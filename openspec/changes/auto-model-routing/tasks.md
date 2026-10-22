@@ -2,19 +2,19 @@
 
 ## 1. 规则单一来源与上一轮上下文
 
-- [ ] 1.1 写失败测试 `jev.test.ts › rubric_version_is_content_hash`：`TIER_QUESTIONS` 深度等于 `src/rubric.json`，`rubricVersion` 为其内容哈希前 8 位，改一个字符版本即变；`escalated` 的“升一级”仍为 `escalated`。确认因 `TIER_QUESTIONS` 仍是内联旧规则而失败。
-- [ ] 1.2 `jev.ts` 从 `src/rubric.json` 读入 `TIER_QUESTIONS`（tsc `resolveJsonModule` 或构建复制，二选一保证 `lib/` 可用），导出 `rubricVersion` 与 `tierAbove`。使 1.1 通过。
-- [ ] 1.3 写失败测试 `context.test.ts › redact_covers_shapes_before_truncation`、`previous_turn_truncated_and_redacted`、`first_turn_state_has_no_context`。确认因 `redact`/`buildState` 不存在而失败。
-- [ ] 1.4 新建 `src/context.ts`（本回合分类输入也先经 `redact` 再截 8000，见 spec“用户回合与分类输入”；design D4 首段的文字补同一说明，属复核记录的非阻塞措辞项）：`redact`（spec 六条正则，按序）、`previousTurn(messages)`（从 `deriveMessages()` 结果倒序取上一条用户消息与最后一条含文本的助手消息）、`buildState({previous, prevUser, prevAssistant, text})`（先脱敏后截断）。使 1.3 通过。
-- [ ] 1.5 写失败测试 `host.integration.test.ts › state_carries_previous_turn`、`previous_tier_survives_restart`（新首行含 `(one tier above: …)`）、`jev_tier_drives_effort`（complex → high）。确认失败。
-- [ ] 1.6 `index.ts` pre-step 中在 `router.begin` 后读取 `payload.agent.session.deriveMessages()`，组装 state 后调用 Jev；`JevClient.judge` 改为接收组装好的 state。使 1.5 通过。
-- [ ] 1.7 重构；全套保持绿。
+- [x] 1.1 写失败测试 `jev.test.ts › rubric_version_is_content_hash`：`TIER_QUESTIONS` 深度等于 `src/rubric.json`，`rubricVersion` 为其内容哈希前 8 位，改一个字符版本即变；`escalated` 的“升一级”仍为 `escalated`。确认因 `TIER_QUESTIONS` 仍是内联旧规则而失败。
+- [x] 1.2 `jev.ts` 从 `src/rubric.json` 读入 `TIER_QUESTIONS`（tsc `resolveJsonModule` 或构建复制，二选一保证 `lib/` 可用），导出 `rubricVersion` 与 `tierAbove`。使 1.1 通过。
+- [x] 1.3 写失败测试 `context.test.ts › redact_covers_shapes_before_truncation`、`previous_turn_truncated_and_redacted`、`first_turn_state_has_no_context`。确认因 `redact`/`buildState` 不存在而失败。
+- [x] 1.4 新建 `src/context.ts`（本回合分类输入也先经 `redact` 再截 8000，见 spec“用户回合与分类输入”；design D4 首段的文字补同一说明，属复核记录的非阻塞措辞项）：`redact`（spec 六条正则，按序）、`previousTurn(messages)`（从 `deriveMessages()` 结果倒序取上一条用户消息与最后一条含文本的助手消息）、`buildState({previous, prevUser, prevAssistant, text})`（先脱敏后截断）。使 1.3 通过。
+- [x] 1.5 写失败测试 `host.integration.test.ts › state_carries_previous_turn`、`previous_tier_survives_restart`（新首行含 `(one tier above: …)`）、`jev_tier_drives_effort`（complex → high）。确认失败。
+- [x] 1.6 `index.ts` pre-step 中在 `router.begin` 后读取 `payload.agent.session.deriveMessages()`，组装 state 后调用 Jev；`JevClient.judge` 改为接收组装好的 state。使 1.5 通过。
+- [x] 1.7 重构；全套保持绿。
 
 ## 2. effort 起点表
 
-- [ ] 2.1 写失败测试 `effort.test.ts › maps_tier_to_effort`、`starting_points_float_and_cap_at_xhigh`、`clamps_unsupported_effort`；`router.test.ts › no_effort_support_passthrough`（含只支持 `[max]`）、`new_model_same_turn_remaps_effort`（Opus high → Astra medium）。确认按新断言失败。
-- [ ] 2.2 `effort.ts` 改为起点常量 + 档位偏移 + 封顶 `xhigh` + 与 `{low,medium,high,xhigh}` 取交集的截断；删除旧映射表。使 2.1 通过。
-- [ ] 2.3 重构；全套保持绿。
+- [x] 2.1 写失败测试 `effort.test.ts › maps_tier_to_effort`、`starting_points_float_and_cap_at_xhigh`、`clamps_unsupported_effort`；`router.test.ts › no_effort_support_passthrough`（含只支持 `[max]`）、`new_model_same_turn_remaps_effort`（Opus high → Astra medium）。确认按新断言失败。
+- [x] 2.2 `effort.ts` 改为起点常量 + 档位偏移 + 封顶 `xhigh` + 与 `{low,medium,high,xhigh}` 取交集的截断；删除旧映射表。使 2.1 通过。
+- [x] 2.3 重构；全套保持绿。
 
 ## 3. 子会话工具
 
@@ -60,3 +60,7 @@
 - [ ] 9.1 真实回归（会产生少量费用）：`OPENROUTER_API_KEY=… node eval/run.mjs`，退出 0；出现基线外新未命中则停下回到规划。
 - [ ] 9.2 用户授权部署后，在**新建会话**中验证：AUTO 判档与 effort（含 session-4390 类请求落在 medium/high）、档位按钮与标注、MANUAL 下委派不判档、AUTO 下一次复杂委派使用 opus/sol 且不被白名单拒绝。
 - [ ] 9.3 写 verify.md；未经授权不合入、归档或清理工作树。
+
+## 实施记录
+
+- 第 1–2 组（2026-10-22）：`rubric.json` 以 `import … with { type: 'json' }` 读入，tsc 开 `resolveJsonModule` 后 `lib/rubric.json` 随构建输出（选 tsc 方案）。本回合输入在 `input.ts` 中先 `redact` 再截 8000（新增 `input.test.ts › redacts_before_bounding`，先观察到失败）。`JevClient.judge(state, signal)` 改为接收组装好的 state。沿用测试中 14 条因新常量（complex：xhigh → high）失败，观察到的失败全部是 effort 值 `xhigh`/`high` 之差，按新映射改断言；`client.test.ts › panel_state_and_history_bound` 改用 `escalated` 以继续断言 `xhigh` 的显示。`CHILD_TABLE` 留到第 3 组替换。

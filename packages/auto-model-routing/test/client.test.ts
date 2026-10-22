@@ -25,7 +25,7 @@ it('panel_state_and_history_bound',()=>{
  const router=new Router(state),agent={id:'S'}
  router.setMode(agent,'AUTO')
  for(let turn=1;turn<=25;turn++){
-  if(router.begin(agent,turn,[{source:{kind:'user'},content:[{type:'text',text:'排查多个模块'}]}]))router.resolve(agent,turn,'complex')
+  if(router.begin(agent,turn,[{source:{kind:'user'},content:[{type:'text',text:'排查多个模块'}]}]))router.resolve(agent,turn,'escalated')
   router.request(agent,turn,{provider:'claude',model:'claude-opus-5-5',reasoningEffort:'medium'},['medium','xhigh'])
  }
  expect(router.status(agent)).toMatchObject({effort:'xhigh',reason:'jev'})

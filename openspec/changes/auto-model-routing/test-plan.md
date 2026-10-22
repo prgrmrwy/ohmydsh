@@ -18,14 +18,14 @@
 | specs/auto-model-routing/spec.md → 用户回合与分类输入 | 同回合与重试复用决定 | test/router.test.ts | turn_retries_reuse_decision | 🟢 green |
 | specs/auto-model-routing/spec.md → 用户回合与分类输入 | 非用户回合沿用上一级别 | test/router.test.ts | nonuser_turn_reuses_level | 🟢 green |
 | specs/auto-model-routing/spec.md → 用户回合与分类输入 | 子会话请求不被改写 | test/router.test.ts | child_passthrough | 🟢 green |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 成功判断采用 Jev 档位 | test/host.integration.test.ts | jev_tier_drives_effort | 🔴 red |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 请求内容受限 | test/host.integration.test.ts | state_carries_previous_turn | 🔴 red |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 上一轮上下文截断、取末段并脱敏 | test/context.test.ts | previous_turn_truncated_and_redacted | 🔴 red |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 脱敏覆盖常见形态且不误伤正文 | test/context.test.ts | redact_covers_shapes_before_truncation | 🔴 red |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 首个用户回合不带上一轮上下文 | test/context.test.ts | first_turn_state_has_no_context | 🔴 red |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 规则版本由规则内容决定 | test/jev.test.ts | rubric_version_is_content_hash | 🔴 red |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 成功判断采用 Jev 档位 | test/host.integration.test.ts | jev_tier_drives_effort | 🟢 green |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 请求内容受限 | test/host.integration.test.ts | state_carries_previous_turn | 🟢 green |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 上一轮上下文截断、取末段并脱敏 | test/context.test.ts | previous_turn_truncated_and_redacted | 🟢 green |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 脱敏覆盖常见形态且不误伤正文 | test/context.test.ts | redact_covers_shapes_before_truncation | 🟢 green |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 首个用户回合不带上一轮上下文 | test/context.test.ts | first_turn_state_has_no_context | 🟢 green |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 规则版本由规则内容决定 | test/jev.test.ts | rubric_version_is_content_hash | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 回归脚本只把基线外的新未命中视为失败 | test/eval-runner.test.ts | runner_exit_codes_and_shared_state | 🔴 red |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 重启后仍沿用上一档位 | test/host.integration.test.ts | previous_tier_survives_restart | 🔴 red |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 重启后仍沿用上一档位 | test/host.integration.test.ts | previous_tier_survives_restart | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 等待期间切换模式丢弃结果 | test/host.integration.test.ts | mode_change_during_jev_discards_result | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 不跟随重定向 | test/jev.test.ts | redirect_is_rejected | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 源码不含本地分类与其它出站 | test/content.test.ts | no_local_classifier_or_other_egress | 🟢 green |
@@ -34,11 +34,11 @@
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 用户重新点 AUTO 清除停用 | test/host.integration.test.ts | auto_clears_disabled | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 用户取消不是失败 | test/host.integration.test.ts | cancel_is_not_failure | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 失败即停用并提示 | 凭据与响应体不泄漏 | test/host.integration.test.ts | no_secret_or_body_leak | 🟢 green |
-| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 档位映射为 effort | test/effort.test.ts | maps_tier_to_effort | 🔴 red |
-| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 起点不同的模型按起点浮动且封顶 xhigh | test/effort.test.ts | starting_points_float_and_cap_at_xhigh | 🔴 red |
-| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 不支持的 effort 被截断 | test/effort.test.ts | clamps_unsupported_effort | 🔴 red |
-| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 无 effort 支持时不改写 | test/router.test.ts | no_effort_support_passthrough | 🔴 red |
-| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 同回合换模型重新映射 | test/router.test.ts | new_model_same_turn_remaps_effort | 🔴 red |
+| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 档位映射为 effort | test/effort.test.ts | maps_tier_to_effort | 🟢 green |
+| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 起点不同的模型按起点浮动且封顶 xhigh | test/effort.test.ts | starting_points_float_and_cap_at_xhigh | 🟢 green |
+| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 不支持的 effort 被截断 | test/effort.test.ts | clamps_unsupported_effort | 🟢 green |
+| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 无 effort 支持时不改写 | test/router.test.ts | no_effort_support_passthrough | 🟢 green |
+| specs/auto-model-routing/spec.md → 级别与 effort 映射 | 同回合换模型重新映射 | test/router.test.ts | new_model_same_turn_remaps_effort | 🟢 green |
 | specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 工具成功返回表中条目 | test/subagent-tool.test.ts | tool_returns_table_entry | 🔴 red |
 | specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 主会话为 MANUAL 时不判档、不外发 | test/subagent-tool.test.ts | manual_root_skips_jev | 🔴 red |
 | specs/auto-model-routing/spec.md → 子会话决策工具与 skill | 子会话中调用按根会话模式判档 | test/subagent-tool.test.ts | nested_child_follows_root_mode | 🔴 red |

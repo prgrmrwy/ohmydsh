@@ -21,7 +21,7 @@ const SECRET = 'sk-or-test-SECRET'
 let cleanup: (() => Promise<void>) | undefined
 afterEach(async () => { await cleanup?.(); cleanup = undefined })
 
-async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean } = {}) {
+async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string } = {}) {
  const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
  const jev = await fakeJev(reply)
@@ -30,8 +30,17 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  const routes = new Map<string, { fetch: (r: Request) => Promise<Response> }>()
  let agent: Awaited<ReturnType<typeof ctx.agents.create>>['agent'] | undefined
  class Adapter extends LlmAdapter {
-  async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, reasoning: { efforts: ['low', 'medium', 'xhigh', 'max'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
-  async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> { calls.push(options); yield { type: 'finish', reason: { kind: 'stop' } } }
+  async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, reasoning: { efforts: ['low', 'medium', 'high', 'xhigh', 'max'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
+  async *stream(request: GenerateOptions): AsyncIterable<StreamChunk> {
+   calls.push(request)
+   const text = options.answer?.()
+   if (text) {
+    yield { type: 'block-start', index: 0, blockType: 'text' }
+    yield { type: 'text-delta', index: 0, text }
+    yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+   }
+   yield { type: 'finish', reason: { kind: 'stop' } }
+  }
  }
  ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: SECRET } }]) as never)
  const forks: { dispose(): unknown }[] = []
@@ -73,9 +82,30 @@ it('jev_tier_drives_effort', async () => {
  const h = await harness(tier('complex'))
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- expect(h.calls.at(-1)).toMatchObject({ model: 'claude-opus-5-5', reasoningEffort: 'xhigh' })
+ expect(h.calls.at(-1)).toMatchObject({ model: 'claude-opus-5-5', reasoningEffort: 'high' })
  expect(h.jev.bodies).toHaveLength(1)
- expect(await h.invoke('state', { sessionId: h.agent.id })).toMatchObject({ mode: 'AUTO', reason: 'jev', effort: 'xhigh' })
+ expect(await h.invoke('state', { sessionId: h.agent.id })).toMatchObject({ mode: 'AUTO', reason: 'jev', effort: 'high' })
+})
+
+it('state_carries_previous_turn', async () => {
+ const replies = ['我先看了登录代码。要我开始实施吗？', '好的']
+ const h = await harness(tier('standard'), { answer: () => replies.shift() ?? '' })
+ await h.setMode('AUTO')
+ await h.run('修一下登录')
+ const first = h.jev.bodies[0] as { state: string }
+ expect(first.state).toBe('Previous user-turn tier: none\nUser message:\n修一下登录')
+ await h.run('继续')
+ const body = h.jev.bodies[1] as { model: string; state: string }
+ expect(Object.keys(body).sort()).toEqual(['model', 'questions', 'state'])
+ expect(body.model).toBe('typesafe/jev-1.13')
+ const lines = body.state.split('\n')
+ expect(lines[0]).toBe('Previous user-turn tier: standard (one tier above: complex)')
+ const at = (needle: string) => body.state.indexOf(needle)
+ expect(at('修一下登录')).toBeGreaterThan(0)
+ expect(at('要我开始实施吗？')).toBeGreaterThan(at('修一下登录'))
+ expect(body.state.endsWith('New user message:\n继续')).toBe(true)
+ expect(body.state).not.toContain(h.agent.id)
+ expect(h.jev.headers[1]!.authorization).toBe(`Bearer ${SECRET}`)
 })
 
 it('rejected_step_skips_jev', async () => {
@@ -87,7 +117,7 @@ it('rejected_step_skips_jev', async () => {
  reject = false
  await h.run('排查多个模块')
  expect(h.jev.bodies).toHaveLength(1)
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
 })
 
 it('mode_change_during_jev_discards_result', async () => {
@@ -113,7 +143,7 @@ it('failure_disables_without_rewrite', async () => {
  const h = await harness(tier('complex'))
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  h.jev.set(json(402, {}))
  await h.run('下一个任务')
  // No rewrite after the failure: the request carries whatever the official selection assembled.
@@ -186,7 +216,7 @@ it('main_decision_toast', async () => {
  await h.setMode('AUTO')
  await h.run('排查多个模块')
  const state = await h.invoke('state', { sessionId: h.agent.id })
- expect(state.decision).toEqual({ id: expect.any(Number), source: 'main', tier: 'complex', effort: 'xhigh', confidence: 0.92, probabilities: { simple: 0.01, standard: 0.04, complex: 0.92, escalated: 0.03 }, ms: expect.any(Number) })
+ expect(state.decision).toEqual({ id: expect.any(Number), source: 'main', tier: 'complex', effort: 'high', confidence: 0.92, probabilities: { simple: 0.01, standard: 0.04, complex: 0.92, escalated: 0.03 }, ms: expect.any(Number) })
  const first = state.decision.id
  await h.run('继续排查')
  expect((await h.invoke('state', { sessionId: h.agent.id })).decision.id).toBeGreaterThan(first)
@@ -238,10 +268,10 @@ it('auto_syncs_official_selection', async () => {
  const h = await harness(tier('complex'))
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
- expect(h.selections).toEqual([{ sessionId: h.agent.id, provider: 'test', model: 'claude-opus-5-5', reasoningEffort: 'xhigh' }])
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
+ expect(h.selections).toEqual([{ sessionId: h.agent.id, provider: 'test', model: 'claude-opus-5-5', reasoningEffort: 'high' }])
  // The same value is not pushed again; the official selection now carries it.
- h.selection.current = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('xhigh') }
+ h.selection.current = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('high') }
  await h.run('继续排查')
  expect(h.selections).toHaveLength(1)
  // MANUAL never writes the selection.
@@ -254,7 +284,7 @@ it('selection_sync_failure_does_not_block_request', async () => {
  await h.setMode('AUTO')
  await h.run('排查多个模块')
  expect(h.selections).toHaveLength(1)
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  expect((await h.invoke('state', { sessionId: h.agent.id })).mode).toBe('AUTO')
 })
 
@@ -266,7 +296,7 @@ it('previous_tier_survives_restart', async () => {
  h.jev.set(tier('complex'))
  await h.run('继续')
  const sent = h.jev.bodies.at(-1) as { state: string }
- expect(sent.state).toContain('Previous user-turn tier: complex')
+ expect(sent.state.split('\n')[0]).toBe('Previous user-turn tier: complex (one tier above: escalated)')
  const dir = join(h.home, 'state/auto-model-routing/sessions')
  const disk = readdirSync(dir).map(f => readFileSync(join(dir, f), 'utf8')).join('\n')
  expect(disk).toContain('"previous":"complex"')

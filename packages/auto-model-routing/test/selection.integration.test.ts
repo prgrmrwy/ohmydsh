@@ -72,12 +72,12 @@ it('manual_keeps_last_auto_effort', async () => {
  h.consumePick() // the pick was used by the first request, as the controller's consume() does
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  await h.setMode('MANUAL')
  await h.run('继续')
  await h.run('再继续')
- // No restore: the official selection keeps using the last request header (xhigh) and the router passes it through.
- expect(h.calls.slice(-2).map(c => c.reasoningEffort)).toEqual(['xhigh', 'xhigh'])
+ // No restore: the official selection keeps using the last request header (high) and the router passes it through.
+ expect(h.calls.slice(-2).map(c => c.reasoningEffort)).toEqual(['high', 'high'])
  expect(h.jev.bodies).toHaveLength(1)
 })
 
@@ -90,9 +90,9 @@ it('auto_overrides_pending_pick', async () => {
  // A pick made during AUTO is replaced by the next AUTO decision (it is synced to the official selection).
  h.pick('low')
  await h.run('排查多个模块')
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  await new Promise(r => setTimeout(r, 0))
  await h.setMode('MANUAL')
  await h.run('继续')
- expect(h.calls.at(-1)?.reasoningEffort).toBe('xhigh')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
 })

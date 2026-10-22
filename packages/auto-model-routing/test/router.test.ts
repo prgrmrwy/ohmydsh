@@ -29,30 +29,30 @@ it('manual_passthrough', () => {
 })
 it('auto_effort_only', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块的并发问题')
- expect(router.request(agent,1,config,supported)).toEqual({...config, reasoningEffort:'xhigh'})
+ expect(router.request(agent,1,config,supported)).toEqual({...config, reasoningEffort:'high'})
 })
 it('rapid_mode_toggle_invalidates_auto', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
  const auto=router.request(agent,1,config,supported)
- expect(auto.reasoningEffort).toBe('xhigh')
+ expect(auto.reasoningEffort).toBe('high')
  router.setMode(agent,'MANUAL')
  // No restore: MANUAL passes the official config through, whatever effort it carries.
  expect(router.request(agent,1,auto,supported)).toEqual(auto)
  router.setMode(agent,'AUTO')
  expect(router.request(agent,1,config,supported)).toEqual(config)
  start(router,agent,2,'排查多个模块')
- expect(router.request(agent,2,config,supported).reasoningEffort).toBe('xhigh')
+ expect(router.request(agent,2,config,supported).reasoningEffort).toBe('high')
  expect(router.status(agent).history.map(h=>h.reason)).not.toContain('manual-restore')
 })
 it('turn_retries_reuse_decision', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
- for(let i=0;i<5;i++) expect(router.request(agent,1,config,supported).reasoningEffort).toBe('xhigh')
+ for(let i=0;i<5;i++) expect(router.request(agent,1,config,supported).reasoningEffort).toBe('high')
  expect(router.status(agent).history).toHaveLength(1)
 })
 it('nonuser_turn_reuses_level', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
  router.request(agent,1,config,supported); router.begin(agent,2,[])
- expect(router.request(agent,2,config,supported).reasoningEffort).toBe('xhigh')
+ expect(router.request(agent,2,config,supported).reasoningEffort).toBe('high')
 })
 it('child_passthrough', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO')
@@ -60,9 +60,11 @@ it('child_passthrough', () => {
  expect(router.request(child,1,config,supported)).toEqual(config)
 })
 it('no_effort_support_passthrough', () => {
- const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1)
- expect(router.request(agent,1,config,[])).toEqual(config)
- expect(router.status(agent).reason).toBe('no-effort-support')
+ for (const efforts of [[], ['max']] as const) {
+  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1)
+  expect(router.request(agent,1,config,efforts)).toEqual(config)
+  expect(router.status(agent).reason).toBe('no-effort-support')
+ }
 })
 it('unresolved_turn_passthrough', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); router.begin(agent,1,message('任务'))
@@ -71,7 +73,7 @@ it('unresolved_turn_passthrough', () => {
 })
 it('new_model_same_turn_remaps_effort', () => {
  const {router,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1,'排查多个模块')
- expect(router.request(agent,1,config,supported).reasoningEffort).toBe('xhigh')
+ expect(router.request(agent,1,config,supported).reasoningEffort).toBe('high')
  const next={...config,model:'gpt-6-astra',provider:'codex',reasoningEffort:'low' as const}
  expect(router.request(agent,1,next,['low','medium','high']).reasoningEffort).toBe('medium')
 })
@@ -84,7 +86,7 @@ it('guard_failure_never_changes_model', () => {
 it('failure_disables_without_rewrite_and_records', () => {
  const {router,state,agent}=fixture(); router.setMode(agent,'AUTO'); start(router,agent,1)
  const auto=router.request(agent,1,config,supported)
- expect(auto.reasoningEffort).toBe('xhigh')
+ expect(auto.reasoningEffort).toBe('high')
  expect(router.begin(agent,2,message('下一个'))).toBeDefined()
  router.fail(agent,2,'insufficient-credits')
  expect(state.read(agent.id)).toEqual({mode:'MANUAL',previous:'complex',disabled:{category:'insufficient-credits',at:expect.any(Number)}})
@@ -104,7 +106,7 @@ it('decision_announced_once_per_jev_judgement', () => {
  router.begin(agent,1,message('排查多个模块')); router.resolve(agent,1,'complex',{confidence:0.9,ms:500})
  router.request(agent,1,config,supported)
  const first=router.judgement(agent.id)!
- expect(first).toMatchObject({source:'main',tier:'complex',effort:'xhigh',confidence:0.9,ms:500})
+ expect(first).toMatchObject({source:'main',tier:'complex',effort:'high',confidence:0.9,ms:500})
  // Same-turn model change remaps effort but is not a new judgement; a continued turn neither.
  router.request(agent,1,{...config,provider:'codex',model:'gpt-6-astra'},['low','medium'])
  router.begin(agent,2,[]); router.request(agent,2,config,supported)

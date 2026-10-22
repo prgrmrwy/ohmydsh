@@ -55,7 +55,7 @@
 理由：用户明确不要复原。删除复原后 MANUAL 成为纯透传，消除了“同 step 重试仍用旧 assembled 快照”“pending 手选与持久头精确匹配”等全部边界，以及首版最复杂的约 10 个场景。代价：关闭 AUTO 后 effort 停留在最后一次 AUTO 值，直到用户手选；README 写明。
 
 ### D4. 每用户回合一次 Jev 判断
-选择：step 1 的 `agent/pre-step` 中先 `const decision = await next()`；仅当 `decision.kind === 'enter'`、会话为 AUTO 且 `decision.messages` 中有用户消息时，聚合可信文本（领取顺序、块顺序、`"\n"` 连接、`.slice(0, 8000)`），`await` 一次 Jev 请求，然后返回 `decision`。`reject` 时不调 Jev、不记录本回合决定（被拒的提案不占用本回合判断）。
+选择：step 1 的 `agent/pre-step` 中先 `const decision = await next()`；仅当 `decision.kind === 'enter'`、会话为 AUTO 且 `decision.messages` 中有用户消息时，聚合可信文本（领取顺序、块顺序、`"\n"` 连接、经 `redact` 后 `.slice(0, 8000)`），`await` 一次 Jev 请求，然后返回 `decision`。`reject` 时不调 Jev、不记录本回合决定（被拒的提案不占用本回合判断）。
 
 **判档规则（2026-10-22 修订）**。唯一的规则文件是 `packages/auto-model-routing/src/rubric.json`（`{tier: {type: 'choice', instructions, criteria}}`）；`TIER_QUESTIONS` 从它读入，评估脚本也读它，不另存副本。规则版本 = `sha256(JSON.stringify(TIER_QUESTIONS)).slice(0, 8)`，随判档记录保存，改规则无需手工改版本号。本修订定稿的规则（内部称 v6）即该文件的内容。
 

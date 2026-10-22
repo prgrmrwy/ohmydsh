@@ -1,6 +1,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { CHILD_TABLE } from './effort.js'
 import { CATEGORY_HINTS, type JevClient } from './jev.js'
+import { buildState } from './context.js'
 import type { Judgement } from './router.js'
 
 /** Sub-agent decision tool: same Jev judgment as the main session, then the D9 child table. Writes no state. */
@@ -27,7 +28,7 @@ export function routeSubagentTool(jev: JevClient, judged: (sessionId: string, va
       render: (_args, v) => [{ type: 'text', text: `Delegate with provider=${v.provider} model=${v.model} reasoning_effort=${v.reasoning_effort} (tier ${v.tier}); label the description [${v.model}·${v.reasoning_effort}].` }],
     },
     execute: async (args, exec) => {
-      const result = await jev.judge(args.task.slice(0, 8000), undefined, exec.signal)
+      const result = await jev.judge(buildState({ text: args.task }), exec.signal)
       if (result.kind === 'cancelled') throw new Error('route_subagent 已取消。')
       if (result.kind === 'failed') throw new Error(`Jev 判档失败：${CATEGORY_HINTS[result.category]}（${result.category}）。请暂停委派并询问用户，不要自行猜测档位或换用其它模型。`)
       const provider = args.provider as 'claude' | 'codex'

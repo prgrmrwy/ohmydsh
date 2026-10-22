@@ -13,6 +13,7 @@ import type { Effort } from './effort.js'
 import { endpoint } from './endpoints.js'
 import { JevClient } from './jev.js'
 import { routeSubagentTool } from './subagent-tool.js'
+import { buildState, previousTurn } from './context.js'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 
 export const name = 'dsh-auto-model-routing'
@@ -48,7 +49,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     const agent = ref(payload.agent)
     const job = router.begin(agent, payload.turn, decision.messages)
     if (!job) return decision
-    const result = await jev.judge(job.text, job.previous, payload.signal)
+    // History before this turn's messages enter: the previous user message and assistant reply.
+    const prior = previousTurn(payload.agent.session.deriveMessages())
+    const result = await jev.judge(buildState({ previous: job.previous, prevUser: prior.user, prevAssistant: prior.assistant, text: job.text }), payload.signal)
     if (result.kind === 'ok') { const { kind: _, tier, ...measure } = result; router.resolve(agent, payload.turn, tier, measure) }
     else if (result.kind === 'failed') router.fail(agent, payload.turn, result.category)
     else router.cancel(agent, payload.turn)

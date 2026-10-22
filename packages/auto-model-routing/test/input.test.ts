@@ -16,3 +16,10 @@ it('ordered_text_bounded_utf16', () => {
   expect(userInput([{ source: { kind: 'user' }, content: [{ type: 'text', text }] }]).text).toBe(text.slice(0, 8000))
   expect(userInput([{ source: { kind: 'user' }, content: [{ type: 'image' }] }])).toEqual({ userTurn: true, text: '' })
 })
+it('redacts_before_bounding', () => {
+  // A key straddling the 8000 boundary must not leave its head behind after the cut.
+  const text = 'a'.repeat(7990) + ' sk-' + 'Z'.repeat(30)
+  const out = userInput([{ source: { kind: 'user' }, content: [{ type: 'text', text }] }]).text
+  expect(out).toBe(('a'.repeat(7990) + ' <redacted>').slice(0, 8000))
+  expect(out).not.toContain('sk-')
+})
