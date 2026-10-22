@@ -242,6 +242,29 @@ describe('unified locus command dispatcher', () => {
     })
   })
 
+  it('a /bind that moved the entry off an archived main says the source changed', async () => {
+    const rebuildProtected = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => ({
+      ...bindResult(parentSessionId),
+      previousLocus: { ...bindResult('session-old999999').locus, parentSessionTitle: '旧会话' },
+    }))
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [session('session-abcdef123456')],
+      bind: { bind: vi.fn(), rebuildProtected: rebuildProtected as never },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
+    })
+
+    const result = await dispatcher.dispatch({
+      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER, authorization: 'retired',
+    })
+
+    expect(rebuildProtected).toHaveBeenCalledWith(expect.objectContaining({ marker: 'retired', parentSessionId: 'session-abcdef123456' }))
+    expect(result).toMatchObject({ ok: true })
+    const text = 'text' in result ? result.text ?? '' : ''
+    expect(text).toContain('原主会话 「旧会话」（old999）')
+    expect(text).toContain('已改挂到新主会话')
+  })
+
   it('fails closed when a protected endpoint has no explicit rebuild adapter', async () => {
     const bind = vi.fn()
     const dispatcher = createLocusControlDispatcher({

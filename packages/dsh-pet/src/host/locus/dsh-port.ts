@@ -32,6 +32,7 @@ import { foldSessionTitle as foldDshSessionTitle } from '@deepseek-ai/dsh-sessio
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { LOCUS_MAIN_PRESET, LOCUS_SAFE_CHILD_COMPOSITION } from './aggregate.js'
 import type { LocusDshPort, LocusParentSession, LocusWorkspace } from './controller.js'
+import { delegationParentOf } from '../session-lineage.js'
 
 /**
  * Re-exported for existing importers; the constant now lives in `aggregate.ts`
@@ -45,6 +46,10 @@ export interface LocusSessionInspection {
   readonly meta: {
     readonly id: SessionId
     readonly parentSession?: SessionId
+    /** Fork lineage marker; with `origin`/`delegationDepth` it tells a fork from a child. */
+    readonly isSeeded?: boolean
+    readonly origin?: string
+    readonly delegationDepth?: number
     /**
      * The preset recorded on this session's durable header.
      *
@@ -276,13 +281,16 @@ export function createProductionLocusDshPort(
         candidate => candidate === brandedSessionId,
       )
       const title = foldTitle(inspection.events)?.title
+      // A user fork records its source in `parentSession` too, but it is a
+      // top-level session and must stay bindable as a main.
+      const delegationParent = delegationParentOf(inspection.meta)
       return {
         id: requestedId,
         workspaceId: String(workspace.id),
         ...(title === undefined ? {} : { title }),
-        ...(inspection.meta.parentSession === undefined
+        ...(delegationParent === undefined
           ? {}
-          : { parentSessionId: String(inspection.meta.parentSession) }),
+          : { parentSessionId: String(delegationParent) }),
         // Carried so an explicit bind can verify what the child would inherit.
         // Deliberately NOT defaulted: "absent" and "some safe value" must stay
         // distinguishable at the gate that reads it.

@@ -268,7 +268,13 @@ function bindReceipt(
   // A document's /bind always restates who may ask (pet-locus-doc-comments D7).
   const disclosure = isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : ''
   if (result.reused) return `${place}已绑定主会话 ${source}，本次未重复创建；当前共享权限为 read。${disclosure}`
-  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${disclosure}`
+  // A rebuild that moved the entry off another main session must say so: the
+  // owner should never believe the entry is still on the old session.
+  const previous = (result as { readonly previousLocus?: { readonly parentSessionId?: string; readonly parentSessionTitle?: string } }).previousLocus
+  const moved = previous?.parentSessionId !== undefined && previous.parentSessionId !== session.id
+    ? `原主会话 ${locusSessionReceiptLabel({ id: previous.parentSessionId, ...(previous.parentSessionTitle === undefined ? {} : { title: previous.parentSessionTitle }) })} 已归档或停用，本入口已改挂到新主会话，旧对话未自动合并。`
+    : ''
+  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${moved}${disclosure}`
 }
 
 /**
