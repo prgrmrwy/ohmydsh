@@ -204,6 +204,8 @@ skill 规则：委派前调用 `route_subagent`；成功则把返回的三个字
 
 cache：该文件在会话首个请求前作为固定前缀写入；改动后进行中的会话只追加增量消息，不改写已缓存前缀（见 Context）。代价是每个会话固定前缀多约 400 字。
 
+**派发前必须先调用工具（2026-10-22 GUI 验收修订）**：最初写法“若 `route_subagent` 可用，按 skill 判档”要求 Agent 先加载 skill 才知道怎么做；验收中 AUTO 判为 simple（effort low）的回合里，Agent 跳过 skill 直接调用官方 `subagent`，子会话继承了父会话的 `low`。改为在该节直接写出可执行步骤：必须先调用 `route_subagent`，`routed: false` 时不传三项，成功时三项全部显式传入，出错时暂停并询问。skill 仍是完整规则的来源（provider 选择、标注、复用），环境指令只保证每次派发都经过工具。替代方案“插件在 `subagent` 工具调用前拦截并改写参数”需要改写官方工具调用，越过了“路由器不改写子会话创建参数”的边界，否决。
+
 开关耦合：派发规则与插件是两个开关。插件禁用后规则仍有效；规则里“`route_subagent` 可用时按 skill 判档”一句在工具不存在时按 skill 的既有约定（告知未启用、按官方默认委派）。
 
 ## Risks / Verification

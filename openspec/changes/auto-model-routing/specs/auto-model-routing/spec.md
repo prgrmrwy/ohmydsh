@@ -335,13 +335,13 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - 派发：实施已批准计划中工作量较大的编码任务；独立评审或复核（需要新上下文）；中间输出多的探索（大范围搜索、读日志、跑测试），只带回结论；彼此独立、可并行的多块工作。
 - 不派发：与用户讨论或做决定的回合；前后依赖且主会话上下文装得下的工作；单个小修复。
 - 本身是子会话时不再向下派发，除非任务明确要求。
-- 派发前若 `route_subagent` 可用，按 `subagent-model-routing` skill 判档并显式传参。
+- 派发前 MUST 先调用 `route_subagent`（工具存在时）：返回 `routed: false` 时按官方默认委派、不传 provider/model/reasoning_effort；成功时把返回的 provider、model、reasoning_effort 全部显式传给官方子会话工具；工具出错时暂停委派并询问用户；详细规则见 `subagent-model-routing` skill。此步骤 SHALL 直接写在该节中，使 Agent 不必先加载 skill 也能执行（2026-10-22 验收：AUTO 回合中 Agent 未加载 skill 便直接委派，子会话继承了父会话 AUTO 设的 effort）。
 该节 MUST NOT 引用具体模型名或 effort 值（唯一来源为插件代码）。本 change MUST NOT 新增物化机制，沿用 `agentInstructions` 将其物化为 `$DSH_HOME/AGENTS.md`（已有 `tests/sync-agent-instructions.test.mjs` 覆盖物化、幂等与撤销）。
 
 #### Scenario: 环境级指令含派发规则且不含模型名
 - **GIVEN** 仓库中的 `instructions/dsh-home.md`
 - **WHEN** 测试读取其文本
-- **THEN** 含标题“子会话派发”，含“独立评审”“并行”“route_subagent”“不派发”与“本身是子会话时不再向下派发”；不含任何 `claude-`、`gpt-` 开头的模型名，也不匹配 `\bxhigh\b`、`\bmax\b`
+- **THEN** 含标题“子会话派发”，含“独立评审”“并行”“route_subagent”“不派发”与“本身是子会话时不再向下派发”；含“必须先调用 `route_subagent`”“`routed: false`”“reasoning_effort”与“暂停委派并询问用户”；不含任何 `claude-`、`gpt-` 开头的模型名，也不匹配 `\bxhigh\b`、`\bmax\b`
 
 ### Requirement: 判档记录与人工标注
 系统 SHALL 把主会话 AUTO 用户回合的每次成功判档追加一行到 `$DSH_HOME/state/auto-model-routing/judgements.jsonl`：`{sessionId, turn, tier, effort?, model, rubricVersion}`，写入时机为成功判档后该回合首个请求（无论是否映射出 effort，未映射时省略 `effort`）；`route_subagent`、失败、取消、被丢弃与非用户回合不写判档行。标注也是追加一行 `{sessionId, turn, label}`。行 MUST NOT 包含消息文本、上一轮上下文、响应体或凭据。追加失败 MUST NOT 影响请求、MUST NOT 停用 AUTO，只记一条日志。读取方 SHALL 按 `(sessionId, turn)` 折叠：判档取最后一条判档行，标注取最后一条标注行；无法解析的行跳过。

@@ -28,6 +28,9 @@ it('tool_returns_table_entry', async () => {
  const { def, server } = await tool(tier('simple'))
  expect(def.name).toBe('route_subagent')
  expect(def.description).toMatch(/OpenRouter/)
+ // Always visible to the agent: says to call it before every delegation and to pass all three values.
+ expect(def.description).toMatch(/Call before every sub-agent delegation/)
+ expect(def.description).toMatch(/pass provider, model and reasoning_effort explicitly/)
  const expected = {
   claude: [['claude-haiku-5-5', 'low'], ['claude-sonnet-5-5', 'medium'], ['claude-opus-5-5', 'high'], ['claude-opus-5-5', 'xhigh']],
   codex: [['gpt-6-luna', 'medium'], ['gpt-6.1-sol', 'medium'], ['gpt-6.1-sol', 'high'], ['gpt-6.1-sol', 'xhigh']],

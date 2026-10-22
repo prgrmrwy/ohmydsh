@@ -30,7 +30,7 @@ const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派，�
 export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
   return defineTool({
     name: 'route_subagent',
-    description: 'Pick provider/model/reasoning_effort for a sub-agent before delegating, using the Jev decision model. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. On error: pause delegation and ask the user; never guess a tier.',
+    description: 'Call before every sub-agent delegation, whatever the task size. Picks provider/model/reasoning_effort with the Jev decision model; pass provider, model and reasoning_effort explicitly to the sub-agent tool, or the sub-agent inherits this session\'s effort. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. On error: pause delegation and ask the user; never guess a tier.',
     timeoutMs: 5000,
     parameters: {
       task: { type: 'string', required: true, description: 'The task the sub-agent will do.' },
