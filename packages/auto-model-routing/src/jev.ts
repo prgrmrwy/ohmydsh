@@ -1,26 +1,11 @@
 import { createHash } from 'node:crypto'
 import { tiers, type Tier } from './effort.js'
 import rubric from './rubric.json' with { type: 'json' }
-
-export type JevCategory =
-  | 'missing-credential' | 'insufficient-credits' | 'unauthorized' | 'rate-limited'
-  | 'region-blocked' | 'rejected' | 'unavailable' | 'timeout' | 'invalid-response'
+import type { JevCategory } from './hints.js'
+export { CATEGORY_HINTS, type JevCategory } from './hints.js'
 export type Distribution = Partial<Record<Tier, number>>
 export type JevResult = { kind: 'ok'; tier: Tier; confidence?: number; probabilities?: Distribution; ms: number } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
 export interface CredentialSource { get(name: string): { value: string } | undefined }
-
-/** Human-readable hint per category, shown on the chip, panel and tool errors. */
-export const CATEGORY_HINTS: Readonly<Record<JevCategory, string>> = {
-  'missing-credential': '未配置 OPENROUTER_API_KEY',
-  'insufficient-credits': '余额不足，请充值',
-  unauthorized: 'key 无效或无权限',
-  'rate-limited': '请求被限流',
-  'region-blocked': '地区受限',
-  rejected: '请求被拒绝',
-  unavailable: 'Jev 服务不可用',
-  timeout: 'Jev 响应超时',
-  'invalid-response': 'Jev 响应无效',
-}
 
 const MODEL = 'typesafe/jev-1.13'
 const MAX_BODY = 64 * 1024

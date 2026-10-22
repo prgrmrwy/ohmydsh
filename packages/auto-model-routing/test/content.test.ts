@@ -21,3 +21,10 @@ it('skill_contains_eight_rules',()=>{
  for(const rule of ['route_subagent','reasoning_effort','[model·effort]','独立','claude/codex','暂停委派并询问用户','新建','子会话 Jev 选模未启用','routed: false','按官方默认委派']) expect(text,rule).toContain(rule)
  expect(text).not.toMatch(/claude-haiku-5-5|claude-fable-5-1|gpt-6-luna|gpt-6-astra|claude-opus-5-5|gpt-6\.1-sol|claude-sonnet-5-5/)
 })
+it('client_sources_stay_browser_safe',()=>{
+ // The client bundle runs in the browser: it may reach only browser-safe modules (no node: built-ins via jev.ts).
+ for(const [file,text] of sources().filter(([file])=>file.startsWith('client/')||file==='hints.ts')) {
+  expect(text,file).not.toMatch(/from '(\.\.\/)?(\.\/)?(jev|context|index|router|state|judgements)\.js'/)
+  expect(text,file).not.toMatch(/node:/)
+ }
+})

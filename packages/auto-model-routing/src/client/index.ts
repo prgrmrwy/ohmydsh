@@ -4,8 +4,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, toastText, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
-import { CATEGORY_HINTS, type JevCategory } from '../jev.js'
+import { CATEGORY_HINTS, type JevCategory } from '../hints.js'
+import { IconGaugeOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { LabelButton, type LabelUi } from './label.js'
 
 interface View {
   mode: 'AUTO' | 'MANUAL'
@@ -137,7 +140,14 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   )
 }
 
+const labelUi = { Tooltip, Menu, Icon: IconGaugeOutlineRegular } as unknown as LabelUi
+
 export function apply(ctx: Context): void {
+  // Reply-bar tier button, after the official feedback (order 10); rendered only on judged turns.
+  ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
+    name: 'conversation.chat.assistant-actions', id: 'auto-model-routing-label', order: 20,
+    inject: (sessionId) => ({ sessionId, rpc: ctx.connection.rpc as unknown as Rpc, ui: labelUi }),
+  }, LabelButton as never))
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right', id: 'auto-model-routing', order: chipOrder,
     inject: (sessionId): Props => ({ sessionId, rpc: ctx.connection.rpc as unknown as Rpc }),

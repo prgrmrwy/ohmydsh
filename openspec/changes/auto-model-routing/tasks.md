@@ -34,9 +34,9 @@
 
 ## 5. 回复操作栏档位按钮
 
-- [ ] 5.1 写失败测试 `label-button.dom.test.ts › button_only_when_judged`、`tooltip_and_menu_content`、`selection_calls_label_only`（jsdom，官方 primitives 以测试替身注入）。确认因操作项未注册而失败。
-- [ ] 5.2 client 注册 `conversation.chat.assistant-actions`（order 20，`inject(sessionId)`），用 `Tooltip`、`Menu`、`IconGaugeOutlineRegular` 与操作栏按钮 class；`package.json` 的 `dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-chat`（如插槽归属需要）。使 5.1 通过。
-- [ ] 5.3 重构；全套保持绿。
+- [x] 5.1 写失败测试 `label-button.dom.test.ts › button_only_when_judged`、`tooltip_and_menu_content`、`selection_calls_label_only`（jsdom，官方 primitives 以测试替身注入）。确认因操作项未注册而失败。
+- [x] 5.2 client 注册 `conversation.chat.assistant-actions`（order 20，`inject(sessionId)`），用 `Tooltip`、`Menu`、`IconGaugeOutlineRegular` 与操作栏按钮 class；`package.json` 的 `dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-chat`（如插槽归属需要）。使 5.1 通过。
+- [x] 5.3 重构；全套保持绿。
 
 ## 6. 派发规则与评估脚本
 
@@ -66,3 +66,4 @@
 - 第 1–2 组（2026-10-22）：`rubric.json` 以 `import … with { type: 'json' }` 读入，tsc 开 `resolveJsonModule` 后 `lib/rubric.json` 随构建输出（选 tsc 方案）。本回合输入在 `input.ts` 中先 `redact` 再截 8000（新增 `input.test.ts › redacts_before_bounding`，先观察到失败）。`JevClient.judge(state, signal)` 改为接收组装好的 state。沿用测试中 14 条因新常量（complex：xhigh → high）失败，观察到的失败全部是 effort 值 `xhigh`/`high` 之差，按新映射改断言；`client.test.ts › panel_state_and_history_bound` 改用 `escalated` 以继续断言 `xhigh` 的显示。`CHILD_TABLE` 留到第 3 组替换。
 - 第 3 组（2026-10-22）：`CHILD_TABLE` 换为 `CHILD_MODELS` + `targetEffort`；`routeSubagentTool(jev, {agents, state, judged})` 沿 `header.parentSession` 经 `ctx.agents.get` 上溯（深度上限 32，任一环缺失视为 MANUAL）。`effort.test.ts › child_table_matches_design_and_family` 随常量替换为 `child_models_match_design_and_family`；`host.integration.test.ts › main_and_tool_share_questions` 与 `subagent_decision_toast` 因“MANUAL 不判档”改为先切 AUTO 并传 `agent`（观察到的失败：`judged is not a function`/工具返回 `routed: false`，以及 complex 的 effort `xhigh` → `high`）。
 - 第 4 组（2026-10-22）：`JudgementBook`（`src/judgements.ts`）同时持有追加写与内存映射；`Router` 新增 `onJudged` 回调，在成功判档后首个请求触发（无 effort 也触发），index 中写判档行、失败只记 warn。用户回合由 pre-step 中 `userInput(...).userTurn` 记录（不论是否 AUTO），`session/event` 的 `assistant/message` 按 `data.turn ≥ 最近用户回合` 映射到该回合、仅当其有判档。`labelEndpoint` 与现有端点共用注册循环与 envelope。观察到的失败：host 集成测试等待第三个路由超时；`labelEndpoint is not a function`；`label-report.mjs` 不存在。
+- 第 5 组（2026-10-22）：`src/client/label.ts` 的 `LabelButton` 经 `ui` 注入官方 `Tooltip`、`Menu`（数据行 `items` + `type: 'label'` 标题行，`selectedId` 由官方画勾）与 `IconGaugeOutlineRegular`；按钮 class 复制自 `dsh-client-ui-chat` 操作栏 `action` 的样式值。primitives 由 web shell 作为共享模块提供（devDependency 仅供类型，另列 peer）；vitest 把它别名到 `test/primitives-stub.ts`，因为真实包的 peer（clsx 等）只在 shell 中存在。`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-chat`（插槽声明方）。实施中发现 client 经 `../jev.js` 把 `node:crypto` 打进浏览器 bundle（第 1 组引入 `createHash` 后），将 `CATEGORY_HINTS`/`JevCategory` 拆到 `src/hints.ts`，并加 `content.test.ts › client_sources_stay_browser_safe`（先改回旧导入观察到失败）。

@@ -67,9 +67,9 @@
 | specs/auto-model-routing/spec.md → 判档记录与人工标注 | 标注追加失败返回错误 | test/host.integration.test.ts | label_append_failure_returns_5xx | 🟢 green |
 | specs/auto-model-routing/spec.md → 判档记录与人工标注 | 无效请求被拒，未知消息不写入 | test/endpoints.test.ts | label_rejects_invalid_and_ignores_unknown | 🟢 green |
 | specs/auto-model-routing/spec.md → 判档记录与人工标注 | 统计脚本按规则版本汇总并跳过损坏行 | test/label-report.test.ts | report_folds_by_version_and_skips_bad_lines | 🟢 green |
-| specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | 有判档才显示按钮 | test/label-button.dom.test.ts | button_only_when_judged | 🔴 red |
-| specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | Tooltip 与菜单内容 | test/label-button.dom.test.ts | tooltip_and_menu_content | 🔴 red |
-| specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | 选择档位只调用插件标注端点，失败不改显示 | test/label-button.dom.test.ts | selection_calls_label_only | 🔴 red |
+| specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | 有判档才显示按钮 | test/label-button.dom.test.ts | button_only_when_judged | 🟢 green |
+| specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | Tooltip 与菜单内容 | test/label-button.dom.test.ts | tooltip_and_menu_content | 🟢 green |
+| specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | 选择档位只调用插件标注端点，失败不改显示 | test/label-button.dom.test.ts | selection_calls_label_only | 🟢 green |
 
 ## Coverage Notes
 
