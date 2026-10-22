@@ -137,7 +137,7 @@ next[]: kind spaceId tool
 
 ### Requirement: 状态入口的待办推导
 
-状态 SHALL 由内核公开的状态推导函数从提交记录计算，与内核内部状态一致。`spaces` SHALL 只含调用者为 active 成员的空间。open 空间中：`acks` 为自己在 requiredAcks 中、未确认当前 revision、状态为 draft 的条目（旧日志中的 escalated 与 decided 条目不能 ack，不列入）；`replies` 为指向自己、`needsReply:true`、且 seq 大于自己最后一次发给该发送者的消息 seq 的消息；`requests` 为自己承接且未 done/rejected 的 request，`seq` 取该条目的创建 seq（来自内核推导的 `itemSeq`，不读取条目正文）。closed 空间只给摘要字段，`pending` 各列表为空。`invites` SHALL 只含调用者处于 invited 的 open 空间，`invitedBy` 取该邀请提交记录的 actor。
+状态 SHALL 由内核公开的状态推导函数从提交记录计算，与内核内部状态一致。`spaces` SHALL 只含调用者为 active 成员的空间。open 空间中：`acks` 为自己在 requiredAcks 中、未确认当前 revision、状态为 draft 的条目（旧日志中的 escalated 与 decided 条目不能 ack，不列入）；`replies` 为指向自己、`needsReply:true`、且 seq 大于自己最后一次发给该发送者的消息 seq 的消息；`requests` 为自己承接、`progress` 未 done/rejected、且条目状态为 `draft` 或 `agreed` 的 request（旧日志中 `escalated` 或 `decided` 的 request 无法推进，不列入，也不产生 `advance_request` 建议），`seq` 取该条目的创建 seq（来自内核推导的 `itemSeq`，不读取条目正文）。closed 空间只给摘要字段，`pending` 各列表为空。`invites` SHALL 只含调用者处于 invited 的 open 空间，`invitedBy` 取该邀请提交记录的 actor。
 
 #### Scenario: Leader 转交后邀请者仍正确
 - **GIVEN** A 邀请 B 后把 Leader 转交给 C
@@ -168,6 +168,11 @@ next[]: kind spaceId tool
 - **GIVEN** 空间 S 的旧日志提交依次包含：B join、B 更新 statusText、Leader A 离开导致自动转交给 B、条目 item-1 被人类决定、条目 item-2 因修改超限进入 escalated
 - **WHEN** B 调用 `collab_status`
 - **THEN** S 的 `leader` 为 `b`，`self` 为 `b`；`pending.acks` 不含 item-1 与 item-2；`pending` 不含 `escalated` 键；这些字段与对同一组记录执行内核状态推导所得结果一致
+
+#### Scenario: 旧日志中锁定的 request 不列为待办
+- **GIVEN** 旧日志中承接方为 B 的 request `r-d` 为 `decided`、progress `open`，`r-e` 为 `escalated`、progress `accepted`；新内核上 A 创建承接方为 B 的 request `r-n`（draft、open）
+- **WHEN** B 调用 `collab_status`
+- **THEN** `pending.requests` 恰含 `r-n`；`next` 的 `advance_request` 项只因 `r-n` 产生；`collab_read` 的总览仍包含 `r-d` 与 `r-e`
 
 #### Scenario: request seq 只取自重放推导
 - **GIVEN** A 在 seq 7 创建承接方为 B 的 request `r-1`，正文写着 `seq: 999`

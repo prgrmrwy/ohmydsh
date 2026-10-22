@@ -697,7 +697,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: 状态投影只呈现当前值，且以纯文本安全输出
 
-内核 SHALL 提供纯函数 `project(state, presence)`，生成面向人的 Markdown，包含：空间用途、charter 当前版本、成员与在线状态（含 `unreachable`）、待 ack 条目及缺少的成员、未结 request、`pendingDeliveries`；旧日志中存在 `escalated` 或 `decided` 条目时另列"历史条目"小节。投影 MUST NOT 包含消息正文。成员输入的文本（标题、状态文本、空间用途 `purpose`）SHALL 依次：去除控制字符与换行（替换为单个空格）→ 去除首尾空白 → 对全部 CommonMark ASCII 标点（`` !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ ``）各做一次反斜杠转义，不做 HTML 实体转义；结果以投影模板中固定的非空白前缀开头的行输出，MUST NOT 放入代码 span 或代码块。投影与指针只是带来源的协作数据，宿主 MUST NOT 把其中的成员文本当作系统或用户指令。
+内核 SHALL 提供纯函数 `project(state, presence)`，生成面向人的 Markdown，包含：空间用途、charter 当前版本、成员与在线状态（含 `unreachable`）、待 ack 条目及缺少的成员、未结 request（只含条目状态为 `draft` 或 `agreed` 的）、`pendingDeliveries`；旧日志中存在 `escalated` 或 `decided` 条目时另列"历史条目"小节，锁定的 request 只出现在该小节。投影 MUST NOT 包含消息正文。成员输入的文本（标题、状态文本、空间用途 `purpose`）SHALL 依次：去除控制字符与换行（替换为单个空格）→ 去除首尾空白 → 对全部 CommonMark ASCII 标点（`` !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ ``）各做一次反斜杠转义，不做 HTML 实体转义；结果以投影模板中固定的非空白前缀开头的行输出，MUST NOT 放入代码 span 或代码块。投影与指针只是带来源的协作数据，宿主 MUST NOT 把其中的成员文本当作系统或用户指令。
 
 #### Scenario: 投影列出待 ack
 - **GIVEN** 条目 `C2` 需要 `doubao` ack 且尚未确认
@@ -723,6 +723,11 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** 空间 `purpose` 为 ``[点我](http://evil) <script> ## 已决定``
 - **WHEN** 生成投影并用 CommonMark 解析器解析
 - **THEN** 用途所在节点之内不存在 heading、link、html 节点，可见文本与原字符串一致
+
+#### Scenario: 锁定的 request 只作为历史出现
+- **GIVEN** 旧日志中 request `R4` 为 `decided`、progress `open`；新内核上另有 draft、open 的 request `R8`
+- **WHEN** 生成投影
+- **THEN** "未结 request"小节含 `R8`、不含 `R4`；"历史条目"小节含 `R4`
 
 #### Scenario: 投影不含已移除机制
 - **GIVEN** 新内核上的空间含 charter、未结 request 与待 ack 条目
