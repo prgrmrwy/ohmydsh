@@ -163,7 +163,7 @@ v1 and v2 stay pinned by sha256 tests. The bundle hook and the artifact tests li
 - **Agents forget `ref` on genuine follow-ups.** Chains then fragment. This is safe, because protection only weakens and nothing breaks. The convention and tool description prompt for `ref`, and status exposes request seqs.
 - **A member deliberately exhausts another's item chain** with item revisions.
   - Each waking revision and each completed agreement add one link. An agent can make three waking revisions before its fourth escalates (escalation wakes no agents), and an agreement resets the edit counter.
-  - In agent-only revise/agree cycles, four complete cycles reach length 17, and the fifth cycle hits the limit. Human revisions have no edit cap.
+  - In a plain revise/agree cycle (one revision plus one agreement), each cycle adds 2: nine cycles reach 19, the tenth revision reaches 20, and its ack is rejected. An agent can make more cycles shorter by revising up to three times before agreement (at most 4 links per cycle), so exhaustion can come in about five such cycles. Human revisions have no edit cap.
   - Request progress and human decisions stay exempt, so a request can still be finished and an item can still be decided.
 - **Items that are already exhausted when loaded or created.**
   - Old items start at 1 but replay their historical waking events, so a long-lived item can load at 20 or more. Its next waking revision or ack is then rejected.
