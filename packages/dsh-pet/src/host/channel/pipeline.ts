@@ -175,7 +175,8 @@ export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired
   // not to a per-entry button that could never succeed.
   return '这个入口已停止服务，需要重建后才会继续应答。'
     + '如果它的主会话已被归档：在「会话归档管理」里恢复该主会话，本入口会自动恢复服务；'
-    + '不想再用那个主会话时，在 Pet 设置页「Locus 管理」里找到该主会话，点「用新的主会话接替」，'
+    + '或在本入口 @ 机器人发送 /bind 加要改用的会话 id 前缀（至少 6 位），把本入口改挂到那个会话上；'
+    + '也可以在 Pet 设置页「Locus 管理」里找到该主会话，点「用新的主会话接替」，'
     + '它名下的入口会一起迁到新建的主会话上。新入口从只读（read）权限开始。'
 }
 

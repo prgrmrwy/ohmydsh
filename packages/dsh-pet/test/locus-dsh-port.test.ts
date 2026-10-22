@@ -223,6 +223,31 @@ describe('production LocusDshPort session resolution', () => {
       parentSessionId: 'session-parent',
     })
   })
+
+  it('treats a user fork as a top-level main, but a subagent child as a child', async () => {
+    const ws = workspace('ws-project', { sessions: ['session-fork', 'session-sub'] })
+    const headers: Record<string, object> = {
+      // Real DSH headers: a fork is seeded at depth 0; a subagent is depth 1.
+      'session-fork': { parentSession: SessionId('session-source'), isSeeded: true, delegationDepth: 0 },
+      'session-sub': { parentSession: SessionId('session-source'), isSeeded: false, origin: 'subagent', delegationDepth: 1 },
+    }
+    const deps = harness({
+      sessionController: {
+        inspect: vi.fn(async (id: SessionId) => ({ meta: { id, ...headers[String(id)] }, events: [] })),
+      },
+      workspaceRegistry: {
+        get: id => (id === ws.id ? ws : undefined),
+        list: () => [ws],
+        archivedSessionIds: [],
+      },
+    })
+    const port = createProductionLocusDshPort(deps)
+
+    const fork = await port.resolveSession('session-fork')
+    expect(fork).toMatchObject({ id: 'session-fork', state: 'active' })
+    expect(fork).not.toHaveProperty('parentSessionId')
+    await expect(port.resolveSession('session-sub')).resolves.toMatchObject({ parentSessionId: 'session-source' })
+  })
 })
 
 describe('production LocusDshPort default Workspace resolution', () => {

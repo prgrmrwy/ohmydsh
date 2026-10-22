@@ -2597,13 +2597,19 @@ async function initialize(
               })
             }
             const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
-            if (previous === undefined || previous.state === 'active') {
+            if (previous === undefined) {
               throw new Error('Protected unified generation is unavailable for explicit rebuild')
             }
+            // An `active` row reaches here only because admission saw its main
+            // session archived. That is the one case where `/bind` may move the
+            // entry to another session: the owner already gave up the old one.
+            // rebuildExplicit re-proves the archive fact; a serving main still
+            // refuses, so binding drift stays blocked.
             return locusProvisioningController.rebuildExplicit({
               endpoint,
               previousLocusId: previous.id,
               parentSessionId,
+              ...(previous.state === 'active' ? { replaceArchivedParent: true } : {}),
             })
           }
           return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()

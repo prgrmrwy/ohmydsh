@@ -1,6 +1,7 @@
 /** Cold identity adapter; no Agent loading, history projection, or policy writes. */
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { CollaborationCallerPorts, CollaborationSessionIdentity } from './caller.js'
+import { delegationParentOf } from '../session-lineage.js'
 
 export interface CollaborationHostIdentityDeps {
   readonly sessionController?: {
@@ -42,7 +43,8 @@ export function createCollaborationHostIdentity(
         if (!record(inspection) || !record(inspection.meta) || isArchived(id)) return undefined
         const { meta } = inspection
         if (meta.id !== id) return undefined
-        const parent = meta.parentSession
+        // A user fork is a top-level session, not a delegated child.
+        const parent = delegationParentOf(meta)
         // Do not read inspection.events; identity lives in metadata. Consumers
         // wanting titles/recovery facts must use a distinct authorized projection.
         if (parent === undefined) return Object.freeze({ id })

@@ -27,6 +27,15 @@ describe('production-shaped collaboration cold identity adapter', () => {
     expect(Object.isFrozen(result)).toBe(true)
   })
 
+  it('reads a user fork as a root session, not a child of its source', async () => {
+    const f = fixture()
+    f.inspect.mockResolvedValue({ meta: { id: 'fork', parentSession: 'source', isSeeded: true, delegationDepth: 0 } })
+    expect(await f.identity.inspect('fork')).toEqual({ id: 'fork' })
+    // Seeded but delegated is still a child: only the exact fork shape is released.
+    f.inspect.mockResolvedValue({ meta: { id: 'fork', parentSession: 'source', isSeeded: true, origin: 'subagent', delegationDepth: 1 } })
+    expect(await f.identity.inspect('fork')).toEqual({ id: 'fork', parentSessionId: 'source' })
+  })
+
   it.each([
     undefined, null, {}, { header: { id: 'child', parentSession: 'main' } },
     { meta: { id: 'other' } }, { meta: { id: 'child', parentSession: null } },
