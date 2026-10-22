@@ -68,7 +68,9 @@ The first version of this change planned a narrower fix: a per-chain limit that 
 - **Derivation.** `reduce` maintains three maps:
   - `topicOf[seq]`, for every message and every item creation;
   - `itemSeq[itemId]`, written as own properties, as `items` already is, so `__proto__` resolves;
-  - `topicWakes[root]`, which is incremented when a commit contains a `message/sent` with `needsReply` together with a `wake` intent carrying `delivery.thread`.
+  - `topicWakes[root]`, which is incremented when a commit contains a `needsReply` `message/sent` together with a `wake` intent addressed to that message's recipient.
+
+  Counting depends only on those two events in the same commit, never on `delivery.thread`. Old logs have no `thread`, and their waking messages still count against their own (self-rooted) topic, so an old space does not get a fresh budget after upgrade. `thread` is redundant metadata for audit and for the pointer.
 - **Why topics and not chain length.** With chain length, many messages that all `ref` the same point each stay at length 2. Referencing a task or the first message, which is the natural thing to do, would then defeat the limit. A topic count is independent of where in the topic a message points.
 - **Why it was rejected before, and why it holds now.** Earlier rounds rejected topic counting because item events also woke people, which raised three problems:
   - multi-recipient boundaries;
@@ -105,7 +107,14 @@ Everything else returns an empty set.
 - internal purpose `breaker-reset`;
 - the authorization-table rows for the removed commands.
 
-`checkFields` stops accepting `deciders`: an input that carries it is `COLLAB_BAD_ITEM` with field `deciders`.
+Validation splits caller input from persisted state:
+
+- A caller-supplied `deciders` in `createItem` or `reviseItem.changes` is `COLLAB_BAD_ITEM` (field `deciders`), checked after receipt lookup.
+- Validation of the resulting item only covers active fields (`title`, `body`, `requiredAcks`, `kind`, `assignee`). Inert `deciders`/`agentEditCount` on an old snapshot are carried through unchanged and never cause a rejection. A title-only revision of an old `draft` or `agreed` item therefore succeeds.
+
+**Historical locked items.** `escalated`/`decided` items, which only exist in old logs, reject `reviseItem`, `ackItem` and `advanceRequest` with their existing status errors, checked after receipt lookup. Today `advanceRequest` ignores item status, and the `requests-01` test even asserts that locked requests progress. That test changes. Status excludes locked requests from actionable work, and the projection shows them as history.
+
+**Human members.** The kernel's member model allowed `kind:'human'` through provider-claimed creation and invitation. New members must be `agent` (`COLLAB_BAD_KIND`, checked after receipt lookup, so old successful commands still replay). Historical human members replay as ordinary members with no special authority. The `human-provider` authorization rule disappears together with `confirmDecision`.
 
 **Rationale:**
 - The breaker is replaced by topics.
@@ -126,6 +135,7 @@ Everything else returns an empty set.
 ### D6. Space `purpose`
 
 - `space/created` gains an optional `purpose`: a trimmed string of 1–200 characters with no control characters. It is immutable, and the overview returns it.
+- In the projection, `purpose` goes through the same plain-text escaping as titles and status text (control characters removed, CommonMark punctuation escaped).
 - `collab_status` is otherwise a free-text-free whitelist. `purpose` is the single exception:
   - it is creator-supplied text, sanitized and truncated;
   - it is emitted only under the fixed `source` notice.
@@ -167,7 +177,20 @@ Tool changes:
 
 Wake-notice text: the `requestDecision` clause is replaced with "ask your own user".
 
-Budget: removing one tool (about 230 characters) offsets the additions (about 150). The real-header budget test stays the gate.
+**Legacy `deciders` in the plugin tools.** Every pre-upgrade `collab_create_item` call carried a required `deciders`, often `[]`. Three straightforward options break the promise that an identical retry returns the original result:
+
+- Keeping it required makes new creates fail the kernel prohibition.
+- Deleting it from the schema makes the plugin's unknown-field check reject old retries before receipt lookup.
+- Stripping it changes the canonical payload hash, so the retry conflicts.
+
+So `deciders` stays as an optional, undocumented schema field, forwarded unchanged:
+
+- an exact old retry hits its receipt;
+- a fresh command carrying it is rejected by the kernel.
+
+`collab_revise_item.changes.deciders` is handled the same way.
+
+**Budget.** Removing one tool (about 230 characters) offsets the additions (about 150), and keeping `deciders` optional costs nothing new. The real-header budget test stays the gate.
 
 ### D10. Self-reported progress needs no new type
 
@@ -176,6 +199,7 @@ Agent Teams expresses "I am working on X" as a claimed task whose description it
 ## Risks / Trade-offs
 
 - **[Agents omit `ref` to dodge the limit]** Accepted by the user. The convention forbids it, and each new topic is still capped.
+- **[Completion notices across requests can still alternate]** One notice per request does not bound a chain of requests. A and B can each create a new request for the other and complete the previous one, and every completion wakes the other side, with no message budget consumed. This is a residual, accepted risk: the standard forbids a global cap and a reset, and each step needs a fresh `createItem` plus progress commands, which is far more deliberate than a reply loop. The convention tells members not to answer a completion with a new request for the same work.
 - **[Agents forget `ref` on genuine follow-ups]** Topics fragment. This only weakens protection; nothing breaks. The tool description and convention prompt for `ref`.
 - **[Lost features: formal escalation and verifiable human decisions]** Disputes now rely on the topic limit and each side asking its own user. A human's "approval" written by a root cannot be verified by the kernel. On one machine every root normally serves the same person, so the standard accepts this. Cross-machine work must redesign it.
 - **[A long-lived space accumulates topics]** One integer per message and one per topic root. Spaces are batch-scoped. Replay already clones state per record, so it is already superlinear; the extra maps are small.

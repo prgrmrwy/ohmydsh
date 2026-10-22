@@ -49,7 +49,7 @@
 
 每条消息与每个条目 SHALL 有话题根（topic），由重放从 `ref` 推导，不读取正文：没有 `ref` 的消息或条目，其话题根为自身 seq（消息为其 `id`，条目为其创建 seq）；有 `ref` 的，其话题根为被引用记录的话题根。本变更之前写入的记录没有 `ref`，各自为根。状态与总览 SHALL 提供 `topicOf: {seq: 话题根}`（键为消息 seq 与条目创建 seq）与 `topicWakes: {话题根: 计数}`。
 
-一个话题的计数 SHALL 等于该话题内实际记账了 `wake` 类 `dispatch/intended` 的 `needsReply` 消息条数，由日志重放得出。发送一条 `needsReply:true`、且按唤醒规则会为收件人记账唤醒的消息时，若其话题的计数已达到常量 `TOPIC_LIMIT`（= 20），命令 MUST 以 `COLLAB_THREAD_LIMIT` 拒绝，不写提交、不写收据、不记账投递。`needsReply:false` 的消息、因收件人不可达或绑定不支持唤醒而不记账唤醒的消息 MUST NOT 被拒绝，也不计数，但仍获得话题根并可被引用。邀请与 request 的结束通知 MUST NOT 计入任何话题的计数，也 MUST NOT 被话题上限拒绝；结束通知的 `dispatch/intended` SHALL 在 `delivery.thread` 中记录该 request 的话题根，计数消息的 `dispatch/intended` 记录该消息的话题根，邀请 MUST 不含 `delivery.thread`。
+一个话题的计数 SHALL 等于该话题内实际记账了 `wake` 类 `dispatch/intended` 的 `needsReply` 消息条数，由日志重放得出：一条提交含 `needsReply:true` 的 `message/sent` 且同一提交含对其收件人的 `wake` 类 `dispatch/intended` 时，该消息计入其话题；判断只依赖同一提交内的这两个事件，不依赖 `delivery.thread`（`thread` 只是冗余记录），因此本变更之前的需回复消息也按原样计入。发送一条 `needsReply:true`、且按唤醒规则会为收件人记账唤醒的消息时，若其话题的计数已达到常量 `TOPIC_LIMIT`（= 20），命令 MUST 以 `COLLAB_THREAD_LIMIT` 拒绝，不写提交、不写收据、不记账投递。`needsReply:false` 的消息、因收件人不可达或绑定不支持唤醒而不记账唤醒的消息 MUST NOT 被拒绝，也不计数，但仍获得话题根并可被引用。邀请与 request 的结束通知 MUST NOT 计入任何话题的计数，也 MUST NOT 被话题上限拒绝；结束通知的 `dispatch/intended` SHALL 在 `delivery.thread` 中记录该 request 的话题根，计数消息的 `dispatch/intended` 记录该消息的话题根，邀请 MUST 不含 `delivery.thread`。
 
 话题上限检查 SHALL 在同一协作空间的串行事务中、以与重放相同的推导完成，并发命令不能越过上限。不提供重置话题计数的入口。
 
@@ -57,6 +57,11 @@
 - **GIVEN** `aily` 与 `doubao` 均 presence 可达；`aily` 在 seq 5 发出需回复消息给 `doubao`
 - **WHEN** 此后两人轮流发 `needsReply:true` 的消息，每条都以 `ref` 指向本话题中任意一条先前消息（包括总是指向 seq 5）
 - **THEN** 包括 seq 5 在内的前 20 条都成功，各自唤醒的 `delivery.thread` 为 5；第 21 条返回 `COLLAB_THREAD_LIMIT`，日志长度不变；总览 `topicWakes[5]` 为 20
+
+#### Scenario: 旧日志中的唤醒消息计入其话题
+- **GIVEN** 本变更之前的日志中消息 seq 3 为 `needsReply:true`，同一提交含对收件人的 `wake` 记账（无 `delivery.thread`）
+- **WHEN** 新内核加载后，两人以 `ref` 指向该话题轮流发 19 条需回复消息，随后关闭并重新打开空间，再发 1 条
+- **THEN** 加载后 `topicWakes[3]` 为 1；这 19 条都成功；重开后 `topicWakes[3]` 为 20；重开后发出的那 1 条返回 `COLLAB_THREAD_LIMIT`，日志长度不变
 
 #### Scenario: 不写 ref 的新消息开启新话题
 - **GIVEN** 承上，话题 5 已达上限
@@ -82,6 +87,11 @@
 - **GIVEN** 作者 `aily` 以 `ref:5` 创建 request `R1`、承接方 `doubao`，话题 5 已达上限
 - **WHEN** `doubao` 推进 `R1` 为 `accepted` 再到 `done`
 - **THEN** 两次都成功；推进为 `done` 的提交含一条对 `aily`、`delivery.thread` 为 5 的 `wake` 类 `dispatch/intended`；`topicWakes[5]` 仍为 20
+
+#### Scenario: 跨 request 的结束通知不受话题上限约束
+- **GIVEN** 话题 5 已达上限；`aily` 与 `doubao` 互为承接方
+- **WHEN** `aily` 以 `ref:5` 创建承接方为 `doubao` 的 `R6`，`doubao` 把 `R6` 推进到 `done`；`doubao` 再以 `ref:5` 创建承接方为 `aily` 的 `R7`，`aily` 把 `R7` 推进到 `done`
+- **THEN** 两次推进到 `done` 都成功，各产生一条对作者的唤醒；`topicWakes[5]` 仍为 20（这是已知并接受的残余风险，不设全局上限）
 
 #### Scenario: 并发提交不越过上限
 - **GIVEN** 话题 5 的计数为 19
@@ -242,6 +252,54 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **WHEN** principal `internal{purpose:'other'}` 调用 `overview`
 - **THEN** 返回 `COLLAB_FORBIDDEN`
 
+### Requirement: 成员模型与地址唯一
+
+成员 SHALL 表示为 `{name, kind: human|agent, status: invited|active|declined|gone, joinSeq, binding}`，`binding` 为 `{channel, address, supports:{wake, confirm}}`，本期每个成员恰有一个绑定。成员名 SHALL 匹配 `^[a-z][a-z0-9-]{0,31}$`，在协作空间内唯一且不可复用，否则以 `COLLAB_BAD_NAME` / `COLLAB_NAME_TAKEN` 拒绝。`{channel, address}` 在协作空间内 SHALL 唯一且不可复用（包括 `declined`、`gone` 成员占用的地址），冲突 MUST 以 `COLLAB_ADDRESS_TAKEN` 拒绝。
+
+`invite(address, name, kind)` 与 `createSpace` 的首成员 SHALL 都经 provider 认领确定绑定：内核把 `(address, kind)` 交给全部已注册 provider 的 `claim`，只有恰好一个 provider 返回非空结果时才写入成员；无人认领 MUST 以 `COLLAB_ADDRESS_UNCLAIMED` 拒绝；多个认领 MUST 以 `COLLAB_ADDRESS_AMBIGUOUS` 拒绝并返回候选 channel 列表。新写入的成员 `kind` MUST 为 `agent`：`createSpace` 的首成员与 `invite` 的被邀请者声明 `kind:'human'` 时 MUST 以 `COLLAB_BAD_KIND` 拒绝（人类不作为台账成员，见跨边界协作标准）；该检查位于收据查找之后，本变更之前成功的同 cmdId 命令重放仍返回原结果。由 provider principal 发起时认领的 channel MUST 等于该 provider 的注册 channel。本变更之前日志中的 `kind:'human'` 成员照常重放，保持原状态与权限，可以像其它成员一样读写、离开或被标记离开，但不再具有任何人类专属能力（决策已移除）。
+
+入站反查 SHALL 按 `{channel, address}` 精确匹配。
+
+#### Scenario: 唯一认领后加入
+- **GIVEN** provider P1（channel `test-a`）只认领形如 `a:*` 的地址
+- **WHEN** Leader 邀请 `a:42` 为 agent 成员 `bob`，随后 `agent{test-a, a:42}` 调用 `join`
+- **THEN** `bob.binding` 为 `{channel:'test-a', address:'a:42'}`，状态为 `active`
+
+#### Scenario: 无人认领
+- **GIVEN** 没有 provider 认领地址 `zzz`
+- **WHEN** Leader 邀请 `zzz`
+- **THEN** 返回 `COLLAB_ADDRESS_UNCLAIMED`，日志长度不变
+
+#### Scenario: 多个认领
+- **GIVEN** provider P1（`test-a`）与 P2（`test-b`）都认领地址 `dup:1`
+- **WHEN** Leader 邀请 `dup:1`
+- **THEN** 返回 `COLLAB_ADDRESS_AMBIGUOUS`，错误详情 `candidates` 为 `['test-a','test-b']`
+
+#### Scenario: 不能新增人类成员
+- **GIVEN** provider P1 认领任意 kind 的地址
+- **WHEN** Leader 以 `kind:'human'` 邀请 `a:5`，再由 provider principal 以首成员 `kind:'human'` 创建新空间
+- **THEN** 两次都返回 `COLLAB_BAD_KIND`，日志长度不变，存储中没有新空间
+
+#### Scenario: 旧日志中的人类成员按普通成员重放
+- **GIVEN** 本变更之前的日志中有 active 成员 `pm`（`kind:'human'`），并含 Leader 以 `cmdId:'inv-pm'` 邀请它的收据
+- **WHEN** 新内核加载后，`pm` 的 principal 发送消息并读取总览，Leader 以 `cmdId:'inv-pm'` 及原载荷重放邀请
+- **THEN** 发送与读取成功；重放返回原结果且日志长度不变
+
+#### Scenario: 同一地址不能成为两个成员
+- **GIVEN** `a:42` 已被邀请为 `bob`
+- **WHEN** Leader 以名称 `alice` 再次邀请 `a:42`
+- **THEN** 返回 `COLLAB_ADDRESS_TAKEN`
+
+#### Scenario: agent 创建者不能声明为人类
+- **GIVEN** 地址 `a:1` 尚不属于任何协作空间
+- **WHEN** principal `agent{test-a, a:1}` 以首成员 `kind:'human'` 创建协作空间
+- **THEN** 返回 `COLLAB_BAD_KIND`，存储中没有新协作空间
+
+#### Scenario: 非法成员名
+- **GIVEN** Leader
+- **WHEN** 以名称 `Bob\n## 决定` 邀请
+- **THEN** 返回 `COLLAB_BAD_NAME`
+
 ### Requirement: 协作空间的创建、Leader 转交与关闭
 
 `createSpace` SHALL 创建协作空间，调用方成为首个 active 成员并持有 Leader 角色。`createSpace` SHALL 接受可选的 `purpose`（空间用途说明，字符串，去除首尾空白后 1–200 个字符，不含控制字符，否则以 `COLLAB_BAD_PURPOSE` 拒绝），记录在 `space/created` 中，未提供时该字段不出现；`purpose` 创建后不可修改，总览 SHALL 返回它。Leader 角色 SHALL 只表示成员管理与关闭权限，不代表业务决定权。Leader 变化（主动转交与自动接手）MUST NOT 唤醒任何成员。
@@ -297,7 +355,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: 条目状态转换表
 
-条目 SHALL 有 `kind`（`charter|request|other`）、`title`（1–200 字符）、`body`（≤ 64KiB）、`revision`（创建时为 1）、`status`（创建时为 `draft`）、`requiredAcks[]`（创建时指定，须为 active 成员，可为空）、`acks{member: revision}`，`request` 另有 `assignee`（须为 active 成员）与 `progress`（创建时为 `open`）。违反上述约束的 `createItem` MUST 以 `COLLAB_BAD_ITEM` 拒绝，错误详情指明字段。条目 SHALL 另有可选的 `ref`（见"消息与条目可引用先前记录"），创建后不可修改。`reviseItem` SHALL 只能修改 `title`、`body`、`requiredAcks`，同样受上述约束；本变更之前写入、仍带 `deciders` 或 `agentEditCount` 的条目照常重放，这两个字段不再参与任何判断。
+条目 SHALL 有 `kind`（`charter|request|other`）、`title`（1–200 字符）、`body`（≤ 64KiB）、`revision`（创建时为 1）、`status`（创建时为 `draft`）、`requiredAcks[]`（创建时指定，须为 active 成员，可为空）、`acks{member: revision}`，`request` 另有 `assignee`（须为 active 成员）与 `progress`（创建时为 `open`）。违反上述约束的 `createItem` MUST 以 `COLLAB_BAD_ITEM` 拒绝，错误详情指明字段。条目 SHALL 另有可选的 `ref`（见"消息与条目可引用先前记录"），创建后不可修改。`reviseItem` SHALL 只能修改 `title`、`body`、`requiredAcks`，同样受上述约束；本变更之前写入、仍带 `deciders` 或 `agentEditCount` 的条目照常重放，这两个字段不再参与任何判断：字段校验只针对调用方本次提供的输入与条目的有效字段，旧快照上的 `deciders` 与 `agentEditCount` MUST NOT 导致修改或 ack 被拒；调用方在 `createItem` 或 `reviseItem.changes` 中提供 `deciders` MUST 以 `COLLAB_BAD_ITEM`（字段 `deciders`）拒绝，该检查位于收据查找之后。
 
 条目状态 SHALL 只按下表转换，表外组合 MUST 以表中所列错误拒绝且不写事件：
 
@@ -347,6 +405,11 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **WHEN** 创建 `requiredAcks` 为 `['bob']` 的条目，再创建带 `deciders` 字段的条目
 - **THEN** 两次都返回 `COLLAB_BAD_ITEM`，详情字段分别为 `requiredAcks` 与 `deciders`
 
+#### Scenario: 旧快照的条目可正常修改
+- **GIVEN** 本变更之前的日志中条目 `C5` 为 `draft`，快照含 `deciders:['pm']` 与 `agentEditCount:2`
+- **WHEN** 新内核加载后成员以当前 revision 只修改 `title`
+- **THEN** 成功，`C5` revision 加 1；随后以 `changes:{deciders:[]}` 修改返回 `COLLAB_BAD_ITEM`，详情字段为 `deciders`
+
 #### Scenario: 修改与达成共识不唤醒
 - **GIVEN** `aily` 与 `doubao` 均为 active，charter `C1` 的 `requiredAcks` 为 `['doubao']`
 - **WHEN** `aily` 修改 `C1`，随后 `doubao` ack 使其 `agreed`
@@ -383,7 +446,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: request 条目的承接流程
 
-`request` 条目的 `progress` SHALL 只能按 `open → accepted → done`、`open → rejected`、`accepted → rejected` 推进，仅 `assignee` 可推进，且与条目状态与 revision 无关。非法跳转 MUST 以 `COLLAB_BAD_TRANSITION` 拒绝；非承接方推进 MUST 以 `COLLAB_FORBIDDEN` 拒绝。推进为 `accepted` MUST NOT 唤醒任何成员；推进为终态 `done` 或 `rejected` SHALL 唤醒 request 的作者（结束通知；作者即承接方本人时不唤醒）。终态不可逆，因此每个 request 至多产生一次结束通知。
+`request` 条目的 `progress` SHALL 只能按 `open → accepted → done`、`open → rejected`、`accepted → rejected` 推进，仅 `assignee` 可推进，且与条目状态与 revision 无关。非法跳转 MUST 以 `COLLAB_BAD_TRANSITION` 拒绝；非承接方推进 MUST 以 `COLLAB_FORBIDDEN` 拒绝。条目状态为 `escalated` 或 `decided`（只可能来自旧日志）的 request MUST NOT 被推进，分别以 `COLLAB_ITEM_ESCALATED`、`COLLAB_DECIDED_LOCKED` 拒绝；该检查位于收据查找之后。推进为 `accepted` MUST NOT 唤醒任何成员；推进为终态 `done` 或 `rejected` SHALL 唤醒 request 的作者（结束通知；作者即承接方本人时不唤醒）。终态不可逆，因此每个 request 至多产生一次结束通知。
 
 #### Scenario: 承接方正常推进
 - **GIVEN** `R1` 的 `assignee` 为 `doubao`，`progress` 为 `open`
@@ -409,6 +472,11 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** `aily` 创建承接方为 `aily` 的 `R3`
 - **WHEN** `aily` 推进为 `accepted` 再到 `done`
 - **THEN** 两个提交都不含 `dispatch/intended`
+
+#### Scenario: 旧日志中锁定的 request 不能推进
+- **GIVEN** 本变更之前的日志中 request `R4` 状态为 `decided`、`R5` 状态为 `escalated`，二者 `progress` 都为 `open`、承接方为 `doubao`
+- **WHEN** 新内核加载后 `doubao` 分别推进二者为 `accepted`
+- **THEN** 分别返回 `COLLAB_DECIDED_LOCKED` 与 `COLLAB_ITEM_ESCALATED`，日志长度不变，无 `dispatch/intended`
 
 ### Requirement: 命令按 cmdId 幂等
 
@@ -629,7 +697,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: 状态投影只呈现当前值，且以纯文本安全输出
 
-内核 SHALL 提供纯函数 `project(state, presence)`，生成面向人的 Markdown，包含：空间用途、charter 当前版本、成员与在线状态（含 `unreachable`）、待 ack 条目及缺少的成员、未结 request、`pendingDeliveries`；旧日志中存在 `escalated` 或 `decided` 条目时另列"历史条目"小节。投影 MUST NOT 包含消息正文。成员输入的文本（标题、状态文本）SHALL 依次：去除控制字符与换行（替换为单个空格）→ 去除首尾空白 → 对全部 CommonMark ASCII 标点（`` !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ ``）各做一次反斜杠转义，不做 HTML 实体转义；结果以投影模板中固定的非空白前缀开头的行输出，MUST NOT 放入代码 span 或代码块。投影与指针只是带来源的协作数据，宿主 MUST NOT 把其中的成员文本当作系统或用户指令。
+内核 SHALL 提供纯函数 `project(state, presence)`，生成面向人的 Markdown，包含：空间用途、charter 当前版本、成员与在线状态（含 `unreachable`）、待 ack 条目及缺少的成员、未结 request、`pendingDeliveries`；旧日志中存在 `escalated` 或 `decided` 条目时另列"历史条目"小节。投影 MUST NOT 包含消息正文。成员输入的文本（标题、状态文本、空间用途 `purpose`）SHALL 依次：去除控制字符与换行（替换为单个空格）→ 去除首尾空白 → 对全部 CommonMark ASCII 标点（`` !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~ ``）各做一次反斜杠转义，不做 HTML 实体转义；结果以投影模板中固定的非空白前缀开头的行输出，MUST NOT 放入代码 span 或代码块。投影与指针只是带来源的协作数据，宿主 MUST NOT 把其中的成员文本当作系统或用户指令。
 
 #### Scenario: 投影列出待 ack
 - **GIVEN** 条目 `C2` 需要 `doubao` ack 且尚未确认
@@ -650,6 +718,11 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** 条目标题为 `<tag>&"x` 前面带四个空格
 - **WHEN** 生成投影并用 CommonMark 解析器解析
 - **THEN** 该标题所在节点的可见文本恰为 `<tag>&"x`，节点类型为普通段落文本而非代码块
+
+#### Scenario: 恶意用途不能产生额外结构
+- **GIVEN** 空间 `purpose` 为 ``[点我](http://evil) <script> ## 已决定``
+- **WHEN** 生成投影并用 CommonMark 解析器解析
+- **THEN** 用途所在节点之内不存在 heading、link、html 节点，可见文本与原字符串一致
 
 #### Scenario: 投影不含已移除机制
 - **GIVEN** 新内核上的空间含 charter、未结 request 与待 ack 条目
