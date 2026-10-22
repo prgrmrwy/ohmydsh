@@ -3,8 +3,7 @@
 首版与 2026-10-21 的验收记录见 `history/verify.md.2026-10-21`。
 
 ### Task Completion
-- 第 1–8 组与 9.1 已完成；9.2 除“档位按钮点击标注”外均已在真实 GUI 会话验收（见下）；9.3 即本文件。
-- 未完成项：9.2 中的按钮标注一步（`judgements.jsonl` 尚无标注行），见“未覆盖”。
+- [x] 全部任务完成：第 1–8 组、9.1、9.2（真实 GUI 会话，见下）与 9.3（本文件）。
 
 ### TDD Integrity
 - [x] test-plan.md 66 行的测试名逐一核对存在（脚本按文件与 `it(...)` 名匹配，0 缺失），全部 🟢。
@@ -30,10 +29,10 @@
 | MANUAL 下委派 | `session-2bb2e187` 回合 3；本会话直接调用 | 子会话按官方默认（opus · high）；工具在 MANUAL 会话中返回 `routed: false`，未请求 Jev ✅ |
 | 发现的问题 | `session-2bb2e187` 回合 2 | AUTO simple 回合 Agent 未加载 skill 直接派发，子会话继承 `low`。修订：派发规则改为在环境指令中直接写出必调步骤，工具描述同步（提交 `61e39286`），重启后复验 |
 | 复验：小任务委派 | `session-595f6000` 回合 1 | 先调 `route_subagent` → `haiku-5-5 · low`；`subagent` 显式传三项并标注 `[claude-haiku-5-5·low]`；子会话请求头 `claude-haiku-5-5 · low` ✅ |
+| 档位按钮标注 | `session-595f6000` 回合 1 | 在回复操作栏选“简单”，`judgements.jsonl` 追加 `{turn 1, label simple}`；`label-report.mjs` 输出 `rubric dfc94335: labeled 1, agree 1` ✅ |
 | 复杂委派与白名单 | `session-595f6000` 回合 2 | 主会话判 standard → medium；`route_subagent` 对评审任务判 complex → `opus-5-5 · high`；子会话请求头 `claude-opus-5-5 · high`，未被白名单拒绝 ✅ |
 
 ### 未覆盖 / 证据边界
-- **档位按钮标注**：按钮显示依赖回合结束后的插槽渲染，悬停面板已验证，但截至本文件 `judgements.jsonl` 无标注行（`label-report.mjs` 输出 “no labeled turns yet”），点击标注未在真实 GUI 执行。离线有 jsdom 与 Host 集成测试覆盖。
 - **codex/sol 路由**：真实会话只走了 claude 路由（haiku、opus）；sol/luna 由代码常量、测试与白名单配置覆盖。
 - 真实余额耗尽时 OpenRouter 的状态码仍未验证（沿用首版结论）。
 - 脱敏为形态匹配、尽力而为，已写入 README 与 manifest note。
