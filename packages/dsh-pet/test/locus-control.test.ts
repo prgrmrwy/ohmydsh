@@ -263,6 +263,44 @@ describe('unified locus command dispatcher', () => {
     const text = 'text' in result ? result.text ?? '' : ''
     expect(text).toContain('原主会话 「旧会话」（old999）')
     expect(text).toContain('已改挂到新主会话')
+    expect(text).not.toContain('话题')
+  })
+
+  it('reports topics carried along with a group move, including skipped ones', async () => {
+    const rebuildProtected = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => ({
+      ...bindResult(parentSessionId),
+      previousLocus: bindResult('session-old999999').locus,
+      movedTopics: 2,
+      skippedTopics: ['入口仍有执行中或排队消息，请空闲后再重建。'],
+    }))
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [session('session-abcdef123456')],
+      bind: { bind: vi.fn(), rebuildProtected: rebuildProtected as never },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
+    })
+
+    const result = await dispatcher.dispatch({
+      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER, authorization: 'retired',
+    })
+    const text = 'text' in result ? result.text ?? '' : ''
+    expect(text).toContain('同群原主会话下的话题已一起改挂 2 个，1 个未改挂（入口仍有执行中或排队消息')
+    expect(text).toContain('再发一次 /bind')
+  })
+
+  it('a same-source group /bind that only carried old topics does not claim a new child', async () => {
+    const bind = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => ({
+      ...bindResult(parentSessionId), created: false, reused: true, movedTopics: 3, skippedTopics: [],
+    }))
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER],
+      listSessions: () => [session('session-abcdef123456')],
+      bind: { bind: bind as never },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
+    })
+    const result = await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER })
+    const text = 'text' in result ? result.text ?? '' : ''
+    expect(text).toBe('当前入口已绑定主会话 「研发会话」（abcdef）。同群原主会话下的话题已一起改挂 3 个。')
   })
 
   it('fails closed when a protected endpoint has no explicit rebuild adapter', async () => {

@@ -267,14 +267,26 @@ function bindReceipt(
   const source = locusSessionReceiptLabel(session)
   // A document's /bind always restates who may ask (pet-locus-doc-comments D7).
   const disclosure = isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : ''
-  if (result.reused) return `${place}已绑定主会话 ${source}，本次未重复创建；当前共享权限为 read。${disclosure}`
+  // Topics carried along with a group move are reported, including the ones
+  // that could not move: a silently skipped topic keeps answering "stopped".
+  const carried = result as { readonly movedTopics?: number; readonly skippedTopics?: readonly string[] }
+  const skipped = carried.skippedTopics ?? []
+  const topicNote = (carried.movedTopics ?? 0) > 0 || skipped.length > 0
+    ? `同群原主会话下的话题已一起改挂 ${carried.movedTopics ?? 0} 个`
+      + (skipped.length > 0 ? `，${skipped.length} 个未改挂（${skipped[0]}），可在该话题里再发一次 /bind。` : '。')
+    : ''
+  if (result.reused) {
+    return topicNote === ''
+      ? `${place}已绑定主会话 ${source}，本次未重复创建；当前共享权限为 read。${disclosure}`
+      : `${place}已绑定主会话 ${source}。${topicNote}${disclosure}`
+  }
   // A rebuild that moved the entry off another main session must say so: the
   // owner should never believe the entry is still on the old session.
   const previous = (result as { readonly previousLocus?: { readonly parentSessionId?: string; readonly parentSessionTitle?: string } }).previousLocus
   const moved = previous?.parentSessionId !== undefined && previous.parentSessionId !== session.id
     ? `原主会话 ${locusSessionReceiptLabel({ id: previous.parentSessionId, ...(previous.parentSessionTitle === undefined ? {} : { title: previous.parentSessionTitle }) })} 已归档或停用，本入口已改挂到新主会话，旧对话未自动合并。`
     : ''
-  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${moved}${disclosure}`
+  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${moved}${topicNote}${disclosure}`
 }
 
 /**

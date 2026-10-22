@@ -146,6 +146,7 @@ import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './ho
 import type { LocusToolTierName } from './host/locus/aggregate.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
+import { carryArchivedTopics, type CarriedTopics } from './host/locus/carry-topics.js'
 import { createDocControlMessenger, DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
@@ -2546,6 +2547,19 @@ async function initialize(
     })
   })()
 
+  /** See carry-topics.ts: move this group's old topics off an archived main. */
+  const moveArchivedTopics = (
+    endpoint: { readonly chatId: string; readonly threadId?: string },
+    parentSessionId: string,
+  ): Promise<CarriedTopics> => locusProvisioningController === undefined
+    ? Promise.resolve({ movedTopics: 0, skippedTopics: [] })
+    : carryArchivedTopics({
+      listLoci: () => locusRepository.listLoci(),
+      latestIdOf: topic => locusRepository.getLatestLocusByEndpoint(topic)?.id,
+      isArchived: isSessionArchived,
+      rebuild: input => locusProvisioningController.rebuildExplicit(input),
+    }, endpoint, parentSessionId)
+
   const locusControlDispatch = locusProvisioningController === undefined || locusDshPort === undefined || locusPermissionMutation === undefined || locusToolTierMutation === undefined
     ? undefined
     : createLocusControlDispatcher({
@@ -2570,12 +2584,22 @@ async function initialize(
       },
       bind: {
         bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
-          const run = () => endpoint.threadId === undefined
-            ? locusProvisioningController.ensureGroup({
-              chatId: endpoint.chatId,
-              parentSessionId,
-              ...(chatName === undefined ? {} : { chatName }),
-            })
+          const run = async () => endpoint.threadId === undefined
+            ? await (async () => {
+              const result = await locusProvisioningController.ensureGroup({
+                chatId: endpoint.chatId,
+                parentSessionId,
+                ...(chatName === undefined ? {} : { chatName }),
+              })
+              // A same-source retry in a group whose old topics were left on an
+              // archived main (e.g. the group was moved before topics were
+              // carried along) is the owner's repair path for those topics.
+              if (!result.reused || result.locus.parentSessionId !== parentSessionId) return result
+              const carried = await moveArchivedTopics(endpoint, parentSessionId)
+              return carried.movedTopics === 0 && carried.skippedTopics.length === 0
+                ? result
+                : { ...result, ...carried }
+            })()
             : locusProvisioningController.ensureTopic({
               chatId: endpoint.chatId,
               threadId: endpoint.threadId,
@@ -2605,12 +2629,15 @@ async function initialize(
             // entry to another session: the owner already gave up the old one.
             // rebuildExplicit re-proves the archive fact; a serving main still
             // refuses, so binding drift stays blocked.
-            return locusProvisioningController.rebuildExplicit({
+            const archivedParent = previous.state === 'active' ? previous.parentSessionId : undefined
+            const rebuilt = await locusProvisioningController.rebuildExplicit({
               endpoint,
               previousLocusId: previous.id,
               parentSessionId,
-              ...(previous.state === 'active' ? { replaceArchivedParent: true } : {}),
+              ...(archivedParent === undefined ? {} : { replaceArchivedParent: true }),
             })
+            if (archivedParent === undefined) return rebuilt
+            return { ...rebuilt, ...await moveArchivedTopics(endpoint, parentSessionId) }
           }
           return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
