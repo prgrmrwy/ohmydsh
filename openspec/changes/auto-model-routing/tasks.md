@@ -48,12 +48,12 @@
 
 ## 7. 沿用测试复核
 
-- [ ] 7.1 运行全套，确认 test-plan 中 🟢 的 33 行仍通过；任何因新常量或签名而需改断言的，按 🔴 记录观察到的失败后再改。
+- [x] 7.1 运行全套，确认 test-plan 中 🟢 的 33 行仍通过；任何因新常量或签名而需改断言的，按 🔴 记录观察到的失败后再改。
 
 ## 8. 文档与登记
 
-- [ ] 8.1 更新 package README（中英）：判档规则、effort 起点、子会话表与 MANUAL 行为、上一轮上下文与脱敏（尽力而为）、判档记录位置与统计脚本、白名单须包含的五条路由且对新会话生效。更新 `dsh.yaml` note（外发范围含助手回复片段、子会话只在 AUTO 时判档）。
-- [ ] 8.2 运行 package `npm run typecheck`、`npm test`、`npm run build`；根 `npm test`、`npm run check:artifacts`；隔离 DSH_HOME 连续 `node scripts/sync.mjs` 两次，第二次无变化；`openspec validate auto-model-routing`。逐行把 test-plan 翻绿。
+- [x] 8.1 更新 package README（中英）：判档规则、effort 起点、子会话表与 MANUAL 行为、上一轮上下文与脱敏（尽力而为）、判档记录位置与统计脚本、白名单须包含的五条路由且对新会话生效。更新 `dsh.yaml` note（外发范围含助手回复片段、子会话只在 AUTO 时判档）。
+- [x] 8.2 运行 package `npm run typecheck`、`npm test`、`npm run build`；根 `npm test`、`npm run check:artifacts`；隔离 DSH_HOME 连续 `node scripts/sync.mjs` 两次，第二次无变化；`openspec validate auto-model-routing`。逐行把 test-plan 翻绿。
 
 ## 9. 验收（需用户在场或授权）
 
@@ -68,3 +68,4 @@
 - 第 4 组（2026-10-22）：`JudgementBook`（`src/judgements.ts`）同时持有追加写与内存映射；`Router` 新增 `onJudged` 回调，在成功判档后首个请求触发（无 effort 也触发），index 中写判档行、失败只记 warn。用户回合由 pre-step 中 `userInput(...).userTurn` 记录（不论是否 AUTO），`session/event` 的 `assistant/message` 按 `data.turn ≥ 最近用户回合` 映射到该回合、仅当其有判档。`labelEndpoint` 与现有端点共用注册循环与 envelope。观察到的失败：host 集成测试等待第三个路由超时；`labelEndpoint is not a function`；`label-report.mjs` 不存在。
 - 第 5 组（2026-10-22）：`src/client/label.ts` 的 `LabelButton` 经 `ui` 注入官方 `Tooltip`、`Menu`（数据行 `items` + `type: 'label'` 标题行，`selectedId` 由官方画勾）与 `IconGaugeOutlineRegular`；按钮 class 复制自 `dsh-client-ui-chat` 操作栏 `action` 的样式值。primitives 由 web shell 作为共享模块提供（devDependency 仅供类型，另列 peer）；vitest 把它别名到 `test/primitives-stub.ts`，因为真实包的 peer（clsx 等）只在 shell 中存在。`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-chat`（插槽声明方）。实施中发现 client 经 `../jev.js` 把 `node:crypto` 打进浏览器 bundle（第 1 组引入 `createHash` 后），将 `CATEGORY_HINTS`/`JevCategory` 拆到 `src/hints.ts`，并加 `content.test.ts › client_sources_stay_browser_safe`（先改回旧导入观察到失败）。
 - 第 6 组（2026-10-22）：`eval/run.mjs` 从 `lib/` 导入 `TIER_QUESTIONS`、`buildState` 与 `userInput`（与 Host 同一路径：先 `redact` 再截断）；支持 `--base`、`--runs`（默认 3）、`--only`。`eval-runner.test.ts` 先以 tsc 构建 `lib/`，再以回环假 Jev 运行脚本；用例按“Host 对该用例构造的完整 state”反查，任何一条与 Host 不逐字相等都会失败。观察到的失败：`run.mjs` 不存在；首版测试按文本结尾反查用例不可靠，改为按完整 state。
+- 第 7–8 组（2026-10-22）：test-plan 66 行的测试名逐一核对存在且通过（package 16 个文件 94 个测试）。package `typecheck`/`test`/`build` 通过；根 `npm test` 447 项中 445 通过、2 项为仓库既有的条件跳过、0 失败（首次运行有 5 项失败，原因是新工作树里 `packages/dsh-openspec/lib/` 未构建，构建后通过，与本 change 无关）；`npm run check:artifacts` 通过；隔离 DSH_HOME 两次 sync 由 `tests/auto-model-routing-sync.test.mjs`（第二次 `no changes`）与 `tests/sync-agent-instructions.test.mjs` 覆盖并通过；`openspec validate auto-model-routing --strict` 通过。
