@@ -29,6 +29,14 @@
 ## 6. 验证
 
 - [x] 6.1 `npm --workspace packages/collab-kernel test`、`npm --workspace packages/dsh-collab test` 及各自 typecheck/build
-- [ ] 6.2 仓库级 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs` 连续两次幂等
+- [x] 6.2 仓库级 `npm test`、`npm run check:artifacts`、`node scripts/sync.mjs` 连续两次幂等
 - [x] 6.3 `openspec validate dsh-collab-member-trust --strict`
-- [ ] 6.4 真实 Host 验收：`dsh build` + `dsh restart` 后，A 邀请 B 时 B 无需 join；A 给 B 派 request 后，B 不问人直接 accepted→done（权限内任务）
+- [x] 6.4 真实 Host 验收：`dsh build` + `dsh restart` 后，A 邀请 B 时 B 无需 join；A 给 B 派 request 后，B 不问人直接 accepted→done（权限内任务）
+
+## 验收记录
+
+- 6.1：collab-kernel 214/214、typecheck 0；dsh-collab vitest 105/105、typecheck 0。build/sync artifact 两项在 worktree lean 依赖下缺 `tsdown`（基线同样失败），在复制主 checkout `node_modules` 的仓内副本中 2/2 通过（含 lib/v1.md 与 v2.md）。
+- 6.2：根 `npm test` 与基线相同的 8 个既有失败（dsh-openspec/routing sync 测试），无新增；`check:artifacts` 通过；合入 main（a6f6dae99）后 `dsh build` 部署，主 checkout 再连跑两次 `node scripts/sync.mjs` 均为 "no changes — deployment already matches manifest"。
+- 6.4（2026-10-22，正式 3080 Host 重启后）：A = 发起会话 session-a9414de2…，B = 经官方 `/api session/create` 新建的空会话 session-96868ca3…（cwd `~/.dsh-collab-acceptance/ws-trust-b`，不在任何配置中）。空间 trust-acc-1 记录约定 v2。
+  - A 邀请 B（seq2）返回 `autoJoined:true`，B 的 `member/joined` 在 seq4；B 被唤醒收到常设授权文本与"宿主已代为加入"，调用 `collab_status` 后确认已加入，未调用 join、未询问用户。
+  - A 建 request req-probe-file（seq5）并发 needsReply 消息（seq6）；B 被唤醒后直接 accepted（seq8）→ 写 `collab-probe.txt`（内容 `ok\n`）→ done（seq10）→ needsReply:false 回复（seq12），全程无 `ask_user_question`。A 随后关闭空间（seq13）。
