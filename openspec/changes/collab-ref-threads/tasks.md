@@ -1,8 +1,8 @@
 ## 0. 基线
 
-- [ ] 0.1 在任何修改之前运行 kernel 与 dsh-collab 全部测试（含 `test:components`）、typecheck 与根 `npm test`，记录基线（含既有失败清单）
-- [ ] 0.2 确认 test-plan 中标为 🟢 的回归测试在基线上为绿
-- [ ] 0.3 约定：每组先写的测试须在该组实现前为红；若某断言已被更早的组满足，允许起始即绿并在 test-plan 记一句原因，不得为它伪造失败
+- [x] 0.1 在任何修改之前运行 kernel 与 dsh-collab 全部测试（含 `test:components`）、typecheck 与根 `npm test`，记录基线（含既有失败清单）
+- [x] 0.2 确认 test-plan 中标为 🟢 的回归测试在基线上为绿
+- [x] 0.3 约定：每组先写的测试须在该组实现前为红；若某断言已被更早的组满足，允许起始即绿并在 test-plan 记一句原因，不得为它伪造失败
 
 ## 1. 协作约定 v3 与打包（一个批次，含插件产物）
 
@@ -42,3 +42,7 @@
 - [ ] 5.3 Run 根 `npm test`、`npm run check:artifacts`；与 0.1 基线比较无新增失败
 - [ ] 5.4 Run `openspec validate collab-ref-threads --strict`；test-plan 所有行为 🟢（N/A 行对应检查已执行）
 - [ ] 5.5 Run 真实 Host 验收（`dsh build` + 重启后）：旧空间可打开且原暂停成员恢复；同一话题第 21 条需回复消息收到 `COLLAB_THREAD_LIMIT`；不写 ref 从新话题开始；条目修改、ack、Leader 转交不唤醒；request done 唤醒作者；成员信任下宿主权限不放宽
+
+## 实施记录
+
+- 0.1 基线（2026-10-23，worktree lean 依赖）：collab-kernel 38 files / 214 tests 通过、typecheck 0；dsh-collab vitest 6 files / 105 tests 通过、typecheck 0。`test:components` 与 build/sync 产物测试在 lean 依赖下缺 `tsdown`（基线即失败），在验证阶段于复制主 checkout `node_modules` 的仓内副本中运行。
