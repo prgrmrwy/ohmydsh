@@ -43,9 +43,16 @@
 - 新增日志仅稳定原因码；业务正文发送路径无新增调用。
 - 反馈经原 controller try/catch，失败不阻塞队列；推进传纯correlation避免捕获selector。
 
+## 本机部署（2026-10-22 02:03，实现提交 0c5f87dc）
+
+- `dsh build` exit0，日志含 `local package dsh-pet content changed, reinstalling atomically`；第二次 exit0，`no changes — deployment already matches manifest`。
+- 部署副本 `~/.dsh/profiles/web/node_modules/dsh-pet/lib/host/locus/refused-reply.js` 与仓库构建 sha256 相同。
+- perl 双 fork + setsid 脱离进程组后调用官方 `dsh restart --no-open`：runner PPID=1；restart-exit=0；旧 PID 8757 已退出，新 PID 75075 监听 127.0.0.1:3080，未鉴权请求 401（正常）。
+- 新启动日志：`inquiry-reconcile ok`（全 0）、`inquiry-startup-recovery`（全 0）、`ready — routes registered`、飞书订阅 `connected`；本次启动后无 degraded 行。
+
 ## 仍未完成
 
-- 未提交实现，未 `dsh build` 物化、未重启、未现役真机（失败表情/实际飞书B回复）；任务4.2/4.3不能勾。
+- 未做现役真机：截至 10-22 10:57 尚无自然发生的 `reply-refused` 收尾日志；未主动在飞书群构造被拒场景（需要真实出站与用户确认）。任务4.3不能勾。
 - 当前spec仍是已批准delta，尚未合入main/归档；任务4.4保留。
 - 限制：真实模型actor组合、完整插件fixture、真实controller集成分成三套，并非一个完整真实Host+Feishu E2E。不得把本地通过称为上线验收。
 - restore-pet-inquiry-runtime-channel 的其它未完项（managed entry覆盖、result crash恢复、三方闭环等）未纳入此次修复，仍未完成。
