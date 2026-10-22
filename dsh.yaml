@@ -371,12 +371,13 @@ customizations:
     enabled: true
     brief: 为 ponytail 包挂专属 skill-filesystem provider(不含默认根)
     note: '组合补丁(patches/ponytail-skills.yml):插入 @deepseek-ai/dsh-skill-filesystem 行,providerName ponytail-plugin,includeDefaultRoots:false,skills 目录由 profile baseUrl 经包主入口解析(包的 exports 未导出 package.json,不能照搬 archify 写法)。升级复核:确认包主入口仍位于 .opencode/plugins/ 下两级(目录结构变化需同步改路径)。移除:enabled:false → dsh build。'
-  # 第三方 /btw 旁问(BACKLOG B049):先装官方 1.0.4 做 prompt cache 基线实测,再换 PR #16 tarball 对比。
+  # 第三方 /btw 旁问(BACKLOG B049):1.0.4 基线已测完,现为 PR #16 tarball 对照组,测完改回 npm 精确版本。
   - id: michengai-btw
     type: package
     source: remote
-    spec: '@michengai/dsh-btw@1.0.4'
+    spec: 'file:/Users/prgrmrwy/.dsh/managed-assets/btw-cache-probe/michengai-dsh-btw-1.0.4-pr16-e28856d.tgz'
+    name: '@michengai/dsh-btw'
     version: 1.0.4
     enabled: true
-    brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;B049 cache 实测中)
-    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘,答案只进命令结果与气泡。B049 实测:1.0.4 为基线(persona+空工具白名单,预期不命中 cache),对照为 PR #16 tarball(~/.dsh/managed-assets/btw-cache-probe/,commit e28856d,SHA256 586c1c62…2226a)。测完改回 npm 精确版本或 enabled:false。移除:enabled:false → dsh build → 重启。 pin 校验 sha512-0PaSfsFUkC0u23Pfeg+CeJCT7puJFna/1mC/qkKQ+7Cvf4RvNzLb3IaPgYeHu7Ch1zaeeJRDYWCmthe5bL3gvw=='
+    brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;B049 cache 实测中:PR #16 对照组)
+    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。B049:1.0.4 基线实测 Claude 与 codex 首请求 cacheRead 均为 0;当前临时装 PR #16 本地 tarball(commit e28856d,SHA256 586c1c62…2226a)对照,与 1.0.4 差异仅为去掉 persona 与空工具白名单。测完改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
