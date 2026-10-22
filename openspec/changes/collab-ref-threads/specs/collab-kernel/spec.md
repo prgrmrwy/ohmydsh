@@ -74,8 +74,8 @@
 
 #### Scenario: 条目往返计入链长
 - **GIVEN** 作者 `aily` 在 seq 7 创建条目 `C1`，`requiredAcks:['doubao']`（链长 1）
-- **WHEN** `aily` 修改 `C1`、`doubao` ack 使其 `agreed`，如此反复
-- **THEN** 每次修改与每次达成 `agreed` 各使 `C1` 链长加 1，相应唤醒的 `delivery.thread` 为 7；使链长超过 20 的那次修改或 ack 返回 `COLLAB_THREAD_LIMIT`，`C1` 状态与 revision 不变
+- **WHEN** `aily` 修改 `C1`、`doubao` ack 使其 `agreed`，如此反复完成 9 个循环，然后 `aily` 第 10 次修改，`doubao` 再 ack
+- **THEN** 每次修改与每次达成 `agreed` 各使 `C1` 链长加 1，相应唤醒的 `delivery.thread` 为 7；9 个循环后链长为 19；第 10 次修改成功、链长为 20；随后的 ack 返回 `COLLAB_THREAD_LIMIT`，`C1` 的状态仍为 draft，revision、acks、`chainLength`、收据集合与日志长度均不变
 
 #### Scenario: request 进度计入链长
 - **GIVEN** `aily` 在 seq 3 发起消息链（链长 1），消息 5 以该链为 ref 链长为 3（链起点 3）；作者 `aily` 以 `ref:5` 创建 request `R1`、承接方 `doubao`
