@@ -50,9 +50,18 @@
 - perl 双 fork + setsid 脱离进程组后调用官方 `dsh restart --no-open`：runner PPID=1；restart-exit=0；旧 PID 8757 已退出，新 PID 75075 监听 127.0.0.1:3080，未鉴权请求 401（正常）。
 - 新启动日志：`inquiry-reconcile ok`（全 0）、`inquiry-startup-recovery`（全 0）、`ready — routes registered`、飞书订阅 `connected`；本次启动后无 degraded 行。
 
+## 现役真机（2026-10-22 15:15–15:20，测试群 Pet Locus shell-tier test group 1）
+
+用户不允许以其用户身份发飞书消息，触发消息均由用户本人手动发送。
+
+- 15:15 首轮：两条都被回复"入口已停止服务"——原主会话 session-1baf0786 已在 archivedSessionIds；属既有退役规则，与本修复无关。
+- 用户以新主会话接替后（主 session-f506ed42，child session-d8d01e4c，safe 档）：A/B 均正常回复「收到A」「收到B」并加 DONE 表情。证明部署后正常 finish/队列路径未受影响。safe 档无 bash，sleep 未执行。
+- 15:19 第二轮尝试构造被拒：监视脚本在 A2 新 turn 开始时经 Host API `session/prompt mode=steer` 插入 GUI 消息，Host 返回 `session/agent-busy: is owned by subagent routing`，GUI 插话未进入。因此 A2 未混入来源，A2/B2 正常各自回复（child 日志 turn3/turn4 finish 均"已提交当前飞书请求"），本次启动后无 `authorization refused` 也无 `reply-refused` 日志。
+- 结论：现役 Host 的 locus child 由 subagent 路由独占，官方 GUI/API steer 无法向其插话；在现役环境用外部手段稳定制造"回复被拒"不可行（除非有真实 GUI 混入以外的自然拒绝）。被拒收尾路径的证据仍限于本地编译图/插件/集成测试。
+
 ## 仍未完成
 
-- 未做现役真机：截至 10-22 10:57 尚无自然发生的 `reply-refused` 收尾日志；未主动在飞书群构造被拒场景（需要真实出站与用户确认）。任务4.3不能勾。
+- 任务4.3 只完成"正常路径不受影响"部分；被拒→失败收尾→B 晋升的现役证据缺失，待真实流量自然出现 `dsh-pet locus delivery released: reply-refused` 后从日志与 child 会话核对。
 - 当前spec仍是已批准delta，尚未合入main/归档；任务4.4保留。
 - 限制：真实模型actor组合、完整插件fixture、真实controller集成分成三套，并非一个完整真实Host+Feishu E2E。不得把本地通过称为上线验收。
 - restore-pet-inquiry-runtime-channel 的其它未完项（managed entry覆盖、result crash恢复、三方闭环等）未纳入此次修复，仍未完成。
