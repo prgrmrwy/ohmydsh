@@ -58,8 +58,8 @@
 ## 9. 验收（需用户在场或授权）
 
 - [x] 9.1 真实回归（会产生少量费用）：`OPENROUTER_API_KEY=… node eval/run.mjs`，退出 0；出现基线外新未命中则停下回到规划。
-- [ ] 9.2 用户授权部署后，在**新建会话**中验证：AUTO 判档与 effort（含 session-4390 类请求落在 medium/high）、档位按钮与标注、MANUAL 下委派不判档、AUTO 下一次复杂委派使用 opus/sol 且不被白名单拒绝。
-- [ ] 9.3 写 verify.md；未经授权不合入、归档或清理工作树。
+- [ ] 9.2 （除按钮点击标注外均已验收，见 verify.md）用户授权部署后，在**新建会话**中验证：AUTO 判档与 effort（含 session-4390 类请求落在 medium/high）、档位按钮与标注、MANUAL 下委派不判档、AUTO 下一次复杂委派使用 opus/sol 且不被白名单拒绝。
+- [x] 9.3 写 verify.md；未经授权不合入、归档或清理工作树。
 
 ## 实施记录
 
