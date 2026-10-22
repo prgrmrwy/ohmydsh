@@ -13,7 +13,7 @@ it('a valid member name does not collide with Object.prototype', async () => {
 
 it('an inherited object key is not an existing item', async () => {
   const w = await world()
-  await w.service.createItem(w.ctx(), { itemId: 'constructor', kind: 'other', title: 'ordinary item', body: '', requiredAcks: [], deciders: [] })
+  await w.service.createItem(w.ctx(), { itemId: 'constructor', kind: 'other', title: 'ordinary item', body: '', requiredAcks: [] })
   expect((await w.service.overview(w.read())).items.constructor).toMatchObject({ id: 'constructor', revision: 1 })
 })
 

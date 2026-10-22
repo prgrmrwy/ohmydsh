@@ -250,7 +250,8 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
   const plugin = await consumerPlugin(root)
   let ctx = await controller(root)
   const ids = [SessionId('consumer-a'), SessionId('consumer-b')]
-  const config = { dataDir: join(root, 'collab-data'), allowedSessionIds: ids }
+  // Manual-join flow: member trust (default on) would auto-join invitees.
+  const config = { dataDir: join(root, 'collab-data'), allowedSessionIds: ids, memberTrust: false }
   try {
     await presets(ctx)
     for (const [index, id] of ids.entries()) await ctx.sessionController.create({ sessionId: id, cwd: index ? cwdB : cwdA, agentPreset: 'P1' })
@@ -278,7 +279,7 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     }
     assert.equal((await call(b, 'collab_space', { action: 'close', spaceId: 'shared', cmdId: 'invited-close' })).error.code, 'COLLAB_MEMBER_INACTIVE')
     await call(b, 'collab_member', { action: 'join', spaceId: 'shared', cmdId: 'join' })
-    const created = await call(a, 'collab_create_item', { spaceId: 'shared', cmdId: 'item', itemId: 'item', kind: 'other', title: 'Title', body: 'Body', requiredAcks: ['b'], deciders: [] })
+    const created = await call(a, 'collab_create_item', { spaceId: 'shared', cmdId: 'item', itemId: 'item', kind: 'other', title: 'Title', body: 'Body', requiredAcks: ['b'] })
     assert.equal(created.itemId, 'item')
     await call(b, 'collab_ack_item', { spaceId: 'shared', cmdId: 'ack', itemId: 'item', revision: 1 })
     const conflict = await call(a, 'collab_revise_item', { spaceId: 'shared', cmdId: 'stale', itemId: 'item', expectedRevision: 99, changes: { title: 'must not change' } })
@@ -300,7 +301,9 @@ test('consumer-integration: actual bundled tools share ledger across sessions an
     assert.deepEqual(await call(a, 'collab_invite', { spaceId: 'shared', cmdId: 'invite', name: 'b', recipientSessionId: ids[1] }), invited)
     assert.deepEqual(await businessRecords(), beforeDecision)
     assert.equal(b.session.snapshotEvents().filter(event => event.type === 'user/message' && event.data.source.kind === 'plugin:dsh-collab').length, received)
-    assert.equal((await call(a, 'collab_request_decision', { spaceId: 'shared', cmdId: 'decision', itemId: 'item', options: ['yes', 'no'] })).error.code, 'COLLAB_NO_DECIDER')
+    // Human decisions were removed: the tool is gone and a fresh deciders field is refused by the kernel.
+    assert.equal((await ctx.tools.execute({ callId: 'decision', name: 'collab_request_decision', arguments: { spaceId: 'shared', cmdId: 'decision', itemId: 'item', options: ['yes', 'no'] }, agent: a, signal: AbortSignal.timeout(5000) })).isError, true)
+    assert.equal((await call(a, 'collab_create_item', { spaceId: 'shared', cmdId: 'item-decider', itemId: 'item-2', kind: 'other', title: 'T', body: 'B', requiredAcks: [], deciders: ['b'] })).error.code, 'COLLAB_BAD_ITEM')
     assert.deepEqual(await businessRecords(), beforeDecision)
     const afterDecision = await call(a, 'collab_read', { view: 'overview', spaceId: 'shared' })
     assert.deepEqual(Object.keys(afterDecision.members).sort(), ['a', 'b'])
@@ -569,7 +572,7 @@ test('consumer-model-identity: real model tool calls retain caller and reject fo
     assert.equal(ctx.agentPresets.composedPreset(b.ctx), 'P1')
     const header = b.session.snapshotEvents().find(event => event.type === 'request/header')
     const names = header.data.header.tools.map(tool => tool.name).filter(name => name.startsWith('collab_'))
-    assert.equal(names.length, 12); assert.equal(new Set(names).size, 12)
+    assert.equal(names.length, 11); assert.equal(new Set(names).size, 11)
     assert.ok(!names.some(name => /confirm|reset|break|execute/.test(name)))
     const before = await readFile(log)
     for (const extra of [{ principal: { kind: 'human' } }, { actor: 'a' }, { sessionId: a.id }, { providerId: 'forged' }]) {
@@ -723,7 +726,7 @@ test('controller-assembly: all real concrete services activate without a full DS
   } finally { await ctx.fiber.dispose() }
 })
 
-// ---- dsh-collab-invite-admission: resident 12-tool surface on real request headers ----
+// ---- dsh-collab-invite-admission: resident 11-tool surface on real request headers ----
 const BUDGET = 4200
 /** Measure exactly as specified: collab_ tool objects of the real header, original order. */
 export function collabToolBytes(headerTools) { return JSON.stringify(headerTools.filter(tool => tool.name.startsWith('collab_'))).length }
@@ -745,7 +748,8 @@ async function surfaceWorld(name) {
   assert.ok(a && b && c)
   const plugin = await consumerPlugin(root)
   // Invite admission: no allowlist at all.
-  const handle = ctx.plugin(plugin, { dataDir: join(root, 'ledger') })
+  // Manual-join flow: member trust (default on) would auto-join invitees.
+  const handle = ctx.plugin(plugin, { dataDir: join(root, 'ledger'), memberTrust: false })
   await handle.inertia; assert.equal(handle.state, 2)
   const call = async (agent, toolName, args) => {
     const result = await ctx.tools.execute({ callId: `surface-${toolName}`, name: toolName, arguments: args, agent, signal: AbortSignal.timeout(5000) })
@@ -788,7 +792,7 @@ test('surface-01：生命周期前后工具定义字节一致', { timeout: 20000
     snapshots.push(JSON.stringify((await w.turn(w.b)).filter(t => t.name.startsWith('collab_'))))
     assert.equal(snapshots.length, 5)
     assert.equal(new Set(snapshots).size, 1)
-    assert.ok(JSON.parse(snapshots[0]).length === 12)
+    assert.ok(JSON.parse(snapshots[0]).length === 11)
   } finally { await w.ctx.fiber.dispose() }
 })
 
@@ -825,11 +829,26 @@ test('tool-06：内部与人类能力不出现在工具面', { timeout: 15000 },
   const w = await surfaceWorld('surface-closed')
   try {
     const tools = (await w.turn(w.a)).filter(t => t.name.startsWith('collab_'))
-    assert.deepEqual(tools.map(t => t.name).sort(), ['collab_status', 'collab_space', 'collab_invite', 'collab_member', 'collab_read', 'collab_create_item', 'collab_revise_item', 'collab_ack_item', 'collab_send_message', 'collab_set_status', 'collab_advance_request', 'collab_request_decision'].sort())
-    assert.ok(!tools.some(t => /confirm|reset|append|event|execute|dispatch|unlock|salvage/.test(t.name)))
+    assert.deepEqual(tools.map(t => t.name).sort(), ['collab_status', 'collab_space', 'collab_invite', 'collab_member', 'collab_read', 'collab_create_item', 'collab_revise_item', 'collab_ack_item', 'collab_send_message', 'collab_set_status', 'collab_advance_request'].sort())
+    assert.ok(!tools.some(t => /decision|confirm|reset|append|event|execute|dispatch|unlock|salvage/.test(t.name)))
+    assert.ok(!tools.some(t => /deciders|requestDecision/.test(t.description)))
     const enumOf = (name, key) => [...tools.find(t => t.name === name).parameters.properties[key].enum].sort()
     assert.deepEqual(enumOf('collab_space', 'action'), ['close', 'create'])
     assert.deepEqual(enumOf('collab_member', 'action'), ['decline', 'join', 'leave', 'mark_gone', 'transfer_leader'])
     assert.deepEqual(enumOf('collab_read', 'view'), ['convention', 'overview', 'since'])
+  } finally { await w.ctx.fiber.dispose() }
+})
+
+test('surface-04：新增参数后仍在预算内', { timeout: 15000 }, async () => {
+  const w = await surfaceWorld('surface-params')
+  try {
+    const tools = (await w.turn(w.a)).filter(t => t.name.startsWith('collab_'))
+    const props = name => tools.find(t => t.name === name).parameters.properties
+    assert.equal(props('collab_send_message').ref.type, 'integer')
+    assert.equal(props('collab_create_item').ref.type, 'integer')
+    assert.equal(props('collab_space').purpose.type, 'string')
+    assert.ok(!tools.some(t => t.name === 'collab_request_decision'))
+    const length = assertBudget(tools)
+    console.log(JSON.stringify({ case: 'surface-04', collabToolChars: length, budget: BUDGET }))
   } finally { await w.ctx.fiber.dispose() }
 })

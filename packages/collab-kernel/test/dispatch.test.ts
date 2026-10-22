@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import type { CollabEvent } from '../src/index.js'
 import { CollabService } from '../src/index.js'
-import { dispatchItem, dispatchWorld } from './support/dispatch-world.js'
+import { dispatchWorld } from './support/dispatch-world.js'
 
 async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve() }
 const intended = (w: Awaited<ReturnType<typeof dispatchWorld>>, after = 0) => w.log().slice(after).flatMap(r => r.events).filter((event): event is Extract<CollabEvent, { type: 'dispatch/intended' }> => event.type === 'dispatch/intended')
@@ -31,33 +31,20 @@ it('dispatch-03：provider抛错记为失败', async () => {
   expect(w.log()[1]?.events.some(e => e.type === 'message/sent')).toBe(true)
 })
 
-it('dispatch-04：确认缺messageRef记为失败', async () => {
-  const w = await dispatchWorld([{ type: 'item/created', actor: 'aily', item: dispatchItem() }])
-  vi.spyOn(w.provider, 'requestConfirmation').mockResolvedValueOnce({} as never)
-  await w.service.requestDecision(w.ctx(), { itemId: 'C1', options: ['yes', 'no'] })
-  await vi.waitFor(() => expect(w.log().flatMap(r => r.events).some(e => e.type === 'dispatch/completed')).toBe(true))
-  const delivery = intended(w).find(x => x.delivery.kind === 'confirm')!.delivery
-  expect(w.log().at(-1)?.events).toContainEqual({ type: 'dispatch/completed', actor: 'system:dispatch', deliveryId: delivery.deliveryId, outcome: 'failed' })
-  await expect(w.service.confirmDecision(w.ctx('pm'), { requestId: delivery.requestId!, choice: 'yes', evidence: { actionId: 'x', deliveryId: delivery.deliveryId } })).rejects.toMatchObject({ code: 'COLLAB_DELIVERY_UNKNOWN' })
-})
-
 it('dispatch-05：慢投递在结束前不写结果', async () => {
   vi.useFakeTimers()
   try {
-    let finish!: (value: { messageRef: string }) => void
-    const w = await dispatchWorld([{ type: 'item/created', actor: 'aily', item: dispatchItem() }])
-    vi.spyOn(w.provider, 'requestConfirmation').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
-    await w.service.requestDecision(w.ctx(), { itemId: 'C1', options: ['yes', 'no'] })
-    expect(intended(w).filter(x => x.delivery.kind === 'confirm')).toHaveLength(1)
-    const delivery = intended(w).find(x => x.delivery.kind === 'confirm')!.delivery
+    const w = await dispatchWorld()
+    vi.spyOn(w.provider, 'deliver').mockImplementationOnce(() => new Promise<void>(resolve => { setTimeout(resolve, 60_000) }))
+    const result = await w.service.sendMessage(w.ctx(), { to: 'doubao', body: 'slow', needsReply: true })
+    const delivery = intended(w).find(x => x.delivery.member === 'doubao')!.delivery
+    expect(delivery.thread).toBe(result.seq)
     await vi.advanceTimersByTimeAsync(30_000)
     expect(w.log().flatMap(r => r.events).some(e => e.type === 'dispatch/completed' && e.deliveryId === delivery.deliveryId)).toBe(false)
     expect((await w.service.overview(w.read())).inFlightDeliveries).toContainEqual(expect.objectContaining({ deliveryId: delivery.deliveryId }))
     await vi.advanceTimersByTimeAsync(30_000)
-    finish({ messageRef: 'm-9' })
     await flush()
-    expect(w.log().at(-1)?.events).toContainEqual({ type: 'dispatch/completed', actor: 'system:dispatch', deliveryId: delivery.deliveryId, outcome: 'succeeded', messageRef: 'm-9' })
-    await expect(w.service.confirmDecision(w.ctx('pm'), { requestId: delivery.requestId!, choice: 'yes', evidence: { actionId: 'e-9', deliveryId: delivery.deliveryId } })).resolves.toBeDefined()
+    expect(w.log().at(-1)?.events).toEqual([{ type: 'dispatch/completed', actor: 'system:dispatch', deliveryId: delivery.deliveryId, outcome: 'succeeded' }])
   } finally { vi.useRealTimers() }
 })
 

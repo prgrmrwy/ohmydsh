@@ -72,19 +72,17 @@ function checkedLines(bytes: Buffer): (CommitRecord & { sha256: string })[] {
   })
 }
 
-const confirmation = { requestId: 'D1', choice: 'ship', evidence: { actionId: 'click-1', deliveryId: 'confirm-pm' } }
-async function decisionWorld(instanceId: string, injectedFs: Partial<FileStoreFs> = {}) {
+/** A legacy log seeded through the storage SPI only: a human member, an escalated item and a decision. */
+async function legacyWorld(instanceId: string, injectedFs: Partial<FileStoreFs> = {}) {
   const w = instance(instanceId, injectedFs)
-  const item: Item = { id: 'I1', kind: 'other', author: 'aily', title: 'Release', body: 'Review release', requiredAcks: ['aily'], deciders: ['pm'], revision: 1, status: 'draft', acks: {}, agentEditCount: 0 }
+  const item = { id: 'I1', kind: 'other', author: 'aily', title: 'Release', body: 'Review release', requiredAcks: ['aily'], deciders: ['pm'], revision: 5, status: 'escalated', acks: {}, agentEditCount: 4 } as unknown as Item
   const events: CollabEvent[] = [
     { type: 'space/created', actor: 'aily', spaceId, serviceId: 'service-1', leader: 'aily', convention: { version: '1', sha256: 'seed-convention' } },
     ...[member('aily', 'a:1'), member('pm', 'a:pm', 'human', 'active', 2)].map(m => ({ type: 'member/joined' as const, actor: 'aily', member: m })),
     { type: 'item/created', actor: 'aily', item },
-    ...[2, 3, 4, 5].map(revision => ({ type: 'item/revised' as const, actor: 'aily', item: { ...item, revision, agentEditCount: revision - 1, status: revision === 5 ? 'escalated' as const : 'draft' as const } })),
     { type: 'decision/requested', actor: 'aily', request: { id: 'D1', itemId: 'I1', revision: 5, author: 'aily', options: ['ship', 'wait'], deciders: ['pm'], status: 'open', awaitingChannel: false } },
     { type: 'dispatch/intended', actor: 'aily', delivery: { deliveryId: 'confirm-pm', member: 'pm', kind: 'confirm', providerId: 'P1', requestId: 'D1' } },
   ]
-  // Bootstrap through the storage SPI only; no public service event-append API.
   await w.store.open(spaceId)
   await w.store.commit(spaceId, { kind: 'command', seq: 1, events, receipt: { cmdId: 'seed', scope: { kind: 'create', channel: 'test-a', address: 'a:1' }, payloadHash: 'seed', result: { seq: 1, spaceId } } }, 0)
   await w.store.commit(spaceId, { kind: 'completion', seq: 2, events: [{ type: 'dispatch/completed', actor: 'system:dispatch', deliveryId: 'confirm-pm', outcome: 'succeeded', messageRef: 'm-1' }] }, 1)
@@ -100,20 +98,21 @@ function deferred() {
 }
 
 describe('FileStore service integration — approved storage scenarios', () => {
-  it('store-01: restart preserves full state after member join, item revision and human decision', async () => {
-    const x = await decisionWorld('x')
+  it('store-01：重启后状态一致', async () => {
+    const x = await legacyWorld('x')
     await x.service.invite(x.ctx(), { name: 'doubao', kind: 'agent', address: 'a:2' })
     await x.service.join(x.ctx('doubao'))
-    await x.service.createItem(x.ctx(), { itemId: 'I2', kind: 'request', title: 'Build', body: 'v1', requiredAcks: ['aily'], deciders: ['pm'], assignee: 'doubao' })
+    const item = await x.service.createItem(x.ctx(), { itemId: 'I2', kind: 'request', title: 'Build', body: 'v1', requiredAcks: ['doubao'], assignee: 'doubao' })
     await x.service.reviseItem(x.ctx(), { itemId: 'I2', expectedRevision: 1, changes: { body: 'v2' } })
-    await x.service.confirmDecision(x.ctx('pm'), confirmation)
+    await x.service.ackItem(x.ctx('doubao'), { itemId: 'I2', revision: 2 })
+    await x.service.sendMessage(x.ctx(), { to: 'doubao', body: 'see I2', needsReply: true, ref: item.seq })
     await expect.poll(async () => (await x.service.overview(x.read())).inFlightDeliveries).toEqual([])
     const before = await x.service.overview(x.read())
     expect(before.members.doubao).toMatchObject({ status: 'active', binding: { address: 'a:2' } })
-    expect(before.items.I2).toMatchObject({ revision: 2, body: 'v2', assignee: 'doubao', progress: 'open' })
-    expect(before.requests.D1?.status).toBe('closed')
-    expect(before.decisions).toHaveLength(1)
-    expect(before.decisions[0]).toMatchObject({ requestId: 'D1', itemId: 'I1', actor: 'pm', choice: 'ship' })
+    expect(before.items.I2).toMatchObject({ revision: 2, body: 'v2', assignee: 'doubao', progress: 'open', status: 'agreed' })
+    expect(before.items.I1?.status).toBe('escalated')
+    expect(before.itemSeq.I2).toBe(item.seq)
+    expect(before.topicWakes[item.seq]).toBe(1)
     await x.service.close(spaceId)
     const bytes = await logBytes()
     const y = instance('y'); await y.service.open(spaceId)
@@ -188,13 +187,17 @@ describe('FileStore service integration — approved storage scenarios', () => {
     expect(await logBytes()).toEqual(bytes)
   })
 
-  it('store-06: partial write of a valid multi-event human confirmation leaves D1 open after recovery', async () => {
+  it('store-06：多事件命令不会只落一半', async () => {
     const fault = { shortWrite: true, failWriteAfter: undefined as number | undefined }
-    const x = await decisionWorld('x', faultyFs(fault))
+    const x = await created('x', faultyFs(fault))
+    await x.service.invite(x.ctx(), { name: 'doubao', kind: 'agent', address: 'a:2' })
+    await x.service.join(x.ctx('doubao'))
+    await expect.poll(async () => (await x.service.overview(x.read())).inFlightDeliveries).toEqual([])
     const baseline = await logBytes()
-    expect((await x.service.overview(x.read())).requests.D1?.status).toBe('open')
+    const rows = checkedLines(baseline).length
     fault.failWriteAfter = 1
-    await expect(x.service.confirmDecision(x.ctx('pm', 'confirm-1'), confirmation)).rejects.toMatchObject({ code: 'COLLAB_STORE_FAILED' })
+    const ctx = x.ctx('aily', 'multi-1'), input = { to: 'doubao', body: 'needs a reply', needsReply: true }
+    await expect(x.service.sendMessage(ctx, input)).rejects.toMatchObject({ code: 'COLLAB_STORE_FAILED' })
     const partial = await logBytes()
     expect(partial.length).toBeGreaterThan(baseline.length)
     expect(partial.subarray(0, baseline.length)).toEqual(baseline)
@@ -203,17 +206,13 @@ describe('FileStore service integration — approved storage scenarios', () => {
     const y = instance('y'); await y.service.open(spaceId)
     expect(await logBytes()).toEqual(baseline)
     const recovered = await y.service.overview(y.read())
-    expect(recovered.requests.D1?.status).toBe('open')
-    expect(recovered.items.I1?.status).toBe('escalated')
-    expect(recovered.decisions).toEqual([])
-    expect(await y.store.read(spaceId, 0)).toHaveLength(2)
-    // The same fixture must be a legal multi-event confirmation without the fault.
-    const result = await y.service.confirmDecision(y.ctx('pm', 'confirm-1'), confirmation)
-    const committed = (await y.service.readSince(y.read(), 2)).find(r => r.seq === result.seq)!
-    expect(committed.events.filter(e => e.type === 'decision/decided')).toHaveLength(1)
-    expect(committed.events.length).toBeGreaterThan(1)
-    expect(committed.events).toContainEqual({ type: 'breaker/reset', actor: 'pm', member: 'aily' })
-    expect((await y.service.overview(y.read())).requests.D1?.status).toBe('closed')
+    expect(recovered.messages).toEqual([])
+    expect(Object.values(recovered.deliveries).filter(d => d.member === 'doubao' && d.pointer?.counts.message)).toEqual([])
+    expect(await y.store.read(spaceId, 0)).toHaveLength(rows)
+    // The same command is a legal multi-event commit without the fault.
+    const result = await y.service.sendMessage(y.ctx('aily', 'multi-1'), input)
+    const committed = (await y.service.readSince(y.read(), 0)).find(r => r.seq === result.seq)!
+    expect(committed.events.map(e => e.type)).toEqual(['message/sent', 'dispatch/intended'])
   })
 
   it('store-07: a complete line surviving fsync failure is resolved by same-cmdId replay without growth', async () => {

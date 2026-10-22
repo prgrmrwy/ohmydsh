@@ -1,45 +1,39 @@
-import { BREAKER_LIMIT, type Delivery, type Overview, type Presence, type SpaceState } from '../model/index.js'
+import type { Delivery, Overview, Presence, SpaceState } from '../model/index.js'
 
 function plainText(value: string): string {
   return value.replace(/\p{Cc}+/gu, ' ').trim().replace(/[!"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~]/g, '\\$&')
 }
+const active = (status: string) => status === 'draft' || status === 'agreed'
 
-export function project(state: SpaceState, presence: Record<string, Presence | 'paused'>): string {
-  const lines = ['# 协作空间总览', '', '## Charter']
+export function project(state: SpaceState, presence: Record<string, Presence>): string {
+  const lines = ['# 协作空间总览']
+  if (state.purpose !== undefined) lines.push('', `用途：${plainText(state.purpose)}`)
+  lines.push('', '## Charter')
   const charter = Object.values(state.items).find(item => item.kind === 'charter')
   if (charter) lines.push(`Charter：${plainText(charter.title)}（revision ${charter.revision}）`)
   else lines.push('Charter：无')
 
   lines.push('', '## 成员')
   for (const member of Object.values(state.members).sort((a, b) => a.joinSeq - b.joinSeq)) {
-    const online = presence[member.name] ?? 'unknown'
-    const onlineText = member.wakeCount >= BREAKER_LIMIT ? 'paused' : online
-    lines.push(`- 成员 ${plainText(member.name)}：${member.status}；在线 ${onlineText}；状态 ${plainText(member.statusText) || '无'}`)
+    lines.push(`- 成员 ${plainText(member.name)}：${member.status}；在线 ${presence[member.name] ?? 'unknown'}；状态 ${plainText(member.statusText) || '无'}`)
   }
 
   lines.push('', '## 待确认')
-  for (const item of Object.values(state.items).filter(item => item.requiredAcks.some(name => item.acks[name] !== item.revision))) {
+  for (const item of Object.values(state.items).filter(item => active(item.status) && item.requiredAcks.some(name => item.acks[name] !== item.revision))) {
     const missing = item.requiredAcks.filter(name => item.acks[name] !== item.revision)
     lines.push(`条目 ${plainText(item.id)} ${plainText(item.title)}；缺少 ${missing.map(plainText).join('、')}`)
   }
 
   lines.push('', '## 未结 request')
-  for (const item of Object.values(state.items).filter(item => item.kind === 'request' && item.progress !== 'done' && item.progress !== 'rejected')) {
-    if (item.kind === 'request') lines.push(`- Request ${plainText(item.id)} ${plainText(item.title)}；承接 ${plainText(item.assignee)}；进度 ${item.progress}`)
+  for (const item of Object.values(state.items)) {
+    if (item.kind === 'request' && active(item.status) && item.progress !== 'done' && item.progress !== 'rejected') lines.push(`- Request ${plainText(item.id)} ${plainText(item.title)}；承接 ${plainText(item.assignee)}；进度 ${item.progress}`)
   }
 
-  lines.push('', '## 已升级')
-  for (const item of Object.values(state.items).filter(item => item.status === 'escalated')) lines.push(`- 条目 ${plainText(item.id)} ${plainText(item.title)}`)
-
-  lines.push('', '## 已决定')
-  for (const item of Object.values(state.items).filter(item => item.status === 'decided')) {
-    const decision = state.decisions.find(entry => entry.itemId === item.id)
-    lines.push(`条目 ${plainText(item.id)} ${plainText(item.title)}；决定人 ${plainText(decision?.actor ?? 'unknown')}；选择 ${plainText(decision?.choice ?? 'unknown')}`)
-  }
-
-  lines.push('', '## 等待确认通道')
-  for (const request of Object.values(state.requests).filter(request => request.status === 'open' && request.awaitingChannel)) {
-    lines.push(`决策请求 ${plainText(request.id)}（条目 ${plainText(request.itemId)}）：awaitingChannel`)
+  // Items locked by the removed escalation/decision mechanisms: read-only history from pre-change logs.
+  const history = Object.values(state.items).filter(item => !active(item.status))
+  if (history.length) {
+    lines.push('', '## 历史条目')
+    for (const item of history) lines.push(`- 条目 ${plainText(item.id)} ${plainText(item.title)}；只读历史 ${item.status}${item.kind === 'request' ? `；进度 ${item.progress}` : ''}`)
   }
 
   lines.push('', '## 待处理投递')

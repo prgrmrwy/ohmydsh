@@ -11,7 +11,7 @@ Before behavior implementation, created runnable `throw new Error('not implement
 
 - `model/index.ts`: typed discriminated events; command commit includes receipt and may have empty events; completion commit has exactly one dispatch/completed event and no receipt.
 - `store/interface.ts`: open, close, breakLock, commit, read, list; no FileStore implementation by this implementer.
-- `spi/index.ts`: claim(address, kind), deliver, presence, requestConfirmation.
+- `spi/index.ts`: claim(address, kind), deliver, presence.
 - `service/index.ts`: every write takes CommandContext `{principal, spaceId, cmdId}` and typed input; reads take ReadContext `{principal, spaceId}`. Exact lifecycle exceptions for API coverage: open/close only. No execute, setDeciders, recordDispatch or event-write service method.
 - Convention/project integration is injected with ServiceOptions.convention/project; Lead owns later defaults and pure project export.
 

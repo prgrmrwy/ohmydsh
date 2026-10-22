@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, chmod, realpath, symlink, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
-import { validateConfig, checkCurrentLocation } from '../src/config.js'
+import { validateConfig, checkCurrentLocation, admissionPolicy } from '../src/config.js'
 
 describe('trusted Host config', () => {
   it('config-01: rejects nonabsolute and node_modules storage before IO', async () => {
@@ -14,6 +14,15 @@ describe('trusted Host config', () => {
     for (const allowedSessionIds of [[''], [' '], ['a', 'a'], [1], 'a']) {
       await expect(validateConfig({ dataDir: '/unused', allowedSessionIds } as never, [])).rejects.toMatchObject({ code: 'COLLAB_BAD_CONFIG' })
     }
+  })
+  it('trust-config-01：缺省开启成员信任', async () => {
+    expect(admissionPolicy({ dataDir: '/unused' }).memberTrust).toBe(true)
+    expect(admissionPolicy({ dataDir: '/unused', admission: 'allowlist', allowedSessionIds: ['a'] }).memberTrust).toBe(true)
+    expect(admissionPolicy({ dataDir: '/unused', memberTrust: false }).memberTrust).toBe(false)
+    const parent = await realpath(tmpdir())
+    const home = await mkdtemp(join(parent, 'collab-home-'))
+    try { expect((await validateConfig({}, [], { DSH_HOME: home })).memberTrust).toBe(true) }
+    finally { if (basename(home).startsWith('collab-home-') && dirname(home) === parent) await rm(home, { recursive: true, force: true }) }
   })
   it('config-unknown: rejects unknown config fields before IO', async () => {
     await expect(validateConfig({ dataDir: '/unused', principal: 'forged' } as never, [])).rejects.toMatchObject({ code: 'COLLAB_BAD_CONFIG' })

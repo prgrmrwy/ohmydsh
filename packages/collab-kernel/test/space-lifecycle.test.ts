@@ -23,7 +23,7 @@ it('failed replay releases the storage handle so another instance can recover', 
   await w.service.close('s')
   const record = w.store.records.get('s')![0]!
   const original = structuredClone(record.events)
-  record.events = [{ type: 'breaker/reset', actor: 'internal:breaker-reset', member: 'missing' }]
+  record.events = [{ type: 'member/statusText', actor: 'aily', name: 'missing', text: 'x' }]
   let opened = false
   const open = w.store.open.bind(w.store)
   const close = w.store.close.bind(w.store)

@@ -3,13 +3,13 @@
 [English](README.md) · 简体中文
 
 <!-- problem -->
-独立会话需要共享约定、请求与可验证的人类决定，但不应把业务规则绑在某个宿主上。本 TypeScript 库提供零运行时依赖的协作内核，不是 DSH 插件，也不登记部署 manifest；未来的 `dsh-collab` 将在构建时内联它。
+独立会话需要共享约定、请求与消息，但不应把业务规则绑在某个宿主上。本 TypeScript 库提供零运行时依赖的协作内核，不是 DSH 插件，也不登记部署 manifest；未来的 `dsh-collab` 将在构建时内联它。
 
 ## 范围
 
-内核提供具名且按 principal 授权的命令、绑定 revision 的 ack、持久化命令收据、本地 JSONL 存储、provider 投递、普通唤醒次数限制与纯 Markdown 总览。人类决定必须来自受信 provider，并匹配已成功的确认投递；`decided` 为终态。
+内核提供具名且按 principal 授权的命令、绑定 revision 的 ack、持久化命令收据、本地 JSONL 存储、provider 投递、三种唤醒触发（需要回复的消息、邀请、request 进入 `done`/`rejected`）、经可选 `ref` 按话题限制往返（每个话题至多 20 条唤醒消息，之后返回 `COLLAB_THREAD_LIMIT`）与纯 Markdown 总览。按话题限制之前写入的日志原样重放，其中的决定、熔断与升级记录是只读历史。
 
-本包没有真实宿主集成或人类通道。宿主负责验证身份并构造 principal；provider 是受信代码，不是认证沙箱。agent 转述的“人已同意”不是确认凭据。
+本包没有真实宿主集成，新成员只能是 agent。宿主负责验证身份并构造 principal；provider 是受信代码，不是认证沙箱。
 
 ## 构建与测试
 
@@ -28,7 +28,7 @@ npm --workspace packages/collab-kernel run build
 ```ts
 import { CollabService, FileStore, principals } from 'collab-kernel'
 
-// providers 实现 claim、presence、deliver、requestConfirmation。
+// providers 实现 claim、presence、deliver。
 const service = new CollabService({ serviceId: 'host-1', store: new FileStore('./collaboration'), providers })
 const context = {
   spaceId: 'release-1',

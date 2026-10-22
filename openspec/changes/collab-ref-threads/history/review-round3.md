@@ -2,15 +2,15 @@
 - **Review round**: 3
 - **Prior round**: round 2 — APPROVE_WITH_CHANGES (0C/2M/11S), changes applied and re-checked
 - **Reviewer context**: cross-model (codex gpt-6-astra subagent); independent reviewer, not artifact author
-- **Tool restrictions**: read-only inspection; only write is [review.md](<openspec/changes/collab-ref-threads/review.md>)
-- **Artifacts reviewed**: the six artifacts below, [round 1](<openspec/changes/collab-ref-threads/review-round1.md>), [round 2](<openspec/changes/collab-ref-threads/review-round2.md>), relevant current specs, kernel/service/store/convention code and tests, and plugin tool/provider/status/Host/salvage/bundle code and artifact-test references.
+- **Tool restrictions**: read-only inspection; only write is review.md (`openspec/changes/collab-ref-threads/review.md`)
+- **Artifacts reviewed**: the six artifacts below, round 1 (`openspec/changes/collab-ref-threads/review-round1.md`), round 2 (`openspec/changes/collab-ref-threads/review-round2.md`), relevant current specs, kernel/service/store/convention code and tests, and plugin tool/provider/status/Host/salvage/bundle code and artifact-test references.
 - **Artifact hashes (sha256 prefix)**:
-  - [proposal.md](<openspec/changes/collab-ref-threads/proposal.md>): `ec8f3f4b7b15`
-  - [design.md](<openspec/changes/collab-ref-threads/design.md>): `7781cb7641f6`
-  - [kernel delta](<openspec/changes/collab-ref-threads/specs/collab-kernel/spec.md>): `c7f2a45778bd`
-  - [plugin delta](<openspec/changes/collab-ref-threads/specs/dsh-collab/spec.md>): `faead1c3451f`
-  - [test-plan.md](<openspec/changes/collab-ref-threads/test-plan.md>): `1b82d54f1cf9`
-  - [tasks.md](<openspec/changes/collab-ref-threads/tasks.md>): `dd128e257832`
+  - proposal.md (`openspec/changes/collab-ref-threads/proposal.md`): `ec8f3f4b7b15`
+  - design.md (`openspec/changes/collab-ref-threads/design.md`): `7781cb7641f6`
+  - kernel delta (`openspec/changes/collab-ref-threads/specs/collab-kernel/spec.md`): `c7f2a45778bd`
+  - plugin delta (`openspec/changes/collab-ref-threads/specs/dsh-collab/spec.md`): `faead1c3451f`
+  - test-plan.md (`openspec/changes/collab-ref-threads/test-plan.md`): `1b82d54f1cf9`
+  - tasks.md (`openspec/changes/collab-ref-threads/tasks.md`): `dd128e257832`
 - **Verification performed**: source/spec inspection and read-only scenario/hash checks. No package tests, builds, deployment, or strict validation were executed in this review; those could write beyond the permitted report.
 
 ## Findings
@@ -19,38 +19,38 @@
 
 ### 🟡 Moderate
 **M1. The rejection oracle requires an existing receipt to disappear.**
-- **Location:** [test-plan.md:111](<openspec/changes/collab-ref-threads/test-plan.md#L111>), [kernel delta:341–344](<openspec/changes/collab-ref-threads/specs/collab-kernel/spec.md#L341-L344>).
+- **Location:** test-plan.md:111 (`openspec/changes/collab-ref-threads/test-plan.md#L111`), kernel delta:341–344 (`openspec/changes/collab-ref-threads/specs/collab-kernel/spec.md#L341-L344`).
 - **Problem:** Every `COLLAB_CMD_CONFLICT` case must assert that the receipt is absent. The ref-conflict scenario starts with a successful command, so a receipt already exists for that scope/cmdId. The service checks that receipt before executing the new payload.
 - **Why it matters:** Correct durable idempotency cannot satisfy this oracle. Deleting the receipt would allow an original-payload retry to execute twice.
 - **Concrete fix:** For conflicts assert that the original receipt is unchanged, no new commit/receipt is added, and the original payload still returns its original result. Receipt absence applies only to a previously uncommitted cmdId rejected by validation or the limit.
 
 **M2. The RED/GREEN task order cannot be followed honestly.**
-- **Location:** [tasks.md:3–18](<openspec/changes/collab-ref-threads/tasks.md#L3-L18>), [tasks.md:29–30](<openspec/changes/collab-ref-threads/tasks.md#L29-L30>), [tasks.md:47–103](<openspec/changes/collab-ref-threads/tasks.md#L47-L103>); [current convention tests](<packages/collab-kernel/test/convention.test.ts#L10-L29>) and [current authorization tests](<packages/collab-kernel/test/auth.test.ts#L10-L44>).
+- **Location:** tasks.md:3–18 (`openspec/changes/collab-ref-threads/tasks.md#L3-L18`), tasks.md:29–30 (`openspec/changes/collab-ref-threads/tasks.md#L29-L30`), tasks.md:47–103 (`openspec/changes/collab-ref-threads/tasks.md#L47-L103`); current convention tests (`packages/collab-kernel/test/convention.test.ts#L10-L29`) and current authorization tests (`packages/collab-kernel/test/auth.test.ts#L10-L44`).
 - **Problem:** The baseline follows deletion of breaker tests. Preserved behavior—no-ref event shape and immutable v1/v2 bytes/reads—is mandated to fail before implementation. The 20-wake test precedes removal of the existing six-wake gate, although every triplet demands a green full suite. Removing `resetBreaker` also breaks authorization/test callers that later tasks treat as independent changes. Several later tests will already pass after earlier feature work.
 - **Why it matters:** Implementers must fabricate RED evidence, skip tests, or silently do future tasks early. A scenario ledger with all named rows does not make that sequence executable TDD.
 - **Concrete fix:** Capture the intact baseline first. Mark preserved assertions as green regression coverage (or newly added passing coverage), not mandatory RED. Group inseparable breaker/API/caller/fixture changes into a coherent batch whose new behavioral tests precede implementation; allow subsequent assertions already satisfied by that batch to start green. Keep the scenario-to-test mapping, but do not demand one independent failure per scenario.
 
 **M3. The proposed parity test does not test check-time/reload parity or the mutable-item reference boundary.**
-- **Location:** [test-plan.md:112–113](<openspec/changes/collab-ref-threads/test-plan.md#L112-L113>), [design.md:69–90](<openspec/changes/collab-ref-threads/design.md#L69-L90>), [wake.ts:15–17](<packages/collab-kernel/src/domain/wake.ts#L15-L17>).
+- **Location:** test-plan.md:112–113 (`openspec/changes/collab-ref-threads/test-plan.md#L112-L113`), design.md:69–90 (`openspec/changes/collab-ref-threads/design.md#L69-L90`), wake.ts:15–17 (`packages/collab-kernel/src/domain/wake.ts#L15-L17`).
 - **Problem:** The plan now explicitly says `chainCheck` reuses `reduce`, which addresses the architectural part of round-2 S3. However, its test called “check-time lengths equal reload lengths” merely folds the same log twice. That proves neither correct tentative-state construction nor equality to command-time decisions. There is also no explicit before/after test for referencing an item whose current length changes. The concurrent-item note names neither commands nor the losing error: two revisions using the same expected revision can produce one success because of `COLLAB_STALE_REVISION`, without exercising the chain gate.
 - **Why it matters:** A consistent but incorrectly ordered reducer passes the proposed test. In particular, testing an ack's recipients after replacing the item's snapshot loses the transition to `agreed`. Messages must capture an item's length at their own creation, while later references must see its newer length; neither property follows from replaying one implementation twice.
 - **Concrete fix:** State that wake eligibility is evaluated against the pre-event state. Add tracked tests exercising actual service commands, exact boundary outcomes, then close/reopen and compare maps. Include revise→agree, references before/after item growth (old message unchanged, new reference uses the updated length), and presence/capability independence. For concurrency, control enqueue order and choose business-valid successive commands so the loser must be `COLLAB_THREAD_LIMIT`, not a stale-revision or permission failure. A simple deterministic fixture is sufficient; no new framework is needed.
 
 **M4. “v3 is v2 plus” retains instructions for the breaker that this change removes.**
-- **Location:** [design.md:142–152](<openspec/changes/collab-ref-threads/design.md#L142-L152>), [existing v2:44–49](<packages/collab-kernel/src/convention/v2.md#L44-L49>), [v3 content oracle](<openspec/changes/collab-ref-threads/specs/collab-kernel/spec.md#L440-L442>).
+- **Location:** design.md:142–152 (`openspec/changes/collab-ref-threads/design.md#L142-L152`), existing v2:44–49 (`packages/collab-kernel/src/convention/v2.md#L44-L49`), v3 content oracle (`openspec/changes/collab-ref-threads/specs/collab-kernel/spec.md#L440-L442`).
 - **Problem:** D8 instructs building v3 by adding a chain section to v2. The retained v2 section promises six wakes per member, paused members, reset by a human decision, and a trusted internal reset interface. Those rules contradict this change's runtime/API behavior. The proposed keyword oracle accepts both those stale instructions and a document missing the stop/report/no-new-chain clauses.
 - **Why it matters:** The convention is operational input read by agents, not historical release notes. A literal implementation teaches new spaces to wait for a nonexistent pause/reset mechanism, while the accepted omit-ref escape makes the omitted behavioral instructions especially important. This is stronger evidence than round-2 S9's test-gap observation alone.
 - **Concrete fix:** Define v3 as a revised copy of v2: replace the obsolete member-breaker paragraph and remove paused-stop wording in v3 only; keep v1/v2 bytes frozen. Assert the stop, report-to-own-user, and no-new-chain-for-the-same-exchange clauses, and assert that v3 no longer describes six-wake pauses/internal resets as current behavior. Keep the new-request and Leader-no-wake guidance.
 
 ### 📌 Suggestions
 **S1. Dangling-ref recovery still promises the wrong diagnostic and cause.**
-- **Location:** [design.md:73](<openspec/changes/collab-ref-threads/design.md#L73>) versus [design.md:161](<openspec/changes/collab-ref-threads/design.md#L161>), [service open](<packages/collab-kernel/src/service/index.ts#L37-L57>), [Host startup](<packages/dsh-collab/src/host.ts#L49-L60>), [salvage scanner](<packages/dsh-collab/src/salvage.ts#L18-L30>).
+- **Location:** design.md:73 (`openspec/changes/collab-ref-threads/design.md#L73`) versus design.md:161 (`openspec/changes/collab-ref-threads/design.md#L161`), service open (`packages/collab-kernel/src/service/index.ts#L37-L57`), Host startup (`packages/dsh-collab/src/host.ts#L49-L60`), salvage scanner (`packages/dsh-collab/src/salvage.ts#L18-L30`).
 - **Problem:** A reducer exception is not automatically store-classified corruption. A plain exception becomes `COLLAB_HOST_ERROR`; structural salvage does not locate a semantically invalid ref. Also, retaining a valid prefix cannot leave a previously valid backward reference dangling, as the Risks section itself correctly states.
 - **Why it matters:** Operators may attempt ineffective salvage, and implementers may assume diagnostics already exist.
 - **Concrete fix:** Document the actual fail-closed Host behavior and recovery limitation, remove the salvage-cause claim, and add a semantic-dangling-ref load test. Do not expand salvage into a semantic repair subsystem just for this change. Round-2 S1 remains a suggestion because fail-closed behavior itself is preserved.
 
 **S2. Explain exhausted-item migration and correct the exhaustion estimate.**
-- **Location:** [proposal.md:19–26](<openspec/changes/collab-ref-threads/proposal.md#L19-L26>), [design.md:154–167](<openspec/changes/collab-ref-threads/design.md#L154-L167>), [current revision/ack implementation](<packages/collab-kernel/src/service/index.ts#L279-L292>).
+- **Location:** proposal.md:19–26 (`openspec/changes/collab-ref-threads/proposal.md#L19-L26`), design.md:154–167 (`openspec/changes/collab-ref-threads/design.md#L154-L167`), current revision/ack implementation (`packages/collab-kernel/src/service/index.ts#L279-L292`).
 - **Problem:** Legacy items start at 1 but accumulate historical wake-producing events during replay; they can therefore load already exhausted. A non-waking creation referencing length 20 also succeeds at length 21. Neither consequence is explicit in Risks. “About 10 completed agree cycles” is not a bound: an agent can make three waking revisions before an agreement resets its edit counter, and human revisions have no agent-edit cap.
 - **Why it matters:** The upgrade can immediately reject a previously usable item's next waking revision/ack; fresh items can also start exhausted. These are accepted-rule consequences, not a reason to reintroduce a global breaker or reject non-waking creation.
 - **Concrete fix:** Document both cases and retain the distinction that request progress/human decisions remain exempt. Replace the numerical exhaustion estimate with the actual per-event counting rule and escalation limits. For agent-only cycles with three revisions plus agreement, four complete cycles reach length 17 and a fifth cycle can hit the boundary; ten cycles is not necessary. This consolidates round-2 S2/S6/S7 without reopening frozen choices.
