@@ -130,11 +130,6 @@ export interface CollaborationAssemblySeams {
    */
   readonly describe: (sessionId: string) => CollaboratorDescription | undefined
   /**
-   * Host-proven origin/audience of the work the caller is currently serving.
-   * Returning `undefined` refuses the inquiry rather than defaulting to local.
-   */
-  readonly origin: (callerSessionId: string) => InquiryOriginProof | undefined
-  /**
    * The Host's actual agent driver, read for the isolated queued-turn claim
    * marker. Anything else — including a missing service — is unavailable.
    */

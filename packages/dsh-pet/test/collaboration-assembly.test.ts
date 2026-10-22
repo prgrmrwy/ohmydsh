@@ -101,6 +101,9 @@ async function hostContext(): Promise<Context> {
  * boundary" a real claim rather than an artifact of the fixture.
  */
 /** Tool names one scope's model would actually be offered. */
+/** A Host-proven local origin, as the runtime would supply for a GUI-started inquiry. */
+const localOrigin = () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }) as const
+
 function visibleTools(ctx: Context, scope?: unknown): string[] {
   const runtime = ctx.tools as unknown as { schemas(scope?: unknown): { name: string }[] }
   return runtime.schemas(scope).map(schema => schema.name)
@@ -213,7 +216,6 @@ async function seams(
       answerBinding: () => false,
     },
     describe: (sessionId: string) => ({ title: `title ${sessionId}`, availability: 'available' }),
-    origin: () => ({ origin: { kind: 'local' }, audience: { kind: 'unknown' } }),
     installed: new WeakSet<object>(),
     ...overrides,
   }
@@ -492,7 +494,7 @@ describe('a missing seam keeps the whole surface unpublished', () => {
         hasPublicContext: () => false,
       },
       store: built.ledger!,
-      origin: built.origin,
+      origin: localOrigin,
       now: () => 0,
       newInquiryId: () => 'x',
     })
@@ -580,7 +582,7 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
       }),
       inquiryRuntime: {
       ready: true,
-      forExecution: () => ({ origin: built.origin, accept: async (request, facts) => { accepts++; return built.ledger!.accept(request, facts) } }),
+      forExecution: () => ({ origin: localOrigin, accept: async (request, facts) => { accepts++; return built.ledger!.accept(request, facts) } }),
 
       afterAnswer: () => undefined,
       answerBinding: () => false,

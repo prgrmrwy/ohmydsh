@@ -83,7 +83,6 @@ import {
   planInquiryRecoveryForMembers,
   runInquiryStartupRecovery,
 } from './host/inquiry/startup-recovery.js'
-import type { InquiryOriginProof } from './host/inquiry/ask.js'
 import type {
   PetLocusFinishInput,
   PetLocusFinishResult,
@@ -549,7 +548,6 @@ async function initialize(
   // the pass can classify inquiries but cannot see whether a result already
   // exists, so it would report a fault instead of reconciling on a guess.
   const inquiryOutboxStore = new InquiryOutboxStore(domain as never)
-  const inquiryHandoffStore = new InquiryHandoffStore(domain as never)
   const inquiryWorkStore = new InquiryWorkStore(domain as never)
 
   /**
@@ -575,52 +573,6 @@ async function initialize(
     return { availability: 'available', ...(title === undefined ? {} : { title }) }
   }
 
-  /**
-   * Host-proven origin and audience of the work one caller is serving.
-   *
-   * Derived from the executing session's durable facts, never from an argument:
-   * a child serving a Feishu Delivery cannot relabel that work as private local
-   * work to widen what an answer may contain. A locus child whose current
-   * Delivery cannot be proven gets `local` origin with an `unknown` audience —
-   * honest rather than a claim of privacy — and a main session gets a genuinely
-   * local origin, because a main session has no Feishu outbound at all.
-   */
-  const resolveInquiryOrigin = (callerSessionId: string): InquiryOriginProof | undefined => {
-    try {
-      const owned = locusRepository.findByChildSessionId(callerSessionId)
-      if (owned.length > 1) return undefined
-      const row = owned[0]
-      if (row === undefined) {
-        // Not a locus child: a main session's work is local to its own session.
-        if (locusRepository.getLocusByChild(callerSessionId) !== undefined) return undefined
-        return {
-          origin: { kind: 'local' },
-          audience: { kind: 'local-session', sessionId: callerSessionId },
-        }
-      }
-      if (row.state !== 'active' || row.childSessionId !== callerSessionId) return undefined
-      const proof = currentLocusTurnProof(callerSessionId)
-      const delivery = proof === undefined
-        ? undefined
-        : locusRepository
-          .listPendingDeliveries(row.id)
-          .find(record =>
-            record.childSessionId === callerSessionId
-            && record.executionId === proof.executionId)
-      if (delivery === undefined) {
-        // No provable Feishu request behind this segment. `unknown` tightens
-        // disclosure instead of asserting a private local audience.
-        return { origin: { kind: 'local' }, audience: { kind: 'unknown' } }
-      }
-      return {
-        origin: { kind: 'feishu-delivery', deliveryId: delivery.deliveryId },
-        audience: { kind: 'feishu-chat', chatId: delivery.endpoint.chatId },
-      }
-    } catch {
-      // An unreadable index proves nothing; refusing is the only safe answer.
-      return undefined
-    }
-  }
 
   /**
    * Inquiry readiness is evaluated live and remains fail-closed unless durable
@@ -763,7 +715,6 @@ async function initialize(
     ledger: inquiryLedgerStore,
     resultOutbox: inquiryOutboxStore,
     describe: describeCollaborator,
-    origin: resolveInquiryOrigin,
     agentLoop,
     probeIsolatedClaim: claimProbe,
     answerStore: composed.answerStore,
