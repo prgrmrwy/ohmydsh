@@ -59,9 +59,20 @@
 - 15:19 第二轮尝试构造被拒：监视脚本在 A2 新 turn 开始时经 Host API `session/prompt mode=steer` 插入 GUI 消息，Host 返回 `session/agent-busy: is owned by subagent routing`，GUI 插话未进入。因此 A2 未混入来源，A2/B2 正常各自回复（child 日志 turn3/turn4 finish 均"已提交当前飞书请求"），本次启动后无 `authorization refused` 也无 `reply-refused` 日志。
 - 结论：现役 Host 的 locus child 由 subagent 路由独占，官方 GUI/API steer 无法向其插话；在现役环境用外部手段稳定制造"回复被拒"不可行（除非有真实 GUI 混入以外的自然拒绝）。被拒收尾路径的证据仍限于本地编译图/插件/集成测试。
 
+- 更正：上面"API steer 被拒"只适用于 child 冷启动时的 `/api session/prompt`；用户在 GUI 中打开该 child 后，输入框可正常发送（15:32 的「hi」作为 `user` 来源进入 turn5）。
+
+## 现役真机：被拒收尾全链路（2026-10-22 15:34–15:36）
+
+用户手动在群里发 A3、B3，并在 A3 处理中于 GUI child 页面用 cmd+enter（steer）插话「插话」；随后又以排队方式发「插画2」。child `session-d8d01e4c`：
+
+- turn6：spliced A3 投递（user, next-turn）→ spliced「插话」（user，next-turn 后转 next-step）混入同轮 → `pet_context`、`pet_collaborators` → `pet_locus_finish {reply,"收到A3"}` 返回授权拒绝文本（工具结果标记 ok，内容为拒绝；模型据此判断被拒）→ turn6 completed。
+- Host 日志依次：`locus authorization refused: finish:claim-unbound` → `locus turn: turn-ended` → **`locus delivery released: reply-refused`**。GUI 插话不对应任何 Delivery，按设计保持 unresolved，因此原因是 claim-unbound 而非 mixed-source；两者同为 current capability 拒绝，均触发收尾。
+- turn7：B3 投递立即进入，`pet_locus_finish {reply,"收到B3"}` 成功。turn8：排队的「插画2」作为独立 GUI 轮处理，无 finish、无回群。
+- 飞书群（bot 读取）：A3 无任何正文回复，触发消息 reaction 为 **CRY**（失败反馈）；B3 回复「收到B3」，reaction **DONE**。
+- 对照 delta 场景"回复被拒后本轮结束"：A 收尾为 failed/reply-refused、不发正文、失败反馈、B 立即成为 current 并完成——全部满足。场景文字据此由仅 `mixed-source` 扩为 `mixed-source` 或 `claim-unbound`。
+
 ## 仍未完成
 
-- 任务4.3 只完成"正常路径不受影响"部分；被拒→失败收尾→B 晋升的现役证据缺失，待真实流量自然出现 `dsh-pet locus delivery released: reply-refused` 后从日志与 child 会话核对。
-- 当前spec仍是已批准delta，尚未合入main/归档；任务4.4保留。
+- restore-pet-inquiry-runtime-channel 的其它未完项不在本 change 范围。
 - 限制：真实模型actor组合、完整插件fixture、真实controller集成分成三套，并非一个完整真实Host+Feishu E2E。不得把本地通过称为上线验收。
 - restore-pet-inquiry-runtime-channel 的其它未完项（managed entry覆盖、result crash恢复、三方闭环等）未纳入此次修复，仍未完成。

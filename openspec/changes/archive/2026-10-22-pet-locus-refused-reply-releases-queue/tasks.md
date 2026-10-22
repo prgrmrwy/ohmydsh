@@ -18,5 +18,5 @@
 
 - [x] 4.1 Pet typecheck 0 错误、默认全量通过（基线 3319 通过、0 失败）、编译图 production/wiring/managed-effects 全绿、`git diff --check`、`openspec validate pet-locus-refused-reply-releases-queue --strict`
 - [x] 4.2 本机 `dsh build`（第二次无变化）+ 脱离进程组重启 Host；日志无降级
-- [ ] 4.3 真机：在测试群构造一次 finish 被拒并结束本轮（或以现役日志/会话证据确认首次自然发生时的行为），核对 Delivery 终态、失败反馈与下一条立即派发
-- [ ] 4.4 delta 合入 `openspec/specs/pet-locus-collaboration/spec.md` 并归档
+- [x] 4.3 真机：在测试群构造一次 finish 被拒并结束本轮（或以现役日志/会话证据确认首次自然发生时的行为），核对 Delivery 终态、失败反馈与下一条立即派发
+- [x] 4.4 delta 合入 `openspec/specs/pet-locus-collaboration/spec.md` 并归档

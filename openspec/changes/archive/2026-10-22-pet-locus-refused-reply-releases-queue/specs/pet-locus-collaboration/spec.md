@@ -12,7 +12,7 @@
 Host MUST 独立证明被拒调用的精确活跃轮关联该 Delivery，MUST NOT 只凭 child 有 current 推断。收尾 MUST NOT 发送或重试业务正文、放宽授权；SHALL 复用失败控制反馈且反馈失败不阻断收尾。终结 SHALL 与 finish/超时原子竞争且至多一次，MUST NOT 消费后续 Delivery 或新代际。
 
 #### Scenario: 回复被拒后本轮结束
-- **WHEN** current Delivery A 的执行轮中 `pet_locus_finish` 以 `mixed-source` 被拒，child 随后结束该轮且未成功 finish 或 wait
+- **WHEN** current Delivery A 的执行轮因 GUI 插话等混入而使 `pet_locus_finish` 以 `mixed-source` 或 `claim-unbound` 被拒，child 随后结束该轮且未成功 finish 或 wait
 - **THEN** A 在该轮结束时收尾为 `failed/reply-refused`，不发送正文，触发消息得到失败反馈，backlog 中的 B 立即成为 current
 
 #### Scenario: 被拒后同轮改正
