@@ -17,6 +17,21 @@
 
 ## 讨论中
 
+### [B049] btw 旁问：先推动社区插件复用 prompt cache，再接入 Pet
+- **状态**: 讨论中
+- **优先级**: P1
+- **背景 / 动机**: 想要类似 Claude Code `/btw` 的能力：主会话工作时问一个问题，开一个知道主会话上下文的独立会话，只回答、不执行工具、不写回主会话，又快又便宜。社区已有 `@michengai/dsh-btw`（Apache-2.0，支持 0.2.0-rc.1 至 0.2.1-rc.2，含本仓 pin），功能最接近，但会改写请求前缀，复用不了主会话的 prompt cache。
+- **已定的方向**:
+  - 不自研，先推上游：2026-10-22 已提 [MichengAI/dsh-btw#16](https://github.com/MichengAI/dsh-btw/pull/16)。PR 去掉 persona 与空工具白名单，工具改由执行期 `AnswerOnlyGuard` 拒绝，末尾提问消息里说明工具调用会被拒绝。附真实 AgentLoop + fork 的前缀对比测试：1.0.4 可复用的主会话消息为 0/4，PR 为 4/4，工具定义与系统提示一致。四个宿主版本的 compat 测试均通过。
+  - btw 与 Pet 解耦：btw 作为独立插件，Pet 只做轮盘入口适配。候选做法是 Pet 拿到主会话活 Agent 后经 `ctx.commands.execute(agent, '/btw …')` 复用社区命令，需先核实 Host 侧可调用性，以及命令事件不进入模型上下文（`command/run`/`command/done` 在 session 核心无引用，上游测试断言答案不进 `deriveMessages`）。
+  - 气泡等展示交给插件本身，不在 Pet 内重做。
+- **待定**:
+  - PR 结论：合入则按 `add-dsh-plugin` 流程引入社区插件（精确 pin + 审查记录）再做 Pet 适配；被拒或长期无回应，则按已起草的方案自研 `dsh-btw`。要点：自有 provider 截在最后一个 `step/end`、一次性 `subagents.start`、只用执行期 guard、0.2.0-rc.2 公开 API、不动 compat overlay。
+  - 截到 `turn/end`（上游现状）还是 `step/end`（可看到进行中轮次已完成的 step），PR 中刻意不涉及，待 #16 有结论后再议。
+  - OpenAI 系 provider 以会话 id 为 `prompt_cache_key`，子会话 id 不同，命中率可能偏低；需接入真实 provider 实测 `cache_read`。
+- **依据**: memex `dsh-020-one-shot-subagent-is-official-no-delivery-child`、`dsh-child-session-prompt-cache-prerequisites`、`dsh-community-btw-plugins-survey-2026-10`。
+- **更新**: 2026-10-22 调研社区实现，本地实测确认前缀被破坏，提交上游 PR #16。
+
 ### [B045] Locus 群回复采用结论先行的渐进披露
 - **状态**: 想法
 - **优先级**: P1

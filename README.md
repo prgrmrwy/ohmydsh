@@ -170,6 +170,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — Switches the conversation width between five tiers.
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — Turns the sidebar into a service-backed workbench with tabs.
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — Sends the session header that OpenCode Go requires, fixing missing-session errors.
+- [michengai-btw](https://github.com/MichengAI/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context, without running tools or writing back to the main conversation.
 
 ### Official optional
 
