@@ -7,7 +7,7 @@
 ## Requirements
 
 ### Requirement: 模式与改写规则
-系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，默认 `MANUAL`，按会话持久化。
+系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，按会话持久化。新建普通会话的初始模式 SHALL 取设置项「新会话默认模式」（`MANUAL` | `AUTO`，缺省 `MANUAL`）：仅当普通会话以全新方式创建（不是恢复、清空、压缩或子会话）时，系统 SHALL 按创建时刻的设置值写入该会话的模式；此后修改设置 MUST NOT 改变已有会话的模式。没有状态记录的已有会话（例如设置生效前创建的会话）SHALL 视为 `MANUAL`。默认模式为 `AUTO` 时新会话的行为与用户手动切到 `AUTO` 相同（含 Jev 失败即停用）。
 - **AUTO**：系统 SHALL 只改写主会话请求的 reasoning effort，MUST NOT 改写 provider 与 model；同一回合内档位一经决定即不再变化（同回合换模型时按新模型重新映射 effort）。改写出的 effort 与官方本次合成的 effort 不同时，系统 SHALL 经官方 `sessionController.selectModel` 把会话选择更新为 `{provider, model, effort}`（官方选择已为该值时不调用；同一值的调用尚未完成时不重复调用），使右侧模型选择器与实际请求一致；官方该接口同时把此选择保存为新会话的默认值（用户已接受）。调用失败 MUST NOT 影响本次请求。
 - **MANUAL**：系统 MUST NOT 改写任何字段，也 MUST NOT 把 effort 写回任何先前的值。切到 MANUAL 只是停止自动调整；此后请求使用官方当前选择（运行时在无待生效手选时沿用上一次实际请求的配置），由用户在官方模型选择器中自行调整。
 切 MANUAL SHALL 废止当前回合的 AUTO 决定：同回合后续请求不再改写。再次切 AUTO 只能在下一用户回合首个请求重新决定，此前 MUST NOT 恢复旧 AUTO 决定。重复设置相同模式 SHALL 为无副作用操作。插件不保存锚点、不维护复原义务；未加载时不请求 Jev、不改写。
@@ -52,6 +52,16 @@
 - **WHEN** 插件读取该会话状态
 - **THEN** 读取成功，模式与 `disabled` 保留；读取不触发重写，旧字段在下次写入时去掉；`mode` 或 `disabled` 形状非法时仍拒绝，不回退为默认值
 
+#### Scenario: 新会话按默认模式创建
+- **GIVEN** 设置「新会话默认模式」为 `AUTO`
+- **WHEN** 新建普通会话 S1，并恢复一个此前从未设置过模式的已有会话 S0，S1 派生子会话 C1
+- **THEN** S1 的模式为 `AUTO`，其首个用户回合请求 Jev；S0 为 `MANUAL`；C1 不产生会话状态
+
+#### Scenario: 修改默认模式不影响已有会话
+- **GIVEN** 默认模式为 `AUTO` 时创建了会话 S1（`AUTO`），用户随后把 S1 切为 `MANUAL`
+- **WHEN** 把默认模式改为 `MANUAL`，再改回 `AUTO`，然后 Host 重启
+- **THEN** S1 始终为 `MANUAL`；改回后新建的会话 S2 为 `AUTO`
+
 ### Requirement: 用户回合与分类输入
 系统 SHALL 只在 step 1 的 `agent/pre-step` 中、先执行 `await next()` 得到 `PreStepDecision` 后判定用户回合并请求 Jev 判断：结果为 `reject` 时 MUST NOT 请求 Jev、MUST NOT 记录本回合决定；结果为 `enter` 时只使用其 `messages`。**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含首轮 Host 注入的 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的级别且不请求 Jev；首个用户回合之前无级别时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接，经 `redact`（见“Jev 判断档位”）后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 被分类或改写。
 
@@ -86,7 +96,7 @@
 - **THEN** 输出与官方合成配置深度相等，Jev 请求次数为 0
 
 ### Requirement: Jev 判断档位
-系统 SHALL 在 AUTO 的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据每次调用时经官方 launch environment 读取 `OPENROUTER_API_KEY`；`questions` 为主会话与 `route_subagent` 共用的 `TIER_QUESTIONS`，SHALL 从 package 内唯一的规则文件 `packages/auto-model-routing/src/rubric.json` 读入（源码与评估脚本都从它读，不另存副本）；规则版本 `rubricVersion` SHALL 为 `sha256(JSON.stringify(TIER_QUESTIONS))` 的前 8 个十六进制字符，由代码计算、不手工维护；单次请求期限 3000ms，`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径；代码只做上一档“升一级”的计算（档位序加一，`escalated` 封顶），不读消息内容。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
+系统 SHALL 在 AUTO 的用户回合 step 1 中，以一次 Jev `choice` 请求得出本回合档位 `simple | standard | complex | escalated`：经 `POST https://openrouter.ai/api/alpha/decisions`，模型 `typesafe/jev-1.13`，凭据 `OPENROUTER_API_KEY` 每次调用时经官方 credentials 服务解析（其固有优先级：启动环境 > 凭据存储文件 > 项目 `.env` > `$DSH_HOME/.env`；credentials 服务不存在时经官方 launch environment 读取），未解析到值时为 `missing-credential`；`questions` 为主会话与 `route_subagent` 共用的 `TIER_QUESTIONS`，SHALL 从 package 内唯一的规则文件 `packages/auto-model-routing/src/rubric.json` 读入（源码与评估脚本都从它读，不另存副本）；规则版本 `rubricVersion` SHALL 为 `sha256(JSON.stringify(TIER_QUESTIONS))` 的前 8 个十六进制字符，由代码计算、不手工维护；单次请求期限取设置项「Jev 期限」（整数毫秒，范围 1000–4500，缺省 3000；每次请求时读取），`redirect: 'error'`，MUST NOT 重试。Jev 返回后 SHALL 重新读取会话状态，等待期间模式已变时丢弃该结果（不写决定、不写 `disabled`）。成功时 SHALL 采用响应 `answers.tier.choice` 作为档位，`reason` 为 `jev`，不设置信度门槛。系统 MUST NOT 包含本地规则、关键词或通用对话模型的分类路径；代码只做上一档“升一级”的计算（档位序加一，`escalated` 封顶），不读消息内容。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为 `openrouter.ai`。
 
 主会话请求的 `state` SHALL 依次包含：
 1. 档位行：有上一档时为 `Previous user-turn tier: <tier> (one tier above: <tier+1>)`，否则为 `Previous user-turn tier: none`。上一用户回合档位 SHALL 按会话持久化（只存档位名，不存任务文本），Host 重启后仍随下一次判档发送，并在 MANUAL、停用与重新切 AUTO 时保留。
@@ -158,6 +168,16 @@
 - **WHEN** 测试扫描源码文本
 - **THEN** 不存在 `classify` 导出或关键词词表；唯一出站 URL 主机为 `openrouter.ai`；不出现 `node:http`、`node:https`、`node:child_process`
 
+#### Scenario: 凭据从存储读取且换 key 立即生效
+- **GIVEN** 启动环境中没有 `OPENROUTER_API_KEY`，credentials 存储中为 key A
+- **WHEN** 发出一次 AUTO 判档，然后经设置页把 key 换成 B，再发出一次判档，再删除 key 后判档
+- **THEN** 假 Jev 服务依次收到 `Bearer A`、`Bearer B`；第三次不发请求，会话以 `missing-credential` 停用；全程无需重启
+
+#### Scenario: 期限按设置生效
+- **GIVEN** 「Jev 期限」设为 1500，假 Jev 服务 2000ms 后才响应
+- **WHEN** 发出一次 AUTO 判档
+- **THEN** 约 1500ms 时以 `timeout` 停用；把期限改为 2500 后，下一次判档成功
+
 ### Requirement: Jev 失败即停用并提示
 Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MANUAL 相同：废止本回合 AUTO 决定，本回合不改写、不复原 effort），MUST NOT 改写 provider/model，同时持久记录 `disabled = {category, at}`，并向历史追加 `{reason: jev-failed, category}`（不含 effort）；MUST NOT 以任何本地规则或其它模型得出档位。失败类别为闭集：`missing-credential`（凭据缺失，不发请求）、`insufficient-credits`（402）、`unauthorized`（401/403）、`rate-limited`（429）、`region-blocked`（451）、`rejected`（其它 4xx）、`unavailable`（5xx 或网络错误）、`timeout`（期限到达）、`invalid-response`（非 JSON、缺 choice 或 choice 不在四级内）。HTTP 200 但 body 含数字 `error.code` 时 SHALL 按该 code 套用上述映射。调用方取消（用户取消回合）MUST NOT 视为失败：不停用、不写 `disabled`、本回合不改写。停用 SHALL 保持到用户把模式设为 `AUTO`，此时清除 `disabled`；系统 MUST NOT 轮询、主动查询余额或自动恢复 AUTO。`disabled`、错误结果与日志 MUST NOT 包含凭据或响应体。
 
@@ -187,7 +207,11 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 均不含 `sk-or-test-SECRET` 或 `SECRET-BODY`
 
 ### Requirement: 级别与 effort 映射
-系统 SHALL 把档位按 `await next()` 得到的实际官方 provider/model 转为 effort，MUST NOT 套用尚未生效的手选模型的映射；同回合实际模型变化时 SHALL 按新模型重新映射，不重新请求 Jev。每个模型有一个起点 effort（代码常量，取值与出处见 design D9）：`claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5`、`gpt-6.1-sol` 为 `medium`，`claude-fable-5-1`、`gpt-6-luna` 为 `high`，`gpt-6-astra` 为 `low`，其它模型为 `medium`。在序列 `low < medium < high < xhigh < max` 上：`standard` 取起点，`simple` 降一级（最低 `low`），`complex` 升一级，`escalated` 升两级；任一档位结果 MUST NOT 高于 `xhigh`，自动路由 MUST NOT 输出 `max`。候选集为模型受支持的 effort 与 `{low, medium, high, xhigh}` 的交集；目标不在候选集时取不超过目标的最高候选值，无则取最低候选值；候选集为空时不改写，`reason` 为 `no-effort-support`。
+系统 SHALL 把档位按 `await next()` 得到的实际官方 provider/model 转为 effort，MUST NOT 改变 provider/model ；同回合实际模型变化时 SHALL 按新模型重新映射，不重新请求 Jev。主会话 SHALL 优先读取provider/tier 的体系级显式 `mainEfforts`（作用该体系所有主模型）；未覆盖时用模型起点算法：Opus/Sonnet/Haiku/Sol 起点 medium，Fable/Luna 起点 high，Astra 起点 low，其它模型 medium，simple 降一级、standard 不变、complex 升一级、escalated 升两级，最高 xhigh。自动路由 MUST NOT 输出 max。
+
+「自动 effort 上限」为 `low | medium | high | xhigh`，缺省 xhigh。缺省算法的目标 SHALL 取起点浮动结果与上限的较低者；候选集为模型实际支持的自动 effort 中不超过上限的值。目标不在候选集时取不超过目标的最高候选值，无则取候选集最低值；候选集为空时不改写，reason 为 `no-effort-support`，MUST NOT 为满足模型最低值而突破上限。
+
+显式主映射保存时 SHALL 被当前目录该体系全部模型共同支持且不超过上限，目录无对应模型时拒绝新增覆盖；运行时 SHALL 校验官方实际模型支持该值。保存时出现冲突 SHALL 拒绝，MUST NOT 静默截断；使用时因文件修改或目录变化发现显式映射无效，SHALL 阻止该次 AUTO 请求并给出设置错误，MUST NOT 换模型、改用缺省映射或记为 Jev 失败停用。配置在下一次请求生效，同回合已完成的 Jev 判档仍复用。
 
 #### Scenario: 档位映射为 effort
 - **GIVEN** 实际模型 `claude-opus-5-5`，支持全部五级
@@ -214,8 +238,28 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **WHEN** 同回合后续请求实际模型变为 `gpt-6-astra`
 - **THEN** 输出 effort 为 `medium`，Jev 请求次数仍为 1
 
+#### Scenario: 上限压低主会话 effort
+- **GIVEN** 「自动 effort 上限」为 `medium`，实际模型 `claude-opus-5-5` 支持全部五级
+- **WHEN** 路由器为四个档位计算 effort
+- **THEN** 依次输出 `low`、`medium`、`medium`、`medium`；上限为 `low` 时四个档位均为 `low`
+
+#### Scenario: 上限对起点高于它的模型同样生效
+- **GIVEN** 「自动 effort 上限」为 `medium`，实际模型 `claude-fable-5-1`（起点 `high`）
+- **WHEN** 路由器为 `simple` 与 `standard` 计算 effort
+- **THEN** 两者都输出 `medium`
+
+#### Scenario: 主会话显式映射作用整个体系
+- **GIVEN** codex/simple 显式设为 medium，Claude 未覆盖，官方目录各模型支持该值
+- **WHEN** Jev 判 simple，实际模型分别为 Sol、Luna、Astra、Opus
+- **THEN** 前三者均使用 medium，Opus 使用缺省 low；不改 provider/model
+
+#### Scenario: 显式映射使用时失效
+- **GIVEN** 已存 claude/complex=high，之后模型目录不再支持 high
+- **WHEN** AUTO 请求经过路由器
+- **THEN** 返回设置错误阻止请求，不静默改成其它 effort、不调用其它模型、不写 Jev disabled
+
 ### Requirement: 子会话决策工具与 skill
-系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话模型按档位取自代码常量 `CHILD_MODELS`（唯一来源）：`claude` 依次为 `claude-haiku-5-5`、`claude-sonnet-5-5`、`claude-opus-5-5`、`claude-opus-5-5`，`codex` 依次为 `gpt-6-luna`、`gpt-6.1-sol`、`gpt-6.1-sol`、`gpt-6.1-sol`；模型选择只依赖档位与 provider，MUST NOT 受调用会话当前模型限制；MUST NOT 自动返回 `claude-fable-5-1` 或 `gpt-6-astra`。`reasoning_effort` SHALL 按“级别与 effort 映射”的同一起点规则对所选模型计算（不做受支持值截断，由官方创建参数校验）；失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态。工具 SHALL 先确定**所属主会话**：调用会话为普通会话时即其本身；为子会话时经 `ctx.agents.get(header.parentSession)` 逐级向上，找到第一个非 `origin = subagent` 的会话；链上任一会话不在 live 注册表中时视为 MANUAL。模式按所属主会话 id 从插件状态读取。所属主会话模式不是 `AUTO`（含因 Jev 失败停用）时，工具 MUST NOT 请求 Jev、MUST NOT 外发任务文本，返回非错误结果 `{routed: false, reason: "manual"}`，渲染文本说明“主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort”；只有所属主会话为 `AUTO` 时才判档。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位；(8) 工具返回 `routed: false` 时按官方默认委派且不传 provider/model/reasoning_effort，不询问用户、不猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
+系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex"}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话推荐 SHALL 按 provider/tier 读取设置中的完整 `childRoutes` 组合 `{model, reasoningEffort}`；未覆盖的格子用代码默认表（claude 为 Haiku/Sonnet/Opus/Opus，codex 为 Luna/Sol/Sol/Sol）与所选模型的缺省起点算法生成完整组合，再应用全局 effort 上限与模型支持范围。用户可在官方允许列表中选择 Fable/Astra；默认表不含它们。子会话推荐 MUST NOT 继承 `mainEfforts`，MUST NOT 受调用会话当前模型限制。显式 effort MUST NOT 被静默改写；模型不在当前官方允许列表、effort 不被支持或超过上限、无有效默认 effort 时 SHALL 返回设置错误并要求暂停委派，不换模型、不回退到其它映射、不记为 Jev 失败、不改会话状态。工具使用时 SHALL 重新校验当前列表与模型能力，最终仍由官方创建校验和会话白名单快照把关。失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态。工具 SHALL 先确定**所属主会话**：调用会话为普通会话时即其本身；为子会话时经 `ctx.agents.get(header.parentSession)` 逐级向上，找到第一个非 `origin = subagent` 的会话；链上任一会话不在 live 注册表中时视为 MANUAL。模式按所属主会话 id 从插件状态读取。所属主会话模式不是 `AUTO`（含因 Jev 失败停用）时，工具 MUST NOT 请求 Jev、MUST NOT 外发任务文本，返回非错误结果 `{routed: false, reason: "manual"}`，渲染文本说明“主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort”；只有所属主会话为 `AUTO` 时才判档。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位；(8) 工具返回 `routed: false` 时按官方默认委派且不传 provider/model/reasoning_effort，不询问用户、不猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
 
 #### Scenario: 工具成功返回表中条目
 - **GIVEN** 调用会话为 `AUTO`
@@ -233,9 +277,19 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 返回 `{standard, claude, claude-sonnet-5-5, medium}`；假 Jev 服务收到 1 个请求；S1 不新增 `decision`
 
 #### Scenario: 子会话模型不受调用会话模型限制
-- **GIVEN** 调用会话为 `AUTO` 且当前模型为 `claude-haiku-5-5`，Jev 对任务返回 `escalated`
+- **GIVEN** 调用会话为 `AUTO` 且当前模型为 `claude-haiku-5-5`，子会话模型表为缺省值，Jev 对任务返回 `escalated`
 - **WHEN** 以 `provider: claude` 调用 `route_subagent`
 - **THEN** 返回 `{escalated, claude, claude-opus-5-5, xhigh}`；对四个档位与两个 provider 的全部组合，返回值中不出现 `claude-fable-5-1`、`gpt-6-astra` 或 `max`
+
+#### Scenario: 子会话显式推荐按设置生效
+- **GIVEN** 当前官方允许列表与模型目录允许 Fable/Astra；`claude.escalated` 配置 Fable/high，`codex.simple` 配置 Astra/low，上限 high
+- **WHEN** Jev 分别判为 escalated 与 simple，工具按对应 provider 调用
+- **THEN** 返回 Fable/high 与 Astra/low；未覆盖的 claude.standard 仍为 Sonnet/medium；修改主会话 Fable 的映射不影响子会话推荐
+
+#### Scenario: 使用时发现推荐失效
+- **GIVEN** 已保存子会话推荐 Sol/high，之后官方移除 Sol，或文件被改为超过上限的 effort
+- **WHEN** AUTO 下调用 route_subagent 并判到该档
+- **THEN** 返回明确设置错误并要求暂停委派，不返回另一个模型或较低 effort，不改变根会话模式和 disabled
 
 #### Scenario: 工具失败返回类别且不改状态
 - **GIVEN** Jev 返回 402，主会话 S1 为 `AUTO` 且无 `disabled`
@@ -316,7 +370,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 不重复显示 id 7；3 秒后提示被移除；官方隐藏右侧控件时提示仍可见
 
 ### Requirement: Host 端点边界
-本插件只提供三个经 `connection.fetch.register` 注册的端点：读取状态、设置模式与标注（`label`，参数与校验见“判档记录与人工标注”）。三者 SHALL 以请求体 `sessionId` 经官方会话控制器解析目标会话（与官方会话端点同一授权模型）；`sessionId` 缺失、非字符串、无法解析或指向 `origin = "subagent"` 会话时 SHALL 返回 4xx 且不修改任何状态；设置模式 SHALL 只修改该会话的模式与 `disabled`（设为 `AUTO` 时清除），`mode` 不属于 `AUTO | MANUAL` 时返回 4xx；读取状态 SHALL 返回 `disabled`（如有）。
+本插件只提供六个经 `connection.fetch.register` 注册的端点：读取状态、设置模式、标注（`label`，参数与校验见“判档记录与人工标注”），以及读取设置、保存设置、设置 API key（三者见“设置页”，不带 `sessionId`、不读写任何会话状态）。前三者 SHALL 以请求体 `sessionId` 经官方会话控制器解析目标会话（与官方会话端点同一授权模型）；`sessionId` 缺失、非字符串、无法解析或指向 `origin = "subagent"` 会话时 SHALL 返回 4xx 且不修改任何状态；设置模式 SHALL 只修改该会话的模式与 `disabled`（设为 `AUTO` 时清除），`mode` 不属于 `AUTO | MANUAL` 时返回 4xx；读取状态 SHALL 返回 `disabled`（如有）。
 
 #### Scenario: 无效会话被拒绝且无副作用
 - **GIVEN** 会话 S1 为 `AUTO`；`session-unknown` 无法解析；`session-child` 为子会话
@@ -414,3 +468,126 @@ client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个�
 - **GIVEN** 按钮已渲染、未标注
 - **WHEN** 用户在菜单中选择 `标准`，端点分别返回成功与错误
 - **THEN** 两次都只发出一次带 `label: standard` 的 `auto-model-routing.label` 请求，未调用官方反馈接口；成功时 Tooltip 追加“你标注：标准”，错误时 Tooltip 仍不含“你标注”
+
+### Requirement: 设置页
+系统 SHALL 在官方设置页注册「自动模型路由」，提供读取设置、保存设置、设置 API key 三个已认证 Host 端点。非密钥设置 SHALL 保存在 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`（目录 0700、文件 0600，原子替换），字段均可缺省：
+- `decisionToast`：布尔，缺省 true；
+- `defaultMode`：MANUAL | AUTO，缺省 MANUAL；
+- `effortCap`：low | medium | high | xhigh，缺省 xhigh；
+- `jevTimeoutMs`：1000–4500 整数，缺省 3000；
+- `mainEfforts`：按 provider（claude/codex）、tier 索引的稀疏体系 effort 覆盖，适用于该体系所有主模型；
+- `childRoutes`：按 provider（claude/codex）、tier 索引的稀疏 `{model, reasoningEffort}` 完整组合覆盖。
+模型 id SHALL 为 1–128 个字母数字或 `._:-` 字符；tier SHALL 为四档之一，effort SHALL 为自动集合之一。页面保存 SHALL 只持久化被修改的覆盖；恢复默认 SHALL 删除该格覆盖，不固化其它缺省值。
+
+写入 SHALL 整体校验、保留未修改字段，拒绝未知字段、形似凭据的字段名、非法 provider/model/tier/effort。Host SHALL 重新验证本次提交涉及的显式映射：主 effort 被当前目录该体系全部模型共同支持且目录非空；子模型在当前启用的官方子智能体允许列表与可用目录的交集中；effort 被该模型支持且不超过新上限。降低上限 SHALL 验证所有存续的显式覆盖并拒绝冲突；同一次提交可同时修复映射。失败 SHALL 返回字段级错误且配置文件字节不变，MUST NOT 自动换模型、选择其它 effort 或静默截断。未改动的历史失效记录可保留并提示，但不能因此允许新增或修改成失效组合。
+
+文件缺失/不可解析时 SHALL 使用缺省设置并报告配置状态；可独立解析的非法普通字段按缺省值处理。显式路由覆盖有误时 SHALL 保留可识别的错误状态，不把它当作未配置而静默恢复默认。读取/保存/使用映射时均核验所需能力，下一次请求或工具调用采用新配置，无需重启。
+
+读取响应 SHALL 包含设置、默认值、配置问题、API key 状态 `{configured, source?, writable}`、当前主会话可用模型目录、子会话允许列表状态、模型展示名与实际 reasoning efforts，以及当前 `rubric.json` 的四档 criteria 原文；MUST NOT 包含 key 值。
+
+页面 SHALL 按 Claude / GPT 分页，GPT 内部 provider id 为 codex。切换分页 SHALL 保留其它视图的未保存草稿，MUST NOT 切换真实会话模型或调用会话 selectModel。每页包含：
+- MUST NOT 显示表格上方的主会话模型选择器；主会话列直接管理本页体系全部模型；
+- 四行表格，列为「档位」「主会话推理等级」「子会话推荐」；
+- 档位只显示英文名 + info，hover/键盘聚焦直接显示规则文件 criteria 原文，MUST NOT 维护中文描述或第二份规则副本；
+- 主会话格可选择该体系此档的统一 effort，候选为当前体系所有主模型支持交集且不超过上限；未覆盖时显示「默认（随模型）」而非任意模型算例；子会话格可选择完整 model + effort，收起时两者作为同一个 trigger 展示，打开为「模型」「推理等级」两行，再进入各自候选菜单；
+- 子模型只能选择当前官方允许列表内且可用的同 provider 模型。effort 菜单只列所选模型支持且不超过上限的自动等级。换模型时原 effort 若仍有效则保留，否则要求用户重新选择并阻止保存；不得悄悄选一个新值；
+- 已存模型后来被移除时，仅以不可用状态显示旧值，不把旧值放进可选项。列表未启用、为空或不可读取时禁用子会话 picker 并说明原因，其它可验证设置仍可保存；
+- 推理强度上限放在通用行为分区。超上限的显式格子显示冲突并阻止保存，不显示划线自动降档预览；
+- 常驻说明主会话保留真实当前模型、子会话推荐仅用于 route_subagent 后续委派，不改现有子会话、不决定是否派发，并提示官方允许列表是会话创建时的快照。
+
+三个分段控件（Claude/GPT、MANUAL/AUTO、effort 上限）SHALL 统一紧凑高度 28px、字号 12px、内边距和圆角，随内容自然占宽，不用固定宽度放大体系 tabs。字段保持官方 13px 阅读尺寸、辅助动作/控件用 12px、分区标题 13px/600 体现层级；表格 picker 同样紧凑。
+
+页面 SHALL 复用官方主题令牌、表单与菜单基础组件，深浅色跟随宿主；图标使用用户选定的 E 字形，仅修改自己的导航行，定位失败保留官方默认图标。菜单 SHALL 支持键盘选择、Escape 返回上层/关闭、关闭后焦点回 trigger，浮层不得被表格裁切；窄栏不得水平溢出。
+
+设置 API key 端点接受 `{value: string}`（保存/替换）或 `{value: null}`（删除），经官方 credentials 服务写入 OPENROUTER_API_KEY。空、超过 512 字符或含空白时拒绝。启动环境只读来源 SHALL 拒绝修改，页面说明先移除启动环境变量并重启，再在这里保存；MUST NOT 指导用户在只读覆盖下先保存。credentials 服务不可用时禁用输入。任何响应、日志、配置文件与错误 MUST NOT 含 key 值；输入不预填，保存后清空草稿；保存 key 不自动清除会话 disabled。key 与非密钥配置是独立提交，任一失败时 SHALL 明确显示哪部分已保存、哪部分未保存，不宣称跨存储原子提交成功。
+
+#### Scenario: 保存普通设置不固化映射
+- **GIVEN** 文件只含 decisionToast=false
+- **WHEN** 保存 defaultMode=AUTO、jevTimeoutMs=2500
+- **THEN** 保留 decisionToast，文件为 0600，不添加 mainEfforts 或 childRoutes；后续新会话与请求采用新设置
+
+#### Scenario: 非法设置整体拒绝
+- **GIVEN** 当前设置有效
+- **WHEN** 分别提交期限 6000、effortCap=max、defaultMode=auto、非法 model id、未知字段 foo、凭据字段 apiKey
+- **THEN** 每次均返回字段错误，文件字节不变
+
+#### Scenario: 分页只编辑体系草稿且没有主模型选择器
+- **GIVEN** 真实会话模型为 Sol，主目录有 Claude Opus/Fable 与 GPT Sol/Luna/Astra
+- **WHEN** 在 Claude 页编辑 simple=medium，再切 GPT 页并返回 Claude
+- **THEN** Claude 草稿仍为 medium，真实会话与默认模型未改变；页顶没有主会话模型选择器，表格主列仍可编辑
+
+#### Scenario: 主 effort 不受子列表限制
+- **GIVEN** Fable 支持 high 且在 Claude 主目录，但不在子允许列表
+- **WHEN** 设置 Claude 主列 complex=high 并打开子模型菜单
+- **THEN** 该主设置作用所有 Claude 模型，子模型菜单不可选 Fable
+
+#### Scenario: 体系主 effort 校验全模型支持交集
+- **GIVEN** GPT 主目录模型 A 支持 low/medium/high，B 仅支持 low/medium
+- **WHEN** 尝试保存 codex/complex=high，再保存 medium
+- **THEN** high 被 Host 拒绝且文件不变，medium 成功；页面仅列 low/medium，恢复默认仍可用
+
+#### Scenario: picker 可同时配置模型与 effort
+- **GIVEN** GPT 允许列表与目录有 Luna/Sol，上限 xhigh
+- **WHEN** simple 子会话 picker 从 Luna/medium 改为 Sol/high 并保存
+- **THEN** trigger 显示 Sol High；AUTO 下工具判为 simple 时精确返回 Sol/high，不重新套用模型起点
+
+#### Scenario: 换模型时要求有效 effort
+- **GIVEN** 原草稿为模型 A/xhigh，新允许模型 B 仅支持 low/medium
+- **WHEN** picker 改为 B
+- **THEN** 提示重新选择推理等级并阻止保存；选 medium 后保存 B/medium
+
+#### Scenario: 允许列表收缩与保存竞态
+- **GIVEN** 页面打开时 Sol 被允许，之后官方移除 Sol
+- **WHEN** 提交新的 Sol 推荐，然后重新读取页面
+- **THEN** Host 拒绝提交且文件不变；之前已存的 Sol 推荐仅显示为不可用旧值，菜单不能选 Sol，用户可改选有效项
+
+#### Scenario: 上限冲突必须显式修复
+- **GIVEN** 已保存 claude/complex=high 和 GPT 子会话 complex=Sol/high
+- **WHEN** 单独把上限降为 medium，再在同一次请求中连同两格改为 medium 提交
+- **THEN** 首次返回两个格子的冲突且不保存；第二次整体成功，精确保存 medium，无静默降档或划线旧值
+
+#### Scenario: 恢复默认不复制缺省表
+- **GIVEN** mainEfforts 中只有 codex/simple=medium
+- **WHEN** 恢复该格默认并保存
+- **THEN** 删除该覆盖，显示「默认（随模型）」，各实际模型恢复自己的默认算法，不新增模型记录
+
+#### Scenario: 档位描述只有一个来源
+- **GIVEN** simple 的 criteria 为规则文件中的英文原文
+- **WHEN** hover 或键盘聚焦 simple 的 info
+- **THEN** tooltip 显示完全相同的英文字符串，无中文转述，浮层不被表格裁切
+
+#### Scenario: 设置文件损坏
+- **GIVEN** 文件不可解析，或普通字段 effortCap=max 而期限为 2000
+- **WHEN** 打开页面并解析设置
+- **THEN** 前者使用默认并说明保存将覆盖损坏文件；后者上限用 xhigh、期限用 2000；非法显式映射另显示错误而不静默删除
+
+#### Scenario: 缺少允许列表服务
+- **GIVEN** 子列表不可读取或未启用
+- **WHEN** 打开页面并修改提示开关
+- **THEN** 子 picker 禁用且给出配置指引；提示开关可保存，历史推荐不被改写
+
+#### Scenario: key 的只读来源与迁移
+- **GIVEN** key 来自启动环境
+- **WHEN** 打开页面并尝试替换
+- **THEN** 显示只读并拒绝，提示先移除环境变量、重启、再保存；重新由存储管理后换 key 下一次请求生效，不回传 key
+
+#### Scenario: 独立保存结果与不泄漏
+- **GIVEN** credentials 可写，用户同时编辑 key 和普通设置
+- **WHEN** key 保存成功而普通设置因映射冲突失败
+- **THEN** 明确显示 key 已保存、设置未保存，清空 key 草稿但保留配置草稿；响应、日志与配置文件无 key
+
+#### Scenario: 导航图标只作用于本区块
+- **GIVEN** 设置导航中有本区块与其它插件
+- **WHEN** 插件挂载再卸载
+- **THEN** 只有自己的导航行使用 E 字形；卸载清除标记，找不到行不报错
+
+#### Scenario: 旧逐模型主覆盖不静默沿用
+- **GIVEN** 文件中仍有 mainEfforts.codex.gpt-6.1-sol.simple=medium 的旧形状
+- **WHEN** 读取设置并发 AUTO 请求，随后只保存提示开关
+- **THEN** 页面诊断旧配置、提供整组重设动作；AUTO 报设置错误，不静默采用旧值/默认；普通保存保留旧数据
+- **WHEN** 用户明确将该体系恢复默认（provider=null）或提交新的 provider/tier 对象
+- **THEN** 只删除或替换该旧体系对象，另一体系和子推荐不受影响
+
+#### Scenario: 设置分段控件紧凑一致
+- **WHEN** 在真实主题下渲染设置页
+- **THEN** 三组 tabs 均为 28px 高、12px 字号，内边距圆角一致，体系页签不拉伸为大块，深浅色跟随宿主且窄栏不溢出

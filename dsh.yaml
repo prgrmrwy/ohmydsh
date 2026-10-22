@@ -170,10 +170,10 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.1.0
+    version: 0.2.0
     enabled: true
     brief: 主会话按任务自动调整推理强度，保留用户模型选择
-    note: '自研,change auto-model-routing。Jev(OpenRouter decisions,typesafe/jev-1.13)判档,AUTO 每用户回合外发≤8000字消息及上一轮问答片段(用户前500字、助手回复末1200字,形态脱敏、尽力而为)至 OpenRouter/TypeSafe,子会话只在所属主会话为 AUTO 时判档外发,保留条款未确认;判档记录(无文本)追加到 $DSH_HOME/state/auto-model-routing/judgements.jsonl;凭据 OPENROUTER_API_KEY 仅本机 .env.local。Jev 失败即停用为 MANUAL 并在芯片提示,无本地降级。不换 provider/model;会话默认 MANUAL。切 MANUAL 或 Jev 失败只停止自动调整、不复原,effort 停在最后一次 AUTO 值,由用户在官方选择器中另选。2026-10-21 用户授权启用部署,GUI 验收中。停用:enabled:false → dsh build。'
+    note: '自研,change auto-model-routing-settings。Jev(OpenRouter decisions,typesafe/jev-1.13)判档;AUTO 外发≤8000字当前消息及前轮用户前500/助手末1200字,子任务仅根会话 AUTO 时外发,形态脱敏尽力而为,OpenRouter/TypeSafe 保留条款未确认。凭据经官方 credentials(~/.dsh/.credentials.yaml,0600)或只读启动环境;GUI 不回传值。非密钥设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json。Claude/GPT 分页配置主 effort 与子 model+effort,受目录/允许列表/上限约束,不自动选 max。不换主模型;新会话默认 MANUAL,可设 AUTO,已有会话不变。Jev 失败即 MANUAL,无本地降级;MANUAL 不复原 effort。无文本判档记录在 $DSH_HOME/state/auto-model-routing/judgements.jsonl。0.2.0 已部署,用户接受 GUI 与已记录验收缺口后归档。停用:enabled:false → dsh build。'
   - id: subagent-model-routing
     type: skill
     enabled: true

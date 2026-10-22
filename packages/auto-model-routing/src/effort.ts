@@ -19,15 +19,16 @@ const OFFSET: Readonly<Record<Tier, number>> = { simple: -1, standard: 0, comple
 const automatic: readonly Effort[] = ['low', 'medium', 'high', 'xhigh']
 
 /** Target effort before clamping to what the model supports (also used for sub-agents, unclamped). */
-export function targetEffort(model: string, tier: Tier): Effort {
+export function targetEffort(model: string, tier: Tier, cap: Effort = 'xhigh'): Effort {
   const start = automatic.indexOf(STARTING_POINTS[model] ?? 'medium')
-  return automatic[Math.max(0, Math.min(automatic.length - 1, start + OFFSET[tier]))]!
+  const ceiling = cap === 'max' ? automatic.length - 1 : automatic.indexOf(cap)
+  return automatic[Math.max(0, Math.min(ceiling, start + OFFSET[tier]))]!
 }
 
 /** Undefined when the model supports none of low..xhigh: the request is then left as is. */
-export function mapEffort(model: string, tier: Tier, supported: readonly Effort[]): Effort | undefined {
-  const target = targetEffort(model, tier)
-  const candidates = automatic.filter(effort => supported.includes(effort))
+export function mapEffort(model: string, tier: Tier, supported: readonly Effort[], cap: Effort = 'xhigh'): Effort | undefined {
+  const target = targetEffort(model, tier, cap)
+  const candidates = automatic.filter(effort => supported.includes(effort) && automatic.indexOf(effort) <= (cap === 'max' ? automatic.length - 1 : automatic.indexOf(cap)))
   return candidates.filter(effort => automatic.indexOf(effort) <= automatic.indexOf(target)).at(-1) ?? candidates[0]
 }
 

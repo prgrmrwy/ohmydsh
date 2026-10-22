@@ -2,6 +2,9 @@ import { mapEffort, type Effort, type Reason, type Tier } from './effort.js'
 import type { Distribution, JevCategory } from './jev.js'
 import { userInput, type ClaimedMessage } from './input.js'
 import type { Mode, RoutingState, Selection } from './state.js'
+import { explicitMainEffort, SettingsValidationError } from './settings.js'
+import { validateMainRoute } from './settings-validation.js'
+import { DEFAULT_SETTINGS, type Settings, type RoutingCatalog } from './settings-contract.js'
 export interface AgentRef { id: string; origin?: string }
 export interface RequestConfig extends Selection { [key: string]: unknown }
 interface Decision { effort?: Effort; reason: Reason; category?: JevCategory }
@@ -29,7 +32,7 @@ export class Router {
   private readonly judgements = new Map<string, Judgement>()
   private sequence = 0
   /** `onJudged` fires once per successful main-session judgement, at the turn's first request (with or without an effort). */
-  constructor(private readonly state: RoutingState, private readonly onJudged: (sessionId: string, turn: number, tier: Tier, model: string, effort?: Effort) => void = () => {}) {}
+  constructor(private readonly state: RoutingState, private readonly onJudged: (sessionId: string, turn: number, tier: Tier, model: string, effort?: Effort) => void = () => {}, private readonly readSettings: () => Settings = () => DEFAULT_SETTINGS) {}
 
   /** Remember the latest decision; the session id comes from the caller's own agent. */
   judged(sessionId: string, value: Omit<Judgement, 'id'>): void {
@@ -107,15 +110,25 @@ export class Router {
     }
   }
 
-  request(agent: AgentRef, turn: number, config: RequestConfig, supported: readonly Effort[]): RequestConfig {
+  request(agent: AgentRef, turn: number, config: RequestConfig, supported: readonly Effort[], catalog?: RoutingCatalog): RequestConfig {
     if (agent.origin === 'subagent') return config
     const runtime = this.runtimes.get(agent)
     if (!runtime || runtime.turn !== turn || !runtime.active || this.state.read(agent.id).mode !== 'AUTO') return config
-    const route = `${config.provider}\0${config.model}\0${supported.join(',')}`
+    if (!runtime.tier) return config
+    const settings = this.readSettings()
+    // Revalidate before consulting the mapping cache: settings and model capabilities can change mid-turn.
+    const explicit = explicitMainEffort(settings, config.provider, config.model, runtime.tier, catalog ?? {
+      models: [{ provider: config.provider, model: config.model, name: config.model, reasoningEfforts: supported }],
+      childAllowlist: { status: 'unavailable', allowedModels: [] },
+    })
+    if (explicit !== undefined) {
+      const errors = validateMainRoute({ models: [{ provider: config.provider, model: config.model, name: config.model, reasoningEfforts: supported }], childAllowlist: { status: 'unavailable', allowedModels: [] } }, config.provider, config.model, explicit, settings.effortCap, `mainEfforts.${config.provider}.${runtime.tier}`)
+      if (errors.length) throw new SettingsValidationError(errors)
+    }
+    const effort = explicit ?? mapEffort(config.model, runtime.tier, supported, settings.effortCap)
+    const route = `${config.provider}\0${config.model}\0${supported.join(',')}\0${effort ?? ''}`
     if (!runtime.decision || runtime.decisionRoute !== route) {
       runtime.decisionRoute = route
-      if (!runtime.tier) return config
-      const effort = mapEffort(config.model, runtime.tier, supported)
       const reason = effort === undefined ? 'no-effort-support' : runtime.reason
       runtime.decision = { ...(effort ? { effort } : {}), reason }
       this.record(runtime, runtime.decision)

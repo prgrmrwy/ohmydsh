@@ -7,10 +7,11 @@ import { Router } from '../src/router.js'
 import { RoutingState, type SessionState } from '../src/state.js'
 it('chip_negative_order',()=>{
  expect(chipOrder).toBeLessThan(0)
- let registration: {name:string;order:number} | undefined
- const ctx={slots:{inject:(_name:string,callback:()=>void)=>callback(),register:(options:{name:string;order:number})=>{registration=options;return ()=>{}}}}
+ const registrations: {name:string;order:number}[] = []
+ const ctx={effect:(callback:()=>unknown)=>callback(),slots:{inject:(_name:string,callback:()=>void)=>callback(),register:(options:{name:string;order:number})=>{registrations.push(options);return ()=>{}}}}
  apply(ctx as never)
- expect(registration).toMatchObject({name:'conversation.input.right',order:-10})
+ expect(registrations).toContainEqual(expect.objectContaining({name:'conversation.input.right',order:-10}))
+ expect(registrations).toContainEqual(expect.objectContaining({name:'settings.section',order:300}))
 })
 it('toggle_plugin_endpoint_only',async()=>{
  const calls:unknown[][]=[]

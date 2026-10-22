@@ -12,7 +12,11 @@ it('no_local_classifier_or_other_egress', () => {
  for(const [file,text] of sources()) {
   expect(text,file).not.toMatch(/export function (classify|resolveLevel)\b/)
   expect(text,file).not.toMatch(/node:https?|node:child_process/)
-  for(const url of text.match(/https?:\/\/[^\s'"`]+/g) ?? []) expect(new URL(url).host,file).toBe('openrouter.ai')
+  for(const url of text.match(/https?:\/\/[^\s'"`]+/g) ?? []) {
+    // SVG namespace identifiers do not initiate network requests.
+    if (url === 'http://www.w3.org/2000/svg') continue
+    expect(new URL(url).host,file).toBe('openrouter.ai')
+   }
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
 })
