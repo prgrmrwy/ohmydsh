@@ -7,6 +7,7 @@
  *   Qwen/Hunyuan/LongCat/MiMo/Gemini/Nvidia/Meta/AntGroup/OpenRouter/ByteDance:
  *   @lobehub/icons-static-svg 1.94.0 (MIT)
  * - OpenCode: anomalyco/opencode commit 5e75e5e… (MIT)
+ * - Magpie: yetone/magpie commit ba1dc7f… internal/provider/magpie.svg (MIT)
  *
  * @module dsh-sidebar-session-provider-icon/client/logos
  */
@@ -32,6 +33,7 @@ import metaSvg from './assets/meta.svg'
 import antgroupSvg from './assets/antgroup.svg'
 import openrouterSvg from './assets/openrouter.svg'
 import bytedanceSvg from './assets/bytedance.svg'
+import magpieSvg from './assets/magpie.svg'
 
 /** Badge side length for the injected SVG (also the composite footprint). */
 export const BADGE_SIZE = 14
@@ -42,7 +44,7 @@ const SUB_ICON_OFFSET = -4
 const UNKNOWN_FILL = '#8a9199'
 
 export type BrandKey = 'deepseek' | 'openai' | 'opencode' | 'anthropic' | 'grok' | 'kimi' | 'glm' | 'minimax' | 'pi' | 'openclaw' | 'hermes' | 'trae'
-  | 'qwen' | 'hunyuan' | 'longcat' | 'mimo' | 'gemini' | 'nvidia' | 'meta' | 'antgroup' | 'openrouter' | 'bytedance'
+  | 'qwen' | 'hunyuan' | 'longcat' | 'mimo' | 'gemini' | 'nvidia' | 'meta' | 'antgroup' | 'openrouter' | 'bytedance' | 'magpie'
 
 /** Normalize opaque route/model ids without guessing display names. */
 export function normalizeIdentity(value: string): string {
@@ -56,6 +58,9 @@ export function normalizeIdentity(value: string): string {
  */
 export function providerBrandOf(provider: string): BrandKey | undefined {
   const route = normalizeIdentity(provider)
+  // Gateways first, by exact name or prefix: `dsh-magpie-connect` normalizes
+  // to `magpie-connect`; a `magpie` substring elsewhere is not Magpie.
+  if (route === 'magpie' || route.startsWith('magpie-')) return 'magpie'
   if (route.includes('openclaw')) return 'openclaw'
   if (route.includes('hermes') || route.includes('hermas') || route.includes('nousresearch') || route === 'nous') return 'hermes'
   if (route.includes('opencode')) return 'opencode'
@@ -114,6 +119,24 @@ export function brandKeyOf(provider: string, model: string): BrandKey | undefine
   return providerBrandOf(provider) ?? modelBrandOf(model)
 }
 
+/**
+ * Routes that front other providers and name a model `<upstream>/<model>`
+ * (Magpie: `claude/claude-haiku-5-5`, `opencode-go/deepseek-v4-flash`).
+ */
+const GATEWAY_BRANDS: ReadonlySet<BrandKey> = new Set<BrandKey>(['magpie'])
+
+/**
+ * Model brand behind a gateway: the upstream segment is itself a provider
+ * route, so it is read as one first (an `opencode-go/deepseek-*` model is
+ * served by OpenCode, as it would be directly); a segment that is no brand
+ * (`auto/`, `group/`, a custom id) falls back to the model name after it.
+ */
+function gatewayModelBrandOf(model: string): BrandKey | undefined {
+  const slash = model.indexOf('/')
+  if (slash <= 0) return modelBrandOf(model)
+  return providerBrandOf(model.slice(0, slash)) ?? modelBrandOf(model.slice(slash + 1))
+}
+
 /** Primary logo plus the optional bottom-right model sub-icon. */
 export interface BadgeBrands {
   readonly primary: BrandKey | undefined
@@ -127,7 +150,7 @@ export interface BadgeBrands {
  */
 export function badgeBrands(provider: string, model: string): BadgeBrands {
   const route = providerBrandOf(provider)
-  const picked = modelBrandOf(model)
+  const picked = route !== undefined && GATEWAY_BRANDS.has(route) ? gatewayModelBrandOf(model) : modelBrandOf(model)
   if (route === undefined) return { primary: picked, secondary: undefined }
   return { primary: route, secondary: picked !== undefined && picked !== route ? picked : undefined }
 }
@@ -155,7 +178,15 @@ const LOGOS: Record<BrandKey, string> = {
   antgroup: antgroupSvg,
   openrouter: openrouterSvg,
   bytedance: bytedanceSvg,
+  magpie: magpieSvg,
 }
+
+/**
+ * Marks whose downloaded paths carry no fill and rely on the page's CSS
+ * (`fill: currentColor`) to be visible; without it SVG paints them black.
+ * The file stays byte-for-byte; only the injected root gains the fill.
+ */
+const ROOT_FILL_CURRENT: ReadonlySet<string> = new Set([magpieSvg])
 
 /**
  * Normalize bundler text/data-url forms, then size without editing the
@@ -163,6 +194,7 @@ const LOGOS: Record<BrandKey, string> = {
  * `url(#…)` references) so a nested copy never resolves another copy's defs.
  */
 function sizedSvg(imported: string, size: number = BADGE_SIZE, idSuffix: string = ''): string {
+  const rootFill = ROOT_FILL_CURRENT.has(imported) ? ' fill="currentColor"' : ''
   let raw = imported.startsWith('data:image/svg+xml,')
     ? decodeURIComponent(imported.slice('data:image/svg+xml,'.length))
     : imported
@@ -177,7 +209,7 @@ function sizedSvg(imported: string, size: number = BADGE_SIZE, idSuffix: string 
     const withoutSize = tag
       .replace(/\s(?:width|height)=(?:"[^"]*"|'[^']*')/g, '')
       .replace(/\sstyle=(?:"[^"]*"|'[^']*')/g, '')
-    return withoutSize.replace('<svg', `<svg width="${size}" height="${size}" aria-hidden="true" style="display:block;color:currentColor"`)
+    return withoutSize.replace('<svg', `<svg width="${size}" height="${size}"${rootFill} aria-hidden="true" style="display:block;color:currentColor"`)
   })
 }
 
