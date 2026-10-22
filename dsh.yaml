@@ -371,3 +371,13 @@ customizations:
     enabled: true
     brief: 为 ponytail 包挂专属 skill-filesystem provider(不含默认根)
     note: '组合补丁(patches/ponytail-skills.yml):插入 @deepseek-ai/dsh-skill-filesystem 行,providerName ponytail-plugin,includeDefaultRoots:false,skills 目录由 profile baseUrl 经包主入口解析(包的 exports 未导出 package.json,不能照搬 archify 写法)。升级复核:确认包主入口仍位于 .opencode/plugins/ 下两级(目录结构变化需同步改路径)。移除:enabled:false → dsh build。'
+
+  # 第三方(remote):Magpie 网关 provider —— 家庭 CT105 magpie(114.114.114.223:3425)的模型进入选择器,与现有直连 provider 并存
+  - id: dsh-magpie-connect
+    type: package
+    source: remote
+    spec: dsh-magpie-connect@0.4.1
+    version: 0.4.1
+    enabled: true
+    brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
+    note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='
