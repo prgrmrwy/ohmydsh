@@ -92,9 +92,9 @@ it('toast_once_and_expires',()=>{
 })
 it('panel_shows_latest_decision',()=>{
  const render=(view:object)=>renderToStaticMarkup(createElement(RoutingChip,{sessionId:'S',rpc:{call:async()=>({ok:true})},initialView:view as never,initiallyOpen:true})).replace(/<[^>]+>/g,' ')
- const panel=render({mode:'AUTO',decision:{id:1,source:'main',tier:'complex',effort:'xhigh',probabilities:{simple:0,standard:0,complex:0.61,escalated:0.39},ms:780}})
+ const panel=render({mode:'AUTO',decision:{id:1,source:'main',tier:'complex',effort:'high',probabilities:{simple:0,standard:0,complex:0.61,escalated:0.39},ms:780}})
  expect(panel).toContain('最近决策')
- expect(panel).toContain('主会话判断 · complex → xhigh · 0.78s')
+ expect(panel).toContain('主会话判断 · complex → high · 0.78s')
  expect(panel).toContain('complex 61% / escalated 39%')
  expect(render({mode:'AUTO'})).not.toContain('最近决策')
 })

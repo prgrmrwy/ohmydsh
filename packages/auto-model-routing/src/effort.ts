@@ -32,10 +32,8 @@ export function mapEffort(model: string, tier: Tier, supported: readonly Effort[
 }
 
 export type ChildProvider = 'claude' | 'codex'
-/** Sub-agent table (design D9); the single source used by `route_subagent`. */
-export const CHILD_TABLE: Readonly<Record<Tier, Readonly<Record<ChildProvider, readonly [model: string, effort: Effort]>>>> = {
-  simple: { claude: ['claude-haiku-5-5', 'low'], codex: ['gpt-6-luna', 'medium'] },
-  standard: { claude: ['claude-sonnet-5-5', 'medium'], codex: ['gpt-6.1-sol', 'medium'] },
-  complex: { claude: ['claude-opus-5-5', 'xhigh'], codex: ['gpt-6.1-sol', 'xhigh'] },
-  escalated: { claude: ['claude-fable-5-1', 'high'], codex: ['gpt-6-astra', 'medium'] },
+/** Sub-agent models by tier (design D9); the single source for `route_subagent`. Effort comes from `targetEffort`. */
+export const CHILD_MODELS: Readonly<Record<ChildProvider, readonly [simple: string, standard: string, complex: string, escalated: string]>> = {
+  claude: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5'],
+  codex: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6.1-sol'],
 }

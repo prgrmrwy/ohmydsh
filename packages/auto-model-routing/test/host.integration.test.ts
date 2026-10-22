@@ -203,7 +203,7 @@ it('main_and_tool_share_questions', async () => {
  await h.run('修复分页')
  const def = h.ctx.tools.get('route_subagent')
  expect(def).toBeTruthy()
- await def!.execute({ task: '给子会话的任务', provider: 'claude' }, { signal: new AbortController().signal } as never)
+ await def!.execute({ task: '给子会话的任务', provider: 'claude' }, { signal: new AbortController().signal, agent: h.agent } as never)
  const [main, child] = h.jev.bodies as { model: string; questions: unknown; state: string }[]
  expect(child!.model).toBe(main!.model)
  expect(child!.questions).toEqual(main!.questions)
@@ -225,11 +225,16 @@ it('main_decision_toast', async () => {
 it('subagent_decision_toast', async () => {
  const h = await harness(tier('complex', 0.8))
  h.toast(true)
+ // MANUAL: the tool does not judge, so no hint appears.
+ const manual = await h.ctx.tools.get('route_subagent')!.execute({ task: '给子会话的任务', provider: 'claude' }, { signal: new AbortController().signal, agent: h.agent } as never)
+ expect(manual).toEqual({ routed: false, reason: 'manual' })
+ expect((await h.invoke('state', { sessionId: h.agent.id })).decision).toBeUndefined()
+ await h.setMode('AUTO')
  const def = h.ctx.tools.get('route_subagent')!
  await def.execute({ task: '给子会话的任务', provider: 'claude' }, { signal: new AbortController().signal, agent: h.agent } as never)
  const state = await h.invoke('state', { sessionId: h.agent.id })
- expect(state.mode).toBe('MANUAL')
- expect(state.decision).toEqual({ id: expect.any(Number), source: 'subagent', tier: 'complex', model: 'claude-opus-5-5', effort: 'xhigh', confidence: 0.8, ms: expect.any(Number) })
+ expect(state.mode).toBe('AUTO')
+ expect(state.decision).toEqual({ id: expect.any(Number), source: 'subagent', tier: 'complex', model: 'claude-opus-5-5', effort: 'high', confidence: 0.8, ms: expect.any(Number) })
 })
 
 it('toast_switch_default_on_only_false_is_off', async () => {

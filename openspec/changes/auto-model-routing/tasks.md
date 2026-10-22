@@ -18,11 +18,11 @@
 
 ## 3. 子会话工具
 
-- [ ] 3.1 写失败测试 `subagent-tool.test.ts › tool_returns_table_entry`（8 组枚举）、`child_model_not_capped_by_caller`、`manual_root_skips_jev`（MANUAL、Jev 停用、父会话不在 live 注册表三种，假 Jev 0 次请求）、`nested_child_follows_root_mode`、`tool_failure_reports_without_state_change`（AUTO 下 402）。确认失败。
-- [ ] 3.2 `effort.ts` 增加 `CHILD_MODELS`（只含模型）并由起点规则计算 effort；`subagent-tool.ts` 经 `ctx.agents.get(header.parentSession)` 上溯到根会话、按根会话 id 读 `RoutingState`，非 AUTO 返回 `{routed: false, reason: 'manual'}`；任务文本先 `redact`。工具注册改为能拿到 `agents` 与状态。使 3.1 通过。
-- [ ] 3.3 写失败测试 `content.test.ts › skill_contains_eight_rules`；改 `skills/subagent-model-routing/SKILL.md` 增加第 8 条（`routed: false` 时按官方默认委派、不询问）。使其通过。
-- [ ] 3.4 写失败测试 `host.integration.test.ts › main_decision_toast`、`subagent_decision_toast`（effort 新值；子会话提示只在调用会话为 AUTO 时出现）与 `client.test.ts › panel_shows_latest_decision`（complex → high）。按需改实现使其通过。
-- [ ] 3.5 重构；全套保持绿。
+- [x] 3.1 写失败测试 `subagent-tool.test.ts › tool_returns_table_entry`（8 组枚举）、`child_model_not_capped_by_caller`、`manual_root_skips_jev`（MANUAL、Jev 停用、父会话不在 live 注册表三种，假 Jev 0 次请求）、`nested_child_follows_root_mode`、`tool_failure_reports_without_state_change`（AUTO 下 402）。确认失败。
+- [x] 3.2 `effort.ts` 增加 `CHILD_MODELS`（只含模型）并由起点规则计算 effort；`subagent-tool.ts` 经 `ctx.agents.get(header.parentSession)` 上溯到根会话、按根会话 id 读 `RoutingState`，非 AUTO 返回 `{routed: false, reason: 'manual'}`；任务文本先 `redact`。工具注册改为能拿到 `agents` 与状态。使 3.1 通过。
+- [x] 3.3 写失败测试 `content.test.ts › skill_contains_eight_rules`；改 `skills/subagent-model-routing/SKILL.md` 增加第 8 条（`routed: false` 时按官方默认委派、不询问）。使其通过。
+- [x] 3.4 写失败测试 `host.integration.test.ts › main_decision_toast`、`subagent_decision_toast`（effort 新值；子会话提示只在调用会话为 AUTO 时出现）与 `client.test.ts › panel_shows_latest_decision`（complex → high）。按需改实现使其通过。
+- [x] 3.5 重构；全套保持绿。
 
 ## 4. 判档记录与标注端点
 
@@ -64,3 +64,4 @@
 ## 实施记录
 
 - 第 1–2 组（2026-10-22）：`rubric.json` 以 `import … with { type: 'json' }` 读入，tsc 开 `resolveJsonModule` 后 `lib/rubric.json` 随构建输出（选 tsc 方案）。本回合输入在 `input.ts` 中先 `redact` 再截 8000（新增 `input.test.ts › redacts_before_bounding`，先观察到失败）。`JevClient.judge(state, signal)` 改为接收组装好的 state。沿用测试中 14 条因新常量（complex：xhigh → high）失败，观察到的失败全部是 effort 值 `xhigh`/`high` 之差，按新映射改断言；`client.test.ts › panel_state_and_history_bound` 改用 `escalated` 以继续断言 `xhigh` 的显示。`CHILD_TABLE` 留到第 3 组替换。
+- 第 3 组（2026-10-22）：`CHILD_TABLE` 换为 `CHILD_MODELS` + `targetEffort`；`routeSubagentTool(jev, {agents, state, judged})` 沿 `header.parentSession` 经 `ctx.agents.get` 上溯（深度上限 32，任一环缺失视为 MANUAL）。`effort.test.ts › child_table_matches_design_and_family` 随常量替换为 `child_models_match_design_and_family`；`host.integration.test.ts › main_and_tool_share_questions` 与 `subagent_decision_toast` 因“MANUAL 不判档”改为先切 AUTO 并传 `agent`（观察到的失败：`judged is not a function`/工具返回 `routed: false`，以及 complex 的 effort `xhigh` → `high`）。

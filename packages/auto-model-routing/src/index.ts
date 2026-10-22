@@ -33,7 +33,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const toastOn = (): boolean => {
     try { return (JSON.parse(readFileSync(configFile, 'utf8')) as { decisionToast?: unknown })?.decisionToast !== false } catch { return true }
   }
-  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, (sessionId, value) => router.judged(sessionId, value))))
+  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, judged: (sessionId, value) => router.judged(sessionId, value) })))
   // Agent is the WeakMap identity; origin stays on the immutable session header.
   const refs = new WeakMap<object, AgentRef>()
   const ref = (agent: { id: string; session: { header: { origin?: string } } }): AgentRef => {

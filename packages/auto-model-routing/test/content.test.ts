@@ -16,8 +16,8 @@ it('no_local_classifier_or_other_egress', () => {
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
 })
-it('skill_contains_seven_rules',()=>{
+it('skill_contains_eight_rules',()=>{
  const text=skill()
- for(const rule of ['route_subagent','reasoning_effort','[model·effort]','独立','claude/codex','暂停委派并询问用户','新建','子会话 Jev 选模未启用']) expect(text,rule).toContain(rule)
+ for(const rule of ['route_subagent','reasoning_effort','[model·effort]','独立','claude/codex','暂停委派并询问用户','新建','子会话 Jev 选模未启用','routed: false','按官方默认委派']) expect(text,rule).toContain(rule)
  expect(text).not.toMatch(/claude-haiku-5-5|claude-fable-5-1|gpt-6-luna|gpt-6-astra|claude-opus-5-5|gpt-6\.1-sol|claude-sonnet-5-5/)
 })

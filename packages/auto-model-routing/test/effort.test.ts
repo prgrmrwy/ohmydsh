@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { CHILD_TABLE, mapEffort, tiers } from '../src/effort.js'
+import { CHILD_MODELS, mapEffort, tiers } from '../src/effort.js'
 
 const all = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 const row = (model: string, supported: readonly string[] = all) => tiers.map(t => mapEffort(model, t, supported as never))
@@ -21,15 +21,11 @@ it('clamps_unsupported_effort', () => {
  expect(mapEffort('other', 'standard', [])).toBeUndefined()
  expect(mapEffort('other', 'escalated', ['max'])).toBeUndefined()
 })
-it('child_table_matches_design_and_family', () => {
- expect(CHILD_TABLE).toEqual({
-  simple: { claude: ['claude-haiku-5-5', 'low'], codex: ['gpt-6-luna', 'medium'] },
-  standard: { claude: ['claude-sonnet-5-5', 'medium'], codex: ['gpt-6.1-sol', 'medium'] },
-  complex: { claude: ['claude-opus-5-5', 'xhigh'], codex: ['gpt-6.1-sol', 'xhigh'] },
-  escalated: { claude: ['claude-fable-5-1', 'high'], codex: ['gpt-6-astra', 'medium'] },
+it('child_models_match_design_and_family', () => {
+ expect(CHILD_MODELS).toEqual({
+  claude: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5'],
+  codex: ['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6.1-sol', 'gpt-6.1-sol'],
  })
- for (const row of Object.values(CHILD_TABLE)) {
-  expect(row.claude[0]).toMatch(/^claude-/)
-  expect(row.codex[0]).not.toMatch(/^claude-/)
- }
+ for (const model of CHILD_MODELS.claude) expect(model).toMatch(/^claude-/)
+ for (const model of CHILD_MODELS.codex) expect(model).not.toMatch(/^claude-/)
 })

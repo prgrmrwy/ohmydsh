@@ -5,15 +5,16 @@ description: 创建或复用子智能体前，调用 route_subagent（Jev 判档
 
 # 子会话模型选择
 
-判档由插件工具 `route_subagent` 完成（与主会话 AUTO 共用同一个 Jev 判断），主 Agent 不自行估档。此 skill 独立于主会话 AUTO/MANUAL。调用该工具会把任务文本发送给 OpenRouter/TypeSafe。
+判档由插件工具 `route_subagent` 完成（与主会话 AUTO 共用同一个 Jev 判断），主 Agent 不自行估档。工具跟随所属主会话的模式：只有主会话为 AUTO 时才判档，并把脱敏后的任务文本发送给 OpenRouter/TypeSafe；主会话为 MANUAL 时不判档、不外发。
 
 ## 创建
 
 1. 尊重用户或 lead 显式指定的模型；有显式指定时不调用工具。
 2. 选择 provider：默认用当前会话的 provider；用户或 lead 要求独立模型体系审查时改用另一个。当前 provider 不是 claude/codex 时，暂停委派并询问用户使用哪一个。
 3. 委派前调用 `route_subagent`，参数为任务描述与 provider。
-4. 成功时，把返回的 `provider`、`model`、`reasoning_effort` **全部显式**传给官方子智能体工具，即使与当前模型相同也要显式写 `reasoning_effort`，避免继承父会话 AUTO 残留的 effort。
-5. 在 `description` 末尾以 `[model·effort]` 标注，例如 `检查鉴权边界 [<model>·<effort>]`。官方白名单校验不能绕过；官方报告模型不可用时如实告知用户，不换模型。
+4. 返回 `routed: false`（主会话为 MANUAL）时：按官方默认委派，**不传** provider/model/reasoning_effort，不询问用户，也不猜档位。
+5. 成功时，把返回的 `provider`、`model`、`reasoning_effort` **全部显式**传给官方子智能体工具，即使与当前模型相同也要显式写 `reasoning_effort`，避免继承父会话 AUTO 残留的 effort。
+6. 在 `description` 末尾以 `[model·effort]` 标注，例如 `检查鉴权边界 [<model>·<effort>]`。官方白名单校验不能绕过；官方报告模型不可用时如实告知用户，不换模型。
 
 ## 失败
 
