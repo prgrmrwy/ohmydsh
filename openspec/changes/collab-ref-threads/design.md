@@ -59,26 +59,32 @@ Validation:
 
 ### D2. Chain length is derived in `reduce`
 
-`SpaceState` gains three derived maps, maintained incrementally while `reduce` folds the log:
-- `chain: Record<seq, {length, thread}>`, with one entry per message and per item creation;
-- `itemSeq: Record<itemId, seq>`;
-- the item's current chain entry, which is stored under its creation seq and updated in place when the item grows.
+`SpaceState` gains two derived maps, maintained incrementally while `reduce` folds the log:
+- `chain: Record<seq, {length, thread}>`: one entry per message and per item creation. An item's entry sits under its creation seq and is updated in place when the item grows.
+- `itemSeq: Record<itemId, seq>`.
+
+The overview exposes these under the names in the spec. `chainLength: {seq: length}` is a projection of `chain`; `itemSeq` is exposed as is. `chain` is internal state. `Member.wakeCount` is still folded for old logs but is labelled legacy: nothing reads it, and the overview omits it.
+
+A message stores the item length **at the time it is created**. A later reference to the same item reads the item's length as it is then. For example, a message that references item R at length 3 has length 4 and keeps it after R grows to 5. A new reference made after that point gets 6.
 
 Item ids are written with own-property semantics (`Object.defineProperty`), the same way `reduce` already handles `items`. A `__proto__` item id therefore still resolves.
 
 **Messages.** Each `message/sent` gets `{length: ref ? chain[ref].length + 1 : 1, thread: ref ? chain[ref].thread : seq}`.
 
-**Items.** `item/created` is computed the same way. An item event that would wake someone adds 1 to the item's entry. "Would wake someone" is defined by the wake table *before* presence and capability filtering, so replay determines it without needing to know who was online. In code it is a `wakeRecipients(state, [event]).size > 0` check, which is a pure function of state. That keeps it reproducible on replay.
+**Items.** `item/created` is computed the same way. An item event that would wake someone adds 1 to the item's entry. "Would wake someone" is defined by the wake table *before* presence and capability filtering, so replay determines it without needing to know who was online. In code it is a `wakeRecipients(pre, [event]).size > 0` check, evaluated against the state **before** the event is applied. This matters for ack: after the agreed snapshot replaces the item, the transition to `agreed` is no longer visible. The check is a pure function of state, so it is reproducible on replay.
 
-**A dangling `ref` on replay.** This can only come from a hand-edited log or a log after salvage. Load fails closed with the existing corrupt-log path, because the reducer throws on a missing `chain[ref]` and the store marks the space unavailable. This is the same treatment as other impossible records. The persisted `ref` is input, while length and thread are derived and never stored in business events.
+**A dangling `ref` on replay.** This can only come from a hand-edited log. Salvage keeps a valid prefix, and references only point backwards, so salvage cannot produce one. Load fails closed: the reducer throws on a missing `chain[ref]`, and `CollabService.open` fails, as it does today for other impossible records. The Host records `COLLAB_HOST_ERROR` and marks the space unavailable. This is not a store-corruption verdict, and the structural salvage tool cannot locate the record. Recovery is a new space. A load test covers this. The persisted `ref` is input, while length and thread are derived and never stored in business events.
 
 `delivery.thread` is recorded on `wake` dispatch intents as an audit of which chain a wake belonged to. It is not used for counting. A sender's chain length is fully derivable from `ref` and item events alone.
 
 ### D3. The limit is checked inside the command transaction
 
-`CollabService.command` already runs `decide` inside the per-space serial queue. After `decide` has produced the business events, a pure helper `chainCheck(state, events)` does the following:
-- computes the post-commit length of every chain those events extend;
-- throws `COLLAB_THREAD_LIMIT` if any length exceeds `CHAIN_LIMIT`.
+`CollabService.command` already runs `decide` inside the per-space serial queue. After `decide` has produced the business events, `chainCheck(state, events)` does the following:
+- folds a tentative record `{kind:'command', seq: lastSeq+1, events}` with the same `reduce` used on replay, so check time and replay cannot diverge;
+- reads the resulting `chain` entries for the chains those events extend;
+- throws `COLLAB_THREAD_LIMIT` if a limited event pushes a length beyond `CHAIN_LIMIT`.
+
+Acceptance tests drive real service commands to the exact boundary, then close and reopen the space and compare the derived maps. A test that folds the same log twice is not enough.
 
 This happens before `decideDispatch` and before `persist`, so nothing is written. Because the check runs inside the serial queue, concurrent commands see each other's commits. Two concurrent extensions of the same item cannot both pass.
 
@@ -141,7 +147,7 @@ The existing size test is extended with a scenario that keeps the budget under 4
 
 ### D8. Convention v3
 
-v3 is v2 plus a "链与往返上限" section:
+v3 is a revised copy of v2. The paragraph in v2's "唤醒与停止" section that describes the member breaker (six wakes, pause, human or internal reset, and "被暂停时停止空转") is replaced. The rest of v2 is kept. A "链与往返上限" section is added:
 - Continue the same task with `ref` pointing at the other side's message or item seq.
 - Start a new task without `ref`.
 - When creating a new request, omit `ref` and name its origin in the body, so the request gets a fresh chain (review S11).
@@ -155,7 +161,14 @@ v1 and v2 stay pinned by sha256 tests. The bundle hook and the artifact tests li
 
 - **Agents omit `ref` to dodge the limit.** Accepted by the user. The convention forbids it, and each new chain is still capped.
 - **Agents forget `ref` on genuine follow-ups.** Chains then fragment. This is safe, because protection only weakens and nothing breaks. The convention and tool description prompt for `ref`, and status exposes request seqs.
-- **A member deliberately exhausts another's item chain** with item revisions. Item revisions by agents already escalate after 3 edits without agreement. Exhausting a chain needs about 10 completed agree cycles involving the other party. A human decision is never blocked.
+- **A member deliberately exhausts another's item chain** with item revisions.
+  - Each waking revision and each completed agreement add one link. An agent can make three waking revisions before its fourth escalates (escalation wakes no agents), and an agreement resets the edit counter.
+  - In agent-only revise/agree cycles, four complete cycles reach length 17, and the fifth cycle hits the limit. Human revisions have no edit cap.
+  - Request progress and human decisions stay exempt, so a request can still be finished and an item can still be decided.
+- **Items that are already exhausted when loaded or created.**
+  - Old items start at 1 but replay their historical waking events, so a long-lived item can load at 20 or more. Its next waking revision or ack is then rejected.
+  - `createItem` with `ref` onto a chain of length 20 succeeds, because creation wakes nobody, and gives a new item of length 21.
+  - Both are accepted consequences of the rule. Convention v3 tells agents to start a new request without `ref`.
 - **Rollback to the previous kernel.** New logs load, because only optional fields were added and there are no new event types. The old per-member counting resumes and may pause busy members. v3 spaces return `COLLAB_CONVENTION_UNKNOWN` for `readConvention('3')` on the old kernel. Both effects are documented.
 - **Replay cost.** `reduce` already deep-clones state per record, so replay is already superlinear. The new maps add one small entry per message or item. Spaces are batch-scoped, so this is acceptable.
 - **Salvage reuses seqs.** A seq an agent remembers may name a different record after a salvage. A dangling `ref` in a salvaged prefix cannot occur, because salvage keeps only a valid prefix and references point backwards.

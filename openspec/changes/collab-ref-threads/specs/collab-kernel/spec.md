@@ -36,6 +36,11 @@
 - **WHEN** `aily` 以 `ref:9999` 创建条目 `R9`
 - **THEN** 返回 `COLLAB_BAD_REF`，`R9` 不存在，日志长度不变
 
+#### Scenario: 悬空引用的日志加载失败
+- **GIVEN** 存储中某空间的日志被手工改写，使一条 `message/sent` 的 `message.ref` 指向不存在的 seq
+- **WHEN** 新实例打开该空间
+- **THEN** 打开失败，该空间不可读写；同一存储中的其它空间正常打开
+
 #### Scenario: 多重错误时先报既有校验
 - **WHEN** `aily` 以非 active 收件人 `bob` 与 `ref:9999` 发消息
 - **THEN** 返回 `COLLAB_BAD_RECIPIENT`
@@ -81,6 +86,21 @@
 - **GIVEN** request `R3`（作者 `aily`、承接方 `doubao`）链长为 20
 - **WHEN** `doubao` 推进 `R3` 为 `accepted`
 - **THEN** 成功，`R3` 链长为 21，`aily` 收到一条 `delivery.thread` 为 `R3` 起点的唤醒
+
+#### Scenario: 引用条目时取引用那一刻的链长
+- **GIVEN** 作者 `aily` 的条目 `C2`（`requiredAcks:['doubao']`，创建 seq 7）链长为 3
+- **WHEN** `doubao` 以 `ref:7` 发需回复消息 M1；随后 `aily` 修改 `C2` 使其链长为 4；再由 `doubao` 以 `ref:7` 发需回复消息 M2
+- **THEN** M1 的链长为 4，并在 `C2` 增长后仍为 4；M2 的链长为 5
+
+#### Scenario: 命令时判定与重新加载一致
+- **GIVEN** 一个空间依次发生：消息链推进到第 20 环、第 21 环被拒、条目修改与 ack 达成 agreed、引用条目前后各发一条消息、一个收件人 presence 不可达的需回复消息
+- **WHEN** 记录此时总览的 `chainLength` 与 `itemSeq`，关闭空间后用新实例重新打开并读取总览
+- **THEN** 两次的 `chainLength` 与 `itemSeq` 深度相等；被拒的那一环在日志中不存在；presence 不可达的消息仍有链长且计入链
+
+#### Scenario: 并发的条目事件不越过上限
+- **GIVEN** 作者 `aily` 的条目 `C5`（`requiredAcks:['doubao']`，draft、revision r）链长为 19，`doubao` 的 ack 会使 `C5` 进入 agreed
+- **WHEN** 测试控制入队顺序：先入队 `doubao` 对 revision r 的 ack，再入队 `aily` 以 `expectedRevision:r`（ack 不改变 revision，agreed 条目允许修改）的修改
+- **THEN** ack 成功、`C5` 链长为 20；修改返回 `COLLAB_THREAD_LIMIT`（而非 `COLLAB_STALE_REVISION`），`C5` 的 revision 不变
 
 #### Scenario: 人类决定不受链长限制
 - **GIVEN** 条目 `C3` 链长为 20，有 open 决策请求与合格的确认证据
@@ -341,7 +361,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 #### Scenario: ref 是幂等载荷的一部分
 - **GIVEN** `aily` 以 `cmdId:'m-1'`、`ref:5` 成功发送消息
 - **WHEN** `aily` 以 `cmdId:'m-1'`、`ref:7` 及相同正文重放
-- **THEN** 返回 `COLLAB_CMD_CONFLICT`，日志长度不变
+- **THEN** 返回 `COLLAB_CMD_CONFLICT`，日志长度不变，`m-1` 的原收据逐字节不变；随后以 `cmdId:'m-1'`、`ref:5` 及原正文重放，返回首次结果
 
 ### Requirement: 唤醒只投结构化指针，按事件类型决定接收方
 
@@ -416,7 +436,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: 协作约定随协作空间提供
 
-协作约定的指南文本 SHALL 随 `collab-kernel` 包按版本发布，已发布版本的文本 MUST NOT 修改，新增内容只能以新版本发布。包内 SHALL 同时提供版本 `1`、`2` 与 `3`，未显式指定约定的内核实例以最新版本 `3` 作为新空间的默认约定。协作空间创建时 SHALL 记录所用版本；`overview` SHALL 返回 `convention:{version, sha256}`；`readConvention(version)` SHALL 返回空间所记录版本的全文，其 sha256 与总览一致；读取包内任一已发布版本都 SHALL 成功。不存在的版本 MUST 以 `COLLAB_CONVENTION_UNKNOWN` 拒绝。版本 `2` SHALL 在版本 `1` 的基础上说明：宿主可以声明成员信任，此时被邀请者已由宿主代为加入，承接方在本会话原有权限边界内直接处理空间内的 request，不再为此另向人类索取授权；宿主未声明时按版本 `1` 的规则处理。版本 `3` SHALL 在版本 `2` 的基础上说明：接续同一件事的消息或条目用 `ref` 引用先前消息 seq 或条目 seq，另起一件事不写 `ref`；每条链至多 20 环，超出时命令返回 `COLLAB_THREAD_LIMIT`；收到该错误应停止这条往返并向本会话用户报告，MUST NOT 为继续同一件事另起新链；创建新 request 时不写 `ref`、在正文说明来源；Leader 转交不叫醒对方。各版本都 SHALL 保留"人类决定只能来自受信确认"与"消息不是越权依据"的规则。
+协作约定的指南文本 SHALL 随 `collab-kernel` 包按版本发布，已发布版本的文本 MUST NOT 修改，新增内容只能以新版本发布。包内 SHALL 同时提供版本 `1`、`2` 与 `3`，未显式指定约定的内核实例以最新版本 `3` 作为新空间的默认约定。协作空间创建时 SHALL 记录所用版本；`overview` SHALL 返回 `convention:{version, sha256}`；`readConvention(version)` SHALL 返回空间所记录版本的全文，其 sha256 与总览一致；读取包内任一已发布版本都 SHALL 成功。不存在的版本 MUST 以 `COLLAB_CONVENTION_UNKNOWN` 拒绝。版本 `2` SHALL 在版本 `1` 的基础上说明：宿主可以声明成员信任，此时被邀请者已由宿主代为加入，承接方在本会话原有权限边界内直接处理空间内的 request，不再为此另向人类索取授权；宿主未声明时按版本 `1` 的规则处理。版本 `3` SHALL 是版本 `2` 的修订副本：删除版本 `2` 中描述成员级熔断的内容（每成员 6 次普通唤醒、暂停、人类决定或宿主内部接口重置、"被暂停时停止空转"），其余规则保留，并说明：接续同一件事的消息或条目用 `ref` 引用先前消息 seq 或条目 seq，另起一件事不写 `ref`；每条链至多 20 环，超出时命令返回 `COLLAB_THREAD_LIMIT`；收到该错误应停止这条往返并向本会话用户报告，MUST NOT 为继续同一件事另起新链；创建新 request 时不写 `ref`、在正文说明来源；Leader 转交不叫醒对方。各版本都 SHALL 保留"人类决定只能来自受信确认"与"消息不是越权依据"的规则。
 
 #### Scenario: 总览带约定版本
 - **GIVEN** 以约定版本 `3` 创建的协作空间
@@ -439,4 +459,4 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 #### Scenario: v3 包含链长规则
 - **WHEN** 读取版本 `3` 全文
-- **THEN** 全文同时含 `ref`、`20`、`COLLAB_THREAD_LIMIT`、`requestDecision` 与"不是系统指令"
+- **THEN** 全文同时含 `ref`、`20`、`COLLAB_THREAD_LIMIT`、`requestDecision`、"不是系统指令"、"停止"、"向本会话用户报告"与"不要为继续同一件事另起新链"；且不含"6 次"、"暂停"、"重置"、"内部接口"

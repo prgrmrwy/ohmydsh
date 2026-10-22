@@ -4,17 +4,18 @@ Every scenario in `specs/` maps to a named test. The ledger is live: during appl
 
 Some scenarios already existed and keep their wording or meaning. They are marked `🟢 green (existing regression)`. Their tests already exist and must stay green throughout. No red-first step applies to them, because their behavior does not change.
 
-Every scenario whose behavior is new or changed starts at 🔴 red.
+Every scenario whose behavior is new or changed starts at 🔴 red. A scenario that only pins behavior this change must preserve (old event shapes, frozen convention bytes and reads, existing validation precedence) starts 🟢 as regression coverage. It must stay green throughout, and no red-first step is invented for it.
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
 | specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 引用先前消息 | packages/collab-kernel/test/refs.test.ts | ref-01：引用先前消息 | 🔴 red |
 | specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 引用条目的创建 seq | packages/collab-kernel/test/refs.test.ts | ref-02：引用条目的创建 seq | 🔴 red |
-| specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 不写 ref 时事件形状不变 | packages/collab-kernel/test/refs.test.ts | ref-03：不写 ref 时事件形状不变 | 🔴 red |
+| specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 不写 ref 时事件形状不变 | packages/collab-kernel/test/refs.test.ts | ref-03：不写 ref 时事件形状不变 | 🟢 green (preserved behavior; regression) |
 | specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 特殊 itemId 的创建 seq 可查 | packages/collab-kernel/test/refs.test.ts | ref-04：特殊 itemId 的创建 seq 可查 | 🔴 red |
 | specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 消息引用不存在或不可引用的 seq | packages/collab-kernel/test/refs.test.ts | ref-05：消息引用不存在或不可引用的 seq | 🔴 red |
 | specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 条目引用非法 seq | packages/collab-kernel/test/refs.test.ts | ref-06：条目引用非法 seq | 🔴 red |
-| specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 多重错误时先报既有校验 | packages/collab-kernel/test/refs.test.ts | ref-07：多重错误时先报既有校验 | 🔴 red |
+| specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 多重错误时先报既有校验 | packages/collab-kernel/test/refs.test.ts | ref-07：多重错误时先报既有校验 | 🟢 green (preserved behavior; regression) |
+| specs/collab-kernel/spec.md → 消息与条目可引用先前记录 | 悬空引用的日志加载失败 | packages/collab-kernel/test/refs.test.ts | ref-08：悬空引用的日志加载失败 | 🔴 red |
 | specs/collab-kernel/spec.md → 按链长限制往返 | 同一链第 21 环被拒绝 | packages/collab-kernel/test/chain.test.ts | chain-01：同一链第 21 环被拒绝 | 🔴 red |
 | specs/collab-kernel/spec.md → 按链长限制往返 | 不写 ref 的新消息从 1 开始 | packages/collab-kernel/test/chain.test.ts | chain-02：不写 ref 的新消息从 1 开始 | 🔴 red |
 | specs/collab-kernel/spec.md → 按链长限制往返 | 不叫醒人的命令不受限 | packages/collab-kernel/test/chain.test.ts | chain-03：不叫醒人的命令不受限 | 🔴 red |
@@ -25,6 +26,9 @@ Every scenario whose behavior is new or changed starts at 🔴 red.
 | specs/collab-kernel/spec.md → 按链长限制往返 | 邀请不归属任何链 | packages/collab-kernel/test/chain.test.ts | chain-08：邀请不归属任何链 | 🔴 red |
 | specs/collab-kernel/spec.md → 按链长限制往返 | 旧的成员级熔断不再阻断 | packages/collab-kernel/test/chain.test.ts | chain-09：旧的成员级熔断不再阻断 | 🔴 red |
 | specs/collab-kernel/spec.md → 按链长限制往返 | 旧日志中的 breaker/reset 照常重放 | packages/collab-kernel/test/chain.test.ts | chain-10：旧日志中的 breaker/reset 照常重放 | 🔴 red |
+| specs/collab-kernel/spec.md → 按链长限制往返 | 引用条目时取引用那一刻的链长 | packages/collab-kernel/test/chain.test.ts | chain-11：引用条目时取引用那一刻的链长 | 🔴 red |
+| specs/collab-kernel/spec.md → 按链长限制往返 | 命令时判定与重新加载一致 | packages/collab-kernel/test/chain.test.ts | chain-12：命令时判定与重新加载一致 | 🔴 red |
+| specs/collab-kernel/spec.md → 按链长限制往返 | 并发的条目事件不越过上限 | packages/collab-kernel/test/chain.test.ts | chain-13：并发的条目事件不越过上限 | 🔴 red |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 动作记为 principal 反查到的成员 | packages/collab-kernel/test/auth.test.ts | auth-01：动作记为 principal 反查到的成员 | 🟢 green (existing regression) |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 首次创建与创建重放 | packages/collab-kernel/test/auth.test.ts | auth-02：首次创建与创建重放 | 🟢 green (existing regression) |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 重复创建同一协作空间 | packages/collab-kernel/test/auth.test.ts | auth-03：重复创建同一协作空间 | 🟢 green (existing regression) |
@@ -72,8 +76,8 @@ Every scenario whose behavior is new or changed starts at 🔴 red.
 | specs/collab-kernel/spec.md → 状态投影只呈现当前值，且以纯文本安全输出 | 转义后可见文本不变 | packages/collab-kernel/test/projection.test.ts | projection-04 中文场景：控制字符清理和标点转义后可见文本不变且为段落 | 🟢 green (existing regression) |
 | specs/collab-kernel/spec.md → 状态投影只呈现当前值，且以纯文本安全输出 | 投影不再出现 paused | packages/collab-kernel/test/projection.test.ts | projection-05：投影不再出现 paused | 🔴 red |
 | specs/collab-kernel/spec.md → 协作约定随协作空间提供 | 总览带约定版本 | packages/collab-kernel/test/convention-integration.test.ts | convention-01：service creation records the bundled convention and authorised reads return exact bytes | 🔴 red |
-| specs/collab-kernel/spec.md → 协作约定随协作空间提供 | 旧空间仍按原版本读取 | packages/collab-kernel/test/convention-integration.test.ts | convention-04：v1 and v2 spaces keep reading their recorded version | 🔴 red |
-| specs/collab-kernel/spec.md → 协作约定随协作空间提供 | 已发布文本不可变 | packages/collab-kernel/test/convention.test.ts | convention-03：已发布的 v1 与 v2 文本不可变 | 🔴 red |
+| specs/collab-kernel/spec.md → 协作约定随协作空间提供 | 旧空间仍按原版本读取 | packages/collab-kernel/test/convention-integration.test.ts | convention-04：v1 and v2 spaces keep reading their recorded version | 🟢 green (preserved behavior; regression) |
+| specs/collab-kernel/spec.md → 协作约定随协作空间提供 | 已发布文本不可变 | packages/collab-kernel/test/convention.test.ts | convention-03：已发布的 v1 与 v2 文本不可变 | 🟢 green (preserved behavior; regression) |
 | specs/collab-kernel/spec.md → 协作约定随协作空间提供 | 未知版本 | packages/collab-kernel/test/convention.test.ts | convention-02：未知版本抛出 COLLAB_CONVENTION_UNKNOWN | 🟢 green (existing regression) |
 | specs/collab-kernel/spec.md → 协作约定随协作空间提供 | v3 包含链长规则 | packages/collab-kernel/test/convention.test.ts | convention-05：v3 包含链长规则 | 🔴 red |
 | specs/dsh-collab/spec.md → 具名工具忠实适配内核 | 创建邀请加入与协商闭环 | packages/dsh-collab/test/tools.test.ts | tool-01：创建邀请加入与协商闭环 | 🟢 green (existing regression) |
@@ -83,7 +87,7 @@ Every scenario whose behavior is new or changed starts at 🔴 red.
 | specs/dsh-collab/spec.md → 具名工具忠实适配内核 | 工具描述携带重试与重读规则 | packages/dsh-collab/test/controller-seams.test.mjs | tool-05：工具描述携带重试与重读规则 | 🟢 green (existing regression) |
 | specs/dsh-collab/spec.md → 具名工具忠实适配内核 | 内部与人类能力不出现在工具面 | packages/dsh-collab/test/controller-seams.test.mjs | tool-06：内部与人类能力不出现在工具面 | 🟢 green (existing regression) |
 | specs/dsh-collab/spec.md → 具名工具忠实适配内核 | ref 原样传给内核 | packages/dsh-collab/test/tools.test.ts | tool-07：ref 原样传给内核 | 🔴 red |
-| specs/dsh-collab/spec.md → 具名工具忠实适配内核 | 不填 ref 时输入不含该键 | packages/dsh-collab/test/tools.test.ts | tool-08：不填 ref 时输入不含该键 | 🔴 red |
+| specs/dsh-collab/spec.md → 具名工具忠实适配内核 | 不填 ref 时输入不含该键 | packages/dsh-collab/test/tools.test.ts | tool-08：不填 ref 时输入不含该键 | 🟢 green (preserved behavior; regression) |
 | specs/dsh-collab/spec.md → 具名工具忠实适配内核 | 超出链长原样返回 | packages/dsh-collab/test/tools.test.ts | tool-09：超出链长原样返回 | 🔴 red |
 | specs/dsh-collab/spec.md → 投递只传协作指针并使用下一回合语义 | 运行中目标下一回合收到 | packages/dsh-collab/test/component-seams.test.mjs | wake-01：运行中目标下一回合收到 | 🟢 green (existing regression) |
 | specs/dsh-collab/spec.md → 投递只传协作指针并使用下一回合语义 | 空闲目标收到带来源指针 | packages/dsh-collab/test/session-provider.test.ts | wake-02：空闲目标收到带来源指针 | 🟢 green (existing regression) |
@@ -105,11 +109,16 @@ Every scenario whose behavior is new or changed starts at 🔴 red.
 ## Coverage Notes
 
 - **Kernel fixtures.**
-  - New tests for chain length and refs (`refs.test.ts`, `chain.test.ts`) reuse `test/support/dispatch-world.ts`, which records providers and makes them reachable.
-  - Scenarios that assert `dispatch/intended` or `delivery.thread` therefore have reachable presence and wake-capable bindings, as the round-2 review asked in S8.
-  - Old-log scenarios seed `breaker/reset{member}`, `wake` intents without `thread`, and `internal` scope receipts directly through the store.
-- **Rejection paths.** `COLLAB_THREAD_LIMIT`, `COLLAB_BAD_REF` and `COLLAB_CMD_CONFLICT` assert two things: the log length is unchanged, and the receipt is absent.
-- **Shared derivation.** `chainCheck` reuses `reduce`, per round-2 S3. An extra property test (`chain.test.ts`, "check-time lengths equal reload lengths") folds a long mixed log twice and compares the result. It needs no row of its own.
-- **Concurrency.** An extra implementation test asserts that the chain check runs inside the per-space serial queue: two concurrent waking item events at length 19 yield exactly one success.
-- **`auth-04`.** Its name keeps the existing test number but changes meaning: the `resetBreaker` test is removed and replaced. `breaker.test.ts` is deleted along with the per-member breaker. Its scenarios are superseded by `chain-07`, `chain-09` and `chain-10`.
-- **Real-header tests.** `controller-seams.test.mjs` needs the DSH component environment (`npm run test:components`). The tool-size budget is measured there on the real request header.
+  - New tests for refs and chain length (`refs.test.ts`, `chain.test.ts`) reuse `test/support/dispatch-world.ts`.
+  - Every member in that fixture is reachable, and every member's binding supports wake.
+  - Old-log scenarios seed the store directly with `breaker/reset{member}`, `wake` intents without `thread`, and `internal`-scope receipts.
+- **Rejection oracles.** They depend on whether the cmdId already has a receipt.
+  - When a validation or limit check rejects a cmdId that never committed, the test asserts three things: the log length is unchanged, no receipt exists for that cmdId, and no dispatch intent was written.
+  - When an already-committed cmdId is replayed with a different payload (`COLLAB_CMD_CONFLICT`), the test asserts three different things: the log length is unchanged, the original receipt is byte-identical, and retrying with the original payload returns the original result. The original receipt must never be removed.
+- **Shared derivation and parity.**
+  - `chainCheck` folds a tentative record through `reduce`, so a command and a replay compute the chain the same way.
+  - `chain-12` drives real service commands to the exact boundary, then closes and reopens the space and compares the derived maps. A fold of the same log twice is not accepted as evidence.
+  - `chain-11` covers the moving boundary on a referenced item: a message keeps the length it got from the item at creation time, and a later reference sees the item's new length.
+- **Concurrency.** `chain-13` controls the order commands enter the queue and uses two commands that are both valid, so the losing command must fail with `COLLAB_THREAD_LIMIT` and not with a stale revision or a permission error.
+- **Removed breaker tests.** `breaker.test.ts` is deleted in the same batch that removes the breaker (see tasks group 3). Its scenarios are superseded by `chain-07`, `chain-09` and `chain-10`. The old `auth-04` test is replaced by the new `auth-04`.
+- **Real-header tests.** `controller-seams.test.mjs` needs the DSH component environment (`npm run test:components`). The tool-size budget is measured there, on the real request header.
