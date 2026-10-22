@@ -10,8 +10,10 @@ import { homedir } from 'node:os'
 import { FileStateStore, RoutingState } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
 import type { Effort } from './effort.js'
-import { endpoint } from './endpoints.js'
-import { JevClient } from './jev.js'
+import { endpoint, labelEndpoint } from './endpoints.js'
+import { JudgementBook } from './judgements.js'
+import { userInput } from './input.js'
+import { JevClient, rubricVersion } from './jev.js'
 import { routeSubagentTool } from './subagent-tool.js'
 import { buildState, previousTurn } from './context.js'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
@@ -27,7 +29,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
   const jev = new JevClient(launchEnvironmentOf(ctx), config.jevBase, config.jevTimeoutMs)
   const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
-  const router = new Router(state)
+  const book = new JudgementBook(resolve(home, 'state/auto-model-routing/judgements.jsonl'))
+  const router = new Router(state, (sessionId, turn, tier, model, effort) => {
+    const line = { sessionId, turn, tier, ...(effort ? { effort } : {}), model, rubricVersion }
+    book.judged(line)
+    // Recording is best effort: a failed append never touches the request or the mode.
+    try { book.append(line) }
+    catch (error) { ctx.logger.warn(`auto-model-routing: could not record the judgement: ${String(error)}`) }
+  })
   const configFile = resolve(home, 'plugins/dsh-auto-model-routing/config.json')
   // Read on every status request so the switch applies without a restart; on unless explicitly `false`.
   const toastOn = (): boolean => {
@@ -47,6 +56,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     // Judge only steps that actually enter, using the messages that enter (a rejected step sends nothing).
     if (payload.step !== 1 || decision.kind !== 'enter') return decision
     const agent = ref(payload.agent)
+    if (agent.origin !== 'subagent' && userInput(decision.messages).userTurn) book.userTurn(agent.id, payload.turn)
     const job = router.begin(agent, payload.turn, decision.messages)
     if (!job) return decision
     // History before this turn's messages enter: the previous user message and assistant reply.
@@ -56,6 +66,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     else if (result.kind === 'failed') router.fail(agent, payload.turn, result.category)
     else router.cancel(agent, payload.turn)
     return decision
+  })
+  // Reply → user turn, for the reply-bar tier button (memory only; empty after a restart).
+  ctx.on('session/event', (session, event) => {
+    if (event.type !== 'assistant/message') return
+    const data = event.data as { turn: number; message: { id: string } }
+    book.assistant(session.id, data.message.id, data.turn)
   })
   // Official selection writer, set while the session controller is available.
   let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
@@ -87,7 +103,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['connection', 'sessionController'], child => {
-    for (const operation of ['state', 'setMode'] as const) {
+    for (const operation of ['state', 'setMode', 'label'] as const) {
       child.effect(() => child.connection.fetch.register({
         path: `/api/auto-model-routing.${operation}`,
         methods: ['POST'], requestBody: 'buffered',
@@ -97,10 +113,12 @@ export function apply(ctx: Context, config: Config = {}): void {
           const wire = body as { type?: unknown; rpcId?: unknown; method?: unknown; payload?: unknown } | null
           const enveloped = wire?.type === 'client-request'
           if (enveloped && (typeof wire.rpcId !== 'string' || wire.method !== `auto-model-routing.${operation}`)) return Response.json({ error: 'invalid RPC envelope' }, { status: 400 })
-          const response = await endpoint(operation, enveloped ? wire.payload : body, async id => {
+          const resolveAgent = async (id: string) => {
             const result = await child.sessionController.resolveAgent(id as never)
             return 'agent' in result ? ref(result.agent) : undefined
-          }, router, state, toastOn)
+          }
+          const payload = enveloped ? wire.payload : body
+          const response = operation === 'label' ? await labelEndpoint(payload, resolveAgent, book) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
           if (!enveloped) return response
           const value = await response.json()
           return Response.json({ type: 'server-response', rpcId: wire.rpcId, result: response.ok ? { ok: true, value } : { ok: false, error: { code: 'invalid-request', message: value.error, details: {} } } })

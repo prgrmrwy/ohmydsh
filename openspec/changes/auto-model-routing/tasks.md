@@ -26,11 +26,11 @@
 
 ## 4. 判档记录与标注端点
 
-- [ ] 4.1 写失败测试 `host.integration.test.ts › judgement_line_appended_without_text`、`no_judgement_line_for_failure_cancel_child_continued`、`judgement_write_failure_is_harmless`、`label_query_and_append_by_message`（含 MANUAL 回合后的 continued 消息返回 `{}`）、`label_append_failure_returns_5xx`；`endpoints.test.ts › label_rejects_invalid_and_ignores_unknown`。确认失败。
-- [ ] 4.2 新建 `src/judgements.ts`：追加写 `judgements.jsonl`（判档行、标注行），读取时按 `(sessionId, turn)` 折叠并跳过坏行；写失败只记日志。在 `Router.judged()` 的主会话调用点写判档行（无 effort 时也写，省略 `effort`）。
-- [ ] 4.3 `index.ts` 订阅 `session/event`，维护每会话 `messageId → turn`，continued 回合的消息记到最近一个有判档的用户回合；注册 `auto-model-routing.label` 端点（同现有 envelope 与授权）。使 4.1 通过。
-- [ ] 4.4 写失败测试 `label-report.test.ts › report_folds_by_version_and_skips_bad_lines`；实现零依赖 `scripts/label-report.mjs`。使其通过。
-- [ ] 4.5 重构；全套保持绿。
+- [x] 4.1 写失败测试 `host.integration.test.ts › judgement_line_appended_without_text`、`no_judgement_line_for_failure_cancel_child_continued`、`judgement_write_failure_is_harmless`、`label_query_and_append_by_message`（含 MANUAL 回合后的 continued 消息返回 `{}`）、`label_append_failure_returns_5xx`；`endpoints.test.ts › label_rejects_invalid_and_ignores_unknown`。确认失败。
+- [x] 4.2 新建 `src/judgements.ts`：追加写 `judgements.jsonl`（判档行、标注行），读取时按 `(sessionId, turn)` 折叠并跳过坏行；写失败只记日志。在 `Router.judged()` 的主会话调用点写判档行（无 effort 时也写，省略 `effort`）。
+- [x] 4.3 `index.ts` 订阅 `session/event`，维护每会话 `messageId → turn`，continued 回合的消息记到最近一个有判档的用户回合；注册 `auto-model-routing.label` 端点（同现有 envelope 与授权）。使 4.1 通过。
+- [x] 4.4 写失败测试 `label-report.test.ts › report_folds_by_version_and_skips_bad_lines`；实现零依赖 `scripts/label-report.mjs`。使其通过。
+- [x] 4.5 重构；全套保持绿。
 
 ## 5. 回复操作栏档位按钮
 
@@ -65,3 +65,4 @@
 
 - 第 1–2 组（2026-10-22）：`rubric.json` 以 `import … with { type: 'json' }` 读入，tsc 开 `resolveJsonModule` 后 `lib/rubric.json` 随构建输出（选 tsc 方案）。本回合输入在 `input.ts` 中先 `redact` 再截 8000（新增 `input.test.ts › redacts_before_bounding`，先观察到失败）。`JevClient.judge(state, signal)` 改为接收组装好的 state。沿用测试中 14 条因新常量（complex：xhigh → high）失败，观察到的失败全部是 effort 值 `xhigh`/`high` 之差，按新映射改断言；`client.test.ts › panel_state_and_history_bound` 改用 `escalated` 以继续断言 `xhigh` 的显示。`CHILD_TABLE` 留到第 3 组替换。
 - 第 3 组（2026-10-22）：`CHILD_TABLE` 换为 `CHILD_MODELS` + `targetEffort`；`routeSubagentTool(jev, {agents, state, judged})` 沿 `header.parentSession` 经 `ctx.agents.get` 上溯（深度上限 32，任一环缺失视为 MANUAL）。`effort.test.ts › child_table_matches_design_and_family` 随常量替换为 `child_models_match_design_and_family`；`host.integration.test.ts › main_and_tool_share_questions` 与 `subagent_decision_toast` 因“MANUAL 不判档”改为先切 AUTO 并传 `agent`（观察到的失败：`judged is not a function`/工具返回 `routed: false`，以及 complex 的 effort `xhigh` → `high`）。
+- 第 4 组（2026-10-22）：`JudgementBook`（`src/judgements.ts`）同时持有追加写与内存映射；`Router` 新增 `onJudged` 回调，在成功判档后首个请求触发（无 effort 也触发），index 中写判档行、失败只记 warn。用户回合由 pre-step 中 `userInput(...).userTurn` 记录（不论是否 AUTO），`session/event` 的 `assistant/message` 按 `data.turn ≥ 最近用户回合` 映射到该回合、仅当其有判档。`labelEndpoint` 与现有端点共用注册循环与 envelope。观察到的失败：host 集成测试等待第三个路由超时；`labelEndpoint is not a function`；`label-report.mjs` 不存在。

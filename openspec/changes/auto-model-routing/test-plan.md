@@ -60,13 +60,13 @@
 | specs/auto-model-routing/spec.md → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | set_mode_targets_one_session | 🟢 green |
 | specs/auto-model-routing/spec.md → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🟢 green |
 | specs/auto-model-routing/spec.md → 子会话派发时机写入环境级指令 | 环境级指令含派发规则且不含模型名 | tests/agent-instructions-dispatch.test.mjs | dispatch_rules_present_without_model_names | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 成功判档追加一行不含文本的记录 | test/host.integration.test.ts | judgement_line_appended_without_text | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 失败、取消、子会话判档与非用户回合不写判档行 | test/host.integration.test.ts | no_judgement_line_for_failure_cancel_child_continued | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 写入失败不影响请求 | test/host.integration.test.ts | judgement_write_failure_is_harmless | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 按消息查询与标注 | test/host.integration.test.ts | label_query_and_append_by_message | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 标注追加失败返回错误 | test/host.integration.test.ts | label_append_failure_returns_5xx | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 无效请求被拒，未知消息不写入 | test/endpoints.test.ts | label_rejects_invalid_and_ignores_unknown | 🔴 red |
-| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 统计脚本按规则版本汇总并跳过损坏行 | test/label-report.test.ts | report_folds_by_version_and_skips_bad_lines | 🔴 red |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 成功判档追加一行不含文本的记录 | test/host.integration.test.ts | judgement_line_appended_without_text | 🟢 green |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 失败、取消、子会话判档与非用户回合不写判档行 | test/host.integration.test.ts | no_judgement_line_for_failure_cancel_child_continued | 🟢 green |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 写入失败不影响请求 | test/host.integration.test.ts | judgement_write_failure_is_harmless | 🟢 green |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 按消息查询与标注 | test/host.integration.test.ts | label_query_and_append_by_message | 🟢 green |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 标注追加失败返回错误 | test/host.integration.test.ts | label_append_failure_returns_5xx | 🟢 green |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 无效请求被拒，未知消息不写入 | test/endpoints.test.ts | label_rejects_invalid_and_ignores_unknown | 🟢 green |
+| specs/auto-model-routing/spec.md → 判档记录与人工标注 | 统计脚本按规则版本汇总并跳过损坏行 | test/label-report.test.ts | report_folds_by_version_and_skips_bad_lines | 🟢 green |
 | specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | 有判档才显示按钮 | test/label-button.dom.test.ts | button_only_when_judged | 🔴 red |
 | specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | Tooltip 与菜单内容 | test/label-button.dom.test.ts | tooltip_and_menu_content | 🔴 red |
 | specs/auto-model-routing/spec.md → 回复操作栏档位按钮 | 选择档位只调用插件标注端点，失败不改显示 | test/label-button.dom.test.ts | selection_calls_label_only | 🔴 red |

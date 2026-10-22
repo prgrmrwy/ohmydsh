@@ -53,7 +53,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
   selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
- await expect.poll(() => routes.size).toBe(2)
+ await expect.poll(() => routes.size).toBe(3)
  const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
  const handle = await ctx.agents.create({
   sessionId: SessionId(`host-${Math.random()}`), agentOptions: { provider: 'test', model: 'claude-opus-5-5' },
@@ -67,9 +67,9 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
  cleanup = async () => { await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
  // Simulate a Host restart for this plugin: all its memory is dropped, only the state directory remains.
- const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(2) }
+ const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(3) }
  const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
- return { ctx, jev, calls, agent, selection, invoke, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
+ return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
 it('host_routes_and_rpc_envelope', async () => {
@@ -306,4 +306,97 @@ it('previous_tier_survives_restart', async () => {
  const disk = readdirSync(dir).map(f => readFileSync(join(dir, f), 'utf8')).join('\n')
  expect(disk).toContain('"previous":"complex"')
  expect(disk).not.toContain('排查')
+})
+
+const judgementLines = (home: string) => {
+ try { return readFileSync(join(home, 'state/auto-model-routing/judgements.jsonl'), 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)) } catch { return [] }
+}
+const lastAssistantId = (h: { agent: { session: { deriveMessages(): readonly { role: string; id: string }[] } } }) => h.agent.session.deriveMessages().findLast(m => m.role === 'assistant')!.id
+
+it('judgement_line_appended_without_text', async () => {
+ const h = await harness(tier('complex'), { answer: () => '回复' })
+ await h.setMode('AUTO')
+ await h.run('修复 SECRET-TEXT 相关问题')
+ await h.run('排查多个模块')
+ const lines = judgementLines(h.home)
+ expect(lines).toHaveLength(2)
+ const { rubricVersion } = await import('../src/jev.js')
+ expect(lines[0]).toEqual({ sessionId: h.agent.id, turn: 1, tier: 'complex', effort: 'high', model: 'claude-opus-5-5', rubricVersion })
+ expect(lines[1]).toMatchObject({ turn: 2 })
+ expect(readFileSync(join(h.home, 'state/auto-model-routing/judgements.jsonl'), 'utf8')).not.toContain('SECRET-TEXT')
+})
+
+it('no_judgement_line_for_failure_cancel_child_continued', async () => {
+ const h = await harness(json(402, {}))
+ await h.setMode('AUTO')
+ await h.run('任务')
+ // Cancel.
+ h.jev.set(() => { /* hold */ })
+ await h.setMode('AUTO')
+ const running = h.run('排查多个模块')
+ await expect.poll(() => h.jev.bodies.length).toBe(2)
+ h.agent.cancel({ kind: 'user' })
+ await running
+ // Discarded: mode switched while judging.
+ let release!: () => void
+ const gate = new Promise<void>(done => { release = done })
+ h.jev.set((req, res, body) => { void gate.then(() => tier('complex')(req, res, body)) })
+ const discarded = h.run('再试')
+ await expect.poll(() => h.jev.bodies.length).toBe(3)
+ await h.setMode('MANUAL'); release(); await discarded
+ // A successful route_subagent does not write a judgement line.
+ h.jev.set(tier('complex'))
+ await h.setMode('AUTO')
+ await h.ctx.tools.get('route_subagent')!.execute({ task: 'x', provider: 'claude' }, { signal: new AbortController().signal, agent: h.agent } as never)
+ expect(judgementLines(h.home)).toEqual([])
+ // A continued (non-user) turn after a judged turn adds nothing beyond the judged turn's line.
+ await h.run('排查多个模块')
+ h.agent.followup(createUserMessage({ content: [{ type: 'text', text: '子会话完成' }], source: { kind: 'plugin' } as never })); await h.agent.whenIdle()
+ expect(judgementLines(h.home)).toHaveLength(1)
+})
+
+it('judgement_write_failure_is_harmless', async () => {
+ const h = await harness(tier('standard'))
+ // A directory where the file should be makes every append fail.
+ mkdirSync(join(h.home, 'state/auto-model-routing/judgements.jsonl'), { recursive: true })
+ await h.setMode('AUTO')
+ await h.run('修复分页')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('medium')
+ const state = await h.invoke('state', { sessionId: h.agent.id })
+ expect(state.mode).toBe('AUTO')
+ expect(state.disabled).toBeUndefined()
+})
+
+it('label_query_and_append_by_message', async () => {
+ const h = await harness(tier('complex'), { answer: () => '回复' })
+ const label = (messageId: unknown, value?: string) => h.invoke('label', { sessionId: h.agent.id, messageId, ...(value ? { label: value } : {}) })
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ const m1 = lastAssistantId(h)
+ // A continued turn's reply maps to the latest user turn.
+ h.agent.followup(createUserMessage({ content: [{ type: 'text', text: '子会话完成' }], source: { kind: 'plugin' } as never })); await h.agent.whenIdle()
+ const m3 = lastAssistantId(h)
+ expect(m3).not.toBe(m1)
+ expect(await label(m1)).toEqual({ tier: 'complex', effort: 'high' })
+ expect(await label(m3, 'standard')).toEqual({ tier: 'complex', effort: 'high', label: 'standard' })
+ expect(judgementLines(h.home).at(-1)).toEqual({ sessionId: h.agent.id, turn: 1, label: 'standard' })
+ expect(await label(m1)).toEqual({ tier: 'complex', effort: 'high', label: 'standard' })
+ // A MANUAL user turn has no judgement: its continued turn's reply maps to nothing.
+ await h.setMode('MANUAL')
+ await h.run('手动回合')
+ h.agent.followup(createUserMessage({ content: [{ type: 'text', text: '子会话完成' }], source: { kind: 'plugin' } as never })); await h.agent.whenIdle()
+ expect(await label(lastAssistantId(h))).toEqual({})
+})
+
+it('label_append_failure_returns_5xx', async () => {
+ const h = await harness(tier('complex'), { answer: () => '回复' })
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ const file = join(h.home, 'state/auto-model-routing/judgements.jsonl')
+ const { rmSync } = await import('node:fs')
+ rmSync(file); mkdirSync(file)
+ const response = await h.routes.get('/api/auto-model-routing.label')!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify({ sessionId: h.agent.id, messageId: lastAssistantId(h), label: 'simple' }) }))
+ expect(response.status).toBeGreaterThanOrEqual(500)
+ expect(await response.json()).not.toHaveProperty('label')
+ expect((await h.invoke('state', { sessionId: h.agent.id })).mode).toBe('AUTO')
 })

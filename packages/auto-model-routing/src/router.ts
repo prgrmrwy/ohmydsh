@@ -28,7 +28,8 @@ export class Router {
   private readonly runtimes = new WeakMap<AgentRef, Runtime>()
   private readonly judgements = new Map<string, Judgement>()
   private sequence = 0
-  constructor(private readonly state: RoutingState) {}
+  /** `onJudged` fires once per successful main-session judgement, at the turn's first request (with or without an effort). */
+  constructor(private readonly state: RoutingState, private readonly onJudged: (sessionId: string, turn: number, tier: Tier, model: string, effort?: Effort) => void = () => {}) {}
 
   /** Remember the latest decision; the session id comes from the caller's own agent. */
   judged(sessionId: string, value: Omit<Judgement, 'id'>): void {
@@ -118,8 +119,12 @@ export class Router {
       const reason = effort === undefined ? 'no-effort-support' : runtime.reason
       runtime.decision = { ...(effort ? { effort } : {}), reason }
       this.record(runtime, runtime.decision)
-      // Only a fresh Jev judgement is announced; continued turns and remaps of it are not.
-      if (effort && runtime.measure) { this.judged(agent.id, { source: 'main', tier: runtime.tier, effort, ...runtime.measure }); delete runtime.measure }
+      // Only a fresh Jev judgement is announced and logged; continued turns and remaps of it are not.
+      if (runtime.measure) {
+        if (effort) this.judged(agent.id, { source: 'main', tier: runtime.tier, effort, ...runtime.measure })
+        this.onJudged(agent.id, turn, runtime.tier, config.model, effort)
+        delete runtime.measure
+      }
     }
     return runtime.decision.effort ? withEffort(config, runtime.decision.effort) : config
   }

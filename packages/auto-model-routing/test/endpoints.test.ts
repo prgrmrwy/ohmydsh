@@ -30,3 +30,16 @@ it('set_mode_targets_one_session',async()=>{
  expect((await (await endpoint('state',{sessionId:'S1'},resolve,router,state)).json()).disabled).toBeUndefined()
  expect(state.read('S2')).toEqual(before)
 })
+it('label_rejects_invalid_and_ignores_unknown',async()=>{
+ const {labelEndpoint}=await import('../src/endpoints.js')
+ const {resolve}=fixture()
+ const writes:unknown[]=[]
+ const book={lookup:(sessionId:string,messageId:string)=>sessionId==='S1'&&messageId==='m2'?{turn:3,tier:'complex' as const,effort:'high' as const}:undefined,append:(line:unknown)=>{writes.push(line)},label:()=>undefined}
+ for(const body of [{sessionId:'S1',messageId:'m2',label:'huge'},{sessionId:'child',messageId:'m2'},{sessionId:'S1',messageId:42},{messageId:'m2'},null]){
+  const response=await labelEndpoint(body,resolve,book)
+  expect(response.status,JSON.stringify(body)).toBeGreaterThanOrEqual(400);expect(response.status).toBeLessThan(500)
+ }
+ const unknown=await labelEndpoint({sessionId:'S1',messageId:'m-unknown',label:'simple'},resolve,book)
+ expect(unknown.status).toBe(200);expect(await unknown.json()).toEqual({})
+ expect(writes).toEqual([])
+})
