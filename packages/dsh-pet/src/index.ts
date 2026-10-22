@@ -103,6 +103,7 @@ import {
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
 import { createRefusedReplyTracker } from './host/locus/refused-reply.js'
+import { resumeModelFor } from './host/inquiry/resume-model.js'
 import type { InquiryExecutionProof, InquiryAgent as InquiryAgentAdapter } from './host/inquiry/agent-adapter.js'
 import {
   proveInterruptedStartupDelivery,
@@ -661,11 +662,10 @@ async function initialize(
   const inquiryAgentResolver = createInquiryAgentResolver({
     getLive: getInquiryLiveAgent,
     resumeMain: async (sessionId, _signal) => {
-      const current = selection()
-      const presetId = await persistedPresetFor(sessionId)
+      const { presetId, model } = await persistedCompositionFor(sessionId)
       await ctx.agents.resume({
         resumeSessionId: SessionId(sessionId),
-        agentOptions: { provider: current.providerId, model: current.modelId },
+        agentOptions: model,
         setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, presetId) },
       })
     },
@@ -1744,7 +1744,13 @@ async function initialize(
    * mirrors the native session controller's resume path instead of guessing
    * from Pet's current setting.
    */
-  const persistedPresetFor = async (sessionId: string): Promise<string> => {
+  const persistedPresetFor = async (sessionId: string): Promise<string> =>
+    (await persistedCompositionFor(sessionId)).presetId
+
+  /** Persisted preset plus the model the session should keep running on. */
+  const persistedCompositionFor = async (
+    sessionId: string,
+  ): Promise<{ readonly presetId: string; readonly model: { readonly provider: string; readonly model: string } }> => {
     const query = ctx.get('sessionQuery') as
       | {
           observeSession(
@@ -1752,7 +1758,7 @@ async function initialize(
             options: { projectionMode: 'all' },
           ): Promise<{
             header: { agentPreset?: unknown }
-            projections?: { values?: { agentPreset?: unknown } }
+            projections?: { values?: { agentPreset?: unknown; modelSelection?: unknown } }
             [Symbol.dispose]?: () => void
           }>
         }
@@ -1774,7 +1780,11 @@ async function initialize(
           `Pet executor session ${sessionId} has no persisted Agent preset`,
         )
       }
-      return stored
+      const current = selection()
+      return {
+        presetId: stored,
+        model: resumeModelFor(observation.projections?.values?.modelSelection, { provider: current.providerId, model: current.modelId }),
+      }
     } finally {
       observation[Symbol.dispose]?.()
     }
@@ -3638,11 +3648,10 @@ async function initialize(
       }
     },
     resume: async sessionId => {
-      const current = selection()
-      const presetId = await persistedPresetFor(sessionId)
+      const { presetId, model } = await persistedCompositionFor(sessionId)
       await ctx.agents.resume({
         resumeSessionId: SessionId(sessionId),
-        agentOptions: { provider: current.providerId, model: current.modelId },
+        agentOptions: model,
         setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, presetId) },
       })
     },

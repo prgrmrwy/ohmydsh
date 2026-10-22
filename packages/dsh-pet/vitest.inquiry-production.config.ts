@@ -10,7 +10,7 @@ const req = createRequire(resolve(graph, 'package.json'))
 const modules = [
   'cordis', 'dsh-agent', 'dsh-session', 'dsh-llm', 'dsh-tools', 'dsh-system-prompt',
   'dsh-session-projection', 'dsh-scope', 'dsh-session-persistence', 'dsh-agent-loop',
-  'dsh-storage-domain',
+  'dsh-storage-domain', 'dsh-session-persistence-jsonl',
 ]
 const aliases = modules.map((name) => ({
   find: new RegExp(`^@deepseek-ai/${name}$`),

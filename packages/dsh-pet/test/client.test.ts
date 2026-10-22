@@ -1870,20 +1870,35 @@ describe('the hover disc survives the capability fetch', () => {
 })
 
 describe('resume carries the model route', () => {
-  it('passes the flat provider/model pair, matching creation', async () => {
+  it('passes a flat provider/model pair on every resume path', async () => {
     const { readFile } = await import('node:fs/promises')
     const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
-    const from = entry.indexOf('ctx.agents.resume(')
-    const end = entry.indexOf('} as never)', from)
-    const block = entry.slice(from, end)
-
+    const blocks: string[] = []
+    for (let from = entry.indexOf('ctx.agents.resume('); from !== -1; from = entry.indexOf('ctx.agents.resume(', from + 1)) {
+      blocks.push(entry.slice(from, entry.indexOf('setup:', from)))
+    }
+    expect(blocks.length).toBeGreaterThanOrEqual(3)
     // Without a model route the persona template's {{model}} has no value and
     // assembly fails before the agent ever runs.
-    expect(block).toContain('provider: current.providerId')
-    expect(block).toContain('model: current.modelId')
+    for (const block of blocks) expect(block).toMatch(/agentOptions: (model|\{\s*provider: current\.providerId)/)
     // The preset is resolved from the session's persisted projection and
     // mounted through setup, never repeated as a current-setting option.
-    expect(block).not.toContain('agentPreset: current.agentPreset')
+    for (const block of blocks) expect(block).not.toContain('agentPreset: current.agentPreset')
+  })
+
+  it('cold inquiry and todo resume keep the session model instead of the Host default', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
+    // agents.resume routes by agentOptions, so passing the current Host default
+    // silently switched a resumed session to the user's latest model pick.
+    for (const marker of ['resumeMain: async (sessionId', 'resume: async sessionId =>']) {
+      const from = entry.indexOf(marker)
+      expect(from).toBeGreaterThan(-1)
+      const block = entry.slice(from, entry.indexOf('setup:', from))
+      expect(block).toContain('persistedCompositionFor(sessionId)')
+      expect(block).toContain('agentOptions: model')
+      expect(block).not.toContain('selection()')
+    }
   })
 })
 

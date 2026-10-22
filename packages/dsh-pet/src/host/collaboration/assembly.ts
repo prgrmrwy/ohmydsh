@@ -2,7 +2,7 @@
  * Production assembly of the scoped collaboration + inquiry surface.
  *
  * The individual slices (caller resolver, public-fact store, roster, ledger,
- * ask/answer, scheduler, capability detector) already exist and are tested in
+ * ask/answer, capability detector) already exist and are tested in
  * isolation. This module is the ONE place that decides, for a real Host,
  * whether they may be published at all and on WHICH agent scope — nothing else
  * constructs them.
@@ -56,7 +56,6 @@ import {
   type InquiryReconcileOutbox,
   type InquiryReconcileReport,
 } from '../inquiry/reconcile.js'
-import { InquiryScheduler } from '../inquiry/scheduler.js'
 import type { InquiryAnswerRecord } from '../inquiry/answer.js'
 import { registerInquiryAnswerTool, registerInquiryAskTool } from '../inquiry/tools.js'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
@@ -174,8 +173,6 @@ export interface CollaborationAssembly {
    * roster remain installed, while asks fail before writing any inquiry row.
    */
   readonly inquiryDispatch: IsolatedQueuedTurnClaimSupport
-  /** The scheduler built with the REAL verdict above; it never re-probes. */
-  readonly scheduler: InquiryScheduler
   /**
    * Cheap synchronous durable hint: is this session a main session or a current
    * Locus child of one? Used only to decide whether to install; the tool bodies
@@ -248,10 +245,6 @@ export function composeCollaborationSurface(
     ...(seams.probeIsolatedClaim === undefined
       ? {}
       : { probeIsolatedClaim: seams.probeIsolatedClaim }),
-  })
-  const scheduler = new InquiryScheduler({
-    clock: { now },
-    isolatedQueuedTurnClaim: inquiryDispatch,
   })
 
   /**
@@ -400,5 +393,5 @@ export function composeCollaborationSurface(
     installed.add(scope)
   }
 
-  return { inquiryDispatch, scheduler, eligible, reconcileInquiries, isInstalled, install }
+  return { inquiryDispatch, eligible, reconcileInquiries, isInstalled, install }
 }

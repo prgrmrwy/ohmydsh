@@ -533,7 +533,6 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
     // not a silent "available": a claim that sweeps pending GUI input would
     // destroy user input that can never be re-delivered.
     expect(assembly.inquiryDispatch).toEqual({ available: false, reason: 'agent-loop-missing' })
-    expect(assembly.scheduler.isolatedQueuedTurnClaimSupport()).toEqual(assembly.inquiryDispatch)
   })
 
   it('stays unavailable when a driver declares the marker but no probe corroborates it', async () => {
@@ -545,30 +544,6 @@ describe('inquiry dispatch reports unavailable instead of throwing', () => {
     })
 
     expect(assembly.inquiryDispatch).toEqual({ available: false, reason: 'probe-missing' })
-  })
-
-  it('refuses to dispatch a queued inquiry and leaves it exactly where it was', async () => {
-    const { assembly } = await composed()
-    const accepted = assembly.scheduler.acceptInquiry({
-      inquiryId: 'inquiry-1',
-      requesterSessionId: CHILD_A,
-      targetSessionId: CHILD_B,
-    })
-    expect(accepted.accepted).toBe(true)
-
-    const dispatched = assembly.scheduler.dispatch(CHILD_B, [
-      { messageId: 'msg-1', origin: 'inquiry', ref: 'inquiry-1' },
-    ])
-
-    // Deterministic refusal with nothing consumed: no segment, no phase change,
-    // and the inquiry stays queued so a rebuilt runtime can run it later.
-    expect(dispatched).toEqual({
-      dispatched: false,
-      reason: 'isolated-claim-unsupported',
-      inquiryId: 'inquiry-1',
-      stillQueued: true,
-    })
-    expect(assembly.scheduler.occupiesRunSlot(CHILD_B)).toBe(false)
   })
 
   it('refuses acceptance while runtime is unavailable and performs no ledger write', async () => {

@@ -15,6 +15,7 @@ import { createLocusTurnObserver } from '../src/host/locus/turn-observer.js'
 import { createRefusedReplyTracker } from '../src/host/locus/refused-reply.js'
 import { abandonRefusedDelivery, acceptDelivery, claimCurrentDelivery, createDeliveryLedger } from '../src/host/locus/delivery.js'
 import { registerPetTools } from '../src/host/tools.js'
+import { createInquiryAgentResolver } from '../src/host/inquiry/agent-resolver.js'
 
 const scope = { kind: 'main' as const, sessionId: 'inquiry-test' }
 
@@ -642,6 +643,126 @@ describe('production inquiry composition', () => {
     }
   })
 
+  it('cold-resumes an evicted requester from disk and continues it with the answer', async () => {
+    const h = await openPetHarness()
+    const { mkdtemp } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const Persistence = (await import('@deepseek-ai/dsh-session-persistence-jsonl')).default
+    const ctx = new Context()
+    for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+    await ctx.plugin(Persistence as never, { root: await mkdtemp(join(tmpdir(), 'pet-cold-resume-')) })
+    const scopes = new Map<string, import('../src/host/inquiry/ledger.js').InquiryScope>([['main', { kind: 'main', sessionId: 'main' }], ['child-b', { kind: 'child', sessionId: 'child-b', locusId: 'b', generation: 1 }]])
+    const locus = buildLocusRecord({ id: 'b', generation: 1, parentSessionId: 'main', childSessionId: 'child-b', endpoint: { chatId: 'chat-b' }, workspaceId: 'ws', source: 'explicit', state: 'active' })
+    const ports = { loci: { findByChildSessionId: (id: string) => id === 'child-b' ? [locus] : [], getLocusByChild: (id: string) => id === 'child-b' ? locus : undefined, listLociByParent: (id: string) => id === 'main' ? [locus] : [], getCurrentLocus: () => locus },
+      inspect: async (id: string) => id === 'main' ? { id } : { id, parentSessionId: 'main' }, isArchived: () => false, hasPublicContext: () => true }
+    const resultSeen = Promise.withResolvers<string>()
+    const holdAnswer = Promise.withResolvers<void>()
+    let askerCalls = 0
+    class Asker extends LlmAdapter {
+      async *stream(request: { messages: Array<{ content?: Array<{ type: string; text?: string }> }> }) {
+        const texts = request.messages.flatMap(m => m.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '')
+        const result = texts.map(t => { try { return JSON.parse(t) as { purpose?: string; answer?: string } } catch { return undefined } }).find(v => v?.purpose === 'inquiry-result')
+        if (result) resultSeen.resolve(String(result.answer))
+        if (askerCalls++ === 0) {
+          const call = { type: 'tool-call', id: 'cold-inquire', name: 'pet_inquire', arguments: JSON.stringify({ target: 'child:b:1:child-b', question: 'q', purpose: 'p' }) }
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+          yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
+          yield { type: 'block-end', index: 0, block: call }
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'ok' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: 'ok' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    let targetCalls = 0
+    class Target extends LlmAdapter {
+      async *stream(request: { messages: Array<{ content?: Array<{ type: string; text?: string }> }> }) {
+        if (targetCalls++ === 0) {
+          await holdAnswer.promise
+          const texts = request.messages.flatMap(m => m.content ?? []).filter(b => b.type === 'text').map(b => b.text ?? '')
+          const asked = texts.map(t => { try { return JSON.parse(t) as { inquiryId?: string } } catch { return undefined } }).find(v => typeof v?.inquiryId === 'string')
+          const call = { type: 'tool-call', id: 'cold-answer', name: 'pet_inquiry_answer', arguments: JSON.stringify({ inquiryId: asked!.inquiryId, answer: 'cold answer', confidence: 'confirmed', recency: 'current', sources: ['proof'] }) }
+          yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+          yield { type: 'tool-call-delta', index: 0, id: call.id, name: call.name, argumentsDelta: call.arguments }
+          yield { type: 'block-end', index: 0, block: call }
+          yield { type: 'finish', reason: { kind: 'tool-calls' } }
+          return
+        }
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'answered' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: 'answered' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    const disposers: Array<() => void> = []
+    try {
+      ctx.llm.registerAdapter(['cold-asker'], new Asker())
+      ctx.llm.registerAdapter(['cold-target'], new Target())
+      await ctx.plugin(AgentLoop, { agents: [], maxParallelToolCalls: 1 })
+      const guard = (agent: { ctx: { tools: { guard(fn: (e: { name: string }) => string | undefined): void } } }) =>
+        agent.ctx.tools.guard(e => e.name === 'pet_inquire' || e.name === 'pet_inquiry_answer' ? undefined : 'fixture denies')
+      const resumes: Array<{ provider?: string; model?: string }> = []
+      const resolver = createInquiryAgentResolver({
+        getLive: id => ctx.agents.get(id as never) as never,
+        resumeMain: async id => {
+          resumes.push({ provider: 'cold-asker', model: 'm' })
+          await ctx.agents.resume({ resumeSessionId: id as never, agentOptions: { provider: 'cold-asker', model: 'm' }, setup: async agentCtx => { guard({ ctx: agentCtx as never }) } } as never)
+        },
+        parentSessionOf: () => undefined, materializeChild: async () => { throw new Error('not used') }, log: () => undefined,
+      })
+      let composedRef!: ReturnType<typeof composeProductionInquiry>
+      const registerAsk = (agent: { ctx: unknown }) => disposers.push(registerInquiryAskTool(agent.ctx as never, { forExecution: execution => {
+        const bound = composedRef.forExecution(execution as never)
+        return { ports: ports as never, store: { accept: bound.accept }, origin: bound.origin, ready: () => composedRef.ready, now: () => 1_800_000_000_000, newInquiryId: () => 'cold-inquiry' }
+      } }))
+      composedRef = composeProductionInquiry({
+        domain: h.domain as never, currentScope: (id: string) => scopes.get(id), resolveAgent: resolver as never,
+        agentLoop: ctx.agentLoop, probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop), tools: ctx.tools,
+        readinessManagedGuard: () => true, log: () => undefined, onError: e => resultSeen.reject(e instanceof Error ? e : new Error(String(e))),
+        now: () => 1_800_000_000_000, newMessageId: (() => { let n = 0; return () => `cold-message-${++n}` })(), newInquiryId: () => 'cold-inquiry',
+      })
+      const askerHandle = await ctx.agents.create({ sessionId: 'main' as never, agentOptions: { provider: 'cold-asker', model: 'm' }, meta: { cwd: '/cold' } as never } as never)
+      const target = await ctx.agentLoop.create('child-b', { provider: 'cold-target', model: 'm' })
+      guard(askerHandle.agent as never); guard(target as never)
+      composedRef.install(askerHandle.agent as Agent); composedRef.install(target as Agent)
+      registerAsk(askerHandle.agent as never)
+      disposers.push(registerInquiryAnswerTool(target.ctx, { ports: ports as never, ledger: new (await import('../src/host/inquiry/ledger-store.js')).InquiryLedgerStore(h.domain as never) as never, answers: composedRef.answerStore,
+        commitAnswer: (c, e) => composedRef.answerStore.commit(c, e), binding: (s, i, x) => composedRef.answerBinding(s, i, x as never), afterAnswer: composedRef.afterAnswer, now: () => 1_800_000_000_000,
+        newEventId: (() => { let n = 0; return () => `cold-event-${++n}` })() }))
+      ;(askerHandle.agent as Agent).followup(createUserMessage({ content: [{ type: 'text', text: 'ask then wait' }], source: { kind: 'user' } }))
+      await (askerHandle.agent as Agent).whenIdle()
+      await vi.waitFor(() => expect(h.domain.table('inquiries').get('cold-inquiry')).toMatchObject({ status: 'executing' }))
+      // Evict the requester: from here on it only exists on disk.
+      const evicted = askerHandle.agent as Agent
+      composedRef.release(evicted)
+      await askerHandle.dispose()
+      expect(ctx.agents.get('main' as never)).toBeUndefined()
+      // The answer now arrives while the requester is cold.
+      holdAnswer.resolve()
+      ctx.on('agent/created' as never, ((payload: { agent: { id: string; ctx: unknown } }) => {
+        if (payload.agent.id === 'main') { composedRef.install(payload.agent as never); registerAsk(payload.agent) }
+      }) as never)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const answer = await Promise.race([resultSeen.promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('cold requester never received the inquiry result')), 8000) })]).finally(() => clearTimeout(timer))
+      expect(answer).toBe('cold answer')
+      expect(resumes).toHaveLength(1)
+      const resumed = ctx.agents.get('main' as never) as Agent | undefined
+      expect(resumed).toBeDefined()
+      expect(resumed).not.toBe(evicted)
+      await resumed!.whenIdle()
+      expect(h.domain.table('inquiries').get('cold-inquiry')).toMatchObject({ status: 'result-delivered' })
+    } finally {
+      holdAnswer.resolve()
+      for (const dispose of disposers.reverse()) dispose()
+      await ctx.fiber.dispose()
+      await h.close()
+    }
+  })
+
   it('releases an agent adapter for cold reload while rejecting live duplicate instances and stale releases', async () => {
     const h = await openPetHarness()
     const ctx = new Context()
@@ -884,6 +1005,71 @@ describe('inquiry startup recovery on the compiled graph', () => {
     const idle = async () => { await Promise.all([...agents.values()].map(agent => agent.whenIdle())); await Promise.all([...agents.values()].map(agent => agent.whenIdle())) }
     return { ctx, agents, claims, errors, plan, recover, idle }
   }
+
+  it('hands the requester an explicit failure when the target was mid-answer at restart', async () => {
+    const h = await openPetHarness()
+    let graph: Awaited<ReturnType<typeof bootAfterRestart>> | undefined
+    try {
+      const { handoff } = await acceptWithoutTarget(h)
+      // Process 1b: the target claims the question and the process dies before it answers.
+      {
+        const ctx = new Context()
+        for (const plugin of [Sessions, Agents, Llm, SystemPrompt, ToolRuntime, Projections]) await ctx.plugin(plugin)
+        const claimed = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        class Hang extends LlmAdapter {
+          // Stand-in for a crash mid-answer: the turn never completes while we snapshot.
+          async *stream() { claimed.resolve(); await release.promise; throw new Error('process terminated') }
+        }
+        ctx.llm.registerAdapter(['recovery-hang'], new Hang())
+        await ctx.plugin(AgentLoop, { agents: [], maxParallelToolCalls: 1 })
+        const main = await ctx.agentLoop.create('main', { provider: 'recovery-hang', model: 'm' })
+        const target = await ctx.agentLoop.create('child-b', { provider: 'recovery-hang', model: 'm' })
+        const agents = new Map([['main', main], ['child-b', target]])
+        const composed = composeProductionInquiry({
+          domain: h.domain as never, currentScope: (id: string) => recoveryScopes.get(id), resolveAgent: ((s: { sessionId: string }) => agents.get(s.sessionId)) as never,
+          agentLoop: ctx.agentLoop, probeIsolatedClaim: ctx.agentLoop.probeIsolatedQueuedTurnClaim.bind(ctx.agentLoop), tools: ctx.tools,
+          readinessManagedGuard: () => true, log: () => undefined, onError: () => undefined, now: () => 1_800_000_000_000, newMessageId: () => 'unused', newInquiryId: () => 'unused',
+        })
+        for (const agent of agents.values()) composed.install(agent as Agent)
+        await composed.pumpTarget('child-b')
+        await claimed.promise
+        expect(h.domain.table('inquiry_handoffs').get(JSON.stringify(['recovery-inquiry', 'target']))).toMatchObject({ state: 'claimed' })
+        expect(h.domain.table('inquiries').get('recovery-inquiry')).toMatchObject({ status: 'executing' })
+        // Snapshot the durable rows exactly as a crash would leave them, then tear the process down
+        // and put the snapshot back, so graceful shutdown cannot settle anything a crash would not.
+        const tables = ['inquiries', 'inquiry_handoffs', 'inquiry_results', 'inquiry_works', 'inquiry_answers'] as const
+        const crashed = Object.fromEntries(tables.map(name => [name, [...h.domain.table(name).entries()]]))
+        release.resolve()
+        await Promise.all([main.whenIdle(), target.whenIdle()])
+        await ctx.fiber.dispose()
+        for (const name of tables) {
+          const table = h.domain.table(name) as unknown as { entries(): Iterable<[string, unknown]>; delete(key: string): Promise<boolean>; put(key: string, value: unknown): Promise<void> }
+          for (const [key] of [...table.entries()]) await table.delete(key)
+          for (const [key, value] of crashed[name]!) await table.put(key, value)
+        }
+      }
+      // Process 2: production order — reconcile first, then the startup recovery executor.
+      graph = await bootAfterRestart(h)
+      const { reconcileInquiriesAtStartup } = await import('../src/host/inquiry/reconcile.js')
+      const { InquiryLedgerStore } = await import('../src/host/inquiry/ledger-store.js')
+      const { InquiryOutboxStore } = await import('../src/host/inquiry/outbox-store.js')
+      const report = await reconcileInquiriesAtStartup({ ledger: new InquiryLedgerStore(h.domain as never) as never, outbox: new InquiryOutboxStore(h.domain as never) as never, now: () => 1_800_000_000_001 })
+      expect(report.inquiries.needsReview).toBe(1)
+      await graph.recover()
+      await graph.idle()
+      // The requester must be told: a failure result reaches its session instead of waiting for the deadline.
+      const resultHandoff = h.domain.table('inquiry_handoffs').get(JSON.stringify(['recovery-inquiry', 'result'])) as { messageId: string; state: string } | undefined
+      expect(resultHandoff, 'requester received no result handoff for the interrupted inquiry').toBeDefined()
+      expect(graph.claims.filter(claim => claim.agentId === 'main' && claim.messageId === resultHandoff!.messageId)).toHaveLength(1)
+      // Never re-run the target's model work.
+      expect(graph.claims.filter(claim => claim.messageId === handoff!.messageId)).toHaveLength(0)
+      expect(graph.errors).toEqual([])
+    } finally {
+      await graph?.ctx.fiber.dispose()
+      await h.close()
+    }
+  })
 
   it('re-triggers an accepted-but-never-delivered target message exactly once after a restart', async () => {
     const h = await openPetHarness()

@@ -50,11 +50,9 @@
 
 ### Requirement: 询问执行和续进不得改变权限或回复归属
 
-按用户确认的 A 边界，询问轮 SHALL 保留目标已发布的正常工具快照与权限上限，不新增权限，不因询问临时移除父原有 shell/Git/查询能力。Host SHALL 在自身管理的飞书回复/finish/wait、普通跨 agent 通信、再次委派、待办请求执行及权限/绑定变更入口，重验真实身份、代际、有效片段并拒绝询问轮调用；实际注册入口/alias 与异步 wrapper SHALL 同样受此限制，不能用 prompt 代替受管入口守卫。嵌套询问与公共事实更新分别按询问链预算及成员/CAS 授权。
+询问轮 SHALL 保留目标原有工具与权限上限，不新增权限。Host SHALL 在受管入口（飞书回复/finish/wait、跨 agent 通信、委派、待办执行、权限/绑定变更）拒绝询问轮调用，alias 与异步 wrapper 同样受限。本 capability MUST NOT 宣称隔离 shell/HTTP 等通用工具的内部效果，也 MUST NOT 放宽 Locus child safe composition。
 
-本 capability MUST NOT 宣称提供任意 shell/脚本/通用 HTTP 内部效果的 OS、凭据、网络或完整信息流隔离；这些路径仍受目标既有策略及模型行为约束。模型 SHALL 被告知答案只经关联答复返回，不借既有通用工具代答外发或扩散执行，但这不是任意代码效果的硬保证。此边界 MUST NOT 放宽 current Locus child safe composition、增发 shell 或更改 child 既有出站要求。
-
-结果续进 SHALL 重验请求方的原工作身份；仅当原 Delivery 仍唯一有效、同 child/代际且当前执行可证明时，才能恢复其原受管回复能力。不存在或已终结的 Delivery MUST NOT 被重建、续命或改绑到后续请求；一般 agent-message/GUI 输入仍遵守现有 fail-closed 规则。询问不修改现有 Delivery deadline 或待办受理策略。
+结果续进 SHALL 只在原 Delivery 仍唯一有效、同 child/代际且执行可证明时恢复其回复能力；已终结的 Delivery MUST NOT 被续命或改绑。询问不修改 Delivery deadline 或待办受理策略。
 
 #### Scenario: 询问父不能调用受管通信入口
 - **WHEN** 父在子询问轮调用 Host 管理的飞书回复、普通跨 agent 消息、委派、待办请求执行或修改绑定入口
@@ -74,11 +72,9 @@
 
 ### Requirement: 全链路继承 Host 派生的原工作与询问链
 
-系统 SHALL 在接受事务中绑定具体原工作引用，并在问题派发、claim、答案、结果投递、续进和受管效果检查中继承同一关联。协作范围 SHALL 复用 circleParentSessionId 及 child 的 locusId/generation/sessionId；原请求 SHALL 用 DeliveryId 或持久 local workId；问答分支 SHALL 用 inquiryId，询问链 SHALL 复用 rootInquiryId/depth/visited。locusId 或当前 session 相同 MUST NOT 被当成同一原工作，也 MUST NOT 单独授权回复。关联 SHALL 由 Host 从实际执行证据及持久引用解析，不能由模型选择；回复目标仍从原 Delivery 解析，不另造成员或 tracing 真相源。
+系统 SHALL 在接受时绑定原工作（DeliveryId 或持久 local workId），并在派发、答案、结果投递与续进中继承同一关联；inquiryId 标识问答分支。locusId 或 session 相同 MUST NOT 被当成同一原工作或单独授权回复；关联 SHALL 由 Host 从执行证据解析，不能由模型选择。
 
-本地 work anchor SHALL 在实际本地请求 claim 时建立或复用可证明的持久根，接受时登记开放分支。原轮结束但有未解决分支 SHALL 保持 waiting，不视作工作结束；每个结果可独立续进，不等待其它分支。关联续进结束且无开放分支、或显式 cancel/finish 后 SHALL settled；全部分支已永久处置且无可运行续进时 SHALL 原子关闭 waiting anchor。新的 GUI 请求 SHALL 有不同 workId，重启 SHALL 恢复原根或明确 unknown，不选最新任务替代。没有原工作证明 SHALL 在接受前拒绝。
-
-target inquiry 与 result continuation 中再次 `pet_inquire` SHALL 从当前 Host segment 继承原工作、受众、parentInquiryId 和根预算，不能回落 local 来源重置根。Host SHALL 拒绝访问当前链已有成员并执行已有深度、根累计及每 session 待处理上限。
+本地 work anchor SHALL 在原轮结束而分支未解决时保持 waiting，结果到达后续进原工作；没有原工作证明 SHALL 在接受前拒绝。询问轮或结果轮中再次 `pet_inquire` SHALL 继承当前链，拒绝访问链内已有成员，并执行深度与待处理上限。
 
 #### Scenario: 同一 locus 的两次业务请求
 - **WHEN** 同一 locus 的请求 A 已终态，请求 B 成为 current，A 的答案迟到
@@ -125,6 +121,10 @@ target inquiry 与 result continuation 中再次 `pet_inquire` SHALL 从当前 H
 #### Scenario: 交接中断且无法证明消费情况
 - **WHEN** 问题或结果可能已交接而持久阶段缺确认，会话证据不足
 - **THEN** 标记待核查，不自动重发或重跑模型，不宣称外部 exactly-once
+
+#### Scenario: 目标已开始作答时重启
+- **WHEN** 目标已 claim 询问、尚未提交答案时 Host 重启
+- **THEN** 对账将询问终结为 needs-review 并生成失败结果，启动恢复把该失败结果送回原请求方一次，使其可明确告知"未问到"；目标模型不重跑
 
 #### Scenario: 修复前旧 accepted 记录
 - **WHEN** 能力上线发现旧协议 accepted/queued 询问

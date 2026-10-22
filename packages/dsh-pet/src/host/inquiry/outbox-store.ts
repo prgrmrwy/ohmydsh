@@ -20,9 +20,8 @@
  *     that re-delivers it, because re-running a continuation that may already
  *     have run is exactly what design D8 forbids.
  *
- * It owns nothing else. It authorizes nobody (the continuation fence is
- * `verifyInquiryContinuation`, re-run by the Host at hand-back time), it
- * schedules nothing, and — like the pure module — it has no answerer, chat,
+ * It owns nothing else. It authorizes nobody (the result pump re-verifies the
+ * original work at hand-back time), it schedules nothing, and — like the pure module — it has no answerer, chat,
  * message or feedback field anywhere, so no code path here can create or
  * consume a Feishu delivery for the ANSWERER.
  *

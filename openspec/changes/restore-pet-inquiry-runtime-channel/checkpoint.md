@@ -1,4 +1,4 @@
-# 实施检查点（已部署本机，未完成）
+# 实施检查点（已部署本机，已收尾归档）
 
 本文件记录 `restore-pet-inquiry-runtime-channel` 的阶段性进度；通道核心已在本机真机恢复，剩余项见"必须继续完成"。需求为修复本机 `pet_inquire` 接受后未真实派发、无答案回送的问题，不修改远端机器或待办受理语义。
 
@@ -59,4 +59,13 @@ npx --no-install vitest run
 
 A 边界只硬守 Host 管理的入口，不承诺 shell/脚本/HTTP 内部任意效果隔离。保留 parent 正常工具及 child 现行 safe composition。
 
-本机 v15→v17 迁移与 10-20 两次重建重启均由用户执行；未推送远端，未操作 lumevm/devbox。历史两条询问处置须另行确认。
+本机 v15→v17 迁移与 10-20 两次重建重启均由用户执行；未推送远端，未操作 lumevm/devbox。历史两条询问已于 10-21 按所有者决定取消（tasks 8.5）。
+
+## 收尾（2026-10-22，按 ponytail 评审缩小范围）
+
+- 冷恢复：`resume-model.ts` 让冷恢复的主会话与待办执行会话沿用会话自身 modelSelection（pending → lastUsed → Host 默认），不再被切到用户最新选的模型；编译图用例用真实 jsonl 持久化驱逐请求方后由答案触发冷恢复并续进，变异（禁用冷恢复）使其失败。
+- 重启中断：目标已 claim 未答复时重启，对账生成的 needs-review 失败结果因无结果 handoff 被规划器判为不一致、永远卡住。`recovery.ts` 新增"结果尚未预留"分支交还请求方；编译图用例修复前失败、修复后请求方恰好收到一次、目标不重跑；规划器单测含换人与未就绪分支。
+- 删除死代码：`scheduler`/`continuation`/`effect-fence`/`disposition-store` 四模块与 `outbox.ts` 续进校验/进度视图，及其测试（生产无引用）。
+- 验证：Pet typecheck 0；默认全量 195 文件 / 3356 通过 8 跳过；编译图 production 15、wiring 10、managed 14 全过；根 npm test 445 通过 0 失败 2 跳过；check:artifacts、diff --check、strict validate 通过。
+- 部署：`dsh build` 第一次重装 dsh-pet、第二次 no changes；部署 `resume-model.js`/`recovery.js` 与仓库构建同哈希，死模块已不在部署目录。脱离进程组 `dsh restart --no-open` exit 0，旧 PID 57632 退出、新 PID 89964 监听；启动日志 reconcile/startup-recovery 全 0、ready、订阅 connected、无 degraded。
+- 未做（见 tasks 删线项）：审计记录、三层逐层回传、各边界逐一崩溃证明等，评审判定为过度设计或已有覆盖。冷恢复与重启中断两项均为编译图证据，未在真机复现。
