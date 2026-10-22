@@ -24,7 +24,7 @@
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 脱敏覆盖常见形态且不误伤正文 | test/context.test.ts | redact_covers_shapes_before_truncation | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 首个用户回合不带上一轮上下文 | test/context.test.ts | first_turn_state_has_no_context | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 规则版本由规则内容决定 | test/jev.test.ts | rubric_version_is_content_hash | 🟢 green |
-| specs/auto-model-routing/spec.md → Jev 判断档位 | 回归脚本只把基线外的新未命中视为失败 | test/eval-runner.test.ts | runner_exit_codes_and_shared_state | 🔴 red |
+| specs/auto-model-routing/spec.md → Jev 判断档位 | 回归脚本只把基线外的新未命中视为失败 | test/eval-runner.test.ts | runner_exit_codes_and_shared_state | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 重启后仍沿用上一档位 | test/host.integration.test.ts | previous_tier_survives_restart | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 等待期间切换模式丢弃结果 | test/host.integration.test.ts | mode_change_during_jev_discards_result | 🟢 green |
 | specs/auto-model-routing/spec.md → Jev 判断档位 | 不跟随重定向 | test/jev.test.ts | redirect_is_rejected | 🟢 green |
@@ -59,7 +59,7 @@
 | specs/auto-model-routing/spec.md → Host 端点边界 | 无效会话被拒绝且无副作用 | test/endpoints.test.ts | invalid_targets_rejected | 🟢 green |
 | specs/auto-model-routing/spec.md → Host 端点边界 | 只修改目标会话 | test/endpoints.test.ts | set_mode_targets_one_session | 🟢 green |
 | specs/auto-model-routing/spec.md → 自动选路不得绕过既有模型门禁 | 门禁拒绝不引起改路由 | test/router.test.ts | guard_failure_never_changes_model | 🟢 green |
-| specs/auto-model-routing/spec.md → 子会话派发时机写入环境级指令 | 环境级指令含派发规则且不含模型名 | tests/agent-instructions-dispatch.test.mjs | dispatch_rules_present_without_model_names | 🔴 red |
+| specs/auto-model-routing/spec.md → 子会话派发时机写入环境级指令 | 环境级指令含派发规则且不含模型名 | tests/agent-instructions-dispatch.test.mjs | dispatch_rules_present_without_model_names | 🟢 green |
 | specs/auto-model-routing/spec.md → 判档记录与人工标注 | 成功判档追加一行不含文本的记录 | test/host.integration.test.ts | judgement_line_appended_without_text | 🟢 green |
 | specs/auto-model-routing/spec.md → 判档记录与人工标注 | 失败、取消、子会话判档与非用户回合不写判档行 | test/host.integration.test.ts | no_judgement_line_for_failure_cancel_child_continued | 🟢 green |
 | specs/auto-model-routing/spec.md → 判档记录与人工标注 | 写入失败不影响请求 | test/host.integration.test.ts | judgement_write_failure_is_harmless | 🟢 green |

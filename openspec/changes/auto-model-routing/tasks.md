@@ -40,11 +40,11 @@
 
 ## 6. 派发规则与评估脚本
 
-- [ ] 6.1 写失败测试 `tests/agent-instructions-dispatch.test.mjs › dispatch_rules_present_without_model_names`（仓库根 `node --test`）。确认因指令文件无该节而失败。
-- [ ] 6.2 在 `instructions/dsh-home.md` 增加“子会话派发”一节（含不派发、子会话不再向下派发、`route_subagent` 一句，不含模型名与 effort 值）。使 6.1 通过。
-- [ ] 6.3 写失败测试 `eval-runner.test.ts › runner_exit_codes_and_shared_state`（回环假 Jev：全按基线 → 0，基线外新未命中 → 1，HTTP 500 → 2；脚本与 Host 对同一用例的 state 逐字相等）。确认因 `eval/run.mjs` 不存在而失败。
-- [ ] 6.4 实现 `eval/run.mjs`：从 `lib/` 导入 `TIER_QUESTIONS` 与 `buildState`，`--base` 指定服务地址，三次取多数，按 `baseline.json` 判定退出码，请求失败单列。使 6.3 通过。
-- [ ] 6.5 重构；全套保持绿。
+- [x] 6.1 写失败测试 `tests/agent-instructions-dispatch.test.mjs › dispatch_rules_present_without_model_names`（仓库根 `node --test`）。确认因指令文件无该节而失败。
+- [x] 6.2 在 `instructions/dsh-home.md` 增加“子会话派发”一节（含不派发、子会话不再向下派发、`route_subagent` 一句，不含模型名与 effort 值）。使 6.1 通过。
+- [x] 6.3 写失败测试 `eval-runner.test.ts › runner_exit_codes_and_shared_state`（回环假 Jev：全按基线 → 0，基线外新未命中 → 1，HTTP 500 → 2；脚本与 Host 对同一用例的 state 逐字相等）。确认因 `eval/run.mjs` 不存在而失败。
+- [x] 6.4 实现 `eval/run.mjs`：从 `lib/` 导入 `TIER_QUESTIONS` 与 `buildState`，`--base` 指定服务地址，三次取多数，按 `baseline.json` 判定退出码，请求失败单列。使 6.3 通过。
+- [x] 6.5 重构；全套保持绿。
 
 ## 7. 沿用测试复核
 
@@ -67,3 +67,4 @@
 - 第 3 组（2026-10-22）：`CHILD_TABLE` 换为 `CHILD_MODELS` + `targetEffort`；`routeSubagentTool(jev, {agents, state, judged})` 沿 `header.parentSession` 经 `ctx.agents.get` 上溯（深度上限 32，任一环缺失视为 MANUAL）。`effort.test.ts › child_table_matches_design_and_family` 随常量替换为 `child_models_match_design_and_family`；`host.integration.test.ts › main_and_tool_share_questions` 与 `subagent_decision_toast` 因“MANUAL 不判档”改为先切 AUTO 并传 `agent`（观察到的失败：`judged is not a function`/工具返回 `routed: false`，以及 complex 的 effort `xhigh` → `high`）。
 - 第 4 组（2026-10-22）：`JudgementBook`（`src/judgements.ts`）同时持有追加写与内存映射；`Router` 新增 `onJudged` 回调，在成功判档后首个请求触发（无 effort 也触发），index 中写判档行、失败只记 warn。用户回合由 pre-step 中 `userInput(...).userTurn` 记录（不论是否 AUTO），`session/event` 的 `assistant/message` 按 `data.turn ≥ 最近用户回合` 映射到该回合、仅当其有判档。`labelEndpoint` 与现有端点共用注册循环与 envelope。观察到的失败：host 集成测试等待第三个路由超时；`labelEndpoint is not a function`；`label-report.mjs` 不存在。
 - 第 5 组（2026-10-22）：`src/client/label.ts` 的 `LabelButton` 经 `ui` 注入官方 `Tooltip`、`Menu`（数据行 `items` + `type: 'label'` 标题行，`selectedId` 由官方画勾）与 `IconGaugeOutlineRegular`；按钮 class 复制自 `dsh-client-ui-chat` 操作栏 `action` 的样式值。primitives 由 web shell 作为共享模块提供（devDependency 仅供类型，另列 peer）；vitest 把它别名到 `test/primitives-stub.ts`，因为真实包的 peer（clsx 等）只在 shell 中存在。`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-chat`（插槽声明方）。实施中发现 client 经 `../jev.js` 把 `node:crypto` 打进浏览器 bundle（第 1 组引入 `createHash` 后），将 `CATEGORY_HINTS`/`JevCategory` 拆到 `src/hints.ts`，并加 `content.test.ts › client_sources_stay_browser_safe`（先改回旧导入观察到失败）。
+- 第 6 组（2026-10-22）：`eval/run.mjs` 从 `lib/` 导入 `TIER_QUESTIONS`、`buildState` 与 `userInput`（与 Host 同一路径：先 `redact` 再截断）；支持 `--base`、`--runs`（默认 3）、`--only`。`eval-runner.test.ts` 先以 tsc 构建 `lib/`，再以回环假 Jev 运行脚本；用例按“Host 对该用例构造的完整 state”反查，任何一条与 Host 不逐字相等都会失败。观察到的失败：`run.mjs` 不存在；首版测试按文本结尾反查用例不可靠，改为按完整 state。
