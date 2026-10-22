@@ -109,6 +109,22 @@ export const toolSpecs: Record<string, Spec> = {
     run: (a, s, c) => s.requestDecision(c, { itemId: a.itemId, options: a.options }),
   },
 }
+/** Reserved cmdId: addresses are never reused in a space, so one join per member; retries replay its receipt. */
+export const AUTO_JOIN_CMD_ID = 'dsh-collab:auto-join'
+/**
+ * Member trust: after a successful invite, the Host joins on behalf of the
+ * invitee it just claimed (Host-vouched identity; never a model-chosen address
+ * beyond the invite target). Failure leaves the invite as is.
+ */
+async function autoJoin(host: CollabHost, access: SessionAccess, spaceId: string, address: string): Promise<boolean> {
+  // A replayed invite may name a session that has since lost admission.
+  if (typeof address !== 'string' || !access.admissible(address)) return false
+  try {
+    const command = host.context(address, spaceId, AUTO_JOIN_CMD_ID)
+    await host.command(address, spaceId, AUTO_JOIN_CMD_ID, service => service.join(command))
+    return true
+  } catch { return false }
+}
 const OUTPUT = { schema: { type: 'json' }, render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: JSON.stringify(value) }] } as const
 
 export function collabTools(ctx: Context, access: SessionAccess, getHost: () => CollabHost | undefined) {
@@ -161,6 +177,7 @@ export function collabTools(ctx: Context, access: SessionAccess, getHost: () => 
         const result = spec.kind === 'write'
           ? await host.command(caller, spaceId, command.cmdId, service => run!(object, service, command))
           : await host.read(caller, spaceId, service => run!(object, service, command))
+        if (name === 'collab_invite' && access.policy?.memberTrust === true) return { ...JSON.parse(JSON.stringify(result)), autoJoined: await autoJoin(host, access, spaceId, object.recipientSessionId) }
         return JSON.parse(JSON.stringify(result))
       } catch (error) { log(spaceId, error); return { error: safeError(error) } }
     })

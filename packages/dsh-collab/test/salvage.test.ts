@@ -111,8 +111,7 @@ it('salvage-06：换新空间重建无需停机', () => world(async (host, dataD
     const op = ops(host)
     expect(await op.overview('session-a', 'S')).toEqual({ error: { code: 'COLLAB_SPACE_UNAVAILABLE' } })
     expect((await op.create('session-a', 'S2', 'a')).seq).toBe(1)
-    await op.invite('session-a', 'S2', 'b', 'session-b'); await settle()
-    expect((await op.join('session-b', 'S2')).error).toBeUndefined()
+    expect((await op.invite('session-a', 'S2', 'b', 'session-b')).autoJoined).toBe(true); await settle()
     expect((await op.overview('session-b', 'S2')).members.b.status).toBe('active')
     expect((await snapshot(dataDir)).filter(([name]) => String(name).startsWith('S.'))).toEqual(before.filter(([name]) => String(name).startsWith('S.')))
   } finally { await h.close() }

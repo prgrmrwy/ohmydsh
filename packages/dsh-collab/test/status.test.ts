@@ -95,7 +95,7 @@ describe('status hides nonconforming identifiers', () => {
 
 describe('status pending derivation', () => {
   it('status-pending-01：Leader 转交后邀请者仍正确', () => world(async host => {
-    live(host, 'session-a', 'session-b', 'session-c'); await start(host)
+    live(host, 'session-a', 'session-b', 'session-c'); await start(host, { extra: { memberTrust: false } })
     const op = await team(host, 's', ['c'])
     await op.invite('session-a', 's', 'b', 'session-b'); await settle()
     await op.member('session-a', 's', 'transfer_leader', { member: 'c' }); await settle()
@@ -114,7 +114,7 @@ describe('status pending derivation', () => {
     expect(out.next.filter((n: any) => n.spaceId === 's')).toEqual([])
   }))
   it('status-pending-03：已拒绝或已离开的空间不出现', () => world(async host => {
-    live(host, 'session-a', 'session-b'); await start(host); const op = ops(host)
+    live(host, 'session-a', 'session-b'); await start(host, { extra: { memberTrust: false } }); const op = ops(host)
     await op.create('session-a', 's1', 'a'); await op.invite('session-a', 's1', 'b', 'session-b'); await settle()
     expect((await op.member('session-b', 's1', 'decline')).error).toBeUndefined()
     await team(host, 's2'); expect((await op.member('session-b', 's2', 'leave')).error).toBeUndefined()
@@ -169,7 +169,7 @@ describe('status pending derivation', () => {
 
 describe('status next and contacts', () => {
   it('status-next-01：邀请只暴露最少信息', () => world(async host => {
-    live(host, 'session-a', 'session-b'); await start(host); const op = ops(host)
+    live(host, 'session-a', 'session-b'); await start(host, { extra: { memberTrust: false } }); const op = ops(host)
     await op.create('session-a', 's', 'a'); await op.invite('session-a', 's', 'b', 'session-b'); await settle()
     const out = shape(await op.status('session-b'))
     expect(out.invites).toEqual([{ spaceId: 's', invitedBy: 'a' }])

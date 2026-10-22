@@ -9,7 +9,7 @@ import { admissionPolicy, checkCurrentLocation, type HostConfig } from './config
 export { salvage } from './salvage.js'
 export const name = 'dsh-collab'
 export const inject = ['tools', 'agents', 'sessions', 'sessionQuery', 'sessionController', 'workspaceRegistry']
-export const Config = z.object({ dataDir: z.string(), admission: z.union(['invite', 'allowlist']).default('invite'), allowedSessionIds: z.array(z.string()).default([]), denySessionIds: z.array(z.string()).default([]) })
+export const Config = z.object({ dataDir: z.string(), admission: z.union(['invite', 'allowlist']).default('invite'), allowedSessionIds: z.array(z.string()).default([]), denySessionIds: z.array(z.string()).default([]), memberTrust: z.boolean().default(true) })
 export async function apply(ctx: Context, config: HostConfig) {
   const check = () => { if (host) checkCurrentLocation(host.config.dataDir, ctx.workspaceRegistry.list().map(workspace => workspace.path)) }
   // Reject invalid admission config before registering any tool or touching dataDir.
