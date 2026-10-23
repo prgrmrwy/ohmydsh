@@ -33,7 +33,6 @@ interface LocusInput {
   readonly permission?: PetLocusView['permission']
   readonly toolTier?: PetLocusView['toolTier']
   readonly childComposition?: PetLocusView['childComposition']
-   readonly toolTier?: PetLocusView['toolTier'] readonly toolTier?: PetLocusView['toolTier']
   readonly state?: PetLocusState
   readonly source?: PetLocusSource
   readonly parentLocusId?: string
