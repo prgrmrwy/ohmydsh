@@ -32,7 +32,14 @@ export const loadLottiePlayer: MascotPlayerLoader = (
   return {
     play: () => animation.play(),
     pause: () => animation.pause(),
-    stopFirstFrame: () => animation.goToAndStop(0, true),
+    stopFirstFrame: () => {
+      animation.goToAndStop(0, true)
+      // `goToAndStop` seeks and renders, but a player that was mid-loop when
+      // the pointer left can still paint one queued frame. Force the sought
+      // frame to be the last paint.
+      const repaint = (animation as unknown as { renderFrame?: () => void }).renderFrame
+      repaint?.call(animation)
+    },
     destroy: () => animation.destroy(),
     on: (event, listener) => animation.addEventListener(event, listener),
   }

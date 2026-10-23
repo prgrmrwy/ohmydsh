@@ -254,6 +254,13 @@ export function createMascotAnimation(
     }
     if (hoverOnly && !hovered && !environment.hidden()) {
       loaded.stopFirstFrame()
+      // The player may be mid-render when the pointer leaves; seek again on
+      // the next tick so the resting image is definitely the animation's first
+      // frame rather than the frame that happened to be showing.
+      environment.schedule(() => {
+        if (disposed || hovered || environment.hidden()) return
+        loaded.stopFirstFrame()
+      })
       return
     }
     loaded.pause()

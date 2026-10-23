@@ -519,6 +519,41 @@ describe('settings information architecture', () => {
     expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
   })
 
+  it('puts URL import first and folds JSON paste away', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // URL is the common path; pasting a full JSON document is the specialist
+    // path and stays collapsed until asked for.
+    const urlIndex = markup.indexOf('从 URL 导入')
+    const jsonIndex = markup.indexOf('直接粘贴 Lottie JSON')
+    expect(urlIndex).toBeGreaterThan(-1)
+    expect(jsonIndex).toBeGreaterThan(urlIndex)
+    expect(markup).toContain('<details class="dshpet-json-import">')
+    expect(markup).not.toMatch(/<details class="dshpet-json-import"[^>]*\bopen\b/)
+  })
+
+  it('saves playback through a segmented radio, not an edit mode', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('role="radiogroup" aria-label="动画播放"')
+    expect(markup).toContain('aria-checked="true"')
+    expect(markup).toContain('自动循环')
+  })
+
+  it('explains with hover/focus tooltips instead of click disclosures', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('role="tooltip"')
+    expect(markup).not.toContain('<details class="dshpet-info"')
+    expect(PET_CSS).toContain('.dshpet-info:hover .dshpet-info-body')
+  })
+
   it('does not report a playback save the Host did not persist', async () => {
     const { readFile } = await import('node:fs/promises')
     const settings = await readFile(

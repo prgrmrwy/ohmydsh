@@ -450,29 +450,67 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   outline-offset:2px;border-radius:2px}
 .dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:6px;min-width:0}
 /* Inline "i" disclosure for explanation text that used to be page prose. */
+.dshpet-settings .dshpet-field-head{display:flex;align-items:center;gap:6px;min-width:0}
+/* Inline "i" hint. Explanation is a GLANCE, not a mode: hover/focus shows the
+   tooltip, no click state to toggle back. The tooltip is a child of the
+   wrapper, so moving the pointer into it keeps it open and its links usable. */
 .dshpet-settings .dshpet-info{position:relative;display:inline-flex;flex:none}
-.dshpet-settings .dshpet-info-mark{list-style:none;display:inline-flex;align-items:center;
-  justify-content:center;width:16px;height:16px;border-radius:50%;cursor:pointer;
+.dshpet-settings .dshpet-info-mark{border:none;padding:0;cursor:help;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;border-radius:50%;
+  background:transparent;
   border:.5px solid var(--dsw-alias-border-l2,#d0d3d6);
   font:500 11px/1 var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-tertiary,#8f959e);user-select:none}
-.dshpet-settings .dshpet-info-mark::-webkit-details-marker{display:none}
 .dshpet-settings .dshpet-info-mark:hover{color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-settings .dshpet-info-mark:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
   outline-offset:2px}
-.dshpet-settings .dshpet-info[open] .dshpet-info-mark{
+.dshpet-settings .dshpet-info:hover .dshpet-info-mark,
+.dshpet-settings .dshpet-info:focus-within .dshpet-info-mark{
   color:var(--dsw-alias-state-business-primary,#4176e6);border-color:currentColor}
-.dshpet-settings .dshpet-info-body{position:absolute;left:0;top:22px;z-index:30;
-  width:330px;max-width:min(330px,70vw);box-sizing:border-box;
-  display:flex;flex-direction:column;gap:6px;
-  padding:10px 12px;border-radius:10px;text-align:left;
+.dshpet-settings .dshpet-info-body{position:absolute;left:0;top:100%;z-index:30;
+  display:none;padding-top:6px;width:340px;max-width:min(340px,72vw);text-align:left}
+.dshpet-settings .dshpet-info:hover .dshpet-info-body,
+.dshpet-settings .dshpet-info:focus-within .dshpet-info-body{display:block}
+.dshpet-settings .dshpet-info-card{display:flex;flex-direction:column;gap:6px;
+  padding:10px 12px;border-radius:10px;box-sizing:border-box;
   background:var(--dsw-alias-bg-layer-1,#ffffff);
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);
   box-shadow:0 8px 24px rgba(0,0,0,.14);
   font:var(--dsw-font-xs-13,400 12px/18px var(--dsw-font-family,inherit));
   color:var(--dsw-alias-label-secondary,#61666b)}
-.dshpet-settings .dshpet-info-body p{margin:0}
-.dshpet-settings .dshpet-info-body code{font-size:11px;word-break:break-all}
+.dshpet-settings .dshpet-info-card p{margin:0}
+.dshpet-settings .dshpet-info-card code{font-size:11px;word-break:break-all}
+/* Two-value radio: saved immediately, no edit/save mode. */
+.dshpet-settings .dshpet-segmented{display:inline-flex;gap:2px;padding:2px;align-self:flex-start;
+  border-radius:10px;background:var(--dsw-alias-interactive-bg-hover,#0000000f)}
+.dshpet-settings .dshpet-segment{border:none;background:transparent;cursor:pointer;
+  font:inherit;font-size:12px;line-height:18px;padding:4px 12px;border-radius:8px;
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-segment:hover{color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-segment[data-selected="true"]{
+  background:var(--dsw-specific-menu,#ffffff);color:var(--dsw-alias-label-primary,#1f2329);
+  box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.dshpet-settings .dshpet-segment:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+/* Current-animation row: one compact fact line with its row actions. */
+.dshpet-settings .dshpet-expression-status{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;min-height:28px}
+.dshpet-settings .dshpet-expression-fact{
+  font:var(--dsw-font-xs-13,400 12px/20px var(--dsw-font-family,inherit));
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-expression-actions{display:flex;gap:6px;flex:none}
+/* URL first, JSON paste folded away: the URL path is the common one. */
+.dshpet-settings .dshpet-url-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dshpet-settings .dshpet-url-row .dshpet-input{flex:1;min-width:220px;max-width:none}
+.dshpet-settings .dshpet-json-import>summary{cursor:pointer;list-style:none;
+  font:var(--dsw-font-xs-13,400 12px/20px var(--dsw-font-family,inherit));
+  color:var(--dsw-alias-label-secondary,#61666b);width:fit-content}
+.dshpet-settings .dshpet-json-import>summary::-webkit-details-marker{display:none}
+.dshpet-settings .dshpet-json-import>summary:hover{color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-json-import>summary:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+.dshpet-settings .dshpet-json-import[open]>summary{margin-bottom:6px}
 .dshpet-settings .dshpet-form-panel{display:flex;flex-direction:column;gap:8px}
 /* Attribute [hidden] must beat the flex display above: the UA rule loses on
    specificity, so state it explicitly instead of relying on default CSS. */

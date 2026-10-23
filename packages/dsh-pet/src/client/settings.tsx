@@ -12,7 +12,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   DEFAULT_GLYPH,
   PET_ACCENT_EVENT,
@@ -121,10 +121,10 @@ export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
 /**
  * A small "i" affordance for explanation text.
  *
- * Settings prose used to sit in the page flow above the controls; a reader who
- * already knows the feature pays for it on every visit. `<details>` keeps the
- * explanation one click/keyboard press away and needs no JS state, while the
- * summary is a real focusable disclosure target.
+ * Hover/focus only — no click state: explanation is a glance, not a mode. The
+ * trigger is a real button so keyboard users can focus it, and the tooltip is
+ * a described-by element rendered as a child of the wrapper so moving the
+ * pointer into the tooltip keeps it open (links inside stay clickable).
  * @param props - Accessible label plus the explanation content.
  * @returns the disclosure control.
  */
@@ -132,13 +132,21 @@ export function InfoHint(props: {
   readonly label: string
   readonly children: ReactNode
 }): JSX.Element {
+  const id = useId()
   return (
-    <details className="dshpet-info">
-      <summary className="dshpet-info-mark" title={props.label} aria-label={props.label}>
+    <span className="dshpet-info">
+      <button
+        type="button"
+        className="dshpet-info-mark"
+        aria-label={props.label}
+        aria-describedby={id}
+      >
         <span aria-hidden="true">i</span>
-      </summary>
-      <div className="dshpet-info-body">{props.children}</div>
-    </details>
+      </button>
+      <span id={id} role="tooltip" className="dshpet-info-body">
+        <span className="dshpet-info-card">{props.children}</span>
+      </span>
+    </span>
   )
 }
 
@@ -408,6 +416,30 @@ function GeneralTab(): JSX.Element {
     formTouched.current = true
     setForm(next)
   }
+
+  /**
+   * Persist the playback mode immediately (the control is a radio, not a
+   * read-only row with an edit mode). Older Hosts drop unknown appearance
+   * keys but still answer 200, so the echoed value is verified.
+   */
+  const saveAnimationPlayback = async (next: PetAnimationPlayback): Promise<void> => {
+    try {
+      const updated = await petApi.updateConfig({
+        appearance: { animationPlayback: next },
+      })
+      setConfig(updated)
+      if (updated.appearance?.animationPlayback !== next) {
+        throw new Error(
+          '当前运行中的 DSH Host 还没有加载「动画播放」设置；请重启 DSH 后再保存。',
+        )
+      }
+      setAnimationPlayback(resolveAnimationPlayback(next))
+      setError(undefined)
+      globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -671,36 +703,31 @@ function GeneralTab(): JSX.Element {
           className="dshpet-form-panel"
           hidden={form !== 'lottie'}
         >
-        <StoredField
-          label="动画播放"
-          info={
+        <div className="dshpet-field">
+          <div className="dshpet-field-head">
+            <span className="dshpet-fact-key">动画播放</span>
             <InfoHint label="播放模式说明">
-              <p>「自动循环」：导入的动画一直循环播放。</p>
-              <p>「悬停时播放」：平时停在动画首帧，鼠标悬停吉祥物时循环，移出恢复静态。</p>
+              <p>「自动循环」一直播放；「悬停时播放」平时停在动画首帧，指针移入才循环。</p>
               <p>系统「减少动效」偏好始终优先：无论哪种模式都停在首帧。</p>
             </InfoHint>
-          }
-          value={animationPlayback}
-          options={PET_ANIMATION_PLAYBACKS.map(item => ({ value: item.id, label: item.label }))}
-          onSave={async next => {
-            const updated = await petApi.updateConfig({
-              appearance: { animationPlayback: next },
-            })
-            setConfig(updated)
-            // A Host process started before this setting existed filters the
-            // unknown field out and still answers 200, so "saved" would be a
-            // lie until DSH is restarted. Verify what came back instead of
-            // echoing the request.
-            if (updated.appearance?.animationPlayback !== next) {
-              throw new Error(
-                '当前运行中的 DSH Host 还没有加载「动画播放」设置；请重启 DSH 后再保存。',
-              )
-            }
-            setAnimationPlayback(resolveAnimationPlayback(next))
-            globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
-          }}
-        />
-          <ExpressionSection />
+          </div>
+          <div className="dshpet-segmented" role="radiogroup" aria-label="动画播放">
+            {PET_ANIMATION_PLAYBACKS.map(item => (
+              <button
+                key={item.id}
+                type="button"
+                role="radio"
+                aria-checked={animationPlayback === item.id}
+                className="dshpet-segment"
+                data-selected={animationPlayback === item.id}
+                onClick={() => void saveAnimationPlayback(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <ExpressionSection />
         </div>
       </Group>
 
@@ -863,22 +890,33 @@ export function ExpressionSection(): JSX.Element {
 
   return (
     <div className="dshpet-form-panel">
-      <p className="dshpet-item-hint">导入一段 Lottie 动画替换静态图标。</p>
-      {saved !== undefined ? (
-        <div className="dshpet-fact">
-          <span className="dshpet-fact-key">当前动画</span>
-          <span className="dshpet-fact-value">
-            已导入 · {saved.bytes} 字节 · {new Date(saved.importedAt).toLocaleString()}
-          </span>
-        </div>
-      ) : view?.state === 'corrupt' ? (
-        <p className="dshpet-item-hint">当前动画不可用：{view.diagnostic}</p>
-      ) : (
-        <div className="dshpet-fact">
-          <span className="dshpet-fact-key">当前动画</span>
-          <span className="dshpet-fact-value">未导入</span>
-        </div>
-      )}
+      <div className="dshpet-expression-status">
+        <span className="dshpet-expression-fact">
+          {saved !== undefined
+            ? `已导入 · ${saved.bytes} 字节 · ${new Date(saved.importedAt).toLocaleString()}`
+            : view?.state === 'corrupt'
+              ? `当前动画不可用：${view.diagnostic}`
+              : '当前未导入动画'}
+        </span>
+        <span className="dshpet-expression-actions">
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm"
+            disabled={busy !== 'idle' || saved === undefined}
+            onClick={() => void copySource()}
+          >
+            {copied ? '已复制' : '复制导出'}
+          </button>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm dshpet-action-danger"
+            disabled={busy !== 'idle' || saved === undefined}
+            onClick={() => setPending('remove')}
+          >
+            {busy === 'remove' ? '移除中…' : '移除'}
+          </button>
+        </span>
+      </div>
 
       {renderDiagnostic !== undefined ? (
         <p className="dshpet-error">动画渲染失败：{renderDiagnostic}</p>
@@ -931,79 +969,68 @@ export function ExpressionSection(): JSX.Element {
       ) : null}
 
       <div className="dshpet-field">
-        <div className="dshpet-field-label">
-          <span className="dshpet-fact-key">粘贴 Lottie JSON</span>
-          <InfoHint label="格式与存储说明">
-            <p>只接受 Lottie JSON 文本；不支持 SVG、PNG/GIF 或其它格式。</p>
-            <p>动画保存在 Pet 的状态目录（<code>plugins/dsh-pet/expressions/</code>），不写入配置数据库。</p>
-            <p>素材的来源与许可由你自行负责；对外分发前请确认原作者许可。</p>
-          </InfoHint>
-        </div>
-        <textarea
-          className="dshpet-textarea"
-          value={draft}
-          spellCheck={false}
-          disabled={busy !== 'idle'}
-          onChange={event => setDraft(event.target.value)}
-          placeholder='{"v":"5.7.0","w":100,"h":100,"layers":[...]}'
-        />
-      </div>
-      <div className="dshpet-row">
-        <button
-          type="button"
-          className="dshpet-action"
-          disabled={busy !== 'idle' || draft.trim() === ''}
-          onClick={() => beginImport('import')}
-        >
-          {busy === 'import' ? '导入中…' : '导入'}
-        </button>
-        <button
-          type="button"
-          className="dshpet-action"
-          disabled={busy !== 'idle' || saved === undefined}
-          onClick={() => void copySource()}
-        >
-          复制导出
-        </button>
-        <button
-          type="button"
-          className="dshpet-action"
-          disabled={busy !== 'idle' || saved === undefined}
-          onClick={() => setPending('remove')}
-        >
-          {busy === 'remove' ? '移除中…' : '移除'}
-        </button>
-        {copied ? <span className="dshpet-item-hint">已复制 JSON</span> : null}
-      </div>
-      <div className="dshpet-field">
-        <div className="dshpet-field-label">
-          <span className="dshpet-fact-key">或从 URL 导入（由 Host 下载）</span>
+        <div className="dshpet-field-head">
+          <span className="dshpet-fact-key">从 URL 导入</span>
           <InfoHint label="URL 导入规则">
             <p>由运行 DSH 的 Host 下载，因此浏览器网络受限或受 CORS 限制时仍可用。</p>
             <p>仅支持 https、默认 443 端口、单文件 ≤512 KiB；本机、内网与保留地址会被拒绝。</p>
             <p>下载失败会在页内显示诊断，现有动画保持不变。</p>
           </InfoHint>
         </div>
-        <input
-          className="dshpet-input"
-          type="url"
-          value={urlDraft}
-          spellCheck={false}
-          disabled={busy !== 'idle'}
-          onChange={event => setUrlDraft(event.target.value)}
-          placeholder="https://example.com/animations/lottie.json"
-        />
+        <div className="dshpet-url-row">
+          <input
+            className="dshpet-input"
+            type="url"
+            value={urlDraft}
+            spellCheck={false}
+            disabled={busy !== 'idle'}
+            onChange={event => setUrlDraft(event.target.value)}
+            placeholder="https://example.com/animations/lottie.json"
+          />
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-primary"
+            disabled={busy !== 'idle' || urlDraft.trim() === ''}
+            onClick={() => beginImport('url')}
+          >
+            {busy === 'url' ? '导入中…' : '从 URL 导入'}
+          </button>
+        </div>
+        <p className="dshpet-item-hint">由 Host 下载；浏览器网络受限时仍可用。</p>
       </div>
-      <div className="dshpet-row">
-        <button
-          type="button"
-          className="dshpet-action"
-          disabled={busy !== 'idle' || urlDraft.trim() === ''}
-          onClick={() => beginImport('url')}
-        >
-          {busy === 'url' ? '导入中…' : '从 URL 导入'}
-        </button>
-      </div>
+
+      <details className="dshpet-json-import">
+        <summary>直接粘贴 Lottie JSON</summary>
+        <div className="dshpet-field">
+          <span className="dshpet-field-label">
+            <span className="dshpet-fact-key">Lottie JSON</span>
+            <InfoHint label="格式与存储说明">
+              <p>只接受 Lottie JSON 文本；不支持 SVG、PNG/GIF 或其它格式。</p>
+              <p>动画保存在 Pet 的状态目录（<code>plugins/dsh-pet/expressions/</code>），不写入配置数据库。</p>
+              <p>素材的来源与许可由你自行负责；对外分发前请确认原作者许可。</p>
+            </InfoHint>
+          </span>
+          <textarea
+            className="dshpet-textarea"
+            value={draft}
+            spellCheck={false}
+            disabled={busy !== 'idle'}
+            onChange={event => setDraft(event.target.value)}
+            placeholder='{"v":"5.7.0","w":100,"h":100,"layers":[...]}'
+          />
+          <div className="dshpet-row">
+            <button
+              type="button"
+              className="dshpet-action"
+              disabled={busy !== 'idle' || draft.trim() === ''}
+              onClick={() => beginImport('import')}
+            >
+              {busy === 'import' ? '导入中…' : '粘贴导入'}
+            </button>
+          </div>
+        </div>
+      </details>
+
       <p className="dshpet-item-hint">
         去哪里找动画：
         <InfoHint label="素材来源">
@@ -1036,12 +1063,12 @@ export function ExpressionSection(): JSX.Element {
           </p>
         </InfoHint>
       </p>
+
       {notice !== undefined ? <p className="dshpet-item-hint">{notice}</p> : null}
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
   )
 }
-
 // ---------------------------------------------------------------------------
 // Owner-facing locus management surface.
 //
