@@ -3,7 +3,7 @@ import type { SpaceState } from '../../src/model/index.js'
 export function projectionState(): SpaceState {
   return {
     spaceId: 'space-1', serviceId: 'svc-1', status: 'open', leader: 'lead',
-    convention: { version: '1', sha256: 'abc' },
+    convention: { version: '1', sha256: 'abc' }, managers: [],
     members: {
       lead: { name: 'lead', kind: 'agent', status: 'active', joinSeq: 1, binding: { channel: 'test', address: 'lead', supports: { wake: true, confirm: false } }, statusText: 'working', wakeCount: 0 },
       bob: { name: 'bob', kind: 'agent', status: 'active', joinSeq: 2, binding: { channel: 'test', address: 'bob', supports: { wake: true, confirm: false } }, statusText: 'reviewing', wakeCount: 0 },

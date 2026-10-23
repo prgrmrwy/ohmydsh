@@ -19,7 +19,7 @@ export function reduce(previous: SpaceState | undefined, record: CommitRecord): 
     return root
   }
   for (const e of record.events) {
-    if (e.type === 'space/created') state = { spaceId: e.spaceId, serviceId: e.serviceId, leader: e.leader, convention: e.convention, ...(e.purpose === undefined ? {} : { purpose: e.purpose }), status: 'open', members: {}, items: {}, itemSeq: {}, topicOf: {}, topicWakes: {}, requests: {}, decisions: [], messages: [], deliveries: {}, lastSeq: 0 }
+    if (e.type === 'space/created') state = { spaceId: e.spaceId, serviceId: e.serviceId, leader: e.leader, convention: e.convention, ...(e.purpose === undefined ? {} : { purpose: e.purpose }), status: 'open', managers: [], members: {}, items: {}, itemSeq: {}, topicOf: {}, topicWakes: {}, requests: {}, decisions: [], messages: [], deliveries: {}, lastSeq: 0 }
     if (!state) throw new Error('event before space/created')
     switch (e.type) {
       case 'space/closed': state.status = 'closed'; break

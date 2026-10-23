@@ -9,7 +9,7 @@
   - `Member.managedBy?/previousBindings?`、`Message.ext?/mode?`、`Item.ext?`、`Delivery.mode?`、`Pointer.mode?`、`SpaceState.managers`；
   - 新错误码列表。
 
-  要求：kernel typecheck 为 0，全部既有测试仍为绿。
+  要求：kernel typecheck 为 0。授权表已含五个新命令、方法是桩，所以 `auth.test.ts` 中枚举授权表的两条测试（全部具名写命令逐项允许与拒绝、`auth-15`）在此刻为红，原因正确（缺少新命令的检查项）；它们归第 1 组在 1.1 中补齐。其余既有测试保持绿。
 - [ ] 0.3 约定：每组先写的测试必须在实现前失败，且失败原因正确；若某断言已被更早的组满足，允许起始即绿，并在 test-plan 记一句原因，不得为它伪造失败
 
 ## 1. 内核：托管成员与授权（kernel 组）
