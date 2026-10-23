@@ -443,6 +443,10 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    hurts: a row mixing a 32px control with a taller wrapped one pins them to
    their bottom edges instead of their text. "end" on the baseline axis keeps
    the labelled-field case working while equal-height controls simply agree. */
+.dshpet-settings .dshpet-form-panel{display:flex;flex-direction:column;gap:8px}
+/* Attribute [hidden] must beat the flex display above: the UA rule loses on
+   specificity, so state it explicitly instead of relying on default CSS. */
+.dshpet-settings .dshpet-form-panel[hidden]{display:none}
 .dshpet-settings .dshpet-row{display:flex;flex-direction:row;gap:12px;
   align-items:flex-end;flex-wrap:wrap}
 .dshpet-settings .dshpet-row .dshpet-field{flex:1;min-width:140px}

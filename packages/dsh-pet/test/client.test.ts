@@ -506,6 +506,19 @@ describe('settings information architecture', () => {
     expect(markup).not.toContain('不支持链接')
   })
 
+  it('presents emoji and animation as two forms of one mascot', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // One mascot, two forms: a tab switch instead of two flat setting blocks.
+    expect(markup).toContain('吉祥物有两种形态')
+    expect(markup).toContain('Emoji 图标')
+    expect(markup).toContain('动画表情')
+    expect(markup).toContain('dshpet-form-panel')
+    expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
+  })
+
   it('offers the animation playback modes in Appearance', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),

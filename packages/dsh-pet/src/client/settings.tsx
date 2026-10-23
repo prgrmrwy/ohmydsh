@@ -368,6 +368,14 @@ function GeneralTab(): JSX.Element {
   const [size, setSize] = useState<PetSizeId>('medium')
   const [ringStyle, setRingStyle] = useState<PetRingStyleId>(DEFAULT_RING_STYLE)
   const [animationPlayback, setAnimationPlayback] = useState<PetAnimationPlayback>('loop')
+  // Emoji glyph and imported animation are two FORMS of the same mascot, not
+  // two independent settings to scroll past: only one is shown at a time.
+  const [form, setForm] = useState<'emoji' | 'lottie'>('emoji')
+  const formTouched = useRef(false)
+  const selectForm = (next: 'emoji' | 'lottie'): void => {
+    formTouched.current = true
+    setForm(next)
+  }
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -391,6 +399,17 @@ function GeneralTab(): JSX.Element {
         setAnimationPlayback(resolveAnimationPlayback(look.animationPlayback))
       })
       .catch((cause: unknown) => setError(String(cause)))
+  }, [])
+
+  // Open the form the owner actually uses. A stored animation wins on first
+  // load, but a manual switch is never overridden afterwards.
+  useEffect(() => {
+    void petApi
+      .expression()
+      .then(view => {
+        if (!formTouched.current && view.state === 'ok') setForm('lottie')
+      })
+      .catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -455,8 +474,41 @@ function GeneralTab(): JSX.Element {
 
       <Group title="外观">
         <p className="dshpet-item-hint">
-          桌宠配色。保存在 Pet 的本机配置中，对本机所有浏览器生效。
+          吉祥物有两种形态：静态 emoji 图标，或导入的 Lottie 动画。两者共用配色与尺寸，
+          但同一时间只展示其中一种。
         </p>
+        <div className="dshpet-tabs" role="tablist" aria-label="吉祥物形态">
+          <button
+            type="button"
+            role="tab"
+            id="dshpet-form-tab-emoji"
+            aria-selected={form === 'emoji'}
+            aria-controls="dshpet-form-panel-emoji"
+            className="dshpet-tab"
+            onClick={() => selectForm('emoji')}
+          >
+            Emoji 图标
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="dshpet-form-tab-lottie"
+            aria-selected={form === 'lottie'}
+            aria-controls="dshpet-form-panel-lottie"
+            className="dshpet-tab"
+            onClick={() => selectForm('lottie')}
+          >
+            动画表情
+          </button>
+        </div>
+
+        <div
+          role="tabpanel"
+          id="dshpet-form-panel-emoji"
+          aria-labelledby="dshpet-form-tab-emoji"
+          className="dshpet-form-panel"
+          hidden={form !== 'emoji'}
+        >
         <div className="dshpet-swatches" role="radiogroup" aria-label="桌宠配色">
           {PET_ACCENTS.map(item => (
             <button
@@ -578,6 +630,15 @@ function GeneralTab(): JSX.Element {
           「默认」配色本身是白色，任何档位下圆环都靠描边区分。
         </p>
 
+        </div>
+
+        <div
+          role="tabpanel"
+          id="dshpet-form-panel-lottie"
+          aria-labelledby="dshpet-form-tab-lottie"
+          className="dshpet-form-panel"
+          hidden={form !== 'lottie'}
+        >
         <StoredField
           label="动画播放"
           value={animationPlayback}
@@ -595,9 +656,9 @@ function GeneralTab(): JSX.Element {
           默认「自动循环」。选择「悬停时播放」后，吉祥物平时停在动画首帧，只在鼠标悬停时循环播放；
           减少动效偏好仍优先（始终停在首帧）。
         </p>
+          <ExpressionSection />
+        </div>
       </Group>
-
-      <ExpressionSection />
 
       <Group title="新建任务">
         <p className="dshpet-item-hint">
@@ -757,7 +818,7 @@ export function ExpressionSection(): JSX.Element {
   const confirming = pending !== undefined
 
   return (
-    <Group title="动画表情">
+    <div className="dshpet-form-panel">
       <p className="dshpet-item-hint">
         粘贴一段 <strong>Lottie JSON</strong>，吉祥物就会播放这个动画；删除后恢复显示上面的图标。
         支持 JSON 文本或 <strong>https URL</strong>（由 Host 下载，浏览器网络受限时仍可用）；
@@ -898,7 +959,7 @@ export function ExpressionSection(): JSX.Element {
       </div>
       {notice !== undefined ? <p className="dshpet-item-hint">{notice}</p> : null}
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
-    </Group>
+    </div>
   )
 }
 
