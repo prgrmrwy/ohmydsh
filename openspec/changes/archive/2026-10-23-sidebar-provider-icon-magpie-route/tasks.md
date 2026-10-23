@@ -23,12 +23,12 @@
 
 - [x] 4.1 版本 0.1.8 → 0.1.9：`package.json`、CHANGELOG、`dsh.yaml`（version 与 note 的 change 名）；包 README / README.zh 的映射表加 Magpie
 - [x] 4.2 仓库 `npm test`、`npm run check:artifacts` 通过；`node scripts/sync.mjs` 部署，第二次运行无变化
-- [ ] 4.3 刷新 http://127.0.0.1:3080，用真实 Magpie 会话核对：Magpie 主图在深浅主题下都可辨认，右下角显示上游品牌；直连会话不变
-- [ ] 4.4 合入主规范并归档 change；提交并推送
+- [x] 4.3 刷新 http://127.0.0.1:3080，用真实 Magpie 会话核对：Magpie 主图在深浅主题下都可辨认，右下角显示上游品牌；直连会话不变
+- [x] 4.4 合入主规范并归档 change；提交并推送
 
 ## 实施记录（2026-10-23）
 
 - 3.2 实施中修正一条预期：`openrouter/anthropic/claude-haiku-5.5` 的子图标是 Anthropic，不是 OpenRouter。原因是 OpenRouter 在本插件里只是 model 维度品牌（`openrouter-*`），不是 route 品牌，所以上游段识别不出，回落到 `/` 之后的模型名。这符合 D3。
 - 测试环境：Vite 默认 4 KB 内联上限会把约 4.9 KB 的 magpie.svg 变成 URL 字符串，vitest 下拿不到 markup，所以 `vitest.config.ts` 把 `build.assetsInlineLimit` 设为 16 KB；生产用的 tsdown text loader 不受影响。
 - 验证：包内 vitest 56/56、typecheck、build 通过，bundle 中除 w3.org 命名空间外没有外部 URL。仓库 `npm test` 为 444 pass / 1 fail，失败项是 origin/main 上已有的 `collab-ref-threads` 链接问题，与本 change 无关（逐条比对，没有新增的失败链接）；`check:artifacts` 通过。`sync.mjs` 部署 5 处变更，第二次运行无变化；部署产物与构建产物逐字节一致。
-- 4.3 部分：用本包真实的 `badgeInnerHTML` 输出在 headless Chrome 中按浅色和深色主题各渲染一次。Magpie 主图在两种主题下都可见，右下角分别为 Anthropic、OpenAI、OpenCode；`custom/omen-alpha` 只显示 Magpie；直连 `claude`、`opencode-go` 不变。**真实 DSH 页面刷新后的核对尚待用户完成。**
+- 4.3 部分：用本包真实的 `badgeInnerHTML` 输出在 headless Chrome 中按浅色和深色主题各渲染一次。Magpie 主图在两种主题下都可见，右下角分别为 Anthropic、OpenAI、OpenCode；`custom/omen-alpha` 只显示 Magpie；直连 `claude`、`opencode-go` 不变。2026-10-23 用户在真实 DSH 页面（http://127.0.0.1:3080）刷新后确认：Magpie 会话图标显示正确。

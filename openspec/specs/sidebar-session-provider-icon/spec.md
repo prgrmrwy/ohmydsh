@@ -69,7 +69,7 @@
 - **THEN** 该行不插入 logo
 
 ### Requirement: 使用下载落盘的真实品牌资产
-系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude、Grok、Kimi、GLM/智谱、MiniMax、Pi、OpenClaw、Hermes Agent（含 `hermas` 兼容别名）与 Trae（含 `traex` route）；model 维度 SHALL 另外覆盖 Qwen、腾讯混元（含 `hy<数字>` 系列）、美团 LongCat、小米 MiMo、Google Gemini、NVIDIA（Nemotron）、Meta（Muse Spark / Llama）、蚂蚁（Ling/Ring）、OpenRouter（`openrouter-*`）与字节跳动 Seed（`Seed-*`），使 OpenCode Go/Zen 与 TraeX 当前模型目录中有可识别厂商或平台的模型族都能得到品牌子图标。品牌判定 SHALL 优先识别已知 provider route 作为主品牌；仅当 route 未知/通用时再按 model id 作为主品牌 fallback。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
+系统 SHALL 使用下载后随包保存的品牌 SVG，而不是代码中手绘的近似 path。已知映射 SHALL 至少覆盖 DeepSeek 鲸鱼、OpenAI/GPT 螺旋、OpenCode、Anthropic/Claude、Grok、Kimi、GLM/智谱、MiniMax、Pi、OpenClaw、Hermes Agent（含 `hermas` 兼容别名）、Trae（含 `traex` route）与 Magpie（含 `dsh-magpie-connect` route）；model 维度 SHALL 另外覆盖 Qwen、腾讯混元（含 `hy<数字>` 系列）、美团 LongCat、小米 MiMo、Google Gemini、NVIDIA（Nemotron）、Meta（Muse Spark / Llama）、蚂蚁（Ling/Ring）、OpenRouter（`openrouter-*`）与字节跳动 Seed（`Seed-*`），使 OpenCode Go/Zen 与 TraeX 当前模型目录中有可识别厂商或平台的模型族都能得到品牌子图标。品牌判定 SHALL 优先识别已知 provider route 作为主品牌；仅当 route 未知/通用时再按 model id 作为主品牌 fallback。当 provider route 识别为网关型品牌（Magpie）时，model id 形如 `<上游provider>/<model>`：model 维度品牌 SHALL 先按 `/` 前的上游 provider 段识别，识别不出再按 `/` 后的模型名识别；该解析 SHALL 只对网关型 route 生效，不改变其它 route 的判定。未知选择 SHALL 使用中性 fallback，不得冒充已知品牌。浏览器运行时 SHALL 不为品牌图访问外部 CDN。
 
 #### Scenario: DeepSeek/OpenAI/OpenCode 显示正确品牌
 - **WHEN** 当前选择分别属于 DeepSeek、GPT/Codex 或 OpenCode
@@ -103,6 +103,22 @@
 - **WHEN** provider route 未知/通用，但 model id 明确属于 GPT 或 DeepSeek
 - **THEN** 显示对应 OpenAI 或 DeepSeek 的单一 logo，不叠加子图标
 
+#### Scenario: Magpie route 显示 Magpie 品牌
+- **WHEN** 当前选择的 provider route 为 `dsh-magpie-connect`、`magpie` 或以 `magpie-` 开头
+- **THEN** 主图使用下载落盘的 Magpie SVG（magpie 官方仓库按 commit pin 的资产），而不是按 model 名显示 Anthropic、OpenAI 或 DeepSeek
+
+#### Scenario: Magpie 只按精确名或前缀匹配
+- **WHEN** provider route 只是在中间包含 `magpie` 子串（如 `not-magpie`），且不属于其它已知品牌
+- **THEN** 不识别为 Magpie，按 model fallback 处理
+
+#### Scenario: 网关模型 id 按上游 provider 段识别
+- **WHEN** 当前选择为 `dsh-magpie-connect` 下的 `claude/claude-haiku-5-5`、`codex/gpt-6-luna` 或 `opencode-go/deepseek-v4-flash`
+- **THEN** model 维度品牌分别为 Anthropic、OpenAI、OpenCode（上游段优先于 `/` 后的模型名）
+
+#### Scenario: 上游段无法识别时退回模型名
+- **WHEN** 当前选择为 `dsh-magpie-connect` 下的 `auto/claude-haiku-5.5` 或 `group/deepseek-v4-flash`
+- **THEN** model 维度品牌按 `/` 后的模型名分别识别为 Anthropic、DeepSeek
+
 ### Requirement: provider 与 model 品牌不同时显示复合 icon
 当 provider route 识别为已知品牌 P、且 model id 独立识别为已知品牌 M 并且 M ≠ P 时，系统 SHALL 显示复合 icon：主图为 P 的品牌 logo，右下角叠加缩小的 M 品牌子图标。当 M = P、M 无法识别、或 provider route 未知时，系统 SHALL 只显示单一品牌 logo（或中性 fallback），不叠加子图标。复合 icon SHALL 保持与单一 logo 相同的行内占位尺寸，不推挤标题；子图标 SHALL 以不加底板、描边或内边距的品牌 glyph 呈现，尺寸不小于主图的 70%，并溢出主图右下角，使其在侧边栏实际尺寸下可辨认。tooltip SHALL 继续展示精确的 `provider · model`。当 selector 当前选择改变导致复合与否或子图标品牌改变时，系统 SHALL 与单 logo 同样即时更新。
 
@@ -129,6 +145,14 @@
 #### Scenario: 复合 icon 不改变行内布局
 - **WHEN** 某行由单一 logo 变为复合 icon
 - **THEN** badge 在行内占据的宽高不变，标题与官方 StateDot、时间、菜单的位置保持不变
+
+#### Scenario: Magpie 网关显示复合 icon
+- **WHEN** 当前选择为 `dsh-magpie-connect / claude/claude-haiku-5-5` 或 `dsh-magpie-connect / codex/gpt-6-luna`
+- **THEN** 主图为 Magpie，右下角子图标分别为 Anthropic、OpenAI；tooltip 仍为精确的 `provider · model`
+
+#### Scenario: Magpie 下无法识别的模型只显示 Magpie
+- **WHEN** 当前选择为 `dsh-magpie-connect` 下上游段与模型名都无法识别的模型（如 `custom/omen-alpha`）
+- **THEN** 只显示 Magpie 单一 logo，不叠加中性首字母子图标
 
 ### Requirement: 不影响官方行内 UI 与任务状态点
 系统 SHALL 只读使用官方 session 行 DOM，不得替换、移动、隐藏或改写官方 `StateDot`、时间标签、右键菜单或拖拽行为。logo SHALL 作为标题前独立元素；无法可靠定位时 SHALL 安全降级为不显示。
