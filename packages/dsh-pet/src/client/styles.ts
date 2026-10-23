@@ -451,17 +451,18 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:6px;min-width:0}
 /* Inline "i" disclosure for explanation text that used to be page prose. */
 .dshpet-settings .dshpet-field-head{display:flex;align-items:center;gap:6px;min-width:0}
+/* Label + hint on the left, control on the right — one line, like the other
+   DSH panels (default-mode / reasoning-effort switches). */
+.dshpet-settings .dshpet-inline-row{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;flex-wrap:wrap}
 /* Inline "i" hint. Explanation is a GLANCE, not a mode: hover/focus shows the
    tooltip, no click state to toggle back. The tooltip is a child of the
    wrapper, so moving the pointer into it keeps it open and its links usable. */
 .dshpet-settings .dshpet-info{position:relative;display:inline-flex;flex:none}
-.dshpet-settings .dshpet-info-mark{border:none;padding:0;cursor:help;
+.dshpet-settings .dshpet-info-mark{border:0;padding:2px;margin:0;cursor:help;
   display:inline-flex;align-items:center;justify-content:center;
-  width:16px;height:16px;border-radius:50%;
-  background:transparent;
-  border:.5px solid var(--dsw-alias-border-l2,#d0d3d6);
-  font:500 11px/1 var(--dsw-font-family,inherit);
-  color:var(--dsw-alias-label-tertiary,#8f959e);user-select:none}
+  background:none;color:var(--dsw-alias-label-tertiary,#8f959e);
+  font:inherit;user-select:none}
 .dshpet-settings .dshpet-info-mark:hover{color:var(--dsw-alias-label-primary,#1f2329)}
 .dshpet-settings .dshpet-info-mark:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
   outline-offset:2px}
@@ -488,7 +489,8 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   font:inherit;font-size:12px;line-height:18px;padding:4px 12px;border-radius:8px;
   color:var(--dsw-alias-label-secondary,#61666b)}
 .dshpet-settings .dshpet-segment:hover{color:var(--dsw-alias-label-primary,#1f2329)}
-.dshpet-settings .dshpet-segment[data-selected="true"]{
+.dshpet-settings .dshpet-segment[data-selected="true"],
+.dshpet-settings .dshpet-segment[aria-selected="true"]{
   background:var(--dsw-specific-menu,#ffffff);color:var(--dsw-alias-label-primary,#1f2329);
   box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .dshpet-settings .dshpet-segment:focus-visible{
@@ -503,14 +505,6 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* URL first, JSON paste folded away: the URL path is the common one. */
 .dshpet-settings .dshpet-url-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dshpet-settings .dshpet-url-row .dshpet-input{flex:1;min-width:220px;max-width:none}
-.dshpet-settings .dshpet-json-import>summary{cursor:pointer;list-style:none;
-  font:var(--dsw-font-xs-13,400 12px/20px var(--dsw-font-family,inherit));
-  color:var(--dsw-alias-label-secondary,#61666b);width:fit-content}
-.dshpet-settings .dshpet-json-import>summary::-webkit-details-marker{display:none}
-.dshpet-settings .dshpet-json-import>summary:hover{color:var(--dsw-alias-label-primary,#1f2329)}
-.dshpet-settings .dshpet-json-import>summary:focus-visible{
-  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
-.dshpet-settings .dshpet-json-import[open]>summary{margin-bottom:6px}
 .dshpet-settings .dshpet-form-panel{display:flex;flex-direction:column;gap:8px}
 /* Attribute [hidden] must beat the flex display above: the UA rule loses on
    specificity, so state it explicitly instead of relying on default CSS. */

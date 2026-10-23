@@ -141,7 +141,16 @@ export function InfoHint(props: {
         aria-label={props.label}
         aria-describedby={id}
       >
-        <span aria-hidden="true">i</span>
+        {/* Official Fluent info-outline glyph (14px) so this matches the
+            DSH settings panels that use the shared icon set. */}
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <path
+            d="M12.5757 7.00012C12.5757 3.92085 10.0794 1.42463 7.00012 1.42456C3.9208 1.42456 1.42456 3.9208 1.42456 7.00012C1.42463 10.0794 3.92085 12.5757 7.00012 12.5757C10.0793 12.5756 12.5756 10.0793 12.5757 7.00012ZM13.8002 7.00012C13.8001 10.7559 10.7559 13.8001 7.00012 13.8002C3.2443 13.8002 0.199291 10.7559 0.199219 7.00012C0.199219 3.24426 3.24426 0.199219 7.00012 0.199219C10.7559 0.199291 13.8002 3.2443 13.8002 7.00012Z"
+            fill="currentColor"
+          />
+          <path d="M7.6127 3.18921V4.55986H6.38735V3.18921H7.6127Z" fill="currentColor" />
+          <path d="M7.6127 5.68921V10.8109H6.38735V5.68921H7.6127Z" fill="currentColor" />
+        </svg>
       </button>
       <span id={id} role="tooltip" className="dshpet-info-body">
         <span className="dshpet-info-card">{props.children}</span>
@@ -541,14 +550,15 @@ function GeneralTab(): JSX.Element {
           吉祥物有两种形态：静态 emoji 图标，或导入的 Lottie 动画。两者共用配色与尺寸，
           但同一时间只展示其中一种。
         </p>
-        <div className="dshpet-tabs" role="tablist" aria-label="吉祥物形态">
+        <div className="dshpet-segmented" role="tablist" aria-label="吉祥物形态">
           <button
             type="button"
             role="tab"
             id="dshpet-form-tab-emoji"
             aria-selected={form === 'emoji'}
             aria-controls="dshpet-form-panel-emoji"
-            className="dshpet-tab"
+            className="dshpet-segment"
+            data-selected={form === 'emoji'}
             onClick={() => selectForm('emoji')}
           >
             Emoji 图标
@@ -559,7 +569,8 @@ function GeneralTab(): JSX.Element {
             id="dshpet-form-tab-lottie"
             aria-selected={form === 'lottie'}
             aria-controls="dshpet-form-panel-lottie"
-            className="dshpet-tab"
+            className="dshpet-segment"
+            data-selected={form === 'lottie'}
             onClick={() => selectForm('lottie')}
           >
             动画表情
@@ -703,7 +714,7 @@ function GeneralTab(): JSX.Element {
           className="dshpet-form-panel"
           hidden={form !== 'lottie'}
         >
-        <div className="dshpet-field">
+        <div className="dshpet-inline-row">
           <div className="dshpet-field-head">
             <span className="dshpet-fact-key">动画播放</span>
             <InfoHint label="播放模式说明">
@@ -788,6 +799,8 @@ export function ExpressionSection(): JSX.Element {
    * visible and always actionable.
    */
   const [pending, setPending] = useState<'import' | 'url' | 'remove' | undefined>(undefined)
+  /** URL import or pasted JSON — one method shown at a time. */
+  const [importMode, setImportMode] = useState<'url' | 'json'>('url')
   const [error, setError] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [copied, setCopied] = useState(false)
@@ -968,48 +981,71 @@ export function ExpressionSection(): JSX.Element {
         </div>
       ) : null}
 
-      <div className="dshpet-field">
-        <div className="dshpet-field-head">
-          <span className="dshpet-fact-key">从 URL 导入</span>
-          <InfoHint label="URL 导入规则">
-            <p>由运行 DSH 的 Host 下载，因此浏览器网络受限或受 CORS 限制时仍可用。</p>
-            <p>仅支持 https、默认 443 端口、单文件 ≤512 KiB；本机、内网与保留地址会被拒绝。</p>
-            <p>下载失败会在页内显示诊断，现有动画保持不变。</p>
-          </InfoHint>
-        </div>
-        <div className="dshpet-url-row">
-          <input
-            className="dshpet-input"
-            type="url"
-            value={urlDraft}
-            spellCheck={false}
-            disabled={busy !== 'idle'}
-            onChange={event => setUrlDraft(event.target.value)}
-            placeholder="https://example.com/animations/lottie.json"
-          />
+      <div className="dshpet-inline-row">
+        <div className="dshpet-segmented" role="radiogroup" aria-label="导入方式">
           <button
             type="button"
-            className="dshpet-action dshpet-action-primary"
-            disabled={busy !== 'idle' || urlDraft.trim() === ''}
-            onClick={() => beginImport('url')}
+            role="radio"
+            aria-checked={importMode === 'url'}
+            aria-label="从 URL 导入"
+            className="dshpet-segment"
+            data-selected={importMode === 'url'}
+            onClick={() => setImportMode('url')}
           >
-            {busy === 'url' ? '导入中…' : '从 URL 导入'}
+            URL 导入
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={importMode === 'json'}
+            aria-label="粘贴 JSON"
+            className="dshpet-segment"
+            data-selected={importMode === 'json'}
+            onClick={() => setImportMode('json')}
+          >
+            粘贴 JSON
           </button>
         </div>
-        <p className="dshpet-item-hint">由 Host 下载；浏览器网络受限时仍可用。</p>
+        <InfoHint label="格式与存储说明">
+          <p>只接受 Lottie JSON 文本；不支持 SVG、PNG/GIF 或其它格式。</p>
+          <p>动画保存在 Pet 的状态目录（<code>plugins/dsh-pet/expressions/</code>），不写入配置数据库。</p>
+          <p>素材的来源与许可由你自行负责；对外分发前请确认原作者许可。</p>
+        </InfoHint>
       </div>
 
-      <details className="dshpet-json-import">
-        <summary>直接粘贴 Lottie JSON</summary>
+      {importMode === 'url' ? (
         <div className="dshpet-field">
-          <span className="dshpet-field-label">
-            <span className="dshpet-fact-key">Lottie JSON</span>
-            <InfoHint label="格式与存储说明">
-              <p>只接受 Lottie JSON 文本；不支持 SVG、PNG/GIF 或其它格式。</p>
-              <p>动画保存在 Pet 的状态目录（<code>plugins/dsh-pet/expressions/</code>），不写入配置数据库。</p>
-              <p>素材的来源与许可由你自行负责；对外分发前请确认原作者许可。</p>
+          <div className="dshpet-field-head">
+            <span className="dshpet-fact-key">URL</span>
+            <InfoHint label="URL 导入规则">
+              <p>由运行 DSH 的 Host 下载，因此浏览器网络受限或受 CORS 限制时仍可用。</p>
+              <p>仅支持 https、默认 443 端口、单文件 ≤512 KiB；本机、内网与保留地址会被拒绝。</p>
+              <p>下载失败会在页内显示诊断，现有动画保持不变。</p>
             </InfoHint>
-          </span>
+          </div>
+          <div className="dshpet-url-row">
+            <input
+              className="dshpet-input"
+              type="url"
+              value={urlDraft}
+              spellCheck={false}
+              disabled={busy !== 'idle'}
+              onChange={event => setUrlDraft(event.target.value)}
+              placeholder="https://example.com/animations/lottie.json"
+            />
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-primary"
+              disabled={busy !== 'idle' || urlDraft.trim() === ''}
+              onClick={() => beginImport('url')}
+            >
+              {busy === 'url' ? '导入中…' : '从 URL 导入'}
+            </button>
+          </div>
+          <p className="dshpet-item-hint">由 Host 下载；浏览器网络受限时仍可用。</p>
+        </div>
+      ) : (
+        <div className="dshpet-field">
           <textarea
             className="dshpet-textarea"
             value={draft}
@@ -1029,7 +1065,7 @@ export function ExpressionSection(): JSX.Element {
             </button>
           </div>
         </div>
-      </details>
+      )}
 
       <p className="dshpet-item-hint">
         去哪里找动画：

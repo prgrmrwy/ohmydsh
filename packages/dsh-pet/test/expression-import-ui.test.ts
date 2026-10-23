@@ -136,6 +136,22 @@ describe('URL import replacement flow', () => {
     expect(host.textContent).toContain('已导入动画（68027 字节）')
   })
 
+  it('switches between URL import and JSON paste', async () => {
+    const host = await mount()
+
+    expect(host.querySelector('input[type="url"]')).not.toBeNull()
+    expect(host.querySelector('textarea')).toBeNull()
+
+    button(host, '粘贴 JSON').click()
+    await settle()
+    expect(host.querySelector('textarea')).not.toBeNull()
+    expect(host.querySelector('input[type="url"]')).toBeNull()
+
+    button(host, 'URL 导入').click()
+    await settle()
+    expect(host.querySelector('input[type="url"]')).not.toBeNull()
+  })
+
   it('shows the Host error instead of failing silently', async () => {
     expression = { state: 'none' }
     vi.stubGlobal(

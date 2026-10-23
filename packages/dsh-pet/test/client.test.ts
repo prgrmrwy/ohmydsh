@@ -519,19 +519,19 @@ describe('settings information architecture', () => {
     expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
   })
 
-  it('puts URL import first and folds JSON paste away', () => {
+  it('defaults to URL import and keeps JSON paste behind a mode switch', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),
     )
 
     // URL is the common path; pasting a full JSON document is the specialist
-    // path and stays collapsed until asked for.
-    const urlIndex = markup.indexOf('从 URL 导入')
-    const jsonIndex = markup.indexOf('直接粘贴 Lottie JSON')
-    expect(urlIndex).toBeGreaterThan(-1)
-    expect(jsonIndex).toBeGreaterThan(urlIndex)
-    expect(markup).toContain('<details class="dshpet-json-import">')
-    expect(markup).not.toMatch(/<details class="dshpet-json-import"[^>]*\bopen\b/)
+    // path and only renders after switching import mode.
+    expect(markup).toContain('role="radiogroup" aria-label="导入方式"')
+    expect(markup).toContain('aria-label="从 URL 导入"')
+    expect(markup).toContain('aria-label="粘贴 JSON"')
+    expect(markup).toContain('type="url"')
+    expect(markup).not.toContain('<textarea')
+    expect(markup).not.toContain('dshpet-json-import')
   })
 
   it('saves playback through a segmented radio, not an edit mode', () => {
