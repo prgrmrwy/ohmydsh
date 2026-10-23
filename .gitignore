@@ -35,6 +35,7 @@ spike/
 # Architecture render/scratch directories are regenerable local output. A
 # diagram documentation actually shows belongs in docs/assets/ with its source.
 archify-out/
+.archify/
 **/arch/*
 **/archify/*
 arch/*
