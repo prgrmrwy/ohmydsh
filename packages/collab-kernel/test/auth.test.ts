@@ -4,6 +4,8 @@ import { world, member } from './support/world.js'
 import { MemStore } from './support/mem-store.js'
 import { FakeProvider } from './support/fake-provider.js'
 import { serviceMethods, missingAuthorization } from './support/api-coverage.js'
+import { managed, managedWorld } from './support/managed-world.js'
+import { defaultMembers } from './support/world.js'
 it('auth-01：动作记为 principal 反查到的成员', async () => { const w = await world(); await w.service.sendMessage(w.ctx(), { to: 'doubao', body: 'hi' }); expect(w.log().at(-1)?.events.find(e => e.type === 'message/sent')?.actor).toBe('aily') })
 it('auth-02：首次创建与创建重放', async () => { const store = new MemStore(), service = new CollabService({ serviceId: 'x', store, providers: [new FakeProvider()] }); const ctx = { spaceId: 'new', principal: principals.agent({ channel: 'test-a', address: 'a:1' }), cmdId: 'c-1' }, input = { name: 'aily', address: 'a:1', kind: 'agent' as const }; const first = await service.createSpace(ctx, input); expect(await service.createSpace(ctx, input)).toEqual(first); expect((await store.read('new', 0))).toHaveLength(1) })
 it('auth-03：重复创建同一协作空间', async () => { const w = await world(); await expect(w.service.createSpace(w.ctx('doubao'), { name: 'doubao', address: 'a:2', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_SPACE_EXISTS' }) })
@@ -19,7 +21,7 @@ it('auth-13：gone 成员不能读写', async () => { const w = await world([], 
 it('全部具名写命令逐项允许与拒绝授权', async () => {
   const item: Item = { id: 'C', kind: 'request', assignee: 'doubao', progress: 'open', author: 'aily', title: 'C', body: '', revision: 1, status: 'draft', requiredAcks: [], acks: {} }
   const seed: CollabEvent[] = [{ type: 'item/created', actor: 'aily', item }]
-  type W = Awaited<ReturnType<typeof world>>
+  type W = Awaited<ReturnType<typeof managedWorld>>
   const checks: { name: keyof typeof authorization; run: (w: W, allowed: boolean) => Promise<unknown> }[] = [
     { name: 'createSpace', run: (w, yes) => w.service.createSpace({ ...w.ctx(), spaceId: 'new', principal: yes ? principals.agent({ channel: 'test-a', address: 'a:1' }) : principals.internal('host-index') }, { name: 'aily', kind: 'agent', address: 'a:1' }) },
     { name: 'invite', run: (w, yes) => w.service.invite(w.ctx(yes ? 'aily' : 'doubao'), { name: 'new', kind: 'agent', address: 'a:new' }) },
@@ -35,9 +37,16 @@ it('全部具名写命令逐项允许与拒绝授权', async () => {
     { name: 'sendMessage', run: (w, yes) => w.service.sendMessage(w.ctx(yes ? 'aily' : 'bob'), { to: 'doubao', body: 'hi' }) },
     { name: 'setStatus', run: (w, yes) => w.service.setStatus(w.ctx(yes ? 'aily' : 'bob'), { text: 'x' }) },
     { name: 'advanceRequest', run: (w, yes) => w.service.advanceRequest(w.ctx(yes ? 'doubao' : 'aily'), { itemId: 'C', progress: 'accepted' }) },
+    { name: 'allowManager', run: (w, yes) => w.service.allowManager(w.ctx(yes ? 'aily' : 'doubao'), { channel: 'other-loc' }) },
+    { name: 'revokeManager', run: (w, yes) => w.service.revokeManager(w.ctx(yes ? 'aily' : 'doubao'), { channel: 'pet-locus' }) },
+    // Manager commands: allowed for the manager principal, forbidden for the Leader's own agent principal.
+    { name: 'admitMember', run: (w, yes) => w.service.admitMember(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { name: 'locus-b', address: 'loc:b' }) },
+    { name: 'rebindMember', run: (w, yes) => w.service.rebindMember(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { member: 'locus-a', address: 'loc:b' }) },
+    { name: 'retireMember', run: (w, yes) => w.service.retireMember(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { member: 'locus-a' }) },
   ]
   expect(checks.map(c => c.name).sort()).toEqual(Object.keys(authorization).sort())
-  for (const check of checks) { const yes = await world(seed); await expect(check.run(yes, true), check.name).resolves.toBeDefined(); const no = await world(seed); await expect(check.run(no, false), check.name).rejects.toMatchObject({ code: expect.stringMatching(/^COLLAB_(FORBIDDEN|MEMBER_INACTIVE)$/) }); expect(no.log(), check.name).toHaveLength(1) }
+  const fresh = () => managedWorld({ extra: seed, allowed: ['pet-locus'], members: [...defaultMembers(), managed('locus-a', 'loc:a', 5)] })
+  for (const check of checks) { const yes = await fresh(); await expect(check.run(yes, true), check.name).resolves.toBeDefined(); const no = await fresh(); await expect(check.run(no, false), check.name).rejects.toMatchObject({ code: expect.stringMatching(/^COLLAB_(FORBIDDEN|MEMBER_INACTIVE)$/) }); expect(no.log(), check.name).toHaveLength(1) }
 })
 it('principal必须受信构造', async () => { const w = await world(); await expect(w.service.overview({ spaceId: 's', principal: { kind: 'agent', channel: 'test-a', address: 'a:1' } as Principal })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' }) })
 const counted = (w: Awaited<ReturnType<typeof world>>) => {
@@ -62,6 +71,9 @@ it('auth-15：host-index 不能执行任何写命令', async () => {
     ['reviseItem', () => w.service.reviseItem(c, { itemId: 'x', expectedRevision: 1, changes: {} })], ['ackItem', () => w.service.ackItem(c, { itemId: 'x', revision: 1 })],
     ['sendMessage', () => w.service.sendMessage(c, { to: 'doubao', body: 'hi' })], ['setStatus', () => w.service.setStatus(c, { text: 'x' })],
     ['advanceRequest', () => w.service.advanceRequest(c, { itemId: 'x', progress: 'accepted' })],
+    ['allowManager', () => w.service.allowManager(c, { channel: 'pet-locus' })], ['revokeManager', () => w.service.revokeManager(c, { channel: 'pet-locus' })],
+    ['admitMember', () => w.service.admitMember({ ...c, guard: () => true }, { name: 'x', address: 'a:x' })], ['rebindMember', () => w.service.rebindMember({ ...c, guard: () => true }, { member: 'doubao', address: 'a:x' })],
+    ['retireMember', () => w.service.retireMember({ ...c, guard: () => true }, { member: 'doubao' })],
   ]
   expect(runs.map(r => r[0]).sort()).toEqual(Object.keys(authorization).sort())
   for (const [name, run] of runs) await expect(run(), name).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
@@ -75,3 +87,24 @@ it('auth-15：host-index 不能执行任何写命令', async () => {
 })
 it('auth-16：internal 在已关闭空间执行成员命令仍为 FORBIDDEN', async () => { const w = await world([{ type: 'space/closed', actor: 'aily' }]), calls = counted(w); await expect(w.service.invite({ spaceId: 's', cmdId: 'x', principal: principals.internal('host-index') }, { name: 'x', address: 'a:x', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' }); await expect(w.service.invite({ spaceId: 's', cmdId: 'y', principal: principals.internal('breaker-reset' as never) }, { name: 'x', address: 'a:x', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' }); expect(calls).toEqual({ claim: 0, presence: 0, deliver: 0 }) })
 it('auth-17：未知 internal purpose 被拒绝', async () => { const w = await world(); await expect(w.service.overview({ spaceId: 's', principal: principals.internal('other' as never) })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' }) })
+it('auth-m-01：manager principal 不能执行成员命令或读取', async () => {
+  const w = await managedWorld({ allowed: ['pet-locus'] }), before = JSON.stringify(w.log())
+  await expect(w.service.sendMessage(w.mgr('m-send'), { to: 'doubao', body: 'hi' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  await expect(w.service.invite(w.mgr('m-invite'), { name: 'x', address: 's:x', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  await expect(w.service.overview({ spaceId: 's', principal: principals.manager('PL'), guard: () => true })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  await expect(w.service.readSince({ spaceId: 's', principal: principals.manager('PL'), guard: () => true }, 0)).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  await expect(w.service.createSpace({ ...w.mgr('m-create'), spaceId: 'new' }, { name: 'x', address: 'loc:x', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  // The Leader's agent principal cannot run a manager command, with or without a guard.
+  await expect(w.service.admitMember({ ...w.ctx('aily', 'leader-admit'), guard: () => true }, { name: 'locus-a', address: 'loc:1' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  await expect(w.service.admitMember(w.ctx('aily', 'leader-admit-2'), { name: 'locus-a', address: 'loc:1' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  expect(JSON.stringify(w.log())).toBe(before)
+  expect(w.P.claims).toEqual([])
+  expect(w.P.presenceCalls + w.provider.presenceCalls).toBe(0)
+})
+it('auth-m-02：未声明托管的 provider 不能作为 manager', async () => {
+  const w = await managedWorld({ allowed: ['pet-locus'] }), before = JSON.stringify(w.log())
+  await expect(w.service.admitMember(w.mgr('s-admit', 'S'), { name: 'locus-a', address: 's:1' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  await expect(w.service.admitMember(w.mgr('unknown-admit', 'nobody'), { name: 'locus-a', address: 's:1' })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
+  expect(w.S.claims).toEqual([])
+  expect(JSON.stringify(w.log())).toBe(before)
+})

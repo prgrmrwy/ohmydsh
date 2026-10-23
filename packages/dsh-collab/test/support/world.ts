@@ -42,9 +42,18 @@ export function hostContext(root: string) {
     followup: (message: any) => { counts.followup++; followups.push({ id, message }) },
   })
   const tools = new Map<string, any>()
+  const services = new Map<string, any>()
   const effects: (() => unknown)[] = []
   const ctx: any = {
     tools: { register(tool: any) { tools.set(tool.name, tool); return () => { tools.delete(tool.name) } } },
+    // Like cordis, a provided service is a fiber effect: unloading the plugin unregisters it.
+    provide: (name: string, value: unknown) => {
+      if (services.has(name)) throw new Error(`service ${name} already provided`)
+      services.set(name, value)
+      const dispose = () => { if (services.get(name) === value) services.delete(name) }
+      effects.push(dispose)
+      return dispose
+    },
     agents: { get: (id: string) => live.get(id), isOwnedBy: () => false },
     sessions: { get: (id: string) => live.get(id)?.session },
     sessionQuery: {
@@ -69,7 +78,7 @@ export function hostContext(root: string) {
     return id
   }
   return {
-    ctx, live, headers, archived, counts, followups, logs, tools, root,
+    ctx, live, headers, archived, counts, followups, logs, tools, services, root,
     session, makeAgent,
     failMetadata: (value = true) => { failList = value },
     setResolver: (next: typeof resolver) => { resolver = next },
@@ -92,6 +101,12 @@ export async function call(host: Host, caller: string | undefined, name: string,
   const tool = host.tools.get(name)
   if (!tool) throw new Error(`tool ${name} not registered`)
   const agent = caller === undefined ? undefined : host.live.get(caller)
+  return callAs(host, agent, name, args)
+}
+/** Execute a registered tool as a specific Agent object (which may no longer be the Host's current one). */
+export async function callAs(host: Host, agent: unknown, name: string, args: Record<string, unknown>) {
+  const tool = host.tools.get(name)
+  if (!tool) throw new Error(`tool ${name} not registered`)
   return tool.execute(args, { agent, callId: 'test', signal: AbortSignal.timeout(5000) })
 }
 

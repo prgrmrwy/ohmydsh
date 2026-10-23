@@ -22,6 +22,8 @@ export const unavailable = (code: string) => UNAVAILABLE.has(code) || code.start
 export function safeError(error: unknown) {
   if (!(error instanceof CollabError)) return { code: 'COLLAB_HOST_ERROR' }
   if (unavailable(error.code)) return { code: 'COLLAB_SPACE_UNAVAILABLE' }
+  // The caller went stale between entry and the kernel's commit/read boundary.
+  if (error.code === 'COLLAB_CALLER_STALE') return { code: 'COLLAB_CALLER_UNAVAILABLE' }
   const { field, currentRevision, candidates } = error.details
   const details = { ...(field !== undefined ? { field } : {}), ...(currentRevision !== undefined ? { currentRevision } : {}), ...(candidates ? { candidates: [...candidates] } : {}) }
   return Object.keys(details).length ? { code: error.code, details } : { code: error.code }
@@ -38,11 +40,13 @@ const self = (c: CommandContext) => c.principal.kind === 'agent' ? c.principal.a
 
 export const toolSpecs: Record<string, Spec> = {
   collab_space: {
-    description: '创建或关闭协作空间（关闭需 Leader）。', kind: 'write', selector: 'action',
-    parameters: { action: { type: 'string', enum: ['create', 'close'], required: true }, ...common, name: S, purpose: S },
+    description: '创建或关闭协作空间（关闭需 Leader）；Leader 用 allow_manager/revoke_manager 授权或撤销接入方 channel 托管成员。', kind: 'write', selector: 'action',
+    parameters: { action: { type: 'string', enum: ['create', 'close', 'allow_manager', 'revoke_manager'], required: true }, ...common, name: S, purpose: S, channel: S },
     variants: {
       create: { fields: ['name'], optional: ['purpose'], run: (a, s, c) => s.createSpace(c, { name: a.name, address: self(c), kind: 'agent', ...pick(a, 'purpose') }) },
       close: { fields: [], run: (_a, s, c) => s.closeSpace(c) },
+      allow_manager: { fields: ['channel'], run: (a, s, c) => s.allowManager(c, { channel: a.channel }) },
+      revoke_manager: { fields: ['channel'], run: (a, s, c) => s.revokeManager(c, { channel: a.channel }) },
     },
   },
   collab_invite: {
@@ -153,7 +157,11 @@ export function collabTools(ctx: Context, access: SessionAccess, getHost: () => 
       const caller = access.caller(exec)
       const host = getHost()
       if (!host) throw new CollabError('COLLAB_SERVICE_NOT_READY')
-      return JSON.parse(JSON.stringify(await collabStatus(host, access, caller, typeof object.spaceId === 'string' ? object.spaceId : undefined)))
+      const out = JSON.parse(JSON.stringify(await collabStatus(host, access, caller, typeof object.spaceId === 'string' ? object.spaceId : undefined)))
+      // Status reads through host-index, so the kernel never sees this caller's
+      // guard: re-run every entry condition after the last await, before returning.
+      if (!caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+      return out
     } catch (error) { return { error: safeError(error) } }
   })
   for (const [name, spec] of Object.entries(toolSpecs)) {
@@ -177,6 +185,7 @@ export function collabTools(ctx: Context, access: SessionAccess, getHost: () => 
         const result = spec.kind === 'write'
           ? await host.command(caller, spaceId, command.cmdId, service => run!(object, service, command))
           : await host.read(caller, spaceId, service => run!(object, service, command))
+        if (spec.kind === 'read' && !caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
         if (name === 'collab_invite' && access.policy?.memberTrust === true) return { ...JSON.parse(JSON.stringify(result)), autoJoined: await autoJoin(host, access, spaceId, object.recipientSessionId) }
         return JSON.parse(JSON.stringify(result))
       } catch (error) { log(spaceId, error); return { error: safeError(error) } }

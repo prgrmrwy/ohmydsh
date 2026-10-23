@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { CollabService, principals } from '../src/index.js'
 import { world, member, rawCommand, seedRecord, worldFrom } from './support/world.js'
 import { MemStore } from './support/mem-store.js'
+import { managedWorld } from './support/managed-world.js'
 import { FakeProvider } from './support/fake-provider.js'
 it('idempotency-01：原结果和序号重放不新增', async () => { const w = await world(); const ctx = w.ctx('aily', 'same'); const first = await w.service.setStatus(ctx, { text: 'x' }); expect(await w.service.setStatus(ctx, { text: 'x' })).toEqual(first); expect(w.log()).toHaveLength(2) })
 it('idempotency-02：join后状态变化仍可重放', async () => { const w = await world(); const ctx = w.ctx('bob', 'join'); const first = await w.service.join(ctx); expect(await w.service.join(ctx)).toEqual(first); expect(w.log()).toHaveLength(2) })
@@ -39,3 +40,14 @@ it('idempotency-08：ref 是幂等载荷的一部分', async () => {
 })
 it('每种公开写命令含非空cmdId包括创建', async () => { const s = new CollabService({ serviceId: 'x', store: new MemStore(), providers: [new FakeProvider()] }); await expect(s.createSpace({ spaceId: 'new', cmdId: '', principal: principals.agent({ channel: 'test-a', address: 'a:1' }) }, { name: 'aily', address: 'a:1', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_BAD_CMD_ID' }) })
 it('canonical参数键顺序不影响hash及并发相同cmd', async () => { const w = await world(); const ctx = w.ctx('aily', 'same'); const values = await Promise.all([w.service.sendMessage(ctx, { to: 'doubao', body: 'hi' }), w.service.sendMessage(ctx, { body: 'hi', to: 'doubao' })]); expect(values[0]).toEqual(values[1]); expect(w.log()).toHaveLength(2) })
+it('idempotency-m-01：manager 收据与同名成员互不冲突', async () => {
+  const w = await managedWorld({ allowed: ['pet-locus'], members: [member('aily', 'a:1'), member('pet-locus', 'a:pl', 'agent', 'active', 2)] })
+  const admit = await w.service.admitMember(w.mgr('x-1'), { name: 'locus-a', address: 'loc:1' })
+  const status = await w.service.setStatus(w.ctx('pet-locus', 'x-1'), { text: 'same cmdId' })
+  expect(status.seq).toBe(admit.seq + 1)
+  const length = w.log().length
+  expect(await w.service.admitMember(w.mgr('x-1'), { name: 'locus-a', address: 'loc:1' })).toEqual(admit)
+  expect(await w.service.setStatus(w.ctx('pet-locus', 'x-1'), { text: 'same cmdId' })).toEqual(status)
+  expect(w.log()).toHaveLength(length)
+  expect(w.log().filter(r => r.kind === 'command' && r.receipt.cmdId === 'x-1').map(r => r.kind === 'command' && r.receipt.scope)).toEqual([{ kind: 'manager', channel: 'pet-locus' }, { kind: 'member', name: 'pet-locus' }])
+})

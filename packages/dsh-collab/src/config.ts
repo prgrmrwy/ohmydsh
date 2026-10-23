@@ -5,9 +5,14 @@ import { mkdir, realpath, stat } from 'node:fs/promises'
 import { dirname, basename, isAbsolute, join, relative, sep, resolve } from 'node:path'
 
 export type Admission = 'invite' | 'allowlist'
-export interface HostConfig { dataDir?: string; admission?: Admission; allowedSessionIds?: readonly string[]; denySessionIds?: readonly string[]; memberTrust?: boolean }
-/** `memberTrust`: the operator pre-consents that invitees join and members take requests within their own permissions. */
+export interface HostConfig { dataDir?: string; admission?: Admission; allowedSessionIds?: readonly string[]; denySessionIds?: readonly string[]; memberTrust?: boolean; managedChannels?: readonly string[] }
+/**
+ * `memberTrust`: the operator pre-consents that invitees join and members take requests within their own permissions.
+ * `managedChannels`: integrator channels that may attach and manage members; only the Host config declares them.
+ */
 export interface AdmissionPolicy { admission: Admission; allowedSessionIds: readonly string[]; denySessionIds: readonly string[]; memberTrust: boolean }
+export interface HostPolicy extends AdmissionPolicy { managedChannels: readonly string[] }
+export const CHANNEL = /^[a-z][a-z0-9-]{0,31}$/
 function bad(): never { throw Object.assign(new Error('Invalid collaboration Host configuration'), { code: 'COLLAB_BAD_CONFIG' }) }
 function under(root: string, target: string) {
   const rel = relative(root, target)
@@ -35,15 +40,17 @@ const ids = (value: unknown): string[] => {
   return [...list]
 }
 /** Synchronous admission/ID-list validation; runs before any tool registration or IO. */
-export function admissionPolicy(config: HostConfig): AdmissionPolicy {
-  if (!config || typeof config !== 'object' || Object.keys(config).some(key => !['dataDir', 'admission', 'allowedSessionIds', 'denySessionIds', 'memberTrust'].includes(key))) bad()
+export function admissionPolicy(config: HostConfig): HostPolicy {
+  if (!config || typeof config !== 'object' || Object.keys(config).some(key => !['dataDir', 'admission', 'allowedSessionIds', 'denySessionIds', 'memberTrust', 'managedChannels'].includes(key))) bad()
   const admission = config.admission ?? 'invite'
   if (admission !== 'invite' && admission !== 'allowlist') bad()
   const allowedSessionIds = ids(config.allowedSessionIds), denySessionIds = ids(config.denySessionIds)
   if (allowedSessionIds.some(id => denySessionIds.includes(id))) bad()
   const memberTrust = config.memberTrust ?? true
   if (typeof memberTrust !== 'boolean') bad()
-  return { admission, allowedSessionIds, denySessionIds, memberTrust }
+  const managedChannels = config.managedChannels ?? []
+  if (!Array.isArray(managedChannels) || managedChannels.some(channel => typeof channel !== 'string' || !CHANNEL.test(channel) || channel === 'dsh-session') || new Set(managedChannels).size !== managedChannels.length) bad()
+  return { admission, allowedSessionIds, denySessionIds, memberTrust, managedChannels: [...managedChannels] }
 }
 /**
  * Default ledger location: `<DSH home>/plugins/dsh-collab`, where DSH home follows the official

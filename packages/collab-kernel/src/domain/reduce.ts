@@ -27,6 +27,13 @@ export function reduce(previous: SpaceState | undefined, record: CommitRecord): 
       case 'member/invited': case 'member/joined': state.members[e.member.name] = structuredClone(e.member); break
       case 'member/status': state.members[e.name]!.status = e.status; break
       case 'member/statusText': state.members[e.name]!.statusText = e.text; break
+      case 'member/rebound': {
+        const m = state.members[e.name]!
+        m.previousBindings = [...(m.previousBindings ?? []), { channel: m.binding.channel, address: m.binding.address }]
+        m.binding = structuredClone(e.binding); break
+      }
+      case 'manager/allowed': if (!state.managers.includes(e.channel)) state.managers.push(e.channel); break
+      case 'manager/revoked': state.managers = state.managers.filter(c => c !== e.channel); break
       case 'item/created':
         state.topicOf[record.seq] = topicOf(record.seq, e.item.ref)
         own(state.itemSeq, e.item.id, record.seq)

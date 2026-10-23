@@ -206,6 +206,35 @@ describe('named tools adapt the kernel faithfully', () => {
       expect(Object.hasOwn(inputs[2][1], 'purpose')).toBe(false)
     } finally { await assembled.close() }
   }))
+  it('tool-m-01：授权与撤销托管 channel', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-b', { live: true })
+    await start(host, { extra: { managedChannels: ['pet-locus'] } }); const op = ops(host)
+    await op.create('session-a', 's', 'a'); await op.invite('session-a', 's', 'b', 'session-b'); await settle()
+    const space = (caller: string, cmdId: string, extra: Record<string, unknown>) => call(host, caller, 'collab_space', { spaceId: 's', cmdId, ...extra })
+    const allowed = await space('session-a', 'm-1', { action: 'allow_manager', channel: 'pet-locus' })
+    expect(allowed.error).toBeUndefined()
+    expect(await codeOf(space('session-b', 'm-2', { action: 'allow_manager', channel: 'pet-locus' }))).toBe('COLLAB_FORBIDDEN')
+    expect(await codeOf(space('session-a', 'm-3', { action: 'allow_manager', channel: 'nope' }))).toBe('COLLAB_BAD_CHANNEL')
+    const revoked = await space('session-a', 'm-4', { action: 'revoke_manager', channel: 'pet-locus' })
+    expect(revoked.error).toBeUndefined()
+    const before = await bytes(ledger(host, 's'))
+    expect(await codeOf(space('session-a', 'm-5', { action: 'allow_manager' }))).toBe('COLLAB_BAD_ARGUMENTS')
+    expect(await codeOf(space('session-a', 'm-6', { action: 'create', name: 'a', channel: 'pet-locus' }))).toBe('COLLAB_BAD_ARGUMENTS')
+    expect(await bytes(ledger(host, 's'))).toEqual(before)
+    const lines = (await readFile(ledger(host, 's'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    for (const seq of [allowed.seq, revoked.seq]) {
+      const commit = lines.find((r: any) => r.seq === seq)
+      expect(commit.events.map((e: any) => e.type)).toEqual([seq === allowed.seq ? 'manager/allowed' : 'manager/revoked'])
+    }
+  }))
+  it('caller-m-01：名单模式下托管调用者不需要列入名单', () => world(async host => {
+    const { managedSpace } = await import('./support/integrator.js')
+    const { callAs } = await import('./support/world.js')
+    const { L } = await managedSpace(host, { admission: 'allowlist', allowedSessionIds: ['session-a'] })
+    const read = await callAs(host, L, 'collab_read', { view: 'overview', spaceId: 's' })
+    expect(read.error).toBeUndefined()
+    expect(read.members['locus-a'].managedBy).toBe('pet-locus')
+  }))
   it('tool-10：超出话题上限原样返回', () => world(async host => {
     host.session('session-a', { live: true }); host.session('session-b', { live: true })
     await start(host); const op = ops(host)

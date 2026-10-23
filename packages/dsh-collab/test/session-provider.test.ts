@@ -27,7 +27,7 @@ function fixture() {
 describe('exact session trust and delivery', () => {
   it('session-identity: caller must match session ID, allowlist, origin and actual ownership', async () => {
     const f = fixture()
-    expect(await f.access.caller({ agent: f.a })).toBe('a')
+    expect(f.access.caller({ agent: f.a })).toMatchObject({ channel: 'dsh-session', address: 'a' })
     for (const agent of [undefined, f.agent('outside'), { ...f.a, id: 'b' }]) {
       expect(() => f.access.caller({ agent })).toThrow('COLLAB_CALLER_UNAVAILABLE')
     }
@@ -51,7 +51,7 @@ describe('exact session trust and delivery', () => {
     const replacement = f.agent('a')
     f.live.set('a', replacement)
     expect(() => f.access.caller({ agent: f.a })).toThrow('COLLAB_CALLER_UNAVAILABLE')
-    expect(f.access.caller({ agent: replacement })).toBe('a')
+    expect(f.access.caller({ agent: replacement })).toMatchObject({ channel: 'dsh-session', address: 'a' })
   })
   it('session-discovery: only allowlisted exact headers, ordinary forks allowed, no content or activation', async () => {
     const f = fixture()
@@ -222,7 +222,10 @@ describe('invite admission', () => {
   }))
   it('admit-05：排除名单与派生会话不可调用', () => world(async host => {
     host.session('session-a', { live: true }); host.session('session-p', { live: true }); host.session('session-s', { live: true, header: { origin: 'subagent', delegationDepth: 1 } })
-    await start(host, { denySessionIds: ['session-p'] }); const op = ops(host)
+    await start(host, { denySessionIds: ['session-p'], extra: { managedChannels: ['pet-locus'] } }); const op = ops(host)
+    // An integrator is attached, but it resolves neither P nor S.
+    const resolved: Record<string, number> = {}
+    host.services.get('dshCollab').attach('pet-locus', { claim: async () => false, presence: async () => 'unknown', deliver: async () => {}, resolveCaller: (agent: any) => { resolved[agent.id] = (resolved[agent.id] ?? 0) + 1; return undefined }, holds: () => false, modes: [] })
     await op.create('session-a', 's', 'a'); const before = await bytes(ledger(host, 's'))
     for (const id of ['session-p', 'session-s']) {
       expect(await codeOf(op.create(id, `own-${id}`, 'x'))).toBe('COLLAB_CALLER_UNAVAILABLE')
@@ -230,6 +233,9 @@ describe('invite admission', () => {
       expect(await codeOf(op.overview(id, 's'))).toBe('COLLAB_CALLER_UNAVAILABLE')
       expect(await exists(ledger(host, `own-${id}`))).toBe(false)
     }
+    // Only the subagent S is offered to the integrator (once per call); the denied P never is.
+    expect(resolved['session-s']).toBe(3)
+    expect(resolved['session-p']).toBeUndefined()
     expect(await bytes(ledger(host, 's'))).toEqual(before)
   }))
   it('admit-06：兼容模式保持首版行为', () => world(async host => {

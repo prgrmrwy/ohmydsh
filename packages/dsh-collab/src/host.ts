@@ -1,4 +1,5 @@
-import { CollabError, CollabService, FileStore, principals, type ChannelProvider } from 'collab-kernel'
+import { CollabError, CollabService, FileStore, principals, type ChannelProvider, type CommandContext } from 'collab-kernel'
+import type { Caller } from './session-provider.js'
 import { readdir } from 'node:fs/promises'
 import { validateConfig, type HostConfig } from './config.js'
 import { judgeLock, type Probe } from './maintenance.js'
@@ -62,19 +63,27 @@ export class CollabHost {
       return host
     } catch (error) { await host.close(); throw error }
   }
-  context(id: string, spaceId: string, cmdId?: string) { return { principal: principals.agent({ channel: 'dsh-session', address: id }), spaceId, cmdId: cmdId! } }
+  /**
+   * Agent principal for the resolved caller, with its call-level guard for the
+   * kernel. A bare session ID is a Host-vouched `dsh-session` address without
+   * a guard (auto-join and maintenance paths).
+   */
+  context(caller: Caller | string, spaceId: string, cmdId?: string): CommandContext {
+    if (typeof caller === 'string') return { principal: principals.agent({ channel: 'dsh-session', address: caller }), spaceId, cmdId: cmdId! }
+    return { principal: principals.agent({ channel: caller.channel, address: caller.address }), spaceId, cmdId: cmdId!, guard: caller.guard }
+  }
   admissionCheck?: () => void
   private gate(spaceId: string) {
     this.admissionCheck?.()
     if (this.closing) throw new CollabError('COLLAB_SERVICE_CLOSING')
     if (this.failures.has(spaceId)) throw this.failures.get(spaceId)
   }
-  async command<T>(_caller: string, spaceId: string, _cmdId: string, run: (service: CollabService) => Promise<T>): Promise<T> {
+  async command<T>(_caller: unknown, spaceId: string, _cmdId: string, run: (service: CollabService) => Promise<T>): Promise<T> {
     this.gate(spaceId)
     this.tracked.add(spaceId)
     return run(this.service)
   }
-  async read<T>(_caller: string, spaceId: string, run: (service: CollabService) => Promise<T>): Promise<T> {
+  async read<T>(_caller: unknown, spaceId: string, run: (service: CollabService) => Promise<T>): Promise<T> {
     this.gate(spaceId)
     return run(this.service)
   }

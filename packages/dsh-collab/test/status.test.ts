@@ -247,6 +247,18 @@ describe('status next and contacts', () => {
     const out = shape(await ops(host).status('session-b'))
     expect(out.contacts).toEqual([])
   }))
+  it('status-m-01：托管调用者没有联系人', () => world(async host => {
+    const { managedSpace } = await import('./support/integrator.js')
+    const { callAs } = await import('./support/world.js')
+    host.session('session-d')
+    const { L } = await managedSpace(host, { allowedSessionIds: ['session-d'] })
+    expect((await ops(host).status('session-a')).contacts.map((c: any) => c.sessionId)).toEqual(['session-d'])
+    const lists = host.counts.listSessions
+    const out = shape(await callAs(host, L, 'collab_status', {}))
+    expect(out.contacts).toEqual([])
+    expect(host.counts.listSessions).toBe(lists)
+    expect(out.spaces.map((s: any) => s.self)).toEqual(['locus-a'])
+  }))
   it('status-next-04：没有待办时没有建议', () => world(async host => {
     live(host, 'session-a', 'session-b'); await start(host)
     const op = await team(host, 's')

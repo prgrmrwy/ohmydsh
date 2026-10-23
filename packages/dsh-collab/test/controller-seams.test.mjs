@@ -833,7 +833,9 @@ test('tool-06：内部与人类能力不出现在工具面', { timeout: 15000 },
     assert.ok(!tools.some(t => /decision|confirm|reset|append|event|execute|dispatch|unlock|salvage/.test(t.name)))
     assert.ok(!tools.some(t => /deciders|requestDecision/.test(t.description)))
     const enumOf = (name, key) => [...tools.find(t => t.name === name).parameters.properties[key].enum].sort()
-    assert.deepEqual(enumOf('collab_space', 'action'), ['close', 'create'])
+    assert.deepEqual(enumOf('collab_space', 'action'), ['allow_manager', 'close', 'create', 'revoke_manager'])
+    assert.ok(!tools.some(t => /admit|rebind|retire|manager_member/.test(t.name)))
+    for (const tool of tools) for (const key of ['ext', 'mode', 'address']) assert.ok(!Object.hasOwn(tool.parameters.properties, key), `${tool.name}.${key}`)
     assert.deepEqual(enumOf('collab_member', 'action'), ['decline', 'join', 'leave', 'mark_gone', 'transfer_leader'])
     assert.deepEqual(enumOf('collab_read', 'view'), ['convention', 'overview', 'since'])
   } finally { await w.ctx.fiber.dispose() }

@@ -1,6 +1,6 @@
 import { CollabError, principals, reduce, type CommitRecord, type SpaceState } from 'collab-kernel'
 import type { CollabHost } from './host.js'
-import type { SessionAccess } from './session-provider.js'
+import type { Caller, SessionAccess } from './session-provider.js'
 
 /** Structural-injection guard for member-supplied identifiers that reach model input. */
 export const SAFE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -32,7 +32,7 @@ function pending(state: SpaceState, self: string): Pending {
  * opened, through the kernel's host-index purpose; never opens, writes, wakes
  * or samples presence. Output is restricted to the whitelisted structure.
  */
-export async function collabStatus(host: CollabHost, access: SessionAccess, caller: string, filter?: string) {
+export async function collabStatus(host: CollabHost, access: SessionAccess, caller: Pick<Caller, 'channel' | 'address'>, filter?: string) {
   const spaces: unknown[] = [], invites: { spaceId: string; invitedBy: string }[] = [], next: Next[] = []
   for (const spaceId of host.openSpaces()) {
     if (!SAFE_ID.test(spaceId) || (filter !== undefined && filter !== spaceId)) continue
@@ -42,7 +42,7 @@ export async function collabStatus(host: CollabHost, access: SessionAccess, call
     let state: SpaceState | undefined
     for (const record of records) state = reduce(state, record)
     if (!state) continue
-    const me = Object.values(state.members).find(m => m.binding.channel === 'dsh-session' && m.binding.address === caller)
+    const me = Object.values(state.members).find(m => m.binding.channel === caller.channel && m.binding.address === caller.address)
     if (!me) continue
     if (me.status === 'invited') {
       if (state.status !== 'open') continue
@@ -62,5 +62,7 @@ export async function collabStatus(host: CollabHost, access: SessionAccess, call
     if (p.replies.length) next.push({ kind: 'read_and_reply', spaceId, tool: 'collab_read' })
     if (p.requests.length) next.push({ kind: 'advance_request', spaceId, tool: 'collab_advance_request' })
   }
-  return { source: SOURCE, spaces, invites, contacts: await access.contacts(caller), next }
+  // Seed contacts describe ordinary sessions only; integrators provide their members' own.
+  const contacts = caller.channel === 'dsh-session' ? await access.contacts(caller.address) : []
+  return { source: SOURCE, spaces, invites, contacts, next }
 }

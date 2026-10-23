@@ -9,12 +9,34 @@ import type { ChannelProvider } from '../spi/index.js'
 import type { CollabStore } from '../store/interface.js'
 import { conventions, defaultConvention } from '../convention/index.js'
 import { project } from '../projection/index.js'
+import { canonicalJson } from '../store/canonical.js'
+const EXT_LIMIT = 4096
+const plainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null)
+/** Recursively only JSON values; an own `undefined` entry is not JSON and is refused rather than dropped. */
+const jsonValue = (v: unknown, seen = new Set<object>()): boolean => {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return true
+  if (typeof v === 'number') return Number.isFinite(v)
+  if (typeof v !== 'object' || seen.has(v)) return false
+  if (!Array.isArray(v) && !plainObject(v)) return false
+  seen.add(v)
+  try { return Array.isArray(v) ? Array.from(v).every(x => jsonValue(x, seen)) : Object.values(v).every(x => jsonValue(x, seen)) } finally { seen.delete(v) }
+}
+/** Opaque integrator data: a plain JSON object of at most 4096 canonical UTF-8 bytes (the store's row normalization). */
+function checkExt(ext: unknown): void {
+  if (ext === undefined) return
+  if (!plainObject(ext) || !jsonValue(ext)) fail('COLLAB_BAD_EXT')
+  let bytes: number
+  try { bytes = Buffer.byteLength(canonicalJson(ext), 'utf8') } catch { return fail('COLLAB_BAD_EXT') }
+  if (bytes > EXT_LIMIT) fail('COLLAB_BAD_EXT')
+}
+const MODE_FORMAT = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
 /**
  * `guard` is created by the host per call and re-checked synchronously at the
  * final commit/read boundary; false or throwing rejects with COLLAB_CALLER_STALE.
  */
 export interface ReadContext { principal: Principal; spaceId: string; guard?: () => boolean }
 export interface CommandContext extends ReadContext { cmdId: string }
+type ManagerCommand = 'admitMember' | 'rebindMember' | 'retireMember'
 export interface ServiceOptions { serviceId: string; store: CollabStore; providers: ChannelProvider[]; convention?: { version: string; sha256: string; text: string }; project?: (state: Overview) => string }
 export function canonical(value: unknown): string {
   const normalize = (v: unknown): unknown => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, x]) => [k, normalize(x)])) : v
@@ -76,7 +98,7 @@ export class CollabService {
     try { await closing } finally { this.closings.delete(spaceId) }
   }
   private snapshot<T extends ReadContext>(ctx: T): T {
-    this.stable(ctx.principal)
+    this.entry(ctx)
     const p = ctx.principal
     return { ...ctx, principal: p.kind === 'provider' ? { ...p, on: { ...p.on } } : { ...p } }
   }
@@ -84,6 +106,26 @@ export class CollabService {
     if (!isPrincipal(p)) fail('COLLAB_FORBIDDEN')
     if (p.kind === 'provider' && !this.options.providers.some(x => x.id === p.providerId && x.channel === p.on.channel)) fail('COLLAB_FORBIDDEN')
     if (p.kind === 'internal' && p.purpose !== 'host-index') fail('COLLAB_FORBIDDEN')
+    if (p.kind === 'manager' && !this.managerProvider(p.providerId)) fail('COLLAB_FORBIDDEN')
+  }
+  /** Principal check plus the guard requirement, before any provider call. */
+  private entry(ctx: ReadContext): void {
+    this.stable(ctx.principal)
+    const p = ctx.principal
+    const managedChannel = p.kind === 'manager' || ((p.kind === 'agent' || p.kind === 'provider') && this.options.providers.some(x => x.managed === true && x.channel === (p.kind === 'agent' ? p.channel : p.on.channel)))
+    if (managedChannel && typeof ctx.guard !== 'function') fail('COLLAB_FORBIDDEN')
+  }
+  /** Synchronous linearization check; callers must not await between it and the commit or return. */
+  private guard(ctx: ReadContext): void {
+    if (ctx.guard === undefined) return
+    let valid = false
+    try { valid = ctx.guard() === true } catch { valid = false }
+    if (!valid) fail('COLLAB_CALLER_STALE')
+  }
+  private managerProvider(providerId: string): ChannelProvider | undefined { return this.options.providers.find(x => x.id === providerId && x.managed === true) }
+  /** Current and retired bindings both occupy an address forever. */
+  private addressTaken(s: SpaceState, b: Address): boolean {
+    return Object.values(s.members).some(m => [m.binding, ...(m.previousBindings ?? [])].some(x => x.channel === b.channel && x.address === b.address))
   }
   private address(p: Principal): Address { if (p.kind === 'internal' || p.kind === 'manager') return fail('COLLAB_FORBIDDEN'); return p.kind === 'agent' ? p : p.on }
   private state(spaceId: string): SpaceState {
@@ -117,16 +159,18 @@ export class CollabService {
     this.commits.set(spaceId, committing)
     try { await committing } finally { this.commits.delete(spaceId) }
   }
-  private async samplePresence(members: Member[]): Promise<Record<string, Presence>> {
+  /** One sample per member name, tied to the exact binding it was taken for. */
+  private async samplePresence(members: Member[]): Promise<{ presence: Record<string, Presence>; bindings: Record<string, Address> }> {
     const unique = [...new Map(members.map(member => [member.name, member])).values()]
-    return Object.fromEntries(await Promise.all(unique.map(async member => {
+    const sampled = await Promise.all(unique.map(async member => {
       const provider = this.options.providers.find(p => p.channel === member.binding.channel)
       let presence: Presence = 'unreachable'
       if (member.binding.supports.wake && provider) {
         try { presence = await provider.presence(structuredClone(member)) } catch { presence = 'unreachable' }
       }
-      return [member.name, presence] as const
-    })))
+      return { name: member.name, presence, binding: { channel: member.binding.channel, address: member.binding.address } }
+    }))
+    return { presence: Object.fromEntries(sampled.map(x => [x.name, x.presence])), bindings: Object.fromEntries(sampled.map(x => [x.name, x.binding])) }
   }
   private launchDispatch(spaceId: string, events: CollabEvent[], generation: symbol): void {
     if (this.generations.get(spaceId) !== generation || !this.opened.has(spaceId) || this.failed.has(spaceId)) return
@@ -157,19 +201,21 @@ export class CollabService {
   }
   private authorize(name: CommandName, s: SpaceState, p: Principal, m: Member | undefined): void {
     const rule = authorization[name]
-    if (p.kind === 'internal' || !m) fail('COLLAB_FORBIDDEN')
+    if (p.kind === 'internal' || p.kind === 'manager' || !m) fail('COLLAB_FORBIDDEN')
+    // A managed member's entry and exit belong to its integrator.
+    if (m.managedBy !== undefined && (name === 'join' || name === 'declineInvite' || name === 'leave')) fail('COLLAB_FORBIDDEN')
     if (m.status !== (rule === 'invited' ? 'invited' : 'active')) fail('COLLAB_MEMBER_INACTIVE')
     if (rule === 'leader' && s.leader !== m.name) fail('COLLAB_FORBIDDEN')
   }
-  private async command(ctx: CommandContext, name: Exclude<CommandName, 'createSpace'>, input: unknown, decide: (s: SpaceState, actor: string, member: Member | undefined) => CollabEvent[] | Promise<CollabEvent[]>, replay?: (s: SpaceState, actor: string) => CommandResult | undefined, prepare?: () => Promise<Member[]>): Promise<CommandResult> {
-    this.stable(ctx.principal)
+  private async command(ctx: CommandContext, name: Exclude<CommandName, 'createSpace' | ManagerCommand>, input: unknown, decide: (s: SpaceState, actor: string, member: Member | undefined) => CollabEvent[] | Promise<CollabEvent[]>, replay?: (s: SpaceState, actor: string) => CommandResult | undefined, prepare?: () => Promise<Member[]>): Promise<CommandResult> {
+    this.entry(ctx)
     // Internal principals never run member commands; reject before prepare,
     // provider claim, presence sampling or any space-state check.
-    if (ctx.principal.kind === 'internal') fail('COLLAB_FORBIDDEN')
+    if (ctx.principal.kind === 'internal' || ctx.principal.kind === 'manager') fail('COLLAB_FORBIDDEN')
     if (this.failed.has(ctx.spaceId) || this.stopped.has(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
     const generation = this.generations.get(ctx.spaceId)
     const extraMembers = await prepare?.() ?? []
-    const presence = await this.samplePresence([...Object.values(this.states.get(ctx.spaceId)?.members ?? {}), ...extraMembers])
+    const samples = await this.samplePresence([...Object.values(this.states.get(ctx.spaceId)?.members ?? {}), ...extraMembers])
     let dispatch: CollabEvent[] = []
     const response = await this.enqueue(ctx.spaceId, async () => {
       if (generation !== this.generations.get(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
@@ -178,17 +224,18 @@ export class CollabService {
       const m = this.lookup(s, p)
       const scope: ReceiptScope = { kind: 'member', name: m.name }
       const hash = createHash('sha256').update(canonical({ name, input })).digest('hex')
-      const old = this.receipt(ctx, scope, hash); if (old) return old
+      const old = this.receipt(ctx, scope, hash); if (old) { this.guard(ctx); return old }
       if (s.status === 'closed') fail('COLLAB_SPACE_CLOSED')
       this.authorize(name, s, p, m)
       const actor = m.name
       const original = replay?.(s, actor)
       const business = original ? [] : await decide(s, actor, m)
       if (generation !== this.generations.get(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
-      const events = decideDispatch(s, business, { presence, providers: new Map(this.options.providers.map(p => [p.channel, p.id])) }), result: CommandResult = original ?? { seq: s.lastSeq + 1, spaceId: s.spaceId }
+      const events = decideDispatch(s, business, { ...samples, providers: new Map(this.options.providers.map(p => [p.channel, p.id])) }), result: CommandResult = original ?? { seq: s.lastSeq + 1, spaceId: s.spaceId }
       const item = events.find(e => e.type === 'item/created'); if (item?.type === 'item/created') result.itemId = item.item.id
       const record: CommitRecord = { kind: 'command', seq: s.lastSeq + 1, events, receipt: { cmdId: ctx.cmdId, scope, payloadHash: hash, result } }
       this.checkTopicLimit(s, record)
+      this.guard(ctx)
       await this.persist(ctx.spaceId, record)
       dispatch = events
       return structuredClone(result)
@@ -209,14 +256,73 @@ export class CollabService {
     if (ref === undefined) return
     if (typeof ref !== 'number' || !Number.isSafeInteger(ref) || ref < 1 || !Object.hasOwn(s.topicOf, ref)) fail('COLLAB_BAD_REF')
   }
+  /** Two-phase manager pipeline: claim outside the queue at most once, then decide everything again from current state. */
+  private async managerCommand(ctx: CommandContext, name: ManagerCommand, input: unknown, decide: (s: SpaceState, actor: string, channel: string, claimed: Binding | undefined) => CollabEvent[], claimAddress?: unknown): Promise<CommandResult> {
+    this.entry(ctx)
+    const p = ctx.principal
+    if (p.kind !== 'manager') fail('COLLAB_FORBIDDEN')
+    const provider = this.managerProvider(p.providerId)!, channel = provider.channel
+    if (this.failed.has(ctx.spaceId) || this.stopped.has(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
+    const generation = this.generations.get(ctx.spaceId)
+    const scope: ReceiptScope = { kind: 'manager', channel }
+    const hash = createHash('sha256').update(canonical({ name, input })).digest('hex')
+    let claimed: Binding | undefined
+    const hasReceipt = (this.records.get(ctx.spaceId) ?? []).some(r => r.kind === 'command' && r.receipt.cmdId === ctx.cmdId && canonical(r.receipt.scope) === canonical(scope))
+    if (claimAddress !== undefined && !hasReceipt) {
+      try {
+        const b = typeof claimAddress === 'string' ? await provider.claim(claimAddress, 'agent') : null
+        if (b && b.channel === channel) claimed = structuredClone(b)
+      } catch { /* no usable claim: COLLAB_ADDRESS_UNCLAIMED in the queue */ }
+    }
+    // Nothing decided above is trusted below except the claim result itself.
+    return this.enqueue(ctx.spaceId, async () => {
+      if (generation !== this.generations.get(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
+      const s = this.state(ctx.spaceId)
+      if (!ctx.cmdId || typeof ctx.cmdId !== 'string') fail('COLLAB_BAD_CMD_ID')
+      const old = this.receipt(ctx, scope, hash); if (old) { this.guard(ctx); return old }
+      // Authorization before closure: an unauthorized integrator learns nothing about the space.
+      if (!s.managers.includes(channel)) fail('COLLAB_NOT_MEMBER')
+      if (s.status === 'closed') fail('COLLAB_SPACE_CLOSED')
+      const events = decide(s, `manager:${channel}`, channel, claimed)
+      const result: CommandResult = { seq: s.lastSeq + 1, spaceId: s.spaceId }
+      this.guard(ctx)
+      await this.persist(ctx.spaceId, { kind: 'command', seq: s.lastSeq + 1, events, receipt: { cmdId: ctx.cmdId, scope, payloadHash: hash, result } })
+      return structuredClone(result)
+    })
+  }
+  private checkName(s: SpaceState, name: unknown): void {
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(name)) fail('COLLAB_BAD_NAME')
+    if (Object.hasOwn(s.members, name)) fail('COLLAB_NAME_TAKEN')
+  }
+  private checkClaimed(s: SpaceState, claimed: Binding | undefined): Binding {
+    if (!claimed) fail('COLLAB_ADDRESS_UNCLAIMED')
+    if (this.addressTaken(s, claimed)) fail('COLLAB_ADDRESS_TAKEN')
+    return claimed
+  }
+  /** Target of rebind/retire: an active member managed by this very channel. */
+  private managedTarget(s: SpaceState, channel: string, name: unknown): Member {
+    const m = typeof name === 'string' && Object.hasOwn(s.members, name) ? s.members[name]! : undefined
+    if (!m || m.managedBy !== channel) fail('COLLAB_FORBIDDEN')
+    if (m.status !== 'active') fail('COLLAB_MEMBER_INACTIVE')
+    return m
+  }
+  /** Synchronous, inside the serial transaction: format, needsReply, and the recipient provider's support. */
+  private checkMode(recipient: Member, mode: unknown, needsReply: boolean): void {
+    if (typeof mode !== 'string' || !MODE_FORMAT.test(mode) || !needsReply) fail('COLLAB_BAD_MODE')
+    const provider = this.options.providers.find(p => p.channel === recipient.binding.channel)
+    let supported = false
+    try { supported = provider?.supportsMode?.(mode) === true } catch { supported = false }
+    if (!supported) fail('COLLAB_MODE_UNSUPPORTED')
+  }
   private async claim(address: string, kind: MemberKind): Promise<Binding> {
-    const claimed = (await Promise.all(this.options.providers.map(p => p.claim(address, kind)))).filter((b): b is Binding => b !== null)
+    // Managed providers' addresses enter only through admitMember.
+    const claimed = (await Promise.all(this.options.providers.filter(p => p.managed !== true).map(p => p.claim(address, kind)))).filter((b): b is Binding => b !== null)
     if (claimed.length > 1) fail('COLLAB_ADDRESS_AMBIGUOUS', { candidates: claimed.map(b => b.channel) })
     return claimed[0] ?? fail('COLLAB_ADDRESS_UNCLAIMED')
   }
   async createSpace(ctx: CommandContext, input: { name: string; address: string; kind: MemberKind; purpose?: string }): Promise<CommandResult> {
     ctx = this.snapshot(ctx); input = structuredClone(input)
-    this.stable(ctx.principal); const a = this.address(ctx.principal)
+    const a = this.address(ctx.principal)
     const epoch = this.epochs.get(ctx.spaceId) ?? 0
     const check = () => {
       if ((this.epochs.get(ctx.spaceId) ?? 0) !== epoch || this.stopped.has(ctx.spaceId) || this.failed.has(ctx.spaceId)) fail('COLLAB_STORE_FAILED')
@@ -226,7 +332,7 @@ export class CollabService {
       check()
       if (!ctx.cmdId || typeof ctx.cmdId !== 'string') fail('COLLAB_BAD_CMD_ID')
       const scope: ReceiptScope = { kind: 'create', channel: a.channel, address: a.address }, hash = createHash('sha256').update(canonical({ name: 'createSpace', input })).digest('hex')
-      const old = this.receipt(ctx, scope, hash); if (old) return old
+      const old = this.receipt(ctx, scope, hash); if (old) { this.guard(ctx); return old }
       if (this.states.has(ctx.spaceId)) fail('COLLAB_SPACE_EXISTS')
       const spaces = await this.options.store.list()
       check()
@@ -244,6 +350,7 @@ export class CollabService {
       const convention = this.options.convention ?? defaultConvention
       const events: CollabEvent[] = [{ type: 'space/created', actor: input.name, spaceId: ctx.spaceId, serviceId: this.options.serviceId, leader: input.name, convention: { version: convention.version, sha256: convention.sha256 }, ...(purpose === undefined ? {} : { purpose }) }, { type: 'member/joined', actor: input.name, member }]
       const result = { seq: 1, spaceId: ctx.spaceId }
+      this.guard(ctx)
       await this.persist(ctx.spaceId, { kind: 'command', seq: 1, events, receipt: { cmdId: ctx.cmdId, scope, payloadHash: hash, result } }); return result
     })
   }
@@ -254,9 +361,8 @@ export class CollabService {
     if (input.kind !== 'agent') fail('COLLAB_BAD_KIND')
     if (!invited) throw claimError
     const binding = invited.binding
-    if (!/^[a-z][a-z0-9-]{0,31}$/.test(input.name)) fail('COLLAB_BAD_NAME')
-    if (Object.hasOwn(s.members, input.name)) fail('COLLAB_NAME_TAKEN')
-    if (Object.values(s.members).some(m => m.binding.channel === binding.channel && m.binding.address === binding.address)) fail('COLLAB_ADDRESS_TAKEN')
+    this.checkName(s, input.name)
+    if (this.addressTaken(s, binding)) fail('COLLAB_ADDRESS_TAKEN')
     return [{ type: 'member/invited', actor, member: invited }]
   }, undefined, async () => {
     try {
@@ -270,14 +376,14 @@ export class CollabService {
   async leave(ctx: CommandContext): Promise<CommandResult> { ctx = this.snapshot(ctx); return this.command(ctx, 'leave', undefined, (s, actor) => {
     const events: CollabEvent[] = [{ type: 'member/status', actor, name: actor, status: 'gone' }]
     if (s.leader === actor) {
-      const next = Object.values(s.members).filter(m => m.name !== actor && m.status === 'active').sort((a, b) => a.joinSeq - b.joinSeq)[0]
+      const next = Object.values(s.members).filter(m => m.name !== actor && m.status === 'active' && m.managedBy === undefined).sort((a, b) => a.joinSeq - b.joinSeq)[0]
       events.push(next ? { type: 'leader/changed', actor, leader: next.name } : { type: 'space/closed', actor })
     }
     return events
   }) }
   private otherActive(s: SpaceState, actor: string, name: string): void { if (name === actor || s.members[name]?.status !== 'active') fail('COLLAB_FORBIDDEN') }
   async markGone(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'markGone', input, (s, actor) => { this.otherActive(s, actor, input.member); return [{ type: 'member/status', actor, name: input.member, status: 'gone' }] }) }
-  async transferLeader(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'transferLeader', input, (s, actor) => { this.otherActive(s, actor, input.member); return [{ type: 'leader/changed', actor, leader: input.member }] }) }
+  async transferLeader(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'transferLeader', input, (s, actor) => { this.otherActive(s, actor, input.member); if (s.members[input.member]!.managedBy !== undefined) fail('COLLAB_FORBIDDEN'); return [{ type: 'leader/changed', actor, leader: input.member }] }) }
   async closeSpace(ctx: CommandContext): Promise<CommandResult> { ctx = this.snapshot(ctx); return this.command(ctx, 'closeSpace', undefined, (_s, actor) => [{ type: 'space/closed', actor }]) }
   async createItem(ctx: CommandContext, input: CreateItemInput): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'createItem', input, (s, actor) => {
     rejectDeciders(input)
@@ -285,8 +391,9 @@ export class CollabService {
     if (!['charter', 'request', 'other'].includes(input.kind)) fail('COLLAB_BAD_ITEM', { field: 'kind' })
     if (input.kind === 'request' && (!Object.hasOwn(s.members, input.assignee) || s.members[input.assignee]!.status !== 'active')) fail('COLLAB_BAD_ITEM', { field: 'assignee' })
     if (typeof input.itemId !== 'string' || !input.itemId || Object.hasOwn(s.items, input.itemId)) fail('COLLAB_BAD_ITEM', { field: 'itemId' })
+    checkExt(input.ext)
     this.checkRef(s, input.ref)
-    const base = { id: input.itemId, author: actor, title: input.title, body: input.body, requiredAcks: [...input.requiredAcks], revision: 1, status: 'draft' as const, acks: {}, ...(input.ref === undefined ? {} : { ref: input.ref }) }
+    const base = { id: input.itemId, author: actor, title: input.title, body: input.body, requiredAcks: [...input.requiredAcks], revision: 1, status: 'draft' as const, acks: {}, ...(input.ref === undefined ? {} : { ref: input.ref }), ...(input.ext === undefined ? {} : { ext: input.ext }) }
     const item: Item = input.kind === 'request' ? { ...base, kind: 'request', assignee: input.assignee, progress: 'open' } : { ...base, kind: input.kind }
     return [{ type: 'item/created', actor, item }]
   }) }
@@ -309,8 +416,10 @@ export class CollabService {
   async sendMessage(ctx: CommandContext, input: { to: string; body: string; needsReply?: boolean; ref?: number; ext?: Ext; mode?: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'sendMessage', input, (s, actor) => {
     if (input.to === actor || !Object.hasOwn(s.members, input.to) || s.members[input.to]!.status !== 'active') fail('COLLAB_BAD_RECIPIENT')
     if (typeof input.body !== 'string' || Buffer.byteLength(input.body) < 1 || Buffer.byteLength(input.body) > 16384 || (input.needsReply !== undefined && typeof input.needsReply !== 'boolean')) fail('COLLAB_BAD_MESSAGE')
+    checkExt(input.ext)
     this.checkRef(s, input.ref)
-    return [{ type: 'message/sent', actor, message: { id: `${s.lastSeq + 1}`, actor, to: input.to, body: input.body, needsReply: input.needsReply === undefined ? false : input.needsReply, ...(input.ref === undefined ? {} : { ref: input.ref }) } }]
+    if (input.mode !== undefined) this.checkMode(s.members[input.to]!, input.mode, input.needsReply === true)
+    return [{ type: 'message/sent', actor, message: { id: `${s.lastSeq + 1}`, actor, to: input.to, body: input.body, needsReply: input.needsReply === undefined ? false : input.needsReply, ...(input.ref === undefined ? {} : { ref: input.ref }), ...(input.ext === undefined ? {} : { ext: input.ext }), ...(input.mode === undefined ? {} : { mode: input.mode }) } }]
   }) }
   async setStatus(ctx: CommandContext, input: { text: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'setStatus', input, (_s, actor) => { if (typeof input.text !== 'string' || input.text.length > 500) fail('COLLAB_BAD_STATUS'); return [{ type: 'member/statusText', actor, name: actor, text: input.text }] }) }
   async advanceRequest(ctx: CommandContext, input: { itemId: string; progress: Progress }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'advanceRequest', input, (s, actor) => {
@@ -321,31 +430,60 @@ export class CollabService {
     if (!transitions[item.progress].includes(input.progress)) fail('COLLAB_BAD_TRANSITION')
     return [{ type: 'request/progressed', actor, itemId: item.id, progress: input.progress }]
   }) }
-  async allowManager(_ctx: CommandContext, _input: { channel: string }): Promise<CommandResult> { return fail('COLLAB_NOT_IMPLEMENTED') }
-  async revokeManager(_ctx: CommandContext, _input: { channel: string }): Promise<CommandResult> { return fail('COLLAB_NOT_IMPLEMENTED') }
-  async admitMember(_ctx: CommandContext, _input: { name: string; address: string }): Promise<CommandResult> { return fail('COLLAB_NOT_IMPLEMENTED') }
-  async rebindMember(_ctx: CommandContext, _input: { member: string; address: string }): Promise<CommandResult> { return fail('COLLAB_NOT_IMPLEMENTED') }
-  async retireMember(_ctx: CommandContext, _input: { member: string }): Promise<CommandResult> { return fail('COLLAB_NOT_IMPLEMENTED') }
-  private readState(ctx: ReadContext): SpaceState { this.stable(ctx.principal); const s = this.state(ctx.spaceId); if (ctx.principal.kind !== 'internal' && this.lookup(s, ctx.principal).status !== 'active') fail('COLLAB_MEMBER_INACTIVE'); return s }
+  async allowManager(ctx: CommandContext, input: { channel: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'allowManager', input, (s, actor) => {
+    const channel = input.channel
+    const valid = typeof channel === 'string' && /^[a-z][a-z0-9-]{0,31}$/.test(channel) && this.options.providers.some(p => p.managed === true && p.channel === channel)
+    if (!valid || s.managers.includes(channel)) fail('COLLAB_BAD_CHANNEL')
+    return [{ type: 'manager/allowed', actor, channel }]
+  }) }
+  async revokeManager(ctx: CommandContext, input: { channel: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'revokeManager', input, (s, actor) => {
+    const channel = input.channel
+    if (typeof channel !== 'string' || !s.managers.includes(channel)) fail('COLLAB_BAD_CHANNEL')
+    // Retire in the same commit: no active member may outlive its manager's grant.
+    const retired = Object.values(s.members).filter(m => m.managedBy === channel && m.status === 'active')
+    return [{ type: 'manager/revoked', actor, channel }, ...retired.map(m => ({ type: 'member/status' as const, actor, name: m.name, status: 'gone' as const }))]
+  }) }
+  async admitMember(ctx: CommandContext, input: { name: string; address: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.managerCommand(ctx, 'admitMember', input, (s, actor, channel, claimed) => {
+    const binding = claimed ?? fail('COLLAB_ADDRESS_UNCLAIMED')
+    this.checkName(s, input.name)
+    this.checkClaimed(s, binding)
+    const member: Member = { name: input.name, kind: 'agent', status: 'active', joinSeq: s.lastSeq + 1, binding, statusText: '', wakeCount: 0, managedBy: channel }
+    return [{ type: 'member/joined', actor, member }]
+  }, input.address) }
+  async rebindMember(ctx: CommandContext, input: { member: string; address: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.managerCommand(ctx, 'rebindMember', input, (s, actor, channel, claimed) => {
+    const target = this.managedTarget(s, channel, input.member)
+    return [{ type: 'member/rebound', actor, name: target.name, binding: this.checkClaimed(s, claimed) }]
+  }, input.address) }
+  async retireMember(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.managerCommand(ctx, 'retireMember', input, (s, actor, channel) => {
+    const target = this.managedTarget(s, channel, input.member)
+    return [{ type: 'member/status', actor, name: target.name, status: 'gone' }]
+  }) }
+  private readState(ctx: ReadContext): SpaceState { this.entry(ctx); const s = this.state(ctx.spaceId); if (ctx.principal.kind !== 'internal' && this.lookup(s, ctx.principal).status !== 'active') fail('COLLAB_MEMBER_INACTIVE'); return s }
   async overview(ctx: ReadContext): Promise<Overview> {
     ctx = this.snapshot(ctx)
     const generation = this.generations.get(ctx.spaceId)
     const observed = await this.samplePresence(Object.values(this.readState(ctx).members))
     if (this.generations.get(ctx.spaceId) !== generation) fail('COLLAB_STORE_FAILED')
     const s = structuredClone(this.readState(ctx))
-    const presence: Overview['presence'] = Object.fromEntries(Object.values(s.members).map(m => [m.name, observed[m.name]!]))
+    // A sample taken for an older binding says nothing about the current one.
+    const presence: Overview['presence'] = Object.fromEntries(Object.values(s.members).map(m => {
+      const b = Object.hasOwn(observed.bindings, m.name) ? observed.bindings[m.name] : undefined
+      return [m.name, b && b.channel === m.binding.channel && b.address === m.binding.address ? observed.presence[m.name]! : 'unknown']
+    }))
     const active = this.inFlight.get(ctx.spaceId) ?? new Set<string>()
     const unfinished = Object.values(s.deliveries).filter(d => !d.outcome)
+    this.guard(ctx)
     return { ...s, pendingDeliveries: unfinished.filter(d => !active.has(d.deliveryId)), inFlightDeliveries: unfinished.filter(d => active.has(d.deliveryId)), presence }
   }
-  async readSince(ctx: ReadContext, seq: number): Promise<CommitRecord[]> { this.readState(ctx); if (!Number.isInteger(seq) || seq < 0) fail('COLLAB_BAD_SEQ'); return structuredClone((this.records.get(ctx.spaceId) ?? []).filter(r => r.seq > seq)) }
+  async readSince(ctx: ReadContext, seq: number): Promise<CommitRecord[]> { this.readState(ctx); if (!Number.isInteger(seq) || seq < 0) fail('COLLAB_BAD_SEQ'); this.guard(ctx); return structuredClone((this.records.get(ctx.spaceId) ?? []).filter(r => r.seq > seq)) }
   async project(ctx: ReadContext): Promise<string> { const s = await this.overview(ctx); return this.options.project?.(s) ?? project(s, s.presence) }
   async readConvention(ctx: ReadContext, version: string): Promise<string> {
     this.readState(ctx)
     const custom = this.options.convention
-    if (custom) { if (custom.version !== version) fail('COLLAB_CONVENTION_UNKNOWN'); return custom.text }
+    if (custom) { if (custom.version !== version) fail('COLLAB_CONVENTION_UNKNOWN'); this.guard(ctx); return custom.text }
     // Spaces keep the version recorded at creation; every published version stays readable.
     if (!Object.hasOwn(conventions, version)) fail('COLLAB_CONVENTION_UNKNOWN')
+    this.guard(ctx)
     return conventions[version]!.text
   }
 }

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { canonical } from '../src/service/index.js'
 import { expect, it } from 'vitest'
 import { CollabService, principals } from '../src/index.js'
-import { member, rawCommand, rejectsCleanly, seedRecord, world, worldFrom } from './support/world.js'
+import { defaultMembers, member, rawCommand, rejectsCleanly, seedRecord, world, worldFrom } from './support/world.js'
 import { MemStore } from './support/mem-store.js'
 import { FakeProvider } from './support/fake-provider.js'
 it('members-01：唯一认领后加入', async () => { const w = await world(); await w.service.invite(w.ctx(), { name: 'alice', address: 'a:42', kind: 'agent' }); const ctx = { spaceId: 's', principal: principals.agent({ channel: 'test-a', address: 'a:42' }), cmdId: 'join' }; await w.service.join(ctx); expect((await w.service.overview(w.read())).members.alice).toMatchObject({ status: 'active', binding: { channel: 'test-a', address: 'a:42' } }); expect(w.provider.claims).toContainEqual(['a:42', 'agent']) })
@@ -32,6 +32,12 @@ it('members-08：旧日志中的人类成员按普通成员重放', async () => 
   expect(await w.service.invite(w.ctx('aily', 'inv-pm'), invite)).toEqual(original)
   expect(w.log()).toHaveLength(length)
 })
-it('members-05：地址与名字不能复用包括gone/declined', async () => { const w = await world(); await expect(w.service.invite(w.ctx(), { name: 'alice', address: 'a:9', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_ADDRESS_TAKEN' }); await w.service.declineInvite(w.ctx('bob')); await expect(w.service.invite(w.ctx(), { name: 'alice', address: 'a:9', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_ADDRESS_TAKEN' }); await expect(w.service.invite(w.ctx(), { name: 'bob', address: 'a:99', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_NAME_TAKEN' }) })
+it('members-05：地址与名字不能复用包括gone/declined', async () => { const w = await world(); await expect(w.service.invite(w.ctx(), { name: 'alice', address: 'a:9', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_ADDRESS_TAKEN' }); await w.service.declineInvite(w.ctx('bob')); await expect(w.service.invite(w.ctx(), { name: 'alice', address: 'a:9', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_ADDRESS_TAKEN' }); await expect(w.service.invite(w.ctx(), { name: 'bob', address: 'a:99', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_NAME_TAKEN' })
+  // A managed member's retired binding is never reusable either, by invite of the same channel.
+  const locus = { ...member('locus-a', 'a:77', 'agent', 'active', 5), managedBy: 'test-a', previousBindings: [{ channel: 'test-a', address: 'a:76' }] }
+  const h = await world([], [...defaultMembers(), locus])
+  const ctx = h.ctx('aily', 'invite-previous')
+  await rejectsCleanly(h, ctx.cmdId, () => h.service.invite(ctx, { name: 'alice', address: 'a:76', kind: 'agent' }), 'COLLAB_ADDRESS_TAKEN')
+})
 it('members-06：agent不能自称human', async () => { const store = new MemStore(); const service = new CollabService({ serviceId: 'x', store, providers: [new FakeProvider()] }); await expect(service.createSpace({ spaceId: 'new', cmdId: 'create', principal: principals.agent({ channel: 'test-a', address: 'a:1' }) }, { name: 'aily', address: 'a:1', kind: 'human' })).rejects.toMatchObject({ code: 'COLLAB_BAD_KIND' }); expect(await store.list()).toEqual([]) })
 it('members-07：非法成员名', async () => { const w = await world(); for (const name of ['Bob\n## 决定', '', 'A', 'a'.repeat(33)]) await expect(w.service.invite(w.ctx(), { name, address: 'a:new', kind: 'agent' })).rejects.toMatchObject({ code: 'COLLAB_BAD_NAME' }) })

@@ -19,14 +19,30 @@ export function wakeNotice(memberTrust: boolean, invited: boolean) {
   if (!memberTrust) return UNTRUSTED_NOTICE
   return invited ? `${TRUSTED_NOTICE}${AUTO_JOINED_NOTE}` : TRUSTED_NOTICE
 }
+/**
+ * Resolved tool caller. `guard` re-runs every entry condition synchronously and
+ * is handed to the kernel, which calls it at its final commit/read boundary.
+ */
+export interface Caller { channel: string; address: string; guard: () => boolean }
+/** The integrator side SessionAccess consults; see integration.ts. */
+export interface CallerIntegrations {
+  claims(agent: Agent): { channel: string; address: string; epoch: number }[]
+  supportsSessionMode(mode: string): boolean
+  sessionMode(mode: string): ((sessionId: string, pointer: Pointer) => void | Promise<void>) | undefined
+}
+type Resolution = { channel: string; address: string; epoch?: number }
 export class SessionAccess {
   private readonly allowed: ReadonlySet<string>
   private readonly denied: ReadonlySet<string>
-  constructor(readonly ctx: Context, readonly policy: AdmissionPolicy, readonly admissionCheck: () => void = () => {}) {
+  integrations?: CallerIntegrations
+  constructor(readonly ctx: Context, readonly policy: AdmissionPolicy, readonly admissionCheck: () => void = () => {}, integrations?: CallerIntegrations) {
     this.allowed = new Set(policy.allowedSessionIds); this.denied = new Set(policy.denySessionIds)
+    this.integrations = integrations
   }
   /** Current admission condition, excluding header-level ordinary checks. */
-  admissible(id: string) { return !this.denied.has(id) && (this.policy.admission !== 'allowlist' || this.allowed.has(id)) && !this.archived(id) }
+  admissible(id: string) { return !this.excluded(id) && (this.policy.admission !== 'allowlist' || this.allowed.has(id)) }
+  /** Deny list and archive apply to every caller, ordinary or managed. */
+  excluded(id: string) { return this.denied.has(id) || this.archived(id) }
   archived(id: string) { return this.ctx.workspaceRegistry.archivedSessionIds.includes(SessionId(id)) }
   ordinary(header: SessionHeader, agent?: Agent) {
     if (header.origin === 'subagent' || (header.delegationDepth ?? 0) !== 0) return false
@@ -36,10 +52,34 @@ export class SessionAccess {
     }
     return true
   }
-  caller(exec: { agent?: Agent }): string {
-    const agent = exec.agent
-    if (!agent || this.ctx.agents.get(agent.id) !== agent || agent.id !== agent.session.id || !this.admissible(agent.id) || !this.ordinary(agent.session.header, agent)) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
-    return agent.id
+  /**
+   * Resolve the actual executing session to exactly one caller address, never
+   * cached. Ordinary first-level sessions map to `dsh-session`; any other
+   * session maps to a managed address only when exactly one attached
+   * integrator resolves it. An ordinary session claimed by an integrator is
+   * refused. Deny list and archive are checked before any integrator is asked.
+   */
+  private resolve(agent: Agent | undefined): Resolution | undefined {
+    if (!agent || this.ctx.agents.get(agent.id) !== agent || agent.id !== agent.session.id || this.excluded(agent.id)) return
+    const claims = this.integrations?.claims(agent) ?? []
+    if (this.ordinary(agent.session.header, agent)) {
+      if (claims.length || !this.admissible(agent.id)) return
+      return { channel: 'dsh-session', address: agent.id }
+    }
+    if (claims.length !== 1) return
+    return claims[0]
+  }
+  caller(exec: { agent?: Agent }): Caller {
+    const agent = exec?.agent
+    const resolved = this.resolve(agent)
+    if (!resolved) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+    const guard = () => {
+      try {
+        const now = this.resolve(agent)
+        return !!now && now.channel === resolved.channel && now.address === resolved.address && now.epoch === resolved.epoch
+      } catch { return false }
+    }
+    return { channel: resolved.channel, address: resolved.address, guard }
   }
   async header(id: string): Promise<SessionHeader | undefined> {
     if (!this.admissible(id)) return
@@ -110,8 +150,20 @@ export class SessionProvider implements ChannelProvider {
     if (!('agent' in result) || !result.agent || result.agent.id !== id || result.agent.session.id !== id || !this.access.ordinary(result.agent.session.header, result.agent) || !await this.access.header(id)) throw new CollabError('COLLAB_SESSION_UNAVAILABLE')
     this.gate()
     if (!this.access.admissible(id) || this.access.ctx.agents.get(SessionId(id)) !== result.agent || result.agent.id !== id || result.agent.session.id !== id || !this.access.ordinary(result.agent.session.header, result.agent)) throw new CollabError('COLLAB_SESSION_UNAVAILABLE')
-    const safe = { spaceId: pointer.spaceId, toSeq: pointer.toSeq, counts: { message: pointer.counts.message, item: pointer.counts.item, decision: pointer.counts.decision, member: pointer.counts.member }, from: pointer.from, ...(pointer.invited ? { invited: true } : {}), ...(Number.isSafeInteger(pointer.thread) ? { thread: pointer.thread } : {}) }
+    const safe = { spaceId: pointer.spaceId, toSeq: pointer.toSeq, counts: { message: pointer.counts.message, item: pointer.counts.item, decision: pointer.counts.decision, member: pointer.counts.member }, from: pointer.from, ...(pointer.invited ? { invited: true as const } : {}), ...(Number.isSafeInteger(pointer.thread) ? { thread: pointer.thread } : {}) }
+    if (pointer.mode !== undefined) {
+      // A mode wake goes to the integrator's handler after every check above;
+      // never followup, never a silent downgrade when the mode is gone.
+      const handler = typeof pointer.mode === 'string' ? this.access.integrations?.sessionMode(pointer.mode) : undefined
+      if (!handler) throw new CollabError('COLLAB_MODE_UNSUPPORTED')
+      await handler(id, { ...safe, mode: pointer.mode })
+      return
+    }
     result.agent.followup(createUserMessage({ source: { kind: 'plugin:dsh-collab' }, content: [{ type: 'text', text: `${wakeNotice(this.access.policy.memberTrust, pointer.invited === true)}\n${JSON.stringify(safe)}` }] }))
+  }
+  /** Synchronous, in-memory: only modes an attached integrator registered for ordinary recipients. */
+  supportsMode(mode: string): boolean {
+    return !this.closing && typeof mode === 'string' && this.access.integrations?.supportsSessionMode(mode) === true
   }
   close() { this.closing = true }
 }
