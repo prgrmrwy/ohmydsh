@@ -519,6 +519,19 @@ describe('settings information architecture', () => {
     expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
   })
 
+  it('does not report a playback save the Host did not persist', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(process.cwd(), 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Older Hosts drop unknown appearance keys but still answer 200; the
+    // client must verify the echo and tell the owner to restart DSH.
+    expect(settings).toContain("updated.appearance?.animationPlayback !== next")
+    expect(settings).toContain('请重启 DSH 后再保存')
+  })
+
   it('keeps explanation text behind info disclosures', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),

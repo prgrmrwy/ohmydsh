@@ -687,6 +687,15 @@ function GeneralTab(): JSX.Element {
               appearance: { animationPlayback: next },
             })
             setConfig(updated)
+            // A Host process started before this setting existed filters the
+            // unknown field out and still answers 200, so "saved" would be a
+            // lie until DSH is restarted. Verify what came back instead of
+            // echoing the request.
+            if (updated.appearance?.animationPlayback !== next) {
+              throw new Error(
+                '当前运行中的 DSH Host 还没有加载「动画播放」设置；请重启 DSH 后再保存。',
+              )
+            }
             setAnimationPlayback(resolveAnimationPlayback(next))
             globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
           }}
