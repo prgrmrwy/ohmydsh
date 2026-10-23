@@ -4,8 +4,6 @@
 
 English · [简体中文](README.zh.md)
 
-![The DSH session list with a different brand logo before each title (Grok, GLM, Kimi, OpenAI, DeepSeek), one per session's selected model; the models are local demo routes](docs/overview.png)
-
 ![Sidebar rendering: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)](docs/screenshot.png)
 
 <!-- problem -->
@@ -63,12 +61,37 @@ The badge content is derived only from `(provider, model)`; `index.ts` rebuilds 
 
 None. The plugin row carries no `config` fields and the package reads no environment variables.
 
-Recognized brands:
+## Provider / model → icon
 
-| Dimension | Brands |
-|---|---|
-| provider and model | DeepSeek, OpenAI/GPT/Codex, Anthropic/Claude, Grok/xAI, Kimi/Moonshot, GLM (Zhipu), MiniMax, Pi, OpenClaw, Hermes Agent (the misspelling `hermas` is also accepted), OpenCode, Qwen, Tencent Hunyuan (`hy3`, `hy4-*`), Meituan LongCat, Xiaomi MiMo, Gemini/Gemma, NVIDIA (Nemotron), Meta (Muse Spark, Llama), Ant Group (Ling/Ring), OpenRouter, ByteDance Seed |
-| provider only | Trae (`trae`, `trae-ai`, `traex*`; exact name or prefix, never a substring), Magpie (`magpie`, `magpie-*`, and the `dsh-magpie-connect` plugin route; exact name or prefix) |
+The table lists recognized provider route aliases and model-name examples, not a fixed model catalog. Matching ignores case and strips an npm scope and a leading `dsh-` / `dsh_`. A known provider determines the main icon; a different known model brand determines the corner icon. `—` means that dimension is not recognized for that brand. The exact rules live in [`logos.ts`](src/client/logos.ts).
+
+| Icon | Brand | Provider routes / aliases | Model names / families |
+|---|---|---|---|
+| <img src="src/client/assets/deepseek.svg" width="24" height="24" alt="DeepSeek"> | DeepSeek | `deepseek`, `deepseek-official` | `deepseek-*` |
+| <img src="src/client/assets/openai.svg" width="24" height="24" alt="OpenAI"> | OpenAI | `openai`, `codex` | `gpt-*`, `codex-*` |
+| <img src="src/client/assets/anthropic.svg" width="24" height="24" alt="Anthropic"> | Anthropic | `anthropic`, `claude` | `claude-*`, names containing `anthropic` |
+| <img src="src/client/assets/grok.svg" width="24" height="24" alt="Grok"> | Grok / xAI | `grok`, `xai` | `grok-*` |
+| <img src="src/client/assets/kimi.svg" width="24" height="24" alt="Kimi"> | Kimi / Moonshot | `kimi`, `moonshot` | `kimi-*`, `moonshot-*` |
+| <img src="src/client/assets/glm.svg" width="24" height="24" alt="GLM"> | GLM / Zhipu | `glm`, `z-ai`, `zai`, `zhipu` | `glm-*` |
+| <img src="src/client/assets/minimax.svg" width="24" height="24" alt="MiniMax"> | MiniMax | `minimax` | `minimax-*` |
+| <img src="src/client/assets/pi.svg" width="24" height="24" alt="Pi"> | Pi | `pi`, `pi-ai` | `pi`, `pi-*` |
+| <img src="src/client/assets/openclaw.svg" width="24" height="24" alt="OpenClaw"> | OpenClaw | names containing `openclaw` | names containing `openclaw` |
+| <img src="src/client/assets/hermes.svg" width="24" height="24" alt="Hermes"> | Hermes Agent | `hermes`, `hermas`, `nousresearch`, `nous` | names containing `hermes`, `hermas`, `nousresearch` |
+| <img src="src/client/assets/opencode.svg" width="24" height="24" alt="OpenCode"> | OpenCode | `opencode`, `opencode-go`, `opencode-zen` | names containing `opencode` |
+| <img src="src/client/assets/trae.svg" width="24" height="24" alt="Trae"> | Trae | `trae`, `trae-ai`, `traex*` | — |
+| <img src="src/client/assets/magpie.svg" width="24" height="24" alt="Magpie"> | Magpie | `magpie`, `magpie-*`, `dsh-magpie-connect` | — (gateway rule below) |
+| <img src="src/client/assets/qwen.svg" width="24" height="24" alt="Qwen"> | Qwen | `qwen`, `dashscope`, `bailian` | `qwen*`, `qwq*` |
+| <img src="src/client/assets/hunyuan.svg" width="24" height="24" alt="Hunyuan"> | Tencent Hunyuan | `hunyuan`, `tencent` | `hunyuan*`, `hy<digit>*` (e.g. `hy3`, `hy4-preview`) |
+| <img src="src/client/assets/longcat.svg" width="24" height="24" alt="LongCat"> | Meituan LongCat | `longcat`, `meituan` | `longcat-*` |
+| <img src="src/client/assets/mimo.svg" width="24" height="24" alt="MiMo"> | Xiaomi MiMo | `xiaomi`, `mimo` | `mimo-*` |
+| <img src="src/client/assets/gemini.svg" width="24" height="24" alt="Gemini"> | Google Gemini | `gemini`, `google`, `google-*` | `gemini-*`, `gemma*` |
+| <img src="src/client/assets/nvidia.svg" width="24" height="24" alt="NVIDIA"> | NVIDIA | names containing `nvidia` | names containing `nemotron` |
+| <img src="src/client/assets/meta.svg" width="24" height="24" alt="Meta"> | Meta | `meta`, `meta-ai`, `meta-llama*` | `muse-spark*`, names containing `llama` |
+| <img src="src/client/assets/antgroup.svg" width="24" height="24" alt="Ant Group"> | Ant Group | `ant-ling`, `inclusionai`, `antgroup` | `ling-*`, `ring-*` |
+| <img src="src/client/assets/openrouter.svg" width="24" height="24" alt="OpenRouter"> | OpenRouter | — | `openrouter-*` (e.g. TraeX `openrouter-3o[1m]`) |
+| <img src="src/client/assets/bytedance.svg" width="24" height="24" alt="ByteDance"> | ByteDance | — | `seed-*` |
+
+Trae and Magpie routes match exact names / prefixes, never arbitrary substrings. OpenRouter and ByteDance are **model-only** mappings: a provider route named `openrouter` does not by itself select the OpenRouter icon.
 
 Behind a gateway route (Magpie) a model id is `<upstream provider>/<model>`: the corner logo comes from the upstream segment read as a provider route (`claude` → Anthropic, `opencode-go` → OpenCode), and only when that segment is no brand (`auto/`, `group/`, a custom id) from the model name after the slash. Other routes keep reading the whole model id.
 

@@ -4,8 +4,6 @@
 
 [English](README.md) · 简体中文
 
-![DSH 会话列表，每个标题前是该会话所选模型的品牌 logo（Grok、GLM、Kimi、OpenAI、DeepSeek）；这些模型是本地演示路由](docs/overview.png)
-
 ![侧边栏效果：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）](docs/screenshot.png)
 
 <!-- problem -->
@@ -63,12 +61,37 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 
 无。插件行没有任何 `config` 字段，也不读取环境变量。
 
-可识别的品牌：
+## Provider / model → 图标对应关系
 
-| 维度 | 品牌 |
-|---|---|
-| provider 与 model | DeepSeek、OpenAI/GPT/Codex、Anthropic/Claude、Grok/xAI、Kimi/Moonshot、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（也接受 `hermas` 拼写）、OpenCode、Qwen、腾讯混元（`hy3`、`hy4-*`）、美团 LongCat、小米 MiMo、Gemini/Gemma、NVIDIA（Nemotron）、Meta（Muse Spark、Llama）、蚂蚁（Ling/Ring）、OpenRouter、ByteDance Seed |
-| 仅 provider | Trae（`trae`、`trae-ai`、`traex*`；按完整名或前缀匹配，不按子串）、Magpie（`magpie`、`magpie-*` 及插件 route `dsh-magpie-connect`；按完整名或前缀匹配） |
+下表列出可识别的 provider route 别名与 model 名称示例，不是固定的模型目录。匹配不区分大小写，并去掉 npm scope 和开头的 `dsh-` / `dsh_`。已知 provider 决定主图；model 品牌已知且不同时决定右下角小图标。`—` 表示该品牌不支持这一维度。精确规则见 [`logos.ts`](src/client/logos.ts)。
+
+| 图标 | 品牌 | Provider route / 别名 | Model 名称 / 系列 |
+|---|---|---|---|
+| <img src="src/client/assets/deepseek.svg" width="24" height="24" alt="DeepSeek"> | DeepSeek | `deepseek`、`deepseek-official` | `deepseek-*` |
+| <img src="src/client/assets/openai.svg" width="24" height="24" alt="OpenAI"> | OpenAI | `openai`、`codex` | `gpt-*`、`codex-*` |
+| <img src="src/client/assets/anthropic.svg" width="24" height="24" alt="Anthropic"> | Anthropic | `anthropic`、`claude` | `claude-*`、名称含 `anthropic` |
+| <img src="src/client/assets/grok.svg" width="24" height="24" alt="Grok"> | Grok / xAI | `grok`、`xai` | `grok-*` |
+| <img src="src/client/assets/kimi.svg" width="24" height="24" alt="Kimi"> | Kimi / Moonshot | `kimi`、`moonshot` | `kimi-*`、`moonshot-*` |
+| <img src="src/client/assets/glm.svg" width="24" height="24" alt="GLM"> | GLM / 智谱 | `glm`、`z-ai`、`zai`、`zhipu` | `glm-*` |
+| <img src="src/client/assets/minimax.svg" width="24" height="24" alt="MiniMax"> | MiniMax | `minimax` | `minimax-*` |
+| <img src="src/client/assets/pi.svg" width="24" height="24" alt="Pi"> | Pi | `pi`、`pi-ai` | `pi`、`pi-*` |
+| <img src="src/client/assets/openclaw.svg" width="24" height="24" alt="OpenClaw"> | OpenClaw | 名称含 `openclaw` | 名称含 `openclaw` |
+| <img src="src/client/assets/hermes.svg" width="24" height="24" alt="Hermes"> | Hermes Agent | `hermes`、`hermas`、`nousresearch`、`nous` | 名称含 `hermes`、`hermas`、`nousresearch` |
+| <img src="src/client/assets/opencode.svg" width="24" height="24" alt="OpenCode"> | OpenCode | `opencode`、`opencode-go`、`opencode-zen` | 名称含 `opencode` |
+| <img src="src/client/assets/trae.svg" width="24" height="24" alt="Trae"> | Trae | `trae`、`trae-ai`、`traex*` | — |
+| <img src="src/client/assets/magpie.svg" width="24" height="24" alt="Magpie"> | Magpie | `magpie`、`magpie-*`、`dsh-magpie-connect` | —（按下文网关规则） |
+| <img src="src/client/assets/qwen.svg" width="24" height="24" alt="Qwen"> | Qwen | `qwen`、`dashscope`、`bailian` | `qwen*`、`qwq*` |
+| <img src="src/client/assets/hunyuan.svg" width="24" height="24" alt="Hunyuan"> | 腾讯混元 | `hunyuan`、`tencent` | `hunyuan*`、`hy<数字>*`（如 `hy3`、`hy4-preview`） |
+| <img src="src/client/assets/longcat.svg" width="24" height="24" alt="LongCat"> | 美团 LongCat | `longcat`、`meituan` | `longcat-*` |
+| <img src="src/client/assets/mimo.svg" width="24" height="24" alt="MiMo"> | 小米 MiMo | `xiaomi`、`mimo` | `mimo-*` |
+| <img src="src/client/assets/gemini.svg" width="24" height="24" alt="Gemini"> | Google Gemini | `gemini`、`google`、`google-*` | `gemini-*`、`gemma*` |
+| <img src="src/client/assets/nvidia.svg" width="24" height="24" alt="NVIDIA"> | NVIDIA | 名称含 `nvidia` | 名称含 `nemotron` |
+| <img src="src/client/assets/meta.svg" width="24" height="24" alt="Meta"> | Meta | `meta`、`meta-ai`、`meta-llama*` | `muse-spark*`、名称含 `llama` |
+| <img src="src/client/assets/antgroup.svg" width="24" height="24" alt="Ant Group"> | 蚂蚁集团 | `ant-ling`、`inclusionai`、`antgroup` | `ling-*`、`ring-*` |
+| <img src="src/client/assets/openrouter.svg" width="24" height="24" alt="OpenRouter"> | OpenRouter | — | `openrouter-*`（如 TraeX 的 `openrouter-3o[1m]`） |
+| <img src="src/client/assets/bytedance.svg" width="24" height="24" alt="ByteDance"> | 字节跳动 | — | `seed-*` |
+
+Trae、Magpie 的 route 按完整名 / 前缀匹配，不按任意子串匹配。OpenRouter、ByteDance **仅支持 model 维度**：provider route 单独叫 `openrouter` 不会因此显示 OpenRouter 图标。
 
 model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模型族，并覆盖当前 TraeX 目录中的 GPT、DeepSeek、Gemini、OpenRouter 与 ByteDance Seed 系列。
 
