@@ -324,12 +324,13 @@ customizations:
     brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
     note: '自研,change upgrade-dsh-0-2-0-runtime(spec cockpit-memex-browse-shim)。纯 Web client adapter:把 cockpitBridge.forwards 接给 dshMemex.browseAddress,两端互不引用、无顶层 inject。按设备端口单飞 acquire,只交付 ready 的当前地址(最多等 15 秒,不缓存 URL);仅 CockpitForwardsError code=local-device 回落 localhost,unavailable/网络/业务错误原样传播;已接线的 bridge 消失时保持 fail-closed,避免远端静默误路由。须配 bridge >=0.6.1(已删旧 portForward,不能搭配 shim 0.1.1)。升级复核:bridge 的 forwards 契约。移除:删除本条即解耦;回滚旧 shim 必须同时回滚 bridge 到旧服务版本。'
   # 官方可选(remote):Schedule / 自动化任务。0.1.5 默认组合自带,0.2.0 移入默认关闭的官方可选包
+  # B049 临时停用(2026-10-23):schedule_* 只注册给 root agent,使 fork 子会话工具集与父不一致;实测完恢复 true。
   - id: experimental-schedule
     type: package
     source: remote
     spec: '@deepseek-ai/dsh-experimental-schedule-bundle@0.2.0-rc.2'
     version: 0.2.0-rc.2
-    enabled: true
+    enabled: false
     brief: 官方可选 Schedule(侧栏自动化任务页 + schedule_* 工具 + 时间上下文)
     note: '官方 bundle @deepseek-ai/dsh-experimental-schedule-bundle,与 dshVersion 同版本精确 pin。0.2.0 把 time-context/schedule/ui-schedule 三行移出出厂 Web 组合并放入本包(依赖同版本三个官方包);用户选择默认打开以保留 0.1.5 能力。任务存于会话日志内的会话本地投影。升级复核:升级 dshVersion 时须同步改本 pin。回滚/移除:enabled:false → dsh build → 重启(只撤销三行,已存任务保留)。 pin 校验 sha512-6oGDFceBMAsrKeJfFxByyvXBPE+Obfd0oMCwNYdWesPmRBueuRwj5lwp8BY+v59mQAc3Jzdkx1hZh/E6xRcMng=='
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
