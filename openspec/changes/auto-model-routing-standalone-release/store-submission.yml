@@ -1,0 +1,6 @@
+url: https://github.com/prgrmrwy/dsh-auto-model-routing
+name: prgrmrwy/dsh-auto-model-routing
+category: model
+description:
+  en: 'Adjusts reasoning effort per user turn using Jev via OpenRouter without changing the main model; includes configurable subagent route recommendations and disables AUTO on judgment failure.'
+  zh: '通过 OpenRouter 上的 Jev 按用户回合调整推理强度，不换主模型；提供可配置的子智能体路由推荐，判档失败即停用 AUTO。'

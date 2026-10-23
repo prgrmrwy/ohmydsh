@@ -18,7 +18,7 @@
 - [x] 3.1 运行 package test/typecheck/build、根 npm test、check:artifacts；区分已有失败与本次回归并记录真实结果。
 - [x] 3.2 在不共享 monorepo node_modules 的临时目录从已准备包独立 install/typecheck/test/build，补齐暴露的依赖；检查 npm pack 文件清单及解包后的 Host/Web/skill/展示资源入口。
 - [x] 3.3 使用临时 HOME/XDG/DSH_HOME 真实 Host，验证干净安装时 skill catalog 唯一、正文可加载、route_subagent 存在且 MANUAL 不外发；不得借用生产私有路径补丁让测试通过。
-- [ ] 3.4 在隔离旧部署上升级并连续 sync 两次，确认旧受管副本撤销、第二次 no-op、skill 唯一；禁用/重新装配后工具和 skill 消失且数据未变，记录非受管副本处理与实际 scope 可见性。
+- [x] 3.4 在隔离旧部署上升级并连续 sync 两次，确认旧受管副本撤销、第二次 no-op、skill 唯一；禁用/重新装配后工具和 skill 消失且数据未变，记录非受管副本处理与实际 scope 可见性。
 - [ ] 3.5 停止并收集所有隔离进程，检查目标路径后清理临时文件；不重启生产实例，写入轻量 verify 记录。
 
 ## 4. 提交与公开镜像
