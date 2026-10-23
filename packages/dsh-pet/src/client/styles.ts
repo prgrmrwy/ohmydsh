@@ -448,17 +448,18 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-link:hover{border-bottom-color:currentColor}
 .dshpet-settings .dshpet-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
   outline-offset:2px;border-radius:2px}
-.dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:6px;min-width:0}
+.dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:2px;min-width:0}
 /* Inline "i" disclosure for explanation text that used to be page prose. */
-.dshpet-settings .dshpet-field-head{display:flex;align-items:center;gap:6px;min-width:0}
+.dshpet-settings .dshpet-field-head{display:flex;align-items:center;gap:2px;min-width:0}
 /* Label + hint on the left, control on the right — one line, like the other
    DSH panels (default-mode / reasoning-effort switches). */
-.dshpet-settings .dshpet-inline-row{display:flex;align-items:center;justify-content:space-between;
-  gap:12px;flex-wrap:wrap}
+.dshpet-settings .dshpet-inline-row{display:flex;align-items:center;justify-content:flex-start;
+  gap:10px;flex-wrap:wrap}
 /* Inline "i" hint. Explanation is a GLANCE, not a mode: hover/focus shows the
    tooltip, no click state to toggle back. The tooltip is a child of the
    wrapper, so moving the pointer into it keeps it open and its links usable. */
-.dshpet-settings .dshpet-info{position:relative;display:inline-flex;flex:none}
+.dshpet-settings .dshpet-info{position:relative;display:inline-flex;flex:none;
+  vertical-align:middle;margin-left:1px}
 .dshpet-settings .dshpet-info-mark{border:0;padding:2px;margin:0;cursor:help;
   display:inline-flex;align-items:center;justify-content:center;
   background:none;color:var(--dsw-alias-label-tertiary,#8f959e);

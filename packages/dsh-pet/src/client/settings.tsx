@@ -1068,19 +1068,17 @@ export function ExpressionSection(): JSX.Element {
       )}
 
       <p className="dshpet-item-hint">
-        去哪里找动画：
+        找素材：
+        <a
+          className="dshpet-link"
+          href="https://googlefonts.github.io/noto-emoji-animation/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Google Noto 动画 emoji
+        </a>
         <InfoHint label="素材来源">
-          <p>
-            <a
-              className="dshpet-link"
-              href="https://googlefonts.github.io/noto-emoji-animation/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Google Noto 动画 emoji
-            </a>
-            ：方形构图、适合小图标；素材为 CC BY 4.0，对外使用需署名。
-          </p>
+          <p>方形构图、适合小图标；素材为 CC BY 4.0，对外使用需署名。</p>
           <p>
             直链形如 <code>https://fonts.gstatic.cn/s/e/notoemoji/latest/1f914/lottie.json</code>；
             <code>fonts.gstatic.com</code> 不通时换成 <code>fonts.gstatic.cn</code>，由 Host 下载即可。
