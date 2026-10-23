@@ -545,6 +545,38 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     return () => document.removeEventListener('mousemove', onMove)
   }, [mode, wheelRadius])
 
+  /**
+   * Hover-to-play trigger area.
+   *
+   * The button only covers the mascot circle; the capability wheel is drawn
+   * outside it, so moving onto a ring fired the button's mouseleave and froze
+   * the animation. Treat the whole rendered disc — mascot plus (while open)
+   * the wheel radius — as "the pointer is on Pet".
+   */
+  useEffect(() => {
+    const onMove = (event: PointerEvent): void => {
+      const node = rootRef.current?.querySelector('.dshpet-mascot')
+      if (node === null || node === undefined) return
+      const box = node.getBoundingClientRect()
+      const distance = Math.hypot(
+        event.clientX - (box.left + box.width / 2),
+        event.clientY - (box.top + box.height / 2),
+      )
+      const overMascot = distance <= box.width / 2
+      const overWheel = mode === 'menu' && distance <= wheelRadius
+      animationRef.current?.setHover(overMascot || overWheel)
+    }
+    const clear = (): void => animationRef.current?.setHover(false)
+    document.addEventListener('pointermove', onMove)
+    document.documentElement.addEventListener('pointerleave', clear)
+    window.addEventListener('blur', clear)
+    return () => {
+      document.removeEventListener('pointermove', onMove)
+      document.documentElement.removeEventListener('pointerleave', clear)
+      window.removeEventListener('blur', clear)
+    }
+  }, [mode, wheelRadius])
+
   useEffect(() => {
     if (mode !== 'panel') return
     const onPointerDownOutside = (event: PointerEvent): void => {
@@ -842,9 +874,6 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         onMouseEnter={() => {
           animationRef.current?.setHover(true)
           if (mode === 'closed') setMode('menu')
-        }}
-        onMouseLeave={() => {
-          animationRef.current?.setHover(false)
         }}
         // Inline, because the palette is user data: emitting one rule per
         // accent into the injected stylesheet would couple the CSS to the
