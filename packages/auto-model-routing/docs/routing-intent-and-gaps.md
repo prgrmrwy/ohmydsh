@@ -40,8 +40,12 @@
 ## 已独立核验的缓存证据
 
 - [OpenAI Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md)（2026-10-24读取）：request-level reasoning.effort 可以改变模型侧指令；支持的 GPT-6+ 模型通过追加 configuration_update 并保持顶层原值来保留早先前缀。这是 API 能力，不证明当前 DSH/订阅适配器已支持。
-- [Magpie rules.go](https://github.com/yetone/magpie/blob/main/internal/gateway/rules.go)（2026-10-24读取 main，可变引用）：同回合保持决策；keepsEffort 在缓存仍暖时阻止降 effort，但允许升档，缓存过冷或上下文缩小至一半以下时允许降档；区分 Pick 与 Wanted，注释说明支持 effort updates 的路径可使用 Wanted。项目注释中的缓存命中观测是上游自述，不是本项目复现结果。它是可借鉴的缓存策略，不能直接抄作所有 provider 的普遍规律。
+- [Magpie rules.go](https://github.com/yetone/magpie/blob/main/internal/gateway/rules.go)（2026-10-24读取 main，可变引用）：同回合保持决策；keepsEffort 在缓存仍暖时阻止降 effort，但允许升档，缓存过冷或上下文缩小至一半以下时允许降档；区分 Pick 与 Wanted，注释说明支持 effort updates 的路径可使用 Wanted。项目注释中的缓存命中观测是上游自述，不是本项目复现结果。它是可借鉴的缓存策略，不能直接抄作所有 provider 的普遍规律。Sol 后续对固定提交 f3eb92924e56605860f6a85a3449247c26c0bd90 的检查指出，effort_update.go 的更新通路为 MAGPIE_EFFORT_UPDATES=on 显式启用的 preview，默认关闭，限 GPT-6/OpenAI或ChatGPT账户/Responses；不能将源码出现 takesEffortUpdates 解读为所有部署默认具备缓存保持能力。
+
+## 官方强主轻子的适用边界
+
+[Anthropic 多智能体研究系统](https://www.anthropic.com/research/multi-agent-research-system)（2026-10-24全文读取）描述 Opus 4 lead + Sonnet 4 workers，在其内部研究评估优于单 Opus 4；这是特定研究系统结果，不是本项目收益证明，也不是所有 coding 都适合多agent的结论。文章强调并行独立方向、上下文压缩、清晰任务边界与最终结果评估；同时指出多agent显著增加token，编码任务往往比研究更难并行。应采用其编排与验收原则，不直接复制旧代模型组合或收益百分比。
 
 ## 外部调研
 
-已委派 gpt-6.1-sol 调研官方指引、维护/热度较高的社区路由与 yetone/magpie 策略。结果应区分官方文档、代码事实、项目自述与未经复现的效果声明；热度不等于效果。调研完成后另附来源与建议，不把未确认结论写入现行spec。
+已由 gpt-6.1-sol/high 完成官方指引、维护/热度较高社区路由与 yetone/magpie 策略调研，主会话复核了OpenAI缓存、Anthropic研究编排、LiteLLM评估与Magpie更新路径。详见 [调研记录](routing-community-research-2026-10-24.md)。结果区分官方文档、代码事实、项目自述与未经复现的效果声明；热度不等于效果，不把调研建议直接写为现行spec。
