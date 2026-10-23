@@ -33,7 +33,7 @@
 ## 4. 文档与配置
 
 - [x] 4.1 Run: 更新 dsh-collab README（中英）与 `dsh.yaml` note（去掉"每成员6次熔断""约定v2""requestDecision"，写三触发唤醒、话题上限 20、`COLLAB_THREAD_LIMIT`、`ref`、`purpose`、11 个工具）；仓库文档治理测试通过
-- [ ] 4.2 Run: 归档时把 collab-kernel spec Purpose 中"人类决策证据、投递与熔断"改为"投递与话题上限"，dsh-collab spec Purpose 中"不可信的人类确认"表述按新模型修订（记入归档清单）
+- [x] 4.2 Run: 归档时把 collab-kernel spec Purpose 中"人类决策证据、投递与熔断"改为"投递与话题上限"，dsh-collab spec Purpose 中"不可信的人类确认"表述按新模型修订（记入归档清单）
 
 ## 5. 验证
 
@@ -41,7 +41,7 @@
 - [x] 5.2 Run dsh-collab test + typecheck + `test:components`；confirm passes
 - [x] 5.3 Run 根 `npm test`、`npm run check:artifacts`；与 0.1 基线比较无新增失败
 - [x] 5.4 Run `openspec validate collab-ref-threads --strict`；test-plan 所有行为 🟢（N/A 行对应检查已执行）
-- [ ] 5.5 Run 真实 Host 验收（`dsh build` + 重启后）：旧空间可打开且原暂停成员恢复；同一话题第 21 条需回复消息收到 `COLLAB_THREAD_LIMIT`；不写 ref 从新话题开始；条目修改、ack、Leader 转交不唤醒；request done 唤醒作者；成员信任下宿主权限不放宽
+- [x] 5.5 Run 真实 Host 验收（`dsh build` + 重启后）：旧空间可打开且原暂停成员恢复；同一话题第 21 条需回复消息收到 `COLLAB_THREAD_LIMIT`；不写 ref 从新话题开始；条目修改、ack、Leader 转交不唤醒；request done 唤醒作者；成员信任下宿主权限不放宽
 
 ## 实施记录
 
@@ -52,3 +52,5 @@
 - 1.3/3.3/5.x（Lead，完整依赖仓内副本 `.acc/fullcopy`，复制主 checkout `node_modules` 与 `spike/collab-components` 组件夹具，collab-kernel 先构建）：dsh-collab typecheck 0、`npm test`（vitest 118 + build/sync 产物 2+4）全过、`test:components` 18/18（真实 header 工具体积 3806 ≤ 4200）。组件套件中 3 处断言修正见 test-plan Coverage Notes。
 - 4.1：README（中英，dsh-collab 与 collab-kernel）与 `dsh.yaml` note 已更新（note 压到 ≤600 码点）。为通过仓库 markdown 链接检查，`history/` 与 `review*.md` 中评审者写的仓库根相对链接改为纯文本（内容不变）。
 - 5.3：worktree 根 `npm test` 447 tests / 437 pass / 8 fail，8 个失败（sync/openspec-upgrade/auto-model-routing 类）在干净基线提交上同样失败（lean 依赖环境），无新增失败。
+- 5.5（Lead，2026-10-23，真实 Host PID 94237，`dsh build` 后由用户重启）：验收会话 A `session-22bb0723-…`、B `session-45cfcaed-…`，空间 `ref-acc-1`（约定 v3、purpose 已记录）。台账核验：邀请唤醒 B 并自动加入；c1 修改、B ack 达成 agreed、r1 创建、Leader 转交都没有 `dispatch/intended`；坏 ref 返回 `COLLAB_BAD_REF` 且无提交；r1 `accepted` 不唤醒，`done` 唤醒作者 a（thread=7）；话题 13 中根消息加 19 条 ref 成功，第 21 条需回复消息返回 `COLLAB_THREAD_LIMIT` 且无提交；不写 ref 的新消息开启话题 53；B 共收到 22 次唤醒，指针带 thread，唤醒文本为新的"问本机用户"版本。旧空间 `trust-acc-1`（已关闭）由原成员读取总览与约定 v2 成功，写入按关闭空间规则被拒；非成员读取为 `COLLAB_SPACE_UNAVAILABLE`。本机旧空间没有被熔断的成员，"暂停成员恢复"由 `topic-11` 覆盖。成员信任不放宽宿主权限：本变更未改动该路径，沿用 dsh-collab-member-trust 的真实 Host 验收结论（test-plan N/A 行）。
+- 4.2：归档后已修订 collab-kernel 与 dsh-collab current spec 的 Purpose 段落（去掉人类决策证据、熔断与"不可信的人类确认"，改为话题上限、三种唤醒与"问本机用户"）。
