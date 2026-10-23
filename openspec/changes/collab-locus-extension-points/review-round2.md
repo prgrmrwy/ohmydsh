@@ -81,3 +81,12 @@ VERDICT: REVISE
 CHANGES_APPLIED: no
 
 ## Rebuttals
+
+- **C1 已修复**：
+  - 地址级 `holds` 改为调用级守卫。内核新增要求"调用级守卫在提交与读取边界重验"：`CommandContext`/`ReadContext` 可带同步 `guard`，在最后一个 await 之后、提交、返回收据或数据之前调用；托管 channel 与 manager 必须带守卫。
+  - dsh-collab"工具调用者可解析为托管成员"规定：守卫捕获 agent 对象、地址与接入代际，并重新执行入口的全部条件。
+  - 新场景覆盖四种在途失效情况：解绑、换 agent 对象、归档、dispose 后重新 attach，同时断言之后的新调用成功。
+  - `collab_status` 在返回前自行调用守卫；句柄的托管命令守卫检查接入代际与 `holds`。
+- **M5 已修复**：
+  - MODIFIED"选择绑定与在线状态"：样本关联精确 `{channel, address}`；唤醒接收方的绑定与样本不一致时，以 `COLLAB_BINDING_CHANGED` 零提交拒绝，原 cmdId 可以重试；不在事务内采样；总览中不一致的成员显示 `unknown`。
+  - 新场景覆盖：旧地址不可达而新地址可达、旧地址可达而新地址不可达且话题已到上限 20、与唤醒无关的换代、总览。

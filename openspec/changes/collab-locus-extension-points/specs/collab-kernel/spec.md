@@ -43,7 +43,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
     - ⑤ channel 在 `managers` 中，否则以 `COLLAB_NOT_MEMBER` 拒绝。
     - ⑥ 协作空间未关闭。
     - ⑦ 业务校验：目标成员状态、名称与地址唯一性，都基于当前状态重新计算；预备阶段没有可用认领结果时为 `COLLAB_ADDRESS_UNCLAIMED`。
-    - ⑧ 对 `admitMember`、`rebindMember`，按"托管绑定在提交与读取边界重验"同步检查新地址，然后提交。
+    - ⑧ 按"调用级守卫在提交与读取边界重验"同步调用守卫，然后提交。宿主为 `admitMember`、`rebindMember` 创建的守卫 SHALL 同时确认新地址仍被接入方持有，见 dsh-collab。
   - 授权检查（⑤）先于关闭检查（⑥），因此未获授权的接入方对不存在、已关闭与 open 的空间得到同一类错误。
 - **`createSpace`**：① principal 稳定校验（internal principal 在此 MUST 以 `COLLAB_FORBIDDEN` 拒绝）→ ② 以 principal 的 `{channel, address}` 为 scope 查找创建收据（命中则返回原结果）→ ③ 请求的 `spaceId` 不存在（已存在为 `COLLAB_SPACE_EXISTS`）→ ④ 认领首成员地址，认领结果的 `{channel, address}` MUST 等于 principal 的地址 → ⑤ 业务校验。同一 `spaceId` 的创建与该空间上的其他命令串行执行。
 
@@ -329,6 +329,41 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **WHEN** Leader `aily` 邀请 `a:9` 为 `bob`
 - **THEN** 该提交恰含一条对 `bob` 的 `wake` 类 `dispatch/intended`；随后的 `deliver` 指针中 `invited` 为 `true` 且不含 `thread`；`bob` 读取总览仍返回 `COLLAB_MEMBER_INACTIVE`
 
+### Requirement: 选择绑定与在线状态
+
+本期每个成员只有一个绑定。普通唤醒 SHALL 只在该绑定 `supports.wake` 为真、且记账前对其 `presence` 的采样不为 `unreachable` 时记账，否则不记账，并在总览中把该成员标记为 `unreachable`。`presence` SHALL 在命令进入事务之前，按每个成员当时的绑定采样一次，作为该命令计算的显式输入；每个样本 SHALL 关联采样时的精确 `{channel, address}`。事务内 SHALL 只把样本用于绑定与样本一致的成员。命令需要为某个唤醒接收方判断是否记账，而该成员的当前绑定与样本不一致（采样后被换代）时，命令 MUST 以 `COLLAB_BINDING_CHANGED` 拒绝：不写提交、收据或投递，同一 cmdId 可以原样重试，重试时重新采样。内核 MUST NOT 在串行事务内调用 `presence`。总览中绑定与样本不一致的成员 SHALL 显示为 `unknown`。绑定的 `supports.confirm` 字段 SHALL 保留以兼容成员形状，但不再参与任何判断。
+
+#### Scenario: 不可达成员不记账
+- **GIVEN** agent 成员 `doubao` 的 presence 采样为 `unreachable`
+- **WHEN** `aily` 发送需回复消息给 `doubao`
+- **THEN** 该提交不含对 `doubao` 的 `dispatch/intended`，总览中 `doubao` 为 `unreachable`
+
+#### Scenario: 不支持唤醒的绑定不记账
+- **GIVEN** 成员 `pm` 的绑定 `supports.wake` 为假
+- **WHEN** `aily` 发送需回复消息给 `pm`
+- **THEN** 该提交不含对 `pm` 的 `dispatch/intended`，消息照常提交
+
+#### Scenario: 采样后换代的收件人不沿用旧样本
+- **GIVEN** 托管成员 `locus-a` 绑定 `loc:old`；`aily` 发需回复消息给它，presence 采样挂起
+- **WHEN** 采样得到 `loc:old` 为 `unreachable`；消息入队前接入方把 `locus-a` 换代到 `loc:new`；消息进入事务
+- **THEN** 返回 `COLLAB_BINDING_CHANGED`，日志长度不变；`aily` 以同一 cmdId 重试，若 `loc:new` 为 `reachable`，提交含对 `locus-a` 的 `dispatch/intended`，话题计数加 1
+
+#### Scenario: 反方向换代同样不沿用
+- **GIVEN** 同上，但 `loc:old` 的样本为 `reachable`，`loc:new` 为 `unreachable`；话题已有 20 条计数消息，消息以 `ref` 指向该话题
+- **WHEN** 换代发生在采样之后、事务之前
+- **THEN** 返回 `COLLAB_BINDING_CHANGED`（不是 `COLLAB_THREAD_LIMIT`）；同一 cmdId 重试时成功提交、不记账唤醒、话题计数仍为 20
+
+#### Scenario: 与唤醒无关的成员换代不影响命令
+- **GIVEN** 托管成员 `locus-b` 在 `aily` 发消息给 `doubao` 的采样之后被换代
+- **WHEN** 消息进入事务
+- **THEN** 正常提交
+
+#### Scenario: 总览不把旧样本标到新绑定
+- **GIVEN** `overview` 采样后、返回前 `locus-a` 被换代
+- **WHEN** `overview` 返回
+- **THEN** `presence['locus-a']` 为 `unknown`
+
+
 ## ADDED Requirements
 
 ### Requirement: 接入方按空间托管成员
@@ -438,44 +473,47 @@ provider MAY 声明 `managed: true`，表示它代表一个接入方（例如 Pe
 - **WHEN** principal `agent{pet-locus, loc:2}` 以 `m-1` 与原载荷重放
 - **THEN** 返回首次结果，日志长度不变
 
-### Requirement: 托管绑定在提交与读取边界重验
+### Requirement: 调用级守卫在提交与读取边界重验
 
-声明 `managed: true` 的 provider MUST 实现同步方法 `holds(address): boolean`，表示该地址当前仍是接入方承认的有效绑定。缺少该方法、返回非 `true` 或抛错，均视为不持有。
+写命令与读取的上下文 SHALL 接受可选的 `guard`：由宿主在调用时创建的同步函数 `() => boolean`。它表示"发起本次操作的那个调用方，此刻是否仍然有效"。内核不解读守卫检查的内容（执行会话对象、接入代际、绑定等由宿主决定），只在下列线性化点同步调用它，检查与其后动作之间 MUST NOT 再有 await：
 
-主体地址的 channel 属于托管 provider 时（无论 principal 是 agent 还是 provider），内核 SHALL 在下列线性化点同步调用 `holds(address)`，检查与其后动作之间 MUST NOT 再有 await：
-
-- **写命令**：在串行事务内、最后一个 await 之后，开始提交或返回收据结果之前；
+- **写命令**：串行事务内、该命令最后一个 await 之后，在提交，或返回收据中的原结果之前；
 - **读取**：`overview`、`readSince`、`project`、`readConvention` 在最后一个 await 之后、返回数据之前。
 
-不持有时 MUST 以 `COLLAB_BINDING_STALE` 拒绝，不写提交、收据或投递，也不返回空间数据。该检查不改变成员状态，台账何时退役由接入方决定。
+守卫返回非 `true` 或抛错时，MUST 以 `COLLAB_CALLER_STALE` 拒绝，不写提交、收据或投递，也不返回空间数据，空间不进入 `failed`。该检查不改变成员状态。
 
-`admitMember` 与 `rebindMember` 在提交前 SHALL 以同样方式检查新地址，不持有时以 `COLLAB_ADDRESS_UNCLAIMED` 拒绝。
+以下调用 MUST 携带守卫，否则以 `COLLAB_FORBIDDEN` 拒绝，早于任何 provider 调用：
 
-非托管 channel 的主体不执行该检查，行为与本变更之前相同。
+- 地址 channel 属于托管 provider 的 agent 或 provider principal；
+- manager principal。
 
-#### Scenario: 入口通过后、提交前解绑
+其它调用可以不带守卫；不带时行为与本变更之前相同。
+
+#### Scenario: 入口通过后、提交前守卫失效
 - **GIVEN** `locus-a`（地址 `loc:1`）为 active 托管成员；presence 采样被可控 Promise 挂起
-- **WHEN** `locus-a` 发送消息并已通过入口；接入方随后让 `holds('loc:1')` 返回假（台账未退役），再释放 presence
-- **THEN** 返回 `COLLAB_BINDING_STALE`，日志长度不变，无 `dispatch/intended`
+- **WHEN** `locus-a` 带守卫发送消息；采样挂起期间宿主让该守卫返回假（台账未退役），再释放采样
+- **THEN** 返回 `COLLAB_CALLER_STALE`，日志长度不变，无 `dispatch/intended`
 
-#### Scenario: 读取期间解绑不返回数据
+#### Scenario: 读取期间守卫失效不返回数据
 - **GIVEN** 同上，`overview` 的 presence 采样被挂起
-- **WHEN** 接入方解绑后释放采样
-- **THEN** `overview` 返回 `COLLAB_BINDING_STALE`
+- **WHEN** 守卫变为假后释放采样
+- **THEN** `overview` 返回 `COLLAB_CALLER_STALE`
 
-#### Scenario: 解绑后连收据也不返回
-- **GIVEN** `locus-a` 已以 `cmdId:'m-1'` 成功发送消息，随后接入方解绑 `loc:1`
-- **WHEN** 以 `m-1` 与原载荷重放
-- **THEN** 返回 `COLLAB_BINDING_STALE`
+#### Scenario: 守卫失效时连收据也不返回
+- **GIVEN** `locus-a` 已以 `cmdId:'m-1'` 成功发送消息
+- **WHEN** 以 `m-1`、原载荷和一个返回假的守卫重放
+- **THEN** 返回 `COLLAB_CALLER_STALE`；改用返回真的守卫重放时返回首次结果
 
-#### Scenario: 认领后、提交前接入方撤回地址
-- **GIVEN** P 的 `admitMember` 已认领 `loc:3`
-- **WHEN** 进入事务前 `holds('loc:3')` 变为假
-- **THEN** 返回 `COLLAB_ADDRESS_UNCLAIMED`，日志长度不变
+#### Scenario: 托管 channel 的调用缺少守卫被拒
+- **WHEN** principal `agent{pet-locus, loc:1}` 不带守卫发送消息；manager principal 不带守卫调用 `admitMember`
+- **THEN** 两次都返回 `COLLAB_FORBIDDEN`，provider 的 `claim` 与 `presence` 调用次数都为 0
 
-#### Scenario: 普通成员不受影响
-- **GIVEN** 普通 provider 未实现 `holds`
-- **WHEN** 普通成员发送消息并读取总览
+#### Scenario: 守卫抛错按失效处理
+- **WHEN** 普通成员带一个会抛错的守卫发送消息
+- **THEN** 返回 `COLLAB_CALLER_STALE`，空间仍可正常提交其它命令
+
+#### Scenario: 普通成员不带守卫不受影响
+- **WHEN** 普通成员不带守卫发送消息并读取总览
 - **THEN** 两次都成功
 
 ### Requirement: 托管成员不承担 Leader 与自助成员操作

@@ -229,6 +229,10 @@
 
 句柄 SHALL 提供 `admit(spaceId, cmdId, {name, address})`、`rebind(spaceId, cmdId, {member, address})` 与 `retire(spaceId, cmdId, {member})`。它们以该中继 provider 的 manager principal 调用内核同名命令，返回内核结果。错误按"错误披露不泄露无权空间"映射。
 
+每次调用 SHALL 携带一个守卫。守卫捕获本句柄的接入代际，只在该代际仍是当前代际时返回真；对 `admit` 与 `rebind`，还要求 adapter 的同步方法 `holds(address)` 对新地址返回真。因此句柄 dispose 后，它发起的、仍在途的托管命令不会提交。
+
+内核以 `COLLAB_CALLER_STALE` 拒绝时，句柄按守卫记录的失败原因映射错误：接入代际已变返回 `COLLAB_CHANNEL_DETACHED`，新地址不再被持有返回 `COLLAB_ADDRESS_UNCLAIMED`。
+
 句柄 MUST NOT 提供 `allowManager`、`revokeManager`、`invite`、`markGone`、`transferLeader` 或 `closeSpace`。接入方不能替任何会话授权自己。
 
 #### Scenario: Leader 授权后接入方接纳成员
@@ -240,6 +244,16 @@
 - **GIVEN** `pet-locus` 未获下列空间授权：S1 健康、S2 已关闭、S3 被锁、S4 日志损坏、S5 运行期提交失败、S6 不存在
 - **WHEN** 句柄对每个空间各调用一次 `admit`
 - **THEN** 六个响应序列化后完全相同，都是 `{"error":{"code":"COLLAB_SPACE_UNAVAILABLE"}}`；各空间日志字节都不变
+
+#### Scenario: 旧句柄的在途托管命令不提交
+- **GIVEN** 句柄 H1 调用 `admit`，其认领被挂起
+- **WHEN** H1 dispose，同 channel 重新 attach 得到 H2，随后释放认领
+- **THEN** H1 的 `admit` 返回 `COLLAB_CHANNEL_DETACHED`，日志字节不变；H2 以同一 cmdId 与载荷调用 `admit` 成功
+
+#### Scenario: 认领后、提交前地址被撤回
+- **GIVEN** 句柄的 `admit` 已认领 `loc:3`
+- **WHEN** 进入事务前 adapter 的 `holds('loc:3')` 变为假
+- **THEN** 返回 `COLLAB_ADDRESS_UNCLAIMED`，日志字节不变
 
 #### Scenario: 句柄没有 Leader 能力
 - **WHEN** 检查句柄对象的方法集合
@@ -257,14 +271,18 @@
 
 解析结果 SHALL 每次调用重新计算，MUST NOT 缓存。
 
-在途调用同样要防住：
+在途调用同样要防住。每次工具调用与句柄调用，插件 SHALL 在入口创建一个调用级守卫，并随命令或读取交给内核（见内核"调用级守卫在提交与读取边界重验"）。守卫捕获入口时的执行 agent 对象、解析出的 `{channel, address}`，以及托管调用者所属句柄的接入代际（每次 `attach` 递增）。被调用时，它同步重新执行入口的全部条件：
 
-- 中继 provider 的 `holds(address)` SHALL 同步转交当前接入方 adapter 的 `holds`；没有接入方时返回假。
-- 内核按"托管绑定在提交与读取边界重验"在最终边界再查一次。因此接入方解除绑定后，该会话既不能发起新调用，也不能完成已经在途的调用，即使台账尚未退役它。
-- 内核的 `COLLAB_BINDING_STALE` SHALL 映射为 `COLLAB_CALLER_UNAVAILABLE`。
-- 对托管调用者，`collab_status` SHALL 在最后一个 await 之后、返回之前，再同步调用一次 `resolveCaller`；结果与入口时不同，就返回 `COLLAB_CALLER_UNAVAILABLE`。
+- 该 agent 对象仍是 Host 当前对象，且 `agent.id === agent.session.id`；
+- 未归档，不在 `denySessionIds` 中；
+- 普通会话仍满足 `admission`，且不被任何接入方认领；
+- 托管调用者的接入代际仍是当前代际，且 `resolveCaller` 对该 agent 仍返回同一地址。
 
-adapter SHALL 提供同步的 `holds(address)`。`resolveCaller` 与 `holds` 都必须基于接入方已异步核验过的内存投影，不能靠省略核验来满足同步接口。
+任一不满足即返回假。因此，以下任一情况发生时，已在途的调用也不能完成，即使台账尚未退役该成员：接入方解除绑定、Host 换了 agent 对象、会话被归档、句柄 dispose 后又重新 attach。
+
+- 内核的 `COLLAB_CALLER_STALE` SHALL 映射为 `COLLAB_CALLER_UNAVAILABLE`；`COLLAB_BINDING_CHANGED` 原样返回，表示可用原 cmdId 重试。
+- `collab_status` 只经 host-index 读取，所以 SHALL 在最后一个 await 之后、返回之前自行调用同一守卫，返回假时输出 `COLLAB_CALLER_UNAVAILABLE`。
+- `resolveCaller` 必须基于接入方已异步核验过的内存投影，不能靠省略核验来满足同步接口。
 
 #### Scenario: 受管子会话以托管成员身份写入
 - **GIVEN** 子会话 L（subagent，delegationDepth 1）被 `pet-locus` 接入方解析为 `loc:1`；`loc:1` 是空间 S 的托管成员 `locus-a`
@@ -276,10 +294,20 @@ adapter SHALL 提供同步的 `holds(address)`。`resolveCaller` 与 `holds` 都
 - **WHEN** L 调用 `collab_read`
 - **THEN** 返回 `COLLAB_CALLER_UNAVAILABLE`，不返回空间内容
 
-#### Scenario: 在途调用在解绑后失败
-- **GIVEN** L 已通过入口，被解析为 `locus-a`；它的 `collab_send_message` 停在内核的 presence 采样
-- **WHEN** 接入方让 `holds` 对该地址返回假，随后采样完成
-- **THEN** 工具返回 `{"error":{"code":"COLLAB_CALLER_UNAVAILABLE"}}`，日志字节不变
+#### Scenario: 在途调用在失效后不能完成
+- **GIVEN** L（agent 对象 A）已通过入口，被解析为 `locus-a`（`loc:1`）；它的 `collab_send_message` 与另一次 `collab_read` 都停在内核的 presence 采样
+- **WHEN** 分别在四次独立运行中，于采样挂起期间：
+  1. 接入方让 `resolveCaller(A)` 返回 `undefined`；
+  2. Host 把该会话的当前 agent 对象换成 A′，接入方对 A′ 仍返回 `loc:1`；
+  3. 归档该会话；
+  4. 句柄 dispose 后，同 channel 重新 attach，新 adapter 对 A 仍返回 `loc:1`。
+  每次之后释放采样
+- **THEN** 四次运行中，发送都返回 `{"error":{"code":"COLLAB_CALLER_UNAVAILABLE"}}`，日志字节不变、无投递；读取返回同一错误、不含空间数据。第 2、4 种情况下，随后由 A′ 或新句柄发起的新调用成功
+
+#### Scenario: 状态入口在返回前重验
+- **GIVEN** L 的 `collab_status` 停在 host-index 读取
+- **WHEN** 期间句柄 dispose 后重新 attach
+- **THEN** 返回 `{"error":{"code":"COLLAB_CALLER_UNAVAILABLE"}}`，不含空间列表
 
 #### Scenario: 普通会话不能被接入方冒认
 - **GIVEN** 普通一级会话 A，接入方的 `resolveCaller` 对 A 返回 `loc:9`

@@ -97,8 +97,18 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 - `SessionAccess.caller` 改为返回 `{channel, address}`：先检查对象身份、归档与排除名单，再判断普通会话；否则同步询问各接入方的 `resolveCaller`。
 - 普通会话被接入方认领时一律拒绝，防止接入方把一个普通会话"改名"成托管成员。
 - 每次调用都重新计算，不缓存（D1 交集语义的前提）。
-- 只在入口解析不够：内核在提交前会 await presence 采样和空间队列，入口快照可能在此期间失效。因此托管 provider 必须提供同步的 `holds(address)`，内核在**最后一个 await 之后**、提交或返回数据之前再查一次，二者之间不再有 await（内核"托管绑定在提交与读取边界重验"）。这与 Pet 自己"await 之后重新观察"的做法一致。收据重放也要经过这次检查：解绑的地址连旧结果也拿不到。
-- `resolveCaller` 与 `holds` 都是同步接口，前提是接入方维护一份已异步核验过的内存投影（Pet 现有的 `resolveCollaborationCaller` 是异步的，不能直接接上，见 Context）。这是 Locus 接入 change 的验收点；本 change 用测试替身覆盖语义。
+- **只在入口解析不够。** 内核在提交前会 await presence 采样和空间队列，入口时的判断可能在这期间失效。
+- **第 1 轮修法（地址级 `holds`）不够。** 第 2 轮评审 C1 指出，"地址仍被持有"不等于"发起调用的那个执行对象仍然有效"：
+  - Host 可能换了 agent 对象；
+  - 句柄可能 dispose 后又重新 attach，新句柄仍承认同一地址（ABA）。
+- **最终做法：调用级守卫。**
+  - 插件在入口创建一个同步函数，捕获执行 agent 对象、解析出的地址和接入代际；
+  - 内核在该命令最后一个 await 之后、提交或返回数据之前调用它，二者之间没有 await（内核"调用级守卫在提交与读取边界重验"）；
+  - 守卫在被调用时重新执行入口的全部条件，并要求接入代际不变。
+- **为什么让内核调用宿主给的函数，而不是由内核自己检查。** 内核不依赖宿主（不知道 agent、归档、代际），这样它仍是宿主无关的独立库。插件不能在 await 内核之后再补查，因为那时写入已经发生。
+- **适用范围。** 普通会话调用也带守卫，这样顺带封住了现有实现中"入口通过后被归档或加入排除名单仍能提交"的窗口。内核只强制托管 channel 与 manager 的调用必须带守卫，普通调用不带时行为不变，旧测试不受影响。
+- **收据重放也经过守卫。** 失效的调用者连旧结果也拿不到；有效的新执行对象可以重放同一 cmdId。
+- **同步约束。** `resolveCaller` 与 adapter 的 `holds` 都是同步接口，前提是接入方维护一份已异步核验过的内存投影。Pet 现有的 `resolveCollaborationCaller` 是异步的，不能直接接上（见 Context）。这是 Locus 接入 change 的验收点；本 change 用测试替身覆盖语义。
 - `collab_status` 只经 host-index 读取，不走内核成员读取。所以对托管调用者，它在返回前再同步调用一次 `resolveCaller` 比对。
 
 **句柄。**
@@ -113,8 +123,13 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 
 ### D5 内核内部
 
-- `ChannelProvider` 增加可选 `managed?: boolean`、`holds?(address): boolean`、`supportsMode?(mode): boolean`。托管 provider 缺少 `holds` 视为不持有任何地址（fail closed）。
-- manager 命令分两阶段（评审 M1）：事务外只做 principal 校验，以及"没有现成收据时认领一次"；进入串行队列后，从当前状态重新判定收据、授权、关闭、目标状态、唯一性，再以 `holds` 确认新地址。预备阶段的结果不被沿用。
+- `ChannelProvider` 增加可选的 `managed?: boolean` 与 `supportsMode?(mode): boolean`。
+- `CommandContext` 与 `ReadContext` 增加可选的 `guard?: () => boolean`。托管 channel 与 manager 的调用缺少守卫时以 `COLLAB_FORBIDDEN` 拒绝（fail closed）。
+- manager 命令分两阶段（评审 M1）：事务外只做 principal 校验，以及"没有现成收据时认领一次"；进入串行队列后，从当前状态重新判定收据、授权、关闭、目标状态、唯一性，最后调用守卫；句柄给的守卫会检查接入代际与 adapter 是否仍持有新地址。预备阶段的结果不被沿用。
+- presence 样本按绑定匹配（第 2 轮评审 M5）。换代保留成员名，所以按成员名保存的样本可能属于旧地址。样本改为关联采样时的 `{channel, address}`；事务内发现唤醒接收方的绑定与样本不一致时，以 `COLLAB_BINDING_CHANGED` 零提交拒绝，调用方用原 cmdId 重试并重新采样。
+  - 没有选择"离开队列自动重新预备"：那需要在服务内循环，并为循环设上限。
+  - 没有选择"事务内重新采样"：那违反"不在串行事务内 await provider"。
+  - 只有命令确实要为该成员判断唤醒时才拒绝，与唤醒无关的换代不影响命令。
 - 未获授权的 manager 得到 `COLLAB_NOT_MEMBER`（授权检查先于关闭检查），dsh-collab 再把它与不存在、存储失败统一映射为 `COLLAB_SPACE_UNAVAILABLE`。这样没有授权的接入方无法探测空间是否存在、是否关闭（评审 M2）。
 - `claim` 只遍历非托管 provider；`admitMember` 与 `rebindMember` 只调用 principal 对应的 provider，认领放在进入串行事务之前的 `prepare` 阶段，与 `invite` 相同。
 - `reduce`：
@@ -143,7 +158,8 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 
 - **[接入方 adapter 是信任边界]** `resolveCaller` 返回什么，dsh-collab 就把调用者当作哪个成员。→ 只有宿主配置声明的 channel 才能 attach；即便如此，也只能映射到该 channel 已被 Leader 授权、且由它自己接纳的成员；普通会话不能被认领；归档与排除名单先于 adapter 检查。接入方本身是本机已审查的插件，与 provider 处在同一信任层。
 - **[`supportsMode` 在串行事务内同步调用]** 慢的 provider 会阻塞该空间。→ 规定为同步布尔方法（中继与 `dsh-session` 都只查内存表），抛错视为不支持，不会使空间进入 `failed`。
-- **[`holds` 在串行事务内同步调用]** 与 `supportsMode` 相同，要求只查内存；抛错视为不持有，命令失败，但空间不进入 `failed`。
+- **[守卫在串行事务内同步调用]** 与 `supportsMode` 相同，要求只查内存；抛错视为失效，命令失败，但空间不进入 `failed`。
+- **[`COLLAB_BINDING_CHANGED` 需要调用方重试]** 只在采样与提交之间恰好换代时出现，窗口很小。错误码表明可以安全地用原 cmdId 重试；模型工具原样返回它，句柄调用方由接入方决定是否重试。
 - **[模式判断与投递之间的竞态]** 发送时支持，投递时已注销。→ 投递失败，不降级（场景已覆盖），结果与其它投递失败相同，列为 failed。
 - **[托管成员数量]** 一个 Locus 有很多群，presence 采样会为每个成员调用接入方。→ 采样已经按命令执行一次并去重。接入方的 presence 应是内存查询，这是接入 change 的验收点。
 - **[回滚]** 回滚到旧内核时：
