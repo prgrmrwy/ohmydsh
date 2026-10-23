@@ -87,6 +87,10 @@ export const PET_CSS = `
 .dshpet-mascot:hover{transform:scale(1.06);box-shadow:0 6px 22px rgba(0,0,0,.24)}
 .dshpet-mascot:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:3px}
 .dshpet-mascot[data-dragging="true"]{cursor:grabbing}
+/* Imported Lottie animation. It fills the mascot circle and must never take
+   pointer events: dragging and clicking belong to the button around it. */
+.dshpet-lottie{width:100%;height:100%;display:block;overflow:hidden;pointer-events:none}
+.dshpet-lottie>svg{width:100%;height:100%;display:block}
 .dshpet-badge{position:absolute;top:-2px;right:-2px;min-width:18px;height:18px;padding:0 5px;
   border-radius:9px;font-size:11px;line-height:18px;text-align:center;font-variant-numeric:tabular-nums;
   background:var(--dsw-alias-label-primary,#0f1115);
@@ -407,6 +411,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   background:var(--dsw-specific-tip,#fff);
   border:.5px solid var(--dsw-alias-border-l4,#0000001a);border-radius:8px;outline:none}
 .dshpet-settings .dshpet-input::placeholder{color:var(--dsw-alias-label-dimmed,#cfd3d6)}
+/* Paste box for one Lottie JSON source: monospace-ish, resizable, bounded. */
+.dshpet-settings .dshpet-textarea{width:100%;max-width:560px;box-sizing:border-box;
+  min-height:120px;resize:vertical;font:inherit;font-size:12px;line-height:18px;
+  padding:8px 10px;border-radius:8px;
+  border:1px solid var(--dsw-alias-border-l1,#e4e6eb);
+  background:var(--dsw-alias-bg-layer-1,#ffffff);
+  color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-textarea:focus,
+.dshpet-settings .dshpet-textarea:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:-1px}
 .dshpet-settings .dshpet-input:focus,.dshpet-settings .dshpet-input:focus-visible{
   border-color:var(--dsw-alias-state-business-primary,#4176e6)}
 /* A checkbox is not a text box: the shared input sizing stretched it into a

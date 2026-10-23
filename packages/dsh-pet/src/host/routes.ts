@@ -19,6 +19,11 @@ import {
 import type { PetChangeFeed } from './changes.js'
 import type { PetLifecycleMachine } from './lifecycle.js'
 import type { PetPaths } from './paths.js'
+import {
+  readExpression,
+  removeExpression,
+  saveExpression,
+} from './expression.js'
 import { detectProjectionDrift, rebuildProjection } from './projection.js'
 import type { PetRepository } from './repository.js'
 import {
@@ -32,6 +37,8 @@ import { currentAllowlist } from './skill-provider.js'
 import { PET_ENV_PREFIX } from './shell-env.js'
 import {
   ROUTES,
+  EXPRESSION_ROUTES,
+  MAX_EXPRESSION_REQUEST_BODY_BYTES,
   PET_ENV_GLOBAL,
   type PetBindState,
   type PetChannelBlocker,
@@ -804,6 +811,39 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         throw new PetError('INVALID_REQUEST', "action must be 'accept', 'done' or 'drop'.")
       }
       return invokeLocus('处置待办', () => ledger.advance(itemId, action))
+    }),
+
+    // Owner-imported mascot animation. Read/import/remove are POSTs because
+    // the Web client's transport is POST-only (see `client/api.ts`); a GET-only
+    // read would make the contract depend on a second method for no gain.
+    petRoute(EXPRESSION_ROUTES.view, async ({ body }) => {
+      strictBody(body, [])
+      requireReady(lifecycle)
+      return readExpression(deps.paths)
+    }),
+    petRoute(
+      EXPRESSION_ROUTES.import,
+      async ({ body }) => {
+        const record = strictBody(body, ['content'])
+        requireReady(lifecycle)
+        const content = record['content']
+        // Deliberately NOT `requireString`: it trims, and the stored bytes must
+        // equal what the owner pasted (formatted JSON usually ends with a
+        // newline). Missing/non-string is a request error; an unusable string
+        // is an expression error, with distinct client-visible codes.
+        if (typeof content !== 'string') {
+          throw new PetError('INVALID_REQUEST', "Field 'content' must be a string")
+        }
+        const saved = await saveExpression(deps.paths, content)
+        return { state: 'ok' as const, bytes: saved.bytes }
+      },
+      { bodyLimit: MAX_EXPRESSION_REQUEST_BODY_BYTES },
+    ),
+    petRoute(EXPRESSION_ROUTES.remove, async ({ body }) => {
+      strictBody(body, [])
+      requireReady(lifecycle)
+      await removeExpression(deps.paths)
+      return { state: 'none' as const }
     }),
 
     petRoute(ROUTES.status, async ({ body }) => {

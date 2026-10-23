@@ -110,6 +110,17 @@ Skill 常常需要 Pet 无法推断的值——要把评审消息发到哪个群
 
 悬浮的 Pet 和 Task 面板只负责快速执行、来源确认和日常 Task 操作；安装、环境变量和诊断都在设置里。尚未绑定 bot 时，悬浮 Pet 会显示一条可关闭的提示，引导到 Channel 页签；Skill 引导优先于它，关闭它也不会让 Channel 页签消失。
 
+### 动画表情（Lottie）
+
+设置 → Pet → General → **动画表情** 可以把吉祥物从静态图标换成一段动画：从素材站点复制一段 **Lottie JSON**（例如 LottieFiles 下载的 `.json`，或 Google Fonts 动画 emoji 页面里的 `lottie.json`），粘贴进输入框后点「导入」，吉祥物立即开始播放，不需要刷新页面，也不需要构建资源包。
+
+- **格式**：只接受 Lottie JSON 文本。链接、SVG、PNG/GIF 都不接受；需要图片素材时请先自行转成 Lottie 的内嵌位图。
+- **保存位置**：`$DSH_HOME/plugins/dsh-pet/expressions/active.lottie.json`（文件存在即生效），**不会写入 SQLite**。可以「复制导出」保存原文；移除会把它改名为 `active.lottie.json.removed`（只保留最近一份），吉祥物恢复显示图标。
+- **上限**：素材 ≤ 512 KiB；按 `refId` 展开后的渲染层数 ≤ 80（引用深度 ≤ 32，拒绝成环）；嵌套 precomp 宽高 ≤ 2048；图片只允许可解码的 PNG/JPEG/WebP/GIF data URI；字体不允许远程加载。
+- **失败回退**：素材损坏、读取失败或播放器渲染失败时，吉祥物回退显示图标，原因显示在设置页，不会白屏。
+- **动效偏好**：`prefers-reduced-motion` 时停在首帧；页面隐藏时暂停。
+- **许可责任**：Pet 不内置任何动画素材，用户自备素材的来源与许可是用户自己的责任（例如 Google Noto 动画 emoji 为 CC BY 4.0，需署名；LottieFiles 素材逐项许可不同）。客户端打包的播放器 [lottie-web](https://github.com/airbnb/lottie-web) 为 MIT，其声明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
 ## 飞书通道与 Locus
 <!-- section: lark-channel -->
 

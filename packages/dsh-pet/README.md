@@ -110,6 +110,17 @@ Six stable tabs:
 
 The floating Pet and Task panel handle only quick execution, source confirmation and day-to-day Task operations. Installation, environment and diagnostics live in Settings. While no bot is bound, the floating Pet shows one dismissible hint that leads to the Channel tab; a Skill hint takes priority over it, and dismissing it never removes the Channel tab.
 
+### Mascot animation (Lottie)
+
+Settings → Pet → General → **Animated mascot** replaces the mascot's static glyph with an animation. Copy a **Lottie JSON** source from the site you already use (a `.json` downloaded from LottieFiles, or the `lottie.json` offered by the Google Fonts animated emoji pages), paste it and import: the mascot switches immediately, with no page reload and no asset bundle.
+
+- **Format:** Lottie JSON text only. Links, SVG and PNG/GIF are not accepted; convert raster art into an embedded Lottie asset first if needed.
+- **Storage:** `$DSH_HOME/plugins/dsh-pet/expressions/active.lottie.json` (its presence is the active state); nothing is written to SQLite. "Copy export" returns the original text; removing renames it to `active.lottie.json.removed` (one backup kept) and restores the glyph.
+- **Limits:** source ≤ 512 KiB; at most 80 layers after expanding `refId` precomps (reference depth ≤ 32, cycles refused); nested precomp dimensions ≤ 2048; images must be decodable PNG/JPEG/WebP/GIF data URIs; remote fonts are refused.
+- **Failure fallback:** a corrupt source, failed read or failed render falls back to the glyph and shows the reason in Settings — never a blank mascot.
+- **Motion preference:** `prefers-reduced-motion` freezes the first frame; a hidden page pauses playback.
+- **License responsibility:** Pet bundles no animation assets; the source and license of an imported animation remain the owner's responsibility (e.g. Google Noto animated emoji are CC BY 4.0 and need attribution; LottieFiles assets vary per item). The bundled player, [lottie-web](https://github.com/airbnb/lottie-web), is MIT; its notice ships in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ## Lark channel and Locus
 <!-- section: lark-channel -->
 

@@ -42,8 +42,16 @@ import {
   QA_GROUP_ACTION_ID,
   SESSION_MESSAGE_CAPABILITY_ID,
   type PetCapability,
+  type PetExpressionView,
   type PetSourceKind,
 } from '../wire.js'
+import {
+  createLatestOnly,
+  createMascotAnimation,
+  resolveMascotFace,
+  type MascotPlayerLoader,
+} from './mascot-expression.js'
+import { setMascotExpressionDiagnostic } from './mascot-diagnostics.js'
 
 /**
  * Display name for an Invocation origin that is not a Skill.
@@ -72,6 +80,13 @@ export interface PetOverlayProps {
   readonly currentSource: SourceSelection | undefined
   /** Opens a native DSH session; used by "open full process". */
   readonly openSession?: (sessionId: string) => void
+  /**
+   * Real Lottie player factory, injected by the browser entry.
+   *
+   * Absent in tests and in any surface that does not run the browser bundle;
+   * the mascot then simply keeps its glyph, which is also the failure fallback.
+   */
+  readonly loadAnimation?: MascotPlayerLoader
 }
 
 type Mode = 'closed' | 'menu' | 'panel'
@@ -140,6 +155,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [glyph, setGlyph] = useState(DEFAULT_GLYPH)
   const [size, setSize] = useState(DEFAULT_SIZE_PX)
   const [ringStyle, setRingStyle] = useState<PetRingStyleId>(DEFAULT_RING_STYLE)
+  /** Owner-imported animation projection; `undefined` until the first read. */
+  const [expression, setExpression] = useState<PetExpressionView | undefined>(undefined)
+  /** True when the player mounted but proved it cannot draw anything usable. */
+  const [renderFailed, setRenderFailed] = useState(false)
+  const lottieHostRef = useRef<HTMLSpanElement | null>(null)
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -228,7 +248,23 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // Settings can change the accent; the surface reads it once into state, so
   // the change must be broadcast to take effect without a reload.
   useEffect(() => {
+    // Latest-wins token: a slow read must not resurrect an animation the
+    // owner already removed (the settings root and this one are separate).
+    const expressionReads = createLatestOnly()
+    const loadExpression = (): void => {
+      const token = expressionReads.begin()
+      void petApi
+        .expression()
+        .then(view => {
+          if (!expressionReads.isCurrent(token)) return
+          setExpression(view)
+          if (view.state === 'corrupt') setMascotExpressionDiagnostic(view.diagnostic)
+          if (view.state === 'none') setMascotExpressionDiagnostic(undefined)
+        })
+        .catch(() => undefined)
+    }
     const load = (): void => {
+      loadExpression()
       void petApi
         .config()
         .then(config => {
@@ -252,6 +288,33 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
       globalThis.removeEventListener(PET_APPEARANCE_EVENT, onAppearance)
     }
   }, [])
+
+  // A new expression is always given a fresh chance: the previous failure may
+  // have been about the previous source, and staying on the glyph forever
+  // after a successful re-import would look like the import did nothing.
+  useEffect(() => {
+    setRenderFailed(false)
+  }, [expression])
+
+  useEffect(() => {
+    if (expression?.state !== 'ok') return undefined
+    if (props.loadAnimation === undefined) return undefined
+    if (renderFailed) return undefined
+    const container = lottieHostRef.current
+    if (container === null) return undefined
+    const animation = createMascotAnimation(container, expression.content, {
+      loader: props.loadAnimation,
+      onFailure: reason => {
+        setRenderFailed(true)
+        setMascotExpressionDiagnostic(reason)
+      },
+      onReady: () => {
+        setRenderFailed(false)
+        setMascotExpressionDiagnostic(undefined)
+      },
+    })
+    return () => animation.destroy()
+  }, [expression, renderFailed, props.loadAnimation])
 
 
   /**
@@ -697,6 +760,8 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     return undefined
   }
 
+  const face = resolveMascotFace(expression, renderFailed)
+
   return (
     <div
       ref={rootRef}
@@ -796,7 +861,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           if (event.key === 'ArrowUp' && mode === 'closed') setMode('menu')
         }}
       >
-        {glyph}
+        {face === 'animation' ? (
+          <span className="dshpet-lottie" ref={lottieHostRef} aria-hidden="true" />
+        ) : (
+          glyph
+        )}
         {degraded !== undefined ? (
           <span className="dshpet-badge" data-state="degraded" title={degraded} role="status">
             <span className="dshpet-visually-hidden">Pet 未就绪：{degraded}</span>

@@ -18,7 +18,7 @@ import { PetLifecycleMachine } from '../src/host/lifecycle.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/host/paths.js'
 import { createPetRoutes } from '../src/host/routes.js'
 import { SourceContextRegistry } from '../src/host/capture.js'
-import { LOCUS_ROUTES, ROUTES } from '../src/wire.js'
+import { EXPRESSION_ROUTES, LOCUS_ROUTES, ROUTES } from '../src/wire.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
 let harness: PetHarness | undefined
@@ -117,7 +117,11 @@ describe('every documented route is registered', () => {
     // A duplicate would shadow one handler and a missing one would 405 with
     // no diagnostic — both invisible without calling the factory.
     expect(new Set(registered).size).toBe(registered.length)
-    for (const declared of [...Object.values(ROUTES), ...Object.values(LOCUS_ROUTES)]) {
+    for (const declared of [
+      ...Object.values(ROUTES),
+      ...Object.values(LOCUS_ROUTES),
+      ...Object.values(EXPRESSION_ROUTES),
+    ]) {
       expect(registered).toContain(declared)
     }
   })

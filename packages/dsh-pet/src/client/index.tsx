@@ -28,6 +28,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { PetOverlay, type SourceSelection } from './overlay.js'
+import { loadLottiePlayer } from './player.js'
 import {
   PetSettingsSection,
   setDirectoryPicker,
@@ -301,6 +302,7 @@ function PetOverlaySurface(): JSX.Element | null {
   return (
     <PetOverlay
       currentSource={source}
+      loadAnimation={loadLottiePlayer}
       openSession={sessionId => {
         openSession(ctx, { kind: 'session', sessionId })
       }}

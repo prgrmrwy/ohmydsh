@@ -53,6 +53,7 @@ export function toErrorBody(error: unknown): PetErrorBody {
 export function statusOf(code: PetErrorCode): number {
   switch (code) {
     case 'INVALID_REQUEST':
+    case 'INVALID_EXPRESSION':
     case 'SKILL_IMPORT_REJECTED':
     case 'BINDING_INVALID':
     case 'LOCUS_INVALID':

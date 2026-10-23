@@ -31,6 +31,14 @@ export interface PetPaths {
   /** `<stateRoot>/skills/staging` — scratch space for verified atomic installs. */
   readonly stagingRoot: string
   /**
+   * `<stateRoot>/expressions` — owner-imported mascot animation sources.
+   *
+   * A display asset rather than configuration: the active source is a file,
+   * never a database row, so it survives plugin/profile rebuilds and stays
+   * inspectable by the owner.
+   */
+  readonly expressionsRoot: string
+  /**
    * `<stateRoot>/media-spool` — the only place a media download may touch disk.
    *
    * It lives inside the state root on purpose: the locus project-read guard
@@ -61,6 +69,7 @@ export function resolvePetPaths(
     projectionRoot: path.join(workspaceRoot, '.dsh', 'skills'),
     storeRoot: path.join(stateRoot, 'skills', 'store'),
     stagingRoot: path.join(stateRoot, 'skills', 'staging'),
+    expressionsRoot: path.join(stateRoot, 'expressions'),
     mediaSpoolRoot: path.join(stateRoot, 'media-spool'),
   }
 }
@@ -80,6 +89,7 @@ export async function ensurePetDirectories(paths: PetPaths): Promise<void> {
     paths.projectionRoot,
     paths.storeRoot,
     paths.stagingRoot,
+    paths.expressionsRoot,
     paths.mediaSpoolRoot,
   ]
   for (const dir of required) {

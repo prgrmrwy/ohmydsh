@@ -7,11 +7,14 @@
  */
 
 import {
+  EXPRESSION_ROUTES,
   LOCUS_ROUTES,
   ROUTES,
   type PetCapability,
   type PetChannelView,
   type PetEnvRecord,
+  type PetExpressionImportResult,
+  type PetExpressionView,
   type PetLifecycleState,
   type PetWorkspaceChoice,
   type PetLocusActionRequest,
@@ -230,6 +233,20 @@ export const petApi = {
   archive: (taskId: string, revision?: number): Promise<unknown> =>
     call(ROUTES.taskArchive, revision === undefined ? { taskId } : { taskId, revision }),
   diagnostics: (): Promise<Record<string, unknown>> => call(ROUTES.diagnostics),
+  /**
+   * Read the owner-imported mascot animation.
+   *
+   * The projection is `none`, `ok` with the raw Lottie source, or `corrupt`
+   * with a diagnostic; the source is a string so the Host's response redactor
+   * cannot rewrite animation data.
+   */
+  expression: (): Promise<PetExpressionView> => call(EXPRESSION_ROUTES.view),
+  /** Validate and store one pasted Lottie JSON source. */
+  importExpression: (content: string): Promise<PetExpressionImportResult> =>
+    call(EXPRESSION_ROUTES.import, { content }),
+  /** Deactivate the current mascot animation (keeps one backup). */
+  removeExpression: (): Promise<{ state: 'none' }> => call(EXPRESSION_ROUTES.remove),
+
   /** Owner-facing unified locus snapshot; this does not read legacy Tasks. */
   locus: (): Promise<PetLocusManagementView> => call(LOCUS_ROUTES.view),
   locusDiscovery: (input: PetLocusDiscoveryRequest): Promise<PetLocusDiscoveryView> =>

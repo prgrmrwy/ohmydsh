@@ -470,6 +470,33 @@ describe('settings information architecture', () => {
     expect(markup).toContain('不是你当前浏览器所在的机器')
   })
 
+  it('renders the animation expression group in General', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // The import flow is the whole consumer path: one paste box plus the
+    // format and storage facts, so the owner does not have to infer them.
+    expect(markup).toContain('动画表情')
+    expect(markup).toContain('Lottie JSON')
+    expect(markup).toContain('粘贴')
+  })
+
+  it('warns before replacing the active expression', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // The warning is shown in the surface and used by the overwrite confirm;
+    // both are source-guaranteed because the visible copy only renders after a
+    // Host read that never runs in static markup.
+    expect(settings).toContain('EXPRESSION_REPLACE_WARNING')
+    expect(settings).toContain('当前动画将被替换且不保留')
+    expect(settings).toContain('globalThis.confirm')
+  })
+
   it('states that Pet follows the DSH default model instead of its own', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),

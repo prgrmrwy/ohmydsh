@@ -30,6 +30,10 @@ import {
 } from './accent.js'
 import { petApi, type PetConfig, type PetTodoLedgerGroup } from './api.js'
 import {
+  getMascotExpressionDiagnostic,
+  subscribeMascotExpressionDiagnostic,
+} from './mascot-diagnostics.js'
+import {
   availableTodoActions,
   groupTodosByLocus,
   resolveFeishuJumpTarget,
@@ -77,6 +81,7 @@ import type {
   PetSkillRevision,
   PetChannelPhase,
   PetChannelView,
+  PetExpressionView,
   PetLocusDiscoveryRequest,
   PetLocusDiscoveryView,
   PetLocusEndpointView,
@@ -445,7 +450,7 @@ function GeneralTab(): JSX.Element {
 
       <Group title="外观">
         <p className="dshpet-item-hint">
-          桌宠配色。保存在本浏览器中，不影响其他设备。
+          桌宠配色。保存在 Pet 的本机配置中，对本机所有浏览器生效。
         </p>
         <div className="dshpet-swatches" role="radiogroup" aria-label="桌宠配色">
           {PET_ACCENTS.map(item => (
@@ -569,6 +574,8 @@ function GeneralTab(): JSX.Element {
         </p>
       </Group>
 
+      <ExpressionSection />
+
       <Group title="新建任务">
         <p className="dshpet-item-hint">
           新任务默认关联哪个来源。选择「不关联」时任务独立运行，
@@ -590,6 +597,190 @@ function GeneralTab(): JSX.Element {
         />
       </Group>
     </div>
+  )
+}
+
+/**
+ * Copy shown (and confirmed) before replacing an already-imported animation.
+ *
+ * Exported so the replacement-warning contract is assertable from the static
+ * markup test instead of relying on a live `confirm`.
+ */
+export const EXPRESSION_REPLACE_WARNING =
+  '当前动画将被替换且不保留，如需保留请先复制导出。'
+
+/**
+ * Owner-imported mascot animation (Lottie JSON only).
+ *
+ * The flow is deliberately one textarea: the owner copies the JSON from the
+ * site they already use, pastes it here and saves. The Host does the security
+ * validation; this surface only reports what the Host answered, plus the
+ * mascot root's own render diagnostic (shared through `mascot-diagnostics`).
+ * @returns the animation settings group.
+ */
+function ExpressionSection(): JSX.Element {
+  const [view, setView] = useState<PetExpressionView | undefined>(undefined)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [copied, setCopied] = useState(false)
+  const [renderDiagnostic, setRenderDiagnostic] = useState<string | undefined>(
+    getMascotExpressionDiagnostic(),
+  )
+
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      setView(await petApi.expression())
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    return subscribeMascotExpressionDiagnostic(() =>
+      setRenderDiagnostic(getMascotExpressionDiagnostic()),
+    )
+  }, [refresh])
+
+  const saved = view?.state === 'ok' ? view : undefined
+
+  const importExpression = async (): Promise<void> => {
+    if (draft.trim() === '') {
+      setError('请先粘贴 Lottie JSON 内容。')
+      return
+    }
+    if (saved !== undefined) {
+      const confirmed =
+        typeof globalThis.confirm === 'function'
+          ? globalThis.confirm(`${EXPRESSION_REPLACE_WARNING}\n\n继续导入？`)
+          : true
+      if (!confirmed) return
+    }
+    setBusy(true)
+    setError(undefined)
+    try {
+      await petApi.importExpression(draft)
+      setDraft('')
+      setCopied(false)
+      setRenderDiagnostic(undefined)
+      await refresh()
+      // The mascot lives on another React root; this is the same broadcast the
+      // glyph/accent controls already use.
+      globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copySource = async (): Promise<void> => {
+    if (saved === undefined) return
+    try {
+      await navigator.clipboard.writeText(saved.content)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setError('复制失败，请手动选择保存的 JSON 文本复制。')
+    }
+  }
+
+  const remove = async (): Promise<void> => {
+    if (saved === undefined) return
+    const confirmed =
+      typeof globalThis.confirm === 'function'
+        ? globalThis.confirm('移除后吉祥物会恢复显示图标，并保留一份最近素材的备份。继续？')
+        : true
+    if (!confirmed) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      await petApi.removeExpression()
+      await refresh()
+      globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Group title="动画表情">
+      <p className="dshpet-item-hint">
+        粘贴一段 <strong>Lottie JSON</strong>，吉祥物就会播放这个动画；删除后恢复显示上面的图标。
+        只接受 JSON 文本（可从 LottieFiles 下载，或从 Google Noto 动画 emoji 页面复制
+        <code>lottie.json</code>），不支持链接、SVG 或图片。
+      </p>
+      <p className="dshpet-item-hint">
+        动画保存在 Pet 的状态目录，不写入配置数据库。素材的来源与许可由你自行负责。
+      </p>
+
+      {saved !== undefined ? (
+        <>
+          <div className="dshpet-fact">
+            <span className="dshpet-fact-key">当前动画</span>
+            <span className="dshpet-fact-value">
+              已导入 · {saved.bytes} 字节 · {new Date(saved.importedAt).toLocaleString()}
+            </span>
+          </div>
+          <p className="dshpet-callout" data-tone="warn">
+            {EXPRESSION_REPLACE_WARNING}
+          </p>
+        </>
+      ) : view?.state === 'corrupt' ? (
+        <p className="dshpet-item-hint">当前动画不可用：{view.diagnostic}</p>
+      ) : (
+        <div className="dshpet-fact">
+          <span className="dshpet-fact-key">当前动画</span>
+          <span className="dshpet-fact-value">未导入</span>
+        </div>
+      )}
+
+      {renderDiagnostic !== undefined ? (
+        <p className="dshpet-error">动画渲染失败：{renderDiagnostic}</p>
+      ) : null}
+
+      <label className="dshpet-field">
+        粘贴 Lottie JSON
+        <textarea
+          className="dshpet-textarea"
+          value={draft}
+          spellCheck={false}
+          onChange={event => setDraft(event.target.value)}
+          placeholder='{"v":"5.7.0","w":100,"h":100,"layers":[...]}'
+        />
+      </label>
+      <div className="dshpet-row">
+        <button
+          type="button"
+          className="dshpet-action"
+          disabled={busy || draft.trim() === ''}
+          onClick={() => void importExpression()}
+        >
+          导入
+        </button>
+        <button
+          type="button"
+          className="dshpet-action"
+          disabled={busy || saved === undefined}
+          onClick={() => void copySource()}
+        >
+          复制导出
+        </button>
+        <button
+          type="button"
+          className="dshpet-action"
+          disabled={busy || saved === undefined}
+          onClick={() => void remove()}
+        >
+          移除
+        </button>
+        {copied ? <span className="dshpet-item-hint">已复制 JSON</span> : null}
+      </div>
+      {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
+    </Group>
   )
 }
 

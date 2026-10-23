@@ -119,12 +119,17 @@ export function isTrustedRequest(req: IncomingMessage): boolean {
 /**
  * Read and parse a bounded JSON request body.
  * @param req - Incoming request.
+ * @param limit - Maximum body bytes for THIS route; defaults to the global
+ *   management limit. Only the expression import route raises it.
  * @returns the parsed body.
  * @throws PetError when the body is too large or not valid JSON.
  */
-export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+export async function readJsonBody(
+  req: IncomingMessage,
+  limit: number = MAX_REQUEST_BODY_BYTES,
+): Promise<unknown> {
   const declared = Number(req.headers['content-length'] ?? 0)
-  if (Number.isFinite(declared) && declared > MAX_REQUEST_BODY_BYTES) {
+  if (Number.isFinite(declared) && declared > limit) {
     throw new PetError('INVALID_REQUEST', 'Request body is too large')
   }
   return new Promise((resolve, reject) => {
@@ -132,7 +137,7 @@ export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     let size = 0
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
-      if (size > MAX_REQUEST_BODY_BYTES) {
+      if (size > limit) {
         reject(new PetError('INVALID_REQUEST', 'Request body is too large'))
         req.destroy()
         return
@@ -277,13 +282,27 @@ export type PetRouteHandler = (input: {
   readonly req: IncomingMessage
 }) => Promise<unknown>
 
+/** Per-route overrides for {@link petRoute}. */
+export interface PetRouteOptions {
+  /**
+   * Request-body byte cap for this route only. Omitted routes keep
+   * {@link MAX_REQUEST_BODY_BYTES}; the mascot import route raises it because
+   * a JSON-escaped Lottie source is much larger than its on-disk bytes.
+   */
+  readonly bodyLimit?: number
+}
+
 /**
  * Wrap a Pet handler with trust, body limits, redaction and error mapping.
  * @param path - Exact route path.
  * @param handler - The route implementation.
  * @returns the route registration.
  */
-export function petRoute(path: string, handler: PetRouteHandler): RouteRegistration {
+export function petRoute(
+  path: string,
+  handler: PetRouteHandler,
+  options?: PetRouteOptions,
+): RouteRegistration {
   return {
     path,
     handler: async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -296,7 +315,7 @@ export function petRoute(path: string, handler: PetRouteHandler): RouteRegistrat
         return
       }
       try {
-        const body = req.method === 'GET' ? {} : await readJsonBody(req)
+        const body = req.method === 'GET' ? {} : await readJsonBody(req, options?.bodyLimit)
         const result = await handler({ body, req })
         sendJson(res, 200, redactSecrets({ ok: true, data: result }))
       } catch (error) {

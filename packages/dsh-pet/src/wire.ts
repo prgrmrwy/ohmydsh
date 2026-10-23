@@ -71,6 +71,51 @@ export const ROUTES = {
 } as const
 
 /**
+ * Routes for the owner-imported mascot animation.
+ *
+ * Separate from `ROUTES` for the same reason as `LOCUS_ROUTES`: a declared
+ * route must be registered exactly once, and these three are mounted together
+ * by `createPetRoutes`. Read/import/remove are all POST because the browser
+ * client's transport (`client/api.ts`) is POST-only and `petRoute` treats GET
+ * as a body-less special case; one method keeps the contract and its tests in
+ * a single shape.
+ */
+export const EXPRESSION_ROUTES = {
+  /** Projection of the active expression: `none`, `ok` with source, or `corrupt`. */
+  view: '/dsh-pet/api/expression',
+  /** Validate and atomically store one pasted Lottie JSON source. */
+  import: '/dsh-pet/api/expression-import',
+  /** Deactivate the current expression, keeping one `.removed` backup. */
+  remove: '/dsh-pet/api/expression-remove',
+} as const
+
+/** Maximum accepted JSON request body for an ordinary Pet management route. */
+export const MAX_REQUEST_BODY_BYTES = 256 * 1024
+
+/**
+ * Body limit for the expression import route only.
+ *
+ * A 512 KiB source can grow up to about 6x under JSON string escaping (control
+ * characters become `\uXXXX`), so the transport limit must clear the source
+ * limit by a wide margin; otherwise a merely-oversized animation would be
+ * reported as a generic "body too large" instead of an actionable source
+ * validation error.
+ */
+export const MAX_EXPRESSION_REQUEST_BODY_BYTES = 4 * 1024 * 1024
+
+/** Maximum accepted Lottie source bytes (UTF-8) for one mascot expression. */
+export const MAX_EXPRESSION_SOURCE_BYTES = 512 * 1024
+
+/** Maximum number of layers a Lottie source may expand to when rendered. */
+export const MAX_EXPRESSION_LAYERS = 80
+
+/** Maximum depth of precomp references between compositions. */
+export const MAX_EXPRESSION_LAYER_DEPTH = 32
+
+/** Maximum width/height a Lottie composition may declare. */
+export const MAX_EXPRESSION_DIMENSION = 2048
+
+/**
  * Routes for the unified locus management surface.
  *
  * These paths intentionally live beside, rather than inside, the legacy
@@ -1008,9 +1053,6 @@ export interface PetChannelView {
   readonly binding?: PetBindState
 }
 
-/** Maximum accepted JSON request body for any Pet management route. */
-export const MAX_REQUEST_BODY_BYTES = 256 * 1024
-
 // ---------------------------------------------------------------------------
 // Host lifecycle
 // ---------------------------------------------------------------------------
@@ -1385,6 +1427,30 @@ export interface PetInvocationCapture {
 // ---------------------------------------------------------------------------
 
 /** Stable Pet error codes returned by every management route. */
+/** Projection of the owner-imported mascot animation. */
+export type PetExpressionView =
+  | { readonly state: 'none' }
+  | {
+      readonly state: 'ok'
+      /** Raw Lottie source exactly as imported; never parsed or rewritten. */
+      readonly content: string
+      /** UTF-8 byte length read from disk. */
+      readonly bytes: number
+      /** Filesystem mtime of the active source, in epoch milliseconds. */
+      readonly importedAt: number
+    }
+  | {
+      readonly state: 'corrupt'
+      /** Human-readable reason the stored source cannot be used. */
+      readonly diagnostic: string
+    }
+
+/** Successful import projection. */
+export interface PetExpressionImportResult {
+  readonly state: 'ok'
+  readonly bytes: number
+}
+
 export type PetErrorCode =
   | 'PET_DEGRADED'
   | 'INVALID_REQUEST'
@@ -1403,6 +1469,7 @@ export type PetErrorCode =
   | 'SKILL_DISABLED'
   | 'SKILL_DIGEST_MISMATCH'
   | 'SKILL_IMPORT_REJECTED'
+  | 'INVALID_EXPRESSION'
   | 'PROJECTION_DRIFT'
   /** Workspace files an executor depends on are missing and could not be repaired. */
   | 'WORKSPACE_UNHEALTHY'
