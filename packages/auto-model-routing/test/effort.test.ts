@@ -21,6 +21,11 @@ it('clamps_unsupported_effort', () => {
  expect(mapEffort('other', 'standard', [])).toBeUndefined()
  expect(mapEffort('other', 'escalated', ['max'])).toBeUndefined()
 })
+it('defaults_respect_cap_without_exceeding_it_for_model_minimum', () => {
+ expect(tiers.map(t => mapEffort('claude-opus-5-5', t, all, 'medium'))).toEqual(['low', 'medium', 'medium', 'medium'])
+ expect(mapEffort('claude-fable-5-1', 'standard', all, 'low')).toBe('low')
+ expect(mapEffort('gpt-6-astra', 'simple', ['high', 'xhigh'], 'medium')).toBeUndefined()
+})
 it('child_models_match_design_and_family', () => {
  expect(CHILD_MODELS).toEqual({
   claude: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5'],

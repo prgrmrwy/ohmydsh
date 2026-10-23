@@ -5,7 +5,7 @@ import type { JevCategory } from './hints.js'
 export { CATEGORY_HINTS, type JevCategory } from './hints.js'
 export type Distribution = Partial<Record<Tier, number>>
 export type JevResult = { kind: 'ok'; tier: Tier; confidence?: number; probabilities?: Distribution; ms: number } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
-export interface CredentialSource { get(name: string): { value: string } | undefined }
+export interface CredentialSource { get(name: string): { value: string } | undefined | Promise<{ value: string } | undefined> }
 
 const MODEL = 'typesafe/jev-1.13'
 const MAX_BODY = 64 * 1024
@@ -27,18 +27,33 @@ function byStatus(status: number): JevCategory {
 
 export class JevClient {
   readonly url: string
-  constructor(private readonly env: CredentialSource, base = 'https://openrouter.ai', private readonly timeoutMs = 3000) {
+  constructor(private readonly env: CredentialSource, base = 'https://openrouter.ai', private readonly timeoutMs: number | (() => number) = 3000) {
     this.url = `${base}/api/alpha/decisions`
   }
 
   /** One request, no retry. Never throws; never returns the body or the key. */
   /** `state` is assembled and redacted by the caller (`buildState`). */
   async judge(state: string, signal: AbortSignal): Promise<JevResult> {
-    const key = this.env.get('OPENROUTER_API_KEY')?.value
-    if (!key) return { kind: 'failed', category: 'missing-credential' }
-    const deadline = AbortSignal.timeout(this.timeoutMs)
+    if (signal.aborted) return { kind: 'cancelled' }
+    const configuredTimeout = typeof this.timeoutMs === 'function' ? this.timeoutMs() : this.timeoutMs
+    // Settings callbacks use the public range; numeric constructor overrides remain available to tests.
+    const timeout = typeof this.timeoutMs === 'function' && (!Number.isInteger(configuredTimeout) || configuredTimeout < 1000 || configuredTimeout > 4500) ? 3000 : configuredTimeout
+    const deadline = AbortSignal.timeout(timeout)
     const started = performance.now()
     try {
+      const abort = AbortSignal.any([signal, deadline])
+      let onAbort: () => void = () => {}
+      const cancelled = new Promise<never>((_, reject) => {
+        onAbort = () => reject(new Error('aborted'))
+        abort.addEventListener('abort', onAbort, { once: true })
+      })
+      let credential: { value: string } | undefined
+      try { credential = await Promise.race([Promise.resolve(this.env.get('OPENROUTER_API_KEY')), cancelled]) }
+      finally { abort.removeEventListener('abort', onAbort) }
+      const key = credential?.value
+      if (signal.aborted) return { kind: 'cancelled' }
+      if (deadline.aborted) return { kind: 'failed', category: 'timeout' }
+      if (!key) return { kind: 'failed', category: 'missing-credential' }
       const response = await fetch(this.url, {
         method: 'POST',
         redirect: 'error',

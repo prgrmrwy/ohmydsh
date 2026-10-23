@@ -8,7 +8,7 @@ names concerned — see [Trademarks](#trademarks) at the end.
 
 ## Brand SVG assets from `@lobehub/icons-static-svg@1.94.0`
 
-21 of the 22 files in `src/client/assets/` are unmodified copies of icons published in
+21 of the 23 files in `src/client/assets/` are unmodified copies of icons published in
 [`@lobehub/icons-static-svg@1.94.0`](https://www.npmjs.com/package/@lobehub/icons-static-svg)
 ([lobehub/lobe-icons](https://github.com/lobehub/lobe-icons)). The upstream URL and SHA-256
 checksum of every copy are recorded file by file in
@@ -68,6 +68,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## `src/client/assets/magpie.svg`
+
+An unmodified copy of `internal/provider/magpie.svg` from
+[`yetone/magpie`](https://github.com/yetone/magpie) at commit
+`ba1dc7f975666e50308ef7bf8173c8a8e91c553b`.
+
+```
+MIT License
+
+Copyright (c) 2026 yetone
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Rendering notes
 
 The files on disk are byte-for-byte copies of the upstream SVGs, checksummed in
@@ -80,6 +110,10 @@ recorded here because it changes what is displayed:
   no visual effect. For the 10 single-colour marks drawn with `currentColor`
   (`anthropic`, `grok`, `hermes`, `kimi`, `longcat`, `mimo`, `openai`, `opencode`, `pi`, `trae`)
   the mark is painted in the host theme's foreground colour instead of black or white.
+- `magpie.svg` carries no `fill` at all (magpie's own pages colour it with CSS
+  `fill: currentColor`), so SVG would paint it black and it would vanish on a dark theme. For
+  this file only, the injected root additionally receives `fill="currentColor"`, giving it the
+  host theme's foreground colour like the single-colour marks above.
 - For the corner (model) instance of a composite badge, `id` attributes and `url(#…)` references
   are suffixed with `-sub`, so two copies of the same file on one page cannot resolve each
   other's gradient or clip-path definitions.

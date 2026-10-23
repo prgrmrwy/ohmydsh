@@ -1,0 +1,100 @@
+id: T8
+name: 用户已跳过的三项mock缺口
+description: 不执行trail，仅完整保留CP21/22/23的oracle与用户skip决定；未覆盖不计通过。
+device: pc
+parallel_group: J
+conflicts_with: []
+precondition: 用户已明确“跳过这三项，继续”；无需再确认阶段2。
+ask_user_if_blocked: false
+status: skipped
+blocked_reason: missing原生mock且用户已选择本次skip；不运行任何动作。
+mock_setup:
+  required: true
+  status: missing
+  scenario_id: CP21-CP22-CP23-native-host-mocks-missing
+  surface: host-Jev-child-policy-and-picker-capabilities
+  data_source: host-Jev-official-allowlist-and-model-catalog
+  evidence:
+    - mock-discovery.md:9-22
+    - mock-discovery.md:28-30
+    - mock-discovery.md:46-54
+  enable:
+    command: null
+    env: null
+    notes: 不新增框架、不改共享白名单、不重启、不用浏览器mock假冒Host出站。
+  user_decision: skip
+budget: Jev0，模型0，写设置0。
+cleanup: 无操作无需恢复。
+steps:
+  - seq: 1
+    description: 仅登记用户已确认未覆盖，不执行navigate/wait_for或任何真实操作
+    action: wait_for
+    target: NOT-EXECUTED-user-skip-ledger
+    value: null
+    url_needs_input: false
+    checkpoints:
+      - id: CP21
+        description: 固定2000ms响应与1500/2500期限状态未覆盖，跳过不计通过
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: true
+        data_scenario: fixed-Jev-delay-2000
+        surface: host-Jev-timeout
+        data_source: host-Jev-outbound
+        mock_scenario_id: CP21-native-host-delay-missing
+        expected_source: 'user-confirmed-CP21; delta-spec:137-140'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        expected_url: https://openrouter.ai/api/alpha/decisions
+        expected_method: POST
+        expected_params: null
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 用户选择skip；自然网络耗时不代替固定2000ms，不发付费请求尝试碰撞。
+        result: skipped
+        result_detail: 用户已明确跳过，missing原生Host延迟mock；未覆盖、不计通过。
+      - id: CP22
+        description: 允许列表收缩后旧值不可选及Host保存/工具拒绝状态未覆盖
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: true
+        data_scenario: allowlist-shrink-race
+        surface: child-picker-save-and-tool
+        data_source: official-child-allowlist
+        mock_scenario_id: CP22-native-allowlist-mock-missing
+        expected_source: 'user-confirmed-CP22; delta-spec:195,222-225,317-320'
+        expected_unverified: false
+        input_method: default
+        class: flaky
+        expected_url: /api/auto-model-routing.saveSettings
+        expected_method: POST
+        expected_params: null
+        expected_status: 400
+        expected_response: null
+        reviewer_notes: 用户skip；不修改共享列表，不用浏览器假列表代替Host/工具复核。
+        result: skipped
+        result_detail: 用户已明确跳过，missing隔离原生动态列表场景；未覆盖、不计通过。
+      - id: CP23
+        description: 换到不兼容模型后要求重选effort并阻止保存的状态未覆盖
+        focus: interaction
+        verify: assert_dom
+        automation: partial
+        data_scenario_required: true
+        data_scenario: incompatible-effort-model-change
+        surface: child-model-and-effort-picker
+        data_source: official-model-capabilities
+        mock_scenario_id: CP23-native-model-capability-mock-missing
+        expected_source: 'user-confirmed-CP23; delta-spec:312-315'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        selector: '.amr-settings [data-tier="simple"]'
+        expected_text: 请选择推理等级
+        expected_attrs: null
+        expected_visible: true
+        reviewer_notes: 当前真实7模型均支持五级，Astra低能力只存在UT fixture；不当真实场景，不计通过。
+        result: skipped
+        result_detail: 用户已明确跳过，missing现网能力fixture；未覆盖、不计通过。

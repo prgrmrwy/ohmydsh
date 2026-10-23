@@ -20,5 +20,6 @@
 | `openrouter.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/openrouter-color.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `17bede1b89166f824ee06753dc526a3f5e18b769706deaab09d04a3a98de1a78` |
 | `bytedance.svg` | `https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@1.94.0/icons/bytedance-color.svg` | `@lobehub/icons-static-svg@1.94.0` | MIT | `3d37647be262c79b044e293bb1a4993202537e9f9ffdbd2bbe7e9fc5378d1005` |
 | `opencode.svg` | `https://raw.githubusercontent.com/anomalyco/opencode/5e75e5e9901f0d178f425bfb47f1bd46cbe78a59/packages/ui/src/assets/icons/provider/opencode.svg` | commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` | MIT | `018a85654f13635373dc283ecc27928fa4e001c06cde47f7efa1cbcab567b51c` |
+| `magpie.svg` | `https://raw.githubusercontent.com/yetone/magpie/ba1dc7f975666e50308ef7bf8173c8a8e91c553b/internal/provider/magpie.svg` | commit `ba1dc7f975666e50308ef7bf8173c8a8e91c553b` | MIT | `988d2e57b6b87043776521220c82e6f4cdbff0a7d2785ee9416321a918ec0138` |
 
 品牌所有者保留其商标权利。这些标识仅用于标明所选的 provider/model 路线，不代表任何背书。

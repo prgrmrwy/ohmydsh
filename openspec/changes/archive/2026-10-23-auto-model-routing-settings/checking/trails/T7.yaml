@@ -1,0 +1,58 @@
+id: T7
+name: 设置校验与期限边界
+description: CP19；非法设置每次字节不变，合法期限边界保存后立即回读并恢复，无Jev请求。
+device: pc
+parallel_group: I
+conflicts_with: [T1, T2, T9, T6, T3, T4, T10, T5]
+precondition: 用户授权安静窗口、快照S_T、精确回滚；同源已认证RPC，不输出token；保持key只读不调用setKey。
+ask_user_if_blocked: true
+status: partial
+blocked_reason: Loop2已真实执行并恢复；仍有线级或指定GUI子断言缺口，非原预检无入口。
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: settings-form-and-save-endpoint
+  data_source: config-file
+  evidence: [mock-discovery.md:45]
+  enable:
+    command: null
+    env: null
+    notes: 真实Host负例，非UT/e2e；不改代码。
+  user_decision: null
+budget: Jev0，模型0；不要为期限上下界发送真实Jev请求。
+cleanup: 每个合法边界后立即恢复其前快照并核验hash；全部结束finally精确恢复S_T和官方默认（此trail不应改变模型）。
+timing:
+  hard_limit_seconds: 180
+  stop_new_actions_at_seconds: 120
+  cleanup_reserve_seconds: 60
+  rule: 从进入trail开始计时；前置只读绑定与恢复入口确认后才准写入。120秒停止新动作并取消活跃回合，finally恢复；180秒前未证实恢复则blocked并停止全部后续trail，不重跑。
+  paid_chain_admission: 最迟60秒启动唯一付费链路；未完成配置/观察绑定则不发送，余项blocked。T5最多三段短链，分别须在30/60/90秒前启动；任何链未结束不启动下一段。
+steps:
+  - seq: 1
+    description: UI清空期限观察保存禁用；同源saveSettings逐个提交execution-notes列出的非法期限/枚举/max/模型id/未知字段负例；逐个比较字节；1000与4500各合法提交回读后恢复
+    action: fill
+    target: '#amr-timeout; /api/auto-model-routing.saveSettings'
+    value: execution-notes.md-CP19-boundary-matrix
+    url_needs_input: false
+    checkpoints:
+      - id: CP19
+        description: 非法期限枚举max提交拒绝且原配置字节不变；合法1000/4500保存回读成功并恢复
+        focus: integration
+        verify: assert_network
+        automation: full
+        data_scenario_required: false
+        surface: settings-form-and-save-endpoint
+        data_source: config-file-and-validation-errors
+        expected_source: 'user-confirmed-CP19; delta-spec:259-267,292-295'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        expected_url: /api/auto-model-routing.saveSettings
+        expected_method: POST
+        expected_params: null
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 矩阵每负例须4xx+字段错误+本次前后hash相等；合法边界200且settings/磁盘整数等于提交值。覆盖999/4501/6000/1000.5/null/空串/特殊字符/带空格/超长非整数字符串，defaultMode=auto，cap=max，非法provider/tier/effort，非法id及129字符id，foo与合成apiKey字段（不是实际credential）。禁止全量响应带潜在凭据，不能把有错误文案但文件变化判通过；没有原生fixture不影响这些真实输入负例。详见execution-notes.md，不发明额外max-length阈值。
+        result: pass
+        result_detail: Loop2 T7 UI清空timeout保存禁用；19个合同负例逐个HTTP400+字段issues且逐项hash不变；1000/4500各成功整数回读并立即精确原bytes/mode恢复；无Jev请求。 详见execution-facts.md Loop2。

@@ -5,7 +5,8 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import { resolve } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { SettingsStore } from './settings.js'
+import { settingsHost } from './settings-host.js'
 import { homedir } from 'node:os'
 import { FileStateStore, RoutingState } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
@@ -16,7 +17,6 @@ import { userInput } from './input.js'
 import { JevClient, rubricVersion } from './jev.js'
 import { routeSubagentTool } from './subagent-tool.js'
 import { buildState, previousTurn } from './context.js'
-import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 
 export const name = 'dsh-auto-model-routing'
 export const inject = ['llm', 'agents', 'tools']
@@ -27,8 +27,11 @@ export interface Config { home?: string; jevBase?: string; jevTimeoutMs?: number
 
 export function apply(ctx: Context, config: Config = {}): void {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
-  const jev = new JevClient(launchEnvironmentOf(ctx), config.jevBase, config.jevTimeoutMs)
-  const state = new RoutingState(new FileStateStore(resolve(home, 'state/auto-model-routing/sessions')))
+  const settings = new SettingsStore(resolve(home, 'plugins/dsh-auto-model-routing/config.json'))
+  const hostSettings = settingsHost(ctx, settings)
+  const jev = new JevClient({ get: hostSettings.credential }, config.jevBase, config.jevTimeoutMs ?? (() => settings.read().settings.jevTimeoutMs))
+  const stateFiles = new FileStateStore(resolve(home, 'state/auto-model-routing/sessions'))
+  const state = new RoutingState(stateFiles)
   const book = new JudgementBook(resolve(home, 'state/auto-model-routing/judgements.jsonl'))
   const router = new Router(state, (sessionId, turn, tier, model, effort) => {
     const line = { sessionId, turn, tier, ...(effort ? { effort } : {}), model, rubricVersion }
@@ -36,13 +39,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     // Recording is best effort: a failed append never touches the request or the mode.
     try { book.append(line) }
     catch (error) { ctx.logger.warn(`auto-model-routing: could not record the judgement: ${String(error)}`) }
+  }, () => settings.read().settings)
+  const toastOn = (): boolean => settings.read().settings.decisionToast
+  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, judged: (sessionId, value) => router.judged(sessionId, value) })))
+  ctx.on('agent/created', ({ agent, source }) => {
+    // Factory resume announces `resume`; a nonzero initial seed also excludes restored/forked histories.
+    if (source !== 'startup' || agent.session.header.origin === 'subagent' || agent.session.firstLiveSeq !== 0 || agent.session.header.isSeeded || agent.session.snapshotEvents().some(event => event.type === 'session/end-seed') || stateFiles.get(agent.id)) return
+    if (settings.read().settings.defaultMode === 'AUTO') state.setMode(agent.id, 'AUTO')
+    return undefined
   })
-  const configFile = resolve(home, 'plugins/dsh-auto-model-routing/config.json')
-  // Read on every status request so the switch applies without a restart; on unless explicitly `false`.
-  const toastOn = (): boolean => {
-    try { return (JSON.parse(readFileSync(configFile, 'utf8')) as { decisionToast?: unknown })?.decisionToast !== false } catch { return true }
-  }
-  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, judged: (sessionId, value) => router.judged(sessionId, value) })))
   // Agent is the WeakMap identity; origin stays on the immutable session header.
   const refs = new WeakMap<object, AgentRef>()
   const ref = (agent: { id: string; session: { header: { origin?: string } } }): AgentRef => {
@@ -81,7 +86,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     if (payload.agent.session.header.origin === 'subagent') return config
     const model = router.needsModelInfo(ref(payload.agent)) ? await ctx.llm.resolveModelInfo(config.provider, config.model, payload.signal) : undefined
     const efforts = (model?.reasoning?.efforts ?? []).map(effort => effort.id).filter(id => knownEfforts.has(id)) as Effort[]
-    const routed = router.request(ref(payload.agent), payload.turn, config as unknown as RequestConfig, efforts)
+    const catalog = model && settings.read().settings.mainEfforts ? await hostSettings.catalog() : undefined
+    const routed = router.request(ref(payload.agent), payload.turn, config as unknown as RequestConfig, efforts, catalog)
     // AUTO moved the effort away from the official selection: make that selection (and the picker) carry it.
     // `config` is the official selection for this request, so a user pick made since the last sync is caught too.
     // Not awaited and never fatal; `inflight` only stops repeat calls before the first one lands.
@@ -103,7 +109,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['connection', 'sessionController'], child => {
-    for (const operation of ['state', 'setMode', 'label'] as const) {
+    for (const operation of ['state', 'setMode', 'label', 'settings', 'saveSettings', 'setKey'] as const) {
       child.effect(() => child.connection.fetch.register({
         path: `/api/auto-model-routing.${operation}`,
         methods: ['POST'], requestBody: 'buffered',
@@ -118,10 +124,12 @@ export function apply(ctx: Context, config: Config = {}): void {
             return 'agent' in result ? ref(result.agent) : undefined
           }
           const payload = enveloped ? wire.payload : body
-          const response = operation === 'label' ? await labelEndpoint(payload, resolveAgent, book) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
+          const response = operation === 'settings' || operation === 'saveSettings' || operation === 'setKey'
+            ? await hostSettings.endpoint(operation, payload)
+            : operation === 'label' ? await labelEndpoint(payload, resolveAgent, book) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
           if (!enveloped) return response
           const value = await response.json()
-          return Response.json({ type: 'server-response', rpcId: wire.rpcId, result: response.ok ? { ok: true, value } : { ok: false, error: { code: 'invalid-request', message: value.error, details: {} } } })
+          return Response.json({ type: 'server-response', rpcId: wire.rpcId, result: response.ok ? { ok: true, value } : { ok: false, error: { code: 'invalid-request', message: value.error, details: { issues: value.issues ?? [] } } } })
         },
       }))
     }

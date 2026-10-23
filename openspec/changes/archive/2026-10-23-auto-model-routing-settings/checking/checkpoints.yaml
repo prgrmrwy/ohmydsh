@@ -1,0 +1,138 @@
+meta:
+  feature: auto-model-routing-settings
+  stage: 3-independent-review-complete-awaiting-user-confirmation
+  oracle_confirmation: already-confirmed-do-not-repeat
+  provenance: user-confirmed-24CP-list-in-delegation-plus-OpenSpec-spec-only
+  original_session_oracle_persisted: false
+  reconstruction_boundary: 原始24CP未持久化；只使用本次用户逐项提供列表，spec仅补细化，不新增预期。
+  independence: low
+  qualification: oracle与实现同源，绿不等于免人工；没有执行结果。
+  previous_lint_pass_rate: 87.5
+  previous_lint_source: mock-discovery.md既有阶段1记录；不是本轮重算
+  skip_confirmation: 用户明确“跳过这三项，继续”；CP21/CP22/CP23未覆盖，不计通过。
+  spec: openspec/changes/auto-model-routing-settings/specs/auto-model-routing/spec.md
+  inherited_spec: openspec/specs/auto-model-routing/spec.md
+checkpoints:
+  - id: CP01
+    claim: key env只读不预填不回传
+    expected: 来源env、输入禁用且空；settings响应只有配置状态元数据，无key值；不迁移、不调setKey。
+    provenance: user-list-CP01;delta-spec:271,285,347-350
+    trail: T1
+  - id: CP02
+    claim: 页签/编辑模型草稿不改真实或默认模型
+    expected: 切Claude/GPT和编辑模型后草稿保留；官方会话与默认provider/model不变；不调用selectModel。
+    provenance: user-list-CP02;delta-spec:273,297-300
+    trail: T1
+  - id: CP03
+    claim: 精确主effort实际请求
+    expected: 实际provider/model的显式mainEfforts格生效；不能用编辑对象或芯片自报代替实际请求证据。
+    provenance: user-list-CP03;delta-spec:142-147,184-187
+    trail: T2
+  - id: CP04
+    claim: 另一未覆盖模型缺省
+    expected: 同provider另一无覆盖模型按其起点、Jev实际档位、cap和支持集合计算，不继承前一模型覆盖。
+    provenance: user-list-CP04;delta-spec:143-145,184-187
+    trail: T9
+  - id: CP05
+    claim: AUTO不换provider/model且官方选择匹配实际
+    expected: 请求provider/model保持发送前官方选择；官方选择effort与实际请求一致。
+    provenance: user-list-CP05;delta-spec:5,24-27
+    trail: T2
+  - id: CP06
+    claim: 保存后下一请求生效
+    expected: 更新显式主映射后，下一实际请求采用新值；同回合若可观察应复用档位，不借新请求声称覆盖同回合缓存。
+    provenance: user-list-CP06;delta-spec:147
+    trail: T6
+  - id: CP07
+    claim: route_subagent精确model+effort
+    expected: 工具精确返回所判tier对应childRoutes的provider/model/reasoning_effort，不重套起点。
+    provenance: user-list-CP07;delta-spec:194-195,217-220
+    trail: T3
+  - id: CP08
+    claim: 子不继承main
+    expected: 同模型主映射与子推荐刻意不同；工具推荐及实际子请求用子组合，不套mainEfforts。
+    provenance: user-list-CP08;delta-spec:195,217-220;current-spec:83-86
+    trail: T3
+  - id: CP09
+    claim: 官方真实派发精确参数且不绕门禁
+    expected: 官方subagent调用显式传完整工具组合；子请求同组合；受官方既有门禁约束，拒绝时不换模型重试。
+    provenance: user-list-CP09;delta-spec:195;current-spec:331-337
+    trail: T3
+  - id: CP10
+    claim: 降cap冲突拒绝
+    expected: 高于新cap的主子显式格均报冲突；UI阻止、Host拒绝；配置字节不变，不静默截断。
+    provenance: user-list-CP10;delta-spec:267,322-325
+    trail: T4
+  - id: CP11
+    claim: 同提交修复成功
+    expected: cap和冲突主子格同一提交修复后整体成功，回读精确值。
+    provenance: user-list-CP11;delta-spec:322-325
+    trail: T4
+  - id: CP12
+    claim: 缺省受cap支持集合
+    expected: 未覆盖主子格按起点计算并受cap和支持集合约束，不突破cap；当前真实目录非稀疏能力，不能声称覆盖候选空分支。
+    provenance: user-list-CP12;delta-spec:145,174-182,195
+    trail: T10
+  - id: CP13
+    claim: 恢复默认删除覆盖不固化
+    expected: 恢复该主/子格默认并保存后覆盖被删除，显示解析默认；其它缺省格无新增记录。
+    provenance: user-list-CP13;delta-spec:265,327-330
+    trail: T4
+  - id: CP14
+    claim: 新普通会话默认AUTO首请求判档
+    expected: defaultMode=AUTO后新普通验收会话初始AUTO，首用户请求产生Jev判档。
+    provenance: user-list-CP14;delta-spec:4,49-52
+    trail: T5
+  - id: CP15
+    claim: 自建旧MANUAL不翻转
+    expected: 本次自建并已物化的MANUAL普通会话，在修改默认后重新打开仍MANUAL；不动历史业务会话、不重启。
+    provenance: user-list-CP15;delta-spec:4,54-57
+    trail: T5
+  - id: CP16
+    claim: MANUAL直通工具routed:false
+    expected: 主MANUAL请求配置直通；工具非错误返回routed=false/reason=manual，不判档、不派发。
+    provenance: user-list-CP16;delta-spec:6,202-205
+    trail: T5
+  - id: CP17
+    claim: 提示关仍判档无toast但hover可见
+    expected: decisionToast=false下成功判档，无新toast，hover最近决策与同次状态一致。
+    provenance: user-list-CP17;current-spec:273-276,288-311
+    trail: T2
+  - id: CP18
+    claim: 开后toast
+    expected: decisionToast=true后新成功判档触发toast，内容对应新decision，不复用旧id。
+    provenance: user-list-CP18;current-spec:288-316
+    trail: T6
+  - id: CP19
+    claim: 非法期限枚举max拒绝原配置不变含边界
+    expected: 非整数或超1000-4500期限、非法枚举及max拒绝且字节不变；1000/4500整数有效。所有写入后恢复。
+    provenance: user-list-CP19;delta-spec:259-267,292-295
+    trail: T7
+  - id: CP20
+    claim: criteria原文与列表有效
+    expected: 四档info等于rubric criteria原文；主/子候选分别符合目录与允许列表，effort受支持/cap过滤，无max。
+    provenance: user-list-CP20;delta-spec:271-279,332-335
+    trail: T1
+  - id: CP21
+    claim: 固定延迟1500/2500测试
+    expected: 固定2000ms Jev响应时1500超时，2500成功。
+    provenance: user-list-CP21;delta-spec:137-140
+    trail: T8
+    disposition: skipped-user-confirmed-missing-native-mock
+  - id: CP22
+    claim: 允许列表收缩竞态
+    expected: 旧推荐不可再选，保存/工具当前列表复核拒绝，不换模型。
+    provenance: user-list-CP22;delta-spec:195,222-225,317-320
+    trail: T8
+    disposition: skipped-user-confirmed-missing-native-mock
+  - id: CP23
+    claim: 换不兼容effort
+    expected: A/xhigh换到仅low/medium的B要求重选并阻止保存，重选medium可保存。
+    provenance: user-list-CP23;delta-spec:312-315
+    trail: T8
+    disposition: skipped-user-confirmed-missing-native-mock
+  - id: CP24
+    claim: 实际AUTO/child无max
+    expected: 已执行主AUTO与真实子请求的effort均非max；不以picker无max代替实际请求证据，也不宣称穷举所有档位。
+    provenance: user-list-CP24;delta-spec:143,145,195
+    trail: T3

@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { Router } from '../src/router.js'
 import type { Tier } from '../src/effort.js'
+import { DEFAULT_SETTINGS, type Settings } from '../src/settings-contract.js'
 import { RoutingState, type SessionState } from '../src/state.js'
 
 const config = { provider: 'claude', model: 'claude-opus-5-5', reasoningEffort: 'medium', temperature: 0.7 } as const
@@ -15,6 +16,71 @@ function fixture() {
  const agent = { id: 'S' }
  return { state, agent, router: new Router(state) }
 }
+it('exact_overrides_and_settings_changes_remap_same_tier_without_rejudging', () => {
+ const {state,agent}=fixture()
+ let settings: Settings = {...DEFAULT_SETTINGS, mainEfforts:{claude:{complex:'medium'}}}
+ const router = new Router(state, undefined, () => settings)
+ router.setMode(agent,'AUTO'); start(router,agent,1)
+ expect(router.request(agent,1,config,supported).reasoningEffort).toBe('medium')
+ settings = {...DEFAULT_SETTINGS, effortCap:'low'}
+ expect(router.begin(agent,1,message('retry'))).toBeUndefined()
+ expect(router.request(agent,1,config,supported).reasoningEffort).toBe('low')
+ settings = {...DEFAULT_SETTINGS, mainEfforts:{codex:{complex:'medium'}}}
+ expect(router.request(agent,1,{...config,provider:'codex',model:'gpt-6.1-sol'},supported).reasoningEffort).toBe('medium')
+ expect(router.request(agent,1,config,supported).reasoningEffort).toBe('high')
+})
+it('family_override_applies_to_all_family_models_and_absence_preserves_model_defaults', () => {
+ const {state,agent}=fixture()
+ let settings: Settings={...DEFAULT_SETTINGS,mainEfforts:{codex:{complex:'high'}}}
+ const router=new Router(state,undefined,()=>settings)
+ router.setMode(agent,'AUTO');start(router,agent,1)
+ for (const model of ['gpt-6-astra','gpt-6-luna','gpt-6.1-sol']) expect(router.request(agent,1,{...config,provider:'codex',model},supported).reasoningEffort).toBe('high')
+ settings={...DEFAULT_SETTINGS}
+ expect(router.request(agent,1,{...config,provider:'codex',model:'gpt-6-astra'},supported).reasoningEffort).toBe('medium')
+ expect(router.request(agent,1,{...config,provider:'codex',model:'gpt-6-luna'},supported).reasoningEffort).toBe('xhigh')
+})
+it('actual_request_support_must_validate_explicit_effort_even_with_stale_catalog',()=>{
+ const {state,agent}=fixture()
+ const router=new Router(state,undefined,()=>({...DEFAULT_SETTINGS,mainEfforts:{claude:{complex:'high'}}}))
+ router.setMode(agent,'AUTO');start(router,agent,1)
+ const catalog={models:[{provider:config.provider,model:config.model,name:'Opus',reasoningEfforts:supported}],childAllowlist:{status:'unavailable' as const,allowedModels:[]}}
+ expect(()=>router.request(agent,1,config,['low','medium'],catalog)).toThrow('自动模型路由设置无效')
+})
+it('invalid_explicit_effort_blocks_request_without_disabling_and_can_be_repaired', () => {
+ const {state,agent}=fixture()
+ let settings: Settings = {...DEFAULT_SETTINGS, mainEfforts:{claude:{complex:'high'}}}
+ const router = new Router(state, undefined, () => settings)
+ router.setMode(agent,'AUTO'); start(router,agent,1)
+ expect(router.request(agent,1,config,supported).reasoningEffort).toBe('high')
+ expect(()=>router.request(agent,1,config,['low','medium'])).toThrow(/路由设置无效/)
+ settings = {...settings,effortCap:'medium'}
+ expect(()=>router.request(agent,1,config,supported)).toThrow(/路由设置无效/)
+ expect(state.read(agent.id)).toEqual({mode:'AUTO',previous:'complex'})
+ settings = {...DEFAULT_SETTINGS}
+ expect(router.request(agent,1,config,supported).reasoningEffort).toBe('high')
+})
+it('removed_advertised_main_model_blocks_cached_explicit_mapping_even_if_resolvable', () => {
+ const {state,agent}=fixture()
+ const settings: Settings = {...DEFAULT_SETTINGS,mainEfforts:{claude:{complex:'medium'}}}
+ const router=new Router(state,undefined,()=>settings)
+ const childAllowlist={status:'unavailable' as const,allowedModels:[]}
+ const entry={provider:config.provider,model:config.model,name:config.model,reasoningEfforts:supported}
+ router.setMode(agent,'AUTO');start(router,agent,1)
+ expect(router.request(agent,1,config,supported,{models:[entry],childAllowlist}).reasoningEffort).toBe('medium')
+ expect(()=>router.request(agent,1,config,supported,{models:[],childAllowlist})).toThrow('自动模型路由设置无效')
+ expect(state.read(agent.id)).toEqual({mode:'AUTO',previous:'complex'})
+ expect(router.request(agent,1,config,supported,{models:[entry],childAllowlist}).reasoningEffort).toBe('medium')
+ expect(router.status(agent).history).toHaveLength(1)
+})
+it('malformed_explicit_ancestors_do_not_fall_back_and_manual_does_not_read_settings', () => {
+ const {state,agent}=fixture()
+ const router = new Router(state, undefined, () => ({...DEFAULT_SETTINGS, mainEfforts:{claude:null}} as unknown as Settings))
+ start(router,agent,1)
+ expect(router.request(agent,1,config,supported)).toEqual(config)
+ router.setMode(agent,'AUTO'); start(router,agent,2)
+ expect(()=>router.request(agent,2,config,supported)).toThrow('自动模型路由设置无效')
+ expect(state.read(agent.id).disabled).toBeUndefined()
+})
 it('manual_does_not_need_model_metadata',()=>{
  const {router,agent}=fixture()
  expect(router.needsModelInfo(agent)).toBe(false)

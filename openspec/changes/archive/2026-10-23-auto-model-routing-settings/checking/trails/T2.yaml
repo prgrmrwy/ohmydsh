@@ -1,0 +1,107 @@
+id: T2
+name: 精确主映射与提示关闭
+description: CP03/05/17；同一真实AUTO短回合验证精确映射、官方选择和提示关闭。
+device: pc
+parallel_group: B
+conflicts_with: [T1, T9, T6, T3, T4, T10, T5, T7]
+precondition: B审查和用户授权完成；安静窗口；已保存S0与本trail S_T原字节/存在性/模式及官方选择/默认；仅本次新建验收普通会话；全部方法见execution-notes.md。
+ask_user_if_blocked: true
+status: partial
+blocked_reason: Loop2已真实执行并恢复；仍有线级或指定GUI子断言缺口，非原预检无入口。
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: main-official-picker-and-request
+  data_source: mainEfforts-and-official-call-configuration
+  evidence: [mock-discovery.md:40]
+  enable:
+    command: null
+    env: null
+    notes: 临时真实非密钥设置，不是mock；当前目录只读重核。
+  user_decision: null
+budget: Jev主1，主模型预计1，child0；所有实际尝试纳入全局10/20提议阈值（待确认）。
+cleanup: 每次保存后回读；本trail finally恢复原非密钥config字节/存在性/模式与官方当前/默认选择，核验hash，取消运行并将本次会话置MANUAL；不发额外模型请求。
+evidence_policy: 缺安全可关联Host到provider出站证据时CP03/04/05/06保持partial，request/header.config仅合成配置佐证；不得用芯片或工具输出补成PASS。
+timing:
+  hard_limit_seconds: 180
+  stop_new_actions_at_seconds: 120
+  cleanup_reserve_seconds: 60
+  rule: 从进入trail开始计时；前置只读绑定与恢复入口确认后才准写入。120秒停止新动作并取消活跃回合，finally恢复；180秒前未证实恢复则blocked并停止全部后续trail，不重跑。
+  paid_chain_admission: 最迟60秒启动唯一付费链路；未完成配置/观察绑定则不发送，余项blocked。T5最多三段短链，分别须在30/60/90秒前启动；任何链未结束不启动下一段。
+steps:
+  - seq: 1
+    description: 打开设置，目标精确模型Sol四档临时均设medium、cap=xhigh；保存后在官方picker选Sol并于本次AUTO会话保存decisionToast=false并在发送前开启只读DOM观察，只发“仅回复OK，不调用工具”；记录新decision后hover面板
+    action: click
+    target: '.amr-settings; 官方模型picker; 本次验收会话composer发送按钮'
+    value: mainEfforts.codex.gpt-6.1-sol.all-tiers=medium; decisionToast=false
+    url_needs_input: false
+    checkpoints:
+      - id: CP03
+        description: 保存回读仅目标精确模型覆盖，下一真实请求effort更新为medium
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: false
+        surface: main-request
+        data_source: mainEfforts-and-request-evidence
+        expected_source: 'user-confirmed-CP03; delta-spec:142-147,184-187'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        network_assertion_enabled: false
+        blocked_subassertion: Host-to-provider出站观察源未发现；本断言不可执行，不轮询、不造URL或正则，不可判PASS。
+        expected_url: null
+        expected_method: POST
+        expected_params:
+          provider: codex
+          model: gpt-6.1-sol
+          reasoningEffort: medium
+        expected_status: null
+        expected_response: null
+        reviewer_notes: expected_url=null且network_assertion_enabled=false，出站断言不可执行。记录saveSettings字段/回读和请求关联官方request/header.config；无Host线级观察设施则actual-request部分未证实，整个CP不PASS。设置四档同值只是不依赖Jev档位，不伪造固定分类。
+        result: manual
+        result_detail: partial：T2保存Sol四档medium，新decision14 simple，turn1 seq18官方request/header为codex/Sol/medium；provider线级未证实。 详见execution-facts.md Loop2。
+      - id: CP05
+        description: AUTO请求包含发送前provider/model，完成后官方选择effort匹配该请求配置
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: false
+        surface: main-official-picker-and-request
+        data_source: official-selection-and-request-evidence
+        expected_source: 'user-confirmed-CP05; delta-spec:5,24-27'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        network_assertion_enabled: false
+        blocked_subassertion: Host-to-provider出站观察源未发现；本断言不可执行，不轮询、不造URL或正则，不可判PASS。
+        expected_url: null
+        expected_method: POST
+        expected_params:
+          provider: codex
+          model: gpt-6.1-sol
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 每次发送前快照官方selection，发送后与request/header及官方picker比较三元组；不以设置编辑模型证明provider/model不变。官方selection证据可独立记子断言，实际线级证据缺失不完整PASS。
+        result: manual
+        result_detail: partial：T2发送前及官方header codex/Sol/medium一致，完成后官方lastUsed/next一致；线级未证实。 详见execution-facts.md Loop2。
+      - id: CP17
+        description: 提示关后新判档状态更新，无新toast；hover包含同一新decision的档位effort分布
+        focus: interaction
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        surface: composer-toast-and-hover
+        data_source: decisionToast-and-decision
+        expected_source: 'user-confirmed-CP17; current-spec:273-276,288-311'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        selector: 本次AUTO芯片悬停面板及toast容器
+        expected_text: 面板内容逐字段等于同次新decision；连续观察无新toast
+        expected_attrs: null
+        expected_visible: true
+        reviewer_notes: 记录发送前后decision id、source/tier/effort/probabilities；从发送前到判档后至少3秒连续观察toast，不能只在结束后因其消失判关闭成功。Jev自然失败无新decision则前提未满足，不把无toast当PASS；芯片只证明此CP的可见状态，不证明实际模型请求。
+        result: manual
+        result_detail: 未覆盖：T2新decision14成功且toast关，observer无toast，但GUI仍是另一空白新会话，不是目标session；hover与目标toast连续观察未完成，不能把无toast计PASS。 详见execution-facts.md Loop2。

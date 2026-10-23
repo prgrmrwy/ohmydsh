@@ -1,0 +1,486 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "auto-model-routing \u2014 settings and per-turn Jev routing",
+    "output": "archify-out/auto-routing-settings/architecture.html",
+    "quality_profile": "showcase",
+    "locale": "en"
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "User",
+      "sublabel": "DSH web GUI",
+      "pos": [
+        40,
+        470
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "chip",
+      "type": "frontend",
+      "label": "AUTO/MANUAL chip",
+      "sublabel": "input.right \u00b7 reply-bar gauge",
+      "pos": [
+        40,
+        280
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "endpoints",
+      "type": "backend",
+      "label": "RPC endpoints",
+      "sublabel": "state \u00b7 setMode \u00b7 label",
+      "pos": [
+        340,
+        280
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "Session state",
+      "sublabel": "mode \u00b7 previous tier \u00b7 disabled",
+      "tag": "sessions/*.json",
+      "pos": [
+        640,
+        280
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "agentloop",
+      "type": "external",
+      "label": "DSH AgentLoop",
+      "sublabel": "official turn loop",
+      "pos": [
+        340,
+        470
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "prestep",
+      "type": "backend",
+      "label": "pre-step hook",
+      "sublabel": "Router.begin / resolve / fail",
+      "pos": [
+        640,
+        470
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "jev",
+      "type": "security",
+      "label": "JevClient",
+      "sublabel": "redact \u00b7 deadline \u00b7 no retry",
+      "tag": "fail \u2192 MANUAL",
+      "pos": [
+        950,
+        470
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "openrouter",
+      "type": "cloud",
+      "label": "OpenRouter \u00b7 Jev",
+      "sublabel": "typesafe/jev-1.13",
+      "pos": [
+        950,
+        1040
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM provider",
+      "sublabel": "unchanged provider/model",
+      "pos": [
+        40,
+        660
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "request",
+      "type": "backend",
+      "label": "agent/request hook",
+      "sublabel": "family effort \u00b7 model checked",
+      "pos": [
+        640,
+        660
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "tool",
+      "type": "backend",
+      "label": "route_subagent tool",
+      "sublabel": "root AUTO \u00b7 exact child route",
+      "pos": [
+        950,
+        660
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Main agent",
+      "sublabel": "subagent-model-routing skill",
+      "pos": [
+        950,
+        850
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "selection",
+      "type": "external",
+      "label": "sessionController",
+      "sublabel": "official model selection",
+      "pos": [
+        640,
+        840
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "settings-ui",
+      "type": "frontend",
+      "label": "Settings page",
+      "sublabel": "Claude / GPT \u00b7 draft only",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        190,
+        74
+      ]
+    },
+    {
+      "id": "settings-host",
+      "type": "backend",
+      "label": "Settings adapter",
+      "sublabel": "validate \u00b7 save \u00b7 setKey",
+      "pos": [
+        340,
+        40
+      ],
+      "size": [
+        190,
+        74
+      ]
+    },
+    {
+      "id": "settings",
+      "type": "database",
+      "label": "Routing settings",
+      "sublabel": "mainEfforts \u00b7 childRoutes \u00b7 cap",
+      "pos": [
+        340,
+        650
+      ],
+      "size": [
+        190,
+        74
+      ]
+    },
+    {
+      "id": "catalog",
+      "type": "external",
+      "label": "Official catalog / policy",
+      "sublabel": "model efforts \u00b7 child allowlist",
+      "pos": [
+        640,
+        40
+      ],
+      "size": [
+        190,
+        74
+      ]
+    },
+    {
+      "id": "credentials",
+      "type": "security",
+      "label": "Official credentials",
+      "sublabel": "resolve each judge \u00b7 write-only",
+      "pos": [
+        950,
+        240
+      ],
+      "size": [
+        190,
+        74
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "DSH Host process",
+      "wraps": [
+        "agentloop",
+        "endpoints",
+        "state",
+        "prestep",
+        "jev",
+        "request",
+        "tool",
+        "selection",
+        "settings-host",
+        "settings",
+        "catalog",
+        "credentials"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "user-turn",
+      "from": "user",
+      "to": "agentloop",
+      "label": "user turn",
+      "variant": "emphasis"
+    },
+    {
+      "id": "user-chip",
+      "from": "user",
+      "to": "chip",
+      "label": "toggle",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "chip-rpc",
+      "from": "chip",
+      "to": "endpoints",
+      "label": "RPC \u00b7 3 s poll"
+    },
+    {
+      "id": "set-mode",
+      "from": "endpoints",
+      "to": "state",
+      "label": "setMode"
+    },
+    {
+      "id": "pre-step",
+      "from": "agentloop",
+      "to": "prestep",
+      "label": "agent/pre-step",
+      "variant": "emphasis"
+    },
+    {
+      "id": "judge",
+      "from": "prestep",
+      "to": "jev",
+      "label": "AUTO user turn",
+      "variant": "emphasis"
+    },
+    {
+      "id": "decisions",
+      "from": "jev",
+      "to": "openrouter",
+      "label": "HTTPS decisions",
+      "variant": "security"
+    },
+    {
+      "id": "remember",
+      "from": "prestep",
+      "to": "state",
+      "label": "tier / disable",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "tier",
+      "from": "prestep",
+      "to": "request",
+      "label": "tier",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "variant": "emphasis"
+    },
+    {
+      "id": "effort",
+      "from": "request",
+      "to": "llm",
+      "label": "effort only",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sync",
+      "from": "request",
+      "to": "selection",
+      "label": "selectModel",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "route",
+      "from": "agent",
+      "to": "tool",
+      "label": "route_subagent"
+    },
+    {
+      "id": "same-judge",
+      "from": "tool",
+      "to": "jev",
+      "label": "same rubric",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "settings-rpc",
+      "from": "settings-ui",
+      "to": "settings-host",
+      "label": "settings RPC",
+      "variant": "dashed"
+    },
+    {
+      "id": "save-config",
+      "from": "settings-host",
+      "to": "settings",
+      "label": "read / atomic save",
+      "variant": "dashed"
+    },
+    {
+      "id": "read-catalog",
+      "from": "settings-host",
+      "to": "catalog",
+      "label": "read capabilities",
+      "variant": "dashed"
+    },
+    {
+      "id": "key-write",
+      "from": "settings-host",
+      "to": "credentials",
+      "label": "set / unset key",
+      "variant": "dashed"
+    },
+    {
+      "id": "judge-key",
+      "from": "jev",
+      "to": "credentials",
+      "label": "resolve key",
+      "variant": "dashed"
+    },
+    {
+      "id": "main-map",
+      "from": "request",
+      "to": "settings",
+      "label": "read main map",
+      "variant": "dashed"
+    },
+    {
+      "id": "child-map",
+      "from": "tool",
+      "to": "settings",
+      "label": "read child map",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Main chat (AUTO)",
+      "items": [
+        "Judged once per user turn at step 1; continued turns reuse the last tier",
+        "Only reasoning effort changes; provider and model stay as selected",
+        "mainEfforts[provider][tier] covers all family models; defaults remain model-specific"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Fail closed",
+      "items": [
+        "Any Jev failure sets MANUAL and records the category; no local fallback",
+        "MANUAL passes requests through unchanged and sends nothing out"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Sub-agents",
+      "items": [
+        "route_subagent walks up to the root chat and judges only when it is AUTO",
+        "Exact child model + effort or defaults, checked against catalog and allowlist"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Local files",
+      "items": [
+        "state/auto-model-routing/sessions/*.json (mode, tier, disabled)",
+        "state/auto-model-routing/judgements.jsonl (no message text)",
+        "plugins/dsh-auto-model-routing/config.json (non-secret overrides)",
+        "Official credential store owns the key; settings never return its value"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Working-tree documentation",
+      "items": [
+        "Source notes describe the current implementation, not an immutable commit",
+        "Settings errors block invalid routes without Jev disable or silent fallback"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Source notes (local working tree)",
+      "items": [
+        "packages/auto-model-routing/src/settings.ts + settings-host.ts: storage, catalog, credentials",
+        "packages/auto-model-routing/src/client/settings-section.ts: family table, no main model picker",
+        "packages/auto-model-routing/src/router.ts + subagent-tool.ts: main and child mapping"
+      ]
+    }
+  ]
+}
