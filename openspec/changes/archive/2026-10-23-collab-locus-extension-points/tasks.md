@@ -91,7 +91,7 @@
 - [x] 6.2 Run dsh-collab test + typecheck + `test:components`（完整依赖副本）；confirm passes，且真实 header 中协作工具体积 ≤ 4200，记录实测值
 - [x] 6.3 Run 根 `npm test`、`npm run check:artifacts`；与基线比较，无新增失败
 - [x] 6.4 Run `openspec validate collab-locus-extension-points --strict`；test-plan 所有行 🟢
-- [ ] 6.5 Run 真实 Host 验收（`dsh build` 后由用户重启）：
+- [x] 6.5 Run 真实 Host 验收（`dsh build` 后由用户重启）：
   - 未配置 `managedChannels` 时，既有协作流程不变；
   - 普通会话的 11 个工具 schema 只多出 `collab_space` 的两个 action，体积在预算内；
   - `allow_manager` 对未声明的 channel 返回 `COLLAB_BAD_CHANNEL`；
@@ -201,4 +201,22 @@ gpt-6-astra 对 f92ab4c79 做只读实现评审，结论 FIX_THEN_SHIP：
   - 真实 header 中协作工具体积 3927 ≤ 4200（surface-02 与 surface-04 实测值相同）。
 - 6.3 根 `npm test`：447 tests，437 pass，8 fail。在基线提交 d9be6f1e3 的临时 worktree 中跑同样的测试，失败的正是同样 8 个（sync / openspec-upgrade / routing 类，lean 依赖环境问题），无新增失败。`npm run check:artifacts` 通过。
 - 6.4 `openspec validate collab-locus-extension-points --strict` 通过；test-plan 149 行全部 🟢。
-- 6.5 待做：需要 `dsh build` 后由用户重启 Host。
+- 6.5 真实 Host 验收（Lead，2026-10-23）：
+  - **部署**：main `3fe3ab9ba`（ws-merge 合入）。`dsh build` 第一次报 "failed to refresh deployment of dsh-collab"，但部署目录的 `lib/index.js`、`index.d.ts`、`package.json`、`cordis.patch.yml` 与源码逐字节一致，含新代码；第二、三次 build 分别为 up-to-date 与 no changes。用户重启后，Host PID 79662 持有全部空间锁。本机配置未设 `managedChannels`。
+  - **验收对象**：会话 A 是本会话（Leader `lead`）；会话 B 经 Host `/api` 的 `session/create` 新建，ID `session-e8c58c9f-…`；空间 `ext-acc-1`。下列结论都以台账 JSONL 和 B 的会话日志（按多帧 zstd 解码）为准，不以模型叙述为准。
+  - **接入方授权**：
+    - `allow_manager` 对 `pet-locus`（未声明）与 `dsh-session`（普通 channel）都返回 `COLLAB_BAD_CHANNEL`；
+    - `revoke_manager` 对未授权的 channel 返回 `COLLAB_BAD_CHANNEL`；
+    - 缺少 `channel` 参数返回 `COLLAB_BAD_ARGUMENTS`；
+    - 以上调用都没有写入台账（成功的提交 seq 连续，没有被拒绝的记录）。
+  - **普通流程不变**：
+    - 邀请唤醒 B，B 被代为加入（seq 2、4）；
+    - 创建 request r1（seq 5）不唤醒；
+    - 需回复消息 `ref:5`（seq 6）唤醒 B，`thread=5`；
+    - B 推进 `accepted`（seq 8）不唤醒，推进 `done`（seq 9）唤醒作者 lead，`thread=5`；
+    - B 回复了一条不需回复的消息（seq 11）；
+    - 每次投递都记为 succeeded；
+    - B 的两次唤醒都经 `next-turn` inbox 进入新回合，唤醒文本未变。
+  - **工具面**：`collab_send_message` 带 `ext` 返回 `COLLAB_BAD_ARGUMENTS`。B 的真实 request header 中有 11 个 `collab_*` 工具，合计 3927 字符（≤ 4200），与组件测试实测值一致。
+  - **未在真实 Host 中验收的部分**：接纳、换代与退役托管成员，以及 mode 投递，需要真实接入方，属于 Locus 接入 change；本 change 只在组件测试中以脚本化 adapter 覆盖这些路径。
+  - **收尾**：验收空间 `ext-acc-1` 已关闭（seq 12）。
