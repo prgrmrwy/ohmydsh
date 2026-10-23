@@ -207,6 +207,40 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     expect(runtimeContextEvents(child.agent)).toHaveLength(1)
   })
 
+  it('keeps the inherited child guard when generic recovery resolves no binding for the child id', async () => {
+    const record = operation()
+    const { ctx } = await harness(1)
+    let bodyCalls = 0
+    ctx.tools.register(defineContentToolFixture({
+      name: 'read',
+      description: 'test read fixture',
+      parameters: { file_path: { type: 'string', required: true } },
+      async execute() { bodyCalls += 1; return [{ type: 'text', text: 'must not execute' }] },
+    }))
+    const parent = await createBoundAgent(ctx, record)
+    rememberBind(ctx, parent.agent.id as string, record)
+    const child = await ctx.agents.create({
+      sessionId: SessionId('session-child-guard'),
+      meta: { cwd: record.repoRoot, parentSession: parent.agent.id, origin: 'subagent', delegationDepth: 1 },
+      agentOptions: { provider: 'scripted', model: 'scripted' },
+      setup(childCtx, childAgent) { installSubagentInheritance(childCtx, childAgent) },
+    })
+    // agent/created recovery reconciles the child's own (absent) binding.
+    rememberBind(ctx, child.agent.id as string, undefined)
+    const result = await ctx.tools.execute({
+      callId: ToolCallId('child-escape-read'),
+      name: 'read',
+      arguments: { file_path: record.repoRoot + '/file.txt' },
+      agent: child.agent,
+      signal: new AbortController().signal,
+    })
+    expect(result.isError).toBe(true)
+    // Lexical guard or physical containment may report first; either way the
+    // child is still confined and the tool body never runs.
+    expect(result.isError && result.error.message).toMatch(/超出托管执行目录|realpath '\/repo\/\.worktrees\/task'/)
+    expect(bodyCalls).toBe(0)
+  })
+
   it('keeps a cleaned Session deny-all guard on the real ToolRuntime dispatch path', async () => {
     const cleaned = operation('cleaned')
     const { ctx } = await harness(1)
