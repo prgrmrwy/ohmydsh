@@ -9,7 +9,10 @@ description: 创建或复用子智能体前，调用 route_subagent（Jev 判档
 
 ## 创建
 
-1. 尊重用户或 lead 显式指定的模型；有显式指定时不调用工具。
+1. 尊重用户或 lead 显式指定的模型与 effort：
+   - 已指定 effort（无论是否指定模型）：不调用工具，按指定值委派。
+   - 只指定模型：照常调用工具，并把该模型作为 `model` 传入；工具只推荐 effort，模型保持不变。工具返回 `routed: false` 时只传指定的模型。
+   - 都未指定：按下面的步骤由工具选模型与 effort。
 2. 选择 provider：默认用当前会话的 provider；用户或 lead 要求独立模型体系审查时改用另一个。当前 provider 不是 claude/codex 时，暂停委派并询问用户使用哪一个。
 3. 委派前调用 `route_subagent`，参数为任务描述与 provider。
 4. 返回 `routed: false`（主会话为 MANUAL）时：按官方默认委派，**不传** provider/model/reasoning_effort，不询问用户，也不猜档位。
