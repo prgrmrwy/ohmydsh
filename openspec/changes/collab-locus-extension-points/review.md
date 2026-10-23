@@ -1,62 +1,82 @@
 ## Review Metadata
-- **Review round**: 1
-- **Prior round**: none
+- **Review round**: 2
+- **Prior round**: Round 1 — REVISE（C1 在途调用失权，M1–M4，S1）
 - **Reviewer context**: cross-model (codex gpt-6-astra, fresh context)
 - **Tool restrictions**: read-only except review.md
-- **Artifacts reviewed**: [proposal](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/proposal.md>)、[design](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md>)、[kernel delta](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md>)、[plugin delta](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md>)；当前 [kernel spec](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/collab-kernel/spec.md>)、[plugin spec](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/dsh-collab/spec.md>)、[inquiry spec](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/pet-inquiry-runtime-channel/spec.md>)；[协作标准](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-collab/docs/cross-boundary-collaboration-standard.md>)、[ADR-0006](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md>)；调研纪要第 6 节（只读读取 origin/ws/collab-pet-locus-collab）；[ref 历史设计](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/archive/2026-10-23-collab-ref-threads/design.md>) 与 [最终 review](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/archive/2026-10-23-collab-ref-threads/review.md>)；[manifest](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/dsh.yaml>) 的版本/相关 package 配置；关联源码包括内核 service/auth/model/spi/reduce/decide，以及插件 config/index/host/session-provider/status/tools 与下文引用的 Pet caller。
-- **Validation**: 两轮静态核查已完成。未执行测试、构建、安装或部署；本报告评审的是计划，不把当前实现缺少尚未实施的新功能本身列为缺陷。未修改任何其他文件。最终计数：1 Critical / 4 Moderate / 1 Suggestion。
+- **Artifacts reviewed**: 本轮重新审阅 [proposal](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/proposal.md>)、[design](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md>)、[kernel delta](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md>)、[plugin delta](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md>)，并对照 [round-1 报告与 rebuttals](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/review-round1.md>)。目录中尚无 tasks 工件，本轮不把实施前的任务缺席列为缺陷。
+- **Supporting evidence**: 对照当前 [kernel spec](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/collab-kernel/spec.md>)、[plugin spec](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/dsh-collab/spec.md>) 的相关要求、[inquiry spec](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/pet-inquiry-runtime-channel/spec.md#L8-L90>)、[协作标准](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-collab/docs/cross-boundary-collaboration-standard.md>)、[ADR-0006](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md>)、[manifest](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/dsh.yaml#L95-L110>)，以及 origin/ws/collab-pet-locus-collab 调研纪要第 6 节。实现交叉核对包括 [kernel service](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/collab-kernel/src/service/index.ts>)、[SessionAccess](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-collab/src/session-provider.ts>)、[status](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-collab/src/status.ts>)、[Pet caller](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-pet/src/host/collaboration/caller.ts#L135-L170>)。
+- **Validation**: 静态、对抗性计划审查；未运行测试、构建、安装或部署，不声称真实 Host 验收通过。只覆盖本报告；未改 proposal/design/specs 或其他文件。最终开放计数：**1 Critical / 1 Moderate / 0 Suggestions**。
+
+## Round-1 Findings Status
+
+| 原编号 | 本轮状态 | 对 rebuttal 的判定 |
+|---|---|---|
+| C1 | **partially resolved（部分解决，仍阻断）** | 不接受“已全部修复”：同步 `holds` 已封住“地址变为不持有”的简单竞态，但没有将入口实际 Agent 和 attach 代际带到最终边界；见下方 C1。 |
+| M1 | **resolved（已解决）** | **accepted by reviewer** — manager 事务内明确重做收据、授权、closed、目标状态及唯一性判定，并覆盖 revoke、markGone、同 cmdId、地址抢占及零 claim 重放。 |
+| M2 | **resolved（已解决）** | **accepted by reviewer** — manager 授权先于 closed，无权错误由插件统一映射；六类空间的响应要求序列化后完全相同。 |
+| M3 | **resolved（已解决）** | **accepted by reviewer** — 主调用者 requirement 已引用统一解析，allowlist 明确只约束普通会话，新增托管正向及普通负向场景。 |
+| M4 | **resolved（已解决）** | **accepted by reviewer** — Q6 不再承诺成员 outbox 后台自主恢复，区分 manager 重放与真实有效会话重试，失效身份交人工处置，并列出三处崩溃验收。 |
+| S1 | **resolved（已解决）** | **accepted by reviewer** — 设计已准确区分 Pet 内部同步快照与公开异步解析，明确未来接入须提供已核验内存投影，不要求本 change 修改 Pet。 |
+
+判定依据分别为 [manager 两阶段](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L35-L47>)、[manager 并发场景](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L408-L429>)、[六类错误等价](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L239-L242>)、[统一调用身份](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L3-L38>)、[恢复协议](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md#L136-L139>) 和 [异步解析说明](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md#L96-L102>)。接受这些修复不代表其相邻交互已自动通过。
 
 ## Findings
 
 ### 🔴 Critical (blocking)
 
-#### C1 — 调用入口的一次身份解析不能兑现解绑立即失权
-- **位置**：[插件 delta:245–263](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L245-L263>)；[设计:96–100](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md#L96-L100>)。
-- **问题**：规范只要求每次调用入口重新解析，随后把固定 `{channel,address}` principal 交给内核，却承诺接入方解绑后立即失去身份。内核在提交前异步采样 presence 并等待空间队列；宿主绑定可以在此期间消失，台账仍 active。已解析的旧 principal 仍可提交消息或条目。
-- **具体反例**：L 发消息，presence 被可控 Promise 挂起；接入方先解除 L 的绑定，尚未执行 retire；释放 Promise 后旧请求通过台账成员授权并提交。每次调用只解析一次的实现完全满足当前步骤，却违反“两份事实交集”的安全承诺。读取/status 的异步边界也须处理。
-- **证据**：[service:160–191](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/collab-kernel/src/service/index.ts#L160-L191>) 在 await 后仅重新检查台账成员；[Pet caller:135–159](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-pet/src/host/collaboration/caller.ts#L135-L159>) 已明确采用 await 后重新观察的模式，而不是把入口快照当 capability。
-- **具体修复**：规定身份失效与提交/返回数据的线性化边界；在最终授权边界重新验证同一执行 Agent、adapter attach 代际及当前绑定，且与提交 admission 之间不得再有未受保护的 await。若使用宿主租约/epoch 或受信 guard，明确 SPI 与校验顺序。添加“入口通过→presence/队列挂起→解绑或 dispose→恢复”的拒绝场景，不仅测试解绑后的新调用。
+#### C1 — 地址仍有效，不代表发起在途调用的执行会话仍有效
+
+- **位置**：[插件调用者与 holds 规则:250–267](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L250-L267>)、[attach/dispose:201–207](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L201-L207>)、[内核最终检查:441–454](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L441-L454>)。
+- **问题**：入口校验的是 `exec.agent` 的真实对象、Host 当前对象、归档状态及唯一 adapter 解析；最终检查却只剩 `holds(address)`，且中继明确调用**当前** adapter。该布尔值证明“地址仍存在”，不能证明“当初的 Agent 仍能代表它”，也不证明当前 attach 就是接受请求的那个 attach。两种证明不能替换。现有验收仅人为把 holds 设为假，未覆盖 holds 为真但入口身份已失效的情况。
+- **具体反例**：
+  1. Agent 对象 A 解析为 `pet-locus/loc:1`，发送命令停在 presence。Host 将同 session 的当前 Agent 对象替换为 A′，绑定仍有效。`holds('loc:1')` 理应为真，而旧 A 已不满足入口的“Host 当前对象”条件。释放采样后，按现有规范实现的最终检查仍允许旧调用提交；读取、收据也有同类窗口。
+  2. A 的请求挂起，原句柄 dispose，随后同 channel 重新 attach；新 adapter 仍承认 `loc:1`。中继转交新 adapter 的 true，让旧 attach 发起的工作通过。它不需要台账复用历史地址，只需在同一当前绑定上发生 detach/re-attach，因此地址永不复用规则不能防住该 ABA。
+- **影响**：失效执行对象或已撤销接入代际的在途工作仍可取得成员权限，违背本轮明确承诺的立即失权。这是 round-1 C1 尚未封闭的安全边界，不是要求可信 adapter 防恶意插件。
+- **具体修复**：保留地址级 `holds`，另定义宿主创建、调用方不可伪造的**每次操作有效性 guard**：捕获入口执行 Agent 对象、attach epoch、解析出的 channel/address；在内核最终写 admission、读数据与收据返回边界同步重验完整入口条件及唯一解析结果，并要求 attach epoch 相同。校验与相应动作之间不得再有未保护 await；不能仅在插件 await 内核之后检查，因为写入已经发生。明确内核如何接收此 guard（可信调用上下文/不可伪造令牌等），而非让内核导入 Host。manager 句柄的在途操作同样须在最终 admission 验证其 attach epoch。`collab_status` 使用同一完整 guard，不能只比较地址字符串。
+- **所需验收**：入口通过后分别挂起 presence/队列/读取；期间替换 Host Agent、归档执行会话、dispose 后重新 attach 同 channel 同地址；恢复后旧调用不得产生提交/收据/投递或返回空间数据，旧句柄按其 detached 契约拒绝。新有效 Agent/新句柄的独立新调用仍可成功。以真实执行对象身份和 attach epoch 为断言，不能只让测试替身返回 holds=false。
 
 ### 🟡 Moderate
 
-#### M1 — manager 的事务外认领缺少明确的事务内重验证协议
-- **位置**：[内核 delta:35](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L35>)；[设计:114–115](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md#L114-L115>)。
-- **问题及影响**：规定先查收据、关闭状态、manager 授权和业务条件，再在事务外 await claim，却未明确进入队列后重新读取这些条件。认领挂起期间 Leader revoke/markGone、其他 rebind 或同 cmdId 提交均可改变判定。直接沿用前置判定会在撤销后接纳成员、把 gone 成员换代，或写重复收据；把整个过程塞进队列又违背不在串行事务等待 SPI 的约束。
-- **具体修复**：写清“两阶段”：事务外只做预检和一次 claim；事务内重新做收据优先、closed、manager 授权、目标状态、名称/地址唯一性，不能依赖预检快照。补充 claim 挂起时 revoke、markGone、并发同 cmdId、抢占新地址四类场景，以及零 claim 的历史重放场景。
+#### M5 — rebind 保留成员名，但旧地址的 presence 样本会被用于新地址
 
-#### M2 — manager API 新增无权空间存在性与关闭状态探针
-- **位置**：[插件 delta:225–237](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L225-L237>)；[内核 delta:35](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L35>)。
-- **问题及影响**：句柄承诺沿用“错误披露不泄露无权空间”，但未授权空间场景规定返回 FORBIDDEN。结合当前映射，不存在返回 SPACE_UNAVAILABLE，存在且 open 返回 FORBIDDEN，存在且 closed 在 manager 授权前返回 SPACE_CLOSED。没有任何空间授权的 adapter 可以区分三种状态。
-- **证据**：[当前错误规范:320–337](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/dsh-collab/spec.md#L320-L337>)；[safeError:17–27](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-collab/src/tools.ts#L17-L27>)。
-- **具体修复**：定义 manager 专属披露规则：未授权且无可返回的本人历史收据时，对不存在/open/closed/存储失败统一 SPACE_UNAVAILABLE；授权成功后的业务错误才透出。修改“未授权空间返回不可用”的场景实际断言，增加跨六类空间的等价响应测试。
-
-#### M3 — 新旧调用身份要求同时存在，channel 与 allowlist 语义互相冲突
-- **位置**：[插件 delta:5](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L5>) 对照 [同文件:247–253](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L247-L253>)。
-- **问题及影响**：替换后的主 requirement 仍要求所有调用以 `dsh-session` + session ID 构造 principal，并要求 allowlist 调用者额外在名单中；新增 requirement 却要求托管 channel + adapter 地址且显式豁免 allowlist。按主 requirement 实现会使托管调用找不到成员或被名单拒绝；按新增 requirement 实现则违背主 requirement。
-- **具体修复**：主 requirement 改为引用统一身份解析结果；把 allowlist 明确限定为普通会话。为 allowlist 下未列入名单的托管子会话增加正向测试，同时保留普通未列名单会话的负向测试。
-
-#### M4 — outbox 的重启重放方案没有可用的成员命令入口
-- **位置**：[设计:132](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md#L132>) 对照 [插件 delta:285–293](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L285-L293>)、[调用者要求:247–253](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/dsh-collab/spec.md#L247-L253>)。
-- **问题及影响**：Q6 承诺 Pet 先提交 outbox、重启后凭确定 cmdId/载荷重放台账命令。但唯一可写 `ext`/`mode` 的成员入口是 `command(exec,...)`，必须从真实执行会话解析身份，且禁止接入方指定地址；manager 只能做成员管理。Host 崩溃重启后，outbox worker 没有原先的工具执行上下文；原 session 也可能未驻留、已解绑或已换代。因此即便载荷和 cmdId 完整，worker 仍不能调用到收据查找。成功但响应丢失与尚未提交的命令都可能永久留在 outbox。确定 cmdId 解决重复写入，不解决恢复时以谁的权限重试。
-- **具体修复**：明确区分 manager outbox（现有句柄可重放）与成员内容 outbox；为后者选定且写清恢复协议。可以只允许恢复同一有效会话后经真实受信执行重试，并把失效身份的条目标记为需人工处置；如要求后台自主恢复，则需设计受限、可审计的宿主恢复能力，不能暗中伪造 exec 或放宽一般 actor 参数。验收覆盖 Pet 提交后、台账提交前崩溃；台账提交后、结果记回前崩溃；重启时原身份已失效。不要再把“同 cmdId 重放”表述为目前 SPI 已保证的跨存储闭环。
+- **位置**：[rebind 规则:349–352](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L349-L352>)；未被本 delta 替换的 [选择绑定与在线状态:591–603](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/specs/collab-kernel/spec.md#L591-L603>)；[mode 不改变 presence 与计数:560–570](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/specs/collab-kernel/spec.md#L560-L570>)。
+- **问题**：基线要求事务前只采样一次，原来绑定不可换，按成员名保存样本可成立；现在绑定可在预备与事务之间被 rebind，而规范没有规定如何检测、处置这种失配。仅重读当前成员与收件人 provider 并不让旧样本自动成为新地址的在线状态。当前实现确实 [按 member.name 保存 presence](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/collab-kernel/src/service/index.ts#L116-L125>)，再在 [串行事务中把它交给当前状态的 dispatch 决策](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/collab-kernel/src/service/index.ts#L167-L188>)；设计没有要求改变这个关联键。
+- **具体反例**：A 给成员 L 发需回复消息，对 `loc:old` 采样为 unreachable；消息尚未入队时 manager 先完成 `L → loc:new`，且新地址 reachable。随后消息事务按当前 L 通过收件人校验，却使用旧样本，不记录唤醒。反向竞态则会把旧地址的 reachable 用在不可达的新地址上。带 mode 的消息同样受影响；在话题已计数 20 次时，旧 unreachable 样本还会把本应针对新绑定检查的唤醒/上限分支改成“不唤醒、不计数”。这不是计数器算法本身绕过，而是其输入属于错误绑定。
+- **影响**：换代后首次通知可能静默不唤醒；反向情形可能多记一次失败投递及话题计数。该差异影响承接与 cap20 的可预测性，不只是总览显示略旧。
+- **具体修复**：将样本与精确 `{channel,address}`（必要时附 binding revision/attach epoch）绑定，事务内先与当前目标绑定比对。明确选择一种协议：失配则离开队列重新预备再入队，或者返回具名可重试错误且零提交；不得把旧地址样本直接套到新地址，也不得在串行事务内 await provider。对应修改基线“只采样一次”要求，说明它是每次预备尝试一次。总览也应避免将旧地址样本标成新绑定的 presence。
+- **所需验收**：可控挂起 presence，在消息入队前完成 rebind，覆盖 old unreachable/new reachable 及相反方向；断言最终收件绑定、dispatch 有无、mode、话题计数以及 cap20 处的结果。若选择拒绝路径，断言日志、收据、投递均不新增，原 cmdId 可安全重试。接受用户选定的 rebind，不建议以删除换代能力规避该问题。
 
 ### 📌 Suggestions
 
-#### S1 — 不要把 Pet 的内部同步快照当成现有公开解析器
-- **位置**：[设计:100](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/openspec/changes/collab-locus-extension-points/design.md#L100>)；[Pet caller:140–168](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-pet/src/host/collaboration/caller.ts#L140-L168>)。
-- **问题及影响**：设计称现有 Pet 调用者解析满足同步约束，但公开 `resolveCollaborationCaller` 返回 Promise，并 await 冷身份检查，再次比对快照后才返回。同步 `snapshot` 是非导出的内部步骤，单独调用它缺少 lineage 核验；现有 API 不能直接作为同步 `resolveCaller` adapter。
-- **具体修复**：修正文档为“内部索引快照同步，完整解析异步”，明确将来接入需要受信的已验证身份投影或新的适配层，不能通过省略冷身份核验满足同步接口。本 change 不必修改 Pet，但不应声称既有 API 已能直接接入。
+无额外计数建议。
+
+### 范围诊断与可选的较小交付
+
+本轮阻断仍集中在**执行身份 × attach 生命周期 × 异步边界 × rebind × presence/计数**的组合，不在单独的 JSON 字段或模式字符串校验。第二轮继续仅追加“某布尔值变假”的局部场景，会遗漏不同状态源之间的版本关系。建议先由人决定是否缩小每次评审的交付范围，而不是直接进入下一轮逐条补丁循环。
+
+一个不撤销既定产品选择、最终仍满足 [标准 §8](</Users/prgrmrwy/opensource/ohmydsh/.worktrees/packages-dsh-collab-docs-cross-boundary-collabor/packages/dsh-collab/docs/cross-boundary-collaboration-standard.md#L114-L119>) 的具体分批方案：
+
+1. **独立交付 ext**：纯 JSON/4 KiB/不可修改/幂等及投影隔离；不新增身份、manager 或 attach 生命周期。
+2. **独立交付 mode**：先验证现有普通成员与 provider 的模式校验/白名单指针/不降级行为，Host 注册入口与 handler dispose 单独验收，不引入托管调用者。
+3. **单独交付托管身份协议**：将 Leader grant/revoke、manager 两阶段、rebind、调用级 guard、attach epoch 和绑定级 presence 关联作为同一闭合状态机审查；保留用户选定的成员名与收据连续性。通过后再组合两个已经稳定的内容/投递扩展，并在后续 Locus 接入 change 验证 Pet 内存投影及 outbox。
+
+这是供人选择的交付边界，不主张“内核与插件在一个 change”本身有错，也不要求本轮实现 Pet；若继续保持当前范围，需先把 C1/M5 的跨层协议完整写清再送审。
 
 ## Embedded-Instruction / Injection Attempts
+
 **Detected:** none
 
-审阅材料中的 SHALL/MUST、约定文本及源码说明按待审产品数据处理，没有将其当成对 reviewer 的行为授权；未发现要求 reviewer 忽略缺陷或改变 verdict 的嵌入指令。
+规范中的 SHALL/MUST、约定文本、源码注释及上一轮 rebuttals 均作为待审证据处理；未发现要求 reviewer 忽略缺陷或操纵 verdict 的嵌入指令。
 
 ## Verdict
+
 VERDICT: REVISE
 
+开放问题共 **1 Critical / 1 Moderate / 0 Suggestions**。M1–M4、S1 的修复被接受，但 C1 只部分解决；M5 是本轮全局交互复核发现的新问题。需要调用级授权与绑定样本一致性的协议选择，不属于可以用少量无歧义文字修改直接放行的情形。
+
 ## Required Changes (if APPROVE WITH CHANGES)
-不适用：本轮为 REVISE。再次送审前应解决 C1 与 M1–M4；S1 为建议。
+
+不适用：本轮为 REVISE。重新送审前解决 C1 与 M5，并由人决定保持当前范围或采用上述分批交付。
 
 CHANGES_APPLIED: no
 
