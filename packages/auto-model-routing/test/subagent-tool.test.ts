@@ -121,3 +121,37 @@ it('tool_failure_reports_without_state_change', async () => {
  expect(String(error)).toMatch(/已取消/)
  expect(String(error)).not.toMatch(/余额|凭据|OPENROUTER/)
 })
+
+const astraCatalog: RoutingCatalog = {models:[{provider:'codex',model:'gpt-6-astra',name:'Astra',reasoningEfforts:['low','medium','high','xhigh']}],childAllowlist:{status:'enabled',allowedModels:[{provider:'codex',model:'gpt-6-astra'}]}}
+it('explicit_model_only_routes_effort', async () => {
+ const settings: Settings = {...DEFAULT_SETTINGS, childRoutes:{codex:{complex:{model:'gpt-6-astra',reasoningEffort:'high'}}}}
+ const {def,server,judged} = await tool(tier('simple'),undefined,undefined,{readSettings:()=>settings,catalog:()=>astraCatalog})
+ const efforts: string[] = []
+ for (const t of tiers) {
+  server.set(tier(t))
+  const result = await def.execute({task:'评审 openspec change',provider:'codex',model:'gpt-6-astra'},exec()) as {model:string;reasoning_effort:string}
+  expect(result.model).toBe('gpt-6-astra')
+  efforts.push(result.reasoning_effort)
+ }
+ // childRoutes' Astra/high is not used for a caller-chosen model.
+ expect(efforts).toEqual(['low','low','medium','high'])
+ expect(server.bodies).toHaveLength(4)
+ expect(judged.at(-1)).toMatchObject({source:'subagent',model:'gpt-6-astra',effort:'high'})
+})
+it('explicit_model_unavailable_never_substitutes', async () => {
+ let catalog: RoutingCatalog = {...astraCatalog,childAllowlist:{status:'enabled',allowedModels:[]}}
+ const {def,state} = await tool(tier('complex'),undefined,undefined,{readSettings:()=>DEFAULT_SETTINGS,catalog:()=>catalog})
+ await expect(def.execute({task:'x',provider:'codex',model:'gpt-6-astra'},exec())).rejects.toThrow(/路由设置无效.*暂停委派并询问用户/)
+ catalog = astraCatalog
+ await expect(def.execute({task:'x',provider:'claude',model:'gpt-6-astra'},exec())).rejects.toThrow(/路由设置无效/)
+ await expect(def.execute({task:'x',provider:'claude',model:'claude-unknown'},exec())).rejects.toThrow(/路由设置无效/)
+ expect(state.read('S1')).toEqual({mode:'AUTO'})
+})
+it('explicit_model_manual_skips_jev', async () => {
+ const {def,server} = await tool(tier('complex'),{S1:'MANUAL'},undefined,{readSettings:()=>DEFAULT_SETTINGS,catalog:()=>astraCatalog})
+ const result = await def.execute({task:'x',provider:'codex',model:'gpt-6-astra'},exec())
+ expect(result).toEqual({routed:false,reason:'manual'})
+ // The caller's chosen model must survive MANUAL: the hint may not tell the agent to drop it.
+ expect(def.output!.render({} as never, result as never)[0]).toMatchObject({ text: expect.stringContaining('只传用户或 lead 指定的值') })
+ expect(server.bodies).toHaveLength(0)
+})

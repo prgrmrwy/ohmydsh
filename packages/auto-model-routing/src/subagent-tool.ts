@@ -29,17 +29,18 @@ function rootOf(caller: SessionLike | undefined, agents: ToolDeps['agents']): Se
   return undefined
 }
 
-const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort。'
+const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派；只传用户或 lead 指定的值（例如指定的模型），不传其它 provider/model/reasoning_effort。'
 
 /** Sub-agent decision tool: same Jev judgment as the main session, only while the root session is AUTO. Writes no state. */
 export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
   return defineTool({
     name: 'route_subagent',
-    description: 'Call before every sub-agent delegation, whatever the task size. Picks provider/model/reasoning_effort with the Jev decision model; pass provider, model and reasoning_effort explicitly to the sub-agent tool, or the sub-agent inherits this session\'s effort. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. On error: pause delegation and ask the user; never guess a tier.',
+    description: 'Call before every sub-agent delegation, whatever the task size. Picks provider/model/reasoning_effort with the Jev decision model; pass provider, model and reasoning_effort explicitly to the sub-agent tool, or the sub-agent inherits this session\'s effort. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. If the user or lead already chose the sub-agent model, pass it as model: only reasoning_effort is routed and the model is kept. On error: pause delegation and ask the user; never guess a tier.',
     timeoutMs: 5000,
     parameters: {
       task: { type: 'string', required: true, description: 'The task the sub-agent will do.' },
       provider: { type: 'string', required: true, enum: ['claude', 'codex'], description: 'Provider family for the sub-agent.' },
+      model: { type: 'string', description: 'Sub-agent model already chosen by the user or lead; when given, only reasoning_effort is routed.' },
     },
     output: {
       schema: {
@@ -78,8 +79,9 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
         }
         if (exec.signal.aborted) throw new Error('cancelled')
         const settings = deps.readSettings?.() ?? DEFAULT_SETTINGS
-        const explicit = explicitChildRoute(settings, provider, result.tier, catalog)
-        model = explicit?.model ?? defaultModel
+        // A caller-chosen model skips the tier→model table entirely (childRoutes included); only effort is routed.
+        const explicit = args.model ? undefined : explicitChildRoute(settings, provider, result.tier, catalog)
+        model = args.model || (explicit?.model ?? defaultModel)
         const supported = catalog.models.find(entry => entry.provider === provider && entry.model === model)?.reasoningEfforts ?? []
         const mapped = explicit?.reasoningEffort ?? mapEffort(model, result.tier, supported as readonly Effort[], settings.effortCap)
         if (!mapped || validateChildRoute(catalog, provider, { model, reasoningEffort: mapped }, settings.effortCap).length) throw new SettingsValidationError([])

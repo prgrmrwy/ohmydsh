@@ -13,8 +13,9 @@
 - 派发：实施已批准计划中工作量较大的编码任务；独立评审或复核（需要不带当前上下文的新视角）；中间输出多的探索（大范围搜索、读日志、跑测试），只带回结论；彼此独立、可并行的多块工作。
 - 不派发：与用户讨论或做决定的回合；前后依赖且当前上下文装得下的工作；单个小修复。
 - 本身是子会话时不再向下派发，除非任务明确要求。
-- `route_subagent` 工具存在时，每次派发前必须先调用 `route_subagent`（参数为任务描述与 provider），不论任务大小：
-  - 返回 `routed: false`：按官方默认派发，不传 provider/model/reasoning_effort。
+- `route_subagent` 工具存在时，每次派发前必须先调用 `route_subagent`（参数为任务描述与 provider），不论任务大小；用户或 lead 已指定 effort 时不调用，按指定值派发：
+  - 只指定了模型：调用时把该模型作为 `model` 传入，工具只推荐 reasoning_effort，模型保持不变。
+  - 返回 `routed: false`：按官方默认派发，只传用户或 lead 指定的值，不传其它 provider/model/reasoning_effort。
   - 返回档位：把其中的 provider、model、reasoning_effort 全部显式传给子会话工具，不要省略，否则子会话会继承当前会话的 effort。
   - 返回错误：暂停委派并询问用户，不要自己猜档位或换模型。
   - provider 选择、描述标注与复用规则见 `subagent-model-routing` skill。

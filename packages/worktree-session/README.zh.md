@@ -58,7 +58,7 @@ promote 由 Agent 驱动，并保持 Session 绑定不变。它更新元数据�
 已绑定的 Session 在 worktree 之外 fail closed：
 
 - **文件工具、搜索与 Bash。** 路径和 `workdir` 必须是绝对路径且在词法上位于托管 worktree 内，随后再按规范化的物理路径复核（含符号链接祖先目录和尚不存在的输出）。没有显式 worktree `workdir` 的 Bash 会被拒绝。
-- **委派。** 只允许上文配置的、经审计的 continuable 后台 `subagent`；前台（`run_in_background: false`）调用会被拒绝。`subagent_fork`、`subagent_codex` 这类一次性 provider 以及未知的委派类工具一律拒绝，因为无法证明子 Agent 在首步前继承了托管根。`send_message` 不受影响。
+- **委派。** 只允许上文配置的、经审计的 `subagent`，后台与前台（`run_in_background: false`）均可：两者都经 `agents.create` 创建子 Agent，由 `agent/created` 钩子在首个 prompt 前装入绑定。`subagent_fork`、`subagent_codex` 这类一次性 provider 以及未知的委派类工具一律拒绝，因为无法证明子 Agent 在首步前继承了托管根。`send_message` 不受影响。
 - **未审计的工具。** 不在审计清单内的工具默认不受影响，除非其参数暴露了路径、cwd、命令等本地能力——此时在复核之前一律拒绝。
 - **已清理的绑定。** 清理之后，针对旧执行根的所有工具一律拒绝。
 - **稳定上下文。** 对模型可见的上下文只包含持久不变量：仓库根、托管 worktree 根、任务分支、禁止使用主 checkout、显式路径规则，以及变更依赖前先 promote 的指引。分支状态、dirty 状态、时间戳、生命周期阶段、诊断和 lean/mutable 模式属于元数据/UI 或按需的状态输出。

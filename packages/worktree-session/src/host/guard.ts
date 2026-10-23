@@ -77,7 +77,10 @@ export function checkTool({ name, args }: { name: string; args: unknown }, opera
   }
   if (contract.kind === 'delegation') {
     if (name === 'send_message') return undefined
-    if (!continuableDelegationTools.includes(name) || firstPathObject(args).run_in_background === false) return `Worktree Session 只允许 Host 配置已审计且可证明首步前继承策略的 continuable background delegation：${name}`
+    // Foreground and background runs of an audited tool both create the child
+    // through `agents.create` with `parentSession` set, so the `agent/created`
+    // inheritance hook covers either mode before the first prompt.
+    if (!continuableDelegationTools.includes(name)) return `Worktree Session 只允许 Host 配置已审计且可证明首步前继承策略的委派工具：${name}`
     return undefined
   }
   if (contract.kind === 'maintenance') return undefined

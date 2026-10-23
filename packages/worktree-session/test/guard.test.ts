@@ -88,11 +88,14 @@ describe('fail-closed managed-root tool policy', () => {
     expect(checkTool({ name: 'bash', args: { workdir: worktree, command: 'ls' } }, cleaned)).toMatch(/已清理/)
   })
 
-  it('allows audited continuable delegation and denies unsupported one-shot providers', async () => {
+  it('allows audited delegation in both run modes and denies unsupported one-shot providers', async () => {
     const { record } = await fixture()
     expect(checkTool({ name: 'subagent', args: { description: 'x', prompt: 'y', run_in_background: true } }, record)).toMatch(/Host 配置已审计/)
+    expect(checkTool({ name: 'subagent', args: { description: 'x', prompt: 'y', run_in_background: false } }, record)).toMatch(/Host 配置已审计/)
     expect(checkTool({ name: 'subagent', args: { description: 'x', prompt: 'y', run_in_background: true } }, record, undefined, ['subagent'])).toBeUndefined()
-    expect(checkTool({ name: 'subagent', args: { description: 'x', prompt: 'y', run_in_background: false } }, record, undefined, ['subagent'])).toMatch(/continuable background/)
+    // Foreground children are created through the same agents.create +
+    // agent/created boundary, so inheritance is equally provable.
+    expect(checkTool({ name: 'subagent', args: { description: 'x', prompt: 'y', run_in_background: false } }, record, undefined, ['subagent'])).toBeUndefined()
     expect(checkTool({ name: 'send_message', args: { subagent_id: 'child', message: 'next' } }, record)).toBeUndefined()
     expect(checkTool({ name: 'ws', args: { action: 'status', path: record.worktreePath } }, record)).toBeUndefined()
     expect(checkTool({ name: 'subagent_fork', args: { prompt: 'fork' } }, record)).toMatch(/无法证明/)

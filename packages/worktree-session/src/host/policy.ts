@@ -8,6 +8,14 @@ import { installGuard } from './guard.js'
 /** Live source Session id → bound operation, seeded by the Host routes. */
 const survey = new Map<string, OperationRecord>()
 const guards = new WeakMap<Agent, () => void>()
+/**
+ * Delegated children whose policy is owned by parent-lineage inheritance. The
+ * generic per-Session recovery path (`agent/created` → reconcile) also runs
+ * for children and resolves no binding of their own; without this ownership
+ * marker its async `rememberBind(childId, undefined)` would strip the
+ * inherited guard/context right after the child's first step.
+ */
+const inheritedChildren = new WeakSet<Agent>()
 let continuableDelegationTools: readonly string[] = []
 
 export function configureContinuableDelegationTools(names: readonly string[]): void {
@@ -39,15 +47,21 @@ function refreshAgent(agent: Agent | undefined, operation: OperationRecord | und
  */
 export function rememberBind(ctx: Context, sourceSessionId: string, operation: OperationRecord | undefined, validationFailure?: string): void {
   const current = operation !== undefined && bindingOf(operation)?.state !== 'released' ? operation : undefined
+  const agent = ctx.agents.get(sourceSessionId as never)
+  // An inherited child is never itself a bind source; its policy follows the
+  // parent lineage and is torn down only on disposal.
+  if (agent !== undefined && inheritedChildren.has(agent)) return
   if (current === undefined) survey.delete(sourceSessionId)
   else survey.set(sourceSessionId, current)
-  refreshAgent(ctx.agents.get(sourceSessionId as never), current, validationFailure)
+  refreshAgent(agent, current, validationFailure)
 }
 
 /** Re-install the recorded context/guard for a Session whose Agent just came live. */
 export function refreshPolicy(ctx: Context, sourceSessionId: string): void {
+  const agent = ctx.agents.get(sourceSessionId as never)
+  if (agent !== undefined && inheritedChildren.has(agent)) return
   const operation = survey.get(sourceSessionId)
-  refreshAgent(ctx.agents.get(sourceSessionId as never), operation)
+  refreshAgent(agent, operation)
 }
 
 /**
@@ -65,7 +79,9 @@ function installInheritanceForAgent(child: Agent): () => void {
   const binding = bindingOf(operation)
   if (binding?.mode !== 'source-session' || binding.sourceSessionId !== parentId) throw new Error(`Worktree Session cannot prove parent binding for delegated Agent ${child.id as string}`)
   refreshAgent(child, operation)
+  inheritedChildren.add(child)
   return () => {
+    inheritedChildren.delete(child)
     const guard = guards.get(child)
     if (guard !== undefined) { guard(); guards.delete(child) }
     installContext(child, undefined)

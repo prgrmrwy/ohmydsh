@@ -58,7 +58,7 @@ export function RoutePicker({ ui, catalog, provider, cap, label, value, onChange
   return h('span', null, h('style', null, CSS),
     h('button', { ref: trigger, type: 'button', className: 'amr-picker-trigger', 'aria-label': label, 'aria-haspopup': 'menu', 'aria-expanded': page !== null, 'aria-controls': page ? id : undefined,
       disabled: disabled || (mode === 'effort' && efforts.length === 0), onClick: () => page ? close() : setPage(mode === 'child' ? 'root' : mode),
-      onKeyDown: e => { if (e.key === 'ArrowDown') { e.preventDefault(); setPage(mode === 'child' ? 'root' : mode) } },
+      onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => { if (e.key === 'ArrowDown') { e.preventDefault(); setPage(mode === 'child' ? 'root' : mode) } },
     }, h('span', null, mode === 'effort' ? invalid ? '无效配置' : value.reasoningEffort ?? '默认（随模型）' : `${model?.name ?? (value.model || '请选择模型')}${unavailable ? '（不可用）' : ''}`),
     mode === 'child' && h('span', { className: 'amr-picker-effort' }, value.reasoningEffort ?? '请选择推理等级'), h(ui.IconChevronDownOutlineRegular, { size: 12 })),
     page && createPortal(h(ui.MenuSurface, { ref: panel, id, role: 'menu', 'aria-label': label, className: 'amr-picker-menu', style: { ...position, visibility: position ? undefined : 'hidden' }, onKeyDown: keyboard },
