@@ -30,6 +30,9 @@ updates:
     ignore:
       # DSH 运行体与官方 bundle 由 dsh.yaml + autoUpdate 单独管理。
       - dependency-name: '@deepseek-ai/dsh*'
+      # 受管 OpenSpec CLI 精确 pin,只经 openspec-upgrade(parity/smoke/integrity)升级;
+      # Dependabot 会把 workspace spec 改成 ^x.y.z,触发 dsh-openspec-pin-mismatch。
+      - dependency-name: '@fission-ai/openspec'
       # 大版本升级需要单独做运行时、类型和 API 兼容性审查，不自动开 PR。
       - dependency-name: '*'
         update-types:
