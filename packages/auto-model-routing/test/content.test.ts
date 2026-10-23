@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, it } from 'vitest'
 
-const skillPath = resolve(import.meta.dirname, '../../../skills/subagent-model-routing/SKILL.md')
+const skillPath = resolve(import.meta.dirname, '../skills/subagent-model-routing/SKILL.md')
 const skill = () => existsSync(skillPath) ? readFileSync(skillPath, 'utf8') : ''
 const sources = () => {
  const root=resolve(import.meta.dirname,'../src')

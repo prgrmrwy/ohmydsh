@@ -1,0 +1,97 @@
+## ADDED Requirements
+
+### Requirement: 插件安装自包含配套 skill
+安装本插件 SHALL 同时提供 `route_subagent` 工具和唯一的 `subagent-model-routing` skill，不依赖 ohmydsh 根目录的 skills 或环境级指令。skill SHALL 保留既有八项派发规则，但 MUST NOT 声称仅注册 skill 就能强制 Agent 每次委派前执行工具。ohmydsh SHALL 仅保留插件的 local customization；原独立 skill 的受管部署副本 SHALL 在迁移同步时撤销，不删除用户自建的非受管副本。禁用插件并重新装配后，其工具及包内 skill SHALL 均不可用，用户设置与判档记录 SHALL 保留。
+
+#### Scenario: 干净安装获得唯一 skill
+- **WHEN** 在不含 ohmydsh 指令或全局 skill 的干净 DSH profile 安装并加载发布包
+- **THEN** 真实 Host 的 skill catalog 中 `subagent-model-routing` 恰好出现一次，加载其正文可见既有八项规则；工具集包含 `route_subagent`
+
+#### Scenario: 旧部署迁移无重复来源
+- **GIVEN** 上一版本通过 manifest 的独立 skill 条目产生受管副本
+- **WHEN** 升级到 0.3.0 并连续执行两次隔离 sync，再重新装配 Host
+- **THEN** 旧受管副本不再存在，包内 skill 恰好注册一次，第二次 sync 为 no-op；现有配置、模式与判档记录未被修改
+
+#### Scenario: 插件禁用撤销 skill 与工具
+- **WHEN** 从 profile 移除插件或在 ohmydsh 禁用插件后同步并重新装配
+- **THEN** 本插件提供的 skill 和工具不再注册；非插件管理的 skill 与既有数据不被删除
+
+### Requirement: 独立分发与可验证发布
+本插件 SHALL 提供自包含的 npm 发布物与可从 Git 源码构建的公开镜像。发布物 SHALL 包含 Host/Web 入口、bundle patch、配套 skill、许可证及 README 引用的展示资产；独立安装 MUST NOT 依赖 monorepo node_modules、配置或相对路径。公开安装说明 SHALL 披露兼容性、默认 MANUAL、Jev 外发文本与脱敏限制、凭据和状态写入位置。公开镜像 SHALL 由 ohmydsh 已提交的包目录生成，不成为第二份可独立编辑的真源。
+
+#### Scenario: 打包安装与源码安装均可加载
+- **WHEN** 分别在独立临时目录从 npm 打包产物安装、从已提交的镜像源码安装，并执行规定构建生命周期
+- **THEN** Host/Web 入口可解析，bundle 能装配工具及 skill；README 图片与包内路径均有效，无 ohmydsh 私有路径依赖
+
+#### Scenario: 发版身份一致
+- **WHEN** 镜像 release workflow 发布版本
+- **THEN** 版本 tag 与包版本必须匹配，否则发布前失败；长期自动发布通过绑定该仓库和 workflow 的 OIDC 完成，仓库与日志中不存在长期 npm token
+
+#### Scenario: 外部步骤未满足前置条件
+- **WHEN** npm 认证、商店年龄/准入校验、审核或索引探测尚未完成
+- **THEN** 发布记录分别标明待办条件、已发布版本、PR/申请地址与可见性；不得把创建仓库、发出 PR 或 registry 暂存状态当作已上架，也不得用重复发版绕过等待
+
+## MODIFIED Requirements
+
+### Requirement: 子会话决策工具与 skill
+系统 SHALL 注册 Host 工具 `route_subagent`，参数 `{task: string, provider: "claude" | "codex", model?: string}`，描述须说明会把任务文本发送给 OpenRouter/TypeSafe：以与主会话相同的 Jev 客户端、`TIER_QUESTIONS` 与失败类别判断档位（`state` 上一档位为 `none`），成功返回 `{tier, provider, model, reasoning_effort}`。子会话推荐 SHALL 按 provider/tier 读取设置中的完整 `childRoutes` 组合 `{model, reasoningEffort}`；未覆盖的格子用代码默认表（claude 为 Haiku/Sonnet/Opus/Opus，codex 为 Luna/Sol/Sol/Sol）与所选模型的缺省起点算法生成完整组合，再应用全局 effort 上限与模型支持范围。用户可在官方允许列表中选择 Fable/Astra；默认表不含它们。子会话推荐 MUST NOT 继承 `mainEfforts`，MUST NOT 受调用会话当前模型限制。调用方传入 `model` 时（用户或 lead 已指定子会话模型），工具 SHALL 只推荐 effort：返回的 `model` 等于传入值，MUST NOT 查默认表或 `childRoutes`（即使某格配置了同一模型也不采用其 effort），effort 按该模型的缺省起点算法、全局 effort 上限与模型支持范围计算；该模型不在当前模型目录、不属于所给 provider、不在当前官方允许列表或无可用 effort 时 SHALL 返回设置错误并要求暂停委派，MUST NOT 换成其它模型。所属主会话不是 AUTO 时，传入 `model` 也同样返回 `routed: false`，不判档、不外发。显式 effort MUST NOT 被静默改写；模型不在当前官方允许列表、effort 不被支持或超过上限、无有效默认 effort 时 SHALL 返回设置错误并要求暂停委派，不换模型、不回退到其它映射、不记为 Jev 失败、不改会话状态。工具使用时 SHALL 重新校验当前列表与模型能力，最终仍由官方创建校验和会话白名单快照把关。失败返回错误结果，内容为该类别提示与“暂停委派并询问用户”；`exec.signal` 取消时返回“已取消”错误结果，不含余额/凭据提示。工具 MUST NOT 改写任何会话状态。工具 SHALL 先确定**所属主会话**：调用会话为普通会话时即其本身；为子会话时经 `ctx.agents.get(header.parentSession)` 逐级向上，找到第一个非 `origin = subagent` 的会话；链上任一会话不在 live 注册表中时视为 MANUAL。模式按所属主会话 id 从插件状态读取。所属主会话模式不是 `AUTO`（含因 Jev 失败停用）时，工具 MUST NOT 请求 Jev、MUST NOT 外发任务文本，返回非错误结果 `{routed: false, reason: "manual"}`，渲染文本说明“主会话为 MANUAL：不判档，按官方默认委派；只传用户或 lead 指定的值（例如指定的模型），不传其它 provider/model/reasoning_effort”；只有所属主会话为 `AUTO` 时才判档。系统 SHALL 提供 skill `subagent-model-routing`，其文本须要求：(1) 委派前调用 `route_subagent`；用户或 lead 已同时指定模型与 effort（或只指定 effort）时不调用工具，按指定值委派；只指定模型时调用工具并传入该 `model`，其余规则不变；工具返回 `routed: false` 时只传用户或 lead 指定的值；(2) 将返回的 `provider`、`model`、`reasoning_effort` 全部显式传给官方 `subagent`；(3) 在 `description` 末尾以 `[model·effort]` 标注；(4) 默认 provider 为当前会话 provider，用户或 lead 要求独立体系时改用另一个；当前 provider 不是 `claude`/`codex` 时暂停委派并询问用户；(5) 工具失败时暂停委派并询问用户，MUST NOT 自行猜测档位、改由主会话完成或换用其它模型；(6) 复用已有子会话前比较其标注，更高或无法确认时新建；(7) `route_subagent` 工具不存在时告知用户“子会话 Jev 选模未启用”，按官方默认委派且不传 provider/model/reasoning_effort，不得猜档位；(8) 工具返回 `routed: false` 时按官方默认委派且不传 provider/model/reasoning_effort，不询问用户、不猜档位。路由器 MUST NOT 改写子会话的创建参数或请求。
+
+#### Scenario: 工具成功返回表中条目
+- **GIVEN** 调用会话为 `AUTO`
+- **WHEN** Jev 依次返回四个档位，并分别以 `provider: claude` 与 `provider: codex` 调用 `route_subagent`
+- **THEN** 8 个结果的 `{model, reasoning_effort}` 依次为：claude `haiku-5-5/low`、`sonnet-5-5/medium`、`opus-5-5/high`、`opus-5-5/xhigh`；codex `gpt-6-luna/medium`、`gpt-6.1-sol/medium`、`gpt-6.1-sol/high`、`gpt-6.1-sol/xhigh`（Claude 模型名带 `claude-` 前缀）
+
+#### Scenario: 主会话为 MANUAL 时不判档、不外发
+- **GIVEN** 会话 S1 为 `MANUAL`（分别为用户手动设置、因 Jev 402 停用两种情况）；S1 的子会话 C1；另有 AUTO 会话 S2 的子会话 C2，其父会话不在 live 注册表中
+- **WHEN** 分别在 S1、C1、C2 中调用 `route_subagent`
+- **THEN** 三次都返回非错误结果 `{routed: false, reason: manual}`，渲染文本含“按官方默认委派”；假 Jev 服务收到 0 个请求；S1 无新的 `decision`
+
+#### Scenario: 子会话中调用按根会话模式判档
+- **GIVEN** 会话 S1 为 `AUTO`，其子会话 C1 的子会话 C2，Jev 返回 `standard`
+- **WHEN** 在 C2 中以 `provider: claude` 调用 `route_subagent`
+- **THEN** 返回 `{standard, claude, claude-sonnet-5-5, medium}`；假 Jev 服务收到 1 个请求；S1 不新增 `decision`
+
+#### Scenario: 子会话模型不受调用会话模型限制
+- **GIVEN** 调用会话为 `AUTO` 且当前模型为 `claude-haiku-5-5`，子会话模型表为缺省值，Jev 对任务返回 `escalated`
+- **WHEN** 以 `provider: claude` 调用 `route_subagent`
+- **THEN** 返回 `{escalated, claude, claude-opus-5-5, xhigh}`；对四个档位与两个 provider 的全部组合，返回值中不出现 `claude-fable-5-1`、`gpt-6-astra` 或 `max`
+
+#### Scenario: 子会话显式推荐按设置生效
+- **GIVEN** 当前官方允许列表与模型目录允许 Fable/Astra；`claude.escalated` 配置 Fable/high，`codex.simple` 配置 Astra/low，上限 high
+- **WHEN** Jev 分别判为 escalated 与 simple，工具按对应 provider 调用
+- **THEN** 返回 Fable/high 与 Astra/low；未覆盖的 claude.standard 仍为 Sonnet/medium；修改主会话 Fable 的映射不影响子会话推荐
+
+#### Scenario: 使用时发现推荐失效
+- **GIVEN** 已保存子会话推荐 Sol/high，之后官方移除 Sol，或文件被改为超过上限的 effort
+- **WHEN** AUTO 下调用 route_subagent 并判到该档
+- **THEN** 返回明确设置错误并要求暂停委派，不返回另一个模型或较低 effort，不改变根会话模式和 disabled
+
+#### Scenario: 指定模型时只推荐 effort
+- **GIVEN** 调用会话为 `AUTO`；当前模型目录与官方允许列表包含 `gpt-6-astra`（支持 low..xhigh），上限 xhigh；`childRoutes.codex.complex` 配置为 Astra/high
+- **WHEN** Jev 依次返回四个档位，每次以 `provider: codex, model: gpt-6-astra` 调用 `route_subagent`
+- **THEN** 返回的 `model` 均为 `gpt-6-astra`，`reasoning_effort` 依次为 `low`、`low`、`medium`、`high`（不采用 `childRoutes` 中的 high）；假 Jev 服务收到 4 个请求
+
+#### Scenario: 指定模型不可用时不换模型
+- **GIVEN** 调用会话为 `AUTO`
+- **WHEN** 分别以 `provider: codex, model: gpt-6-astra`（不在官方允许列表）、`provider: claude, model: gpt-6-astra`（provider 不符）、`provider: claude, model: claude-unknown`（不在模型目录）调用 `route_subagent`
+- **THEN** 三次都返回设置错误，含“暂停委派并询问用户”，不返回其它模型；会话模式与 `disabled` 不变
+
+#### Scenario: 指定模型且主会话为 MANUAL
+- **GIVEN** 会话 S1 为 `MANUAL`
+- **WHEN** 以 `provider: codex, model: gpt-6-astra` 调用 `route_subagent`
+- **THEN** 返回 `{routed: false, reason: manual}`，渲染文本含“只传用户或 lead 指定的值”；假 Jev 服务收到 0 个请求
+
+#### Scenario: 工具失败返回类别且不改状态
+- **GIVEN** Jev 返回 402，主会话 S1 为 `AUTO` 且无 `disabled`
+- **WHEN** 调用 `route_subagent`
+- **THEN** 结果为错误，内容含“余额不足”与“暂停委派并询问用户”；S1 仍为 `AUTO` 且无 `disabled`
+
+#### Scenario: 主子会话问题定义相同
+- **GIVEN** 主会话一个 AUTO 用户回合与一次 `route_subagent` 调用
+- **WHEN** 记录二者发往假 Jev 服务的 body
+- **THEN** 两个 body 的 `model` 与 `questions` 深度相等，仅 `state` 不同
+
+#### Scenario: skill 文本包含八项规则
+- **GIVEN** 插件安装目录中的 `skills/subagent-model-routing/SKILL.md`
+- **WHEN** 测试读取其文本
+- **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则、“只指定模型”时传 `model` 的规则、“子会话 Jev 选模未启用”及 `routed: false` 时按官方默认委派，且不含档位表模型名

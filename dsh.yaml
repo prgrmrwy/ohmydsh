@@ -170,15 +170,10 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.2.0
+    version: 0.3.0
     enabled: true
     brief: 主会话按任务自动调整推理强度，保留用户模型选择
-    note: '自研,change auto-model-routing-settings。Jev(OpenRouter decisions,typesafe/jev-1.13)判档;AUTO 外发≤8000字当前消息及前轮用户前500/助手末1200字,子任务仅根会话 AUTO 时外发,形态脱敏尽力而为,OpenRouter/TypeSafe 保留条款未确认。凭据经官方 credentials(~/.dsh/.credentials.yaml,0600)或只读启动环境;GUI 不回传值。非密钥设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json。Claude/GPT 分页配置主 effort 与子 model+effort,受目录/允许列表/上限约束,不自动选 max。不换主模型;新会话默认 MANUAL,可设 AUTO,已有会话不变。Jev 失败即 MANUAL,无本地降级;MANUAL 不复原 effort。无文本判档记录在 $DSH_HOME/state/auto-model-routing/judgements.jsonl。0.2.0 已部署,用户接受 GUI 与已记录验收缺口后归档。停用:enabled:false → dsh build。'
-  - id: subagent-model-routing
-    type: skill
-    enabled: true
-    brief: 子会话委派前调用 route_subagent 并显式传参与标注
-    note: '自研,change auto-model-routing。委派前调用插件工具 route_subagent(Jev 判档),显式传 provider/model/reasoning_effort;工具失败暂停委派并询问用户;插件未启用时告知用户并按官方默认委派。不绕过官方白名单。与插件同批启用;工具跟随所属主会话模式,MANUAL 时返回 routed:false,按官方默认委派、不询问。'
+    note: '自研,change auto-model-routing-standalone-release;0.3.0 自带 subagent-model-routing skill,与插件同启停。Jev(OpenRouter decisions,typesafe/jev-1.13)判档;AUTO 外发≤8000字当前消息及前轮用户前500/助手末1200字,子任务仅根会话 AUTO 时外发,形态脱敏尽力而为,OpenRouter/TypeSafe 保留条款未确认。凭据经官方 credentials(~/.dsh/.credentials.yaml,0600)或只读启动环境;GUI 不回传值。非密钥设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json。Claude/GPT 分页配置主 effort 与子 model+effort,受目录/允许列表/上限约束,不自动选 max。不换主模型;新会话默认 MANUAL,可设 AUTO,已有会话不变。Jev 失败即 MANUAL,无本地降级;MANUAL 不复原 effort。无文本判档记录在 $DSH_HOME/state/auto-model-routing/judgements.jsonl。设置验收缺口见归档 change。停用:enabled:false → dsh build。'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package

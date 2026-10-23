@@ -7,7 +7,17 @@
 <!-- problem -->
 不必每条消息都手动调高或调低推理强度。AUTO 下，每个用户回合由 Jev 决策模型（经 OpenRouter）判为 `simple` / `standard` / `complex` / `escalated`，插件**只调整你已选模型的推理强度**，不换 provider 和模型。Jev 任何失败都会让 AUTO 自动停用，芯片上显示原因。
 
-**安装**：在 `dsh.yaml` 中把 `auto-model-routing` 与配套 skill `subagent-model-routing` 设为 `enabled: true`，再运行 `dsh build`。见[插件索引](../../README.zh.md#插件索引)。
+**安装**：DSH `0.2.0-rc.2`，Node.js `>=22.19`。
+
+```sh
+dsh plugin --profile web add dsh-auto-model-routing
+# 或从源码安装（出现提示时批准本地构建）：
+dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
+```
+
+重启 DSH、刷新页面，再到**设置 → 自动模型路由**配置 OpenRouter key。配套 skill 已包含，提供委派指引，但不强制拦截每次派发。与模型池路由或本地分类器不同，本插件用外部 Jev 判档，始终不换主模型。演示来自隔离 Host，使用本地模拟的 Jev 和模型响应。
+
+在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 中只需启用 local `auto-model-routing` 条目并运行 `dsh build`，不再单独启用 skill 条目。
 
 ## 使用
 
@@ -38,21 +48,21 @@
 
 ![auto-model-routing 架构图：芯片与 RPC 端点、agent/pre-step 钩子经 OpenRouter 请求 Jev、agent/request 钩子只改推理强度、route_subagent 工具共用同一判断](docs/architecture.dual.svg)
 
-`agent/pre-step` 钩子在每个用户回合的第 1 步判档；随后以 prepend 注册的 `agent/request` 钩子只改写 `reasoningEffort`，并同步到官方模型选择。入口 [`src/index.ts`](src/index.ts)，判档规则 [`src/rubric.json`](src/rubric.json)，强度表 [`src/effort.ts`](src/effort.ts)，界面 [`src/client/`](src/client/index.ts)，回归用例 [`eval/`](eval/README.zh.md)，图源 [`docs/architecture.json`](docs/architecture.json)（archify）。
+`agent/pre-step` 钩子在每个用户回合的第 1 步判档；随后以 prepend 注册的 `agent/request` 钩子只改写 `reasoningEffort`，并同步到官方模型选择。入口 [`src/index.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/index.ts)，判档规则 [`src/rubric.json`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/rubric.json)，强度表 [`src/effort.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/effort.ts)，界面 [`src/client/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/client/index.ts)，回归用例 [`eval/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/eval/README.zh.md)，图源 [`docs/architecture.json`](docs/architecture.json)（archify）。
 
 ## 开发验证
 
 ```sh
-npm --prefix packages/auto-model-routing test
-npm --prefix packages/auto-model-routing run typecheck
-npm --prefix packages/auto-model-routing run build
+npm test
+npm run typecheck
+npm run build
 ```
 
 测试使用真实 AgentLoop、假 LLM 流和本地回环假 Jev，不访问 OpenRouter。`node scripts/label-report.mjs` 按规则版本汇总你的档位标注。
 
-规范与设计：当前规范见 [`openspec/specs/auto-model-routing`](../../openspec/specs/auto-model-routing/spec.md)。归档 change 记录了设计演进：[路由](../../openspec/changes/archive/2026-10-22-auto-model-routing/design.md)（决策 D1–D14）与[设置](../../openspec/changes/archive/2026-10-23-auto-model-routing-settings/design.md)。配套 skill 见 [`skills/subagent-model-routing`](../../skills/subagent-model-routing/SKILL.md)。修改钩子前先读 [DSH 插件集成陷阱](../../docs/architecture/dsh-plugin-integration-pitfalls.md)。
+规范与设计：当前规范见 [`openspec/specs/auto-model-routing`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)。归档 change 记录了设计演进：[路由](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-22-auto-model-routing/design.md)（决策 D1–D14）与[设置](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-23-auto-model-routing-settings/design.md)。配套 skill 见 [`skills/subagent-model-routing`](skills/subagent-model-routing/SKILL.md)。修改钩子前先读 [DSH 插件集成陷阱](https://github.com/prgrmrwy/ohmydsh/blob/main/docs/architecture/dsh-plugin-integration-pitfalls.md)。
 
 ## 移除
 <!-- section: removal -->
 
-设为 `enabled: false` 并重新构建。会话保持 AUTO 最后设定的 effort，需要时在模型选择器里另选。插件停用后，skill 会让 Agent 按官方默认委派。
+运行 `dsh plugin --profile web remove dsh-auto-model-routing`，重启 DSH 并刷新页面；ohmydsh 则设为 `enabled: false` 并构建。插件提供的 skill 与工具一并撤销，设置和日志保留。会话保持 AUTO 最后设定的 effort，直到在模型选择器里另选。

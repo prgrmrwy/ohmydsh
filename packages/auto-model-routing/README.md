@@ -7,7 +7,17 @@ English · [简体中文](README.zh.md)
 <!-- problem -->
 You should not have to raise or lower reasoning effort by hand for every message. In AUTO, each user turn is judged by the Jev decision model (via OpenRouter) as `simple` / `standard` / `complex` / `escalated`, and the plugin changes **only the reasoning effort** of the model you already picked. Provider and model are never changed. If Jev fails for any reason, AUTO switches itself off and the chip shows why.
 
-**Install.** Managed through `dsh.yaml`: set `enabled: true` on `auto-model-routing` and its companion skill `subagent-model-routing`, then run `dsh build`. See the [plugin index](../../README.md#plugins).
+**Install.** DSH `0.2.0-rc.2`, Node.js `>=22.19`.
+
+```sh
+dsh plugin --profile web add dsh-auto-model-routing
+# Or install source (approve the local build when prompted):
+dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
+```
+
+Restart DSH, refresh the Web page, then configure your OpenRouter key in **Settings → 自动模型路由**. The companion skill is included; it guides delegation but does not enforce every dispatch. Unlike model-pool routers or local classifiers, this plugin uses external Jev judgments and never switches the main model. The demos use an isolated Host with local mock Jev/model responses.
+
+In [ohmydsh](https://github.com/prgrmrwy/ohmydsh), enable only the local `auto-model-routing` entry and run `dsh build`; no separate skill customization is needed.
 
 ## Use
 
@@ -38,21 +48,21 @@ You should not have to raise or lower reasoning effort by hand for every message
 
 ![auto-model-routing architecture: the chip and RPC endpoints, the agent/pre-step hook asking Jev through OpenRouter, the agent/request hook rewriting only reasoning effort, and the route_subagent tool sharing the same judgment](docs/architecture.dual.svg)
 
-An `agent/pre-step` hook judges step 1 of each user turn. An `agent/request` hook (prepended) then rewrites only `reasoningEffort`, and syncs it to the official model selection. Entry point: [`src/index.ts`](src/index.ts). Rubric: [`src/rubric.json`](src/rubric.json). Effort table: [`src/effort.ts`](src/effort.ts). UI: [`src/client/`](src/client/index.ts). Regression cases: [`eval/`](eval/README.md). Diagram source: [`docs/architecture.json`](docs/architecture.json) (archify).
+An `agent/pre-step` hook judges step 1 of each user turn. An `agent/request` hook (prepended) then rewrites only `reasoningEffort`, and syncs it to the official model selection. Entry point: [`src/index.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/index.ts). Rubric: [`src/rubric.json`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/rubric.json). Effort table: [`src/effort.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/effort.ts). UI: [`src/client/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/client/index.ts). Regression cases: [`eval/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/eval/README.md). Diagram source: [`docs/architecture.json`](docs/architecture.json) (archify).
 
 ## Development
 
 ```sh
-npm --prefix packages/auto-model-routing test
-npm --prefix packages/auto-model-routing run typecheck
-npm --prefix packages/auto-model-routing run build
+npm test
+npm run typecheck
+npm run build
 ```
 
 Tests use the real AgentLoop with a fake LLM stream and a loopback fake Jev; they never call OpenRouter. `node scripts/label-report.mjs` summarizes your tier labels per rubric version.
 
-Specs and design: the current spec is [`openspec/specs/auto-model-routing`](../../openspec/specs/auto-model-routing/spec.md). The archived changes record the design history: [routing](../../openspec/changes/archive/2026-10-22-auto-model-routing/design.md) (decisions D1–D14) and [settings](../../openspec/changes/archive/2026-10-23-auto-model-routing-settings/design.md). The companion skill is [`skills/subagent-model-routing`](../../skills/subagent-model-routing/SKILL.md). Before you change the hooks, read [DSH plugin integration pitfalls](../../docs/architecture/dsh-plugin-integration-pitfalls.md).
+Specs and design: the current spec is [`openspec/specs/auto-model-routing`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md). The archived changes record the design history: [routing](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-22-auto-model-routing/design.md) (decisions D1–D14) and [settings](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-23-auto-model-routing-settings/design.md). The companion skill is [`skills/subagent-model-routing`](skills/subagent-model-routing/SKILL.md). Before you change the hooks, read [DSH plugin integration pitfalls](https://github.com/prgrmrwy/ohmydsh/blob/main/docs/architecture/dsh-plugin-integration-pitfalls.md).
 
 ## Removal
 <!-- section: removal -->
 
-Set `enabled: false` and rebuild. Chats keep the last effort AUTO set; pick another one in the model picker if needed. With the plugin off, the skill tells the agent to delegate with official defaults.
+Run `dsh plugin --profile web remove dsh-auto-model-routing`, then restart DSH and refresh the page. In ohmydsh, set `enabled: false` and rebuild instead. The plugin-owned skill and tools disappear; settings and logs remain. Chats keep the last effort AUTO set until you pick another one.

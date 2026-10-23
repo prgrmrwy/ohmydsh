@@ -317,7 +317,7 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 两个 body 的 `model` 与 `questions` 深度相等，仅 `state` 不同
 
 #### Scenario: skill 文本包含八项规则
-- **GIVEN** `skills/subagent-model-routing/SKILL.md`
+- **GIVEN** 插件安装目录中的 `skills/subagent-model-routing/SKILL.md`
 - **WHEN** 测试读取其文本
 - **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则、“只指定模型”时传 `model` 的规则、“子会话 Jev 选模未启用”及 `routed: false` 时按官方默认委派，且不含档位表模型名
 
@@ -606,3 +606,34 @@ client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个�
 #### Scenario: 设置分段控件紧凑一致
 - **WHEN** 在真实主题下渲染设置页
 - **THEN** 三组 tabs 均为 28px 高、12px 字号，内边距圆角一致，体系页签不拉伸为大块，深浅色跟随宿主且窄栏不溢出
+
+### Requirement: 插件安装自包含配套 skill
+安装本插件 SHALL 同时提供 `route_subagent` 工具和唯一的 `subagent-model-routing` skill，不依赖 ohmydsh 根目录的 skills 或环境级指令。skill SHALL 保留既有八项派发规则，但 MUST NOT 声称仅注册 skill 就能强制 Agent 每次委派前执行工具。ohmydsh SHALL 仅保留插件的 local customization；原独立 skill 的受管部署副本 SHALL 在迁移同步时撤销，不删除用户自建的非受管副本。禁用插件并重新装配后，其工具及包内 skill SHALL 均不可用，用户设置与判档记录 SHALL 保留。
+
+#### Scenario: 干净安装获得唯一 skill
+- **WHEN** 在不含 ohmydsh 指令或全局 skill 的干净 DSH profile 安装并加载发布包
+- **THEN** 真实 Host 的 skill catalog 中 `subagent-model-routing` 恰好出现一次，加载其正文可见既有八项规则；工具集包含 `route_subagent`
+
+#### Scenario: 旧部署迁移无重复来源
+- **GIVEN** 上一版本通过 manifest 的独立 skill 条目产生受管副本
+- **WHEN** 升级到 0.3.0 并连续执行两次隔离 sync，再重新装配 Host
+- **THEN** 旧受管副本不再存在，包内 skill 恰好注册一次，第二次 sync 为 no-op；现有配置、模式与判档记录未被修改
+
+#### Scenario: 插件禁用撤销 skill 与工具
+- **WHEN** 从 profile 移除插件或在 ohmydsh 禁用插件后同步并重新装配
+- **THEN** 本插件提供的 skill 和工具不再注册；非插件管理的 skill 与既有数据不被删除
+
+### Requirement: 独立分发与可验证发布
+本插件 SHALL 提供自包含的 npm 发布物与可从 Git 源码构建的公开镜像。发布物 SHALL 包含 Host/Web 入口、bundle patch、配套 skill、许可证及 README 引用的展示资产；独立安装 MUST NOT 依赖 monorepo node_modules、配置或相对路径。公开安装说明 SHALL 披露兼容性、默认 MANUAL、Jev 外发文本与脱敏限制、凭据和状态写入位置。公开镜像 SHALL 由 ohmydsh 已提交的包目录生成，不成为第二份可独立编辑的真源。
+
+#### Scenario: 打包安装与源码安装均可加载
+- **WHEN** 分别在独立临时目录从 npm 打包产物安装、从已提交的镜像源码安装，并执行规定构建生命周期
+- **THEN** Host/Web 入口可解析，bundle 能装配工具及 skill；README 图片与包内路径均有效，无 ohmydsh 私有路径依赖
+
+#### Scenario: 发版身份一致
+- **WHEN** 镜像 release workflow 发布版本
+- **THEN** 版本 tag 与包版本必须匹配，否则发布前失败；长期自动发布通过绑定该仓库和 workflow 的 OIDC 完成，仓库与日志中不存在长期 npm token
+
+#### Scenario: 外部步骤未满足前置条件
+- **WHEN** npm 认证、商店年龄/准入校验、审核或索引探测尚未完成
+- **THEN** 发布记录分别标明待办条件、已发布版本、PR/申请地址与可见性；不得把创建仓库、发出 PR 或 registry 暂存状态当作已上架，也不得用重复发版绕过等待

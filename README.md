@@ -215,7 +215,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
-- [subagent-model-routing](skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
+- [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
