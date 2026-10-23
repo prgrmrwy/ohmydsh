@@ -21,16 +21,23 @@
 - **状态**: 讨论中
 - **优先级**: P1
 - **背景 / 动机**: 想要类似 Claude Code `/btw` 的能力：主会话工作时问一个问题，开一个知道主会话上下文的独立会话，只回答、不执行工具、不写回主会话，又快又便宜。社区已有 `@michengai/dsh-btw`（Apache-2.0，支持 0.2.0-rc.1 至 0.2.1-rc.2，含本仓 pin），功能最接近，但会改写请求前缀，复用不了主会话的 prompt cache。
+- **实测结论（2026-10-23，真实部署，读会话日志 `usage`，脚本 `scripts/fork-cache-report.mjs`）**: 旁问首个请求要命中主会话 cache，两个条件缺一不可。
+  1. 插件不改请求开头：不加 persona、不传空工具白名单，工具只在执行期拦截（PR #16）。
+  2. 父子工具集逐字节一致：宿主里不能有只注册给 root agent 的工具。`experimental-schedule` 的 4 个 `schedule_*` 就违反这一条（`packages/schedule/schedule/src/index.ts` 的 `roots().includes(agent)`）。
+  - 对照：1.0.4 或开着 schedule 时，Claude 与 codex 的 cacheRead 都是 0。PR #16 且停用 schedule 时，Claude 读 51.76 万/51.76 万，codex 读 2.92 万、未缓存只有 681。codex 子会话的会话 id 虽然不同，仍能命中，之前担心的 `prompt_cache_key` 问题不存在。
+  - 本机 14 个 fork 子会话的日志显示，没有一个读到过父会话 cache。这不是 btw 独有的问题，任何 fork 子代理都受影响。
+  - 当前部署：schedule 已恢复启用；btw 继续用 PR #16 本地 tarball，它不会比 1.0.4 差，上游修复后就能命中。
 - **已定的方向**:
-  - 不自研，先推上游：2026-10-22 已提 [MichengAI/dsh-btw#16](https://github.com/MichengAI/dsh-btw/pull/16)。PR 去掉 persona 与空工具白名单，工具改由执行期 `AnswerOnlyGuard` 拒绝，末尾提问消息里说明工具调用会被拒绝。附真实 AgentLoop + fork 的前缀对比测试：1.0.4 可复用的主会话消息为 0/4，PR 为 4/4，工具定义与系统提示一致。四个宿主版本的 compat 测试均通过。
+  - 不自研，先推上游：2026-10-22 已提 [MichengAI/dsh-btw#16](https://github.com/MichengAI/dsh-btw/pull/16)。PR 去掉 persona 与空工具白名单，工具改由执行期 `AnswerOnlyGuard` 拒绝，末尾提问消息里说明工具调用会被拒绝。四个宿主版本的 compat 测试都通过。harness 里的前缀测试不加载可选 bundle，所以证明不了真实部署能命中，以上面的实测为准。
+  - 宿主问题另提 DSH 上游 Discussion（上游已关闭 Issues）：只注册给 root 的工具应当也在 fork 子会话上注册，到执行期再拒绝，与 `ask_user_question` 的做法一致。机制佐证见 discussions #9190。
   - btw 与 Pet 解耦：btw 作为独立插件，Pet 只做轮盘入口适配。候选做法是 Pet 拿到主会话活 Agent 后经 `ctx.commands.execute(agent, '/btw …')` 复用社区命令，需先核实 Host 侧可调用性，以及命令事件不进入模型上下文（`command/run`/`command/done` 在 session 核心无引用，上游测试断言答案不进 `deriveMessages`）。
   - 气泡等展示交给插件本身，不在 Pet 内重做。
 - **待定**:
   - PR 结论：合入则按 `add-dsh-plugin` 流程引入社区插件（精确 pin + 审查记录）再做 Pet 适配；被拒或长期无回应，则按已起草的方案自研 `dsh-btw`。要点：自有 provider 截在最后一个 `step/end`、一次性 `subagents.start`、只用执行期 guard、0.2.0-rc.2 公开 API、不动 compat overlay。
   - 截到 `turn/end`（上游现状）还是 `step/end`（可看到进行中轮次已完成的 step），PR 中刻意不涉及，待 #16 有结论后再议。
-  - OpenAI 系 provider 以会话 id 为 `prompt_cache_key`，子会话 id 不同，命中率可能偏低；需接入真实 provider 实测 `cache_read`。
-- **依据**: memex `dsh-020-one-shot-subagent-is-official-no-delivery-child`、`dsh-child-session-prompt-cache-prerequisites`、`dsh-community-btw-plugins-survey-2026-10`。
-- **更新**: 2026-10-22 调研社区实现，本地实测确认前缀被破坏，提交上游 PR #16。
+  - PR #16 合入发版后，把 manifest 里的本地 tarball 换回 npm 精确版本。
+- **依据**: memex `dsh-020-one-shot-subagent-is-official-no-delivery-child`、`dsh-child-session-prompt-cache-prerequisites`、`dsh-community-btw-plugins-survey-2026-10`、`dsh-fork-child-cannot-share-parent-prompt-cache-schedule-tools`、`dsh-read-cache-usage-from-session-logs`。
+- **更新**: 2026-10-22 调研社区实现，提交上游 PR #16。2026-10-23 在真实部署上对照实测，定位宿主侧 root-only 工具这一根因；Claude 与 codex 均确认命中条件。
 
 ### [B045] Locus 群回复采用结论先行的渐进披露
 - **状态**: 想法

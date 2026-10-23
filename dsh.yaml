@@ -324,13 +324,13 @@ customizations:
     brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
     note: '自研,change upgrade-dsh-0-2-0-runtime(spec cockpit-memex-browse-shim)。纯 Web client adapter:把 cockpitBridge.forwards 接给 dshMemex.browseAddress,两端互不引用、无顶层 inject。按设备端口单飞 acquire,只交付 ready 的当前地址(最多等 15 秒,不缓存 URL);仅 CockpitForwardsError code=local-device 回落 localhost,unavailable/网络/业务错误原样传播;已接线的 bridge 消失时保持 fail-closed,避免远端静默误路由。须配 bridge >=0.6.1(已删旧 portForward,不能搭配 shim 0.1.1)。升级复核:bridge 的 forwards 契约。移除:删除本条即解耦;回滚旧 shim 必须同时回滚 bridge 到旧服务版本。'
   # 官方可选(remote):Schedule / 自动化任务。0.1.5 默认组合自带,0.2.0 移入默认关闭的官方可选包
-  # B049 临时停用(2026-10-23):schedule_* 只注册给 root agent,使 fork 子会话工具集与父不一致;实测完恢复 true。
+  # 已知副作用(B049):schedule_* 只注册给 root agent,fork 子会话工具集因此与父不一致,读不到父会话 prompt cache;待上游修复。
   - id: experimental-schedule
     type: package
     source: remote
     spec: '@deepseek-ai/dsh-experimental-schedule-bundle@0.2.0-rc.2'
     version: 0.2.0-rc.2
-    enabled: false
+    enabled: true
     brief: 官方可选 Schedule(侧栏自动化任务页 + schedule_* 工具 + 时间上下文)
     note: '官方 bundle @deepseek-ai/dsh-experimental-schedule-bundle,与 dshVersion 同版本精确 pin。0.2.0 把 time-context/schedule/ui-schedule 三行移出出厂 Web 组合并放入本包(依赖同版本三个官方包);用户选择默认打开以保留 0.1.5 能力。任务存于会话日志内的会话本地投影。升级复核:升级 dshVersion 时须同步改本 pin。回滚/移除:enabled:false → dsh build → 重启(只撤销三行,已存任务保留)。 pin 校验 sha512-6oGDFceBMAsrKeJfFxByyvXBPE+Obfd0oMCwNYdWesPmRBueuRwj5lwp8BY+v59mQAc3Jzdkx1hZh/E6xRcMng=='
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
@@ -372,7 +372,7 @@ customizations:
     enabled: true
     brief: 为 ponytail 包挂专属 skill-filesystem provider(不含默认根)
     note: '组合补丁(patches/ponytail-skills.yml):插入 @deepseek-ai/dsh-skill-filesystem 行,providerName ponytail-plugin,includeDefaultRoots:false,skills 目录由 profile baseUrl 经包主入口解析(包的 exports 未导出 package.json,不能照搬 archify 写法)。升级复核:确认包主入口仍位于 .opencode/plugins/ 下两级(目录结构变化需同步改路径)。移除:enabled:false → dsh build。'
-  # 第三方 /btw 旁问(BACKLOG B049):1.0.4 基线已测完,现为 PR #16 tarball 对照组,测完改回 npm 精确版本。
+  # 第三方 /btw 旁问(BACKLOG B049):暂用 PR #16 本地构建(唯一能复用主会话 cache 的版本),合入发版后改回 npm 精确版本。
   - id: michengai-btw
     type: package
     source: remote
@@ -380,5 +380,5 @@ customizations:
     name: '@michengai/dsh-btw'
     version: 1.0.4
     enabled: true
-    brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;B049 cache 实测中:PR #16 对照组)
-    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。B049:1.0.4 基线实测 Claude 与 codex 首请求 cacheRead 均为 0;当前临时装 PR #16 本地 tarball(commit e28856d,SHA256 586c1c62…2226a)对照,与 1.0.4 差异仅为去掉 persona 与空工具白名单。测完改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
+    brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;暂用 PR #16 构建)
+    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。现装 PR #16 本地 tarball(commit e28856d,SHA256 586c1c62…2226a),相对 1.0.4 只去掉 persona 与空工具白名单。B049 实测:该构建在父子工具集一致时 Claude/codex 首请求均近全量命中主会话 cache,1.0.4 恒为 0;experimental-schedule 启用时工具集不一致,同样不命中。合入发版后改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
