@@ -29,13 +29,14 @@
   - 当前部署：schedule 已恢复启用；btw 继续用 PR #16 本地 tarball，它不会比 1.0.4 差，上游修复后就能命中。
 - **已定的方向**:
   - 不自研，先推上游：2026-10-22 已提 [MichengAI/dsh-btw#16](https://github.com/MichengAI/dsh-btw/pull/16)。PR 去掉 persona 与空工具白名单，工具改由执行期 `AnswerOnlyGuard` 拒绝，末尾提问消息里说明工具调用会被拒绝。四个宿主版本的 compat 测试都通过。harness 里的前缀测试不加载可选 bundle，所以证明不了真实部署能命中，以上面的实测为准。
-  - 宿主问题另提 DSH 上游 Discussion（上游已关闭 Issues）：只注册给 root 的工具应当也在 fork 子会话上注册，到执行期再拒绝，与 `ask_user_question` 的做法一致。机制佐证见 discussions #9190。
+  - 宿主问题已提 DSH 上游 [discussions #10753](https://github.com/deepseek-ai/deepseek-harness/discussions/10753)（上游已关闭 Issues）：只注册给 root 的工具应当也在 fork 子会话上注册，到执行期再拒绝，与 `ask_user_question` 的做法一致。机制佐证见 discussions #9190。实测对照已补到 [PR #16 评论](https://github.com/MichengAI/dsh-btw/pull/16#issuecomment-6358791369)。
   - btw 与 Pet 解耦：btw 作为独立插件，Pet 只做轮盘入口适配。候选做法是 Pet 拿到主会话活 Agent 后经 `ctx.commands.execute(agent, '/btw …')` 复用社区命令，需先核实 Host 侧可调用性，以及命令事件不进入模型上下文（`command/run`/`command/done` 在 session 核心无引用，上游测试断言答案不进 `deriveMessages`）。
   - 气泡等展示交给插件本身，不在 Pet 内重做。
 - **待定**:
   - PR 结论：合入则按 `add-dsh-plugin` 流程引入社区插件（精确 pin + 审查记录）再做 Pet 适配；被拒或长期无回应，则按已起草的方案自研 `dsh-btw`。要点：自有 provider 截在最后一个 `step/end`、一次性 `subagents.start`、只用执行期 guard、0.2.0-rc.2 公开 API、不动 compat overlay。
   - 截到 `turn/end`（上游现状）还是 `step/end`（可看到进行中轮次已完成的 step），PR 中刻意不涉及，待 #16 有结论后再议。
-  - PR #16 合入发版后，把 manifest 里的本地 tarball 换回 npm 精确版本。
+  - PR #16 合入发版后，把 manifest 里的 fork release tarball 换回 npm 精确版本。
+  - 跟进 #10753 与 PR #16 的回复；宿主修复后，在启用 schedule 的部署上用 `scripts/fork-cache-report.mjs` 复测命中。
 - **依据**: memex `dsh-020-one-shot-subagent-is-official-no-delivery-child`、`dsh-child-session-prompt-cache-prerequisites`、`dsh-community-btw-plugins-survey-2026-10`、`dsh-fork-child-cannot-share-parent-prompt-cache-schedule-tools`、`dsh-read-cache-usage-from-session-logs`。
 - **更新**: 2026-10-22 调研社区实现，提交上游 PR #16。2026-10-23 在真实部署上对照实测，定位宿主侧 root-only 工具这一根因；Claude 与 codex 均确认命中条件。
 
