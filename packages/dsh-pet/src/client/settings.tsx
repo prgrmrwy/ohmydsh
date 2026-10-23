@@ -828,6 +828,31 @@ export function ExpressionSection(): JSX.Element {
         动画保存在 Pet 的状态目录，不写入配置数据库。素材的来源与许可由你自行负责。
       </p>
 
+      <p className="dshpet-item-hint">
+        还没想好用什么？逛一圈{' '}
+        <a
+          className="dshpet-link"
+          href="https://googlefonts.github.io/noto-emoji-animation/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Google Noto 动画 emoji
+        </a>
+        （方形构图、适合小图标；素材是 CC BY 4.0，对外使用需署名）。它的直链形如{' '}
+        <code>https://fonts.gstatic.cn/s/e/notoemoji/latest/1f914/lottie.json</code>
+        ——`fonts.gstatic.com` 不通时把域名换成 `fonts.gstatic.cn`，由 Host 下载即可。
+        也可以去{' '}
+        <a
+          className="dshpet-link"
+          href="https://lottiefiles.com/free-animations"
+          target="_blank"
+          rel="noreferrer"
+        >
+          LottieFiles
+        </a>
+        （素材更多，但每个作品的许可不同，商用前逐个确认）。
+      </p>
+
       {saved !== undefined ? (
         <div className="dshpet-fact">
           <span className="dshpet-fact-key">当前动画</span>

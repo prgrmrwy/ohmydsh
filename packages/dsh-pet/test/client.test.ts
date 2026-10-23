@@ -519,6 +519,18 @@ describe('settings information architecture', () => {
     expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
   })
 
+  it('points at where to find animations', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // The settings surface must answer "where do I get a URL/JSON?", including
+    // the China-accessible mirror, so the owner is not left guessing.
+    expect(markup).toContain('googlefonts.github.io/noto-emoji-animation')
+    expect(markup).toContain('lottiefiles.com/free-animations')
+    expect(markup).toContain('fonts.gstatic.cn/s/e/notoemoji/latest')
+  })
+
   it('offers the animation playback modes in Appearance', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),
