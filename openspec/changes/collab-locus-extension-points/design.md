@@ -109,7 +109,7 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 - **适用范围。** 普通会话调用也带守卫，这样顺带封住了现有实现中"入口通过后被归档或加入排除名单仍能提交"的窗口。内核只强制托管 channel 与 manager 的调用必须带守卫，普通调用不带时行为不变，旧测试不受影响。
 - **收据重放也经过守卫。** 失效的调用者连旧结果也拿不到；有效的新执行对象可以重放同一 cmdId。
 - **同步约束。** `resolveCaller` 与 adapter 的 `holds` 都是同步接口，前提是接入方维护一份已异步核验过的内存投影。Pet 现有的 `resolveCollaborationCaller` 是异步的，不能直接接上（见 Context）。这是 Locus 接入 change 的验收点；本 change 用测试替身覆盖语义。
-- `collab_status` 只经 host-index 读取，不走内核成员读取。所以对托管调用者，它在返回前再同步调用一次 `resolveCaller` 比对。
+- `collab_status` 只经 host-index 读取，不走内核成员读取。所以它在最后一个 await 之后、返回之前，对普通调用者和托管调用者都自行调用同一个完整的调用级守卫；失败时返回 `COLLAB_CALLER_UNAVAILABLE`，不返回空间列表。
 
 **句柄。**
 - 托管命令：`admit`/`rebind`/`retire`。
