@@ -64,3 +64,13 @@
 - [x] 7.4 构建后复测 client bundle 增量为 +约 168 KiB raw / +47 KiB gzip，并把数字写入 `verify.md` 与 design 的实测记录
 - [x] 7.5 `npm pack --dry-run` 证明 `THIRD-PARTY-NOTICES.md` 进入 tarball；`openspec validate pet-mascot-expression-import --strict` 退出 0
 - [ ] 7.6 `dsh build` 物化到 `~/.dsh`；与所有者确认后重启 DSH，实机验收导入/移除/回退/无刷新生效
+
+## 8. 从 HTTPS URL 导入
+
+- [x] 8.1 写失败测试：`test/expression-fetch.test.ts` 的 URL 形状、SSRF、重定向、下载失败与体积上限用例（断言先红）
+- [x] 8.2 实现：`src/host/expression-fetch.ts`（https/默认端口/凭据拒绝、私有与保留地址、DNS 全量校验、≤3 跳重定向逐跳复验、10s 超时、512 KiB、content-type 白名单）；`wire.ts` 增加路由与 `EXPRESSION_FETCH_FAILED`，`errors.ts` 映射 502
+- [x] 8.3 写失败测试：`test/expression-routes.test.ts` 的 URL 路由用例（成功、非 https 拒绝、下载失败 502、下载内容非法保持现状）
+- [x] 8.4 实现：`routes.ts` 增加 `expression-import-url` 路由与 `RouteDeps.fetchExpressionSource` 注入点，下载后复用 `saveExpression`
+- [x] 8.5 写失败测试：`test/client.test.ts` 断言设置页出现「从 URL 导入」与 Host 下载说明
+- [x] 8.6 实现：`client/api.ts` 增加 `importExpressionFromUrl`；`settings.tsx` 增加 URL 输入与按钮、复用覆盖确认/即时生效广播
+- [x] 8.7 文档与版本：README 双语补充 URL 导入与安全边界；dsh-pet 0.2.0 → 0.2.1（`package.json` + `dsh.yaml`）

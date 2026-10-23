@@ -14,12 +14,12 @@
 - 一条最简消费路径：设置里粘贴 Lottie JSON → 校验 → 保存 → 吉祥物立即播放；可复制导出、可移除。
 - 素材以普通文件保存在 Pet 状态目录，不进 SQLite，无 schema/迁移。
 - 安全与失败边界明确：请求体上限按路由区分；素材格式/资源引用/递归复杂度受限；读取失败与渲染失败一律回退 glyph 而非白屏，且诊断可达 Settings。
-- 不引入新的服务进程或网络请求：播放器随 client bundle 分发，素材本地提供，渲染器不执行表达式 `eval`。
+- 不引入新的服务进程；客户端不直接访问网络，播放器随 client bundle 分发，素材本地提供，渲染器不执行表达式 `eval`。**唯一的出站请求**是所有者显式触发的 URL 导入：由 Host 以 SSRF 防护方式下载（见 D11）。
 
 **Non-Goals:**
 
 - 不支持 SVG / PNG / GIF / emoji 导入（保留现有 glyph 作为回退）。
-- 不做按状态映射（思考中/完成/出错分别用不同动画）、不做表情包分享、不做多素材库、不做远程 URL 拉取或文件上传。
+- 不做按状态映射（思考中/完成/出错分别用不同动画）、不做表情包分享、不做多素材库、不做文件上传；URL 导入由 Host 下载（见 D11），不使用浏览器直连或环境代理。
 - 不内置任何第三方动画素材，不改 DSH core、compat overlay、preset 或 SQLite schema。
 
 ## Decisions
@@ -98,6 +98,18 @@ expressions/
 - 卸载/切换素材时 `destroy()` 并移除全部 listener；容器 `pointer-events:none`、`aria-hidden="true"`，不占拖动/点击/键盘焦点（评审 S7）。
 - 读取请求带单调 request id：只有最新一次读取可写入状态，迟到响应丢弃（评审 M7 C）；`AbortController` 或序号都可行，实现用序号以保持可测。
 
+### D11 从 URL 导入：Host 侧下载 + SSRF 防护
+
+- **为什么在 Host 侧**：所有者浏览器所在网络可能到不了素材 CDN（本次动机：`fonts.gstatic.com` 在浏览器不可达但 Host 可访问），浏览器还受 CORS 限制；Host 下载后走与粘贴完全相同的校验/存储路径。
+- **只允许**：`https:`、默认 443 端口、URL 不带用户名/密码；`localhost`/`*.local`/`*.internal`/`*.home`/`*.lan` 直接拒绝；IP 字面量按保留段拒绝（0/8、10/8、100.64/10、127/8、169.254/16、172.16/12、192.168/16、198.18/15、TEST-NET、组播/保留、IPv6 回环/ULA/link-local/组播/文档段、IPv4-mapped）。
+- **DNS 全部地址校验 + 地址 pin**：`dns.lookup(all)` 返回的每个地址都必须是公网，任一私有即拒绝（“一公一私”也拒绝）；验证后的**全部**地址经自定义 `lookup` pin 进 TLS 连接，且该 `lookup` 同时支持 Node 的两种调用形状（`{all:true}` 返回数组 / 传统单地址），否则 Happy Eyeballs 会让所有主机名 URL 报 `ERR_INVALID_IP_ADDRESS`。连接阶段不再二次解析，消除 DNS rebinding TOCTOU。IPv6 按 16 字节解析（含 `::ffff:0:0/96` 的点分与十六进制两种形式、`::/96`、NAT64、6to4、Teredo、ULA/link-local/site-local），不再用字符串前缀判断。
+- **重定向**：使用 `https.request`（本身不自动跟随重定向），手工逐跳处理且最多 3 跳，每一跳重新做 URL 形状 + DNS 校验；缺 `Location`、非 https、目标内网一律拒绝。
+- **请求**：`GET`，不带 cookie/凭据/referer，`accept-encoding: identity`；**整体截止 10s**（DNS 单次 ≤4s、全部重定向与下载共用）；响应必须 2xx；`content-type` 只接受 `application/json`/`text/json`/`text/plain`/`application/octet-stream`/`binary/octet-stream`（缺省接受），非 identity 的 `content-encoding` 直接判失败；`content-length` 与实际流式读取都受 512 KiB 上限约束（超限即中止并关闭响应）。
+- **代理**：使用专用 `https.Agent` 且**不读取** `HTTP(S)_PROXY`/`NODE_USE_ENV_PROXY`——代理会在不调用 `lookup` 的情况下自行解析目标，绕过地址 pin。取舍：仅能经代理出网的环境里 URL 导入会返回 `EXPRESSION_FETCH_FAILED`（README 已注明）。
+- **错误语义**：URL 形状/目标被拒 → `INVALID_REQUEST`（400，且**不发起请求**）；下载失败（网络/超时/HTTP 非 2xx/类型/超限）→ `EXPRESSION_FETCH_FAILED`（502）；下载成功但内容校验不过 → `INVALID_EXPRESSION`（400，现有素材不变）。
+- **不记录**：日志与错误消息不包含完整 URL/查询串（可能含一次性 token），只报主机名或通用原因。
+- 依赖注入：`fetchExpressionSource(url, deps)` 的 `request`/`lookup` 可注入，路由通过 `RouteDeps.fetchExpressionSource` 注入，测试不触网。
+
 ### D8 即时生效与覆盖确认
 
 - Settings 导入/移除成功后 `dispatchEvent(new Event(PET_APPEARANCE_EVENT))`（已有机制，overlay 已监听）；overlay 的 `load()` 同时重读 config 与 expression。
@@ -111,7 +123,7 @@ expressions/
 
 ### D10 版本与交付边界
 
-- `packages/dsh-pet/package.json` 与 `dsh.yaml` 的 dsh-pet 条目版本 0.1.0 → 0.2.0；`dsh.yaml` note 增加"动画表情文件在状态目录、无 schema 变更、lottie-web MIT"。
+- `packages/dsh-pet/package.json` 与 `dsh.yaml` 的 dsh-pet 条目版本 0.1.0 → 0.2.1（0.2.0 交付粘贴导入，0.2.1 交付 URL 导入）；`dsh.yaml` note 增加"动画表情文件在状态目录、无 schema 变更、lottie-web MIT"。
 - 无 DB schema/版本变更、无新 Host 常驻服务、无 compat 变更。回滚：`dsh.yaml` 置 `enabled:false` → `dsh build`；用户素材留在状态目录。
 
 ## Risks / Trade-offs
@@ -120,6 +132,7 @@ expressions/
 - **[常驻浮层播放动画持续消耗 CPU]** → 递归层数 ≤80、尺寸 ≤2048、reduced-motion 停首帧、页面隐藏暂停；Settings 提示复杂度限制。
 - **[用户素材来源/许可不可控]** → 不内置素材；README 明确用户责任；UI 只做技术校验，不做许可判断。
 - **[lottie-web 上游维护/安全]** → 固定 5.13.0（2025-05-21，Snyk 无直接漏洞记录）；只用无表达式执行的 light 构建；升级需重新审查。
+- **[新增出站请求面]** → 只允许所有者显式触发、https+默认端口、逐跳 DNS 校验、私网/元数据地址拒绝、全部地址 pin、整体 10s/512 KiB 上限、无凭据；错误不泄露完整 URL。**刻意不使用环境代理**（专用 agent）：代理会自行解析目标从而绕过 pin；代价是代理-only 环境不可用，返回可诊断错误。
 - **[用户手动改坏/替换 `active.lottie.json`]** → `stat` + 校验，损坏回退 glyph 并显示诊断；Host 不抛 500。
 - **[Windows rename 覆盖已存在文件语义]** → Node `fs.rename` 在 POSIX 原子覆盖；Windows 上目标存在时可能失败。兜底顺序是「先把旧文件 rename 到唯一 displaced 名（保留）→ 再 rename 新文件 → 成功后清理 displaced / 失败则恢复旧文件」，MUST NOT 先 unlink 目标（那会在第二步失败时永久丢旧素材）。原子性只在 POSIX 上声明（spec 已按平台措辞）。
 - **[lottie_light.min.js 在 tsdown 下打包失败]** → 构建阶段即暴露；备选非 min 的 light 构建并更新数字，不换完整构建。
@@ -132,4 +145,4 @@ expressions/
 
 ## Open Questions
 
-- 无阻塞问题。已知非阻塞项：`isTrustedRequest` 对 `Origin: null` 的既有信任语义被新的 4 MiB 写路由继承；本 change 不改变该信任边界，留作独立后续（round 3 S2 / round 4 S5）。后续可扩展（不在本 change）：按状态映射不同动画、SVG/PNG 导入、表情包导出/分享、远程 URL 导入（需先解决隐私与 CSP）。
+- 无阻塞问题。已知非阻塞项：`isTrustedRequest` 对 `Origin: null` 的既有信任语义被新的 4 MiB 写路由继承；本 change 不改变该信任边界，留作独立后续（round 3 S2 / round 4 S5）。后续可扩展（不在本 change）：按状态映射不同动画、SVG/PNG 导入、表情包导出/分享。URL 导入已在本 change 交付（Host 侧下载，见 D11）；代理-only 环境不可用属已记录取舍。

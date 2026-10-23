@@ -87,6 +87,8 @@ export const EXPRESSION_ROUTES = {
   import: '/dsh-pet/api/expression-import',
   /** Deactivate the current expression, keeping one `.removed` backup. */
   remove: '/dsh-pet/api/expression-remove',
+  /** Download one Lottie source from an HTTPS URL (Host-side fetch). */
+  importUrl: '/dsh-pet/api/expression-import-url',
 } as const
 
 /** Maximum accepted JSON request body for an ordinary Pet management route. */
@@ -1470,6 +1472,8 @@ export type PetErrorCode =
   | 'SKILL_DIGEST_MISMATCH'
   | 'SKILL_IMPORT_REJECTED'
   | 'INVALID_EXPRESSION'
+  /** A URL import failed to download a usable body (network/status/type/size). */
+  | 'EXPRESSION_FETCH_FAILED'
   | 'PROJECTION_DRIFT'
   /** Workspace files an executor depends on are missing and could not be repaired. */
   | 'WORKSPACE_UNHEALTHY'

@@ -14,21 +14,23 @@
 ### Evidence
 
 - Final full-suite command: `cd packages/dsh-pet && npm test`（`pretest` 先跑 `npm run build`）
-- Result summary: **200 passed | 3 skipped test files；3405 passed | 8 skipped tests；0 failed**（duration 106.99s；最终实现后重跑）
+- Result summary: **202 passed | 3 skipped test files；3430 passed | 8 skipped tests；0 failed**（duration 109.35s；含 URL 导入增量与 round 8 修复）
 - Typecheck: `cd packages/dsh-pet && npm run typecheck` → exit 0（host + client 两个 tsconfig）
 - 仓库级：`npm test`（root, node:test）→ 447 tests, **445 pass / 2 skip / 0 fail**；`npm run check:artifacts` → tracked paths comply
 - OpenSpec: `./node_modules/.bin/openspec validate pet-mascot-expression-import --strict` → `Change 'pet-mascot-expression-import' is valid`，exit 0
 - 发布物：`npm pack --dry-run` 包含 `THIRD-PARTY-NOTICES.md`（1.6kB）；`package.json#files` 含该文件与 `lib`
 - Bundle 体积：`lib/client.js` 由 343,072 B raw / 86,013 B gzip（变更前）增至 590,112 B raw / 145,041 B gzip（变更后），即 **+247,040 B raw / +59,028 B gzip**；其中含 lottie-web light（上游 min 文件 168,394 B raw）与本特性代码
+- URL 导入真机探针（一次性，未入库，**round-6 修复后重跑**）：`env -u NODE_USE_ENV_PROXY -u HTTP(S)_PROXY` 下用生产实现直连 `https://fonts.gstatic.com/s/e/notoemoji/latest/1f914/lottie.json` → **68,027 B 下载成功**并通过 `validateLottieSource`；同一构建对 `https://[::ffff:7f00:1]/…` 与 `https://[::ffff:a9fe:a9fe]/…` 返回 `INVALID_REQUEST`（C1 lookup 形状、C2 mapped IPv6 均修复）。注：URL 导入刻意不走环境代理，代理-only 环境会得到 `EXPRESSION_FETCH_FAILED`
+- URL 导入增量：新增 `test/expression-fetch.test.ts`（19 用例：地址分类、URL 形状、SSRF、地址 pin、重定向、DNS、下载失败/大小/流中断）、`test/expression-transport.test.ts`（mock `node:https` 断言 `defaultRequest` 使用专用 agent 与 pinned lookup）与 `test/expression-routes.test.ts` 的 5 条 URL 路由用例；`test/client.test.ts` 断言设置页出现「从 URL 导入」；`openspec validate --strict` 通过（39 场景 / 39 test-plan 行）
 - 真实素材/渲染探针（一次性，未入库）：Google Noto Animated Emoji `1f914/lottie.json`（68,027 B）通过 `validateLottieSource`；用 jsdom + 最小 canvas shim 加载真实 `lottie_light.min.js` 渲染该文件，结果 `isLoaded: true`、生成 `<svg>` 且含可绘制 `<path>`（drawable: true，nodes: 76），证明 Host 校验、真实素材与 light 播放器链路可用
-- 部署：`node scripts/sync.mjs` 完成，`~/.dsh/profiles/web/node_modules/dsh-pet` 已是 0.2.0，包含 `lib/client.js`（590,112 B）、`lib/host/expression.js`、`THIRD-PARTY-NOTICES.md`；实机验收待重启（见 7.6）
+- 部署：`node scripts/sync.mjs` 完成，`~/.dsh/profiles/web/node_modules/dsh-pet` 已是 **0.2.1**（含 `lib/host/expression-fetch.js`）；round-6 修复后再次物化，包含 `lib/client.js`（590,112 B）、`lib/host/expression.js`、`THIRD-PARTY-NOTICES.md`；实机验收待重启（见 7.6）
 - Sync 附带失败（与本 change 无关，属既有环境）：`@michengai/dsh-btw` 指向 macOS 本地 tarball `/Users/prgrmrwy/.dsh/managed-assets/btw-cache-probe/...tgz`，本机不存在；本 change 未改该条目
 - TDD 记录：新增模块的测试在实现落地前先行创建（首次运行出现 module-not-found / 断言失败），随后实现转绿；本轮未逐行留存失败输出，只有最终全绿证据
 
 ### Review Integrity
-- [x] review.md `VERDICT: APPROVE`（round 5，0 Critical / 0 Moderate），且 `CHANGES_APPLIED: yes`
-- [x] Verdict not stale: proposal.md、design.md、specs/ 自 round 5 verdict 后未再修改（round 5 后又无 artifact 变更）
-- [x] All findings fixed or rebutted; round 1–4 的全部 Required Changes 已落实并由 round 5 独立复核；round 5 仅余 2 条不阻塞 Suggestions（枚举/描述滞后），已记录
+- [x] review.md 最新 verdict 为 round 9 `VERDICT: APPROVE`（0 Critical / 0 Moderate），`CHANGES_APPLIED: yes`；round 1–5 基础改动由 round 5 APPROVE 复核；round 6 的 C1/C2/M1/M2 由 round 7 复核；round 7/8 的 M1-R/M1-D 由 round 9 复核并通过（0 Critical / 0 Moderate），`CHANGES_APPLIED: yes`
+- [x] Verdict not stale: proposal.md、design.md、specs/ 在 round 9 verdict 后未再修改（除应用 Required Changes 与数字回填）
+- [x] All findings fixed or rebutted; round 1–5 的 Required Changes 由 round 5 复核，round 6 的 C1/C2/M1/M2 由 round 7 复核，round 7 的 M1-R/M1-D 由 round 8 复核
 
 ### Change Delivery
 

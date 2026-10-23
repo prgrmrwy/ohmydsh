@@ -621,6 +621,7 @@ export const EXPRESSION_REPLACE_WARNING =
 function ExpressionSection(): JSX.Element {
   const [view, setView] = useState<PetExpressionView | undefined>(undefined)
   const [draft, setDraft] = useState('')
+  const [urlDraft, setUrlDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [copied, setCopied] = useState(false)
@@ -645,11 +646,8 @@ function ExpressionSection(): JSX.Element {
 
   const saved = view?.state === 'ok' ? view : undefined
 
-  const importExpression = async (): Promise<void> => {
-    if (draft.trim() === '') {
-      setError('请先粘贴 Lottie JSON 内容。')
-      return
-    }
+  /** Confirm replacing an existing animation, then apply one import. */
+  const runImport = async (load: () => Promise<unknown>, clear: () => void): Promise<void> => {
     if (saved !== undefined) {
       const confirmed =
         typeof globalThis.confirm === 'function'
@@ -660,8 +658,8 @@ function ExpressionSection(): JSX.Element {
     setBusy(true)
     setError(undefined)
     try {
-      await petApi.importExpression(draft)
-      setDraft('')
+      await load()
+      clear()
       setCopied(false)
       setRenderDiagnostic(undefined)
       await refresh()
@@ -673,6 +671,28 @@ function ExpressionSection(): JSX.Element {
     } finally {
       setBusy(false)
     }
+  }
+
+  const importExpression = async (): Promise<void> => {
+    if (draft.trim() === '') {
+      setError('请先粘贴 Lottie JSON 内容。')
+      return
+    }
+    await runImport(
+      () => petApi.importExpression(draft),
+      () => setDraft(''),
+    )
+  }
+
+  const importExpressionFromUrl = async (): Promise<void> => {
+    if (urlDraft.trim() === '') {
+      setError('请先填写要导入的 https URL。')
+      return
+    }
+    await runImport(
+      () => petApi.importExpressionFromUrl(urlDraft.trim()),
+      () => setUrlDraft(''),
+    )
   }
 
   const copySource = async (): Promise<void> => {
@@ -710,8 +730,8 @@ function ExpressionSection(): JSX.Element {
     <Group title="动画表情">
       <p className="dshpet-item-hint">
         粘贴一段 <strong>Lottie JSON</strong>，吉祥物就会播放这个动画；删除后恢复显示上面的图标。
-        只接受 JSON 文本（可从 LottieFiles 下载，或从 Google Noto 动画 emoji 页面复制
-        <code>lottie.json</code>），不支持链接、SVG 或图片。
+        支持 JSON 文本或 <strong>https URL</strong>（由 Host 下载，浏览器网络受限时仍可用）；
+        不支持 SVG 或图片。
       </p>
       <p className="dshpet-item-hint">
         动画保存在 Pet 的状态目录，不写入配置数据库。素材的来源与许可由你自行负责。
@@ -778,6 +798,30 @@ function ExpressionSection(): JSX.Element {
           移除
         </button>
         {copied ? <span className="dshpet-item-hint">已复制 JSON</span> : null}
+      </div>
+      <label className="dshpet-field">
+        或从 URL 导入（由 Host 下载）
+        <input
+          className="dshpet-input"
+          type="url"
+          value={urlDraft}
+          spellCheck={false}
+          onChange={event => setUrlDraft(event.target.value)}
+          placeholder="https://example.com/animations/lottie.json"
+        />
+      </label>
+      <div className="dshpet-row">
+        <button
+          type="button"
+          className="dshpet-action"
+          disabled={busy || urlDraft.trim() === ''}
+          onClick={() => void importExpressionFromUrl()}
+        >
+          从 URL 导入
+        </button>
+        <span className="dshpet-item-hint">
+          仅支持 https、默认 443 端口，单文件 ≤512 KiB；本机/内网地址会被拒绝。
+        </span>
       </div>
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </Group>

@@ -20,6 +20,7 @@ import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/hos
 import { createPetRoutes } from '../src/host/routes.js'
 import { SourceContextRegistry } from '../src/host/capture.js'
 import { EXPRESSION_ROUTES, ROUTES } from '../src/wire.js'
+import { PetError } from '../src/host/errors.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
 let harness: PetHarness | undefined
@@ -90,6 +91,33 @@ function source(overrides: Record<string, unknown> = {}): string {
   })
 }
 
+/**
+ * Build the real route set, with optional dependency overrides.
+ *
+ * Rebuilt inside a test when a case needs an injected downloader; the module
+ * level `harness`/`paths` are the same ones the default set used.
+ */
+function buildRoutes(overrides: Record<string, unknown>): readonly Route[] {
+  return createPetRoutes({
+    repository: harness!.repository,
+    capabilities: overrides['capabilities'],
+    coordinator: overrides['coordinator'],
+    lifecycle: overrides['lifecycle'],
+    paths,
+    packageVersion: '0.1.0',
+    changes: new PetChangeFeed(),
+    archiveSink: async () => {},
+    ...overrides,
+  } as never)
+}
+
+/** A lifecycle already marked ready, for re-built route sets. */
+function readyLifecycle(): PetLifecycleMachine {
+  const lifecycle = new PetLifecycleMachine()
+  lifecycle.markReady()
+  return lifecycle
+}
+
 beforeEach(async () => {
   harness = await openPetHarness()
   const home = await mkdtemp(path.join(tmpdir(), 'pet-expression-routes-'))
@@ -116,16 +144,7 @@ beforeEach(async () => {
     selection: () => ({ providerId: 'anthropic', modelId: 'claude-opus-5' }),
   } as never)
 
-  routes = createPetRoutes({
-    repository: harness.repository,
-    capabilities,
-    coordinator,
-    lifecycle,
-    paths,
-    packageVersion: '0.1.0',
-    changes: new PetChangeFeed(),
-    archiveSink: async () => {},
-  } as never)
+  routes = buildRoutes({ capabilities, coordinator, lifecycle })
 })
 
 afterEach(async () => {
@@ -209,6 +228,82 @@ describe('expression route contract', () => {
       () => undefined,
     )
     expect(databaseSibling).toBeUndefined()
+  })
+})
+
+describe('URL import route', () => {
+  it('imports a source downloaded by the Host', async () => {
+    const text = source()
+    routes = buildRoutes({
+      capabilities: new CapabilityRegistry(),
+      coordinator: undefined,
+      lifecycle: readyLifecycle(),
+      fetchExpressionSource: async (url: string) => {
+        expect(url).toBe('https://cdn.example/thinking.json')
+        return text
+      },
+    } as never)
+
+    const reply = await call(EXPRESSION_ROUTES.importUrl, {
+      url: 'https://cdn.example/thinking.json',
+    })
+    expect(reply).toMatchObject({ ok: true, data: { state: 'ok' } })
+
+    const read = await call(EXPRESSION_ROUTES.view, {})
+    expect(read.data).toMatchObject({ state: 'ok', content: text })
+  })
+
+  it('rejects a URL that is not https before any download', async () => {
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'http://cdn.example/a.json' })
+    expect(reply).toMatchObject({ ok: false, error: 'INVALID_REQUEST' })
+    expect(reply.status).toBe(400)
+  })
+
+  it('maps a failed download to EXPRESSION_FETCH_FAILED', async () => {
+    routes = buildRoutes({
+      lifecycle: readyLifecycle(),
+      fetchExpressionSource: async () => {
+        throw new PetError('EXPRESSION_FETCH_FAILED', '下载动画失败：请求失败或超时')
+      },
+    } as never)
+
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
+    expect(reply).toMatchObject({ ok: false, error: 'EXPRESSION_FETCH_FAILED' })
+    expect(reply.status).toBe(502)
+  })
+
+  it('keeps the current expression when the download fails', async () => {
+    const current = source()
+    await call(EXPRESSION_ROUTES.import, { content: current })
+
+    routes = buildRoutes({
+      lifecycle: readyLifecycle(),
+      fetchExpressionSource: async () => {
+        throw new PetError('EXPRESSION_FETCH_FAILED', '下载动画失败：请求失败或超时')
+      },
+    } as never)
+
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
+    expect(reply).toMatchObject({ ok: false, error: 'EXPRESSION_FETCH_FAILED' })
+
+    const read = await call(EXPRESSION_ROUTES.view, {})
+    expect(read.data).toMatchObject({ state: 'ok', content: current })
+  })
+
+  it('keeps the current expression when downloaded content is invalid', async () => {
+    const current = source()
+    await call(EXPRESSION_ROUTES.import, { content: current })
+
+    routes = buildRoutes({
+      lifecycle: readyLifecycle(),
+      fetchExpressionSource: async () => '{"v":"5.0.0","w":1,"h":1,"layers":[]}',
+    } as never)
+
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
+    expect(reply).toMatchObject({ ok: false, error: 'INVALID_EXPRESSION' })
+
+    const read = await call(EXPRESSION_ROUTES.view, {})
+    expect(read.data).toMatchObject({ state: 'ok', content: current })
   })
 })
 

@@ -244,6 +244,9 @@ export const petApi = {
   /** Validate and store one pasted Lottie JSON source. */
   importExpression: (content: string): Promise<PetExpressionImportResult> =>
     call(EXPRESSION_ROUTES.import, { content }),
+  /** Ask the Host to download one Lottie source from an HTTPS URL. */
+  importExpressionFromUrl: (url: string): Promise<PetExpressionImportResult> =>
+    call(EXPRESSION_ROUTES.importUrl, { url }),
   /** Deactivate the current mascot animation (keeps one backup). */
   removeExpression: (): Promise<{ state: 'none' }> => call(EXPRESSION_ROUTES.remove),
 

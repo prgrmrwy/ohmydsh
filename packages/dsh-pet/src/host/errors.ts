@@ -83,6 +83,8 @@ export function statusOf(code: PetErrorCode): number {
     case 'LOCUS_PERMISSION_DENIED':
     case 'WRITE_UNSUPPORTED':
       return 403
+    case 'EXPRESSION_FETCH_FAILED':
+      return 502
     case 'PET_DEGRADED':
     case 'MODEL_UNAVAILABLE':
     case 'LOCUS_UNAVAILABLE':

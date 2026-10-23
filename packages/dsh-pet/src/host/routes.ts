@@ -24,6 +24,7 @@ import {
   removeExpression,
   saveExpression,
 } from './expression.js'
+import { fetchExpressionSource } from './expression-fetch.js'
 import { detectProjectionDrift, rebuildProjection } from './projection.js'
 import type { PetRepository } from './repository.js'
 import {
@@ -67,6 +68,13 @@ export interface RouteDeps {
   readonly coordinator: PetCoordinator
   readonly lifecycle: PetLifecycleMachine
   readonly paths: PetPaths
+  /**
+   * Downloads one source for the URL-import route.
+   *
+   * Injectable so route tests never touch the network; the Host default is
+   * the SSRF-guarded {@link fetchExpressionSource}.
+   */
+  readonly fetchExpressionSource?: (url: string) => Promise<string>
   readonly packageVersion: string
   readonly changes: PetChangeFeed
   /** Archives the executor session when a terminal Task is archived from Pet. */
@@ -839,6 +847,22 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       },
       { bodyLimit: MAX_EXPRESSION_REQUEST_BODY_BYTES },
     ),
+    petRoute(EXPRESSION_ROUTES.importUrl, async ({ body }) => {
+      const record = strictBody(body, ['url'])
+      requireReady(lifecycle)
+      const url = record['url']
+      if (typeof url !== 'string' || url.trim() === '') {
+        throw new PetError('INVALID_REQUEST', "Field 'url' must be a non-empty string")
+      }
+      // Download on the Host: the owner's browser network may not reach the
+      // CDN (and CORS would block it), while the Host can. The SSRF guard in
+      // `fetchExpressionSource` decides whether the URL may be contacted; the
+      // downloaded bytes then pass the same validator as a pasted source.
+      const download = deps.fetchExpressionSource ?? fetchExpressionSource
+      const content = await download(url.trim())
+      const saved = await saveExpression(deps.paths, content)
+      return { state: 'ok' as const, bytes: saved.bytes }
+    }),
     petRoute(EXPRESSION_ROUTES.remove, async ({ body }) => {
       strictBody(body, [])
       requireReady(lifecycle)

@@ -480,6 +480,12 @@ describe('settings information architecture', () => {
     expect(markup).toContain('动画表情')
     expect(markup).toContain('Lottie JSON')
     expect(markup).toContain('粘贴')
+    // The URL path exists because the owner's browser may not reach a CDN the
+    // Host can; it is a Host-side download, and the surface says so.
+    expect(markup).toContain('从 URL 导入')
+    expect(markup).toContain('Host 下载')
+    // The copy must not contradict the URL capability added beside it.
+    expect(markup).not.toContain('不支持链接')
   })
 
   it('warns before replacing the active expression', async () => {
