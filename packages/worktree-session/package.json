@@ -64,7 +64,7 @@
     "node": ">=22.19"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis": "^4.0.5",
     "@deepseek-ai/dsh-agent": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-conversation": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-slots": "^0.2.0-rc.2",
@@ -81,7 +81,7 @@
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.0-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis": "^4.0.5",
     "@deepseek-ai/dsh-agent": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-agent-loop": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-api-remotes": "^0.2.0-rc.2",
@@ -96,13 +96,13 @@
     "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-user-questions": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-workspace": "^0.2.0-rc.2",
-    "@types/node": "^24.0.0",
+    "@types/node": "^24.19.2",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "tsdown": "^0.23.0",
+    "tsdown": "^0.23.1",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.1",
+    "vitest": "^5.0.5",
     "@deepseek-ai/dsh-api-session-controller": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-client-ui-renderer": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-session-projection": "^0.2.0-rc.2",
