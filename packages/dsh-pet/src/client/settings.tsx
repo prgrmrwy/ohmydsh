@@ -618,12 +618,23 @@ export const EXPRESSION_REPLACE_WARNING =
  * mascot root's own render diagnostic (shared through `mascot-diagnostics`).
  * @returns the animation settings group.
  */
-function ExpressionSection(): JSX.Element {
+export function ExpressionSection(): JSX.Element {
   const [view, setView] = useState<PetExpressionView | undefined>(undefined)
   const [draft, setDraft] = useState('')
   const [urlDraft, setUrlDraft] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'idle' | 'import' | 'url' | 'remove'>('idle')
+  /**
+   * A destructive import/removal waiting for an IN-PAGE confirmation.
+   *
+   * Deliberately not `window.confirm`: a WebView/PWA may suppress native
+   * dialogs (or the user may have ticked "prevent additional dialogs"), and a
+   * silently-cancelled confirm looks exactly like a dead button — the button
+   * click does nothing and no state changes. An inline confirmation is always
+   * visible and always actionable.
+   */
+  const [pending, setPending] = useState<'import' | 'url' | 'remove' | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
+  const [notice, setNotice] = useState<string | undefined>(undefined)
   const [copied, setCopied] = useState(false)
   const [renderDiagnostic, setRenderDiagnostic] = useState<string | undefined>(
     getMascotExpressionDiagnostic(),
@@ -644,55 +655,69 @@ function ExpressionSection(): JSX.Element {
     )
   }, [refresh])
 
+  /** The projection when an animation is active. */
   const saved = view?.state === 'ok' ? view : undefined
 
-  /** Confirm replacing an existing animation, then apply one import. */
-  const runImport = async (load: () => Promise<unknown>, clear: () => void): Promise<void> => {
-    if (saved !== undefined) {
-      const confirmed =
-        typeof globalThis.confirm === 'function'
-          ? globalThis.confirm(`${EXPRESSION_REPLACE_WARNING}\n\n继续导入？`)
-          : true
-      if (!confirmed) return
-    }
-    setBusy(true)
+  const executeImport = async (kind: 'import' | 'url'): Promise<void> => {
+    setPending(undefined)
+    setBusy(kind)
     setError(undefined)
+    setNotice(undefined)
     try {
-      await load()
-      clear()
+      const result =
+        kind === 'import'
+          ? await petApi.importExpression(draft)
+          : await petApi.importExpressionFromUrl(urlDraft.trim())
+      if (kind === 'import') setDraft('')
+      else setUrlDraft('')
       setCopied(false)
       setRenderDiagnostic(undefined)
       await refresh()
+      setNotice(`已导入动画（${result.bytes} 字节）。`)
       // The mascot lives on another React root; this is the same broadcast the
       // glyph/accent controls already use.
       globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
-      setBusy(false)
+      setBusy('idle')
     }
   }
 
-  const importExpression = async (): Promise<void> => {
-    if (draft.trim() === '') {
+  const beginImport = (kind: 'import' | 'url'): void => {
+    if (kind === 'import' && draft.trim() === '') {
       setError('请先粘贴 Lottie JSON 内容。')
       return
     }
-    await runImport(
-      () => petApi.importExpression(draft),
-      () => setDraft(''),
-    )
-  }
-
-  const importExpressionFromUrl = async (): Promise<void> => {
-    if (urlDraft.trim() === '') {
+    if (kind === 'url' && urlDraft.trim() === '') {
       setError('请先填写要导入的 https URL。')
       return
     }
-    await runImport(
-      () => petApi.importExpressionFromUrl(urlDraft.trim()),
-      () => setUrlDraft(''),
-    )
+    setError(undefined)
+    setNotice(undefined)
+    // Nothing to lose when no animation is active: import immediately.
+    if (saved === undefined) {
+      void executeImport(kind)
+      return
+    }
+    setPending(kind)
+  }
+
+  const executeRemove = async (): Promise<void> => {
+    setPending(undefined)
+    setBusy('remove')
+    setError(undefined)
+    setNotice(undefined)
+    try {
+      await petApi.removeExpression()
+      await refresh()
+      setNotice('已移除动画，吉祥物恢复显示图标。')
+      globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy('idle')
+    }
   }
 
   const copySource = async (): Promise<void> => {
@@ -706,25 +731,7 @@ function ExpressionSection(): JSX.Element {
     }
   }
 
-  const remove = async (): Promise<void> => {
-    if (saved === undefined) return
-    const confirmed =
-      typeof globalThis.confirm === 'function'
-        ? globalThis.confirm('移除后吉祥物会恢复显示图标，并保留一份最近素材的备份。继续？')
-        : true
-    if (!confirmed) return
-    setBusy(true)
-    setError(undefined)
-    try {
-      await petApi.removeExpression()
-      await refresh()
-      globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setBusy(false)
-    }
-  }
+  const confirming = pending !== undefined
 
   return (
     <Group title="动画表情">
@@ -738,17 +745,12 @@ function ExpressionSection(): JSX.Element {
       </p>
 
       {saved !== undefined ? (
-        <>
-          <div className="dshpet-fact">
-            <span className="dshpet-fact-key">当前动画</span>
-            <span className="dshpet-fact-value">
-              已导入 · {saved.bytes} 字节 · {new Date(saved.importedAt).toLocaleString()}
-            </span>
-          </div>
-          <p className="dshpet-callout" data-tone="warn">
-            {EXPRESSION_REPLACE_WARNING}
-          </p>
-        </>
+        <div className="dshpet-fact">
+          <span className="dshpet-fact-key">当前动画</span>
+          <span className="dshpet-fact-value">
+            已导入 · {saved.bytes} 字节 · {new Date(saved.importedAt).toLocaleString()}
+          </span>
+        </div>
       ) : view?.state === 'corrupt' ? (
         <p className="dshpet-item-hint">当前动画不可用：{view.diagnostic}</p>
       ) : (
@@ -762,12 +764,59 @@ function ExpressionSection(): JSX.Element {
         <p className="dshpet-error">动画渲染失败：{renderDiagnostic}</p>
       ) : null}
 
+      {pending === 'remove' ? (
+        <div className="dshpet-callout" data-tone="warn">
+          移除后吉祥物会恢复显示图标，并保留一份最近素材的备份。
+          <div className="dshpet-row">
+            <button
+              type="button"
+              className="dshpet-action"
+              disabled={busy !== 'idle'}
+              onClick={() => void executeRemove()}
+            >
+              确认移除
+            </button>
+            <button
+              type="button"
+              className="dshpet-action"
+              disabled={busy !== 'idle'}
+              onClick={() => setPending(undefined)}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      ) : confirming ? (
+        <div className="dshpet-callout" data-tone="warn">
+          {EXPRESSION_REPLACE_WARNING}
+          <div className="dshpet-row">
+            <button
+              type="button"
+              className="dshpet-action"
+              disabled={busy !== 'idle'}
+              onClick={() => void executeImport(pending === 'url' ? 'url' : 'import')}
+            >
+              确认替换
+            </button>
+            <button
+              type="button"
+              className="dshpet-action"
+              disabled={busy !== 'idle'}
+              onClick={() => setPending(undefined)}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <label className="dshpet-field">
         粘贴 Lottie JSON
         <textarea
           className="dshpet-textarea"
           value={draft}
           spellCheck={false}
+          disabled={busy !== 'idle'}
           onChange={event => setDraft(event.target.value)}
           placeholder='{"v":"5.7.0","w":100,"h":100,"layers":[...]}'
         />
@@ -776,15 +825,15 @@ function ExpressionSection(): JSX.Element {
         <button
           type="button"
           className="dshpet-action"
-          disabled={busy || draft.trim() === ''}
-          onClick={() => void importExpression()}
+          disabled={busy !== 'idle' || draft.trim() === ''}
+          onClick={() => beginImport('import')}
         >
-          导入
+          {busy === 'import' ? '导入中…' : '导入'}
         </button>
         <button
           type="button"
           className="dshpet-action"
-          disabled={busy || saved === undefined}
+          disabled={busy !== 'idle' || saved === undefined}
           onClick={() => void copySource()}
         >
           复制导出
@@ -792,10 +841,10 @@ function ExpressionSection(): JSX.Element {
         <button
           type="button"
           className="dshpet-action"
-          disabled={busy || saved === undefined}
-          onClick={() => void remove()}
+          disabled={busy !== 'idle' || saved === undefined}
+          onClick={() => setPending('remove')}
         >
-          移除
+          {busy === 'remove' ? '移除中…' : '移除'}
         </button>
         {copied ? <span className="dshpet-item-hint">已复制 JSON</span> : null}
       </div>
@@ -806,6 +855,7 @@ function ExpressionSection(): JSX.Element {
           type="url"
           value={urlDraft}
           spellCheck={false}
+          disabled={busy !== 'idle'}
           onChange={event => setUrlDraft(event.target.value)}
           placeholder="https://example.com/animations/lottie.json"
         />
@@ -814,15 +864,16 @@ function ExpressionSection(): JSX.Element {
         <button
           type="button"
           className="dshpet-action"
-          disabled={busy || urlDraft.trim() === ''}
-          onClick={() => void importExpressionFromUrl()}
+          disabled={busy !== 'idle' || urlDraft.trim() === ''}
+          onClick={() => beginImport('url')}
         >
-          从 URL 导入
+          {busy === 'url' ? '导入中…' : '从 URL 导入'}
         </button>
         <span className="dshpet-item-hint">
           仅支持 https、默认 443 端口，单文件 ≤512 KiB；本机/内网地址会被拒绝。
         </span>
       </div>
+      {notice !== undefined ? <p className="dshpet-item-hint">{notice}</p> : null}
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </Group>
   )

@@ -495,12 +495,14 @@ describe('settings information architecture', () => {
       'utf8',
     )
 
-    // The warning is shown in the surface and used by the overwrite confirm;
-    // both are source-guaranteed because the visible copy only renders after a
-    // Host read that never runs in static markup.
+    // The warning is shown in the surface and gates the overwrite through an
+    // IN-PAGE confirmation. Native `window.confirm` is deliberately not used:
+    // WebViews/PWAs can suppress it, which makes the button look dead.
     expect(settings).toContain('EXPRESSION_REPLACE_WARNING')
     expect(settings).toContain('当前动画将被替换且不保留')
-    expect(settings).toContain('globalThis.confirm')
+    expect(settings).toContain('确认替换')
+    expect(settings).toContain('取消')
+    expect(settings).not.toContain('globalThis.confirm')
   })
 
   it('states that Pet follows the DSH default model instead of its own', () => {
