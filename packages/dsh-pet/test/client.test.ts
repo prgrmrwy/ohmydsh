@@ -519,6 +519,21 @@ describe('settings information architecture', () => {
     expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
   })
 
+  it('keeps explanation text behind info disclosures', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // The page should read as controls, not as a manual: details live behind
+    // small "i" disclosures next to the field they explain.
+    expect(markup).toContain('class="dshpet-info"')
+    expect(markup).toContain('aria-label="格式与存储说明"')
+    expect(markup).toContain('aria-label="URL 导入规则"')
+    expect(markup).toContain('aria-label="播放模式说明"')
+    expect(markup).toContain('aria-label="素材来源"')
+    expect(PET_CSS).toContain('.dshpet-info-body{')
+  })
+
   it('points at where to find animations', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),

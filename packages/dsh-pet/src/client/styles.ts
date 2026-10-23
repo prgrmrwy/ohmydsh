@@ -448,6 +448,31 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-link:hover{border-bottom-color:currentColor}
 .dshpet-settings .dshpet-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
   outline-offset:2px;border-radius:2px}
+.dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:6px;min-width:0}
+/* Inline "i" disclosure for explanation text that used to be page prose. */
+.dshpet-settings .dshpet-info{position:relative;display:inline-flex;flex:none}
+.dshpet-settings .dshpet-info-mark{list-style:none;display:inline-flex;align-items:center;
+  justify-content:center;width:16px;height:16px;border-radius:50%;cursor:pointer;
+  border:.5px solid var(--dsw-alias-border-l2,#d0d3d6);
+  font:500 11px/1 var(--dsw-font-family,inherit);
+  color:var(--dsw-alias-label-tertiary,#8f959e);user-select:none}
+.dshpet-settings .dshpet-info-mark::-webkit-details-marker{display:none}
+.dshpet-settings .dshpet-info-mark:hover{color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-info-mark:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
+  outline-offset:2px}
+.dshpet-settings .dshpet-info[open] .dshpet-info-mark{
+  color:var(--dsw-alias-state-business-primary,#4176e6);border-color:currentColor}
+.dshpet-settings .dshpet-info-body{position:absolute;left:0;top:22px;z-index:30;
+  width:330px;max-width:min(330px,70vw);box-sizing:border-box;
+  display:flex;flex-direction:column;gap:6px;
+  padding:10px 12px;border-radius:10px;text-align:left;
+  background:var(--dsw-alias-bg-layer-1,#ffffff);
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);
+  box-shadow:0 8px 24px rgba(0,0,0,.14);
+  font:var(--dsw-font-xs-13,400 12px/18px var(--dsw-font-family,inherit));
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-info-body p{margin:0}
+.dshpet-settings .dshpet-info-body code{font-size:11px;word-break:break-all}
 .dshpet-settings .dshpet-form-panel{display:flex;flex-direction:column;gap:8px}
 /* Attribute [hidden] must beat the flex display above: the UA rule loses on
    specificity, so state it explicitly instead of relying on default CSS. */

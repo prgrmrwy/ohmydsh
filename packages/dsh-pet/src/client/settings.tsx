@@ -119,6 +119,30 @@ export type PetSettingsTab = (typeof PET_SETTINGS_TABS)[number]
  * @returns the rendered section.
  */
 /**
+ * A small "i" affordance for explanation text.
+ *
+ * Settings prose used to sit in the page flow above the controls; a reader who
+ * already knows the feature pays for it on every visit. `<details>` keeps the
+ * explanation one click/keyboard press away and needs no JS state, while the
+ * summary is a real focusable disclosure target.
+ * @param props - Accessible label plus the explanation content.
+ * @returns the disclosure control.
+ */
+export function InfoHint(props: {
+  readonly label: string
+  readonly children: ReactNode
+}): JSX.Element {
+  return (
+    <details className="dshpet-info">
+      <summary className="dshpet-info-mark" title={props.label} aria-label={props.label}>
+        <span aria-hidden="true">i</span>
+      </summary>
+      <div className="dshpet-info-body">{props.children}</div>
+    </details>
+  )
+}
+
+/**
  * A stored setting: read-only until the user chooses to edit.
  *
  * Every persisted value in this panel behaves the same way — you can see what
@@ -136,6 +160,8 @@ function StoredField(props: {
   readonly placeholder?: string
   readonly options?: readonly { value: string; label: string }[]
   readonly emptyText?: string
+  /** Optional explanation rendered as an info icon beside the label. */
+  readonly info?: ReactNode
   /** Optional "restore default" action, shown only while editing. */
   readonly onReset?: () => Promise<void>
   readonly onSave: (next: string) => Promise<void>
@@ -160,7 +186,10 @@ function StoredField(props: {
   if (!editing) {
     return (
       <div className="dshpet-field">
-        <span className="dshpet-fact-key">{props.label}</span>
+        <div className="dshpet-field-label">
+          <span className="dshpet-fact-key">{props.label}</span>
+          {props.info}
+        </div>
         <div className="dshpet-row">
           <span className="dshpet-readonly" data-empty={shown === ''}>
             {display}
@@ -197,7 +226,10 @@ function StoredField(props: {
 
   return (
     <div className="dshpet-field">
-      <span className="dshpet-fact-key">{props.label}</span>
+      <div className="dshpet-field-label">
+        <span className="dshpet-fact-key">{props.label}</span>
+        {props.info}
+      </div>
       {props.options === undefined ? (
         <input
           className="dshpet-input"
@@ -641,6 +673,13 @@ function GeneralTab(): JSX.Element {
         >
         <StoredField
           label="动画播放"
+          info={
+            <InfoHint label="播放模式说明">
+              <p>「自动循环」：导入的动画一直循环播放。</p>
+              <p>「悬停时播放」：平时停在动画首帧，鼠标悬停吉祥物时循环，移出恢复静态。</p>
+              <p>系统「减少动效」偏好始终优先：无论哪种模式都停在首帧。</p>
+            </InfoHint>
+          }
           value={animationPlayback}
           options={PET_ANIMATION_PLAYBACKS.map(item => ({ value: item.id, label: item.label }))}
           onSave={async next => {
@@ -652,10 +691,6 @@ function GeneralTab(): JSX.Element {
             globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
           }}
         />
-        <p className="dshpet-item-hint">
-          默认「自动循环」。选择「悬停时播放」后，吉祥物平时停在动画首帧，只在鼠标悬停时循环播放；
-          减少动效偏好仍优先（始终停在首帧）。
-        </p>
           <ExpressionSection />
         </div>
       </Group>
@@ -819,40 +854,7 @@ export function ExpressionSection(): JSX.Element {
 
   return (
     <div className="dshpet-form-panel">
-      <p className="dshpet-item-hint">
-        粘贴一段 <strong>Lottie JSON</strong>，吉祥物就会播放这个动画；删除后恢复显示上面的图标。
-        支持 JSON 文本或 <strong>https URL</strong>（由 Host 下载，浏览器网络受限时仍可用）；
-        不支持 SVG 或图片。
-      </p>
-      <p className="dshpet-item-hint">
-        动画保存在 Pet 的状态目录，不写入配置数据库。素材的来源与许可由你自行负责。
-      </p>
-
-      <p className="dshpet-item-hint">
-        还没想好用什么？逛一圈{' '}
-        <a
-          className="dshpet-link"
-          href="https://googlefonts.github.io/noto-emoji-animation/"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Google Noto 动画 emoji
-        </a>
-        （方形构图、适合小图标；素材是 CC BY 4.0，对外使用需署名）。它的直链形如{' '}
-        <code>https://fonts.gstatic.cn/s/e/notoemoji/latest/1f914/lottie.json</code>
-        ——`fonts.gstatic.com` 不通时把域名换成 `fonts.gstatic.cn`，由 Host 下载即可。
-        也可以去{' '}
-        <a
-          className="dshpet-link"
-          href="https://lottiefiles.com/free-animations"
-          target="_blank"
-          rel="noreferrer"
-        >
-          LottieFiles
-        </a>
-        （素材更多，但每个作品的许可不同，商用前逐个确认）。
-      </p>
-
+      <p className="dshpet-item-hint">导入一段 Lottie 动画替换静态图标。</p>
       {saved !== undefined ? (
         <div className="dshpet-fact">
           <span className="dshpet-fact-key">当前动画</span>
@@ -919,8 +921,15 @@ export function ExpressionSection(): JSX.Element {
         </div>
       ) : null}
 
-      <label className="dshpet-field">
-        粘贴 Lottie JSON
+      <div className="dshpet-field">
+        <div className="dshpet-field-label">
+          <span className="dshpet-fact-key">粘贴 Lottie JSON</span>
+          <InfoHint label="格式与存储说明">
+            <p>只接受 Lottie JSON 文本；不支持 SVG、PNG/GIF 或其它格式。</p>
+            <p>动画保存在 Pet 的状态目录（<code>plugins/dsh-pet/expressions/</code>），不写入配置数据库。</p>
+            <p>素材的来源与许可由你自行负责；对外分发前请确认原作者许可。</p>
+          </InfoHint>
+        </div>
         <textarea
           className="dshpet-textarea"
           value={draft}
@@ -929,7 +938,7 @@ export function ExpressionSection(): JSX.Element {
           onChange={event => setDraft(event.target.value)}
           placeholder='{"v":"5.7.0","w":100,"h":100,"layers":[...]}'
         />
-      </label>
+      </div>
       <div className="dshpet-row">
         <button
           type="button"
@@ -957,8 +966,15 @@ export function ExpressionSection(): JSX.Element {
         </button>
         {copied ? <span className="dshpet-item-hint">已复制 JSON</span> : null}
       </div>
-      <label className="dshpet-field">
-        或从 URL 导入（由 Host 下载）
+      <div className="dshpet-field">
+        <div className="dshpet-field-label">
+          <span className="dshpet-fact-key">或从 URL 导入（由 Host 下载）</span>
+          <InfoHint label="URL 导入规则">
+            <p>由运行 DSH 的 Host 下载，因此浏览器网络受限或受 CORS 限制时仍可用。</p>
+            <p>仅支持 https、默认 443 端口、单文件 ≤512 KiB；本机、内网与保留地址会被拒绝。</p>
+            <p>下载失败会在页内显示诊断，现有动画保持不变。</p>
+          </InfoHint>
+        </div>
         <input
           className="dshpet-input"
           type="url"
@@ -968,7 +984,7 @@ export function ExpressionSection(): JSX.Element {
           onChange={event => setUrlDraft(event.target.value)}
           placeholder="https://example.com/animations/lottie.json"
         />
-      </label>
+      </div>
       <div className="dshpet-row">
         <button
           type="button"
@@ -978,10 +994,39 @@ export function ExpressionSection(): JSX.Element {
         >
           {busy === 'url' ? '导入中…' : '从 URL 导入'}
         </button>
-        <span className="dshpet-item-hint">
-          仅支持 https、默认 443 端口，单文件 ≤512 KiB；本机/内网地址会被拒绝。
-        </span>
       </div>
+      <p className="dshpet-item-hint">
+        去哪里找动画：
+        <InfoHint label="素材来源">
+          <p>
+            <a
+              className="dshpet-link"
+              href="https://googlefonts.github.io/noto-emoji-animation/"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Google Noto 动画 emoji
+            </a>
+            ：方形构图、适合小图标；素材为 CC BY 4.0，对外使用需署名。
+          </p>
+          <p>
+            直链形如 <code>https://fonts.gstatic.cn/s/e/notoemoji/latest/1f914/lottie.json</code>；
+            <code>fonts.gstatic.com</code> 不通时换成 <code>fonts.gstatic.cn</code>，由 Host 下载即可。
+          </p>
+          <p>
+            也可以去
+            <a
+              className="dshpet-link"
+              href="https://lottiefiles.com/free-animations"
+              target="_blank"
+              rel="noreferrer"
+            >
+              LottieFiles
+            </a>
+            ，素材更多，但每个作品的许可不同，商用前逐个确认。
+          </p>
+        </InfoHint>
+      </p>
       {notice !== undefined ? <p className="dshpet-item-hint">{notice}</p> : null}
       {error !== undefined ? <p className="dshpet-error">{error}</p> : null}
     </div>
