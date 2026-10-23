@@ -30,7 +30,7 @@
 ## 5. npm 首发与长期认证
 
 - [x] 5.1 安全检查现有 npm 登录与发布权限；不足时请用户仅在本机配置认证，记录待办，不索取聊天 token、不读取输出凭据内容。
-- [ ] 5.2 手动首发 0.3.0，核验正式 registry 版本、tarball 内容及独立安装；暂存/processing 不算成功且不重复发布，成功后在镜像正确子树提交创建版本 tag/Release，避免触发同版本重复发布。
+- [x] 5.2 手动首发 0.3.0，核验正式 registry 版本、tarball 内容及独立安装；暂存/processing 不算成功且不重复发布，成功后在镜像正确子树提交创建版本 tag/Release，避免触发同版本重复发布。
 - [ ] 5.3 由用户完成 npm Trusted Publisher 两步绑定（正确仓库、release.yml、Allow npm publish）；记录绑定状态，后续版本首次 OIDC 成功时再确认 attestations，不为测试而重复发布 0.3.0，不强制把尚未发生的 provenance 标为已验证。
 
 ## 6. 商店收录与交付
