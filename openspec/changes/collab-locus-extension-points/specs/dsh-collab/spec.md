@@ -2,7 +2,7 @@
 
 ### Requirement: 调用身份来自实际执行会话
 
-协作工具 SHALL 从宿主工具执行上下文推导调用会话，以 channel `dsh-session` 与完整 session ID 构造 agent principal。参数 MUST NOT 接受 actor、principal、providerId 或调用者 sessionId。调用会话 MUST 是当前 Host 中真实执行的普通一级会话，或按"工具调用者可解析为托管成员"被恰好一个接入方解析的会话：已归档或位于 `denySessionIds` 中的会话，以及未被接入方解析的已知 subagent origin、非零 delegationDepth、官方所有权拒绝的会话，MUST 以 `COLLAB_CALLER_UNAVAILABLE` 拒绝且不读写协作数据。准入模式 `admission` 取值 SHALL 仅为 `invite`（默认）或 `allowlist`：`invite` 下通过上述校验即可调用，空间读写由内核成员授权决定；`allowlist` 额外要求调用者在 `allowedSessionIds` 中。两个 ID 列表只能由宿主配置提供，agent 工具不能修改；修改后须经 `dsh build` 与 `dsh restart` 才生效。插件启动时 MUST 拒绝以下配置并不注册服务：`admission` 不是上述两个值之一；任一列表含空串、首尾空白或重复项；同一 ID 同时出现在两个列表。工具不会授予额外文件权限，也不会改变 preset、cwd 或会话派生关系。
+协作工具 SHALL 从宿主工具执行上下文推导调用会话，并按"工具调用者可解析为托管成员"得到唯一的调用者地址：普通一级会话的地址是 channel `dsh-session` 加完整 session ID；托管调用者的地址是接入方 channel 加接入方给出的地址。agent principal 由该地址构造。参数 MUST NOT 接受 actor、principal、providerId 或调用者 sessionId。调用会话 MUST 是当前 Host 中真实执行的普通一级会话，或按"工具调用者可解析为托管成员"被恰好一个接入方解析的会话：已归档或位于 `denySessionIds` 中的会话，以及未被接入方解析的已知 subagent origin、非零 delegationDepth、官方所有权拒绝的会话，MUST 以 `COLLAB_CALLER_UNAVAILABLE` 拒绝且不读写协作数据。准入模式 `admission` 取值 SHALL 仅为 `invite`（默认）或 `allowlist`：`invite` 下通过上述校验即可调用，空间读写由内核成员授权决定；`allowlist` 额外要求普通会话调用者在 `allowedSessionIds` 中，名单不约束托管调用者。两个 ID 列表只能由宿主配置提供，agent 工具不能修改；修改后须经 `dsh build` 与 `dsh restart` 才生效。插件启动时 MUST 拒绝以下配置并不注册服务：`admission` 不是上述两个值之一；任一列表含空串、首尾空白或重复项；同一 ID 同时出现在两个列表。工具不会授予额外文件权限，也不会改变 preset、cwd 或会话派生关系。
 
 #### Scenario: 跨 workspace 调用仍归属实际会话
 - **GIVEN** workspace A/B 的已有普通会话 A/B
@@ -26,6 +26,11 @@
 - **GIVEN** 会话 P 在 `denySessionIds` 中，会话 S 是没有被任何接入方解析的 subagent
 - **WHEN** P 或 S 调用任一协作工具
 - **THEN** 返回 `COLLAB_CALLER_UNAVAILABLE`，日志字节不变
+
+#### Scenario: 名单模式下托管调用者不需要列入名单
+- **GIVEN** `admission: allowlist`；子会话 L 不在 `allowedSessionIds` 中，但被 `pet-locus` 接入方解析为托管成员 `locus-a` 的地址
+- **WHEN** L 调用 `collab_read` 读取 `locus-a` 所在空间
+- **THEN** 读取成功
 
 #### Scenario: 兼容模式保持首版行为
 - **GIVEN** `admission: allowlist`，C 是不在名单中的普通会话
@@ -231,10 +236,10 @@
 - **WHEN** 接入方句柄以 `cmdId:'adm-1'` 接纳 `locus-a`（地址 `loc:1`），再以相同参数重试
 - **THEN** 两次返回同一 seq；台账含 `manager/allowed` 与 actor 为 `manager:pet-locus` 的 `member/joined`；无唤醒
 
-#### Scenario: 未授权空间返回不可用
-- **GIVEN** 空间 S 未授权 `pet-locus`
-- **WHEN** 句柄调用 `admit`
-- **THEN** 返回 `COLLAB_FORBIDDEN`，日志字节不变
+#### Scenario: 未授权空间的响应完全一致
+- **GIVEN** `pet-locus` 未获下列空间授权：S1 健康、S2 已关闭、S3 被锁、S4 日志损坏、S5 运行期提交失败、S6 不存在
+- **WHEN** 句柄对每个空间各调用一次 `admit`
+- **THEN** 六个响应序列化后完全相同，都是 `{"error":{"code":"COLLAB_SPACE_UNAVAILABLE"}}`；各空间日志字节都不变
 
 #### Scenario: 句柄没有 Leader 能力
 - **WHEN** 检查句柄对象的方法集合
@@ -250,7 +255,16 @@
 2. 否则询问当前全部接入方。恰有一个返回地址时，调用者为 `{channel:<该 channel>, address:<地址>}`。`allowlist` 模式不约束托管调用者：它们的准入由 Leader 授权与接入方绑定共同决定。
 3. 以下情况 MUST 以 `COLLAB_CALLER_UNAVAILABLE` 拒绝：普通会话同时被任一接入方认领；多个接入方认领同一会话；没有任何一方认领。
 
-解析结果 SHALL 每次调用重新计算，MUST NOT 缓存。因此接入方解除绑定后，该会话立即无法以托管成员身份调用，即使台账尚未退役它。
+解析结果 SHALL 每次调用重新计算，MUST NOT 缓存。
+
+在途调用同样要防住：
+
+- 中继 provider 的 `holds(address)` SHALL 同步转交当前接入方 adapter 的 `holds`；没有接入方时返回假。
+- 内核按"托管绑定在提交与读取边界重验"在最终边界再查一次。因此接入方解除绑定后，该会话既不能发起新调用，也不能完成已经在途的调用，即使台账尚未退役它。
+- 内核的 `COLLAB_BINDING_STALE` SHALL 映射为 `COLLAB_CALLER_UNAVAILABLE`。
+- 对托管调用者，`collab_status` SHALL 在最后一个 await 之后、返回之前，再同步调用一次 `resolveCaller`；结果与入口时不同，就返回 `COLLAB_CALLER_UNAVAILABLE`。
+
+adapter SHALL 提供同步的 `holds(address)`。`resolveCaller` 与 `holds` 都必须基于接入方已异步核验过的内存投影，不能靠省略核验来满足同步接口。
 
 #### Scenario: 受管子会话以托管成员身份写入
 - **GIVEN** 子会话 L（subagent，delegationDepth 1）被 `pet-locus` 接入方解析为 `loc:1`；`loc:1` 是空间 S 的托管成员 `locus-a`
@@ -261,6 +275,11 @@
 - **GIVEN** 承上，接入方随后对 L 的 `resolveCaller` 返回 `undefined`，台账中 `locus-a` 仍为 active
 - **WHEN** L 调用 `collab_read`
 - **THEN** 返回 `COLLAB_CALLER_UNAVAILABLE`，不返回空间内容
+
+#### Scenario: 在途调用在解绑后失败
+- **GIVEN** L 已通过入口，被解析为 `locus-a`；它的 `collab_send_message` 停在内核的 presence 采样
+- **WHEN** 接入方让 `holds` 对该地址返回假，随后采样完成
+- **THEN** 工具返回 `{"error":{"code":"COLLAB_CALLER_UNAVAILABLE"}}`，日志字节不变
 
 #### Scenario: 普通会话不能被接入方冒认
 - **GIVEN** 普通一级会话 A，接入方的 `resolveCaller` 对 A 返回 `loc:9`
@@ -304,6 +323,13 @@
 #### Scenario: 模型工具不接受附加数据与方式
 - **WHEN** 会话调用 `collab_send_message` 时携带 `ext` 或 `mode`
 - **THEN** 返回 `COLLAB_BAD_ARGUMENTS`，内核未收到命令
+
+#### Scenario: 换代后的新会话可凭原 cmdId 确定结果
+- **GIVEN**
+  - `locus-a` 在会话 L1（地址 `loc:1`）中经 `command` 以 `cmdId:'c-9'` 创建条目，接入方没有记下结果；
+  - 随后接入方把 `locus-a` 换代到会话 L2（地址 `loc:2`），并解绑 `loc:1`。
+- **WHEN** 在 L2 的真实工具执行中，以 `c-9` 与原载荷调用 `command`
+- **THEN** 返回首次结果，日志字节不变
 
 #### Scenario: 不能经句柄执行成员管理
 - **WHEN** 句柄以 `op:'invite'` 或 `op:'allowManager'` 调用 `command`

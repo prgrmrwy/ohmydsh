@@ -8,7 +8,7 @@
 - **记录内容。** 消息是 `{id, actor, to, body, needsReply, ref?}`，条目字段是 title/body/requiredAcks。没有给接入方的结构化位置。
 - **投递。** `decideDispatch` 按成员 channel 选 provider，指针只含白名单字段。`SessionProvider.deliver` 固定用 `followup`（`session-provider.ts` 114）。
 - **Pet 一侧（只读参考，不改）。**
-  - `collaboration/caller.ts` 的调用者解析是对一次事件循环观测的同步快照，从 Locus 正反索引推导主子关系。
+  - `collaboration/caller.ts` 的公开解析 `resolveCollaborationCaller` 是异步的：先做同步的索引快照（非导出的 `snapshot`），再 await 冷身份核验，之后重新快照比对，一致才返回。它不能直接充当同步接口；接入时需要由 Pet 维护一份已异步核验过的内存投影（见 D4）。
   - 询问（`pet-inquiry-runtime-channel` 规范）要求独立轮次、不与 GUI 输入合并、不 steer。
   - Locus 的身份、代际、退役都以 Pet 持久层为真源。
 
@@ -93,11 +93,13 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 - `managedChannels` 在启动时由配置确定，内核的 provider 列表在构造 `CollabService` 时固定，所以必须在启动时为每个 channel 注册中继，接入方之后再 attach。
 - 没有接入方时，中继不认领、presence 为 `unreachable`、deliver 抛错。这样接入方未加载时，消息照常提交但不记账唤醒（presence 采样在事务前，见 `samplePresence`），不会有悬空的唤醒。
 
-**调用者解析。**
+**调用者解析与在途调用的失权（评审 C1）。**
 - `SessionAccess.caller` 改为返回 `{channel, address}`：先检查对象身份、归档与排除名单，再判断普通会话；否则同步询问各接入方的 `resolveCaller`。
 - 普通会话被接入方认领时一律拒绝，防止接入方把一个普通会话"改名"成托管成员。
 - 每次调用都重新计算，不缓存（D1 交集语义的前提）。
-- Pet 现有调用者解析是同步快照（`caller.ts`），满足同步约束。
+- 只在入口解析不够：内核在提交前会 await presence 采样和空间队列，入口快照可能在此期间失效。因此托管 provider 必须提供同步的 `holds(address)`，内核在**最后一个 await 之后**、提交或返回数据之前再查一次，二者之间不再有 await（内核"托管绑定在提交与读取边界重验"）。这与 Pet 自己"await 之后重新观察"的做法一致。收据重放也要经过这次检查：解绑的地址连旧结果也拿不到。
+- `resolveCaller` 与 `holds` 都是同步接口，前提是接入方维护一份已异步核验过的内存投影（Pet 现有的 `resolveCollaborationCaller` 是异步的，不能直接接上，见 Context）。这是 Locus 接入 change 的验收点；本 change 用测试替身覆盖语义。
+- `collab_status` 只经 host-index 读取，不走内核成员读取。所以对托管调用者，它在返回前再同步调用一次 `resolveCaller` 比对。
 
 **句柄。**
 - 托管命令：`admit`/`rebind`/`retire`。
@@ -111,7 +113,9 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 
 ### D5 内核内部
 
-- `ChannelProvider` 增加可选 `managed?: boolean`、`supportsMode?(mode): boolean`。
+- `ChannelProvider` 增加可选 `managed?: boolean`、`holds?(address): boolean`、`supportsMode?(mode): boolean`。托管 provider 缺少 `holds` 视为不持有任何地址（fail closed）。
+- manager 命令分两阶段（评审 M1）：事务外只做 principal 校验，以及"没有现成收据时认领一次"；进入串行队列后，从当前状态重新判定收据、授权、关闭、目标状态、唯一性，再以 `holds` 确认新地址。预备阶段的结果不被沿用。
+- 未获授权的 manager 得到 `COLLAB_NOT_MEMBER`（授权检查先于关闭检查），dsh-collab 再把它与不存在、存储失败统一映射为 `COLLAB_SPACE_UNAVAILABLE`。这样没有授权的接入方无法探测空间是否存在、是否关闭（评审 M2）。
 - `claim` 只遍历非托管 provider；`admitMember` 与 `rebindMember` 只调用 principal 对应的 provider，认领放在进入串行事务之前的 `prepare` 阶段，与 `invite` 相同。
 - `reduce`：
   - `manager/allowed` 与 `manager/revoked` 维护 `managers`；
@@ -129,13 +133,17 @@ ADR-0006 决定 Locus 不提取为独立插件。它没有限制 Pet 消费外�
 3. **托管成员怎样进入、退出、换代，同时避免双份授权真相？** 见 D1、D4：Leader 授权 channel → 接入方 `admit`/`rebind`/`retire` → 每次调用都由接入方实时解析调用者，权限是两份事实的交集。
 4. **request 能否统一表达自记工作与待承接事项？是否需要依赖和 claim？** 能。自记工作用作者自己维护、无 `requiredAcks` 的 `other` 条目（约定 v3 已写明）；待承接事项用 request。依赖、claim、ready 属于边界之内的分工，交给 Agent Teams（标准第 1 节）。本 change 不加。
 5. **通用通知与需要续进原工作的询问怎样区分？何时允许唤醒？** 唤醒时机仍只有三种触发。"询问"是一条带 `mode` 的需回复消息（D3）。是否独立轮次、怎样关联原工作和续进，由收件人 provider 或接入方 handler 决定。原工作的关联放在 `ext`，回答 `ref` 到问题。协作层只保证不能静默降级为普通 followup。
-6. **台账与 Pet 原子 domain 的交界。** 不做跨存储原子提交。接入方用 outbox：在自己的事务里记下"将要写入台账的命令 + 确定的 cmdId + 载荷"，提交后再调用句柄；重启时用同一 cmdId 和载荷重放，由内核收据给出确定结果（`COLLAB_CMD_CONFLICT` 能暴露载荷不一致）。接入方必须用确定的 cmdId，这是接入 change 的验收点。台账写成功而 Pet 事务回滚的方向不会出现，因为 Pet 先提交、后写台账。
+6. **台账与 Pet 原子 domain 的交界。** 不做跨存储原子提交。接入方先在自己的事务里记下"将要写入台账的命令、确定的 cmdId 与载荷"，提交后再调用句柄。因为 Pet 先提交、后写台账，不会出现"台账写成功而 Pet 回滚"。恢复时以谁的身份重试，要按命令种类区分（评审 M4）：
+   - **托管命令**（`admit`/`rebind`/`retire`）：以 manager principal 执行，不依赖任何会话。重启后的后台恢复可以直接用原 cmdId 和载荷重放，由收据给出确定结果。
+   - **成员内容命令**（经 `command(exec, …)` 写入、带 `ext` 的条目或消息）：身份只能来自真实执行会话，本 change **不提供**后台以成员身份写入的能力，也不伪造 exec。可行的恢复路径是：等该成员下一次在有效会话中执行时（换代后的新会话也可以，收据按成员名命中），用原 cmdId 和载荷重试，得到原结果或首次提交。身份已失效（成员已退役或被 `markGone`）的待办，由接入方标记为"需人工处置"，不自动重试。
+   - 确定的 cmdId 解决的是重复写入；它不提供恢复时的写入权限。接入 change 必须覆盖三种崩溃点：Pet 提交后、台账提交前；台账提交后、结果记回前；重启时原身份已失效。
 7. **与 ref 工作对齐。** 已基于归档的 `collab-ref-threads`：`ext`/`mode` 不参与 `ref` 校验和话题推导；`mode` 不绕过话题上限；托管命令不产生消息，不计数。
 
 ## Risks / Trade-offs
 
 - **[接入方 adapter 是信任边界]** `resolveCaller` 返回什么，dsh-collab 就把调用者当作哪个成员。→ 只有宿主配置声明的 channel 才能 attach；即便如此，也只能映射到该 channel 已被 Leader 授权、且由它自己接纳的成员；普通会话不能被认领；归档与排除名单先于 adapter 检查。接入方本身是本机已审查的插件，与 provider 处在同一信任层。
 - **[`supportsMode` 在串行事务内同步调用]** 慢的 provider 会阻塞该空间。→ 规定为同步布尔方法（中继与 `dsh-session` 都只查内存表），抛错视为不支持，不会使空间进入 `failed`。
+- **[`holds` 在串行事务内同步调用]** 与 `supportsMode` 相同，要求只查内存；抛错视为不持有，命令失败，但空间不进入 `failed`。
 - **[模式判断与投递之间的竞态]** 发送时支持，投递时已注销。→ 投递失败，不降级（场景已覆盖），结果与其它投递失败相同，列为 failed。
 - **[托管成员数量]** 一个 Locus 有很多群，presence 采样会为每个成员调用接入方。→ 采样已经按命令执行一次并去重。接入方的 presence 应是内存查询，这是接入 change 的验收点。
 - **[回滚]** 回滚到旧内核时：

@@ -23,7 +23,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 | `createItem`、`reviseItem`、`ackItem`、`sendMessage`、`setStatus` | agent、provider | 成员（另受条目状态转换表约束） |
 | `advanceRequest` | agent、provider | 成员且为该 request 的承接方 |
 | `allowManager`、`revokeManager` | agent、provider | 成员且为 Leader |
-| `admitMember`、`rebindMember`、`retireMember` | manager | 其 channel 在 `managers` 中（否则 `COLLAB_FORBIDDEN`）；目标规则见"接入方按空间托管成员" |
+| `admitMember`、`rebindMember`、`retireMember` | manager | 其 channel 在 `managers` 中（否则 `COLLAB_NOT_MEMBER`，与非成员不可区分）；目标规则见"接入方按空间托管成员" |
 
 表中允许 agent、provider 的命令，manager principal 调用时 MUST 以 `COLLAB_FORBIDDEN` 拒绝；manager 命令由 agent 或 provider principal 调用时同样 MUST 以 `COLLAB_FORBIDDEN` 拒绝。manager principal 不能读取。
 
@@ -32,7 +32,19 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 处理顺序 SHALL 按命令所属的两个分支之一执行：
 
 - **普通成员命令**（除 `createSpace` 与三个 manager 命令外的全部写命令）：① principal 稳定校验（brand、provider 已注册且 `on.channel` 等于注册 channel；internal principal 在此 MUST 立即以 `COLLAB_FORBIDDEN` 拒绝，早于任何 provider 调用、presence 采样与空间状态检查）→ ② 协作空间存在（否则 `COLLAB_SPACE_NOT_FOUND`）→ ③ 按 `{channel, address}` 反查成员，不检查其状态（失败为 `COLLAB_NOT_MEMBER`）→ ④ `cmdId` 收据查找 → ⑤ 协作空间未关闭 → ⑥ 本表前置条件 → ⑦ 命令专属幂等键 → ⑧ 业务校验。
-- **manager 命令**：① principal 稳定校验（同上；agent、provider、internal principal 在此 MUST 以 `COLLAB_FORBIDDEN` 拒绝）→ ② 协作空间存在 → ③ 以 `{kind:'manager', channel}` 为 scope 查找收据 → ④ 协作空间未关闭 → ⑤ channel 在 `managers` 中 → ⑥ 业务校验（地址认领只在此后、且只调用该 provider 一次，认领在进入串行事务前完成，与 `invite` 相同）。
+- **manager 命令**分两个阶段：
+  - **事务外预备**：
+    - ① principal 稳定校验：agent、provider、internal principal 在此 MUST 以 `COLLAB_FORBIDDEN` 拒绝。
+    - ② 仅对 `admitMember`、`rebindMember`：当前已加载的日志中已有同 scope、同 cmdId 的收据时，不认领；否则只调用该 provider 的 `claim(address, 'agent')` 一次。
+    - 预备阶段的任何判断结果都 MUST NOT 被事务内阶段沿用。
+  - **事务内**：在串行队列中，从当前状态重新判定。
+    - ③ 协作空间存在。
+    - ④ 以 `{kind:'manager', channel}` 为 scope 查找收据；命中且载荷相同时返回原结果。
+    - ⑤ channel 在 `managers` 中，否则以 `COLLAB_NOT_MEMBER` 拒绝。
+    - ⑥ 协作空间未关闭。
+    - ⑦ 业务校验：目标成员状态、名称与地址唯一性，都基于当前状态重新计算；预备阶段没有可用认领结果时为 `COLLAB_ADDRESS_UNCLAIMED`。
+    - ⑧ 对 `admitMember`、`rebindMember`，按"托管绑定在提交与读取边界重验"同步检查新地址，然后提交。
+  - 授权检查（⑤）先于关闭检查（⑥），因此未获授权的接入方对不存在、已关闭与 open 的空间得到同一类错误。
 - **`createSpace`**：① principal 稳定校验（internal principal 在此 MUST 以 `COLLAB_FORBIDDEN` 拒绝）→ ② 以 principal 的 `{channel, address}` 为 scope 查找创建收据（命中则返回原结果）→ ③ 请求的 `spaceId` 不存在（已存在为 `COLLAB_SPACE_EXISTS`）→ ④ 认领首成员地址，认领结果的 `{channel, address}` MUST 等于 principal 的地址 → ⑤ 业务校验。同一 `spaceId` 的创建与该空间上的其他命令串行执行。
 
 分支中的成员与创建者地址 scope 均采用幂等 requirement 定义的带类型标签编码；本变更之前写入的 internal scope 收据照常参与重放比对。
@@ -356,10 +368,14 @@ provider MAY 声明 `managed: true`，表示它代表一个接入方（例如 Pe
   - 退役后成员状态为 `gone`；
   - 三个托管命令事件的 actor 都是 `manager:pet-locus`。
 
-#### Scenario: 未授权的接入方不能接纳
-- **GIVEN** 空间 `managers` 为空
-- **WHEN** P 调用 `admitMember`
-- **THEN** 返回 `COLLAB_FORBIDDEN`，日志长度不变，P 的 `claim` 调用次数为 0
+#### Scenario: 未授权的接入方与非成员不可区分
+- **GIVEN**
+  - S1 为 open，`managers` 为空；
+  - S2 已关闭，未授权 `pet-locus`；
+  - S3 不存在；
+  - S4 曾授权 `pet-locus`，后又撤销。
+- **WHEN** P 对四个空间分别调用 `admitMember`
+- **THEN** S1、S2、S4 返回 `COLLAB_NOT_MEMBER`；S3 返回 `COLLAB_SPACE_NOT_FOUND`（宿主统一映射为不可用，见 dsh-collab）；四个空间的日志长度都不变
 
 #### Scenario: 不能授权普通 provider 或重复授权
 - **GIVEN** 已注册普通 provider（channel `dsh-session`）与托管 provider P；`pet-locus` 已被授权
@@ -377,7 +393,7 @@ provider MAY 声明 `managed: true`，表示它代表一个接入方（例如 Pe
 - **THEN**
   - 撤销提交恰含 `manager/revoked` 与 `locus-a`、`locus-b` 各一条 `member/status gone`，且不含 `dispatch/intended`；
   - `managers` 为空数组；
-  - 之后的 `admitMember` 返回 `COLLAB_FORBIDDEN`。
+  - 之后的 `admitMember` 返回 `COLLAB_NOT_MEMBER`。
 
 #### Scenario: 只能管理本 channel 的成员
 - **GIVEN** 托管 provider P（`pet-locus`）与 Q（`other-loc`）都已获授权；`locus-a` 由 P 托管，`doubao` 为普通成员
@@ -389,6 +405,29 @@ provider MAY 声明 `managed: true`，表示它代表一个接入方（例如 Pe
 - **WHEN** P 以 `loc:1` 接纳 `locus-b`，再把 `locus-a` 换代回 `loc:1`
 - **THEN** 两次都返回 `COLLAB_ADDRESS_TAKEN`
 
+#### Scenario: 认领挂起期间被撤销
+- **GIVEN** P 已调用 `admitMember({name:'locus-a', address:'loc:1'})`，其 `claim` 被可控 Promise 挂起
+- **WHEN** Leader 调用 `revokeManager({channel:'pet-locus'})`，随后释放 `claim`
+- **THEN** `admitMember` 返回 `COLLAB_NOT_MEMBER`，日志中没有 `locus-a`
+
+#### Scenario: 认领挂起期间目标被标记离开
+- **GIVEN** `locus-a` 为 active；P 调用 `rebindMember({member:'locus-a', address:'loc:2'})`，其认领被挂起
+- **WHEN** Leader 对 `locus-a` 调用 `markGone`，随后释放认领
+- **THEN** `rebindMember` 返回 `COLLAB_MEMBER_INACTIVE`，`locus-a` 的绑定仍为原地址
+
+#### Scenario: 并发的同 cmdId 接纳只提交一次
+- **WHEN** P 以同一 `cmdId:'adm-1'` 和相同载荷并发调用两次 `admitMember`，两次认领都挂起后依次释放
+- **THEN** 两次返回同一 seq；日志恰有一条 `member/joined(locus-a)`
+
+#### Scenario: 认领期间地址被抢占
+- **WHEN** P 以不同 cmdId 并发调用 `admitMember({name:'locus-a', address:'loc:1'})` 与 `admitMember({name:'locus-b', address:'loc:1'})`，先入队者提交后，后者才进入事务
+- **THEN** 后者返回 `COLLAB_ADDRESS_TAKEN`
+
+#### Scenario: 收据重放不再认领
+- **GIVEN** P 以 `cmdId:'adm-1'` 成功接纳 `locus-a`；此后 P 的 `claim` 一经调用即抛错
+- **WHEN** P 以 `adm-1` 与原载荷重放
+- **THEN** 返回首次结果，`claim` 调用次数为 0
+
 #### Scenario: 托管 provider 声明非法 channel
 - **GIVEN** 托管 provider 的 channel 为 `Pet Locus`
 - **WHEN** Leader 以该字符串调用 `allowManager`
@@ -398,6 +437,46 @@ provider MAY 声明 `managed: true`，表示它代表一个接入方（例如 Pe
 - **GIVEN** `locus-a`（地址 `loc:1`）以 `cmdId:'m-1'` 发送消息成功，随后被换代到 `loc:2`
 - **WHEN** principal `agent{pet-locus, loc:2}` 以 `m-1` 与原载荷重放
 - **THEN** 返回首次结果，日志长度不变
+
+### Requirement: 托管绑定在提交与读取边界重验
+
+声明 `managed: true` 的 provider MUST 实现同步方法 `holds(address): boolean`，表示该地址当前仍是接入方承认的有效绑定。缺少该方法、返回非 `true` 或抛错，均视为不持有。
+
+主体地址的 channel 属于托管 provider 时（无论 principal 是 agent 还是 provider），内核 SHALL 在下列线性化点同步调用 `holds(address)`，检查与其后动作之间 MUST NOT 再有 await：
+
+- **写命令**：在串行事务内、最后一个 await 之后，开始提交或返回收据结果之前；
+- **读取**：`overview`、`readSince`、`project`、`readConvention` 在最后一个 await 之后、返回数据之前。
+
+不持有时 MUST 以 `COLLAB_BINDING_STALE` 拒绝，不写提交、收据或投递，也不返回空间数据。该检查不改变成员状态，台账何时退役由接入方决定。
+
+`admitMember` 与 `rebindMember` 在提交前 SHALL 以同样方式检查新地址，不持有时以 `COLLAB_ADDRESS_UNCLAIMED` 拒绝。
+
+非托管 channel 的主体不执行该检查，行为与本变更之前相同。
+
+#### Scenario: 入口通过后、提交前解绑
+- **GIVEN** `locus-a`（地址 `loc:1`）为 active 托管成员；presence 采样被可控 Promise 挂起
+- **WHEN** `locus-a` 发送消息并已通过入口；接入方随后让 `holds('loc:1')` 返回假（台账未退役），再释放 presence
+- **THEN** 返回 `COLLAB_BINDING_STALE`，日志长度不变，无 `dispatch/intended`
+
+#### Scenario: 读取期间解绑不返回数据
+- **GIVEN** 同上，`overview` 的 presence 采样被挂起
+- **WHEN** 接入方解绑后释放采样
+- **THEN** `overview` 返回 `COLLAB_BINDING_STALE`
+
+#### Scenario: 解绑后连收据也不返回
+- **GIVEN** `locus-a` 已以 `cmdId:'m-1'` 成功发送消息，随后接入方解绑 `loc:1`
+- **WHEN** 以 `m-1` 与原载荷重放
+- **THEN** 返回 `COLLAB_BINDING_STALE`
+
+#### Scenario: 认领后、提交前接入方撤回地址
+- **GIVEN** P 的 `admitMember` 已认领 `loc:3`
+- **WHEN** 进入事务前 `holds('loc:3')` 变为假
+- **THEN** 返回 `COLLAB_ADDRESS_UNCLAIMED`，日志长度不变
+
+#### Scenario: 普通成员不受影响
+- **GIVEN** 普通 provider 未实现 `holds`
+- **WHEN** 普通成员发送消息并读取总览
+- **THEN** 两次都成功
 
 ### Requirement: 托管成员不承担 Leader 与自助成员操作
 
