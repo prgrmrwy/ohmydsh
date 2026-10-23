@@ -289,6 +289,8 @@ npm run typecheck  # both programs
 npm test           # vitest
 ```
 
+客户端会把 `lottie-web` **打包进** `lib/client.js`。依赖清单变化后，先在仓库根执行 `npm install`（或 `npm ci`）再构建：缺少该依赖时打包器会静默把它留成运行时 `require`，DSH web 启动会报 `client-modules: ... missed the module table`。`npm run build:client` 末尾的 `scripts/verify-client-bundle.mjs` 会显式拦截这种漂移，并提示先安装依赖。
+
 测试针对真实的 DSH 存储层和真实的 SQLite backend 运行，并对符号链接投影使用真实文件系统，而不是 mock 这些契约。当前行为的规范位于 `openspec/specs/`（`dsh-pet`、`pet-lark-channel`、`pet-locus-collaboration`、`pet-locus-media-access`、`pet-workspace-env`、`pet-top-layer`）；设计决策见本 package 的 [`docs/adr/`](docs/adr/ADR-0001-executor-preset.md) 以及仓库级的 [ADR](../../docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md)。
 
 ## 许可证

@@ -61,6 +61,37 @@ describe('player packaging and import seam', () => {
     expect(await read('src/client/index.tsx')).toContain("from './player.js'")
   })
 
+  it('ships a self-contained client bundle (no stray runtime requires)', async () => {
+    // The Web client runs inside DSH's `client-modules` loader, whose require
+    // only knows the shell modules. A dependency missing at build time is
+    // silently externalized, so the build succeeds and the browser then fails
+    // to activate the plugin — exactly the regression this guard prevents.
+    const bundle = await readFile(path.join(PACKAGE_ROOT, 'lib', 'client.js'), 'utf8')
+    const shellModules = new Set([
+      'react',
+      'react/jsx-runtime',
+      'react-dom',
+      'react-dom/client',
+      '@deepseek-ai/cordis',
+      '@deepseek-ai/dsh-client-ui-slots',
+    ])
+    const stray: string[] = []
+    for (const match of bundle.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)) {
+      const id = match[1]
+      if (id === undefined || shellModules.has(id)) continue
+      if (id.startsWith('.') || id.startsWith('/') || id.startsWith('node:')) continue
+      stray.push(id)
+    }
+    expect(stray).toEqual([])
+    // Positive control: the player must actually be bundled, not just absent.
+    expect(bundle).toMatch(/lottie_light_min|Bodymovin/)
+  })
+
+  it('runs the bundle guard as part of the client build', async () => {
+    const pkg = JSON.parse(await read('package.json')) as { scripts?: Record<string, string> }
+    expect(pkg.scripts?.['build:client']).toContain('verify-client-bundle.mjs')
+  })
+
   it('bundles no animation assets', async () => {
     const files = await listFiles(SOURCE_ROOT)
     expect(files.filter(file => file.endsWith('.lottie.json'))).toEqual([])

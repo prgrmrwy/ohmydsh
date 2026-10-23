@@ -289,6 +289,8 @@ npm run typecheck  # both programs
 npm test           # vitest
 ```
 
+The client bundles `lottie-web` **into** `lib/client.js`. After any dependency change, run `npm install` (or `npm ci`) at the repository root before building: a missing dependency is silently left as a runtime `require` by the bundler, and DSH web then fails at boot with `client-modules: ... missed the module table`. `scripts/verify-client-bundle.mjs`, run at the end of `npm run build:client`, turns that drift into a build failure with the install hint.
+
 Tests run against the real DSH storage layer and real SQLite backend, and use real filesystems for symlink projection, rather than mocking those contracts. The current behavior is specified under `openspec/specs/` (`dsh-pet`, `pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-media-access`, `pet-workspace-env`, `pet-top-layer`); design decisions live in [`docs/adr/`](docs/adr/ADR-0001-executor-preset.md) of this package and in the repository-level [ADRs](../../docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md).
 
 ## License
