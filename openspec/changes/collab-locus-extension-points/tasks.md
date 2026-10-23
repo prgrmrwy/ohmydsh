@@ -87,10 +87,10 @@
 
 ## 6. 验证
 
-- [ ] 6.1 Run kernel test + typecheck；confirm passes
-- [ ] 6.2 Run dsh-collab test + typecheck + `test:components`（完整依赖副本）；confirm passes，且真实 header 中协作工具体积 ≤ 4200，记录实测值
-- [ ] 6.3 Run 根 `npm test`、`npm run check:artifacts`；与基线比较，无新增失败
-- [ ] 6.4 Run `openspec validate collab-locus-extension-points --strict`；test-plan 所有行 🟢
+- [x] 6.1 Run kernel test + typecheck；confirm passes
+- [x] 6.2 Run dsh-collab test + typecheck + `test:components`（完整依赖副本）；confirm passes，且真实 header 中协作工具体积 ≤ 4200，记录实测值
+- [x] 6.3 Run 根 `npm test`、`npm run check:artifacts`；与基线比较，无新增失败
+- [x] 6.4 Run `openspec validate collab-locus-extension-points --strict`；test-plan 所有行 🟢
 - [ ] 6.5 Run 真实 Host 验收（`dsh build` 后由用户重启）：
   - 未配置 `managedChannels` 时，既有协作流程不变；
   - 普通会话的 11 个工具 schema 只多出 `collab_space` 的两个 action，体积在预算内；
@@ -191,3 +191,14 @@ gpt-6-astra 对 f92ab4c79 做只读实现评审，结论 FIX_THEN_SHIP：
   - 协作标准第 8 节标注已实现；
   - `dsh.yaml` note 585 码点（不超过 600）。
 - 本 change 的 review 文件中，评审者写的绝对路径链接已改成纯文本（内容不变），以通过仓库 markdown 链接检查。
+
+## 6. 验证记录（Lead，2026-10-23）
+
+- 6.1 kernel：44 files / 272 tests 通过，typecheck 0。
+- 6.2 dsh-collab：
+  - worktree 中 vitest 9 files / 152 tests 通过；
+  - 完整依赖副本 `spike/fullcopy` 中 typecheck 0，`npm test` 为 vitest 152 加 build/sync 产物测试 2+4，`test:components` 18/18；
+  - 真实 header 中协作工具体积 3927 ≤ 4200（surface-02 与 surface-04 实测值相同）。
+- 6.3 根 `npm test`：447 tests，437 pass，8 fail。在基线提交 d9be6f1e3 的临时 worktree 中跑同样的测试，失败的正是同样 8 个（sync / openspec-upgrade / routing 类，lean 依赖环境问题），无新增失败。`npm run check:artifacts` 通过。
+- 6.4 `openspec validate collab-locus-extension-points --strict` 通过；test-plan 149 行全部 🟢。
+- 6.5 待做：需要 `dsh build` 后由用户重启 Host。
