@@ -149,6 +149,9 @@ it('explicit_model_unavailable_never_substitutes', async () => {
 })
 it('explicit_model_manual_skips_jev', async () => {
  const {def,server} = await tool(tier('complex'),{S1:'MANUAL'},undefined,{readSettings:()=>DEFAULT_SETTINGS,catalog:()=>astraCatalog})
- expect(await def.execute({task:'x',provider:'codex',model:'gpt-6-astra'},exec())).toEqual({routed:false,reason:'manual'})
+ const result = await def.execute({task:'x',provider:'codex',model:'gpt-6-astra'},exec())
+ expect(result).toEqual({routed:false,reason:'manual'})
+ // The caller's chosen model must survive MANUAL: the hint may not tell the agent to drop it.
+ expect(def.output!.render({} as never, result as never)[0]).toMatchObject({ text: expect.stringContaining('只传用户或 lead 指定的值') })
  expect(server.bodies).toHaveLength(0)
 })

@@ -13,5 +13,9 @@
 - [x] 3.1 运行插件包 typecheck/test、`npm test`、`openspec validate subagent-route-explicit-model --strict`
   - 顺带修复既有构建错误：`src/client/route-picker.ts` 触发按钮 `onKeyDown` 参数缺类型（TS7006，来自 f3b7b903），否则插件无法构建、部署。
   - `npm test` 仍有 8 个隔离夹具中的 sync 失败（auto-model-routing 与 dsh-openspec 在临时仓库内 build 失败），改动前后数量相同，与本 change 无关；真实 `node scripts/sync.mjs` 构建与部署成功。
-- [ ] 3.2 `node scripts/sync.mjs` 部署并确认第二次运行无变化；新会话 AUTO 下请求“用指定模型派一个只读评审子会话”，核对 `route_subagent` 收到 `model`、子会话请求头的 model 与 effort 与工具返回一致
-  - 部署已完成（第一次 36 项变更，第二次无变化，已部署的 `lib/subagent-tool.js` 与 skill 含新规则）；新会话实测需重启 DSH 后由用户进行，未完成。
+- [x] 3.2 `node scripts/sync.mjs` 部署并确认第二次运行无变化；新会话 AUTO 下请求“用指定模型派一个只读评审子会话”，核对 `route_subagent` 收到 `model`、子会话请求头的 model 与 effort 与工具返回一致
+  - 部署已完成（第一次 36 项变更，第二次无变化，已部署的 `lib/subagent-tool.js` 与 skill 含新规则）；2026-10-23 在主干部署、重启后，经 Host API 新建 AUTO 普通会话 session-1705a46a 实测：route_subagent 参数含 model=gpt-6-astra，返回 astra·low（standard）；subagent 显式传 codex/gpt-6-astra/low 并标注；子会话请求头 codex/gpt-6-astra/low，一致。（Worktree Session 内官方 subagent 被 guard 拒绝，故改用普通会话。）
+
+## 4. 验收反馈
+
+- [x] 4.1 实测子会话评审指出 MANUAL 渲染文本仍要求“不传 provider/model/reasoning_effort”，会让 Agent 丢掉指定模型：先在 `explicit_model_manual_skips_jev` 断言渲染文本含“只传用户或 lead 指定的值”并观察到失败，再改文本使其通过

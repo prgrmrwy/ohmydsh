@@ -29,7 +29,7 @@ function rootOf(caller: SessionLike | undefined, agents: ToolDeps['agents']): Se
   return undefined
 }
 
-const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派，不传 provider/model/reasoning_effort。'
+const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派；只传用户或 lead 指定的值（例如指定的模型），不传其它 provider/model/reasoning_effort。'
 
 /** Sub-agent decision tool: same Jev judgment as the main session, only while the root session is AUTO. Writes no state. */
 export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
