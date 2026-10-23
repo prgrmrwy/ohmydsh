@@ -29,6 +29,24 @@ function checkExt(ext: unknown): void {
   try { bytes = Buffer.byteLength(canonicalJson(ext), 'utf8') } catch { return fail('COLLAB_BAD_EXT') }
   if (bytes > EXT_LIMIT) fail('COLLAB_BAD_EXT')
 }
+/** Stands in for an ext that cannot be cloned or serialized; checkExt rejects it. */
+const UNSERIALIZABLE_EXT = '\u0000unserializable-ext'
+/**
+ * Input snapshot and payload hash run before business checks. An `ext` that
+ * cannot be cloned or serialized (bigint, cycles, functions) is replaced by a
+ * placeholder here, so the error surfaces as COLLAB_BAD_EXT at ext's own
+ * position (after existing business checks, before ref) instead of as a raw
+ * exception that would jump ahead of guard, membership and business errors.
+ */
+function cloneInput<T extends object>(input: T): T {
+  if (input && typeof input === 'object' && Object.hasOwn(input, 'ext')) {
+    const ext = (input as { ext?: unknown }).ext
+    let usable = true
+    try { JSON.stringify(ext); structuredClone(ext) } catch { usable = false }
+    if (!usable) return { ...structuredClone({ ...input, ext: undefined }), ext: UNSERIALIZABLE_EXT } as T
+  }
+  return structuredClone(input)
+}
 const MODE_FORMAT = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
 /**
  * `guard` is created by the host per call and re-checked synchronously at the
@@ -385,7 +403,7 @@ export class CollabService {
   async markGone(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'markGone', input, (s, actor) => { this.otherActive(s, actor, input.member); return [{ type: 'member/status', actor, name: input.member, status: 'gone' }] }) }
   async transferLeader(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'transferLeader', input, (s, actor) => { this.otherActive(s, actor, input.member); if (s.members[input.member]!.managedBy !== undefined) fail('COLLAB_FORBIDDEN'); return [{ type: 'leader/changed', actor, leader: input.member }] }) }
   async closeSpace(ctx: CommandContext): Promise<CommandResult> { ctx = this.snapshot(ctx); return this.command(ctx, 'closeSpace', undefined, (_s, actor) => [{ type: 'space/closed', actor }]) }
-  async createItem(ctx: CommandContext, input: CreateItemInput): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'createItem', input, (s, actor) => {
+  async createItem(ctx: CommandContext, input: CreateItemInput): Promise<CommandResult> { ctx = this.snapshot(ctx); input = cloneInput(input); return this.command(ctx, 'createItem', input, (s, actor) => {
     rejectDeciders(input)
     checkFields(s, input)
     if (!['charter', 'request', 'other'].includes(input.kind)) fail('COLLAB_BAD_ITEM', { field: 'kind' })
@@ -413,7 +431,7 @@ export class CollabService {
     if (item.requiredAcks.length && item.requiredAcks.every(n => item.acks[n] === item.revision)) item.status = 'agreed'
     return [{ type: 'item/acked', actor, item }]
   }) }
-  async sendMessage(ctx: CommandContext, input: { to: string; body: string; needsReply?: boolean; ref?: number; ext?: Ext; mode?: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'sendMessage', input, (s, actor) => {
+  async sendMessage(ctx: CommandContext, input: { to: string; body: string; needsReply?: boolean; ref?: number; ext?: Ext; mode?: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = cloneInput(input); return this.command(ctx, 'sendMessage', input, (s, actor) => {
     if (input.to === actor || !Object.hasOwn(s.members, input.to) || s.members[input.to]!.status !== 'active') fail('COLLAB_BAD_RECIPIENT')
     if (typeof input.body !== 'string' || Buffer.byteLength(input.body) < 1 || Buffer.byteLength(input.body) > 16384 || (input.needsReply !== undefined && typeof input.needsReply !== 'boolean')) fail('COLLAB_BAD_MESSAGE')
     checkExt(input.ext)
@@ -476,7 +494,13 @@ export class CollabService {
     return { ...s, pendingDeliveries: unfinished.filter(d => !active.has(d.deliveryId)), inFlightDeliveries: unfinished.filter(d => active.has(d.deliveryId)), presence }
   }
   async readSince(ctx: ReadContext, seq: number): Promise<CommitRecord[]> { this.readState(ctx); if (!Number.isInteger(seq) || seq < 0) fail('COLLAB_BAD_SEQ'); this.guard(ctx); return structuredClone((this.records.get(ctx.spaceId) ?? []).filter(r => r.seq > seq)) }
-  async project(ctx: ReadContext): Promise<string> { const s = await this.overview(ctx); return this.options.project?.(s) ?? project(s, s.presence) }
+  async project(ctx: ReadContext): Promise<string> {
+    ctx = this.snapshot(ctx)
+    const s = await this.overview(ctx)
+    // overview checked the guard before its own return; project resumes after that await, so check again.
+    this.guard(ctx)
+    return this.options.project?.(s) ?? project(s, s.presence)
+  }
   async readConvention(ctx: ReadContext, version: string): Promise<string> {
     this.readState(ctx)
     const custom = this.options.convention

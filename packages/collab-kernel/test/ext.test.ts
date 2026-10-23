@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import type { Ext } from '../src/index.js'
+import { principals, type Ext } from '../src/index.js'
 import { intents, rejectsCleanly, world } from './support/world.js'
 
 /** An object whose canonical JSON (`{"k":"…"}`) is exactly `bytes` long. */
@@ -36,7 +36,7 @@ it('ext-02：非法附加数据被拒', async () => {
   const bad: [string, unknown][] = [
     ['array', [1]], ['null', null], ['string', 'x'], ['infinity', { n: Infinity }], ['nan', { n: NaN }], ['undefined', { a: undefined }],
     ['nested-undefined', { a: [1, undefined] }], ['date', { d: new Date(0) }], ['map', new Map()], ['too-big', sized(4097)],
-    ['multibyte', { k: '雪'.repeat(1363) }],
+    ['multibyte', { k: '雪'.repeat(1363) }], ['bigint', { n: 1n }], ['cycle', (() => { const o: Record<string, unknown> = {}; o.self = o; return o })()], ['function', { f: () => 1 }],
   ]
   for (const [label, ext] of bad) {
     const ctx = w.ctx('aily', `ext-${label}`)
@@ -81,4 +81,19 @@ it('ext-05：附加数据是幂等载荷的一部分', async () => {
   await expect(w.service.sendMessage(ctx, { to: 'doubao', body: 'same' })).rejects.toMatchObject({ code: 'COLLAB_CMD_CONFLICT' })
   expect(await w.service.sendMessage(ctx, { to: 'doubao', body: 'same', ext: { a: 1 } })).toEqual(first)
   expect(w.log()).toHaveLength(length)
+})
+
+it('ext-02b：不可序列化的附加数据按原有错误优先级报告', async () => {
+  const w = await world()
+  const ext = { n: 1n } as unknown as Ext
+  // Existing business checks come first: bad recipient, bad title.
+  const r = w.ctx('aily', 'eb-recipient')
+  await rejectsCleanly(w, r.cmdId, () => w.service.sendMessage(r, { to: 'bob', body: 'x', ext }), 'COLLAB_BAD_RECIPIENT')
+  const i = w.ctx('aily', 'eb-title')
+  await rejectsCleanly(w, i.cmdId, () => w.service.createItem(i, { itemId: 'T7', kind: 'other', title: '', body: '', requiredAcks: [], ext }), 'COLLAB_BAD_ITEM')
+  // Then ext, before ref.
+  const f = w.ctx('aily', 'eb-ref')
+  await rejectsCleanly(w, f.cmdId, () => w.service.sendMessage(f, { to: 'doubao', body: 'x', ref: 9999, ext }), 'COLLAB_BAD_EXT')
+  // A non-member still gets the membership error first.
+  await expect(w.service.sendMessage({ spaceId: 's', cmdId: 'eb-nm', principal: principals.agent({ channel: 'test-a', address: 'a:404' }) }, { to: 'doubao', body: 'x', ext })).rejects.toMatchObject({ code: 'COLLAB_NOT_MEMBER' })
 })

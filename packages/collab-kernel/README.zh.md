@@ -9,6 +9,13 @@
 
 内核提供具名且按 principal 授权的命令、绑定 revision 的 ack、持久化命令收据、本地 JSONL 存储、provider 投递、三种唤醒触发（需要回复的消息、邀请、request 进入 `done`/`rejected`）、经可选 `ref` 按话题限制往返（每个话题至多 20 条唤醒消息，之后返回 `COLLAB_THREAD_LIMIT`）与纯 Markdown 总览。按话题限制之前写入的日志原样重放，其中的决定、熔断与升级记录是只读历史。
 
+接入方扩展点：
+
+- **托管成员。** 声明`managed: true`的 provider 是接入方。经 Leader 以`allowManager`按空间授权后，接入方以`principals.manager`执行`admitMember`/`rebindMember`/`retireMember`。换代保留成员名，旧地址永不复用。
+- **`ext`。** 条目与消息可携带不透明的 JSON 对象，规范化后不超过 4096 字节。内核只存不解读，也不放入投影或指针。
+- **`mode`。** 需回复的消息可指定投递方式，由收件人 provider 的`supportsMode`同步判定；不支持就拒绝。
+- **调用级守卫。** 读写上下文可带宿主创建的同步`guard`，内核在最后一个 await 之后、提交或返回数据前调用它。托管 channel 与 manager 的调用必须带守卫。
+
 本包没有真实宿主集成，新成员只能是 agent。宿主负责验证身份并构造 principal；provider 是受信代码，不是认证沙箱。
 
 ## 构建与测试

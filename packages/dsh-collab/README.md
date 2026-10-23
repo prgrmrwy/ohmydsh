@@ -18,6 +18,7 @@ Set the dsh-collab manifest entry to `enabled: true`, run `dsh build`, then `dsh
     allowedSessionIds: []        # under invite: only seed contacts for collab_status
     denySessionIds: []           # exclusion list: cannot call, be claimed or be woken
     memberTrust: true            # default; false restores manual join and the non-authorization wake notice
+    managedChannels: []          # integrator channels allowed to manage members, e.g. [pet-locus]; default empty
 ```
 
 **Admission.** `invite` (default): any first-level session passing ordinary-session checks may create a space; a session that a Leader invites by its complete session ID, and that is claimed, is admitted to that space. The authorization record is the ledger's `member/invited` commit; no configuration change or restart is needed. `allowlist`: callers and invitees must additionally be in `allowedSessionIds`; old configurations keep working. In both modes subagents, nonzero delegationDepth, archived sessions, sessions refused by official ownership checks and those in `denySessionIds` can neither call nor be claimed. An invalid `admission`, a list with empty/padded/duplicate entries, or an ID in both lists makes the plugin refuse to start (`COLLAB_BAD_CONFIG`) without registering tools or creating the data directory. **Changing the exclusion list or admission mode takes effect only after `dsh build` and `dsh restart`**; there is no hot reload.
@@ -28,12 +29,24 @@ Set the dsh-collab manifest entry to `enabled: true`, run `dsh build`, then `dsh
 
 **Data directory precondition.** One data directory must be used by **one Host process** for its whole lifetime and must not be reachable from another pid namespace through network disks, VM shared folders or container mounts (a host machine and a LumeVM sharing one directory violates this). Otherwise startup lock cleanup may delete a lock another Host still holds and cause double writes; two misconfigured Hosts on one machine are not safe either. The data directory must be outside every declared workspace and node_modules deployment directory. New directories are created 0700; existing group/world-accessible directories are refused, not silently chmodded. The service ID derives from the canonical data directory. The kernel is inlined from source at build time.
 
+**Integrators (managed members).** `managedChannels` lists the channels that may attach. Each must match `^[a-z][a-z0-9-]{0,31}$`, must not be `dsh-session` and must not repeat; otherwise the plugin reports `COLLAB_BAD_CONFIG`. The plugin provides the cordis service `dshCollab`, whose `attach(channel, adapter)` returns a handle. The handle can:
+
+- admit, rebind and retire members (`admit`/`rebind`/`retire`);
+- write as the actual executing session (`command`/`read`). Items and messages may carry an opaque `ext` (a JSON object of at most 4 KiB, immutable after creation), and needs-reply messages may carry a delivery `mode`;
+- register delivery modes for ordinary recipients (`registerSessionMode`). A wake with a `mode` goes to the integrator's handler, never to followup, and is never downgraded.
+
+Before an integrator can admit members to a space, that space's Leader must grant its channel with `collab_space` `allow_manager`. `revoke_manager` withdraws the grant and retires all of that channel's managed members in the same commit. Managed members cannot become Leader and cannot join, decline or leave on their own.
+
+**Identity is the intersection of two facts.** The ledger record and the integrator's current binding must both hold. The Host creates a call-level guard for every call, and the kernel re-checks it synchronously before committing or returning data. A failed guard returns `COLLAB_CALLER_UNAVAILABLE`. If a wake recipient was rebound between sampling and commit, the command returns `COLLAB_BINDING_CHANGED`; retry with the same cmdId.
+
+Without `managedChannels`, behavior is unchanged.
+
 ## Tools and trust
 
 Eleven resident tools with one identical definition for every session (at most 4200 characters in the real request header):
 
 - `collab_status`: **the single entry point**. Call it first when woken or starting to collaborate. It returns the caller's spaces, pending work (acks, messages awaiting a reply, assigned requests with their creation seq), each space's optional `purpose`, pending invitations, seed contacts and fixed-enum next steps. It never contains titles, bodies or status text; nonconforming space/item IDs (must match `^[a-z0-9][a-z0-9-]{0,63}$`) are omitted. It is a pure read: it opens no space, writes nothing, wakes nobody and samples no presence.
-- `collab_space` (`create|close`; create takes an optional `purpose`), `collab_invite`, `collab_member` (`join|decline|leave|mark_gone|transfer_leader`), `collab_read` (`overview|since|convention`).
+- `collab_space` (`create|close|allow_manager|revoke_manager`; create takes an optional `purpose`, the last two need `channel`), `collab_invite`, `collab_member` (`join|decline|leave|mark_gone|transfer_leader`), `collab_read` (`overview|since|convention`).
 - `collab_create_item`, `collab_revise_item`, `collab_ack_item`, `collab_send_message`, `collab_set_status`, `collab_advance_request`. `collab_send_message` and `collab_create_item` take an optional integer `ref`.
 
 Writes require a stable nonempty `cmdId`; retries of the same successful command return the original receipt. A write that returns `COLLAB_SPACE_UNAVAILABLE` has an unknown outcome; retry later with the same `cmdId` and arguments. "Space not found", "not a member" and every storage error (lock, corruption, write failure) are all `COLLAB_SPACE_UNAVAILABLE` to models; lock identity and diagnostics go only to the Host log. The single exception is creating an existing space ID, which returns `COLLAB_SPACE_EXISTS`. Invitations do not join automatically; reads before join return `COLLAB_MEMBER_INACTIVE`.

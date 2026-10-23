@@ -28,6 +28,15 @@ it('guard-01：入口通过后、提交前守卫失效', async () => {
   await w.service.setStatus(w.ctx(), { text: 'still writable' })
 })
 
+it('guard-02b：project 在 overview 之后、返回之前再查守卫', async () => {
+  const w = await locusWorld()
+  let valid = true, calls = 0
+  // Turns false right after its first (overview) check, before project's own continuation runs.
+  const guard = () => { calls++; if (calls === 1) queueMicrotask(() => { valid = false }); return valid }
+  const read = { spaceId: 's', principal: principals.agent({ channel: 'pet-locus', address: 'loc:1' }), guard }
+  await expect(w.service.project(read)).rejects.toMatchObject({ code: 'COLLAB_CALLER_STALE' })
+})
+
 it('guard-02：读取期间守卫失效不返回数据', async () => {
   const w = await locusWorld(), g = flag()
   const hold = gate(); w.P.holdPresence = () => hold.promise
@@ -99,4 +108,10 @@ it('guard-06：普通成员不带守卫不受影响', async () => {
   const g = flag()
   await w.service.setStatus({ ...w.ctx(), guard: g.check }, { text: 'guarded' })
   expect(g.calls).toBe(1)
+})
+
+it('guard-04b：缺少守卫时先报 FORBIDDEN，不被不可序列化的附加数据抢先', async () => {
+  const w = await locusWorld()
+  const ctx = { spaceId: 's', cmdId: 'gb-1', principal: principals.agent({ channel: 'pet-locus', address: 'loc:1' }) }
+  await expect(w.service.sendMessage(ctx, { to: 'aily', body: 'x', ext: { n: 1n } as never })).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })
 })

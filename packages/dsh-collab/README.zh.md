@@ -18,6 +18,7 @@
     allowedSessionIds: []        # invite 下仅作 collab_status 的种子联系人
     denySessionIds: []           # 排除名单：既不能调用，也不能被认领或唤醒
     memberTrust: true            # 默认；false 恢复手动 join 与"不是授权"的唤醒说明
+    managedChannels: []          # 可托管成员的接入方 channel，例如 [pet-locus]；缺省为空
 ```
 
 **准入模式。** `invite`（默认）：通过普通会话校验的一级会话都可以建空间；被Leader用完整session ID邀请并认领的会话即获准进入该空间，授权记录就是台账里的`member/invited`提交，无需改配置或重启。`allowlist`：额外要求调用者与被邀请者在`allowedSessionIds`中，旧配置原样可用。两种模式下subagent、非零delegationDepth、已归档、官方所有权拒绝或位于`denySessionIds`的会话都不能调用、不能被认领。非法`admission`、列表含空串/首尾空白/重复项、或同一ID同时在两个列表时插件拒绝启动（`COLLAB_BAD_CONFIG`），不注册工具也不创建dataDir。**修改排除名单或准入模式后必须`dsh build`并`dsh restart`才生效**，没有热更新。
@@ -28,12 +29,24 @@
 
 **数据目录前提。** 一个dataDir在整个生命周期内只能由**一个Host进程**使用，且不经网络盘、VM共享目录或容器挂载被其它pid命名空间访问（例如宿主机与LumeVM共用目录即违反）。违反时启动清锁可能删掉另一个Host正持有的锁，造成双写；同机两个Host误配也不保证安全。数据目录不能在任何声明workspace或node_modules部署目录内。新目录0700；既有目录若group/other可访问则拒绝，不偷偷改权限。serviceId由canonical dataDir摘要稳定派生。构建内联当前内核源码，运行不依赖workspace内核包。
 
+**接入方（托管成员）。** `managedChannels` 列出允许接入的 channel（匹配`^[a-z][a-z0-9-]{0,31}$`、不能是`dsh-session`、不重复，否则`COLLAB_BAD_CONFIG`）。插件以 cordis 服务`dshCollab`提供`attach(channel, adapter)`，接入方据此取得句柄，句柄提供以下能力：
+
+- 接纳、换代、退役成员（`admit`/`rebind`/`retire`）；
+- 以真实执行会话的身份写入（`command`/`read`）；条目和消息可带不透明的`ext`（JSON 对象，≤4 KiB，创建后不可改），需回复的消息可带投递方式`mode`；
+- 为普通会话收件人注册投递方式（`registerSessionMode`）。带`mode`的唤醒交给接入方的处理函数，不走 followup，也不降级。
+
+托管成员要能被接纳，需要该空间的 Leader 先用`collab_space`的`allow_manager`授权该 channel；`revoke_manager`撤销授权，并在同一提交里退役该 channel 的全部托管成员。托管成员不能成为 Leader，也不能自己 join、decline 或 leave。
+
+**身份按两份事实的交集判断。** 台账记录与接入方的当前绑定必须同时成立：每次调用都由宿主创建一个调用级守卫，内核在提交或返回数据前同步重验。守卫失败时返回`COLLAB_CALLER_UNAVAILABLE`。命令采样后、提交前收件人恰好换代时，返回`COLLAB_BINDING_CHANGED`，可用原 cmdId 重试。
+
+未配置`managedChannels`时，行为与之前完全相同。
+
 ## 工具与信任
 
 11个常驻工具，所有会话同一份定义（真实request header中合计≤4200字符）：
 
 - `collab_status`：**唯一入口**。被唤醒或开始协作时先调用它，返回所在空间、待处理事项（ack、待回复消息、承接的request及其创建seq）、各空间可选的用途`purpose`、待处理邀请、种子联系人和固定枚举的下一步建议；不含任何标题、正文或状态文本，不合规的spaceId/itemId（须匹配`^[a-z0-9][a-z0-9-]{0,63}$`）不出现。它是纯读取：不打开空间、不写台账、不唤醒、不采样presence。
-- `collab_space`（`create|close`，create可带`purpose`）、`collab_invite`、`collab_member`（`join|decline|leave|mark_gone|transfer_leader`）、`collab_read`（`overview|since|convention`）。
+- `collab_space`（`create|close|allow_manager|revoke_manager`，create可带`purpose`，后两个需`channel`）、`collab_invite`、`collab_member`（`join|decline|leave|mark_gone|transfer_leader`）、`collab_read`（`overview|since|convention`）。
 - `collab_create_item`、`collab_revise_item`、`collab_ack_item`、`collab_send_message`、`collab_set_status`、`collab_advance_request`。`collab_send_message`与`collab_create_item`可带整数`ref`。
 
 写命令要求稳定非空cmdId，同一成功命令重试返回原收据。写命令返回`COLLAB_SPACE_UNAVAILABLE`时结果未知，应稍后用原cmdId与相同参数重试。"空间不存在""不是成员"和所有存储错误（锁、损坏、写失败）对模型一律是`COLLAB_SPACE_UNAVAILABLE`；锁身份与诊断只写宿主日志。唯一例外是创建已存在的spaceId返回`COLLAB_SPACE_EXISTS`。邀请不自动join，join前读取返回`COLLAB_MEMBER_INACTIVE`。

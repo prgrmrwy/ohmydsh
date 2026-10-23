@@ -1,7 +1,7 @@
 ## 0. 基线与接口约定
 
 - [x] 0.1 在任何修改之前运行 kernel 测试与 typecheck、dsh-collab vitest，记录基线：kernel 38 files / 224 tests 通过、typecheck 0；dsh-collab vitest 6 files / 118 tests 通过（2026-10-23，lean 依赖）
-- [ ] 0.2 Lead 先提交 kernel 公开类型的接口约定（只改类型，不改行为），作为两组并行的共同依据：
+- [x] 0.2 Lead 先提交 kernel 公开类型的接口约定（只改类型，不改行为），作为两组并行的共同依据：
   - `ChannelProvider.managed?`、`supportsMode?`；
   - `principals.manager`；
   - `CommandContext.guard?`、`ReadContext.guard?`；
@@ -10,7 +10,7 @@
   - 新错误码列表。
 
   要求：kernel typecheck 为 0。授权表已含五个新命令、方法是桩，所以 `auth.test.ts` 中枚举授权表的两条测试（全部具名写命令逐项允许与拒绝、`auth-15`）在此刻为红，原因正确（缺少新命令的检查项）；它们归第 1 组在 1.1 中补齐。其余既有测试保持绿。
-- [ ] 0.3 约定：每组先写的测试必须在实现前失败，且失败原因正确；若某断言已被更早的组满足，允许起始即绿，并在 test-plan 记一句原因，不得为它伪造失败
+- [x] 0.3 约定：每组先写的测试必须在实现前失败，且失败原因正确；若某断言已被更早的组满足，允许起始即绿，并在 test-plan 记一句原因，不得为它伪造失败
 
 ## 1. 内核：托管成员与授权（kernel 组）
 
@@ -79,7 +79,7 @@
 
 ## 5. 文档与配置
 
-- [ ] 5.1 Run：
+- [x] 5.1 Run：
   - 更新 `packages/dsh-collab/docs/cross-boundary-collaboration-standard.md` 第 8 节状态：三个扩展点已在协作层实现，Locus 接入另开 change；
   - 更新 dsh-collab 与 collab-kernel 的 README（中英）：`managedChannels`、接入服务、托管成员、`ext`、`mode`、新错误码；
   - 更新 `dsh.yaml` 中 dsh-collab 的 note，不超过 600 码点；
@@ -168,3 +168,26 @@ refactor（第 1.3、2.3、3.3 项）：
 - 插件 dispose 时先 `integrations.close()`（全部句柄失效、注销全部 mode、之后 `attach` 返回 `COLLAB_SERVICE_CLOSING`），再移除工具和关闭空间；为此补了 `attach-05`（见 test-plan Coverage Notes）。
 - `dshCollab` 用 `ctx.provide` 直接发布，生命周期跟随插件 fiber，不放进 `inject`；测试替身 `world.ts` 的 `provide` 也改为 fiber effect，否则同一 ctx 上重启插件会重复注册（trust-03 首先暴露了这一点）。
 - smode-01/02 读取投递结果时，等待异步的 `dispatch/completed` 提交，而不是用固定轮数（参见 memex 卡片 `dsh-collab-tests-separate-model-idle-from-ledger-drain`）。
+
+### 实现评审修复（Lead，2026-10-23）
+
+gpt-6-astra 对 f92ab4c79 做只读实现评审，结论 FIX_THEN_SHIP：
+
+- **🔴 `project()` 在 `await overview()` 之后未再调用守卫。** overview 检查通过后到 project 返回前的微任务间隙里，失效的调用者仍能拿到投影。
+  - 先加红测 `guard-02b`：守卫第一次检查后用 microtask 失效，原实现照常返回投影。
+  - 修复：project 先 `snapshot(ctx)`，`await overview` 之后同步调用守卫，再返回。
+- **🟡 不可序列化的 `ext` 以原生异常抛出。** bigint、循环对象、函数在入参快照或 payloadHash 阶段就抛出原生异常，而不是 `COLLAB_BAD_EXT`。
+  - 先加红测：`ext-02` 增加 bigint、cycle、function；新增 `ext-02b`，覆盖非法收件人或空标题时先报原有错误、ref 非法时先报 `COLLAB_BAD_EXT`、非成员先报 `COLLAB_NOT_MEMBER`；新增 `guard-04b`（缺守卫时先报 FORBIDDEN），它起始即绿，因为 entry 在快照之前执行。
+  - 修复：`cloneInput` 把不可复制或不可序列化的 ext 换成占位值，由 `checkExt` 在原规定位置（既有业务校验之后、ref 之前）报 `COLLAB_BAD_EXT`。我中途尝试过"入口提前拒绝"，评审指出会打乱错误优先级，已撤回。
+- **复跑结果：**
+  - kernel：44 files / 272 tests，typecheck 0；
+  - dsh-collab：vitest 152；
+  - 完整依赖副本：typecheck 0，产物测试 2+4，`test:components` 18/18，真实 header 中协作工具 3927 ≤ 4200。
+
+## 5. 文档与配置（完成记录）
+
+- 5.1 已完成：
+  - dsh-collab 与 collab-kernel 的 README（中英）新增接入方、托管成员、`ext`/`mode` 与调用级守卫说明；
+  - 协作标准第 8 节标注已实现；
+  - `dsh.yaml` note 585 码点（不超过 600）。
+- 本 change 的 review 文件中，评审者写的绝对路径链接已改成纯文本（内容不变），以通过仓库 markdown 链接检查。
