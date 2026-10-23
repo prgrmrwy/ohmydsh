@@ -23,9 +23,9 @@
 
 ## 4. 提交与公开镜像
 
-- [ ] 4.1 复核 GitHub/npm 名称仍可用、包当前树及拟公开子树历史无秘密/公司身份；新克隆设显式公开身份；提交并推送验证过的 ohmydsh 源码。
-- [ ] 4.2 创建 prgrmrwy/dsh-auto-model-routing 公开镜像，subtree 推已提交 package；设置默认 main、About/topics，记录源提交与镜像提交映射及 created_at。
-- [ ] 4.3 从镜像执行真实 Git 依赖安装并验证 prepare/build approval 与 bundle/skill 装配，不只测试手动复制目录。
+- [x] 4.1 复核 GitHub/npm 名称仍可用、包当前树及拟公开子树历史无秘密/公司身份；新克隆设显式公开身份；提交并推送验证过的 ohmydsh 源码。
+- [x] 4.2 创建 prgrmrwy/dsh-auto-model-routing 公开镜像，subtree 推已提交 package；设置默认 main、About/topics，记录源提交与镜像提交映射及 created_at。
+- [x] 4.3 从镜像执行真实 Git 依赖安装并验证 prepare/build approval 与 bundle/skill 装配，不只测试手动复制目录。
 
 ## 5. npm 首发与长期认证
 
@@ -36,6 +36,6 @@
 ## 6. 商店收录与交付
 
 - [ ] 6.1 重新读取 awesome-dsh-plugin 当前贡献规则/类别/schema，核对差异化描述、包可加载与实际仓库年龄；本地 validateEntries 预校验通过后以公开身份提单条 YAML PR，记录链接和 CI。
-- [ ] 6.2 提交 dsh.so 自助申请，记录结果；其它 topic 爬虫只报告已配索引条件，不声称即时收录。
-- [ ] 6.3 更新根索引独立仓库链接及 verify 中的 npm/镜像/PR/网站可见性；年龄、认证、审核和探测等待分别列为未完成条件，禁止把“申请已提交”写成“已上架”。
-- [ ] 6.4 同步主规范的新增要求与 skill 路径，运行严格 OpenSpec 校验；按实际完成情况汇报，仍有必要外部待办则保持 change 未归档。
+- [x] 6.2 提交 dsh.so 自助申请，记录结果；其它 topic 爬虫只报告已配索引条件，不声称即时收录。
+- [x] 6.3 更新根索引独立仓库链接及 verify 中的 npm/镜像/PR/网站可见性；年龄、认证、审核和探测等待分别列为未完成条件，禁止把“申请已提交”写成“已上架”。
+- [x] 6.4 同步主规范的新增要求与 skill 路径，运行严格 OpenSpec 校验；按实际完成情况汇报，仍有必要外部待办则保持 change 未归档。

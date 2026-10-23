@@ -206,7 +206,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
 - [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
-- [auto-model-routing](packages/auto-model-routing/README.md) — In AUTO, asks the Jev decision model for each turn's tier and adjusts only reasoning effort; any Jev failure turns AUTO off and says why.
+- [auto-model-routing](packages/auto-model-routing/README.md) — In AUTO, asks the Jev decision model for each turn's tier and adjusts only reasoning effort; any Jev failure turns AUTO off and says why. [Standalone repository](https://github.com/prgrmrwy/dsh-auto-model-routing).
 
 ### Self-developed skills, preset and patch
 

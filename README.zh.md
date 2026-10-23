@@ -206,7 +206,7 @@ tests/                   仓库级测试
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
 - [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
-- [auto-model-routing](packages/auto-model-routing/README.md) — AUTO 下每回合请 Jev 决策模型判档，只调整推理强度；Jev 任何失败即停用 AUTO 并提示原因。
+- [auto-model-routing](packages/auto-model-routing/README.md) — AUTO 下每回合请 Jev 决策模型判档，只调整推理强度；Jev 任何失败即停用 AUTO 并提示原因。[独立仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)。
 
 ### 自研 skill、preset 与 patch
 
