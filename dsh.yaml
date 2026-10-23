@@ -372,16 +372,17 @@ customizations:
     enabled: true
     brief: 为 ponytail 包挂专属 skill-filesystem provider(不含默认根)
     note: '组合补丁(patches/ponytail-skills.yml):插入 @deepseek-ai/dsh-skill-filesystem 行,providerName ponytail-plugin,includeDefaultRoots:false,skills 目录由 profile baseUrl 经包主入口解析(包的 exports 未导出 package.json,不能照搬 archify 写法)。升级复核:确认包主入口仍位于 .opencode/plugins/ 下两级(目录结构变化需同步改路径)。移除:enabled:false → dsh build。'
-  # 第三方 /btw 旁问(BACKLOG B049):暂用 PR #16 本地构建(唯一能复用主会话 cache 的版本),合入发版后改回 npm 精确版本。
+  # 第三方 /btw 旁问(BACKLOG B049):暂用 PR #16 构建(唯一能复用主会话 cache 的版本),合入发版后改回 npm 精确版本。
+  # spec 必须是各机器都能取到的地址:file: 本机路径会让其他机器 dsh build 报 ENOENT。
   - id: michengai-btw
     type: package
     source: remote
-    spec: 'file:/Users/prgrmrwy/.dsh/managed-assets/btw-cache-probe/michengai-dsh-btw-1.0.4-pr16-e28856d.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-btw/releases/download/pr16-e28856d/michengai-dsh-btw-1.0.4-pr16-e28856d.tgz'
     name: '@michengai/dsh-btw'
     version: 1.0.4
     enabled: true
     brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;暂用 PR #16 构建)
-    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。现装 PR #16 本地 tarball(commit e28856d,SHA256 586c1c62…2226a),相对 1.0.4 只去掉 persona 与空工具白名单。B049 实测:该构建在父子工具集一致时 Claude/codex 首请求均近全量命中主会话 cache,1.0.4 恒为 0;experimental-schedule 启用时工具集不一致,同样不命中。合入发版后改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
+    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。现装 PR #16 构建,发布于本人 fork 的 release(commit e28856d,tarball SHA256 586c1c62…2226a),相对 1.0.4 只去掉 persona 与空工具白名单。B049 实测:该构建在父子工具集一致时 Claude/codex 首请求均近全量命中主会话 cache,1.0.4 恒为 0;experimental-schedule 启用时工具集不一致,同样不命中。合入发版后改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
 
   # 第三方(remote):Magpie 网关 provider —— 家庭 CT105 magpie(114.114.114.223:3425)的模型进入选择器,与现有直连 provider 并存
   - id: dsh-magpie-connect

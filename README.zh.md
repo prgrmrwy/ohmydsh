@@ -170,7 +170,7 @@ tests/                   仓库级测试
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — 在五档之间切换对话区宽度。
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — 把侧边栏变成服务化的多标签工作台。
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — 发送 OpenCode Go 要求的会话头，修复缺少会话 ID 的报错。
-- [michengai-btw](https://github.com/MichengAI/dsh-btw) — 增加 `/btw` 旁问：只依据当前上下文一次性作答，不执行工具，也不写回主会话。
+- [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — 增加 `/btw` 旁问：只依据当前上下文一次性作答，不执行工具，也不写回主会话。暂时从 fork 的 release 安装上游 MichengAI/dsh-btw 的 PR #16 构建。
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — 把 Magpie AI 网关的模型接入模型选择器，与直连 provider 并存。
 
 ### 官方可选
