@@ -33,6 +33,12 @@ updates:
       # 受管 OpenSpec CLI 精确 pin,只经 openspec-upgrade(parity/smoke/integrity)升级;
       # Dependabot 会把 workspace spec 改成 ^x.y.z,触发 dsh-openspec-pin-mismatch。
       - dependency-name: '@fission-ai/openspec'
+      # 宿主提供的共享运行时库:版本随 dsh.yaml 的 DSH pin 走(官方包以 ~x.y.z 锁定),
+      # 插件 peer/运行时范围不得超过部署宿主,否则 peer 不满足或装出第二份副本。
+      # 跟随 DSH 升级一起手动调整。
+      - dependency-name: '@deepseek-ai/cordis*'
+      - dependency-name: '@deepseek-ai/schemastery'
+      - dependency-name: 'zod'
       # 大版本升级需要单独做运行时、类型和 API 兼容性审查，不自动开 PR。
       - dependency-name: '*'
         update-types:
