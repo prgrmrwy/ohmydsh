@@ -1,8 +1,25 @@
 import type { CommitRecord, SpaceState } from '../model/index.js'
+
+const own = <T>(target: Record<string, T>, key: string, value: T) => Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true })
+
+/**
+ * Pure fold of one commit. Besides the business state it derives the topic of
+ * every message and item creation from `ref`, and counts a topic's waking
+ * messages: a needsReply `message/sent` counts when the same commit holds a
+ * `wake` intent for its recipient. `delivery.thread` is never consulted, so
+ * pre-change logs count the same way. A dangling `ref` throws: the space
+ * fails closed instead of loading with a broken chain.
+ */
 export function reduce(previous: SpaceState | undefined, record: CommitRecord): SpaceState | undefined {
   let state = previous ? structuredClone(previous) : undefined
+  const topicOf = (seq: number, ref: number | undefined): number => {
+    if (ref === undefined) return seq
+    const root = state!.topicOf[ref]
+    if (root === undefined || !(ref < seq)) throw new Error(`dangling ref ${ref} at seq ${seq}`)
+    return root
+  }
   for (const e of record.events) {
-    if (e.type === 'space/created') state = { spaceId: e.spaceId, serviceId: e.serviceId, leader: e.leader, convention: e.convention, status: 'open', members: {}, items: {}, requests: {}, decisions: [], messages: [], deliveries: {}, lastSeq: 0 }
+    if (e.type === 'space/created') state = { spaceId: e.spaceId, serviceId: e.serviceId, leader: e.leader, convention: e.convention, ...(e.purpose === undefined ? {} : { purpose: e.purpose }), status: 'open', members: {}, items: {}, itemSeq: {}, topicOf: {}, topicWakes: {}, requests: {}, decisions: [], messages: [], deliveries: {}, lastSeq: 0 }
     if (!state) throw new Error('event before space/created')
     switch (e.type) {
       case 'space/closed': state.status = 'closed'; break
@@ -10,9 +27,20 @@ export function reduce(previous: SpaceState | undefined, record: CommitRecord): 
       case 'member/invited': case 'member/joined': state.members[e.member.name] = structuredClone(e.member); break
       case 'member/status': state.members[e.name]!.status = e.status; break
       case 'member/statusText': state.members[e.name]!.statusText = e.text; break
-      case 'item/created': case 'item/revised': case 'item/acked': Object.defineProperty(state.items, e.item.id, { value: structuredClone(e.item), enumerable: true, configurable: true, writable: true }); break
+      case 'item/created':
+        state.topicOf[record.seq] = topicOf(record.seq, e.item.ref)
+        own(state.itemSeq, e.item.id, record.seq)
+        own(state.items, e.item.id, structuredClone(e.item)); break
+      case 'item/revised': case 'item/acked': own(state.items, e.item.id, structuredClone(e.item)); break
       case 'request/progressed': { const item = state.items[e.itemId]; if (item?.kind === 'request') item.progress = e.progress; break }
-      case 'message/sent': state.messages.push(structuredClone(e.message)); break
+      case 'message/sent': {
+        const root = topicOf(record.seq, e.message.ref)
+        state.topicOf[record.seq] = root
+        state.messages.push(structuredClone(e.message))
+        const counted = e.message.needsReply && record.events.some(d => d.type === 'dispatch/intended' && d.delivery.kind === 'wake' && d.delivery.member === e.message.to)
+        if (counted) state.topicWakes[root] = (state.topicWakes[root] ?? 0) + 1
+        break
+      }
       case 'decision/requested': state.requests[e.request.id] = structuredClone(e.request); break
       case 'decision/superseded': state.requests[e.requestId]!.status = 'superseded'; break
       case 'decision/decided': state.decisions.push(structuredClone(e.decision)); state.requests[e.decision.requestId]!.status = 'closed'; state.items[e.decision.itemId]!.status = 'decided'; break

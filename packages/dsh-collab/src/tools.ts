@@ -8,6 +8,10 @@ const S = { type: 'string' } as const
 const str = { type: 'string', required: true } as const
 const integer = { type: 'integer', required: true } as const
 const strings = { type: 'array', items: { type: 'string' }, required: true } as const
+const optStrings = { type: 'array', items: { type: 'string' } } as const
+const ref = { type: 'integer' } as const
+/** Copy optional fields only when present, unchanged: absent keys stay absent so payload hashes match. */
+const pick = (a: Args, ...keys: string[]) => Object.fromEntries(keys.filter(k => a[k] !== undefined).map(k => [k, a[k]]))
 const common = { spaceId: str, cmdId: str } as const
 
 /** Codes that could reveal whether a space exists, who is in it, or its storage state. */
@@ -26,7 +30,7 @@ export function safeError(error: unknown) {
 type Args = Record<string, any>
 type Run = (args: Args, service: CollabService, command: CommandContext) => Promise<unknown>
 /** One closed enum value: the exact kernel method it maps to and its own fields. */
-interface Variant { fields: readonly string[]; run: Run }
+interface Variant { fields: readonly string[]; optional?: readonly string[]; run: Run }
 interface Spec { description: string; parameters: ParameterSchemaSpec; kind: 'write' | 'read'; selector?: 'action' | 'view'; variants?: Record<string, Variant>; run?: Run }
 
 export const STATUS_DESCRIPTION = '同机会话协作入口：先调用它查看你所在空间、待办与下一步建议。写命令返回 COLLAB_SPACE_UNAVAILABLE 时结果未知，稍后用原 cmdId 与相同参数重试。'
@@ -35,9 +39,9 @@ const self = (c: CommandContext) => c.principal.kind === 'agent' ? c.principal.a
 export const toolSpecs: Record<string, Spec> = {
   collab_space: {
     description: '创建或关闭协作空间（关闭需 Leader）。', kind: 'write', selector: 'action',
-    parameters: { action: { type: 'string', enum: ['create', 'close'], required: true }, ...common, name: S },
+    parameters: { action: { type: 'string', enum: ['create', 'close'], required: true }, ...common, name: S, purpose: S },
     variants: {
-      create: { fields: ['name'], run: (a, s, c) => s.createSpace(c, { name: a.name, address: self(c), kind: 'agent' }) },
+      create: { fields: ['name'], optional: ['purpose'], run: (a, s, c) => s.createSpace(c, { name: a.name, address: self(c), kind: 'agent', ...pick(a, 'purpose') }) },
       close: { fields: [], run: (_a, s, c) => s.closeSpace(c) },
     },
   },
@@ -68,9 +72,10 @@ export const toolSpecs: Record<string, Spec> = {
   },
   collab_create_item: {
     description: '创建条目；itemId 用小写字母、数字与连字符；request 需 assignee。', kind: 'write',
-    parameters: { ...common, itemId: str, kind: { type: 'string', enum: ['charter', 'other', 'request'], required: true }, title: str, body: str, requiredAcks: strings, deciders: strings, assignee: S },
+    parameters: { ...common, itemId: str, kind: { type: 'string', enum: ['charter', 'other', 'request'], required: true }, title: str, body: str, requiredAcks: strings, assignee: S, ref, deciders: optStrings },
     run: (a, s, c) => {
-      const input = { itemId: a.itemId, title: a.title, body: a.body, requiredAcks: a.requiredAcks, deciders: a.deciders }
+      // Legacy `deciders` is forwarded untyped so pre-change retries hit their receipts; the kernel refuses it otherwise.
+      const input = { itemId: a.itemId, title: a.title, body: a.body, requiredAcks: a.requiredAcks, ...pick(a, 'deciders', 'ref') } as any
       if (a.kind === 'request') {
         if (!a.assignee) throw new CollabError('COLLAB_BAD_ARGUMENTS')
         return s.createItem(c, { ...input, kind: 'request', assignee: a.assignee })
@@ -89,9 +94,9 @@ export const toolSpecs: Record<string, Spec> = {
     run: (a, s, c) => s.ackItem(c, { itemId: a.itemId, revision: a.revision }),
   },
   collab_send_message: {
-    description: '发消息；只有需要对方接续时 needsReply=true。', kind: 'write',
-    parameters: { ...common, to: str, body: str, needsReply: { type: 'boolean' } },
-    run: (a, s, c) => s.sendMessage(c, { to: a.to, body: a.body, needsReply: a.needsReply }),
+    description: '发消息；只有需要对方接续时 needsReply=true。接续同一件事时 ref 填相关消息或条目的 seq，另起一件事不填。', kind: 'write',
+    parameters: { ...common, to: str, body: str, needsReply: { type: 'boolean' }, ref },
+    run: (a, s, c) => s.sendMessage(c, { to: a.to, body: a.body, needsReply: a.needsReply, ...pick(a, 'ref') }),
   },
   collab_set_status: {
     description: '更新自己的状态文本，不唤醒他人。', kind: 'write',
@@ -102,11 +107,6 @@ export const toolSpecs: Record<string, Spec> = {
     description: '承接方推进 request。', kind: 'write',
     parameters: { ...common, itemId: str, progress: { type: 'string', enum: ['open', 'accepted', 'done', 'rejected'], required: true } },
     run: (a, s, c) => s.advanceRequest(c, { itemId: a.itemId, progress: a.progress }),
-  },
-  collab_request_decision: {
-    description: '请人决定，给 2–8 个选项。', kind: 'write',
-    parameters: { ...common, itemId: str, options: strings },
-    run: (a, s, c) => s.requestDecision(c, { itemId: a.itemId, options: a.options }),
   },
 }
 /** Reserved cmdId: addresses are never reused in a space, so one join per member; retries replay its receipt. */
@@ -157,14 +157,14 @@ export function collabTools(ctx: Context, access: SessionAccess, getHost: () => 
     } catch (error) { return { error: safeError(error) } }
   })
   for (const [name, spec] of Object.entries(toolSpecs)) {
-    const variantFields = new Set(Object.values(spec.variants ?? {}).flatMap(v => v.fields))
+    const variantFields = new Set(Object.values(spec.variants ?? {}).flatMap(v => [...v.fields, ...(v.optional ?? [])]))
     register(name, spec.description, spec.parameters, async (object, exec) => {
       let run = spec.run
       if (spec.selector) {
         const value = object[spec.selector]
         const variant = typeof value === 'string' && Object.hasOwn(spec.variants!, value) ? spec.variants![value]! : undefined
         // Closed enum: each value needs exactly its own fields, never another value's.
-        if (!variant || variant.fields.some(f => object[f] === undefined) || [...variantFields].some(f => object[f] !== undefined && !variant.fields.includes(f))) throw new CollabError('COLLAB_BAD_ARGUMENTS')
+        if (!variant || variant.fields.some(f => object[f] === undefined) || [...variantFields].some(f => object[f] !== undefined && !variant.fields.includes(f) && !variant.optional?.includes(f))) throw new CollabError('COLLAB_BAD_ARGUMENTS')
         run = variant.run
       }
       if (spec.kind === 'write' && (typeof object.cmdId !== 'string' || !object.cmdId.trim())) throw new CollabError('COLLAB_BAD_CMD_ID')

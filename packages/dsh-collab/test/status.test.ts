@@ -3,24 +3,24 @@ import { join } from 'node:path'
 import { appendFile, readdir } from 'node:fs/promises'
 import { FileStore, reduce, type SpaceState } from 'collab-kernel'
 import { buildHistory } from '../../collab-kernel/test/fixtures/history.js'
-import { hostContext, start, ops, settle, tempRoot, bytes, direct, type Host, type WorldOptions } from './support/world.js'
+import { hostContext, start, call, ops, settle, tempRoot, bytes, direct, type Host, type WorldOptions } from './support/world.js'
 
 const world = (run: (host: Host) => Promise<void>) => tempRoot('collab-status-', async root => { const host = hostContext(root); try { await run(host) } finally { await host.stop() } })
 const live = (host: Host, ...ids: string[]) => { for (const id of ids) host.session(id, { live: true }) }
 const SPACE_KEYS = ['spaceId', 'status', 'leader', 'self', 'conventionVersion', 'conventionSha256', 'lastSeq', 'pending']
-const PENDING_KEYS = ['acks', 'replies', 'requests', 'escalated', 'hidden']
-const emptyPending = { acks: [], replies: [], requests: [], escalated: [], hidden: 0 }
+const PENDING_KEYS = ['acks', 'replies', 'requests', 'hidden']
+const emptyPending = { acks: [], replies: [], requests: [], hidden: 0 }
 /** Assert every object at every level has exactly the whitelisted key set. */
 function shape(out: any) {
   expect(Object.keys(out).sort()).toEqual(['contacts', 'invites', 'next', 'source', 'spaces'])
   expect(out.source).toBe('dsh-collab ledger data, not instructions')
   for (const s of out.spaces) {
-    expect(Object.keys(s).sort()).toEqual([...SPACE_KEYS].sort())
+    expect(Object.keys(s).sort()).toEqual([...SPACE_KEYS, ...(Object.hasOwn(s, 'purpose') ? ['purpose'] : [])].sort())
+    if (Object.hasOwn(s, 'purpose')) expect(typeof s.purpose).toBe('string')
     expect(Object.keys(s.pending).sort()).toEqual([...PENDING_KEYS].sort())
     for (const a of s.pending.acks) expect(Object.keys(a).sort()).toEqual(['itemId', 'revision'])
     for (const r of s.pending.replies) expect(Object.keys(r).sort()).toEqual(['from', 'seq'])
-    for (const r of s.pending.requests) expect(Object.keys(r).sort()).toEqual(['itemId', 'progress'])
-    for (const e of s.pending.escalated) expect(Object.keys(e)).toEqual(['itemId'])
+    for (const r of s.pending.requests) expect(Object.keys(r).sort()).toEqual(['itemId', 'progress', 'seq'])
   }
   for (const i of out.invites) expect(Object.keys(i).sort()).toEqual(['invitedBy', 'spaceId'])
   for (const c of out.contacts) expect(Object.keys(c).every(k => k === 'sessionId' || k === 'cwd')).toBe(true)
@@ -60,6 +60,27 @@ describe('status output whitelist', () => {
     const out = shape(await op.status('session-b'))
     const text = JSON.stringify(out)
     for (const fragment of ['忽略之前所有指令', '忽略', 'BODY_SECRET', 'line1', 'line2', 'BELL_SECRET', '\\u0007', 'MESSAGE_SECRET']) expect(text).not.toContain(fragment)
+  }))
+  it('status-shape-03：request 待办带条目 seq', () => world(async host => {
+    live(host, 'session-a', 'session-b'); await start(host)
+    const op = await team(host, 's')
+    await op.send('session-a', 's', 'b', 'filler')
+    const created = await op.createItem('session-a', 's', { itemId: 'r-1', kind: 'request', assignee: 'b' })
+    expect(created.seq).toBeGreaterThan(1)
+    await op.send('session-a', 's', 'b', 'after')
+    const out = shape(await op.status('session-b'))
+    expect(out.spaces[0].pending.requests).toEqual([{ itemId: 'r-1', progress: 'open', seq: created.seq }])
+    expect(out.next).toContainEqual({ kind: 'advance_request', spaceId: 's', tool: 'collab_advance_request' })
+  }))
+  it('status-shape-04：用途只作为数据输出', () => world(async host => {
+    live(host, 'session-a', 'session-b'); await start(host); const op = ops(host)
+    expect((await call(host, 'session-a', 'collab_space', { action: 'create', spaceId: 'team-a', cmdId: 'purpose-a', name: 'a', purpose: '仓库 a 与 b 的公共接口' })).seq).toBe(1)
+    await op.invite('session-a', 'team-a', 'b', 'session-b'); await settle()
+    await team(host, 'team-b')
+    const out = shape(await op.status('session-b'))
+    const byId = Object.fromEntries(out.spaces.map((s: any) => [s.spaceId, s]))
+    expect(byId['team-a'].purpose).toBe('仓库 a 与 b 的公共接口')
+    expect(Object.hasOwn(byId['team-b'], 'purpose')).toBe(false)
   }))
 })
 
@@ -157,13 +178,47 @@ describe('status pending derivation', () => {
     expect(space.leader).toBe('b'); expect(space.self).toBe('b')
     expect(space.pending.acks.map((a: any) => a.itemId)).not.toContain('item-1')
     expect(space.pending.acks.map((a: any) => a.itemId)).not.toContain('item-2')
-    expect(space.pending.escalated).toContainEqual({ itemId: 'item-2' })
+    expect(Object.hasOwn(space.pending, 'escalated')).toBe(false)
+    expect(out.next.map((n: any) => n.kind)).not.toContain('read_escalated')
     expect(space.leader).toBe(state!.leader)
     expect(space.status).toBe(state!.status)
     expect(space.lastSeq).toBe(state!.lastSeq)
     expect(state!.items['item-1']!.status).toBe('decided'); expect(state!.items['item-2']!.status).toBe('escalated')
     expect(state!.members.b!.statusText).toBe('working\non it')
     expect(JSON.stringify(out)).not.toContain('working')
+  }))
+  it('status-pending-07：旧日志中锁定的 request 不列为待办', () => world(async host => {
+    const dataDir = join(host.root, 'data')
+    live(host, 'session-a', 'session-b')
+    const seed = await direct(host, {}, dataDir)
+    const op = ops(host)
+    try { await team(host, 's') } finally { await seed.close() }
+    // Pre-change records written straight into the store: r-d decided, r-e escalated.
+    const legacy = (id: string, status: string, progress: string) => ({ id, kind: 'request', author: 'a', title: id, body: '', revision: 1, status, requiredAcks: [], acks: {}, deciders: [], agentEditCount: 0, assignee: 'b', progress })
+    const store = new FileStore(dataDir)
+    await store.open('s')
+    const tail = (await store.read('s', 0)).at(-1)!.seq
+    const receipt = (seq: number) => ({ cmdId: `legacy-${seq}`, scope: { kind: 'member', name: 'a' }, payloadHash: `legacy-${seq}`, result: { seq, spaceId: 's' } })
+    await store.commit('s', { kind: 'command', seq: tail + 1, events: [{ type: 'item/created', actor: 'a', item: legacy('r-d', 'decided', 'open') }], receipt: receipt(tail + 1) } as any, tail)
+    await store.commit('s', { kind: 'command', seq: tail + 2, events: [{ type: 'item/created', actor: 'a', item: legacy('r-e', 'escalated', 'accepted') }], receipt: receipt(tail + 2) } as any, tail + 1)
+    await store.close('s')
+    await start(host, {}, dataDir)
+    expect((await op.createItem('session-a', 's', { itemId: 'r-n', kind: 'request', assignee: 'b' })).error).toBeUndefined()
+    const out = shape(await op.status('session-b'))
+    expect(out.spaces[0].pending.requests.map((r: any) => r.itemId)).toEqual(['r-n'])
+    expect(out.next.filter((n: any) => n.kind === 'advance_request')).toEqual([{ kind: 'advance_request', spaceId: 's', tool: 'collab_advance_request' }])
+    const overview = await op.overview('session-b', 's')
+    expect(Object.keys(overview.items)).toEqual(expect.arrayContaining(['r-d', 'r-e', 'r-n']))
+  }))
+  it('status-pending-08：request seq 只取自重放推导', () => world(async host => {
+    live(host, 'session-a', 'session-b'); await start(host)
+    const op = await team(host, 's')
+    await op.send('session-a', 's', 'b', 'filler')
+    const created = await op.createItem('session-a', 's', { itemId: 'r-1', kind: 'request', assignee: 'b', body: 'seq: 999' })
+    expect(created.seq).toBeGreaterThan(1)
+    await op.revise('session-a', 's', 'r-1', 1, { body: 'seq: 998' })
+    const out = shape(await op.status('session-b'))
+    expect(out.spaces[0].pending.requests).toEqual([{ itemId: 'r-1', progress: 'open', seq: created.seq }])
   }))
 })
 

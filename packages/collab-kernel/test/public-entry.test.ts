@@ -10,7 +10,7 @@ it('public package entry offers the library without exposing unauthorised conven
 })
 import { principals as p, reduce, type SpaceState } from '../src/index.js'
 import { buildHistory } from './fixtures/history.js'
-const pick = (s: Partial<SpaceState>) => ({ members: s.members, items: s.items, leader: s.leader, status: s.status, lastSeq: s.lastSeq })
+const pick = (s: Partial<SpaceState>) => ({ members: s.members, items: s.items, leader: s.leader, status: s.status, lastSeq: s.lastSeq, itemSeq: s.itemSeq, topicOf: s.topicOf })
 it('reduce-01：公开推导与内核状态一致', async () => {
   const h = await buildHistory()
   const records = await h.service.readSince({ spaceId: 's', principal: p.internal('host-index') }, 0)
@@ -19,6 +19,8 @@ it('reduce-01：公开推导与内核状态一致', async () => {
   const overview = await h.service.overview({ spaceId: 's', principal: p.internal('host-index') })
   expect(pick(state!)).toEqual(pick(overview))
   expect(state!.leader).toBe('b'); expect(state!.items['item-1']!.status).toBe('decided'); expect(state!.items['item-2']!.status).toBe('escalated')
+  const item3 = state!.itemSeq['item-3']!; const message = state!.messages.at(-1)!
+  expect(message.ref).toBe(item3); expect(state!.topicOf[Number(message.id)]).toBe(item3); expect(state!.topicWakes[item3]).toBe(1)
 })
 it('reduce-02：推导不修改输入', async () => {
   const h = await buildHistory()

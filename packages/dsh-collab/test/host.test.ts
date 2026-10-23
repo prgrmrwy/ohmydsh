@@ -104,7 +104,7 @@ it('host-close-drain: one close rejection cannot finish shutdown before another 
   } finally { release(); await observed; await close('failed') }
 }))
 
-it('host-human-history: legitimate persisted human with no confirmation channel remains awaitingChannel', () => fixture(async root => {
+it('host-human-history: a persisted human member and deciders replay as history with no decision path', () => fixture(async root => {
   const dataDir = join(root, 'data')
   let host = await CollabHost.create({ dataDir }, [], [provider])
   const serviceId = host.config.serviceId
@@ -128,13 +128,16 @@ it('host-human-history: legitimate persisted human with no confirmation channel 
   // by an exposed command or granted a provider principal at this boundary.
   host = await CollabHost.create({ dataDir }, [], [provider])
   try {
-    const result = await host.command('a', 'history', 'decision', service => service.requestDecision(host.context('a', 'history', 'decision'), { itemId: 'i', options: ['yes', 'no'] }))
     const state = await host.read('a', 'history', service => service.overview(host.context('a', 'history')))
-    expect(state.requests[result.requestId!]).toMatchObject({ status: 'open', awaitingChannel: true, deciders: ['pm'] })
+    expect(state.members.pm).toMatchObject({ kind: 'human', status: 'active' })
+    expect(state.items.i).toMatchObject({ status: 'draft', deciders: ['pm'] })
+    expect('requestDecision' in host.service).toBe(false)
+    // A fresh command may no longer name deciders; the kernel rejects it without writing.
+    await expect(host.command('a', 'history', 'new-item', service => service.createItem(host.context('a', 'history', 'new-item'), { itemId: 'j', kind: 'other', title: 'T', body: '', requiredAcks: [], deciders: ['pm'] } as any))).rejects.toMatchObject({ code: 'COLLAB_BAD_ITEM', details: { field: 'deciders' } })
     expect(state.decisions).toEqual([])
     expect(state.pendingDeliveries).toEqual([])
     const records = (await readFile(join(dataDir, 'history.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-    expect(records.flatMap(record => record.events).some(event => event.type === 'decision/decided' || event.type === 'dispatch/intended')).toBe(false)
+    expect(records).toHaveLength(1)
   } finally { await host.close() }
 }))
 

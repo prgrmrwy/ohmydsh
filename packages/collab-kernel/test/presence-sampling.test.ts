@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { world } from './support/world.js'
+import { defaultMembers, world } from './support/world.js'
 
 it('presence is sampled once before queue admission and later changes do not rewrite the intent', async () => {
   const w = await world()
@@ -18,14 +18,14 @@ it('presence is sampled once before queue admission and later changes do not rew
   const presence = vi.spyOn(w.provider, 'presence')
   w.provider.observedPresence = 'reachable'
   const pending = w.service.sendMessage(w.ctx('aily', 'queued'), { to: 'doubao', body: 'message', needsReply: true })
-  await expect.poll(() => presence.mock.calls.length).toBe(5)
+  await expect.poll(() => presence.mock.calls.length).toBe(defaultMembers().length)
   w.provider.observedPresence = 'unreachable'
   release()
   await first
   const result = await pending
   const command = w.log().find(r => r.seq === result.seq)!
   expect(command.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'dispatch/intended', delivery: expect.objectContaining({ member: 'doubao', kind: 'wake' }) })]))
-  expect(presence).toHaveBeenCalledTimes(5)
+  expect(presence).toHaveBeenCalledTimes(defaultMembers().length)
 })
 
 it('a pending provider delivery cannot hold the space serial queue or close', async () => {

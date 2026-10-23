@@ -1,7 +1,0 @@
-import { expect, it } from 'vitest'
-import { ESCALATE_AFTER, type Item } from '../src/index.js'
-import { world } from './support/world.js'
-const seed = (count: number) => world([{ type: 'item/created', actor: 'aily', item: { id: 'C', kind: 'charter', author: 'aily', title: 'C', body: '', revision: 4, status: 'draft', requiredAcks: ['aily'], deciders: [], acks: {}, agentEditCount: count } satisfies Item }])
-it('escalation-01：第四次agent修改升级且无agent唤醒', async () => { const w = await seed(ESCALATE_AFTER); await w.service.reviseItem(w.ctx(), { itemId: 'C', expectedRevision: 4, changes: { title: 'new' } }); expect((await w.service.overview(w.read())).items.C).toMatchObject({ status: 'escalated', revision: 5, title: 'new', agentEditCount: ESCALATE_AFTER + 1 }); expect(w.log().at(-1)?.events.filter(e => e.type === 'dispatch/intended' && e.delivery.kind === 'wake')).toEqual([]) })
-it('escalation-02：人类修改不变计数', async () => { const w = await seed(ESCALATE_AFTER); await w.service.reviseItem(w.ctx('pm'), { itemId: 'C', expectedRevision: 4, changes: { title: 'new' } }); expect((await w.service.overview(w.read())).items.C).toMatchObject({ status: 'draft', agentEditCount: ESCALATE_AFTER }) })
-it('escalation-03：agreed计数归零', async () => { const w = await seed(2); await w.service.ackItem(w.ctx(), { itemId: 'C', revision: 4 }); expect((await w.service.overview(w.read())).items.C).toMatchObject({ status: 'agreed', agentEditCount: 0 }) })

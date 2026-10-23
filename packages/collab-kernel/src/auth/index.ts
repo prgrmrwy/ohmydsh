@@ -1,5 +1,5 @@
 import type { Address } from '../model/index.js'
-export type InternalPurpose = 'breaker-reset' | 'host-index'
+export type InternalPurpose = 'host-index'
 const brand = Symbol('collab-principal')
 export type Principal = ({ kind: 'agent' } & Address | { kind: 'provider'; providerId: string; on: Address } | { kind: 'internal'; purpose: InternalPurpose }) & { readonly [brand]: true }
 export const principals = {
@@ -9,6 +9,6 @@ export const principals = {
 }
 export const isPrincipal = (value: Principal): boolean => value?.[brand] === true
 export const authorization = {
-  createSpace: 'create', invite: 'leader', join: 'invited', declineInvite: 'invited', leave: 'active', markGone: 'leader', transferLeader: 'leader', closeSpace: 'leader', createItem: 'active', reviseItem: 'active', ackItem: 'active', sendMessage: 'active', setStatus: 'active', advanceRequest: 'assignee', requestDecision: 'active', confirmDecision: 'human-provider', resetBreaker: 'internal',
+  createSpace: 'create', invite: 'leader', join: 'invited', declineInvite: 'invited', leave: 'active', markGone: 'leader', transferLeader: 'leader', closeSpace: 'leader', createItem: 'active', reviseItem: 'active', ackItem: 'active', sendMessage: 'active', setStatus: 'active', advanceRequest: 'assignee',
 } as const
 export type CommandName = keyof typeof authorization

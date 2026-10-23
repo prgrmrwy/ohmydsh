@@ -3,14 +3,16 @@ import { join } from 'node:path'
 import { collabTools, safeError } from '../src/tools.js'
 import { CollabError, FileStore } from 'collab-kernel'
 import { hostContext, start, call, ops, settle, tempRoot, bytes, direct, type Host } from './support/world.js'
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { canonical } from '../../collab-kernel/src/service/index.js'
 
-const NAMES = ['collab_status', 'collab_space', 'collab_invite', 'collab_member', 'collab_read', 'collab_create_item', 'collab_revise_item', 'collab_ack_item', 'collab_send_message', 'collab_set_status', 'collab_advance_request', 'collab_request_decision']
+const NAMES = ['collab_status', 'collab_space', 'collab_invite', 'collab_member', 'collab_read', 'collab_create_item', 'collab_revise_item', 'collab_ack_item', 'collab_send_message', 'collab_set_status', 'collab_advance_request']
 const codeOf = async (run: Promise<any>) => { try { const value = await run; return value?.error?.code ?? 'OK' } catch (error: any) { return error?.code ?? 'THROWN' } }
 const ledger = (host: Host, spaceId: string) => join(host.root, 'data', `${spaceId}.jsonl`)
 const world = (run: (host: Host) => Promise<void>) => tempRoot('collab-tools-', async root => { const host = hostContext(root); try { await run(host) } finally { await host.stop() } })
 
-it('tool-contract: exactly twelve named tools, unknown identity fields rejected before Host reads', async () => {
+it('tool-contract: exactly eleven named tools, unknown identity fields rejected before Host reads', async () => {
   let calls = 0
   const tools: any[] = []
   collabTools({ tools: { register(tool: any) { tools.push(tool) } } } as any, { caller: async () => { calls++; return 'a' } } as any, undefined as any)
@@ -47,7 +49,11 @@ it('tool-mapping: every closed enum value invokes its exact kernel method with t
     ['collab_send_message', { to: 'a', body: 'B', needsReply: true }, 'sendMessage', { to: 'a', body: 'B', needsReply: true }, true],
     ['collab_set_status', { text: 'working' }, 'setStatus', { text: 'working' }, true],
     ['collab_advance_request', { itemId: 'i', progress: 'done' }, 'advanceRequest', { itemId: 'i', progress: 'done' }, true],
-    ['collab_request_decision', { itemId: 'i', options: ['yes', 'no'] }, 'requestDecision', { itemId: 'i', options: ['yes', 'no'] }, true],
+    ['collab_create_item', { itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [] }, 'createItem', { itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [] }, true],
+    ['collab_create_item', { itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [], ref: 4 }, 'createItem', { itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [], ref: 4 }, true],
+    ['collab_revise_item', { itemId: 'i', expectedRevision: 2, changes: { deciders: [] } }, 'reviseItem', { itemId: 'i', expectedRevision: 2, changes: { deciders: [] } }, true],
+    ['collab_send_message', { to: 'a', body: 'B', needsReply: true, ref: 9999 }, 'sendMessage', { to: 'a', body: 'B', needsReply: true, ref: 9999 }, true],
+    ['collab_space', { action: 'create', name: 'b', purpose: ' p ' }, 'createSpace', { name: 'b', address: 'actual-b', kind: 'agent', purpose: ' p ' }, true],
     ['collab_read', { view: 'overview' }, 'overview', undefined, false], ['collab_read', { view: 'since', sinceSeq: 3 }, 'readSince', 3, false], ['collab_read', { view: 'convention', version: '1' }, 'readConvention', '1', false],
   ]
   for (const [name, args, method, input, write] of rows) {
@@ -127,6 +133,92 @@ describe('named tools adapt the kernel faithfully', () => {
     const before = await bytes(ledger(host, 's'))
     expect(await op.createItem('session-a', 's', { itemId: 'Old Item', title: 'old' }, 'c-1')).toEqual(first)
     expect(await bytes(ledger(host, 's'))).toEqual(before)
+  }))
+  it('tool-07：ref 与 purpose 原样传给内核', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-b', { live: true })
+    const assembled = await direct(host)
+    try {
+      const op = ops(host)
+      expect((await call(host, 'session-a', 'collab_space', { action: 'create', spaceId: 's', cmdId: 'p-1', name: 'a', purpose: '接口协作' })).seq).toBe(1)
+      await op.invite('session-a', 's', 'b', 'session-b'); await settle()
+      const asked = await op.send('session-a', 's', 'b', 'question', true); await settle()
+      expect(asked.seq).toBeGreaterThan(0)
+      const service: any = assembled.collab.service, inputs: any[] = [], original = service.sendMessage.bind(service)
+      service.sendMessage = (ctx: any, input: any) => { inputs.push(structuredClone(input)); return original(ctx, input) }
+      const answered = await op.send('session-b', 's', 'a', 'answer', false, 'ref-ok', { ref: asked.seq })
+      expect(answered.error).toBeUndefined(); expect(answered.seq).toBeGreaterThan(asked.seq)
+      expect(inputs[0]).toEqual({ to: 'a', body: 'answer', needsReply: false, ref: asked.seq })
+      await settle()
+      const before = await bytes(ledger(host, 's'))
+      expect(await op.send('session-b', 's', 'a', 'dangling', false, 'ref-bad', { ref: 9999 })).toEqual({ error: { code: 'COLLAB_BAD_REF' } })
+      expect(inputs[1]).toMatchObject({ ref: 9999 })
+      expect(await bytes(ledger(host, 's'))).toEqual(before)
+      expect((await op.overview('session-a', 's')).purpose).toBe('接口协作')
+    } finally { await assembled.close() }
+  }))
+  it('tool-08：升级前的创建重试仍命中收据', () => world(async host => {
+    host.session('session-a', { live: true })
+    const dataDir = join(host.root, 'data')
+    let assembled = await direct(host, {}, dataDir)
+    expect((await ops(host).create('session-a', 's', 'a')).seq).toBe(1)
+    await assembled.close()
+    // Pre-change plugin call: deciders was required, so the old kernel hashed it into the payload.
+    const args = { spaceId: 's', cmdId: 'c-9', itemId: 'item-9', kind: 'other', title: 'old title', body: 'old body', requiredAcks: [], deciders: [] }
+    const input = { itemId: args.itemId, title: args.title, body: args.body, requiredAcks: args.requiredAcks, deciders: args.deciders, kind: args.kind }
+    const result = { seq: 2, spaceId: 's', itemId: 'item-9' }
+    const store = new FileStore(dataDir)
+    await store.open('s')
+    await store.commit('s', {
+      kind: 'command', seq: 2,
+      events: [{ type: 'item/created', actor: 'a', item: { id: 'item-9', kind: 'other', author: 'a', title: 'old title', body: 'old body', revision: 1, status: 'draft', requiredAcks: [], acks: {}, deciders: [], agentEditCount: 0 } }],
+      receipt: { cmdId: 'c-9', scope: { kind: 'member', name: 'a' }, payloadHash: createHash('sha256').update(canonical({ name: 'createItem', input })).digest('hex'), result },
+    } as any, 1)
+    await store.close('s')
+    assembled = await direct(host, {}, dataDir)
+    try {
+      const before = await bytes(ledger(host, 's'))
+      expect(await call(host, 'session-a', 'collab_create_item', args)).toEqual(result)
+      expect(await bytes(ledger(host, 's'))).toEqual(before)
+      expect(await call(host, 'session-a', 'collab_create_item', { ...args, title: 'changed title' })).toEqual({ error: { code: 'COLLAB_CMD_CONFLICT' } })
+      expect(await bytes(ledger(host, 's'))).toEqual(before)
+      expect(await call(host, 'session-a', 'collab_create_item', { ...args, cmdId: 'c-10', itemId: 'item-10' })).toEqual({ error: { code: 'COLLAB_BAD_ITEM', details: { field: 'deciders' } } })
+      expect(await bytes(ledger(host, 's'))).toEqual(before)
+      const lines = (await readFile(ledger(host, 's'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      expect(lines.some((r: any) => r.receipt?.cmdId === 'c-10')).toBe(false)
+      expect(lines.flatMap((r: any) => r.events).some((e: any) => e.type === 'dispatch/intended')).toBe(false)
+    } finally { await assembled.close() }
+  }))
+  it('tool-09：不填 ref 时输入不含该键', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-b', { live: true })
+    const assembled = await direct(host)
+    try {
+      const op = ops(host)
+      await op.create('session-a', 's', 'a'); await op.invite('session-a', 's', 'b', 'session-b'); await settle()
+      const service: any = assembled.collab.service, inputs: any[] = []
+      for (const method of ['sendMessage', 'createItem', 'createSpace']) { const original = service[method].bind(service); service[method] = (ctx: any, input: any) => { inputs.push([method, structuredClone(input)]); return original(ctx, input) } }
+      expect((await op.send('session-a', 's', 'b', 'hello')).error).toBeUndefined()
+      expect((await op.createItem('session-a', 's', { itemId: 'item-1' })).error).toBeUndefined()
+      expect((await op.create('session-a', 't', 'a')).error).toBeUndefined()
+      expect(inputs.map(([method]) => method)).toEqual(['sendMessage', 'createItem', 'createSpace'])
+      expect(Object.hasOwn(inputs[0][1], 'ref')).toBe(false)
+      expect(Object.hasOwn(inputs[1][1], 'ref')).toBe(false)
+      expect(Object.hasOwn(inputs[1][1], 'deciders')).toBe(false)
+      expect(Object.hasOwn(inputs[2][1], 'purpose')).toBe(false)
+    } finally { await assembled.close() }
+  }))
+  it('tool-10：超出话题上限原样返回', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-b', { live: true })
+    await start(host); const op = ops(host)
+    await op.create('session-a', 's', 'a'); await op.invite('session-a', 's', 'b', 'session-b'); await settle()
+    const root = await op.send('session-a', 's', 'b', 'topic root', true); await settle()
+    expect(root.error).toBeUndefined()
+    for (let i = 2; i <= 20; i++) { expect((await op.send('session-a', 's', 'b', `turn ${i}`, true, undefined, { ref: root.seq })).error).toBeUndefined(); await settle() }
+    const wakes = host.followups.filter(f => f.id === 'session-b').length
+    const before = await bytes(ledger(host, 's'))
+    expect(await op.send('session-a', 's', 'b', 'turn 21', true, undefined, { ref: root.seq })).toEqual({ error: { code: 'COLLAB_THREAD_LIMIT' } })
+    await settle()
+    expect(await bytes(ledger(host, 's'))).toEqual(before)
+    expect(host.followups.filter(f => f.id === 'session-b').length).toBe(wakes)
   }))
 })
 

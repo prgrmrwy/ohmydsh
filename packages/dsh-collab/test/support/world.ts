@@ -107,10 +107,10 @@ export function ops(host: Host) {
     join: (caller: string, spaceId: string, cmdId = c()) => call(host, caller, 'collab_member', { action: 'join', spaceId, cmdId }),
     overview: (caller: string, spaceId: string) => call(host, caller, 'collab_read', { view: 'overview', spaceId }),
     since: (caller: string, spaceId: string, sinceSeq: number) => call(host, caller, 'collab_read', { view: 'since', spaceId, sinceSeq }),
-    send: (caller: string, spaceId: string, to: string, body: string, needsReply = false, cmdId = c()) => call(host, caller, 'collab_send_message', { spaceId, cmdId, to, body, needsReply }),
+    send: (caller: string, spaceId: string, to: string, body: string, needsReply = false, cmdId = c(), extra: Record<string, unknown> = {}) => call(host, caller, 'collab_send_message', { spaceId, cmdId, to, body, needsReply, ...extra }),
     status: (caller: string, spaceId?: string) => call(host, caller, 'collab_status', spaceId === undefined ? {} : { spaceId }),
     setStatus: (caller: string, spaceId: string, text: string, cmdId = c()) => call(host, caller, 'collab_set_status', { spaceId, cmdId, text }),
-    createItem: (caller: string, spaceId: string, input: Record<string, unknown>, cmdId = c()) => call(host, caller, 'collab_create_item', { spaceId, cmdId, title: 'T', body: '', requiredAcks: [], deciders: [], kind: 'other', ...input }),
+    createItem: (caller: string, spaceId: string, input: Record<string, unknown>, cmdId = c()) => call(host, caller, 'collab_create_item', { spaceId, cmdId, title: 'T', body: '', requiredAcks: [], kind: 'other', ...input }),
     revise: (caller: string, spaceId: string, itemId: string, expectedRevision: number, changes: Record<string, unknown>, cmdId = c()) => call(host, caller, 'collab_revise_item', { spaceId, cmdId, itemId, expectedRevision, changes }),
     ack: (caller: string, spaceId: string, itemId: string, revision: number, cmdId = c()) => call(host, caller, 'collab_ack_item', { spaceId, cmdId, itemId, revision }),
   }

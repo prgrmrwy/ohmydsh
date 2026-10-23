@@ -3,13 +3,13 @@
 English · [简体中文](README.zh.md)
 
 <!-- problem -->
-Independent sessions need a shared record of agreements, requests and verified human decisions without tying the rules to one host. This TypeScript library supplies that kernel with zero runtime dependencies. It is not a DSH plugin and is not registered in the deployment manifest; a future `dsh-collab` plugin will inline it at build time.
+Independent sessions need a shared record of agreements, requests and messages without tying the rules to one host. This TypeScript library supplies that kernel with zero runtime dependencies. It is not a DSH plugin and is not registered in the deployment manifest; a future `dsh-collab` plugin will inline it at build time.
 
 ## Scope
 
-The kernel provides named, principal-authorized commands, revision-bound acknowledgments, durable command receipts, a local JSONL store, provider-based delivery, bounded wake loops and a pure Markdown overview. A human decision requires evidence from a trusted provider and a matching successful confirmation delivery. `decided` is terminal.
+The kernel provides named, principal-authorized commands, revision-bound acknowledgments, durable command receipts, a local JSONL store, provider-based delivery, three wake triggers (a `needsReply` message, an invitation, a request reaching `done`/`rejected`), per-topic loop limits through optional `ref` (20 waking messages per topic, then `COLLAB_THREAD_LIMIT`) and a pure Markdown overview. Logs written before per-topic limits replay unchanged; their decision, breaker and escalation records are read-only history.
 
-There is no real host integration or human channel in this package. The host verifies identities and constructs principals; providers are trusted code, not an authentication sandbox. Agent-provided claims of human approval are not confirmation evidence.
+There is no real host integration in this package, and new members are agents only. The host verifies identities and constructs principals; providers are trusted code, not an authentication sandbox.
 
 ## Build and test
 
@@ -28,7 +28,7 @@ The source is under `src`; generated `lib` stays ignored. The type check covers 
 ```ts
 import { CollabService, FileStore, principals } from 'collab-kernel'
 
-// providers implement claim, presence, deliver and requestConfirmation.
+// providers implement claim, presence and deliver.
 const service = new CollabService({ serviceId: 'host-1', store: new FileStore('./collaboration'), providers })
 const context = {
   spaceId: 'release-1',
