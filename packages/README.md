@@ -31,6 +31,8 @@ Every package declares a documentation tier in `package.json` as `"ohmydsh": { "
 |---|---|---|
 | A | `dsh-pet`, `dsh-memex`, `worktree-session`, `dsh-openspec` | `<!-- problem -->` paragraph, a bitmap screenshot under the package's `docs/` (a diagram may be added) |
 | B | `sidebar-session-provider-icon`, `session-title-copy`, `system-clock`, `sidebar-session-resources`, `home-network-model-guard` | `<!-- problem -->` paragraph and a bitmap screenshot under the package's `docs/` |
-| C | `subscriptions-sandbox-shim`, `cockpit-worktree-open-shim`, `cockpit-memex-browse-shim`, `collab-kernel`, `dsh-collab` | `<!-- problem -->` paragraph and a `## Removal` section anchored with `<!-- section: removal -->` saying which two ends it connects and when it can be removed |
+| C | `subscriptions-sandbox-shim`, `cockpit-worktree-open-shim`, `cockpit-memex-browse-shim`, `collab-kernel`, `dsh-collab`, `auto-model-routing` | `<!-- problem -->` paragraph and a `## Removal` section anchored with `<!-- section: removal -->` saying which two ends it connects and when it can be removed |
+
+A package may also add an architecture diagram next to its screenshots: `docs/architecture.dual.svg` (dual-theme SVG exported by archify) with its editable source `docs/architecture.json` beside it, embedded under an `## Architecture` section. The diagram does not count as the tier A/B bitmap; see [`auto-model-routing`](auto-model-routing/README.md#architecture) for an example.
 
 Screenshots must come from an isolated `DSH_HOME` filled with synthetic data, never from a daily-use instance, and each one must be registered in the `SCREENSHOTS.md` next to the image (≤ 400 KiB per image).

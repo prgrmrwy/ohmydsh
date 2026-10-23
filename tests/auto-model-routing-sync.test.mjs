@@ -10,7 +10,7 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.1.0
+    version: 0.2.0
     enabled: true
   - id: subagent-model-routing
     type: skill

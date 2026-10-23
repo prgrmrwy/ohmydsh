@@ -1,0 +1,130 @@
+id: T3
+name: 子推荐与官方真实派发
+description: CP07/08/09/24；同模型主high、子low构造可区分对照；只派1个真实子会话。
+device: pc
+parallel_group: E
+conflicts_with: [T1, T2, T9, T6, T4, T10, T5, T7]
+precondition: 授权安静窗口与快照S_T；新建本次验收AUTO根会话；当前官方目录/子列表允许Astra，否则暂停不改列表；执行器是获授权可派发的根会话，不由当前Collector child派发。
+ask_user_if_blocked: true
+status: partial
+blocked_reason: Loop2已真实执行并恢复；仍有线级或指定GUI子断言缺口，非原预检无入口。
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: child-picker-tool-dispatch-request
+  data_source: childRoutes-and-official-allowlist-snapshot
+  evidence: [mock-discovery.md:28,42]
+  enable:
+    command: null
+    env: null
+    notes: 不改共享白名单；仅临时配置已允许组合。
+  user_decision: null
+budget: Jev主1+工具1；主模型预计3；子创建最多1，子模型预计1。拒绝不重试、不换路由。
+cleanup: 保存后回读；finally精确恢复config、官方当前/默认选择；取消本次主子运行，根置MANUAL；保留本次证据不删历史；异常恢复暂停报告。
+evidence_policy: 工具返回不等于派发成功；子创建header不等于子实际请求；Host线级不可得则CP08/09/24 partial。既有门禁正常态不证明拒绝分支。
+timing:
+  hard_limit_seconds: 180
+  stop_new_actions_at_seconds: 120
+  cleanup_reserve_seconds: 60
+  rule: 从进入trail开始计时；前置只读绑定与恢复入口确认后才准写入。120秒停止新动作并取消活跃回合，finally恢复；180秒前未证实恢复则blocked并停止全部后续trail，不重跑。
+  paid_chain_admission: 最迟60秒启动唯一付费链路；未完成配置/观察绑定则不发送，余项blocked。T5最多三段短链，分别须在30/60/90秒前启动；任何链未结束不启动下一段。
+steps:
+  - seq: 1
+    description: 设置主Astra四档high、codex子四档Astra/low并保存，官方picker明确选Astra；在本次AUTO根会话请求先仅调用route_subagent(task=仅回复OK, provider=codex)，接着将返回三元组原样传给至多一个官方subagent
+    action: click
+    target: '.amr-settings 保存; 官方picker; 本次验收composer'
+    value: main-Astra-high-child-Astra-low-cap-xhigh
+    url_needs_input: false
+    checkpoints:
+      - id: CP07
+        description: 保存回读后工具精确返回Astra/low，包含完整provider/model/reasoning_effort
+        focus: integration
+        verify: assert_dom
+        automation: full
+        data_scenario_required: false
+        surface: route-subagent-tool-result
+        data_source: childRoutes-and-official-tool-result
+        expected_source: 'user-confirmed-CP07; delta-spec:194-195,217-220'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        selector: 本次验收会话route_subagent工具展开结果
+        expected_text: 'provider=codex; model=gpt-6-astra; reasoning_effort=low'
+        expected_attrs: null
+        expected_visible: true
+        reviewer_notes: 必须读取实际工具结构化输出并与实际tier格逐字段对比；不凭助手转述。四档同组合避免重抽分类。无权派发/门禁拒绝不应绕过，停止链路记缺口。
+        result: manual
+        result_detail: partial：T3实际tool/result seq69非错误，rendered text包含codex/Astra/low与simple；官方subagent完整同三元组。持久事件未提供raw structured return，不能按助手转述或render冒称结构化PASS。 详见execution-facts.md Loop2。
+      - id: CP08
+        description: 主映射high与子推荐low不同，子真实请求不继承主覆盖
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: false
+        surface: child-actual-request
+        data_source: mainEfforts-childRoutes-and-child-request
+        expected_source: 'user-confirmed-CP08; delta-spec:195,217-220; current-spec:83-86'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        network_assertion_enabled: false
+        blocked_subassertion: Host-to-provider出站观察源未发现；本断言不可执行，不轮询、不造URL或正则，不可判PASS。
+        expected_url: null
+        expected_method: POST
+        expected_params:
+          provider: codex
+          model: gpt-6-astra
+          reasoningEffort: low
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 主实际合成配置high、工具low、子request/header.config=low分别记录；无Host子出站证据整个CP保持partial，不只比较两个UI标签。
+        result: manual
+        result_detail: partial：T3主Astra/high，child a95699ca-62ab-4b6c-bb62-68aea2cd9051官方header seq18 Astra/low、成功1step；线级未证实。 详见execution-facts.md Loop2。
+      - id: CP09
+        description: 官方subagent调用参数与工具三元组一致；真实子请求受门禁，不含绕过或替换重试
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: false
+        surface: official-subagent-dispatch-and-child-request
+        data_source: official-tool-call-and-child-request
+        expected_source: 'user-confirmed-CP09; delta-spec:195; current-spec:331-337'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        network_assertion_enabled: false
+        blocked_subassertion: Host-to-provider出站观察源未发现；本断言不可执行，不轮询、不造URL或正则，不可判PASS。
+        expected_url: null
+        expected_method: POST
+        expected_params:
+          provider: codex
+          model: gpt-6-astra
+          reasoning_effort: low
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 核验官方tool-call显式参数（不是description标注）和返回child id，随后只读该child实际请求。官方拒绝即停止，不放宽列表、不重建换模型。无受控门禁拒绝场景和Host线级证据需列缺口，不冒称全部门禁已验证。
+        result: manual
+        result_detail: partial：T3 seq73官方subagent显式codex/Astra/low，唯一child成功返回OK、闲置；无换路由/重试。拒绝分支及provider线级未覆盖。 详见execution-facts.md Loop2。
+      - id: CP24
+        description: 本轮AUTO主与真实child请求effort不包含max
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: false
+        surface: main-and-child-actual-requests
+        data_source: request-ledger-across-T2-T9-T6-T3-T10-T5
+        expected_source: 'user-confirmed-CP24; delta-spec:143,145,195'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        network_assertion_enabled: false
+        blocked_subassertion: Host-to-provider出站观察源未发现；本断言不可执行，不轮询、不造URL或正则，不可判PASS。
+        expected_url: null
+        expected_method: POST
+        expected_params: null
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 检查所有本轮主AUTO和实际子请求配置，最终收尾汇总后才可判；要求effort!=max，不以picker无max代替请求。若child未实际发出，child部分未覆盖；只有官方config无出站仍partial；不宣称全tier/模型穷举。
+        result: manual
+        result_detail: partial：本轮6个AUTO主回合共9个成功settlement和1个成功child均未见max，官方header medium/medium/high/high/low/low及child low；provider线级未证实，不声称全档穷举。 详见execution-facts.md Loop2。

@@ -41,6 +41,7 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 | `opencode-go/deepseek-v4-flash`、`opencode-go/qwen3.8-flash`、`opencode-go/kimi-k2.7-code` | OpenCode 主图，右下角 DeepSeek / Qwen / Kimi |
 | `traex/GPT-5.6-Sol[1m]`、`traex/DeepSeek-V4-Flash`、`traex/Gemini-3.1-Pro-Preview` | Trae 主图，右下角 OpenAI / DeepSeek / Gemini |
 | `traex/openrouter-3o[1m]`、`traex/Seed-2.1-Pro-0915` | Trae 主图，右下角 OpenRouter / ByteDance |
+| `dsh-magpie-connect` + `claude/claude-haiku-5-5`、`codex/gpt-6-luna`、`opencode-go/deepseek-v4-flash`（Magpie 网关） | Magpie 主图，右下角 Anthropic / OpenAI / OpenCode |
 | 已知 route + 认不出的 model（如 `opencode-go/omen-alpha`） | 只显示 route 品牌，不叠小图标 |
 | 未知或通用 route | 按 model 名显示单一 logo；仍匹配不上时显示中性的单字母徽标 |
 
@@ -67,14 +68,17 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 | 维度 | 品牌 |
 |---|---|
 | provider 与 model | DeepSeek、OpenAI/GPT/Codex、Anthropic/Claude、Grok/xAI、Kimi/Moonshot、GLM（智谱）、MiniMax、Pi、OpenClaw、Hermes Agent（也接受 `hermas` 拼写）、OpenCode、Qwen、腾讯混元（`hy3`、`hy4-*`）、美团 LongCat、小米 MiMo、Gemini/Gemma、NVIDIA（Nemotron）、Meta（Muse Spark、Llama）、蚂蚁（Ling/Ring）、OpenRouter、ByteDance Seed |
-| 仅 provider | Trae（`trae`、`trae-ai`、`traex*`；按完整名或前缀匹配，不按子串） |
+| 仅 provider | Trae（`trae`、`trae-ai`、`traex*`；按完整名或前缀匹配，不按子串）、Magpie（`magpie`、`magpie-*` 及插件 route `dsh-magpie-connect`；按完整名或前缀匹配） |
 
 model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模型族，并覆盖当前 TraeX 目录中的 GPT、DeepSeek、Gemini、OpenRouter 与 ByteDance Seed 系列。
 
+网关型 route（Magpie）下，model id 形如 `<上游 provider>/<model>`：右下角小图标先按 `/` 前的上游段当作 provider route 识别（`claude` → Anthropic、`opencode-go` → OpenCode），上游段认不出（`auto/`、`group/`、自定义 id）时才按 `/` 后的模型名识别。其它 route 仍按整个 model id 识别。
+
 品牌图是固定版本并随包落盘的，不手绘，运行时也不访问 CDN：
 
-- 除 OpenCode 外的所有品牌：`@lobehub/icons-static-svg@1.94.0`，MIT；有彩色版时用彩色版；
-- OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 中的官方 provider SVG，MIT。
+- 除 OpenCode、Magpie 外的所有品牌：`@lobehub/icons-static-svg@1.94.0`，MIT；有彩色版时用彩色版；
+- OpenCode：`anomalyco/opencode` commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59` 中的官方 provider SVG，MIT；
+- Magpie：`yetone/magpie` commit `ba1dc7f975666e50308ef7bf8173c8a8e91c553b` 中的官方标志 `internal/provider/magpie.svg`，MIT。
 
 逐个文件的来源 URL 与 SHA-256 校验值见 [`src/client/assets/README.md`](src/client/assets/README.md)。部分彩色 SVG 内含渐变/裁剪 id；右下角实例会给它们加 `-sub` 后缀，避免同一页面的多份 SVG 串用定义。
 

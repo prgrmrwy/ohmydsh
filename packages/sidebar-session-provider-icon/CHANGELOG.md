@@ -80,3 +80,12 @@
 - 根因：行 → session 的映射一直靠**标题文本反查**（`providerTitleIndex` + 每轮 `used` 集合），同名会话按「DOM 行顺序 ↔ 列表顺序」逐一对号；侧栏按工作区分组后两者顺序不一致（两个同名会话分属不同 workspace），两行就把彼此的 id 拿反了。
 - 修复：官方行 DOM 本身带 `data-row-key="session:<id>"`（`dsh-client-ui-workspace` 的 `SessionNodeItem`），改为优先用它做精确身份；标题反查保留为没有该属性时的 fallback；同一 key 重复出现时宁可不显示该行徽标，也不回退到别人的标题。
 - 测试：`test/row-locator.test.ts` 新增 4 条用例（行键优先、同名不互换、无属性回退、缺失/畸形/重复键不显示），旧实现下 3 条 RED——失败信息就是互换本身（`expected 'newer' to be 'older'`）。
+
+## 0.1.9 — 2026-10-23
+
+- 新增 Magpie 网关品牌：provider route `magpie`、`magpie-*` 与 `dsh-magpie-connect` 插件 route（规范化后为 `magpie-connect`）识别为 Magpie，按完整名或前缀匹配，不按子串。此前该 route 不被识别，网关会话按模型名回落，与直连会话图标完全一样。
+- 网关型 route 下 model id 形如 `<上游provider>/<model>`：右下角小图标先按上游段当作 provider route 识别（`claude/claude-haiku-5-5` → Anthropic，`opencode-go/deepseek-v4-flash` → OpenCode），认不出时再按 `/` 后的模型名识别（`auto/claude-haiku-5.5` → Anthropic）；都认不出只显示 Magpie。其它 route 的判定不变。
+- 资产：`yetone/magpie` commit `ba1dc7f` 的官方标志 `internal/provider/magpie.svg`（MIT），逐字节落盘并记录 SHA-256。该文件本身不带 fill（magpie 页面用 CSS 上色），渲染时只对它的根元素注入 `fill="currentColor"`，深浅主题下都可见。
+- 测试环境：vitest 的资源内联上限提高到 16 KB，使约 4.9 KB 的 magpie.svg 与生产构建一样以 markup 形式进入代码。
+- 对应 openspec change `sidebar-provider-icon-magpie-route`。
+

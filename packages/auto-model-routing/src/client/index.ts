@@ -5,10 +5,14 @@ import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, toastText, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
 import { CATEGORY_HINTS, type JevCategory } from '../hints.js'
 import { IconGaugeOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { LabelButton, type LabelUi } from './label.js'
+import * as settingsUi from '@deepseek-ai/dsh-client-ui-primitives'
+import { RoutingSettings } from './settings-section.js'
+import { installRoutingNavIcon } from './nav-icon.js'
 
 interface View {
   mode: 'AUTO' | 'MANUAL'
@@ -143,6 +147,12 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
 const labelUi = { Tooltip, Menu, Icon: IconGaugeOutlineRegular } as unknown as LabelUi
 
 export function apply(ctx: Context): void {
+  ctx.slots.inject('settings.section', () => ctx.slots.register({
+    name: 'settings.section', id: 'auto-model-routing', order: 300,
+    label: () => '自动模型路由',
+    inject: () => ({ rpc: ctx.connection.rpc as unknown as Rpc, ui: settingsUi }),
+  }, RoutingSettings))
+  ctx.effect(() => typeof document === 'undefined' ? () => {} : installRoutingNavIcon(document), 'auto-model-routing: settings navigation icon')
   // Reply-bar tier button, after the official feedback (order 10); rendered only on judged turns.
   ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
     name: 'conversation.chat.assistant-actions', id: 'auto-model-routing-label', order: 20,

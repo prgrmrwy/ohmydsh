@@ -1,0 +1,63 @@
+id: T10
+name: cap约束未覆盖主子缺省
+description: CP12；单个AUTO回合与一次工具同时验证主子缺省受cap约束。
+device: pc
+parallel_group: G
+conflicts_with: [T1, T2, T9, T6, T3, T4, T5, T7]
+precondition: 安静窗口和授权；快照S_T；本次新建AUTO验收会话；目录允许所选主/子模型；每次写入前记录当前hash。
+ask_user_if_blocked: true
+status: partial
+blocked_reason: Loop2已真实执行并恢复；仍有线级或指定GUI子断言缺口，非原预检无入口。
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: cap-form-save-endpoint-and-defaults
+  data_source: config-file-and-catalog
+  evidence: [mock-discovery.md:40-45]
+  enable:
+    command: null
+    env: null
+    notes: 真实配置构造；不改catalog或allowlist。
+  user_decision: null
+budget: Jev主1+工具1；主模型预计2；不派child。
+cleanup: 每步写后回读；finally恢复S_T原字节/存在性/模式与官方默认，核验hash；本次会话置MANUAL。
+timing:
+  hard_limit_seconds: 180
+  stop_new_actions_at_seconds: 120
+  cleanup_reserve_seconds: 60
+  rule: 从进入trail开始计时；前置只读绑定与恢复入口确认后才准写入。120秒停止新动作并取消活跃回合，finally恢复；180秒前未证实恢复则blocked并停止全部后续trail，不重跑。
+  paid_chain_admission: 最迟60秒启动唯一付费链路；未完成配置/观察绑定则不发送，余项blocked。T5最多三段短链，分别须在30/60/90秒前启动；任何链未结束不启动下一段。
+steps:
+  - seq: 1
+    description: 暂清本trail测试用codex主Luna与子各档覆盖、设cap=low；回读默认后官方选Luna，AUTO短回合仅调用一次route_subagent(provider=codex)不派发
+    action: click
+    target: '.amr-settings 保存; 官方picker; 验收composer'
+    value: capped-default-low
+    url_needs_input: false
+    checkpoints:
+      - id: CP12
+        description: 缺省主及子推荐均按cap支持集合更新为low，不突破上限
+        focus: integration
+        verify: assert_network
+        automation: partial
+        data_scenario_required: false
+        surface: capped-default-main-and-tool
+        data_source: cap-catalog-and-default-mapping
+        expected_source: 'user-confirmed-CP12; delta-spec:145,174-182,195'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        network_assertion_enabled: false
+        blocked_subassertion: Host-to-provider出站观察源未发现；本断言不可执行，不轮询、不造URL或正则，不可判PASS。
+        expected_url: null
+        expected_method: POST
+        expected_params:
+          provider: codex
+          model: gpt-6-luna
+          reasoningEffort: low
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 降到low前同次移除/修复所有临时存续超cap显式格；若基线另有覆盖，为此trail临时删除需完整快照且finally还原。当前模型均支持low，任意Jev tier缺省effort=low，工具按默认tier模型但effort=low。实际主线级证据缺失保留partial；不声称稀疏能力或候选空已测。
+        result: manual
+        result_detail: partial：T10 cap=low且无显式覆盖，turn5 seq90官方Luna/low；tool/result seq95为Luna/low(simple)；线级未证实。 详见execution-facts.md Loop2。

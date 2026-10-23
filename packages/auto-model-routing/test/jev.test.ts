@@ -26,6 +26,35 @@ it('request_body_and_limits', async () => {
  expect(new JevClient(env('k')).url).toBe('https://openrouter.ai/api/alpha/decisions')
 })
 
+it('async_credentials_and_deadline_are_resolved_for_each_judgement', async () => {
+ const {server} = await setup((_req,res)=>{setTimeout(()=>res.end(JSON.stringify({answers:{tier:{choice:'simple'}}})),2000)})
+ let key: string|undefined = 'key-A'
+ let timeout = 1500
+ const client = new JevClient({get:async()=>key ? {value:key}:undefined},server.base,()=>timeout)
+ expect(await client.judge('x',new AbortController().signal)).toEqual({kind:'failed',category:'timeout'})
+ key='key-B';timeout=2500
+ expect(await client.judge('x',new AbortController().signal)).toMatchObject({kind:'ok',tier:'simple'})
+ expect(server.headers.map(h=>h.authorization)).toEqual(['Bearer key-A','Bearer key-B'])
+ key=undefined
+ expect(await client.judge('x',new AbortController().signal)).toEqual({kind:'failed',category:'missing-credential'})
+ expect(server.bodies).toHaveLength(2)
+}, 6000)
+it('cancel_during_async_credential_resolution_does_not_send', async () => {
+ const {server}=await setup(tier('simple'))
+ const controller = new AbortController()
+ const client = new JevClient({get:async()=>{controller.abort();return {value:'key'}}},server.base,()=>1500)
+ expect(await client.judge('x',controller.signal)).toEqual({kind:'cancelled'})
+ expect(server.bodies).toHaveLength(0)
+})
+it('cancel_interrupts_pending_credential_lookup', async () => {
+ const {server}=await setup(tier('simple'))
+ const controller=new AbortController()
+ const client=new JevClient({get:()=>new Promise(()=>{})},server.base)
+ const pending=client.judge('x',controller.signal)
+ controller.abort()
+ expect(await pending).toEqual({kind:'cancelled'})
+ expect(server.bodies).toHaveLength(0)
+})
 it('rubric_version_is_content_hash', async () => {
  const { readFileSync } = await import('node:fs')
  const { createHash } = await import('node:crypto')

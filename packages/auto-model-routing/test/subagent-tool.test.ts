@@ -1,5 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
-import { routeSubagentTool } from '../src/subagent-tool.js'
+import { routeSubagentTool, type ToolDeps } from '../src/subagent-tool.js'
+import { DEFAULT_SETTINGS, type Settings, type RoutingCatalog } from '../src/settings-contract.js'
 import { JevClient } from '../src/jev.js'
 import { tiers } from '../src/effort.js'
 import { RoutingState, type SessionState } from '../src/state.js'
@@ -12,14 +13,14 @@ afterEach(async () => { await close?.(); close = undefined })
 interface FakeAgent { id: string; session: { header: { origin?: 'subagent'; parentSession?: string } } }
 const session = (id: string, parent?: string): FakeAgent => ({ id, session: { header: parent ? { origin: 'subagent', parentSession: parent } : {} } })
 
-async function tool(reply: Reply, modes: Record<string, 'AUTO' | 'MANUAL'> = { S1: 'AUTO' }, live: FakeAgent[] = [session('S1')]) {
+async function tool(reply: Reply, modes: Record<string, 'AUTO' | 'MANUAL'> = { S1: 'AUTO' }, live: FakeAgent[] = [session('S1')], options: Pick<ToolDeps, 'readSettings' | 'catalog'> = {}) {
  const server = await fakeJev(reply); close = server.close
  const disk = new Map<string, SessionState>()
  const state = new RoutingState({ get: id => disk.get(id), set: (id, v) => { disk.set(id, v) } })
  for (const [id, mode] of Object.entries(modes)) state.setMode(id, mode)
  const registry = new Map(live.map(agent => [agent.id, agent]))
  const judged: unknown[] = []
- const def = routeSubagentTool(new JevClient(env, server.base, 300), { agents: { get: (id: string) => registry.get(id) as never }, state, judged: (id, value) => judged.push({ id, ...value }) })
+ const def = routeSubagentTool(new JevClient(env, server.base, 300), { ...options, agents: { get: (id: string) => registry.get(id) as never }, state, judged: (id, value) => judged.push({ id, ...value }) })
  return { server, def, state, disk, judged }
 }
 const exec = (agent: FakeAgent | undefined = session('S1'), signal = new AbortController().signal) => ({ signal, agent }) as never
@@ -48,6 +49,26 @@ it('tool_returns_table_entry', async () => {
  expect(sent.state).toBe('Previous user-turn tier: none\nUser message:\ndeploy with token=<redacted>')
 })
 
+it('explicit_child_routes_and_current_catalog_are_validated_without_changing_state', async () => {
+ let settings: Settings = {...DEFAULT_SETTINGS, effortCap:'high', childRoutes:{claude:{escalated:{model:'claude-fable-5-1',reasoningEffort:'high'}}}, mainEfforts:{claude:{escalated:'low'}}}
+ let catalog: RoutingCatalog = {models:[{provider:'claude',model:'claude-fable-5-1',name:'Fable',reasoningEfforts:['low','high']}],childAllowlist:{status:'enabled',allowedModels:[{provider:'claude',model:'claude-fable-5-1'}]}}
+ const {def,state,judged} = await tool(tier('escalated'),undefined,undefined,{readSettings:()=>settings,catalog:async()=>catalog})
+ expect(await def.execute({task:'x',provider:'claude'},exec())).toMatchObject({model:'claude-fable-5-1',reasoning_effort:'high'})
+ catalog = {...catalog,childAllowlist:{status:'enabled',allowedModels:[]}}
+ await expect(def.execute({task:'x',provider:'claude'},exec())).rejects.toThrow(/路由设置无效.*暂停委派并询问用户/)
+ catalog = {...catalog,childAllowlist:{status:'enabled',allowedModels:[{provider:'claude',model:'claude-fable-5-1'}]}}
+ settings = {...settings,effortCap:'medium'}
+ await expect(def.execute({task:'x',provider:'claude'},exec())).rejects.toThrow(/路由设置无效/)
+ expect(state.read('S1')).toEqual({mode:'AUTO'})
+ expect(judged).toHaveLength(1)
+})
+it('default_child_effort_obeys_cap_support_and_no_route_substitution', async () => {
+ let catalog: RoutingCatalog = {models:[{provider:'codex',model:'gpt-6-luna',name:'Luna',reasoningEfforts:['low','high']}],childAllowlist:{status:'enabled',allowedModels:[{provider:'codex',model:'gpt-6-luna'}]}}
+ const {def} = await tool(tier('simple'),undefined,undefined,{readSettings:()=>({...DEFAULT_SETTINGS,effortCap:'medium'}),catalog:()=>catalog})
+ expect(await def.execute({task:'x',provider:'codex'},exec())).toMatchObject({model:'gpt-6-luna',reasoning_effort:'low'})
+ catalog = {...catalog,models:[{...catalog.models[0]!,reasoningEfforts:['high']}]}
+ await expect(def.execute({task:'x',provider:'codex'},exec())).rejects.toThrow(/路由设置无效/)
+})
 it('child_model_not_capped_by_caller', async () => {
  const { def, server } = await tool(tier('escalated'))
  expect(await def.execute({ task: '证明并发正确性', provider: 'claude' }, exec())).toEqual({ tier: 'escalated', provider: 'claude', model: 'claude-opus-5-5', reasoning_effort: 'xhigh' })

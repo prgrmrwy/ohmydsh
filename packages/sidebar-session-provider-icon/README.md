@@ -41,6 +41,7 @@ Brand resolution has two independent dimensions: the provider route picks the **
 | `opencode-go/deepseek-v4-flash`, `opencode-go/qwen3.8-flash`, `opencode-go/kimi-k2.7-code` | OpenCode, with DeepSeek / Qwen / Kimi in the corner |
 | `traex/GPT-5.6-Sol[1m]`, `traex/DeepSeek-V4-Flash`, `traex/Gemini-3.1-Pro-Preview` | Trae, with OpenAI / DeepSeek / Gemini in the corner |
 | `traex/openrouter-3o[1m]`, `traex/Seed-2.1-Pro-0915` | Trae, with OpenRouter / ByteDance in the corner |
+| `dsh-magpie-connect` + `claude/claude-haiku-5-5`, `codex/gpt-6-luna`, `opencode-go/deepseek-v4-flash` (Magpie gateway) | Magpie, with Anthropic / OpenAI / OpenCode in the corner |
 | known route + unrecognized model (e.g. `opencode-go/omen-alpha`) | the route logo only, no corner logo |
 | unknown or generic route | a single logo from the model name; if that also fails, a neutral single-letter badge |
 
@@ -67,14 +68,17 @@ Recognized brands:
 | Dimension | Brands |
 |---|---|
 | provider and model | DeepSeek, OpenAI/GPT/Codex, Anthropic/Claude, Grok/xAI, Kimi/Moonshot, GLM (Zhipu), MiniMax, Pi, OpenClaw, Hermes Agent (the misspelling `hermas` is also accepted), OpenCode, Qwen, Tencent Hunyuan (`hy3`, `hy4-*`), Meituan LongCat, Xiaomi MiMo, Gemini/Gemma, NVIDIA (Nemotron), Meta (Muse Spark, Llama), Ant Group (Ling/Ring), OpenRouter, ByteDance Seed |
-| provider only | Trae (`trae`, `trae-ai`, `traex*`; exact name or prefix, never a substring) |
+| provider only | Trae (`trae`, `trae-ai`, `traex*`; exact name or prefix, never a substring), Magpie (`magpie`, `magpie-*`, and the `dsh-magpie-connect` plugin route; exact name or prefix) |
+
+Behind a gateway route (Magpie) a model id is `<upstream provider>/<model>`: the corner logo comes from the upstream segment read as a provider route (`claude` → Anthropic, `opencode-go` → OpenCode), and only when that segment is no brand (`auto/`, `group/`, a custom id) from the model name after the slash. Other routes keep reading the whole model id.
 
 The model dimension covers every identifiable model family in the OpenCode Go / Zen catalogs, plus the GPT, DeepSeek, Gemini, OpenRouter and ByteDance Seed families in the current TraeX catalog.
 
 Brand art is pinned and vendored, never hand-drawn and never fetched from a CDN at runtime:
 
-- every brand except OpenCode: `@lobehub/icons-static-svg@1.94.0`, MIT; the color variant is used where one exists;
-- OpenCode: the official provider SVG from `anomalyco/opencode` at commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59`, MIT.
+- every brand except OpenCode and Magpie: `@lobehub/icons-static-svg@1.94.0`, MIT; the color variant is used where one exists;
+- OpenCode: the official provider SVG from `anomalyco/opencode` at commit `5e75e5e9901f0d178f425bfb47f1bd46cbe78a59`, MIT;
+- Magpie: the official mark `internal/provider/magpie.svg` from `yetone/magpie` at commit `ba1dc7f975666e50308ef7bf8173c8a8e91c553b`, MIT.
 
 Per-file source URLs and SHA-256 checksums are listed in [`src/client/assets/README.md`](src/client/assets/README.md). Some color SVGs carry gradient/clip ids; the corner instance suffixes them with `-sub` so copies on the same page never resolve each other's definitions.
 

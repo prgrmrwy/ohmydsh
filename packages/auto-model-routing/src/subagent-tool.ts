@@ -1,5 +1,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { CHILD_MODELS, targetEffort, tiers, type ChildProvider } from './effort.js'
+import { CHILD_MODELS, mapEffort, tiers, type ChildProvider, type Effort } from './effort.js'
+import { explicitChildRoute, SettingsValidationError } from './settings.js'
+import { DEFAULT_SETTINGS, type Settings, type RoutingCatalog } from './settings-contract.js'
+import { validateChildRoute } from './settings-validation.js'
 import { CATEGORY_HINTS, type JevClient } from './jev.js'
 import { buildState } from './context.js'
 import type { Judgement } from './router.js'
@@ -10,6 +13,8 @@ export interface ToolDeps {
   /** Live agent registry (`ctx.agents`); used to walk a child up to its root session. */
   agents: { get(id: string): SessionLike | undefined }
   state: RoutingState
+  readSettings?: () => Settings
+  catalog?: () => RoutingCatalog | Promise<RoutingCatalog>
   judged?: (sessionId: string, value: Omit<Judgement, 'id'>) => void
 }
 
@@ -62,8 +67,27 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
       if (result.kind === 'cancelled') throw new Error('route_subagent 已取消。')
       if (result.kind === 'failed') throw new Error(`Jev 判档失败：${CATEGORY_HINTS[result.category]}（${result.category}）。请暂停委派并询问用户，不要自行猜测档位或换用其它模型。`)
       const provider = args.provider as ChildProvider
-      const model = CHILD_MODELS[provider][tiers.indexOf(result.tier)]!
-      const effort = targetEffort(model, result.tier)
+      const defaultModel = CHILD_MODELS[provider][tiers.indexOf(result.tier)]!
+      let model: string
+      let effort: Effort
+      try {
+        // Legacy callers without settings/catalog keep the original table; the Host always supplies both.
+        const catalog = deps.catalog ? await deps.catalog() : {
+          models: deps.readSettings ? [] : [{ provider, model: defaultModel, name: defaultModel, reasoningEfforts: ['low', 'medium', 'high', 'xhigh'] }],
+          childAllowlist: { status: 'enabled' as const, allowedModels: deps.readSettings ? [] : [{ provider, model: defaultModel }] },
+        }
+        if (exec.signal.aborted) throw new Error('cancelled')
+        const settings = deps.readSettings?.() ?? DEFAULT_SETTINGS
+        const explicit = explicitChildRoute(settings, provider, result.tier, catalog)
+        model = explicit?.model ?? defaultModel
+        const supported = catalog.models.find(entry => entry.provider === provider && entry.model === model)?.reasoningEfforts ?? []
+        const mapped = explicit?.reasoningEffort ?? mapEffort(model, result.tier, supported as readonly Effort[], settings.effortCap)
+        if (!mapped || validateChildRoute(catalog, provider, { model, reasoningEffort: mapped }, settings.effortCap).length) throw new SettingsValidationError([])
+        effort = mapped
+      } catch {
+        if (exec.signal.aborted) throw new Error('route_subagent 已取消。')
+        throw new Error('自动模型路由设置无效。请暂停委派并询问用户，修复设置后重试，不要自行换路由。')
+      }
       // Shown on the caller's chip; a child caller has none, so only ordinary callers are recorded.
       if (caller === root) { const { kind: _, ...measure } = result; deps.judged?.(root.id, { source: 'subagent', model, effort, ...measure }) }
       return { tier: result.tier, provider, model, reasoning_effort: effort }

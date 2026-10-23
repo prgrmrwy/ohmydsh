@@ -160,3 +160,51 @@ describe('composite provider + model badge', () => {
     expect(badgeInnerHTML('minimax', 'MiniMax-M3')).toMatch(/id=["']lobe-icons-minimax-_R_0_["']/)
   })
 })
+
+describe('Magpie gateway route', () => {
+  it('recognizes the plugin route and magpie routes by exact name or prefix only', () => {
+    expect(brandKeyOf('dsh-magpie-connect', 'claude/claude-haiku-5-5')).toBe('magpie')
+    expect(brandKeyOf('magpie', 'codex/gpt-6-luna')).toBe('magpie')
+    expect(brandKeyOf('magpie-home', 'x/y')).toBe('magpie')
+    // A substring elsewhere in the route is not Magpie; the model decides.
+    expect(brandKeyOf('not-magpie', 'gpt-5')).toBe('openai')
+  })
+
+  it('reads the upstream provider segment of a gateway model id first', () => {
+    expect(badgeBrands('dsh-magpie-connect', 'claude/claude-haiku-5-5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
+    expect(badgeBrands('dsh-magpie-connect', 'codex/gpt-6-luna')).toEqual({ primary: 'magpie', secondary: 'openai' })
+    // The upstream route wins over the model name, as it does for a direct session.
+    expect(badgeBrands('dsh-magpie-connect', 'opencode-go/deepseek-v4-flash')).toEqual({ primary: 'magpie', secondary: 'opencode' })
+    // OpenRouter is a model brand here, not a route brand, so its segment falls
+    // through to the model name after it.
+    expect(badgeBrands('dsh-magpie-connect', 'openrouter/anthropic/claude-haiku-5.5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
+  })
+
+  it('falls back to the model name when the upstream segment is not a brand', () => {
+    expect(badgeBrands('dsh-magpie-connect', 'auto/claude-haiku-5.5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
+    expect(badgeBrands('dsh-magpie-connect', 'group/deepseek-v4-flash')).toEqual({ primary: 'magpie', secondary: 'deepseek' })
+    expect(badgeBrands('dsh-magpie-connect', 'custom/omen-alpha')).toEqual({ primary: 'magpie', secondary: undefined })
+    expect(badgeBrands('dsh-magpie-connect', 'claude-haiku-5-5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
+  })
+
+  it('leaves the upstream-segment reading off for every other route', () => {
+    // A slash in a non-gateway model id keeps the old whole-id model reading.
+    expect(badgeBrands('opencode-go', 'claude/x')).toEqual({ primary: 'opencode', secondary: 'anthropic' })
+    expect(badgeBrands('traex', 'codex/x')).toEqual({ primary: 'trae', secondary: 'openai' })
+  })
+
+  it('renders the vendored Magpie mark in the theme colour, with no external URL', () => {
+    const single = badgeInnerHTML('dsh-magpie-connect', 'custom/omen-alpha')
+    expect(single).not.toContain('data-composite')
+    const root = single.match(/<svg\b[^>]*>/)?.[0] ?? ''
+    expect(root).toContain('fill="currentColor"')
+    // Quote style differs between tsdown's text loader and Vite's inline form.
+    expect(root).toMatch(/viewBox=["']0 0 44 44["']/)
+    expect(single).not.toMatch(/https?:\/\/(?!www\.w3\.org)/)
+    const composite = badgeInnerHTML('dsh-magpie-connect', 'claude/claude-haiku-5-5')
+    expect(composite).toContain('data-sub-brand="anthropic"')
+    expect(composite.match(/fill="currentColor"/g)?.length).toBeGreaterThanOrEqual(1)
+    // Only Magpie's root gains a fill; another brand's markup is unchanged.
+    expect(badgeInnerHTML('deepseek-official', 'deepseek-v4')).not.toMatch(/<svg[^>]*fill="currentColor"/)
+  })
+})

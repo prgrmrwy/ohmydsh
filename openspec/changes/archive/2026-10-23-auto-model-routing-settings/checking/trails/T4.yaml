@@ -1,0 +1,130 @@
+id: T4
+name: cap冲突、修复与恢复默认
+description: CP10/11/13；主子两格冲突必须同时修复，不借UI禁用代替Host拒绝。
+device: pc
+parallel_group: F
+conflicts_with: [T1, T2, T9, T6, T3, T10, T5, T7]
+precondition: 安静窗口和授权；快照S_T；无需模型回合；目录允许所选主/子模型；每次写入前记录当前hash。
+ask_user_if_blocked: true
+status: partial
+blocked_reason: Loop2已真实执行并恢复；仍有线级或指定GUI子断言缺口，非原预检无入口。
+mock_setup:
+  required: false
+  status: not_needed
+  scenario_id: null
+  surface: cap-form-save-endpoint-and-defaults
+  data_source: config-file-and-catalog
+  evidence: [mock-discovery.md:40-45]
+  enable:
+    command: null
+    env: null
+    notes: 真实配置构造；不改catalog或allowlist。
+  user_decision: null
+budget: Jev0，模型0；缺省真实请求单列T10，不派child。
+cleanup: 每步写后回读；finally恢复S_T原字节/存在性/模式与官方默认，核验hash；本次会话置MANUAL。
+timing:
+  hard_limit_seconds: 180
+  stop_new_actions_at_seconds: 120
+  cleanup_reserve_seconds: 60
+  rule: 从进入trail开始计时；前置只读绑定与恢复入口确认后才准写入。120秒停止新动作并取消活跃回合，finally恢复；180秒前未证实恢复则blocked并停止全部后续trail，不重跑。
+  paid_chain_admission: 最迟60秒启动唯一付费链路；未完成配置/观察绑定则不发送，余项blocked。T5最多三段短链，分别须在30/60/90秒前启动；任何链未结束不启动下一段。
+steps:
+  - seq: 1
+    description: 临时保存Opus/complex=high和codex子complex=Sol/high、cap=xhigh；再UI降cap=medium，并用同浏览器已认证saveSettings提交仅cap=medium的负例
+    action: click
+    target: '.amr-settings; /api/auto-model-routing.saveSettings'
+    value: effortCap=medium-conflict-only
+    url_needs_input: false
+    checkpoints:
+      - id: CP10
+        description: UI禁用保存且两格报冲突；Host拒绝降cap提交，原配置字节不变
+        focus: integration
+        verify: assert_network
+        automation: full
+        data_scenario_required: false
+        surface: cap-form-and-save-endpoint
+        data_source: config-file
+        expected_source: 'user-confirmed-CP10; delta-spec:267,322-325'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        expected_url: /api/auto-model-routing.saveSettings
+        expected_method: POST
+        expected_params:
+          effortCap: medium
+        expected_status: null
+        expected_response: null
+        reviewer_notes: 状态按已确认oracle断言4xx，不擅自限定400；比较负例提交前后原字节hash（前一次合法setup另记），字段错误包含主Opus/complex和子codex/complex。UI禁用需另做DOM断言；不强行点击disabled按钮，Host负例通过既有同源已认证RPC执行，无认证值输出。
+        result: manual
+        result_detail: partial：T4 Host仅降cap=medium返回400，issues同时指主Opus/complex与子codex/complex，字节hash不变；未验证UI双格冲突与禁用保存。 详见execution-facts.md Loop2。
+  - seq: 2
+    description: 同一次提交cap=medium、主Opus/complex=medium和子Sol/complex=medium后回读
+    action: click
+    target: '.amr-settings 保存'
+    value: repair-both-cells-in-one-submit
+    url_needs_input: false
+    checkpoints:
+      - id: CP11
+        description: 同提交修复整体保存成功，回读cap及两格精确medium
+        focus: integration
+        verify: assert_network
+        automation: full
+        data_scenario_required: false
+        surface: cap-form-and-save-endpoint
+        data_source: config-file
+        expected_source: 'user-confirmed-CP11; delta-spec:322-325'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        expected_url: /api/auto-model-routing.saveSettings
+        expected_method: POST
+        expected_params:
+          effortCap: medium
+          mainEfforts:
+            claude:
+              claude-opus-5-5:
+                complex: medium
+          childRoutes:
+            codex:
+              complex:
+                model: gpt-6.1-sol
+                reasoningEffort: medium
+        expected_status: 200
+        expected_response: null
+        reviewer_notes: 抓同一个请求包含三项；settings回读和原始非密钥config均精确medium，没有静默降档或新增其它默认表。
+        result: pass
+        result_detail: Loop2 T4同一saveSettings提交cap=medium和主Opus/complex=medium、子Sol/complex=medium成功，settings与磁盘回读精确，无静默截断；finally原字节恢复。 详见execution-facts.md Loop2。
+  - seq: 3
+    description: cap恢复xhigh，临时只保留主Sol/simple=medium及子codex/simple=Sol/high测试格；分别点击两格恢复默认并同次保存
+    action: click
+    target: '.amr-settings-reset; .amr-settings 保存'
+    value: reset-main-and-child-cells
+    url_needs_input: false
+    checkpoints:
+      - id: CP13
+        description: 恢复默认保存删除对应覆盖，回显默认解析值，不固化其它缺省格
+        focus: integration
+        verify: assert_network
+        automation: full
+        data_scenario_required: false
+        surface: route-cell-reset-and-save
+        data_source: sparse-config-file
+        expected_source: 'user-confirmed-CP13; delta-spec:265,327-330'
+        expected_unverified: false
+        input_method: default
+        class: deterministic
+        expected_url: /api/auto-model-routing.saveSettings
+        expected_method: POST
+        expected_params:
+          mainEfforts:
+            codex:
+              gpt-6.1-sol:
+                simple: null
+          childRoutes:
+            codex:
+              simple: null
+        expected_status: 200
+        expected_response: null
+        reviewer_notes: 对比稀疏键而非解析后的settings（settings会含缺省普通字段）；Sol/simple回显low，child/simple按Luna起点回显medium；无其它格新增。cleanup最终还原本trail原配置而非停在此临时默认。
+        result: manual
+        result_detail: partial：T4 null删除实际测试主Opus/complex与子codex/complex覆盖，settings及稀疏磁盘不再含映射；未点击指定Sol/simple与子simple恢复默认按钮/回显，不能完整PASS。 详见execution-facts.md Loop2。

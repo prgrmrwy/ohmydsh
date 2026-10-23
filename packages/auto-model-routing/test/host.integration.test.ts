@@ -21,15 +21,17 @@ const SECRET = 'sk-or-test-SECRET'
 let cleanup: (() => Promise<void>) | undefined
 afterEach(async () => { await cleanup?.(); cleanup = undefined })
 
-async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string } = {}) {
+async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: [] } = {}) {
  const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
+ if (options.defaultAuto) { mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true }); writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), JSON.stringify({ defaultMode: 'AUTO' })) }
  const jev = await fakeJev(reply)
  const ctx = new Context()
  const calls: GenerateOptions[] = []
  const routes = new Map<string, { fetch: (r: Request) => Promise<Response> }>()
  let agent: Awaited<ReturnType<typeof ctx.agents.create>>['agent'] | undefined
  class Adapter extends LlmAdapter {
+  async listModels(provider: string) { return (provider === 'codex' ? ['gpt-6-luna','gpt-6.1-sol'] : ['claude-haiku-5-5','claude-sonnet-5-5','claude-opus-5-5']).map(id => ({ provider, id, name: id })) }
   async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, reasoning: { efforts: ['low', 'medium', 'high', 'xhigh', 'max'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
   async *stream(request: GenerateOptions): AsyncIterable<StreamChunk> {
    calls.push(request)
@@ -42,20 +44,32 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
    yield { type: 'finish', reason: { kind: 'stop' } }
   }
  }
- ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: SECRET } }]) as never)
+ ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: options.storedKey === undefined ? { OPENROUTER_API_KEY: SECRET } : {} }]) as never)
+ let storedKey = options.storedKey
+ if (options.storedKey !== undefined) ctx.provide('credentials', {
+  describe: async () => ({ configured: Boolean(storedKey), source: 'file', writable: true }),
+  resolve: async () => storedKey ? { value: storedKey, source: 'file' } : undefined,
+  set: async (_ref: unknown, value: string) => { storedKey = value },
+  unset: async () => { storedKey = undefined },
+ } as never)
  const forks: { dispose(): unknown }[] = []
  for (const p of [Projections, Sessions, Agents, Prompt, Tools, Llm]) forks.push(await ctx.plugin(p))
  forks.push(await ctx.plugin(Loop, { agents: [] }))
- ctx.llm.registerAdapter(['test'], new Adapter())
+ ctx.llm.registerAdapter(['test','claude','codex'], new Adapter())
+ ctx.provide('subagentModelSelection' as never, { current: () => ({ enabled: true, allowedModels: [
+  { provider: 'claude', model: 'claude-haiku-5-5' }, { provider: 'claude', model: 'claude-sonnet-5-5' }, { provider: 'claude', model: 'claude-opus-5-5' },
+  { provider: 'codex', model: 'gpt-6-luna' }, { provider: 'codex', model: 'gpt-6.1-sol' },
+ ] }) } as never)
  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (r: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
  ctx.provide('sessionController', {
   resolveAgent: async (id: string) => agent?.id === id ? { agent } : { error: new Error('unknown') },
   selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
- await expect.poll(() => routes.size).toBe(3)
+ await expect.poll(() => routes.size).toBe(6)
  const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
  const handle = await ctx.agents.create({
+  ...(options.seed ? { seed: options.seed } : {}),
   sessionId: SessionId(`host-${Math.random()}`), agentOptions: { provider: 'test', model: 'claude-opus-5-5' },
   setup(c) {
    installModelSelection(c, selection)
@@ -67,7 +81,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
  cleanup = async () => { await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
  // Simulate a Host restart for this plugin: all its memory is dropped, only the state directory remains.
- const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(3) }
+ const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(6) }
  const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
  return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
@@ -399,4 +413,75 @@ it('label_append_failure_returns_5xx', async () => {
  expect(response.status).toBeGreaterThanOrEqual(500)
  expect(await response.json()).not.toHaveProperty('label')
  expect((await h.invoke('state', { sessionId: h.agent.id })).mode).toBe('AUTO')
+})
+
+
+it('settings_rpc_uses_catalog_and_sparse_patch_without_selecting_session', async () => {
+ const h = await harness(tier('simple'))
+ const view = await h.invoke('settings', {})
+ expect(view.models.some((m: {provider:string}) => m.provider === 'codex')).toBe(true)
+ expect(view.criteria.simple).toMatch(/Answerable/)
+ const saved = await h.invoke('saveSettings', { mainEfforts: { codex: { simple: 'medium' } } })
+ expect(saved.settings.mainEfforts.codex.simple).toBe('medium')
+ expect(h.selections).toHaveLength(0)
+ const error = await h.invoke('saveSettings', { type:'client-request', rpcId:'bad-route', method:'auto-model-routing.saveSettings', payload:{childRoutes:{codex:{simple:{model:'not-allowed',reasoningEffort:'medium'}}}} })
+ expect(error.result.ok).toBe(false)
+ expect(error.result.error.details.issues.length).toBeGreaterThan(0)
+})
+
+it('family_mapping_reaches_actual_requests_for_multiple_main_models_without_switching_them',async()=>{
+ const h=await harness(tier('simple'))
+ await h.invoke('saveSettings',{mainEfforts:{codex:{simple:'high'}}})
+ await h.setMode('AUTO')
+ for (const model of ['gpt-6-luna','gpt-6.1-sol']) {
+  h.selection.current={provider:'codex',model,reasoningEffort:ReasoningEffortId('medium')}
+  await h.run(`run ${model}`)
+  expect(h.calls.at(-1)).toMatchObject({provider:'codex',model,reasoningEffort:'high'})
+ }
+ await h.invoke('saveSettings',{mainEfforts:{codex:{simple:null}}})
+ h.selection.current={provider:'codex',model:'gpt-6-luna',reasoningEffort:ReasoningEffortId('high')}
+ await h.run('use defaults')
+ expect(h.calls.at(-1)).toMatchObject({model:'gpt-6-luna',reasoningEffort:'medium'})
+})
+it('credential_store_rotation_and_deletion_apply_without_restart', async () => {
+ const h = await harness(tier('simple'), { storedKey: 'key-A' })
+ await h.setMode('AUTO'); await h.run('one')
+ expect(h.jev.headers.at(-1)?.authorization).toBe('Bearer key-A')
+ const result = await h.invoke('setKey', { value:'key-B' })
+ expect(JSON.stringify(result)).not.toContain('key-B')
+ await h.run('two')
+ expect(h.jev.headers.at(-1)?.authorization).toBe('Bearer key-B')
+ await h.invoke('setKey', { value:null }); await h.run('three')
+ expect(h.jev.bodies).toHaveLength(2)
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({mode:'MANUAL',disabled:{category:'missing-credential'}})
+})
+
+it('new_session_default_auto_does_not_reapply_after_plugin_restart', async () => {
+ const h = await harness(tier('simple'), { defaultAuto:true })
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({mode:'AUTO'})
+ await h.run('one')
+ expect(h.jev.bodies).toHaveLength(1)
+ await h.setMode('MANUAL'); await h.restart()
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({mode:'MANUAL'})
+})
+
+it('empty_seed_is_not_a_fresh_auto_session', async () => {
+ const h = await harness(tier('simple'), { defaultAuto:true, seed:[] })
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({mode:'MANUAL'})
+ await h.run('one')
+ expect(h.jev.bodies).toHaveLength(0)
+})
+
+it('default_auto_ignores_resume_clear_compact_and_subagents', async () => {
+ const h = await harness(tier('simple'), { defaultAuto:true })
+ await h.setMode('MANUAL')
+ for (const source of ['resume','clear','compact'] as const) {
+  await h.ctx.serial('agent/created', { agent:h.agent, source })
+  expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({mode:'MANUAL'})
+ }
+ const child=await h.ctx.agents.create({sessionId:SessionId(`child-${Math.random()}`),meta:{origin:'subagent'},agentOptions:{provider:'test',model:'claude-opus-5-5'}})
+ try {
+  const stateFiles=join(h.home,'state/auto-model-routing/sessions')
+  expect(readdirSync(stateFiles)).toHaveLength(1)
+ } finally { await child.dispose() }
 })

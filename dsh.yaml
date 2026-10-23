@@ -139,10 +139,10 @@ customizations:
   - id: sidebar-session-provider-icon
     type: package
     source: local
-    version: 0.1.8
+    version: 0.1.9
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
-    note: '自研,spec sidebar-session-provider-icon(change sidebar-provider-icon-selection-freshness)。Web client 按 store 身份观测官方 modelDirectories 的即时选择:每次列表/DOM 信号重新解析,换代即重订阅并重读快照,观测值仅在该 session 仍打开且目录可解析期间有效,否则改用持久投影:官方 modelSelection.next(含已选未发送)→本插件 provider projection(最近一次请求);行身份取官方 data-row-key(session:<id>),同名会话不串用徽标;provider 与 model 品牌不同时主图为 provider、右下角叠 10px 小图标,同品牌仍单 logo;品牌 SVG 随包落盘(@lobehub/icons-static-svg@1.94.0 MIT;OpenCode 取自 anomalyco/opencode),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,定位失败静默降级,自身不发网络请求。升级复核:DSH 升级后回归 row-locator 的行 DOM 假设。移除:enabled:false → dsh build → 重启。'
+    note: '自研,spec sidebar-session-provider-icon(change sidebar-provider-icon-selection-freshness、sidebar-provider-icon-magpie-route)。Web client 按 store 身份观测官方 modelDirectories 的即时选择:每次列表/DOM 信号重新解析,换代即重订阅并重读快照,观测失效时改用持久投影 modelSelection.next→最近一次请求;行身份取官方 data-row-key(session:<id>),同名会话不串用徽标;provider 与 model 品牌不同时主图为 provider、右下角叠 10px 小图标,同品牌仍单 logo;Magpie 网关 route 下按上游段识别小图标;品牌 SVG 随包落盘(@lobehub/icons-static-svg@1.94.0、anomalyco/opencode、yetone/magpie,均 MIT),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,定位失败静默降级,自身不发网络请求。升级复核:DSH 升级后回归 row-locator 的行 DOM 假设。移除:enabled:false → dsh build → 重启。'
   # 自研(local):会话标题旁 session id 短标识徽标(点击复制完整 id)
   - id: session-title-copy
     type: package
@@ -170,10 +170,10 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.1.0
+    version: 0.2.0
     enabled: true
     brief: 主会话按任务自动调整推理强度，保留用户模型选择
-    note: '自研,change auto-model-routing。Jev(OpenRouter decisions,typesafe/jev-1.13)判档,AUTO 每用户回合外发≤8000字消息及上一轮问答片段(用户前500字、助手回复末1200字,形态脱敏、尽力而为)至 OpenRouter/TypeSafe,子会话只在所属主会话为 AUTO 时判档外发,保留条款未确认;判档记录(无文本)追加到 $DSH_HOME/state/auto-model-routing/judgements.jsonl;凭据 OPENROUTER_API_KEY 仅本机 .env.local。Jev 失败即停用为 MANUAL 并在芯片提示,无本地降级。不换 provider/model;会话默认 MANUAL。切 MANUAL 或 Jev 失败只停止自动调整、不复原,effort 停在最后一次 AUTO 值,由用户在官方选择器中另选。2026-10-21 用户授权启用部署,GUI 验收中。停用:enabled:false → dsh build。'
+    note: '自研,change auto-model-routing-settings。Jev(OpenRouter decisions,typesafe/jev-1.13)判档;AUTO 外发≤8000字当前消息及前轮用户前500/助手末1200字,子任务仅根会话 AUTO 时外发,形态脱敏尽力而为,OpenRouter/TypeSafe 保留条款未确认。凭据经官方 credentials(~/.dsh/.credentials.yaml,0600)或只读启动环境;GUI 不回传值。非密钥设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json。Claude/GPT 分页配置主 effort 与子 model+effort,受目录/允许列表/上限约束,不自动选 max。不换主模型;新会话默认 MANUAL,可设 AUTO,已有会话不变。Jev 失败即 MANUAL,无本地降级;MANUAL 不复原 effort。无文本判档记录在 $DSH_HOME/state/auto-model-routing/judgements.jsonl。0.2.0 已部署,用户接受 GUI 与已记录验收缺口后归档。停用:enabled:false → dsh build。'
   - id: subagent-model-routing
     type: skill
     enabled: true
@@ -382,3 +382,13 @@ customizations:
     enabled: true
     brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;B049 cache 实测中:PR #16 对照组)
     note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。B049:1.0.4 基线实测 Claude 与 codex 首请求 cacheRead 均为 0;当前临时装 PR #16 本地 tarball(commit e28856d,SHA256 586c1c62…2226a)对照,与 1.0.4 差异仅为去掉 persona 与空工具白名单。测完改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
+
+  # 第三方(remote):Magpie 网关 provider —— 家庭 CT105 magpie(114.114.114.223:3425)的模型进入选择器,与现有直连 provider 并存
+  - id: dsh-magpie-connect
+    type: package
+    source: remote
+    spec: dsh-magpie-connect@0.4.1
+    version: 0.4.1
+    enabled: true
+    brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
+    note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='
