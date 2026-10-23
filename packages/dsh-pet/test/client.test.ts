@@ -229,6 +229,24 @@ describe('overlay position persistence', () => {
 })
 
 describe('overlay markup and accessibility', () => {
+  it('drops the mascot surface for imported animations', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Lottie artwork is transparent; painting the tinted disc (and shadow)
+    // behind it would draw a visible background around the animation.
+    expect(overlay).toContain("background: face === 'animation' ? 'transparent' : accent.background")
+    expect(overlay).toContain('data-face={face}')
+    const rule = PET_CSS.match(/\.dshpet-mascot\[data-face="animation"\]\{[^}]*\}/)?.[0] ?? ''
+    expect(rule).toContain('background:transparent')
+    expect(rule).toContain('box-shadow:none')
+    // The glyph mode keeps its surface.
+    expect(PET_CSS).toMatch(/\.dshpet-mascot\{[^}]*background:var\(--dsw-specific-menu/)
+  })
+
   it('renders an accessible, labelled mascot control', () => {
     const markup = renderToStaticMarkup(
       createElement(PetOverlay, { currentSource: undefined }),

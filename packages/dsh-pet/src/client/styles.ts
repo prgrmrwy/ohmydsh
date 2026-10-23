@@ -85,6 +85,12 @@ export const PET_CSS = `
   color:var(--dsw-alias-label-primary,#1f2329);
   box-shadow:0 4px 16px rgba(0,0,0,.18);transition:transform .12s ease,box-shadow .12s ease}
 .dshpet-mascot:hover{transform:scale(1.06);box-shadow:0 6px 22px rgba(0,0,0,.24)}
+/* Imported Lottie artwork is transparent and already shaped; the tinted disc
+   and its shadow existed only to give the single emoji glyph a surface, and
+   behind an animation they read as an unwanted circle/background. Keep the
+   button (hit target, hover scale, focus ring) but paint nothing behind it. */
+.dshpet-mascot[data-face="animation"]{background:transparent;box-shadow:none}
+.dshpet-mascot[data-face="animation"]:hover{box-shadow:none}
 .dshpet-mascot:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:3px}
 .dshpet-mascot[data-dragging="true"]{cursor:grabbing}
 /* Imported Lottie animation. It fills the mascot circle and must never take

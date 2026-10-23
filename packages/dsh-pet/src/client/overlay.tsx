@@ -835,13 +835,15 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // palette and grow it for options nobody selected.
         style={{
           // The surface is tinted, not the glyph: 🐾 is a colour emoji and
-          // CSS `color` cannot recolour it.
-          background: accent.background,
+          // CSS `color` cannot recolour it. Imported Lottie artwork is already
+          // a complete picture, so it gets no tinted disc behind it.
+          background: face === 'animation' ? 'transparent' : accent.background,
           width: size,
           height: size,
           // Keep the glyph proportional to the circle it sits in.
           fontSize: Math.round(size * 0.53),
         }}
+        data-face={face}
         data-dragging={dragging.current !== undefined}
         aria-label="DSH Pet"
         aria-expanded={mode !== 'closed'}
