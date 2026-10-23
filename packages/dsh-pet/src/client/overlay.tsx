@@ -31,6 +31,8 @@ import {
   PET_SKILLS_EVENT,
   PET_SIZES,
   resolveAccent,
+  resolveAnimationPlayback,
+  type PetAnimationPlayback,
 } from './accent.js'
 import {
   clampPosition,
@@ -49,6 +51,7 @@ import {
   createLatestOnly,
   createMascotAnimation,
   resolveMascotFace,
+  type MascotAnimation,
   type MascotPlayerLoader,
 } from './mascot-expression.js'
 import { setMascotExpressionDiagnostic } from './mascot-diagnostics.js'
@@ -159,7 +162,10 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [expression, setExpression] = useState<PetExpressionView | undefined>(undefined)
   /** True when the player mounted but proved it cannot draw anything usable. */
   const [renderFailed, setRenderFailed] = useState(false)
+  /** Auto-loop by default; 'hover' freezes the first frame until hovered. */
+  const [animationPlayback, setAnimationPlayback] = useState<PetAnimationPlayback>('loop')
   const lottieHostRef = useRef<HTMLSpanElement | null>(null)
+  const animationRef = useRef<MascotAnimation | null>(null)
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -275,6 +281,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           setRingStyle(
             PET_RING_STYLES.find(item => item.id === look.ringStyle)?.id ?? DEFAULT_RING_STYLE,
           )
+          setAnimationPlayback(resolveAnimationPlayback(look.animationPlayback))
         })
         .catch(() => undefined)
     }
@@ -304,6 +311,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     if (container === null) return undefined
     const animation = createMascotAnimation(container, expression.content, {
       loader: props.loadAnimation,
+      hoverOnly: animationPlayback === 'hover',
       onFailure: reason => {
         setRenderFailed(true)
         setMascotExpressionDiagnostic(reason)
@@ -313,8 +321,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         setMascotExpressionDiagnostic(undefined)
       },
     })
-    return () => animation.destroy()
-  }, [expression, renderFailed, props.loadAnimation])
+    animationRef.current = animation
+    return () => {
+      animationRef.current = null
+      animation.destroy()
+    }
+  }, [expression, renderFailed, props.loadAnimation, animationPlayback])
 
 
   /**
@@ -828,7 +840,11 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // the empty square around a collapsed mascot a hover target, so the
         // wheel sprang open from well outside it.
         onMouseEnter={() => {
+          animationRef.current?.setHover(true)
           if (mode === 'closed') setMode('menu')
+        }}
+        onMouseLeave={() => {
+          animationRef.current?.setHover(false)
         }}
         // Inline, because the palette is user data: emitting one rule per
         // accent into the injected stylesheet would couple the CSS to the

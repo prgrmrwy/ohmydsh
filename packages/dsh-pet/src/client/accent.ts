@@ -104,6 +104,27 @@ function firstGrapheme(raw: string): string {
   return [...segmenter.segment(raw)][0]?.segment ?? ''
 }
 
+/** How an imported animation plays. */
+export type PetAnimationPlayback = 'loop' | 'hover'
+
+/** The animation playback modes offered in Settings → Appearance. */
+export const PET_ANIMATION_PLAYBACKS = [
+  { id: 'loop', label: '自动循环' },
+  { id: 'hover', label: '悬停时播放' },
+] as const
+
+/**
+ * Resolve the stored playback mode.
+ *
+ * Unset means the historical behavior (loop): a Host written before this
+ * setting existed must not suddenly freeze every mascot animation.
+ * @param id - Stored identifier, possibly unknown.
+ * @returns the mode to apply.
+ */
+export function resolveAnimationPlayback(id: string | undefined): PetAnimationPlayback {
+  return id === 'hover' ? 'hover' : 'loop'
+}
+
 /** Selectable mascot diameters, in pixels. */
 export const PET_SIZES = [
   { id: 'small', label: '小', px: 56 },

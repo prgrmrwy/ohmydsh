@@ -506,6 +506,16 @@ describe('settings information architecture', () => {
     expect(markup).not.toContain('不支持链接')
   })
 
+  it('offers the animation playback modes in Appearance', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Default is auto-loop; "hover" freezes the first frame until pointed at.
+    expect(markup).toContain('动画播放')
+    expect(markup).toContain('自动循环')
+  })
+
   it('warns before replacing the active expression', async () => {
     const { readFile } = await import('node:fs/promises')
     const settings = await readFile(

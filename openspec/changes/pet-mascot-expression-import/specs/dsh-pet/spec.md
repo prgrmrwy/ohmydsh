@@ -163,7 +163,7 @@ Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相
 
 ### Requirement: 吉祥物渲染、回退与可诊断
 
-存在有效动画时，吉祥物 SHALL 渲染该动画并 MUST NOT 同时显示 glyph；glyph 只在无生效动画、读取为 corrupt 或渲染失败时显示。渲染失败 MUST 通过事件与时序判定：订阅播放器 `error`/`onError`，在 `DOMLoaded` 后的有界窗口内检查渲染容器；`isLoaded` MUST NOT 作为唯一即时判据；可绘制节点 MUST 排除 `g`/`defs`/`clipPath`/`mask` 等容器，只认真正的绘制元素。失败 SHALL 销毁播放器、回退 glyph，并写入客户端共享诊断状态供 Settings 展示。播放策略 SHALL 由 `reducedMotion || document.hidden` 决定：为真时 MUST 不播放，且在整个期间对可见性变化都不得恢复播放。
+存在有效动画时，吉祥物 SHALL 渲染该动画并 MUST NOT 同时显示 glyph；glyph 只在无生效动画、读取为 corrupt 或渲染失败时显示。渲染失败 MUST 通过事件与时序判定：订阅播放器 `error`/`onError`，在 `DOMLoaded` 后的有界窗口内检查渲染容器；`isLoaded` MUST NOT 作为唯一即时判据；可绘制节点 MUST 排除 `g`/`defs`/`clipPath`/`mask` 等容器，只认真正的绘制元素。失败 SHALL 销毁播放器、回退 glyph，并写入客户端共享诊断状态供 Settings 展示。播放策略 SHALL 由 `reducedMotion || document.hidden` 决定：为真时 MUST 不播放，且在整个期间对可见性变化都不得恢复播放。所有者 SHALL 可选择播放模式：默认自动循环；选择悬停播放时，吉祥物 MUST 静止停在首帧，仅在指针悬停时循环，移出后恢复静态。`reducedMotion` 与隐藏状态 MUST 优先于悬停。
 
 #### Scenario: 动画优先于 glyph
 - **GIVEN** 存在有效动画且用户同时配置了自定义 glyph
@@ -179,6 +179,11 @@ Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相
 - **GIVEN** 读取路由返回 `state: 'corrupt'`
 - **WHEN** 吉祥物完成一次读取
 - **THEN** 吉祥物显示配置的 glyph（不挂载播放器），Settings 外观页显示该诊断文本
+
+#### Scenario: 悬停播放模式
+- **GIVEN** 外观设置为「悬停时播放」且存在生效动画
+- **WHEN** 吉祥物挂载后未被悬停，随后指针移入再移出
+- **THEN** 未悬停时停在动画首帧且不播放，悬停期间循环播放，移出后恢复静态；`prefers-reduced-motion` 为真时即使悬停也不播放
 
 #### Scenario: 减少动效或页面隐藏期间不播放
 - **GIVEN** `prefers-reduced-motion: reduce`，或页面处于隐藏状态

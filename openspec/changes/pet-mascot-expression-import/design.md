@@ -94,6 +94,7 @@ expressions/
 ### D7 播放策略与生命周期
 
 - 纯函数 `resolvePlayback({ reducedMotion, hidden }): 'play' | 'pause'`；挂载时按该函数决定是否 `autoplay`，监听 `matchMedia('(prefers-reduced-motion: reduce)')` 的 change 与 `visibilitychange` 重新求值。
+- **播放模式设置**（`appearance.animationPlayback`，默认 `loop`）：`loop` 为历史行为（自动循环）；`hover` 时创建时不 autoplay 并 `stopFirstFrame()` 渲染首帧，overlay 在 mascot `mouseenter/mouseleave` 调用 `setHover()` 切换播放。播放判定合并为 `reducedMotion > hidden > hover 门控`：reduce 恒停首帧、hidden 暂停、hover 模式下未悬停停首帧。设置页「外观 → 动画播放」单选，保存后广播 `PET_APPEARANCE_EVENT` 立即生效。
 - `reducedMotion` 为真时始终 `goToAndStop(0, true)`（停首帧）；即使从隐藏恢复也 MUST NOT 播放（评审 M5）。
 - 卸载/切换素材时 `destroy()` 并移除全部 listener；容器 `pointer-events:none`、`aria-hidden="true"`，不占拖动/点击/键盘焦点（评审 S7）。
 - 读取请求带单调 request id：只有最新一次读取可写入状态，迟到响应丢弃（评审 M7 C）；`AbortController` 或序号都可行，实现用序号以保持可测。

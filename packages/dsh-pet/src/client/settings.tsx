@@ -20,7 +20,10 @@ import {
   PET_SKILLS_EVENT,
   normalizeGlyph,
   PET_ACCENTS,
+  PET_ANIMATION_PLAYBACKS,
   PET_SIZES,
+  resolveAnimationPlayback,
+  type PetAnimationPlayback,
   PET_RING_STYLES,
   DEFAULT_RING_STYLE,
   type PetRingStyleId,
@@ -364,6 +367,7 @@ function GeneralTab(): JSX.Element {
   const [glyph, setGlyph] = useState(DEFAULT_GLYPH)
   const [size, setSize] = useState<PetSizeId>('medium')
   const [ringStyle, setRingStyle] = useState<PetRingStyleId>(DEFAULT_RING_STYLE)
+  const [animationPlayback, setAnimationPlayback] = useState<PetAnimationPlayback>('loop')
   const [presetOptions, setPresetOptions] = useState<
     readonly { value: string; label: string }[]
   >([])
@@ -384,6 +388,7 @@ function GeneralTab(): JSX.Element {
         setRingStyle(
           PET_RING_STYLES.find(item => item.id === look.ringStyle)?.id ?? DEFAULT_RING_STYLE,
         )
+        setAnimationPlayback(resolveAnimationPlayback(look.animationPlayback))
       })
       .catch((cause: unknown) => setError(String(cause)))
   }, [])
@@ -571,6 +576,24 @@ function GeneralTab(): JSX.Element {
         <p className="dshpet-item-hint">
           能力轮盘的圆环底色跟随上面的配色，由内向外逐圈变淡。
           「默认」配色本身是白色，任何档位下圆环都靠描边区分。
+        </p>
+
+        <StoredField
+          label="动画播放"
+          value={animationPlayback}
+          options={PET_ANIMATION_PLAYBACKS.map(item => ({ value: item.id, label: item.label }))}
+          onSave={async next => {
+            const updated = await petApi.updateConfig({
+              appearance: { animationPlayback: next },
+            })
+            setConfig(updated)
+            setAnimationPlayback(resolveAnimationPlayback(next))
+            globalThis.dispatchEvent?.(new Event(PET_APPEARANCE_EVENT))
+          }}
+        />
+        <p className="dshpet-item-hint">
+          默认「自动循环」。选择「悬停时播放」后，吉祥物平时停在动画首帧，只在鼠标悬停时循环播放；
+          减少动效偏好仍优先（始终停在首帧）。
         </p>
       </Group>
 

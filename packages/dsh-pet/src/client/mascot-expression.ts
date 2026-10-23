@@ -161,6 +161,11 @@ export function createLatestOnly(): LatestOnly {
 /** Handle for a mounted mascot animation. */
 export interface MascotAnimation {
   readonly destroy: () => void
+  /**
+   * Hover state for `hoverOnly` playback. Ignored in the default loop mode.
+   * Present on every handle so the overlay can wire one listener unconditionally.
+   */
+  readonly setHover: (hovered: boolean) => void
 }
 
 /**
@@ -180,6 +185,13 @@ export function createMascotAnimation(
   options: {
     readonly loader: MascotPlayerLoader
     readonly environment?: MascotEnvironment
+    /**
+     * Freeze on the first frame and play only while hovered.
+     *
+     * Default (absent/`false`) is the historical auto-loop behavior; the
+     * setting is persisted as `appearance.animationPlayback`.
+     */
+    readonly hoverOnly?: boolean
     readonly onFailure?: (reason: string) => void
     readonly onReady?: () => void
   },
@@ -213,21 +225,59 @@ export function createMascotAnimation(
     animationData = JSON.parse(content)
   } catch {
     fail('动画内容不是合法 JSON')
-    return { destroy: () => undefined }
+    return { destroy: () => undefined, setHover: () => undefined }
   }
   if (typeof animationData !== 'object' || animationData === null) {
     fail('动画内容不是 JSON 对象')
-    return { destroy: () => undefined }
+    return { destroy: () => undefined, setHover: () => undefined }
+  }
+
+  const hoverOnly = options.hoverOnly === true
+  let hovered = !hoverOnly
+
+  /**
+   * Apply the combined playback rule: reduced-motion > hidden > hover gate.
+   *
+   * Reduced motion wins over everything (freeze the first frame); hidden
+   * pauses; in hover mode an un-hovered mascot freezes on the first frame.
+   */
+  const applyPlayback = (): void => {
+    if (disposed) return
+    const decision = gate.update(environment.reducedMotion(), environment.hidden())
+    if (decision === 'play' && (!hoverOnly || hovered)) {
+      loaded.play()
+      return
+    }
+    if (decision === 'pause' && gate.pauseMode() === 'first-frame') {
+      loaded.stopFirstFrame()
+      return
+    }
+    if (hoverOnly && !hovered && !environment.hidden()) {
+      loaded.stopFirstFrame()
+      return
+    }
+    loaded.pause()
   }
 
   const initial = gate.update(environment.reducedMotion(), environment.hidden())
+  const autoplay = initial === 'play' && (!hoverOnly || hovered)
   try {
-    handle = options.loader(container, animationData, initial === 'play')
+    handle = options.loader(container, animationData, autoplay)
   } catch (error) {
     fail(`播放器加载失败：${error instanceof Error ? error.message : String(error)}`)
-    return { destroy: () => undefined }
+    return { destroy: () => undefined, setHover: () => undefined }
   }
   const loaded = handle
+
+  // Static modes must render something rather than stay blank until the first
+  // interaction.
+  if (!autoplay) {
+    try {
+      loaded.stopFirstFrame()
+    } catch {
+      // A player that cannot seek is handled by the drawable check below.
+    }
+  }
 
   loaded.on('error', () => fail('播放器报告动画错误'))
   loaded.on('DOMLoaded', () => {
@@ -241,21 +291,14 @@ export function createMascotAnimation(
     })
   })
 
-  unsubscribe = environment.subscribe(() => {
-    if (disposed) return
-    const decision = gate.update(environment.reducedMotion(), environment.hidden())
-    if (decision === 'play') {
-      loaded.play()
-      return
-    }
-    if (gate.pauseMode() === 'first-frame') {
-      loaded.stopFirstFrame()
-      return
-    }
-    loaded.pause()
-  })
+  unsubscribe = environment.subscribe(applyPlayback)
 
   return {
+    setHover: (next: boolean) => {
+      if (disposed) return
+      hovered = next
+      if (hoverOnly) applyPlayback()
+    },
     destroy: () => {
       if (disposed) return
       disposed = true

@@ -178,7 +178,7 @@ customizations:
   - id: dsh-pet
     type: package
     source: local
-    version: 0.2.1
+    version: 0.2.2
     enabled: true
     # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
     # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
