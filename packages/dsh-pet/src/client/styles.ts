@@ -450,6 +450,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   outline-offset:2px;border-radius:2px}
 .dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:2px;min-width:0}
 /* Inline "i" disclosure for explanation text that used to be page prose. */
+/* The shared fact-row key reserves 132px so values line up in tables of
+   label/value pairs. Inside a field header that reservation is pure gap: the
+   info icon floated ~120px away from its own label. */
+.dshpet-settings .dshpet-field-head .dshpet-fact-key,
+.dshpet-settings .dshpet-field-label .dshpet-fact-key{min-width:0}
 .dshpet-settings .dshpet-field-head{display:flex;align-items:center;gap:2px;min-width:0}
 /* Label + hint on the left, control on the right — one line, like the other
    DSH panels (default-mode / reasoning-effort switches). */

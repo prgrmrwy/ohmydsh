@@ -554,6 +554,17 @@ describe('settings information architecture', () => {
     expect(PET_CSS).toContain('.dshpet-info:hover .dshpet-info-body')
   })
 
+  it('keeps the info glyph next to its own label', () => {
+    // The shared fact-row key reserves a value column; inside a field header
+    // that reservation pushed the info icon far from the label it explains.
+    expect(PET_CSS).toMatch(
+      /\.dshpet-field-head \.dshpet-fact-key[^{]*\{[^}]*min-width:0/,
+    )
+    expect(PET_CSS).toMatch(
+      /\.dshpet-field-label \.dshpet-fact-key[^{]*\{[^}]*min-width:0/,
+    )
+  })
+
   it('does not report a playback save the Host did not persist', async () => {
     const { readFile } = await import('node:fs/promises')
     const settings = await readFile(
