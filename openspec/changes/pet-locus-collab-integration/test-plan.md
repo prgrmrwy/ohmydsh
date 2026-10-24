@@ -79,20 +79,20 @@
 | specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层恢复后自动重新可用 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-03：协作层恢复后自动重新可用` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只在管理面 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-01：旧版待办只在管理面` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只读 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-02：旧版待办只读` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 回应消息沿 ref 路由到最近的戳 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-01：回应消息沿 ref 路由到最近的戳` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 正文点名 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-02：正文点名` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 无法路由不猜 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-03：无法路由不猜` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 零 active child 时终态仍登记 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-04：零 active child 时终态仍登记` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 回应消息沿 ref 路由到最近的戳 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-01：回应消息沿 ref 路由到最近的戳` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 正文点名 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-02：正文点名` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 无法路由不猜 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-03：无法路由不猜` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 零 active child 时终态仍登记 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-04：零 active child 时终态仍登记` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 同一流程在新旧存储上输出一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-01：同一流程在新旧存储上输出一致` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 证据边界值在新旧存储上逐字段一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-02：证据边界值在新旧存储上逐字段一致` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 并发受理在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-03：并发受理在新旧存储上一致` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 失败路径在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-04：失败路径在新旧存储上一致` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 兄弟子会话读不到彼此登记的结论 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-01：兄弟子会话读不到彼此登记的结论` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 跨主会话不可读 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-02：跨主会话不可读` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 台账不随条目清空而消失 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-03：台账不随条目清空而消失` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 新增条目类型不改既有语义 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-04：新增条目类型不改既有语义` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 换代后登记照旧归入同一代理 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-05：换代后登记照旧归入同一代理` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 主会话未加载时不为建空间唤醒它 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-06：主会话未加载时不为建空间唤醒它` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 兄弟子会话读不到彼此登记的结论 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-01：兄弟子会话读不到彼此登记的结论` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 跨主会话不可读 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-02：跨主会话不可读` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 台账不随条目清空而消失 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-03：台账不随条目清空而消失` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 新增条目类型不改既有语义 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-04：新增条目类型不改既有语义` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 换代后登记照旧归入同一代理 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-05：换代后登记照旧归入同一代理` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 主会话未加载时不为建空间唤醒它 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-06：主会话未加载时不为建空间唤醒它` | 🟡 partial（collab_status 部分绿；pet_locus_track 部分为 it.todo，等第 7 组） |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 工具不接受目标参数 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-01：工具不接受目标参数` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 代际更替后待办仍可解析 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-02：代际更替后待办仍可解析` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 入口退役不使待办消失 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-03：入口退役不使待办消失` | 🔴 red |

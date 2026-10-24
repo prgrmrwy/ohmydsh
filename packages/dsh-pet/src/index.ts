@@ -69,6 +69,8 @@ import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
 import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import { legacyTodoBackend } from './host/ledger/backend.js'
+import { LocusCollabProxy } from './host/collab/proxy.js'
+import type { CollabService } from './host/collab/types.js'
 import {
   acceptTodo,
   requestTodoExecution,
@@ -950,6 +952,35 @@ async function initialize(
     if (!['inquiries', 'inquiry_handoffs', 'inquiry_answers', 'inquiry_results', 'inquiry_works'].includes(change.table)) return
     changes.publish()
   }), 'dsh-pet: publish committed inquiry projection changes')
+
+  // Locus collaboration proxy (`pet-locus-collab-integration` D1–D5). The
+  // projection follows committed locus rows; dsh-collab is an OPTIONAL peer
+  // consumed through a dynamic inject, so Pet loads unchanged without it.
+  // Nothing here resumes a main session, opens a turn or sends to Feishu.
+  const locusCollab = new LocusCollabProxy({
+    listLoci: () => locusRepository.listLoci(),
+    liveAgent: sessionId => ctx.agents.get(sessionId as never),
+    log: message => petLog(message),
+  })
+  const ensureLocusSpaces = () => {
+    void locusCollab.ensureAll().catch(error => petWarn(`dsh-pet collab: ${String(error)}`))
+  }
+  ctx.effect(() => ctx.on('domain/changed', change => {
+    if (change.domain !== PET_DOMAIN_NAME || change.table !== 'loci') return
+    locusCollab.refresh()
+    ensureLocusSpaces()
+  }), 'dsh-pet: follow locus rows into the collaboration proxy')
+  // A main session that just loaded may now be able to establish its space.
+  ctx.effect(() => ctx.on('agent/created', (): undefined => { ensureLocusSpaces(); return undefined }),
+    'dsh-pet: establish Locus spaces when a main session loads')
+  ctx.inject(['dshCollab'], collabCtx => {
+    collabCtx.effect(() => {
+      const detach = locusCollab.attach((collabCtx as unknown as { dshCollab: CollabService }).dshCollab)
+      locusCollab.refresh()
+      ensureLocusSpaces()
+      return detach
+    }, 'dsh-pet: attach pet-locus to dsh-collab')
+  })
 
   // Archiving a terminal Task from Pet syncs its executor session; DSH
   // exposes archive but no unarchive, so this stays one-way by design.

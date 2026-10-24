@@ -36,3 +36,10 @@
 - AMD-1（2026-10-25）：`visible` 增加同步 `lookup.recordAt`，原因与评审复核见 review.md 末节；新增 `stamp-20`。
 - task-7（AMD-1）：`stamp-20` 先红于"`visible` 只收到 2 个参数、lookup 未传"（插桩确认后撤掉），再实现；另对写授权单独变异（不传 lookup）确认 `stamp-20` 变红。dsh-collab 179/179。
 - AMD-2（2026-10-25）：戳 `locusId` 改为由规范化入口键派生（第 1 版追 `replacesLocusId` 根被评审驳回：重建链不补、前驱不保证可达）；第 2 版评审复核接受。
+
+## 第 6 组（Pet 代理）
+
+- 顺序：先写 proxy 再写集成测试，集成用例没有经历"模块不存在"的红；纯函数 `collab-routing-pure.test.ts` 15 条覆盖命名、戳、路由、可见性。实际出现的红：routing-01 原 GIVEN 不可构造（→ AMD-3，评审接受）；scope-03 所有者处置须走 `disposeRequest`（内核不许 assignee 外 open→done，符合 D8）；scope-04 子会话推进自己登记的待办得到内核 `COLLAB_FORBIDDEN` 而非插件 `ITEM_NOT_FOUND`——因为该条目戳相等通过插件写检查，再被内核以"非 assignee"拒绝。scope-04 断言改为"新增 kind 前后拒绝结果完全相同"。
+- 待处理：triage delta 场景"子会话不能推进待办状态"写的是插件层 `COLLAB_ITEM_NOT_FOUND`。经 `pet_locus_track` 登记的待办 ext 含来源事实，不等于戳，因此插件判"不是自己的"并返回 `ITEM_NOT_FOUND`（stamp-h1 已证）；scope-04 的条目是测试直接用原生 create 写的、ext 恰为戳，属于另一类。第 7 组用真实 `pet_locus_track` 登记后应得到 `ITEM_NOT_FOUND`，以 lifecycle-04 验证，不改规范。
+- scope-06 的 `pet_locus_track` 部分为 `it.todo`，等第 7 组。
+- 结果：dsh-pet 206 files / 3457 passed / 8 skipped / 1 todo；typecheck 通过。

@@ -42,10 +42,10 @@
 
 ## 6. Pet：代理（戳、visible、路由、presence、deliver）与空间建立
 
-- [ ] 6.1 Write failing test: `scope-01..06`（兄弟读不到彼此、跨主会话不可读、台账不随条目清空而消失、新增条目类型不改既有语义、换代后登记照旧归入同一代理、主会话未加载时不为建空间唤醒它）
-- [ ] 6.2 Write failing test: `routing-01..04`（回应消息沿 ref 路由到最近的戳、正文点名、无法路由不猜、零 active child 时终态仍登记）
-- [ ] 6.3 Implement: 可选 inject `dshCollab`、attach `pet-locus`；路由投影；`resolveCaller` 返回地址 `pet:<parent>` 与戳；`visible` 纯函数；`recipients: ['main']`；`presence` 按空间建立；`deliver` 按 D5 路由并登记（不开轮次）；D1 命名；D2 `establish` + 一次 `admit('pet')`，使 6.1、6.2 通过
-- [ ] 6.4 Refactor；Pet 全套通过
+- [x] 6.1 Write failing test: `scope-01..06`（兄弟读不到彼此、跨主会话不可读、台账不随条目清空而消失、新增条目类型不改既有语义、换代后登记照旧归入同一代理、主会话未加载时不为建空间唤醒它）
+- [x] 6.2 Write failing test: `routing-01..04`（回应消息沿 ref 路由到最近的戳、正文点名、无法路由不猜、零 active child 时终态仍登记）
+- [x] 6.3 Implement: 可选 inject `dshCollab`、attach `pet-locus`；路由投影；`resolveCaller` 返回地址 `pet:<parent>` 与戳；`visible` 纯函数；`recipients: ['main']`；`presence` 按空间建立；`deliver` 按 D5 路由并登记（不开轮次）；D1 命名；D2 `establish` + 一次 `admit('pet')`，使 6.1、6.2 通过
+- [x] 6.4 Refactor；Pet 全套通过
 
 ## 7. Pet：`collab` 实现与子会话工具面
 
