@@ -34,7 +34,7 @@ dsh-collab 服务缺失、`pet-locus` 未能接入或接入句柄失效时，待
 
 ### Requirement: 协作层发给代理的记录按 locus 路由
 
-发给成员 `pet` 的需回复消息与作者为 `pet` 的 request 终态通知，经 dsh-collab 中继 provider 交给 Pet 时，Pet SHALL 按以下顺序确定目标 locus 并登记：(1) 沿 `ref` 链向前追溯，取离本记录最近的带 `locusId` 戳的记录；(2) 正文中恰好出现一个 `locus-<8 位十六进制>` 不透明名时取其对应 locus；(3) 否则登记为无法路由并在管理面可见。Pet MUST NOT 猜测目标。本变更中路由结果只登记，MUST NOT 开启子会话轮次或产生飞书出站。
+发给成员 `pet` 的需回复消息与作者为 `pet` 的 request 终态通知，经 dsh-collab 中继 provider 交给 Pet 时，Pet SHALL 按以下顺序确定目标 locus 并登记：(1) 沿 `ref` 链向前追溯，取离本记录最近的带 `locusId` 戳的记录；(2) 正文中恰好出现一个 `locus-<16 位十六进制>` 不透明名且等于本主会话下某个入口的戳时取该入口；(3) 否则登记为无法路由并在管理面可见。Pet MUST NOT 猜测目标。本变更中路由结果只登记，MUST NOT 开启子会话轮次或产生飞书出站。
 
 #### Scenario: 回应消息沿 ref 路由到最近的戳
 - **GIVEN** locus A 的记录 Ra（seq 5）、locus B 的记录 Rb（seq 7）；主会话发给 `pet` 的消息 M（seq 9）`ref: 7`，而 Rb 本身 `ref: 5`

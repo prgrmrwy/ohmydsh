@@ -113,3 +113,9 @@ CHANGES_APPLIED: yes
 
 - **AMD-1 visible 增加同步 lookup**：实施 D4/D5 时发现 `visible(stamp, subject)` 只给消息本身，Pet 无法同步执行 D5 规则 1（沿 ref 链取最近的戳）；若由 Pet 自建异步 seq 索引，`needsReply:false` 的主会话消息不触发投递，窗口期内对目标子会话漏显示。修订为 `visible(stamp, subject, lookup)`，`lookup.recordAt(seq)` 由 dsh-collab 从同一次完整重放的状态同步提供。改动位置：design D3 接口说明、D4 visible 说明、D5 末句；dsh-collab delta 要求文字一句；新增场景"visible 可沿 ref 链查前序记录"（test-plan 新增 `stamp-20`）。不改可见性规则本身、不改投影与授权。
   - **accepted by reviewer**：仅补齐 ref 链判定所需的同次完整重放同步查询，现有状态可实现；不改可见性、投影或写授权规则，新增无投递消息场景可机械断言，lookup 仅供可信本地接入方判定、不向子会话输出，未扩大误泄边界。
+
+- **AMD-2 戳的 locusId 取换代链根 id；不透明名定义**：实施中发现现行 Locus 每次换代都分配新记录 id（`controller.ts` 多处 `generatedId('locus', …)`，持久层以 `replacesLocusId` 串链），而 D4、scope-05、"换代后登记照旧归入同一代理"都假定跨代 locusId 不变。修订：戳中的 `locusId` 定义为沿 `replacesLocusId` 回溯到第 1 代的根 id；待办 ext 另记登记时那代的记录 id 与 generation 仅作审计。D5 规则 2 的不透明名定义为 `locus-` + sha256(根 id) 前 8 位，同主会话内碰撞视为不匹配。改动位置：design D4 新增一条、D5 规则 2 一句。规范场景文字不变（它们说的"同一 locus"本义即入口身份）。
+  - **not accepted**：根身份符合待办语义，但现有内存仓库 rebuildLocus 不补 replacesLocusId，重建会断开跨代身份；持久化 putLocus 与冷启动校验也不保证前驱存在、同入口递减至第 1 代或无环，故“已提交记录必可追根”不成立。最小修复：补齐重建链，D4 明定跨全部历史（含退役及重绑前主会话）校验回溯，断链／环拒绝认领而非另造根，空间归属仍按各代 parentSessionId；D5 对同主会话内不同根的同名拒配是安全的，须先按根去重，不能把同链多代误判为碰撞。
+
+- **AMD-2 第 2 版（回应上条 not accepted）**：不再沿 `replacesLocusId` 追根。戳 `locusId` 直接由规范化入口键派生：`'locus-' + sha256(入口键)` 前 16 位十六进制；入口键是 Locus 索引键，跨代、重建、冷启动不变，纯函数、不读历史。点名与戳为同一个值（不再另设 8 位名）。同一主会话下不同入口碰撞时两者都不认领（fail closed）。入口改绑到其它主会话时属于另一空间。改动位置：design D4 该条、D5 规则 2；pet-locus-intent-triage delta 路由要求中的"8 位"改为"16 位且等于本主会话下某入口的戳"。
+  - **accepted by reviewer**：规范化入口键确定且分隔符受校验，保留 doc: 前缀及评论 threadId，派生戳不依赖代际、重建链或进程状态；改绑按主会话空间隔离，同空间不同入口碰撞双向拒认领，点名与戳统一；主会话可读、子会话仅见自身的既定投影未扩大泄露面，与换代、重建、退役及协作层恢复场景一致。

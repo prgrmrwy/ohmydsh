@@ -103,6 +103,7 @@ dsh-collab 对带戳的托管调用者的行为：
 
 - **路由表** = 现有 Locus 绑定表。内存投影 `sessionId → {parentSessionId, locusId, generation}`，只含 active、当前代的 child；在绑定事务提交后与启动冷读后更新。
 - **`resolveCaller(agent)`**：agent 是投影中的 child、是 Host 当前对象、且其主会话空间已建立 → `{ address: 'pet:<parentSessionId>', stamp: { pet: { locusId } } }`；否则 `undefined`。所有子会话解析到同一地址，戳不同。
+- **戳中的 `locusId` 是入口的稳定身份**（AMD-2，第 2 版）：现行代码每次换代、重建都分配新的 locus 记录 id，`replacesLocusId` 链在内存仓库的重建路径上不补、持久层也不保证前驱可达，所以不能靠追链得到稳定身份（评审复核指出）。改为直接取**入口本身**：`locusId = 'locus-' + sha256(规范化入口键)` 的前 16 位十六进制，入口键即 `normalizeLocusEndpoint` 给出的 `chatId`（+`threadId`）键。入口是 Locus 索引的键，跨代、重建、冷启动都不变，计算是纯函数、不读历史记录。同一主会话下若两个**不同**入口算出同一值（64 位碰撞），Pet 对两者都不认领（fail closed）。入口改绑到别的主会话时属于另一个空间，戳在各自空间内独立。待办 ext 中另记登记时那一代的记录 id 与 `generation`，仅作审计。
 - **`holds`、`claim`**：`address` 形如 `pet:<parentSessionId>` 且该主会话有空间记录。
 - **`visible(stamp, subject, lookup)`**（纯函数，按主体；沿 ref 链只用 `lookup.recordAt`，Pet 不维护自己的 seq 索引）：
   - `item`：作者为 `main`，或 `item.ext.pet.locusId === stamp.pet.locusId`。主会话修订子会话条目后作者不变，可见性不变。
@@ -115,7 +116,7 @@ dsh-collab 对带戳的托管调用者的行为：
 
 发给 `pet` 的消息或 request 终态通知，目标 Locus 按顺序确定：
 1. **ref 链上最近的戳**：沿 `ref` 向前追溯，取离本记录最近的带 `ext.pet.locusId` 的记录。
-2. **正文点名**：正文中**恰好一个** `locus-<8 位 hex>` 不透明名且对应本主会话下的 locus（含已退役）；多个、零个或不属于本主会话则不匹配。子会话发消息的 `to` 只能是 `main`，所以本规则只对主会话发的消息起作用，子会话不能借点名把消息转给兄弟。
+2. **正文点名**：正文中**恰好一个**形如 `locus-<16 位 hex>` 的不透明名，且等于本主会话下某个入口（含已退役）的戳 `locusId`；即点名与戳是同一个值，不另设名字；多个、零个或不属于本主会话则不匹配。子会话发消息的 `to` 只能是 `main`，所以本规则只对主会话发的消息起作用，子会话不能借点名把消息转给兄弟。
 3. **无法路由**：登记为 `unroutable`，管理面可见，对任何 child 不可见。
 
 request 终态通知只用规则 1（request 本身带戳）。路由是纯函数 `route(message, recordAt)`，`visible` 与 `deliver` 共用；`visible` 中的 `recordAt` 来自 dsh-collab，`deliver` 中的 `recordAt` 由 Pet 从 `readManaged` 的结果构建。
