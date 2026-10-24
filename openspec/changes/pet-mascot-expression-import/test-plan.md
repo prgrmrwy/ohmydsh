@@ -27,14 +27,17 @@
 | specs/dsh-pet/spec.md → 管理路由的请求体上限按路由区分 | 超过 4 MiB 的导入请求被请求体上限拒绝 | test/expression-routes.test.ts | `rejects request bodies over 4 MiB with INVALID_REQUEST` | 🟢 green |
 | specs/dsh-pet/spec.md → 管理路由的请求体上限按路由区分 | 其余管理路由维持 256 KiB 上限 | test/expression-routes.test.ts | `keeps the 256 KiB limit for every other route` | 🟢 green |
 | specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 从 HTTPS URL 导入合法动画 | test/expression-routes.test.ts | `imports a source downloaded by the Host` | 🟢 green |
-| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 非 HTTPS 或内网目标被拒绝且不发起请求 | test/expression-fetch.test.ts | `refuses localhost names, private literals and private DNS answers` | 🟢 green |
-| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 重定向到内网或次数超限被拒绝 | test/expression-fetch.test.ts | `re-checks every redirect hop and refuses private targets`（外加 `follows up to three public redirects and refuses more`） | 🟢 green |
+| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 非 HTTPS 或带凭据的目标被拒绝且不发起请求 | test/expression-fetch.test.ts | `rejects malformed, non-HTTPS and credential-bearing URLs before fetching` | 🟢 green |
+| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 重定向协议不支持或次数超限 | test/expression-fetch.test.ts | `rejects excess or missing redirects and unsupported redirect URLs` | 🟢 green |
+| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 下载沿用 Host 网络且无需专用配置 | test/expression-fetch.test.ts / test/expression-transport.test.ts | `uses Host fetch for local, reserved and custom-port targets without an opt-in` / `uses the existing global dispatcher without resolving the target locally` | 🟢 green |
+| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 压缩响应与非标准内容类型 | test/expression-transport.test.ts / test/expression-fetch.test.ts | `decodes gzip with the ordinary fetch transport` / `leaves content validation to Lottie regardless of the MIME label` | 🟢 green |
+| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 解压后大小与全程超时 | test/expression-transport.test.ts / test/expression-fetch.test.ts | `limits decompressed bytes even when the wire body is small` / `keeps the same deadline through redirects and a stalled body` | 🟢 green |
 | specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 下载失败返回可诊断错误且现有素材不变 | test/expression-routes.test.ts | `keeps the current expression when the download fails` | 🟢 green |
 | specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 下载内容不是合法 Lottie 时返回 INVALID_EXPRESSION | test/expression-routes.test.ts | `keeps the current expression when downloaded content is invalid` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 动画优先于 glyph | test/mascot-expression.test.ts | `prefers a valid animation over the glyph` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 渲染失败时回退 glyph 并显示诊断 | test/mascot-expression.test.ts | `falls back and publishes a diagnostic when the player fails` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 读取为 corrupt 时显示 glyph 并暴露诊断 | test/mascot-expression.test.ts | `renders the glyph and exposes the diagnostic for a corrupt read` | 🟢 green |
-| specs/dsh-pet/spec.md → 吉祥物表情素材导入 | fake-ip 放宽只放行代理 fake-ip 段 | test/expression-fetch.test.ts / test/expression-routes.test.ts | `allows proxy fake-ip answers only after an explicit opt-in` / `passes the owner fake-ip opt-in to the downloader` | 🟢 green |
+| specs/dsh-pet/spec.md → 支持从 HTTPS URL 导入动画表情 | 移除专用网络配置 | test/expression-routes.test.ts / test/client.test.ts | `downloads without a network opt-in and does not expose the retired config` / `uses Host network configuration without a download-specific switch` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 悬停播放模式 | test/mascot-expression.test.ts | `freezes on the first frame until hovered` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 减少动效或页面隐藏期间不播放 | test/mascot-expression.test.ts | `never plays under reduced motion or while hidden` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 导入与移除无需刷新即生效 | test/mascot-expression-dom.test.ts | `refreshes the mascot on appearance broadcast without reload` | 🟢 green |

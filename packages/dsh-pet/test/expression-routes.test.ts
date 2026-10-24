@@ -253,29 +253,20 @@ describe('URL import route', () => {
     expect(read.data).toMatchObject({ state: 'ok', content: text })
   })
 
-  it('passes the owner fake-ip opt-in to the downloader', async () => {
-    let seen: boolean | undefined
+  it('downloads without a network opt-in and does not expose the retired config', async () => {
     routes = buildRoutes({
       lifecycle: readyLifecycle(),
-      fetchExpressionSource: async (_url: string, options: { allowFakeIp: boolean }) => {
-        seen = options.allowFakeIp
+      fetchExpressionSource: async (...args: unknown[]) => {
+        expect(args).toEqual(['https://assets.internal:8443/a.json'])
         return source()
       },
     } as never)
-
-    // Default is strict.
-    await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
-    expect(seen).toBe(false)
-
-    const saved = await call(ROUTES.configUpdate, { expressionFetchAllowFakeIp: true })
-    expect(saved.data).toMatchObject({ expressionFetchAllowFakeIp: true })
-
-    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://assets.internal:8443/a.json' })
     expect(reply).toMatchObject({ ok: true })
-    expect(seen).toBe(true)
-
     const config = await call(ROUTES.config, {})
-    expect(config.data).toMatchObject({ expressionFetchAllowFakeIp: true })
+    expect(config.data).not.toHaveProperty('expressionFetchAllowFakeIp')
+    const saved = await call(ROUTES.configUpdate, { appearance: { glyph: '🐾' } })
+    expect(saved.data).not.toHaveProperty('expressionFetchAllowFakeIp')
   })
 
   it('rejects a URL that is not https before any download', async () => {

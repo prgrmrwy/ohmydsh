@@ -72,12 +72,9 @@ export interface RouteDeps {
    * Downloads one source for the URL-import route.
    *
    * Injectable so route tests never touch the network; the Host default is
-   * the SSRF-guarded {@link fetchExpressionSource}.
+   * {@link fetchExpressionSource}, using the Host network.
    */
-  readonly fetchExpressionSource?: (
-    url: string,
-    options: { readonly allowFakeIp: boolean },
-  ) => Promise<string>
+  readonly fetchExpressionSource?: (url: string) => Promise<string>
   readonly packageVersion: string
   readonly changes: PetChangeFeed
   /** Archives the executor session when a terminal Task is archived from Pet. */
@@ -857,16 +854,9 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       if (typeof url !== 'string' || url.trim() === '') {
         throw new PetError('INVALID_REQUEST', "Field 'url' must be a non-empty string")
       }
-      // Download on the Host: the owner's browser network may not reach the
-      // CDN (and CORS would block it), while the Host can. The SSRF guard in
-      // `fetchExpressionSource` decides whether the URL may be contacted; the
-      // downloaded bytes then pass the same validator as a pasted source.
-      const allowFakeIp = repository.global.expressionFetchAllowFakeIp === true
-      const download =
-        deps.fetchExpressionSource ??
-        ((target: string, options: { readonly allowFakeIp: boolean }) =>
-          fetchExpressionSource(target, undefined, options))
-      const content = await download(url.trim(), { allowFakeIp })
+      // Owner-triggered download uses the Host network, then the paste validator.
+      const download = deps.fetchExpressionSource ?? fetchExpressionSource
+      const content = await download(url.trim())
       const saved = await saveExpression(deps.paths, content)
       return { state: 'ok' as const, bytes: saved.bytes }
     }),
@@ -908,7 +898,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         agentPreset: global.agentPreset,
         defaultContextPolicy: global.defaultContextPolicy,
         appearance: global.appearance,
-        expressionFetchAllowFakeIp: global.expressionFetchAllowFakeIp === true,
         workspaceId: global.workspaceId,
       }
     }),
@@ -919,7 +908,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         'agentPreset',
         'defaultContextPolicy',
         'appearance',
-        'expressionFetchAllowFakeIp',
       ])
 
       // Appearance is display state, but it must round-trip exactly: accept
@@ -936,10 +924,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
           if (typeof source[key] === 'string') appearance[key] = source[key]
         }
       }
-      const rawAllowFakeIp = record['expressionFetchAllowFakeIp']
-      if (rawAllowFakeIp !== undefined && typeof rawAllowFakeIp !== 'boolean') {
-        throw new PetError('INVALID_REQUEST', 'expressionFetchAllowFakeIp must be a boolean')
-      }
       const policy = optionalString(record, 'defaultContextPolicy')
       if (policy !== undefined && policy !== 'current-session' && policy !== 'none') {
         throw new PetError('INVALID_REQUEST', 'defaultContextPolicy must be current-session or none', {
@@ -954,9 +938,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         ...current,
         ...(agentPreset !== undefined ? { agentPreset } : {}),
         ...(policy !== undefined ? { defaultContextPolicy: policy } : {}),
-        ...(typeof rawAllowFakeIp === 'boolean'
-          ? { expressionFetchAllowFakeIp: rawAllowFakeIp }
-          : {}),
         // Merge, so setting one field does not clear the others.
         ...(appearance !== undefined
           ? { appearance: { ...(current.appearance ?? {}), ...appearance } }
@@ -972,7 +953,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         agentPreset: updated.agentPreset,
         appearance: updated.appearance,
         defaultContextPolicy: updated.defaultContextPolicy,
-        expressionFetchAllowFakeIp: updated.expressionFetchAllowFakeIp === true,
         workspaceId: updated.workspaceId,
       }
     }),

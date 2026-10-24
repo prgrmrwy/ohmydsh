@@ -150,8 +150,6 @@ export interface PetConfig {
     readonly ringStyle?: string
     readonly animationPlayback?: string
   }
-  /** Owner opt-in for proxy fake-ip DNS (198.18.0.0/15). */
-  readonly expressionFetchAllowFakeIp?: boolean
   readonly defaultContextPolicy: 'current-session' | 'none'
   readonly workspaceId?: string
 }
@@ -167,8 +165,6 @@ export interface PetConfigPatch {
     readonly ringStyle?: string
     readonly animationPlayback?: string
   }
-  /** Owner opt-in for proxy fake-ip DNS (198.18.0.0/15). */
-  readonly expressionFetchAllowFakeIp?: boolean
 }
 
 /** The typed Pet management API. */

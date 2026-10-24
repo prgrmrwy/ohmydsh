@@ -460,10 +460,6 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    DSH panels (default-mode / reasoning-effort switches). */
 .dshpet-settings .dshpet-inline-row{display:flex;align-items:center;justify-content:flex-start;
   gap:10px;flex-wrap:wrap}
-.dshpet-settings .dshpet-check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;
-  font:var(--dsw-font-xs-13,400 12px/20px var(--dsw-font-family,inherit));
-  color:var(--dsw-alias-label-secondary,#61666b)}
-.dshpet-settings .dshpet-check input{margin:0;accent-color:var(--dsw-alias-state-business-primary,#4176e6)}
 /* Inline "i" hint. Explanation is a GLANCE, not a mode: hover/focus shows the
    tooltip, no click state to toggle back. The tooltip is a child of the
    wrapper, so moving the pointer into it keeps it open and its links usable. */

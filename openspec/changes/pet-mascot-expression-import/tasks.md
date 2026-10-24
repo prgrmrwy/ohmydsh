@@ -65,7 +65,13 @@
 - [x] 7.5 `npm pack --dry-run` 证明 `THIRD-PARTY-NOTICES.md` 进入 tarball；`openspec validate pet-mascot-expression-import --strict` 退出 0
 - [ ] 7.6 `dsh build` 物化到 `~/.dsh`；与所有者确认后重启 DSH，实机验收导入/移除/回退/无刷新生效
 
-## 8. 从 HTTPS URL 导入
+## 9. 用户主动下载沿用 Host 网络（2026-10-25 用户批准，取代 8.x 网络策略）
+
+- [x] 9.1 删除 DNS/IP 检查、地址钉扎及专用 Agent，使用 Host 普通 fetch；保留 HTTPS/TLS、10s 总超时、3 跳重定向和解压后 512 KiB 上限，内容交给 Lottie 校验
+- [x] 9.2 移除 fake-ip 配置、界面和专用样式；旧配置不影响下载，管理接口信任边界不变
+- [x] 9.3 回归 Host dispatcher、内部地址/自定义端口、压缩、超时/流式上限、失败不覆盖；同步文档、验证与部署
+
+## 8. 从 HTTPS URL 导入（初版实现记录，网络策略由 9.x 取代）
 
 - [x] 8.1 写失败测试：`test/expression-fetch.test.ts` 的 URL 形状、SSRF、重定向、下载失败与体积上限用例（断言先红）
 - [x] 8.2 实现：`src/host/expression-fetch.ts`（https/默认端口/凭据拒绝、私有与保留地址、DNS 全量校验、≤3 跳重定向逐跳复验、10s 超时、512 KiB、content-type 白名单）；`wire.ts` 增加路由与 `EXPRESSION_FETCH_FAILED`，`errors.ts` 映射 502

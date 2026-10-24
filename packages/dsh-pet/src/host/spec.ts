@@ -1173,15 +1173,6 @@ const petGlobalState = z.object({
       animationPlayback: z.string().optional(),
     })
     .optional(),
-  /**
-   * Owner opt-in for proxy fake-ip DNS (198.18.0.0/15).
-   *
-   * Off by default: URL import only contacts public addresses. Turning it on
-   * accepts the benchmark range that TUN/proxy fake-ip mode returns for every
-   * hostname, so URL import keeps working there; all other non-public ranges
-   * stay refused.
-   */
-  expressionFetchAllowFakeIp: z.boolean().optional(),
   /** Registered Pet Workspace id, once created. */
   workspaceId: z.string().optional(),
 })

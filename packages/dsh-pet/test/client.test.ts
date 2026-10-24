@@ -519,15 +519,14 @@ describe('settings information architecture', () => {
     expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
   })
 
-  it('offers the proxy fake-ip opt-in with its warning', () => {
+  it('uses Host network configuration without a download-specific switch', () => {
     const markup = renderToStaticMarkup(
       createElement(PetSettingsSection, { initialTab: 'general' as const }),
     )
 
-    // Fake-ip networks need an explicit escape hatch; the default stays strict.
-    expect(markup).toContain('允许代理 fake-ip 地址')
-    expect(markup).toContain('aria-label="fake-ip 说明"')
-    expect(markup).toContain('198.18.0.0/15')
+    expect(markup).toContain('沿用 Host 的网络与代理配置')
+    expect(markup).not.toContain('fake-ip')
+    expect(markup).not.toContain('内网与保留地址会被拒绝')
   })
 
   it('defaults to URL import and keeps JSON paste behind a mode switch', () => {

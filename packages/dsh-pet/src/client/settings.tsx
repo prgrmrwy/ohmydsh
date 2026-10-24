@@ -819,8 +819,6 @@ export function ExpressionSection(): JSX.Element {
   const [pending, setPending] = useState<'import' | 'url' | 'remove' | undefined>(undefined)
   /** URL import or pasted JSON — one method shown at a time. */
   const [importMode, setImportMode] = useState<'url' | 'json'>('url')
-  /** Owner opt-in for proxy fake-ip DNS; off unless the Host config says so. */
-  const [allowFakeIp, setAllowFakeIp] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [copied, setCopied] = useState(false)
@@ -840,10 +838,6 @@ export function ExpressionSection(): JSX.Element {
 
   useEffect(() => {
     void refresh()
-    void petApi
-      .config()
-      .then(config => setAllowFakeIp(config.expressionFetchAllowFakeIp === true))
-      .catch(() => undefined)
     return subscribeMascotExpressionDiagnostic(() =>
       setRenderDiagnostic(getMascotExpressionDiagnostic()),
     )
@@ -911,25 +905,6 @@ export function ExpressionSection(): JSX.Element {
       setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy('idle')
-    }
-  }
-
-  /**
-   * Persist the fake-ip relaxation.
-   *
-   * The Host re-reads it per download, so no broadcast is needed; the echoed
-   * config is verified so an old Host cannot silently ignore the toggle.
-   */
-  const saveAllowFakeIp = async (next: boolean): Promise<void> => {
-    try {
-      const updated = await petApi.updateConfig({ expressionFetchAllowFakeIp: next })
-      if (updated.expressionFetchAllowFakeIp !== next) {
-        throw new Error('当前运行中的 DSH Host 还没有加载该选项；请重启 DSH 后再试。')
-      }
-      setAllowFakeIp(next)
-      setError(undefined)
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
 
@@ -1064,7 +1039,7 @@ export function ExpressionSection(): JSX.Element {
             <span className="dshpet-fact-key">URL</span>
             <InfoHint label="URL 导入规则">
               <p>由运行 DSH 的 Host 下载，因此浏览器网络受限或受 CORS 限制时仍可用。</p>
-              <p>仅支持 https、默认 443 端口、单文件 ≤512 KiB；本机、内网与保留地址会被拒绝。</p>
+              <p>沿用 Host 的网络与代理配置；支持 HTTPS，单文件 ≤512 KiB，下载超时 10 秒。</p>
               <p>下载失败会在页内显示诊断，现有动画保持不变。</p>
             </InfoHint>
           </div>
@@ -1086,30 +1061,6 @@ export function ExpressionSection(): JSX.Element {
             >
               {busy === 'url' ? '导入中…' : '从 URL 导入'}
             </button>
-          </div>
-          <p className="dshpet-item-hint">
-            由 Host 下载；浏览器网络受限时仍可用。若域名被公司/校园 DNS 解析到内网，
-            改用 fonts.gstatic.cn，或切到「粘贴 JSON」导入。
-          </p>
-          <div className="dshpet-inline-row">
-            <label className="dshpet-check">
-              <input
-                className="dshpet-input"
-                type="checkbox"
-                checked={allowFakeIp}
-                disabled={busy !== 'idle'}
-                onChange={event => void saveAllowFakeIp(event.target.checked)}
-              />
-              允许代理 fake-ip 地址
-            </label>
-            <InfoHint label="fake-ip 说明">
-              <p>
-                使用 Clash/mihomo 的 fake-ip + TUN 时，DNS 会把所有域名解析到
-                198.18.0.0/15，严格校验会拒绝所有 URL。开启后 Host 接受这一段
-                地址并交给本机代理网络；本机、内网、链路本地与云元数据地址仍然拒绝。
-              </p>
-              <p>只在你信任本机代理与 DNS 时开启；默认关闭。</p>
-            </InfoHint>
           </div>
         </div>
       ) : (
