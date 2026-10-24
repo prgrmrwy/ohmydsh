@@ -6,14 +6,14 @@
 
 业务校验：
 - 条目必须存在且 `kind` 为 `request`，否则 `COLLAB_ITEM_NOT_FOUND`（不存在）或 `COLLAB_FORBIDDEN`（非 request）；
-- 条目作者必须是由该 channel 托管的成员（成员 `managedBy` 等于该 channel，作者已退役或被 `markGone` 仍算），否则 `COLLAB_FORBIDDEN`；
+- 条目作者必须是由该 channel 托管的成员（`managedBy` 等于该 channel，作者已退役或被 `markGone` 仍算），否则 `COLLAB_FORBIDDEN`；
 - 条目状态为 `escalated` 或 `decided` 时分别以 `COLLAB_ITEM_ESCALATED`、`COLLAB_DECIDED_LOCKED` 拒绝；
 - 允许的转换为 `open → accepted`、`open → done`、`open → rejected`、`accepted → done`、`accepted → rejected`，其余以 `COLLAB_BAD_TRANSITION` 拒绝。
 
 成功时提交一条 `request/progressed` 事件，actor 为 `manager:<channel>`。该命令 MUST NOT 产生任何 `dispatch/intended`，也不计入任何话题。终态不可逆，因此 assignee 此后的 `advanceRequest` 以 `COLLAB_BAD_TRANSITION` 拒绝。
 
 #### Scenario: 代人受理不唤醒
-- **GIVEN** 空间 S 已授权 `pet-locus`；托管成员 `locus-a` 创建 request `todo-1`（assignee `main`，open）
+- **GIVEN** 空间 S 已授权 `pet-locus`；托管成员 `pet` 创建 request `todo-1`（assignee `main`，open）
 - **WHEN** manager 以 `cmdId:'acc-1'` 调用 `disposeManagedRequest({itemId:'todo-1', progress:'accepted'})`，再以相同参数重试
 - **THEN** 两次返回同一 seq；`todo-1.progress` 为 `accepted`；提交中 actor 为 `manager:pet-locus`，不含 `dispatch/intended`
 
@@ -28,7 +28,7 @@
 - **THEN** 返回 `COLLAB_FORBIDDEN`，日志长度不变
 
 #### Scenario: 作者退役后仍可处置
-- **GIVEN** `locus-a` 登记 `todo-3` 后被 `retireMember`
+- **GIVEN** `pet` 登记 `todo-3` 后被 `retireMember`
 - **WHEN** manager 推进 `todo-3` 为 `rejected`
 - **THEN** 成功，不含 `dispatch/intended`
 
@@ -199,7 +199,6 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 #### Scenario: 未知 internal purpose 被拒绝
 - **WHEN** principal `internal{purpose:'other'}` 调用 `overview`
 - **THEN** 返回 `COLLAB_FORBIDDEN`
-
 
 ### Requirement: request 条目的承接流程
 

@@ -1,6 +1,6 @@
 ## Test Plan
 
-本账本由脚本从三份 delta 的 `#### Scenario:` 逐条生成，共 71 个场景，无遗漏。已有测试按场景名命中的沿用原测试名（31 条）；其余为新测试（40 条）。
+本账本由脚本从四份 delta 的 `#### Scenario:` 逐条生成，共 105 个场景，无遗漏。已有测试按场景名命中的沿用原测试名（38 条）；其余为新测试（67 条）。
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
@@ -17,7 +17,7 @@
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 重复创建同一协作空间 | packages/collab-kernel/test/auth.test.ts | `auth-03：重复创建同一协作空间` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 已移除的 internal purpose 被拒绝 | packages/collab-kernel/test/auth.test.ts | `auth-04：已移除的 internal purpose 被拒绝` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 不存在的协作空间先于成员反查报错 | packages/collab-kernel/test/auth.test.ts | `auth-05：不存在的协作空间先于成员反查报错` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 公开命令与授权表一致 | packages/collab-kernel/test/auth.test.ts | `auth-06：公开命令与授权表一致` | 🟢 green（沿用；新增命令与授权表同时改，检查自动覆盖） |
+| specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 公开命令与授权表一致 | packages/collab-kernel/test/auth.test.ts | `auth-06：公开命令与授权表一致` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 没有按字符串分发的入口 | packages/collab-kernel/test/auth.test.ts | `auth-07：没有按字符串分发的入口` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 非 Leader 邀请被拒 | packages/collab-kernel/test/auth.test.ts | `auth-08：非 Leader 邀请被拒` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 他人代为加入被拒 | packages/collab-kernel/test/auth.test.ts | `auth-09：他人代为加入被拒` | 🟢 green（沿用，需随本 change 保持通过） |
@@ -40,46 +40,83 @@
 | specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 中断后重试补齐 | packages/dsh-collab/test/establish.test.ts | `establish-02：中断后重试补齐` | 🔴 red |
 | specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 托管成员不能建立 | packages/dsh-collab/test/establish.test.ts | `establish-03：托管成员不能建立` | 🔴 red |
 | specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 非 Leader 不能借此授权 | packages/dsh-collab/test/establish.test.ts | `establish-04：非 Leader 不能借此授权` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 托管调用者写入带戳且 cmdId 带命名空间 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-01：托管调用者写入带戳且 cmdId 带命名空间` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同戳的同名 cmdId 互不干扰 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-02：不同戳的同名 cmdId 互不干扰` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 兄弟条目对读取不可见 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-03：兄弟条目对读取不可见` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 公开记录引用隐藏记录仍能重放 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-04：公开记录引用隐藏记录仍能重放` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 同一提交中的 dispatch 不泄露兄弟消息 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-05：同一提交中的 dispatch 不泄露兄弟消息` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 状态文本不能传话 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-06：状态文本不能传话` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 隐藏条目的标识不经任何字段泄露 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-07：隐藏条目的标识不经任何字段泄露` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不能借主会话的公开条目传话 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-08：不能借主会话的公开条目传话` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 可以修订自己的条目 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-09：可以修订自己的条目` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 主会话的条目对子会话只读 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-10：主会话的条目对子会话只读` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 可以引用主会话发给自己的消息 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-11：可以引用主会话发给自己的消息` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同 Locus 新开独立话题不继承其它根的额度 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-12：不同 Locus 新开独立话题不继承其它根的额度` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 成员计数不进投影 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-13：成员计数不进投影` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不能修改、确认或引用兄弟条目 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-14：不能修改、确认或引用兄弟条目` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 无权调用者拿不到旧收据 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-15：无权调用者拿不到旧收据` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 带戳调用者只能发给 main | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-16：带戳调用者只能发给 main` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 戳在途变化时调用失效 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-17：戳在途变化时调用失效` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 超长或非对象的戳视为未解析 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-18：超长或非对象的戳视为未解析` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不提供 visible 时不投影也不做写授权 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-19：不提供 visible 时不投影也不做写授权` | 🔴 red |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | Leader 授权后接入方接纳成员 | packages/dsh-collab/test/integration.test.ts | `handle-01：Leader 授权后接入方接纳成员` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 未授权空间的响应完全一致 | packages/dsh-collab/test/integration.test.ts | `handle-02：未授权空间的响应完全一致` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 旧句柄的在途托管命令不提交 | packages/dsh-collab/test/integration.test.ts | `handle-03：旧句柄的在途托管命令不提交` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 认领后、提交前地址被撤回 | packages/dsh-collab/test/integration.test.ts | `handle-04：认领后、提交前地址被撤回` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 句柄没有 Leader 能力 | packages/dsh-collab/test/integration.test.ts | `handle-05：句柄没有 Leader 能力` | 🔴 red（断言须更新） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 托管读取只对已授权空间可用 | packages/dsh-collab/test/integration.test.ts | `handle-06：托管读取只对已授权空间可用` | 🔴 red |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 受管子会话以托管成员身份写入 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-01：受管子会话以托管成员身份写入` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 解除绑定后立即失去身份 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-02：解除绑定后立即失去身份` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 在途调用在失效后不能完成 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-03：在途调用在失效后不能完成（参数化）` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 状态入口在返回前重验 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-04：状态入口在返回前重验` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 普通会话不能被接入方冒认 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-05：普通会话不能被接入方冒认` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 排除名单与归档对托管调用者同样生效 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-06：排除名单与归档对托管调用者同样生效` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 未被认领的子会话仍被拒绝 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-07：未被认领的子会话仍被拒绝` | 🟢 green（沿用，需随本 change 保持通过） |
+| specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 托管调用者的状态入口 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-08：托管调用者的状态入口` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层缺失时登记失败而回复照常 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-01：协作层缺失时登记失败而回复照常` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 管理面不把不可用显示为空 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-02：管理面不把不可用显示为空` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层恢复后自动重新可用 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-03：协作层恢复后自动重新可用` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办仍可读到 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-01：旧版待办仍可读到` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只在管理面 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-01：旧版待办只在管理面` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只读 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-02：旧版待办只读` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 回应消息沿 ref 路由到最近的戳 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-01：回应消息沿 ref 路由到最近的戳` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 正文点名 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-02：正文点名` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 无法路由不猜 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-03：无法路由不猜` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 零 active child 时终态仍登记 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-04：零 active child 时终态仍登记` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 同一流程在新旧存储上输出一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-01：同一流程在新旧存储上输出一致` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 证据边界值在新旧存储上逐字段一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-02：证据边界值在新旧存储上逐字段一致` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 并发受理在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-03：并发受理在新旧存储上一致` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 失败路径在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-04：失败路径在新旧存储上一致` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 同源子会话读到彼此登记的结论 | packages/dsh-pet/test/ledger-read.test.ts | `spec: 同源子会话读到彼此登记的结论 — item registered by a DIFFERENT locus under the same parent is still visible` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 跨主会话不可读 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-01：跨主会话不可读` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 台账不随条目清空而消失 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-02：台账不随条目清空而消失` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 新增条目类型不改既有语义 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-03：新增条目类型不改既有语义` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 换代后仍是同一成员 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-04：换代后仍是同一成员` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 权限切换期间协作层重接不移除成员 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-05：权限切换期间协作层重接不移除成员` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 兄弟子会话读不到彼此登记的结论 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-01：兄弟子会话读不到彼此登记的结论` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 跨主会话不可读 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-02：跨主会话不可读` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 台账不随条目清空而消失 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-03：台账不随条目清空而消失` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 新增条目类型不改既有语义 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-04：新增条目类型不改既有语义` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 换代后登记照旧归入同一代理 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-05：换代后登记照旧归入同一代理` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 主会话未加载时不为建空间唤醒它 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-06：主会话未加载时不为建空间唤醒它` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 工具不接受目标参数 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-01：工具不接受目标参数` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 代际更替后待办仍可解析 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-02：代际更替后待办仍可解析` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 入口退役不使待办消失 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-03：入口退役不使待办消失` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 无唯一 current 时拒绝登记 | packages/dsh-pet/test/ledger-track.test.ts | `spec: 无唯一 current 时拒绝登记 — no currentDelivery on the authorized record refuses registration` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 主会话修订条目不改变登记证据 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-04：主会话修订条目不改变登记证据` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 时间在重启后保持不变 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-05：时间在重启后保持不变` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 登记不唤醒主会话 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-06：登记不唤醒主会话` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 登记不唤醒主会话 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-04：登记不唤醒主会话` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 主会话修订条目不改变登记证据 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-05：主会话修订条目不改变登记证据` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 时间在重启后保持不变 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-06：时间在重启后保持不变` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 登记后队列继续前进 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-01：登记后队列继续前进` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 回复完成不等于事情做完 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-02：回复完成不等于事情做完` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 待办状态变化不外发 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-03：待办状态变化不外发` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 子会话不能推进待办状态 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-04：子会话不能推进待办状态` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 主会话做完后自行标记完成 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-05：主会话做完后自行标记完成` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 不经受理直接了结 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-06：不经受理直接了结` | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 双向核对 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-01：双向核对` | 🔴 red（现行场景无同名测试，本次补齐） |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话反查 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-02：子会话反查` | 🔴 red（现行场景无同名测试，本次补齐） |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话的协作工具面 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-03：子会话的协作工具面` | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话不能向兄弟发消息 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-04：子会话不能向兄弟发消息` | 🔴 red |
 
 ## Coverage Notes
 
-- **沿用行**：MODIFIED 要求中文字未变的场景，沿用已有测试（kernel 的 `auth-*`、`requests-*`，dsh-collab 的 `handle-*`，Pet 的 `spec: …` 两条）。它们在 apply 期间必须保持通过；只能改夹具，不能改断言。唯一标为 🔴 的沿用行是 `handle-05`：规范把句柄方法集合加了三项，断言须随之更新。`auth-06` 从真实类型与授权表比较，新增命令两边同时改即可通过。
-- **Pet 现有测试**：`ledger-*.test.ts`、`todo-*.test.ts`、`intent-triage-*.test.ts` 中没有逐字命中场景名的测试，仍是迁移前行为的回归网。apply 期间它们的存储夹具改为 `TodoBackend` 两个实现参数化运行，两边都要通过；断言不改（design D9）。这一步就是"迁移前后功能正常"的第二道证据，与等价测试互补。
-- **等价测试夹具**（`todo-migration-equivalence.test.ts`）：同一脚本驱动 `legacy` 与 `collab` 两个 `TodoBackend`；`collab` 用真实 collab-kernel `CollabService` + 真实 dsh-collab `Integrations` 句柄 + 临时目录 file store，两边注入同一假时钟；跟进投递用同一个记录型 port 替身，比较其收到的正文。只归一化 itemId。
-- **Pet 侧新测试夹具**：与 collab-kernel 的连接一律经真实 `Integrations` 句柄，不手写 kernel 替身。按 `docs/architecture/dsh-plugin-integration-pitfalls.md` 第 7 节，替身与真实形状不一致已多次掩盖缺陷。
+- **现行场景无同名测试的两条**（`双向核对`、`子会话反查`）：它们属于被 MODIFIED 的要求，现有测试没有按场景名命名，本次补两条断言现行行为的测试，不改行为。
+- **沿用行**：MODIFIED 要求中文字未变的场景沿用已有测试（kernel 的 `auth-*`、`requests-*`，dsh-collab 的 `handle-*`、`caller-*`，Pet 的 `spec: …`）。apply 期间它们必须保持通过；只能改夹具，不能改断言。唯一需要改断言的沿用行是 `handle-05`（句柄方法集合新增三项）。
+- **MODIFIED 要求"工具调用者可解析为托管成员"** 只在要求文字里加了一句 `resolveCaller` 可返回 `{address, stamp}`，其原有场景不变，全部沿用 `managed-caller.test.ts`。
+- **Pet 现有测试**：`ledger-*.test.ts`、`todo-*.test.ts`、`intent-triage-*.test.ts` 中没有逐字命中场景名的测试，仍是迁移前行为的回归网。apply 期间它们的存储夹具改为 `TodoBackend` 两个实现参数化运行，两边都要通过；断言不改（design D9）。这是"迁移前后功能正常"的第二道证据，与等价测试互补。
+- **等价测试夹具**（`todo-migration-equivalence.test.ts`）：同一脚本驱动 `legacy` 与 `collab` 两个 `TodoBackend`；`collab` 用真实 collab-kernel `CollabService` + 真实 dsh-collab `Integrations` 句柄 + 临时目录 file store，两边注入同一假时钟；跟进投递用同一个记录型 port 替身。只归一化 itemId。三条 `pet_locus_ledger_read` 指引句是唯一允许的文本差异。
+- **投影与授权测试**（`stamp-projection.test.ts`）：用真实 `Integrations` + 内存 kernel，接入方 adapter 是测试替身（只提供 `resolveCaller`/`visible`/`recipients`），对 `overview`/`status` 的断言用完整 JSON 序列化比对。
+- **Pet 侧新测试夹具**：与 collab-kernel 的连接一律经真实 `Integrations` 句柄，不手写 kernel 替身（`docs/architecture/dsh-plugin-integration-pitfalls.md` 第 7 节）。
 - **真实 Host 验收**（tasks 末组）不进本账本，属于 verify 的人工证据。
