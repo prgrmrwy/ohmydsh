@@ -1,5 +1,5 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CollabError, principals, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence } from 'collab-kernel'
+import { CollabError, principals, reduce, type CommitRecord, type SpaceState, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence, type Progress } from 'collab-kernel'
 import type { CollabHost } from './host.js'
 import type { Caller, SessionAccess } from './session-provider.js'
 import { safeError } from './tools.js'
@@ -31,8 +31,14 @@ export interface IntegrationHandle {
   admit(spaceId: string, cmdId: string, input: { name: string; address: string }): Promise<HandleResult<CommandResult>>
   rebind(spaceId: string, cmdId: string, input: { member: string; address: string }): Promise<HandleResult<CommandResult>>
   retire(spaceId: string, cmdId: string, input: { member: string }): Promise<HandleResult<CommandResult>>
+  /** Settle, on the user's behalf, a request authored by this channel's managed member. Never wakes. */
+  disposeRequest(spaceId: string, cmdId: string, input: { itemId: string; progress: Progress }): Promise<HandleResult<CommandResult>>
+  /** Every commit record of a space that granted this channel; otherwise COLLAB_SPACE_UNAVAILABLE. */
+  readManaged(spaceId: string): Promise<HandleResult<CommitRecord[]>>
   command(exec: Exec, spaceId: string, cmdId: string, op: { op: MemberOp; input: any }): Promise<HandleResult<CommandResult>>
   read(exec: Exec, spaceId: string, view: 'overview' | 'since', sinceSeq?: number): Promise<HandleResult<unknown>>
+  /** Create (or reuse) a space as the ordinary session in `exec` and grant this handle's channel. */
+  establish(exec: Exec, spaceId: string, cmdId: string, input: { name: string; purpose: string }): Promise<HandleResult<{ spaceId: string }>>
   registerSessionMode(mode: string, handler: SessionModeHandler): void
   dispose(): void
 }
@@ -51,6 +57,9 @@ const MEMBER_OPS: Readonly<Record<string, (service: CollabService, ctx: CommandC
   setStatus: (s: CollabService, c: CommandContext, i: any) => s.setStatus(c, i),
   advanceRequest: (s: CollabService, c: CommandContext, i: any) => s.advanceRequest(c, i),
 }))
+
+/** establish outcomes that mean "the caller is not this space's Leader". */
+const NOT_LEADER: ReadonlySet<string> = new Set(['COLLAB_FORBIDDEN', 'COLLAB_NOT_MEMBER', 'COLLAB_MEMBER_INACTIVE', 'COLLAB_SPACE_CLOSED'])
 
 /** Whitelisted pointer handed to integrators and mode handlers. */
 export function safePointer(pointer: Pointer): Pointer {
@@ -185,6 +194,50 @@ export class Integrations {
           const value = await host.read<unknown>(ctx, spaceId, service => view === 'overview' ? service.overview(ctx) : service.readSince(ctx, sinceSeq))
           if (!caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
           return JSON.parse(JSON.stringify(value))
+        })
+      },
+      disposeRequest: (spaceId, cmdId, input) => managed(spaceId, cmdId, undefined, (s, c) => s.disposeManagedRequest(c, { itemId: input?.itemId, progress: input?.progress })),
+      readManaged: async spaceId => {
+        if (!this.isCurrent(owner)) return detached
+        const unavailable = { error: { code: 'COLLAB_SPACE_UNAVAILABLE' } }
+        let records: CommitRecord[]
+        try {
+          const host = ready()
+          records = await host.read(undefined, spaceId, service => service.readSince({ spaceId, principal: principals.internal('host-index') }, 0))
+        } catch (error) {
+          if (!this.isCurrent(owner)) return detached
+          if (error instanceof CollabError && (error.code === 'COLLAB_SERVICE_NOT_READY' || error.code === 'COLLAB_SERVICE_CLOSING')) return { error: safeError(error) }
+          return unavailable
+        }
+        let state: SpaceState | undefined
+        try { for (const record of records) state = reduce(state, record) } catch { state = undefined }
+        // Only spaces whose Leader granted this channel; anything else looks like an absent space.
+        if (!state || !state.managers.includes(owner.channel)) return this.isCurrent(owner) ? unavailable : detached
+        if (!this.isCurrent(owner)) return detached
+        return structuredClone(records)
+      },
+      establish: async (exec, spaceId, cmdId, input) => {
+        if (!this.isCurrent(owner)) return detached
+        if (typeof cmdId !== 'string' || !cmdId || !input || typeof input !== 'object') return { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
+        return asCaller(exec, async (host, caller) => {
+          // Only a real ordinary session may create a space and grant a channel; never the integrator itself.
+          if (caller.channel !== 'dsh-session') throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+          try {
+            const ctx = host.context(caller, spaceId, `${cmdId}:create`)
+            await host.command(ctx, spaceId, ctx.cmdId, service => service.createSpace(ctx, { name: input.name, address: caller.address, kind: 'agent', purpose: input.purpose }))
+          } catch (error) { if (!(error instanceof CollabError && error.code === 'COLLAB_SPACE_EXISTS')) throw error }
+          try {
+            const ctx = host.context(caller, spaceId, `${cmdId}:allow`)
+            await host.command(ctx, spaceId, ctx.cmdId, service => service.allowManager(ctx, { channel: owner.channel }))
+          } catch (error) {
+            if (!(error instanceof CollabError)) throw error
+            // Our own declared channel is valid, so BAD_CHANNEL here can only mean "already granted".
+            if (error.code === 'COLLAB_BAD_CHANNEL') return { spaceId }
+            // Not the Leader, not a member, closed: indistinguishable from an absent space.
+            if (NOT_LEADER.has(error.code)) throw new CollabError('COLLAB_SPACE_UNAVAILABLE')
+            throw error
+          }
+          return { spaceId }
         })
       },
       registerSessionMode: (mode, handler) => {

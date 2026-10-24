@@ -615,6 +615,41 @@ test('consumer-stale-exec: real async pre-tool gate cannot retain a disposed cal
   } finally { release(); stop(); await owned?.dispose(); await ctx.fiber.dispose() }
 })
 
+// pet-locus-collab-integration tasks 3.1 (design D2): an integrator acts as the
+// main session's real identity outside any model turn. The exec is only the
+// Agent the Host currently holds; the caller must resolve and its guard must
+// hold through the kernel's commit and read boundaries.
+test('establish-00：Host 当前持有、不在模型轮次内的普通会话 agent 可作 exec', { timeout: 15000 }, async () => {
+  const root = join(home, 'establish-seam')
+  await mkdir(root)
+  const ctx = await controller(root)
+  try {
+    await presets(ctx)
+    const id = SessionId('seam-main')
+    await ctx.sessionController.create({ sessionId: id, cwd: root, agentPreset: 'P1' })
+    assert.ok((await ctx.sessionController.resolveAgent(id)).agent)
+    const plugin = await consumerPlugin(root)
+    const fiber = ctx.plugin(plugin, { dataDir: join(root, 'ledger'), managedChannels: ['pet-locus'] })
+    await fiber.inertia; assert.equal(fiber.state, 2)
+    // The integrator only knows the session ID; it takes whatever Agent the Host holds now.
+    const agent = ctx.agents.get(id)
+    assert.ok(agent && agent.id === id && agent.session.id === id)
+    await agent.whenIdle()
+    const requests = ctx.componentAdapter.requests.length
+    const handle = ctx.get('dshCollab').attach('pet-locus', { claim: () => false, presence: () => 'unreachable', deliver: () => {}, resolveCaller: () => undefined, holds: () => false })
+    const created = await ctx.tools.execute({ callId: 'seam-create', name: 'collab_space', arguments: { action: 'create', spaceId: 'seam', cmdId: 'create', name: 'main' }, agent, signal: AbortSignal.timeout(5000) })
+    assert.deepEqual(created.value, { seq: 1, spaceId: 'seam' })
+    // Ordinary caller through the handle: the guard the kernel re-checks at commit must hold.
+    assert.deepEqual(await handle.command({ agent }, 'seam', 'seam-status', { op: 'setStatus', input: { text: 'outside a model turn' } }), { seq: 2, spaceId: 'seam' })
+    const read = await handle.read({ agent }, 'seam', 'since', 1)
+    assert.deepEqual(read.map(r => r.events.map(e => [e.type, e.actor])), [[['member/statusText', 'main']]])
+    // None of it ran a model request.
+    assert.equal(ctx.componentAdapter.requests.length, requests)
+    assert.equal(agent.session.snapshotEvents().filter(e => e.type === 'request/header').length, 0)
+    handle.dispose()
+  } finally { await ctx.fiber.dispose() }
+})
+
 test('consumer-owned: actual official child ownership is rejected without confusing ordinary fork lineage', { timeout: 15000 }, async () => {
   const root = join(home, 'consumer-owned')
   await mkdir(root)

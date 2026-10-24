@@ -36,10 +36,10 @@
 | specs/collab-kernel/spec.md → request 条目的承接流程 | 拒绝也通知作者 | packages/collab-kernel/test/requests.test.ts | `requests-04：拒绝也通知作者` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → request 条目的承接流程 | 自己给自己的 request 不唤醒 | packages/collab-kernel/test/requests.test.ts | `requests-05：自己给自己的 request 不唤醒` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → request 条目的承接流程 | 旧日志中锁定的 request 不能推进 | packages/collab-kernel/test/requests.test.ts | `requests-06：旧日志中锁定的 request 不能推进` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 首次建立并授权 | packages/dsh-collab/test/establish.test.ts | `establish-01：首次建立并授权` | 🔴 red |
-| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 中断后重试补齐 | packages/dsh-collab/test/establish.test.ts | `establish-02：中断后重试补齐` | 🔴 red |
-| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 托管成员不能建立 | packages/dsh-collab/test/establish.test.ts | `establish-03：托管成员不能建立` | 🔴 red |
-| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 非 Leader 不能借此授权 | packages/dsh-collab/test/establish.test.ts | `establish-04：非 Leader 不能借此授权` | 🔴 red |
+| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 首次建立并授权 | packages/dsh-collab/test/establish.test.ts | `establish-01：首次建立并授权` | 🟢 green |
+| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 中断后重试补齐 | packages/dsh-collab/test/establish.test.ts | `establish-02：中断后重试补齐` | 🟢 green |
+| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 托管成员不能建立 | packages/dsh-collab/test/establish.test.ts | `establish-03：托管成员不能建立` | 🟢 green |
+| specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 非 Leader 不能借此授权 | packages/dsh-collab/test/establish.test.ts | `establish-04：非 Leader 不能借此授权` | 🟢 green |
 | specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 托管调用者写入带戳且 cmdId 带命名空间 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-01：托管调用者写入带戳且 cmdId 带命名空间` | 🔴 red |
 | specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同戳的同名 cmdId 互不干扰 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-02：不同戳的同名 cmdId 互不干扰` | 🔴 red |
 | specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 兄弟条目对读取不可见 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-03：兄弟条目对读取不可见` | 🔴 red |
@@ -63,8 +63,8 @@
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 未授权空间的响应完全一致 | packages/dsh-collab/test/integration.test.ts | `handle-02：未授权空间的响应完全一致` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 旧句柄的在途托管命令不提交 | packages/dsh-collab/test/integration.test.ts | `handle-03：旧句柄的在途托管命令不提交` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 认领后、提交前地址被撤回 | packages/dsh-collab/test/integration.test.ts | `handle-04：认领后、提交前地址被撤回` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 句柄没有 Leader 能力 | packages/dsh-collab/test/integration.test.ts | `handle-05：句柄没有 Leader 能力` | 🔴 red（断言须更新） |
-| specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 托管读取只对已授权空间可用 | packages/dsh-collab/test/integration.test.ts | `handle-06：托管读取只对已授权空间可用` | 🔴 red |
+| specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 句柄没有 Leader 能力 | packages/dsh-collab/test/integration.test.ts | `handle-05：句柄没有 Leader 能力` | 🟢 green（断言已更新为 10 个方法） |
+| specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 托管读取只对已授权空间可用 | packages/dsh-collab/test/integration.test.ts | `handle-06：托管读取只对已授权空间可用` | 🟢 green |
 | specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 受管子会话以托管成员身份写入 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-01：受管子会话以托管成员身份写入` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 解除绑定后立即失去身份 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-02：解除绑定后立即失去身份` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 在途调用在失效后不能完成 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-03：在途调用在失效后不能完成（参数化）` | 🟢 green（沿用，需随本 change 保持通过） |
@@ -119,4 +119,6 @@
 - **等价测试夹具**（`todo-migration-equivalence.test.ts`）：同一脚本驱动 `legacy` 与 `collab` 两个 `TodoBackend`；`collab` 用真实 collab-kernel `CollabService` + 真实 dsh-collab `Integrations` 句柄 + 临时目录 file store，两边注入同一假时钟；跟进投递用同一个记录型 port 替身。只归一化 itemId。三条 `pet_locus_ledger_read` 指引句是唯一允许的文本差异。
 - **投影与授权测试**（`stamp-projection.test.ts`）：用真实 `Integrations` + 内存 kernel，接入方 adapter 是测试替身（只提供 `resolveCaller`/`visible`/`recipients`），对 `overview`/`status` 的断言用完整 JSON 序列化比对。
 - **Pet 侧新测试夹具**：与 collab-kernel 的连接一律经真实 `Integrations` 句柄，不手写 kernel 替身（`docs/architecture/dsh-plugin-integration-pitfalls.md` 第 7 节）。
+- **接缝门 3.1**：`establish-00` 位于 `packages/dsh-collab/test/controller-seams.test.mjs`（`npm run test:components -- --controller`），用真实 sessionController 创建的会话、模型空闲无轮次时作 exec，经句柄提交与读取均成功、未触发模型请求。
+- **额外测试**：`handle-07`（disposeRequest 幂等、actor、未授权与 dispose 后错误）不对应独立场景，按 anvil 允许保留。
 - **真实 Host 验收**（tasks 末组）不进本账本，属于 verify 的人工证据。

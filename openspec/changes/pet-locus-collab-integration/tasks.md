@@ -17,12 +17,12 @@
 
 ## 3. dsh-collab：句柄 `establish`、`disposeRequest`、`readManaged`
 
-- [ ] 3.1 先验证接缝：以 Host 当前持有、但不在模型轮次内的普通会话 agent 作 exec，`SessionAccess.caller` 能解析且守卫成立；写成测试 `establish-00`。不成立就停下，回到 design D2，按 anvil spec drift 规则重审
-- [ ] 3.2 Write failing test: `establish-01..04`
-- [ ] 3.3 Implement: `establish`，使 3.2 通过
-- [ ] 3.4 Write failing test: `handle-06：托管读取只对已授权空间可用`；把 `handle-05` 的断言改为新方法集合，确认它变红
-- [ ] 3.5 Implement: `disposeRequest`、`readManaged`，使 3.4 通过
-- [ ] 3.6 Refactor；dsh-collab 全套通过
+- [x] 3.1 先验证接缝：以 Host 当前持有、但不在模型轮次内的普通会话 agent 作 exec，`SessionAccess.caller` 能解析且守卫成立；写成测试 `establish-00`。不成立就停下，回到 design D2，按 anvil spec drift 规则重审
+- [x] 3.2 Write failing test: `establish-01..04`
+- [x] 3.3 Implement: `establish`，使 3.2 通过
+- [x] 3.4 Write failing test: `handle-06：托管读取只对已授权空间可用`；把 `handle-05` 的断言改为新方法集合，确认它变红
+- [x] 3.5 Implement: `disposeRequest`、`readManaged`，使 3.4 通过
+- [x] 3.6 Refactor；dsh-collab 全套通过
 
 ## 4. dsh-collab：戳、cmdId 命名空间、写目标授权、可见投影
 
