@@ -76,7 +76,7 @@
       "n": 5,
       "source": "docs/notes/cockpit-bridge-061-deployment.md",
       "action": "move",
-      "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md",
+      "target": "openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md",
       "manualRedactions": [
         {
           "findSha256": "e7836ae011aaa4d0cfcd4bb82f86b2482d7052d19b587fe3f32c179db0806fd5",
@@ -362,7 +362,7 @@
       "n": 24,
       "source": "docs/notes/upgrade-dsh-0-2-0-devbox-validation.md",
       "action": "move",
-      "target": "openspec/changes/upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md",
+      "target": "openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md",
       "manualRedactions": [
         {
           "findSha256": "4ad0d7f6ed7001444ae1926530a860ad25f9370d8f0e37c5271aa91045ac382e",

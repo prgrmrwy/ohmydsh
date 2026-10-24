@@ -53,7 +53,7 @@
     }
   },
   "scripts": {
-    "clean": "rm -rf lib",
+    "clean": "node -e \"require('node:fs/promises').rm('lib',{recursive:true,force:true}).catch(error=>{console.error(error);process.exitCode=1})\"",
     "build:host": "tsc -p tsconfig.json",
     "build:client": "tsdown && node scripts/verify-client-bundle.mjs",
     "build": "npm run clean && npm run build:host && npm run build:client",

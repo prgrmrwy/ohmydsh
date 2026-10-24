@@ -30,22 +30,35 @@ const LINE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/
  * @param {string} text
  * @returns {{ name: string, value?: string, line: number, problem?: string }[]}
  */
-export function parseEnvLocal(text) {
+export function parseEnvLocal(text, { mode = 'allowlistConsumer', file = ENV_LOCAL_FILENAME } = {}) {
+  if (!['allowlistConsumer', 'strictLauncher'].includes(mode)) throw new Error('unknown env-local parser mode')
+  const strict = mode === 'strictLauncher'
   const out = []
-  text.split(/\r?\n/).forEach((raw, index) => {
+  text.replace(/^\ufeff/, '').split(/\r?\n/).forEach((raw, index) => {
     const line = index + 1
     if (/^\s*(#|$)/.test(raw)) return
     const match = LINE.exec(raw)
-    if (!match) return
+    const problem = message => {
+      // No line text or value reaches diagnostics, even for non-assignment lines.
+      throw new Error(`${file}:${line}: invalid literal assignment (${message}); use quoted KEY=VALUE with absolute paths, without shell expansion`)
+    }
+    if (!match) {
+      if (strict) problem('expected KEY=VALUE syntax')
+      return
+    }
     const [, name, rest] = match
-    out.push({ name, line, ...parseValue(rest) })
+    const entry = { name, line, ...parseValue(rest, strict) }
+    if (strict && entry.problem) problem(entry.problem)
+    out.push(entry)
   })
   return out
 }
 
 /** @returns {{ value?: string, problem?: string }} */
-function parseValue(rest) {
+function parseValue(rest, strict = false) {
   const s = rest.trimStart()
+  const trailingOk = tail => strict ? /^\s*$/.test(tail) : /^\s*(#.*)?$/.test(tail)
+  if (strict && /[$`]/.test(s)) return { problem: 'shell expansion ($ or backtick) is not supported' }
   if (s.startsWith("'")) {
     const end = s.indexOf("'", 1)
     if (end < 0) return { problem: 'unterminated single quote' }
@@ -65,15 +78,14 @@ function parseValue(rest) {
     return { problem: 'unterminated double quote' }
   }
   // Unquoted: an inline comment starts at whitespace + '#'.
-  const value = s.replace(/\s+#.*$/, '').trim()
+  const value = (strict ? s : s.replace(/\s+#.*$/, '')).trim()
+  if (strict && /[;&|<>()#]/.test(value)) return { problem: 'unquoted operator or inline comment is not supported' }
   if (/[$`]/.test(value)) return { problem: 'shell expansion ($ or backtick) is not supported' }
   if (value.startsWith('~')) return { problem: 'tilde expansion is not supported' }
   if (/["'\\]/.test(value)) return { problem: 'quotes or escapes inside an unquoted value are not supported' }
   if (/\s/.test(value)) return { problem: 'unquoted whitespace is not supported' }
   return { value }
 }
-
-const trailingOk = (tail) => /^\s*(#.*)?$/.test(tail)
 
 /**
  * Fill allow-listed names from `<repo>/.env.local` into `env` when the caller

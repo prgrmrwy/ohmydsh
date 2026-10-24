@@ -3,12 +3,14 @@ const { resolve } = require('node:path')
 
 const root = resolve(__dirname, '../../../..')
 const supervisor = resolve(root, 'scripts/lib/run-bounded.mjs')
+const { resolveExecutable } = require(resolve(root, 'scripts/lib/package-manager.cjs'))
 const DEFAULT_TIMEOUT_MS = 600_000
 const KILL_GRACE_MS = 2_000
 
 /** Run one compat build command with the repository's process-group timeout. */
 function runCompatCommand(command, args, cwd, { capture = false, timeoutMs = DEFAULT_TIMEOUT_MS, env } = {}) {
-  const request = JSON.stringify({ command, args, cwd, timeoutMs, killGraceMs: KILL_GRACE_MS, ...(env === undefined ? {} : { env }) })
+  const executable = resolveExecutable(command, args, { cwd, env: { ...process.env, ...env } })
+  const request = JSON.stringify({ command: executable.command, args: executable.args, cwd, timeoutMs, killGraceMs: KILL_GRACE_MS, ...(env === undefined ? {} : { env }) })
   const result = spawnSync(process.execPath, [supervisor], {
     cwd,
     env: process.env,

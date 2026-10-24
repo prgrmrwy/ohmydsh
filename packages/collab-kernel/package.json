@@ -13,7 +13,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p lib/convention && if ls src/convention/*.md >/dev/null 2>&1; then cp src/convention/*.md lib/convention/; fi",
+    "build": "tsc -p tsconfig.json && node scripts/copy-convention.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run"
   },

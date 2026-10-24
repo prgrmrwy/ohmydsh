@@ -715,7 +715,7 @@
   - 真实人名与 bot 显示名:出现在 `openspec/changes/archive/**`、`openspec/specs/pet-locus-collaboration/spec.md`、`packages/dsh-pet` 的测试夹具与源码注释里;
   - 私有仓库/服务名与提交号:出现在 `BACKLOG.md` 较早条目、ADR-0002、`openspec/changes/archive/**`;
   - 真实 session id 前缀与飞书 ID 形状的夹具值:`packages/dsh-pet/test/**`、`packages/dsh-pet/test/fixtures/**`;
-  - 个别内部 bridge 名与 devbox 辅助脚本名:`openspec/changes/upgrade-dsh-0-2-0-runtime/checking/**`(进行中的 change);
+  - 个别内部 bridge 名与 devbox 辅助脚本名:`openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/**`(2026-10-24 已归档);
   - git 历史对上述所有类别仍保留原文,改当前文件不能抹去。
 - **建议**: 先决定是否值得为此重写历史;若只清当前树,为夹具改用明显合成的值,并给 `redactionRules` 式扫描加一个全仓测试;进行中 change 的 checking 文件在其归档前处理。
 - **更新**: 2026-10-10 新增。

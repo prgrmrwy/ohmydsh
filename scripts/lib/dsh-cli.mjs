@@ -6,6 +6,7 @@
 // Arborist. Remove the single policy entry (and its regression tests) after an
 // isolated cold npx install, consecutive builds and repeated restarts are stable.
 import { spawnSync } from 'node:child_process'
+import packageManager from './package-manager.cjs'
 import {
   existsSync,
   mkdirSync,
@@ -94,7 +95,8 @@ export function runBoundedProvision(command, args, options = {}) {
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS
   const cwd = options.cwd ?? process.cwd()
   const env = options.env ?? process.env
-  const request = JSON.stringify({ command, args, cwd, timeoutMs, killGraceMs })
+  const executable = packageManager.resolveExecutable(command, args, { env })
+  const request = JSON.stringify({ ...executable, cwd, timeoutMs, killGraceMs })
   const result = spawnSync(process.execPath, [BOUNDED_RUNNER], {
     cwd,
     env,
@@ -267,8 +269,7 @@ export function runDshCli(args, opts = {}) {
   const resolved = resolveCliBin(opts)
   if (!resolved) return false
   const stdio = opts.stdio ?? 'inherit'
-  const result = resolved.kind === 'env'
-    ? spawnSync(resolved.bin, args, { stdio })
-    : spawnSync(process.execPath, [resolved.bin, ...args], { stdio })
+  const executable = packageManager.resolveDshCommand(resolved.bin, args, { managed: resolved.kind !== 'env' })
+  const result = spawnSync(executable.command, executable.args, { stdio, shell: false, env: opts.env ?? process.env })
   return result.status === 0
 }

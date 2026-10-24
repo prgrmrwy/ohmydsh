@@ -66,7 +66,7 @@ AI prompt 以 `[ASK-PATH]` 等固定英文规则标签组织，测试只断言�
 | 2 | `2026-09-15-concurrent-write-isolation.md` | 移动 | `openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/research-concurrent-write-isolation.md` | 正文锚定该 change design.md:269 |
 | 3 | `2026-09-15-memex-commit-attribution.md` | 移动 | `openspec/changes/archive/2026-09-20-dsh-memex-scoped-memory/commit-attribution.md` | 只解释该 change 的提交归属 |
 | 4 | `2026-09-18-pet-locus-collaboration-phase2-friction-review.md` | 删除 | — | 含真实 session id、群 chat id 与本机组织路径，不应留在公开仓库；结论已拆入 BACKLOG（B026–B034） |
-| 5 | `cockpit-bridge-061-deployment.md` | 移动 | `openspec/changes/upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md` | 属于 0.2 升级的部署验收 |
+| 5 | `cockpit-bridge-061-deployment.md` | 移动 | `openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/cockpit-bridge-061-deployment.md` | 属于 0.2 升级的部署验收 |
 | 6 | `dsh-0.1.5-rc.2-extension-point-survey.md` | 移动 | `openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/extension-point-survey.md` | 为收缩 Pet compat 所做的上游勘察 |
 | 7 | `dsh-home-agent-instructions.md` | 移动并改写 | `docs/architecture/agent-instructions.md` | 描述当前 `agentInstructions` 机制，被 README 链接 |
 | 8 | `dsh-memex-integration.md` | 移动 | `packages/dsh-memex/docs/integration-notes.md` | 只与 dsh-memex 当前实现相关 |
@@ -85,7 +85,7 @@ AI prompt 以 `[ASK-PATH]` 等固定英文规则标签组织，测试只断言�
 | 21 | `pet-mention-open-id-and-asker-name.md` | 移动 | `openspec/changes/archive/2026-09-19-pet-mention-open-id-and-asker-name/notes.md` | 该文件由此 change 的任务 15 创建（tasks.md:15），用于把随 `pet-locus-delivery-safety-hardening` 发布的行为补进规范；按「由哪个 change 写成」归属 |
 | 22 | `pet-unified-locus-cutover.md` | 移动 | `openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/cutover-runbook.md` | 正文声明为该 change 的 runbook |
 | 23 | `sync-clean-first-build-breaks-deployment.md` | 转 BACKLOG | `BACKLOG.md` 缺陷备忘新条目 | 状态「待处理」的缺陷，不是长期文档 |
-| 24 | `upgrade-dsh-0-2-0-devbox-validation.md` | 移动 | `openspec/changes/upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md` | 该进行中 change 的验收记录 |
+| 24 | `upgrade-dsh-0-2-0-devbox-validation.md` | 移动 | `openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-validation.md` | 该进行中 change 的验收记录 |
 | 25 | `ws-clean-archived-and-loaded-deadlock.md` | 转 BACKLOG | `BACKLOG.md` 缺陷备忘新条目 | 状态「待处理」的缺陷 |
 
 脱敏是**实施期门禁**，规划只规定规则与验收口径，不预先穷举条目：

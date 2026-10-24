@@ -25,20 +25,24 @@
     "node": ">=22.0.0",
     "npm": ">=10.0.0"
   },
+  "bin": {
+    "dsh": "bin/dsh.mjs"
+  },
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
     "sync": "node scripts/sync.mjs",
-    "test": "DSH_LOCAL_MANIFEST=/nonexistent/ohmydsh-test-isolation/dsh.yaml.local node --test tests/*.test.mjs",
+    "test": "node scripts/test.mjs",
     "check:artifacts": "node scripts/check-tracked-artifacts.mjs",
-    "test:tap": "DSH_LOCAL_MANIFEST=/nonexistent/ohmydsh-test-isolation/dsh.yaml.local node --test --test-reporter=tap tests/*.test.mjs"
+    "test:tap": "node scripts/test.mjs --test-reporter=tap"
   },
   "devDependencies": {
     "js-yaml": "^4.1.0",
     "jsdom": "^26.1.0",
     "semver": "^7.8.5",
     "unrun": "^0.3.1",
-    "yaml": "^2.8.1"
+    "yaml": "^2.8.1",
+    "zx": "8.8.5"
   }
 }

@@ -4,6 +4,7 @@ import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } f
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
+import { resolveExecutable } from './package-manager.cjs'
 
 export const SPEC_SUPERFLOW_SKILLS = Object.freeze([
   'bug-investigator',
@@ -231,7 +232,8 @@ export function packagePins(resources, { enabledOnly = true } = {}) {
 }
 
 export function resolveNpmIntegrity(pin, { spawn = spawnSync } = {}) {
-  const result = spawn('npm', ['view', pin.spec, 'dist.integrity', '--json'], { encoding: 'utf8' })
+  const command = resolveExecutable('npm', ['view', pin.spec, 'dist.integrity', '--json'])
+  const result = spawn(command.command, command.args, { encoding: 'utf8', shell: false })
   if (result.status !== 0) throw new Error(`cannot resolve npm integrity for ${pin.spec}`)
   let value
   try { value = JSON.parse(result.stdout) } catch { throw new Error(`invalid npm integrity response for ${pin.spec}`) }

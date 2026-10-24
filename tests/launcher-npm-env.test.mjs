@@ -20,6 +20,14 @@ import { fileURLToPath } from 'node:url'
 import { serverBinFrom } from '../scripts/lib/dsh-cli.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// Historical Bash regression oracle, not the current Node launcher.
+const ORACLE = path.join(ROOT, 'tests/fixtures/launcher-bash-baseline')
+
+// P1 keeps the existing structural assertions across the extracted sources.
+async function launcherSource() {
+  const files = ['bin/dsh', ...['environment', 'runtime-server'].map(name => `scripts/launcher/${name}.sh`)]
+  return (await Promise.all(files.map(file => readFile(path.join(ORACLE, file), 'utf8')))).join('\n')
+}
 
 // npx 烘焙进长期进程的那批变量(实测形态),用作污染基线。
 const BAKED = {
@@ -44,11 +52,12 @@ async function sandbox() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ohmydsh-npmenv-'))
   await mkdir(path.join(dir, 'bin'), { recursive: true })
   await cp(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'), { recursive: true })
+  await cp(path.join(ORACLE, 'scripts'), path.join(dir, 'scripts'), { recursive: true })
   await cp(path.join(ROOT, 'dsh.yaml'), path.join(dir, 'dsh.yaml'))
   await cp(path.join(ROOT, '.npmrc'), path.join(dir, '.npmrc'))
   await cp(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), { recursive: true, dereference: false })
 
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await readFile(path.join(ORACLE, 'scripts/launcher/runtime-server.sh'), 'utf8')
   let patched = src
 
   // CLI 解析桩:不联网。刻意在标记行之前混入一行安装噪声,复现冷启动时
@@ -70,7 +79,8 @@ async function sandbox() {
   assert.notEqual(patched, beforeFg, '前台 server 启动未被替换,测试桩与实现已漂移')
 
   const bin = path.join(dir, 'bin/dsh')
-  await writeFile(bin, patched)
+  await cp(path.join(ORACLE, 'bin/dsh'), bin)
+  await writeFile(path.join(dir, 'scripts/launcher/runtime-server.sh'), patched)
   await chmod(bin, 0o755)
   return { dir, bin }
 }
@@ -143,7 +153,7 @@ test('NPM_CONFIG_REGISTRY 大写拼写同样被识别为用户意图', async (t)
 })
 
 test('启动器不得导出 npm_config_registry 到自身进程环境', async () => {
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await launcherSource()
   assert.doesNotMatch(
     src,
     /^\s*export npm_config_registry=/m,
@@ -153,7 +163,7 @@ test('启动器不得导出 npm_config_registry 到自身进程环境', async ()
 })
 
 test('前台与后台启动路径共用同一份剥离后的环境', async () => {
-  const src = await readFile(ROOT + '/bin/dsh', 'utf8')
+  const src = await launcherSource()
   assert.match(src, /^\s*"\$\{env_args\[@\]\}" node "\$server_bin" web /m, '前台路径必须使用剥离后的 env_args')
   assert.match(src, /^\s*nohup "\$\{env_args\[@\]\}" node "\$server_bin" web /m, '后台路径必须使用剥离后的 env_args')
   assert.equal(src.match(/env_args=\(env /g)?.length, 1, 'env_args 必须只构造一次,避免两条路径漂移')

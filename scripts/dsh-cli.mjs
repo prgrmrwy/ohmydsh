@@ -12,6 +12,7 @@
 // npx 安装锁竞争),以 node 直连执行并透传 stdio 与退出码。
 import { spawnSync } from 'node:child_process'
 import { resolveCliBin } from './lib/dsh-cli.mjs'
+import packageManager from './lib/package-manager.cjs'
 
 const version = process.env.DSH_CLI_VERSION ?? ''
 if (version === '') {
@@ -31,9 +32,10 @@ if (resolved === null) {
 }
 
 const args = process.argv.slice(2)
-const result = resolved.kind === 'env'
-  ? spawnSync(resolved.bin, args, { stdio: 'inherit' })
-  : spawnSync(process.execPath, [resolved.bin, ...args], { stdio: 'inherit' })
+let executable
+try { executable = packageManager.resolveDshCommand(resolved.bin, args, { managed: resolved.kind !== 'env' }) }
+catch (error) { console.error(`error: ${error.message}`); process.exit(1) }
+const result = spawnSync(executable.command, executable.args, { stdio: 'inherit', shell: false })
 
 if (result.error !== undefined) {
   console.error(`error: 执行官方 DSH CLI 失败:${result.error.message}`)

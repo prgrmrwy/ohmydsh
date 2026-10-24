@@ -3,7 +3,7 @@
 // its lifetime. The synchronous launcher waits on this short-lived supervisor;
 // the supervisor can still TERM/KILL the whole npm/pnpm descendant tree.
 import { readFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 const EXIT_TIMEOUT = 124
 const fail = (message, code = 2) => {
@@ -46,6 +46,14 @@ const child = spawn(command, args, {
 
 function signalTree(signal) {
   if (child.pid === undefined) return
+  if (process.platform === 'win32') {
+    // Never tree-kill a stale PID after our leader has exited. On Windows the
+    // first timeout action is already forceful, while the owned leader lives.
+    if (childClosed || child.exitCode !== null || child.signalCode !== null) return
+    const result = spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, shell: false, timeout: Math.min(killGraceMs, 5_000), stdio: 'ignore' })
+    if (result.error) console.error('bounded-provision: cannot reclaim owned Windows process tree')
+    return
+  }
   try {
     process.kill(detached ? -child.pid : child.pid, signal)
   } catch (error) {

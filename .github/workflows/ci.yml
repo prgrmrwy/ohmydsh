@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: ['22.x', '24.x']
 
     steps:
@@ -44,8 +44,31 @@ jobs:
       - name: Build dsh-openspec
         run: npm run build --workspace dsh-openspec
 
-      - name: Run tests
+      - name: Run POSIX complete regression suite
+        if: runner.os != 'Windows'
         run: npm test
+
+      # Native Win32 contract lane deliberately does not use Git Bash, including
+      # the Windows System32 WSL bash shim. Full repo build gate is separate.
+      - name: Run native Windows contracts without Bash
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tools = Join-Path $env:RUNNER_TEMP 'ohmydsh-native-tools'
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          Copy-Item "$env:SystemRoot\System32\taskkill.exe" $tools
+          Copy-Item "$env:SystemRoot\System32\cmd.exe" $tools
+          Copy-Item "$env:SystemRoot\System32\where.exe" $tools
+          $nodeDir = Split-Path (Get-Command node.exe).Source
+          $gitDir = Split-Path (Get-Command git.exe).Source
+          $env:PATH = "$tools;$nodeDir;$gitDir;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          if (Get-Command bash,sh -ErrorAction SilentlyContinue) { throw 'Bash leaked into native lane' }
+          node --test tests/package-manager.test.mjs tests/launcher-bootstrap.test.mjs tests/launcher-exec.test.mjs tests/launcher-args.test.mjs tests/launcher-env-local.test.mjs tests/launcher-environment.test.mjs tests/launcher-process.test.mjs tests/launcher-ui.test.mjs tests/launcher-runner.test.mjs tests/launcher-lifecycle.test.mjs tests/workspace-lifecycle.test.mjs tests/launcher-install.test.mjs tests/launcher-acceptance.test.mjs tests/platform/windows-launcher.test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run macOS platform contracts
+        if: runner.os == 'macOS'
+        run: node --test tests/platform/darwin-launcher.test.mjs
 
   artifacts:
     name: Tracked artifact policy

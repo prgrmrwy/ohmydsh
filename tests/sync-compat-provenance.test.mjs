@@ -66,6 +66,7 @@ async function fixture() {
   for (const rel of [
     ['scripts', 'sync.mjs'],
     ['scripts', 'lib', 'dsh-cli.mjs'],
+    ['scripts', 'lib', 'package-manager.cjs'],
     ['scripts', 'lib', 'dsh-host-runtime.mjs'],
     ['scripts', 'lib', 'manifest-overlay.mjs'],
     ['scripts', 'lib', 'env-local.mjs'],
