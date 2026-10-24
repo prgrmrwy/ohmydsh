@@ -43,8 +43,8 @@ Approved planning SHA256:
 
 ### Change Delivery
 
-- Uncommitted implementation on managed `ws/win`; approved old-change archive/planning files staged for index-based governance, code/evidence changes mixed unstaged/untracked. No commits created solely for verification. Human review precedes any future commit/merge/cleanup authorization.
-- No production deployment/restart, user global installation, actual env/credential/private overlay mutation, or port3080 Host change. All native installs/link probes use scratch prefixes. No upstream package source patched or disabled to obtain green.
+- User subsequently authorized main integration before ordinary PC/WSL local testing. Pre-existing main lock reordering was preserved separately as85ea1f42 after explicit confirmation and parsed-JSON equality check. Migration committed as4a729275; controlled ws-merge succeeded at main merge5b84475f. No push or worktree cleanup. Follow-up evidence corrections remain in the managed worktree until separately committed/merged; planning acceptance remains FAIL.
+- No production Host restart or port3080 Host change, user global installation, actual env/credential/private overlay mutation. User authorized nonisolated local testing, but the actual postmerge build bash-354 targeted the managed Worktree Session DSH home and failed (five pnpm policy errors plus unmanaged schema refusal); this is not ordinary local-profile success. Main dependency bootstrap was not attempted outside the allowed binding. No upstream package source patched or disabled to obtain green.
 - Current main specs are not synchronized with this unaccepted delta, and this change is not archived. Full Windows support is not advertised in README.
 
 ## Overall Decision
