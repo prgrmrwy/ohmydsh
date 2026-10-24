@@ -1,7 +1,7 @@
 ## 0. 基线与前置
 
-- [ ] 0.1 记录迁移前基线：运行 collab-kernel、dsh-collab、dsh-pet 的 test/typecheck，记下通过数与 skip 数到 `implementation-log.md`。之后每组结束都对比基线，不得出现新失败或新 skip
-- [ ] 0.2 给 ADR-0006 补"消费 collab-kernel 承载台账与待办"注记（不改 Decision）；在 `pet-locus-independent-agent-inquiries/tasks.md` 记下"兄弟直询与 sibling 名单与本 change 星形模型冲突，需去掉"的依赖，不改其已完成项；`openspec validate --strict` 通过
+- [x] 0.1 记录迁移前基线：运行 collab-kernel、dsh-collab、dsh-pet 的 test/typecheck，记下通过数与 skip 数到 `implementation-log.md`。之后每组结束都对比基线，不得出现新失败或新 skip
+- [x] 0.2 给 ADR-0006 补"消费 collab-kernel 承载台账与待办"注记（不改 Decision）；在 `pet-locus-independent-agent-inquiries/tasks.md` 记下"兄弟直询与 sibling 名单与本 change 星形模型冲突，需去掉"的依赖，不改其已完成项；`openspec validate --strict` 通过
 
 ## 1. 内核：提交时间 `at`
 
