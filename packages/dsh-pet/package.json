@@ -1,6 +1,6 @@
 {
   "name": "dsh-pet",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "DSH Pet: a resident desktop-companion Agent entry that runs management Skills against a trusted, immutable snapshot of the current DSH session, workspace, or an independent scope",
   "license": "MIT",
   "type": "module",

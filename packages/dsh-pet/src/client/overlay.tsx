@@ -55,6 +55,7 @@ import {
   type MascotPlayerLoader,
 } from './mascot-expression.js'
 import { setMascotExpressionDiagnostic } from './mascot-diagnostics.js'
+import { setExpressionPresence } from './expression-presence.js'
 
 /**
  * Display name for an Invocation origin that is not a Skill.
@@ -263,6 +264,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         .expression()
         .then(view => {
           if (!expressionReads.isCurrent(token)) return
+          setExpressionPresence(view.state === 'ok' ? 'ok' : 'none')
           setExpression(view)
           if (view.state === 'corrupt') setMascotExpressionDiagnostic(view.diagnostic)
           if (view.state === 'none') setMascotExpressionDiagnostic(undefined)

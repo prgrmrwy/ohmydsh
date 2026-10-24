@@ -12,7 +12,7 @@
  */
 
 import type { ReactNode } from 'react'
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import {
   DEFAULT_GLYPH,
   PET_ACCENT_EVENT,
@@ -32,6 +32,11 @@ import {
   type PetSizeId,
 } from './accent.js'
 import { petApi, type PetConfig, type PetTodoLedgerGroup } from './api.js'
+import {
+  getExpressionPresence,
+  setExpressionPresence,
+  subscribeExpressionPresence,
+} from './expression-presence.js'
 import {
   getMascotExpressionDiagnostic,
   subscribeMascotExpressionDiagnostic,
@@ -474,14 +479,27 @@ function GeneralTab(): JSX.Element {
       .catch((cause: unknown) => setError(String(cause)))
   }, [])
 
-  // Open the form the owner actually uses. A stored animation wins on first
-  // load, but a manual switch is never overridden afterwards.
+  // Open the form the owner actually uses. Presence is published by the
+  // overlay (which mounts with the app) and by this section's own reads, so
+  // opening Settings later still lands on the active form. A manual switch is
+  // never overridden.
+  const expressionPresence = useSyncExternalStore(
+    subscribeExpressionPresence,
+    getExpressionPresence,
+    getExpressionPresence,
+  )
   useEffect(() => {
+    if (formTouched.current) return
+    if (expressionPresence === 'ok') setForm('lottie')
+    else if (expressionPresence === 'none') setForm('emoji')
+  }, [expressionPresence])
+  // Nothing has published yet (settings mounted before the overlay's first
+  // read): read once and publish, so the form still follows the real state.
+  useEffect(() => {
+    if (getExpressionPresence() !== 'unknown') return
     void petApi
       .expression()
-      .then(view => {
-        if (!formTouched.current && view.state === 'ok') setForm('lottie')
-      })
+      .then(view => setExpressionPresence(view.state === 'ok' ? 'ok' : 'none'))
       .catch(() => undefined)
   }, [])
 
@@ -810,7 +828,9 @@ export function ExpressionSection(): JSX.Element {
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
-      setView(await petApi.expression())
+      const next = await petApi.expression()
+      setExpressionPresence(next.state === 'ok' ? 'ok' : 'none')
+      setView(next)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
