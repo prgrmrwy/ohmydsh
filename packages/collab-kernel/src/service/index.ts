@@ -54,8 +54,8 @@ const MODE_FORMAT = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
  */
 export interface ReadContext { principal: Principal; spaceId: string; guard?: () => boolean }
 export interface CommandContext extends ReadContext { cmdId: string }
-type ManagerCommand = 'admitMember' | 'rebindMember' | 'retireMember'
-export interface ServiceOptions { serviceId: string; store: CollabStore; providers: ChannelProvider[]; convention?: { version: string; sha256: string; text: string }; project?: (state: Overview) => string }
+type ManagerCommand = 'admitMember' | 'rebindMember' | 'retireMember' | 'disposeManagedRequest'
+export interface ServiceOptions { serviceId: string; store: CollabStore; providers: ChannelProvider[]; convention?: { version: string; sha256: string; text: string }; project?: (state: Overview) => string; /** Clock for commit times; defaults to Date.now. */ now?: () => number }
 export function canonical(value: unknown): string {
   const normalize = (v: unknown): unknown => Array.isArray(v) ? v.map(normalize) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, x]) => [k, normalize(x)])) : v
   return JSON.stringify(normalize(value))
@@ -160,8 +160,10 @@ export class CollabService {
       if (r.receipt.payloadHash !== hash) fail('COLLAB_CMD_CONFLICT'); return structuredClone(r.receipt.result)
     }
   }
-  private async persist(spaceId: string, record: CommitRecord): Promise<void> {
+  /** Every new commit is stamped here, once, just before it becomes durable; replays never reach persist. */
+  private async persist(spaceId: string, unstamped: CommitRecord): Promise<void> {
     if (!this.opened.has(spaceId) || this.failed.has(spaceId)) fail('COLLAB_STORE_FAILED')
+    const record: CommitRecord = { ...unstamped, at: Math.trunc((this.options.now ?? Date.now)()) }
     const committing = (async () => {
       try {
         await this.options.store.commit(spaceId, record, (this.records.get(spaceId)?.at(-1)?.seq ?? 0))
@@ -475,6 +477,20 @@ export class CollabService {
   async retireMember(ctx: CommandContext, input: { member: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.managerCommand(ctx, 'retireMember', input, (s, actor, channel) => {
     const target = this.managedTarget(s, channel, input.member)
     return [{ type: 'member/status', actor, name: target.name, status: 'gone' }]
+  }) }
+  /**
+   * The integrator settles, on the user's behalf, a request authored by one of its managed members
+   * (retired or gone authors still count). Never wakes anyone and is never counted in a topic.
+   */
+  async disposeManagedRequest(ctx: CommandContext, input: { itemId: string; progress: Progress }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.managerCommand(ctx, 'disposeManagedRequest', input, (s, actor, channel) => {
+    const item = (typeof input.itemId === 'string' && Object.hasOwn(s.items, input.itemId) ? s.items[input.itemId] : undefined) ?? fail('COLLAB_ITEM_NOT_FOUND')
+    if (item.kind !== 'request') fail('COLLAB_FORBIDDEN')
+    const author = Object.hasOwn(s.members, item.author) ? s.members[item.author] : undefined
+    if (author?.managedBy !== channel) fail('COLLAB_FORBIDDEN')
+    checkedItem(s, item.id, 'advanceRequest')
+    const transitions: Record<Progress, Progress[]> = { open: ['accepted', 'done', 'rejected'], accepted: ['done', 'rejected'], done: [], rejected: [] }
+    if (!transitions[item.progress].includes(input.progress)) fail('COLLAB_BAD_TRANSITION')
+    return [{ type: 'request/progressed', actor, itemId: item.id, progress: input.progress }]
   }) }
   private readState(ctx: ReadContext): SpaceState { this.entry(ctx); const s = this.state(ctx.spaceId); if (ctx.principal.kind !== 'internal' && this.lookup(s, ctx.principal).status !== 'active') fail('COLLAB_MEMBER_INACTIVE'); return s }
   async overview(ctx: ReadContext): Promise<Overview> {

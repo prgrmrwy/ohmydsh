@@ -4,14 +4,14 @@
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
-| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 代人受理不唤醒 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-01：代人受理不唤醒` | 🔴 red |
-| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 不经受理直接完成 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-02：不经受理直接完成` | 🔴 red |
-| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 不能处置非托管成员的 request | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-03：不能处置非托管成员的 request` | 🔴 red |
-| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 作者退役后仍可处置 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-04：作者退役后仍可处置` | 🔴 red |
-| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 未授权空间不可区分 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-05：未授权空间不可区分` | 🔴 red |
-| specs/collab-kernel/spec.md → 提交记录携带提交时间 | 新提交带时间且重放不刷新 | packages/collab-kernel/test/commit-time.test.ts | `commit-time-01：新提交带时间且重放不刷新` | 🔴 red |
-| specs/collab-kernel/spec.md → 提交记录携带提交时间 | 旧日志无时间照常重放 | packages/collab-kernel/test/commit-time.test.ts | `commit-time-02：旧日志无时间照常重放` | 🔴 red |
-| specs/collab-kernel/spec.md → 提交记录携带提交时间 | 篡改时间被识别为损坏 | packages/collab-kernel/test/commit-time.test.ts | `commit-time-03：篡改时间被识别为损坏` | 🔴 red |
+| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 代人受理不唤醒 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-01：代人受理不唤醒` | 🟢 green |
+| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 不经受理直接完成 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-02：不经受理直接完成` | 🟢 green |
+| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 不能处置非托管成员的 request | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-03：不能处置非托管成员的 request` | 🟢 green |
+| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 作者退役后仍可处置 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-04：作者退役后仍可处置` | 🟢 green |
+| specs/collab-kernel/spec.md → 接入方代人处置其托管成员的 request | 未授权空间不可区分 | packages/collab-kernel/test/managed-dispose.test.ts | `dispose-05：未授权空间不可区分` | 🟢 green |
+| specs/collab-kernel/spec.md → 提交记录携带提交时间 | 新提交带时间且重放不刷新 | packages/collab-kernel/test/commit-time.test.ts | `commit-time-01：新提交带时间且重放不刷新` | 🟢 green |
+| specs/collab-kernel/spec.md → 提交记录携带提交时间 | 旧日志无时间照常重放 | packages/collab-kernel/test/commit-time.test.ts | `commit-time-02：旧日志无时间照常重放` | 🟢 green |
+| specs/collab-kernel/spec.md → 提交记录携带提交时间 | 篡改时间被识别为损坏 | packages/collab-kernel/test/commit-time.test.ts | `commit-time-03：篡改时间被识别为损坏` | 🟢 green |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 动作记为 principal 反查到的成员 | packages/collab-kernel/test/auth.test.ts | `auth-01：动作记为 principal 反查到的成员` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 首次创建与创建重放 | packages/collab-kernel/test/auth.test.ts | `auth-02：首次创建与创建重放` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/collab-kernel/spec.md → 封闭的命令集合与授权 | 重复创建同一协作空间 | packages/collab-kernel/test/auth.test.ts | `auth-03：重复创建同一协作空间` | 🟢 green（沿用，需随本 change 保持通过） |

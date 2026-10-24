@@ -5,15 +5,15 @@
 
 ## 1. 内核：提交时间 `at`
 
-- [ ] 1.1 Write failing test: `commit-time-01..03`，确认因缺少 `at` 而失败
-- [ ] 1.2 Implement: `ServiceOptions.now`；`command` 与 `completion` 提交写入 `at`；重放不写新提交，使 1.1 通过
-- [ ] 1.3 Refactor；collab-kernel 全套通过。现有快照类测试若只因新字段失败，确认后改夹具不改断言含义；dsh-collab 的 salvage 测试仍通过
+- [x] 1.1 Write failing test: `commit-time-01..03`，确认因缺少 `at` 而失败
+- [x] 1.2 Implement: `ServiceOptions.now`；`command` 与 `completion` 提交写入 `at`；重放不写新提交，使 1.1 通过
+- [x] 1.3 Refactor；collab-kernel 全套通过。现有快照类测试若只因新字段失败，确认后改夹具不改断言含义；dsh-collab 的 salvage 测试仍通过
 
 ## 2. 内核：`disposeManagedRequest`
 
-- [ ] 2.1 Write failing test: `dispose-01..05`
-- [ ] 2.2 Implement: manager 命令与授权表行，使 2.1 通过；`auth-06` 随之通过
-- [ ] 2.3 Refactor；`auth-*`、`requests-*`、`managed*` 全部保持通过
+- [x] 2.1 Write failing test: `dispose-01..05`
+- [x] 2.2 Implement: manager 命令与授权表行，使 2.1 通过；`auth-06` 随之通过
+- [x] 2.3 Refactor；`auth-*`、`requests-*`、`managed*` 全部保持通过
 
 ## 3. dsh-collab：句柄 `establish`、`disposeRequest`、`readManaged`
 

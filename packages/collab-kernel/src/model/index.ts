@@ -66,7 +66,8 @@ export type DispatchCompletedEvent = Extract<CollabEvent, { type: 'dispatch/comp
 export type ReceiptScope = { kind: 'member'; name: string } | { kind: 'manager'; channel: string } | { kind: 'create'; channel: string; address: string } | { kind: 'internal'; purpose: string }
 export interface CommandResult { seq: number; spaceId: string; itemId?: string; requestId?: string }
 export interface Receipt { cmdId: string; scope: ReceiptScope; payloadHash: string; result: CommandResult }
-export type CommitRecord = { kind: 'command'; seq: number; events: CollabEvent[]; receipt: Receipt } | { kind: 'completion'; seq: number; events: [DispatchCompletedEvent]; receipt?: never }
+/** `at`: commit time in epoch ms, taken once inside the serial transaction; absent on commits written before it existed. */
+export type CommitRecord = { kind: 'command'; seq: number; at?: number; events: CollabEvent[]; receipt: Receipt } | { kind: 'completion'; seq: number; at?: number; events: [DispatchCompletedEvent]; receipt?: never }
 export type Presence = 'reachable' | 'unreachable' | 'unknown'
 export interface Overview extends SpaceState { pendingDeliveries: Delivery[]; inFlightDeliveries: Delivery[]; presence: Record<string, Presence> }
 /** Maximum counted waking messages per topic; there is no reset. */

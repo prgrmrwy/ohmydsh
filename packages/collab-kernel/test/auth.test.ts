@@ -20,7 +20,7 @@ it('auth-12：internal 不能执行成员命令', async () => { const w = await 
 it('auth-13：gone 成员不能读写', async () => { const w = await world([], [member('aily', 'a:1'), member('doubao', 'a:2', 'agent', 'gone')]); await expect(w.service.setStatus(w.ctx('doubao'), { text: 'hi' })).rejects.toMatchObject({ code: 'COLLAB_MEMBER_INACTIVE' }); await expect(w.service.overview(w.read('doubao'))).rejects.toMatchObject({ code: 'COLLAB_MEMBER_INACTIVE' }) })
 it('全部具名写命令逐项允许与拒绝授权', async () => {
   const item: Item = { id: 'C', kind: 'request', assignee: 'doubao', progress: 'open', author: 'aily', title: 'C', body: '', revision: 1, status: 'draft', requiredAcks: [], acks: {} }
-  const seed: CollabEvent[] = [{ type: 'item/created', actor: 'aily', item }]
+  const seed: CollabEvent[] = [{ type: 'item/created', actor: 'aily', item }, { type: 'item/created', actor: 'locus-a', item: { ...item, id: 'L', author: 'locus-a' } }]
   type W = Awaited<ReturnType<typeof managedWorld>>
   const checks: { name: keyof typeof authorization; run: (w: W, allowed: boolean) => Promise<unknown> }[] = [
     { name: 'createSpace', run: (w, yes) => w.service.createSpace({ ...w.ctx(), spaceId: 'new', principal: yes ? principals.agent({ channel: 'test-a', address: 'a:1' }) : principals.internal('host-index') }, { name: 'aily', kind: 'agent', address: 'a:1' }) },
@@ -43,6 +43,7 @@ it('全部具名写命令逐项允许与拒绝授权', async () => {
     { name: 'admitMember', run: (w, yes) => w.service.admitMember(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { name: 'locus-b', address: 'loc:b' }) },
     { name: 'rebindMember', run: (w, yes) => w.service.rebindMember(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { member: 'locus-a', address: 'loc:b' }) },
     { name: 'retireMember', run: (w, yes) => w.service.retireMember(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { member: 'locus-a' }) },
+    { name: 'disposeManagedRequest', run: (w, yes) => w.service.disposeManagedRequest(yes ? w.mgr() : { ...w.ctx('aily'), guard: () => true }, { itemId: 'L', progress: 'accepted' }) },
   ]
   expect(checks.map(c => c.name).sort()).toEqual(Object.keys(authorization).sort())
   const fresh = () => managedWorld({ extra: seed, allowed: ['pet-locus'], members: [...defaultMembers(), managed('locus-a', 'loc:a', 5)] })
@@ -74,6 +75,7 @@ it('auth-15：host-index 不能执行任何写命令', async () => {
     ['allowManager', () => w.service.allowManager(c, { channel: 'pet-locus' })], ['revokeManager', () => w.service.revokeManager(c, { channel: 'pet-locus' })],
     ['admitMember', () => w.service.admitMember({ ...c, guard: () => true }, { name: 'x', address: 'a:x' })], ['rebindMember', () => w.service.rebindMember({ ...c, guard: () => true }, { member: 'doubao', address: 'a:x' })],
     ['retireMember', () => w.service.retireMember({ ...c, guard: () => true }, { member: 'doubao' })],
+    ['disposeManagedRequest', () => w.service.disposeManagedRequest({ ...c, guard: () => true }, { itemId: 'x', progress: 'done' })],
   ]
   expect(runs.map(r => r[0]).sort()).toEqual(Object.keys(authorization).sort())
   for (const [name, run] of runs) await expect(run(), name).rejects.toMatchObject({ code: 'COLLAB_FORBIDDEN' })

@@ -11,7 +11,8 @@
 
 接入方扩展点：
 
-- **托管成员。** 声明`managed: true`的 provider 是接入方。经 Leader 以`allowManager`按空间授权后，接入方以`principals.manager`执行`admitMember`/`rebindMember`/`retireMember`。换代保留成员名，旧地址永不复用。
+- **托管成员。** 声明`managed: true`的 provider 是接入方。经 Leader 以`allowManager`按空间授权后，接入方以`principals.manager`执行`admitMember`/`rebindMember`/`retireMember`。换代保留成员名，旧地址永不复用。`disposeManagedRequest`让接入方代本机用户处置其托管成员登记的 request（`open → accepted|done|rejected`、`accepted → done|rejected`），不唤醒任何成员。
+- **提交时间。** 每条新提交记录带`at`（毫秒，取自`ServiceOptions.now`，缺省`Date.now`），受行校验和覆盖。收据重放不写提交；`at`出现之前的旧提交照常重放、不补写。
 - **`ext`。** 条目与消息可携带不透明的 JSON 对象，规范化后不超过 4096 字节。内核只存不解读，也不放入投影或指针。
 - **`mode`。** 需回复的消息可指定投递方式，由收件人 provider 的`supportsMode`同步判定；不支持就拒绝。
 - **调用级守卫。** 读写上下文可带宿主创建的同步`guard`，内核在最后一个 await 之后、提交或返回数据前调用它。托管 channel 与 manager 的调用必须带守卫。
