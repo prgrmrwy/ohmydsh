@@ -166,13 +166,17 @@ describe('SSRF guard', () => {
       expect(network.calls).toEqual([])
     }
 
-    await expectCode(
-      fetchExpressionSource(
-        'https://internal.example/a.json',
-        deps({ lookup: async () => ['10.0.0.7'] }),
-      ),
-      'INVALID_REQUEST',
-    )
+    // The rejection must say WHICH answer was refused and how to recover:
+    // corporate DNS sinkholes turn public hosts into private addresses, and
+    // without the answer that looks like a Pet bug.
+    const internal = await fetchExpressionSource(
+      'https://internal.example/a.json',
+      deps({ lookup: async () => ['10.0.0.7'] }),
+    ).catch((cause: unknown) => cause as { code?: string; message?: string })
+    expect(internal.code).toBe('INVALID_REQUEST')
+    expect(internal.message).toContain('10.0.0.7')
+    expect(internal.message).toContain('fonts.gstatic.cn')
+    expect(internal.message).toContain('粘贴 JSON')
     // A hostname with one public and one private answer is refused outright.
     await expectCode(
       fetchExpressionSource(

@@ -401,7 +401,15 @@ export async function resolvePublicTarget(
   }
   if (addresses.length === 0) fetchFailed(`无法解析主机名 ${hostname}`)
   if (addresses.some(address => isDisallowedAddress(address))) {
-    invalidUrl(`主机 ${hostname} 解析到内网或保留地址`)
+    // Include the answer: on corporate/school networks a blocked public host
+    // commonly resolves to a private sinkhole address, and the owner needs to
+    // see that the rejection is DNS-driven rather than a Pet bug.
+    const shown = addresses.slice(0, 3).join('、')
+    invalidUrl(
+      `主机 ${hostname} 解析到内网或保留地址（${shown}）。` +
+        '若这是公司/校园 DNS 对公网域名的屏蔽，请改用可直连的镜像域名（如 fonts.gstatic.cn），' +
+        '或改用「粘贴 JSON」直接导入文件内容。',
+    )
   }
   const targets = addresses
     .map(address => ({ address, family: isIP(address) === 6 ? (6 as const) : (4 as const) }))

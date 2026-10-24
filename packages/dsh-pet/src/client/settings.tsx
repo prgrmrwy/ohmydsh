@@ -1042,7 +1042,10 @@ export function ExpressionSection(): JSX.Element {
               {busy === 'url' ? '导入中…' : '从 URL 导入'}
             </button>
           </div>
-          <p className="dshpet-item-hint">由 Host 下载；浏览器网络受限时仍可用。</p>
+          <p className="dshpet-item-hint">
+            由 Host 下载；浏览器网络受限时仍可用。若域名被公司/校园 DNS 解析到内网，
+            改用 fonts.gstatic.cn，或切到「粘贴 JSON」导入。
+          </p>
         </div>
       ) : (
         <div className="dshpet-field">
