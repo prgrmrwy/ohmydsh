@@ -127,7 +127,7 @@ export interface RouteDeps {
    */
   readonly todoLedger?: {
     /** Every todo owned by one main session, already projected for the owner. */
-    list(parentSessionId: string): readonly PetTodoView[]
+    list(parentSessionId: string): Promise<readonly PetTodoView[]>
     /**
      * Owner-sourced disposition. Rejects illegal transitions and unknown ids.
      *
@@ -797,12 +797,13 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       const parents = typeof requested === 'string' && requested.trim() !== ''
         ? [requested.trim()]
         : ledger.parents()
-      return invokeLocus('读取待办', () => ({
-        ledgers: parents.map(parentSessionId => ({
-          parentSessionId,
-          items: ledger.list(parentSessionId),
-        })),
-      }))
+      return invokeLocus('读取待办', async () => {
+        const ledgers: { parentSessionId: string; items: readonly PetTodoView[] }[] = []
+        for (const parentSessionId of parents) {
+          ledgers.push({ parentSessionId, items: await ledger.list(parentSessionId) })
+        }
+        return { ledgers }
+      })
     }),
     petRoute(LOCUS_ROUTES.todoAction, async ({ body }) => {
       const record = strictBody(body, ['itemId', 'action'])

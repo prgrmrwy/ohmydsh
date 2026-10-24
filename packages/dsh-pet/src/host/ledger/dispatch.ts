@@ -236,8 +236,8 @@ function describe(error: unknown): string {
 
 /** Everything the accept orchestration needs, each independently fakeable. */
 export interface AcceptTodoDeps {
-  /** Reads the CURRENT row. The gate below depends on it being fresh. */
-  readTodo(itemId: string): TodoRecord | undefined
+  /** Reads the CURRENT row (via `TodoBackend#getTodoItem`). The gate below depends on it being fresh. */
+  readTodo(itemId: string): Promise<TodoRecord | undefined>
   registrarFor(todo: TodoRecord): RegistrarCapability
   contextFor(todo: TodoRecord): FollowUpBodyContext
   readonly port: TodoDispatchPort
@@ -271,7 +271,7 @@ export type AcceptTodoResult =
  */
 export async function acceptTodo(itemId: string, deps: AcceptTodoDeps): Promise<AcceptTodoResult> {
   // Step 0: gate on the current status, before anything observable happens.
-  const todo = deps.readTodo(itemId)
+  const todo = await deps.readTodo(itemId)
   if (todo === undefined) return { ok: false, reason: '待办不存在。' }
   if (todo.status !== 'open') {
     return { ok: false, reason: `待办当前不是待处理（${todo.status}），未投递。` }
@@ -350,7 +350,7 @@ export async function requestTodoExecution(
   input: RequestTodoExecutionInput,
   deps: RequestTodoExecutionDeps,
 ): Promise<RequestTodoExecutionResult> {
-  const todo = deps.readTodo(input.itemId)
+  const todo = await deps.readTodo(input.itemId)
   if (todo === undefined) return { ok: false, reason: requestExecutionFailureText('unknown-item') }
 
   // Ownership: a child may only ask for work it registered itself.

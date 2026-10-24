@@ -105,8 +105,8 @@
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 子会话不能推进待办状态 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-04：子会话不能推进待办状态` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 主会话做完后自行标记完成 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-05：主会话做完后自行标记完成` | 🔴 red |
 | specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 不经受理直接了结 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-06：不经受理直接了结` | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 双向核对 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-01：双向核对` | 🔴 red（现行场景无同名测试，本次补齐） |
-| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话反查 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-02：子会话反查` | 🔴 red（现行场景无同名测试，本次补齐） |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 双向核对 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-01：双向核对` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话反查 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-02：子会话反查` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话的协作工具面 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-03：子会话的协作工具面` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话不能向兄弟发消息 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-04：子会话不能向兄弟发消息` | 🔴 red |
 
@@ -115,6 +115,7 @@
 - **现行场景无同名测试的两条**（`双向核对`、`子会话反查`）：它们属于被 MODIFIED 的要求，现有测试没有按场景名命名，本次补两条断言现行行为的测试，不改行为。
 - **沿用行**：MODIFIED 要求中文字未变的场景沿用已有测试（kernel 的 `auth-*`、`requests-*`，dsh-collab 的 `handle-*`、`caller-*`，Pet 的 `spec: …`）。apply 期间它们必须保持通过；只能改夹具，不能改断言。唯一需要改断言的沿用行是 `handle-05`（句柄方法集合新增三项）。
 - **MODIFIED 要求"工具调用者可解析为托管成员"** 只在要求文字里加了一句 `resolveCaller` 可返回 `{address, stamp}`，其原有场景不变，全部沿用 `managed-caller.test.ts`。
+- **Pet 参数化落地（task-5）**：`ledger-store.test.ts` 的 5 条接口契约用例与 `ledger-delivery-decoupling.test.ts` 末条 e2e 经 `test/todo-backends.ts` 的 `todoBackendCases` 参数化（断言只加 await）；legacy 专属用例（表行、`listByLocusId`、重启、畸形行）保持 legacy-only。手写替身的 `todo-dispatch`、`ledger-track`、`todo-action-route`、`ledger-tool-scope` 不经存储，不参数化；`ledger-read` 只测将退役工具，不参数化。新旧存储等价由第 8 组 equivalence 端到端覆盖。
 - **Pet 现有测试**：`ledger-*.test.ts`、`todo-*.test.ts`、`intent-triage-*.test.ts` 中没有逐字命中场景名的测试，仍是迁移前行为的回归网。apply 期间它们的存储夹具改为 `TodoBackend` 两个实现参数化运行，两边都要通过；断言不改（design D9）。这是"迁移前后功能正常"的第二道证据，与等价测试互补。
 - **等价测试夹具**（`todo-migration-equivalence.test.ts`）：同一脚本驱动 `legacy` 与 `collab` 两个 `TodoBackend`；`collab` 用真实 collab-kernel `CollabService` + 真实 dsh-collab `Integrations` 句柄 + 临时目录 file store，两边注入同一假时钟；跟进投递用同一个记录型 port 替身。只归一化 itemId。三条 `pet_locus_ledger_read` 指引句是唯一允许的文本差异。
 - **投影与授权测试**（`stamp-projection.test.ts`）：用真实 `Integrations` + 内存 kernel，接入方 adapter 是测试替身（只提供 `resolveCaller`/`visible`/`recipients`），对 `overview`/`status` 的断言用完整 JSON 序列化比对。

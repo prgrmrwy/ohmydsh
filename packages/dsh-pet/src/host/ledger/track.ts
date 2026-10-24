@@ -17,12 +17,13 @@
  * invariant `pet_locus_finish` already enforces.
  */
 import type { LocusContextRecord, LocusCurrentDelivery } from '../locus/context-repository.js'
-import { LedgerStoreError, type SharedFactLedgerStore } from './store.js'
+import type { TodoBackend } from './backend.js'
+import { LedgerStoreError } from './store.js'
 import type { NewTodoInput, TodoRecord } from './todo.js'
 
 /** What this module needs to actually register a todo. */
 export interface TrackDeps {
-  readonly store: Pick<SharedFactLedgerStore, 'registerTodoItem'>
+  readonly store: Pick<TodoBackend, 'registerTodoItem'>
   readonly now: () => number
   readonly newItemId: () => string
 }

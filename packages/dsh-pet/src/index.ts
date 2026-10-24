@@ -68,6 +68,7 @@ import { createInquiryAgentResolver } from './host/inquiry/agent-resolver.js'
 import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
 import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
+import { legacyTodoBackend } from './host/ledger/backend.js'
 import {
   acceptTodo,
   requestTodoExecution,
@@ -506,6 +507,12 @@ async function initialize(
    * and rejects without it, so construction itself commits nothing.
    */
   const sharedFactLedgerStore = new SharedFactLedgerStore(domain as never)
+  /**
+   * The todo storage seam (`TodoBackend`, design D9) every todo consumer
+   * depends on. Only the retiring `pet_locus_ledger_read` still reads the
+   * legacy store directly (its `ledgerRead` below).
+   */
+  const todoBackend = legacyTodoBackend(sharedFactLedgerStore)
 
   /**
    * Caller-bound intent-triage capability set, shared by BOTH composition
@@ -531,7 +538,7 @@ async function initialize(
       loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
       ledgerRead: { listForParent: (id: string) => sharedFactLedgerStore.listForParent(id) },
       track: {
-        store: sharedFactLedgerStore,
+        store: todoBackend,
         now: () => Date.now(),
         newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
       },
@@ -3626,7 +3633,7 @@ async function initialize(
    * spec requires them to share one chain (design D10).
    */
   const todoAcceptDeps = (): AcceptTodoDeps => ({
-    readTodo: id => sharedFactLedgerStore.getTodoItem(id),
+    readTodo: id => todoBackend.getTodoItem(id),
     // No locus child can execute today, so every request resolves to the
     // handoff branch. Passing it as a FACT rather than hardcoding the main
     // session keeps the future branch a caller decision (design D3).
@@ -3641,7 +3648,7 @@ async function initialize(
       mainWasBriefedStandby: locusRepository.getLocus(todo.locusId)?.source === 'auto',
     }),
     port: todoDispatchPort,
-    advanceStatus: async (id, to) => sharedFactLedgerStore.advanceStatus(id, to, Date.now()),
+    advanceStatus: async (id, to) => todoBackend.advanceStatus(id, to, Date.now()),
     log: reason => petWarn(`dsh-pet ledger: ${reason}`),
   })
 
@@ -4111,8 +4118,8 @@ async function initialize(
     // panel's session jump resolves the CURRENT generation through the locus
     // view, so a stale instance can never become a jump target (design D6).
     todoLedger: {
-      list: parentSessionId => sharedFactLedgerStore
-        .listForParent(parentSessionId)
+      list: async parentSessionId => (await todoBackend
+        .listForParent(parentSessionId))
         .map(projectTodoForOwner),
       // `done` / `drop` stay pure status advances — they settle a record and
       // dispatch nothing. `accept` means "start working on it", so it runs the
@@ -4122,7 +4129,7 @@ async function initialize(
           const to = action === 'done' ? 'done' : 'dropped'
           return {
             todo: projectTodoForOwner(
-              await sharedFactLedgerStore.advanceStatus(itemId, to, Date.now()),
+              await todoBackend.advanceStatus(itemId, to, Date.now()),
             ),
           }
         }
@@ -4136,7 +4143,7 @@ async function initialize(
           if (result.dispatch?.outcome !== 'unreachable') {
             throw new PetError('INVALID_REQUEST', result.reason)
           }
-          const current = sharedFactLedgerStore.getTodoItem(itemId)
+          const current = await todoBackend.getTodoItem(itemId)
           if (current === undefined) throw new PetError('INVALID_REQUEST', result.reason)
           return { todo: projectTodoForOwner(current), dispatch: result.dispatch }
         }

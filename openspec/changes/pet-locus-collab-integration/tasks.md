@@ -36,9 +36,9 @@
 
 ## 5. Pet：`TodoBackend` 接缝（行为不变）
 
-- [ ] 5.1 抽出 `TodoBackend` 接口，`legacy` 实现包装现有 `SharedFactLedgerStore`；`track`/`dispatch`/`routes` 改为依赖接口。纯重构：Pet 全套测试与 0.1 基线一致
-- [ ] 5.2 把现有 `ledger-*`、`todo-*`、`intent-triage-*` 测试的存储夹具改为对 `TodoBackend` 参数化（此时只有 `legacy`）；断言一行不改；全部通过
-- [ ] 5.3 Write failing test: `toolface-01..02`（双向核对、子会话反查，断言现行行为）；Implement 无需改动即应通过，确认它们在现行代码上绿
+- [x] 5.1 抽出 `TodoBackend` 接口，`legacy` 实现包装现有 `SharedFactLedgerStore`；`track`/`dispatch`/`routes` 改为依赖接口。纯重构：Pet 全套测试与 0.1 基线一致
+- [x] 5.2 把现有 `ledger-*`、`todo-*`、`intent-triage-*` 测试的存储夹具改为对 `TodoBackend` 参数化（此时只有 `legacy`）；断言一行不改；全部通过
+- [x] 5.3 Write failing test: `toolface-01..02`（双向核对、子会话反查，断言现行行为）；Implement 无需改动即应通过，确认它们在现行代码上绿
 
 ## 6. Pet：代理（戳、visible、路由、presence、deliver）与空间建立
 
