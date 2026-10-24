@@ -69,6 +69,8 @@ import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
 import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import { legacyTodoBackend } from './host/ledger/backend.js'
+import { projectTodoForOwner } from './host/ledger/owner-view.js'
+import { createOwnerLedger } from './host/ledger/owner-ledger.js'
 import { LocusCollabProxy } from './host/collab/proxy.js'
 import { CollabTodoBackend } from './host/collab/todo-backend.js'
 import { installLocusCollabTools, type DelegableToolDefinition } from './host/collab/child-tools.js'
@@ -183,30 +185,6 @@ import {
 } from './host/workspace.js'
 
 export const name = 'dsh-pet'
-
-/**
- * Project one durable todo into its owner-facing wire shape.
- *
- * Flattens `evidence` into `summary`/`detail` because the panel renders them
- * as two distinct fields, and passes `generation` through as an AUDIT fact
- * only — no consumer may use it to address a locus (design D6: a todo
- * references locus identity, never a locus instance).
- */
-function projectTodoForOwner(record: TodoRecord): PetTodoView {
-  return {
-    itemId: record.itemId,
-    locusId: record.locusId,
-    generation: record.generation,
-    endpoint: record.endpoint,
-    triggerMessageId: record.triggerMessageId,
-    requestedBy: record.requestedBy,
-    summary: record.evidence.summary,
-    detail: record.evidence.detail,
-    status: record.status,
-    createdAt: record.createdAt,
-    statusChangedAt: record.statusChangedAt,
-  }
-}
 
 export const inject = [
   // `storage` is required in addition to `storageDomain`: the backend
@@ -521,9 +499,8 @@ async function initialize(
    * locus repository projection exists; this indirection keeps declaration
    * order free.
    */
-  /** Read-only "旧版" todos; consumed by the management-panel merge (task group 9). Never written. */
+  /** Read-only "旧版" todos, merged into the owner panel (design D10). Never written. */
   const legacyTodos: TodoBackend = legacyTodoBackend(sharedFactLedgerStore)
-  void legacyTodos
   const todoBackend: TodoBackend = {
     registerTodoItem: input => collabTodoBackend.registerTodoItem(input),
     getTodoItem: itemId => collabTodoBackend.getTodoItem(itemId),
@@ -985,6 +962,13 @@ async function initialize(
       return record?.parentSessionId === parentSessionId ? record.childSessionId : undefined
     },
     liveAgent: sessionId => ctx.agents.get(sessionId as never),
+  })
+  const ownerLedger = createOwnerLedger({
+    collab: collabTodoBackend,
+    legacy: legacyTodos,
+    collabAvailable: () => locusCollab.currentHandle() !== undefined,
+    unroutable: parentSessionId => locusCollab.inbox()
+      .filter(entry => entry.parentSessionId === parentSessionId && entry.route.kind === 'unroutable'),
   })
   const ensureLocusSpaces = () => {
     void locusCollab.ensureAll().catch(error => petWarn(`dsh-pet collab: ${String(error)}`))
@@ -4211,13 +4195,15 @@ async function initialize(
     // panel's session jump resolves the CURRENT generation through the locus
     // view, so a stale instance can never become a jump target (design D6).
     todoLedger: {
-      list: async parentSessionId => (await todoBackend
-        .listForParent(parentSessionId))
-        .map(projectTodoForOwner),
+      // Legacy todos read-only beside the live ledger; an unavailable
+      // collaboration layer is stated, never shown as an empty list (D10).
+      list: parentSessionId => ownerLedger.list(parentSessionId),
       // `done` / `drop` stay pure status advances — they settle a record and
       // dispatch nothing. `accept` means "start working on it", so it runs the
       // gate → dispatch → advance orchestration instead (design D5).
       advance: async (itemId, action) => {
+        // A legacy todo is read-only: refused before any backend is touched.
+        await ownerLedger.guard(itemId, action)
         if (action !== 'accept') {
           const to = action === 'done' ? 'done' : 'dropped'
           return {

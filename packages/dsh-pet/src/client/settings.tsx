@@ -102,6 +102,7 @@ import type {
   PetTodoDispatchReceipt,
   PetTodoStatus,
   PetTodoView,
+  PetUnroutableView,
   PetUnifiedLocusReadiness,
   PetWorkspaceChoice,
 } from '../wire.js'
@@ -1932,6 +1933,7 @@ export function WorkSection(props: {
   readonly hasDefaultQa: boolean
   /** Todos filed against this parent session; empty in the by-entry reading. */
   readonly todos?: readonly PetTodoView[]
+  readonly todoMeta?: PetTodoLedgerMeta | undefined
   readonly todoBusyId?: string | undefined
   readonly onTodoDispatch?: (itemId: string, action: PetTodoAction) => void
   readonly initialTodosOpen?: boolean
@@ -2095,6 +2097,7 @@ export function WorkSection(props: {
           busyId={props.todoBusyId}
           disabled={props.busyKey !== undefined}
           onDispatch={props.onTodoDispatch}
+          {...(props.todoMeta === undefined ? {} : { meta: props.todoMeta })}
           {...(props.initialTodosOpen === true ? { initialOpen: true } : {})}
         />
       )}
@@ -2104,6 +2107,12 @@ export function WorkSection(props: {
 
 /** Stable empty reference so a session with no todos does not re-render. */
 const EMPTY_TODOS: readonly PetTodoView[] = Object.freeze([])
+
+/** What the panel knows about one ledger besides its rows (D10). */
+interface PetTodoLedgerMeta {
+  readonly collabUnavailable: boolean
+  readonly unroutable: readonly PetUnroutableView[]
+}
 
 /** Narrowing helper for `.filter()`, since TS does not infer it from a predicate. */
 function isPresent<T>(value: T | undefined): value is T {
@@ -2880,6 +2889,7 @@ export function LocusSurface(props: {
             sharedEntryCount={sharedEntryCount}
             hasDefaultQa={defaultQaParents.has(work.parentSessionId)}
             todos={todos.byParent.get(work.parentSessionId) ?? EMPTY_TODOS}
+            todoMeta={todos.meta.get(work.parentSessionId)}
             todoBusyId={todos.busyId}
             onTodoDispatch={todos.dispatch}
             expanded={props.initialWorksExpanded === true || expandedWorks.includes(work.parentSessionId)}
@@ -2981,6 +2991,8 @@ export function LocusSurface(props: {
  */
 function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
   readonly byParent: ReadonlyMap<string, readonly PetTodoView[]>
+  /** Per-ledger collaboration availability and unroutable records (D10). */
+  readonly meta: ReadonlyMap<string, PetTodoLedgerMeta>
   readonly error: string | undefined
   /** Disposition outcome shown in place when the panel stays open (D11). */
   readonly notice: string | undefined
@@ -3051,8 +3063,18 @@ function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
     for (const group of groups ?? []) map.set(group.parentSessionId, group.items)
     return map
   }, [groups])
+  const meta = useMemo(() => {
+    const map = new Map<string, PetTodoLedgerMeta>()
+    for (const group of groups ?? []) {
+      map.set(group.parentSessionId, {
+        collabUnavailable: group.collab === 'unavailable',
+        unroutable: group.unroutable ?? [],
+      })
+    }
+    return map
+  }, [groups])
 
-  return { byParent, error, notice, busyId, dispatch }
+  return { byParent, meta, error, notice, busyId, dispatch }
 }
 
 /**
@@ -3071,10 +3093,15 @@ function WorkTodos(props: {
   readonly busyId: string | undefined
   readonly disabled: boolean
   readonly onDispatch: (itemId: string, action: PetTodoAction) => void
+  readonly meta?: PetTodoLedgerMeta
   readonly initialOpen?: boolean
 }): JSX.Element | null {
   const [open, setOpen] = useState(props.initialOpen === true)
-  if (props.items.length === 0) return null
+  const collabDown = props.meta?.collabUnavailable === true
+  const unroutable = props.meta?.unroutable ?? []
+  // "Nothing filed" is the only state that may render nothing: an unavailable
+  // collaboration layer must never read as an empty ledger.
+  if (props.items.length === 0 && !collabDown && unroutable.length === 0) return null
 
   const openCount = props.items.filter(item => item.status === 'open').length
   const byLocus = groupTodosByLocus(props.items as readonly TodoSnapshotItem[])
@@ -3091,14 +3118,35 @@ function WorkTodos(props: {
         <span>待办</span>
         {/* The count carries the state; the label stays stable so the control
             keeps one accessible name. */}
-        <span className="dshpet-work-todos-count" data-pending={openCount > 0 ? 'true' : undefined}>
-          {openCount > 0
-            ? `${String(openCount)} 条待处理`
-            : `${String(props.items.length)} 条，都已处理`}
+        <span className="dshpet-work-todos-count" data-pending={openCount > 0 || collabDown ? 'true' : undefined}>
+          {collabDown
+            ? '协作层不可用'
+            : openCount > 0
+              ? `${String(openCount)} 条待处理`
+              : `${String(props.items.length)} 条，都已处理`}
         </span>
       </button>
       {!open ? null : (
         <div className="dshpet-work-todos-body">
+          {!collabDown ? null : (
+            <p className="dshpet-todo-collab-down" role="status">
+              协作层不可用：新的待办暂时读不到，也无法处置。旧版待办仍可查看。
+            </p>
+          )}
+          {unroutable.length === 0 ? null : (
+            <div className="dshpet-todo-unroutable">
+              <span>{`${String(unroutable.length)} 条发给子会话的消息无法路由，没有转给任何子会话：`}</span>
+              <ul className="dshpet-todo-unroutable-list">
+                {unroutable.map(entry => (
+                  <li key={entry.seq}>
+                    {entry.subject === 'message' ? '消息' : '待办终态通知'}
+                    {` #${String(entry.seq)}`}
+                    {entry.at === undefined ? '' : ` · ${formatTodoTime(entry.at)}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {[...byLocus.entries()].flatMap(([locusId, items]) => {
             const locus = props.loci.find(row => row.locusId === locusId)
             const session = resolveSessionJumpTarget(
@@ -3112,12 +3160,20 @@ function WorkTodos(props: {
               })
               const busy = props.disabled || props.busyId === item.itemId
               return (
-                <article key={item.itemId} className="dshpet-todo" data-status={item.status}>
+                <article
+                  key={item.itemId}
+                  className="dshpet-todo"
+                  data-status={item.status}
+                  data-legacy={item.legacy === true ? 'true' : undefined}
+                >
                   <p className="dshpet-todo-summary">{item.summary}</p>
                   <div className="dshpet-todo-meta">
                     <span className="dshpet-status" data-tone={TODO_TONE[item.status]}>
                       {todoStatusLabel(item.status)}
                     </span>
+                    {item.legacy !== true ? null : (
+                      <span className="dshpet-todo-legacy" title="迁移到协作空间之前登记的待办，只读保留">旧版</span>
+                    )}
                     <span className="dshpet-todo-meta-sep">·</span>
                     <time dateTime={new Date(item.createdAt).toISOString()}>
                       {formatTodoTime(item.createdAt)}
@@ -3163,7 +3219,10 @@ function WorkTodos(props: {
                         }}
                       />
                     </span>
-                    {availableTodoActions(item.status).map(action => (
+                    {item.legacy !== true ? null : (
+                      <span className="dshpet-todo-readonly">只读</span>
+                    )}
+                    {availableTodoActions(item.status, { legacy: item.legacy === true }).map(action => (
                       <button
                         key={action}
                         type="button"

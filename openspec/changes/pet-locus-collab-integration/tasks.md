@@ -58,15 +58,15 @@
 
 ## 8. 迁移前后等价
 
-- [ ] 8.1 Write failing test: `equivalence-01..04`。先在 `collab` 实现里故意注入一处差异（证据正文多一个空格），确认测试能抓到，再撤掉
-- [ ] 8.2 Implement: 修正差分暴露出的所有差异，使 8.1 通过
-- [ ] 8.3 Refactor；Pet 全套通过
+- [x] 8.1 Write failing test: `equivalence-01..04`。先在 `collab` 实现里故意注入一处差异（证据正文多一个空格），确认测试能抓到，再撤掉
+- [x] 8.2 Implement: 修正差分暴露出的所有差异，使 8.1 通过
+- [x] 8.3 Refactor；Pet 全套通过
 
 ## 9. 降级与存量
 
-- [ ] 9.1 Write failing test: `availability-01..03`、`legacy-01..02`
-- [ ] 9.2 Implement: 能力门与服务消失/重现处理；生产装配只用 `collab` 写，`legacy` 只读并在管理面合并展示；管理面标旧版与不可用；无法路由登记面，使 9.1 通过
-- [ ] 9.3 Refactor；Pet、collab-kernel、dsh-collab typecheck/test/build 全部通过，与 0.1 基线比没有新失败或新 skip
+- [x] 9.1 Write failing test: `availability-01..03`、`legacy-01..02`
+- [x] 9.2 Implement: 能力门与服务消失/重现处理；生产装配只用 `collab` 写，`legacy` 只读并在管理面合并展示；管理面标旧版与不可用；无法路由登记面，使 9.1 通过
+- [x] 9.3 Refactor；Pet、collab-kernel、dsh-collab typecheck/test/build 全部通过，与 0.1 基线比没有新失败或新 skip
 
 ## 10. 配置、真实验收与收尾
 

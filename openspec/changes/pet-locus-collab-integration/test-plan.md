@@ -74,19 +74,19 @@
 | specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 排除名单与归档对托管调用者同样生效 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-06：排除名单与归档对托管调用者同样生效` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 未被认领的子会话仍被拒绝 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-07：未被认领的子会话仍被拒绝` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 工具调用者可解析为托管成员 | 托管调用者的状态入口 | packages/dsh-collab/test/managed-caller.test.ts | `mcaller-08：托管调用者的状态入口` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层缺失时登记失败而回复照常 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-01：协作层缺失时登记失败而回复照常` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 管理面不把不可用显示为空 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-02：管理面不把不可用显示为空` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层恢复后自动重新可用 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-03：协作层恢复后自动重新可用` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只在管理面 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-01：旧版待办只在管理面` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只读 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-02：旧版待办只读` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层缺失时登记失败而回复照常 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-01：协作层缺失时登记失败而回复照常` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 管理面不把不可用显示为空 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-02：管理面不把不可用显示为空` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 协作层不可用时台账与待办 fail closed | 协作层恢复后自动重新可用 | packages/dsh-pet/test/collab-todo-availability.test.ts | `availability-03：协作层恢复后自动重新可用` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只在管理面 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-01：旧版待办只在管理面` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 存量待办只读保留为旧版 | 旧版待办只读 | packages/dsh-pet/test/collab-todo-legacy.test.ts | `legacy-02：旧版待办只读` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 回应消息沿 ref 路由到最近的戳 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-01：回应消息沿 ref 路由到最近的戳` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 正文点名 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-02：正文点名` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 无法路由不猜 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-03：无法路由不猜` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 协作层发给代理的记录按 locus 路由 | 零 active child 时终态仍登记 | packages/dsh-pet/test/collab-proxy-routing.test.ts | `routing-04：零 active child 时终态仍登记` | 🟢 green |
-| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 同一流程在新旧存储上输出一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-01：同一流程在新旧存储上输出一致` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 证据边界值在新旧存储上逐字段一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-02：证据边界值在新旧存储上逐字段一致` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 并发受理在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-03：并发受理在新旧存储上一致` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 失败路径在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-04：失败路径在新旧存储上一致` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 同一流程在新旧存储上输出一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-01：同一流程在新旧存储上输出一致` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 证据边界值在新旧存储上逐字段一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-02：证据边界值在新旧存储上逐字段一致` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 并发受理在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-03：并发受理在新旧存储上一致` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 迁移前后待办行为等价 | 失败路径在新旧存储上一致 | packages/dsh-pet/test/todo-migration-equivalence.test.ts | `equivalence-04：失败路径在新旧存储上一致` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 兄弟子会话读不到彼此登记的结论 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-01：兄弟子会话读不到彼此登记的结论` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 跨主会话不可读 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-02：跨主会话不可读` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 台账不随条目清空而消失 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-03：台账不随条目清空而消失` | 🟢 green |

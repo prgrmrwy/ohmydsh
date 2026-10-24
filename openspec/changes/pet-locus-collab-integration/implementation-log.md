@@ -60,3 +60,26 @@
   5. executor-scope.test.ts:306–309：计数 9 → 8，并新增断言被移除的恰为 `PET_LOCUS_LEDGER_READ_TOOL`，其余 8 个常量仍在。
   6. 删除 test/ledger-read.test.ts 与 src/host/ledger/ledger-read.ts；删除前 grep 确认唯一调用方是 tools.ts 注册与 index.ts:541 装配。
 - 结果：dsh-pet 208 files / 3465 passed / 8 skipped / 0 todo，typecheck 通过（lead 独立复跑一致）。
+
+## 第 8 组（迁移前后等价）
+
+- equivalence-01..04 在真实 legacy 与真实 collab（真实 dsh-collab 插件 + collab-kernel + 临时目录 file store）上跑同一脚本，同一假时钟，只归一化 itemId；比较工具返回文本、跟进正文、受理回执（outcome/reason/executionTarget）、管理面视图。首跑红于夹具（scope key 与 execute 用了不同对象），修夹具后全绿；未暴露 collab 实现差异，8.2 无需改实现。
+- 8.1 注入差异（collab backend 证据 detail 末尾多一个空格）：第一次只有 01–03 红，04 未比较证据字段——补上管理面视图后第二次 4 条全红，失败均落在证据（管理面 detail 与跟进正文末段）。撤回后 cmp 逐字节一致。
+- 指引文本：规范允许 `pet_locus_ledger_read` → `collab_read` 的唯一差异；由于两边共用 `dispatch.ts`，实际两边失败文本逐字节相同，比规范更严（equivalence-04 注释已写明）。
+
+## 第 9 组（降级与存量）
+
+- 先红后绿：availability-02、legacy-01、legacy-02、无法路由管理面可见、面板渲染（旧版只读无动作、不可用说明、无法路由列表）、ledger-view 的 `availableTodoActions` legacy 分支。
+- 写完即绿（如实记录）：availability-01（行为在第 7 组已实现；本 Host 回复工具为 `pet_locus_finish`，无独立 `pet_locus_reply`）、availability-03（恢复逻辑在第 6/7 组已实现）、装配守卫测试（事后变异：删 guard 行即红）。
+- 实现中发现并修复：协作层不可用时待办块折叠摘要显示"0 条，都已处理"，即"把不可用显示为空"；改为显示"协作层不可用"并补断言。
+- 范围说明：收件登记（含无法路由）只在内存，Host 重启清空，符合 D4"本期不持久"。
+
+## 9.3 结果（lead 独立复跑）
+
+| 包 | typecheck | build | test | 0.1 基线 |
+|---|---|---|---|---|
+| collab-kernel | 0 | 0 | 281 passed / 0 skipped | 272 / 0 |
+| dsh-collab | 0 | 0 | 179 passed / 0 skipped（vitest） | 152 / 0 |
+| dsh-pet | 0 | 0 | 210 files / 3482 passed / 8 skipped | 202 files / 3430 / 8 |
+
+无新失败、无新 skip（dsh-pet 的 8 个 skip 为既有真实 runtime 探针）。

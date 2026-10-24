@@ -111,6 +111,13 @@ describe('todoStatusLabel / isTodoActionable / availableTodoActions', () => {
     expect(availableTodoActions('done')).toEqual([])
     expect(availableTodoActions('dropped')).toEqual([])
   })
+
+  it('a legacy todo offers no action in any status (pet-locus-collab-integration legacy-02)', () => {
+    for (const status of ['open', 'accepted', 'done', 'dropped'] as const) {
+      expect(availableTodoActions(status, { legacy: true })).toEqual([])
+    }
+    expect(availableTodoActions('open', { legacy: false })).toEqual(['accept', 'done', 'drop'])
+  })
 })
 
 describe('groupTodosByLocus', () => {

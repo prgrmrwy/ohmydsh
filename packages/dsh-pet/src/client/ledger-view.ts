@@ -22,6 +22,8 @@ export interface TodoSnapshotItem {
   readonly status: 'open' | 'accepted' | 'done' | 'dropped'
   readonly createdAt: number
   readonly statusChangedAt: number
+  /** Registered before the collaboration-space migration: read-only. */
+  readonly legacy?: true
 }
 
 /** Whether the panel can prove a stable topic (thread) identity for this endpoint. */
@@ -137,8 +139,16 @@ export function isTodoActionable(status: TodoSnapshotItem['status']): boolean {
   return status === 'open' || status === 'accepted'
 }
 
-/** Which owner actions are legal from the CURRENT status, mirroring `ledger/todo.ts#TODO_STATUS_TRANSITIONS` for the panel's button set. */
-export function availableTodoActions(status: TodoSnapshotItem['status']): readonly ('accept' | 'done' | 'drop')[] {
+/**
+ * Which owner actions are legal from the CURRENT status, mirroring
+ * `ledger/todo.ts#TODO_STATUS_TRANSITIONS` for the panel's button set. A legacy
+ * ("旧版") todo is read-only and offers none, whatever its status.
+ */
+export function availableTodoActions(
+  status: TodoSnapshotItem['status'],
+  options: { readonly legacy?: boolean } = {},
+): readonly ('accept' | 'done' | 'drop')[] {
+  if (options.legacy === true) return []
   if (status === 'open') return ['accept', 'done', 'drop']
   if (status === 'accepted') return ['done', 'drop']
   return []

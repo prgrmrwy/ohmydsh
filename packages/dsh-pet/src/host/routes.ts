@@ -59,6 +59,7 @@ import {
   type PetTodoAction,
   type PetTodoDispatchReceipt,
   type PetTodoView,
+  type PetTodoLedgerView,
 } from '../wire.js'
 
 /** Everything the routes read from the Host. */
@@ -126,8 +127,12 @@ export interface RouteDeps {
    * "this Host has no ledger" must stay different answers.
    */
   readonly todoLedger?: {
-    /** Every todo owned by one main session, already projected for the owner. */
-    list(parentSessionId: string): Promise<readonly PetTodoView[]>
+    /**
+     * Every todo owned by one main session, already projected for the owner.
+     * A Host may return the whole ledger view instead of bare rows, adding
+     * collaboration availability and unroutable records (design D10).
+     */
+    list(parentSessionId: string): Promise<readonly PetTodoView[] | PetTodoLedgerView>
     /**
      * Owner-sourced disposition. Rejects illegal transitions and unknown ids.
      *
@@ -798,9 +803,12 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         ? [requested.trim()]
         : ledger.parents()
       return invokeLocus('读取待办', async () => {
-        const ledgers: { parentSessionId: string; items: readonly PetTodoView[] }[] = []
+        const ledgers: PetTodoLedgerView[] = []
         for (const parentSessionId of parents) {
-          ledgers.push({ parentSessionId, items: await ledger.list(parentSessionId) })
+          const listed = await ledger.list(parentSessionId)
+          ledgers.push(Array.isArray(listed)
+            ? { parentSessionId, items: listed as readonly PetTodoView[] }
+            : { ...(listed as PetTodoLedgerView), parentSessionId })
         }
         return { ledgers }
       })
