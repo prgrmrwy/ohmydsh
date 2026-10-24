@@ -70,6 +70,9 @@ import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import { legacyTodoBackend } from './host/ledger/backend.js'
 import { LocusCollabProxy } from './host/collab/proxy.js'
+import { CollabTodoBackend } from './host/collab/todo-backend.js'
+import { installLocusCollabTools, type DelegableToolDefinition } from './host/collab/child-tools.js'
+import type { TodoBackend } from './host/ledger/backend.js'
 import type { CollabService } from './host/collab/types.js'
 import {
   acceptTodo,
@@ -510,11 +513,23 @@ async function initialize(
    */
   const sharedFactLedgerStore = new SharedFactLedgerStore(domain as never)
   /**
-   * The todo storage seam (`TodoBackend`, design D9) every todo consumer
-   * depends on. Only the retiring `pet_locus_ledger_read` still reads the
-   * legacy store directly (its `ledgerRead` below).
+   * The todo storage seam (`TodoBackend`, design D9). Writes go ONLY to the
+   * Locus collaboration space (design D6/D10); the legacy store stays as the
+   * read-only "旧版" source for todos registered before this change (the
+   * management-panel merge is a later task group), and is never written.
+   * `locusCollab` / `collabTodoBackend` are created further down, once the
+   * locus repository projection exists; this indirection keeps declaration
+   * order free.
    */
-  const todoBackend = legacyTodoBackend(sharedFactLedgerStore)
+  /** Read-only "旧版" todos; consumed by the management-panel merge (task group 9). Never written. */
+  const legacyTodos: TodoBackend = legacyTodoBackend(sharedFactLedgerStore)
+  void legacyTodos
+  const todoBackend: TodoBackend = {
+    registerTodoItem: input => collabTodoBackend.registerTodoItem(input),
+    getTodoItem: itemId => collabTodoBackend.getTodoItem(itemId),
+    listForParent: parentSessionId => collabTodoBackend.listForParent(parentSessionId),
+    advanceStatus: (itemId, to, now) => collabTodoBackend.advanceStatus(itemId, to, now),
+  }
 
   /**
    * Caller-bound intent-triage capability set, shared by BOTH composition
@@ -538,7 +553,6 @@ async function initialize(
       // Returns EVERY durable generation for the child identity; rejecting
       // ambiguity is the caller's job — exactly `resolveLedgerCaller`'s contract.
       loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
-      ledgerRead: { listForParent: (id: string) => sharedFactLedgerStore.listForParent(id) },
       track: {
         store: todoBackend,
         now: () => Date.now(),
@@ -962,6 +976,16 @@ async function initialize(
     liveAgent: sessionId => ctx.agents.get(sessionId as never),
     log: message => petLog(message),
   })
+  const collabTodoBackend = new CollabTodoBackend({
+    proxy: locusCollab,
+    // The registering generation's child, only when that record belongs to the
+    // same main session; anything else fails as "collaboration unavailable".
+    childOf: ({ locusId, parentSessionId }) => {
+      const record = locusRepository.getLocus(locusId)
+      return record?.parentSessionId === parentSessionId ? record.childSessionId : undefined
+    },
+    liveAgent: sessionId => ctx.agents.get(sessionId as never),
+  })
   const ensureLocusSpaces = () => {
     void locusCollab.ensureAll().catch(error => petWarn(`dsh-pet collab: ${String(error)}`))
   }
@@ -973,12 +997,46 @@ async function initialize(
   // A main session that just loaded may now be able to establish its space.
   ctx.effect(() => ctx.on('agent/created', (): undefined => { ensureLocusSpaces(); return undefined }),
     'dsh-pet: establish Locus spaces when a main session loads')
+  /**
+   * The child collaboration tool face (design D6): own-scope delegates of the
+   * eight global dsh-collab member tools. Bound to the attach lifecycle —
+   * present only while Pet is attached, re-installed on re-attach, and given
+   * to every Locus child whose scoped surface is (or was) installed. See
+   * `host/collab/child-tools.ts` for why the definitions are copied.
+   */
+  const locusChildScopes = new Map<string, Context>()
+  const locusChildCollabTools = new Map<string, () => void>()
+  let collabAttached = false
+  const installChildCollabTools = (childSessionId: string, scope: Context) => {
+    locusChildCollabTools.get(childSessionId)?.()
+    locusChildCollabTools.delete(childSessionId)
+    if (!collabAttached) return
+    const scoped = scope.get('tools') as { register(definition: unknown): () => void } | undefined
+    const global = ctx.get('tools') as { get(name: string): unknown } | undefined
+    if (scoped === undefined || global === undefined) return
+    const dispose = installLocusCollabTools(scoped, name => global.get(name) as DelegableToolDefinition | undefined)
+    if (dispose !== undefined) locusChildCollabTools.set(childSessionId, dispose)
+  }
+  const removeAllChildCollabTools = () => {
+    for (const dispose of locusChildCollabTools.values()) dispose()
+    locusChildCollabTools.clear()
+  }
   ctx.inject(['dshCollab'], collabCtx => {
     collabCtx.effect(() => {
       const detach = locusCollab.attach((collabCtx as unknown as { dshCollab: CollabService }).dshCollab)
+      collabAttached = true
+      for (const [childSessionId, scope] of [...locusChildScopes]) {
+        // A child no longer in the Host keeps nothing; its scope is gone.
+        if (ctx.agents.get(childSessionId as never) === undefined) { locusChildScopes.delete(childSessionId); continue }
+        installChildCollabTools(childSessionId, scope)
+      }
       locusCollab.refresh()
       ensureLocusSpaces()
-      return detach
+      return () => {
+        collabAttached = false
+        removeAllChildCollabTools()
+        detach()
+      }
     }, 'dsh-pet: attach pet-locus to dsh-collab')
   })
 
@@ -1442,6 +1500,10 @@ async function initialize(
         // failure: the whole surface is simply not published and the child
         // behaves exactly as it did before this existed.
         collaborationSurface?.install(agent.scope)
+        // The collaboration member tools ride the same boundary; absent while
+        // dsh-collab is not attached, which the attestation accepts.
+        locusChildScopes.set(agent.id, scope)
+        installChildCollabTools(agent.id, scope)
       },
       setToolTier: (agent, tier) => {
         const scope = agent.scope as unknown as Context

@@ -49,6 +49,10 @@ export type LedgerStoreErrorCode =
   | 'TODO_EXISTS'
   | 'TODO_CORRUPT'
   | 'TODO_INVALID'
+  /** The collaboration layer (dsh-collab) is absent or Pet's handle is detached. */
+  | 'COLLAB_UNAVAILABLE'
+  /** The main session's Locus space is not established yet (main not loaded). */
+  | 'SPACE_NOT_READY'
 
 export class LedgerStoreError extends Error {
   constructor(readonly code: LedgerStoreErrorCode, message?: string) {
@@ -60,6 +64,8 @@ export class LedgerStoreError extends Error {
       TODO_EXISTS: 'A different todo is already recorded under this id.',
       TODO_CORRUPT: 'Todo storage could not be verified.',
       TODO_INVALID: 'Todo registration failed validation.',
+      COLLAB_UNAVAILABLE: 'The collaboration layer is unavailable.',
+      SPACE_NOT_READY: 'The Locus collaboration space is not ready yet.',
     }[code])
     this.name = 'LedgerStoreError'
   }

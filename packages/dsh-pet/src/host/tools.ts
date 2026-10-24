@@ -53,12 +53,6 @@ import type { PetRepository } from './repository.js'
 import type { LarkClient } from './channel/lark.js'
 import { resolveLedgerCaller, LedgerCallerUnavailableError, type LedgerCallerLocusLookup } from './ledger/caller.js'
 import { lookupParentTranscript, type ParentLookupDeps } from './ledger/parent-lookup.js'
-import {
-  ledgerReadUnavailableText,
-  readSharedLedgerOutcome,
-  type LedgerReadDeps,
-  type LedgerReadUnavailableReason,
-} from './ledger/ledger-read.js'
 import { trackFailureText, trackTodo, type TrackDeps, type TrackFailureReason } from './ledger/track.js'
 import { INTENT_TRIAGE_GUIDANCE } from './ledger/prompt.js'
 import { requestExecutionFailureText } from './ledger/dispatch.js'
@@ -80,7 +74,6 @@ export const PET_LOCUS_FINISH_TOOL = 'pet_locus_finish'
 export const PET_LOCUS_WAIT_TOOL = 'pet_locus_wait'
 /** `pet-locus-intent-triage`: caller-bound, zero-argument, read-only. */
 export const PET_LOCUS_PARENT_LOOKUP_TOOL = 'pet_locus_parent_lookup'
-export const PET_LOCUS_LEDGER_READ_TOOL = 'pet_locus_ledger_read'
 export const PET_LOCUS_TRACK_TOOL = 'pet_locus_track'
 /** Caller-bound request-execution tool: asks for a registered todo to be executed (design D10). */
 export const PET_LOCUS_REQUEST_EXECUTION_TOOL = 'pet_locus_request_execution'
@@ -357,7 +350,6 @@ export interface PetIntentTriageDependencies {
     readonly reason: LocusCurrentCapabilityReason
   }) => void
   readonly parentLookup?: ParentLookupDeps
-  readonly ledgerRead?: LedgerReadDeps
   readonly track?: TrackDeps
   /**
    * Executes a child's request to run a todo it registered (design D10).
@@ -571,54 +563,6 @@ export function registerPetTools(
     }))
 
     register(defineTool({
-      name: PET_LOCUS_LEDGER_READ_TOOL,
-      description:
-        'Read every todo item already registered in your same-source shared-fact ledger — the ' +
-        'set of work requests siblings serving the same main session have recorded, so you can ' +
-        'avoid re-investigating something already found. Takes no arguments. Returns only ' +
-        'structured todo content: summary, detail, status, requester and creation time — never a ' +
-        'sibling\'s conversation history or a list of other endpoints.',
-      parameters: {},
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            ok: { type: 'boolean', required: true },
-            items: { type: 'string' },
-            reason: { type: 'string' },
-          },
-        },
-        // An unavailable read renders as an explicit failure, never as `[]`:
-        // an empty list would tell the model there is no work to avoid
-        // duplicating, which is exactly the conclusion this Host cannot support.
-        render: (_args, value) => [{
-          type: 'text',
-          text: value.ok
-            ? String(value.items)
-            : ledgerReadUnavailableText(value.reason as LedgerReadUnavailableReason),
-        }],
-      },
-      async execute(_args, exec) {
-        const sessionId = callerSessionId(exec as ExecutionLike)
-        let caller
-        try {
-          caller = resolveLedgerCaller(sessionId, intentTriage.loci)
-        } catch (error) {
-          if (error instanceof LedgerCallerUnavailableError) {
-            return { ok: false, reason: 'caller-unresolvable' }
-          }
-          throw error
-        }
-        if (intentTriage.ledgerRead === undefined) return { ok: false, reason: 'ledger-unwired' }
-        const outcome = readSharedLedgerOutcome(caller, intentTriage.ledgerRead)
-        return outcome.ok
-          ? { ok: true, items: JSON.stringify(outcome.items) }
-          : { ok: false, reason: outcome.reason }
-      },
-    }))
-
-    register(defineTool({
       name: PET_LOCUS_TRACK_TOOL,
       description:
         'Register the current Feishu request as a durable todo for the owner to pick up, when it ' +
@@ -695,8 +639,8 @@ export function registerPetTools(
           // comes from, so a retry is possible instead of a guess.
           throw new PetError(
             'INVALID_REQUEST',
-            'itemId must be the exact identifier returned by pet_locus_ledger_read. '
-            + 'Call that tool first, then retry with one of its itemId values.',
+            'itemId must be the exact identifier of a todo you registered, as shown by collab_read. '
+            + 'Read your collaboration space with collab_read first, then retry with that itemId.',
           )
         }
         const sessionId = callerSessionId(exec as ExecutionLike)

@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { LedgerStoreError, SharedFactLedgerStore } from '../src/host/ledger/store.js'
 import type { NewTodoInput } from '../src/host/ledger/todo.js'
 import { emptyMedium, openPetHarness } from './harness.js'
-import { todoBackendCases } from './todo-backends.js'
+import { legacyTodoBackendCase, todoBackendCases } from './todo-backends.js'
 
 function todoInput(overrides: Partial<NewTodoInput> = {}): NewTodoInput {
   return {
@@ -27,17 +27,6 @@ function todoInput(overrides: Partial<NewTodoInput> = {}): NewTodoInput {
 }
 
 describe.each(todoBackendCases)('TodoBackend contract: $name', backendCase => {
-  it('refuses writes without actual atomic Domain support; reads never initialize rows (matching CollaborationContextStore)', async () => {
-    const h = await backendCase.openWithoutTransaction()
-    try {
-      const store = h.backend
-      expect(await store.listForParent('main-1')).toEqual([])
-      expect(await store.getTodoItem('todo-1')).toBeUndefined()
-      await expect(store.registerTodoItem(todoInput())).rejects.toMatchObject({ code: 'TRANSACTION_UNAVAILABLE' })
-      expect(await store.listForParent('main-1')).toEqual([])
-    } finally { await h.close() }
-  })
-
   it('a DIFFERENT todo under a used itemId is refused rather than silently overwriting the first one', async () => {
     const h = await backendCase.open()
     try {
@@ -97,6 +86,23 @@ describe.each(todoBackendCases)('TodoBackend contract: $name', backendCase => {
         .rejects.toMatchObject({ code: 'TODO_NOT_FOUND' })
     } finally { await h.close() }
   })
+})
+
+// A property of the legacy storage medium (atomic Domain batches); the collab
+// backend's "cannot write" is the collaboration layer being unavailable,
+// covered by collab-todo-availability.test.ts.
+describe('TodoBackend capability boundary (legacy-only)', () => {
+  it('refuses writes without actual atomic Domain support; reads never initialize rows (matching CollaborationContextStore)', async () => {
+    const h = await legacyTodoBackendCase.openWithoutTransaction()
+    try {
+      const store = h.backend
+      expect(await store.listForParent('main-1')).toEqual([])
+      expect(await store.getTodoItem('todo-1')).toBeUndefined()
+      await expect(store.registerTodoItem(todoInput())).rejects.toMatchObject({ code: 'TRANSACTION_UNAVAILABLE' })
+      expect(await store.listForParent('main-1')).toEqual([])
+    } finally { await h.close() }
+  })
+
 })
 
 describe('SharedFactLedgerStore with actual atomic Domain (legacy-only)', () => {

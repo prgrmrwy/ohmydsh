@@ -526,7 +526,7 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
 
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('unreachable')
-    expect(result.reason).toContain('pet_locus_ledger_read')
+    expect(result.reason).toContain('collab_read')
     expect(result.reason).toContain('重试')
     expect(result.reason).not.toBe('待办不存在。')
   })
@@ -541,7 +541,7 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
 
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('unreachable')
-    expect(result.reason).toContain('pet_locus_ledger_read')
+    expect(result.reason).toContain('collab_read')
     expect(result.reason).not.toContain('child-other')
     expect(port.calls).toHaveLength(0)
   })
@@ -579,7 +579,7 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
     }
     // The two id-shaped refusals point at the one tool that returns a legal id.
     for (const failure of ['unknown-item', 'not-owned'] as const) {
-      expect(requestExecutionFailureText(failure)).toContain('pet_locus_ledger_read')
+      expect(requestExecutionFailureText(failure)).toContain('collab_read')
     }
   })
 })

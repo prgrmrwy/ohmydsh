@@ -12,6 +12,9 @@ import { endpointKeyOf, type LocusEndpoint } from '../src/host/locus/aggregate.j
 import { locusIdentity, locusSpaceId, petAddress } from '../src/host/collab/naming.js'
 import { LocusCollabProxy, type ProxyLocusRecord } from '../src/host/collab/proxy.js'
 import { SUBAGENT_HEADER, openCollabWorld, result, settle, type CollabWorld } from './support/collab-host.js'
+import { CollabTodoBackend } from '../src/host/collab/todo-backend.js'
+import { trackFailureText, trackTodo } from '../src/host/ledger/track.js'
+import { authorizedFor } from './support/collab-todo.js'
 
 const MAIN = 'session-main-scope'
 const OTHER_MAIN = 'session-main-other'
@@ -183,6 +186,23 @@ describe('共享事实台账按主会话归属并对同源只读开放', () => {
     expect((await w.call(childA, 'collab_status', {}).then(result)).error).toBeUndefined()
   })
 
-  // Waits for task group 7: `pet_locus_track` still writes the legacy store.
-  it.todo('scope-06：主会话未加载时 pet_locus_track 返回协作空间尚未就绪（等待第 7 组）')
+  it('scope-06：主会话未加载时不为建空间唤醒它（pet_locus_track 部分）', async () => {
+    const { w, proxy } = await open([locus('rec-a', ALPHA, 'child-a')])
+    w.session('child-a', SUBAGENT_HEADER(MAIN))
+    const backend = new CollabTodoBackend({
+      proxy,
+      childOf: ({ locusId }) => locusId === 'rec-a' ? 'child-a' : undefined,
+      liveAgent: id => w.live.get(id),
+    })
+    const record = locus('rec-a', ALPHA, 'child-a')
+    const registered = await trackTodo(authorizedFor(record), { summary: '主会话没加载', detail: '' }, {
+      store: backend, now: () => 1_000, newItemId: () => 'todo-early',
+    })
+    expect(registered).toEqual({ ok: false, reason: 'space-not-ready' })
+    expect(trackFailureText('space-not-ready')).toContain('尚未就绪')
+    expect(w.counts.resolveAgent).toBe(0)
+    expect(w.live.has(MAIN)).toBe(false)
+    // Nothing was written anywhere: the space does not even exist.
+    expect(await proxy.currentHandle()!.readManaged(SPACE)).toEqual({ error: { code: 'COLLAB_SPACE_UNAVAILABLE' } })
+  })
 })

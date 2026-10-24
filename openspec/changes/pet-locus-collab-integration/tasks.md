@@ -49,12 +49,12 @@
 
 ## 7. Pet：`collab` 实现与子会话工具面
 
-- [ ] 7.1 Write failing test: `track-01..06`（工具不接受目标参数、代际更替后待办仍可解析、入口退役不使待办消失、登记不唤醒主会话、主会话修订条目不改变登记证据、时间在重启后保持不变），在 `collab` 实现上运行；沿用的 `spec: 无唯一 current 时拒绝登记` 保持通过
-- [ ] 7.2 Write failing test: `lifecycle-01..06`（登记后队列继续前进、回复完成不等于事情做完、待办状态变化不外发、子会话不能推进待办状态、主会话做完后自行标记完成、不经受理直接了结）
-- [ ] 7.3 Write failing test: `toolface-03..04`（子会话的协作工具面、子会话不能向兄弟发消息）
-- [ ] 7.4 Implement: `collab` 实现（body 规范 JSON、从 `item/created` 读证据、`at` 投影时间、`<op>-<itemId>-<attemptId>`、`readSince` 游标）；`pet_locus_ledger_read` 退役并把 `dispatch.ts` 三处指引改为 `collab_read`；子会话白名单加入 8 个协作工具，使 7.1–7.3 通过
-- [ ] 7.5 把第 5.2 步的参数化夹具加入 `collab` 实现；现有 `ledger-*`、`todo-*`、`intent-triage-*` 测试在两个实现上都通过，断言不改。只在 `collab` 上失败的，先判断是缺陷还是规范已改的行为；后者按 spec drift 规则处理，不得为让测试变绿而改断言
-- [ ] 7.6 Refactor；Pet 全套通过
+- [x] 7.1 Write failing test: `track-01..06`（工具不接受目标参数、代际更替后待办仍可解析、入口退役不使待办消失、登记不唤醒主会话、主会话修订条目不改变登记证据、时间在重启后保持不变），在 `collab` 实现上运行；沿用的 `spec: 无唯一 current 时拒绝登记` 保持通过
+- [x] 7.2 Write failing test: `lifecycle-01..06`（登记后队列继续前进、回复完成不等于事情做完、待办状态变化不外发、子会话不能推进待办状态、主会话做完后自行标记完成、不经受理直接了结）
+- [x] 7.3 Write failing test: `toolface-03..04`（子会话的协作工具面、子会话不能向兄弟发消息）
+- [x] 7.4 Implement: `collab` 实现（body 规范 JSON、从 `item/created` 读证据、`at` 投影时间、`<op>-<itemId>-<attemptId>`、`readSince` 游标）；`pet_locus_ledger_read` 退役并把 `dispatch.ts` 三处指引改为 `collab_read`；子会话白名单加入 8 个协作工具，使 7.1–7.3 通过
+- [x] 7.5 把第 5.2 步的参数化夹具加入 `collab` 实现；现有 `ledger-*`、`todo-*`、`intent-triage-*` 测试在两个实现上都通过，断言不改。只在 `collab` 上失败的，先判断是缺陷还是规范已改的行为；后者按 spec drift 规则处理，不得为让测试变绿而改断言
+- [x] 7.6 Refactor；Pet 全套通过
 
 ## 8. 迁移前后等价
 

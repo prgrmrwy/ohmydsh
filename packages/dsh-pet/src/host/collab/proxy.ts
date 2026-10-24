@@ -179,6 +179,11 @@ export class LocusCollabProxy {
     this.activeParents = activeParents
   }
 
+  /** Every parent session with at least one locus record, retired included. */
+  knownParents(): readonly string[] {
+    return [...this.lociByParent.keys()]
+  }
+
   /** Every locus identity of one parent, retired included, collisions excluded. */
   parentLoci(parentSessionId: string): readonly string[] {
     return this.lociByParent.get(parentSessionId) ?? []

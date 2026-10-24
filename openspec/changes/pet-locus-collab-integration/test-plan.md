@@ -92,24 +92,24 @@
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 台账不随条目清空而消失 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-03：台账不随条目清空而消失` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 新增条目类型不改既有语义 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-04：新增条目类型不改既有语义` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 换代后登记照旧归入同一代理 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-05：换代后登记照旧归入同一代理` | 🟢 green |
-| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 主会话未加载时不为建空间唤醒它 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-06：主会话未加载时不为建空间唤醒它` | 🟡 partial（collab_status 部分绿；pet_locus_track 部分为 it.todo，等第 7 组） |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 工具不接受目标参数 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-01：工具不接受目标参数` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 代际更替后待办仍可解析 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-02：代际更替后待办仍可解析` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 入口退役不使待办消失 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-03：入口退役不使待办消失` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 共享事实台账按主会话归属并对同源只读开放 | 主会话未加载时不为建空间唤醒它 | packages/dsh-pet/test/collab-ledger-scope.test.ts | `scope-06：主会话未加载时不为建空间唤醒它` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 工具不接受目标参数 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-01：工具不接受目标参数` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 代际更替后待办仍可解析 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-02：代际更替后待办仍可解析` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 入口退役不使待办消失 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-03：入口退役不使待办消失` | 🟢 green |
 | specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 无唯一 current 时拒绝登记 | packages/dsh-pet/test/ledger-track.test.ts | `spec: 无唯一 current 时拒绝登记 — no currentDelivery on the authorized record refuses registration` | 🟢 green（沿用，需随本 change 保持通过） |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 登记不唤醒主会话 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-04：登记不唤醒主会话` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 主会话修订条目不改变登记证据 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-05：主会话修订条目不改变登记证据` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 时间在重启后保持不变 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-06：时间在重启后保持不变` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 登记后队列继续前进 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-01：登记后队列继续前进` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 回复完成不等于事情做完 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-02：回复完成不等于事情做完` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 待办状态变化不外发 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-03：待办状态变化不外发` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 子会话不能推进待办状态 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-04：子会话不能推进待办状态` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 主会话做完后自行标记完成 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-05：主会话做完后自行标记完成` | 🔴 red |
-| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 不经受理直接了结 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-06：不经受理直接了结` | 🔴 red |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 登记不唤醒主会话 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-04：登记不唤醒主会话` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 主会话修订条目不改变登记证据 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-05：主会话修订条目不改变登记证据` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办登记固定来源与回复去向且关联标识而非实例 | 时间在重启后保持不变 | packages/dsh-pet/test/collab-todo-track.test.ts | `track-06：时间在重启后保持不变` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 登记后队列继续前进 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-01：登记后队列继续前进` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 回复完成不等于事情做完 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-02：回复完成不等于事情做完` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 待办状态变化不外发 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-03：待办状态变化不外发` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 子会话不能推进待办状态 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-04：子会话不能推进待办状态` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 主会话做完后自行标记完成 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-05：主会话做完后自行标记完成` | 🟢 green |
+| specs/pet-locus-intent-triage/spec.md → 待办生命周期与 Delivery 结算解耦 | 不经受理直接了结 | packages/dsh-pet/test/collab-todo-lifecycle.test.ts | `lifecycle-06：不经受理直接了结` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 双向核对 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-01：双向核对` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话反查 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-02：子会话反查` | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话的协作工具面 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-03：子会话的协作工具面` | 🔴 red |
-| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话不能向兄弟发消息 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-04：子会话不能向兄弟发消息` | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话的协作工具面 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-03：子会话的协作工具面` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 关联具备双向发现且不过度披露 | 子会话不能向兄弟发消息 | packages/dsh-pet/test/collab-child-toolface.test.ts | `toolface-04：子会话不能向兄弟发消息` | 🟢 green |
 
 ## Coverage Notes
 

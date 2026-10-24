@@ -43,3 +43,20 @@
 - 待处理：triage delta 场景"子会话不能推进待办状态"写的是插件层 `COLLAB_ITEM_NOT_FOUND`。经 `pet_locus_track` 登记的待办 ext 含来源事实，不等于戳，因此插件判"不是自己的"并返回 `ITEM_NOT_FOUND`（stamp-h1 已证）；scope-04 的条目是测试直接用原生 create 写的、ext 恰为戳，属于另一类。第 7 组用真实 `pet_locus_track` 登记后应得到 `ITEM_NOT_FOUND`，以 lifecycle-04 验证，不改规范。
 - scope-06 的 `pet_locus_track` 部分为 `it.todo`，等第 7 组。
 - 结果：dsh-pet 206 files / 3457 passed / 8 skipped / 1 todo；typecheck 通过。
+
+## 第 7 组（collab TodoBackend、track 迁移、子会话工具面）
+
+- 先红：track-01..06、lifecycle-01..06 红于"collab todo backend not implemented"（先放空壳，避免 import 错误）；toolface-03 红于 attest 判 8 个 collab_* 为 leaked。scope-06（track 部分）与 availability-01（登记 + Delivery 部分）为实现后补写，补做变异：撤掉 track.ts 新 reason 映射后两条红于 `store-error`，恢复后绿。toolface-04 与"dsh-collab 缺失时工具面无 collab_*"写完即绿（前者由 task-4 的 dsh-collab 实现，后者在 child-tools 之后写），如实记录无先红。
+- 7.5 契约：保留的 4 条在 collab 上首跑即过，断言零改动；"无原子事务拒写"与 decoupling e2e 是 legacy 介质特性，移回 legacy-only，断言不变，collab 侧对应 availability-01。
+- D6 实现方式：
+  - 子会话的 8 个协作工具经 own 层委托注册（`src/host/collab/child-tools.ts`），定义逐字取自 dsh-collab 全局定义、execute 原样委托；原因见 `docs/architecture/dsh-plugin-integration-pitfalls.md` own 层与 filter 一节：继承层 `LOCUS_BASE_TOOL_FILTER` 是持久化 allow 列表，直接加名字会在 dsh-collab 缺失时令 child 创建失败、且已存在 child 恢复后仍看不到。不改规范语义。
+  - D6 写"读取用 readSince 游标"；实际句柄 `readManaged` 每次返回全量，游标在 Pet 侧折叠（只处理 seq > 游标的新记录）。效果相同。
+  - TodoRecord.locusId 保持旧语义（登记那代的记录 id，取自 ext.pet.recordId），稳定身份在 ext.pet.locusId（AMD-2）。
+- `pet_locus_ledger_read` 退役（依据 D6 与 delta "兄弟子会话读不到彼此登记的结论"），断言改动逐条：
+  1. todo-dispatch.test.ts:529、544、582：指引 `pet_locus_ledger_read` → `collab_read`；失败原因、`port.calls` 为 0、状态不变的断言未动。
+  2. ledger-tool-scope.test.ts:189：可见 → 不可见；:204、248：常量删除后改为字面名，语义不变。
+  3. ledger-tool-scope.test.ts 原 327–352 三条 ledger_read 执行用例随工具删除；兄弟不可见由 scope-01 承接。
+  4. ledger-tool-scope.test.ts 原 395、439：指引文本改为 `collab_read`（439 对应 tools.ts 畸形 itemId 提示，同属退役指引）；isError 与不泄露 id 的断言未动。
+  5. executor-scope.test.ts:306–309：计数 9 → 8，并新增断言被移除的恰为 `PET_LOCUS_LEDGER_READ_TOOL`，其余 8 个常量仍在。
+  6. 删除 test/ledger-read.test.ts 与 src/host/ledger/ledger-read.ts；删除前 grep 确认唯一调用方是 tools.ts 注册与 index.ts:541 装配。
+- 结果：dsh-pet 208 files / 3465 passed / 8 skipped / 0 todo，typecheck 通过（lead 独立复跑一致）。

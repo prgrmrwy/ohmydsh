@@ -393,13 +393,13 @@ export function requestExecutionFailureText(failure: RequestExecutionFailure, st
   switch (failure) {
     case 'unknown-item':
       return '请求执行失败：没有找到该标识对应的待办，或该标识不是本会话可用的标识。'
-        + '请先调用 `pet_locus_ledger_read` 取得你自己的合法 `itemId`，再用台账返回的标识重试；不要猜测标识。'
+        + '请先调用 `collab_read` 读取你的协作空间，取得你自己登记的合法 `itemId`，再用它重试；不要猜测标识。'
     case 'not-owned':
       return '请求执行失败：这条待办不是由当前子会话登记的。'
-        + '你只能请求自己登记的待办；请调用 `pet_locus_ledger_read` 确认自己登记过的 `itemId` 后重试。'
+        + '你只能请求自己登记的待办；请调用 `collab_read` 确认自己登记过的 `itemId` 后重试。'
     case 'not-open':
       return `请求执行失败：待办当前不是待处理（${status ?? 'unknown'}），本次未投递，无需重复请求执行。`
-        + '如需确认最新状态，请重新调用 `pet_locus_ledger_read`。'
+        + '如需确认最新状态，请重新调用 `collab_read`。'
     default:
       return '请求执行未完成：跟进任务未能投递，该待办仍为待处理、状态未改变。'
         + '可稍后重试；如仍失败，请在回复中如实说明未开始，并请所有者处理。'

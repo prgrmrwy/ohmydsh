@@ -74,11 +74,27 @@ export const LOCUS_CALLER_BOUND_TOOLS: readonly string[] = Object.freeze([
   'pet_locus_chat_history',
   'pet_locus_doc_context',
   'pet_locus_finish',
-  'pet_locus_ledger_read',
   'pet_locus_parent_lookup',
   'pet_locus_request_execution',
   'pet_locus_track',
   'pet_locus_wait',
+])
+
+/**
+ * The collaboration member tools Pet re-registers on a child's own scope
+ * (design D6; see `collab/child-tools.ts` for why they are own-layer). They
+ * are part of Pet's reviewed own surface, and their ABSENCE is not a fault:
+ * without dsh-collab the child is composed without them.
+ */
+export const LOCUS_COLLAB_MEMBER_TOOLS: readonly string[] = Object.freeze([
+  'collab_status',
+  'collab_read',
+  'collab_create_item',
+  'collab_revise_item',
+  'collab_ack_item',
+  'collab_send_message',
+  'collab_set_status',
+  'collab_advance_request',
 ])
 
 /** Outcome of one composition attestation. */
@@ -121,6 +137,7 @@ export function attestLocusComposition(
     ...LOCUS_SAFE_TOOL_NAMES,
     ...tierTools,
     ...LOCUS_CALLER_BOUND_TOOLS,
+    ...LOCUS_COLLAB_MEMBER_TOOLS,
   ])
   const leaks = [...new Set([...visible].filter(name => !allowed.has(name)))].sort()
   if (tier === 'shell' && !visible.includes('bash')) leaks.push('bash (required for shell tier)')

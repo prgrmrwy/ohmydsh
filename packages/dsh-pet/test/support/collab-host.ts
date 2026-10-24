@@ -27,6 +27,8 @@ export interface CollabWorld {
   readonly service: CollabService
   readonly live: Map<string, FakeAgent>
   readonly counts: { resolveAgent: number; followup: number }
+  /** The tool definitions dsh-collab registered globally, by name. */
+  readonly tools: ReadonlyMap<string, any>
   /** Publish a live ordinary or child session. */
   session(id: string, header?: Record<string, unknown>): FakeAgent
   /** Drop a session from the live map (unloaded / replaced). */
@@ -72,7 +74,7 @@ export async function openCollabWorld(): Promise<CollabWorld> {
   const service = services.get('dshCollab') as CollabService | undefined
   if (service === undefined) throw new Error('dshCollab was not provided')
   return {
-    root, service, live, counts,
+    root, service, live, counts, tools,
     session(id, header = {}) { const agent = makeAgent(id, header); live.set(id, agent); return agent },
     unload(id) { live.delete(id) },
     async call(agent, name, args) {

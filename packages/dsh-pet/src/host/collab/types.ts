@@ -100,6 +100,7 @@ export interface CollabIntegratorAdapter {
 export interface CollabIntegrationHandle {
   admit(spaceId: string, cmdId: string, input: { name: string; address: string }): Promise<CollabHandleResult<unknown>>
   readManaged(spaceId: string): Promise<CollabHandleResult<CollabCommitRecord[]>>
+  command(exec: CollabExec, spaceId: string, cmdId: string, op: { op: 'createItem'; input: Record<string, unknown> }): Promise<CollabHandleResult<{ readonly seq: number; readonly itemId?: string }>>
   disposeRequest(spaceId: string, cmdId: string, input: { itemId: string; progress: 'open' | 'accepted' | 'done' | 'rejected' }): Promise<CollabHandleResult<unknown>>
   establish(exec: CollabExec, spaceId: string, cmdId: string, input: { name: string; purpose: string }): Promise<CollabHandleResult<{ spaceId: string }>>
   dispose(): void

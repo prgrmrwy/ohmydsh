@@ -19,8 +19,10 @@
  *    distinguishable "not found";
  *  - `advanceStatus` performs no identity check — callers prove ownership.
  *
- * The retiring `pet_locus_ledger_read` tool keeps its synchronous read straight
- * from the legacy store and is deliberately NOT part of this seam.
+ * Implementations: `legacyTodoBackend` (below; the read-only "旧版" source
+ * since design D10) and `CollabTodoBackend` (`host/collab/todo-backend.ts`,
+ * the only write path). The retired `pet_locus_ledger_read` tool (design D6)
+ * was never part of this seam.
  */
 import type { SharedFactLedgerStore } from './store.js'
 import type { NewTodoInput, TodoRecord, TodoStatus } from './todo.js'
