@@ -59,7 +59,7 @@
 | specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 戳在途变化时调用失效 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-17：戳在途变化时调用失效` | 🟢 green |
 | specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 超长或非对象的戳视为未解析 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-18：超长或非对象的戳视为未解析` | 🟢 green |
 | specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不提供 visible 时不投影也不做写授权 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-19：不提供 visible 时不投影也不做写授权` | 🟢 green |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | visible 可沿 ref 链查前序记录 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-20：visible 可沿 ref 链查前序记录` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | visible 可沿 ref 链查前序记录 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-20：visible 可沿 ref 链查前序记录` | 🟢 green |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | Leader 授权后接入方接纳成员 | packages/dsh-collab/test/integration.test.ts | `handle-01：Leader 授权后接入方接纳成员` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 未授权空间的响应完全一致 | packages/dsh-collab/test/integration.test.ts | `handle-02：未授权空间的响应完全一致` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 旧句柄的在途托管命令不提交 | packages/dsh-collab/test/integration.test.ts | `handle-03：旧句柄的在途托管命令不提交` | 🟢 green（沿用，需随本 change 保持通过） |

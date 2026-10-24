@@ -34,3 +34,4 @@
 ## Apply 期间规范修订
 
 - AMD-1（2026-10-25）：`visible` 增加同步 `lookup.recordAt`，原因与评审复核见 review.md 末节；新增 `stamp-20`。
+- task-7（AMD-1）：`stamp-20` 先红于"`visible` 只收到 2 个参数、lookup 未传"（插桩确认后撤掉），再实现；另对写授权单独变异（不传 lookup）确认 `stamp-20` 变红。dsh-collab 179/179。

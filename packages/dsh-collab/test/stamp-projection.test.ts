@@ -328,3 +328,41 @@ describe('托管调用者经句柄写入（接入方附加事实）', () => {
     expect((read as any).itemSeq).toBeUndefined()
   }))
 })
+
+describe('接入方 visible 的同步查询（AMD-1）', () => {
+  it('stamp-20：visible 可沿 ref 链查前序记录', () => world(async host => {
+    const { pet, main, l, m } = await locusSpace(host)
+    const lookups: { seq: number; record: any }[] = []
+    /** Pet-like rule: main → pet messages follow `ref` to the nearest stamped record. */
+    const nearest = (ref: unknown, lookup: any): string | undefined => {
+      for (let seq = ref, hops = 0; typeof seq === 'number' && hops < 64; hops++) {
+        const record = lookup.recordAt(seq)
+        lookups.push({ seq, record })
+        const subject = record?.kind === 'item' ? record.item : record?.kind === 'message' ? record.message : undefined
+        if (!subject) return
+        if (subject.ext?.pet?.locusId) return subject.ext.pet.locusId
+        seq = subject.ref
+      }
+    }
+    pet.adapter.visible = (stamp: any, subject: any, lookup: any) => {
+      const mine = stamp.pet.locusId
+      if (subject.kind === 'item') return subject.item.author === 'main' || subject.item.ext?.pet?.locusId === mine
+      if (subject.kind === 'message') {
+        const message = subject.message
+        if (message.ext?.pet?.locusId === mine) return true
+        return message.actor === 'main' && message.to === 'pet' && nearest(message.ref, lookup) === mine
+      }
+      return subject.name === 'main'
+    }
+    const ma = ok(await l.send('main', 'from a'))
+    const reply = ok(await main.send('pet', 'answer without naming anyone', { needsReply: false, ref: ma.seq }))
+    const has = (records: any[]) => records.some((r: any) => r.events.some((e: any) => e.type === 'message/sent' && e.message.id === String(reply.seq)))
+    expect(has(ok(await l.since(0)))).toBe(true)
+    expect(has(ok(await m.since(0)))).toBe(false)
+    const seen = lookups.find(x => x.seq === ma.seq)
+    expect(seen?.record).toMatchObject({ kind: 'message', message: { id: String(ma.seq), actor: 'pet', body: 'from a', ext: { pet: { locusId: 'a' } } } })
+    // The same lookup serves write-target checks: only the routed locus may answer M.
+    ok(await l.send('main', 'thanks', { ref: reply.seq }))
+    expect(await m.send('main', 'thanks', { ref: reply.seq })).toEqual({ error: { code: 'COLLAB_BAD_REF' } })
+  }))
+})

@@ -8,6 +8,7 @@ import { admissionPolicy, checkCurrentLocation, type HostConfig } from './config
 import { Integrations } from './integration.js'
 
 export type { DshCollabService, IntegrationHandle, IntegratorAdapter, ManagedTarget, SessionModeHandler } from './integration.js'
+export type { Lookup, Subject } from './stamp.js'
 
 export { salvage } from './salvage.js'
 export const name = 'dsh-collab'

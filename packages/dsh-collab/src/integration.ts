@@ -3,7 +3,7 @@ import { CollabError, principals, reduce, type CommitRecord, type SpaceState, ty
 import type { CollabHost } from './host.js'
 import type { Caller, SessionAccess } from './session-provider.js'
 import { safeError } from './tools.js'
-import { prepareWrite, stampedRead, stampKey, type StampView, type Subject } from './stamp.js'
+import { prepareWrite, stampedRead, stampKey, type Lookup, type StampView, type Subject } from './stamp.js'
 
 /** Kernel mode format; the channel prefix is enforced per handle. */
 const MODE = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
@@ -23,7 +23,7 @@ export interface IntegratorAdapter {
   resolveCaller(agent: Agent): string | { address: string; stamp?: Ext } | undefined
   holds(address: string): boolean
   /** Synchronous, in-memory: may a stamped caller see this subject? Enables projection and write-target checks. */
-  visible?(stamp: Ext, subject: Subject): boolean
+  visible?(stamp: Ext, subject: Subject, lookup: Lookup): boolean
   /** Allowed `to` values for stamped callers' messages. */
   recipients?: readonly string[]
   /** Delivery modes (`<channel>:<name>`) this integrator's members accept. */
@@ -123,7 +123,7 @@ export class Integrations {
     if (key === undefined) return
     const value = JSON.parse(key) as Ext
     const adapter = owner.adapter
-    const visible = typeof adapter.visible === 'function' ? (subject: Subject) => adapter.visible!(structuredClone(value), structuredClone(subject)) === true : undefined
+    const visible = typeof adapter.visible === 'function' ? (subject: Subject, lookup: Lookup) => adapter.visible!(structuredClone(value), structuredClone(subject), lookup) === true : undefined
     const recipients = Array.isArray(adapter.recipients) ? adapter.recipients.filter((r): r is string => typeof r === 'string') : []
     return { channel: owner.channel, address, epoch: owner.epoch, stamped: { stamp: value, key, recipients, ...(visible ? { visible } : {}) } }
   }

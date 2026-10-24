@@ -10,12 +10,14 @@ import type { Caller } from './session-provider.js'
  * write-target authorization and the visible projection of reads.
  */
 export type Subject = { kind: 'item'; item: Item } | { kind: 'message'; message: Message } | { kind: 'statusText'; name: string }
+/** Synchronous view of the same fully replayed state the projection or check uses. */
+export interface Lookup { recordAt(seq: number): { kind: 'item'; item: Item } | { kind: 'message'; message: Message } | undefined }
 export interface StampView {
   stamp: Ext
   /** Canonical JSON of the stamp; equality of stamps is equality of keys. */
   key: string
   /** Present only when the integrator provides `visible`; throwing counts as invisible. */
-  visible?: (subject: Subject) => boolean
+  visible?: (subject: Subject, lookup: Lookup) => boolean
   recipients?: readonly string[]
 }
 
@@ -55,7 +57,20 @@ export const namespacedCmdId = (key: string, cmdId: string) => `${createHash('sh
 const sameStamp = (ext: unknown, view: StampView) => { if (ext === undefined) return false; try { return canonicalJson(ext) === view.key } catch { return false } }
 /** Stamp merged over integrator facts written through a handle: the stamp always wins, so a handle cannot forge another stamp. */
 const merge = (base: unknown, stamp: unknown): unknown => plain(base) && plain(stamp) ? Object.fromEntries([...new Set([...Object.keys(base), ...Object.keys(stamp)])].map(k => [k, Object.hasOwn(stamp, k) ? merge(base[k], stamp[k]) : base[k]])) : stamp
-export const seen = (view: StampView, subject: Subject) => { try { return view.visible?.(subject) === true } catch { return false } }
+/** Business subject created at `seq`: an item's creation or a sent message; nothing else. */
+export function lookupOf(state: SpaceState): Lookup {
+  return {
+    recordAt(seq: number) {
+      if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 1) return
+      const message = state.messages.find(m => m.id === String(seq))
+      if (message) return { kind: 'message', message: structuredClone(message) }
+      const id = Object.keys(state.itemSeq).find(key => state.itemSeq[key] === seq)
+      // Revisions keep their creation seq; the current item stands for the record.
+      if (id !== undefined && Object.hasOwn(state.items, id)) return { kind: 'item', item: structuredClone(state.items[id]!) }
+    },
+  }
+}
+export const seen = (view: StampView, subject: Subject, state: SpaceState) => { try { return view.visible?.(subject, lookupOf(state)) === true } catch { return false } }
 
 /** Item written by this very stamp: authored by the caller's member and carrying exactly its stamp. */
 export const ownItem = (item: Item | undefined, self: string, view: StampView) => !!item && item.author === self && sameStamp(item.ext, view)
@@ -81,7 +96,7 @@ export function refusal(state: SpaceState, self: string, view: StampView, target
     if (message) {
       if (message.actor === self && sameStamp(message.ext, view)) return
       const author = Object.hasOwn(state.members, message.actor) ? state.members[message.actor] : undefined
-      if (author && author.managedBy === undefined && message.to === self && seen(view, { kind: 'message', message })) return
+      if (author && author.managedBy === undefined && message.to === self && seen(view, { kind: 'message', message }, state)) return
       return 'COLLAB_BAD_REF'
     }
     const itemId = Object.keys(state.itemSeq).find(id => state.itemSeq[id] === ref)
@@ -116,9 +131,9 @@ function wakeSources(records: CommitRecord[], state: SpaceState): Map<string, Bu
 class Projector {
   private readonly sources: Map<string, Business | 'structural'>
   constructor(readonly view: StampView, readonly records: CommitRecord[], readonly state: SpaceState) { this.sources = wakeSources(records, state) }
-  item(item: Item | undefined) { return !!item && seen(this.view, { kind: 'item', item }) }
-  message(message: Message) { return seen(this.view, { kind: 'message', message }) }
-  statusText(name: string) { return seen(this.view, { kind: 'statusText', name }) }
+  item(item: Item | undefined) { return !!item && seen(this.view, { kind: 'item', item }, this.state) }
+  message(message: Message) { return seen(this.view, { kind: 'message', message }, this.state) }
+  statusText(name: string) { return seen(this.view, { kind: 'statusText', name }, this.state) }
   delivery(id: string) {
     const source = this.sources.get(id)
     if (source === 'structural') return true
@@ -242,6 +257,6 @@ export function projectOverview(view: StampView, overview: Overview, records: Co
 
 /** Space state as a stamped caller may see it, for status: only visible items and messages. */
 export function projectState(view: StampView, state: SpaceState): SpaceState {
-  const items = Object.fromEntries(Object.entries(state.items).filter(([, item]) => seen(view, { kind: 'item', item })))
-  return { ...state, items, itemSeq: Object.fromEntries(Object.entries(state.itemSeq).filter(([id]) => Object.hasOwn(items, id))), messages: state.messages.filter(message => seen(view, { kind: 'message', message })) }
+  const items = Object.fromEntries(Object.entries(state.items).filter(([, item]) => seen(view, { kind: 'item', item }, state)))
+  return { ...state, items, itemSeq: Object.fromEntries(Object.entries(state.itemSeq).filter(([id]) => Object.hasOwn(items, id))), messages: state.messages.filter(message => seen(view, { kind: 'message', message }, state)) }
 }
