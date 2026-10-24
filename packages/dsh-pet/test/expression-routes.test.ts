@@ -253,6 +253,31 @@ describe('URL import route', () => {
     expect(read.data).toMatchObject({ state: 'ok', content: text })
   })
 
+  it('passes the owner fake-ip opt-in to the downloader', async () => {
+    let seen: boolean | undefined
+    routes = buildRoutes({
+      lifecycle: readyLifecycle(),
+      fetchExpressionSource: async (_url: string, options: { allowFakeIp: boolean }) => {
+        seen = options.allowFakeIp
+        return source()
+      },
+    } as never)
+
+    // Default is strict.
+    await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
+    expect(seen).toBe(false)
+
+    const saved = await call(ROUTES.configUpdate, { expressionFetchAllowFakeIp: true })
+    expect(saved.data).toMatchObject({ expressionFetchAllowFakeIp: true })
+
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://cdn.example/a.json' })
+    expect(reply).toMatchObject({ ok: true })
+    expect(seen).toBe(true)
+
+    const config = await call(ROUTES.config, {})
+    expect(config.data).toMatchObject({ expressionFetchAllowFakeIp: true })
+  })
+
   it('rejects a URL that is not https before any download', async () => {
     const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'http://cdn.example/a.json' })
     expect(reply).toMatchObject({ ok: false, error: 'INVALID_REQUEST' })

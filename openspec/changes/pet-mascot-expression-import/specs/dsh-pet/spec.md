@@ -134,7 +134,7 @@ Host SHALL 在写入前校验导入内容，不合规时 MUST 返回 `INVALID_EX
 
 ### Requirement: 支持从 HTTPS URL 导入动画表情
 
-Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相同的校验与存储流程。下载 MUST 仅允许 https、默认 443 端口、不带凭据；MUST 拒绝 localhost/内网主机名与私有/保留 IP；MUST 校验主机解析出的全部地址均为公网，并把该地址 pin 到实际连接（连接阶段不得再次解析）；重定向 MUST 最多 3 跳且每跳重新校验；整体请求 MUST 在 10 秒内结束（含 DNS 与全部重定向）、响应 ≤512 KiB、content-type 限 JSON 类，且连接 MUST 只使用已校验地址（不得经环境代理或二次解析）。URL 被拒时 MUST 不发起请求；下载失败 SHALL 返回 `EXPRESSION_FETCH_FAILED`（HTTP 502）；下载内容校验失败 SHALL 返回 `INVALID_EXPRESSION` 且现有素材不变。
+Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相同的校验与存储流程。下载 MUST 仅允许 https、默认 443 端口、不带凭据；MUST 拒绝 localhost/内网主机名与私有/保留 IP；MUST 校验主机解析出的全部地址均为公网（所有者显式开启 fake-ip 放宽后，MAY 额外接受代理 fake-ip 段 `198.18.0.0/15`，其余非公网段仍 MUST 拒绝；默认关闭），并把该地址 pin 到实际连接（连接阶段不得再次解析）；重定向 MUST 最多 3 跳且每跳重新校验；整体请求 MUST 在 10 秒内结束（含 DNS 与全部重定向）、响应 ≤512 KiB、content-type 限 JSON 类，且连接 MUST 只使用已校验地址（不得经环境代理或二次解析）。URL 被拒时 MUST 不发起请求；下载失败 SHALL 返回 `EXPRESSION_FETCH_FAILED`（HTTP 502）；下载内容校验失败 SHALL 返回 `INVALID_EXPRESSION` 且现有素材不变。
 
 #### Scenario: 从 HTTPS URL 导入合法动画
 - **GIVEN** 一个公网 https URL 返回合法的 Lottie JSON（经重定向后仍为公网 https）
@@ -145,6 +145,11 @@ Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相
 - **GIVEN** URL 为 `http:`、带凭据、非默认端口，或主机为 localhost/内网名/私有或保留 IP、或 DNS 返回任一私有地址
 - **WHEN** 调用 URL 导入路由
 - **THEN** 返回 `INVALID_REQUEST`（HTTP 400），且没有向该 URL 发起任何 HTTP 请求
+
+#### Scenario: fake-ip 放宽只放行代理 fake-ip 段
+- **GIVEN** 所有者已显式开启 fake-ip 放宽，且 DNS 把主机解析到 `198.18.0.0/15`
+- **WHEN** Host 下载该 URL
+- **THEN** Host 允许连接并把 fake-ip 地址 pin 到连接；若解析结果是 loopback、RFC1918、链路本地/云元数据或其它保留地址，仍返回 `INVALID_REQUEST` 且不发起请求
 
 #### Scenario: 重定向到内网或次数超限被拒绝
 - **GIVEN** 公网 URL 重定向到内网地址，或连续重定向超过 3 次

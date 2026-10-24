@@ -114,6 +114,24 @@ export interface ExpressionFetchDeps {
 }
 
 /**
+ * Owner-controlled relaxation of the address policy.
+ *
+ * `allowFakeIp` exists for machines whose DNS is a proxy in fake-ip mode: every
+ * hostname resolves into 198.18.0.0/15, so the strict public-address rule
+ * would reject every URL. It only widens that one benchmark range; loopback,
+ * RFC1918, link-local/metadata and everything else stay refused.
+ */
+export interface ExpressionFetchOptions {
+  readonly allowFakeIp?: boolean
+}
+
+/** Whether one IPv4 address is in the proxy fake-ip benchmark range. */
+function isFakeIpV4(parts: readonly number[]): boolean {
+  const [a = 0, b = 0] = parts
+  return a === 198 && (b === 18 || b === 19)
+}
+
+/**
  * Build a `lookup` implementation that only ever returns validated addresses.
  *
  * Node's `net.connect` calls this in two shapes: `{ all: true }` (Happy
@@ -209,7 +227,7 @@ function parseIpv4(value: string): number[] | undefined {
 }
 
 /** Whether one IPv4 address (octets) must not be contacted. */
-function ipv4Disallowed(parts: readonly number[]): boolean {
+function ipv4Disallowed(parts: readonly number[], allowFakeIp = false): boolean {
   const [a = 0, b = 0, c = 0] = parts
   return (
     a === 0 || // 0.0.0.0/8
@@ -222,7 +240,7 @@ function ipv4Disallowed(parts: readonly number[]): boolean {
     (a === 192 && b === 0 && c === 2) || // TEST-NET-1
     (a === 192 && b === 88 && c === 99) || // 6to4 relay anycast
     (a === 192 && b === 168) || // 192.168.0.0/16
-    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15
+    (a === 198 && (b === 18 || b === 19) && !allowFakeIp) || // 198.18.0.0/15
     (a === 198 && b === 51 && c === 100) || // TEST-NET-2
     (a === 203 && b === 0 && c === 113) || // TEST-NET-3
     a >= 224 // multicast + reserved + broadcast
@@ -310,12 +328,12 @@ function ipv6Disallowed(bytes: readonly number[]): boolean {
  * @param address - IPv4 or IPv6 literal.
  * @returns whether the address must not be contacted.
  */
-export function isDisallowedAddress(address: string): boolean {
+export function isDisallowedAddress(address: string, allowFakeIp = false): boolean {
   const value = address.trim().toLowerCase()
   const version = isIP(value)
   if (version === 4) {
     const octets = parseIpv4(value)
-    return octets === undefined ? true : ipv4Disallowed(octets)
+    return octets === undefined ? true : ipv4Disallowed(octets, allowFakeIp)
   }
   if (version === 6) {
     const bytes = parseIpv6(value)
@@ -379,7 +397,9 @@ export async function resolvePublicTarget(
   url: URL,
   deps: ExpressionFetchDeps,
   timeoutMs: number = EXPRESSION_DNS_TIMEOUT_MS,
+  options: ExpressionFetchOptions = {},
 ): Promise<PublicTarget> {
+  const allowFakeIp = options.allowFakeIp === true
   const hostname = normalizedHostname(url)
   if (
     hostname === 'localhost' ||
@@ -390,7 +410,7 @@ export async function resolvePublicTarget(
   }
   const literal = isIP(hostname)
   if (literal !== 0) {
-    if (isDisallowedAddress(hostname)) invalidUrl('不允许访问内网或保留地址')
+    if (isDisallowedAddress(hostname, allowFakeIp)) invalidUrl('不允许访问内网或保留地址')
     return { addresses: [{ address: hostname, family: literal === 6 ? 6 : 4 }] }
   }
   let addresses: readonly string[]
@@ -400,7 +420,7 @@ export async function resolvePublicTarget(
     fetchFailed(`无法解析主机名 ${hostname}`)
   }
   if (addresses.length === 0) fetchFailed(`无法解析主机名 ${hostname}`)
-  if (addresses.some(address => isDisallowedAddress(address))) {
+  if (addresses.some(address => isDisallowedAddress(address, allowFakeIp))) {
     // Include the answer: on corporate/school networks a blocked public host
     // commonly resolves to a private sinkhole address, and the owner needs to
     // see that the rejection is DNS-driven rather than a Pet bug.
@@ -466,13 +486,19 @@ async function readBounded(
 export async function fetchExpressionSource(
   rawUrl: string,
   deps: ExpressionFetchDeps = DEFAULT_DEPS,
+  options: ExpressionFetchOptions = {},
 ): Promise<string> {
   const deadline = Date.now() + EXPRESSION_URL_TIMEOUT_MS
   let url = parseExpressionUrl(rawUrl)
   for (let hop = 0; hop <= MAX_EXPRESSION_URL_REDIRECTS; hop += 1) {
     const remaining = deadline - Date.now()
     if (remaining <= 0) fetchFailed('请求超时')
-    const target = await resolvePublicTarget(url, deps, Math.min(remaining, EXPRESSION_DNS_TIMEOUT_MS))
+    const target = await resolvePublicTarget(
+      url,
+      deps,
+      Math.min(remaining, EXPRESSION_DNS_TIMEOUT_MS),
+      options,
+    )
 
     let response: ExpressionHttpResponse
     try {

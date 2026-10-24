@@ -107,6 +107,7 @@ expressions/
 - **重定向**：使用 `https.request`（本身不自动跟随重定向），手工逐跳处理且最多 3 跳，每一跳重新做 URL 形状 + DNS 校验；缺 `Location`、非 https、目标内网一律拒绝。
 - **请求**：`GET`，不带 cookie/凭据/referer，`accept-encoding: identity`；**整体截止 10s**（DNS 单次 ≤4s、全部重定向与下载共用）；响应必须 2xx；`content-type` 只接受 `application/json`/`text/json`/`text/plain`/`application/octet-stream`/`binary/octet-stream`（缺省接受），非 identity 的 `content-encoding` 直接判失败；`content-length` 与实际流式读取都受 512 KiB 上限约束（超限即中止并关闭响应）。
 - **代理**：使用专用 `https.Agent` 且**不读取** `HTTP(S)_PROXY`/`NODE_USE_ENV_PROXY`——代理会在不调用 `lookup` 的情况下自行解析目标，绕过地址 pin。取舍：仅能经代理出网的环境里 URL 导入会返回 `EXPRESSION_FETCH_FAILED`（README 已注明）。
+- **fake-ip 放宽（默认关）**：Clash/mihomo 的 fake-ip + TUN 会把所有域名解析进 `198.18.0.0/15`，严格策略会拒绝一切 URL。`expressionFetchAllowFakeIp` 是 owner 显式 opt-in：开启后只把这一段加入允许集，地址仍 pin 到连接（由本机 TUN/代理决定真实去向）；loopback/RFC1918/链路本地/云元数据等依旧拒绝。设置页在 URL 导入下提供勾选与说明，Host 每次下载重新读取，无需广播。
 - **错误语义**：URL 形状/目标被拒 → `INVALID_REQUEST`（400，且**不发起请求**）；下载失败（网络/超时/HTTP 非 2xx/类型/超限）→ `EXPRESSION_FETCH_FAILED`（502）；下载成功但内容校验不过 → `INVALID_EXPRESSION`（400，现有素材不变）。
 - **不记录**：日志与错误消息不包含完整 URL/查询串（可能含一次性 token），只报主机名或通用原因。
 - 依赖注入：`fetchExpressionSource(url, deps)` 的 `request`/`lookup` 可注入，路由通过 `RouteDeps.fetchExpressionSource` 注入，测试不触网。

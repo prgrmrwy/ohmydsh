@@ -187,6 +187,42 @@ describe('SSRF guard', () => {
     )
   })
 
+  it('allows proxy fake-ip answers only after an explicit opt-in', async () => {
+    // Clash/mihomo fake-ip + TUN resolves EVERY hostname into 198.18.0.0/15.
+    // The strict rule rejects that; the owner can opt in and only that range
+    // is widened — the rest of the private/reserved space stays refused.
+    await expectCode(
+      fetchExpressionSource(
+        'https://cdn.example/a.json',
+        deps({ lookup: async () => ['198.18.0.7'] }),
+      ),
+      'INVALID_REQUEST',
+    )
+
+    const network = deps({ lookup: async () => ['198.18.0.7'] })
+    const body = await fetchExpressionSource('https://cdn.example/a.json', network, {
+      allowFakeIp: true,
+    })
+    expect(body).toBe(LOTTIE)
+    // The fake address is still the pinned target; the local TUN/proxy decides
+    // where it actually goes.
+    expect(network.requests).toEqual([
+      { url: 'https://cdn.example/a.json', address: '198.18.0.7', family: 4 },
+    ])
+
+    for (const address of ['10.0.0.7', '127.0.0.1', '169.254.169.254', '192.168.1.1']) {
+      await expectCode(
+        fetchExpressionSource('https://cdn.example/a.json', deps({ lookup: async () => [address] }), {
+          allowFakeIp: true,
+        }),
+        'INVALID_REQUEST',
+      )
+    }
+    expect(isDisallowedAddress('198.18.0.7', true)).toBe(false)
+    expect(isDisallowedAddress('198.19.255.1', true)).toBe(false)
+    expect(isDisallowedAddress('203.0.113.1', true)).toBe(true)
+  })
+
   it('refuses mapped or reserved answers from DNS and redirects', async () => {
     await expectCode(
       fetchExpressionSource(

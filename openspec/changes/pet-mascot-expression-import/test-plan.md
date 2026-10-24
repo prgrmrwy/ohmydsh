@@ -34,6 +34,7 @@
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 动画优先于 glyph | test/mascot-expression.test.ts | `prefers a valid animation over the glyph` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 渲染失败时回退 glyph 并显示诊断 | test/mascot-expression.test.ts | `falls back and publishes a diagnostic when the player fails` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 读取为 corrupt 时显示 glyph 并暴露诊断 | test/mascot-expression.test.ts | `renders the glyph and exposes the diagnostic for a corrupt read` | 🟢 green |
+| specs/dsh-pet/spec.md → 吉祥物表情素材导入 | fake-ip 放宽只放行代理 fake-ip 段 | test/expression-fetch.test.ts / test/expression-routes.test.ts | `allows proxy fake-ip answers only after an explicit opt-in` / `passes the owner fake-ip opt-in to the downloader` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 悬停播放模式 | test/mascot-expression.test.ts | `freezes on the first frame until hovered` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 减少动效或页面隐藏期间不播放 | test/mascot-expression.test.ts | `never plays under reduced motion or while hidden` | 🟢 green |
 | specs/dsh-pet/spec.md → 吉祥物渲染、回退与可诊断 | 导入与移除无需刷新即生效 | test/mascot-expression-dom.test.ts | `refreshes the mascot on appearance broadcast without reload` | 🟢 green |
