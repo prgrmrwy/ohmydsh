@@ -83,3 +83,8 @@
 | dsh-pet | 0 | 0 | 210 files / 3482 passed / 8 skipped | 202 files / 3430 / 8 |
 
 无新失败、无新 skip（dsh-pet 的 8 个 skip 为既有真实 runtime 探针）。
+
+## 10.1 配置与仓库检查
+
+- `managedChannels: ['pet-locus']` 写在私有 overlay 的 `patches/dsh-collab-local.yml`，而不是公开 `dsh.yaml`：dsh-collab 的本机 config 由该 overlay 整行覆盖（含 denySessionIds），公开 manifest 只放开关与说明。公开 `dsh.yaml` 的 dsh-collab note 已更新。偏离 tasks 10.1 原文"dsh.yaml 中增加"，效果相同。
+- 仓库 `npm test`：首跑 `repo-docs-governance` 失败，原因是评审者写的 review.md 链接相对仓库根而非文件本身；改为相对文件路径（不改内容）后 447 tests / 445 pass / 0 fail / 2 skipped（既有 MCP bridge 探针，与基线同）。`npm run check:artifacts` 通过；`openspec validate --strict` 通过；`git diff --check` 通过。

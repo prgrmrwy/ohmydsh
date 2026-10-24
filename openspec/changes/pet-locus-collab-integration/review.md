@@ -4,18 +4,18 @@
 - **Prior round**: round 3 REVISE（C1 共享 ack/progress；C2 itemId 存在性；M1 wakeCount；M2 共享话题额度；M3 措辞矛盾）；用户随后把威胁模型改为防误泄不防串通
 - **Reviewer context**: cross-model (codex / gpt-6-astra), fresh context
 - **Tool restrictions**: read-only inspection; single write to review.md
-- **范围与方法**：静态审阅 [proposal](<openspec/changes/pet-locus-collab-integration/proposal.md>)、[design](<openspec/changes/pet-locus-collab-integration/design.md>)、四份 delta（[dsh-collab](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md>)、[collab-kernel](<openspec/changes/pet-locus-collab-integration/specs/collab-kernel/spec.md>)、[intent-triage](<openspec/changes/pet-locus-collab-integration/specs/pet-locus-intent-triage/spec.md>)、[collaboration](<openspec/changes/pet-locus-collab-integration/specs/pet-locus-collaboration/spec.md>)及原评审；对照相关现行规范、[manifest](<dsh.yaml>)、[跨边界协作标准](<packages/dsh-collab/docs/cross-boundary-collaboration-standard.md>)、[ADR-0006](<docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md>)与扩展点归档设计。
-- **实现／测试覆盖**：检查 Pet 登记、值模型、存储、受理投递、原子事务、工具组合；dsh-collab caller、句柄、工具、status；内核事件模型、reduce、命令守卫与话题限额。静态抽查 [ledger-store 测试](<packages/dsh-pet/test/ledger-store.test.ts>)、[ledger-todo 测试](<packages/dsh-pet/test/ledger-todo.test.ts>)、[managed-caller 测试](<packages/dsh-collab/test/managed-caller.test.ts>)、[status 测试](<packages/dsh-collab/test/status.test.ts>)、[guard 测试](<packages/collab-kernel/test/guard.test.ts>)，并检索相关 dispatch 测试。未运行测试、构建或部署；未把规划中的功能尚未实现视为缺陷。change 当前无 tasks.md；本轮是方案评审，不据此阻断。
+- **范围与方法**：静态审阅 [proposal](<proposal.md>)、[design](<design.md>)、四份 delta（[dsh-collab](<specs/dsh-collab/spec.md>)、[collab-kernel](<specs/collab-kernel/spec.md>)、[intent-triage](<specs/pet-locus-intent-triage/spec.md>)、[collaboration](<specs/pet-locus-collaboration/spec.md>)及原评审；对照相关现行规范、[manifest](<../../../dsh.yaml>)、[跨边界协作标准](<../../../packages/dsh-collab/docs/cross-boundary-collaboration-standard.md>)、[ADR-0006](<../../../docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md>)与扩展点归档设计。
+- **实现／测试覆盖**：检查 Pet 登记、值模型、存储、受理投递、原子事务、工具组合；dsh-collab caller、句柄、工具、status；内核事件模型、reduce、命令守卫与话题限额。静态抽查 [ledger-store 测试](<../../../packages/dsh-pet/test/ledger-store.test.ts>)、[ledger-todo 测试](<../../../packages/dsh-pet/test/ledger-todo.test.ts>)、[managed-caller 测试](<../../../packages/dsh-collab/test/managed-caller.test.ts>)、[status 测试](<../../../packages/dsh-collab/test/status.test.ts>)、[guard 测试](<../../../packages/collab-kernel/test/guard.test.ts>)，并检索相关 dispatch 测试。未运行测试、构建或部署；未把规划中的功能尚未实现视为缺陷。change 当前无 tasks.md；本轮是方案评审，不据此阻断。
 
 ## Round 3 Findings Status
 
 | 编号 | 状态 | 裁定依据 |
 |---|---|---|
-| C1 共享 ack/progress | **resolved** | [写授权与只读场景](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L41-L46>)、[requiredAcks/assignee 反例](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L94-L97>)要求目标 ext 等于 caller stamp，main 条目不再因共享 pet 名而可改；入口、提交前及收据重放都受检。 |
-| C2 itemId 存在性 | **out-of-scope-by-decision** | [Context 的用户决定](<openspec/changes/pet-locus-collab-integration/design.md#L6-L8>)明确排除存在性／计数等串通信道；不要求改 ID 或拆空间。 |
-| M1 wakeCount | **resolved** | [成员白名单](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L44>)及[新场景](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L109-L112>)删除 overview 中 wakeCount、joinSeq、地址。计数旁路也已不属阻断范围。 |
-| M2 共享话题额度 | **partially resolved；余下旁路 out-of-scope-by-decision** | [ref 门禁](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L41>)关闭直接引用 main 公共条目的路径；“因此所有 Locus 的额度天然独立”仍不成立，见本轮 M2。残留仅是用户排除的额度耦合，不重开安全阻断。 |
-| M3 措辞矛盾 | **resolved** | ack 不再错误排除 Leader；[子会话推进待办场景](<openspec/changes/pet-locus-collab-integration/specs/pet-locus-intent-triage/spec.md#L189-L191>)已统一为插件 ITEM_NOT_FOUND、不调用内核。 |
+| C1 共享 ack/progress | **resolved** | [写授权与只读场景](<specs/dsh-collab/spec.md#L41-L46>)、[requiredAcks/assignee 反例](<specs/dsh-collab/spec.md#L94-L97>)要求目标 ext 等于 caller stamp，main 条目不再因共享 pet 名而可改；入口、提交前及收据重放都受检。 |
+| C2 itemId 存在性 | **out-of-scope-by-decision** | [Context 的用户决定](<design.md#L6-L8>)明确排除存在性／计数等串通信道；不要求改 ID 或拆空间。 |
+| M1 wakeCount | **resolved** | [成员白名单](<specs/dsh-collab/spec.md#L44>)及[新场景](<specs/dsh-collab/spec.md#L109-L112>)删除 overview 中 wakeCount、joinSeq、地址。计数旁路也已不属阻断范围。 |
+| M2 共享话题额度 | **partially resolved；余下旁路 out-of-scope-by-decision** | [ref 门禁](<specs/dsh-collab/spec.md#L41>)关闭直接引用 main 公共条目的路径；“因此所有 Locus 的额度天然独立”仍不成立，见本轮 M2。残留仅是用户排除的额度耦合，不重开安全阻断。 |
+| M3 措辞矛盾 | **resolved** | ack 不再错误排除 Leader；[子会话推进待办场景](<specs/pet-locus-intent-triage/spec.md#L189-L191>)已统一为插件 ITEM_NOT_FOUND、不调用内核。 |
 
 ## Findings
 
@@ -23,32 +23,32 @@
 
 **无。** 在本轮明确的正常读取防误泄边界内，未建立新的兄弟正文／状态泄露、越权修改或实质 D9 回归反例。
 
-尤其不保留“旧存储并发受理可能两个都成功”的怀疑：[advanceStatus](<packages/dsh-pet/src/host/ledger/store.ts#L191-L213>)在事务体内重读，且 [serializeDomainTransaction](<packages/dsh-pet/src/host/storage/atomic-domain.ts#L247-L279>)串行化的是整个事务体，不只是持久化；[真实 domain 并发转换测试](<packages/dsh-pet/test/ledger-store.test.ts#L140-L161>)也覆盖单一赢家。因此 [D9 并发受理 oracle](<openspec/changes/pet-locus-collab-integration/specs/pet-locus-intent-triage/spec.md#L75-L78>)有实现依据。其余同钟、只归一化 ID、证据无损编码、创建快照与明确例外的约束可作为实施验收基础。
+尤其不保留“旧存储并发受理可能两个都成功”的怀疑：[advanceStatus](<../../../packages/dsh-pet/src/host/ledger/store.ts#L191-L213>)在事务体内重读，且 [serializeDomainTransaction](<../../../packages/dsh-pet/src/host/storage/atomic-domain.ts#L247-L279>)串行化的是整个事务体，不只是持久化；[真实 domain 并发转换测试](<../../../packages/dsh-pet/test/ledger-store.test.ts#L140-L161>)也覆盖单一赢家。因此 [D9 并发受理 oracle](<specs/pet-locus-intent-triage/spec.md#L75-L78>)有实现依据。其余同钟、只归一化 ID、证据无损编码、创建快照与明确例外的约束可作为实施验收基础。
 
 ### 🟡 Moderate
 
 #### M1 — 把 Host 登记待办的字段约束误写成全部原生条目的约束
 
-- **位置**：[D3:84](<openspec/changes/pet-locus-collab-integration/design.md#L84>)声称“子会话自己的条目没有 requiredAcks、承接方也不是 pet”，因而 ack/advance 没有可用目标。
-- **反例**：子会话通过原生 create 创建自己盖戳的 request，传 `assignee:'pet'`；或创建 `requiredAcks:['pet']` 的条目。现有[工具参数](<packages/dsh-collab/src/tools.ts#L77-L88>)允许这两个值，新 [delta](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L37-L41>)也未禁止。目标全 ext 等于 caller stamp，故可继续按内核规则 advance／ack。只有 [D6 的 pet_locus_track 待办](<openspec/changes/pet-locus-collab-integration/design.md#L125-L133>)保证空 requiredAcks、assignee main。
+- **位置**：[D3:84](<design.md#L84>)声称“子会话自己的条目没有 requiredAcks、承接方也不是 pet”，因而 ack/advance 没有可用目标。
+- **反例**：子会话通过原生 create 创建自己盖戳的 request，传 `assignee:'pet'`；或创建 `requiredAcks:['pet']` 的条目。现有[工具参数](<../../../packages/dsh-collab/src/tools.ts#L77-L88>)允许这两个值，新 [delta](<specs/dsh-collab/spec.md#L37-L41>)也未禁止。目标全 ext 等于 caller stamp，故可继续按内核规则 advance／ack。只有 [D6 的 pet_locus_track 待办](<design.md#L125-L133>)保证空 requiredAcks、assignee main。
 - **影响**：不会越过兄弟隔离，但会诱导实现者额外禁止原生合法操作，或写出与授权规则冲突的测试。
 - **精确修正**：将该句改为：“经 pet_locus_track 登记的待办 requiredAcks 为空、assignee 为 main，子会话不能通过这两个工具推进该类待办；经原生 collab_create_item 创建的其它自有条目，仍按本节戳检查及内核 ack/assignee 规则处理。”不新增 create 参数限制，不改变既定待办状态路径。
 
 #### M2 — ref 限制没有证明话题根按 Locus 分离，设计仍作过度承诺
 
-- **位置**：[D3:85](<openspec/changes/pet-locus-collab-integration/design.md#L85>)声称“天然分开，不共用话题额度”；[新增额度场景](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L104-L107>)只测试 B 无 ref 新开根。
-- **可复核反例**：main 创建无戳公共条目 I0，随后分别向 pet 发两条 `ref:I0.seq` 的消息，正文各只点名 A、B。按 [D5](<openspec/changes/pet-locus-collab-integration/design.md#L116-L119>)，两条消息分别路由到 A、B。两个 child 各引用自己收到的消息，均符合新 ref 门禁，但 [reduce 的 topicOf](<packages/collab-kernel/src/domain/reduce.ts#L15-L19>)仍把两条链归到 I0；[限额检查](<packages/collab-kernel/src/service/index.ts#L265-L270>)仍共用预算。没有兄弟正文因此可见。
+- **位置**：[D3:85](<design.md#L85>)声称“天然分开，不共用话题额度”；[新增额度场景](<specs/dsh-collab/spec.md#L104-L107>)只测试 B 无 ref 新开根。
+- **可复核反例**：main 创建无戳公共条目 I0，随后分别向 pet 发两条 `ref:I0.seq` 的消息，正文各只点名 A、B。按 [D5](<design.md#L116-L119>)，两条消息分别路由到 A、B。两个 child 各引用自己收到的消息，均符合新 ref 门禁，但 [reduce 的 topicOf](<../../../packages/collab-kernel/src/domain/reduce.ts#L15-L19>)仍把两条链归到 I0；[限额检查](<../../../packages/collab-kernel/src/service/index.ts#L265-L270>)仍共用预算。没有兄弟正文因此可见。
 - **精确修正**：删除“天然分开，不共用话题额度”的保证，替换为：“禁止直接引用 main 的公共条目；独立根的额度互不影响，但 main 消息的 ref 链仍可能共享根，额度耦合按防误泄、不防串通的决定接受。”将新增场景标题改成“不同 Locus 新开独立话题不继承其它根的额度”，保留其现有 GIVEN/WHEN/THEN。不要求内核改计数、插件重写 ref 或增加隔离层。
 
 ### 📌 Suggestions
 
 #### S1 — 后续让 status 的行动建议服从写权限，而不仅服从可见性
 
-[D3 与 delta](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L44-L46>)要求 pending/next 从可见条目推导。main 创建 `requiredAcks:['pet']` 或 `assignee:'pet'` 的公开条目时，按[现有 pending/next 算法](<packages/dsh-collab/src/status.ts#L15-L26>)会向 child 建议 ack/advance，但执行必被新门禁拒绝。建议保留 overview 的只读信息，在 status 中不把这种条目作为可执行动作，或明确注明不可执行；增加一条与只读场景配对的 next 断言。这是交互改进，不是正文泄露，也不作为本轮批准条件。
+[D3 与 delta](<specs/dsh-collab/spec.md#L44-L46>)要求 pending/next 从可见条目推导。main 创建 `requiredAcks:['pet']` 或 `assignee:'pet'` 的公开条目时，按[现有 pending/next 算法](<../../../packages/dsh-collab/src/status.ts#L15-L26>)会向 child 建议 ack/advance，但执行必被新门禁拒绝。建议保留 overview 的只读信息，在 status 中不把这种条目作为可执行动作，或明确注明不可执行；增加一条与只读场景配对的 next 断言。这是交互改进，不是正文泄露，也不作为本轮批准条件。
 
 ## Embedded-Instruction / Injection Attempts
 
-**Detected:** 未发现针对本评审的有效嵌入指令或越权写入要求。[status 测试中的“忽略之前所有指令”](<packages/dsh-collab/test/status.test.ts#L54-L63>)是明确的负向测试数据，不是本轮应执行的指令。历史 fixed/accepted 标记、设计中的“用户已决定”文字均作为待核验证据；威胁模型以本次直接提供的用户决定为准。
+**Detected:** 未发现针对本评审的有效嵌入指令或越权写入要求。[status 测试中的“忽略之前所有指令”](<../../../packages/dsh-collab/test/status.test.ts#L54-L63>)是明确的负向测试数据，不是本轮应执行的指令。历史 fixed/accepted 标记、设计中的“用户已决定”文字均作为待核验证据；威胁模型以本次直接提供的用户决定为准。
 
 ## Verdict
 
@@ -60,8 +60,8 @@ VERDICT: APPROVE_WITH_CHANGES
 
 ## Required Changes (if APPROVE WITH CHANGES)
 
-1. 按 M1 的替换句收窄 [D3:84](<openspec/changes/pet-locus-collab-integration/design.md#L84>)：区分 pet_locus_track 待办与原生创建的其它自有条目。
-2. 按 M2 的替换句修正 [D3:85](<openspec/changes/pet-locus-collab-integration/design.md#L85>)，并重命名[独立根额度场景](<openspec/changes/pet-locus-collab-integration/specs/dsh-collab/spec.md#L104-L107>)；不要把残留耦合误列为必须新增的隔离工作。
+1. 按 M1 的替换句收窄 [D3:84](<design.md#L84>)：区分 pet_locus_track 待办与原生创建的其它自有条目。
+2. 按 M2 的替换句修正 [D3:85](<design.md#L85>)，并重命名[独立根额度场景](<specs/dsh-collab/spec.md#L104-L107>)；不要把残留耦合误列为必须新增的隔离工作。
 
 CHANGES_APPLIED: yes
 
