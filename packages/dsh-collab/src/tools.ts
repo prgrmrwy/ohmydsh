@@ -4,6 +4,7 @@ import { CollabError, type CommandContext, type CollabService } from 'collab-ker
 import type { SessionAccess } from './session-provider.js'
 import type { CollabHost } from './host.js'
 import { collabStatus } from './status.js'
+import { prepareWrite, stampedRead, type WriteOp } from './stamp.js'
 const S = { type: 'string' } as const
 const str = { type: 'string', required: true } as const
 const integer = { type: 'integer', required: true } as const
@@ -79,7 +80,7 @@ export const toolSpecs: Record<string, Spec> = {
     parameters: { ...common, itemId: str, kind: { type: 'string', enum: ['charter', 'other', 'request'], required: true }, title: str, body: str, requiredAcks: strings, assignee: S, ref, deciders: optStrings },
     run: (a, s, c) => {
       // Legacy `deciders` is forwarded untyped so pre-change retries hit their receipts; the kernel refuses it otherwise.
-      const input = { itemId: a.itemId, title: a.title, body: a.body, requiredAcks: a.requiredAcks, ...pick(a, 'deciders', 'ref') } as any
+      const input = { itemId: a.itemId, title: a.title, body: a.body, requiredAcks: a.requiredAcks, ...pick(a, 'deciders', 'ref', 'ext') } as any
       if (a.kind === 'request') {
         if (!a.assignee) throw new CollabError('COLLAB_BAD_ARGUMENTS')
         return s.createItem(c, { ...input, kind: 'request', assignee: a.assignee })
@@ -100,7 +101,7 @@ export const toolSpecs: Record<string, Spec> = {
   collab_send_message: {
     description: '发消息；只有需要对方接续时 needsReply=true。接续同一件事时 ref 填相关消息或条目的 seq，另起一件事不填。', kind: 'write',
     parameters: { ...common, to: str, body: str, needsReply: { type: 'boolean' }, ref },
-    run: (a, s, c) => s.sendMessage(c, { to: a.to, body: a.body, needsReply: a.needsReply, ...pick(a, 'ref') }),
+    run: (a, s, c) => s.sendMessage(c, { to: a.to, body: a.body, needsReply: a.needsReply, ...pick(a, 'ref', 'ext') }),
   },
   collab_set_status: {
     description: '更新自己的状态文本，不唤醒他人。', kind: 'write',
@@ -113,6 +114,8 @@ export const toolSpecs: Record<string, Spec> = {
     run: (a, s, c) => s.advanceRequest(c, { itemId: a.itemId, progress: a.progress }),
   },
 }
+/** Member write tools a stamped caller may run; `ext` is set by the plugin, never by the model. */
+const WRITE_OPS: Readonly<Record<string, WriteOp>> = { collab_create_item: 'createItem', collab_revise_item: 'reviseItem', collab_ack_item: 'ackItem', collab_send_message: 'sendMessage', collab_set_status: 'setStatus', collab_advance_request: 'advanceRequest' }
 /** Reserved cmdId: addresses are never reused in a space, so one join per member; retries replay its receipt. */
 export const AUTO_JOIN_CMD_ID = 'dsh-collab:auto-join'
 /**
@@ -181,10 +184,18 @@ export function collabTools(ctx: Context, access: SessionAccess, getHost: () => 
         const caller = access.caller(exec)
         const host = getHost()
         if (!host) throw new CollabError('COLLAB_SERVICE_NOT_READY')
-        const command = host.context(caller, spaceId, typeof object.cmdId === 'string' ? object.cmdId : undefined)
-        const result = spec.kind === 'write'
-          ? await host.command(caller, spaceId, command.cmdId, service => run!(object, service, command))
-          : await host.read(caller, spaceId, service => run!(object, service, command))
+        let result: unknown
+        if (spec.kind === 'write') {
+          // Stamped managed callers: recipients, write-target checks, ext and cmdId namespace (design D3).
+          const op = WRITE_OPS[name]
+          const prepared = op ? await prepareWrite(host, caller, spaceId, object.cmdId, op, object) : { caller, cmdId: object.cmdId as string, input: object }
+          if ('error' in prepared) throw new CollabError(prepared.error)
+          const command = host.context(prepared.caller, spaceId, prepared.cmdId)
+          result = await host.command(prepared.caller, spaceId, command.cmdId, service => run!(prepared.input, service, command))
+        } else {
+          const command = host.context(caller, spaceId)
+          result = await host.read(caller, spaceId, service => (name === 'collab_read' && (object.view === 'overview' || object.view === 'since') ? stampedRead(host, service, command, caller, object.view, object.sinceSeq) : undefined) ?? run!(object, service, command))
+        }
         if (spec.kind === 'read' && !caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
         if (name === 'collab_invite' && access.policy?.memberTrust === true) return { ...JSON.parse(JSON.stringify(result)), autoJoined: await autoJoin(host, access, spaceId, object.recipientSessionId) }
         return JSON.parse(JSON.stringify(result))

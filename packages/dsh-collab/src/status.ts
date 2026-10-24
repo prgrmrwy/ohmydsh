@@ -1,6 +1,7 @@
 import { CollabError, principals, reduce, type CommitRecord, type SpaceState } from 'collab-kernel'
 import type { CollabHost } from './host.js'
 import type { Caller, SessionAccess } from './session-provider.js'
+import { statusState } from './stamp.js'
 
 /** Structural-injection guard for member-supplied identifiers that reach model input. */
 export const SAFE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/
@@ -32,7 +33,7 @@ function pending(state: SpaceState, self: string): Pending {
  * opened, through the kernel's host-index purpose; never opens, writes, wakes
  * or samples presence. Output is restricted to the whitelisted structure.
  */
-export async function collabStatus(host: CollabHost, access: SessionAccess, caller: Pick<Caller, 'channel' | 'address'>, filter?: string) {
+export async function collabStatus(host: CollabHost, access: SessionAccess, caller: Pick<Caller, 'channel' | 'address' | 'stamped'>, filter?: string) {
   const spaces: unknown[] = [], invites: { spaceId: string; invitedBy: string }[] = [], next: Next[] = []
   for (const spaceId of host.openSpaces()) {
     if (!SAFE_ID.test(spaceId) || (filter !== undefined && filter !== spaceId)) continue
@@ -54,7 +55,7 @@ export async function collabStatus(host: CollabHost, access: SessionAccess, call
       continue
     }
     if (me.status !== 'active') continue
-    const p = state.status === 'open' ? pending(state, me.name) : empty()
+    const p = state.status === 'open' ? pending(statusState(caller.stamped, state, me.name), me.name) : empty()
     const purpose = cleanPurpose(state.purpose)
     spaces.push({ spaceId, status: state.status, leader: state.leader, self: me.name, conventionVersion: state.convention.version, conventionSha256: state.convention.sha256, lastSeq: state.lastSeq, ...(purpose === undefined ? {} : { purpose }), pending: p })
     if (state.status !== 'open') continue

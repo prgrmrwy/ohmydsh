@@ -108,3 +108,8 @@ CHANGES_APPLIED: yes
   - **accepted by reviewer**：D3 明确接受 main 消息链共享根的额度耦合；场景标题已收窄，仍保留 A 耗尽自身话题额度、B 无 ref 新开根成功的 GIVEN/WHEN/THEN。
 - **R4-S1（accepted）**：`collab_status` 对带戳调用者只列出能执行的动作；design D3 与 dsh-collab delta 同步，"主会话的条目对子会话只读"场景加了 `pending`/`next` 断言。
   - **accepted by reviewer**：D3 与 delta 一致按写授权过滤 pending/next，并有只读条目反例断言；过滤动作不取消可见只读信息，与其它读取及回复场景不冲突。
+
+## Apply 期间规范修订（2026-10-25）
+
+- **AMD-1 visible 增加同步 lookup**：实施 D4/D5 时发现 `visible(stamp, subject)` 只给消息本身，Pet 无法同步执行 D5 规则 1（沿 ref 链取最近的戳）；若由 Pet 自建异步 seq 索引，`needsReply:false` 的主会话消息不触发投递，窗口期内对目标子会话漏显示。修订为 `visible(stamp, subject, lookup)`，`lookup.recordAt(seq)` 由 dsh-collab 从同一次完整重放的状态同步提供。改动位置：design D3 接口说明、D4 visible 说明、D5 末句；dsh-collab delta 要求文字一句；新增场景"visible 可沿 ref 链查前序记录"（test-plan 新增 `stamp-20`）。不改可见性规则本身、不改投影与授权。
+  - **accepted by reviewer**：仅补齐 ref 链判定所需的同次完整重放同步查询，现有状态可实现；不改可见性、投影或写授权规则，新增无投递消息场景可机械断言，lookup 仅供可信本地接入方判定、不向子会话输出，未扩大误泄边界。

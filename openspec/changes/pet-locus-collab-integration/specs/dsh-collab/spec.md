@@ -32,7 +32,7 @@
 
 ### Requirement: 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间
 
-接入方 `resolveCaller` 返回的 `stamp` SHALL 是规范 JSON 不超过 1024 字节的普通对象；不满足时该解析结果视为 `undefined`。戳在入口随地址一起捕获，调用级守卫 SHALL 要求地址与戳的规范 JSON 都不变。接入方 adapter MAY 提供同步方法 `visible(stamp, subject): boolean`，`subject` 为 `{kind:'item', item}`、`{kind:'message', message}` 或 `{kind:'statusText', name}`；抛错视为不可见。以下规则只对"带戳的托管调用者"生效；普通调用者与无戳托管调用者不受影响。
+接入方 `resolveCaller` 返回的 `stamp` SHALL 是规范 JSON 不超过 1024 字节的普通对象；不满足时该解析结果视为 `undefined`。戳在入口随地址一起捕获，调用级守卫 SHALL 要求地址与戳的规范 JSON 都不变。接入方 adapter MAY 提供同步方法 `visible(stamp, subject, lookup): boolean`，`subject` 为 `{kind:'item', item}`、`{kind:'message', message}` 或 `{kind:'statusText', name}`；`lookup.recordAt(seq)` SHALL 由插件从本次读取或写入检查所用的完整重放状态同步提供，返回该 seq 处创建的条目或发送的消息（形如 `{kind:'item', item}` 或 `{kind:'message', message}`），不存在时为 `undefined`；抛错视为不可见。以下规则只对"带戳的托管调用者"生效；普通调用者与无戳托管调用者不受影响。
 
 **写入盖戳**：`collab_create_item` 与 `collab_send_message` SHALL 把戳作为 `ext` 交给内核；工具仍 MUST NOT 接受模型传入的 `ext`。
 
@@ -133,6 +133,11 @@
 #### Scenario: 超长或非对象的戳视为未解析
 - **WHEN** 接入方为 L 返回 1025 字节的戳，或戳为数组
 - **THEN** L 调用任一协作工具返回 `COLLAB_CALLER_UNAVAILABLE`
+
+#### Scenario: visible 可沿 ref 链查前序记录
+- **GIVEN** 戳 a 写消息 Ma（seq 5）；`main` 发给 `pet` 的消息 M（seq 9，`needsReply:false`，`ref: 5`）；接入方 `visible` 对作者为 `main`、`to` 为 `pet` 的消息，经 `lookup.recordAt` 沿 ref 找到最近的戳并与调用者戳比较
+- **WHEN** 戳 a 的 L 与戳 b 的 M2 分别调用 `collab_read since 0`
+- **THEN** L 的结果含 M，M2 的结果不含 M；`visible` 被调用时 `lookup.recordAt(5)` 返回 Ma
 
 #### Scenario: 不提供 visible 时不投影也不做写授权
 - **GIVEN** 接入方未实现 `visible`

@@ -70,7 +70,7 @@ Pet 随后以 manager 身份 `admit({name:'pet', address:'pet:<parentSessionId>'
 
 `IntegratorAdapter` 增加：
 - `resolveCaller(agent)` 返回值从 `string | undefined` 扩为 `string | { address: string; stamp?: Ext } | undefined`。`stamp` 是 ≤1 KiB 的 JSON 对象，由接入方从执行会话派生，模型不可指定。
-- `visible?(stamp, subject): boolean`，同步、只查内存。`subject` 不是提交记录，而是**业务主体**：`{kind:'item', item}`、`{kind:'message', message}`、`{kind:'statusText', name}`。结构事件（空间、成员、Leader、manager、dispatch、completion）不经此判断。
+- `visible?(stamp, subject, lookup): boolean`，同步、只查内存。`lookup.recordAt(seq)` 由 dsh-collab 从已完整重放的状态提供，返回该 seq 处的业务主体（`{kind:'item', item}` 或 `{kind:'message', message}`）或 `undefined`，供接入方沿 `ref` 链判断（实施中发现：只给消息本身无法执行 D5 规则 1，接入方自建异步索引会让未触发投递的消息在窗口期内漏显示）。`subject` 不是提交记录，而是**业务主体**：`{kind:'item', item}`、`{kind:'message', message}`、`{kind:'statusText', name}`。结构事件（空间、成员、Leader、manager、dispatch、completion）不经此判断。
 - `recipients?: readonly string[]`：带戳调用者允许的 `to` 集合。
 
 dsh-collab 对带戳的托管调用者的行为：
@@ -104,7 +104,7 @@ dsh-collab 对带戳的托管调用者的行为：
 - **路由表** = 现有 Locus 绑定表。内存投影 `sessionId → {parentSessionId, locusId, generation}`，只含 active、当前代的 child；在绑定事务提交后与启动冷读后更新。
 - **`resolveCaller(agent)`**：agent 是投影中的 child、是 Host 当前对象、且其主会话空间已建立 → `{ address: 'pet:<parentSessionId>', stamp: { pet: { locusId } } }`；否则 `undefined`。所有子会话解析到同一地址，戳不同。
 - **`holds`、`claim`**：`address` 形如 `pet:<parentSessionId>` 且该主会话有空间记录。
-- **`visible(stamp, subject)`**（纯函数，按主体）：
+- **`visible(stamp, subject, lookup)`**（纯函数，按主体；沿 ref 链只用 `lookup.recordAt`，Pet 不维护自己的 seq 索引）：
   - `item`：作者为 `main`，或 `item.ext.pet.locusId === stamp.pet.locusId`。主会话修订子会话条目后作者不变，可见性不变。
   - `message`：`message.ext.pet.locusId === stamp.pet.locusId`；或作者为 `main` 且 `to === 'pet'` 且 D5 路由结果恰为本 locus。**无法路由的消息对任何 child 不可见**，只在管理面可见（评审 C1）。
   - `statusText`：只对 `main` 的状态文本可见；`pet` 的状态文本（任一子会话写的）对所有子会话不可见，`collab_set_status` 因此没有传话用途（评审 C1）。
@@ -118,7 +118,7 @@ dsh-collab 对带戳的托管调用者的行为：
 2. **正文点名**：正文中**恰好一个** `locus-<8 位 hex>` 不透明名且对应本主会话下的 locus（含已退役）；多个、零个或不属于本主会话则不匹配。子会话发消息的 `to` 只能是 `main`，所以本规则只对主会话发的消息起作用，子会话不能借点名把消息转给兄弟。
 3. **无法路由**：登记为 `unroutable`，管理面可见，对任何 child 不可见。
 
-request 终态通知只用规则 1（request 本身带戳）。路由是纯函数，`visible` 与 `deliver` 共用。
+request 终态通知只用规则 1（request 本身带戳）。路由是纯函数 `route(message, recordAt)`，`visible` 与 `deliver` 共用；`visible` 中的 `recordAt` 来自 dsh-collab，`deliver` 中的 `recordAt` 由 Pet 从 `readManaged` 的结果构建。
 
 ### D6 待办 = request；工具面
 

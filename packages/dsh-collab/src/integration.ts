@@ -1,8 +1,9 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CollabError, principals, reduce, type CommitRecord, type SpaceState, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence, type Progress } from 'collab-kernel'
+import { CollabError, principals, reduce, type CommitRecord, type SpaceState, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence, type Progress, type Ext } from 'collab-kernel'
 import type { CollabHost } from './host.js'
 import type { Caller, SessionAccess } from './session-provider.js'
 import { safeError } from './tools.js'
+import { prepareWrite, stampedRead, stampKey, type StampView, type Subject } from './stamp.js'
 
 /** Kernel mode format; the channel prefix is enforced per handle. */
 const MODE = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
@@ -18,8 +19,13 @@ export interface IntegratorAdapter {
   claim(address: string): boolean | Promise<boolean>
   presence(target: ManagedTarget): Presence | Promise<Presence>
   deliver(target: ManagedTarget, pointer: Pointer): void | Promise<void>
-  resolveCaller(agent: Agent): string | undefined
+  /** Address, or address plus a stamp derived from the executing session (never from the model). */
+  resolveCaller(agent: Agent): string | { address: string; stamp?: Ext } | undefined
   holds(address: string): boolean
+  /** Synchronous, in-memory: may a stamped caller see this subject? Enables projection and write-target checks. */
+  visible?(stamp: Ext, subject: Subject): boolean
+  /** Allowed `to` values for stamped callers' messages. */
+  recipients?: readonly string[]
   /** Delivery modes (`<channel>:<name>`) this integrator's members accept. */
   modes?: readonly string[]
 }
@@ -74,7 +80,7 @@ export function safePointer(pointer: Pointer): Pointer {
 }
 
 interface Attachment { channel: string; adapter: IntegratorAdapter; epoch: number }
-export interface ManagedClaim { channel: string; address: string; epoch: number }
+export interface ManagedClaim { channel: string; address: string; epoch: number; stamped?: StampView }
 
 /**
  * Host-declared integrator channels, their current attachment and attach
@@ -99,11 +105,27 @@ export class Integrations {
   claims(agent: Agent): ManagedClaim[] {
     const out: ManagedClaim[] = []
     for (const owner of this.attached.values()) {
-      let address: unknown
-      try { address = owner.adapter.resolveCaller(agent) } catch { address = undefined }
-      if (typeof address === 'string' && address.length > 0) out.push({ channel: owner.channel, address, epoch: owner.epoch })
+      let resolved: unknown
+      try { resolved = owner.adapter.resolveCaller(agent) } catch { resolved = undefined }
+      const claim = this.claimOf(owner, resolved)
+      if (claim) out.push(claim)
     }
     return out
+  }
+  /** A string address, or `{address, stamp?}` whose stamp is a plain JSON object of at most 1 KiB; anything else is no claim. */
+  private claimOf(owner: Attachment, resolved: unknown): ManagedClaim | undefined {
+    if (typeof resolved === 'string') return resolved.length > 0 ? { channel: owner.channel, address: resolved, epoch: owner.epoch } : undefined
+    if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved)) return
+    const { address, stamp } = resolved as { address?: unknown; stamp?: unknown }
+    if (typeof address !== 'string' || !address.length) return
+    if (stamp === undefined) return { channel: owner.channel, address, epoch: owner.epoch }
+    const key = stampKey(stamp)
+    if (key === undefined) return
+    const value = JSON.parse(key) as Ext
+    const adapter = owner.adapter
+    const visible = typeof adapter.visible === 'function' ? (subject: Subject) => adapter.visible!(structuredClone(value), structuredClone(subject)) === true : undefined
+    const recipients = Array.isArray(adapter.recipients) ? adapter.recipients.filter((r): r is string => typeof r === 'string') : []
+    return { channel: owner.channel, address, epoch: owner.epoch, stamped: { stamp: value, key, recipients, ...(visible ? { visible } : {}) } }
   }
   supportsSessionMode(mode: string) { return this.modes.has(mode) }
   sessionMode(mode: string) { return this.modes.get(mode)?.handler }
@@ -181,9 +203,11 @@ export class Integrations {
         if (!run || !input || typeof input !== 'object' || Array.isArray(input)) return { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
         // A handle may only use its own channel's delivery modes.
         if (name === 'sendMessage' && input.mode !== undefined && (typeof input.mode !== 'string' || !input.mode.startsWith(`${owner.channel}:`))) return { error: { code: 'COLLAB_BAD_MODE' } }
-        return asCaller(exec, (host, caller) => {
-          const ctx = host.context(caller, spaceId, cmdId)
-          return host.command(ctx, spaceId, cmdId, service => run(service, ctx, input))
+        return asCaller(exec, async (host, caller) => {
+          const prepared = await prepareWrite(host, caller, spaceId, cmdId, name as MemberOp, input)
+          if ('error' in prepared) throw new CollabError(prepared.error)
+          const ctx = host.context(prepared.caller, spaceId, prepared.cmdId)
+          return host.command(ctx, spaceId, prepared.cmdId, service => run(service, ctx, prepared.input))
         })
       },
       read: async (exec, spaceId, view, sinceSeq = 0) => {
@@ -191,7 +215,7 @@ export class Integrations {
         if (view !== 'overview' && view !== 'since') return { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
         return asCaller(exec, async (host, caller) => {
           const ctx = host.context(caller, spaceId)
-          const value = await host.read<unknown>(ctx, spaceId, service => view === 'overview' ? service.overview(ctx) : service.readSince(ctx, sinceSeq))
+          const value = await host.read<unknown>(ctx, spaceId, service => stampedRead(host, service, ctx, caller, view, sinceSeq) ?? (view === 'overview' ? service.overview(ctx) : service.readSince(ctx, sinceSeq)))
           if (!caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
           return JSON.parse(JSON.stringify(value))
         })

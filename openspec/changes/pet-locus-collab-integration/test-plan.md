@@ -1,6 +1,6 @@
 ## Test Plan
 
-本账本由脚本从四份 delta 的 `#### Scenario:` 逐条生成，共 105 个场景，无遗漏。已有测试按场景名命中的沿用原测试名（38 条）；其余为新测试（67 条）。
+本账本由脚本从四份 delta 的 `#### Scenario:` 逐条生成，共 106 个场景，无遗漏。已有测试按场景名命中的沿用原测试名（38 条）；其余为新测试（68 条）。
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
@@ -40,25 +40,26 @@
 | specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 中断后重试补齐 | packages/dsh-collab/test/establish.test.ts | `establish-02：中断后重试补齐` | 🟢 green |
 | specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 托管成员不能建立 | packages/dsh-collab/test/establish.test.ts | `establish-03：托管成员不能建立` | 🟢 green |
 | specs/dsh-collab/spec.md → 接入方以真实普通会话建立空间并接入自己 | 非 Leader 不能借此授权 | packages/dsh-collab/test/establish.test.ts | `establish-04：非 Leader 不能借此授权` | 🟢 green |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 托管调用者写入带戳且 cmdId 带命名空间 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-01：托管调用者写入带戳且 cmdId 带命名空间` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同戳的同名 cmdId 互不干扰 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-02：不同戳的同名 cmdId 互不干扰` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 兄弟条目对读取不可见 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-03：兄弟条目对读取不可见` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 公开记录引用隐藏记录仍能重放 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-04：公开记录引用隐藏记录仍能重放` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 同一提交中的 dispatch 不泄露兄弟消息 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-05：同一提交中的 dispatch 不泄露兄弟消息` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 状态文本不能传话 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-06：状态文本不能传话` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 隐藏条目的标识不经任何字段泄露 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-07：隐藏条目的标识不经任何字段泄露` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不能借主会话的公开条目传话 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-08：不能借主会话的公开条目传话` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 可以修订自己的条目 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-09：可以修订自己的条目` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 主会话的条目对子会话只读 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-10：主会话的条目对子会话只读` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 可以引用主会话发给自己的消息 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-11：可以引用主会话发给自己的消息` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同 Locus 新开独立话题不继承其它根的额度 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-12：不同 Locus 新开独立话题不继承其它根的额度` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 成员计数不进投影 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-13：成员计数不进投影` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不能修改、确认或引用兄弟条目 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-14：不能修改、确认或引用兄弟条目` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 无权调用者拿不到旧收据 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-15：无权调用者拿不到旧收据` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 带戳调用者只能发给 main | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-16：带戳调用者只能发给 main` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 戳在途变化时调用失效 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-17：戳在途变化时调用失效` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 超长或非对象的戳视为未解析 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-18：超长或非对象的戳视为未解析` | 🔴 red |
-| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不提供 visible 时不投影也不做写授权 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-19：不提供 visible 时不投影也不做写授权` | 🔴 red |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 托管调用者写入带戳且 cmdId 带命名空间 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-01：托管调用者写入带戳且 cmdId 带命名空间` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同戳的同名 cmdId 互不干扰 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-02：不同戳的同名 cmdId 互不干扰` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 兄弟条目对读取不可见 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-03：兄弟条目对读取不可见` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 公开记录引用隐藏记录仍能重放 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-04：公开记录引用隐藏记录仍能重放` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 同一提交中的 dispatch 不泄露兄弟消息 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-05：同一提交中的 dispatch 不泄露兄弟消息` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 状态文本不能传话 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-06：状态文本不能传话` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 隐藏条目的标识不经任何字段泄露 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-07：隐藏条目的标识不经任何字段泄露` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不能借主会话的公开条目传话 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-08：不能借主会话的公开条目传话` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 可以修订自己的条目 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-09：可以修订自己的条目` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 主会话的条目对子会话只读 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-10：主会话的条目对子会话只读` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 可以引用主会话发给自己的消息 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-11：可以引用主会话发给自己的消息` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不同 Locus 新开独立话题不继承其它根的额度 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-12：不同 Locus 新开独立话题不继承其它根的额度` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 成员计数不进投影 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-13：成员计数不进投影` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不能修改、确认或引用兄弟条目 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-14：不能修改、确认或引用兄弟条目` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 无权调用者拿不到旧收据 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-15：无权调用者拿不到旧收据` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 带戳调用者只能发给 main | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-16：带戳调用者只能发给 main` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 戳在途变化时调用失效 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-17：戳在途变化时调用失效` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 超长或非对象的戳视为未解析 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-18：超长或非对象的戳视为未解析` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | 不提供 visible 时不投影也不做写授权 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-19：不提供 visible 时不投影也不做写授权` | 🟢 green |
+| specs/dsh-collab/spec.md → 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间 | visible 可沿 ref 链查前序记录 | packages/dsh-collab/test/stamp-projection.test.ts | `stamp-20：visible 可沿 ref 链查前序记录` | 🔴 red |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | Leader 授权后接入方接纳成员 | packages/dsh-collab/test/integration.test.ts | `handle-01：Leader 授权后接入方接纳成员` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 未授权空间的响应完全一致 | packages/dsh-collab/test/integration.test.ts | `handle-02：未授权空间的响应完全一致` | 🟢 green（沿用，需随本 change 保持通过） |
 | specs/dsh-collab/spec.md → 接入方经句柄托管成员 | 旧句柄的在途托管命令不提交 | packages/dsh-collab/test/integration.test.ts | `handle-03：旧句柄的在途托管命令不提交` | 🟢 green（沿用，需随本 change 保持通过） |
@@ -121,5 +122,5 @@
 - **投影与授权测试**（`stamp-projection.test.ts`）：用真实 `Integrations` + 内存 kernel，接入方 adapter 是测试替身（只提供 `resolveCaller`/`visible`/`recipients`），对 `overview`/`status` 的断言用完整 JSON 序列化比对。
 - **Pet 侧新测试夹具**：与 collab-kernel 的连接一律经真实 `Integrations` 句柄，不手写 kernel 替身（`docs/architecture/dsh-plugin-integration-pitfalls.md` 第 7 节）。
 - **接缝门 3.1**：`establish-00` 位于 `packages/dsh-collab/test/controller-seams.test.mjs`（`npm run test:components -- --controller`），用真实 sessionController 创建的会话、模型空闲无轮次时作 exec，经句柄提交与读取均成功、未触发模型请求。
-- **额外测试**：`handle-07`（disposeRequest 幂等、actor、未授权与 dispose 后错误）不对应独立场景，按 anvil 允许保留。
+- **额外测试**：`stamp-h1`（句柄写入合并戳且戳优先、带附加事实的条目对子会话只读）；`handle-07`（disposeRequest 幂等、actor、未授权与 dispose 后错误）不对应独立场景，按 anvil 允许保留。
 - **真实 Host 验收**（tasks 末组）不进本账本，属于 verify 的人工证据。

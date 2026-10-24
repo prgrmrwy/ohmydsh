@@ -26,13 +26,13 @@
 
 ## 4. dsh-collab：戳、cmdId 命名空间、写目标授权、可见投影
 
-- [ ] 4.1 Write failing test: `stamp-01..02`（写入带戳且 cmdId 带命名空间、不同戳的同名 cmdId 互不干扰）、`stamp-17..18`（戳在途变化失效、超长或非对象戳视为未解析）
-- [ ] 4.2 Implement: `resolveCaller` 返回 `{address, stamp}`；入口捕获戳；守卫比较戳；写入 `ext = stamp`；写命令 cmdId 加 `sha256(stamp)` 前缀，使 4.1 通过
-- [ ] 4.3 Write failing test: `stamp-08..12`（不能借公开条目传话、可以修订自己的条目、主会话条目只读、可以引用主会话发给自己的消息、不同 Locus 新开独立话题）、`stamp-14..16`（不能修改确认引用兄弟条目、无权调用者拿不到旧收据、只能发给 main）
-- [ ] 4.4 Implement: 写目标授权（revise/ack/advance 目标戳相等；ref 只许自己的记录或 main→自己的消息；`recipients`），入口检查并随守卫重验，收据路径同样受检，使 4.3 通过
-- [ ] 4.5 Write failing test: `stamp-03..07`（兄弟条目不可见、公开记录引用隐藏记录仍能重放、同一提交中的 dispatch 不泄露、状态文本不能传话、隐藏条目标识不经任何字段泄露）、`stamp-13`（成员计数不进投影）、`stamp-19`（不提供 visible 时不投影也不做写授权）
-- [ ] 4.6 Implement: 完整重放后投影：`overview` 白名单（含 members 字段白名单）、`since` 事件过滤保留 seq/at、`collab_status` 按投影推导且只列可执行动作，使 4.5 通过
-- [ ] 4.7 Refactor；dsh-collab 全套通过；工具 schema 体积测试仍在预算内（工具定义不变）；collab-kernel、dsh-collab typecheck/test/build 通过
+- [x] 4.1 Write failing test: `stamp-01..02`（写入带戳且 cmdId 带命名空间、不同戳的同名 cmdId 互不干扰）、`stamp-17..18`（戳在途变化失效、超长或非对象戳视为未解析）
+- [x] 4.2 Implement: `resolveCaller` 返回 `{address, stamp}`；入口捕获戳；守卫比较戳；写入 `ext = stamp`；写命令 cmdId 加 `sha256(stamp)` 前缀，使 4.1 通过
+- [x] 4.3 Write failing test: `stamp-08..12`（不能借公开条目传话、可以修订自己的条目、主会话条目只读、可以引用主会话发给自己的消息、不同 Locus 新开独立话题）、`stamp-14..16`（不能修改确认引用兄弟条目、无权调用者拿不到旧收据、只能发给 main）
+- [x] 4.4 Implement: 写目标授权（revise/ack/advance 目标戳相等；ref 只许自己的记录或 main→自己的消息；`recipients`），入口检查并随守卫重验，收据路径同样受检，使 4.3 通过
+- [x] 4.5 Write failing test: `stamp-03..07`（兄弟条目不可见、公开记录引用隐藏记录仍能重放、同一提交中的 dispatch 不泄露、状态文本不能传话、隐藏条目标识不经任何字段泄露）、`stamp-13`（成员计数不进投影）、`stamp-19`（不提供 visible 时不投影也不做写授权）
+- [x] 4.6 Implement: 完整重放后投影：`overview` 白名单（含 members 字段白名单）、`since` 事件过滤保留 seq/at、`collab_status` 按投影推导且只列可执行动作，使 4.5 通过
+- [x] 4.7 Refactor；dsh-collab 全套通过；工具 schema 体积测试仍在预算内（工具定义不变）；collab-kernel、dsh-collab typecheck/test/build 通过
 
 ## 5. Pet：`TodoBackend` 接缝（行为不变）
 
