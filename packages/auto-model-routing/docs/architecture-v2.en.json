@@ -1,0 +1,26 @@
+{
+ "schema_version":1,"diagram_type":"architecture",
+ "meta":{"title":"AUTO resource allocation","output":".archify/architecture-auto-routing-20261026-014646/auto-routing.html","locale":"en","quality_profile":"showcase","repository":{"url":"git@github.com:prgrmrwy/ohmydsh.git","revision":"79f9eab467047e054a2d66f8bce060834a261a2a","link_mode":"local-only"}},
+ "components":[
+ {"id":"turn","type":"frontend","label":"AUTO user turn","sublabel":"Main model stays fixed","pos":[40,80],"size":[190,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":68,"end_line":88}]},
+ {"id":"judge","type":"cloud","label":"Selected Jev service","sublabel":"Depth / capability independently","pos":[360,80],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/decision-service.ts","line":1,"end_line":23},{"path":"packages/auto-model-routing/src/policy-host.ts","line":81,"end_line":88}]},
+ {"id":"route","type":"backend","label":"Validated allocation","sublabel":"Catalog / allowlist / effort cap","pos":[710,80],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":122,"end_line":150}]},
+ {"id":"child","type":"backend","label":"Fresh child binding","sublabel":"Exact child identity; explicit wins","pos":[360,270],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":94,"end_line":132}]},
+ {"id":"request","type":"backend","label":"Official model request","sublabel":"Main effort / child full route","pos":[710,270],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":138,"end_line":160}]},
+ {"id":"persist","type":"database","label":"Persisted child route","sublabel":"Resume keeps initial allocation","pos":[40,270],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":132,"end_line":160}]},
+ {"id":"evidence","type":"backend","label":"Request match evidence","sublabel":"Applied only when config matches","pos":[710,460],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":178,"end_line":201}]},
+ {"id":"feedback","type":"frontend","label":"Decision and reply feedback","sublabel":"Observe allocation; never auto-train","pos":[360,460],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":162,"end_line":174}]},
+ {"id":"snapshot","type":"database","label":"Bound decision snapshot","sublabel":"Metadata / IDs; no task text","pos":[40,460],"size":[220,68],"sources":[{"path":"packages/auto-model-routing/src/policy-host.ts","line":167,"end_line":172}]}
+ ],
+ "connections":[
+ {"id":"main-judge","from":"turn","to":"judge","label":"depth"},
+ {"id":"judge-route","from":"judge","to":"route","label":"decision"},
+ {"id":"child-judge","from":"child","to":"judge","label":"task","fromSide":"top","toSide":"bottom"},
+ {"id":"child-store","from":"child","to":"persist","label":"bind"},
+ {"id":"route-request","from":"route","to":"request","label":"apply"},
+ {"id":"request-match","from":"request","to":"evidence","label":"header"},
+ {"id":"match-feedback","from":"evidence","to":"feedback","label":"matched"},
+ {"id":"feedback-snapshot","from":"feedback","to":"snapshot","label":"bind reply"}
+ ],
+ "cards":[{"dot":"cyan","title":"Decision services","items":["OpenRouter / TypeSafe / Concentrate / custom System One","No automatic service fallback or retry"]},{"dot":"amber","title":"Boundaries","items":["MANUAL: no new judgments; explicit constraints preserved","Fork unsupported; applied is not task success"]}]
+}

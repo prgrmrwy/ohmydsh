@@ -64,30 +64,7 @@ Preset model menus expose documented versions, not live availability guarantees.
 ## Architecture
 <!-- section: architecture -->
 
-```mermaid
-flowchart TD
-    UI[DSH Web: AUTO / MANUAL] --> Main[Main user turn]
-    UI --> Child[Official fresh child creation]
-    Main --> Depth[Jev: depth judgment]
-    Child --> Binding[Bind exact child identity]
-    Binding --> Both[Jev: capability + depth]
-    Services[Selected service: OpenRouter / TypeSafe / Concentrate / Custom] -.-> Depth
-    Services -.-> Both
-    Depth --> MainRoute[Keep main model; adjust supported effort]
-    Both --> Validate[Validate catalog, allowlist and effort cap]
-    Validate --> ChildRoute[Apply child provider / model / effort]
-    MainRoute --> Header[Actual request/header]
-    ChildRoute --> Header
-    Header --> Match{Configuration matches?}
-    Match -->|Yes| Applied[Applied evidence + decision display]
-    Match -->|No| Failed[Visible failure; not applied]
-    ChildRoute --> Store[(Persist exact child route)]
-    Store --> Resume[Resume initial route; no new judgment]
-    Applied --> Reply[Main assistant reply]
-    Reply --> Snapshot[(Immutable decision snapshot)]
-    Reply --> Feedback[Allocation feedback / change / clear]
-    Feedback --> Events[(Timestamped feedback events)]
-```
+![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
 
 Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. The diagram shows the AUTO paths; MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 

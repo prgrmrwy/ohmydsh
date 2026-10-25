@@ -64,30 +64,7 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 ## 架构
 <!-- section: architecture -->
 
-```mermaid
-flowchart TD
-    UI[DSH Web: AUTO / MANUAL] --> Main[主用户回合]
-    UI --> Child[官方 fresh 子任务创建]
-    Main --> Depth[Jev: 判断投入 depth]
-    Child --> Binding[绑定精确 child 身份]
-    Binding --> Both[Jev: 能力与投入独立判断]
-    Services[所选服务: OpenRouter / TypeSafe / Concentrate / 自定义] -.-> Depth
-    Services -.-> Both
-    Depth --> MainRoute[保持主模型; 按支持范围调整 effort]
-    Both --> Validate[校验目录 / 允许列表 / effort 上限]
-    Validate --> ChildRoute[应用子 provider / model / effort]
-    MainRoute --> Header[实际 request/header]
-    ChildRoute --> Header
-    Header --> Match{配置是否匹配?}
-    Match -->|是| Applied[已应用证据与决策展示]
-    Match -->|否| Failed[可见失败; 不标已应用]
-    ChildRoute --> Store[(持久化精确子路由)]
-    Store --> Resume[恢复初始路线; 不重判]
-    Applied --> Reply[主助手回复]
-    Reply --> Snapshot[(不可变决策快照)]
-    Reply --> Feedback[分配反馈 / 修改 / 撤销]
-    Feedback --> Events[(带时间的反馈事件)]
-```
+![AUTO 架构：独立判断、请求校验与分配反馈](docs/architecture-v2.zh.svg)
 
 主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。图示为 AUTO 路径，MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
