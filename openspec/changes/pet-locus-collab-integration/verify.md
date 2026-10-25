@@ -54,12 +54,12 @@ All package results were re-run by the lead independently of the teammates' repo
 
 ### Change Delivery
 - Commits on `main` (rebased onto concurrent unrelated work, so this is a list rather than a range): `d5074b2e5` (first plan), `1561d9518` (rewritten plan, round 4), `25339e0ec`, `a9533f227`, `7b2eb9f5b`, `26e7714d7`, `643be2fb2`, `09d482f15`, `803bcddae`, `d35ef4bc0`, `6bbb77701`, `505d01a9a`, `4aa9fa254`, `d7be3a7cc`, `ced93d049`, `3081dc86e`, `7ca04ffc8`, `b52623af3`, `22b5d32cd`, `4bcd19200`, plus the commit that adds this file. Not pushed.
-- Private overlay (`inner-ohmydsh`): one commit adds `managedChannels: [pet-locus]` to `patches/dsh-collab-local.yml`. Not pushed.
+- Private overlay (`inner-ohmydsh`): first added `managedChannels` there, then (user decision) removed the whole `dsh-collab-local` entry including the historical Pet main-session deny list, which conflicted with the new model. dsh-collab config now lives in the public patch `dsh-collab-config`. Not pushed.
 - Deployed to `~/.dsh` and running on the user's Host.
 
 ### Known limitations (accepted by design, not defects)
 - Pet's inbound registrations, including unroutable messages, are kept in memory only and are cleared on Host restart (D4: not persisted in this change).
-- Locus spaces exist only for main sessions that have been loaded since deployment (D2: no session is woken to create a space).
+- Locus spaces exist only for main sessions that have been loaded since deployment (D2: no session is woken to create a space). Main sessions that were on the removed deny list get their space on their next load after the user restarts the Host.
 - Sibling isolation prevents accidental leaks, not collusion (user decision after review round 3).
 - Inquiry migration, cross-machine spaces, and removal of sibling-direct inquiry in `pet-locus-independent-agent-inquiries` are out of scope and recorded as follow-ups.
 

@@ -103,7 +103,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 已有独立会话经邀请共享协作台账与下一回合通知
-    note: '自研，spec dsh-collab。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠话题上限/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。memberTrust默认true：邀请后代为join、唤醒说明为原有权限内直接承接request的常设授权，false恢复手动join。只由needsReply/邀请/request终态唤醒，ref话题限20条；约定v3。managedChannels（默认空）供接入方经dshCollab服务托管成员，需Leader按空间allow_manager；本机经私有 overlay 声明 pet-locus，供 Pet Locus 代理成员接入（change pet-locus-collab-integration：子会话直接用 8 个 collab_*，托管调用者带戳、按白名单投影、只能写自己的记录）。11个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；本机 dataDir 等配置由私有 overlay 的 mergeConfig 补丁提供（2026-10-20 用户授权日常启用）。'
+    note: '自研，spec dsh-collab。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠话题上限/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。memberTrust默认true：邀请后代为join、唤醒说明为原有权限内直接承接request的常设授权，false恢复手动join。只由needsReply/邀请/request终态唤醒，ref话题限20条；约定v3。managedChannels 由 patch dsh-collab-config 声明 pet-locus，供 Pet Locus 代理成员接入（change pet-locus-collab-integration）。11个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账（2026-10-20 用户授权日常启用）。'
     buildInputs:
       - packages/collab-kernel/src
       - packages/collab-kernel/package.json
@@ -337,6 +337,13 @@ customizations:
     enabled: true
     brief: OpenCode Go 注入 x-opencode-session(修复 400 MissingSessionID;仅作用于 opencode.ai)
     note: '第三方 https://github.com/beihzb/dsh-opencode-session-header(MIT;非官方社区插件,0.1.0 为目前唯一版本、新仓单提交),修 OpenCode Go 自 2026-09-05 起强制 x-opencode-session 头导致的 400 MissingSessionID;官方适配(discussions #5495)合入后移除。信任面(2026-09-09 通读 npm 0.1.0 的 lib/index.js,262 行,零运行时依赖):在 Host 进程全局 patch fetch,仅当请求 host 命中白名单(默认 opencode.ai 及子域)才注入该头,其余字节不改;无外发网络/子进程/文件写入/凭据读取。开关 $DSH_HOME/plugins/dsh-opencode-session-header.json({"enabled":false} 即关,免重启)。升级复核:逐行复读发布物。移除:enabled:false → dsh build。'
+
+  # 自研插件 dsh-collab 的运行配置：准入方式与 Pet Locus 托管 channel。
+  - id: dsh-collab-config
+    type: patch
+    enabled: true
+    brief: dsh-collab 邀请即授权，并为 Pet Locus 声明托管 channel pet-locus
+    note: '整行覆盖 dsh-collab 的 config（admission invite；managedChannels [pet-locus]），数据目录用插件默认值。原私有 overlay 的 Pet 主会话排除名单（denySessionIds）已于 2026-10-25 移除：它是协作层与 Pet 互不相干时期的隔离补丁，与 Locus 主会话作为空间成员的新模型冲突（change pet-locus-collab-integration）。回滚：enabled:false → dsh build → dsh restart，台账保留。'
 
   # 纯配置调优：经官方 gateway 配置放宽大历史传输时的心跳容忍。
   - id: websocket-heartbeat

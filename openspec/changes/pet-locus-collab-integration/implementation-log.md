@@ -112,3 +112,9 @@
 - 观察项（D8 风险）：本主会话 `collab_status` 会列出 open 待办并建议 `advance_request`；本次验收中主会话未自行受理任何 open 待办（seq8 的 CHANGELOG 待办由所有者放弃、seq10 保持 open），只在所有者受理后的跟进轮中推进 done。样本量小，结论仅为"本次未观察到"。
 
 10.3 真机验收完成。
+
+## 收尾：移除 Pet 主会话排除名单，dsh-collab 配置转公开（2026-10-25，用户决定）
+
+- 背景：私有 overlay 的 `dsh-collab-local` 为 dsh-collab 提供 `denySessionIds`（8 个 10-20 枚举的 Pet 主会话 ID）。它是协作层与 Pet 互不相干时期的隔离补丁，在本 change 后与"Locus 主会话是自己空间的成员"冲突：名单中的主会话不能调用 `collab_*`，Pet 也无法以其身份 `establish`，其下 Locus 登记会返回"协作空间尚未就绪"。验收能通过只因当前主会话不在名单里。
+- 处理（break change，不做兼容）：删除私有 overlay 的 `dsh-collab-local` 条目与 `patches/dsh-collab-local.yml`；公开仓库新增 patch `dsh-collab-config`（`patches/dsh-collab-config.yml`，整行覆盖 config：`admission: invite`、`managedChannels: [pet-locus]`），README 双语补列，dsh-collab note 同步。dsh-collab 的 `denySessionIds` 通用能力不变。
+- 验证：sync 1 change，部署后的 dsh-collab 行只含上述两键、无会话 ID；第二次 sync `no changes`；仓库 `npm test` 447 / 445 pass / 0 fail / 2 skipped，`check:artifacts` 通过。需用户重启后生效：原名单中的主会话下次加载时自动建空间。

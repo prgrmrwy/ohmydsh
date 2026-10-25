@@ -1,0 +1,11 @@
+# dsh-collab 运行配置；通过 manifest + sync 物化，不手改部署副本。
+# 整行覆盖该插件的 config。数据目录用插件默认值 <DSH home>/plugins/dsh-collab。
+# managedChannels 声明 pet-locus，供 Pet Locus 代理成员接入（change pet-locus-collab-integration）。
+# 不设排除名单：Locus 主会话本来就是自己空间的成员（2026-10-25 用户决定移除历史名单）。
+# 修改后须 dsh build + dsh restart 才生效。
+- id: dsh-collab
+  name: dsh-collab
+  config:
+    admission: invite
+    managedChannels:
+      - pet-locus
