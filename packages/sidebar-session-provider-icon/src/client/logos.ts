@@ -123,13 +123,11 @@ export function brandKeyOf(provider: string, model: string): BrandKey | undefine
  * Routes that front other providers and name a model `<upstream>/<model>`
  * (Magpie: `claude/claude-haiku-5-5`, `opencode-go/deepseek-v4.1-flash`).
  *
- * The primary logo already says "this went through a gateway", so the
- * sub-icon is the only place that can name the model vendor. The upstream
- * segment is the *distribution platform* (`opencode-go`, `traex`), i.e. the
- * same layer the primary logo just replaced; reading it first spends the
- * sub-icon restating the platform and drops the vendor (`opencode-go/
- * deepseek-v4.1-flash` then looked like "Magpie + OpenCode" while the model
- * was DeepSeek).
+ * A gateway model id can carry TWO identities after the route: the upstream
+ * segment names the *transit platform* (`opencode-go`), and the model name
+ * after it names the *vendor* (`deepseek`). A direct session collapses both
+ * into the primary logo; behind a gateway the primary is the gateway, so both
+ * remaining layers get their own corner (see `compositeHTML`).
  */
 const GATEWAY_BRANDS: ReadonlySet<BrandKey> = new Set<BrandKey>(['magpie'])
 
@@ -145,22 +143,48 @@ function gatewayModelBrandOf(model: string): BrandKey | undefined {
   return modelBrandOf(model.slice(slash + 1)) ?? providerBrandOf(model.slice(0, slash))
 }
 
-/** Primary logo plus the optional bottom-right model sub-icon. */
+/**
+ * Transit platform behind a gateway: the segment before the slash, read as a
+ * provider route (`opencode-go` → OpenCode). Segments that are no brand
+ * (`auto`, `group`, `custom`) yield nothing — a neutral letter would claim an
+ * identity the route does not have.
+ */
+function gatewayTransitBrandOf(model: string): BrandKey | undefined {
+  const slash = model.indexOf('/')
+  if (slash <= 0) return undefined
+  return providerBrandOf(model.slice(0, slash))
+}
+
+/**
+ * Three layers a badge can express: the primary provider route, the model
+ * vendor in the bottom-right corner, and the gateway's transit platform in the
+ * mirrored bottom-left corner.
+ */
 export interface BadgeBrands {
   readonly primary: BrandKey | undefined
   readonly secondary: BrandKey | undefined
+  readonly transit: BrandKey | undefined
 }
 
 /**
  * Decide single vs composite. A sub-icon appears only when the route is a
  * known brand AND the model is a different known brand; an unknown route has
  * no second identity to show, so it stays a single model-brand logo.
+ *
+ * The transit corner is only filled when the gateway named a platform that is
+ * a brand *and* that differs from the model vendor: `opencode-go/deepseek-*`
+ * earns three layers, while `claude/*` and `codex/*` would otherwise draw the
+ * same mark twice.
  */
 export function badgeBrands(provider: string, model: string): BadgeBrands {
   const route = providerBrandOf(provider)
-  const picked = route !== undefined && GATEWAY_BRANDS.has(route) ? gatewayModelBrandOf(model) : modelBrandOf(model)
-  if (route === undefined) return { primary: picked, secondary: undefined }
-  return { primary: route, secondary: picked !== undefined && picked !== route ? picked : undefined }
+  const isGateway = route !== undefined && GATEWAY_BRANDS.has(route)
+  const picked = isGateway ? gatewayModelBrandOf(model) : modelBrandOf(model)
+  if (route === undefined) return { primary: picked, secondary: undefined, transit: undefined }
+  const secondary = picked !== undefined && picked !== route ? picked : undefined
+  const transitBrand = isGateway ? gatewayTransitBrandOf(model) : undefined
+  const transit = transitBrand !== undefined && transitBrand !== route && transitBrand !== secondary ? transitBrand : undefined
+  return { primary: route, secondary, transit }
 }
 
 const LOGOS: Record<BrandKey, string> = {
@@ -230,20 +254,33 @@ function escapeHtml(text: string): string {
 
 /**
  * Primary logo with the model brand as a bare sub-icon overhanging the
- * bottom-right corner. No plate, ring, or padding: at sidebar scale any
- * chrome eats the few pixels the glyph has. The outer box stays BADGE_SIZE
- * square so the row layout is identical to a single logo; the overhang is
- * visible because neither the badge nor its row clip overflow.
+ * bottom-right corner, plus the gateway's transit platform in the mirrored
+ * bottom-left corner. No plate, ring, or padding: at sidebar scale any chrome
+ * eats the few pixels the glyph has. The outer box stays BADGE_SIZE square so
+ * the row layout is identical to a single logo; the overhang is visible
+ * because neither the badge nor its row clip overflow.
+ *
+ * Why the left corner can be used: the official session row puts the badge
+ * 4px after a 16px slot (the StateDot), so a 10px glyph at `left:-4px` spans
+ * the row's gap without covering the dot (measured: dot right edge x=19,
+ * glyph left edge x=24) and keeps 2px clear of the bottom-right glyph.
  */
-function compositeHTML(primary: BrandKey, secondary: BrandKey): string {
-  const sub = `position:absolute;right:${SUB_ICON_OFFSET}px;bottom:${SUB_ICON_OFFSET}px;line-height:0`
-  return `<span data-composite="" style="position:relative;display:block;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px">${sizedSvg(LOGOS[primary])}<span data-sub-brand="${secondary}" style="${sub}">${sizedSvg(LOGOS[secondary], SUB_ICON_SIZE, '-sub')}</span></span>`
+function compositeHTML(primary: BrandKey, secondary: BrandKey | undefined, transit: BrandKey | undefined): string {
+  const corner = (side: 'left' | 'right'): string =>
+    `position:absolute;${side === 'right' ? 'right' : 'left'}:${SUB_ICON_OFFSET}px;bottom:${SUB_ICON_OFFSET}px;line-height:0`
+  const model = secondary === undefined
+    ? ''
+    : `<span data-sub-brand="${secondary}" style="${corner('right')}">${sizedSvg(LOGOS[secondary], SUB_ICON_SIZE, '-sub')}</span>`
+  const via = transit === undefined
+    ? ''
+    : `<span data-transit-brand="${transit}" style="${corner('left')}">${sizedSvg(LOGOS[transit], SUB_ICON_SIZE, '-via')}</span>`
+  return `<span data-composite="" style="position:relative;display:block;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px">${sizedSvg(LOGOS[primary])}${via}${model}</span>`
 }
 
 /** Render downloaded brand SVG(s), or a neutral letter for a genuinely unknown route. */
 export function badgeInnerHTML(provider: string, model: string): string {
-  const { primary, secondary } = badgeBrands(provider, model)
-  if (primary !== undefined && secondary !== undefined) return compositeHTML(primary, secondary)
+  const { primary, secondary, transit } = badgeBrands(provider, model)
+  if (primary !== undefined && (secondary !== undefined || transit !== undefined)) return compositeHTML(primary, secondary, transit)
   if (primary !== undefined) return sizedSvg(LOGOS[primary])
   const letter = normalizeIdentity(model || provider).slice(0, 1).toUpperCase() || '?'
   return `<span style="display:inline-flex;align-items:center;justify-content:center;width:${BADGE_SIZE}px;height:${BADGE_SIZE}px;border-radius:4px;background:${UNKNOWN_FILL};color:#fff;font-size:9px;line-height:1;font-weight:600">${escapeHtml(letter)}</span>`

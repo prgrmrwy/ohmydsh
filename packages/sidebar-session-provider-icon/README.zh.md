@@ -39,14 +39,15 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 | `opencode-go/deepseek-v4-flash`、`opencode-go/qwen3.8-flash`、`opencode-go/kimi-k2.7-code` | OpenCode 主图，右下角 DeepSeek / Qwen / Kimi |
 | `traex/GPT-5.6-Sol[1m]`、`traex/DeepSeek-V4-Flash`、`traex/Gemini-3.1-Pro-Preview` | Trae 主图，右下角 OpenAI / DeepSeek / Gemini |
 | `traex/openrouter-3o[1m]`、`traex/Seed-2.1-Pro-0915` | Trae 主图，右下角 OpenRouter / ByteDance |
-| `dsh-magpie-connect` + `claude/claude-haiku-5-5`、`codex/gpt-6-luna`、`opencode-go/deepseek-v4.1-flash`（Magpie 网关） | Magpie 主图，右下角 Anthropic / OpenAI / DeepSeek |
+| `dsh-magpie-connect` + `opencode-go/deepseek-v4.1-flash`、`opencode-go/glm-5.3-flash`（Magpie 网关，经平台中转） | Magpie 主图，**左下角 OpenCode**（中转平台）+ 右下角 DeepSeek / GLM（模型厂商） |
+| `dsh-magpie-connect` + `claude/claude-haiku-5-5`、`codex/gpt-6-luna`（Magpie 网关，直连厂商） | Magpie 主图，右下角 Anthropic / OpenAI，左下角为空 |
 | 已知 route + 认不出的 model（如 `opencode-go/omen-alpha`） | 只显示 route 品牌，不叠小图标 |
 | 未知或通用 route | 按 model 名显示单一 logo；仍匹配不上时显示中性的单字母徽标 |
 
 - **route 优先。** `opencode-go/deepseek-v4.1-flash` 的主图是 OpenCode；DeepSeek 只会出现在右下角。
-- **网关下小图标说厂商。** 主图已经表达"走了网关"，所以 `dsh-magpie-connect` 会话的右下角是模型厂商（`opencode-go/deepseek-v4.1-flash` → DeepSeek），不是上游平台。
+- **网关最多三层。** 主图是网关，右下角是模型厂商，左下角是**中转平台**——`dsh-magpie-connect / opencode-go/deepseek-v4.1-flash` 同时表达 Magpie、OpenCode、DeepSeek 三层身份。中转层只在上游段是可识别品牌且与模型厂商不同时出现，所以 `claude/*`、`codex/*`、`opencode-go/private-model`、`auto|group|custom` 仍是两层或单层。
 - **认不出不冒充。** 查不到厂商的模型不加小图标，也不会用单字母徽标充当小图标。
-- **尺寸。** 复合图标的外框和单一 logo 一样是 14×14，行布局不变。右下角是 10px 的品牌图形本身，向右下溢出 4px，没有圆底、描边或内边距——在这个尺度下任何装饰都会挤掉图形需要的像素。
+- **尺寸。** 复合图标的外框和单一 logo 一样是 14×14，行布局不变。两个小图标都是 10px 的品牌图形本身，各自向所在下角溢出 4px，没有圆底、描边或内边距——在这个尺度下任何装饰都会挤掉图形需要的像素。左下角图标落在 badge 与官方状态点之间的空隙里，不覆盖 `StateDot`。
 - **悬停提示。** 始终显示精确的 `provider · model`。
 
 | 层 | 实现 |
@@ -96,7 +97,7 @@ Trae、Magpie 的 route 按完整名 / 前缀匹配，不按任意子串匹配�
 
 model 维度覆盖 OpenCode Go / Zen 模型目录里所有能确认厂商的模型族，并覆盖当前 TraeX 目录中的 GPT、DeepSeek、Gemini、OpenRouter 与 ByteDance Seed 系列。
 
-网关型 route（Magpie）下，model id 形如 `<上游 provider>/<model>`：右下角小图标先按 `/` 后的模型名识别模型厂商（`opencode-go/deepseek-v4.1-flash` → DeepSeek、`claude/claude-haiku-5-5` → Anthropic），模型名认不出时才退回把 `/` 前的上游段当 provider route 识别（`opencode-go/private-model` → OpenCode）；两段都认不出只显示 Magpie。其它 route 仍按整个 model id 识别。
+网关型 route（Magpie）下，model id 形如 `<上游 provider>/<model>`，两个段各管一个角：**右下角**取模型厂商（`/` 后的模型名优先，认不出才退回上游段：`opencode-go/private-model` → OpenCode）；**左下角**取中转平台（`/` 前的上游段，仅当它是可识别品牌、且与右下角品牌不同时才画：`opencode-go` → OpenCode）。`auto`、`group`、`custom` 这类非品牌上游段不产生中转角。两段都认不出只显示 Magpie。其它 route 仍按整个 model id 识别。详细取舍见 `openspec/changes/archive/2026-10-25-sidebar-provider-icon-gateway-transit-tier/design.md`。
 
 品牌图是固定版本并随包落盘的，不手绘，运行时也不访问 CDN：
 
