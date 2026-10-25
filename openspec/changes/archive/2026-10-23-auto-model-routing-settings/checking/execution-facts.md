@@ -44,7 +44,7 @@
 
 沿用既有用户授权、quiet window、single_agent，不重复规划/授权。HEAD仍为计划base。真实3080的认证amrRpc可用；官方modelCatalog.default初始codex/gpt-6.1-sol/medium，profile仅agent-default-model块305–310亦同。官方list投影路径实为projections.values.modelSelection/sessionStats；仅读取本次3个会话相关字段，未遍历业务历史内容。
 
-准确config `/Users/bytedance/.dsh/plugins/dsh-auto-model-routing/config.json` 原存在、0600，原bytes为已有decisionToast:true，SHA256 `dc3cd05852d22e9b92fd70bdc59bc593425e74b263baa7948df58015309176e5`。0700私有备份 `/var/folders/lf/ys2dzc0s1yl40zhs32xh4l_00000gn/T/amr-accept-f2xiotil`，原bytes/meta0600。每trail恢复后均回到原hash；无credentials/.env读取、setKey、共享名单/门禁修改。
+准确config `~/.dsh/plugins/dsh-auto-model-routing/config.json` 原存在、0600，原bytes为已有decisionToast:true，SHA256 `dc3cd05852d22e9b92fd70bdc59bc593425e74b263baa7948df58015309176e5`。0700私有备份 `/var/folders/lf/ys2dzc0s1yl40zhs32xh4l_00000gn/T/amr-accept-f2xiotil`，原bytes/meta0600。每trail恢复后均回到原hash；无credentials/.env读取、setKey、共享名单/门禁修改。
 
 ## 实际链与轻量关联
 

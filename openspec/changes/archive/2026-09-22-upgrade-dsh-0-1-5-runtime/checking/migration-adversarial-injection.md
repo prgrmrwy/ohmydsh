@@ -32,7 +32,7 @@
 
 | 项 | 值 |
 |---|---|
-| 宿主机 | devbox `n37-044-026`,Linux x86_64 |
+| 宿主机 | devbox,Linux x86_64 |
 | Node | `v22.23.2`(`~/.nvm/…/v22.23.2/bin/node`,显式 export PATH) |
 | 可破坏素材 | `/tmp/official-home-3x/{mig,golden,work}`(`umask 077`),均由备份**解出的副本** |
 | 备份来源 | `/data00/home/user.001/dsh-backup-20260921-161053/dsh-home.tgz`(升级前) |

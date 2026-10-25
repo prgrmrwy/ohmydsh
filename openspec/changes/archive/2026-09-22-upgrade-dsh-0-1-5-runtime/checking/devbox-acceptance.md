@@ -4,7 +4,7 @@
 
 | Item | Value |
 |---|---|
-| Host | `devbox` (`n37-044-026`), Linux x86_64, 64 cores |
+| Host | `devbox`, Linux x86_64, 64 cores |
 | Candidate SHA (expected = fetched = HEAD) | `dd15a13be4ab907e66be0fcb764a97d3a1559457` |
 | Temporary ref | `refs/heads/acceptance/dsh-015-5e1042d9ea32be47` (deleted by compare-and-delete) |
 | Toolchain | Node `v22.23.2`, npm `10.9.8`, git `2.30.2` (upgraded from 2.20.1) |
