@@ -89,7 +89,7 @@ it('new policy tooltip keeps separate confidence and application state when toas
  await act(async()=>root.render(createElement(RoutingChip,{sessionId:'S',rpc:rpcFor({S:[{mode:'AUTO',decision:d,decisionToast:false}]}) as never,initiallyOpen:true})))
  expect(toast()).toBeNull()
  const panel=host.querySelector('.amr-panel')?.textContent
- expect(panel).toContain('能力 bounded · 置信度 72%');expect(panel).toContain('投入 baseline · 置信度 90%');expect(panel).toContain('已应用');expect(panel).toContain('typesafe / jev-1.13.0')
+ expect(panel).toContain('能力 bounded · 判定确定度 72%');expect(panel).toContain('投入 baseline · 判定确定度 90%');expect(panel).toContain('已应用');expect(panel).toContain('typesafe / jev-1.13.0')
 })
 it('no hint when the switch is off, even for a new decision', async () => {
  const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(12) }] })

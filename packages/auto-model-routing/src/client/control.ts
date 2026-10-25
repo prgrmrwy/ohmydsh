@@ -25,13 +25,13 @@ const spreadText = (order: string[], values?: Record<string, number>) => {
 export function toastText(d: Decision): string[] {
   if (d.depth) return [
     `${d.source === 'main' ? '主会话' : '子任务'} · ${d.status === 'applied' ? '已应用' : d.status === 'failed' ? '未应用' : d.status === 'unsupported' ? '不支持调整' : '已判断/待应用'}`,
-    ...(d.capability ? [`能力 ${d.capability} · 置信度 ${d.capabilityConfidence === undefined ? '未提供' : pct(d.capabilityConfidence)}`] : []),
+    ...(d.capability ? [`能力 ${d.capability} · 判定确定度 ${d.capabilityConfidence === undefined ? '未提供' : pct(d.capabilityConfidence)}`] : []),
     ...(d.capability ? [`能力分布：${spreadText(['bounded', 'analytical', 'frontier', 'insufficient_context'], d.capabilityProbabilities)}`] : []),
-    `投入 ${d.depth} · 置信度 ${d.confidence === undefined ? '未提供' : pct(d.confidence)}`,
+    `投入 ${d.depth} · 判定确定度 ${d.confidence === undefined ? '未提供' : pct(d.confidence)}`,
     `投入分布：${spreadText(['lower', 'baseline', 'higher'], d.probabilities)}`,
     `${d.provider ?? ''} / ${d.model ?? '待确定'} · ${d.effort}`,
     `${d.decisionProvider ?? '未知服务'} / ${d.decisionModel ?? '未知模型'} · ${(d.ms / 1000).toFixed(2)}s`,
-    '置信度是判档确定性，不是任务成功率',
+    '确定度 = (最高概率 − 1/n) ÷ (1 − 1/n)，n 为候选数；不是任务成功率',
   ]
   const head = [
     d.source === 'main' ? '主会话判断' : '子会话判断',

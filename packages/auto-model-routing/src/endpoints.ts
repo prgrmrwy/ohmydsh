@@ -1,3 +1,4 @@
+import { allocationFeedback, type FeedbackBook } from './feedback.js'
 import type { AgentRef, Router } from './router.js'
 import type { RoutingState } from './state.js'
 import { tiers, type Tier } from './effort.js'
@@ -19,12 +20,25 @@ export interface LabelBook {
   label(sessionId: string, turn: number, label: Tier): void
 }
 /** Query (no `label`) or label the judged turn a reply belongs to (design D13). */
-export async function labelEndpoint(body: unknown, resolveAgent: (id: string) => Promise<AgentRef | undefined>, book: LabelBook): Promise<Response> {
+export async function labelEndpoint(body: unknown, resolveAgent: (id: string) => Promise<AgentRef | undefined>, book: LabelBook, feedbackBook?: FeedbackBook): Promise<Response> {
   if (typeof body !== 'object' || body === null) return Response.json({ error: 'invalid request' }, { status: 400 })
   const { sessionId, messageId, label } = body as { sessionId?: unknown; messageId?: unknown; label?: unknown }
   if (typeof sessionId !== 'string' || !sessionId || typeof messageId !== 'string' || (label !== undefined && !tiers.includes(label as Tier))) return Response.json({ error: 'invalid request' }, { status: 400 })
   const agent = await resolveAgent(sessionId)
   if (!agent || agent.origin === 'subagent') return Response.json({ error: 'unknown ordinary session' }, { status: 404 })
+  const hasFeedback = Object.hasOwn(body, 'feedback')
+  const feedback = (body as { feedback?: unknown }).feedback
+  if (hasFeedback && (label !== undefined || (feedback !== null && !allocationFeedback.includes(feedback as typeof allocationFeedback[number])))) return Response.json({ error: 'invalid feedback' }, { status: 400 })
+  const allocation = feedbackBook?.lookup(sessionId, messageId)
+  if (allocation) {
+    if (label !== undefined) return Response.json({ error: 'use allocation feedback' }, { status: 400 })
+    if (hasFeedback) {
+      try { feedbackBook!.set(sessionId, messageId, feedback as typeof allocationFeedback[number] | null) }
+      catch { return Response.json({ error: 'could not record feedback' }, { status: 500 }) }
+    }
+    return Response.json({ policy: 'policy-v2', ...feedbackBook!.lookup(sessionId, messageId) })
+  }
+  if (hasFeedback) return Response.json({ error: 'no applied decision' }, { status: 404 })
   const record = book.lookup(sessionId, messageId)
   if (!record) return Response.json({})
   const { turn, ...view } = record

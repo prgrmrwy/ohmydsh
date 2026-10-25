@@ -98,6 +98,18 @@ it('policy-v2 state does not leak old tier decisions or global selection sync', 
  expect(state.decision).toMatchObject({depth:'baseline',source:'main',decisionProvider:'openrouter'});expect(state.decision.tier).not.toBe('complex');expect(state.history).toEqual([])
  expect(h.selections).toHaveLength(before)
 })
+it('policy feedback binds only applied messages and survives reload without leaking across MANUAL',async()=>{
+ const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'synthetic reply'})
+ const path=join(h.home,'plugins/dsh-auto-model-routing');mkdirSync(path,{recursive:true});writeFileSync(join(path,'config.json'),JSON.stringify({}))
+ await h.setMode('AUTO');await h.run('first user task')
+ const ids=()=>h.agent.session.snapshotEvents().filter(e=>e.type==='assistant/message').map(e=>(e.data as any).message.id)
+ const first=ids().at(-1)!
+ expect(await h.invoke('label',{sessionId:h.agent.id,messageId:first})).toMatchObject({policy:'policy-v2',depth:'baseline',effort:'medium',snapshot:{policyVersion:expect.any(String),decisionProvider:'openrouter',provider:'test',requestSeq:expect.any(Number),decidedAt:expect.any(Number),appliedAt:expect.any(Number)}})
+ await h.invoke('label',{sessionId:h.agent.id,messageId:first,feedback:'too-high'})
+ await h.restart();expect(await h.invoke('label',{sessionId:h.agent.id,messageId:first})).toMatchObject({feedback:'too-high'})
+ await h.setMode('MANUAL');await h.run('manual task')
+ expect(await h.invoke('label',{sessionId:h.agent.id,messageId:ids().at(-1)!})).toEqual({})
+})
 it('policy-v2 mode roundtrip invalidates existing and pending decisions', async () => {
  const h=await harness(json(200,{answers:{depth:{choice:'higher'}}}))
  const path=join(h.home,'plugins/dsh-auto-model-routing');mkdirSync(path,{recursive:true});writeFileSync(join(path,'config.json'),JSON.stringify({}))
