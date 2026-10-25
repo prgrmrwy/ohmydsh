@@ -356,7 +356,7 @@
 - **要点**: 这是对 locus 核心模型的调整，不是修 bug，**应单独立 OpenSpec change 认真设计**，不要在验收收尾时顺手改掉。任何方案都必须保住：子会话不得冒充主会话身份、不得自动把结论回传主会话、飞书业务正文的唯一出口仍是 `pet_locus_reply`。
 - **已确认方案**: 新 child 独立历史，不复制父 transcript 或默认摘要；Host 按实际 caller 与持久 Locus 索引提供「同一主会话 + 当前有效 Locus children」目录，父发现子、子发现父与兄弟。圈内定向异步询问无需逐次人工批准，目标忙时排队、不 steer、不经父模型转述；仅分享适用工作上下文，不开放完整历史或形成代执行授权。答复精确关联原请求再续进，不串飞书出站。旧 fork child 保留历史与模式，所有者可空闲时显式重建为新代/新 child/read。
 - **同源协作上下文（补充确认）**: 公共工作事实、协作者列表和定向询问是一套主子共用的逻辑能力，不是文件夹或新内容 store。公共说明/资料引用/共同约束按主会话只维护一份，由 owner 明确确认共享范围后版本化保存；agent 按需读取，不广播、不自动从父历史/局部锚点/问答答案提取或采纳。挂载不复制，末个 child 退出保留公共事实，改绑不搬运旧圈内容。局部上下文、实际权限和回复目标仍独立。
-- **承接 change**: `openspec/changes/pet-locus-independent-agent-inquiries/`；依赖 `pet-unified-locus-collaboration` 基线及先后规范归档顺序。独立创建/冷恢复、scoped 装配、非 steering 横向队列、询问副作用限制与跨轮持久关联列为 G1–G5 能力核验门槛，不把提案完成当成已实现。
+- **承接 change**: 原 `openspec/changes/pet-locus-independent-agent-inquiries/` 已于 2026-10-25 删除（过期设计：其兄弟直询与 `pet-locus-collab-integration` 的星形模型冲突，协作上下文改由 Locus 协作空间承载；可从 git 历史查阅）。原文：依赖 `pet-unified-locus-collaboration` 基线及先后规范归档顺序。独立创建/冷恢复、scoped 装配、非 steering 横向队列、询问副作用限制与跨轮持久关联列为 G1–G5 能力核验门槛，不把提案完成当成已实现。
 - **更新**: 2026-09-13 在 T8 后由所有者发现并指出「是不是不应该 fork……要不现在这样看起来还是没有 locus 同构的那种效果」；后续探索确认上述方案并建立独立 OpenSpec 提案，早期方案与证据链保留。
 
 ### [B034] Pet 面板与操作回执重叠

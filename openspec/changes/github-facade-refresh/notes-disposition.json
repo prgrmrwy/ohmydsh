@@ -175,12 +175,11 @@
     {
       "n": 13,
       "source": "docs/notes/pet-independent-agent-capability-audit.md",
-      "action": "move",
-      "target": "openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md",
+      "action": "delete",
+      "target": null,
       "manualRedactions": [],
-      "reason": "正文声明对应该进行中 change",
-      "autoRedact": true,
-      "h1": "B035 独立 agent 与同源协作上下文：实施证据"
+      "reason": "原随 change `pet-locus-independent-agent-inquiries` 保存；该 change 于 2026-10-25 作为过期设计删除，审计内容可从 git 历史查阅",
+      "autoRedact": false
     },
     {
       "n": 14,

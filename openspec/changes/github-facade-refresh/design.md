@@ -74,7 +74,7 @@ AI prompt 以 `[ASK-PATH]` 等固定英文规则标签组织，测试只断言�
 | 10 | `dsh-plugin-integration-pitfalls.md` | 移动 | `docs/architecture/dsh-plugin-integration-pitfalls.md` | `CLAUDE.md` 强制前置阅读，跨插件通用 |
 | 11 | `federated-dsh-operations.md` | 删除 | — | `dsh-federation` 已不在仓库，设计与证据保留在归档 change `2026-08-27-federated-dsh-control-plane` |
 | 12 | `local-manifest-overlay.md` | 移动并改写 | `docs/architecture/private-overlay.md` | 描述当前 overlay 机制，被 README 架构章节链接 |
-| 13 | `pet-independent-agent-capability-audit.md` | 移动 | `openspec/changes/pet-locus-independent-agent-inquiries/checking/capability-audit.md` | 正文声明对应该进行中 change |
+| 13 | `pet-independent-agent-capability-audit.md` | 删除 | — | 原随 change `pet-locus-independent-agent-inquiries` 保存；该 change 于 2026-10-25 作为过期设计删除，审计内容可从 git 历史查阅 |
 | 14 | `pet-locus-delivery-safety-hardening-live-acceptance.md` | 移动 | `openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md` | 该 change 的真机验收清单 |
 | 15 | `pet-locus-host-capability-audit.md` | 移动 | `openspec/changes/archive/2026-09-18-pet-unified-locus-collaboration/checking/host-capability-audit.md` | 正文声明为该 change 的边界审计 |
 | 16 | `pet-locus-independent-child-handoff.md` | 移动 | `openspec/changes/archive/2026-09-15-pet-locus-independent-child/handoff.md` | 正文声明对应该 change |
