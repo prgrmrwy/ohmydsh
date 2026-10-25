@@ -1,6 +1,6 @@
 # 任务 8.3:RPC Host fence 与 Web 文件授权(devbox 实测)
 
-被测对象:devbox `n37-044-026`,Host pid **2308857**,端口 **3080**,`$DSH_HOME=/home/user.001/.dsh`,
+被测对象:devbox,Host pid **2308857**,端口 **3080**,`$DSH_HOME=/home/user.001/.dsh`,
 运行体 `dshVersion=0.1.5-rc.2`(`dsh-startup.log` 末行 `2026-09-22T01:58:43+0800`),Node `v22.23.2`。
 本轮为**只读探测**:未重启 Host、未改 `dsh.yaml`、未跑 `dsh build`;写入仅限 devbox `/tmp/pkg-probe-dsh/**`。
 
@@ -283,8 +283,8 @@ PET_INVARIANTS loci=1 deliveries=1 tasks=2 invocations=1 channel_config=1   （�
 
 | 操作 | 路径 | 与 workspace 的关系 | 结果 |
 |---|---|---|---|
-| `read` | `/etc/hostname` | **外** | ✅ `ok:true` `text:"n37-044-026"` `lines:1` `eof:true` |
-| `readAll` | `/etc/hostname` | **外** | ✅ `ok:true` `data:"bjM3LTA0NC0wMjYK"`(base64"n37-044-026") |
+| `read` | `/etc/hostname` | **外** | ✅ `ok:true` `text:"<devbox-host>"` `lines:1` `eof:true` |
+| `readAll` | `/etc/hostname` | **外** | ✅ `ok:true` `data:"<base64 of devbox hostname>"`(base64"<devbox-host>") |
 | `readBytes` | `/etc/hostname` | **外** | ✅ `ok:true` 同上 |
 | `readRelated` | base `/etc/hostname` + `relativePath:"hosts"` | **外→外** | ✅ `ok:true` `absolutePath:"/etc/hosts"` `bytes:297` |
 | `stat` | `/etc/hostname` | **外** | ✅ `ok:true` `bytes:12` |

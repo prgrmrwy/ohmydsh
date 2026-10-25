@@ -1,6 +1,6 @@
 # 任务 8.4:0.1.5 出站代理面(devbox 实测 + 源码证据)
 
-被测对象:devbox `n37-044-026`,Host pid **2308857**,端口 **3080**,`$DSH_HOME=/home/user.001/.dsh`,
+被测对象:devbox,Host pid **2308857**,端口 **3080**,`$DSH_HOME=/home/user.001/.dsh`,
 运行体 `dshVersion=0.1.5-rc.2`。本轮**只读探测**:未重启 Host、未改 `dsh.yaml`、未跑 `dsh build`;
 在 devbox 上的写入仅限 `/tmp/pkg-probe-dsh/**`。
 

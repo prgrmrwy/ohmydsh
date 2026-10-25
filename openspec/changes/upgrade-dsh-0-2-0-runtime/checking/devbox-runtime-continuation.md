@@ -7,7 +7,7 @@
 ## 身份与隔离
 
 - 被测源提交：`bab1a53607ed13cb764631e794937f054a3b9431`；代码与上轮 `20a498a` 相同，差异仅验收文档。
-- devbox：`n37-044-026`。所有构建、包下载、探针、Host 与 Chromium 均在 devbox。
+- devbox：`<devbox-host>`。所有构建、包下载、探针、Host 与 Chromium 均在 devbox。
 - 独立 `DSH_HOME=fresh-fixed-home`、`HOME=fresh-fixed-user`、独立 XDG data/config；生产数据未导入这个 fresh 候选。
 - 仅临时 `127.0.0.1:39521`，Host PID `2158129`。验证后检查 `/proc/<pid>/environ` 中 DSH_HOME 与 cmdline 的 launcher/端口身份，再发送 SIGTERM；退出码 0，端口已关闭。
 - 生产 3080 始终 PID `2004366`，未 build/restart；本机和 VM 未作为验收机器。

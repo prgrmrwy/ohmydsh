@@ -14,7 +14,7 @@
 
 ### 环境
 
-devbox `n37-044-026`,repo `~/opensource/ohmydsh` 对齐 `b5be4b0`(clean),
+devbox,repo `~/opensource/ohmydsh` 对齐 `b5be4b0`(clean),
 `$DSH_HOME=/data00/home/user.001/.dsh`,Node `v22.23.2`(nvm),`dsh build` 走代理。
 
 注入前基线(从 `profiles/web/package.json` 读):

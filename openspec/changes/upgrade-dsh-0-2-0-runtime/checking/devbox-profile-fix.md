@@ -5,7 +5,7 @@
 - 原候选：`c48b50757af1dad34d10ff49842bcfe7acc23a06`。
 - RED 测试提交：`95b9407e0040fe88813e4a7145388ab69f496b6d`。
 - 修复最终代码/测试/规范提交：`20a498a16dc97004666e861317e37e53d2e929be`。
-- 仅 devbox `n37-044-026` 验收，Node 24.12.0、官方 CLI 0.2.0-rc.2。
+- 仅 devbox 验收，Node 24.12.0、官方 CLI 0.2.0-rc.2。
 - 当前机器仅编辑源码和保存 Git 提交/证据；未安装依赖、未 build/sync、未启动或重启本机 DSH。VM 未连接、未操作。
 - Git 操作前在 devbox 执行 `set_sh_devbox_proxy`（可用入口是 `zsh -lic`；bash -lic 未注册该命令）。已提交修复以增量 Git bundle 传输，远端 fetch 精确 commit，未复制未提交工作树，未 push 共享分支。
 

@@ -79,9 +79,9 @@ HEAD                →  bc9755f559f8b5ba9f2fb62c8773bd19e52eca06  (ws/task-459f
 任务要求的「隔离 DSH_HOME 跑 sync」在本 worktree 不能开箱即用，实测遇到三个障碍，逐个定位并处理：
 
 1. **npm scope 预检失败**（首次尝试，17.80s，exit 1）
-   `npm scope @byted (required by package dsh-traex-bridge) has no registry configured for profile <隔离>/profiles/web`。
-   来源：私有 overlay 的 `dsh-traex-bridge` 需要 `@byted` scope，而该配置只存在于生产 `~/.dsh/profiles/web/.npmrc`。
-   处理：只向**隔离** profile 的 `.npmrc` 写入一行 `@byted:registry=https://bnpm.byted.org/`。该 URL 经检查**不含内嵌凭据**，我**没有**复制任何 token/凭据。
+   `npm private scope (required by package dsh-traex-bridge) has no registry configured for profile <隔离>/profiles/web`。
+   来源：私有 overlay 的 `dsh-traex-bridge` 需要 private scope，而该配置只存在于生产 `~/.dsh/profiles/web/.npmrc`。
+   处理：只向**隔离** profile 的 `.npmrc` 写入一行 `@<private-scope>:registry=<private-mirror>/`。该 URL 经检查**不含内嵌凭据**，我**没有**复制任何 token/凭据。
 2. **XDG 路径逃出 DSH_HOME**（第二次尝试，97.86s，exit 1）
    `third-party schema target /Users/prgrmrwy/.local/share/openspec/schemas/anvil is unmanaged; refusing to overwrite`（fail-closed，未写生产路径）。
    根因：`scripts/lib/third-party-resources.mjs:481` 的 `userSchemasDir` 由 `XDG_DATA_HOME` 决定。
@@ -150,7 +150,7 @@ git status --short   →   M dsh.yaml   +   ?? openspec/changes/upgrade-third-pa
 
 ```bash
 DSH_HOME=<scratch>/iso-home-2  XDG_DATA_HOME=<scratch>/iso-home-2/xdg-data  node scripts/sync.mjs
-# 另：<scratch>/iso-home-2/profiles/web/.npmrc 预置 @byted:registry=https://bnpm.byted.org/
+# 另：<scratch>/iso-home-2/profiles/web/.npmrc 预置 @<private-scope>:registry=<private-mirror>/
 ```
 
 ### 4.1 幂等 —— 通过
@@ -309,9 +309,9 @@ node .tmp-audit/verify/check-integrity-peers.mjs dsh.yaml
 node .tmp-audit/verify/dump-manifest.mjs .tmp-audit/verify/dsh.yaml.baseline /tmp/base.json
 node .tmp-audit/verify/dump-manifest.mjs dsh.yaml /tmp/after.json
 
-# 隔离 sync（注意：必须同时隔离 XDG_DATA_HOME；profile .npmrc 需预置 @byted scope）
+# 隔离 sync（注意：必须同时隔离 XDG_DATA_HOME；profile .npmrc 需预置 private scope）
 ISO=<scratch>/iso
-mkdir -p "$ISO/profiles/web" && printf '@byted:registry=https://bnpm.byted.org/\n' > "$ISO/profiles/web/.npmrc"
+mkdir -p "$ISO/profiles/web" && printf '@<private-scope>:registry=<private-mirror>/\n' > "$ISO/profiles/web/.npmrc"
 DSH_HOME="$ISO" XDG_DATA_HOME="$ISO/xdg-data" node scripts/sync.mjs   # run 1
 DSH_HOME="$ISO" XDG_DATA_HOME="$ISO/xdg-data" node scripts/sync.mjs   # run 2 → 期望 "no changes"
 
@@ -417,7 +417,7 @@ jev 实际字段 = [bridge, credentialEnv, enabled, id, integrity, reconnect, se
 
 ## 11.4 隔离物化幂等（连跑两次）—— 通过
 
-harness 沿用 T4 的两个前提：隔离 profile 的 `.npmrc` 预置 `@byted:registry=https://bnpm.byted.org/`（无凭据）+ 同时隔离 `XDG_DATA_HOME`；每次都显式传 `DSH_HOME=<scratch>`。
+harness 沿用 T4 的两个前提：隔离 profile 的 `.npmrc` 预置 `@<private-scope>:registry=<private-mirror>/`（无凭据）+ 同时隔离 `XDG_DATA_HOME`；每次都显式传 `DSH_HOME=<scratch>`。
 
 | 运行 | 结果 | 耗时 | 自报 |
 |---|---|---|---|

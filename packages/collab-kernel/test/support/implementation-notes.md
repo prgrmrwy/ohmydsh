@@ -1,6 +1,6 @@
 # Tasks 2–11 implementation evidence
 
-Execution root: `/Users/bytedance/mydir/opensource/ohmydsh/.worktrees/openspec-explore-session-session-dsh-dsh-agent-t`.
+Execution root: `~/mydir/opensource/ohmydsh/.worktrees/openspec-explore-session-session-dsh-dsh-agent-t`.
 All commands below ran there with an explicit workdir. No install, commit, deployment, planning-artifact edits, or memory writes were performed by this implementer.
 
 ## Approved contract and handoff

@@ -24,7 +24,7 @@
 
 ## 4. 在真实全新机器上确认
 
-- [x] 4.1 在 devbox(`n37-044-026`,全新 `~/.dsh`)上应用修复后运行 sync,确认 `profile package.json missing` 不再出现,且 profile 骨架由运行体模板物化
+- [x] 4.1 在 devbox(全新 `~/.dsh`)上应用修复后运行 sync,确认 `profile package.json missing` 不再出现,且 profile 骨架由运行体模板物化
 - [x] 4.2 确认 package 定制不再被整体跳过:13 项全部完成物化并登记进 profile manifest
 - [x] 4.3 在 devbox 上重跑 sync 确认幂等:输出 `no changes`,无 `initialize profile` 行
 - [x] 4.4 在 devbox 上启动 DSH,确认 bundle 实际加载(启动清单可见)

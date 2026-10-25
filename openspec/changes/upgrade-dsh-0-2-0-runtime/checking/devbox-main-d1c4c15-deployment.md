@@ -17,7 +17,7 @@
 
 ## devbox 正式部署
 
-- host `n37-044-026`；仓库真实路径 `/data00/home/<old-account>/opensource/ohmydsh`，main从a844cdc拉取至d1c4c15。
+- host `<devbox-host>`；仓库真实路径 `/data00/home/<old-account>/opensource/ohmydsh`，main从a844cdc拉取至d1c4c15。
 - `bin/dsh build`两轮成功，第二轮 `[sync] no changes — deployment already matches manifest`。
 - 正式官方dump-config成功、stderr为空；只读解析1632行/210条配置，id无重复。默认js-yaml初次拒绝`!!js`（检查器schema不认识DSH合法tag），以opaque scalar扩展schema后通过，未执行任何表达式；此检查不证明每项loader激活。
 - `bin/dsh restart --no-open`成功；原端口3080新PID `656211`，仅127.0.0.1监听。
@@ -32,9 +32,9 @@
 
 - 全新HOME、DSH_HOME、XDG_DATA_HOME、XDG_CONFIG_HOME，独立127.0.0.1:39522；`DSH_LOCAL_MANIFEST=''`，不加载私有overlay，不导入生产历史。
 - 复用已有隔离Node24.12.0与repo/launcher cache。**这是新DSH状态的冷物化，不是全新OS/空缓存/冷构建launcher证明。**
-- 首轮sync exit1：`@byted/dsh-traex-bridge@0.1.16`访问公开npm404；换HOME丢失了用户registry配置。
+- 首轮sync exit1：`<private-scope>/dsh-traex-bridge@0.1.16`访问公开npm404；换HOME丢失了用户registry配置。
 - 单一全局bnpm重试exit1：已有better-sidebar依赖的`@codemirror/language@6.13.1`尚未镜像（bnpm最新6.13.0）。两次失败均有原始日志，未禁用插件。
-- 只在隔离用户npm配置声明 `@byted:registry=https://bnpm.byted.org/`，其余保持公开npm后成功；没有复制凭据。第二次sync no changes；官方dump-config成功且无stderr。
+- 只在隔离用户npm配置声明 `@<private-scope>:registry=<private-mirror>/`，其余保持公开npm后成功；没有复制凭据。第二次sync no changes；官方dump-config成功且无stderr。
 - 显式使用声明式runtime入口启动Host，PID `690311`，HTTP401。`/proc/<pid>/environ`验证HOME、DSH_HOME、XDG data正确隔离。SIGTERM退出0；39522无listener，生产3080仍PID656211。
 - 新Host日志未命中fetch递归/locus seam unavailable/required-service错误；未执行认证后的Web loader、设置交互或模型流程，不能外推到功能全通过。
 

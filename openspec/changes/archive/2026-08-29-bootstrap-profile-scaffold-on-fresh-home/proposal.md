@@ -1,6 +1,6 @@
 ## Why
 
-在一台没有 `~/.dsh` 的机器上(devbox `n37-044-026`)按 README 流程执行 `dsh build && dsh`,sync 以失败收场:
+在一台没有 `~/.dsh` 的机器上(devbox)按 README 流程执行 `dsh build && dsh`,sync 以失败收场:
 
 ```
 [sync] ERROR profile package.json missing at /home/user.001/.dsh/profiles/web
