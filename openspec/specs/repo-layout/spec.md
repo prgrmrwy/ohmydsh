@@ -540,23 +540,37 @@ sync 写入 profile 的 `package.json` 时，必须（SHALL）与运行体的插
 - **THEN** 该声明 SHALL 改为其在新版本族中的实际承接包,或在不再依赖该接口面时移除,MUST NOT 被改写为该包在新版本族下的同名声明
 
 ### Requirement: 仓库初始化按最低版本准则校验 Node/npm 工具链
-仓库初始化脚本必须(SHALL)按**最低版本准则**校验 Node 与 npm:仅当实际版本低于声明的最低版本时拒绝初始化并给出升级指引;不低于最低版本时必须放行,不得因版本与推荐值不同而失败。最低版本必须(SHALL)在根 `package.json` 的 `engines` 中以范围形式声明,并与初始化脚本内的阈值保持一致。`.nvmrc` 必须(SHALL)作为**推荐版本**的单一来源被初始化脚本读取;实际版本与推荐值不同时,脚本必须仅提示并继续执行。版本比较必须(SHALL)在 bash 内自包含实现,不得依赖 `sort -V`、semver 或其他非 POSIX 通用工具,以保持 macOS / Linux / WSL / Git Bash 通用。仓库不得(SHALL NOT)通过 `packageManager` 等字段在 `engines` 之外再声明一个精确的包管理器版本。依赖的可复现性由根 `package-lock.json` 保证,不由工具链版本相等保证。
+
+仓库初始化 SHALL 提供无需预装仓库依赖或 Bash 即可执行的 Node 入口，按根 `package.json` 的 engines 最低版本校验 Node/npm。低于最低值 SHALL 拒绝并给出指引，不低于时 SHALL 放行；`.nvmrc` SHALL 继续作为推荐版本单一来源，不匹配仅提示。检查不得依赖尚未安装的 zx/semver，不得为了 `.mjs` 改写人为提高 Node 最低值；真实运行体或依赖更高要求另行按实际约束校验，不伪称较低版本可完成完整 build。
+
+版本比较不再要求 Bash 实现。Windows 的 npm 检查与安装 SHALL 不依赖 Git Bash。锁定安装 SHALL 采用根 lock 的 `npm ci`，与 npm link 命令注册分离；健康依赖重复初始化不重复安装，显式 force 可重装。仓库 SHALL NOT 在 engines 外用 packageManager 等字段声明冲突的精确包管理器版本；不写 nested lock。安装失败 SHALL 非零返回，不继续报告初始化成功或修改全局 bin。
+
+Node 缺失时无法运行 Node 初始化入口，安装文档 SHALL 提供最低版本和安装方式；若保留旧 POSIX wrapper，它 SHALL 在 exec 前对缺 Node 提示，不承担另一份初始化逻辑。
 
 #### Scenario: 高于最低版本但不等于推荐版本
-- **WHEN** 用户在 Node/npm 版本满足最低要求、但与 `.nvmrc` 推荐值不同的环境执行仓库初始化
-- **THEN** 初始化继续执行并完成依赖安装,输出中包含推荐版本提示,退出码为 0
+- **GIVEN** 实际 Node/npm 满足最低值但与 .nvmrc 不同
+- **WHEN** 执行初始化
+- **THEN** 提示推荐值并安装缺失根依赖，退出码为 0
 
 #### Scenario: 低于最低版本
-- **WHEN** 用户在 Node 或 npm 版本低于声明最低版本的环境执行仓库初始化
-- **THEN** 初始化以非零退出码失败,错误信息同时给出实际版本、最低版本要求与升级方式,且不执行依赖安装
+- **GIVEN** Node 或 npm 低于 engines 最低值
+- **WHEN** 执行初始化
+- **THEN** 非零退出，报告实际版本、最低值与升级指引，未运行 npm ci
 
 #### Scenario: 工具链缺失
-- **WHEN** 执行仓库初始化时 `node` 或 `npm` 不存在于 PATH
-- **THEN** 初始化以非零退出码失败,并给出最低版本要求与安装方式
+- **GIVEN** PATH 中没有 npm，或没有 node
+- **WHEN** 分别执行 Node 初始化入口，或检查安装指引/运行保留的 POSIX wrapper
+- **THEN** 缺 npm 的初始化非零且给出安装说明；缺 Node 的文档含最低值与下载指引，wrapper 存在时也在非零退出前给出同类提示
 
 #### Scenario: 最低版本声明保持单一准则
-- **WHEN** 开发者查阅根 `package.json` 的 `engines`、初始化脚本阈值与 README 前置要求
-- **THEN** 三者描述同一组最低版本,且仓库中不存在与之冲突的精确包管理器版本声明
+- **GIVEN** engines、初始化实现和安装文档均可读取
+- **WHEN** 执行一致性检查
+- **THEN** 最低版本描述一致，无冲突的精确 packageManager 字段；推荐版本不被当成必须相等值
+
+#### Scenario: 重复初始化与安装失败
+- **GIVEN** 一次初始化完成；另一个隔离 fixture 的 npm ci 被设为失败
+- **WHEN** 对前者重复初始化，对后者首次初始化
+- **THEN** 前者不再安装，后者非零退出且未注册全局 bin或报告成功
 
 ### Requirement: 第三方决策与工作流资源按精确来源可复现物化
 仓库通过 manifest 管理的第三方决策服务包装、OpenSpec schema 或独立工作流 CLI/skills，必须(SHALL)记录上游来源、精确版本或 commit、许可、运行依赖、凭据边界、启用状态、升级复核点与移除路径。sync 必须(SHALL)从所记录来源可复现地物化资源，且不得(SHALL NOT)把 API Key、访问令牌或其它凭据写入仓库、生成文件、部署账本或日志。
@@ -701,6 +715,13 @@ sync、插件升级检查/自动升级、启动清单三个 manifest 消费脚�
 - **GIVEN** `.env.local` 含 `DSH_OPEN_APP="$HOME/Applications/X.app"` 与 `DSH_LOCAL_MANIFEST='<R>/dsh.yaml'`
 - **WHEN** 运行 sync
 - **THEN** sync 成功，并按 `<R>/dsh.yaml` 加载 overlay
+
+启动器与上述裸 manifest 消费脚本 SHALL 共用内置模块可加载的词法解析器，但采用显式的严格/白名单兼容模式。启动器严格校验全文件；裸脚本保持本要求的白名单、调用者优先和宽容非白名单行语义，不执行任何 Shell。文档 SHALL 明确同一个含非白名单 Shell 表达式的文件可以被裸 sync 接受而被 dsh build 拒绝，不能用“统一解析”静默扩大裸脚本读取范围。
+
+#### Scenario: 严格启动入口与白名单裸入口边界明确
+- **GIVEN** 文件包含非法非白名单 Shell 行与合法部署白名单值
+- **WHEN** 分别调用 dsh build 与裸 node scripts/sync.mjs
+- **THEN** 前者副作用前拒绝；后者按白名单正常执行且不应用非法行，共享解析模块不改变各入口覆盖优先级
 
 ### Requirement: 公开仓库不硬编码组织专属值
 

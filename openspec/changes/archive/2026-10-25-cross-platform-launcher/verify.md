@@ -1,3 +1,7 @@
+## Owner closure disposition (2026-10-25)
+
+DELIVERED_AND_ARCHIVED_WITH_WARNINGS — owner explicitly accepted the58remaining tasks and disclosed validation limitations, authorized current-spec synchronization and archive. Owner reports npm link, actual usage and cockpit integration work normally. This is user manual acceptance, not an agent-run macOS PWA/Chrome-cleanup matrix. See checking/owner-closure.md and checking/main-integration-status.md. Historical strict-gate DECISION: FAIL below is preserved, not relabeled PASS. No worktree cleanup or production restart authorized.
+
 ## Verification Results
 
 Post-implementation verification, 2026-10-24. This is a real failed acceptance report, not a placeholder or a claim that green launcher tests satisfy every platform gate.
