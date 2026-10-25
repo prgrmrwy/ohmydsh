@@ -1,6 +1,6 @@
 {
   "name": "dsh-sidebar-session-provider-icon",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "DeepSeek Harness plugin: show a provider + model icon in the sidebar for every session, updated live from the composer selector with a last-request fallback",
   "license": "MIT",
   "author": "prgrmrwy",

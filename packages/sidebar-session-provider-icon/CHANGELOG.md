@@ -89,3 +89,15 @@
 - 测试环境：vitest 的资源内联上限提高到 16 KB，使约 4.9 KB 的 magpie.svg 与生产构建一样以 markup 形式进入代码。
 - 对应 openspec change `sidebar-provider-icon-magpie-route`。
 
+
+## 0.1.10 — 2026-10-25
+
+### Real-GUI feedback revision
+
+修复网关会话的小图标显示成上游平台、而不是模型厂商。
+
+- 实机：会话的 `provider` 已经是 `dsh-magpie-connect`，`model` 是 `opencode-go/deepseek-v4.1-flash`，但侧边栏显示「Magpie 主图 + OpenCode 小图」，看起来 model 是 OpenCode 而不是 DeepSeek。
+- 根因：0.1.9 的网关解析先读 `/` 前的上游段并把它当 provider route，命中即返回。而 `<上游provider>/<model>` 的上游段正是分发平台，主图已经把「走网关」这件事表达掉了，小图标再复述平台就等于丢掉唯一的厂商信息。
+- 修复：网关型 route 下的小图标改为**先按 `/` 后的模型名识别厂商**（`opencode-go/deepseek-v4.1-flash` → DeepSeek、`claude/claude-haiku-5-5` → Anthropic），模型名认不出时才退回上游段（`opencode-go/private-model` → OpenCode），两段都认不出仍只显示 Magpie。
+- 主图与直连 route 完全不变：`opencode-go/deepseek-v4.1-flash` 直连仍是 OpenCode 主图 + DeepSeek 小图。
+- 对应 openspec change `sidebar-provider-icon-gateway-model-brand`；回滚：`dsh.yaml` 版本改回 0.1.9 → `dsh build` → 重启。

@@ -121,20 +121,28 @@ export function brandKeyOf(provider: string, model: string): BrandKey | undefine
 
 /**
  * Routes that front other providers and name a model `<upstream>/<model>`
- * (Magpie: `claude/claude-haiku-5-5`, `opencode-go/deepseek-v4-flash`).
+ * (Magpie: `claude/claude-haiku-5-5`, `opencode-go/deepseek-v4.1-flash`).
+ *
+ * The primary logo already says "this went through a gateway", so the
+ * sub-icon is the only place that can name the model vendor. The upstream
+ * segment is the *distribution platform* (`opencode-go`, `traex`), i.e. the
+ * same layer the primary logo just replaced; reading it first spends the
+ * sub-icon restating the platform and drops the vendor (`opencode-go/
+ * deepseek-v4.1-flash` then looked like "Magpie + OpenCode" while the model
+ * was DeepSeek).
  */
 const GATEWAY_BRANDS: ReadonlySet<BrandKey> = new Set<BrandKey>(['magpie'])
 
 /**
- * Model brand behind a gateway: the upstream segment is itself a provider
- * route, so it is read as one first (an `opencode-go/deepseek-*` model is
- * served by OpenCode, as it would be directly); a segment that is no brand
- * (`auto/`, `group/`, a custom id) falls back to the model name after it.
+ * Model brand behind a gateway: the model name after the slash is read first
+ * because it names the vendor; the upstream segment is only the fallback for a
+ * model name that is no brand (`opencode-go/private-model` → OpenCode). A model
+ * id without a slash is read whole, as for any other route.
  */
 function gatewayModelBrandOf(model: string): BrandKey | undefined {
   const slash = model.indexOf('/')
   if (slash <= 0) return modelBrandOf(model)
-  return providerBrandOf(model.slice(0, slash)) ?? modelBrandOf(model.slice(slash + 1))
+  return modelBrandOf(model.slice(slash + 1)) ?? providerBrandOf(model.slice(0, slash))
 }
 
 /** Primary logo plus the optional bottom-right model sub-icon. */

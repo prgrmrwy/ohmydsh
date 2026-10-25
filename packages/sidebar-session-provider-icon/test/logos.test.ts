@@ -170,17 +170,21 @@ describe('Magpie gateway route', () => {
     expect(brandKeyOf('not-magpie', 'gpt-5')).toBe('openai')
   })
 
-  it('reads the upstream provider segment of a gateway model id first', () => {
+  it('reads the model name of a gateway model id as the model vendor', () => {
     expect(badgeBrands('dsh-magpie-connect', 'claude/claude-haiku-5-5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
     expect(badgeBrands('dsh-magpie-connect', 'codex/gpt-6-luna')).toEqual({ primary: 'magpie', secondary: 'openai' })
-    // The upstream route wins over the model name, as it does for a direct session.
-    expect(badgeBrands('dsh-magpie-connect', 'opencode-go/deepseek-v4-flash')).toEqual({ primary: 'magpie', secondary: 'opencode' })
+    // The vendor after the slash wins; the upstream platform segment only says
+    // how the request was routed, which the Magpie primary already expresses.
+    expect(badgeBrands('dsh-magpie-connect', 'opencode-go/deepseek-v4.1-flash')).toEqual({ primary: 'magpie', secondary: 'deepseek' })
+    expect(badgeBrands('dsh-magpie-connect', 'opencode-go/glm-5.3-flash')).toEqual({ primary: 'magpie', secondary: 'glm' })
+    expect(badgeBrands('dsh-magpie-connect', 'deepseek/deepseek-flash')).toEqual({ primary: 'magpie', secondary: 'deepseek' })
     // OpenRouter is a model brand here, not a route brand, so its segment falls
     // through to the model name after it.
     expect(badgeBrands('dsh-magpie-connect', 'openrouter/anthropic/claude-haiku-5.5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
   })
 
-  it('falls back to the model name when the upstream segment is not a brand', () => {
+  it('falls back to the upstream provider segment when the model name is no brand', () => {
+    expect(badgeBrands('dsh-magpie-connect', 'opencode-go/private-model')).toEqual({ primary: 'magpie', secondary: 'opencode' })
     expect(badgeBrands('dsh-magpie-connect', 'auto/claude-haiku-5.5')).toEqual({ primary: 'magpie', secondary: 'anthropic' })
     expect(badgeBrands('dsh-magpie-connect', 'group/deepseek-v4-flash')).toEqual({ primary: 'magpie', secondary: 'deepseek' })
     expect(badgeBrands('dsh-magpie-connect', 'custom/omen-alpha')).toEqual({ primary: 'magpie', secondary: undefined })
@@ -191,6 +195,14 @@ describe('Magpie gateway route', () => {
     // A slash in a non-gateway model id keeps the old whole-id model reading.
     expect(badgeBrands('opencode-go', 'claude/x')).toEqual({ primary: 'opencode', secondary: 'anthropic' })
     expect(badgeBrands('traex', 'codex/x')).toEqual({ primary: 'trae', secondary: 'openai' })
+  })
+
+  it('never spends the sub-icon on the upstream platform the primary replaced', () => {
+    const routed = badgeInnerHTML('dsh-magpie-connect', 'opencode-go/deepseek-v4.1-flash')
+    expect(routed).toContain('data-sub-brand="deepseek"')
+    expect(routed).not.toContain('data-sub-brand="opencode"')
+    // The direct route still shows OpenCode as the primary.
+    expect(badgeBrands('opencode-go', 'deepseek-v4.1-flash')).toEqual({ primary: 'opencode', secondary: 'deepseek' })
   })
 
   it('renders the vendored Magpie mark in the theme colour, with no external URL', () => {

@@ -39,11 +39,12 @@ Brand resolution has two independent dimensions: the provider route picks the **
 | `opencode-go/deepseek-v4-flash`, `opencode-go/qwen3.8-flash`, `opencode-go/kimi-k2.7-code` | OpenCode, with DeepSeek / Qwen / Kimi in the corner |
 | `traex/GPT-5.6-Sol[1m]`, `traex/DeepSeek-V4-Flash`, `traex/Gemini-3.1-Pro-Preview` | Trae, with OpenAI / DeepSeek / Gemini in the corner |
 | `traex/openrouter-3o[1m]`, `traex/Seed-2.1-Pro-0915` | Trae, with OpenRouter / ByteDance in the corner |
-| `dsh-magpie-connect` + `claude/claude-haiku-5-5`, `codex/gpt-6-luna`, `opencode-go/deepseek-v4-flash` (Magpie gateway) | Magpie, with Anthropic / OpenAI / OpenCode in the corner |
+| `dsh-magpie-connect` + `claude/claude-haiku-5-5`, `codex/gpt-6-luna`, `opencode-go/deepseek-v4.1-flash` (Magpie gateway) | Magpie, with Anthropic / OpenAI / DeepSeek in the corner |
 | known route + unrecognized model (e.g. `opencode-go/omen-alpha`) | the route logo only, no corner logo |
 | unknown or generic route | a single logo from the model name; if that also fails, a neutral single-letter badge |
 
-- **Route first.** `opencode-go/deepseek-v4-flash` shows OpenCode as the main logo; DeepSeek can only appear in the corner.
+- **Route first.** `opencode-go/deepseek-v4.1-flash` shows OpenCode as the main logo; DeepSeek can only appear in the corner.
+- **Behind a gateway the corner names the vendor.** The primary logo already says the request went through a gateway, so a `dsh-magpie-connect` row puts the model vendor in the corner (`opencode-go/deepseek-v4.1-flash` → DeepSeek), not the upstream platform.
 - **No impersonation.** A model whose vendor cannot be identified gets no corner logo, and never a letter badge in the corner.
 - **Size.** The composite keeps the 14×14 footprint of a single logo, so the row layout does not move. The corner logo is the bare 10px glyph, overhanging the bottom-right by 4px, with no plate, ring or padding: at this scale any decoration eats the pixels the glyph needs.
 - **Tooltip.** Hovering always shows the exact `provider · model`.
@@ -93,7 +94,7 @@ The table lists recognized provider route aliases and model-name examples, not a
 
 Trae and Magpie routes match exact names / prefixes, never arbitrary substrings. OpenRouter and ByteDance are **model-only** mappings: a provider route named `openrouter` does not by itself select the OpenRouter icon.
 
-Behind a gateway route (Magpie) a model id is `<upstream provider>/<model>`: the corner logo comes from the upstream segment read as a provider route (`claude` → Anthropic, `opencode-go` → OpenCode), and only when that segment is no brand (`auto/`, `group/`, a custom id) from the model name after the slash. Other routes keep reading the whole model id.
+Behind a gateway route (Magpie) a model id is `<upstream provider>/<model>`: the corner logo comes from the model name after the slash, read as a model vendor (`opencode-go/deepseek-v4.1-flash` → DeepSeek, `claude/claude-haiku-5-5` → Anthropic), and only when that name is no brand from the upstream segment read as a provider route (`opencode-go/private-model` → OpenCode); with neither recognizable the row shows Magpie alone. Other routes keep reading the whole model id.
 
 The model dimension covers every identifiable model family in the OpenCode Go / Zen catalogs, plus the GPT, DeepSeek, Gemini, OpenRouter and ByteDance Seed families in the current TraeX catalog.
 
