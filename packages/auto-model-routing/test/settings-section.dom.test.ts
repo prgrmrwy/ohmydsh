@@ -29,17 +29,38 @@ it('four rows, source criteria, retained family drafts and sparse patch; never s
   expect(calls.find(c => c.endpoint.endsWith('saveSettings'))?.payload).toEqual({ mainEfforts: { claude: { simple: 'medium' } } })
   expect(calls.every(c => /^auto-model-routing\.(settings|saveSettings|setKey)$/.test(c.endpoint))).toBe(true)
 })
+it('connection button shows pending and local success or failure feedback',async()=>{
+ let finish:((value:any)=>void)|undefined
+ const rpc={call:async(_:string,endpoint:string)=>endpoint.endsWith('testDecision')?new Promise<any>(resolve=>{finish=resolve}):({ok:true,value:view()})}
+ await act(async()=>root.render(h(RoutingSettings,{rpc,ui})))
+ await click('测试连接')
+ expect(host.querySelector('.amr-test-button')?.textContent).toBe('测试中…')
+ expect((host.querySelector('.amr-test-button') as HTMLButtonElement).disabled).toBe(true)
+ await act(async()=>finish!({ok:true,value:{kind:'ok',ms:123}}))
+ expect(host.querySelector('.amr-test-row')?.textContent).toContain('连接成功 · 123 ms')
+ await click('测试连接');await act(async()=>finish!({ok:true,value:{kind:'failed',category:'missing-credential'}}))
+ expect(host.querySelector('.amr-test-row')?.textContent).toContain('未配置所选决策服务的 API key')
+})
 it('service selection clears key drafts and waits for save before key management',async()=>{
  const calls:{endpoint:string;payload:any}[]=[]
  const rpc={call:async(_:string,endpoint:string,payload:any)=>{calls.push({endpoint,payload});const data=view();if(endpoint.endsWith('saveSettings'))data.settings={...data.settings,...payload};return {ok:true,value:data}}}
  await act(async()=>root.render(h(RoutingSettings,{rpc,ui})))
- const select=host.querySelector('[aria-label="决策服务"]') as HTMLSelectElement
- await act(async()=>{select.value='typesafe';select.dispatchEvent(new Event('change',{bubbles:true}))})
+ expect(host.querySelector('select')).toBeNull()
+ await clickLabel('决策服务'); await click('TypeSafe 官方')
  expect(host.textContent).toContain('不会沿用原服务的 key')
  expect(host.querySelector('input[type="password"]')?.hasAttribute('disabled')).toBe(true)
  await click('保存')
  expect(calls.find(c=>c.endpoint.endsWith('saveSettings'))?.payload).toEqual({decisionService:{provider:'typesafe'}})
  expect(calls.some(c=>c.endpoint.endsWith('setKey'))).toBe(false)
+})
+it('preset model menu selects version while custom service keeps model input',async()=>{
+ await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async()=>({ok:true,value:view()})},ui})))
+ expect(host.querySelector('input[aria-label="决策模型"]')).toBeNull()
+ await clickLabel('决策服务');await click('TypeSafe 官方')
+ await clickLabel('决策模型');await click('jev-1.14.0')
+ expect(host.querySelector('button[aria-label="决策模型"]')?.textContent).toBe('jev-1.14.0')
+ await clickLabel('决策服务');await click('自定义 System One')
+ expect(host.querySelector('input[aria-label="决策模型"]')).not.toBeNull()
 })
 it('AUTO requires no policy version control and hides inactive old mappings', async () => {
   const data={...view(),settings:{...view().settings,policy:'policy-v2' as const}}

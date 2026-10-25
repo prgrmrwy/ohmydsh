@@ -6,6 +6,7 @@ import { CHILD_MODELS, mapEffort, tiers, type Effort, type Tier } from '../effor
 import { RoutePicker, type DraftRoute } from './route-picker.js'
 import type { SettingsUi } from './settings-ui.js'
 import { DECISION_SERVICES, resolveDecisionService, type DecisionProvider } from '../decision-service.js'
+import { CATEGORY_HINTS, type JevCategory } from '../hints.js'
 import { StrategyDetails } from './strategy-details.js'
 
 export interface SettingsView extends RoutingCatalog {
@@ -16,6 +17,8 @@ export interface SettingsView extends RoutingCatalog {
 const CSS = `
 .amr-settings{font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary);min-width:0;container-type:inline-size}.amr-settings-section{padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}.amr-settings h3{font-size:13px;font-weight:600;margin:0 0 12px}.amr-settings p{margin:6px 0;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}.amr-settings-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:14px 0}.amr-settings-row>div:first-child{min-width:0}.amr-settings-number{width:76px;text-align:right;font:inherit;font-variant-numeric:tabular-nums;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);color:inherit;background:var(--dsw-alias-bg-layer-1);padding:6px}.amr-settings-number:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary)}
 .amr-settings-table{border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-lg);margin:12px 0;min-width:0}.amr-settings-tier,.amr-settings-head{display:grid;grid-template-columns:minmax(85px,.65fr) minmax(0,1fr) minmax(0,1.5fr);gap:10px;padding:12px;align-items:start}.amr-settings-tier,.amr-settings-head{border-bottom:.5px solid var(--dsw-alias-border-l2)}.amr-settings-tier:last-child{border-bottom:0}.amr-settings-head{color:var(--dsw-alias-label-secondary)}.amr-settings-tier-name{display:flex;align-items:center;gap:4px;min-height:30px}.amr-settings-info,.amr-settings-reset{border:0;background:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;font:inherit;padding:2px}.amr-settings-info{display:inline-flex}.amr-settings-reset{font-size:12px;margin-top:4px}.amr-settings-reset:hover{color:var(--dsw-alias-label-primary)}.amr-settings-info:focus-visible,.amr-settings-reset:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary)}.amr-settings .amr-settings-error{color:var(--dsw-alias-state-error-primary)}.amr-settings-cell{min-width:0}.amr-settings-cell-label{display:none}.amr-settings .amr-settings-segments{display:inline-grid;flex:none;width:max-content;max-width:100%;height:28px;box-sizing:border-box;gap:2px;padding:2px;border-radius:var(--dsw-radius-md)}.amr-settings .amr-settings-segments>button{height:24px;min-width:44px;padding:0 8px;border-radius:var(--dsw-radius-sm);font-size:12px;line-height:20px}.amr-settings .amr-settings-segments>[aria-hidden=true]{top:2px;bottom:2px;left:2px;height:calc(100% - 4px);width:calc((100% - 4px - 2px * (var(--dsh-segment-count) - 1)) / var(--dsh-segment-count))}.amr-settings .amr-settings-tabs{--dsh-segment-count:2}.amr-settings .amr-settings-tabs>[aria-hidden=true]{width:calc((100% - 6px) / 2)!important;transform:translateX(calc(var(--amr-tab-index,0) * (100% + 2px)))!important}.amr-settings .amr-settings-tabs:has([aria-selected=true]:last-child){--amr-tab-index:1}
+.amr-test-row{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:12px 0 6px}.amr-test-row>span{font-size:12px;color:var(--dsw-alias-label-secondary)}.amr-test-button{height:28px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;cursor:pointer}.amr-test-button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.amr-test-button:disabled{opacity:.5;cursor:not-allowed}.amr-test-button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+.amr-service-trigger,.amr-service-input{box-sizing:border-box;min-width:0;width:240px;max-width:100%;height:32px;padding:0 10px;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit}.amr-service-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;text-align:left}.amr-service-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}.amr-service-trigger svg{color:var(--dsw-alias-label-tertiary);flex:none}.amr-service-trigger:focus-visible,.amr-service-input:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
 @container(max-width:480px){.amr-settings-head{display:none}.amr-settings-tier{grid-template-columns:1fr;gap:8px}.amr-settings-cell{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(0,1fr);align-items:center;gap:8px}.amr-settings-cell-label{display:block;color:var(--dsw-alias-label-secondary)}.amr-settings-cell p,.amr-settings-reset{grid-column:2}.amr-settings-row{flex-wrap:wrap}}
 `
 async function request(rpc: Rpc, action: string, payload: unknown = {}): Promise<SettingsView> {
@@ -33,9 +36,13 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
   const [patch, setPatch] = useState<SettingsPatch>({})
   const [childDrafts, setChildDrafts] = useState<Record<string, DraftRoute>>({})
   const [provider, setProvider] = useState<RoutingProvider>('claude')
+  const [serviceMenu, setServiceMenu] = useState(false)
+  const [modelMenu, setModelMenu] = useState(false)
   const [key, setKey] = useState('')
   const [removeKey, setRemoveKey] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ text: string; failed: boolean }>()
   const [message, setMessage] = useState('')
   const [failed, setFailed] = useState(false)
   const [saveIssues, setSaveIssues] = useState<SettingsIssue[]>([])
@@ -49,6 +56,9 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
   const cap = settings.effortCap
   const serviceConfig = settings.decisionService ?? { provider: 'openrouter' as const }
   const serviceProvider = serviceConfig.provider
+  const decisionModel = serviceConfig.model ?? DECISION_SERVICES[serviceProvider].model
+  // Preset choices are documented snapshots, not a live availability claim.
+  const decisionModels = [...new Set([...(serviceProvider === 'openrouter' ? ['typesafe/jev-1.13'] : ['jev-1.13.0', 'jev-1.14.0']), decisionModel])]
   const changingService = serviceProvider !== (view.settings.decisionService?.provider ?? 'openrouter')
   let invalidService = false
   try { resolveDecisionService(serviceConfig) } catch { invalidService = true }
@@ -123,16 +133,39 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
   return h('div', { className: 'amr-settings' }, h('style', null, CSS), h(ui.SettingsForm, {
     labels: { unavailable: '无法读取设置', readOnly: '设置只读', saveFailed: '部分更改未保存，请检查提示', save: '保存', saving: '保存中…' },
     state: { available: true, writable: true, dirty, invalid: conflicts.length > 0 || invalidTimeout || invalidKey || invalidService, saving, failed }, onSave: () => { void save() }, onDiscard: () => {},
-    children: h('fieldset', { disabled: saving, style: { border: 0, padding: 0, margin: 0, minWidth: 0 } },
+    children: h('fieldset', { disabled: saving || testing, style: { border: 0, padding: 0, margin: 0, minWidth: 0 } },
       view.configStatus === 'invalid' && h('p', { role: 'status' }, '设置文件无法解析或含无效字段，已按可解析值与默认值显示；保存会覆盖损坏部分'),
       message && h('p', { role: 'status', className: failed ? 'amr-settings-error' : undefined }, message),
       h('section', { className: 'amr-settings-section' }, h('h3', null, '判档服务'), h('p', null, 'AUTO 把脱敏任务发送给所选决策服务；不跨服务自动回退。'),
-        h('label', null, '决策服务 ', h('select', { 'aria-label': '决策服务', value: serviceProvider, onChange: e => { const provider=(e.currentTarget as HTMLSelectElement).value as DecisionProvider; setKey(''); setRemoveKey(false); setPatch(old=>({...old,decisionService:{provider}})) } }, ...Object.entries(DECISION_SERVICES).map(([value,s])=>h('option',{key:value,value},s.label)))),
+        h('div', { className: 'amr-settings-row' }, h('span', null, '决策服务'),
+          h(ui.Menu, { open: serviceMenu, portal: true, side: 'bottom', selectedId: serviceProvider, onClose: () => setServiceMenu(false),
+            items: Object.entries(DECISION_SERVICES).map(([id, service]) => ({ id, label: service.label })),
+            onSelect: id => { if (!Object.hasOwn(DECISION_SERVICES, id)) return; setKey(''); setRemoveKey(false); setPatch(old => ({ ...old, decisionService: { provider: id as DecisionProvider } })); setServiceMenu(false) },
+            anchor: h('button', { type: 'button', className: 'amr-service-trigger', 'aria-label': '决策服务', 'aria-haspopup': 'menu', 'aria-expanded': serviceMenu, onClick: () => setServiceMenu(!serviceMenu) }, h('span', null, DECISION_SERVICES[serviceProvider].label), h(ui.IconChevronDownOutlineRegular, { size: 14 })),
+          })),
         h('p', null, changingService ? '切换服务后先保存，再管理该服务的独立 API key；不会沿用原服务的 key。' : `凭据引用：${DECISION_SERVICES[serviceProvider].credential}`),
-        h('label', null, '决策模型 ', h('input', { 'aria-label':'决策模型', value:serviceConfig.model??DECISION_SERVICES[serviceProvider].model, onChange:e=>setPatch(old=>({...old,decisionService:{...serviceConfig,model:e.currentTarget.value}})) })),
-        serviceProvider==='custom' && h('label', null, '兼容端点 ',h('input',{'aria-label':'兼容端点',value:serviceConfig.endpoint??'',placeholder:'https://example.com/v1/systemone',onChange:e=>setPatch(old=>({...old,decisionService:{...serviceConfig,endpoint:e.currentTarget.value}}))})),
+        h('div', { className: 'amr-settings-row' }, h('span', null, '决策模型'), serviceProvider === 'custom'
+          ? h('input', { className: 'amr-service-input', 'aria-label': '决策模型', value: decisionModel, onChange: e => setPatch(old => ({ ...old, decisionService: { ...serviceConfig, model: e.currentTarget.value } })) })
+          : h(ui.Menu, { open: modelMenu, portal: true, side: 'bottom', selectedId: decisionModel, onClose: () => setModelMenu(false),
+            items: decisionModels.map(id => ({ id, label: id })),
+            onSelect: model => { if (!decisionModels.includes(model)) return; setPatch(old => ({ ...old, decisionService: { ...serviceConfig, model } })); setModelMenu(false) },
+            anchor: h('button', { type: 'button', className: 'amr-service-trigger', 'aria-label': '决策模型', 'aria-haspopup': 'menu', 'aria-expanded': modelMenu, onClick: () => setModelMenu(!modelMenu) }, h('span', null, decisionModel), h(ui.IconChevronDownOutlineRegular, { size: 14 })),
+          })),
+        serviceProvider==='custom' && h('label', { className: 'amr-settings-row' }, '兼容端点 ',h('input',{className:'amr-service-input','aria-label':'兼容端点',value:serviceConfig.endpoint??'',placeholder:'https://example.com/v1/systemone',onChange:e=>setPatch(old=>({...old,decisionService:{...serviceConfig,endpoint:e.currentTarget.value}}))})),
         h('p', null, serviceProvider==='custom'?'仅兼容 System One state/questions → answers；HTTPS 或回环 HTTP；禁止 URL 凭据、查询参数与重定向。':`接口：${DECISION_SERVICES[serviceProvider].endpoint}`),
-        h('button', { type:'button', className:'amr-settings-reset', disabled:dirty||saving, onClick:async()=>{setSaving(true);try{const r=await rpc.call('/api','auto-model-routing.testDecision',{});const v=r.value as {kind?:string;category?:string;ms?:number};setMessage(r.ok&&v?.kind==='ok'?`连接成功 · ${v.ms}ms`:`连接未通过：${v?.category??'服务不可用'}`)}catch{setMessage('连接测试失败')}finally{setSaving(false)}} }, '测试连接（固定公开样例）'),
+        h('div', { className: 'amr-test-row' },
+          h('button', { type: 'button', className: 'amr-test-button', disabled: dirty || saving || testing, 'aria-busy': testing, onClick: async () => {
+            if (testing) return
+            setTesting(true); setTestResult(undefined)
+            try {
+              const r = await rpc.call('/api', 'auto-model-routing.testDecision', {})
+              const v = r.value as { kind?: string; category?: JevCategory; ms?: number } | undefined
+              const ok = r.ok && v?.kind === 'ok'
+              setTestResult({ failed: !ok, text: ok ? `连接成功 · ${v.ms} ms` : `连接失败：${v?.category ? CATEGORY_HINTS[v.category] ?? '服务不可用' : '无法连接决策服务，请重试'}` })
+            } catch { setTestResult({ failed: true, text: '连接测试失败，请检查网络后重试' }) }
+            finally { setTesting(false) }
+          } }, testing ? '测试中…' : '测试连接'),
+          h('span', { role: 'status', 'aria-live': 'polite', className: testResult?.failed ? 'amr-settings-error' : undefined }, testing ? '正在请求所选决策服务…' : testResult?.text ?? (dirty ? '请先保存设置，再测试连接' : ''))),
         h('p',null,'测试会产生一次决策请求，不包含会话内容；请先保存设置。'),
         invalidService && h('p',{role:'alert',className:'amr-settings-error'},'请填写有效模型和兼容端点'),
         h(ui.SettingsSecretField, { id: 'amr-key', label: `${DECISION_SERVICES[serviceProvider].label} API Key`, hint: changingService ? '请先保存服务选择' : keyHint, text: key, disabled: changingService || saving || !view.key.available || !view.key.writable, onEdit: text => { setKey(text); setRemoveKey(false) }, configured: !changingService && view.key.configured, stateLabel: changingService ? '保存后读取' : keyState }),

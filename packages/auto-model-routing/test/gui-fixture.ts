@@ -4,6 +4,7 @@ import rubric from '../src/rubric.json' with { type: 'json' }
 
 const wrap = ({ children, ...props }: { children?: ReactNode }) => h('div', props, children)
 export const ui = {
+  Menu: ({open,anchor,items,onSelect}:any) => h('span',null,anchor,open&&h('div',{role:'menu'},items.map((item:any)=>h('button',{key:item.id,onClick:()=>onSelect(item.id)},item.label)))),
   SettingsForm: ({ state, labels, onSave, children }: any) => h('div', null, children, h('button', { disabled: !state.dirty || state.invalid || state.saving, onClick: onSave }, labels.save)),
   SettingsSecretField: ({ id, label, hint, text, disabled, onEdit, stateLabel }: any) => h('div', null, h('label', { htmlFor: id }, label), h('span', null, stateLabel), h('input', { id, type: 'password', value: text, disabled, onChange: (e: any) => onEdit(e.target.value) }), h('p', null, hint)),
   SegmentedTabs: ({ items, value, onChange, label, className }: any) => h('div', { className, role: 'tablist', 'aria-label': label }, items.map((item: any) => h('button', { key: item.value, role: 'tab', 'aria-selected': value === item.value, onClick: () => onChange(item.value) }, item.label))),
