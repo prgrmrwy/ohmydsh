@@ -1,3 +1,4 @@
+import type { FeedbackBook } from './feedback.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -12,7 +13,7 @@ import { userInput } from './input.js'
 import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
 
-export function policyHost(ctx: Context, deps: { jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
+export function policyHost(ctx: Context, deps: { feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
   const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: 'claude' | 'codex' }>()
   const rootOf = (agent: Agent): Agent | undefined => {
     let current: Agent | undefined = agent
@@ -29,6 +30,9 @@ export function policyHost(ctx: Context, deps: { jev: JevClient; state: RoutingS
   ctx.effect(() => () => { pending.clear(); delegation.disable() })
   const mainStatus = new Map<string, { policyVersion: string; depth: Depth; effort?: string; reason: string; decision?: NonNullable<ChildDecision['decision']> }>()
   let decisionId = Date.now()
+  const requestMetadata = new Map<string, { requestSeq: number; appliedAt: number; requestTurn?: number }>()
+  const decidedAt = new Map<number, number>()
+  const applied = new Map<string, NonNullable<ChildDecision['decision']>>()
   const latest = new Map<string, NonNullable<ChildDecision['decision']>>()
   ctx.on('tools/execute', async (exec, next) => {
     if (!['subagent','subagent_fork','spawn_teammate'].includes(exec.name) || !exec.agent) return next()
@@ -70,6 +74,8 @@ export function policyHost(ctx: Context, deps: { jev: JevClient; state: RoutingS
       const input = userInput(decision.messages)
       const old = main.get(agent)
       if (!input.userTurn) { if (old) main.set(agent, { ...old, turn: payload.turn }); return decision }
+      applied.delete(agent.id)
+      mainStatus.delete(agent.id)
       const startedEpoch = epoch(agent.id)
       const prior = previousTurn(agent.session.deriveMessages())
       const result = await deps.jev.judgePolicy(buildState({ text: input.text, prevUser: prior.user, prevAssistant: prior.assistant }), payload.signal, 'main')
@@ -80,6 +86,8 @@ export function policyHost(ctx: Context, deps: { jev: JevClient; state: RoutingS
       const { kind: _kind, ...measurement } = result
       latest.delete(agent.id)
       mainStatus.set(agent.id, { policyVersion, depth: result.depth, reason: 'jev', decision: { ...measurement, id: ++decisionId, source: 'main', tier: result.depth, effort: '待应用', status: 'recommended' } })
+      decidedAt.set(decisionId, Date.now())
+      if (decidedAt.size > 200) decidedAt.delete(decidedAt.keys().next().value!)
       if (mainStatus.size > 200) mainStatus.delete(mainStatus.keys().next().value!)
       return decision
     }
@@ -152,14 +160,36 @@ export function policyHost(ctx: Context, deps: { jev: JevClient; state: RoutingS
     return { ...config, ...record.route } as typeof config
   }, { prepend: true })
   ctx.on('session/event', (session, event) => {
+    if (event.type === 'assistant/message') {
+      const d = applied.get(session.id)
+      const data = event.data as { message?: { id?: string } }
+      if (d?.status === 'applied' && enabled(session.id) && data.message?.id && d.model) {
+        try { deps.feedback.bind({ sessionId: session.id, messageId: data.message.id, decisionId: d.id, depth: d.depth, model: d.model, effort: d.effort,
+          ...(requestMetadata.has(session.id) && d.provider && decidedAt.has(d.id) ? { snapshot: {
+            ...requestMetadata.get(session.id)!, decidedAt: decidedAt.get(d.id)!, policyVersion, mappingVersion,
+            decisionProvider: d.decisionProvider, decisionModel: d.decisionModel, ms: d.ms, provider: d.provider,
+            ...(d.confidence !== undefined ? { confidence: d.confidence } : {}), ...(d.probabilities ? { probabilities: d.probabilities } : {}),
+          } } : {}),
+        }) }
+        catch { ctx.logger.warn('auto-model-routing: could not bind allocation feedback') }
+      }
+      return
+    }
     if (event.type !== 'request/header') return
+    applied.delete(session.id)
+    requestMetadata.delete(session.id)
     const record = deps.store.get(session.id)
     if (!record?.route) {
       const status = mainStatus.get(session.id)
       const actual = (event.data as { header?: { config?: { provider?: string; model?: string; reasoningEffort?: string } } }).header?.config
-      if (status?.decision && actual) {
+      if (enabled(session.id) && status?.decision && actual) {
         const d = { ...status.decision, status: status.decision.status === 'unsupported' ? 'unsupported' : actual.reasoningEffort === status.effort && actual.provider === status.decision.provider && actual.model === status.decision.model ? 'applied' : 'failed', ...(actual.model ? { model: actual.model } : {}), ...(actual.provider ? { provider: actual.provider } : {}) }
         mainStatus.set(session.id, { ...status, decision: d }); latest.set(session.id, d)
+        if (d.status === 'applied') {
+          applied.set(session.id, d)
+          const data = event.data as { turn?: number }
+          requestMetadata.set(session.id, { requestSeq: event.seq, appliedAt: Date.now(), ...(typeof data.turn === 'number' ? { requestTurn: data.turn } : {}) })
+        }
       }
       return
     }
@@ -171,7 +201,7 @@ export function policyHost(ctx: Context, deps: { jev: JevClient; state: RoutingS
     if (!matches) throw new Error('policy-v2 实际请求配置不匹配')
   })
   return {
-    invalidate: (id: string) => { epochs.set(id, epoch(id) + 1); mainStatus.delete(id); latest.delete(id) },
+    invalidate: (id: string) => { epochs.set(id, epoch(id) + 1); mainStatus.delete(id); latest.delete(id); applied.delete(id) },
     status: (id: string) => deps.store.get(id), mainStatus: (id: string) => enabled(id) ? { ...mainStatus.get(id), ...(latest.get(id) ? { decision: latest.get(id) } : {}) } : undefined,
   }
 }

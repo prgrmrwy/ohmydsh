@@ -12,6 +12,7 @@ import { FileStateStore, RoutingState } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
 import type { Effort } from './effort.js'
 import { endpoint, labelEndpoint } from './endpoints.js'
+import { FeedbackBook } from './feedback.js'
 import { JudgementBook } from './judgements.js'
 import { userInput } from './input.js'
 import { JevClient, rubricVersion } from './jev.js'
@@ -42,7 +43,8 @@ export function apply(ctx: Context, config: Config = {}): void {
     try { book.append(line) }
     catch (error) { ctx.logger.warn(`auto-model-routing: could not record the judgement: ${String(error)}`) }
   }, () => settings.read().settings)
-  const policy = policyHost(ctx, { jev, state, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2')), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(true) })
+  const feedback = new FeedbackBook(resolve(home, 'state/auto-model-routing/allocation-feedback.jsonl'))
+  const policy = policyHost(ctx, { feedback, jev, state, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2')), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(true) })
   const toastOn = (): boolean => settings.read().settings.decisionToast
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, judged: (sessionId, value) => router.judged(sessionId, value) })))
   ctx.on('agent/created', ({ agent, source }) => {
@@ -138,7 +140,7 @@ export function apply(ctx: Context, config: Config = {}): void {
               : Response.json({ error: 'invalid request' }, { status: 400 }))
             : operation === 'settings' || operation === 'saveSettings' || operation === 'setKey' || operation === 'testDecision'
             ? await hostSettings.endpoint(operation, payload)
-            : operation === 'label' ? await labelEndpoint(payload, resolveAgent, book) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
+            : operation === 'label' ? await labelEndpoint(payload, resolveAgent, book, feedback) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
           if ((operation === 'state' || operation === 'setMode') && response.ok && settings.read().settings.policy === 'policy-v2') {
             const value = await response.json()
             const main = policy.mainStatus((payload as { sessionId: string }).sessionId)

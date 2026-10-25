@@ -36,5 +36,5 @@ it('shows each dimension distribution in policy order including zero and context
 })
 it('missing confidences remain unknown rather than a synthetic total',()=>{
  const text=toastText({id:1,source:'subagent',tier:'bounded',depth:'baseline',capability:'bounded',effort:'medium',confidence:.8,ms:42,status:'applied'}).join('\n')
- expect(text).toContain('已应用');expect(text).toContain('能力 bounded · 置信度 未提供');expect(text).toContain('投入 baseline · 置信度 80%');expect(text).toContain('不是任务成功率');expect(text).toContain('能力分布：未提供');expect(text).toContain('投入分布：未提供')
+ expect(text).toContain('已应用');expect(text).toContain('能力 bounded · 判定确定度 未提供');expect(text).toContain('投入 baseline · 判定确定度 80%');expect(text).toContain('不是任务成功率');expect(text).toContain('能力分布：未提供');expect(text).toContain('投入分布：未提供')
 })

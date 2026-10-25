@@ -18,7 +18,7 @@ const ui: LabelUi = {
       : h('button', { key: item.id, role: 'menuitem', 'data-checked': item.id === selectedId ? 'true' : undefined, onClick: () => onSelect(item.id) }, item.label)) : null),
   Icon: () => h('svg', { 'data-icon': 'gauge' }),
 }
-type Call = { endpoint: string; payload: { sessionId: string; messageId: string; label?: string } }
+type Call = { endpoint: string; payload: { sessionId: string; messageId: string; label?: string; feedback?: string | null } }
 function rpcFrom(answer: (payload: Call['payload']) => { ok: boolean; value?: unknown }) {
   const calls: Call[] = []
   return { calls, rpc: { call: async (_channel: string, endpoint: string, payload: Call['payload']) => { calls.push({ endpoint, payload }); return answer(payload) } } }
@@ -26,6 +26,15 @@ function rpcFrom(answer: (payload: Call['payload']) => { ok: boolean; value?: un
 const mount = async (messageId: string, rpc: unknown) => { await act(async () => { root.render(h(LabelButton, { sessionId: 'S1', messageId, rpc: rpc as never, ui })) }) }
 const tooltip = () => host.querySelector('[data-tooltip]')?.getAttribute('data-tooltip')
 
+it('allocation menu supports feedback change cancel and visible failure',async()=>{
+ let feedback:string|null|undefined;let fail=false
+ const {rpc}=rpcFrom(p=>{if(Object.hasOwn(p,'feedback')){if(fail)return {ok:false};feedback=p.feedback}return {ok:true,value:{policy:'policy-v2',depth:'baseline',effort:'medium',model:'sol',feedback}}})
+ await mount('new',rpc)
+ const choose=async(text:string)=>{await act(async()=>{(host.querySelector('button[aria-label]') as HTMLButtonElement).click()});await act(async()=>{(Array.from(host.querySelectorAll('[role=menuitem]')).find(e=>e.textContent===text) as HTMLButtonElement).click()})}
+ await choose('投入偏高');expect(tooltip()).toContain('你反馈：投入偏高')
+ await choose('撤销反馈');expect(tooltip()).not.toContain('你反馈')
+ fail=true;await choose('分配合适');expect(host.querySelector('[role=alert]')?.textContent).toBe('反馈未保存，请重试');expect(tooltip()).not.toContain('你反馈')
+})
 it('button_only_when_judged', async () => {
   const { rpc, calls } = rpcFrom(p => ({ ok: true, value: p.messageId === 'm2' ? { tier: 'complex', effort: 'high' } : {} }))
   await mount('m3', rpc)
