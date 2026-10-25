@@ -17,7 +17,7 @@
 // Check, then install only what is missing or on the wrong version; reinstall
 // nothing that is already correct. Never install anything sync did not declare.
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runBoundedProvision } from './lib/dsh-cli.mjs'

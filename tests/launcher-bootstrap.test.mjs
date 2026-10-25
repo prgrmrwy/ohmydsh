@@ -49,6 +49,7 @@ async function fixture(t) {
   await mkdir(path.join(dir,'scripts/lib'),{recursive:true})
   await cp(path.join(root,'scripts/bootstrap.mjs'),path.join(dir,'scripts/bootstrap.mjs'))
   await cp(path.join(root,'scripts/lib/package-manager.cjs'),path.join(dir,'scripts/lib/package-manager.cjs'))
+  await cp(path.join(root,'scripts/lib/child-process.mjs'),path.join(dir,'scripts/lib/child-process.mjs'))
   await writeFile(path.join(dir,'package.json'),JSON.stringify({private:true,type:'module',engines:{node:'>=22.0.0',npm:'>=10.0.0'}}))
   await writeFile(path.join(dir,'.nvmrc'),'24.12.0\n')
   const packages = Object.fromEntries(['zx','js-yaml','yaml','semver','typescript'].map(name=>['node_modules/'+name,{version:'1.2.3'}]))

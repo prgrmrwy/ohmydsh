@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import net from 'node:net'
-import { spawn } from 'node:child_process'
+import { spawn } from '../lib/child-process.mjs'
 import yaml from 'js-yaml'
 import { parseArgs, isOfficialInvocation, HELP } from './args.mjs'
 import { loadEnvironment } from './environment.mjs'

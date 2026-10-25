@@ -19,7 +19,7 @@ let cached: MemexInstallation | undefined
 
 export function resolveMemexInstallation(): MemexInstallation {
   if (cached) return cached
-  const npmRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: 5_000 }).trim()
+  const npmRoot = execFileSync('npm', ['root', '-g'], { windowsHide: true, encoding: 'utf8', timeout: 5_000 }).trim()
   const root = realpathSync(join(npmRoot, '@touchskyer', 'memex'))
   const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: string; bin?: { memex?: string } }
   if (pkg.version !== KERNEL_VERSION) throw new Error(`Expected @touchskyer/memex@${KERNEL_VERSION}, found ${pkg.version ?? 'unknown'}`)

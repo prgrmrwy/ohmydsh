@@ -158,7 +158,7 @@ export class BotBootstrap {
     const spawnProcess =
       this.options.spawnProcess ??
       ((command: string, commandArgs: readonly string[]) =>
-        spawn(command, [...commandArgs], { stdio: ['pipe', 'pipe', 'pipe'] }))
+        spawn(command, [...commandArgs], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }))
 
     // Starting a replacement attempt explicitly cancels the prior one. Its
     // callbacks are generation-fenced below and cannot mutate the new state.

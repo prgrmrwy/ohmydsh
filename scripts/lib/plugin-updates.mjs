@@ -7,7 +7,7 @@
 //   稳定性 - 非 pre-release、未被 deprecated、最新版发布 ≤ STALE_DAYS。
 //   状态   - up-to-date / upgrade-ready / needs-review / skipped。
 import { readFileSync, existsSync } from 'node:fs'
-import { execFile } from 'node:child_process'
+import { execFile } from './child-process.mjs'
 import path from 'node:path'
 import os from 'node:os'
 import { loadManifestWithOverlay } from './manifest-overlay.mjs'

@@ -72,6 +72,11 @@
 
 命令闭包内的 Node、Git、npm/npx/pnpm 与平台探测 SHALL 保留参数边界、退出码和调用级环境，路径含空格、Unicode 或元字符时不得变成额外命令。可变数据不得通过未转义拼接进入 Shell。前后台 Host 环境剥离、用户显式 registry 与单次 npm registry 注入 SHALL 继续满足 `launcher-npm-environment`，Windows 环境变量名大小写不敏感时也不得泄漏重复变体。库的进程枚举或 kill 结果不得替代 DSH 身份判定。所有携带调用者、manifest 或路径派生 argv 的外部调用 SHALL 使用不经过 Shell 的参数数组；固定平台脚本的插值 SHALL 仅为经验证的整数或启动器构造的 loopback URL，不通过 Shell 传递可变 Git/npm 参数。Windows 显式 DSH_BIN 的 JS 文件 SHALL 用当前 Node 执行，原生 exe SHALL 直接执行；cmd/bat/ps1 或未知不可执行形态 SHALL 在副作用前诊断拒绝，不自动拼接 Shell。POSIX 已有可执行 DSH_BIN 契约保持不变。
 
+#### Scenario: 后台配置操作不创建可见控制台
+- **GIVEN** Windows 上后台 Host 没有可继承的控制台
+- **WHEN** 仓库脚本执行配置、构建、依赖检查或插件更新
+- **THEN** 子进程通过零依赖公共封装默认设置 `windowsHide: true`；显式 `windowsHide: false` 可覆盖默认值，argv、环境、stdio、超时和退出码语义保持不变；独立发布的插件和生成的独立 launcher 在自己的调用边界显式设置该选项，不依赖仓库脚本目录
+
 #### Scenario: 元字符参数仍是数据
 - **GIVEN** 测试路径与参数含空格、中文、引号、美元符、分号、& 和括号（环境文件不参与该参数用例）
 - **WHEN** 经执行层调用 Node、Git 和已解析的包管理器测试桩

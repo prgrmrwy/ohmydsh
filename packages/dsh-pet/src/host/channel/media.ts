@@ -260,6 +260,7 @@ async function downloadIntoSpool(input: {
   const target = join(dir, targetName)
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   const child = spawn(input.binary, [...input.args, '--output', `./${targetName}`], {
+    windowsHide: true,
     cwd: dir,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -390,7 +391,7 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
         const result = await runner(binary, petCliArgs([
           'im', '+messages-mget', '--as', 'bot', '--message-ids', request.messageId,
           '--no-reactions', '--format', 'json',
-        ]), { timeout: timeoutMs, maxBuffer: 1024 * 1024 })
+        ]), { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024 })
         parsed = parseSingleMessageResources(parseJsonSuffix(result.stdout), request.messageId)
       } catch {
         return { kind: 'unavailable', reason: 'platform-read-failed', content: [] }

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from '../lib/child-process.mjs'
 import packageManager from '../lib/package-manager.cjs'
 
 export function run(command, args, { cwd = process.cwd(), env = process.env, capture = false, timeoutMs, ...options } = {}) {

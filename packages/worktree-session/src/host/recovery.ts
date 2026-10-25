@@ -45,9 +45,9 @@ function identityDiagnostic(operation: OperationRecord): string | undefined {
     const repoReal = realpathSync(operation.repoRoot)
     const worktreeReal = realpathSync(operation.worktreePath)
     if (!worktreeReal.startsWith(`${repoReal}/.worktrees/`)) return `managed worktree escaped repository allocation root: ${worktreeReal}`
-    const branch = execFileSync('git', ['-C', operation.worktreePath, 'branch', '--show-current'], { encoding: 'utf8', timeout: 10_000 }).trim()
+    const branch = execFileSync('git', ['-C', operation.worktreePath, 'branch', '--show-current'], { windowsHide: true, encoding: 'utf8', timeout: 10_000 }).trim()
     if (branch !== operation.taskBranch) return `managed worktree branch ${branch || '(detached)'} does not equal ${operation.taskBranch}`
-    const common = execFileSync('git', ['-C', operation.worktreePath, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', timeout: 10_000 }).trim()
+    const common = execFileSync('git', ['-C', operation.worktreePath, 'rev-parse', '--git-common-dir'], { windowsHide: true, encoding: 'utf8', timeout: 10_000 }).trim()
     const commonReal = realpathSync(isAbsolute(common) ? common : resolve(operation.worktreePath, common))
     if (commonReal !== realpathSync(operation.gitCommonDir)) return `managed worktree Git common dir does not match operation metadata`
     return undefined

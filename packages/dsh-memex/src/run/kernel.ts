@@ -22,6 +22,7 @@ export async function runKernel(args: readonly string[], options: KernelRunOptio
 
   return await new Promise<KernelResult>((resolve, reject) => {
     const child = spawn(executable, [...args], {
+      windowsHide: true,
       // A stable C locale is part of the calling contract, not cosmetics: the
       // kernel decides "remote already exists" by matching an English git error
       // string, so `git remote add` failing in a localized message makes

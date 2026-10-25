@@ -11,6 +11,7 @@ test('test_missing_dependencies_do_not_install',async t=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'ohmydsh missing dependencies '));t.after(()=>rm(root,{recursive:true,force:true}))
  await mkdir(path.join(root,'bin'),{recursive:true});await cp(path.join(ROOT,'bin/dsh.mjs'),path.join(root,'bin/dsh.mjs'));await cp(path.join(ROOT,'scripts/bootstrap.mjs'),path.join(root,'scripts/bootstrap.mjs')).catch(async()=>{await mkdir(path.join(root,'scripts'));await cp(path.join(ROOT,'scripts/bootstrap.mjs'),path.join(root,'scripts/bootstrap.mjs'))})
  await mkdir(path.join(root,'scripts/lib'),{recursive:true});await cp(path.join(ROOT,'scripts/lib/package-manager.cjs'),path.join(root,'scripts/lib/package-manager.cjs'))
+  await cp(path.join(ROOT,'scripts/lib/child-process.mjs'),path.join(root,'scripts/lib/child-process.mjs'))
  const home=path.join(root,'home');const result=spawnSync(process.execPath,[path.join(root,'bin/dsh.mjs'),'build'],{encoding:'utf8',env:{...process.env,DSH_HOME:home}})
  assert.notEqual(result.status,0);assert.match(result.stderr,/bootstrap\.mjs/)
  await assert.rejects(readFile(path.join(home,'dsh-startup.log')))

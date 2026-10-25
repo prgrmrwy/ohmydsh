@@ -67,6 +67,7 @@ async function fixture() {
     ['scripts', 'sync.mjs'],
     ['scripts', 'lib', 'dsh-cli.mjs'],
     ['scripts', 'lib', 'package-manager.cjs'],
+    ['scripts', 'lib', 'child-process.mjs'],
     ['scripts', 'lib', 'dsh-host-runtime.mjs'],
     ['scripts', 'lib', 'manifest-overlay.mjs'],
     ['scripts', 'lib', 'env-local.mjs'],

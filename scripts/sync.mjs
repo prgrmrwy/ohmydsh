@@ -4,7 +4,7 @@
 import { readFile, writeFile, mkdir, cp, rm, readdir, stat, rename, realpath } from 'node:fs/promises'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
