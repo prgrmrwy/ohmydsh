@@ -72,7 +72,7 @@ export interface RouteDeps {
    * Downloads one source for the URL-import route.
    *
    * Injectable so route tests never touch the network; the Host default is
-   * the SSRF-guarded {@link fetchExpressionSource}.
+   * {@link fetchExpressionSource}, using the Host network.
    */
   readonly fetchExpressionSource?: (url: string) => Promise<string>
   readonly packageVersion: string
@@ -854,10 +854,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       if (typeof url !== 'string' || url.trim() === '') {
         throw new PetError('INVALID_REQUEST', "Field 'url' must be a non-empty string")
       }
-      // Download on the Host: the owner's browser network may not reach the
-      // CDN (and CORS would block it), while the Host can. The SSRF guard in
-      // `fetchExpressionSource` decides whether the URL may be contacted; the
-      // downloaded bytes then pass the same validator as a pasted source.
+      // Owner-triggered download uses the Host network, then the paste validator.
       const download = deps.fetchExpressionSource ?? fetchExpressionSource
       const content = await download(url.trim())
       const saved = await saveExpression(deps.paths, content)
@@ -923,7 +920,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         }
         const source = rawAppearance as Record<string, unknown>
         appearance = {}
-        for (const key of ['accent', 'glyph', 'size', 'ringStyle'] as const) {
+        for (const key of ['accent', 'glyph', 'size', 'ringStyle', 'animationPlayback'] as const) {
           if (typeof source[key] === 'string') appearance[key] = source[key]
         }
       }

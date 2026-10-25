@@ -1,68 +1,50 @@
-/**
- * Transport wiring for URL imports.
- *
- * The committed security contract is not "an agent constant exists" but "the
- * downloader hands THAT dedicated agent — never the keep-alive, proxy-routable
- * global one — to `https.request`, together with the pinned lookup". Mocking
- * `node:https` lets the test observe the real call options without a network
- * or a subprocess proxy.
- */
+/** Real fetch uses the Host-installed global dispatcher and decodes compression. */
+import { gzipSync } from 'node:zlib'
+import { afterEach, describe, expect, it } from 'vitest'
+import { getGlobalDispatcher, setGlobalDispatcher, MockAgent } from 'undici'
+import { fetchExpressionSource } from '../src/host/expression-fetch.js'
+import { MAX_EXPRESSION_SOURCE_BYTES } from '../src/wire.js'
 
-import { Agent, globalAgent } from 'node:https'
-import { describe, expect, it, vi } from 'vitest'
+const original = getGlobalDispatcher()
+let agent: MockAgent | undefined
 
-/** Options captured from the mocked `https.request` call. */
-interface CapturedOptions {
-  agent?: unknown
-  lookup?: unknown
-  headers?: Record<string, string>
-}
-
-const captured: CapturedOptions[] = []
-
-vi.mock('node:https', async importOriginal => {
-  const actual = await importOriginal<typeof import('node:https')>()
-  return {
-    ...actual,
-    request: vi.fn(
-      (
-        _url: unknown,
-        options: CapturedOptions,
-        callback: (response: {
-          statusCode: number
-          headers: Record<string, string>
-          destroy: () => void
-        }) => void,
-      ) => {
-        captured.push(options)
-        callback({ statusCode: 200, headers: { 'content-type': 'application/json' }, destroy: () => {} })
-        return { on: () => undefined, end: () => undefined }
-      },
-    ),
-  }
+afterEach(async () => {
+  setGlobalDispatcher(original)
+  await agent?.close()
+  agent = undefined
 })
 
-import {
-  defaultRequest,
-  EXPRESSION_REQUEST_AGENT,
-} from '../src/host/expression-fetch.js'
+function installHostDispatcher() {
+  agent = new MockAgent()
+  agent.disableNetConnect()
+  setGlobalDispatcher(agent)
+  return agent.get('https://assets.invalid:8443')
+}
 
-describe('URL import transport wiring', () => {
-  it('passes the dedicated agent and the pinned lookup to https.request', async () => {
-    captured.length = 0
-    const target = { addresses: [{ address: '93.184.216.34', family: 4 as const }] }
+describe('Host fetch transport', () => {
+  it('uses the existing global dispatcher without resolving the target locally', async () => {
+    const host = installHostDispatcher()
+    host.intercept({ path: '/a.json', method: 'GET' }).reply(200, '{"v":"5.7.0"}')
+    await expect(fetchExpressionSource('https://assets.invalid:8443/a.json')).resolves.toBe('{"v":"5.7.0"}')
+    expect(getGlobalDispatcher()).toBe(agent)
+    agent!.assertNoPendingInterceptors()
+  })
 
-    await defaultRequest(new URL('https://cdn.example/a.json'), target, 1000)
+  it('decodes gzip with the ordinary fetch transport', async () => {
+    const text = '{"v":"5.7.0","layers":[{"ty":4}]}'
+    const body = gzipSync(text)
+    installHostDispatcher().intercept({ path: '/a.json' }).reply(200, body, {
+      headers: { 'content-encoding': 'gzip', 'content-length': String(body.length), 'content-type': 'text/plain' },
+    })
+    await expect(fetchExpressionSource('https://assets.invalid:8443/a.json')).resolves.toBe(text)
+  })
 
-    const options = captured[0]
-    expect(options).toBeDefined()
-    // The security fix: not the global (keep-alive, possibly proxied) agent.
-    expect(options?.agent).toBe(EXPRESSION_REQUEST_AGENT)
-    expect(options?.agent).not.toBe(globalAgent)
-    expect(options?.agent).toBeInstanceOf(Agent)
-    // The pinned lookup must travel with the request, not be re-resolved by net.
-    expect(typeof options?.lookup).toBe('function')
-    // No cookies/credentials; compression opt-out is explicit.
-    expect(options?.headers?.['accept-encoding']).toBe('identity')
+  it('limits decompressed bytes even when the wire body is small', async () => {
+    const body = gzipSync('x'.repeat(MAX_EXPRESSION_SOURCE_BYTES + 1))
+    expect(body.length).toBeLessThan(MAX_EXPRESSION_SOURCE_BYTES)
+    installHostDispatcher().intercept({ path: '/a.json' }).reply(200, body, {
+      headers: { 'content-encoding': 'gzip', 'content-length': String(body.length) },
+    })
+    await expect(fetchExpressionSource('https://assets.invalid:8443/a.json')).rejects.toMatchObject({ code: 'EXPRESSION_FETCH_FAILED' })
   })
 })

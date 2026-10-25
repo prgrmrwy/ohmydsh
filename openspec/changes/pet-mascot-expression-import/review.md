@@ -1,4 +1,12 @@
-## Review Metadata
+## Round 10 — 用户主动下载的网络简化设计复核（2026-10-25）
+
+- Reviewer: 当前执行者自审（非独立评审）；仅评审本轮已由用户批准的网络语义。
+- 范围：proposal URL 导入、spec HTTPS requirement、design D11 新决策与 tasks 9.x。
+- 结论：采用 Host 普通 fetch 与官方全局 dispatcher 接缝匹配；不增加独立依赖/代理设置；移除 fake-ip 配置不触碰素材，z.object 忽略旧字段。现有管理接口信任边界保留，不再宣称公网-only。
+- 必须验证：总超时覆盖正文；超限/重定向释放响应；解压后限长；全局 dispatcher 未被覆盖；网络/HTTP/非法内容失败不覆盖素材。旧 round 9 的 Agent/pin 要求已被用户明确替代，不作为新实现验收条件。
+- 设计 VERDICT: APPROVE。实现自审覆盖从基线 `482a0a5b72b5d8c5553e0dfc3e5ab7ce028f708d` 起的完整工作树差异：Host 全局 fetch 接线、移除配置的生产者/消费者、Settings 文案与重复 CSS、测试替换和文档。未发现阻塞问题；不可信自动抓取权限未扩展。压缩 Content-Length 与解压正文不同，提前长度检查仅用于无压缩响应；实际解压字节始终限长。重定向/失败响应取消，完成后清理 timer/controller。实现 VERDICT: APPROVE（当前执行者自审，不是独立评审）；本轮测试结果另见 verify，旧 round 9 结果不作为新实现证据。
+
+## Review Metadata（以下 round 9 为初版历史证据）
 
 - **Review round**: 9
 - **Prior round**: round 8 — APPROVE_WITH_CHANGES（2 Moderate / 2 Required Changes）。本轮只复核 M1-R、M1-D 是否真实落实、测试是否能抓住「改回全局 agent」的变异、是否引入新问题；round 1–8 的其余结论不重审。

@@ -14,12 +14,12 @@
 - 一条最简消费路径：设置里粘贴 Lottie JSON → 校验 → 保存 → 吉祥物立即播放；可复制导出、可移除。
 - 素材以普通文件保存在 Pet 状态目录，不进 SQLite，无 schema/迁移。
 - 安全与失败边界明确：请求体上限按路由区分；素材格式/资源引用/递归复杂度受限；读取失败与渲染失败一律回退 glyph 而非白屏，且诊断可达 Settings。
-- 不引入新的服务进程；客户端不直接访问网络，播放器随 client bundle 分发，素材本地提供，渲染器不执行表达式 `eval`。**唯一的出站请求**是所有者显式触发的 URL 导入：由 Host 以 SSRF 防护方式下载（见 D11）。
+- 不引入新的服务进程；客户端不直接访问网络，播放器随 client bundle 分发，素材本地提供，渲染器不执行表达式 `eval`。**唯一的出站请求**是所有者显式触发的 URL 导入：由 Host 沿用已有网络配置下载（见 D11）。
 
 **Non-Goals:**
 
 - 不支持 SVG / PNG / GIF / emoji 导入（保留现有 glyph 作为回退）。
-- 不做按状态映射（思考中/完成/出错分别用不同动画）、不做表情包分享、不做多素材库、不做文件上传；URL 导入由 Host 下载（见 D11），不使用浏览器直连或环境代理。
+- 不做按状态映射（思考中/完成/出错分别用不同动画）、不做表情包分享、不做多素材库、不做文件上传；URL 导入由 Host 下载（见 D11），不使用浏览器直连，不新增功能级网络配置。
 - 不内置任何第三方动画素材，不改 DSH core、compat overlay、preset 或 SQLite schema。
 
 ## Decisions
@@ -94,11 +94,21 @@ expressions/
 ### D7 播放策略与生命周期
 
 - 纯函数 `resolvePlayback({ reducedMotion, hidden }): 'play' | 'pause'`；挂载时按该函数决定是否 `autoplay`，监听 `matchMedia('(prefers-reduced-motion: reduce)')` 的 change 与 `visibilitychange` 重新求值。
+- **播放模式设置**（`appearance.animationPlayback`，默认 `loop`）：`loop` 为历史行为（自动循环）；`hover` 时创建时不 autoplay 并 `stopFirstFrame()` 渲染首帧，overlay 在 mascot `mouseenter/mouseleave` 调用 `setHover()` 切换播放。播放判定合并为 `reducedMotion > hidden > hover 门控`：reduce 恒停首帧、hidden 暂停、hover 模式下未悬停停首帧。设置页「外观 → 动画播放」单选，保存后广播 `PET_APPEARANCE_EVENT` 立即生效。
 - `reducedMotion` 为真时始终 `goToAndStop(0, true)`（停首帧）；即使从隐藏恢复也 MUST NOT 播放（评审 M5）。
 - 卸载/切换素材时 `destroy()` 并移除全部 listener；容器 `pointer-events:none`、`aria-hidden="true"`，不占拖动/点击/键盘焦点（评审 S7）。
 - 读取请求带单调 request id：只有最新一次读取可写入状态，迟到响应丢弃（评审 M7 C）；`AbortController` 或序号都可行，实现用序号以保持可测。
 
-### D11 从 URL 导入：Host 侧下载 + SSRF 防护
+### D11 从 URL 导入：沿用 Host 网络（2026-10-25 用户批准，取代下方初版策略）
+
+- 这是所有者在设置页主动发起的下载，沿用现有管理路由认证/来源校验；不改变外部消息、模型或其他接口权限。
+- 使用 `globalThis.fetch`，不传自定义 dispatcher、不安装 Agent、不预解析 DNS 或过滤 IP。DSH `dsh-http-proxy` 在启动时安装全局 undici dispatcher，普通 fetch 自动遵循 Host 的代理/NO_PROXY；系统 TUN/DNS 交给系统处理。
+- HTTPS（任意合法端口）、正常 TLS 验证、不接受 URL 用户名/密码，不转发 Host 凭据/Cookie；重定向 manual，最多 3 跳，每跳检查协议/URL 凭据。整个操作共用 AbortController 和 10s 定时器，完成/失败清理定时器，未消费的响应取消，超限中止请求。
+- fetch 正常解压；按正文实际字节累计限制 512 KiB，Content-Length 只作提前超限检查。不限 Content-Type；下载文本交给现有 Lottie 校验与原子保存。HTTP/网络/超时/正文失败映射 `EXPRESSION_FETCH_FAILED`，内容非法映射 `INVALID_EXPRESSION`；不暴露原始网络错误中的 URL/查询串。
+- 删除 `expressionFetchAllowFakeIp` 的 UI、API、Host schema/读写及重复样式。旧字段由现有 z.object 读取时忽略，无素材或 DB 版本迁移。
+- 验收：注入全局 fetch/dispatcher 证明不绕过 Host 出口；内网/保留地址、自定义端口、重定向、gzip、慢正文与大小上限测试；现有保存失败不覆盖测试继续有效。
+
+#### 初版 D11 策略（历史记录，已被上方决策取代，不再约束实现）
 
 - **为什么在 Host 侧**：所有者浏览器所在网络可能到不了素材 CDN（本次动机：`fonts.gstatic.com` 在浏览器不可达但 Host 可访问），浏览器还受 CORS 限制；Host 下载后走与粘贴完全相同的校验/存储路径。
 - **只允许**：`https:`、默认 443 端口、URL 不带用户名/密码；`localhost`/`*.local`/`*.internal`/`*.home`/`*.lan` 直接拒绝；IP 字面量按保留段拒绝（0/8、10/8、100.64/10、127/8、169.254/16、172.16/12、192.168/16、198.18/15、TEST-NET、组播/保留、IPv6 回环/ULA/link-local/组播/文档段、IPv4-mapped）。
@@ -106,6 +116,7 @@ expressions/
 - **重定向**：使用 `https.request`（本身不自动跟随重定向），手工逐跳处理且最多 3 跳，每一跳重新做 URL 形状 + DNS 校验；缺 `Location`、非 https、目标内网一律拒绝。
 - **请求**：`GET`，不带 cookie/凭据/referer，`accept-encoding: identity`；**整体截止 10s**（DNS 单次 ≤4s、全部重定向与下载共用）；响应必须 2xx；`content-type` 只接受 `application/json`/`text/json`/`text/plain`/`application/octet-stream`/`binary/octet-stream`（缺省接受），非 identity 的 `content-encoding` 直接判失败；`content-length` 与实际流式读取都受 512 KiB 上限约束（超限即中止并关闭响应）。
 - **代理**：使用专用 `https.Agent` 且**不读取** `HTTP(S)_PROXY`/`NODE_USE_ENV_PROXY`——代理会在不调用 `lookup` 的情况下自行解析目标，绕过地址 pin。取舍：仅能经代理出网的环境里 URL 导入会返回 `EXPRESSION_FETCH_FAILED`（README 已注明）。
+- **fake-ip 放宽（默认关）**：Clash/mihomo 的 fake-ip + TUN 会把所有域名解析进 `198.18.0.0/15`，严格策略会拒绝一切 URL。`expressionFetchAllowFakeIp` 是 owner 显式 opt-in：开启后只把这一段加入允许集，地址仍 pin 到连接（由本机 TUN/代理决定真实去向）；loopback/RFC1918/链路本地/云元数据等依旧拒绝。设置页在 URL 导入下提供勾选与说明，Host 每次下载重新读取，无需广播。
 - **错误语义**：URL 形状/目标被拒 → `INVALID_REQUEST`（400，且**不发起请求**）；下载失败（网络/超时/HTTP 非 2xx/类型/超限）→ `EXPRESSION_FETCH_FAILED`（502）；下载成功但内容校验不过 → `INVALID_EXPRESSION`（400，现有素材不变）。
 - **不记录**：日志与错误消息不包含完整 URL/查询串（可能含一次性 token），只报主机名或通用原因。
 - 依赖注入：`fetchExpressionSource(url, deps)` 的 `request`/`lookup` 可注入，路由通过 `RouteDeps.fetchExpressionSource` 注入，测试不触网。
@@ -113,7 +124,7 @@ expressions/
 ### D8 即时生效与覆盖确认
 
 - Settings 导入/移除成功后 `dispatchEvent(new Event(PET_APPEARANCE_EVENT))`（已有机制，overlay 已监听）；overlay 的 `load()` 同时重读 config 与 expression。
-- 已有生效动画时，导入按钮先展示「当前动画将被替换且不保留，如需保留请先复制导出」确认；确认后才发请求。
+- 已有生效动画时，导入/移除先展示**页内确认**（「当前动画将被替换且不保留，如需保留请先复制导出」/「移除后恢复图标并保留一份备份」），确认后才发请求。刻意不用 `window.confirm`：WebView/PWA 可能抑制原生对话框，用户会看到一个“点了没反应”的按钮；页内确认始终可见可操作。导入/移除期间按钮显示「导入中…/移除中…」，成功与失败都有页内结果提示。
 
 ### D9 许可与发布
 
@@ -132,7 +143,7 @@ expressions/
 - **[常驻浮层播放动画持续消耗 CPU]** → 递归层数 ≤80、尺寸 ≤2048、reduced-motion 停首帧、页面隐藏暂停；Settings 提示复杂度限制。
 - **[用户素材来源/许可不可控]** → 不内置素材；README 明确用户责任；UI 只做技术校验，不做许可判断。
 - **[lottie-web 上游维护/安全]** → 固定 5.13.0（2025-05-21，Snyk 无直接漏洞记录）；只用无表达式执行的 light 构建；升级需重新审查。
-- **[新增出站请求面]** → 只允许所有者显式触发、https+默认端口、逐跳 DNS 校验、私网/元数据地址拒绝、全部地址 pin、整体 10s/512 KiB 上限、无凭据；错误不泄露完整 URL。**刻意不使用环境代理**（专用 agent）：代理会自行解析目标从而绕过 pin；代价是代理-only 环境不可用，返回可诊断错误。
+- **[用户下载可达 Host 网络]** → 按用户批准的取舍沿用 Host 网络，不再声称只访问公网；现有管理路由边界不变。保留 TLS、10s/512 KiB 上限与素材校验，不向目标转发 Host 凭据，错误不泄露完整 URL。
 - **[用户手动改坏/替换 `active.lottie.json`]** → `stat` + 校验，损坏回退 glyph 并显示诊断；Host 不抛 500。
 - **[Windows rename 覆盖已存在文件语义]** → Node `fs.rename` 在 POSIX 原子覆盖；Windows 上目标存在时可能失败。兜底顺序是「先把旧文件 rename 到唯一 displaced 名（保留）→ 再 rename 新文件 → 成功后清理 displaced / 失败则恢复旧文件」，MUST NOT 先 unlink 目标（那会在第二步失败时永久丢旧素材）。原子性只在 POSIX 上声明（spec 已按平台措辞）。
 - **[lottie_light.min.js 在 tsdown 下打包失败]** → 构建阶段即暴露；备选非 min 的 light 构建并更新数字，不换完整构建。
@@ -145,4 +156,4 @@ expressions/
 
 ## Open Questions
 
-- 无阻塞问题。已知非阻塞项：`isTrustedRequest` 对 `Origin: null` 的既有信任语义被新的 4 MiB 写路由继承；本 change 不改变该信任边界，留作独立后续（round 3 S2 / round 4 S5）。后续可扩展（不在本 change）：按状态映射不同动画、SVG/PNG 导入、表情包导出/分享。URL 导入已在本 change 交付（Host 侧下载，见 D11）；代理-only 环境不可用属已记录取舍。
+- 无阻塞问题。已知非阻塞项：`isTrustedRequest` 对 `Origin: null` 的既有信任语义被新的 4 MiB 写路由继承；本 change 不改变该信任边界，留作独立后续（round 3 S2 / round 4 S5）。后续可扩展（不在本 change）：按状态映射不同动画、SVG/PNG 导入、表情包导出/分享。URL 导入已在本 change 交付（Host 侧下载，见 D11）；当前下载沿用 Host 出口，不再刻意拒绝代理-only 环境。

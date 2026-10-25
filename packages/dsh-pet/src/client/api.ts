@@ -148,6 +148,7 @@ export interface PetConfig {
     readonly glyph?: string
     readonly size?: string
     readonly ringStyle?: string
+    readonly animationPlayback?: string
   }
   readonly defaultContextPolicy: 'current-session' | 'none'
   readonly workspaceId?: string
@@ -162,6 +163,7 @@ export interface PetConfigPatch {
     readonly glyph?: string
     readonly size?: string
     readonly ringStyle?: string
+    readonly animationPlayback?: string
   }
 }
 

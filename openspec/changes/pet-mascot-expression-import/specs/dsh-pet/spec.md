@@ -134,25 +134,35 @@ Host SHALL 在写入前校验导入内容，不合规时 MUST 返回 `INVALID_EX
 
 ### Requirement: 支持从 HTTPS URL 导入动画表情
 
-Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相同的校验与存储流程。下载 MUST 仅允许 https、默认 443 端口、不带凭据；MUST 拒绝 localhost/内网主机名与私有/保留 IP；MUST 校验主机解析出的全部地址均为公网，并把该地址 pin 到实际连接（连接阶段不得再次解析）；重定向 MUST 最多 3 跳且每跳重新校验；整体请求 MUST 在 10 秒内结束（含 DNS 与全部重定向）、响应 ≤512 KiB、content-type 限 JSON 类，且连接 MUST 只使用已校验地址（不得经环境代理或二次解析）。URL 被拒时 MUST 不发起请求；下载失败 SHALL 返回 `EXPRESSION_FETCH_FAILED`（HTTP 502）；下载内容校验失败 SHALL 返回 `INVALID_EXPRESSION` 且现有素材不变。
+Pet SHALL 将 URL 导入视为所有者主动下载，沿用现有接口认证与 Host 普通 fetch 网络配置，不添加 DNS/IP 分类、地址钉扎、代理绕过或网络开关。下载 MUST 使用 HTTPS 与正常证书验证，不接受 URL 用户名/密码或转发 Host 凭据/Cookie。重定向 MUST 最多 3 跳且维持 HTTPS/无凭据；全程 MUST ≤10 秒，解压后内容 MUST ≤512 KiB。内容 SHALL 经共享 Lottie 校验后保存，不按 Content-Type 拒绝。非法 URL 返回 `INVALID_REQUEST`；下载失败返回 `EXPRESSION_FETCH_FAILED`（502）；内容非法返回 `INVALID_EXPRESSION`，失败 MUST 保持现有素材，错误 MUST 不泄露 URL/查询串。
 
 #### Scenario: 从 HTTPS URL 导入合法动画
 - **GIVEN** 一个公网 https URL 返回合法的 Lottie JSON（经重定向后仍为公网 https）
 - **WHEN** 所有者调用 URL 导入路由
 - **THEN** Host 下载内容并写入生效文件，读取路由返回 `state: 'ok'` 且 `content` 与下载内容相同
 
-#### Scenario: 非 HTTPS 或内网目标被拒绝且不发起请求
-- **GIVEN** URL 为 `http:`、带凭据、非默认端口，或主机为 localhost/内网名/私有或保留 IP、或 DNS 返回任一私有地址
+#### Scenario: 非 HTTPS 或带凭据的目标被拒绝且不发起请求
+- **GIVEN** URL 非法、使用非 HTTPS 协议或带用户名/密码
 - **WHEN** 调用 URL 导入路由
 - **THEN** 返回 `INVALID_REQUEST`（HTTP 400），且没有向该 URL 发起任何 HTTP 请求
 
-#### Scenario: 重定向到内网或次数超限被拒绝
-- **GIVEN** 公网 URL 重定向到内网地址，或连续重定向超过 3 次
+#### Scenario: 下载沿用 Host 网络且无需专用配置
+- **GIVEN** Host 使用代理、NO_PROXY、TUN 或自定义 DNS，或用户提供内网 HTTPS 地址及非默认端口
+- **WHEN** 所有者导入 URL（包含重定向到这些目标）
+- **THEN** Pet 使用 Host 普通 fetch，不预先解析或过滤 IP、不替换 dispatcher；网络能否连接由 Host 网络决定，设置页没有 fake-ip 开关；旧 fake-ip 字段不再控制下载且不由配置接口暴露，无需迁移素材，不改变其他接口权限
+
+#### Scenario: 重定向协议不支持或次数超限
+- **GIVEN** URL 重定向到非 HTTPS 或带凭据的目标，或连续重定向超过 3 次
 - **WHEN** 调用 URL 导入路由
-- **THEN** 分别返回 `INVALID_REQUEST`（内网目标）与 `EXPRESSION_FETCH_FAILED`（次数超限），且不写入文件
+- **THEN** 分别返回 `INVALID_REQUEST`（非法目标）与 `EXPRESSION_FETCH_FAILED`（次数超限），且不写入文件
+
+#### Scenario: 压缩响应与非标准内容类型
+- **GIVEN** HTTPS 返回经压缩或标记为非 JSON Content-Type 的合法 Lottie 内容
+- **WHEN** 下载解压后的内容未超过 512 KiB
+- **THEN** 内容进入共享校验并正常保存，不因响应标签被拒绝
 
 #### Scenario: 下载失败返回可诊断错误且现有素材不变
-- **GIVEN** 已有生效动画，URL 返回非 2xx、超时、非 JSON 内容类型或超过 512 KiB
+- **GIVEN** 已有生效动画，URL 返回非 2xx、网络失败、超时或解压后超过 512 KiB
 - **WHEN** 调用 URL 导入路由
 - **THEN** 返回 `EXPRESSION_FETCH_FAILED`（HTTP 502），现有素材与读取结果保持不变
 
@@ -163,7 +173,7 @@ Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相
 
 ### Requirement: 吉祥物渲染、回退与可诊断
 
-存在有效动画时，吉祥物 SHALL 渲染该动画并 MUST NOT 同时显示 glyph；glyph 只在无生效动画、读取为 corrupt 或渲染失败时显示。渲染失败 MUST 通过事件与时序判定：订阅播放器 `error`/`onError`，在 `DOMLoaded` 后的有界窗口内检查渲染容器；`isLoaded` MUST NOT 作为唯一即时判据；可绘制节点 MUST 排除 `g`/`defs`/`clipPath`/`mask` 等容器，只认真正的绘制元素。失败 SHALL 销毁播放器、回退 glyph，并写入客户端共享诊断状态供 Settings 展示。播放策略 SHALL 由 `reducedMotion || document.hidden` 决定：为真时 MUST 不播放，且在整个期间对可见性变化都不得恢复播放。
+存在有效动画时，吉祥物 SHALL 渲染该动画并 MUST NOT 同时显示 glyph；glyph 只在无生效动画、读取为 corrupt 或渲染失败时显示。渲染失败 MUST 通过事件与时序判定：订阅播放器 `error`/`onError`，在 `DOMLoaded` 后的有界窗口内检查渲染容器；`isLoaded` MUST NOT 作为唯一即时判据；可绘制节点 MUST 排除 `g`/`defs`/`clipPath`/`mask` 等容器，只认真正的绘制元素。失败 SHALL 销毁播放器、回退 glyph，并写入客户端共享诊断状态供 Settings 展示。播放策略 SHALL 由 `reducedMotion || document.hidden` 决定：为真时 MUST 不播放，且在整个期间对可见性变化都不得恢复播放。所有者 SHALL 可选择播放模式：默认自动循环；选择悬停播放时，吉祥物 MUST 静止停在首帧，仅在指针悬停时循环，移出后恢复静态。`reducedMotion` 与隐藏状态 MUST 优先于悬停。
 
 #### Scenario: 动画优先于 glyph
 - **GIVEN** 存在有效动画且用户同时配置了自定义 glyph
@@ -179,6 +189,11 @@ Pet SHALL 允许所有者提交一个 URL，由 Host 下载并复用与粘贴相
 - **GIVEN** 读取路由返回 `state: 'corrupt'`
 - **WHEN** 吉祥物完成一次读取
 - **THEN** 吉祥物显示配置的 glyph（不挂载播放器），Settings 外观页显示该诊断文本
+
+#### Scenario: 悬停播放模式
+- **GIVEN** 外观设置为「悬停时播放」且存在生效动画
+- **WHEN** 吉祥物挂载后未被悬停，随后指针移入再移出
+- **THEN** 未悬停时停在动画首帧且不播放，悬停期间循环播放，移出后恢复静态；`prefers-reduced-motion` 为真时即使悬停也不播放
 
 #### Scenario: 减少动效或页面隐藏期间不播放
 - **GIVEN** `prefers-reduced-motion: reduce`，或页面处于隐藏状态

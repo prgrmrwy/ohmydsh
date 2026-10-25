@@ -229,6 +229,24 @@ describe('overlay position persistence', () => {
 })
 
 describe('overlay markup and accessibility', () => {
+  it('drops the mascot surface for imported animations', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const overlay = await readFile(
+      path.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // Lottie artwork is transparent; painting the tinted disc (and shadow)
+    // behind it would draw a visible background around the animation.
+    expect(overlay).toContain("background: face === 'animation' ? 'transparent' : accent.background")
+    expect(overlay).toContain('data-face={face}')
+    const rule = PET_CSS.match(/\.dshpet-mascot\[data-face="animation"\]\{[^}]*\}/)?.[0] ?? ''
+    expect(rule).toContain('background:transparent')
+    expect(rule).toContain('box-shadow:none')
+    // The glyph mode keeps its surface.
+    expect(PET_CSS).toMatch(/\.dshpet-mascot\{[^}]*background:var\(--dsw-specific-menu/)
+  })
+
   it('renders an accessible, labelled mascot control', () => {
     const markup = renderToStaticMarkup(
       createElement(PetOverlay, { currentSource: undefined }),
@@ -488,6 +506,125 @@ describe('settings information architecture', () => {
     expect(markup).not.toContain('不支持链接')
   })
 
+  it('presents emoji and animation as two forms of one mascot', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // One mascot, two forms: a tab switch instead of two flat setting blocks.
+    expect(markup).toContain('吉祥物有两种形态')
+    expect(markup).toContain('Emoji 图标')
+    expect(markup).toContain('动画表情')
+    expect(markup).toContain('dshpet-form-panel')
+    expect(markup).toContain('role="tablist" aria-label="吉祥物形态"')
+  })
+
+  it('uses Host network configuration without a download-specific switch', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('沿用 Host 的网络与代理配置')
+    expect(markup).not.toContain('fake-ip')
+    expect(markup).not.toContain('内网与保留地址会被拒绝')
+  })
+
+  it('defaults to URL import and keeps JSON paste behind a mode switch', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // URL is the common path; pasting a full JSON document is the specialist
+    // path and only renders after switching import mode.
+    expect(markup).toContain('role="radiogroup" aria-label="导入方式"')
+    expect(markup).toContain('aria-label="从 URL 导入"')
+    expect(markup).toContain('aria-label="粘贴 JSON"')
+    expect(markup).toContain('type="url"')
+    expect(markup).not.toContain('<textarea')
+    expect(markup).not.toContain('dshpet-json-import')
+  })
+
+  it('saves playback through a segmented radio, not an edit mode', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('role="radiogroup" aria-label="动画播放"')
+    expect(markup).toContain('aria-checked="true"')
+    expect(markup).toContain('自动循环')
+  })
+
+  it('explains with hover/focus tooltips instead of click disclosures', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    expect(markup).toContain('role="tooltip"')
+    expect(markup).not.toContain('<details class="dshpet-info"')
+    expect(PET_CSS).toContain('.dshpet-info:hover .dshpet-info-body')
+  })
+
+  it('keeps the info glyph next to its own label', () => {
+    // The shared fact-row key reserves a value column; inside a field header
+    // that reservation pushed the info icon far from the label it explains.
+    expect(PET_CSS).toMatch(
+      /\.dshpet-field-head \.dshpet-fact-key[^{]*\{[^}]*min-width:0/,
+    )
+    expect(PET_CSS).toMatch(
+      /\.dshpet-field-label \.dshpet-fact-key[^{]*\{[^}]*min-width:0/,
+    )
+  })
+
+  it('does not report a playback save the Host did not persist', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      path.resolve(process.cwd(), 'src', 'client', 'settings.tsx'),
+      'utf8',
+    )
+
+    // Older Hosts drop unknown appearance keys but still answer 200; the
+    // client must verify the echo and tell the owner to restart DSH.
+    expect(settings).toContain("updated.appearance?.animationPlayback !== next")
+    expect(settings).toContain('请重启 DSH 后再保存')
+  })
+
+  it('keeps explanation text behind info disclosures', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // The page should read as controls, not as a manual: details live behind
+    // small "i" disclosures next to the field they explain.
+    expect(markup).toContain('class="dshpet-info"')
+    expect(markup).toContain('aria-label="格式与存储说明"')
+    expect(markup).toContain('aria-label="URL 导入规则"')
+    expect(markup).toContain('aria-label="播放模式说明"')
+    expect(markup).toContain('aria-label="素材来源"')
+    expect(PET_CSS).toContain('.dshpet-info-body{')
+  })
+
+  it('points at where to find animations', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // The settings surface must answer "where do I get a URL/JSON?", including
+    // the China-accessible mirror, so the owner is not left guessing.
+    expect(markup).toContain('googlefonts.github.io/noto-emoji-animation')
+    expect(markup).toContain('lottiefiles.com/free-animations')
+    expect(markup).toContain('fonts.gstatic.cn/s/e/notoemoji/latest')
+  })
+
+  it('offers the animation playback modes in Appearance', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PetSettingsSection, { initialTab: 'general' as const }),
+    )
+
+    // Default is auto-loop; "hover" freezes the first frame until pointed at.
+    expect(markup).toContain('动画播放')
+    expect(markup).toContain('自动循环')
+  })
+
   it('warns before replacing the active expression', async () => {
     const { readFile } = await import('node:fs/promises')
     const settings = await readFile(
@@ -495,12 +632,14 @@ describe('settings information architecture', () => {
       'utf8',
     )
 
-    // The warning is shown in the surface and used by the overwrite confirm;
-    // both are source-guaranteed because the visible copy only renders after a
-    // Host read that never runs in static markup.
+    // The warning is shown in the surface and gates the overwrite through an
+    // IN-PAGE confirmation. Native `window.confirm` is deliberately not used:
+    // WebViews/PWAs can suppress it, which makes the button look dead.
     expect(settings).toContain('EXPRESSION_REPLACE_WARNING')
     expect(settings).toContain('当前动画将被替换且不保留')
-    expect(settings).toContain('globalThis.confirm')
+    expect(settings).toContain('确认替换')
+    expect(settings).toContain('取消')
+    expect(settings).not.toContain('globalThis.confirm')
   })
 
   it('states that Pet follows the DSH default model instead of its own', () => {

@@ -1169,6 +1169,8 @@ const petGlobalState = z.object({
       glyph: z.string().optional(),
       size: z.string().optional(),
       ringStyle: z.string().optional(),
+      /** 'loop' (default) or 'hover' for imported mascot animations. */
+      animationPlayback: z.string().optional(),
     })
     .optional(),
   /** Registered Pet Workspace id, once created. */

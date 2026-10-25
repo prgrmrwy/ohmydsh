@@ -31,6 +31,8 @@ import {
   PET_SKILLS_EVENT,
   PET_SIZES,
   resolveAccent,
+  resolveAnimationPlayback,
+  type PetAnimationPlayback,
 } from './accent.js'
 import {
   clampPosition,
@@ -49,9 +51,11 @@ import {
   createLatestOnly,
   createMascotAnimation,
   resolveMascotFace,
+  type MascotAnimation,
   type MascotPlayerLoader,
 } from './mascot-expression.js'
 import { setMascotExpressionDiagnostic } from './mascot-diagnostics.js'
+import { setExpressionPresence } from './expression-presence.js'
 
 /**
  * Display name for an Invocation origin that is not a Skill.
@@ -159,7 +163,10 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   const [expression, setExpression] = useState<PetExpressionView | undefined>(undefined)
   /** True when the player mounted but proved it cannot draw anything usable. */
   const [renderFailed, setRenderFailed] = useState(false)
+  /** Auto-loop by default; 'hover' freezes the first frame until hovered. */
+  const [animationPlayback, setAnimationPlayback] = useState<PetAnimationPlayback>('loop')
   const lottieHostRef = useRef<HTMLSpanElement | null>(null)
+  const animationRef = useRef<MascotAnimation | null>(null)
   const [mode, setMode] = useState<Mode>('closed')
   const [capabilities, setCapabilities] = useState<readonly PetCapability[]>([])
   const [degraded, setDegraded] = useState<string | undefined>(undefined)
@@ -257,6 +264,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         .expression()
         .then(view => {
           if (!expressionReads.isCurrent(token)) return
+          setExpressionPresence(view.state === 'ok' ? 'ok' : 'none')
           setExpression(view)
           if (view.state === 'corrupt') setMascotExpressionDiagnostic(view.diagnostic)
           if (view.state === 'none') setMascotExpressionDiagnostic(undefined)
@@ -275,6 +283,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
           setRingStyle(
             PET_RING_STYLES.find(item => item.id === look.ringStyle)?.id ?? DEFAULT_RING_STYLE,
           )
+          setAnimationPlayback(resolveAnimationPlayback(look.animationPlayback))
         })
         .catch(() => undefined)
     }
@@ -304,6 +313,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     if (container === null) return undefined
     const animation = createMascotAnimation(container, expression.content, {
       loader: props.loadAnimation,
+      hoverOnly: animationPlayback === 'hover',
       onFailure: reason => {
         setRenderFailed(true)
         setMascotExpressionDiagnostic(reason)
@@ -313,8 +323,12 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         setMascotExpressionDiagnostic(undefined)
       },
     })
-    return () => animation.destroy()
-  }, [expression, renderFailed, props.loadAnimation])
+    animationRef.current = animation
+    return () => {
+      animationRef.current = null
+      animation.destroy()
+    }
+  }, [expression, renderFailed, props.loadAnimation, animationPlayback])
 
 
   /**
@@ -531,6 +545,38 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
     }
     document.addEventListener('mousemove', onMove)
     return () => document.removeEventListener('mousemove', onMove)
+  }, [mode, wheelRadius])
+
+  /**
+   * Hover-to-play trigger area.
+   *
+   * The button only covers the mascot circle; the capability wheel is drawn
+   * outside it, so moving onto a ring fired the button's mouseleave and froze
+   * the animation. Treat the whole rendered disc — mascot plus (while open)
+   * the wheel radius — as "the pointer is on Pet".
+   */
+  useEffect(() => {
+    const onMove = (event: PointerEvent): void => {
+      const node = rootRef.current?.querySelector('.dshpet-mascot')
+      if (node === null || node === undefined) return
+      const box = node.getBoundingClientRect()
+      const distance = Math.hypot(
+        event.clientX - (box.left + box.width / 2),
+        event.clientY - (box.top + box.height / 2),
+      )
+      const overMascot = distance <= box.width / 2
+      const overWheel = mode === 'menu' && distance <= wheelRadius
+      animationRef.current?.setHover(overMascot || overWheel)
+    }
+    const clear = (): void => animationRef.current?.setHover(false)
+    document.addEventListener('pointermove', onMove)
+    document.documentElement.addEventListener('pointerleave', clear)
+    window.addEventListener('blur', clear)
+    return () => {
+      document.removeEventListener('pointermove', onMove)
+      document.documentElement.removeEventListener('pointerleave', clear)
+      window.removeEventListener('blur', clear)
+    }
   }, [mode, wheelRadius])
 
   useEffect(() => {
@@ -828,6 +874,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // the empty square around a collapsed mascot a hover target, so the
         // wheel sprang open from well outside it.
         onMouseEnter={() => {
+          animationRef.current?.setHover(true)
           if (mode === 'closed') setMode('menu')
         }}
         // Inline, because the palette is user data: emitting one rule per
@@ -835,13 +882,15 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         // palette and grow it for options nobody selected.
         style={{
           // The surface is tinted, not the glyph: 🐾 is a colour emoji and
-          // CSS `color` cannot recolour it.
-          background: accent.background,
+          // CSS `color` cannot recolour it. Imported Lottie artwork is already
+          // a complete picture, so it gets no tinted disc behind it.
+          background: face === 'animation' ? 'transparent' : accent.background,
           width: size,
           height: size,
           // Keep the glyph proportional to the circle it sits in.
           fontSize: Math.round(size * 0.53),
         }}
+        data-face={face}
         data-dragging={dragging.current !== undefined}
         aria-label="DSH Pet"
         aria-expanded={mode !== 'closed'}

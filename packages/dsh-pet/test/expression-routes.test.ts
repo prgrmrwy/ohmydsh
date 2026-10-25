@@ -253,6 +253,22 @@ describe('URL import route', () => {
     expect(read.data).toMatchObject({ state: 'ok', content: text })
   })
 
+  it('downloads without a network opt-in and does not expose the retired config', async () => {
+    routes = buildRoutes({
+      lifecycle: readyLifecycle(),
+      fetchExpressionSource: async (...args: unknown[]) => {
+        expect(args).toEqual(['https://assets.internal:8443/a.json'])
+        return source()
+      },
+    } as never)
+    const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'https://assets.internal:8443/a.json' })
+    expect(reply).toMatchObject({ ok: true })
+    const config = await call(ROUTES.config, {})
+    expect(config.data).not.toHaveProperty('expressionFetchAllowFakeIp')
+    const saved = await call(ROUTES.configUpdate, { appearance: { glyph: '🐾' } })
+    expect(saved.data).not.toHaveProperty('expressionFetchAllowFakeIp')
+  })
+
   it('rejects a URL that is not https before any download', async () => {
     const reply = await call(EXPRESSION_ROUTES.importUrl, { url: 'http://cdn.example/a.json' })
     expect(reply).toMatchObject({ ok: false, error: 'INVALID_REQUEST' })

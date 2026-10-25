@@ -178,7 +178,7 @@ customizations:
   - id: dsh-pet
     type: package
     source: local
-    version: 0.2.1
+    version: 0.2.15
     enabled: true
     # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
     # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
@@ -186,7 +186,7 @@ customizations:
       kind: pet-unified-locus-v1
       supportedDshVersion: 0.2.0-rc.2
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web 双半区,状态在 $DSH_HOME/plugins/dsh-pet/(sqlite,与安装目录分离);不读取 provider 凭据,能力来自用户显式导入的 Skill。飞书入站默认关闭:凭据留在 lark-cli,allowlist 为空即不放行,入站防线均静默 fail closed;lark-cli 最低 1.0.97;入站为单条 event +subscribe(群消息+文档评论),运行期间同一飞书应用的其它 profile 不能做事件订阅,建议独占一个应用;文档评论前置与升级复测见 packages/dsh-pet/README。compat overlay 只替换 @deepseek-ai/dsh-subagent(4 个 seam),dshVersion 变化必须重新审查,不自动套补丁;退役须上游发布全部四项能力(跟踪见 packages/dsh-pet/compat/subagent/README.md)。移除:enabled:false → dsh build → 重启。0.2.x 可导入 Lottie 动画表情(单文件,无 schema 变更);URL 导入仅 https 直连。'
+    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web 双半区,状态在 $DSH_HOME/plugins/dsh-pet/(sqlite,与安装目录分离);不读取 provider 凭据,能力来自用户显式导入的 Skill。飞书入站默认关闭:凭据留在 lark-cli,allowlist 为空即不放行,入站防线均静默 fail closed;lark-cli 最低 1.0.97;入站为单条 event +subscribe(群消息+文档评论),运行期间同一飞书应用的其它 profile 不能做事件订阅,建议独占一个应用;文档评论前置与升级复测见 packages/dsh-pet/README。compat overlay 只替换 @deepseek-ai/dsh-subagent(4 个 seam),dshVersion 变化必须重新审查,不自动套补丁;退役须上游发布全部四项能力(跟踪见 packages/dsh-pet/compat/subagent/README.md)。移除:enabled:false → dsh build → 重启。Lottie 单文件表情;HTTPS 下载沿用 Host 网络/代理。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0

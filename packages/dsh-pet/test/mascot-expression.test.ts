@@ -164,6 +164,54 @@ describe('playback policy', () => {
   })
 })
 
+describe('hover-only playback', () => {
+  it('freezes on the first frame until hovered', () => {
+    const env = environment()
+    const animation = handle()
+    let autoplay: boolean | undefined
+    const mounted = createMascotAnimation(document.createElement('div'), VALID, {
+      loader: (_container, _data, shouldPlay) => {
+        autoplay = shouldPlay
+        return animation
+      },
+      environment: env,
+      hoverOnly: true,
+    })
+
+    // Static until the owner points at the mascot.
+    expect(autoplay).toBe(false)
+    expect(animation.calls).toContain('first-frame')
+    expect(animation.calls).not.toContain('play')
+
+    mounted.setHover(true)
+    expect(animation.calls).toContain('play')
+
+    mounted.setHover(false)
+    expect(animation.calls.filter(call => call === 'first-frame').length).toBeGreaterThanOrEqual(2)
+
+    // Reduced motion still wins over hover: no ADDITIONAL play is started.
+    const plays = animation.calls.filter(call => call === 'play').length
+    env.reducedMotion = () => true
+    env.listeners.forEach(listener => listener())
+    mounted.setHover(true)
+    expect(animation.calls.filter(call => call === 'play').length).toBe(plays)
+  })
+
+  it('keeps auto-looping when hover-only is off', () => {
+    const animation = handle()
+    let autoplay: boolean | undefined
+    createMascotAnimation(document.createElement('div'), VALID, {
+      loader: (_container, _data, shouldPlay) => {
+        autoplay = shouldPlay
+        return animation
+      },
+      environment: environment(),
+    })
+    expect(autoplay).toBe(true)
+    expect(animation.calls).not.toContain('first-frame')
+  })
+})
+
 describe('failure fallback', () => {
   it('falls back and publishes a diagnostic when the player fails', () => {
     const diagnostics: string[] = []

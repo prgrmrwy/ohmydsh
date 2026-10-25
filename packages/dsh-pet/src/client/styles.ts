@@ -85,6 +85,12 @@ export const PET_CSS = `
   color:var(--dsw-alias-label-primary,#1f2329);
   box-shadow:0 4px 16px rgba(0,0,0,.18);transition:transform .12s ease,box-shadow .12s ease}
 .dshpet-mascot:hover{transform:scale(1.06);box-shadow:0 6px 22px rgba(0,0,0,.24)}
+/* Imported Lottie artwork is transparent and already shaped; the tinted disc
+   and its shadow existed only to give the single emoji glyph a surface, and
+   behind an animation they read as an unwanted circle/background. Keep the
+   button (hit target, hover scale, focus ring) but paint nothing behind it. */
+.dshpet-mascot[data-face="animation"]{background:transparent;box-shadow:none}
+.dshpet-mascot[data-face="animation"]:hover{box-shadow:none}
 .dshpet-mascot:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:3px}
 .dshpet-mascot[data-dragging="true"]{cursor:grabbing}
 /* Imported Lottie animation. It fills the mascot circle and must never take
@@ -437,6 +443,78 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    hurts: a row mixing a 32px control with a taller wrapped one pins them to
    their bottom edges instead of their text. "end" on the baseline axis keeps
    the labelled-field case working while equal-height controls simply agree. */
+.dshpet-settings .dshpet-link{color:var(--dsw-alias-state-business-primary,#4176e6);
+  text-decoration:none;border-bottom:1px solid transparent}
+.dshpet-settings .dshpet-link:hover{border-bottom-color:currentColor}
+.dshpet-settings .dshpet-link:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
+  outline-offset:2px;border-radius:2px}
+.dshpet-settings .dshpet-field-label{display:flex;align-items:center;gap:2px;min-width:0}
+/* Inline "i" disclosure for explanation text that used to be page prose. */
+/* The shared fact-row key reserves 132px so values line up in tables of
+   label/value pairs. Inside a field header that reservation is pure gap: the
+   info icon floated ~120px away from its own label. */
+.dshpet-settings .dshpet-field-head .dshpet-fact-key,
+.dshpet-settings .dshpet-field-label .dshpet-fact-key{min-width:0}
+.dshpet-settings .dshpet-field-head{display:flex;align-items:center;gap:2px;min-width:0}
+/* Label + hint on the left, control on the right — one line, like the other
+   DSH panels (default-mode / reasoning-effort switches). */
+.dshpet-settings .dshpet-inline-row{display:flex;align-items:center;justify-content:flex-start;
+  gap:10px;flex-wrap:wrap}
+/* Inline "i" hint. Explanation is a GLANCE, not a mode: hover/focus shows the
+   tooltip, no click state to toggle back. The tooltip is a child of the
+   wrapper, so moving the pointer into it keeps it open and its links usable. */
+.dshpet-settings .dshpet-info{position:relative;display:inline-flex;flex:none;
+  vertical-align:middle;margin-left:1px}
+.dshpet-settings .dshpet-info-mark{border:0;padding:2px;margin:0;cursor:help;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:none;color:var(--dsw-alias-label-tertiary,#8f959e);
+  font:inherit;user-select:none}
+.dshpet-settings .dshpet-info-mark:hover{color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-info-mark:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);
+  outline-offset:2px}
+.dshpet-settings .dshpet-info:hover .dshpet-info-mark,
+.dshpet-settings .dshpet-info:focus-within .dshpet-info-mark{
+  color:var(--dsw-alias-state-business-primary,#4176e6);border-color:currentColor}
+.dshpet-settings .dshpet-info-body{position:absolute;left:0;top:100%;z-index:30;
+  display:none;padding-top:6px;width:340px;max-width:min(340px,72vw);text-align:left}
+.dshpet-settings .dshpet-info:hover .dshpet-info-body,
+.dshpet-settings .dshpet-info:focus-within .dshpet-info-body{display:block}
+.dshpet-settings .dshpet-info-card{display:flex;flex-direction:column;gap:6px;
+  padding:10px 12px;border-radius:10px;box-sizing:border-box;
+  background:var(--dsw-alias-bg-layer-1,#ffffff);
+  border:.5px solid var(--dsw-alias-border-l4,#0000001a);
+  box-shadow:0 8px 24px rgba(0,0,0,.14);
+  font:var(--dsw-font-xs-13,400 12px/18px var(--dsw-font-family,inherit));
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-info-card p{margin:0}
+.dshpet-settings .dshpet-info-card code{font-size:11px;word-break:break-all}
+/* Two-value radio: saved immediately, no edit/save mode. */
+.dshpet-settings .dshpet-segmented{display:inline-flex;gap:2px;padding:2px;align-self:flex-start;
+  border-radius:10px;background:var(--dsw-alias-interactive-bg-hover,#0000000f)}
+.dshpet-settings .dshpet-segment{border:none;background:transparent;cursor:pointer;
+  font:inherit;font-size:12px;line-height:18px;padding:4px 12px;border-radius:8px;
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-segment:hover{color:var(--dsw-alias-label-primary,#1f2329)}
+.dshpet-settings .dshpet-segment[data-selected="true"],
+.dshpet-settings .dshpet-segment[aria-selected="true"]{
+  background:var(--dsw-specific-menu,#ffffff);color:var(--dsw-alias-label-primary,#1f2329);
+  box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.dshpet-settings .dshpet-segment:focus-visible{
+  outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+/* Current-animation row: one compact fact line with its row actions. */
+.dshpet-settings .dshpet-expression-status{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;flex-wrap:wrap;min-height:28px}
+.dshpet-settings .dshpet-expression-fact{
+  font:var(--dsw-font-xs-13,400 12px/20px var(--dsw-font-family,inherit));
+  color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-expression-actions{display:flex;gap:6px;flex:none}
+/* URL first, JSON paste folded away: the URL path is the common one. */
+.dshpet-settings .dshpet-url-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dshpet-settings .dshpet-url-row .dshpet-input{flex:1;min-width:220px;max-width:none}
+.dshpet-settings .dshpet-form-panel{display:flex;flex-direction:column;gap:8px}
+/* Attribute [hidden] must beat the flex display above: the UA rule loses on
+   specificity, so state it explicitly instead of relying on default CSS. */
+.dshpet-settings .dshpet-form-panel[hidden]{display:none}
 .dshpet-settings .dshpet-row{display:flex;flex-direction:row;gap:12px;
   align-items:flex-end;flex-wrap:wrap}
 .dshpet-settings .dshpet-row .dshpet-field{flex:1;min-width:140px}

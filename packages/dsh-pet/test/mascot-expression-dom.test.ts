@@ -25,6 +25,10 @@ import type { PetExpressionView } from '../src/wire.js'
 
 /** Current projection the stubbed Host returns. */
 let expression: PetExpressionView = { state: 'none' }
+/** Playback mode the stubbed Host config reports. */
+let playbackMode: 'loop' | 'hover' = 'loop'
+/** Player calls recorded by the fake loader (play / first-frame / pause). */
+const playbackCalls: string[] = []
 
 /** Route-aware fetch stub: every Pet call the overlay makes is answered. */
 function stubFetch(): void {
@@ -34,7 +38,9 @@ function stubFetch(): void {
       const href = String(url)
       let data: unknown = {}
       if (href.includes('/api/expression')) data = expression
-      else if (href.includes('/api/config')) data = { defaultContextPolicy: 'none' }
+      else if (href.includes('/api/config')) {
+        data = { defaultContextPolicy: 'none', appearance: { animationPlayback: playbackMode } }
+      }
       else if (href.includes('/api/capabilities')) data = { capabilities: [] }
       else if (href.includes('/api/channel')) data = { connection: { phase: 'stopped', queueDepth: 0 } }
       else if (href.includes('/api/status')) {
@@ -60,9 +66,9 @@ const drawableLoader: MascotPlayerLoader = container => {
   svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'path'))
   container.appendChild(svg)
   const handle: MascotPlayerHandle = {
-    play: () => undefined,
-    pause: () => undefined,
-    stopFirstFrame: () => undefined,
+    play: () => playbackCalls.push('play'),
+    pause: () => playbackCalls.push('pause'),
+    stopFirstFrame: () => playbackCalls.push('first-frame'),
     destroy: () => svg.remove(),
     on: (event, listener) => {
       if (event === 'DOMLoaded') setTimeout(listener, 0)
@@ -81,6 +87,8 @@ let mounted: { root: Root; host: HTMLElement } | undefined
 
 beforeEach(() => {
   expression = { state: 'none' }
+  playbackMode = 'loop'
+  playbackCalls.length = 0
   setMascotExpressionDiagnostic(undefined)
   resetLottieStub()
   stubFetch()
@@ -131,6 +139,35 @@ describe('mascot animation mounts and refreshes', () => {
 
     expect(host.querySelector('.dshpet-lottie')).toBeNull()
     expect(host.textContent).toContain('🐾')
+  })
+
+  it('treats the open wheel disc as hovering the mascot', async () => {
+    playbackMode = 'hover'
+    expression = { state: 'ok', content: VALID, bytes: 64, importedAt: Date.now() }
+    const { host } = await mount()
+
+    // Hover mode starts frozen on the first frame.
+    expect(playbackCalls).toContain('first-frame')
+    expect(playbackCalls).not.toContain('play')
+
+    // Open the capability wheel, then move the pointer onto the ring area.
+    const mascot = host.querySelector('.dshpet-mascot')
+    if (mascot === null) throw new Error('mascot did not render')
+    mascot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+    await settle()
+    expect(host.querySelector('.dshpet-wheel')).not.toBeNull()
+
+    // jsdom reports a zero-size mascot box, so any positive distance is
+    // outside the button but inside the wheel radius (36 + 20 + 38).
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 40, clientY: 0, bubbles: true }))
+    await settle()
+    expect(playbackCalls).toContain('play')
+
+    // Leaving the disc stops and rewinds to the first frame.
+    const before = playbackCalls.filter(call => call === 'first-frame').length
+    document.dispatchEvent(new MouseEvent('pointermove', { clientX: 600, clientY: 600, bubbles: true }))
+    await settle()
+    expect(playbackCalls.filter(call => call === 'first-frame').length).toBeGreaterThan(before)
   })
 
   it('renders the glyph and publishes the diagnostic for a corrupt read', async () => {

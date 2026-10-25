@@ -76,7 +76,9 @@ describe('the palette is muted by construction', () => {
     // colour bitmap and CSS `color` silently does nothing. Colouring the
     // circle is the only approach that works for any glyph.
     expect(/\p{Emoji_Presentation}/u.test('🐾')).toBe(true)
-    expect(overlay).toContain('background: accent.background')
+    // The tinted circle belongs to glyph mode only; an imported Lottie paints
+    // its own transparent artwork, so the surface becomes transparent.
+    expect(overlay).toContain("'transparent' : accent.background")
   })
 })
 

@@ -1,4 +1,15 @@
-## Verification Results
+## 0.2.15 — 用户主动下载沿用 Host 网络（2026-10-25）
+
+- 本轮需求：去除功能级 DNS/IP 拦截、地址钉扎、专用直连 Agent 与 fake-ip 配置；使用 Host 全局 fetch，保留 TLS、10s 总截止、3 跳重定向、解压后 512 KiB 上限和共享素材校验。
+- RED：`npx vitest run test/expression-fetch.test.ts -t 'uses Host fetch'` 在旧实现下因 localhost 被主动拒绝而失败（不是导入/语法错误）。
+- 全量：`cd packages/dsh-pet && npm run typecheck && npm test` → 类型通过；204 passed / 3 skipped files，3447 passed / 8 skipped tests，0 failed（143.06s）。移除的是被本轮需求替代的公网/地址 pin 测试，不是绕过仍有效的安全契约。
+- 最终小幅调整（压缩 Content-Length 不代表解压后长度、清理取消异常、显式 never return）后：`npm run typecheck && npx vitest run test/expression-fetch.test.ts test/expression-transport.test.ts test/expression-routes.test.ts test/client.test.ts` → 4 files / 185 tests passed。
+- root `npm test` → 447 tests，445 passed / 2 skipped / 0 failed；`npm run check:artifacts` → passed；`openspec validate pet-mascot-expression-import --strict` → passed（初次因 requirement 超长告警，精简文字并移到场景后通过）。
+- Host transport：真实 Node fetch + undici MockAgent 全局 dispatcher，目标 `.invalid:8443` 仍能下载（不进行 Pet 预解析）；gzip 正常解压，压缩小文件解压超过上限被拒；无自定义 dispatcher/Agent、无 Cookie/Authorization，跨重定向/正文共用截止信号。现有路由失败不覆盖测试通过。
+- review round 10：当前执行者完整差异自审 APPROVE，非独立评审；旧 round 9 对公网/pin 的裁决为历史证据，不再适用于新策略。
+- 部署：`node scripts/sync.mjs` exit 0，物化 0.2.15；第二次 sync 无变化。部署的 `lib/host/expression-fetch.js`、`lib/client.js` 与本轮构建 SHA-256 一致；没有手改部署副本。GUI `http://127.0.0.1:3080/` 未认证探针返回 401，仅证明服务可达；不擅自重启 Host。既有 7.6 浏览器/真机验收仍开放，未经用户机器 fake-ip/TUN 实测，不宣称特定网络必然可达。
+
+## Verification Results（以下为初版历史记录，不作为 0.2.15 当前证据）
 
 ### Task Completion
 - [x] All tasks marked `[x]` in tasks.md
