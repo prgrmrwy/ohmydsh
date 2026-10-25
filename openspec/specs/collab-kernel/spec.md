@@ -40,7 +40,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 | `createItem`、`reviseItem`、`ackItem`、`sendMessage`、`setStatus` | agent、provider | 成员（另受条目状态转换表约束） |
 | `advanceRequest` | agent、provider | 成员且为该 request 的承接方 |
 | `allowManager`、`revokeManager` | agent、provider | 成员且为 Leader |
-| `admitMember`、`rebindMember`、`retireMember` | manager | 其 channel 在 `managers` 中（否则 `COLLAB_NOT_MEMBER`，与非成员不可区分）；目标规则见"接入方按空间托管成员" |
+| `admitMember`、`rebindMember`、`retireMember`、`disposeManagedRequest` | manager | 其 channel 在 `managers` 中（否则 `COLLAB_NOT_MEMBER`，与非成员不可区分）；目标规则见"接入方按空间托管成员" |
 
 表中允许 agent、provider 的命令，manager principal 调用时 MUST 以 `COLLAB_FORBIDDEN` 拒绝；manager 命令由 agent 或 provider principal 调用时同样 MUST 以 `COLLAB_FORBIDDEN` 拒绝。manager principal 不能读取。
 
@@ -52,7 +52,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **manager 命令**分两个阶段：
   - **事务外预备**：
     - ① principal 稳定校验：agent、provider、internal principal 在此 MUST 以 `COLLAB_FORBIDDEN` 拒绝。
-    - ② 仅对 `admitMember`、`rebindMember`：当前已加载的日志中已有同 scope、同 cmdId 的收据时，不认领；否则只调用该 provider 的 `claim(address, 'agent')` 一次。
+    - ② 仅对 `admitMember`、`rebindMember`（`retireMember`、`disposeManagedRequest` 不认领）：当前已加载的日志中已有同 scope、同 cmdId 的收据时，不认领；否则只调用该 provider 的 `claim(address, 'agent')` 一次。
     - 预备阶段的任何判断结果都 MUST NOT 被事务内阶段沿用。
   - **事务内**：在串行队列中，从当前状态重新判定。
     - ③ 协作空间存在。
@@ -355,7 +355,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: request 条目的承接流程
 
-`request` 条目的 `progress` SHALL 只能按 `open → accepted → done`、`open → rejected`、`accepted → rejected` 推进，仅 `assignee` 可推进，且与条目状态与 revision 无关。非法跳转 MUST 以 `COLLAB_BAD_TRANSITION` 拒绝；非承接方推进 MUST 以 `COLLAB_FORBIDDEN` 拒绝。条目状态为 `escalated` 或 `decided`（只可能来自旧日志）的 request MUST NOT 被推进，分别以 `COLLAB_ITEM_ESCALATED`、`COLLAB_DECIDED_LOCKED` 拒绝；该检查位于收据查找之后。推进为 `accepted` MUST NOT 唤醒任何成员；推进为终态 `done` 或 `rejected` SHALL 唤醒 request 的作者（结束通知；作者即承接方本人时不唤醒）。终态不可逆，因此每个 request 至多产生一次结束通知。
+`request` 条目的 `progress` SHALL 只能按 `open → accepted → done`、`open → rejected`、`accepted → rejected` 推进，由 `assignee` 经 `advanceRequest` 推进；另外，托管该 request 作者的接入方可经 `disposeManagedRequest` 代人处置（见"接入方代人处置其托管成员的 request"）。`advanceRequest` 仅 `assignee` 可调用，且与条目状态与 revision 无关。非法跳转 MUST 以 `COLLAB_BAD_TRANSITION` 拒绝；非承接方推进 MUST 以 `COLLAB_FORBIDDEN` 拒绝。条目状态为 `escalated` 或 `decided`（只可能来自旧日志）的 request MUST NOT 被推进，分别以 `COLLAB_ITEM_ESCALATED`、`COLLAB_DECIDED_LOCKED` 拒绝；该检查位于收据查找之后。经 `advanceRequest` 推进为 `accepted` MUST NOT 唤醒任何成员；经 `advanceRequest` 推进为终态 `done` 或 `rejected` SHALL 唤醒 request 的作者（结束通知；作者即承接方本人时不唤醒）。终态不可逆，因此每个 request 至多产生一次结束通知。
 
 #### Scenario: 承接方正常推进
 - **GIVEN** `R1` 的 `assignee` 为 `doubao`，`progress` 为 `open`
@@ -1128,3 +1128,58 @@ provider MAY 实现同步方法 `supportsMode(mode): boolean`。`sendMessage` SH
 - **WHEN** `aily` 不带 `mode` 发需回复消息，并邀请新成员
 - **THEN** 两条 `dispatch/intended` 与对应指针都没有 `mode` 键
 
+### Requirement: 接入方代人处置其托管成员的 request
+
+内核 SHALL 提供 manager 命令 `disposeManagedRequest({itemId, progress})`，供接入方代表本机用户处置由其托管成员登记的 request。它按 manager 命令的两阶段流程执行（不认领；事务内依次判定空间存在、收据、授权、关闭、业务校验、守卫），收据 scope 为 `{kind:'manager', channel}`。
+
+业务校验：
+- 条目必须存在且 `kind` 为 `request`，否则 `COLLAB_ITEM_NOT_FOUND`（不存在）或 `COLLAB_FORBIDDEN`（非 request）；
+- 条目作者必须是由该 channel 托管的成员（`managedBy` 等于该 channel，作者已退役或被 `markGone` 仍算），否则 `COLLAB_FORBIDDEN`；
+- 条目状态为 `escalated` 或 `decided` 时分别以 `COLLAB_ITEM_ESCALATED`、`COLLAB_DECIDED_LOCKED` 拒绝；
+- 允许的转换为 `open → accepted`、`open → done`、`open → rejected`、`accepted → done`、`accepted → rejected`，其余以 `COLLAB_BAD_TRANSITION` 拒绝。
+
+成功时提交一条 `request/progressed` 事件，actor 为 `manager:<channel>`。该命令 MUST NOT 产生任何 `dispatch/intended`，也不计入任何话题。终态不可逆，因此 assignee 此后的 `advanceRequest` 以 `COLLAB_BAD_TRANSITION` 拒绝。
+
+#### Scenario: 代人受理不唤醒
+- **GIVEN** 空间 S 已授权 `pet-locus`；托管成员 `pet` 创建 request `todo-1`（assignee `main`，open）
+- **WHEN** manager 以 `cmdId:'acc-1'` 调用 `disposeManagedRequest({itemId:'todo-1', progress:'accepted'})`，再以相同参数重试
+- **THEN** 两次返回同一 seq；`todo-1.progress` 为 `accepted`；提交中 actor 为 `manager:pet-locus`，不含 `dispatch/intended`
+
+#### Scenario: 不经受理直接完成
+- **GIVEN** 承上但 `todo-1` 为 open
+- **WHEN** manager 推进为 `done`
+- **THEN** 成功；随后 `main` 调用 `advanceRequest` 推进为 `rejected` 返回 `COLLAB_BAD_TRANSITION`
+
+#### Scenario: 不能处置非托管成员的 request
+- **GIVEN** 普通成员 `main` 创建 request `r-2`（assignee `main`）
+- **WHEN** manager 调用 `disposeManagedRequest({itemId:'r-2', progress:'done'})`
+- **THEN** 返回 `COLLAB_FORBIDDEN`，日志长度不变
+
+#### Scenario: 作者退役后仍可处置
+- **GIVEN** `pet` 登记 `todo-3` 后被 `retireMember`
+- **WHEN** manager 推进 `todo-3` 为 `rejected`
+- **THEN** 成功，不含 `dispatch/intended`
+
+#### Scenario: 未授权空间不可区分
+- **GIVEN** 空间 T 未授权 `pet-locus`
+- **WHEN** manager 对 T 调用 `disposeManagedRequest`
+- **THEN** 返回 `COLLAB_NOT_MEMBER`，与对不存在空间的 `admitMember` 同类
+
+### Requirement: 提交记录携带提交时间
+
+内核 SHALL 为本变更之后写入的每条提交记录（`command` 与 `completion`）写入 `at`：在串行事务内、持久化之前取一次 `ServiceOptions.now()`（缺省 `Date.now`）得到的毫秒整数。`at` SHALL 受提交记录既有校验和覆盖。收据命中的重放 MUST NOT 写入新提交，因此 MUST NOT 产生新的 `at`。读取 SHALL 原样返回 `at`。本变更之前没有 `at` 的提交照常重放，内核 MUST NOT 为其补写时间。
+
+#### Scenario: 新提交带时间且重放不刷新
+- **GIVEN** `now` 依次返回 1000、2000
+- **WHEN** 成员以 `cmdId:'c-1'` 创建条目，再以相同 cmdId 与载荷重试
+- **THEN** 日志只有一条该命令的提交，其 `at` 为 1000；重试返回同一结果，日志长度不变
+
+#### Scenario: 旧日志无时间照常重放
+- **GIVEN** 本变更之前写入、提交记录不含 `at` 的日志
+- **WHEN** 新内核加载并读取 `readSince(0)`
+- **THEN** 加载成功，返回的旧提交不含 `at`；之后的新提交含 `at`
+
+#### Scenario: 篡改时间被识别为损坏
+- **GIVEN** 一条带 `at` 的提交
+- **WHEN** 离线把该行的 `at` 改为别的值后重新加载
+- **THEN** 加载按既有损坏处理失败，不使用被改的时间
