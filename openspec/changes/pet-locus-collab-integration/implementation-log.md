@@ -94,3 +94,14 @@
 - 主 checkout @ fa38cd644，载入 `.env.local`（含私有 overlay 路径）后 `node scripts/sync.mjs`：exit 0，`done — 6 change(s) applied`，其中 dsh-collab、dsh-pet 本地包内容变化、原子重装；生成的 `~/.dsh/profiles/web/cordis.patch.yml` 中 dsh-collab config 已含 `managedChannels: [pet-locus]`。另有两条既有 WARN（agent-team profile、voice-input bundle 未在 dsh.yaml 声明），与本 change 无关。
 - 第二次 sync：exit 0，`no changes — deployment already matches manifest`，幂等。
 - 尚未重启 Host；重启与刷新 GUI 由用户执行，10.3 在新会话中进行。
+
+## 10.3 真实 Host 验收（进行中，2026-10-25，重启后）
+
+环境：主会话 = 当前会话（…476b88a5），Locus 群「迁移 Pet Locus 共享台账至协作层」（oc_c98ce…，safe 档，read 权限），子会话 …571266a5。
+
+- 空间建立：重启后主会话加载即建 `pet-locus-e513fbf9993de3e9`；seq1 `space/created`+`member/joined main`，seq2 `manager/allowed pet-locus`（actor main），seq3 `member/joined pet`（actor manager:pet-locus）。成员恰为 main 与 pet。其余 9 个主会话未加载，未建空间（D2 不唤醒）。
+- 旧版只读：管理面 18 组均 `collab=available`，9 条旧待办全部 `legacy`；经真实 `/dsh-pet/api/locus-todo-action` 对旧待办 accept/done/drop 均 400「旧版待办（迁移前登记），只读保留」；`ledger_item` 表前后逐行一致。
+- 登记：用户在群内 @机器人后，子会话调用 `pet_locus_track` 返回"已登记待办（状态为待处理，尚未开始）"，随后 `pet_locus_finish` 回复。空间 seq4 只含 `item/created`（无 `dispatch/intended`，未唤醒任何人）：author `pet`、assignee `main`、progress open；ext.pet 含 locusId `locus-0c3af9d398667401`（入口派生，AMD-2）、recordId、generation、endpoint、triggerMessageId、requestedBy；body 为 `{summary, detail}` JSON；receipt cmdId 带戳前缀 `c5c429942c16a52a:`。
+- 子会话工具面（取自其真实 request header）：恰含 8 个 `collab_*`，不含 `collab_space/invite/member` 与 `pet_locus_ledger_read`。
+- 主会话视角：`collab_status` 列出该 open 待办并建议 `advance_request`（D8 已知风险：主会话可见）；本会话未自行受理。
+- 受理：管理面 accept → 200，seq5 `request/progressed accepted` actor `manager:pet-locus`，cmdId `accept-<itemId>-<attemptId>`；再次 accept → 400"待办当前不是待处理（accepted），未投递"。跟进正文以 `next-turn` 排入主会话 inbox（未 steer 当前轮）。
