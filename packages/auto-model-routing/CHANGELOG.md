@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+- Upgrade AUTO by default: keep the main model fixed, independently judge child capability and reasoning investment, and enforce exact fresh-child bindings with persisted replay. Preserve explicit legacy rollback and MANUAL behavior.
+- Add TypeSafe, Concentrate and custom System One decision services with separate credentials, preset model menus and explicit public-sample connection testing.
+- Expose executable strategy details, candidate distributions, normalized Choice certainty and actual application status; no task-quality or savings claims.
+- Restore per-reply allocation feedback with immutable evaluation snapshots, request-event correlation, timestamped change/cancel events and legacy-record compatibility.
+- Refresh bilingual user documentation; label earlier GIFs as legacy mock-host demonstrations. Fork and real-provider teammate acceptance remain unsupported/unverified as documented.
+
 
 - Accept the DSH 0.2 host's React 18.3.1 as well as React 19 in the runtime peer declaration; client builds continue to use the host's shared React instance.
 
