@@ -105,3 +105,4 @@
 - 子会话工具面（取自其真实 request header）：恰含 8 个 `collab_*`，不含 `collab_space/invite/member` 与 `pet_locus_ledger_read`。
 - 主会话视角：`collab_status` 列出该 open 待办并建议 `advance_request`（D8 已知风险：主会话可见）；本会话未自行受理。
 - 受理：管理面 accept → 200，seq5 `request/progressed accepted` actor `manager:pet-locus`，cmdId `accept-<itemId>-<attemptId>`；再次 accept → 400"待办当前不是待处理（accepted），未投递"。跟进正文以 `next-turn` 排入主会话 inbox（未 steer 当前轮）。
+- 主会话自行完成（①）：跟进正文作为本会话新一轮到达（`next-turn` inbox → 新 turn）。核对证据：根 README 安装命令已是 `dsh build && dsh`（README.md:44 等），待办内容已满足，无需改文件。主会话 `collab_advance_request(done)` → seq6 `request/progressed done` actor `main` + 一条 `dispatch/intended`（kind wake，provider `dsh-collab:pet-locus`，即结束通知送作者 `pet`）；seq7 `dispatch/completed succeeded`。Pet 日志 `registered request-terminal seq 6 … → locus-0c3af9d398667401 (ref)`：按戳路由到登记它的 locus 并登记。子会话日志在此之后无新事件（turn/start 计数不变），未开轮次、无飞书出站。管理面显示 `done`。
