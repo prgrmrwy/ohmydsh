@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile, realpath } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 
 const ROOT = path.resolve(import.meta.dirname,'..')
 async function fixture(t) {
-  const root = await mkdtemp(path.join(os.tmpdir(),'ohmydsh closure 中文 '))
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(),'ohmydsh closure 中文 ')))
   t.after(()=>rm(root,{recursive:true,force:true}))
   await cp(path.join(ROOT,'scripts'),path.join(root,'scripts'),{recursive:true})
   await writeFile(path.join(root,'package.json'),'{"type":"module","private":true}')

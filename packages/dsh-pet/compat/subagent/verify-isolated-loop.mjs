@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { realpathSync, readFileSync } from 'node:fs'
-import { resolve, isAbsolute } from 'node:path'
+import { resolve, isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const args = process.argv.slice(2)
@@ -12,7 +12,7 @@ if (args.length !== 2 || args[0] !== '--graph' || !isAbsolute(args[1])) {
   process.exit(2)
 }
 const graph = resolve(args[1])
-const req = createRequire(`${graph}/package.json`)
+const req = createRequire(join(graph, 'package.json'))
 const load = async name => import(pathToFileURL(req.resolve(`@deepseek-ai/${name}`)).href)
 const [Cordis, Agents, Sessions, Llm, Tools, Prompt, Projections, Loop] = await Promise.all([
   load('cordis'), load('dsh-agent'), load('dsh-session'), load('dsh-llm'),

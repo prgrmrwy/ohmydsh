@@ -53,9 +53,36 @@ test('npxBinPathOf 把 key 与 dsh bin 相对路径组合进缓存根', () => {
 test('npxCacheDirOf / pnpmCliBaseOf 跟随环境变量', () => {
   const env = { npm_config_cache: '/tmp/custom-cache', XDG_CACHE_HOME: '/tmp/xdg' }
   assert.equal(npxCacheDirOf(env), path.join('/tmp/custom-cache', '_npx'))
-  assert.equal(npxCacheDirOf({}), path.join(os.homedir(), '.npm', '_npx'))
+  assert.equal(npxCacheDirOf({}, { platform: 'linux' }), path.join(os.homedir(), '.npm', '_npx'))
   assert.equal(pnpmCliBaseOf(env), path.join('/tmp/xdg', 'ohmydsh', 'dsh-cli'))
   assert.equal(pnpmCliBaseOf({}), path.join(os.homedir(), '.cache', 'ohmydsh', 'dsh-cli'))
+})
+
+test('npxCacheDirOf follows native npm Windows cache and case-insensitive overrides', () => {
+  const win = { platform: 'win32' }
+  assert.equal(npxCacheDirOf({ LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local' }, win), path.win32.join('C:\\Users\\tester\\AppData\\Local', 'npm-cache', '_npx'))
+  assert.equal(npxCacheDirOf({ localappdata: 'D:\\Local' }, win), path.win32.join('D:\\Local', 'npm-cache', '_npx'))
+  assert.equal(npxCacheDirOf({ NPM_CONFIG_CACHE: 'D:\\custom', LOCALAPPDATA: 'D:\\Local' }, win), path.win32.join('D:\\custom', '_npx'))
+  assert.equal(npxCacheDirOf({}, win), path.win32.join(os.homedir(), 'AppData', 'Local', 'npm-cache', '_npx'))
+  assert.equal(npxCacheDirOf({ npm_config_cache: '/custom' }, { platform: 'linux' }), path.join('/custom', '_npx'))
+})
+
+test('resolveCliBin reuses the platform npm cache without provisioning or an explicit cache argument', async (t) => {
+  const root = await fakeNpxCache(t)
+  const env = process.platform === 'win32' ? { localappdata: root } : { npm_config_cache: root }
+  const spec = '@deepseek-ai/dsh@0.2.0-rc.2'
+  const cache = process.platform === 'win32' ? path.join(root, 'npm-cache', '_npx') : path.join(root, '_npx')
+  const bin = await stashBinAt(cache, path.join(computeNpxCacheKey([spec]), BIN))
+  let provisionCalls = 0
+  const resolved = resolveCliBin({
+    spec,
+    version: '0.2.0-rc.2',
+    env,
+    pnpmCacheBase: path.join(root, 'absent-pnpm'),
+    provisionRunner() { provisionCalls++; throw new Error('A ready native npm cache must not provision') },
+  })
+  assert.deepEqual(resolved, { kind: 'npx-cache', bin })
+  assert.equal(provisionCalls, 0)
 })
 
 test('resolveCliBin:DSH_BIN 优先且跳过就绪检查', async (t) => {

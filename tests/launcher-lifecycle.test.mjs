@@ -101,6 +101,37 @@ test('readiness ownership failure reclaims a child that ignores TERM',{timeout:1
   assert.equal((await probePort(f.port)).state,'empty')
 })
 
+test('Windows failed readiness releases its child handle even when taskkill fails',async t=>{
+  const f=await fixture(t)
+  const {default:childProcess}=await import('node:child_process')
+  const {syncBuiltinESMExports}=await import('node:module')
+  const {EventEmitter}=await import('node:events')
+  const original=childProcess.spawn
+  const child=new EventEmitter();child.pid=424242;child.exitCode=null;child.signalCode=null
+  let released=false;child.unref=()=>{released=true}
+  const listener=net.createServer(socket=>socket.end())
+  await new Promise(resolve=>listener.listen(f.port,'127.0.0.1',resolve))
+  let probes=0;const kills=[]
+  childProcess.spawn=()=>child;syncBuiltinESMExports()
+  try{
+    const result=await runLauncher(['--port',String(f.port),'--no-open'],{
+      repo:f.root,platform:'win32',env:{...process.env,DSH_HOME:f.home,DSH_SKIP_HOST_PREREQUISITES:'1'},
+      probe:async()=>({state:++probes===1?'empty':'unknown',processes:[]}),log:()=>{},warn:()=>{},
+      run:async(command,args)=>{
+        if(command==='taskkill.exe'){kills.push(args);return {status:1,stdout:'',stderr:'access denied'}}
+        if(args[0].endsWith('dsh-server-bin.mjs'))return {status:0,stdout:'DSH_SERVER_BIN=fixture.js\nDSH_RUNTIME_KIND=fixture\n',stderr:''}
+        return {status:0,stdout:'{"enabled":false}',stderr:''}
+      },
+    })
+    assert.notEqual(result,0)
+    assert.deepEqual(kills,[['/PID','424242','/T','/F']])
+    assert.equal(released,true,'still-live detached handle must not keep launcher running after cleanup failure')
+  }finally{
+    childProcess.spawn=original;syncBuiltinESMExports()
+    await new Promise(resolve=>listener.close(resolve))
+  }
+})
+
 test('foreground Host nonzero exit is propagated',async t=>{
   const f=await fixture(t)
   const result=await f.run(['--foreground','--no-open'],{FIXTURE_EXIT_AFTER_READY:'1'})

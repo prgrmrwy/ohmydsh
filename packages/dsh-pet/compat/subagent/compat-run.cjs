@@ -8,12 +8,13 @@ const DEFAULT_TIMEOUT_MS = 600_000
 const KILL_GRACE_MS = 2_000
 
 /** Run one compat build command with the repository's process-group timeout. */
-function runCompatCommand(command, args, cwd, { capture = false, timeoutMs = DEFAULT_TIMEOUT_MS, env } = {}) {
-  const executable = resolveExecutable(command, args, { cwd, env: { ...process.env, ...env } })
+function runCompatCommand(command, args, cwd, { capture = false, timeoutMs = DEFAULT_TIMEOUT_MS, env, replaceEnv = false } = {}) {
+  const childEnv = replaceEnv ? env : { ...process.env, ...env }
+  const executable = resolveExecutable(command, args, { cwd, env: childEnv })
   const request = JSON.stringify({ command: executable.command, args: executable.args, cwd, timeoutMs, killGraceMs: KILL_GRACE_MS, ...(env === undefined ? {} : { env }) })
   const result = spawnSync(process.execPath, [supervisor], {
     cwd,
-    env: process.env,
+    env: childEnv,
     input: request,
     encoding: 'utf8',
     stdio: ['pipe', capture ? 'pipe' : 'inherit', 'inherit'],

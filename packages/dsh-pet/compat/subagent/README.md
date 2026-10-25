@@ -10,6 +10,12 @@ The generated launcher replaces the official `@deepseek-ai/dsh-subagent`, `@deep
 
 `node build-launcher.cjs --isolated-output /absolute/new-or-empty-directory` is the single isolated build command: it invokes `build.mjs` and packages that root into a temporary launcher graph. The output must be new or empty. It verifies package identity and behavior without publishing or moving the formal `.launcher` pointer. The default launcher path remains unchanged.
 
+## Install policy and publication
+
+`install-script-policy.json` is the repository-owned exact-version npm script policy; unknown script versions fail strict checks. The builder forces project scope, disables ignore/allow-all bypasses, strips conflicting environment keys, and never automatically approves all scripts. The policy contains only separately human-reviewed exact grants and denials; any new true rule requires separate human review.
+
+POSIX keeps atomic pointer replacement. Windows uses a shared-lock, backup/publish/verify handoff with rollback and a short absent-pointer interval—not atomic visibility. Host preparation holds the same lock through physical-entry, version and fingerprint reads and returns the immutable generation path. Publication retains all generations; cleanup is separate. Unknown/dangling pointers or interrupted next/previous/restore residuals fail closed and require explicit recovery without deleting targets.
+
 ## Compatibility artifacts
 
 - `settlement-notice.patch` patches `@deepseek-ai/dsh-subagent` at the reviewed 0.2.0-rc.2 commit for silent settlement, idle creation, independent child composition, and live child Session access.

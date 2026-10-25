@@ -11,6 +11,7 @@ ohmydsh 的核心部署脚本已经使用 Node，但公开 `dsh` 入口和初始
 - **BREAKING** POSIX start 和 stop 一样需要可用的 lsof/ps 归属查询，缺少时明确诊断，不自动安装；Windows 的显式 DSH_BIN 仅支持 JS 入口或原生 exe，脚本 shim 拒绝并提示使用其真实入口。
 - **BREAKING** `.env.local` 统一为纯 `KEY=VALUE` 配置，支持引号，不执行变量展开、命令替换或脚本；旧 Shell 语法拒绝加载并提示迁移，且错误不回显配置值。用户于 2026-10-24 确认此兼容性调整。
 - macOS 保留既有 PWA/同端口 Chrome 标签清理；Windows/Linux 不自动关闭普通浏览器标签，并明确告知。
+- 2026-10-25 实测后用户确认：Host builder 去掉全量脚本批准，改精确版本策略/未知拒绝；Windows 采用共享锁下可回滚而非原子可见的指针发布，调用方固定已核验物理 generation，发布不自动回收旧代。新增执行许可仍另行确认。
 - 修复命令闭包内 npm/npx/pnpm 调用、测试入口和 Host compatibility builder 的原生 Windows 阻碍；加入真实 Windows/Linux/macOS CI。默认 manifest 的完整 Windows build/启动检查失败时不得宣称“仓库已支持 Windows”。
 
 ## Capabilities

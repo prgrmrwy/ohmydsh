@@ -179,8 +179,8 @@
 ## 10. P4 — 统一入口与支持声明
 
 - [ ] 10.1 RED：编写/迁移 `test_link_from_external_cwd`（`tests/launcher-install.test.mjs`，场景「link 后从其他目录调用」），先确认因预期行为不满足而失败。
-- [ ] 10.2 GREEN：按 spec 与 design 实现「link 后从其他目录调用」，使 `test_link_from_external_cwd` 通过；不改弱 P2 断言。
-- [ ] 10.3 REFACTOR：整理该能力，重跑所属模块和共享合同；记录 `test_link_from_external_cwd` 证据并更新 test-plan 状态。
+- [x] 10.2 GREEN：按 spec 与 design 实现「link 后从其他目录调用」，使 `test_link_from_external_cwd` 通过；不改弱 P2 断言。Linux595根回归、macOS25聚焦/595根回归、Windows双shim及noBash61批次均已有实际PASS。
+- [x] 10.3 REFACTOR：整理该能力，重跑所属模块和共享合同；记录 `test_link_from_external_cwd` 证据并更新 test-plan 状态。既有lock不变/external cwd/隔离prefix/unlink断言保留；历史RED10.1不追补。
 - [ ] 10.4 RED：编写/迁移 `test_missing_dependencies_do_not_install`（`tests/launcher-install.test.mjs`，场景「缺少根依赖不自行安装」），先确认因预期行为不满足而失败。
 - [x] 10.5 GREEN：按 spec 与 design 实现「缺少根依赖不自行安装」，使 `test_missing_dependencies_do_not_install` 通过；不改弱 P2 断言。
 - [x] 10.6 REFACTOR：整理该能力，重跑所属模块和共享合同；记录 `test_missing_dependencies_do_not_install` 证据并更新 test-plan 状态。
@@ -201,6 +201,14 @@
 - [ ] 11.9 机械核对47条 test-plan与测试存在/名字/绿状态、review哈希与场景覆盖；按 Anvil instructions verify 生成真实 verify.md，不为凑齐7/7创建占位。
 - [ ] 11.10 若完整gate仅剩已证明外部平台缺口，报告最小复现并等用户明确接受限缩；不自动归档、不在README宣称完整Windows支持。全部验收成功后才申请收尾；不擅自生产build/restart/合入/清理worktree。
 
+## 12. Windows 实测后的已批准修订
+
+- [x] 12.1 D8/spec/proposal/test-plan 一致性针对复评；原评审不覆盖修订。checking/windows-d8-planning-review.md followup APPROVE，三项规划缺口已闭合。
+- [x] 12.2 精确脚本策略、strict拒绝未知、环境逃逸剥离和缓存策略核验 RED→GREEN；不授予新增 true。实现/独立最终复评先在无新增true下完成；随后用户另行明确批准3个精确版本才加入，详见checking/native-runtime-script-review.md。
+- [x] 12.3 Windows备份/发布/失败恢复、未知实体拒绝、保留generation RED→GREEN，POSIX原子替换不回退。实测next/active身份替换和POSIX恢复失败回归；独立最终复评PASS；Linux20/20、原生Windows19/19（不枚举POSIX-only）。
+- [x] 12.4 Host调用方共享锁覆盖后续读取、返回真实generation、并发/失败释放锁 RED→GREEN。实default prepare/supervisor/双层builder/fingerprint读取竞争者，4类结果finally与物理入口换指针后可执行；提前释放mutation RED，独立最终复评PASS。
+- [x] 12.5 完整回归与原生无副作用发布测试；新增脚本执行另行确认后才重跑真实Host。root593/591/0/2既有skip，native19/19；用户单独批准3个精确版本后bash-354真实Host63120启动/同PID存活/stop通过；全change验收仍FAIL。
+
 ## Evidence reconciliation (2026-10-24)
 
-GREEN/REFACTOR checks above mean the mapped implementation/unit contracts pass in the stated available environment; they do not waive 11.7 or imply all platforms passed. RED tasks remain unchecked wherever a distinct expected-failure receipt was not captured, even if final tests pass. Exact retained test names are reconciled in test-plan.md; aliases in original task prose are historical plan labels. Current whole-root: 577 tests/575 pass/0 fail/2 prior MCP integration skips. Final native Windows60 targeted +7 lifecycle and LinuxPTY1 evidence is separate; scratch cmd link passes, PowerShell shim and console-close remain pending. ShellCheck unavailable. 11.8 remains incomplete until affected package and exact MCP integration prerequisites are checked. No claims of 47/47 native support.
+GREEN/REFACTOR checks above mean the mapped implementation/unit contracts pass in the stated available environment; they do not waive11.7 or imply all platforms passed. Historical RED tasks remain unchecked wherever a distinct expected-failure receipt was not captured. Current Linux/macOS whole-root each595/593pass/0fail/2existing skips; standalone exact MCP bridge now2/2pass0skip (round11), not a rewrite of root counts. Windows noBash61/61+7/7lifecycle and safety20/20; actual user-assisted window-close event2/shell-exit/sameHostPASS. Mac realPTY25-focusedPASS and isolated fullbuild×2/nochange/doctor/dump/HostPASS. Earlier snapshots remain in reports; actual external cockpit/PWA/tab interaction unrun, ShellCheck unavailable, final review/task reconciliation outstanding. Round11 mapping audit50/50 file/exact-name links (47original+3D8), install/gate tests4/4, artifact/diff/strictPASS. No claims of whole-change acceptance or fabricated historical RED.

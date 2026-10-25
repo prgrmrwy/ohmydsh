@@ -75,6 +75,29 @@ P2 Node test runner 通过 Bash adapter 执行原子能力与真实 CLI，用 No
 
 CI Linux/macOS/Windows × Node 22.x/24.x 跑根测试（按现有依赖先构建 dsh-openspec）；Bash 临时基线只在 POSIX 跑，最终 cross-platform suite 在 Windows 排除 Git/bin、Git/usr/bin 等 Bash 目录并保留 Git/cmd 的 git.exe，断言 where.exe bash/sh 不可用，cmd/系统 PowerShell 调 npm shim。ShellCheck 保持到 P4 删除临时 Bash 产品模块后才调整。公开 manifest gate 用隔离 DSH_HOME、空 overlay、非生产端口、web.open=false、autoUpdate 跳过，无私有凭据/生产数据：全量 build×2（第二次无变化）、官方 dump、真实 Host ready/stop 和受影响 local package build/typecheck/test。该重 gate 可独立 workflow_dispatch，不以桩矩阵代替其结果。缺可用 Windows runner或网络导致尚未跑完须保留未验收状态。
 
+### D8. Windows 实证后修订（用户确认，2026-10-25）
+
+Host builder 删除 approve --all，采用仓库精确版本 allowScripts 与 --strict-allow-scripts；首次策略不包含任何新增 true 执行许可。未知版本必须阻断，新增执行许可另行确认。清理调用环境 npm_config_allow_scripts、ignore_scripts、dangerously_allow_all_scripts、strict_allow_scripts 等大小写变体后应用仓库策略，并在 npm 命令显式传 --ignore-scripts=false --dangerously-allow-all-scripts=false --strict-allow-scripts=true，覆盖用户/global/project .npmrc 对 strict 的逃逸；保留 registry 等无关设置。supervisor 必须以清理后的环境执行，不能通过 overlay 再合并原进程环境而复活被移除键。缓存验证策略完全一致；策略/helper 纳入 fingerprint。
+
+Host 调用方通过固定 compat lock 模块持锁（模块不存在即拒绝），把当前 owner token 显式覆盖到传给 supervisor/builder 的 env；不能依赖 process.env 突变传到 caller-supplied env，也不信任调用者注入的 token。同步临界区内为子进程传递 token，finally 恢复先前进程环境并释放本次拥有的锁，嵌套 builder/build.mjs 继承同一 token 不重复等待。
+
+Windows 在共享 compat 锁内备份旧链接→发布新链接→验证，失败恢复；明确不是原子可见性。发现上次 .launcher.previous-* 或 next/restore 残留时不自动删除或猜测恢复，拒绝新发布并报告精确路径，保留备份供操作人员确认；进程中断后的恢复须独立人工决策。恢复失败同时保留原始错误和恢复错误，不继续清理备份、不宣称旧链接恢复。POSIX 原子替换保留。Host 调用方把共享锁扩展到 builder 完成后的路径、版本、fingerprint 读取，返回不可变 generation 的真实入口。候选发布不回收任何历史 generation；没有 lease 证明时不能靠“保留最近两代”保证运行中/已返回路径安全，磁盘增长是此安全策略的显式代价，后续清理需独立授权。不支持的未知实体 fail closed，失败保留恢复备份而非删除目标。该修订改变已审查规划，原评审仅覆盖旧版，需针对 D8 复评后实施。
+
+发布状态表（所有分类用 lstat，不跟随目标）：
+
+| 状态 | 操作/失败后行为 |
+|---|---|
+| 无旧指针、无残留 | 建立next并发布；验证失败仅unlink本次新链接，恢复为无指针 |
+| 已验证旧symlink、无残留 | POSIX原子覆盖；Windows旧链接rename到唯一backup再发布，验证失败恢复原链接 |
+| dangling链接、普通文件/真实目录（含历史legacy目录） | 拒绝修改；不自动迁移未知实体 |
+| 任一previous/next/restore残留 | 后续调用在锁内拒绝，报告残留路径；不推断哪个generation应当活跃 |
+| 建next失败/备份旧链接失败 | 旧指针不动，清理仅本次已证明next；清理失败保留并报错 |
+| 已备份但发布失败 | 若launcher仍缺失则恢复backup；如出现未知实体不覆盖，保留backup并报原错+恢复错 |
+| 新指针已发布但验证失败 | 仅身份匹配的本次链接可unlink后恢复backup；链接改变则不动并报恢复失败 |
+| 验证成功但备份清理失败 | 不宣称本轮成功；保留可诊断实体，下一轮残留门禁拒绝；generation目标都保留 |
+
+测试增加：实子进程携独立env复制穿过supervisor和双层builder继承锁、竞争者直到最终fingerprint读取都被排除、各失败finally释放；发布每个阶段失败注入/恢复失败/中断残留/无旧/dangling/未知实体，三代以上保留与POSIX原子不退化；isolated user/global npmrc bypass与大小写env、未知脚本哨兵、较新版本不继承false、额外缓存approval拒绝。
+
 ## Risks / Trade-offs
 
 - [原生 Windows 强杀跳过刷盘和第三方清理] → 用户已接受；警告保留，不新增未经证实的优雅关闭承诺。

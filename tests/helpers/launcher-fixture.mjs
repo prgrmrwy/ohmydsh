@@ -1,7 +1,7 @@
 // P2 command fixture: copy the frozen oracle unchanged; replace only explicit
 // subprocess entrypoints with independent Node recorders, never source text.
 import { spawn } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile, chmod } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile, chmod, realpath } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -45,7 +45,7 @@ process.exit(scenario.exit?.[command] ?? 0)
 `
 
 export async function createLauncherFixture(t, { scenario = {}, manifest, adapter = 'node' } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh contract 中文 '))
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'ohmydsh contract 中文 ')))
   const repo = root
   const home = path.join(root, 'home')
   const tools = path.join(root, 'tools')

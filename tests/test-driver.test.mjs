@@ -8,6 +8,7 @@ test('portable root test driver retains all POSIX regression and selects native 
  const root=['legacy.test.mjs','launcher-ui.test.mjs','not-a-test.txt']
  assert.deepEqual(portable(testFiles('linux',root)),['tests/launcher-ui.test.mjs','tests/legacy.test.mjs'])
  const native=portable(testFiles('win32',root))
+ for(const name of ['compat-launcher-policy','compat-launcher-publish','dsh-host-runtime'])assert.ok(native.includes(`tests/${name}.test.mjs`),'approved D8 safety suites must run in native Windows lane: '+name)
  assert.ok(native.includes('tests/launcher-ui.test.mjs'))
  assert.ok(native.includes('tests/launcher-runner.test.mjs'))
  assert.ok(native.includes('tests/workspace-lifecycle.test.mjs'))

@@ -301,7 +301,7 @@ open_ui
 
 test('atomic argument and UI observers reject deliberately broken test-only functions', async t => {
   const badArgs = await atomic(t, `
-parse_launcher_args() { PORT=1; PASSTHRU=(); }
+parse_launcher_args() { PORT=1; PASSTHRU=('deliberately-wrong'); }
 parse_launcher_args --port=41023 --host 'a b'
 printf '%s\\0' "$PORT" "\${PASSTHRU[@]}"
 `)

@@ -19,7 +19,7 @@ test('test_supported_dsh_argv_stops', async () => {
 test('darwin accepts bare-node ps argv using independently proven executable and a stable locale', async t => {
   const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises')
   const path = await import('node:path'); const os = await import('node:os')
-  const root = await mkdtemp(path.join(os.tmpdir(), 'darwin-owner-'))
+  const root = await mkdtemp(path.join(os.tmpdir(), 'darwin-owner 中文 '))
   t.after(() => rm(root, { recursive: true, force: true }))
   const entry = path.join(root, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
   await mkdir(path.dirname(entry), { recursive: true }); await writeFile(entry, '')
@@ -27,12 +27,24 @@ test('darwin accepts bare-node ps argv using independently proven executable and
   const calls=[]
   const result=await (await implementation()).probePort(40001,{platform:'darwin',env:{LANG:'zh_CN.UTF-8'},run:async(command,args,options)=>{
     calls.push([command,args,options])
-    if(command==='ps')return {status:0,stdout:`1000 Sat Oct 24 12:00:00 2026 node ${entry.replaceAll('\\','/')} web --port 40001`}
+    if(command==='ps'){
+    const displayed=options.env.LC_ALL==='en_US.UTF-8'?entry.replaceAll('\\','/'):entry.replaceAll('\\','/').replace('中文','M-dM-8M--M-fM^VM^G')
+    return {status:0,stdout:`1000 Sat Oct 24 12:00:00 2026 node ${displayed} web --port 40001`}
+   }
     return {status:0,stdout:args.includes('txt')?`p1234\nn${process.execPath}\n`:'1234\n'}
   }})
   assert.equal(result.state,'owned',result.error)
-  assert.equal(calls.find(([name])=>name==='ps')[2].env.LC_ALL,'C')
+  assert.equal(calls.find(([name])=>name==='ps')[2].env.LC_ALL,'en_US.UTF-8')
   assert.equal(result.processes[0].executable,process.execPath)
+})
+
+test('darwin readable foreign ps command is unknown without signaling', async () => {
+  const { probePort } = await implementation()
+  const result = await probePort(40001, { platform: 'darwin', run: async command => command === 'ps'
+    ? { status: 0, stdout: '1000 Sun Oct 25 12:00:00 2026 /usr/bin/node /tmp/foreign.mjs web --port 40001' }
+    : { status: 0, stdout: '1234\n' } })
+  assert.equal(result.state, 'unknown')
+  assert.equal(result.processes[0].pid, 1234)
 })
 
 test('test_foreign_listener_is_untouched', async () => {

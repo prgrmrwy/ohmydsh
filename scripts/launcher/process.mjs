@@ -97,7 +97,7 @@ async function posixRecord(pid, platform, run, options) {
     const suffix = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)
     return { pid, parentPid: Number(suffix[1]), created: suffix[19], argv: raw.toString().split('\0').filter((value, index, all) => index < all.length - 1), executable }
   }
-  const result = await run('ps', ['-ww', '-p', String(pid), '-o', 'ppid=', '-o', 'lstart=', '-o', 'command='], { ...options, env: { ...options.env, LC_ALL: 'C', LANG: 'C' } })
+  const result = await run('ps', ['-ww', '-p', String(pid), '-o', 'ppid=', '-o', 'lstart=', '-o', 'command='], { ...options, env: { ...options.env, LC_ALL: 'en_US.UTF-8', LANG: 'en_US.UTF-8' } })
   if (result.status !== 0) throw new Error('ps could not read listener identity')
   const match = result.stdout.trim().match(/^(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.+)$/)
   if (!match) throw new Error('ps returned an unreadable listener identity')
@@ -105,7 +105,7 @@ async function posixRecord(pid, platform, run, options) {
   // ambiguous quoted/metacharacter command lines are unknown, never guessed.
   const command = match[3]
   const args = command.match(/^((?:.*\/)?(?:node|node\.exe|nodejs|node\d+))\s+(.+?\/node_modules\/(?:@deepseek-ai\/dsh\/lib\/bin\.js|\.bin\/dsh))\s+(web(?:\s+.*)?)$/)
-  if (!args || /["'\\]/.test(args[3])) throw new Error('ps argv boundaries cannot be proven')
+  if (!args || /["'\\]/.test(args[3])) return { pid, parentPid: Number(match[1]), created: match[2], argv: [], executable: '' }
   // ps argv[0] may be the bare shebang name. lsof txt identifies the actual
   // process executable independently; never resolve a bare name via caller PATH.
   const text = await run('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn'], options)

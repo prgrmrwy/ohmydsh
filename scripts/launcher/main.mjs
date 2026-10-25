@@ -132,8 +132,12 @@ export async function runLauncher(argv, options = {}) {
     // The native ChildProcess handle belongs to this launch; never kill a PID
     // inferred from a reachable port. Reclaim only while our child is alive.
     if (child.exitCode === null && child.signalCode === null && !childError) {
-      if (platform === 'win32') await run('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { capture: true, timeoutMs: 5_000 })
-      else {
+      if (platform === 'win32') {
+        try {
+          const killed = await run('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { capture: true, timeoutMs: 5_000 })
+          if (killed.status !== 0) warn(`Failed to reclaim this launch’s Windows child PID ${child.pid}; inspect dsh.log and the owned child manually`)
+        } finally { child.unref() }
+      } else {
         // The detached group was created by this exact ChildProcess. Reclaim
         // it before returning; an ignored TERM must not keep dsh alive forever.
         const signal = kind => { try { process.kill(flags.foreground ? child.pid : -child.pid, kind) } catch (error) { if (error.code !== 'ESRCH') warn(error.message) } }

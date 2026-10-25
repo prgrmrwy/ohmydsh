@@ -32,6 +32,10 @@ test('test_link_from_external_cwd',async t=>{
  const command=process.platform==='win32'?path.join(prefix,'dsh.cmd'):path.join(prefix,'bin/dsh')
  const result=process.platform==='win32'?spawnSync(process.env.ComSpec||'cmd.exe',['/d','/s','/c',`""${command}" --help"`],{cwd,env,encoding:'utf8',windowsVerbatimArguments:true}):spawnSync(command,['--help'],{cwd,env,encoding:'utf8'})
  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/plugin-update/);assert.match(result.stdout,/doctor/)
+ if(process.platform==='win32'){
+  const ps=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from('& $env:FIXTURE_LINK_SHIM --help; exit $LASTEXITCODE','utf16le').toString('base64')],{cwd,env:{...env,FIXTURE_LINK_SHIM:path.join(prefix,'dsh.ps1')},encoding:'utf8',timeout:10000})
+  assert.equal(ps.status,0,ps.stderr);assert.match(ps.stdout,/plugin-update/);assert.match(ps.stdout,/doctor/)
+ }
  assert.equal(await readFile(path.join(repo,'package-lock.json'),'utf8'),before)
  const unlinked=spawnSync(npm.command,[...npm.argsPrefix,'unlink','--global','ohmydsh-link-fixture','--offline','--ignore-scripts','--no-audit','--no-fund'],{cwd,env,encoding:'utf8',timeout:30000})
  assert.equal(unlinked.status,0,unlinked.stderr)

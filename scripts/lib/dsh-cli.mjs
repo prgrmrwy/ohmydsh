@@ -59,7 +59,13 @@ export function computeNpxCacheKey(packages) {
   return crypto.createHash('sha512').update(input).digest('hex').slice(0, 16)
 }
 
-export function npxCacheDirOf(env = process.env) {
+export function npxCacheDirOf(env = process.env, { platform = process.platform } = {}) {
+  if (platform === 'win32') {
+    const get = name => env[Object.keys(env).find(key => key.toLowerCase() === name)]
+    const local = get('localappdata') || path.win32.join(os.homedir(), 'AppData', 'Local')
+    const cache = get('npm_config_cache') || path.win32.join(local, 'npm-cache')
+    return path.win32.join(cache, '_npx')
+  }
   const cache = env.npm_config_cache || path.join(os.homedir(), '.npm')
   return path.join(cache, '_npx')
 }

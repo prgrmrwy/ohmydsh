@@ -116,6 +116,27 @@
 - **WHEN** 发起 start
 - **THEN** 启动器在就绪预算内非零退出并区分占用/早退原因，不打开 UI，不终止无关进程
 
+### Requirement: Host builder 使用精确脚本策略和可恢复发布
+
+Host compatibility builder SHALL 从仓库维护的精确包名/版本脚本策略生成 npm allowScripts，安装使用 strict-allow-scripts，未知依赖版本在脚本执行前拒绝；不得自动 approve --all，也不得继承调用环境或 user/global/project .npmrc 的 allow-scripts、ignore-scripts 或 dangerously-allow-all-scripts 逃逸；命令行显式 strict=true、ignore=false、dangerously-allow-all=false，清理环境不能被 supervisor overlay 合并复活。明确 false 的规则仅禁止对应版本，true 执行许可须经人类单独确认；策略与发布 helper SHALL 纳入缓存 fingerprint，缓存命中也 SHALL 校验策略一致性。
+
+POSIX 保留原子链接替换。Windows SHALL 在共享锁内先备份旧链接、发布新链接、严格验证，失败恢复旧链接；两次 rename 间允许短暂无指针窗口，不承诺原子可见性。普通调用方 SHALL 持同一锁完成 builder、物理路径/版本/fingerprint 读取，并返回已验证不可变 generation 的真实入口，不能在锁释放后重新跟随可变 .launcher。发布不删除旧 generation，避免删除运行中或已分配给调用方的运行体；清理另走明确授权流程。未知实体或恢复失败 SHALL 保留可恢复备份并非零诊断，不删除链接目标或回退官方运行体。持锁调用方 SHALL 显式把本次有效 token 传入子进程 env，不依赖调用者 env 同步 process.env，且不得使用调用者伪造 token 跳过锁。中断后备份/next/restore 残留 SHALL 阻断后续发布，明确报告需人工恢复，不自动删除或猜测选代；恢复失败须同时报告原错与恢复错。
+
+#### Scenario: 未审查脚本版本拒绝
+- **GIVEN** 策略明确禁止某个精确版本，而安装图出现新脚本版本或调用环境试图全量放行
+- **WHEN** builder 准备运行体
+- **THEN** 仅仓库策略生效，未知版本在脚本执行前拒绝，策略文件不被自动改写，无脚本哨兵副作用
+
+#### Scenario: Windows 发布失败恢复旧链接
+- **GIVEN** 已验证旧 generation 和候选新 generation，含空格和 Unicode 的路径
+- **WHEN** 替换或发布后验证失败
+- **THEN** 旧链接可恢复、两端内容不被删除，未知目录拒绝修改；POSIX 继续使用原子替换
+
+#### Scenario: 启动方跨发布保持同一物理运行体
+- **GIVEN** 两个并发启动方和正在切换的 .launcher
+- **WHEN** 准备并读取运行体
+- **THEN** 读取与发布共享锁，版本和 fingerprint 属于同一物理 generation，返回真实入口；后续指针变化不影响该入口，发布不自动回收旧 generation
+
 ### Requirement: 迁移以同一行为断言和真实平台验收收口
 
 迁移 SHALL 先等价拆分 Bash 原子能力，再补齐与实现无关的行为测试，随后迁移并用同一组可移植断言验证 `.mjs` 版本；新增或修正行为 SHALL 先有失败测试，不得为迁移而删除安全断言。最终产品命令 SHALL 只有一套编排实现，不按平台长期保留 Bash 产品分支。支持声明 SHALL 以原生 Windows、macOS、Linux 的实际测试、根安装、link 与命令生命周期检查为依据；Windows 测试不得依赖 runner 自带 Git Bash 掩盖问题。默认公开 manifest 的完整 build×2、dump 与隔离 Host 启动/停止必须单独验证；无法完成时 SHALL 如实报告兼容缺口，不宣称完整仓库支持。

@@ -81,7 +81,10 @@ export async function closeWindowsTerminal(fixture) {
     const script=`Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public class CloseOwnedConsole{[DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr h);[DllImport("user32.dll")]public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);}';$h=[IntPtr]::new([long]${hwnd});if(-not [CloseOwnedConsole]::IsWindowVisible($h)){throw 'Console is not visible; cannot prove real close'};if(-not [CloseOwnedConsole]::PostMessage($h,0x10,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'PostMessage console close failed'}`
     const sent=await runProcess('powershell.exe',['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')],{env})
     if(sent.status!==0)throw new Error(sent.stderr)
-    const exited=await Promise.race([closed,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Console shell did not close')),8000))])
+    const exited=await Promise.race([closed,new Promise((_,reject)=>setTimeout(async()=>{
+      const observedEvent=await readFile(event,'utf8').catch(()=>'<absent>')
+      reject(new Error(`Console shell did not close: exitCode=${child.exitCode}; signal=${child.signalCode}; event=${observedEvent.trim()}; stderr=${stderr.slice(-1200)}`))
+    },8000))])
     const code=(await readFile(event,'utf8')).trim()
     if(code!=='2')throw new Error('Console handler did not observe CTRL_CLOSE_EVENT: '+code)
     return {stdout,stderr,...exited,before,consoleEvent:code}
@@ -96,6 +99,7 @@ $ErrorActionPreference='Stop'
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
+using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 public static class FixtureConsole {
@@ -106,6 +110,7 @@ public static class FixtureConsole {
   [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
   [DllImport("kernel32.dll")] static extern bool SetConsoleCtrlHandler(Handler handler,bool add);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h,StringBuilder name,int size);
   public static int Launch() {
     var start=new ProcessStartInfo(Environment.GetEnvironmentVariable("FIXTURE_NODE"));
     start.UseShellExecute=false;
@@ -116,7 +121,9 @@ public static class FixtureConsole {
     FreeConsole();
     if(!AllocConsole())throw new Exception("Cannot allocate independent console");
     var h=GetConsoleWindow();
-    if(h==IntPtr.Zero||!IsWindowVisible(h))throw new Exception("No visible owned console (Windows Terminal proxy unsupported)");
+    var windowClass=new StringBuilder(256);
+    GetClassName(h,windowClass,windowClass.Capacity);
+    if(h==IntPtr.Zero||!IsWindowVisible(h)||windowClass.ToString()!="ConsoleWindowClass")throw new Exception("No classic owned console; window class="+windowClass+" (Windows Terminal proxy unsupported)");
     File.WriteAllText(Environment.GetEnvironmentVariable("FIXTURE_HANDLE"),h.ToInt64().ToString());
     handler=delegate(uint kind){File.WriteAllText(Environment.GetEnvironmentVariable("FIXTURE_EVENT"),kind.ToString());return false;};
     if(!SetConsoleCtrlHandler(handler,true))throw new Exception("Console event registration failed");
@@ -157,7 +164,7 @@ try:
     sys.stdout.buffer.write(output)
     sys.stdout.buffer.flush()
     if marker+b':0' not in output:
-        raise RuntimeError('launcher did not return successfully before terminal close')
+        raise RuntimeError('launcher did not return successfully before terminal close: '+output.decode('utf-8', errors='replace')[-5000:])
 finally:
     os.close(master)
 deadline = time.monotonic() + 5

@@ -36,7 +36,7 @@ function inheritedOwner() {
 }
 
 function acquireCompatBuildLock(options = {}) {
-  if (inheritedOwner() !== undefined) return { owned: false, release() {} }
+  if (options.allowInherited !== false && inheritedOwner() !== undefined) return { owned: false, token: readOwner().token, release() {} }
   const waitMs = options.waitMs ?? WAIT_MS
   const staleAfterMs = options.staleAfterMs ?? 2_000
   const started = Date.now()
@@ -49,6 +49,7 @@ function acquireCompatBuildLock(options = {}) {
       let released = false
       return {
         owned: true,
+        token,
         release() {
           if (released) return
           released = true

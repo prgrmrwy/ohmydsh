@@ -4,8 +4,8 @@
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
-| specs/cross-platform-launcher/spec.md → 一个安装入口提供同一命令面 | link 后从其他目录调用 | tests/launcher-install.test.mjs | test_link_from_external_cwd | 🟢 Linux 与原生 Windows scratch-prefix cmd link GREEN；PowerShell shim另待验 |
-| specs/cross-platform-launcher/spec.md → 一个安装入口提供同一命令面 | 缺少根依赖不自行安装 | tests/launcher-install.test.mjs | test_missing_dependencies_do_not_install | 🟢 Linux 与原生 Windows scratch-prefix cmd link GREEN；PowerShell shim另待验 |
+| specs/cross-platform-launcher/spec.md → 一个安装入口提供同一命令面 | link 后从其他目录调用 | tests/launcher-install.test.mjs | test_link_from_external_cwd | 🟢 Linux 与原生 Windows scratch-prefix cmd/PowerShell shim GREEN（bash-381 + no-Bash batch384） |
+| specs/cross-platform-launcher/spec.md → 一个安装入口提供同一命令面 | 缺少根依赖不自行安装 | tests/launcher-install.test.mjs | test_missing_dependencies_do_not_install | 🟢 Linux 与原生 Windows scratch-prefix cmd/PowerShell shim GREEN（bash-381 + no-Bash batch384） |
 | specs/cross-platform-launcher/spec.md → 命令路由与子命令结果跨平台一致 | 本地与官方命令分流 | tests/launcher-contract.test.mjs | test_route_local_and_official_commands | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/cross-platform-launcher/spec.md → 命令路由与子命令结果跨平台一致 | 无效参数没有启动副作用 | tests/launcher-contract.test.mjs | test_invalid_arguments_have_no_effects | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/cross-platform-launcher/spec.md → 本地环境配置只接受无执行语义的赋值 | 纯键值配置跨平台等价 | tests/launcher-env-local.test.mjs | test_literal_environment_parity | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
@@ -19,7 +19,7 @@
 | specs/cross-platform-launcher/spec.md → 外部执行保留参数和环境边界 | Windows 显式 DSH_BIN 形态可预测 | tests/launcher-exec.test.mjs | Windows explicit DSH_BIN uses JS or exe and refuses shim before execution | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/cross-platform-launcher/spec.md → 外部执行保留参数和环境边界 | npm 隐式环境不进入 Host | tests/launcher-environment.test.mjs | test_npm_case_variants_do_not_leak | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/cross-platform-launcher/spec.md → 后台启动有界且不把占用端口等同于就绪 | 后台命令退出后 Host 继续运行 | tests/launcher-lifecycle.test.mjs | test_detached_host_outlives_launcher | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
-| specs/cross-platform-launcher/spec.md → 后台启动有界且不把占用端口等同于就绪 | 关闭发起终端后后台 Host 存活 | tests/platform/launcher-terminal.test.mjs | test_host_survives_real_terminal_close | 🔴 Windows console close 未证实；Linux PTY GREEN，macOS未跑 |
+| specs/cross-platform-launcher/spec.md → 后台启动有界且不把占用端口等同于就绪 | 关闭发起终端后后台 Host 存活 | tests/platform/launcher-terminal.test.mjs | test_host_survives_real_terminal_close | 🔴 整体未齐：Linux PTY GREEN；Windows人类真实关窗PASS（event2/shell退出/同Host/stop，bash-422）；PseudoConsole自动化不支持仍RED；macOS真实PTY25/25聚焦批次GREEN；桌面终端surface与全套平台汇总待核对 |
 | specs/cross-platform-launcher/spec.md → 后台启动有界且不把占用端口等同于就绪 | 缺归属探测工具时明确拒绝 | tests/launcher-lifecycle.test.mjs | test_missing_owner_probe_fails_before_effects | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/cross-platform-launcher/spec.md → 后台启动有界且不把占用端口等同于就绪 | 端口未知占用或新进程早退 | tests/launcher-lifecycle.test.mjs | test_foreign_port_and_early_exit_fail | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/cross-platform-launcher/spec.md → 迁移以同一行为断言和真实平台验收收口 | Bash 与新实现复用契约 | tests/launcher-contract.test.mjs | test_same_contract_across_bash_and_node | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
@@ -51,6 +51,14 @@
 | specs/startup-autoupdate/spec.md → UI 自动打开可由 manifest 关闭 | manifest 关闭自动打开 | tests/launcher-ui.test.mjs | test_manifest_no_open_for_all_start_paths | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/startup-autoupdate/spec.md → UI 自动打开可由 manifest 关闭 | 显式参数优先 | tests/launcher-ui.test.mjs | test_no_open_beats_open_and_manifest | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
 | specs/startup-autoupdate/spec.md → UI 自动打开可由 manifest 关闭 | opener 不可用仍保留服务 | tests/launcher-ui.test.mjs | test_opener_failure_keeps_host_and_prints_url | 🟢 Linux 完整根回归 GREEN（bash-304，577/575/0/2既有skip） |
+
+## D8 follow-up mapping (2026-10-25; focused implementation reviewed, not whole-change acceptance)
+
+| Requirement | Scenario | Test File | Test Name | State |
+|---|---|---|---|---|
+| Host builder 使用精确脚本策略和可恢复发布 | 未审查脚本版本拒绝 | tests/compat-launcher-policy.test.mjs | exact policy rejects blanket grants and unknown scripts | 🟢 Linux20/20/native19/19 focused batch; pinned npm offline unknown/no-sentinel vs hostile npmrc; focused final review PASS (real Host separate) |
+| Host builder 使用精确脚本策略和可恢复发布 | Windows 发布失败恢复旧链接 | tests/compat-launcher-publish.test.mjs | publication rollback preserves targets and refuses unknown entities | 🟢 Linux20/20/native19/19 focused batch; per-stage failures, ownership/residuals, POSIX backup/atomic restore, no GC; final review PASS |
+| Host builder 使用精确脚本策略和可恢复发布 | 启动方跨发布保持同一物理运行体 | tests/dsh-host-runtime.test.mjs | prepared Host pins physical generation under shared lock | 🟢 Linux20/20/native19/19 focused batch incl real default prepare final-read competitor, four outcomes, physical entry after switch; early-release mutation RED; final review PASS |
 
 ## Coverage Notes
 
