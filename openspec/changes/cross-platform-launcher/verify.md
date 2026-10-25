@@ -47,6 +47,12 @@ Approved planning SHA256:
 - No production Host restart or port3080 Host change, user global installation, actual env/credential/private overlay mutation. User authorized nonisolated local testing, but the actual postmerge build bash-354 targeted the managed Worktree Session DSH home and failed (five pnpm policy errors plus unmanaged schema refusal); this is not ordinary local-profile success. Main dependency bootstrap was not attempted outside the allowed binding. No upstream package source patched or disabled to obtain green.
 - Current main specs are not synchronized with this unaccepted delta, and this change is not archived. Full Windows support is not advertised in README.
 
+## Ordinary local verification follow-up (2026-10-25)
+
+At main `1505d274`, a new ordinary, unbound Session completed local WSL bootstrap health, build1 (exit0, one generated-region change), build2 (exit0 and exact no-change assertion), doctor --check (exit0) and official --dump-config (exit0, private body withheld). Bootstrap found healthy locked dependencies and did not rerun npm ci. The actual ordinary web profile retains its existing script denials; its Anvil target has valid matching ownership/hash, so the earlier managed-profile blockers do not reproduce here. Existing Host3080 was probed read-only and not restarted. See checking/main-merge-local-testing.md for commands, toolchain, job receipts and limits.
+
+This is ordinary local-profile evidence with existing inputs, not isolated public-manifest or native Windows/macOS full-gate evidence. It does not close the remaining platform, integration, fresh-install or historical RED obligations; no reduced-scope acceptance was inferred.
+
 ## Overall Decision
 
 DECISION: FAIL

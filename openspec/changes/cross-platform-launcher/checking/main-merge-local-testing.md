@@ -44,3 +44,20 @@ Next ordinary main-checkout initialization/local-profile testing requires a Sess
 8. Windows PC tests remain native Win32, not WSL evidence. Existing native60+7 cases are recorded but do not prove ordinary-PC full build or console-close. macOS remains unrun. Keep DECISION:FAIL and open tasks until their actual gates are closed or the user explicitly accepts a reduced scope.
 
 Do not push, archive the active change, clean this worktree, or mark the goal complete merely because the source was merged.
+
+## Ordinary main-checkout local verification (2026-10-25)
+
+Executed in a new ordinary Session from `/home/prgrmr/opensource/ohmydsh`, main HEAD `1505d27410820886ae0a9b540273cfa4879da095`, initially clean and three commits ahead of origin/main. Current history differs from the original merge receipts above: the current implementation commit is `8bda4a12`, preceded by lock-order commit `8056d0ad`, followed by the evidence handoff commit. No reset or history rewrite was performed in this verification.
+
+Trusted no-path ws status reports no Worktree Session binding for this Session. The launcher environment resolver identifies ordinary `/home/prgrmr/.dsh`, profile `web`; actual sync output also names that profile's generated patch. Toolchain: Node24.20.0, npm12.0.2, pnpm11.24.0. `node scripts/bootstrap.mjs` (bash-3) exits0: dependencies are already healthy at this snapshot, so it skips npm ci. This proves initialization health, not a fresh root installation. The existing global dsh symlink resolves to this checkout's `bin/dsh.mjs`; no npm link or global overwrite was necessary or performed.
+
+Read-only checks of the actual profile's pnpm-workspace.yaml before and after builds show unchanged `allowBuilds`: `@google/genai:false`, `protobufjs:false`, `node-pty:true`. No policy was copied, broadened or written. The ordinary sync ledger already owns user-scope Anvil with the pinned source identity; its real directory is not a symlink and its computed tree hash equals manifest `61250a6741799df17fe74c41ed23a95e2910ea3190fff2f6c0e8f66004a63767`. The earlier managed-profile unmanaged-target failure does not reproduce in this ordinary profile; no schema migration or overwrite was needed.
+
+- Build1: `DSH_SKIP_UPDATE=1 node bin/dsh.mjs build --no-open` (bash-6) exits0, all package/schema/launcher entries up-to-date, generated patch region updated, **1 change applied**.
+- Build2: same command captured and passed to `assertSecondBuildNoop` from checking/full-gate-assertions.mjs (bash-8) exits0, exact `[sync] no changes — deployment already matches manifest` present, no contradictory change-applied marker. **Idempotence passes**.
+- `DSH_SKIP_UPDATE=1 node bin/dsh.mjs doctor --check` exits0; memex0.4.1 ready.
+- `DSH_SKIP_UPDATE=1 node bin/dsh.mjs --profile web --dump-config` (bash-14) exits0, stderr empty, stdout61220 bytes; configuration body was withheld and not saved to the repository. Initial operator invocation used the unsupported positional `dump` (bash-10, then diagnostic repeat), which exited1 with “too many arguments”; source inspection confirmed the gate's documented `--dump-config` flag and the corrected invocation passes. No product repair was required.
+- Both builds warn about two pre-existing unmanaged bundles (experimental-agent-team-profile and experimental-voice-input-bundle), which sync preserves. These warnings do not cause a nonzero build result.
+- Read-only launcher ownership probe identifies existing port3080 as an owned DSH Host (PID471090). No signal, restart, additional Host or test port was used. This is ownership evidence only, not a fresh Host lifecycle acceptance.
+
+This closes ordinary local WSL build×2/idempotence/doctor/dump at the stated main snapshot with existing local inputs. It does not close isolated public-manifest gates, a fresh npm ci, native-PC full build/PowerShell/console-close, macOS, exact MCP integration prerequisites or missing historical RED receipts. Keep verify.md `DECISION: FAIL` and the corresponding tasks open. No push, commit, archive or worktree cleanup was performed in this verification.
