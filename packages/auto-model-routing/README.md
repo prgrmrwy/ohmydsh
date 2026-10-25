@@ -2,6 +2,12 @@
 
 English · [简体中文](README.zh.md)
 
+![AUTO interaction: toggle AUTO/MANUAL and inspect the decision](docs/auto-routing.gif)
+
+*Interaction recording from the earlier four-tier UI (isolated mock Host); current decisions use independent capability and depth as described below.*
+
+[Repository](https://github.com/prgrmrwy/dsh-auto-model-routing) · [Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
+
 <!-- problem -->
 Keep the main model you chose; let AUTO select reasoning investment for each turn and suitable resources for fresh sub-agents. Jev judges **capability and effort independently**. DSH applies the route, and the UI distinguishes a decision from a configuration that actually reached a request.
 
@@ -58,12 +64,32 @@ Preset model menus expose documented versions, not live availability guarantees.
 ## Architecture
 <!-- section: architecture -->
 
-```text
-user turn → pre-step → selected Jev service → depth → main request effort
-fresh child creation → exact child binding → capability + depth → validated route
-request/header → configuration match → applied evidence
-assistant message → immutable decision snapshot → human feedback events
+```mermaid
+flowchart TD
+    UI[DSH Web: AUTO / MANUAL] --> Main[Main user turn]
+    UI --> Child[Official fresh child creation]
+    Main --> Depth[Jev: depth judgment]
+    Child --> Binding[Bind exact child identity]
+    Binding --> Both[Jev: capability + depth]
+    Services[Selected service: OpenRouter / TypeSafe / Concentrate / Custom] -.-> Depth
+    Services -.-> Both
+    Depth --> MainRoute[Keep main model; adjust supported effort]
+    Both --> Validate[Validate catalog, allowlist and effort cap]
+    Validate --> ChildRoute[Apply child provider / model / effort]
+    MainRoute --> Header[Actual request/header]
+    ChildRoute --> Header
+    Header --> Match{Configuration matches?}
+    Match -->|Yes| Applied[Applied evidence + decision display]
+    Match -->|No| Failed[Visible failure; not applied]
+    ChildRoute --> Store[(Persist exact child route)]
+    Store --> Resume[Resume initial route; no new judgment]
+    Applied --> Reply[Main assistant reply]
+    Reply --> Snapshot[(Immutable decision snapshot)]
+    Reply --> Feedback[Allocation feedback / change / clear]
+    Feedback --> Events[(Timestamped feedback events)]
 ```
+
+Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. The diagram shows the AUTO paths; MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
 Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [policy-v2-rubric.json](src/policy-v2-rubric.json). Model slots: [policy-v2.ts](src/policy-v2.ts). UI: [client](src/client/index.ts). Coverage and limitations: [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
 
@@ -72,7 +98,6 @@ Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.t
 
 These isolated-host recordings use mock Jev/model responses and show the previous UI, not the current default policy.
 
-![Legacy AUTO effort adjustment demo](docs/auto-routing.gif)
 ![Legacy four-tier routing settings](docs/settings.gif)
 
 </details>

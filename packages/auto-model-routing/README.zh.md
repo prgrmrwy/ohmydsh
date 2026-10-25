@@ -2,6 +2,12 @@
 
 [English](README.md) · 简体中文
 
+![AUTO 交互：切换 AUTO/MANUAL 并查看决策](docs/auto-routing.gif)
+
+*此交互录屏来自早期四档界面（隔离 mock 宿主）；当前策略按下文独立判断能力与投入。*
+
+[插件仓库](https://github.com/prgrmrwy/dsh-auto-model-routing) · [版本发布](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
+
 <!-- problem -->
 主模型由你选，AUTO 为每轮选择推理投入，并为 fresh 子任务选配资源。Jev **独立判断能力需求和投入**，DSH 验证并应用配置；界面区分“做出了判断”和“实际请求已生效”。
 
@@ -58,12 +64,32 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 ## 架构
 <!-- section: architecture -->
 
-```text
-用户回合 → pre-step → 所选 Jev 服务 → depth → 主请求 effort
-fresh 子创建 → 精确身份绑定 → capability + depth → 校验路由
-request/header → 配置匹配 → applied 证据
-assistant 消息 → 不可变决策快照 → 人工反馈事件
+```mermaid
+flowchart TD
+    UI[DSH Web: AUTO / MANUAL] --> Main[主用户回合]
+    UI --> Child[官方 fresh 子任务创建]
+    Main --> Depth[Jev: 判断投入 depth]
+    Child --> Binding[绑定精确 child 身份]
+    Binding --> Both[Jev: 能力与投入独立判断]
+    Services[所选服务: OpenRouter / TypeSafe / Concentrate / 自定义] -.-> Depth
+    Services -.-> Both
+    Depth --> MainRoute[保持主模型; 按支持范围调整 effort]
+    Both --> Validate[校验目录 / 允许列表 / effort 上限]
+    Validate --> ChildRoute[应用子 provider / model / effort]
+    MainRoute --> Header[实际 request/header]
+    ChildRoute --> Header
+    Header --> Match{配置是否匹配?}
+    Match -->|是| Applied[已应用证据与决策展示]
+    Match -->|否| Failed[可见失败; 不标已应用]
+    ChildRoute --> Store[(持久化精确子路由)]
+    Store --> Resume[恢复初始路线; 不重判]
+    Applied --> Reply[主助手回复]
+    Reply --> Snapshot[(不可变决策快照)]
+    Reply --> Feedback[分配反馈 / 修改 / 撤销]
+    Feedback --> Events[(带时间的反馈事件)]
 ```
+
+主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。图示为 AUTO 路径，MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
 入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[policy-v2-rubric.json](src/policy-v2-rubric.json)。模型槽：[policy-v2.ts](src/policy-v2.ts)。界面：[client](src/client/index.ts)。覆盖边界：[开发验证](docs/policy-v2-development.md)、[真实 Magpie 验收](docs/magpie-live-acceptance.md)。
 
@@ -72,7 +98,6 @@ assistant 消息 → 不可变决策快照 → 人工反馈事件
 
 下列隔离宿主录屏使用模拟 Jev/模型响应，展示旧界面，不代表当前默认策略。
 
-![旧版 AUTO 推理强度调整](docs/auto-routing.gif)
 ![旧版四档路由设置](docs/settings.gif)
 
 </details>
