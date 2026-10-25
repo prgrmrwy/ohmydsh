@@ -88,3 +88,9 @@
 
 - `managedChannels: ['pet-locus']` 写在私有 overlay 的 `patches/dsh-collab-local.yml`，而不是公开 `dsh.yaml`：dsh-collab 的本机 config 由该 overlay 整行覆盖（含 denySessionIds），公开 manifest 只放开关与说明。公开 `dsh.yaml` 的 dsh-collab note 已更新。偏离 tasks 10.1 原文"dsh.yaml 中增加"，效果相同。
 - 仓库 `npm test`：首跑 `repo-docs-governance` 失败，原因是评审者写的 review.md 链接相对仓库根而非文件本身；改为相对文件路径（不改内容）后 447 tests / 445 pass / 0 fail / 2 skipped（既有 MCP bridge 探针，与基线同）。`npm run check:artifacts` 通过；`openspec validate --strict` 通过；`git diff --check` 通过。
+
+## 10.2 部署（2026-10-25，用户授权 sync；重启由用户手动做）
+
+- 主 checkout @ fa38cd644，载入 `.env.local`（含私有 overlay 路径）后 `node scripts/sync.mjs`：exit 0，`done — 6 change(s) applied`，其中 dsh-collab、dsh-pet 本地包内容变化、原子重装；生成的 `~/.dsh/profiles/web/cordis.patch.yml` 中 dsh-collab config 已含 `managedChannels: [pet-locus]`。另有两条既有 WARN（agent-team profile、voice-input bundle 未在 dsh.yaml 声明），与本 change 无关。
+- 第二次 sync：exit 0，`no changes — deployment already matches manifest`，幂等。
+- 尚未重启 Host；重启与刷新 GUI 由用户执行，10.3 在新会话中进行。
