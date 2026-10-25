@@ -19,7 +19,7 @@ dsh plugin --profile web add dsh-auto-model-routing
 dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 ```
 
-Restart DSH and refresh the Web page. In **Settings → 自动模型路由**, choose a decision service, save its API key, and use **测试连接** with a fixed public sample. New chats default to **MANUAL**; click the chip to use AUTO. The companion delegation skill is included—no separate skill installation is needed.
+Restart DSH and refresh the Web page. In **Settings → Auto model routing**, choose a decision service, save its API key, and use **Test connection** with a fixed public sample. These are English descriptions of the controls; the plugin's interface labels are currently in Chinese. New chats default to **MANUAL**; click the chip to use AUTO. The companion delegation skill is included—no separate skill installation is needed.
 
 ## Use
 
@@ -28,7 +28,7 @@ Restart DSH and refresh the Web page. In **Settings → 自动模型路由**, ch
 | **AUTO / MANUAL chip**, left of the model picker | Click to switch. Hover for the decision, candidate distribution, certainty, model/effort and application status. |
 | **Decision hint** | Shows new decisions briefly; its Settings switch does not hide the hover panel. |
 | **Gauge button** below an eligible reply | Mark the allocation appropriate, too high, too low or unknown; change or clear your feedback later. Only replies bound to an applied main decision qualify. |
-| **Settings → 自动模型路由** | Choose service/model, manage its separate key, test the connection, set defaults/cap/deadline, or expand **查看决策策略** to inspect the actual rubric and model slots. |
+| **Settings → Auto model routing** | Choose service/model, manage its separate key, test the connection, set defaults/cap/deadline, or expand **View decision strategy** to inspect the actual rubric and model slots. |
 
 ### Main model stays fixed; children are selected separately
 
