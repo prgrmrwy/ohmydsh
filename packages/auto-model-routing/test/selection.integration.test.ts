@@ -11,7 +11,7 @@ import Tools from '@deepseek-ai/dsh-tools'
 import Llm, { LlmAdapter, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Loop from '@deepseek-ai/dsh-agent-loop'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import * as plugin from '../src/index.js'
 import { fakeJev, tier } from './fake-jev.js'
@@ -45,7 +45,10 @@ async function harness() {
    return { selected: picked }
   },
  } as never)
- const fork = await ctx.plugin(plugin, { home: mkdtempSync(`${tmpdir()}/router-sel-`), jevBase: jev.base })
+ const home = mkdtempSync(`${tmpdir()}/router-sel-`)
+ mkdirSync(`${home}/plugins/dsh-auto-model-routing`,{recursive:true})
+ writeFileSync(`${home}/plugins/dsh-auto-model-routing/config.json`,JSON.stringify({policy:'legacy'}))
+ const fork = await ctx.plugin(plugin, { home, jevBase: jev.base })
  let agentRef: { session: { requestHeader(): { config: { provider: string; model: string; reasoningEffort?: string } } | undefined } } | undefined
  const selection: ModelSelectionRef = {
   get current() {

@@ -16,6 +16,8 @@ import { installRoutingNavIcon } from './nav-icon.js'
 
 interface View {
   mode: 'AUTO' | 'MANUAL'
+  policy?: string
+  depth?: string
   effort?: string
   reason?: string
   disabled?: { category: JevCategory; at: number }
@@ -41,7 +43,7 @@ const CSS = `
 .amr-latest{margin:6px 0;padding:6px 0;border-top:1px solid var(--dsw-alias-border-l1);border-bottom:1px solid var(--dsw-alias-border-l1)}
 .amr-muted{color:var(--dsw-alias-label-tertiary)}
 .amr-error{color:var(--dsw-alias-state-error-primary)}
-.amr-toast{position:fixed;z-index:1100;transform:translate(-50%,-100%);padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:nowrap}
+.amr-toast{position:fixed;z-index:1100;transform:translate(-50%,-100%);padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg,#fff);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;white-space:normal;max-width:min(480px,calc(100vw - 24px));overflow-wrap:anywhere}
 `
 
 // Left-right swap arrows at the picker chevron's size; colour follows currentColor.
@@ -135,9 +137,9 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
         view?.decision && h('div', { className: 'amr-latest' },
           h('p', null, h('strong', null, '最近决策')),
           ...toastText(view.decision).map((line, index) => h('p', { key: index, className: index ? 'amr-muted' : undefined }, line))),
-        h('p', { className: 'amr-muted' }, 'AUTO 的决定会同步到右侧模型选择；要手动指定 effort，请先切到 MANUAL。'),
+        h('p', { className: 'amr-muted' }, view?.policy === 'policy-v2' ? `AUTO · ${view.depth ?? '尚无判断'}；主模型不变，推理投入按请求应用；子任务自动选配。` : 'AUTO 的决定会同步到右侧模型选择；要手动指定 effort，请先切到 MANUAL。'),
         off && h('p', { role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
-        h('p', { className: 'amr-muted' }, 'AUTO 会把任务文本发送给 OpenRouter/TypeSafe 判档。'),
+        h('p', { className: 'amr-muted' }, 'AUTO 会把脱敏任务文本发送给设置中所选的决策服务判档。'),
         error && h('p', { role: 'alert', className: 'amr-error' }, error),
       ),
     ),

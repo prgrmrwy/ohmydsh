@@ -1,13 +1,21 @@
 import { createHash } from 'node:crypto'
+import { resolveDecisionService, type DecisionConfig } from './decision-service.js'
+export interface PolicyMeasure { ms: number; decisionProvider: string; decisionModel: string; confidence?: number; probabilities?: Record<string, number>; capabilityConfidence?: number; capabilityProbabilities?: Record<string, number> }
+const probability = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+const distribution = (value: Record<string, unknown> | undefined) => Object.fromEntries(Object.entries(value ?? {}).filter(([,v]) => probability(v))) as Record<string, number>
 import { tiers, type Tier } from './effort.js'
 import rubric from './rubric.json' with { type: 'json' }
+import policyQuestions from './policy-v2-rubric.json' with { type: 'json' }
+export type Depth = 'lower' | 'baseline' | 'higher'
+export type Capability = 'bounded' | 'analytical' | 'frontier'
+export type PolicyResult = ({ kind: 'ok'; depth: Depth; capability?: Capability | 'insufficient_context' } & PolicyMeasure) | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
+export const policyVersion = `policy-v2-${createHash('sha256').update(JSON.stringify(policyQuestions)).digest('hex').slice(0, 8)}`
 import type { JevCategory } from './hints.js'
 export { CATEGORY_HINTS, type JevCategory } from './hints.js'
 export type Distribution = Partial<Record<Tier, number>>
 export type JevResult = { kind: 'ok'; tier: Tier; confidence?: number; probabilities?: Distribution; ms: number } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
 export interface CredentialSource { get(name: string): { value: string } | undefined | Promise<{ value: string } | undefined> }
 
-const MODEL = 'typesafe/jev-1.13'
 const MAX_BODY = 64 * 1024
 /** Shared by the main session and `route_subagent`; only `state` differs (design D4). Single source: rubric.json. */
 export const TIER_QUESTIONS = rubric
@@ -27,13 +35,43 @@ function byStatus(status: number): JevCategory {
 
 export class JevClient {
   readonly url: string
-  constructor(private readonly env: CredentialSource, base = 'https://openrouter.ai', private readonly timeoutMs: number | (() => number) = 3000) {
+  constructor(private readonly env: CredentialSource, base = 'https://openrouter.ai', private readonly timeoutMs: number | (() => number) = 3000, private readonly service?: () => DecisionConfig | undefined) {
     this.url = `${base}/api/alpha/decisions`
   }
 
   /** One request, no retry. Never throws; never returns the body or the key. */
   /** `state` is assembled and redacted by the caller (`buildState`). */
   async judge(state: string, signal: AbortSignal): Promise<JevResult> {
+    const result = await this.decide(state, signal, TIER_QUESTIONS)
+    if (result.kind !== 'ok') return result
+    const answer = result.answers?.tier
+    const choice = answer?.choice
+    if (!tiers.includes(choice as Tier)) return { kind: 'failed', category: 'invalid-response' }
+    const unit = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1
+    const probabilities: Distribution = {}
+    for (const t of tiers) { const v = answer?.probabilities?.[t]; if (unit(v)) probabilities[t] = v }
+    return { kind: 'ok', tier: choice as Tier, ms: result.ms,
+      ...(unit(answer?.confidence) ? { confidence: answer.confidence } : {}),
+      ...(Object.keys(probabilities).length ? { probabilities } : {}) }
+  }
+
+  async judgePolicy(state: string, signal: AbortSignal, scope: 'main' | 'child', dimensions: 'both' | 'capability' | 'depth' = 'both'): Promise<PolicyResult> {
+    const questions = scope === 'main' || dimensions === 'depth' ? { depth: policyQuestions.depth }
+      : dimensions === 'capability' ? { capability: policyQuestions.capability } : policyQuestions
+    const result = await this.decide(state, signal, questions)
+    if (result.kind !== 'ok') return result
+    const depth = result.answers?.depth?.choice
+    const capability = result.answers?.capability?.choice
+    if (Object.hasOwn(questions, 'depth') && (typeof depth !== 'string' || !Object.hasOwn(policyQuestions.depth.criteria, depth))) return { kind: 'failed', category: 'invalid-response' }
+    if (Object.hasOwn(questions, 'capability') && (typeof capability !== 'string' || !Object.hasOwn(policyQuestions.capability.criteria, capability))) return { kind: 'failed', category: 'invalid-response' }
+    return { kind: 'ok', depth: (Object.hasOwn(questions, 'depth') ? depth : 'baseline') as Depth, ...(Object.hasOwn(questions, 'capability') ? { capability: capability as Capability | 'insufficient_context' } : {}), ms: result.ms, decisionProvider: result.decisionProvider, decisionModel: result.decisionModel,
+      ...(probability(result.answers.depth?.confidence) ? { confidence: result.answers.depth.confidence } : {}),
+      ...(result.answers.depth?.probabilities ? { probabilities: distribution(result.answers.depth.probabilities) } : {}),
+      ...(probability(result.answers.capability?.confidence) ? { capabilityConfidence: result.answers.capability.confidence } : {}),
+      ...(result.answers.capability?.probabilities ? { capabilityProbabilities: distribution(result.answers.capability.probabilities) } : {}) }
+  }
+
+  private async decide(state: string, signal: AbortSignal, questions: unknown): Promise<{ kind: 'ok'; answers: Record<string, { choice?: unknown; confidence?: unknown; probabilities?: Record<string, unknown> }>; ms: number; decisionProvider: string; decisionModel: string } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }> {
     if (signal.aborted) return { kind: 'cancelled' }
     const configuredTimeout = typeof this.timeoutMs === 'function' ? this.timeoutMs() : this.timeoutMs
     // Settings callbacks use the public range; numeric constructor overrides remain available to tests.
@@ -41,6 +79,7 @@ export class JevClient {
     const deadline = AbortSignal.timeout(timeout)
     const started = performance.now()
     try {
+      const service = resolveDecisionService(this.service?.())
       const abort = AbortSignal.any([signal, deadline])
       let onAbort: () => void = () => {}
       const cancelled = new Promise<never>((_, reject) => {
@@ -48,18 +87,18 @@ export class JevClient {
         abort.addEventListener('abort', onAbort, { once: true })
       })
       let credential: { value: string } | undefined
-      try { credential = await Promise.race([Promise.resolve(this.env.get('OPENROUTER_API_KEY')), cancelled]) }
+      try { credential = await Promise.race([Promise.resolve(this.env.get(service.credential)), cancelled]) }
       finally { abort.removeEventListener('abort', onAbort) }
       const key = credential?.value
       if (signal.aborted) return { kind: 'cancelled' }
       if (deadline.aborted) return { kind: 'failed', category: 'timeout' }
       if (!key) return { kind: 'failed', category: 'missing-credential' }
-      const response = await fetch(this.url, {
+      const response = await fetch(this.service ? service.endpoint : this.url, {
         method: 'POST',
         redirect: 'error',
         signal: AbortSignal.any([signal, deadline]),
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'ohmydsh auto-model-routing' },
-        body: JSON.stringify({ model: MODEL, state, questions: TIER_QUESTIONS }),
+        body: JSON.stringify({ model: service.model, state, questions }),
       })
       if (!response.ok) {
         await response.body?.cancel().catch(() => {})
@@ -82,23 +121,11 @@ export class JevClient {
         }
       } finally { reader.releaseLock() }
       const raw = new TextDecoder().decode(bytes.subarray(0, size))
-      let body: { error?: { code?: unknown }; answers?: { tier?: { choice?: unknown; confidence?: unknown; probabilities?: unknown } } }
+      let body: { error?: { code?: unknown }; answers?: Record<string, { choice?: unknown; confidence?: unknown; probabilities?: Record<string, unknown> }> }
       try { body = JSON.parse(raw) } catch { return { kind: 'failed', category: 'invalid-response' } }
       if (typeof body?.error?.code === 'number') return { kind: 'failed', category: byStatus(body.error.code) }
-      const choice = body?.answers?.tier?.choice
-      if (!tiers.includes(choice as Tier)) return { kind: 'failed', category: 'invalid-response' }
-      const confidence = body.answers?.tier?.confidence
-      const spread = body.answers?.tier?.probabilities as Record<string, unknown> | undefined
-      // Keep only the four tiers' values in [0, 1]; anything else in the reply is ignored.
-      const unit = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1
-      const probabilities: Distribution = {}
-      for (const t of tiers) { const v = spread?.[t]; if (unit(v)) probabilities[t] = v }
-      const ms = Math.round(performance.now() - started)
-      return {
-        kind: 'ok', tier: choice as Tier, ms,
-        ...(unit(confidence) ? { confidence } : {}),
-        ...(Object.keys(probabilities).length ? { probabilities } : {}),
-      }
+      if (!body?.answers || typeof body.answers !== 'object' || Array.isArray(body.answers)) return { kind: 'failed', category: 'invalid-response' }
+      return { kind: 'ok', answers: body.answers, ms: Math.round(performance.now() - started), decisionProvider: service.provider, decisionModel: service.model }
     } catch (error) {
       if (signal.aborted) return { kind: 'cancelled' }
       if (deadline.aborted) return { kind: 'failed', category: 'timeout' }

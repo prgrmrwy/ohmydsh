@@ -84,6 +84,13 @@ it('toast is horizontally centred on the chip', async () => {
  } finally { spy.mockRestore() }
 })
 
+it('new policy tooltip keeps separate confidence and application state when toast is off',async()=>{
+ const d={...decision(30),depth:'baseline',capability:'bounded',capabilityConfidence:.72,status:'applied',decisionProvider:'typesafe',decisionModel:'jev-1.13.0'}
+ await act(async()=>root.render(createElement(RoutingChip,{sessionId:'S',rpc:rpcFor({S:[{mode:'AUTO',decision:d,decisionToast:false}]}) as never,initiallyOpen:true})))
+ expect(toast()).toBeNull()
+ const panel=host.querySelector('.amr-panel')?.textContent
+ expect(panel).toContain('能力 bounded · 置信度 72%');expect(panel).toContain('投入 baseline · 置信度 90%');expect(panel).toContain('已应用');expect(panel).toContain('typesafe / jev-1.13.0')
+})
 it('no hint when the switch is off, even for a new decision', async () => {
  const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(12) }] })
  await mount('S', rpc)

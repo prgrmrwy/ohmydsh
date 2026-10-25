@@ -2,7 +2,40 @@
 
 ## Purpose
 
-主会话在 AUTO 下每个用户回合请 Jev 决策模型（经 OpenRouter）只按推理难度判档，再按各模型的官方推荐起点调整 reasoning effort，不改 provider/model；子会话通过 `route_subagent` 复用同一判断选择模型与 effort，且只在所属主会话为 AUTO 时判档。Jev 任何失败都把会话停用为 MANUAL 并让人看到原因，没有本地规则降级。判档记录与回复栏标注用于定期校准规则。
+主会话在 AUTO 下经 Jev（OpenRouter）判断推理投入，主模型不变；子任务独立判断模型能力与投入并由宿主应用精确路由。2026-10-25 用户授权将该新策略设为默认，不再要求选择版本；MANUAL 与现有会话模式不变。显式 `policy: legacy` 仅供回滚，保留旧配置。
+
+## 决策服务与反馈
+
+决策服务 SHALL 默认保留 OpenRouter，可切 TypeSafe 官方、Concentrate 或兼容 System One 自定义完整端点及明确模型。各服务 SHALL 使用独立固定凭据引用，不跨服务自动回退。自定义端点 SHALL 限 HTTPS 或回环 HTTP，无 URL 凭据、query、hash，拒绝重定向。切换服务草稿 SHALL 清空 key 草稿，保存后才管理新服务凭据。测试连接 SHALL 仅在用户点击时发送固定公开样例，不含会话文本。
+
+新策略 SHALL 保留并展示主/子独立维度置信度、耗时、决策服务模型与推荐/实际应用状态。只有实际请求匹配才标已应用。缺失置信度 SHALL 显示未提供，不编造总分或等同任务成功率；toast 开关 SHALL 只控制临时提示，不隐藏 tooltip。子决策 SHALL 随精确身份持久恢复；主状态运行期保留，重启后下一回合重建。
+
+## 当前默认 AUTO 契约
+
+### Requirement: 默认新策略与显式回滚
+缺省 policy SHALL 为内部 `policy-v2`，已有未含 policy 字段配置 SHALL 直接使用新策略且不改写配置文件或会话模式。设置 SHALL 不展示版本选择；旧四档映射 SHALL 仅在显式 legacy 回滚时展示和使用，不删除历史配置。
+
+#### Scenario: 无版本选择即可使用
+- **WHEN** 现有会话为 AUTO 且配置没有 policy 字段
+- **THEN** 新策略生效；用户无需额外开启，MANUAL 会话保持不判档
+
+### Requirement: 新策略决策与执行
+主会话 SHALL 仅判断 depth=lower/baseline/higher 并在模型支持序列按推荐起点最多移动一档，不修改 provider/model、不调用会保存全局默认值的 selectModel。子任务 SHALL 独立判断 capability=bounded/analytical/frontier 或 insufficient_context，保留显式模型/effort，完全显式时不调用 Jev。正式 ordinary/fresh teammate 创建 SHALL 按精确 child ID 绑定、持久化、实际请求匹配后标 applied；恢复不重判。fork SHALL 报 unsupported，不悄悄改 fresh；Agent 保留编排和验收权，不实现自主重试升级。
+
+#### Scenario: Magpie 自动子路由
+- **WHEN** Magpie GPT 主会话为 AUTO 且创建 bounded 子任务
+- **THEN** 从允许列表和实时目录验证同 transport 的 codex/gpt-6-luna 及支持 effort，持久绑定精确 child；不得转到本地入口
+
+### Requirement: 手动隔离与失败可见
+MANUAL SHALL 不触发新判断或主请求覆盖；此前绑定的子实例 SHALL 恢复既定路由。输入 SHALL 仅使用官方 user 来源并脱敏限长。主判断失败 SHALL 可见停用 AUTO，子失败 SHALL 停止派发而非继承/换模。Magpie transport SHALL 保留完整ID；未知能力家族需显式模型，未知推荐effort不猜。OpenRouter只用于Jev。性能与成本缺少证据 SHALL 标未知。
+
+#### Scenario: 新策略不改官方全局模型
+- **WHEN** AUTO 调整主 effort
+- **THEN** 请求按支持范围生效，主 provider/model 保持，selectModel 调用数为零
+
+## legacy 回滚契约作用域
+
+下列历史 Requirements 与场景中的四档、共享 questions、选择器同步及映射配置仅约束显式 `policy: legacy` 回滚路径；不作为新默认 AUTO 的验收预期。新策略使用上述当前契约，旧格式读取、凭据保护和会话模式存储继续共用。
 
 ## Requirements
 

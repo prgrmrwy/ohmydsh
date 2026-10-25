@@ -34,6 +34,14 @@ In [ohmydsh](https://github.com/prgrmrwy/ohmydsh), enable only the local `auto-m
 
 **Sub-agents.** The `route_subagent` tool uses the same judgment and returns provider/model/effort (Claude: Haiku → Sonnet → Opus → Opus; GPT: Luna → Sol → Sol → Sol). It only judges when the root chat is AUTO, and otherwise returns `routed: false`. These routes must be in the official sub-agent allowlist, which is fixed when a chat is created.
 
+## AUTO automatic resource selection (default)
+
+AUTO now directly uses independent capability and effort judgments; no version selector or extra activation is required. Earlier four-tier examples describe only the explicit legacy rollback. The main model stays fixed. Official fresh `subagent` / `spawn_teammate` calls bind decisions to exact child IDs before the first request; persisted decisions are replayed on resume. The legacy tier tables remain unchanged and apply only to the original policy.
+
+Here `route_subagent` is an optional **preview**, not proof of application; do not copy a preview as an explicit user constraint. Explicit model/effort are preserved. Fork remains unsupported until real-provider history compatibility is verified; unbound creation paths stop rather than silently claim routing. Use the `auto-model-routing.childRouting` RPC with `{sessionId}` for `recommended/applied/unsupported/needs-context/failed` evidence. Applied means the actual request configuration matched, not that the task succeeded.
+
+Switching to MANUAL/legacy stops new decisions; existing bound children retain their initial route. Disabling the plugin removes replay and lets the host restore its original creation configuration. See [Jev validation](docs/jev-policy-v2-validation.md) and [development verification / coverage](docs/policy-v2-development.md). The user approved default promotion on 2026-10-25 after minimal real Magpie acceptance. Set `policy: legacy` only for rollback via configuration/RPC; historical mappings are retained. Broader task-quality benefits remain unverified.
+
 ## Good to know
 
 - **New chats default to MANUAL.** You can change this in Settings.

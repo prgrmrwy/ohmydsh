@@ -6,6 +6,20 @@ import { DEFAULT_SETTINGS, explicitChildRoute, explicitMainEffort, SettingsStore
 import type { RoutingCatalog } from '../src/settings-contract.js'
 const catalog: RoutingCatalog = { models: [{provider:'claude',model:'opus',name:'Opus',reasoningEfforts:['low','medium','high','xhigh']},{provider:'codex',model:'sol',name:'Sol',reasoningEfforts:['low','medium','high','xhigh']}], childAllowlist:{status:'enabled',allowedModels:[{provider:'codex',model:'sol'}]} }
 function fixture() { const dir=mkdtempSync(join(tmpdir(),'routing-settings-')); const path=join(dir,'config.json'); return {dir,path,store:new SettingsStore(path)} }
+it('AUTO defaults to the new policy without writing files and retains explicit legacy rollback',()=>{
+ const {path,store}=fixture()
+ expect(store.read().settings.policy).toBe('policy-v2')
+ writeFileSync(path,JSON.stringify({defaultMode:'AUTO',childRoutes:{codex:{simple:{model:'sol',reasoningEffort:'low'}}}}))
+ expect(store.read().settings).toMatchObject({policy:'policy-v2',defaultMode:'AUTO',childRoutes:{codex:{simple:{model:'sol'}}}})
+ expect(JSON.parse(readFileSync(path,'utf8'))).not.toHaveProperty('policy')
+ writeFileSync(path,'{}')
+ store.save({policy:'policy-v2'},catalog)
+ store.save({decisionToast:false},catalog)
+ expect(JSON.parse(readFileSync(path,'utf8'))).toEqual({policy:'policy-v2',decisionToast:false})
+ expect(()=>store.save({policy:'unknown'},catalog)).toThrow()
+ store.save({policy:'legacy'},catalog)
+ expect(store.read().settings.policy).toBe('legacy')
+})
 it('defaults missing or corrupt files and independently defaults invalid ordinary fields',()=>{
  const {path,store}=fixture()
  expect(store.read()).toMatchObject({status:'missing',settings:DEFAULT_SETTINGS})

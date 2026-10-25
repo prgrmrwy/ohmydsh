@@ -4,6 +4,8 @@ import { createElement as h, act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { RoutingSettings } from '../src/client/settings-section.js'
 import { ui, view } from './gui-fixture.js'
+import questions from '../src/policy-v2-rubric.json' with { type: 'json' }
+import { POLICY_MODELS } from '../src/policy-v2.js'
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root, host: HTMLElement
 beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -26,6 +28,44 @@ it('four rows, source criteria, retained family drafts and sparse patch; never s
   await click('保存')
   expect(calls.find(c => c.endpoint.endsWith('saveSettings'))?.payload).toEqual({ mainEfforts: { claude: { simple: 'medium' } } })
   expect(calls.every(c => /^auto-model-routing\.(settings|saveSettings|setKey)$/.test(c.endpoint))).toBe(true)
+})
+it('service selection clears key drafts and waits for save before key management',async()=>{
+ const calls:{endpoint:string;payload:any}[]=[]
+ const rpc={call:async(_:string,endpoint:string,payload:any)=>{calls.push({endpoint,payload});const data=view();if(endpoint.endsWith('saveSettings'))data.settings={...data.settings,...payload};return {ok:true,value:data}}}
+ await act(async()=>root.render(h(RoutingSettings,{rpc,ui})))
+ const select=host.querySelector('[aria-label="决策服务"]') as HTMLSelectElement
+ await act(async()=>{select.value='typesafe';select.dispatchEvent(new Event('change',{bubbles:true}))})
+ expect(host.textContent).toContain('不会沿用原服务的 key')
+ expect(host.querySelector('input[type="password"]')?.hasAttribute('disabled')).toBe(true)
+ await click('保存')
+ expect(calls.find(c=>c.endpoint.endsWith('saveSettings'))?.payload).toEqual({decisionService:{provider:'typesafe'}})
+ expect(calls.some(c=>c.endpoint.endsWith('setKey'))).toBe(false)
+})
+it('AUTO requires no policy version control and hides inactive old mappings', async () => {
+  const data={...view(),settings:{...view().settings,policy:'policy-v2' as const}}
+  const rpc={call:async()=>({ok:true,value:data})}
+  await act(async()=>root.render(h(RoutingSettings,{rpc,ui})))
+  expect(host.querySelector('[aria-label="路由策略"]')).toBeNull()
+  expect(host.textContent).not.toContain('policy-v2')
+  expect(host.textContent).toContain('AUTO 已使用新策略')
+  expect(host.querySelectorAll('[data-tier]')).toHaveLength(0)
+})
+it('strategy entry exposes executable criteria and model slots without saving settings',async()=>{
+  const calls:string[]=[]
+  const data={...view(),settings:{...view().settings,policy:'policy-v2' as const}}
+  await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async(_,endpoint)=>{calls.push(endpoint);return {ok:true,value:data}}},ui})))
+  const details=host.querySelector('details')!
+  expect(details.open).toBe(false)
+  expect(details.querySelector('summary')?.textContent).toBe('查看决策策略')
+  for(const q of Object.values(questions)){
+    expect(details.textContent).toContain(q.instructions)
+    for(const text of Object.values(q.criteria))expect(details.textContent).toContain(text)
+  }
+  for(const slots of Object.values(POLICY_MODELS))for(const model of Object.values(slots))expect(details.textContent).toContain(model)
+  details.open=true;details.dispatchEvent(new Event('toggle'))
+  expect(details.open).toBe(true)
+  expect(calls).toEqual(['auto-model-routing.settings'])
+  expect((Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='保存') as HTMLButtonElement).disabled).toBe(true)
 })
 it('family menu intersects every current model and cap without using child allowlist', async () => {
   const data = view(); data.models[1]!.reasoningEfforts = ['medium', 'high']
@@ -50,7 +90,7 @@ it('key success/config failure clears only secret and reports partial save witho
   expect(input.value).toBe('')
   expect(host.textContent).toContain('API key 已保存')
   expect(host.textContent).toContain('设置未保存')
-  expect(host.querySelector('[aria-pressed=true]')?.textContent).toBe('AUTO')
+  expect(Array.from(host.querySelectorAll('[aria-pressed=true]')).some(el => el.textContent === 'AUTO')).toBe(true)
 })
 it('unavailable child service and readonly environment key still allow unrelated settings save', async () => {
   const data = view(); data.key.writable = false; data.key.source = 'environment'; data.childAllowlist.status = 'unavailable' as never

@@ -31,7 +31,7 @@ export const models = [
 ]
 export const catalog = { models, childAllowlist: { status: 'enabled' as const, allowedModels: models.filter(m => !m.model.includes('fable')).map(({ provider, model }) => ({ provider, model })) } }
 export const view = () => ({
-  settings: { decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 3000 },
+  settings: { policy: 'legacy' as 'legacy' | 'policy-v2', decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 3000 },
   defaults: { decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 3000 },
   configStatus: 'ok', issues: [], key: { configured: true, writable: true, available: true, source: 'store' }, ...catalog,
   criteria: rubric.tier.criteria,
