@@ -112,6 +112,8 @@ npm run build
 
 测试使用官方 AgentLoop、假 LLM 流和 mock/回环 Jev，不产生真实模型费用。`scripts/label-report.mjs` **仅汇总旧四档标注**，不是新分配反馈报表；新数据结构与去重口径见[feedback-evaluation.md](docs/feedback-evaluation.md)。
 
+继续在主仓开发，本仓库仅作发布镜像。插件使用自身声明的依赖、包内 skill 和官方 DSH 服务即可独立构建与加载，不要求检出主仓，也不要求安装主仓环境指令。外部设计链接仅供背景阅读，不是运行输入。
+
 [当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)在源码 monorepo 中维护。包内[委派 skill](skills/subagent-model-routing/SKILL.md)提供指引，执行保障来自官方宿主钩子，而不是提示词。暂无完整任务质量或 token 节省的量化结论。
 
 ## 移除

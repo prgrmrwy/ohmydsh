@@ -112,6 +112,8 @@ npm run build
 
 Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. `scripts/label-report.mjs` reports **legacy tier labels only**; it is not a report for new allocation feedback. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
 
+Development stays in the source monorepo; this repository is its release mirror. The package builds and loads independently using its declared dependencies, bundled skill and official DSH services; no monorepo checkout or monorepo instruction file is required. External design references are optional background, not runtime inputs.
+
 The [current specification](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md) lives in the source monorepo. The bundled [delegation skill](skills/subagent-model-routing/SKILL.md) supplies guidance; enforcement belongs to the official host hooks, not the prompt. No measured task-quality or token-savings claim is made.
 
 ## Removal

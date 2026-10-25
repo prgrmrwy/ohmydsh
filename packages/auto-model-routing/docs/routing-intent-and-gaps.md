@@ -12,10 +12,10 @@
 
 ## 当前证据
 
-- 当前规范：../../../openspec/specs/auto-model-routing/spec.md，固定主模型、共享四档 rubric、childRoutes 与派发规则。
+- 当前规范：[主仓规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)（本节是历史调研快照，不代表当前默认策略），固定主模型、共享四档 rubric、childRoutes 与派发规则。
 - 默认主模型起点与偏移：../src/effort.ts；Claude 子表 Haiku/Sonnet/Opus/Opus；GPT 子表 Luna/Sol/Sol/Sol。
 - 子工具：../src/subagent-tool.ts，单独判断子任务；指定模型时只调 effort；校验目录与允许列表。
-- 包内指导：../skills/subagent-model-routing/SKILL.md，主要约束选模、调用与复用；是否派发的场景主要位于 ../../../instructions/dsh-home.md。历史提交 14d68627（2026-10-22）已明确加入较大编码、独立复核、大量探索、可并行工作的派发规则，以及小修复/讨论不派发；这确认用户记忆中的委派要求确实曾落地，但不是所有简单任务强制派发。
+- 包内指导：../skills/subagent-model-routing/SKILL.md，主要约束选模、调用与复用；是否派发的场景主要位于 [主仓环境指令](https://github.com/prgrmrwy/ohmydsh/blob/main/instructions/dsh-home.md)（可选背景，不是插件加载依赖）。历史提交 14d68627（2026-10-22）已明确加入较大编码、独立复核、大量探索、可并行工作的派发规则，以及小修复/讨论不派发；这确认用户记忆中的委派要求确实曾落地，但不是所有简单任务强制派发。
 - 来源与评估范围：../eval/README.md，现有回归是判档一致性，不是最终任务质量/速度/费用基准。
 
 ## Gap 与建议（待调研校准，不是实施授权）
