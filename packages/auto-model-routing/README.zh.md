@@ -9,7 +9,30 @@
 [插件仓库](https://github.com/prgrmrwy/dsh-auto-model-routing) · [版本发布](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
 
 <!-- problem -->
-主模型由你选，AUTO 为每轮选择推理投入，并为 fresh 子任务选配资源。Jev **独立判断能力需求和投入**，DSH 验证并应用配置；界面区分“做出了判断”和“实际请求已生效”。
+**为 DSH 增加 AUTO 模式：主 Agent 自动调 effort，子 Agent 自动选 model + effort。** 不必每轮手动选择推理投入，也不必为每个子任务手动挑模型。
+
+- **主 Agent：保留你选择的模型，按回合调整推理投入（effort）。**
+- **子 Agent：按任务独立判断能力需求与推理投入，选择模型与 effort。** 不是把“更强模型”和“更深推理”捆成一个档位。
+- **看得见、能反馈：** 展示决策分布与实际生效状态，在回复下方提交本机分配反馈。
+
+### AUTO 覆盖哪些 DSH 场景？
+
+| 场景 | AUTO 的作用 | 当前边界 |
+|---|---|---|
+| 主 Agent 用户回合 | 每个新用户回合判断 effort，主模型不换 | 不逐工具步骤重判；模型必须支持相应 effort |
+| 官方 fresh `subagent` | 首次请求前选择并绑定子 model + effort | 真实 Magpie Claude/GPT 普通子调用已验证；受目录和允许列表约束 |
+| 官方 fresh `spawn_teammate` | 按同一策略绑定新 teammate 的 model + effort | 已有 mock 宿主覆盖，尚未完成真实模型 teammate 验收 |
+| 已绑定子实例恢复或继续执行 | 重用初始路线，不重新分配 | 依赖插件保持启用及路由记录完整 |
+| 显式指定 model / effort | 保留已指定维度，仅判断未指定维度 | 两者都指定则只校验，不调用 Jev |
+| fork、第三方或未绑定创建路径 | 不承诺自动选配 | fork 与未绑定 AUTO 子路径会明确拒绝，不静默替代 |
+
+这里是官方接入路径的覆盖说明，不代表所有 DSH 入口、CLI/TUI 界面或第三方插件都已验收。Web UI 是当前验证入口；MANUAL 不做新判断。`route_subagent` 仅预览，不是必须先调用的派发步骤。
+
+### 本机反馈 → 未来的学习调整
+
+**现在：** 在已绑定决策的回复下评价“合适 / 投入偏高 / 投入不足 / 无法判断”，可修改、撤销。反馈与决策快照保存在本机，不会因点击反馈而上传到决策服务，也不会立即改变路由；AUTO 任务判断本身仍按所选服务外发。
+
+**未来方向：** 增加基于本机反馈与执行结果的学习、评估和策略调整，让 AUTO 更贴合你的任务。**尚未实现自动学习或反馈驱动调参**，目前记录用于后续评估，不承诺已证明的质量提升或成本节省。
 
 **安装**：已验证 DSH `0.2.0-rc.2`、Web UI，Node.js `>=22.19`。
 

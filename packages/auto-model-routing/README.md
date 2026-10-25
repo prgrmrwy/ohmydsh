@@ -9,7 +9,30 @@ English · [简体中文](README.zh.md)
 [Repository](https://github.com/prgrmrwy/dsh-auto-model-routing) · [Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
 
 <!-- problem -->
-Keep the main model you chose; let AUTO select reasoning investment for each turn and suitable resources for fresh sub-agents. Jev judges **capability and effort independently**. DSH applies the route, and the UI distinguishes a decision from a configuration that actually reached a request.
+**Add AUTO mode to DSH: automatic effort for the main agent, automatic model + effort for sub-agents.** Stop adjusting reasoning investment every turn or choosing a model for every delegated task.
+
+- **Main agent: keep your selected model and adjust reasoning effort per user turn.**
+- **Sub-agents: judge capability needs and reasoning investment independently, then select model + effort.** A stronger model does not automatically mean deeper reasoning.
+- **Visible decisions, local feedback:** inspect candidate distributions and actual application status, then rate the allocation below a reply.
+
+### Which DSH scenarios does AUTO cover?
+
+| Scenario | AUTO behavior | Current boundary |
+|---|---|---|
+| Main-agent user turn | Judge effort for each new user turn; keep the main model | Not rejudged at every tool step; model must support the effort |
+| Official fresh `subagent` | Select and bind child model + effort before its first request | Real Magpie Claude/GPT ordinary child calls verified; catalog and allowlist apply |
+| Official fresh `spawn_teammate` | Bind the new teammate's model + effort using the same policy | Mock-host coverage; real-provider teammate acceptance remains unverified |
+| Resume or continue a bound child | Replay its initial allocation without rejudging | Requires the plugin enabled and intact route records |
+| Explicit model / effort | Preserve the specified dimension; judge only the other | Both specified: validate without calling Jev |
+| Fork, third-party or unbound creation paths | No automatic-allocation guarantee | Fork and unbound AUTO child paths are explicitly rejected, not silently replaced |
+
+This describes official integration paths—not acceptance of every DSH entry point, CLI/TUI interface or third-party plugin. The Web UI is the currently verified interface. MANUAL makes no new judgments. `route_subagent` is a preview, not a required step before dispatch.
+
+### Local feedback → future learning and adjustment
+
+**Available now:** rate a decision-bound reply as appropriate, too high, too low or unknown; change or clear the rating. Feedback and decision snapshots stay on your machine. Submitting feedback does not upload it to the decision service or immediately change routing; AUTO task judgments themselves still use your selected external service.
+
+**Planned direction:** add learning, evaluation and policy adjustment based on local feedback and execution outcomes, so AUTO can better fit your tasks. **Automatic learning and feedback-driven tuning are not implemented yet.** Today's records support later evaluation; they are not evidence of measured quality gains or cost savings.
 
 **Install.** Tested with DSH `0.2.0-rc.2`, Web UI, Node.js `>=22.19`.
 
