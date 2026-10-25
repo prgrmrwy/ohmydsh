@@ -33,16 +33,20 @@ ohmydsh 把**一个人的 DSH 配置**收敛成一个可审查、可复现的仓
 ## 快速开始
 <!-- section: quick-start -->
 
-需要 Node.js 22+、npm 10+（见 `.nvmrc`）和 bash 环境（macOS、Linux、WSL 或 Git Bash）。三条路径任选其一。
+初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**完整配置仍待原生平台完整构建和终端关闭验收**；启动器测试通过不等于已承诺全仓 Windows 支持。三条路径任选其一。
 
 ### 路径一：照抄我的完整配置
 
 ```bash
 git clone https://github.com/prgrmrwy/ohmydsh.git && cd ohmydsh
-./scripts/bootstrap.sh     # 检查 Node 并安装依赖（幂等）
-./scripts/install.sh       # 把启动器链接到 ~/.local/bin
+node scripts/bootstrap.mjs # 检查最低版本，必要时执行根 lock 的 npm ci
+npm link                   # 注册仓库 bin；不代替依赖初始化
 dsh build && dsh           # 物化配置，然后启动 DSH
 ```
+
+Windows 可在 cmd 或 PowerShell 执行（Windows PowerShell 5.1 把 `&&` 拆成两行）。`npm link` 在 npm 全局 prefix 生成 `dsh.cmd` / `dsh.ps1`，须把该 prefix 加到 PATH；若执行策略阻止 ps1，直接使用 `dsh.cmd`，不要降低全机器执行策略。POSIX 全局 bin 在 `<prefix>/bin`。用 `npm prefix -g` 与 `where.exe dsh` / `command -v dsh` 排查官方同名命令冲突，不用 `--force` 覆盖无关 bin；`npm unlink --global ohmydsh` 撤销当前 link。旧 POSIX install/bootstrap 只保留薄兼容入口。
+
+POSIX start/stop/restart 要求 `lsof`、`ps`（用系统包管理器安装 lsof），缺探测工具时在启动/停止前拒绝；Windows 使用系统 PowerShell TCP/CIM 查询，仅强制停止再次核验归属的进程树，不保证优雅刷盘。显式 `DSH_BIN` 是单个可执行路径：Windows 支持 JS 入口或原生 `.exe`，拒绝 `.cmd`/`.bat`/`.ps1` shim 与命令字符串，应指向真实 JS CLI。
 
 ### 路径二：挑选部分
 
@@ -154,7 +158,7 @@ tests/                   仓库级测试
 - `dsh.yaml` 才是真相，读它，不要读 `~/.dsh`。
 - `node scripts/plugin-list.mjs` 打印实际加载了什么。
 - 私有 overlay（`dsh.yaml.local`，或 `DSH_LOCAL_MANIFEST` 指向的文件）用来追加不能公开的条目。
-- `.env.local`（被 gitignore）存放本机设置和全部密钥。
+- `.env.local`（被 gitignore）仅保存字面单行 `KEY=VALUE` 设置和密钥，不执行 Shell。含空格/反斜杠路径需引用，以绝对路径代替 `$HOME` / `~`；支持空行、整行注释、可选 `export`、空值和 CRLF。拒绝 `$`、反引号、多行值、裸操作符和行内注释，诊断只报脱敏行号。单引号完全字面，双引号仅解码 `\\` 与 `\"`。文件覆盖启动器继承环境，但调用者显式 `DSH_BIN` 优先。裸 sync/plugin-list 共享解析器，仍保留窄白名单、调用者优先与忽略无关坏行的兼容策略，启动器刻意更严格；迁移不会改写真实文件。
 - `thirdPartyResources` 固定那些不是插件的资产：spec-superflow 工作流 skill、Jev MCP 服务（其 `TYPESAFE_API_KEY` 只从 `.env.local` 读取，绝不进 manifest）和 Anvil OpenSpec schema。
 
 ## 插件索引

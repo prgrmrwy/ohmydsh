@@ -1,10 +1,8 @@
 const {
   existsSync,
   cpSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
-  readlinkSync,
   realpathSync,
   readdirSync,
   renameSync,
@@ -17,6 +15,9 @@ const { createRequire } = require('node:module')
 const { createHash, randomUUID } = require('node:crypto')
 const { acquireCompatBuildLock } = require('./compat-build-lock.cjs')
 const { runCompatCommand } = require('./compat-run.cjs')
+const { validateScriptPolicy, scriptPolicyEnv, assertScriptPolicy, SCRIPT_FLAGS } = require('./compat-script-policy.cjs')
+const { publishLauncher, assertPublicationState } = require('./compat-publish.cjs')
+const scriptPolicy = validateScriptPolicy(require('./install-script-policy.json'))
 
 const here = __dirname
 const isolatedArgs = process.argv.slice(2)
@@ -64,7 +65,7 @@ function run(command, args, cwd, capture = false) {
 }
 
 function runNpm(args, cwd, capture = false) {
-  return run('corepack', [`npm@${npmVersion}`, ...args], cwd, capture)
+  return runCompatCommand('corepack', [`npm@${npmVersion}`, ...args, ...SCRIPT_FLAGS], cwd, { capture, env: scriptPolicyEnv(process.env), replaceEnv: true })
 }
 
 function fail(message) {
@@ -112,6 +113,7 @@ function materializeWorkspaceRanges(packageDir, versions) {
 
 function verifyLauncher(directory, fingerprint) {
   try {
+    assertScriptPolicy(readJson(join(directory, 'package.json')), scriptPolicy)
     const stampFile = join(directory, '.fingerprint')
     const realBin = join(directory, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
     if (!existsSync(stampFile) || !existsSync(realBin)) return undefined
@@ -222,6 +224,9 @@ try {
     .update(readFileSync(join(here, 'build-launcher.cjs')))
     .update(readFileSync(join(here, 'compat-build-lock.cjs')))
     .update(readFileSync(join(here, 'compat-run.cjs')))
+    .update(readFileSync(join(here, 'compat-script-policy.cjs')))
+    .update(readFileSync(join(here, 'install-script-policy.json')))
+    .update(readFileSync(join(here, 'compat-publish.cjs')))
     .update(readFileSync(join(here, 'package.template.json')))
     .update(readFileSync(join(here, 'verify-isolated-loop.mjs')))
     .update(readFileSync(join(here, 'test-packaging.cjs')))
@@ -229,6 +234,7 @@ try {
     .update(readFileSync(join(here, 'README.md')))
     .digest('hex')
 
+  if (!isolatedOutput) assertPublicationState(launcher)
   const cachedBin = isolatedOutput ? undefined : verifyLauncher(launcher, fingerprint)
   if (cachedBin !== undefined) {
     console.log(`[compat/subagent-launcher] up-to-date: ${cachedBin}`)
@@ -358,6 +364,7 @@ try {
       writeFileSync(join(staging, 'package.json'), `${JSON.stringify({
         name: 'dsh-pet-locus-launcher',
         private: true,
+        allowScripts: scriptPolicy,
         description: 'Generated isolated DSH Host runtime with reviewed Pet Locus compatibility overrides.',
         dependencies: {
           '@deepseek-ai/dsh': version,
@@ -385,7 +392,6 @@ try {
 
       console.log('[compat/subagent-launcher] installing isolated DSH Host dependency root')
       runNpm(['install'], staging)
-      runNpm(['install-scripts', 'approve', '--all', '--allow-scripts-pin'], staging)
       // Prove npm resolved one reviewed override tree while its file links still
       // match the install metadata. The links are converted to real copies next.
       runNpm(['ls', '@deepseek-ai/dsh-subagent'], staging)
@@ -433,46 +439,9 @@ try {
       const buildDir = futureBuildDir
       renameSync(staging, buildDir)
 
-      const nextLink = join(here, `.launcher.next-${process.pid}-${randomUUID()}`)
-      const previousEntity = join(here, `.launcher.previous-${process.pid}-${randomUUID()}`)
-      symlinkSync(join('.launcher-builds', generation), nextLink, 'dir')
-      let movedLegacyDirectory = false
-      let previousLinkTarget
-      try {
-        // Existing declarative installs are symlinks and need no removal window:
-        // POSIX rename atomically replaces the old pointer. One-time migration
-        // from the historical real directory must move it aside first because
-        // rename cannot replace a non-empty directory with a symlink.
-        if (existsSync(launcher) && lstatSync(launcher).isSymbolicLink()) {
-          previousLinkTarget = readlinkSync(launcher)
-        } else if (existsSync(launcher)) {
-          renameSync(launcher, previousEntity)
-          movedLegacyDirectory = true
-        }
-        renameSync(nextLink, launcher)
-        const publishedBin = verifyLauncher(launcher, fingerprint)
-        if (publishedBin === undefined) fail('published launcher pointer failed post-rename verification')
-        rmSync(previousEntity, { recursive: true, force: true })
-        // Keep the active and immediately previous immutable build for rollback;
-        // stale older builds are safe to remove only after the new pointer works.
-        const activeTarget = realpathSync(launcher)
-        const candidates = readdirSync(builds).map(name => join(builds, name))
-          .filter(candidate => candidate !== activeTarget)
-          .sort((a, b) => lstatSync(b).mtimeMs - lstatSync(a).mtimeMs)
-        for (const stale of candidates.slice(1)) rmSync(stale, { recursive: true, force: true })
-        console.log(`[compat/subagent-launcher] ready: ${publishedBin}`)
-      } catch (error) {
-        rmSync(nextLink, { force: true })
-        if (previousLinkTarget !== undefined) {
-          const restoreLink = join(here, `.launcher.restore-${process.pid}-${randomUUID()}`)
-          symlinkSync(previousLinkTarget, restoreLink, 'dir')
-          renameSync(restoreLink, launcher)
-        } else if (movedLegacyDirectory) {
-          rmSync(launcher, { force: true })
-          if (existsSync(previousEntity)) renameSync(previousEntity, launcher)
-        }
-        throw error
-      }
+      const publishedBin = publishLauncher({ launcher, target: buildDir, verify: () => verifyLauncher(launcher, fingerprint) })
+      // Generations may still be used by live Hosts or prepared callers; no GC without leases.
+      console.log(`[compat/subagent-launcher] ready: ${publishedBin}`)
       }
     } finally {
       rmSync(staging, { recursive: true, force: true })

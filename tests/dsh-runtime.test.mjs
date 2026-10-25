@@ -8,7 +8,8 @@ import net from 'node:net'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const HELPERS = path.join(ROOT, 'scripts/lib/dsh-runtime.sh')
+// Historical Bash ownership regressions; current Node ownership has its own suite.
+const HELPERS = path.join(ROOT, 'tests/fixtures/launcher-bash-baseline/scripts/lib/dsh-runtime.sh')
 
 async function freePort() {
   return await new Promise((resolve, reject) => {

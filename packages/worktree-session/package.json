@@ -51,8 +51,8 @@
     "dsh-ws": "./lib/cli.js"
   },
   "scripts": {
-    "clean": "rm -rf lib",
-    "build:host": "tsc -p tsconfig.json && chmod +x lib/cli.js",
+    "clean": "node -e \"require('node:fs/promises').rm('lib',{recursive:true,force:true}).catch(error=>{console.error(error);process.exitCode=1})\"",
+    "build:host": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('lib/cli.js',0o755)\"",
     "build:client": "tsdown",
     "build": "npm run clean && npm run build:host && npm run build:client",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",

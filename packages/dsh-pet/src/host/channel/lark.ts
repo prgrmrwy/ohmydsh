@@ -26,7 +26,7 @@ const run = promisify(execFile)
 export type LarkCliRunner = (
   binary: string,
   args: readonly string[],
-  options: { timeout: number; maxBuffer: number; signal?: AbortSignal },
+  options: { windowsHide?: boolean; timeout: number; maxBuffer: number; signal?: AbortSignal },
 ) => Promise<{ stdout: string; stderr?: string }>
 
 /** One historical message, reduced to what the prompt needs. */
@@ -523,6 +523,7 @@ async function callJson(
   let ok = true
   try {
     const result = await runner(binary, petCliArgs(args), {
+      windowsHide: true,
       timeout: CALL_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
     })
@@ -926,6 +927,7 @@ export function createLarkCliClient(
     async cliVersion() {
       try {
         const result = await runner(binary, ['--version'], {
+          windowsHide: true,
           timeout: CALL_TIMEOUT_MS,
           maxBuffer: 1024 * 1024,
         })

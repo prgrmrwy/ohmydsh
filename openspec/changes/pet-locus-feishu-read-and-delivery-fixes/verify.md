@@ -59,7 +59,7 @@ child 两次被要求"故意做非法调用"都**依约拒绝**（工具契约�
 | 工具成功返回内容 | ❌ FAIL（已修） | 工具返回被运行时判为 `INVALID_TOOL_OUTPUT`：`"value.identity" is not a declared property (additionalProperties: false)` → 见 W6 |
 | 失败不伪装成"没有消息" | ✅ PASS | child 如实回复"历史读取工具返回了错误，没拿到聊天内容"，未编造讨论内容 |
 | 投递结算 | ✅ PASS | delivery-51 `status=replied`、`outboundResult=success`、`finishOutcome=reply`（01:10:35） |
-| 守卫拒绝文案（`read /etc/hosts`） | ✅ PASS | `delivery-54` 的 turn 4：`Error: locus-project-read-outside-confirmed-workspace` + 拒绝原因 + `- 允许根：/Users/bytedance/mydir/dev/nexus` + 申请方式（E 组改动真机生效） |
+| 守卫拒绝文案（`read /etc/hosts`） | ✅ PASS | `delivery-54` 的 turn 4：`Error: locus-project-read-outside-confirmed-workspace` + 拒绝原因 + `- 允许根：<work-repo>` + 申请方式（E 组改动真机生效） |
 | 未知参数拒绝 | ✅ PASS（真数据回放，模型侧未产出样本） | 见下方"工具级真数据回放"：对**已构建产物**传入 `chat_id` → `{ok:false, reason:"pet_locus_chat_history does not accept argument 'chat_id'."}` 且**读取次数 0**。模型侧两次都依约拒绝构造非法调用（14:44 与 02:33 的回复），因此没有模型产生的拒绝样本 |
 | 游标篡改/伪造 | ✅ PASS（真数据回放，模型侧未产出样本） | 同上：伪造 `cursor:"abc123"` → `{ok:false, reason:'cursor-invalid'}` 且**读取次数 0**；篡改/跨入口/过期另由 `test/locus-history-cursor.test.ts`（8 例）覆盖 |
 | 话题入口读取 | ⏳ 未验（需所有者） | 群内新建话题后 @ 一次即可（独立 locus/队列）；模型无法自造话题入口 |
@@ -73,7 +73,7 @@ child 两次被要求"故意做非法调用"都**依约拒绝**（工具契约�
 **W6 缺陷（真机发现，已修复）**：`PET_LOCUS_CHAT_HISTORY_TOOL` 的 `output.schema` 声明了 `ok/reason/text/cursor/hasMore/count`，但成功路径返回的对象还带 `identity: 'bot'`；该 schema 是 `additionalProperties: false`，于是**每一次成功读取都会变成 `INVALID_TOOL_OUTPUT`**。单测没抓到，是因为它们直接调用 `executeLocusChatHistory`，从未经过 `ToolRuntime` 的返回值校验。
 
 修复：`1baf443a`（schema 增补 `identity`，并说明该值为何必须声明）；回归测试 `d8258f4e`（在 `test/ledger-tool-scope.test.ts` 里用**真实 ToolRuntime** 执行该工具的成功与失败两条路径；把 `identity` 声明去掉后该测试立即转红，已实测）。同时把 `pet_locus_track` 也纳入真运行时执行断言，避免同类缺陷。重新构建并部署后：`diff -rq packages/dsh-pet/lib ~/.dsh/profiles/web/node_modules/dsh-pet/lib` 无差异，部署物 `lib/host/tools.js` 已含新声明。
-- 真机证据（历史，非本次变更后）：`session-82bccfbf-d4aa-4239-8801-98a51b145aaa`（事故 child，cwd `/Users/bytedance/mydir/dev/nexus`，delivery-42, 16:48:44, locus `locus-runtime-1791794320256-3c9ae68ac77f68`，safe 档）与父会话 `session-a1f7a6e8-7032-4495-8207-1a4e142ca663`
+- 真机证据（历史，非本次变更后）：`session-82bccfbf-d4aa-4239-8801-98a51b145aaa`（事故 child，cwd `<work-repo>`，delivery-42, 16:48:44, locus `locus-runtime-1791794320256-3c9ae68ac77f68`，safe 档）与父会话 `session-a1f7a6e8-7032-4495-8207-1a4e142ca663`
 
 ### Review Integrity
 - [x] `review.md`：round 3 `VERDICT: APPROVE_WITH_CHANGES`，5 项 Required Changes 已全部应用，`CHANGES_APPLIED: yes`（round 1/2 记录保留在 `review-round1.md`/`review-round2.md`）

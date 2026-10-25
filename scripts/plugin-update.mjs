@@ -9,7 +9,7 @@
 // 逐条确认 → 行级改写 dsh.yaml(保留注释) → sync 物化 → 自动 commit。
 // needs-review / skipped 条目永远不纳入自动升级,由人工复核。
 import { readFileSync, writeFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import readline from 'node:readline'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

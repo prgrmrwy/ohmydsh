@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# ohmydsh/dsh — start DSH from this customization repo (bash 命令,非阻塞).
+#
+#   dsh            非阻塞启动:未运行 → 后台拉起,就绪后按 web.open 决定是否打开 UI;
+#                  已运行 → 打开规则同上;UI 也已打开 → 提示已在运行
+#   dsh --open     强制自动打开 UI(覆盖 manifest web.open: false)
+#   dsh --no-open  启动/检测时不自动打开 UI(优先级最高)
+#   dsh --foreground 前台运行(调试用,阻塞)
+#   dsh -b         重新 build(安装/同步 plugins)后再启动
+#   dsh build      只 build,不启动
+#   dsh stop       停止 dsh web 进程,并关闭 UI(PWA;浏览器标签请手动关)
+#   dsh restart    重启:stop → 等端口释放 → start(避免 stop & dsh 竞态)
+#   dsh reset      一键清零自定义 plugins(patch/preset/skill 一并重置;可 dsh build 恢复)
+#   dsh history    查看历次启动清单(时间 / 版本 / 端口 / 加载的 plugins)
+#   dsh plugin-update 统一升级远端插件(检测 → 确认 → 改 dsh.yaml → sync → 自动提交;
+#                   --dry-run 只预览;--yes 跳过逐条确认)
+#   dsh doctor     检查并补齐**本机运行前提**(dsh.yaml 的 hostPrerequisites,如 memex
+#                   存储内核这类全局 npm 安装);失败以非零退出;--check 只检查不安装
+#   dsh -p 8080    指定端口(默认 3080)
+#   官方 CLI 命令自动转交,直接用即可:dsh plugin --profile web add <pkg>、
+#                   dsh --profile <name>、dsh --dump-config(插件安装仍建议走 dsh.yaml + dsh build)
+#
+# autoUpdate(默认开启):start/-b/build/restart 前置检测 registry 最新 DSH 版本,
+#   有更新且工作区干净时阻塞式自动升级(改 dsh.yaml + 同族 pin → 重跑 sync → 自动提交)再启动;
+#   逃生门:autoUpdate.enabled:false 或 DSH_SKIP_UPDATE=1;频道:autoUpdate.channel / DSH_UPDATE_CHANNEL。
+#
+# hostPrerequisites(由 dsh.yaml 各定制声明,如 dsh-memex 的存储内核):这些是**机器本地**
+#   的全局依赖 —— dsh build 不装它们,个人同步清单也不带它们,换机器/换账号/重建 DSH home/
+#   恢复数据目录之后必然缺失,缺失时插件只会静默降级。启动/-b/build/restart 前会自愈一次:
+#   只装声明过的精确版本,失败只告警、绝不阻塞启动;逃生门 DSH_SKIP_HOST_PREREQUISITES=1,
+#   需要立刻补时用 dsh doctor。
+#
+# 本地环境:仓库根 .env.local(gitignored)可放 DSH_OPEN_APP 等;也可行内临时传入,
+# 如 DSH_OPEN_APP="xxx.app" dsh。DSH_OPEN_APP = PWA/App 路径或名称时打开该应用。
+#
+# 安装: 仓库根先 ./scripts/bootstrap.sh 初始化依赖,再 ./scripts/install.sh(默认装到 ~/.local/bin/dsh,幂等可重跑,可卸载)
+set -euo pipefail
+
+# Resolve symlinks so the repo path is correct when invoked via ~/.local/bin/dsh
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+REPO="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$REPO/scripts/lib/dsh-runtime.sh"
+
+# Capability modules are inert until their functions are called below.
+# shellcheck source=scripts/launcher/environment.sh
+source "$REPO/scripts/launcher/environment.sh"
+snapshot_launcher_environment
+# Keep legacy executable configuration in entry scope (including argv/return).
+if [[ -f "$REPO/.env.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$REPO/.env.local"
+  set +a
+fi
+initialize_launcher_environment
+# shellcheck source=scripts/launcher/args.sh
+source "$REPO/scripts/launcher/args.sh"
+initialize_launcher_args
+
+if is_official_cli_invocation "$@"; then
+  CLI_VER="$(dsh_version)"
+  if [[ -z "$CLI_VER" ]]; then
+    echo "error: dshVersion missing in $REPO/dsh.yaml" >&2
+    exit 1
+  fi
+  export DSH_CLI_VERSION="$CLI_VER"
+  with_repo_registry exec node "$REPO/scripts/dsh-cli.mjs" "$@"
+fi
+
+parse_launcher_args "$@"
+validate_launcher_args
+
+# shellcheck source=scripts/launcher/runtime-server.sh
+source "$REPO/scripts/launcher/runtime-server.sh"
+# shellcheck source=scripts/launcher/ui.sh
+source "$REPO/scripts/launcher/ui.sh"
+# shellcheck source=scripts/launcher/maintenance.sh
+source "$REPO/scripts/launcher/maintenance.sh"
+initialize_server_runtime
+
+if [[ $STOP -eq 1 ]]; then
+  do_stop
+  exit 0
+fi
+if [[ $HISTORY -eq 1 ]]; then
+  do_history
+  exit 0
+fi
+# doctor:手动检查/补齐本机运行前提(不改仓库、不动 Host)。退出码如实反映结果,
+# 便于脚本与 CI 使用;--check 只读,不安装任何东西。
+if [[ $DOCTOR -eq 1 ]]; then
+  if [[ $CHECK_ONLY -eq 1 ]]; then
+    with_repo_registry node "$REPO/scripts/host-prerequisites.mjs" --check
+  else
+    with_repo_registry node "$REPO/scripts/host-prerequisites.mjs"
+  fi
+  exit $?
+fi
+if [[ $RESET -eq 1 ]]; then
+  with_repo_registry node "$REPO/scripts/sync.mjs" --reset
+  exit 0
+fi
+
+# ---------- autoUpdate:启动/构建前自动检测并升级 DSH 版本(见文件头部注释) ----------
+AUTOUP_UPDATED=0   # 本次调用是否已完成自动升级(避免 -b/build 重复物化)
+
+if [[ $PLUGIN_UPDATE -eq 1 ]]; then
+  with_repo_registry node "$REPO/scripts/plugin-update.mjs" ${DRY_RUN:+--dry-run} ${YES_FLAG:+--yes}
+  exit $?
+fi
+
+if [[ $BUILD_ONLY -eq 1 || $BUILD -eq 1 || $RESTART -eq 1 ]] || ! is_server_up; then
+  autoupdate
+  # 自愈读的是 manifest 声明,所以放在 autoUpdate 之后(它可能刚改写并重物化 manifest)。
+  ensure_host_prerequisites
+fi
+
+if [[ $BUILD_ONLY -eq 1 ]]; then
+  [[ $AUTOUP_UPDATED -ne 1 ]] && do_build
+  exit 0
+fi
+if [[ $BUILD -eq 1 ]]; then
+  [[ $AUTOUP_UPDATED -ne 1 ]] && do_build
+fi
+
+if [[ $RESTART -eq 1 ]]; then
+  # Validate/build the replacement runtime before stopping a healthy Host.
+  prepare_server_runtime || exit 1
+  do_restart
+fi
+
+# Idempotent start: reuse the running instance instead of spawning another
+if is_server_up; then
+  if [[ $NO_OPEN -eq 1 ]]; then
+    echo "dsh 已在运行: http://127.0.0.1:$PORT"
+    print_plugins
+    exit 0
+  fi
+  if is_ui_open; then
+    echo "dsh 已在运行(UI 已打开): http://127.0.0.1:$PORT"
+    print_plugins
+    exit 0
+  fi
+  if open_ui; then
+    echo "dsh 已在运行,已为你打开 UI: http://127.0.0.1:$PORT"
+  else
+    echo "dsh 已在运行: http://127.0.0.1:$PORT (未自动打开 UI,可 dsh --open)"
+  fi
+  print_plugins
+  exit 0
+fi
+
+start_server

@@ -33,16 +33,20 @@ Two kinds of readers, two entry points:
 ## Quick start
 <!-- section: quick-start -->
 
-You need Node.js 22+ and npm 10+ (see `.nvmrc`) and a bash shell (macOS, Linux, WSL or Git Bash). Pick one of three paths.
+Initialization requires Node.js 22+ and npm 10+; `.nvmrc` is the recommended Node version, not an exact-version gate. The launcher uses one Node implementation on Windows, macOS and Linux, without requiring Git Bash on Windows. **Full configuration support is still pending the complete native-platform build and terminal-close gates**; passing launcher tests is not a full-repository Windows support claim. Pick one of three paths.
 
 ### Path 1 — copy my full configuration
 
 ```bash
 git clone https://github.com/prgrmrwy/ohmydsh.git && cd ohmydsh
-./scripts/bootstrap.sh     # check Node and install dependencies (idempotent)
-./scripts/install.sh       # link the launcher into ~/.local/bin
+node scripts/bootstrap.mjs # validate engines and run locked npm ci when needed
+npm link                   # register the repository bin; separate from dependency installation
 dsh build && dsh           # materialize the configuration, then start DSH
 ```
+
+On Windows, run these commands in cmd or PowerShell (split `&&` into separate lines in Windows PowerShell 5.1). `npm link` creates `dsh.cmd` and `dsh.ps1` in the npm global prefix; put that prefix on PATH. If PowerShell execution policy blocks the generated script, invoke `dsh.cmd` rather than weakening machine-wide policy. On POSIX, the global bin directory is `<prefix>/bin`. Check `npm prefix -g` and `where.exe dsh` / `command -v dsh` when another official `dsh` is already installed; do not use `--force` to overwrite an unrelated command. `npm unlink --global ohmydsh` unregisters this link. POSIX legacy install/bootstrap wrappers remain thin compatibility entries.
+
+POSIX start/stop/restart require `lsof` and `ps` (for example, install `lsof` using your OS package manager); missing ownership tools fail before launching or killing a Host. Windows uses the built-in PowerShell TCP/CIM query and forcefully stops only a revalidated owned tree; graceful flush is not guaranteed. An explicit `DSH_BIN` is a single executable path: Windows accepts JS entrypoints or native `.exe`, not `.cmd`/`.bat`/`.ps1` shims or a command string. Use the real JS CLI, not its npm shim.
 
 ### Path 2 — pick parts
 
@@ -154,7 +158,7 @@ Each machine does the same two things: clone this repository (plus your optional
 - `dsh.yaml` is the truth. Read it, not `~/.dsh`.
 - `node scripts/plugin-list.mjs` prints what is actually loaded.
 - A private overlay (`dsh.yaml.local`, or the file named by `DSH_LOCAL_MANIFEST`) appends entries that must not be public.
-- `.env.local` (gitignored) holds local settings and every secret.
+- `.env.local` (gitignored) holds literal single-line `KEY=VALUE` settings and secrets, never executable Shell. Quote paths containing spaces or backslashes; use absolute paths instead of `$HOME` or `~`. Blank/full-comment lines, optional `export`, empty values and CRLF are supported. `$`, backticks, multiline values, bare operators and inline comments are rejected with redacted line diagnostics. Single quotes are completely literal; double quotes decode only `\\` and `\"`. File values override inherited launcher env except explicit caller `DSH_BIN`. Bare sync/plugin-list consumers share the parser but retain their narrow allow-list, caller-first policy and tolerance for unrelated lines; the launcher is deliberately stricter. Migration never rewrites your file.
 - `thirdPartyResources` pins assets that are not plugins: the spec-superflow workflow skills, the Jev MCP server (its `TYPESAFE_API_KEY` comes from `.env.local` only, never from the manifest) and the Anvil OpenSpec schema.
 
 ## Plugins

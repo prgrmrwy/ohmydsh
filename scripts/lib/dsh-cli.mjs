@@ -5,7 +5,8 @@
 // npm/libnpmexec by default because its prerelease peer graph can hang inside
 // Arborist. Remove the single policy entry (and its regression tests) after an
 // isolated cold npx install, consecutive builds and repeated restarts are stable.
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './child-process.mjs'
+import packageManager from './package-manager.cjs'
 import {
   existsSync,
   mkdirSync,
@@ -58,7 +59,13 @@ export function computeNpxCacheKey(packages) {
   return crypto.createHash('sha512').update(input).digest('hex').slice(0, 16)
 }
 
-export function npxCacheDirOf(env = process.env) {
+export function npxCacheDirOf(env = process.env, { platform = process.platform } = {}) {
+  if (platform === 'win32') {
+    const get = name => env[Object.keys(env).find(key => key.toLowerCase() === name)]
+    const local = get('localappdata') || path.win32.join(os.homedir(), 'AppData', 'Local')
+    const cache = get('npm_config_cache') || path.win32.join(local, 'npm-cache')
+    return path.win32.join(cache, '_npx')
+  }
   const cache = env.npm_config_cache || path.join(os.homedir(), '.npm')
   return path.join(cache, '_npx')
 }
@@ -94,7 +101,8 @@ export function runBoundedProvision(command, args, options = {}) {
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS
   const cwd = options.cwd ?? process.cwd()
   const env = options.env ?? process.env
-  const request = JSON.stringify({ command, args, cwd, timeoutMs, killGraceMs })
+  const executable = packageManager.resolveExecutable(command, args, { env })
+  const request = JSON.stringify({ ...executable, cwd, timeoutMs, killGraceMs })
   const result = spawnSync(process.execPath, [BOUNDED_RUNNER], {
     cwd,
     env,
@@ -267,8 +275,7 @@ export function runDshCli(args, opts = {}) {
   const resolved = resolveCliBin(opts)
   if (!resolved) return false
   const stdio = opts.stdio ?? 'inherit'
-  const result = resolved.kind === 'env'
-    ? spawnSync(resolved.bin, args, { stdio })
-    : spawnSync(process.execPath, [resolved.bin, ...args], { stdio })
+  const executable = packageManager.resolveDshCommand(resolved.bin, args, { managed: resolved.kind !== 'env' })
+  const result = spawnSync(executable.command, executable.args, { stdio, shell: false, env: opts.env ?? process.env })
   return result.status === 0
 }

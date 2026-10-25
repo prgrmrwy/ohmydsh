@@ -4,12 +4,13 @@
 import { readFile, writeFile, mkdir, cp, rm, readdir, stat, rename, realpath } from 'node:fs/promises'
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
+import { resolveExecutable } from './lib/package-manager.cjs'
 import { assertHostRuntimeSources, declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
 import { assertNoReservedEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
 import { applyEnvLocal, enabledEnvNames, isCustomizationEnabled } from './lib/env-local.mjs'
@@ -640,7 +641,8 @@ function runLocalBuild(item, dir) {
   // Each root is its own npm workspace project with its own lockfile, so the
   // build runs where the package lives (design D3).
   const root = item.sourceRoot ?? REPO
-  const result = spawnSync('npm', ['run', 'build', '--workspace', pkg.name], {
+  const command = resolveExecutable('npm', ['run', 'build', '--workspace', pkg.name], { cwd: root, env: process.env })
+  const result = spawnSync(command.command, command.args, {
     cwd: root,
     stdio: 'inherit',
   })
@@ -886,7 +888,8 @@ function preflightScopes(items) {
   }
   const errors = []
   for (const [scope, ids] of declaredBy) {
-    const result = spawnSync('npm', ['config', 'get', `${scope}:registry`], { cwd: PROFILE_DIR, encoding: 'utf8' })
+    const command = resolveExecutable('npm', ['config', 'get', `${scope}:registry`], { cwd: PROFILE_DIR, env: process.env })
+    const result = spawnSync(command.command, command.args, { cwd: PROFILE_DIR, encoding: 'utf8', shell: false })
     const value = String(result.stdout ?? '').trim()
     if (result.status !== 0 || value === '' || value === 'undefined') {
       errors.push(`npm scope ${scope} (required by ${ids.map((id) => `package ${id}`).join(', ')}) has no registry configured for profile ${PROFILE_DIR}; add "${scope}:registry=<url>" to ${path.join(PROFILE_DIR, '.npmrc')} or your user .npmrc`)

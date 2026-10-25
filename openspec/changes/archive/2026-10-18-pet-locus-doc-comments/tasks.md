@@ -233,7 +233,7 @@
 - [x] 10.1 （已完成：pet build + vitest 3210 passed / 0 failed；typecheck 通过；仓库根 416/8，8 个失败与基线完全相同；check:artifacts 通过）运行 `npm --prefix packages/dsh-pet test`、`npm --prefix packages/dsh-pet run build`，以及 typecheck（若有独立脚本）；运行仓库根的 `npm test` 和 `npm run check:artifacts`。记录命令和通过数
 - [x] 10.2 （已完成：129/129 行为绿，其中 4 行 partial；逐行严格核对，测试名必须出现在 it/describe 标题行而非注释中，missing 0；没有新增 skip/only；被删除的测试标题均为改名或有意替换，见 verify.md）核对 test-plan 129 行全部为 🟢；没有 skip 或 pending，也没有弱化或删除过的测试
 - [x] 10.3 （已完成）`openspec validate pet-locus-doc-comments --strict` 通过
-- [x] 10.4 `node scripts/sync.mjs` 连续两次，第二次无变化。2026-10-17 在隔离环境运行：DSH_HOME 用 Worktree Session 自己的 home，为 `profiles/web/.npmrc` 补上 `@byted` registry 行，不含凭据；XDG_DATA_HOME 用临时目录，避免去覆盖本机 `~/.local/share/openspec/schemas/anvil` 这个未受管的 schema。第一次 exit 0，应用 16 处变更；第二次 exit 0，输出“no changes — deployment already matches manifest”，`dsh-pet@0.1.0 up-to-date`
+- [x] 10.4 `node scripts/sync.mjs` 连续两次，第二次无变化。2026-10-17 在隔离环境运行：DSH_HOME 用 Worktree Session 自己的 home，为 `profiles/web/.npmrc` 补上 `<private-scope>` registry 行，不含凭据；XDG_DATA_HOME 用临时目录，避免去覆盖本机 `~/.local/share/openspec/schemas/anvil` 这个未受管的 schema。第一次 exit 0，应用 16 处变更；第二次 exit 0，输出“no changes — deployment already matches manifest”，`dsh-pet@0.1.0 up-to-date`
 - [x] 10.5 在一次性飞书应用上做真机验收（不用生产 dsh-pet 应用），用构建产物复测：
   - E1：一条连接同时收群 @、全文评论、划词评论、回复；
   - E3 反向：Pet 运行时，另起一个同应用的 `+subscribe`，后者应被单实例锁拒绝；先占住连接再启动 Pet，Pet 的门禁应报 `event-connection-conflict`；

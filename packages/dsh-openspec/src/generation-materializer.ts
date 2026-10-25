@@ -55,7 +55,7 @@ export async function materializeGeneration(input: { home: string; id: string; s
     if (!invocationNamesCli(input.invocation, join(destination, binRelative))) throw new Error('invocation-path-mismatch')
     // Smoke the staged CLI before it is renamed into place or activated, so a CLI that cannot run or reports a
     // different version never becomes visible (a failure removes the staging directory in the outer catch).
-    const smoke = await import('node:child_process').then(({ spawnSync }) => spawnSync(process.execPath, [join(staged, binRelative), '--version'], { encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH, HOME: input.home, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: '0' } }))
+    const smoke = await import('node:child_process').then(({ spawnSync }) => spawnSync(process.execPath, [join(staged, binRelative), '--version'], { windowsHide: true, encoding: 'utf8', timeout: 10_000, env: { PATH: process.env.PATH, HOME: input.home, OPENSPEC_NO_UPDATE_CHECK: '1', OPENSPEC_TELEMETRY: '0' } }))
     if (smoke.status !== 0 || !new RegExp(`(?:^|\\s)${input.version.replaceAll('.', '\\.')}\\s*$`).test(`${smoke.stdout}${smoke.stderr}`.trim())) throw new Error('cli-smoke-failed')
     if (input.canActivate?.() === false) throw new Error('generation-cancelled')
     try { await rename(staged, destination) }

@@ -5,6 +5,8 @@
 // reviewed transitive-dependency overlay.
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
 import { runBoundedProvision } from './dsh-cli.mjs'
 import { loadManifestWithOverlay } from './manifest-overlay.mjs'
 
@@ -124,7 +126,7 @@ function verifiedServerBin(declared) {
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error('Host runtime compatibility server entry escapes dsh-pet')
   }
-  return declared.serverBin
+  return realBin
 }
 
 /** Build/reuse and verify the declared Host runtime. Never falls back silently. */
@@ -136,9 +138,15 @@ export function prepareDeclaredHostRuntime({
 } = {}) {
   const declared = loadDeclaredHostRuntime({ repo, env })
   if (declared === null) return null
+  const { acquireCompatBuildLock } = require(path.join(declared.compatRoot, 'compat-build-lock.cjs'))
+  const previousToken = process.env.DSH_PET_COMPAT_BUILD_TOKEN
+  const lock = acquireCompatBuildLock({ allowInherited: false })
+  const childEnv = Object.fromEntries(Object.entries(env).filter(([key]) => key.toUpperCase() !== 'DSH_PET_COMPAT_BUILD_TOKEN'))
+  childEnv.DSH_PET_COMPAT_BUILD_TOKEN = lock.token
+  try {
   const built = runner(process.execPath, [declared.builder], {
     cwd: repo,
-    env,
+    env: childEnv,
     timeoutMs,
     // dsh-server-bin stdout is a machine protocol captured by bin/dsh. Stream
     // builder progress to stderr so a cold build remains visible and cannot
@@ -153,7 +161,7 @@ export function prepareDeclaredHostRuntime({
   const bin = verifiedServerBin(declared)
   const probed = runner(process.execPath, [bin, '--version'], {
     cwd: repo,
-    env,
+    env: childEnv,
     timeoutMs: 30_000,
     stdout: 'pipe',
     stderr: 'inherit',
@@ -164,7 +172,8 @@ export function prepareDeclaredHostRuntime({
       `Host runtime compatibility reports ${String(probed.stdout ?? '').trim()}, expected ${declared.version}`,
     )
   }
-  const fingerprint = readFileSync(path.join(declared.compatRoot, '.launcher', '.fingerprint'), 'utf8').trim()
+  const generation = realpathSync(path.join(declared.compatRoot, '.launcher'))
+  const fingerprint = readFileSync(path.join(generation, '.fingerprint'), 'utf8').trim()
   if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('Host runtime compatibility fingerprint is missing or invalid')
   return {
     kind: 'customization-host-runtime',
@@ -173,5 +182,11 @@ export function prepareDeclaredHostRuntime({
     compatibilityKind: declared.kind,
     fingerprint,
     version: declared.version,
+  }
+  } finally {
+    try { lock.release() } finally {
+      if (previousToken === undefined) delete process.env.DSH_PET_COMPAT_BUILD_TOKEN
+      else process.env.DSH_PET_COMPAT_BUILD_TOKEN = previousToken
+    }
   }
 }

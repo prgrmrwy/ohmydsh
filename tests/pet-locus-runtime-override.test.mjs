@@ -98,12 +98,12 @@ test('reviewed runtime patches stay confined to the approved package sources', a
   assert.doesNotMatch(loopPatch, /packages\/core\/agent\/|packages\/agent\/agent/)
 })
 
-test('the launcher installs reviewed overrides and atomically publishes a self-contained runtime', async () => {
+test('the launcher installs reviewed overrides and safely publishes a self-contained runtime', async () => {
   const launcher = await text('build-launcher.cjs')
 
   assert.match(launcher, /'@deepseek-ai\/dsh': version/)
   assert.match(launcher, /const npmVersion = '11\.19\.0'/)
-  assert.match(launcher, /run\('corepack', \[`npm@\$\{npmVersion\}`/)
+  assert.match(launcher, /runCompatCommand\('corepack', \[`npm@\$\{npmVersion\}`/)
   assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
   // The framework version is declared, not left to npm's resolution order:
   // several official packages pin cordis EXACTLY while others allow a range,
@@ -139,7 +139,10 @@ test('the launcher installs reviewed overrides and atomically publishes a self-c
   assert.match(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:\$\{join\(compatPackages, 'agent-loop'\)\}`/)
   assert.doesNotMatch(launcher, /overrideRuntimeAgent/)
   assert.match(launcher, /renameSync\(staging, buildDir\)/)
-  assert.match(launcher, /renameSync\(nextLink, launcher\)/)
+  assert.match(launcher, /publishLauncher\(\{ launcher, target: buildDir/)
+  const publisher = await text('compat-publish.cjs')
+  assert.match(publisher, /io\.renameSync\(next, launcher\)/)
+  assert.match(publisher, /platform === 'win32'/)
   assert.match(launcher, /realpathSync\(here\)/)
   assert.match(launcher, /acquireCompatBuildLock/)
   assert.doesNotMatch(launcher, /node_modules\/\.npm\/_npx/)

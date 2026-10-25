@@ -1,6 +1,6 @@
 {
   "name": "dsh-sidebar-session-provider-icon",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "description": "DeepSeek Harness plugin: show a provider + model icon in the sidebar for every session, updated live from the composer selector with a last-request fallback",
   "license": "MIT",
   "author": "prgrmrwy",
@@ -61,7 +61,7 @@
     }
   },
   "scripts": {
-    "clean": "rm -rf lib",
+    "clean": "node -e \"require('node:fs/promises').rm('lib',{recursive:true,force:true}).catch(error=>{console.error(error);process.exitCode=1})\"",
     "build:host": "tsc -p tsconfig.json",
     "build:client": "tsdown",
     "build": "npm run clean && npm run build:host && npm run build:client",

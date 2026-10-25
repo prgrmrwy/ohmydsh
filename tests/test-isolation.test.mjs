@@ -15,6 +15,7 @@ async function probeRepo(probeBody) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh-isolation-'))
   await writeFile(path.join(root, 'package.json'), await readFile(path.join(REPO, 'package.json')))
   await cp(path.join(REPO, 'scripts', 'lib'), path.join(root, 'scripts', 'lib'), { recursive: true })
+  await cp(path.join(REPO, 'scripts', 'test.mjs'), path.join(root, 'scripts', 'test.mjs'))
   await symlink(path.join(REPO, 'node_modules'), path.join(root, 'node_modules'), 'dir')
   await mkdir(path.join(root, 'tests'), { recursive: true })
   await writeFile(path.join(root, 'tests', 'probe.test.mjs'), probeBody)

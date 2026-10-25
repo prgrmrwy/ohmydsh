@@ -5,9 +5,10 @@
 // helpers the real files go through. Semantic equivalence of the two languages and
 // the wording of the AI prompt are NOT asserted here; they are manual gates.
 import test from 'node:test'
+import { parseArgs } from '../scripts/launcher/args.mjs'
 import assert from 'node:assert/strict'
 import yaml from 'js-yaml'
-import { chmod, mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdtemp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
@@ -106,15 +107,12 @@ function dshSubcommandMentions(text) {
   return mentions
 }
 
-/** Subcommands declared as positional `case` arms of bin/dsh's argument loop. */
-function binDshSubcommands(source) {
-  const start = source.indexOf('while [[ $# -gt 0 ]]; do')
-  assert.ok(start > -1, 'bin/dsh argument loop not found')
-  const end = source.indexOf('\nesac', start)
+/** Observe actual parser behavior instead of matching a retired Bash case arm. */
+function binDshSubcommands() {
   const commands = new Set()
-  for (const line of source.slice(start, end).split('\n')) {
-    const arm = line.match(/^\s{4}([a-z][a-z-]*(?:\|[a-z][a-z-]*)*)\)/)
-    if (arm) for (const name of arm[1].split('|')) commands.add(name)
+  for (const name of ['build', 'web', 'stop', 'restart', 'reset', 'history', 'doctor', 'plugin-update']) {
+    assert.doesNotThrow(() => parseArgs([name]), `launcher no longer accepts ${name}`)
+    commands.add(name)
   }
   return commands
 }
@@ -322,6 +320,8 @@ async function syncFixture(manifestText) {
   const profile = path.join(dshHome, 'profiles', 'web')
   await mkdir(path.join(repo, 'scripts', 'lib'), { recursive: true })
   await writeFile(path.join(repo, 'scripts', 'sync.mjs'), await readFile(path.join(REPO, 'scripts', 'sync.mjs')))
+  await cp(path.join(REPO, 'scripts/lib/package-manager.cjs'), path.join(repo, 'scripts/lib/package-manager.cjs'))
+  await cp(path.join(REPO,'scripts/lib/child-process.mjs'),path.join(repo,'scripts/lib/child-process.mjs'))
   for (const lib of ['dsh-cli', 'dsh-host-runtime', 'manifest-overlay', 'env-local', 'profile-lock', 'legacy-settings']) {
     await writeFile(path.join(repo, 'scripts', 'lib', `${lib}.mjs`), await readFile(path.join(REPO, 'scripts', 'lib', `${lib}.mjs`)))
   }
@@ -395,7 +395,7 @@ test('agent-install-prompt contains all six rule tags in both READMEs', () => {
 })
 
 test('every dsh subcommand mentioned in READMEs exists in bin/dsh case arms', () => {
-  const known = binDshSubcommands(readFileSync(path.join(REPO, 'bin', 'dsh'), 'utf8'))
+  const known = binDshSubcommands()
   for (const command of ['build', 'stop', 'restart', 'reset', 'history', 'plugin-update', 'doctor']) {
     assert.ok(known.has(command), `bin/dsh no longer declares ${command}`)
   }

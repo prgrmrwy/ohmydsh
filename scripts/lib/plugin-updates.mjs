@@ -7,10 +7,11 @@
 //   稳定性 - 非 pre-release、未被 deprecated、最新版发布 ≤ STALE_DAYS。
 //   状态   - up-to-date / upgrade-ready / needs-review / skipped。
 import { readFileSync, existsSync } from 'node:fs'
-import { execFile } from 'node:child_process'
+import { execFile } from './child-process.mjs'
 import path from 'node:path'
 import os from 'node:os'
 import { loadManifestWithOverlay } from './manifest-overlay.mjs'
+import { resolveExecutable } from './package-manager.cjs'
 
 export const STALE_DAYS = 60
 export const DSH_PEER_PREFIX = '@deepseek-ai/dsh-'
@@ -116,7 +117,13 @@ async function registryPackage(name, registry) {
 // the whole registry round-trip.
 function npmSpawn(args, { cwd, env }) {
   return new Promise((resolve) => {
-    execFile('npm', args, { cwd, encoding: 'utf8', env: { ...process.env, ...env }, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const childEnv = { ...process.env, ...env }
+    let command
+    try { command = resolveExecutable('npm', args, { cwd, env: childEnv }) } catch (error) {
+      resolve({ status: 1, stdout: '', stderr: error.message })
+      return
+    }
+    execFile(command.command, command.args, { cwd, encoding: 'utf8', env: childEnv, maxBuffer: 64 * 1024 * 1024, shell: false }, (error, stdout, stderr) => {
       resolve({ status: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr: stderr || (error && !stderr ? String(error.message) : '') })
     })
   })

@@ -17,6 +17,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// Historical Bash regression oracle, not the current Node launcher.
+const ORACLE = path.join(ROOT, 'tests/fixtures/launcher-bash-baseline')
 
 const PROBE = `import { appendFileSync } from 'node:fs'
 appendFileSync(process.env.PREREQ_PROBE_LOG, JSON.stringify(process.argv.slice(2)) + '\\n')
@@ -35,6 +37,7 @@ async function sandbox(t, { yaml } = {}) {
   t.after(() => rm(dir, { recursive: true, force: true }))
   await mkdir(path.join(dir, 'bin'), { recursive: true })
   await cp(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'), { recursive: true })
+  await cp(path.join(ORACLE, 'scripts'), path.join(dir, 'scripts'), { recursive: true })
   await writeFile(path.join(dir, 'dsh.yaml'), yaml ?? await readFile(path.join(ROOT, 'dsh.yaml'), 'utf8'))
   await writeFile(path.join(dir, 'scripts', 'host-prerequisites.mjs'), PROBE)
   // 运行体解析链会 import scripts/lib 里的模块(js-yaml 等),与既有启动器测试一样
@@ -42,14 +45,15 @@ async function sandbox(t, { yaml } = {}) {
   await symlink(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), 'dir')
   await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'prereq-fixture', private: true, type: 'module' }))
 
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await readFile(path.join(ORACLE, 'scripts/launcher/runtime-server.sh'), 'utf8')
   const patched = src.replace(
     /nohup "\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open \$\{PASSTHRU\[@\]\+"\$\{PASSTHRU\[@\]\}"\} >>"\$DSH_HOME\/dsh\.log" 2>&1 &/,
     'for a in web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"}; do echo "WEB_ARG:$a"; done; exit 0',
   )
   assert.notEqual(patched, src, 'start_server 的 server 启动调用未被替换,测试桩与实现已漂移')
   const bin = path.join(dir, 'bin/dsh')
-  await writeFile(bin, patched)
+  await cp(path.join(ORACLE, 'bin/dsh'), bin)
+  await writeFile(path.join(dir, 'scripts/launcher/runtime-server.sh'), patched)
   await chmod(bin, 0o755)
 
   // 运行体解析走 DSH_BIN 直连(不联网、不装 npx 缓存)。

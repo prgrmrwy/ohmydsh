@@ -16,6 +16,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// Historical Bash regression oracle; Node uses launcher-contract/lifecycle suites.
+const ORACLE = path.join(ROOT, 'tests/fixtures/launcher-bash-baseline')
+
+// P1 keeps the existing structural assertions across the extracted sources.
+async function launcherSource() {
+  const files = ['bin/dsh', ...['args', 'environment', 'runtime-server', 'ui', 'maintenance'].map(name => `scripts/launcher/${name}.sh`)]
+  return (await Promise.all(files.map(file => readFile(path.join(ORACLE, file), 'utf8')))).join('\n')
+}
 
 /**
  * 搭一个隔离沙箱:真实 bin/dsh + scripts,但把官方 CLI 换成记录 argv 的桩,
@@ -26,6 +34,7 @@ async function sandbox() {
   const dir = await mkdtemp(path.join(tmpdir(), 'ohmydsh-routing-'))
   await mkdir(path.join(dir, 'bin'), { recursive: true })
   await cp(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'), { recursive: true })
+  await cp(path.join(ORACLE, 'scripts'), path.join(dir, 'scripts'), { recursive: true })
   await cp(path.join(ROOT, 'dsh.yaml'), path.join(dir, 'dsh.yaml'))
   await cp(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), { recursive: true, dereference: false })
 
@@ -34,14 +43,15 @@ async function sandbox() {
   await writeFile(stub, `for (const a of process.argv.slice(2)) console.log('CLI_ARG:' + a)\n`)
 
   // 启动器:把真实 server 启动替换成回显,其余逻辑保持原样。
-  const src = await import('node:fs/promises').then((fs) => fs.readFile(path.join(ROOT, 'bin/dsh'), 'utf8'))
+  const src = await readFile(path.join(ORACLE, 'scripts/launcher/runtime-server.sh'), 'utf8')
   const patched = src.replace(
     /nohup "\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open \$\{PASSTHRU\[@\]\+"\$\{PASSTHRU\[@\]\}"\} >>"\$DSH_HOME\/dsh\.log" 2>&1 &/,
     'for a in web --port "$PORT" --no-open ${PASSTHRU[@]+"${PASSTHRU[@]}"}; do echo "WEB_ARG:$a"; done; exit 0',
   )
   assert.notEqual(patched, src, 'start_server 的 server 启动调用未被替换,测试桩与实现已漂移')
   const bin = path.join(dir, 'bin/dsh')
-  await writeFile(bin, patched)
+  await cp(path.join(ORACLE, 'bin/dsh'), bin)
+  await writeFile(path.join(dir, 'scripts/launcher/runtime-server.sh'), patched)
   await chmod(bin, 0o755)
   return { dir, bin, stub }
 }
@@ -216,19 +226,19 @@ test('官方 web 参数 --host/--trusted-host 仍原样透传', async (t) => {
 })
 
 test('前台与后台官方启动路径都强制 --no-open,保证只有启动器负责 UI', async () => {
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await launcherSource()
   assert.match(src, /"\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open[^\n]* &/)
   assert.match(src, /nohup "\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" --no-open[^\n]* >>"\$DSH_HOME\/dsh\.log" 2>&1 &/)
   assert.doesNotMatch(src, /(?:^|\n)\s*(?:nohup )?"\$\{env_args\[@\]\}" node "\$server_bin" web --port "\$PORT" (?!--no-open)/)
 })
 
 test('server 不再经 npx 拉起:npx 会把 npm_config_* 烘焙给长期进程', async () => {
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await launcherSource()
   assert.doesNotMatch(src, /npx -y "@deepseek-ai\/dsh@\$VER" web/, 'server 启动必须走 node 直连,否则 npm 环境会泄漏给 agent')
 })
 
 test('stop 在 autoUpdate 与运行体解析之前短路，restart 只进入一次 start_server', async () => {
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await launcherSource()
   const stopBranch = src.indexOf('if [[ $STOP -eq 1 ]]')
   const autoupdateBlock = src.indexOf('# ---------- autoUpdate:')
   assert.ok(stopBranch > 0 && stopBranch < autoupdateBlock, 'stop 必须在版本检测/运行体解析前退出')
@@ -238,7 +248,7 @@ test('stop 在 autoUpdate 与运行体解析之前短路，restart 只进入一�
 })
 
 test('macOS UI AppleScript 清理有界，不得让 stop/restart 永久等待 Chrome', async () => {
-  const src = await readFile(path.join(ROOT, 'bin/dsh'), 'utf8')
+  const src = await launcherSource()
   assert.match(src, /run_osascript_bounded\(\)/)
   assert.match(src, /run_osascript_bounded 3 -e "tell application/)
   assert.match(src, /run_osascript_bounded 3 - "\$PORT"/)

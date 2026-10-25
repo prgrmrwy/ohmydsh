@@ -103,10 +103,10 @@ Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻
 1. 固定 tag 构建并验证各 patch 的 capability marker 与运行时行为；
 2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、三个 reviewed overrides（subagent、agent-loop、tools）
    与显式声明的框架版本（cordis / cordis-plugin-include，值从 reviewed 上游树读取）；
-3. 显式审批固定 install scripts；
+3. 从源码 `install-script-policy.json` 生成精确版本脚本策略；固定 npm 强制项目模式、strict=true、ignore/dangerously-allow-all=false，未知脚本版本拒绝，不自动 approve-all。新执行许可须单独审查确认；当前策略仅包含已分别确认的精确许可和禁止项；
 4. 验证依赖树唯一性、package identity/version/provenance、实际能力与 DSH
    `--version`；
-5. 把 file links 转为自包含 package copies，再原子发布。
+5. 把 file links 转为自包含 package copies。POSIX 原子替换指针；Windows 共享锁内备份→发布→验证，失败恢复（有短暂无指针窗口，不承诺原子可见性）。调用方持同一锁读取版本/fingerprint并固定物理generation入口；发布不自动清理历史generation。未知/dangling实体或previous/next/restore残留拒绝继续，恢复失败保留备份供人工决策，不删除目标。
 
 锁回收只针对同一目录 inode、同一 token/PID 且已确认死亡的 owner。`mkdir` 后尚未写出 owner 的目录即便很旧，也不是进程死亡证明；缺失/损坏 owner 或遗留 `.reclaim-*` 会有界等待后报错，不自动删除。遇到这些情况须由操作人员先确认所有构建进程已停止，再清理明确的锁残留；禁止在不确定时绕过锁启动第二个构建。锁测试复制源文件到临时目录运行，不清理实际 builder 的锁。升级此锁实现后，应确认没有仍加载旧实现的 builder/waiter 进程，再开始新的并发构建；磁盘改动不会更新已运行进程。
 

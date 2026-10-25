@@ -89,3 +89,28 @@
 - 测试环境：vitest 的资源内联上限提高到 16 KB，使约 4.9 KB 的 magpie.svg 与生产构建一样以 markup 形式进入代码。
 - 对应 openspec change `sidebar-provider-icon-magpie-route`。
 
+
+## 0.1.10 — 2026-10-25
+
+### Real-GUI feedback revision
+
+修复网关会话的小图标显示成上游平台、而不是模型厂商。
+
+- 实机：会话的 `provider` 已经是 `dsh-magpie-connect`，`model` 是 `opencode-go/deepseek-v4.1-flash`，但侧边栏显示「Magpie 主图 + OpenCode 小图」，看起来 model 是 OpenCode 而不是 DeepSeek。
+- 根因：0.1.9 的网关解析先读 `/` 前的上游段并把它当 provider route，命中即返回。而 `<上游provider>/<model>` 的上游段正是分发平台，主图已经把「走网关」这件事表达掉了，小图标再复述平台就等于丢掉唯一的厂商信息。
+- 修复：网关型 route 下的小图标改为**先按 `/` 后的模型名识别厂商**（`opencode-go/deepseek-v4.1-flash` → DeepSeek、`claude/claude-haiku-5-5` → Anthropic），模型名认不出时才退回上游段（`opencode-go/private-model` → OpenCode），两段都认不出仍只显示 Magpie。
+- 主图与直连 route 完全不变：`opencode-go/deepseek-v4.1-flash` 直连仍是 OpenCode 主图 + DeepSeek 小图。
+- 对应 openspec change `sidebar-provider-icon-gateway-model-brand`；回滚：`dsh.yaml` 版本改回 0.1.9 → `dsh build` → 重启。
+
+## 0.1.11 — 2026-10-25
+
+### Real-GUI feedback revision
+
+网关会话的 `<上游provider>/<model>` 其实有**三层**身份，此前只表达了两层。
+
+- 实机：`dsh-magpie-connect / opencode-go/deepseek-v4.1-flash` 显示「Magpie + DeepSeek」，中转平台 OpenCode 被完全丢弃，看不出这一轮是经 OpenCode 中转还是直连 DeepSeek。而中转平台是 Magpie 网关的一等配置维度。
+- 复合 icon 增加第三个位置：**左下角**（与右下角镜像）显示中转平台，右下角继续显示模型厂商，主图继续显示 provider route。
+- 只在「上游段是可识别品牌、且与模型厂商不同」时出现第三层：`claude/*`、`codex/*`（同品牌）、`opencode-go/private-model`（兜底同品牌）、`auto|group|custom`（上游段非品牌）都保持两层，不重复画同一个图标。
+- 几何依据（实测官方行 CSS）：badge 位于 x∈[28,42]，官方 StateDot 圆点在 x∈[13,19]；左下角 10px 图标放 `left:-4px` 占 x∈[24,34]，与圆点留 5px、与右下角图标留 2px，badge 占位宽度仍为 14px，行布局不变。
+- 直连 route 判定与渲染完全不变。
+- 对应 openspec change `sidebar-provider-icon-gateway-transit-tier`；回滚：`dsh.yaml` 版本改回 0.1.10 → `dsh build` → 刷新。

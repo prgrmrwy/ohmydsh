@@ -17,10 +17,11 @@
 // Check, then install only what is missing or on the wrong version; reinstall
 // nothing that is already correct. Never install anything sync did not declare.
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runBoundedProvision } from './lib/dsh-cli.mjs'
+import { resolveExecutable } from './lib/package-manager.cjs'
 import { applyEnvLocal, enabledEnvNames, isCustomizationEnabled } from './lib/env-local.mjs'
 import { loadManifestWithOverlay, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
 import { parseHostPrerequisites } from './lib/host-prerequisites.mjs'
@@ -86,7 +87,8 @@ function registryFor(declaration) {
 
 /** The global npm root of the node/npm this process would install with. */
 function globalRoot() {
-  const result = spawnSync('npm', ['root', '-g'], { encoding: 'utf8', timeout: PROBE_TIMEOUT_MS })
+  const command = resolveExecutable('npm', ['root', '-g'], { env: process.env })
+  const result = spawnSync(command.command, command.args, { encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, shell: false })
   if (result.error !== undefined && result.error !== null) throw new Error(`npm root -g 失败: ${result.error.message}`)
   if (result.status !== 0) throw new Error(`npm root -g 退出码 ${result.status ?? 'null'}`)
   const root = String(result.stdout ?? '').trim()
@@ -131,7 +133,11 @@ function install(declaration) {
   const registry = registryFor(declaration)
   const argv = ['install', '-g', spec, ...(registry !== undefined ? [`--registry=${registry}`] : [])]
   note(`${declaration.id}: 安装 ${spec}${registry !== undefined ? ` （registry ${registry}）` : ''}`)
-  const result = runBoundedProvision('npm', argv, {
+  let command
+  try { command = resolveExecutable('npm', argv, { cwd: REPO, env: process.env }) } catch (error) {
+    return { ok: false, detail: `安装入口不可用: ${error.message}` }
+  }
+  const result = runBoundedProvision(command.command, command.args, {
     cwd: REPO,
     timeoutMs: INSTALL_TIMEOUT_MS,
     stdout: 'pipe',

@@ -46,15 +46,15 @@
 
 以下为核验时已安装的官方发布包位置，不是上游改动要求。临时 prefix 可按下方命令重建；其中源码行号仅适用于此 pin。
 
-- [pre-step / request 类型](../../../node_modules/@deepseek-ai/dsh-agent/lib/types/runtime-types.d.ts#L293-L332)：公开事件输入和 waterfall 返回契约。
-- [Loop 请求链](../../../node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js#L1164-L1220)：实际调用 waterfall 后才 `llm.prepareCall`，记录 resolved request header。
-- [scopeTarget](../../../node_modules/@deepseek-ai/dsh-scope/lib/index.js#L315-L337)：无 Agent 作用域标记的全局 listener 可观察不同子身份。
-- [SubagentStartRequest](../../../node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts#L136-L162)：公开 `agentOptions`，不必通过工具 schema 推断宿主能力。
-- [continuation 创建](../../../node_modules/@deepseek-ai/dsh-subagent/lib/types/continuation.js#L101-L176)、[冷恢复](../../../node_modules/@deepseek-ai/dsh-subagent/lib/types/continuation.js#L354-L374)：descriptor 与恢复选项。
-- [官方 Team 创建转发](/tmp/dsh-official-routing-probe.HImElm/node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js#L573-L582)：只转发 prompt/parent，未传 agentOptions；并不妨碍插件在 child request 入口配置。
-- [默认选择副作用](../../../node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js#L720-L739)：`selectModel` 还会 `saveSelection`。
+- pre-step / request 类型（`node_modules/@deepseek-ai/dsh-agent/lib/types/runtime-types.d.ts#L293-L332`）：公开事件输入和 waterfall 返回契约。
+- Loop 请求链（`node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js#L1164-L1220`）：实际调用 waterfall 后才 `llm.prepareCall`，记录 resolved request header。
+- scopeTarget（`node_modules/@deepseek-ai/dsh-scope/lib/index.js#L315-L337`）：无 Agent 作用域标记的全局 listener 可观察不同子身份。
+- SubagentStartRequest（`node_modules/@deepseek-ai/dsh-subagent/lib/types/types.d.ts#L136-L162`）：公开 `agentOptions`，不必通过工具 schema 推断宿主能力。
+- continuation 创建（`node_modules/@deepseek-ai/dsh-subagent/lib/types/continuation.js#L101-L176`）、冷恢复（`node_modules/@deepseek-ai/dsh-subagent/lib/types/continuation.js#L354-L374`）：descriptor 与恢复选项。
+- 官方 Team 创建转发（`/tmp/dsh-official-routing-probe.HImElm/node_modules/@deepseek-ai/dsh-experimental-agent-team/lib/index.js#L573-L582`）：只转发 prompt/parent，未传 agentOptions；并不妨碍插件在 child request 入口配置。
+- 默认选择副作用（`node_modules/@deepseek-ai/dsh-api-session-controller/lib/index.js#L720-L739`）：`selectModel` 还会 `saveSelection`。
 
-`resolveChildAgentOptions` 是 [官方公开导出](../../../node_modules/@deepseek-ai/dsh-subagent/lib/types/index.d.ts#L55)，前期函数级实验使用内部文件路径不意味着函数本身是私有 API。本次整链探针没有导入任何内部 helper。
+`resolveChildAgentOptions` 是 官方公开导出（`node_modules/@deepseek-ai/dsh-subagent/lib/types/index.d.ts#L55`），前期函数级实验使用内部文件路径不意味着函数本身是私有 API。本次整链探针没有导入任何内部 helper。
 
 ## 重跑
 

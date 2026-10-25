@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './child-process.mjs'
 import os from 'node:os'
 import path from 'node:path'
+import { resolveExecutable } from './package-manager.cjs'
 
 export const SPEC_SUPERFLOW_SKILLS = Object.freeze([
   'bug-investigator',
@@ -231,7 +232,8 @@ export function packagePins(resources, { enabledOnly = true } = {}) {
 }
 
 export function resolveNpmIntegrity(pin, { spawn = spawnSync } = {}) {
-  const result = spawn('npm', ['view', pin.spec, 'dist.integrity', '--json'], { encoding: 'utf8' })
+  const command = resolveExecutable('npm', ['view', pin.spec, 'dist.integrity', '--json'])
+  const result = spawn(command.command, command.args, { encoding: 'utf8', shell: false })
   if (result.status !== 0) throw new Error(`cannot resolve npm integrity for ${pin.spec}`)
   let value
   try { value = JSON.parse(result.stdout) } catch { throw new Error(`invalid npm integrity response for ${pin.spec}`) }
@@ -351,6 +353,7 @@ import { spawn } from 'node:child_process'
 const key = process.env.TYPESAFE_API_KEY
 if (!key) process.exit(78)
 const child = spawn(process.execPath, [${JSON.stringify(entryFile)}], {
+  windowsHide: true,
   stdio: 'inherit',
   env: { TYPESAFE_API_KEY: key, JEV_PROVIDER: 'typesafe' },
 })
