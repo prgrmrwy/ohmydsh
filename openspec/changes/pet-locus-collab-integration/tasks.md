@@ -71,6 +71,6 @@
 ## 10. 配置、真实验收与收尾
 
 - [x] 10.1 `dsh.yaml` 中 dsh-collab 增加 `managedChannels: ['pet-locus']` 并更新 note；仓库 `npm test`、`npm run check:artifacts`、`openspec validate pet-locus-collab-integration --strict`、`git diff --check` 通过
-- [ ] 10.2 经用户授权部署：`node scripts/sync.mjs` 两次，第二次无变化；重启 Host 后刷新现有 GUI
-- [ ] 10.3 真实 Host 验收，记录脱敏证据：升级前已有的待办在管理面标为旧版只读；新空间建立且成员恰为 main 与 pet；子会话经 `collab_status`/`collab_read` 只看到自己与主会话的记录；子会话登记待办不唤醒主会话；所有者受理后主会话收到跟进正文（与升级前一条同类待办的正文结构对照）；所有者直接放弃不唤醒；主会话自行完成后 Pet 登记路由到该 locus；停用 dsh-collab 后登记失败而回复照常，重新启用后恢复；观察主会话是否自行受理 open 待办并记录
+- [x] 10.2 经用户授权部署：`node scripts/sync.mjs` 两次，第二次无变化；重启 Host 后刷新现有 GUI
+- [x] 10.3 真实 Host 验收，记录脱敏证据：升级前已有的待办在管理面标为旧版只读；新空间建立且成员恰为 main 与 pet；子会话经 `collab_status`/`collab_read` 只看到自己与主会话的记录；子会话登记待办不唤醒主会话；所有者受理后主会话收到跟进正文（与升级前一条同类待办的正文结构对照）；所有者直接放弃不唤醒；主会话自行完成后 Pet 登记路由到该 locus；停用 dsh-collab 后登记失败而回复照常，重新启用后恢复；观察主会话是否自行受理 open 待办并记录
 - [ ] 10.4 写 `verify.md`（anvil verify：test-plan 全绿、全套通过且无新 skip、评审未过期）；跨边界协作标准 7.2 节改写为代理成员模型；确认 current specs 反映最终行为后归档
