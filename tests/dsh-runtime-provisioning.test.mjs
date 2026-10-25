@@ -33,8 +33,7 @@ function materializingRunner(calls, body = {}) {
     calls.push({ command, args, cwd: options.cwd })
     if (command === 'pnpm' && body.pnpm !== 'fail') {
       const bin = dshBinOf(options.cwd)
-      mkdir(path.dirname(bin), { recursive: true }).then(() => writeFile(bin, '#!/usr/bin/env node\n'))
-      // Runner API is synchronous; test fixture materializes synchronously below.
+      // Runner API is synchronous; do not race cleanup with an unawaited second write.
       const result = spawnSync(process.execPath, ['-e', `const fs=require('fs'),p=require('path');const b=${JSON.stringify(bin)};fs.mkdirSync(p.dirname(b),{recursive:true});fs.writeFileSync(b,'#!/usr/bin/env node\\n')`])
       assert.equal(result.status, 0)
     }
