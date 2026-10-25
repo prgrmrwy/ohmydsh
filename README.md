@@ -219,6 +219,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
+- [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
 - [ponytail-skills](patches/ponytail-skills.yml) — Composition patch that mounts a dedicated skill provider for the ponytail package only.
 

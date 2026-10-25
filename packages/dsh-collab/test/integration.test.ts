@@ -208,9 +208,41 @@ describe('接入方经句柄托管成员', () => {
   it('handle-05：句柄没有 Leader 能力', () => world(async host => {
     await start(host, MANAGED)
     const handle = service(host).attach('pet-locus', scriptedAdapter().adapter)
-    expect(Object.keys(handle).sort()).toEqual(['admit', 'command', 'dispose', 'read', 'rebind', 'registerSessionMode', 'retire'])
+    expect(Object.keys(handle).sort()).toEqual(['admit', 'command', 'dispose', 'disposeRequest', 'establish', 'read', 'readManaged', 'rebind', 'registerSessionMode', 'retire'])
     for (const name of ['allowManager', 'revokeManager', 'invite', 'markGone', 'transferLeader', 'closeSpace']) expect(name in handle).toBe(false)
     expect(Object.keys(service(host)).sort()).toEqual(['attach'])
+  }))
+
+  it('handle-06：托管读取只对已授权空间可用', () => world(async host => {
+    const { handle, op } = await managedSpace(host)
+    // S = 's' (granted). T exists but is not granted; U does not exist.
+    expect((await op.create('session-a', 'T', 'aily')).error).toBeUndefined()
+    await settle()
+    const before = await Promise.all(['s', 'T', 'U'].map(id => bytes(ledger(host, id))))
+    const S = await handle.readManaged('s')
+    expect(S).toEqual((await records(host, 's')).map(({ sha256: _, ...record }: any) => record))
+    const T = await handle.readManaged('T'), U = await handle.readManaged('U')
+    expect(JSON.stringify(T)).toBe(UNAVAILABLE)
+    expect(JSON.stringify(U)).toBe(UNAVAILABLE)
+    expect(await Promise.all(['s', 'T', 'U'].map(id => bytes(ledger(host, id))))).toEqual(before)
+    // Detached handles read nothing.
+    handle.dispose()
+    expect(await handle.readManaged('s')).toEqual({ error: { code: 'COLLAB_CHANNEL_DETACHED' } })
+  }))
+
+  it('handle-07：代人处置托管成员登记的 request', () => world(async host => {
+    const { handle, L } = await managedSpace(host)
+    const created = await handle.command({ agent: L }, 's', 'c-1', { op: 'createItem', input: { itemId: 'todo-1', kind: 'request', assignee: 'aily', title: 'T', body: 'B', requiredAcks: [] } })
+    expect(created.error).toBeUndefined()
+    await settle()
+    const first = await handle.disposeRequest('s', 'acc-1', { itemId: 'todo-1', progress: 'accepted' })
+    expect(first.error).toBeUndefined()
+    expect(await handle.disposeRequest('s', 'acc-1', { itemId: 'todo-1', progress: 'accepted' })).toEqual(first)
+    const progressed = (await events(host, 's')).filter((e: any) => e.type === 'request/progressed')
+    expect(progressed).toEqual([{ type: 'request/progressed', actor: 'manager:pet-locus', itemId: 'todo-1', progress: 'accepted' }])
+    expect(JSON.stringify(await handle.disposeRequest('nowhere', 'acc-2', { itemId: 'todo-1', progress: 'done' }))).toBe(UNAVAILABLE)
+    handle.dispose()
+    expect(await handle.disposeRequest('s', 'acc-3', { itemId: 'todo-1', progress: 'done' })).toEqual({ error: { code: 'COLLAB_CHANNEL_DETACHED' } })
   }))
 })
 

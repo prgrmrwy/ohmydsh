@@ -28,6 +28,7 @@ import {
   type PetTodoActionRequest,
   type PetTodoActionResult,
   type PetTodoView,
+  type PetUnroutableView,
 } from '../wire.js'
 
 /** Uniform envelope returned by every Pet route. */
@@ -303,6 +304,9 @@ export const petApi = {
 export interface PetTodoLedgerGroup {
   readonly parentSessionId: string
   readonly items: readonly PetTodoView[]
+  /** Absent from Hosts that predate the field; `unavailable` means the list holds legacy todos only. */
+  readonly collab?: 'available' | 'unavailable'
+  readonly unroutable?: readonly PetUnroutableView[]
 }
 
 /** Response shape of {@link petApi.locusTodos}. */

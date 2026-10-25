@@ -478,13 +478,39 @@ export interface PetTodoView {
   readonly status: PetTodoStatus
   readonly createdAt: number
   readonly statusChangedAt: number
+  /**
+   * Registered before the collaboration-space migration and kept read-only
+   * ("旧版"): shown and jumpable, never accepted, done or dropped. Absent on
+   * every todo that lives in the Locus collaboration space.
+   */
+  readonly legacy?: true
+}
+
+/** A record addressed to the Pet proxy that could not be routed to any locus (design D5 rule 3). */
+export interface PetUnroutableView {
+  readonly seq: number
+  readonly at?: number
+  readonly subject: 'message' | 'request-terminal'
+  readonly messageId?: string
+  readonly itemId?: string
 }
 
 /** The complete owner-facing todo snapshot for one main session's ledger. */
 export interface PetTodoListView {
   readonly parentSessionId: string
   readonly items: readonly PetTodoView[]
+  /**
+   * Whether the collaboration layer could be read for this ledger. When
+   * `unavailable`, `items` holds only legacy todos and must not be read as
+   * "nothing new was filed". Absent from Hosts that predate the field.
+   */
+  readonly collab?: 'available' | 'unavailable'
+  /** Records the proxy received but could not route; owner-only. */
+  readonly unroutable?: readonly PetUnroutableView[]
 }
+
+/** One main session's ledger group in the todo list response; additive over `PetTodoListView`. */
+export type PetTodoLedgerView = PetTodoListView
 
 /** Request body for the todo disposition route. */
 export interface PetTodoActionRequest {

@@ -1137,6 +1137,21 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    destructive verb from sitting flush against a harmless jump. */
 .dshpet-settings .dshpet-todo-actions .dshpet-todo-routes{margin-right:auto;
   display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+/* "旧版" marks a pre-migration todo kept read-only: a quiet outlined tag, not a
+   status colour, because it describes where the row lives, not its progress. */
+.dshpet-settings .dshpet-todo-legacy{flex:none;padding:0 6px;border-radius:6px;
+  border:.5px solid var(--dsw-alias-border-l3,#0000001f);
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-todo-readonly{font:var(--dsw-font-xs-13,400 12px/18px inherit);
+  color:var(--dsw-alias-label-tertiary,#81858c)}
+/* Collaboration layer down: say so in place, warn tone, never an empty block. */
+.dshpet-settings .dshpet-todo-collab-down{margin:0;padding:8px 11px;border-radius:10px;
+  background:var(--dsw-alias-bg-module-platform,#0000000a);
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);color:var(--dsw-alias-state-warn-label,#dd8629)}
+.dshpet-settings .dshpet-todo-unroutable{margin:0;padding:8px 11px;border-radius:10px;
+  border:.5px dashed var(--dsw-alias-border-l3,#0000001f);
+  font:var(--dsw-font-xs-13,400 12px/18px inherit);color:var(--dsw-alias-label-secondary,#61666b)}
+.dshpet-settings .dshpet-todo-unroutable-list{margin:4px 0 0;padding-left:16px}
 .dshpet-settings .dshpet-todo-route{font:var(--dsw-font-xs-13,400 12px/18px inherit);
   color:var(--dsw-alias-label-tertiary,#81858c);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:20em}

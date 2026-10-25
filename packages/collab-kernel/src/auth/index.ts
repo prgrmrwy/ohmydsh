@@ -10,6 +10,6 @@ export const principals = {
 }
 export const isPrincipal = (value: Principal): boolean => value?.[brand] === true
 export const authorization = {
-  createSpace: 'create', invite: 'leader', join: 'invited', declineInvite: 'invited', leave: 'active', markGone: 'leader', transferLeader: 'leader', closeSpace: 'leader', createItem: 'active', reviseItem: 'active', ackItem: 'active', sendMessage: 'active', setStatus: 'active', advanceRequest: 'assignee', allowManager: 'leader', revokeManager: 'leader', admitMember: 'manager', rebindMember: 'manager', retireMember: 'manager',
+  createSpace: 'create', invite: 'leader', join: 'invited', declineInvite: 'invited', leave: 'active', markGone: 'leader', transferLeader: 'leader', closeSpace: 'leader', createItem: 'active', reviseItem: 'active', ackItem: 'active', sendMessage: 'active', setStatus: 'active', advanceRequest: 'assignee', allowManager: 'leader', revokeManager: 'leader', admitMember: 'manager', rebindMember: 'manager', retireMember: 'manager', disposeManagedRequest: 'manager',
 } as const
 export type CommandName = keyof typeof authorization

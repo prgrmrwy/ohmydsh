@@ -17,12 +17,13 @@
  * invariant `pet_locus_finish` already enforces.
  */
 import type { LocusContextRecord, LocusCurrentDelivery } from '../locus/context-repository.js'
-import { LedgerStoreError, type SharedFactLedgerStore } from './store.js'
+import type { TodoBackend } from './backend.js'
+import { LedgerStoreError } from './store.js'
 import type { NewTodoInput, TodoRecord } from './todo.js'
 
 /** What this module needs to actually register a todo. */
 export interface TrackDeps {
-  readonly store: Pick<SharedFactLedgerStore, 'registerTodoItem'>
+  readonly store: Pick<TodoBackend, 'registerTodoItem'>
   readonly now: () => number
   readonly newItemId: () => string
 }
@@ -31,7 +32,7 @@ export type TrackInput = { readonly summary: string; readonly detail: string }
 
 export type TrackResult =
   | { readonly ok: true; readonly record: TodoRecord }
-  | { readonly ok: false; readonly reason: 'no-current-delivery' | 'invalid-evidence' | 'store-error'; readonly detail?: string }
+  | { readonly ok: false; readonly reason: 'no-current-delivery' | 'invalid-evidence' | 'store-error' | 'collab-unavailable' | 'space-not-ready'; readonly detail?: string }
 
 /**
  * Register one todo from the caller-bound authorized locus context.
@@ -77,7 +78,14 @@ export async function trackTodo(
     const record = await deps.store.registerTodoItem(registration)
     return { ok: true, record }
   } catch (error) {
-    if (error instanceof LedgerStoreError) return { ok: false, reason: 'store-error', detail: error.message }
+    if (error instanceof LedgerStoreError) {
+      // Two different conditions, two different next steps for the model:
+      // the collaboration layer is gone (D10), or this main session's space
+      // simply is not established yet (main not loaded, D2).
+      if (error.code === 'COLLAB_UNAVAILABLE') return { ok: false, reason: 'collab-unavailable' }
+      if (error.code === 'SPACE_NOT_READY') return { ok: false, reason: 'space-not-ready' }
+      return { ok: false, reason: 'store-error', detail: error.message }
+    }
     throw error
   }
 }
@@ -106,6 +114,12 @@ export function trackFailureText(reason: TrackFailureReason): string {
     case 'invalid-evidence':
       return '登记失败：`summary` 必须是一句话的非空摘要，`detail` 必须是非空字符串（位置、原因、建议修法）。'
         + '补齐这两个字段后重试。'
+    case 'collab-unavailable':
+      return '登记失败：协作层当前不可用，本次没有写入任何待办。'
+        + '这不影响回复：照常用 `pet_locus_finish` 结算当前 Delivery，并在回复中如实说明未能登记、需要所有者处理；不要声称已登记。'
+    case 'space-not-ready':
+      return '登记失败：本主会话的协作空间尚未就绪（主会话当前未加载），本次没有写入任何待办。'
+        + '这不影响回复：照常用 `pet_locus_finish` 结算当前 Delivery，并如实说明待办暂未登记；主会话加载后可再次登记。不要声称已登记。'
     case 'store-error':
       return '登记失败：台账存储当前不可写。可稍后重试；若仍失败，请在回复中如实说明无法登记，并请所有者处理。'
     default:

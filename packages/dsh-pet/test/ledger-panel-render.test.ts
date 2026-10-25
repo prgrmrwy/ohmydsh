@@ -352,3 +352,50 @@ describe('accept receipt and navigation (D9 + D11)', () => {
     expect(plan.inPanelNotice).toBeUndefined()
   })
 })
+
+describe('legacy todos, collaboration availability and unroutable records (pet-locus-collab-integration D10)', () => {
+  const base = groups[0]!.items[0]!
+
+  it('legacy-02（面板）：旧版待办有旧版标记与跳转，没有受理/完成/放弃按钮', () => {
+    const legacy = [{ ...groups[0]!, items: [{ ...base, legacy: true as const }] }]
+    const markup = render({ initialTodoGroups: legacy })
+    expect(markup).toContain('data-legacy="true"')
+    expect(markup).toContain('旧版')
+    expect(markup).toContain('dshpet-jump')
+    for (const label of ['>受理<', '>完成<', '>放弃<']) expect(markup).not.toContain(label)
+  })
+
+  it('availability-02（面板）：协作层不可用时说明不可用，旧版仍列出，不显示为空', () => {
+    const down = [{ ...groups[0]!, collab: 'unavailable' as const, items: [{ ...base, legacy: true as const }] }]
+    const markup = render({ initialTodoGroups: down })
+    expect(markup).toContain('协作层不可用')
+    expect(markup).toContain('旧版待办仍可查看')
+    expect(markup).toContain(base.summary)
+  })
+
+  it('availability-02（面板）：协作层不可用且没有旧版待办时，仍显示不可用说明而不是隐藏整块', () => {
+    const down = [{ ...groups[0]!, collab: 'unavailable' as const, items: [] }]
+    const markup = render({ initialTodoGroups: down })
+    expect(markup).toContain('协作层不可用')
+    // Collapsed, the one-line summary must not read as "all handled".
+    const collapsed = render({ initialTodoGroups: down, initialTodosOpen: false })
+    expect(collapsed).toContain('协作层不可用')
+    expect(collapsed).not.toContain('都已处理')
+  })
+
+  it('无法路由的记录在管理面列出', () => {
+    const withUnroutable = [{ ...groups[0]!, unroutable: [{ seq: 9, at: 1_000, subject: 'message' as const, messageId: '9' }] }]
+    const markup = render({ initialTodoGroups: withUnroutable })
+    expect(markup).toContain('无法路由')
+    expect(markup).toContain('dshpet-todo-unroutable')
+  })
+
+  it('every class the new states emit is defined in the stylesheet', () => {
+    const markup = render({ initialTodoGroups: [{ ...groups[0]!, collab: 'unavailable' as const, unroutable: [{ seq: 9, subject: 'message' as const }], items: [{ ...base, legacy: true as const }] }] })
+    const classes = new Set([...markup.matchAll(/class="([^"]+)"/g)].flatMap(match => match[1]!.split(/\s+/)))
+    for (const name of classes) {
+      if (!name.startsWith('dshpet-')) continue
+      expect(PET_CSS, name).toContain(`.${name}`)
+    }
+  })
+})

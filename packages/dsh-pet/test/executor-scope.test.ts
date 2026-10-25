@@ -303,13 +303,15 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // helper's single native registration delegation (which intentionally owns
     // every definition above).
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(9)
+    // 8 since `pet_locus_ledger_read` retired (design D6); exactly that one is gone.
+    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(8)
+    expect(tools).not.toContain('PET_LOCUS_LEDGER_READ_TOOL')
+    expect(tools).not.toContain("'pet_locus_ledger_read'")
     expect([...code.matchAll(/ctx\.tools\.register\s*\(/g)]).toHaveLength(1)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).toContain('PET_LOCUS_FINISH_TOOL')
     expect(tools).toContain('PET_LOCUS_WAIT_TOOL')
     expect(tools).toContain('PET_LOCUS_PARENT_LOOKUP_TOOL')
-    expect(tools).toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).toContain('PET_LOCUS_TRACK_TOOL')
     expect(tools).toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
     expect(tools).toContain('PET_LOCUS_CHAT_HISTORY_TOOL')

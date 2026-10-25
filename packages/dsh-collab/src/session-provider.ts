@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type { AdmissionPolicy } from './config.js'
+import type { StampView } from './stamp.js'
 import { CollabError, type Binding, type ChannelProvider, type Member, type MemberKind, type Pointer, type Presence } from 'collab-kernel'
 
 declare module '@deepseek-ai/dsh-llm' {
@@ -23,14 +24,14 @@ export function wakeNotice(memberTrust: boolean, invited: boolean) {
  * Resolved tool caller. `guard` re-runs every entry condition synchronously and
  * is handed to the kernel, which calls it at its final commit/read boundary.
  */
-export interface Caller { channel: string; address: string; guard: () => boolean }
+export interface Caller { channel: string; address: string; guard: () => boolean; stamped?: StampView }
 /** The integrator side SessionAccess consults; see integration.ts. */
 export interface CallerIntegrations {
-  claims(agent: Agent): { channel: string; address: string; epoch: number }[]
+  claims(agent: Agent): { channel: string; address: string; epoch: number; stamped?: StampView }[]
   supportsSessionMode(mode: string): boolean
   sessionMode(mode: string): ((sessionId: string, pointer: Pointer) => void | Promise<void>) | undefined
 }
-type Resolution = { channel: string; address: string; epoch?: number }
+type Resolution = { channel: string; address: string; epoch?: number; stamped?: StampView }
 export class SessionAccess {
   private readonly allowed: ReadonlySet<string>
   private readonly denied: ReadonlySet<string>
@@ -76,10 +77,10 @@ export class SessionAccess {
     const guard = () => {
       try {
         const now = this.resolve(agent)
-        return !!now && now.channel === resolved.channel && now.address === resolved.address && now.epoch === resolved.epoch
+        return !!now && now.channel === resolved.channel && now.address === resolved.address && now.epoch === resolved.epoch && now.stamped?.key === resolved.stamped?.key
       } catch { return false }
     }
-    return { channel: resolved.channel, address: resolved.address, guard }
+    return { channel: resolved.channel, address: resolved.address, guard, ...(resolved.stamped ? { stamped: resolved.stamped } : {}) }
   }
   async header(id: string): Promise<SessionHeader | undefined> {
     if (!this.admissible(id)) return

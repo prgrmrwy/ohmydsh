@@ -284,7 +284,7 @@ describe('accept orchestration: status gate then dispatch (D5)', () => {
       port,
       advanceStatus,
       deps: {
-        readTodo: (itemId: string) => todoFixture({ itemId }),
+        readTodo: async (itemId: string) => todoFixture({ itemId }),
         registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
         contextFor: () => ({ mainWasBriefedStandby: false }),
         port,
@@ -298,7 +298,7 @@ describe('accept orchestration: status gate then dispatch (D5)', () => {
   it('terminal todo rejects accept before the dispatch port is called', async () => {
     for (const status of ['done', 'dropped'] as const) {
       const { port, advanceStatus, deps } = acceptDeps({
-        readTodo: () => todoWithStatus(status),
+        readTodo: async () => todoWithStatus(status),
       })
       const result = await acceptTodo('todo-1', deps)
       expect(result.ok).toBe(false)
@@ -310,7 +310,7 @@ describe('accept orchestration: status gate then dispatch (D5)', () => {
   })
 
   it('accepted todo rejects a second accept without dispatching', async () => {
-    const { port, deps } = acceptDeps({ readTodo: () => todoWithStatus('accepted') })
+    const { port, deps } = acceptDeps({ readTodo: async () => todoWithStatus('accepted') })
     const result = await acceptTodo('todo-1', deps)
     expect(result.ok).toBe(false)
     expect(port.calls).toHaveLength(0)
@@ -363,7 +363,7 @@ describe('non-accept dispositions never dispatch (D1)', () => {
     const port = fakeDispatchPort({ status: 'idle' })
     for (const status of ['done', 'dropped'] as const) {
       const result = await acceptTodo('todo-1', {
-        readTodo: () => todoWithStatus(status),
+        readTodo: async () => todoWithStatus(status),
         registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
         contextFor: () => ({ mainWasBriefedStandby: false }),
         port,
@@ -384,7 +384,7 @@ describe('child request-execution (D10)', () => {
       port,
       advanceStatus,
       deps: {
-        readTodo: (id: string) => todoFixture({ itemId: id }),
+        readTodo: async (id: string) => todoFixture({ itemId: id }),
         registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
         contextFor: () => ({ mainWasBriefedStandby: false }),
         port,
@@ -409,7 +409,7 @@ describe('child request-execution (D10)', () => {
   it('foreign todo request-execution is refused', async () => {
     const { port, advanceStatus, deps } = requestDeps({
       // The todo belongs to a DIFFERENT locus child than the caller.
-      readTodo: () => todoFixture({ locusId: 'locus-other' }),
+      readTodo: async () => todoFixture({ locusId: 'locus-other' }),
       lookupRegistrarChild: () => 'child-other',
     })
     const result = await requestTodoExecution(
@@ -467,7 +467,7 @@ describe('accept stays off the Feishu outbound path (spec 受理不外发飞书)
     const port = fakeDispatchPort({ status: 'idle' })
     const feishu = { send: vi.fn(), react: vi.fn(), settleDelivery: vi.fn() }
     const result = await acceptTodo('todo-1', {
-      readTodo: id => todoFixture({ itemId: id }),
+      readTodo: async id => todoFixture({ itemId: id }),
       registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
       contextFor: () => ({ mainWasBriefedStandby: false }),
       port,
@@ -508,7 +508,7 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
     return {
       port,
       deps: {
-        readTodo: (id: string) => todoFixture({ itemId: id }),
+        readTodo: async (id: string) => todoFixture({ itemId: id }),
         registrarFor: () => ({ childCanExecute: false, childSessionId: 'child-1' }),
         contextFor: () => ({ mainWasBriefedStandby: false }),
         port,
@@ -520,20 +520,20 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
   }
 
   it('an unknown id points at the ledger read instead of a bare "not found"', async () => {
-    const { deps } = requestDeps({ readTodo: () => undefined })
+    const { deps } = requestDeps({ readTodo: async () => undefined })
 
     const result = await requestTodoExecution({ itemId: 'todo-guessed', callerChildSessionId: 'child-1' }, deps)
 
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('unreachable')
-    expect(result.reason).toContain('pet_locus_ledger_read')
+    expect(result.reason).toContain('collab_read')
     expect(result.reason).toContain('重试')
     expect(result.reason).not.toBe('待办不存在。')
   })
 
   it('a foreign todo says whose it is and how to find a legal one', async () => {
     const { deps, port } = requestDeps({
-      readTodo: () => todoFixture({ locusId: 'locus-other' }),
+      readTodo: async () => todoFixture({ locusId: 'locus-other' }),
       lookupRegistrarChild: () => 'child-other',
     })
 
@@ -541,14 +541,14 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
 
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('unreachable')
-    expect(result.reason).toContain('pet_locus_ledger_read')
+    expect(result.reason).toContain('collab_read')
     expect(result.reason).not.toContain('child-other')
     expect(port.calls).toHaveLength(0)
   })
 
   it('a todo that is no longer open says so without claiming a retry would work', async () => {
     const { deps, port } = requestDeps({
-      readTodo: () => todoFixture({ status: 'accepted' }),
+      readTodo: async () => todoFixture({ status: 'accepted' }),
     })
 
     const result = await requestTodoExecution({ itemId: 'todo-1', callerChildSessionId: 'child-1' }, deps)
@@ -579,7 +579,7 @@ describe('child-facing execution refusals name a next step (task 6.2)', () => {
     }
     // The two id-shaped refusals point at the one tool that returns a legal id.
     for (const failure of ['unknown-item', 'not-owned'] as const) {
-      expect(requestExecutionFailureText(failure)).toContain('pet_locus_ledger_read')
+      expect(requestExecutionFailureText(failure)).toContain('collab_read')
     }
   })
 })

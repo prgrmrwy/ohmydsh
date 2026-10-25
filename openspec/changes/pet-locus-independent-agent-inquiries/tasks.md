@@ -1,3 +1,5 @@
+> **依赖记录（2026-10-25，来自 change `pet-locus-collab-integration`）**：该 change 采用星形模型——Locus 子会话彼此不直接往来、只经主会话转述，并把台账与待办迁到协作空间。本 change 中的兄弟直询（4.7 等）与协作者名单里的 `sibling` 关系与之冲突，继续推进前需去掉；询问存储将来改为协作空间里的 `ref` 消息（询问迁移 change）。此处只记录依赖，不改已完成项。
+
 ## 1. 基线与实施前宿主门槛
 
 - [x] 1.1 核对 `pet-unified-locus-collaboration` 的实际实现与拟发布/current specs；记录四份 delta 的新增/替代边界与前置先归档顺序，前置若变化先更新本规划，不清除其未完成任务

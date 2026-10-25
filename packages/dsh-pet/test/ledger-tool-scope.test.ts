@@ -14,7 +14,6 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
   PET_LOCUS_CHAT_HISTORY_TOOL,
   PET_LOCUS_PARENT_LOOKUP_TOOL,
-  PET_LOCUS_LEDGER_READ_TOOL,
   PET_LOCUS_REQUEST_EXECUTION_TOOL,
   PET_LOCUS_TRACK_TOOL,
   registerPetTools,
@@ -186,7 +185,8 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     await installOnScope(scope.ctx, harness.repository, stubIntentTriage)
 
     expect(visibleTools(ctx, key)).toContain(PET_LOCUS_PARENT_LOOKUP_TOOL)
-    expect(visibleTools(ctx, key)).toContain(PET_LOCUS_LEDGER_READ_TOOL)
+    // Retired (design D6): children read their ledger through collab_read.
+    expect(visibleTools(ctx, key)).not.toContain('pet_locus_ledger_read')
     expect(visibleTools(ctx, key)).toContain(PET_LOCUS_TRACK_TOOL)
   })
 
@@ -201,7 +201,7 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
 
     const visible = visibleTools(ctx, key)
     expect(visible).not.toContain(PET_LOCUS_PARENT_LOOKUP_TOOL)
-    expect(visible).not.toContain(PET_LOCUS_LEDGER_READ_TOOL)
+    expect(visible).not.toContain('pet_locus_ledger_read')
     expect(visible).not.toContain(PET_LOCUS_TRACK_TOOL)
   })
 
@@ -245,7 +245,7 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
 
     const otherScopeVisible = visibleTools(ctx, otherKey)
     expect(otherScopeVisible).not.toContain(PET_LOCUS_PARENT_LOOKUP_TOOL)
-    expect(otherScopeVisible).not.toContain(PET_LOCUS_LEDGER_READ_TOOL)
+    expect(otherScopeVisible).not.toContain('pet_locus_ledger_read')
     expect(otherScopeVisible).not.toContain(PET_LOCUS_TRACK_TOOL)
   })
 })
@@ -323,34 +323,6 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     }
   }
 
-  it('ledger unavailable is rendered as unreadable, not as an empty ledger', async () => {
-    const wired = { loci: { findByChildSessionId: () => [LOCUS] }, ledgerRead: { listForParent: () => { throw new Error('closed') } } }
-
-    const unreadable = await execute(wired, PET_LOCUS_LEDGER_READ_TOOL, {})
-
-    expect(unreadable.isError).toBe(false)
-    expect(unreadable.text).toContain('台账读取不可用')
-    expect(unreadable.text).toContain('不代表"没有待办"')
-    expect(unreadable.text).not.toBe('[]')
-  })
-
-  it('an empty ledger still renders as an empty list, so the two are distinguishable', async () => {
-    const wired = { loci: { findByChildSessionId: () => [LOCUS] }, ledgerRead: { listForParent: () => [] } }
-
-    const empty = await execute(wired, PET_LOCUS_LEDGER_READ_TOOL, {})
-
-    expect(empty.text).toBe('[]')
-  })
-
-  it('an unresolvable caller is told the read is unavailable, never that there is no work', async () => {
-    const wired = { loci: { findByChildSessionId: () => [] }, ledgerRead: { listForParent: () => [] } }
-
-    const refused = await execute(wired, PET_LOCUS_LEDGER_READ_TOOL, {})
-
-    expect(refused.text).toContain('caller-unresolvable')
-    expect(refused.text).not.toBe('[]')
-  })
-
   // One real authorized context record: both tools below prove a current
   // Delivery before they act, so the fixture is shared rather than duplicated.
   const ACTIVE_RECORD = {
@@ -392,7 +364,7 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     const refused = await execute(wired, PET_LOCUS_REQUEST_EXECUTION_TOOL, { itemId: 'todo-does-not-exist' })
 
     expect(refused.isError).toBe(false)
-    expect(refused.text).toContain('pet_locus_ledger_read')
+    expect(refused.text).toContain('collab_read')
     expect(refused.text).toContain('重试')
     // Nothing about the ledger's other rows may appear.
     expect(refused.text).not.toMatch(/item-|locus-|oc_|ou_/)
@@ -436,6 +408,6 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     const refused = await execute(wired, PET_LOCUS_REQUEST_EXECUTION_TOOL, { itemId: '   ' })
 
     expect(refused.isError).toBe(true)
-    expect(refused.text).toContain('pet_locus_ledger_read')
+    expect(refused.text).toContain('collab_read')
   })
 })

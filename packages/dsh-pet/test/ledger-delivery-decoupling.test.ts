@@ -8,7 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { trackTodo } from '../src/host/ledger/track.js'
-import { SharedFactLedgerStore } from '../src/host/ledger/store.js'
+import { legacyTodoBackendCase } from './todo-backends.js'
 import type { LocusContextRecord } from '../src/host/locus/context-repository.js'
 
 function authorized(): LocusContextRecord {
@@ -76,13 +76,15 @@ describe('task 7: todo registration is structurally independent of Delivery fini
     // `newItemId`.
   })
 
+  // Legacy medium only: without atomic writes the legacy store fails closed.
+  // The collab counterpart (registration fails as collab-unavailable while the
+  // Delivery still settles) is availability-01 in collab-todo-availability.test.ts.
   it('end-to-end with the REAL store: register then advance to done produces no outbound artifact and the record reflects exactly the owner action', async () => {
     // Uses the real SharedFactLedgerStore's non-atomic capability-boundary
     // path (no DSH_PET_TEST_RUNTIME needed) to prove the SEQUENCE compiles
     // and behaves as documented even without a live transaction — the atomic
     // path itself is already proven in test/ledger-store.test.ts.
-    const domain = { supportsTransaction: false } as unknown as ConstructorParameters<typeof SharedFactLedgerStore>[0]
-    const store = new SharedFactLedgerStore(domain)
+    const store = legacyTodoBackendCase.nonAtomic()
     await expect(trackTodo(authorized(), { summary: 'x', detail: 'y' }, {
       store, now: () => 1_000, newItemId: () => 'todo-1',
     })).resolves.toMatchObject({ ok: false, reason: 'store-error' })

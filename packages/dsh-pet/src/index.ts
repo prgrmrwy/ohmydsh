@@ -68,6 +68,14 @@ import { createInquiryAgentResolver } from './host/inquiry/agent-resolver.js'
 import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
 import type { InquiryScope } from './host/inquiry/ledger.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
+import { legacyTodoBackend } from './host/ledger/backend.js'
+import { projectTodoForOwner } from './host/ledger/owner-view.js'
+import { createOwnerLedger } from './host/ledger/owner-ledger.js'
+import { LocusCollabProxy } from './host/collab/proxy.js'
+import { CollabTodoBackend } from './host/collab/todo-backend.js'
+import { installLocusCollabTools, type DelegableToolDefinition } from './host/collab/child-tools.js'
+import type { TodoBackend } from './host/ledger/backend.js'
+import type { CollabService } from './host/collab/types.js'
 import {
   acceptTodo,
   requestTodoExecution,
@@ -177,30 +185,6 @@ import {
 } from './host/workspace.js'
 
 export const name = 'dsh-pet'
-
-/**
- * Project one durable todo into its owner-facing wire shape.
- *
- * Flattens `evidence` into `summary`/`detail` because the panel renders them
- * as two distinct fields, and passes `generation` through as an AUDIT fact
- * only — no consumer may use it to address a locus (design D6: a todo
- * references locus identity, never a locus instance).
- */
-function projectTodoForOwner(record: TodoRecord): PetTodoView {
-  return {
-    itemId: record.itemId,
-    locusId: record.locusId,
-    generation: record.generation,
-    endpoint: record.endpoint,
-    triggerMessageId: record.triggerMessageId,
-    requestedBy: record.requestedBy,
-    summary: record.evidence.summary,
-    detail: record.evidence.detail,
-    status: record.status,
-    createdAt: record.createdAt,
-    statusChangedAt: record.statusChangedAt,
-  }
-}
 
 export const inject = [
   // `storage` is required in addition to `storageDomain`: the backend
@@ -506,6 +490,23 @@ async function initialize(
    * and rejects without it, so construction itself commits nothing.
    */
   const sharedFactLedgerStore = new SharedFactLedgerStore(domain as never)
+  /**
+   * The todo storage seam (`TodoBackend`, design D9). Writes go ONLY to the
+   * Locus collaboration space (design D6/D10); the legacy store stays as the
+   * read-only "旧版" source for todos registered before this change (the
+   * management-panel merge is a later task group), and is never written.
+   * `locusCollab` / `collabTodoBackend` are created further down, once the
+   * locus repository projection exists; this indirection keeps declaration
+   * order free.
+   */
+  /** Read-only "旧版" todos, merged into the owner panel (design D10). Never written. */
+  const legacyTodos: TodoBackend = legacyTodoBackend(sharedFactLedgerStore)
+  const todoBackend: TodoBackend = {
+    registerTodoItem: input => collabTodoBackend.registerTodoItem(input),
+    getTodoItem: itemId => collabTodoBackend.getTodoItem(itemId),
+    listForParent: parentSessionId => collabTodoBackend.listForParent(parentSessionId),
+    advanceStatus: (itemId, to, now) => collabTodoBackend.advanceStatus(itemId, to, now),
+  }
 
   /**
    * Caller-bound intent-triage capability set, shared by BOTH composition
@@ -529,9 +530,8 @@ async function initialize(
       // Returns EVERY durable generation for the child identity; rejecting
       // ambiguity is the caller's job — exactly `resolveLedgerCaller`'s contract.
       loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
-      ledgerRead: { listForParent: (id: string) => sharedFactLedgerStore.listForParent(id) },
       track: {
-        store: sharedFactLedgerStore,
+        store: todoBackend,
         now: () => Date.now(),
         newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
       },
@@ -943,6 +943,86 @@ async function initialize(
     if (!['inquiries', 'inquiry_handoffs', 'inquiry_answers', 'inquiry_results', 'inquiry_works'].includes(change.table)) return
     changes.publish()
   }), 'dsh-pet: publish committed inquiry projection changes')
+
+  // Locus collaboration proxy (`pet-locus-collab-integration` D1–D5). The
+  // projection follows committed locus rows; dsh-collab is an OPTIONAL peer
+  // consumed through a dynamic inject, so Pet loads unchanged without it.
+  // Nothing here resumes a main session, opens a turn or sends to Feishu.
+  const locusCollab = new LocusCollabProxy({
+    listLoci: () => locusRepository.listLoci(),
+    liveAgent: sessionId => ctx.agents.get(sessionId as never),
+    log: message => petLog(message),
+  })
+  const collabTodoBackend = new CollabTodoBackend({
+    proxy: locusCollab,
+    // The registering generation's child, only when that record belongs to the
+    // same main session; anything else fails as "collaboration unavailable".
+    childOf: ({ locusId, parentSessionId }) => {
+      const record = locusRepository.getLocus(locusId)
+      return record?.parentSessionId === parentSessionId ? record.childSessionId : undefined
+    },
+    liveAgent: sessionId => ctx.agents.get(sessionId as never),
+  })
+  const ownerLedger = createOwnerLedger({
+    collab: collabTodoBackend,
+    legacy: legacyTodos,
+    collabAvailable: () => locusCollab.currentHandle() !== undefined,
+    unroutable: parentSessionId => locusCollab.inbox()
+      .filter(entry => entry.parentSessionId === parentSessionId && entry.route.kind === 'unroutable'),
+  })
+  const ensureLocusSpaces = () => {
+    void locusCollab.ensureAll().catch(error => petWarn(`dsh-pet collab: ${String(error)}`))
+  }
+  ctx.effect(() => ctx.on('domain/changed', change => {
+    if (change.domain !== PET_DOMAIN_NAME || change.table !== 'loci') return
+    locusCollab.refresh()
+    ensureLocusSpaces()
+  }), 'dsh-pet: follow locus rows into the collaboration proxy')
+  // A main session that just loaded may now be able to establish its space.
+  ctx.effect(() => ctx.on('agent/created', (): undefined => { ensureLocusSpaces(); return undefined }),
+    'dsh-pet: establish Locus spaces when a main session loads')
+  /**
+   * The child collaboration tool face (design D6): own-scope delegates of the
+   * eight global dsh-collab member tools. Bound to the attach lifecycle —
+   * present only while Pet is attached, re-installed on re-attach, and given
+   * to every Locus child whose scoped surface is (or was) installed. See
+   * `host/collab/child-tools.ts` for why the definitions are copied.
+   */
+  const locusChildScopes = new Map<string, Context>()
+  const locusChildCollabTools = new Map<string, () => void>()
+  let collabAttached = false
+  const installChildCollabTools = (childSessionId: string, scope: Context) => {
+    locusChildCollabTools.get(childSessionId)?.()
+    locusChildCollabTools.delete(childSessionId)
+    if (!collabAttached) return
+    const scoped = scope.get('tools') as { register(definition: unknown): () => void } | undefined
+    const global = ctx.get('tools') as { get(name: string): unknown } | undefined
+    if (scoped === undefined || global === undefined) return
+    const dispose = installLocusCollabTools(scoped, name => global.get(name) as DelegableToolDefinition | undefined)
+    if (dispose !== undefined) locusChildCollabTools.set(childSessionId, dispose)
+  }
+  const removeAllChildCollabTools = () => {
+    for (const dispose of locusChildCollabTools.values()) dispose()
+    locusChildCollabTools.clear()
+  }
+  ctx.inject(['dshCollab'], collabCtx => {
+    collabCtx.effect(() => {
+      const detach = locusCollab.attach((collabCtx as unknown as { dshCollab: CollabService }).dshCollab)
+      collabAttached = true
+      for (const [childSessionId, scope] of [...locusChildScopes]) {
+        // A child no longer in the Host keeps nothing; its scope is gone.
+        if (ctx.agents.get(childSessionId as never) === undefined) { locusChildScopes.delete(childSessionId); continue }
+        installChildCollabTools(childSessionId, scope)
+      }
+      locusCollab.refresh()
+      ensureLocusSpaces()
+      return () => {
+        collabAttached = false
+        removeAllChildCollabTools()
+        detach()
+      }
+    }, 'dsh-pet: attach pet-locus to dsh-collab')
+  })
 
   // Archiving a terminal Task from Pet syncs its executor session; DSH
   // exposes archive but no unarchive, so this stays one-way by design.
@@ -1404,6 +1484,10 @@ async function initialize(
         // failure: the whole surface is simply not published and the child
         // behaves exactly as it did before this existed.
         collaborationSurface?.install(agent.scope)
+        // The collaboration member tools ride the same boundary; absent while
+        // dsh-collab is not attached, which the attestation accepts.
+        locusChildScopes.set(agent.id, scope)
+        installChildCollabTools(agent.id, scope)
       },
       setToolTier: (agent, tier) => {
         const scope = agent.scope as unknown as Context
@@ -3626,7 +3710,7 @@ async function initialize(
    * spec requires them to share one chain (design D10).
    */
   const todoAcceptDeps = (): AcceptTodoDeps => ({
-    readTodo: id => sharedFactLedgerStore.getTodoItem(id),
+    readTodo: id => todoBackend.getTodoItem(id),
     // No locus child can execute today, so every request resolves to the
     // handoff branch. Passing it as a FACT rather than hardcoding the main
     // session keeps the future branch a caller decision (design D3).
@@ -3641,7 +3725,7 @@ async function initialize(
       mainWasBriefedStandby: locusRepository.getLocus(todo.locusId)?.source === 'auto',
     }),
     port: todoDispatchPort,
-    advanceStatus: async (id, to) => sharedFactLedgerStore.advanceStatus(id, to, Date.now()),
+    advanceStatus: async (id, to) => todoBackend.advanceStatus(id, to, Date.now()),
     log: reason => petWarn(`dsh-pet ledger: ${reason}`),
   })
 
@@ -4111,18 +4195,20 @@ async function initialize(
     // panel's session jump resolves the CURRENT generation through the locus
     // view, so a stale instance can never become a jump target (design D6).
     todoLedger: {
-      list: parentSessionId => sharedFactLedgerStore
-        .listForParent(parentSessionId)
-        .map(projectTodoForOwner),
+      // Legacy todos read-only beside the live ledger; an unavailable
+      // collaboration layer is stated, never shown as an empty list (D10).
+      list: parentSessionId => ownerLedger.list(parentSessionId),
       // `done` / `drop` stay pure status advances — they settle a record and
       // dispatch nothing. `accept` means "start working on it", so it runs the
       // gate → dispatch → advance orchestration instead (design D5).
       advance: async (itemId, action) => {
+        // A legacy todo is read-only: refused before any backend is touched.
+        await ownerLedger.guard(itemId, action)
         if (action !== 'accept') {
           const to = action === 'done' ? 'done' : 'dropped'
           return {
             todo: projectTodoForOwner(
-              await sharedFactLedgerStore.advanceStatus(itemId, to, Date.now()),
+              await todoBackend.advanceStatus(itemId, to, Date.now()),
             ),
           }
         }
@@ -4136,7 +4222,7 @@ async function initialize(
           if (result.dispatch?.outcome !== 'unreachable') {
             throw new PetError('INVALID_REQUEST', result.reason)
           }
-          const current = sharedFactLedgerStore.getTodoItem(itemId)
+          const current = await todoBackend.getTodoItem(itemId)
           if (current === undefined) throw new PetError('INVALID_REQUEST', result.reason)
           return { todo: projectTodoForOwner(current), dispatch: result.dispatch }
         }

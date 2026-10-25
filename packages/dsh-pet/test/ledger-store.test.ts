@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { LedgerStoreError, SharedFactLedgerStore } from '../src/host/ledger/store.js'
 import type { NewTodoInput } from '../src/host/ledger/todo.js'
 import { emptyMedium, openPetHarness } from './harness.js'
+import { legacyTodoBackendCase, todoBackendCases } from './todo-backends.js'
 
 function todoInput(overrides: Partial<NewTodoInput> = {}): NewTodoInput {
   return {
@@ -25,20 +26,86 @@ function todoInput(overrides: Partial<NewTodoInput> = {}): NewTodoInput {
   }
 }
 
-describe('SharedFactLedgerStore capability boundary', () => {
-  it('refuses writes without actual atomic Domain support; reads never initialize rows (matching CollaborationContextStore)', async () => {
-    const h = await openPetHarness(emptyMedium(), { noTransaction: true })
+describe.each(todoBackendCases)('TodoBackend contract: $name', backendCase => {
+  it('a DIFFERENT todo under a used itemId is refused rather than silently overwriting the first one', async () => {
+    const h = await backendCase.open()
     try {
-      const store = new SharedFactLedgerStore(h.domain)
-      expect(store.listForParent('main-1')).toEqual([])
-      expect(store.getTodoItem('todo-1')).toBeUndefined()
-      await expect(store.registerTodoItem(todoInput())).rejects.toMatchObject({ code: 'TRANSACTION_UNAVAILABLE' })
-      expect(store.listForParent('main-1')).toEqual([])
+      const store = h.backend
+      await store.registerTodoItem(todoInput())
+      await expect(store.registerTodoItem(todoInput({ requestedBy: 'ou_someone_else' })))
+        .rejects.toMatchObject({ code: 'TODO_EXISTS' })
+      // The original row is untouched.
+      expect((await store.getTodoItem('todo-1'))?.requestedBy).toBe('ou_requester')
+    } finally { await h.close() }
+  })
+
+  it('spec: same-source read — listForParent returns only items whose parentSessionId matches, never cross-source items', async () => {
+    const h = await backendCase.open()
+    try {
+      const store = h.backend
+      await store.registerTodoItem(todoInput({ itemId: 'todo-a', parentSessionId: 'main-a' }))
+      await store.registerTodoItem(todoInput({ itemId: 'todo-b', parentSessionId: 'main-b' }))
+      expect((await store.listForParent('main-a')).map(r => r.itemId)).toEqual(['todo-a'])
+      expect((await store.listForParent('main-b')).map(r => r.itemId)).toEqual(['todo-b'])
+      // A parentSessionId with NO ledger returns empty, not a distinguishable
+      // "not found" — spec: reads must not let a caller probe existence of a
+      // foreign ledger.
+      expect(await store.listForParent('main-nonexistent')).toEqual([])
+    } finally { await h.close() }
+  })
+
+  it('advanceStatus serializes concurrent transitions inside the real domain transaction, not a repository-instance lock', async () => {
+    const h = await backendCase.open()
+    try {
+      const store = h.backend
+      await store.registerTodoItem(todoInput())
+      // Two concurrent attempts to move the SAME open item to two different
+      // terminal states — only one legal terminal can win; the other, if it
+      // reads the now-terminal state, is rejected as already-terminal rather
+      // than silently applied.
+      const results = await Promise.allSettled([
+        store.advanceStatus('todo-1', 'done', 2_000),
+        store.advanceStatus('todo-1', 'dropped', 2_000),
+      ])
+      const fulfilled = results.filter(r => r.status === 'fulfilled')
+      const rejected = results.filter(r => r.status === 'rejected')
+      expect(fulfilled).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(LedgerStoreError)
+      // The stored record reflects exactly the winner, not a merged/racy state.
+      const stored = await store.getTodoItem('todo-1')
+      expect(['done', 'dropped']).toContain(stored?.status)
+    } finally { await h.close() }
+  })
+
+  it('advancing a nonexistent todo is rejected as TODO_NOT_FOUND', async () => {
+    const h = await backendCase.open()
+    try {
+      const store = h.backend
+      await expect(store.advanceStatus('does-not-exist', 'done', 1_000))
+        .rejects.toMatchObject({ code: 'TODO_NOT_FOUND' })
     } finally { await h.close() }
   })
 })
 
-describe('SharedFactLedgerStore with actual atomic Domain', () => {
+// A property of the legacy storage medium (atomic Domain batches); the collab
+// backend's "cannot write" is the collaboration layer being unavailable,
+// covered by collab-todo-availability.test.ts.
+describe('TodoBackend capability boundary (legacy-only)', () => {
+  it('refuses writes without actual atomic Domain support; reads never initialize rows (matching CollaborationContextStore)', async () => {
+    const h = await legacyTodoBackendCase.openWithoutTransaction()
+    try {
+      const store = h.backend
+      expect(await store.listForParent('main-1')).toEqual([])
+      expect(await store.getTodoItem('todo-1')).toBeUndefined()
+      await expect(store.registerTodoItem(todoInput())).rejects.toMatchObject({ code: 'TRANSACTION_UNAVAILABLE' })
+      expect(await store.listForParent('main-1')).toEqual([])
+    } finally { await h.close() }
+  })
+
+})
+
+describe('SharedFactLedgerStore with actual atomic Domain (legacy-only)', () => {
   it('registers a todo and idempotently ensures its owning ledger row in the SAME transaction', async () => {
     const h = await openPetHarness()
     try {
@@ -79,18 +146,6 @@ describe('SharedFactLedgerStore with actual atomic Domain', () => {
     } finally { await h.close() }
   })
 
-  it('a DIFFERENT todo under a used itemId is refused rather than silently overwriting the first one', async () => {
-    const h = await openPetHarness()
-    try {
-      const store = new SharedFactLedgerStore(h.domain)
-      await store.registerTodoItem(todoInput())
-      await expect(store.registerTodoItem(todoInput({ requestedBy: 'ou_someone_else' })))
-        .rejects.toMatchObject({ code: 'TODO_EXISTS' })
-      // The original row is untouched.
-      expect(store.getTodoItem('todo-1')?.requestedBy).toBe('ou_requester')
-    } finally { await h.close() }
-  })
-
   it('spec: "最后一条条目移除后台账保留" — dropping the only todo does not delete the ledger row', async () => {
     const h = await openPetHarness()
     try {
@@ -108,21 +163,6 @@ describe('SharedFactLedgerStore with actual atomic Domain', () => {
     } finally { await h.close() }
   })
 
-  it('spec: same-source read — listForParent returns only items whose parentSessionId matches, never cross-source items', async () => {
-    const h = await openPetHarness()
-    try {
-      const store = new SharedFactLedgerStore(h.domain)
-      await store.registerTodoItem(todoInput({ itemId: 'todo-a', parentSessionId: 'main-a' }))
-      await store.registerTodoItem(todoInput({ itemId: 'todo-b', parentSessionId: 'main-b' }))
-      expect(store.listForParent('main-a').map(r => r.itemId)).toEqual(['todo-a'])
-      expect(store.listForParent('main-b').map(r => r.itemId)).toEqual(['todo-b'])
-      // A parentSessionId with NO ledger returns empty, not a distinguishable
-      // "not found" — spec: reads must not let a caller probe existence of a
-      // foreign ledger.
-      expect(store.listForParent('main-nonexistent')).toEqual([])
-    } finally { await h.close() }
-  })
-
   it('design D6: listByLocusId finds a todo by its stable locus identity regardless of registered generation', async () => {
     const h = await openPetHarness()
     try {
@@ -134,39 +174,6 @@ describe('SharedFactLedgerStore with actual atomic Domain', () => {
       // generation is retained per-record but never used to EXCLUDE a match —
       // this is the "identity not instance" guarantee from design D6.
       expect(byLocus.map(r => r.generation).sort()).toEqual([2, 5])
-    } finally { await h.close() }
-  })
-
-  it('advanceStatus serializes concurrent transitions inside the real domain transaction, not a repository-instance lock', async () => {
-    const h = await openPetHarness()
-    try {
-      const store = new SharedFactLedgerStore(h.domain)
-      await store.registerTodoItem(todoInput())
-      // Two concurrent attempts to move the SAME open item to two different
-      // terminal states — only one legal terminal can win; the other, if it
-      // reads the now-terminal state, is rejected as already-terminal rather
-      // than silently applied.
-      const results = await Promise.allSettled([
-        store.advanceStatus('todo-1', 'done', 2_000),
-        store.advanceStatus('todo-1', 'dropped', 2_000),
-      ])
-      const fulfilled = results.filter(r => r.status === 'fulfilled')
-      const rejected = results.filter(r => r.status === 'rejected')
-      expect(fulfilled).toHaveLength(1)
-      expect(rejected).toHaveLength(1)
-      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(LedgerStoreError)
-      // The stored record reflects exactly the winner, not a merged/racy state.
-      const stored = store.getTodoItem('todo-1')
-      expect(['done', 'dropped']).toContain(stored?.status)
-    } finally { await h.close() }
-  })
-
-  it('advancing a nonexistent todo is rejected as TODO_NOT_FOUND', async () => {
-    const h = await openPetHarness()
-    try {
-      const store = new SharedFactLedgerStore(h.domain)
-      await expect(store.advanceStatus('does-not-exist', 'done', 1_000))
-        .rejects.toMatchObject({ code: 'TODO_NOT_FOUND' })
     } finally { await h.close() }
   })
 

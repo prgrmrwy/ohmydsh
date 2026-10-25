@@ -34,9 +34,9 @@ thirdPartyResources:
   - id: jev
     type: npm-mcp-server
     enabled: true
-    spec: '@jkudish/jev-mcp@0.14.1'
-    version: 0.14.1
-    integrity: sha512-HGG0NyKGdGBTyIUsrxXdf3Da0rVBk0YM2p8zDRcZXnbAxaa/EOC9vFWgD5/snVz0K0NiSmz1eMh/aahbxPoQ7w==
+    spec: '@jkudish/jev-mcp@0.14.5'
+    version: 0.14.5
+    integrity: sha512-Imqfmx3wfA64MRqjOs6ZJYJYJz/v6qMxS+RPggDQYyjpbbe9LWvpYd/zamZ2RDv6m2p6qJdQeCS10DvkH4A+WA==
     bridge:
       spec: '@deepseek-ai/dsh-mcp-client@0.2.0-rc.2'
       version: 0.2.0-rc.2
@@ -103,7 +103,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 已有独立会话经邀请共享协作台账与下一回合通知
-    note: '自研，spec dsh-collab。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠话题上限/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。memberTrust默认true：邀请后代为join、唤醒说明为原有权限内直接承接request的常设授权，false恢复手动join。只由needsReply/邀请/request终态唤醒，ref话题限20条；约定v3。managedChannels（默认空）供接入方经dshCollab服务托管成员，需Leader按空间allow_manager。11个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账；本机 dataDir 等配置由私有 overlay 的 mergeConfig 补丁提供（2026-10-20 用户授权日常启用）。'
+    note: '自研，spec dsh-collab。内联零运行时依赖collab-kernel当前源码；默认admission:invite邀请即授权（完整session ID，不限邀请与累计唤醒，靠话题上限/拒绝/denySessionIds），allowlist兼容首版；改deny/准入须build+restart。memberTrust默认true：邀请后代为join、唤醒说明为原有权限内直接承接request的常设授权，false恢复手动join。只由needsReply/邀请/request终态唤醒，ref话题限20条；约定v3。managedChannels 由 patch dsh-collab-config 声明 pet-locus，供 Pet Locus 代理成员接入（change pet-locus-collab-integration）。11个常驻工具、collab_status为入口。dataDir须由单一Host进程独占（不跨pid命名空间）、在workspace/部署目录外且0700；启动按死亡证明自动清残锁，损坏日志停机dsh-collab-salvage或换新spaceId（抢救后seq复用）。只接受入队，不自动重发。升级复核官方cold preset和真实关闭预算。移除关闭工具与存储但保留台账（2026-10-20 用户授权日常启用）。'
     buildInputs:
       - packages/collab-kernel/src
       - packages/collab-kernel/package.json
@@ -252,13 +252,13 @@ customizations:
   - id: llm-subscriptions
     type: package
     source: remote
-    spec: dsh-plugin-subscriptions@0.9.9
-    version: 0.9.9
-    integrity: sha512-eXdAPyCONv4F3o+yfcpeHji7mfIQBr4u2vjUC+Bg6XESASOmwNGc0+Ewmpu5u+5hEBXktP0L/27GMn57mtlPAQ==
-    # provenance: upstream npm release, gitHead 9930c5ee5e3fa239db9031f47a0f6f30f7ffc443.
+    spec: dsh-plugin-subscriptions@0.9.10
+    version: 0.9.10
+    integrity: sha512-QiFoVFtCL9CawI5p8lKM2lfH2Lr95nMp6xyjBaEUpZxSae9MehGSaogX7G41rf965vVjVn0EQqJ0nPoFP1LA8Q==
+    # provenance: upstream npm release, gitHead a5b01068b7f0c0cdb6f38bafe700c345fdfee4ba.
     enabled: true
     brief: codex/claude/grok/copilot 订阅制 provider(Claude 复用本机登录态,输入框可切换)
-    note: '第三方 https://github.com/V1ki/dsh-plugin-subscriptions(MIT),spec llm-subscriptions。订阅制 provider:codex/claude/grok/copilot 经 OAuth 登录后出现在模型选择器。信任面:凭据在 $DSH_HOME/plugins/subscriptions/auth.json(0600);Claude 可导入本机 Claude Code 凭据(macOS keychain 经 /usr/bin/security,或 ~/.claude/.credentials.json)并写回;Codex 目录另查 registry.npmjs.org(无凭据,可用 codexClientVersion 关闭);订阅自动化有 ToS/封号风险;0.9.9 新增 chatgpt.com reset-credits 鉴权路径与 prepareReset/consumeReset 路由。升级复核:出站域名集与 child_process 面未变;shim 依赖 LLM provider route id,非 /api/subscriptions-auth.* 路由。回滚:spec/version/integrity 改回上一 pin(git 历史)→ dsh build → 重启。'
+    note: '第三方 https://github.com/V1ki/dsh-plugin-subscriptions(MIT),spec llm-subscriptions。订阅制 provider:codex/claude/grok/copilot 经 OAuth 登录后出现在模型选择器。信任面:凭据在 $DSH_HOME/plugins/subscriptions/auth.json(0600);Claude 可导入本机 Claude Code 凭据(macOS keychain 经 /usr/bin/security,或 ~/.claude/.credentials.json)并写回;Codex 目录另查 registry.npmjs.org(无凭据,可用 codexClientVersion 关闭);订阅自动化有 ToS/封号风险;0.9.9 起含 chatgpt.com reset-credits 鉴权与 prepareReset/consumeReset 路由(0.9.10 复核未变)。升级复核:出站域名集与 child_process 面未变;shim 依赖 LLM provider route id,非 /api/subscriptions-auth.* 路由。回滚:spec/version/integrity 改回上一 pin(git 历史)→ dsh build → 重启。'
   # 自研(local):D001/issue #7 + Codex Responses 孤立 function_call 部署侧缓解
   - id: subscriptions-sandbox-shim
     type: package
@@ -270,11 +270,11 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.7
-    version: 1.0.7
+    spec: dsh-width-tiers@1.0.9
+    version: 1.0.9
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
-    note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区五档宽度切换,以 localStorage 记忆;无网络请求、无 Host 文件/命令/模型能力,卸载时清理 DOM/监听/定时器/样式;不触碰右侧面板,全宽档经官方 layout 服务收起侧边栏。1.0.7 起 medium 档 960→1120px(用户可见),档位文案复制了应用侧公式 clamp(680,列×0.64,920),公式漂移只影响文案。升级复核:自 1.0.4 起接线由包自带 bundle patch 承载,绝不可再并存手写 wiring patch(对无 id 的 insert DSH 不去重,会出现两条同 id loader 行);验收为启动清单中 dsh-width-tiers 恰好出现一次;DSH 升级需回归 layout/locale 服务。回滚:改回上一 pin → dsh build → 重启。 pin 校验 sha512-3cGoklw3tYSSXKBf9GzGduv4k9Vv4UO0IHl/FdKMQi+zdw7H9XapvSol4vuxBWqWjnhCWz3VQQc86yBjVrsHBQ=='
+    note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区五档宽度切换,以 localStorage 记忆;无网络请求、无 Host 文件/命令/模型能力,卸载时清理 DOM/监听/定时器/样式;不触碰右侧面板,全宽档经官方 layout 服务收起侧边栏。1.0.7 起 medium 档 960→1120px(用户可见),档位文案复制了应用侧公式 clamp(680,列×0.64,920),公式漂移只影响文案;1.0.9 仅 client/README 变化,bundle patch 未变(2.0.0 改挂 shell.overlay,暂缓)。升级复核:自 1.0.4 起接线由包自带 bundle patch 承载,绝不可再并存手写 wiring patch(对无 id 的 insert DSH 不去重,会出现两条同 id loader 行);验收为启动清单中 dsh-width-tiers 恰好出现一次;DSH 升级需回归 layout/locale 服务。回滚:改回上一 pin → dsh build → 重启。 pin 校验 sha512-zP3PXsiR84ePtzCOuh/XQ8Fn61YSQlAgiMRm1DxDco2Ym0nHbtcfZGsepthf2wi1NYFhK1m4cqb12xkKjQqadA=='
   # 自研(local):会话资源面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
   - id: sidebar-session-resources
     type: package
@@ -287,11 +287,11 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.25.0
-    version: 0.25.0
+    spec: dsh-better-sidebar@0.26.1
+    version: 0.26.1
     enabled: true
     brief: 服务化侧边栏工作台
-    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-5dro5VDpkrnWBO5jNff6Kzt8UlniZEWwXFqsl+wptlqnGMC4PrdJQ4Sd3+tLU8LPKYH8dDI00Dd5IC3FtH/erA=='
+    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-0/BXLEAqFJnd3SI/aryQVFHayrjE+RHcFgWIy57GrCYUeppEFTujfQOkO4U9V4QRd3qTVHFE7DZzNzUyU+kscw=='
   # 自研(remote):驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package
@@ -338,6 +338,13 @@ customizations:
     brief: OpenCode Go 注入 x-opencode-session(修复 400 MissingSessionID;仅作用于 opencode.ai)
     note: '第三方 https://github.com/beihzb/dsh-opencode-session-header(MIT;非官方社区插件,0.1.0 为目前唯一版本、新仓单提交),修 OpenCode Go 自 2026-09-05 起强制 x-opencode-session 头导致的 400 MissingSessionID;官方适配(discussions #5495)合入后移除。信任面(2026-09-09 通读 npm 0.1.0 的 lib/index.js,262 行,零运行时依赖):在 Host 进程全局 patch fetch,仅当请求 host 命中白名单(默认 opencode.ai 及子域)才注入该头,其余字节不改;无外发网络/子进程/文件写入/凭据读取。开关 $DSH_HOME/plugins/dsh-opencode-session-header.json({"enabled":false} 即关,免重启)。升级复核:逐行复读发布物。移除:enabled:false → dsh build。'
 
+  # 自研插件 dsh-collab 的运行配置：准入方式与 Pet Locus 托管 channel。
+  - id: dsh-collab-config
+    type: patch
+    enabled: true
+    brief: dsh-collab 邀请即授权，并为 Pet Locus 声明托管 channel pet-locus
+    note: '整行覆盖 dsh-collab 的 config（admission invite；managedChannels [pet-locus]），数据目录用插件默认值。原私有 overlay 的 Pet 主会话排除名单（denySessionIds）已于 2026-10-25 移除：它是协作层与 Pet 互不相干时期的隔离补丁，与 Locus 主会话作为空间成员的新模型冲突（change pet-locus-collab-integration）。回滚：enabled:false → dsh build → dsh restart，台账保留。'
+
   # 纯配置调优：经官方 gateway 配置放宽大历史传输时的心跳容忍。
   - id: websocket-heartbeat
     type: patch
@@ -357,11 +364,11 @@ customizations:
   - id: ponytail
     type: package
     source: remote
-    spec: '@dietrichgebert/ponytail@5.2.0'
-    version: 5.2.0
+    spec: '@dietrichgebert/ponytail@5.3.2'
+    version: 5.3.2
     enabled: true
     brief: ponytail skill(/ponytail 懒惰资深开发模式,抑制需求膨胀)
-    note: '第三方 https://github.com/DietrichGebert/ponytail(MIT):纯提示词 skill 包(skills/ 下 6 个 SKILL.md,另含 opencode/qoder/pi 适配,本仓不加载)。无 dsh.bundle,可见性由 ponytail-skills 补丁(patches/ponytail-skills.yml)提供。信任面:skills 内无出站调用,仅一处文档链接;hooks/ 等 Claude/Codex/Cursor 钩子文件随包落盘但 DSH 不执行。升级复核:改 pin 前复读 skills/*/SKILL.md 与 exports(须仍有主入口可解析)。移除:两条 enabled:false → dsh build → 重启。D006:host 层 provider 会进入 Pet scope。 pin 校验 sha512-7jhVaF8PjQux0NCDLRfWMm49lp332FxlkgUGMUwt4+VvJHiJeBgEsdBFuwPXxxTIerBv4pEa390eeQ88C8DMxQ=='
+    note: '第三方 https://github.com/DietrichGebert/ponytail(MIT):纯提示词 skill 包(skills/ 下 6 个 SKILL.md,另含 opencode/qoder/pi 适配,本仓不加载)。无 dsh.bundle,可见性由 ponytail-skills 补丁(patches/ponytail-skills.yml)提供。信任面:skills 内无出站调用,仅一处文档链接;hooks/ 等 Claude/Codex/Cursor 钩子文件随包落盘但 DSH 不执行。升级复核:改 pin 前复读 skills/*/SKILL.md 与 exports(须仍有主入口可解析)。移除:两条 enabled:false → dsh build → 重启。D006:host 层 provider 会进入 Pet scope。 pin 校验 sha512-AjJnMi54AXO55kXi0ISNPacLuTjb7e9V4lV2oidyxBOnVoPih8CIAmnfHgwX2VyPsDqwQhJthJ9bNu30MaHuOg=='
   - id: ponytail-skills
     type: patch
     enabled: true

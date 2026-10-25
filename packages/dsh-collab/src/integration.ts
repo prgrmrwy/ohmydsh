@@ -1,8 +1,9 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { CollabError, principals, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence } from 'collab-kernel'
+import { CollabError, principals, reduce, type CommitRecord, type SpaceState, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence, type Progress, type Ext } from 'collab-kernel'
 import type { CollabHost } from './host.js'
 import type { Caller, SessionAccess } from './session-provider.js'
 import { safeError } from './tools.js'
+import { prepareWrite, stampedRead, stampKey, type Lookup, type StampView, type Subject } from './stamp.js'
 
 /** Kernel mode format; the channel prefix is enforced per handle. */
 const MODE = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
@@ -18,8 +19,13 @@ export interface IntegratorAdapter {
   claim(address: string): boolean | Promise<boolean>
   presence(target: ManagedTarget): Presence | Promise<Presence>
   deliver(target: ManagedTarget, pointer: Pointer): void | Promise<void>
-  resolveCaller(agent: Agent): string | undefined
+  /** Address, or address plus a stamp derived from the executing session (never from the model). */
+  resolveCaller(agent: Agent): string | { address: string; stamp?: Ext } | undefined
   holds(address: string): boolean
+  /** Synchronous, in-memory: may a stamped caller see this subject? Enables projection and write-target checks. */
+  visible?(stamp: Ext, subject: Subject, lookup: Lookup): boolean
+  /** Allowed `to` values for stamped callers' messages. */
+  recipients?: readonly string[]
   /** Delivery modes (`<channel>:<name>`) this integrator's members accept. */
   modes?: readonly string[]
 }
@@ -31,8 +37,14 @@ export interface IntegrationHandle {
   admit(spaceId: string, cmdId: string, input: { name: string; address: string }): Promise<HandleResult<CommandResult>>
   rebind(spaceId: string, cmdId: string, input: { member: string; address: string }): Promise<HandleResult<CommandResult>>
   retire(spaceId: string, cmdId: string, input: { member: string }): Promise<HandleResult<CommandResult>>
+  /** Settle, on the user's behalf, a request authored by this channel's managed member. Never wakes. */
+  disposeRequest(spaceId: string, cmdId: string, input: { itemId: string; progress: Progress }): Promise<HandleResult<CommandResult>>
+  /** Every commit record of a space that granted this channel; otherwise COLLAB_SPACE_UNAVAILABLE. */
+  readManaged(spaceId: string): Promise<HandleResult<CommitRecord[]>>
   command(exec: Exec, spaceId: string, cmdId: string, op: { op: MemberOp; input: any }): Promise<HandleResult<CommandResult>>
   read(exec: Exec, spaceId: string, view: 'overview' | 'since', sinceSeq?: number): Promise<HandleResult<unknown>>
+  /** Create (or reuse) a space as the ordinary session in `exec` and grant this handle's channel. */
+  establish(exec: Exec, spaceId: string, cmdId: string, input: { name: string; purpose: string }): Promise<HandleResult<{ spaceId: string }>>
   registerSessionMode(mode: string, handler: SessionModeHandler): void
   dispose(): void
 }
@@ -52,6 +64,9 @@ const MEMBER_OPS: Readonly<Record<string, (service: CollabService, ctx: CommandC
   advanceRequest: (s: CollabService, c: CommandContext, i: any) => s.advanceRequest(c, i),
 }))
 
+/** establish outcomes that mean "the caller is not this space's Leader". */
+const NOT_LEADER: ReadonlySet<string> = new Set(['COLLAB_FORBIDDEN', 'COLLAB_NOT_MEMBER', 'COLLAB_MEMBER_INACTIVE', 'COLLAB_SPACE_CLOSED'])
+
 /** Whitelisted pointer handed to integrators and mode handlers. */
 export function safePointer(pointer: Pointer): Pointer {
   return {
@@ -65,7 +80,7 @@ export function safePointer(pointer: Pointer): Pointer {
 }
 
 interface Attachment { channel: string; adapter: IntegratorAdapter; epoch: number }
-export interface ManagedClaim { channel: string; address: string; epoch: number }
+export interface ManagedClaim { channel: string; address: string; epoch: number; stamped?: StampView }
 
 /**
  * Host-declared integrator channels, their current attachment and attach
@@ -90,11 +105,27 @@ export class Integrations {
   claims(agent: Agent): ManagedClaim[] {
     const out: ManagedClaim[] = []
     for (const owner of this.attached.values()) {
-      let address: unknown
-      try { address = owner.adapter.resolveCaller(agent) } catch { address = undefined }
-      if (typeof address === 'string' && address.length > 0) out.push({ channel: owner.channel, address, epoch: owner.epoch })
+      let resolved: unknown
+      try { resolved = owner.adapter.resolveCaller(agent) } catch { resolved = undefined }
+      const claim = this.claimOf(owner, resolved)
+      if (claim) out.push(claim)
     }
     return out
+  }
+  /** A string address, or `{address, stamp?}` whose stamp is a plain JSON object of at most 1 KiB; anything else is no claim. */
+  private claimOf(owner: Attachment, resolved: unknown): ManagedClaim | undefined {
+    if (typeof resolved === 'string') return resolved.length > 0 ? { channel: owner.channel, address: resolved, epoch: owner.epoch } : undefined
+    if (!resolved || typeof resolved !== 'object' || Array.isArray(resolved)) return
+    const { address, stamp } = resolved as { address?: unknown; stamp?: unknown }
+    if (typeof address !== 'string' || !address.length) return
+    if (stamp === undefined) return { channel: owner.channel, address, epoch: owner.epoch }
+    const key = stampKey(stamp)
+    if (key === undefined) return
+    const value = JSON.parse(key) as Ext
+    const adapter = owner.adapter
+    const visible = typeof adapter.visible === 'function' ? (subject: Subject, lookup: Lookup) => adapter.visible!(structuredClone(value), structuredClone(subject), lookup) === true : undefined
+    const recipients = Array.isArray(adapter.recipients) ? adapter.recipients.filter((r): r is string => typeof r === 'string') : []
+    return { channel: owner.channel, address, epoch: owner.epoch, stamped: { stamp: value, key, recipients, ...(visible ? { visible } : {}) } }
   }
   supportsSessionMode(mode: string) { return this.modes.has(mode) }
   sessionMode(mode: string) { return this.modes.get(mode)?.handler }
@@ -172,9 +203,11 @@ export class Integrations {
         if (!run || !input || typeof input !== 'object' || Array.isArray(input)) return { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
         // A handle may only use its own channel's delivery modes.
         if (name === 'sendMessage' && input.mode !== undefined && (typeof input.mode !== 'string' || !input.mode.startsWith(`${owner.channel}:`))) return { error: { code: 'COLLAB_BAD_MODE' } }
-        return asCaller(exec, (host, caller) => {
-          const ctx = host.context(caller, spaceId, cmdId)
-          return host.command(ctx, spaceId, cmdId, service => run(service, ctx, input))
+        return asCaller(exec, async (host, caller) => {
+          const prepared = await prepareWrite(host, caller, spaceId, cmdId, name as MemberOp, input)
+          if ('error' in prepared) throw new CollabError(prepared.error)
+          const ctx = host.context(prepared.caller, spaceId, prepared.cmdId)
+          return host.command(ctx, spaceId, prepared.cmdId, service => run(service, ctx, prepared.input))
         })
       },
       read: async (exec, spaceId, view, sinceSeq = 0) => {
@@ -182,9 +215,53 @@ export class Integrations {
         if (view !== 'overview' && view !== 'since') return { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
         return asCaller(exec, async (host, caller) => {
           const ctx = host.context(caller, spaceId)
-          const value = await host.read<unknown>(ctx, spaceId, service => view === 'overview' ? service.overview(ctx) : service.readSince(ctx, sinceSeq))
+          const value = await host.read<unknown>(ctx, spaceId, service => stampedRead(host, service, ctx, caller, view, sinceSeq) ?? (view === 'overview' ? service.overview(ctx) : service.readSince(ctx, sinceSeq)))
           if (!caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
           return JSON.parse(JSON.stringify(value))
+        })
+      },
+      disposeRequest: (spaceId, cmdId, input) => managed(spaceId, cmdId, undefined, (s, c) => s.disposeManagedRequest(c, { itemId: input?.itemId, progress: input?.progress })),
+      readManaged: async spaceId => {
+        if (!this.isCurrent(owner)) return detached
+        const unavailable = { error: { code: 'COLLAB_SPACE_UNAVAILABLE' } }
+        let records: CommitRecord[]
+        try {
+          const host = ready()
+          records = await host.read(undefined, spaceId, service => service.readSince({ spaceId, principal: principals.internal('host-index') }, 0))
+        } catch (error) {
+          if (!this.isCurrent(owner)) return detached
+          if (error instanceof CollabError && (error.code === 'COLLAB_SERVICE_NOT_READY' || error.code === 'COLLAB_SERVICE_CLOSING')) return { error: safeError(error) }
+          return unavailable
+        }
+        let state: SpaceState | undefined
+        try { for (const record of records) state = reduce(state, record) } catch { state = undefined }
+        // Only spaces whose Leader granted this channel; anything else looks like an absent space.
+        if (!state || !state.managers.includes(owner.channel)) return this.isCurrent(owner) ? unavailable : detached
+        if (!this.isCurrent(owner)) return detached
+        return structuredClone(records)
+      },
+      establish: async (exec, spaceId, cmdId, input) => {
+        if (!this.isCurrent(owner)) return detached
+        if (typeof cmdId !== 'string' || !cmdId || !input || typeof input !== 'object') return { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
+        return asCaller(exec, async (host, caller) => {
+          // Only a real ordinary session may create a space and grant a channel; never the integrator itself.
+          if (caller.channel !== 'dsh-session') throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+          try {
+            const ctx = host.context(caller, spaceId, `${cmdId}:create`)
+            await host.command(ctx, spaceId, ctx.cmdId, service => service.createSpace(ctx, { name: input.name, address: caller.address, kind: 'agent', purpose: input.purpose }))
+          } catch (error) { if (!(error instanceof CollabError && error.code === 'COLLAB_SPACE_EXISTS')) throw error }
+          try {
+            const ctx = host.context(caller, spaceId, `${cmdId}:allow`)
+            await host.command(ctx, spaceId, ctx.cmdId, service => service.allowManager(ctx, { channel: owner.channel }))
+          } catch (error) {
+            if (!(error instanceof CollabError)) throw error
+            // Our own declared channel is valid, so BAD_CHANNEL here can only mean "already granted".
+            if (error.code === 'COLLAB_BAD_CHANNEL') return { spaceId }
+            // Not the Leader, not a member, closed: indistinguishable from an absent space.
+            if (NOT_LEADER.has(error.code)) throw new CollabError('COLLAB_SPACE_UNAVAILABLE')
+            throw error
+          }
+          return { spaceId }
         })
       },
       registerSessionMode: (mode, handler) => {

@@ -666,7 +666,9 @@ next[]: kind spaceId tool
 
 内核以 `COLLAB_CALLER_STALE` 拒绝时，句柄按守卫记录的失败原因映射错误：接入代际已变返回 `COLLAB_CHANNEL_DETACHED`，新地址不再被持有返回 `COLLAB_ADDRESS_UNCLAIMED`。
 
-句柄 MUST NOT 提供 `allowManager`、`revokeManager`、`invite`、`markGone`、`transferLeader` 或 `closeSpace`。接入方不能替任何会话授权自己。
+句柄 SHALL 另提供 `disposeRequest(spaceId, cmdId, {itemId, progress})`，以 manager principal 调用内核 `disposeManagedRequest`，守卫只检查接入代际；以及 `readManaged(spaceId)`：以宿主既有的 `internal{purpose:'host-index'}` 读取该空间全部提交记录，推导状态后要求本句柄 channel 在 `managers` 中，否则与空间不存在、存储失败一样返回 `COLLAB_SPACE_UNAVAILABLE`；返回前检查接入代际，结果为深拷贝。内核读取授权不因此改变。
+
+句柄 MUST NOT 提供 `revokeManager`、`invite`、`markGone`、`transferLeader` 或 `closeSpace`。`allowManager` 只能经 `establish` 以真实普通会话调用者的身份、且只为本句柄 channel 执行（见"接入方以真实普通会话建立空间并接入自己"）；接入方不能凭自身身份授权自己。
 
 #### Scenario: Leader 授权后接入方接纳成员
 - **GIVEN** 会话 A 是空间 S 的 Leader，A 以 `collab_space` 的 `allow_manager` 授权 `pet-locus`
@@ -690,11 +692,16 @@ next[]: kind spaceId tool
 
 #### Scenario: 句柄没有 Leader 能力
 - **WHEN** 检查句柄对象的方法集合
-- **THEN** 恰含 `admit`、`rebind`、`retire`、`command`、`read`、`registerSessionMode` 与 `dispose`
+- **THEN** 恰含 `admit`、`rebind`、`retire`、`disposeRequest`、`readManaged`、`establish`、`command`、`read`、`registerSessionMode` 与 `dispose`
+
+#### Scenario: 托管读取只对已授权空间可用
+- **GIVEN** 空间 S 已授权 `pet-locus`，空间 T 未授权，空间 U 不存在
+- **WHEN** 句柄分别调用 `readManaged('S')`、`readManaged('T')`、`readManaged('U')`
+- **THEN** S 返回其全部提交记录；T 与 U 的响应序列化后相同，均为 `{"error":{"code":"COLLAB_SPACE_UNAVAILABLE"}}`；各日志字节不变
 
 ### Requirement: 工具调用者可解析为托管成员
 
-接入方 adapter SHALL 提供同步方法 `resolveCaller(agent)`。它只在该 agent 是接入方当前绑定的成员会话时返回地址，否则返回 `undefined`；抛错视为 `undefined`。
+接入方 adapter SHALL 提供同步方法 `resolveCaller(agent)`。它只在该 agent 是接入方当前绑定的成员会话时返回地址，否则返回 `undefined`；抛错视为 `undefined`。返回值 SHALL 为字符串地址，或 `{address, stamp?}`：`stamp` 是接入方从执行会话派生的戳（见"托管调用者的戳与读取过滤"），多个 agent 可以解析到同一地址而戳不同。
 
 协作工具解析调用者时，SHALL 先满足既有的执行会话条件：执行 agent 存在、是 Host 当前对象、`agent.id === agent.session.id`、未归档、不在 `denySessionIds` 中。随后：
 
@@ -830,3 +837,146 @@ handler 正常返回只表示接入方已接受该次投递。
 - **WHEN** `pet-locus` 的句柄注册 `dsh-session:x`
 - **THEN** 返回 `COLLAB_BAD_MODE`
 
+### Requirement: 接入方以真实普通会话建立空间并接入自己
+
+句柄 SHALL 提供 `establish(exec, spaceId, cmdId, {name, purpose})`：
+
+1. 按"工具调用者可解析为托管成员"的入口从 `exec` 解析调用者；解析结果不是 `dsh-session` 普通会话时 MUST 以 `COLLAB_CALLER_UNAVAILABLE` 拒绝，不调用内核。
+2. 以该调用者执行 `createSpace`，cmdId 为 `<cmdId>:create`，首成员名 `name`，`purpose` 原样传入；`COLLAB_SPACE_EXISTS` 时进入第 3 步而不报错。
+3. 以同一调用者执行 `allowManager({channel: 本句柄 channel})`，cmdId 为 `<cmdId>:allow`；channel 已在 `managers` 中视为已满足。
+4. 第 2、3 步都成功或已满足时返回 `{spaceId}`；调用者不是该空间的 Leader 时 MUST 返回 `COLLAB_SPACE_UNAVAILABLE`，不泄露空间是否存在。
+
+两步各自带调用级守卫，句柄 dispose 后在途的 `establish` 不再提交。第 2 步成功、第 3 步之前中断时，以同一 cmdId 重试 SHALL 补齐授权。
+
+#### Scenario: 首次建立并授权
+- **GIVEN** 普通会话 A 是 Host 当前对象，空间 `pet-locus-x` 不存在
+- **WHEN** 句柄以 A 的 exec 调用 `establish(exec, 'pet-locus-x', 'est-1', {name:'main', purpose:'…'})`
+- **THEN** 台账依次含 `space/created`（Leader `main`）与 `manager/allowed{pet-locus}`，二者 actor 都是 `main`
+
+#### Scenario: 中断后重试补齐
+- **GIVEN** 上一次 `establish` 只完成了 `createSpace`
+- **WHEN** 以同一 cmdId 重试
+- **THEN** 创建命中收据，授权被提交一次；再重试日志不变
+
+#### Scenario: 托管成员不能建立
+- **WHEN** 以解析为托管成员的 child exec 调用 `establish`
+- **THEN** 返回 `COLLAB_CALLER_UNAVAILABLE`，内核未收到命令
+
+#### Scenario: 非 Leader 不能借此授权
+- **GIVEN** 空间 S 已由 B 建立，A 不是其成员
+- **WHEN** 句柄以 A 的 exec 调用 `establish(exec, 'S', …)`
+- **THEN** 返回 `COLLAB_SPACE_UNAVAILABLE`，S 的日志不变
+
+### Requirement: 托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间
+
+接入方 `resolveCaller` 返回的 `stamp` SHALL 是规范 JSON 不超过 1024 字节的普通对象；不满足时该解析结果视为 `undefined`。戳在入口随地址一起捕获，调用级守卫 SHALL 要求地址与戳的规范 JSON 都不变。接入方 adapter MAY 提供同步方法 `visible(stamp, subject, lookup): boolean`，`subject` 为 `{kind:'item', item}`、`{kind:'message', message}` 或 `{kind:'statusText', name}`；`lookup.recordAt(seq)` SHALL 由插件从本次读取或写入检查所用的完整重放状态同步提供，返回该 seq 处创建的条目或发送的消息（形如 `{kind:'item', item}` 或 `{kind:'message', message}`），不存在时为 `undefined`；抛错视为不可见。以下规则只对"带戳的托管调用者"生效；普通调用者与无戳托管调用者不受影响。
+
+**写入盖戳**：`collab_create_item` 与 `collab_send_message` SHALL 把戳作为 `ext` 交给内核；工具仍 MUST NOT 接受模型传入的 `ext`。
+
+**cmdId 命名空间**：插件 SHALL 把每个写命令的 cmdId 改写为 `<sha256(规范 JSON(stamp)) 的前 16 位十六进制>:<原 cmdId>` 后交给内核。模型 MUST NOT 能指定或看到该前缀。
+
+**写目标授权**：接入方提供 `visible` 时，带戳调用者只能改自己的记录：`collab_revise_item`、`collab_ack_item`、`collab_advance_request` 的目标条目 `ext` MUST 等于调用者的戳（普通成员写的条目对带戳调用者只读，即使其 `requiredAcks` 或 `assignee` 含该托管成员名）；`collab_create_item`、`collab_send_message` 的 `ref` 所指记录 MUST 是带相同戳的记录，或作者为普通成员、`to` 为该托管成员名、且接入方 `visible` 判定为可见的消息；MUST NOT 允许 ref 普通成员写的条目。不满足时条目类以 `COLLAB_ITEM_NOT_FOUND`、ref 以 `COLLAB_BAD_REF` 拒绝，不调用内核，MUST NOT 泄露 revision 或存在性。该检查 SHALL 在入口执行并随调用级守卫在提交前重验；收据重放路径同样经过该检查。`collab_send_message` 的 `to` 对带戳调用者 SHALL 只允许接入方声明的收件人集合（本变更中 Pet 声明为 `['main']`）；其它取值以 `COLLAB_BAD_RECIPIENT` 拒绝，不调用内核。
+
+**读取为可见投影**：接入方提供 `visible` 时，插件 SHALL 先用完整日志重放内核状态，再对返回值投影，MUST NOT 以删除提交记录的方式过滤。投影 SHALL 挡住正常读取中兄弟的正文与状态；MUST NOT 被表述为防止有意配合的托管调用者借存在性、计数或错误码传递信息。
+- `collab_read overview`：按白名单输出，SHALL 恰含 `spaceId`、`serviceId`、`status`、`leader`、`convention`、`purpose`、`lastSeq`、`members`、`items`、`messages`、`deliveries`、`pendingDeliveries`、`inFlightDeliveries`、`presence`，MUST NOT 含 `itemSeq`、`topicOf`、`topicWakes` 或任何其它派生索引；`members[*]` 只输出 `name`、`kind`、`status`、`binding.channel`、`managedBy`、`statusText`，MUST NOT 含 `wakeCount`、`joinSeq` 或地址；`statusText` 对不可见者置为空字符串；`items`、`messages` 只保留可见主体；三个投递列表只保留唤醒源可见的；`lastSeq` 原样。
+- `collab_read since`：每条提交记录保留 `seq` 与 `at`，`events` 经过滤：业务事件按主体可见性保留，`dispatch/*` 只在其唤醒源可见时保留，`member/statusText` 只在可见时保留，其余结构事件保留；过滤后 `events` 为空的记录仍输出且 `events` 为 `[]`；不输出 `receipt`。
+- `collab_status`：`pending.*` 与 `next` 按投影后的条目与消息推导，且 SHALL 只列出带戳调用者按写目标授权能执行的动作：普通成员写的条目即使 `requiredAcks` 或 `assignee` 含该托管成员名，也 MUST NOT 产生 `ack` 或 `advance_request` 项。
+- `convention` 读取不投影。
+
+#### Scenario: 托管调用者写入带戳且 cmdId 带命名空间
+- **GIVEN** L 解析为 `{address:'pet:s1', stamp:{pet:{locusId:'a'}}}`
+- **WHEN** L 以 `cmdId:'c-1'` 调用 `collab_create_item` 创建 request `todo-1`
+- **THEN** `item/created` 的 `ext` 为 `{pet:{locusId:'a'}}`；收据的 cmdId 以 `sha256` 前缀开头并以 `:c-1` 结尾；L 的调用参数中不含 `ext`
+
+#### Scenario: 不同戳的同名 cmdId 互不干扰
+- **GIVEN** A（戳 a）与 B（戳 b）都解析到地址 `pet:s1`
+- **WHEN** A 以 `cmdId:'s-1'` 调用 `collab_set_status('x')`，B 以 `cmdId:'s-1'` 调用 `collab_set_status('y')`，随后 A 以相同参数重试
+- **THEN** 两次 `set_status` 都提交，B 的调用不返回 A 的 seq 也不返回 `COLLAB_CMD_CONFLICT`；A 的重试返回 A 的原 seq，日志长度不变
+
+#### Scenario: 兄弟条目对读取不可见
+- **GIVEN** 空间 S 中有 `main` 写的条目 I0、戳 a 写的条目 Ia、戳 b 写的条目 Ib；`visible` 只对作者为 `main` 或 `ext.pet.locusId` 等于戳的主体返回真
+- **WHEN** 戳 a 的 L 调用 `collab_read overview`、`collab_read since 0` 与 `collab_status`
+- **THEN** 三者都含 I0 与 Ia、不含 Ib；`since` 中创建 Ib 的记录 `events` 为 `[]` 且 seq 保留；`collab_status` 的 `pending` 不因 Ib 产生任何项；`main` 的同样读取得到全部三条
+
+#### Scenario: 公开记录引用隐藏记录仍能重放
+- **GIVEN** 戳 b 创建条目 Ib（seq 3，不唤醒）；`main` 创建条目 I0，`ref: 3`
+- **WHEN** 戳 a 的 L 调用 `collab_read overview` 与 `collab_status`
+- **THEN** 两者成功返回，含 I0、不含 Ib；没有 `dangling ref` 类错误
+
+#### Scenario: 同一提交中的 dispatch 不泄露兄弟消息
+- **GIVEN** 戳 b 向在线的 `main` 发 `needsReply` 消息，其 `message/sent` 与 `dispatch/intended` 在同一提交
+- **WHEN** 戳 a 的 L 调用 `collab_read since 0`
+- **THEN** 该提交记录输出为 `events: []`；`overview` 的 `pendingDeliveries`/`inFlightDeliveries` 不含该投递
+
+#### Scenario: 状态文本不能传话
+- **GIVEN** 戳 a 的 L 调用 `collab_set_status('给 B 的话')`；`visible({kind:'statusText', name:'pet'})` 为假
+- **WHEN** 戳 b 的 M 调用 `collab_read overview` 与 `since`
+- **THEN** `overview.members.pet.statusText` 为空字符串；`since` 中该 `member/statusText` 事件被过滤
+
+#### Scenario: 隐藏条目的标识不经任何字段泄露
+- **GIVEN** 戳 b 创建条目，`itemId` 为 `zq7-secret-marker`
+- **WHEN** 戳 a 的 L 调用 `collab_read overview` 与 `collab_status`，对两者的返回值做完整 JSON 序列化
+- **THEN** 两个序列化字符串都不含 `zq7-secret-marker`；`overview` 的顶层键恰为白名单所列；`main` 的 `overview.itemSeq` 含该 id
+
+#### Scenario: 不能借主会话的公开条目传话
+- **GIVEN** `main` 创建条目 I0（无 requiredAcks）；戳 a 与戳 b 都能读到 I0
+- **WHEN** 戳 a 的 L 调用 `collab_revise_item(I0, expectedRevision: 1, body: '给 B 的话')`
+- **THEN** 返回 `COLLAB_ITEM_NOT_FOUND`，内核未收到命令，日志字节不变；戳 b 读到的 I0 正文仍是原文
+
+#### Scenario: 可以修订自己的条目
+- **GIVEN** 戳 a 创建条目 Ia（revision 1）
+- **WHEN** 戳 a 的 L 以正确 revision 调用 `collab_revise_item(Ia)`
+- **THEN** 修订成功，`item/revised` 的 `item.ext` 仍为戳 a
+
+#### Scenario: 主会话的条目对子会话只读
+- **GIVEN** `main` 创建 `requiredAcks:['pet']` 的条目 I1 与 `assignee:'pet'` 的 request R1；戳 b 能读到两者
+- **WHEN** 戳 a 的 L 分别 `collab_ack_item(I1, 1)`、`collab_advance_request(R1, 'accepted')`、带 `ref` 指向 I1 创建 seq 的 `collab_send_message(to:'main')`
+- **THEN** 前两者返回 `COLLAB_ITEM_NOT_FOUND`，第三者返回 `COLLAB_BAD_REF`；内核未收到命令，日志字节不变；戳 b 读到的 I1、R1 状态不变；戳 a 与戳 b 的 `collab_status` 的 `pending.acks`、`pending.requests` 都不含 I1、R1，`next` 不含对应建议
+
+#### Scenario: 可以引用主会话发给自己的消息
+- **GIVEN** `main` 向 `pet` 发消息 M（seq 9），接入方路由其目标为戳 a
+- **WHEN** 戳 a 的 L 调用 `collab_send_message(to:'main', ref: 9, needsReply: true)`；戳 b 的 M2 调用同样的命令
+- **THEN** 前者成功；后者返回 `COLLAB_BAD_REF`，内核未收到命令
+
+#### Scenario: 不同 Locus 新开独立话题不继承其它根的额度
+- **GIVEN** 戳 a 在自己的话题里连续发了 20 条被唤醒的 `needsReply` 消息，第 21 条被 `COLLAB_THREAD_LIMIT` 拒绝
+- **WHEN** 戳 b 向 `main` 发第一条无 `ref` 的 `needsReply` 消息
+- **THEN** 成功，不受 a 的额度影响
+
+#### Scenario: 成员计数不进投影
+- **GIVEN** 戳 b 向在线的 `main` 发 `needsReply` 消息，`main` 的内核 `wakeCount` 加一
+- **WHEN** 戳 a 的 L 调用 `collab_read overview`
+- **THEN** `members.main` 的键恰为 `name`、`kind`、`status`、`binding`、`statusText`（`binding` 只含 `channel`），不含 `wakeCount`；`main` 的同样读取含 `wakeCount`
+
+#### Scenario: 不能修改、确认或引用兄弟条目
+- **GIVEN** 戳 b 创建条目 Ib（revision 1）
+- **WHEN** 戳 a 的 L 分别调用 `collab_revise_item(Ib, expectedRevision: 5)`、`collab_ack_item(Ib, 1)`、`collab_advance_request(Ib)`，以及带 `ref` 指向 Ib 创建 seq 的 `collab_create_item`
+- **THEN** 前三者返回 `COLLAB_ITEM_NOT_FOUND`，不含 `currentRevision`；最后一个返回 `COLLAB_BAD_REF`；内核未收到任何命令，日志字节不变
+
+#### Scenario: 无权调用者拿不到旧收据
+- **GIVEN** 戳 b 以 `cmdId:'r-1'` 修订了自己的条目 Ib
+- **WHEN** 戳 a 的 L 以 `cmdId:'r-1'` 与相同参数调用 `collab_revise_item(Ib)`
+- **THEN** 返回 `COLLAB_ITEM_NOT_FOUND`，不返回 b 的结果
+
+#### Scenario: 带戳调用者只能发给 main
+- **WHEN** 戳 a 的 L 调用 `collab_send_message` 且 `to` 为 `pet` 或任何非 `main` 的值
+- **THEN** 返回 `COLLAB_BAD_RECIPIENT`，内核未收到命令
+
+#### Scenario: 戳在途变化时调用失效
+- **GIVEN** L 以戳 a 通过入口，其 `collab_send_message` 停在内核的 presence 采样
+- **WHEN** 接入方此时把 L 解析为戳 b，随后释放采样
+- **THEN** 调用返回 `COLLAB_CALLER_UNAVAILABLE`，日志字节不变
+
+#### Scenario: 超长或非对象的戳视为未解析
+- **WHEN** 接入方为 L 返回 1025 字节的戳，或戳为数组
+- **THEN** L 调用任一协作工具返回 `COLLAB_CALLER_UNAVAILABLE`
+
+#### Scenario: visible 可沿 ref 链查前序记录
+- **GIVEN** 戳 a 写消息 Ma（seq 5）；`main` 发给 `pet` 的消息 M（seq 9，`needsReply:false`，`ref: 5`）；接入方 `visible` 对作者为 `main`、`to` 为 `pet` 的消息，经 `lookup.recordAt` 沿 ref 找到最近的戳并与调用者戳比较
+- **WHEN** 戳 a 的 L 与戳 b 的 M2 分别调用 `collab_read since 0`
+- **THEN** L 的结果含 M，M2 的结果不含 M；`visible` 被调用时 `lookup.recordAt(5)` 返回 Ma
+
+#### Scenario: 不提供 visible 时不投影也不做写授权
+- **GIVEN** 接入方未实现 `visible`
+- **WHEN** 托管调用者 `collab_read since 0` 并修订任意条目
+- **THEN** 返回全部记录；修订按内核规则执行
