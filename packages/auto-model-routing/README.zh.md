@@ -34,11 +34,21 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 **子会话**：`route_subagent` 工具用同一套判档，返回 provider/model/effort（Claude：Haiku → Sonnet → Opus → Opus；GPT：Luna → Sol → Sol → Sol）。只有根会话为 AUTO 时才判档，否则返回 `routed: false`。这些路由须在官方子智能体允许列表中，该列表在会话创建时固定。
 
+## AUTO 自动选配（默认策略）
+
+AUTO 直接使用新策略，无需版本选择或额外开启。下面及前面的四档说明仅供旧策略回滚参考。主会话只判断 `lower/baseline/higher` 投入，模型保持不变；子任务独立判断能力与投入，在官方 fresh `subagent` / `spawn_teammate` 首次请求前绑定实际 child ID 并应用，恢复后保持初始配置。旧四档映射只用于原策略。
+
+此分支 `route_subagent` 仅为可选预览，不必先预览再派发，不把推荐当应用，也不要把推荐复制成用户显式约束。显式 model/effort 保留；两者指定不判、只指定一个只判另一维。fork 未通过真实历史兼容门槛，明确拒绝，不擅自变为 fresh。未知/未绑定创建路径停止并报告。
+
+通过 `auto-model-routing.childRouting` RPC（payload `{sessionId}`）查看 `recommended/applied/unsupported/needs-context/failed`。applied 只表示实际请求配置匹配，不表示任务成功或模型调用成功。记录只含最小身份、版本和路由，不含任务原文。切回原策略/MANUAL 停止新决策，已绑定实例维持初始路线；关闭插件才完全退出请求接入，届时恢复会用宿主创建配置。
+
+见 [Jev 验证](docs/jev-policy-v2-validation.md)和[开发验收/支持矩阵](docs/policy-v2-development.md)。本地开发完成不代表已部署、默认推广或真实子模型收益验证。
+
 ## 须知
 
 - **新会话缺省 MANUAL**，可在设置中改。
 - **失败即关闭**：无 key、余额不足、限流、地区受限、超时或响应无效时，会话切到 `MANUAL · Jev 停用` 并显示原因，点 AUTO 重试。没有本地降级，也不重试。
-- **MANUAL 只停止调整**：会话保持 AUTO 最后设定的 effort。AUTO 也会把它写入官方模型选择，所以新会话会从这个值开始。
+- **MANUAL 只停止调整**：主会话使用官方当前选择，不复原旧值。新策略按请求应用 effort，不调用会修改全局默认模型的 selectModel。旧配置保留供回滚；必要时通过插件配置/RPC 显式设 `policy: legacy`，不作为日常设置。
 - **外发数据**：AUTO 下每个用户回合会把你的消息（最多 8000 字符）和上一轮的少量片段发给 OpenRouter / TypeSafe（`typesafe/jev-1.13`）。外发前先按形态脱敏（密钥、token、URL 凭据、IP），这是尽力而为，不保证去掉所有敏感信息。
 - **key** 经官方 DSH 凭据服务保存，不写进插件配置。启动环境里的 `OPENROUTER_API_KEY` 优先且只读；要迁到 GUI，先从启动环境删掉它，重启一次，再在设置页保存。
 - **文件**：设置在 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`；每个会话的模式与判档记录在 `$DSH_HOME/state/auto-model-routing/`。改动在下一次请求生效，无需重启。

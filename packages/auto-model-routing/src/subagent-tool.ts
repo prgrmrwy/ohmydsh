@@ -7,6 +7,8 @@ import { CATEGORY_HINTS, type JevClient } from './jev.js'
 import { buildState } from './context.js'
 import type { Judgement } from './router.js'
 import type { RoutingState } from './state.js'
+import { choosePolicyRoute, modelFamily, type PolicyProvider } from './policy-v2.js'
+import { policyVersion } from './jev.js'
 
 interface SessionLike { id: string; session: { header: { origin?: string; parentSession?: string } } }
 export interface ToolDeps {
@@ -35,12 +37,15 @@ const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派；�
 export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
   return defineTool({
     name: 'route_subagent',
-    description: 'Call before every sub-agent delegation, whatever the task size. Picks provider/model/reasoning_effort with the Jev decision model; pass provider, model and reasoning_effort explicitly to the sub-agent tool, or the sub-agent inherits this session\'s effort. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. If the user or lead already chose the sub-agent model, pass it as model: only reasoning_effort is routed and the model is kept. On error: pause delegation and ask the user; never guess a tier.',
+    description: 'When policy-v2 is selected, this tool is an optional preview only: use the official fresh creation tool directly for exact-child automatic routing, do not turn preview output into explicit user constraints; fork is unsupported. Under the legacy policy: Call before every sub-agent delegation, whatever the task size. Picks provider/model/reasoning_effort with the Jev decision model; pass provider, model and reasoning_effort explicitly to the sub-agent tool, or the sub-agent inherits this session\'s effort. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. If the user or lead already chose the sub-agent model, pass it as model: only reasoning_effort is routed and the model is kept. On error: pause delegation and ask the user; never guess a tier.',
     timeoutMs: 5000,
     parameters: {
       task: { type: 'string', required: true, description: 'The task the sub-agent will do.' },
-      provider: { type: 'string', required: true, enum: ['claude', 'codex'], description: 'Provider family for the sub-agent.' },
+      provider: { type: 'string', required: true, enum: ['claude', 'codex', 'dsh-magpie-connect'], description: 'Exact transport provider. Magpie is available only under policy-v2.' },
       model: { type: 'string', description: 'Sub-agent model already chosen by the user or lead; when given, only reasoning_effort is routed.' },
+      reasoning_effort: { type: 'string', description: 'Explicit effort constraint for policy-v2; preserved and validated, never silently replaced.' },
+      family: { type: 'string', enum: ['claude','codex'], description: 'Magpie automatic capability family; required when no model is explicitly supplied.' },
+      path: { type: 'string', enum: ['ordinary','fork','teammate'], description: 'policy-v2 creation path; fork remains unsupported until real history compatibility is verified.' },
     },
     output: {
       schema: {
@@ -48,6 +53,10 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
         additionalProperties: false,
         properties: {
           routed: { type: 'boolean' },
+          status: { type: 'string' },
+          policyVersion: { type: 'string' },
+          capability: { type: 'string' },
+          depth: { type: 'string' },
           reason: { type: 'string' },
           tier: { type: 'string' },
           provider: { type: 'string' },
@@ -55,7 +64,10 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
           reasoning_effort: { type: 'string' },
         },
       },
-      render: (_args, v) => [{ type: 'text', text: v.routed === false
+      render: (_args, v) => [{ type: 'text', text: v.status ? (v.status === 'recommended'
+        ? `policy-v2 recommended only (not applied): ${v.provider}/${v.model}/${v.reasoning_effort}. Use the official creation tool; AUTO judges and binds the exact child before its first request. Do not copy this recommendation as a new explicit user constraint. Query the child routing status for applied evidence.`
+        : `policy-v2 ${v.status}: ${v.reason}. 暂停委派并询问用户；不将推荐冒充实际应用。`)
+        : v.routed === false
         ? MANUAL_TEXT
         : `Delegate with provider=${v.provider} model=${v.model} reasoning_effort=${v.reasoning_effort} (tier ${v.tier}); label the description [${v.model}·${v.reasoning_effort}].` }],
     },
@@ -64,6 +76,17 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
       const root = rootOf(caller, deps.agents)
       // MANUAL (or disabled, or an unreachable root): no judgement and nothing leaves the machine.
       if (!root || deps.state.read(root.id).mode !== 'AUTO') return { routed: false, reason: 'manual' }
+      if (deps.readSettings?.().policy === 'policy-v2') {
+        if (args.path === 'fork') return { routed: false, status: 'unsupported', policyVersion, reason: 'fork 真实历史兼容尚未验证；选择 fresh 或由用户关闭试验后继承' }
+        const explicit = { ...(args.model ? { model: args.model } : {}), ...(args.reasoning_effort ? { reasoningEffort: args.reasoning_effort } : {}) }
+        const result = explicit.model && explicit.reasoningEffort ? { kind: 'ok' as const, depth: 'baseline' as const, capability: 'bounded' as const }
+          : await jev.judgePolicy(buildState({ text: args.task }), exec.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
+        if (result.kind !== 'ok') throw new Error('policy-v2 Jev 判断失败或取消；暂停委派并询问用户')
+        if (result.capability === 'insufficient_context') return { routed: false, status: 'needs-context', policyVersion, reason: '请补充任务目标与范围' }
+        const route = choosePolicyRoute(args.provider as PolicyProvider, result.capability ?? 'bounded', result.depth, await deps.catalog!(), deps.readSettings!().effortCap, explicit, args.family ?? (args.model ? modelFamily(args.provider, args.model) : undefined))
+        return { status: 'recommended', policyVersion, ...(result.capability ? { capability: result.capability } : {}), depth: result.depth, provider: route.provider, model: route.model, reasoning_effort: route.reasoningEffort }
+      }
+      if (args.provider === 'dsh-magpie-connect') throw new Error('Magpie 路由需显式选择 policy-v2；原策略不变')
       const result = await jev.judge(buildState({ text: args.task }), exec.signal)
       if (result.kind === 'cancelled') throw new Error('route_subagent 已取消。')
       if (result.kind === 'failed') throw new Error(`Jev 判档失败：${CATEGORY_HINTS[result.category]}（${result.category}）。请暂停委派并询问用户，不要自行猜测档位或换用其它模型。`)

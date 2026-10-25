@@ -1,11 +1,12 @@
 import { afterEach, expect, it } from 'vitest'
 import { routeSubagentTool, type ToolDeps } from '../src/subagent-tool.js'
-import { DEFAULT_SETTINGS, type Settings, type RoutingCatalog } from '../src/settings-contract.js'
+import { DEFAULT_SETTINGS as CURRENT_DEFAULTS, type Settings, type RoutingCatalog } from '../src/settings-contract.js'
 import { JevClient } from '../src/jev.js'
 import { tiers } from '../src/effort.js'
 import { RoutingState, type SessionState } from '../src/state.js'
 import { fakeJev, json, tier, type Reply } from './fake-jev.js'
 
+const DEFAULT_SETTINGS = { ...CURRENT_DEFAULTS, policy: 'legacy' as const }
 const env = { get: (name: string) => name === 'OPENROUTER_API_KEY' ? { value: 'sk-or-test' } : undefined }
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.(); close = undefined })
@@ -25,6 +26,25 @@ async function tool(reply: Reply, modes: Record<string, 'AUTO' | 'MANUAL'> = { S
 }
 const exec = (agent: FakeAgent | undefined = session('S1'), signal = new AbortController().signal) => ({ signal, agent }) as never
 
+it('policy-v2 preview is recommended not applied and respects explicit dimensions', async () => {
+ const model = {provider:'claude',model:'claude-haiku-5-5',name:'Haiku',reasoningEfforts:['low','medium','high','xhigh']}
+ const catalog:RoutingCatalog={models:[model],childAllowlist:{status:'enabled',allowedModels:[model]}}
+ const {def,server}=await tool(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'baseline'}}}),undefined,undefined,{readSettings:()=>({...DEFAULT_SETTINGS,policy:'policy-v2'}),catalog:async()=>catalog})
+ expect(await def.execute({task:'synthetic',provider:'claude'},exec())).toMatchObject({status:'recommended',model:model.model,reasoning_effort:'medium'})
+ expect(await def.execute({task:'synthetic',provider:'claude',model:model.model,reasoning_effort:'high'},exec())).toMatchObject({status:'recommended',reasoning_effort:'high'})
+ expect(server.bodies).toHaveLength(1)
+ expect(await def.execute({task:'synthetic',provider:'claude',path:'fork'},exec())).toMatchObject({status:'unsupported'})
+ expect(server.bodies).toHaveLength(1)
+})
+it('Magpie preview uses exact provider/model and legacy rejects before Jev',async()=>{
+ const model={provider:'dsh-magpie-connect',model:'codex/gpt-6-luna',name:'Luna',reasoningEfforts:['low','medium','high','xhigh']}
+ let policy:'legacy'|'policy-v2'='policy-v2'
+ const {def,server}=await tool(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'baseline'}}}),undefined,undefined,{readSettings:()=>({...DEFAULT_SETTINGS,policy}),catalog:async()=>({models:[model],childAllowlist:{status:'enabled',allowedModels:[model]}})})
+ expect(await def.execute({task:'synthetic',provider:'dsh-magpie-connect',family:'codex'},exec())).toMatchObject({provider:'dsh-magpie-connect',model:'codex/gpt-6-luna',reasoning_effort:'high',status:'recommended'})
+ policy='legacy'
+ await expect(def.execute({task:'synthetic',provider:'dsh-magpie-connect'},exec())).rejects.toThrow('policy-v2')
+ expect(server.bodies).toHaveLength(1)
+})
 it('tool_returns_table_entry', async () => {
  const { def, server } = await tool(tier('simple'))
  expect(def.name).toBe('route_subagent')

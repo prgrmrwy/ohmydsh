@@ -24,7 +24,7 @@ afterEach(async () => { await cleanup?.(); cleanup = undefined })
 async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: [] } = {}) {
  const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
- if (options.defaultAuto) { mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true }); writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), JSON.stringify({ defaultMode: 'AUTO' })) }
+ mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true }); writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), JSON.stringify({ policy: 'legacy', ...(options.defaultAuto ? { defaultMode: 'AUTO' } : {}) }))
  const jev = await fakeJev(reply)
  const ctx = new Context()
  const calls: GenerateOptions[] = []
@@ -66,7 +66,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
   selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
- await expect.poll(() => routes.size).toBe(6)
+ await expect.poll(() => routes.size).toBe(8)
  const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
  const handle = await ctx.agents.create({
   ...(options.seed ? { seed: options.seed } : {}),
@@ -81,11 +81,39 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
  cleanup = async () => { await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
  // Simulate a Host restart for this plugin: all its memory is dropped, only the state directory remains.
- const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(6) }
- const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
+ const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(8) }
+ const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ policy: 'legacy', decisionToast: on })) }
  return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
+it('policy-v2 state does not leak old tier decisions or global selection sync', async () => {
+ const h=await harness(tier('complex'))
+ await h.setMode('AUTO');await h.run('legacy task')
+ const before=h.selections.length
+ const path=join(h.home,'plugins/dsh-auto-model-routing');mkdirSync(path,{recursive:true});writeFileSync(join(path,'config.json'),JSON.stringify({}))
+ h.jev.set(json(200,{answers:{depth:{choice:'baseline'}}}))
+ await h.run('new policy task')
+ const state=await h.invoke('state',{sessionId:h.agent.id})
+ expect(state).toMatchObject({policy:'policy-v2',depth:'baseline',effort:'medium'})
+ expect(state.decision).toMatchObject({depth:'baseline',source:'main',decisionProvider:'openrouter'});expect(state.decision.tier).not.toBe('complex');expect(state.history).toEqual([])
+ expect(h.selections).toHaveLength(before)
+})
+it('policy-v2 mode roundtrip invalidates existing and pending decisions', async () => {
+ const h=await harness(json(200,{answers:{depth:{choice:'higher'}}}))
+ const path=join(h.home,'plugins/dsh-auto-model-routing');mkdirSync(path,{recursive:true});writeFileSync(join(path,'config.json'),JSON.stringify({}))
+ await h.setMode('AUTO');await h.run('initial task')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
+ await h.setMode('MANUAL');await h.setMode('AUTO')
+ expect(await h.invoke('state',{sessionId:h.agent.id})).not.toHaveProperty('depth')
+ let release!:()=>void
+ const gate=new Promise<void>(resolve=>{release=resolve})
+ h.jev.set((_req,res)=>{void gate.then(()=>{res.writeHead(402);res.end('{}')})})
+ const running=h.run('pending task')
+ await expect.poll(()=>h.jev.bodies.length).toBe(2)
+ await h.setMode('MANUAL');await h.setMode('AUTO');release();await running
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({mode:'AUTO'})
+ expect(await h.invoke('state',{sessionId:h.agent.id})).not.toHaveProperty('disabled')
+})
 it('host_routes_and_rpc_envelope', async () => {
  const h = await harness(tier('simple'))
  const rpc = await h.invoke('state', { type: 'client-request', rpcId: 'probe-1', method: 'auto-model-routing.state', payload: { sessionId: h.agent.id } })

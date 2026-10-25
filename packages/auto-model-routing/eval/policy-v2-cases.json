@@ -1,0 +1,12 @@
+[
+  {"id":"dev-bulk","split":"development","task":"Rename the deprecated field oldId to newId in 80 JSON fixtures using the supplied exact schema. Run the deterministic validator. No schema or design decisions are needed.","capability":["bounded"],"depth":["baseline"]},
+  {"id":"dev-risk","split":"development","task":"Prepare, but do not execute, the exact documented production rollback command with the supplied version ID. All steps and checks are specified. Execution requires separate human approval.","capability":["bounded"],"depth":["lower","baseline"]},
+  {"id":"dev-debug","split":"development","task":"Investigate an intermittent cache invalidation defect. Correlate request logs and two cache layers, identify the root cause, and add a regression test. No reproduction or root cause is yet known.","capability":["analytical"],"depth":["baseline","higher"]},
+  {"id":"dev-proof","split":"development","task":"Develop an original formal argument for linearizability of a new concurrent reclamation algorithm under a weak memory model; resolve ABA and stalled-thread cases with a rigorous proof or counterexample.","capability":["frontier"],"depth":["higher"]},
+  {"id":"dev-missing","split":"development","task":"Handle it.","capability":["insufficient_context"],"depth":["baseline"]},
+  {"id":"hold-extract","split":"holdout","task":"Copy the value of the explicitly named version field from this JSON into one output line: {\"version\":\"1.2.3\"}. No explanation.","capability":["bounded"],"depth":["lower"]},
+  {"id":"hold-batch","split":"holdout","task":"Apply a provided AST codemod to 150 source files and execute the supplied snapshot tests. The transformation and expected output are fixed; report failures without redesigning anything.","capability":["bounded"],"depth":["baseline"]},
+  {"id":"hold-tradeoff","split":"holdout","task":"Compare three known database indexing approaches for the supplied query workload. Measure representative queries and recommend one with a clear account of write overhead and latency tradeoffs.","capability":["analytical"],"depth":["baseline"]},
+  {"id":"hold-constraints","split":"holdout","task":"Find a novel impossibility proof or a valid protocol satisfying mutually interacting Byzantine consensus, asynchronous progress and adversarial adaptive membership constraints; carefully reconcile the stated timing assumptions.","capability":["frontier"],"depth":["higher"]},
+  {"id":"hold-unknown","split":"holdout","task":"Do the thing we discussed.","capability":["insufficient_context"],"depth":["baseline"]}
+]

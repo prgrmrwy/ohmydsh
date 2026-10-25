@@ -7,6 +7,21 @@ description: 创建或复用子智能体前，调用 route_subagent（Jev 判档
 
 判档由插件工具 `route_subagent` 完成（与主会话 AUTO 共用同一个 Jev 判断），主 Agent 不自行估档。工具跟随所属主会话的模式：只有主会话为 AUTO 时才判档，并把脱敏后的任务文本发送给 OpenRouter/TypeSafe；主会话为 MANUAL 时不判档、不外发。
 
+## 默认 AUTO（优先于下方旧策略回滚规则）
+
+无需选择版本；未显式配置 legacy 回滚且根会话为 AUTO 时：Agent 仍决定拆解、派发和验收；AUTO 在官方创建工具的精确 child 身份上选配资源，主子问题不再相同。
+
+- Magpie 使用精确 provider `dsh-magpie-connect` 和完整带前缀 model ID，不改成本地 claude/codex；自动槽支持 Claude/GPT 家族，其他网关模型需显式模型与可验证 effort。当前本机测试仅走 Magpie，OpenRouter 只用于 Jev，不直接调用本地 Claude/codex。
+- 使用官方 fresh `subagent` / `spawn_teammate` 创建，提供清楚的目标和范围即可；不要为自动任务先调用推荐工具再把推荐伪装成用户显式约束。请求首次发送前 AUTO 会判断能力与投入、验证目录并应用。
+- 用户显式指定 model/effort 时照实传递；只指定一个维度仅判断另一个，两者指定则不调用 Jev。只指定 effort 也不能沿用下方“完全不判”的原策略规则。
+- `route_subagent` 在此分支仅做可选预览，`status: recommended` 不是 applied；fork 返回 unsupported，应暂停并改用 fresh，或让用户明确选择关闭试验后继承。不要擅自将 fork 改为 fresh。
+- 通过 `childRouting` 状态接口检查对应 sessionId 的 recommended/applied/unsupported/needs-context/failed；应用证据来自实际 request/header，不来自工具推荐。未绑定的创建路径不冒充已路由。
+- 已创建成员收到后续消息不重选；需要升级视作 Agent 明确发起的新建资源决策，说明原因并保留显式约束，不进行自治重试。
+- 验收时区分任务描述不足、信息缺失、推理投入不足、能力不足与基础设施故障；网络错误不是自动升级理由。
+- MANUAL 停止新决策，已创建实例保持初始路线；关闭试验回到原策略，不删除已绑定子会话的恢复记录。
+
+以下规则只适用于原策略。
+
 ## 创建
 
 1. 尊重用户或 lead 显式指定的模型与 effort：

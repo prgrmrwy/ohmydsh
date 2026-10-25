@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSy
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
+import { resolveDecisionService } from './decision-service.js'
 import { tiers, type Tier } from './effort.js'
 import { AUTO_EFFORTS, DEFAULT_SETTINGS, type AutomaticEffort, type RoutingCatalog, type Settings, type SettingsIssue, type SettingsRead } from './settings-contract.js'
 import { isRecord, issue, MODEL_ID_PATTERN, validateChildRoute, validateFamilyMainEffort, validateMainRoute } from './settings-validation.js'
@@ -9,6 +10,8 @@ export { DEFAULT_SETTINGS } from './settings-contract.js'
 export type { Settings, SettingsPatch, SettingsIssue, SettingsRead, RoutingCatalog } from './settings-contract.js'
 
 const ordinary = {
+  decisionService: z.object({ provider: z.enum(['openrouter','typesafe','concentrate','custom']), model: z.string().regex(/^[A-Za-z0-9._:/~-]{1,128}$/).optional(), endpoint: z.string().max(2048).optional() }).strict().refine(value => { try { resolveDecisionService(value); return true } catch { return false } }, 'Invalid decision service'),
+  policy: z.enum(['legacy', 'policy-v2']),
   decisionToast: z.boolean(), defaultMode: z.enum(['MANUAL', 'AUTO']),
   effortCap: z.enum(AUTO_EFFORTS), jevTimeoutMs: z.number().int().min(1000).max(4500),
 }
@@ -142,7 +145,11 @@ export class SettingsStore {
       if (!Object.hasOwn(raw, key)) continue
       const parsed = schema.safeParse(raw[key])
       if (parsed.success) Object.assign(settings, { [key]: parsed.data })
-      else issues.push(...schemaIssues(parsed.error, key))
+      else {
+        issues.push(...schemaIssues(parsed.error, key))
+        // A malformed explicit transport must never fall back to OpenRouter.
+        if (key === 'decisionService') Object.assign(settings, { decisionService: { provider: 'custom', endpoint: '' } })
+      }
     }
     for (const kind of ['mainEfforts', 'childRoutes'] as const) {
       if (!Object.hasOwn(raw, kind)) continue

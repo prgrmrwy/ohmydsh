@@ -15,7 +15,7 @@ it('no_local_classifier_or_other_egress', () => {
   for(const url of text.match(/https?:\/\/[^\s'"`]+/g) ?? []) {
     // SVG namespace identifiers do not initiate network requests.
     if (url === 'http://www.w3.org/2000/svg') continue
-    expect(new URL(url).host,file).toBe('openrouter.ai')
+    expect(['openrouter.ai','api.typesafe.ai','api.concentrate.ai','example.com']).toContain(new URL(url).host)
    }
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')

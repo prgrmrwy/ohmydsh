@@ -6,6 +6,8 @@ export type RoutingProvider = 'claude' | 'codex'
 export const PROVIDERS = [{ id: 'claude', label: 'Claude' }, { id: 'codex', label: 'GPT' }] as const
 export interface ChildRoute { model: string; reasoningEffort: AutomaticEffort }
 export interface Settings {
+  policy?: 'legacy' | 'policy-v2'
+  decisionService?: import('./decision-service.js').DecisionConfig
   decisionToast: boolean
   defaultMode: 'MANUAL' | 'AUTO'
   effortCap: AutomaticEffort
@@ -13,12 +15,12 @@ export interface Settings {
   mainEfforts?: Partial<Record<RoutingProvider, Partial<Record<Tier, AutomaticEffort>>>>
   childRoutes?: Partial<Record<RoutingProvider, Partial<Record<Tier, ChildRoute>>>>
 }
-export type SettingsPatch = Partial<Pick<Settings, 'decisionToast' | 'defaultMode' | 'effortCap' | 'jevTimeoutMs'>> & {
+export type SettingsPatch = Partial<Pick<Settings, 'decisionService' | 'policy' | 'decisionToast' | 'defaultMode' | 'effortCap' | 'jevTimeoutMs'>> & {
   mainEfforts?: Partial<Record<RoutingProvider, Partial<Record<Tier, AutomaticEffort | null>> | null>>
   childRoutes?: Partial<Record<RoutingProvider, Partial<Record<Tier, ChildRoute | null>>>>
 }
 export interface SettingsIssue { path: string; code: string; message: string }
-export interface RoutingModel { provider: string; model: string; name: string; reasoningEfforts: readonly string[] }
+export interface RoutingModel { provider: string; model: string; name: string; reasoningEfforts: readonly string[]; defaultEffort?: string }
 export interface RoutingCatalog {
   models: readonly RoutingModel[]
   childAllowlist: {
@@ -32,4 +34,4 @@ export interface SettingsRead {
   issues: SettingsIssue[]
   status: 'missing' | 'ok' | 'invalid'
 }
-export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 3000 })
+export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ policy: 'policy-v2', decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 3000 })

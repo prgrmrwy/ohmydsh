@@ -5,7 +5,7 @@ export type JevCategory =
 
 /** Human-readable hint per category, shown on the chip, panel and tool errors. */
 export const CATEGORY_HINTS: Readonly<Record<JevCategory, string>> = {
-  'missing-credential': '未配置 OPENROUTER_API_KEY',
+  'missing-credential': '未配置所选决策服务的 API key',
   'insufficient-credits': '余额不足，请充值',
   unauthorized: 'key 无效或无权限',
   'rate-limited': '请求被限流',

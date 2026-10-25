@@ -17,6 +17,8 @@ import { userInput } from './input.js'
 import { JevClient, rubricVersion } from './jev.js'
 import { routeSubagentTool } from './subagent-tool.js'
 import { buildState, previousTurn } from './context.js'
+import { policyHost } from './policy-host.js'
+import { PolicyStore } from './policy-store.js'
 
 export const name = 'dsh-auto-model-routing'
 export const inject = ['llm', 'agents', 'tools']
@@ -29,7 +31,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
   const settings = new SettingsStore(resolve(home, 'plugins/dsh-auto-model-routing/config.json'))
   const hostSettings = settingsHost(ctx, settings)
-  const jev = new JevClient({ get: hostSettings.credential }, config.jevBase, config.jevTimeoutMs ?? (() => settings.read().settings.jevTimeoutMs))
+  const jev = new JevClient({ get: hostSettings.credential }, config.jevBase, config.jevTimeoutMs ?? (() => settings.read().settings.jevTimeoutMs), config.jevBase ? undefined : () => settings.read().settings.decisionService)
   const stateFiles = new FileStateStore(resolve(home, 'state/auto-model-routing/sessions'))
   const state = new RoutingState(stateFiles)
   const book = new JudgementBook(resolve(home, 'state/auto-model-routing/judgements.jsonl'))
@@ -40,6 +42,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     try { book.append(line) }
     catch (error) { ctx.logger.warn(`auto-model-routing: could not record the judgement: ${String(error)}`) }
   }, () => settings.read().settings)
+  const policy = policyHost(ctx, { jev, state, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2')), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(true) })
   const toastOn = (): boolean => settings.read().settings.decisionToast
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, judged: (sessionId, value) => router.judged(sessionId, value) })))
   ctx.on('agent/created', ({ agent, source }) => {
@@ -59,7 +62,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     // Judge only steps that actually enter, using the messages that enter (a rejected step sends nothing).
-    if (payload.step !== 1 || decision.kind !== 'enter') return decision
+    if (settings.read().settings.policy === 'policy-v2' || payload.step !== 1 || decision.kind !== 'enter') return decision
     const agent = ref(payload.agent)
     if (agent.origin !== 'subagent' && userInput(decision.messages).userTurn) book.userTurn(agent.id, payload.turn)
     const job = router.begin(agent, payload.turn, decision.messages)
@@ -83,7 +86,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const inflight = new Map<string, string>()
   ctx.on('agent/request', async (payload, next) => {
     const config = await next()
-    if (payload.agent.session.header.origin === 'subagent') return config
+    if (settings.read().settings.policy === 'policy-v2' || payload.agent.session.header.origin === 'subagent') return config
     const model = router.needsModelInfo(ref(payload.agent)) ? await ctx.llm.resolveModelInfo(config.provider, config.model, payload.signal) : undefined
     const efforts = (model?.reasoning?.efforts ?? []).map(effort => effort.id).filter(id => knownEfforts.has(id)) as Effort[]
     const catalog = model && settings.read().settings.mainEfforts ? await hostSettings.catalog() : undefined
@@ -109,7 +112,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['connection', 'sessionController'], child => {
-    for (const operation of ['state', 'setMode', 'label', 'settings', 'saveSettings', 'setKey'] as const) {
+    for (const operation of ['state', 'setMode', 'label', 'settings', 'saveSettings', 'setKey', 'testDecision', 'childRouting'] as const) {
       child.effect(() => child.connection.fetch.register({
         path: `/api/auto-model-routing.${operation}`,
         methods: ['POST'], requestBody: 'buffered',
@@ -124,9 +127,25 @@ export function apply(ctx: Context, config: Config = {}): void {
             return 'agent' in result ? ref(result.agent) : undefined
           }
           const payload = enveloped ? wire.payload : body
-          const response = operation === 'settings' || operation === 'saveSettings' || operation === 'setKey'
+          if (operation === 'setMode' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
+            const id = (payload as { sessionId: string }).sessionId
+            const mode = (payload as { mode?: unknown }).mode
+            if ((mode === 'AUTO' || mode === 'MANUAL') && state.read(id).mode !== mode && await resolveAgent(id)) policy.invalidate(id)
+          }
+          const response = operation === 'childRouting'
+            ? (typeof (payload as { sessionId?: unknown })?.sessionId === 'string'
+              ? Response.json(policy.status((payload as { sessionId: string }).sessionId) ?? { status: 'unsupported', reason: '没有已绑定的 policy-v2 决策' })
+              : Response.json({ error: 'invalid request' }, { status: 400 }))
+            : operation === 'settings' || operation === 'saveSettings' || operation === 'setKey' || operation === 'testDecision'
             ? await hostSettings.endpoint(operation, payload)
             : operation === 'label' ? await labelEndpoint(payload, resolveAgent, book) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
+          if ((operation === 'state' || operation === 'setMode') && response.ok && settings.read().settings.policy === 'policy-v2') {
+            const value = await response.json()
+            const main = policy.mainStatus((payload as { sessionId: string }).sessionId)
+            const { decision: _legacyDecision, effort: _legacyEffort, reason: _legacyReason, history: _legacyHistory, ...base } = value
+            const result = { ...base, history: [], policy: 'policy-v2', ...main }
+            return Response.json(enveloped ? { type: 'server-response', rpcId: wire.rpcId, result: { ok: true, value: result } } : result)
+          }
           if (!enveloped) return response
           const value = await response.json()
           return Response.json({ type: 'server-response', rpcId: wire.rpcId, result: response.ok ? { ok: true, value } : { ok: false, error: { code: 'invalid-request', message: value.error, details: { issues: value.issues ?? [] } } } })
