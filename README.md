@@ -176,7 +176,6 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — Sends the session header that OpenCode Go requires, fixing missing-session errors.
 - [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context, without running tools or writing back to the main conversation. Temporarily installed from a fork release of upstream MichengAI/dsh-btw PR #16.
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — Brings the models of a Magpie AI gateway into the model picker, alongside the direct providers.
-- [dsh-session-insights](https://github.com/GreenLv/dsh-session-insights) — Adds `/session-insights`, a local retrospective of past sessions similar to Claude Code `/insights`, written as an HTML and JSON report. Pinned to an older release that supports the current DSH version; large session histories need `--project` and a small `--days`.
 
 ### Official optional
 
@@ -218,6 +217,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [ws](skills/ws/SKILL.md) — Inspects, promotes and cleans Worktree Session bindings.
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Observation-only routing hint on whether work should use a formal workflow.
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — Reports memory recall statistics and which cards are never recalled.
+- [weekly-insights](skills/weekly-insights/SKILL.md) — Local session retrospective like Claude Code `/insights`: streams session logs, tags each session and caches the result, writes an HTML report with improvement prompts.
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.

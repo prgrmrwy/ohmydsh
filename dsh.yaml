@@ -213,6 +213,12 @@ customizations:
     enabled: true
     brief: memex 召回报告 skill(只读:空结果率/死卡/高频卡与建议)
     note: '自研 skill,change memex-recall-report-cli(2026-09-24 归档)。命令随 dsh-memex 包的 bin 分发,本 skill 只提供触发词、定位脚本与解读纪律。只读:读本机召回遥测与卡片文件名,不写文件、不联网、不改卡片。升级复核:dsh-memex 遥测格式或 bin 变化时回归 report.sh。移除:enabled:false → dsh build。'
+  # 自研 skill:会话洞察(对标 Claude /insights),替代 dsh-session-insights(其 64 MiB 单次上限读不了本机会话量)
+  - id: weekly-insights
+    type: skill
+    enabled: true
+    brief: 会话洞察 skill(流式读会话日志,逐会话打标签并按 id 缓存,出 HTML 改进建议)
+    note: '自研 skill,思路参考社区 dsh-insights(切段、逐会话缓存、子会话并行打标签)。scripts/insights.mjs 用 zstd CLI 流式解码 v4 日志(多帧),只取窗口内事件,跳过 seeded 继承段,子会话并入根会话;facet 按 session id 缓存在 $DSH_HOME/insights/weekly/facets,指纹为最后事件 seq,会话增长即重打。只读会话日志、只写 $DSH_HOME/insights/weekly、不联网;打标签由当前模型完成,会话摘录会发给该模型。需 zstd 与 Node 22+。升级复核:会话日志格式变化时回归 tests/weekly-insights。移除:enabled:false → dsh build,手删 $DSH_HOME/insights/weekly。'
   # 自研 skill:添加远端插件的标准流程
   - id: add-dsh-plugin
     type: skill
@@ -405,13 +411,3 @@ customizations:
     enabled: true
     brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
     note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='
-
-  # 第三方(remote):会话复盘报告,对标 Claude Code /insights
-  - id: dsh-session-insights
-    type: package
-    source: remote
-    spec: dsh-session-insights@0.5.2
-    version: 0.5.2
-    enabled: true
-    brief: /session-insights 会话复盘(对标 Claude /insights:工作类型、摩擦、建议,本地 HTML+JSON 报告)
-    note: '第三方 https://github.com/GreenLv/dsh-session-insights(MIT,商店收录)。0.6.x 要 DSH>=0.2.1-rc.2,故 pin 0.5.2(engines >=0.2.0-rc.2);升 DSH 后再升。2026-10-26 审 0.5.2:bundle 只插 session-insights;JS 无 child_process、无网络,经 sessionQuery 读会话、Worker 分析,报告写 $DSH_HOME/insights/runs,HTML 无外部资源。语义阶段把脱敏证据交当前模型(--deterministic 离线)。单次上限 2000 会话/64 MiB,本机大会话多,须 --project 加小 --days(超限报错在 GUI 几乎不可见)。移除:enabled:false → dsh build → 重启,手删 $DSH_HOME/insights。 pin sha512-w+A3IRaJBXG0XOXBPKDNyZLYfzOaB3xTbqN3mjuUVbOyJGWDh9eGB/CeMGoiz/v1CakPZdBMf/6Vsgor0rqA8w=='

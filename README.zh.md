@@ -176,7 +176,6 @@ tests/                   仓库级测试
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — 发送 OpenCode Go 要求的会话头，修复缺少会话 ID 的报错。
 - [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — 增加 `/btw` 旁问：只依据当前上下文一次性作答，不执行工具，也不写回主会话。暂时从 fork 的 release 安装上游 MichengAI/dsh-btw 的 PR #16 构建。
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — 把 Magpie AI 网关的模型接入模型选择器，与直连 provider 并存。
-- [dsh-session-insights](https://github.com/GreenLv/dsh-session-insights) — 增加 `/session-insights`：类似 Claude Code `/insights` 的本地会话复盘，生成 HTML 与 JSON 报告。固定在支持当前 DSH 版本的较早版本；会话量大时需加 `--project` 并缩小 `--days`。
 
 ### 官方可选
 
@@ -218,6 +217,7 @@ tests/                   仓库级测试
 - [ws](skills/ws/SKILL.md) — 查看、提升并清理 Worktree Session 绑定。
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — 仅观察的路由提示：判断工作是否应走正式工作流。
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — 统计记忆召回情况，并列出从未被召回的卡片。
+- [weekly-insights](skills/weekly-insights/SKILL.md) — 类似 Claude Code `/insights` 的本地会话复盘：流式读取会话日志，逐会话打标签并缓存，生成带改进建议的 HTML 报告。
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — 把远端插件加入 manifest、build，并在重启前询问。
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — 从 manifest 移除插件、build，并在重启前询问。
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
