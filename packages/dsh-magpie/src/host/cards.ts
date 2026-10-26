@@ -46,7 +46,7 @@ export class CardsController {
     if (target && !('all' in target)) path+=`?provider=${encodeURIComponent(target.provider)}${target.user===undefined?'':`&user=${encodeURIComponent(target.user)}`}`
     let httpError: string | undefined
     try {
-      const response=await this.runtime.transport.request({baseUrl:gen.baseUrl,key},target?'POST':'GET',path,{signal:gen.bgAbort.signal})
+      const response=await this.runtime.transport.request(op,target?'POST':'GET',path,{signal:gen.bgAbort.signal})
       if (!response.ok) {
         httpError=`HTTP ${response.status}: ${this.runtime.formatErrorBody(await response.text())}`
         throw Object.assign(new Error(httpError),{status:response.status})

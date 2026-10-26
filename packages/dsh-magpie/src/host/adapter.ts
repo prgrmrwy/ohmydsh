@@ -117,7 +117,7 @@ export class MagpieAdapter extends LlmAdapter {
     return normalizeContext({messages,...(options.system?{systemPrompt:options.system}:{}),...(options.tools?{tools:options.tools as Tool[]}: {})})
   }
   private async *dispatch(op:Operation,entry:CatalogModel,options:GenerateOptions,untrack=()=>{}):AsyncIterable<StreamChunk>{
-    const releaseKey=this.runtime.retainKey(op.key)
+    const releaseKey=this.runtime.retainIdentity(op)
     const controller=new AbortController()
     const signal=AbortSignal.any([controller.signal,this.runtime.transport.signal.signal,...(options.signal?[options.signal]:[])])
     let timer:ReturnType<typeof setTimeout>|undefined,timedOut=false
@@ -131,7 +131,7 @@ export class MagpieAdapter extends LlmAdapter {
       const context=await this.context(options,model)
       const fast=!!options.sessionId&&this.isFast(options.sessionId)&&entry.serviceTiers.includes('priority')
       arm(90000)
-      const gatewayFetch=this.runtime.transport.fetchFor({baseUrl:op.gen.baseUrl,key:op.key})
+      const gatewayFetch=this.runtime.transport.fetchFor(op)
       const fetchWithRetry:typeof fetch=async(input,init)=>{
         for(let attempt=0;;attempt++){
           const response=await gatewayFetch(input,init)

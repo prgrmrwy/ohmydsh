@@ -17,6 +17,7 @@ export interface ModelGroup { provider: string; models: ModelRow[] }
 export type SyncErrorKind = 'unauthorized' | 'forbidden' | 'http' | 'unreachable'
 export interface SettingsView {
   baseUrl?: string | null; key?: { configured?: boolean; writable?: boolean }
+  access?: { clientId?: { configured?: boolean; writable?: boolean }; clientSecret?: { configured?: boolean; writable?: boolean } }
   lastSyncAt?: string; lastSyncError?: string; lastSyncErrorKind?: SyncErrorKind
   groups?: ModelGroup[]; visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>
 }

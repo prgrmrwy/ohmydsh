@@ -69,7 +69,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     settingsLock.current = true; setSavingSettings(true)
     const version = ++settingsVersion.current
     const body = typeof change === 'function' ? change(settingsRef.current) : change
-    const identityWrite = Object.hasOwn(body, 'baseUrl') || Object.hasOwn(body, 'key')
+    const identityWrite = ['baseUrl', 'key', 'accessClientId', 'accessClientSecret'].some(field => Object.hasOwn(body, field))
     const epoch = identityWrite ? clearUsage() : cardsEpoch.current
     try {
       const result = await postSettings(api, body)
@@ -171,6 +171,8 @@ async function postSettings(api: Api, body: Record<string, unknown>): Promise<Se
 function Connection({ settings, saving, mutateSettings }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation }) {
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl ?? '')
   const [key, setKey] = useState('')
+  const [accessClientId, setAccessClientId] = useState('')
+  const [accessClientSecret, setAccessClientSecret] = useState('')
   const [message, setMessage] = useState<{ text: string; failed: boolean }>()
   const writable = settings.key?.writable !== false
   const configured = settings.key?.configured === true
@@ -179,13 +181,15 @@ function Connection({ settings, saving, mutateSettings }: { settings: SettingsVi
     setMessage(undefined)
     const result = await mutateSettings(body)
     if (!result) return
-    if (result.view) { setKey(''); setMessage({ text: done, failed: false }) }
+    if (result.view) { setKey(''); setAccessClientId(''); setAccessClientSecret(''); setMessage({ text: done, failed: false }) }
     else setMessage({ text: result.error!, failed: true })
   }
   const save = () => {
     const body: Record<string, unknown> = {}
     if (baseUrl.trim() !== savedUrl) body.baseUrl = baseUrl.trim()
     if (key) body.key = key
+    if (accessClientId) body.accessClientId = accessClientId
+    if (accessClientSecret) body.accessClientSecret = accessClientSecret
     void post(body, '已保存')
   }
   return h('section', { className: 'dmg-panel', 'aria-label': '连接' },
@@ -197,8 +201,20 @@ function Connection({ settings, saving, mutateSettings }: { settings: SettingsVi
         className: 'dmg-input', type: 'password', autoComplete: 'off', value: key, disabled: saving || !writable,
         placeholder: configured ? '留空则保持不变' : '必填', onChange: (e: { target: { value: string } }) => setKey(e.target.value),
       })),
+    h('p', { className: 'dmg-hint' }, 'Cloudflare Access（可选）：公网入口填写服务令牌两项；仅支持 HTTPS。局域网直连无需填写。留空保持不变。'),
+    ...([
+      ['Access Client ID', settings.access?.clientId, accessClientId, setAccessClientId],
+      ['Access Client Secret', settings.access?.clientSecret, accessClientSecret, setAccessClientSecret],
+    ] as const).map(([label, status, value, setValue]) => h('label', { key: label, className: 'dmg-field' },
+      h('span', null, `${label} · ${status?.configured ? '已配置' : '未配置'}${status?.writable === false ? '（来自启动环境，只读）' : ''}`),
+      h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value,
+        disabled: saving || status?.writable === false, placeholder: '留空则保持不变',
+        onChange: (e: { target: { value: string } }) => setValue(e.target.value) }))),
     h('div', { className: 'dmg-row' },
-      h('button', { type: 'button', className: 'dmg-button', disabled: saving || (!key && baseUrl.trim() === savedUrl), onClick: save }, saving ? '保存中…' : '保存'),
+      h('button', { type: 'button', className: 'dmg-button', disabled: saving || (!key && !accessClientId && !accessClientSecret && baseUrl.trim() === savedUrl), onClick: save }, saving ? '保存中…' : '保存'),
+      (settings.access?.clientId?.configured || settings.access?.clientSecret?.configured) ? h('button', { type: 'button', className: 'dmg-button',
+        disabled: saving || settings.access?.clientId?.writable === false || settings.access?.clientSecret?.writable === false,
+        onClick: () => { void post({ accessClientId: null, accessClientSecret: null }, '已清除 Access 凭据') } }, '清除 Access 凭据') : null,
       configured && writable ? h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ key: null }, '已清除 key') } }, '清除 key') : null,
       h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ resync: true }, '已重新获取目录') } }, '重新获取目录')),
     h(SyncStatus, { settings }),

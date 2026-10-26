@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { dirname } from 'node:path'
-export interface Settings { baseUrl: string; visibleModels: Record<string, string[]>; defaultEfforts: Record<string, string> }
+export interface Settings { baseUrl: string; visibleModels: Record<string, string[]>; defaultEfforts: Record<string, string>; credentialUpdatePending?: string[] }
 export class SettingsStore {
   value: Settings = { baseUrl: '', visibleModels: {}, defaultEfforts: {} }
   constructor(readonly path?: string) {

@@ -19,7 +19,7 @@ Non-goals: replacing Magpie bearer auth, browser Access login, Cloudflare admin 
 
 ## Risks / Trade-offs
 
-- Multi-key writes are not inherently transactional → prevalidate writable fields and define/verify failure handling before implementing UI save; never claim atomic rollback without tests.
+- Multi-key writes are not inherently transactional → persist non-secret credentialUpdatePending attempted field names in SettingsStore before any credential mutation; atomically commit URL/settings without marker only after all credential writes succeed. Runtime reconstructed from pending marker rejects new operations until explicit complete retry. Marker persistence failure performs zero credential writes. User approved this restart-safe quarantine on 2026-10-27; no atomic credential rollback is claimed.
 - Active operation secrets may outlive a settings change → retain/redact each captured secret until operation release and preserve prepared lifecycle behavior.
 - Cloudflare edge behavior differs from local mocks → real plugin public smoke remains an explicit acceptance step; company network is user acceptance.
 

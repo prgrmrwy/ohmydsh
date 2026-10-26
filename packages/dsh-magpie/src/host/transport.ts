@@ -1,11 +1,18 @@
 import { Agent, fetch as directFetch } from 'undici'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
-export interface ConnectionIdentity { baseUrl: string; key: string }
+export interface ConnectionIdentity { baseUrl: string; key: string; accessClientId?: string; accessClientSecret?: string }
+export function validateIdentity(identity: ConnectionIdentity) {
+  const { accessClientId: id = '', accessClientSecret: secret = '' } = identity
+  if (!!id !== !!secret) throw new Error('MAGPIE_ACCESS_PAIR_REQUIRED')
+  if ([id, secret].some(value => value && (value.length > 512 || /[^\x21-\x7e]/.test(value)))) throw new Error('MAGPIE_ACCESS_INVALID')
+  if (id && identity.baseUrl && new URL(identity.baseUrl).protocol !== 'https:') throw new Error('MAGPIE_ACCESS_HTTPS_REQUIRED')
+}
 const allowed = new Set(['GET /models', 'POST /responses', 'POST /chat/completions', 'GET /magpie/quotas/cards', 'POST /magpie/quotas/refresh'])
 export class GatewayTransport {
   readonly signal = new AbortController()
   private readonly agent = new Agent()
   async request(identity: ConnectionIdentity, method: string, path: string, init: RequestInit = {}): Promise<Response> {
+    validateIdentity(identity)
     const base = new URL(identity.baseUrl)
     const url = /^https?:/.test(path) ? new URL(path) : new URL(identity.baseUrl + path)
     const relative = url.pathname.slice(base.pathname.length)
@@ -14,6 +21,12 @@ export class GatewayTransport {
     const headers = new Headers(init.headers)
     for (const [key, value] of Object.entries(attributionHeaders())) headers.set(key, value)
     headers.set('authorization', `Bearer ${identity.key}`)
+    headers.delete('CF-Access-Client-Id')
+    headers.delete('CF-Access-Client-Secret')
+    if (identity.accessClientId && identity.accessClientSecret) {
+      headers.set('CF-Access-Client-Id', identity.accessClientId)
+      headers.set('CF-Access-Client-Secret', identity.accessClientSecret)
+    }
     try {
       return await directFetch(url, { ...init, method, headers: Object.fromEntries(headers), redirect: 'error', dispatcher: this.agent,
         signal: AbortSignal.any([this.signal.signal, ...(init.signal ? [init.signal] : [])]),

@@ -1,13 +1,15 @@
-import type { Credentials } from '../../src/host/runtime.js'
+import { KEY_REF, type Credentials } from '../../src/host/runtime.js'
 export function credentialsMock(initial?: string, writable = true) {
   let value = initial
   const writes: unknown[] = []
   let listener = () => {}
+  const extra = new Map<unknown, string>()
+  const get = (ref: unknown) => ref === KEY_REF ? value : extra.get(ref)
   const service: Credentials = {
-    describe: async () => ({ configured: !!value, writable }),
-    resolve: async () => value ? { value, source: writable ? 'file' : 'env' } : undefined,
-    set: async (_ref, next) => { writes.push(next); value = next; listener() },
-    unset: async () => { writes.push(null); value = undefined; listener() },
+    describe: async ref => ({ configured: !!get(ref), writable }),
+    resolve: async ref => get(ref) ? { value: get(ref)!, source: writable ? 'file' : 'env' } : undefined,
+    set: async (ref, next) => { writes.push(next); if (ref === KEY_REF) value = next; else extra.set(ref, next); listener() },
+    unset: async ref => { writes.push(null); if (ref === KEY_REF) value = undefined; else extra.delete(ref); listener() },
   }
   return { service, writes, change(next?: string, emit = false) { value = next; if (emit) listener() }, onChange(callback: () => void) { listener = callback } }
 }
