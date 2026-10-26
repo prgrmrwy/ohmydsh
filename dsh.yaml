@@ -405,3 +405,13 @@ customizations:
     enabled: true
     brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
     note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='
+
+  # 第三方(remote):会话复盘报告,对标 Claude Code /insights
+  - id: dsh-session-insights
+    type: package
+    source: remote
+    spec: dsh-session-insights@0.5.2
+    version: 0.5.2
+    enabled: true
+    brief: /session-insights 会话复盘(对标 Claude /insights:工作类型、摩擦、建议,本地 HTML+JSON 报告)
+    note: '第三方 https://github.com/GreenLv/dsh-session-insights(MIT,商店收录)。0.6.x 要求 DSH>=0.2.1-rc.2,故 pin 0.5.2(engines dsh>=0.2.0-rc.2,匹配当前 dshVersion);升 DSH 到 0.2.1 后再升本插件(0.6.0 起需新开 run)。2026-10-26 审 0.5.2 tarball:bundle 只插入 session-insights 插件;JS 端无 child_process、无网络调用,经 sessionQuery 读会话,在 Worker 中分析,报告写到 $DSH_HOME/insights/runs;dashboard.html 无外部资源。语义阶段把脱敏证据交当前 agent 的模型(--deterministic 可跳过,--privacy metrics 不出摘录);随包 Python CLI/skill 未启用。清理需 /session-insights --cleanup <run> --confirm。移除:enabled:false → dsh build → 重启,手删 $DSH_HOME/insights。 pin sha512-w+A3IRaJBXG0XOXBPKDNyZLYfzOaB3xTbqN3mjuUVbOyJGWDh9eGB/CeMGoiz/v1CakPZdBMf/6Vsgor0rqA8w=='
