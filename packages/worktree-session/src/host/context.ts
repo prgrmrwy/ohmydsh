@@ -14,6 +14,7 @@ export function activeBindingContext(operation: OperationRecord): string {
     '规则：',
     '- 所有 Bash 调用必须显式使用托管执行目录作为 workdir。',
     '- 所有本地文件与搜索工具必须使用托管执行目录中的绝对路径。',
+    '- 回复中指向托管执行目录内文件的 Markdown 链接，使用相对于托管执行目录的路径，例如 [报告](docs/report.md)；不要添加源仓库绝对路径或 .worktrees/任务目录前缀。此规则仅用于回复中的文件链接，不改变文件与搜索工具必须使用绝对路径的要求。',
     '- 禁止把主 checkout（源仓库主工作区）当作工作区做日常编辑（写文件、跑工具、改源码）。',
     '- 版本收尾动作（合入任务分支、删除已合并分支、归档后清理 worktree）是任务闭环的必要步骤，仅可在用户明确批准后、通过受控命令执行（如 scripts/ws-merge.mjs / scripts/ws-cleanup.mjs），不得裸跑 git merge 或强删。',
     '- 修改依赖（install/uninstall/update）前必须先通过 ws promote。',
