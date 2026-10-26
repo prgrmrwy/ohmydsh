@@ -16,6 +16,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // A fresh root's absent path masks both exported and checkout-local overlays.
   const isolation = mkdtempSync(path.join(os.tmpdir(), 'ohmydsh-test-isolation-'))
   const tests = testFiles(process.platform, readdirSync('tests'))
+  // tests/dsh-openspec-upgrade imports the gitignored packages/dsh-openspec/lib;
+  // build it here so a fresh checkout or worktree is not ERR_MODULE_NOT_FOUND.
+  if (tests.includes(path.join('tests', 'dsh-openspec-upgrade.test.mjs'))) {
+    const build = spawnSync('npm', ['run', 'build', '--workspace', 'dsh-openspec'], { stdio: 'inherit' })
+    if (build.status !== 0) { process.exitCode = build.status ?? 1; process.exit() }
+  }
   const result = spawnSync(process.execPath, ['--test', ...process.argv.slice(2), ...tests], { stdio: 'inherit', env: { ...process.env, DSH_LOCAL_MANIFEST: path.join(isolation, 'absent.yaml') } })
   process.exitCode = result.status ?? 1
 }
