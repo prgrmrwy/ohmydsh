@@ -53,6 +53,37 @@ promote 由 Agent 驱动，并保持 Session 绑定不变。它更新元数据�
 - **编辑器打开方式。** 默认 `vscode://file/<path>`；其他插件可通过上文所述的客户端注册点在运行时替换。
 - **托管的 `.env.local` 块。** 只有当 Git 忽略源 `.env.local` 时才会把它复制进 worktree（否则拒绝准备）。随后 WS 写入一个托管块，把 `DSH_HOME` 指向 `<git-common-dir>/ws/dsh-home/<operationId>` 下的隔离目录。该块只影响在 worktree 内执行的 `bin/dsh build`，不改变已在运行的 GUI Host 的进程 home。
 
+## 可选的预览环境准备
+
+仅在已绑定会话需要预览或验收时，调用 `ws` 工具的 `action=prepare-preview`；operator 等价命令是 `dsh-ws prepare-preview /absolute/worktree/path`。ws start 不自动执行任何 hook。仓库不接入也无需配置，准备动作只报告 `skipped`。
+
+接入方可提交可执行的普通文件 `.ws/prepare-preview` 和 `.ws/teardown-preview`。未跟踪、不可执行、符号链接（含 `.ws` 目录链接）的脚本不会执行。不支持覆盖脚本路径。hook 不经 shell，cwd 为绑定 worktree。最小 Node 示例：
+
+```js
+#!/usr/bin/env node
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+await writeFile(join(process.env.WS_DSH_HOME, 'preview-ready'), 'ready', { mode: 0o600 })
+```
+
+提交前执行 `chmod +x .ws/prepare-preview`。hook 收到的环境变量：
+
+| 变量 | 可信来源 |
+| --- | --- |
+| `WS_SOURCE_REPO` | 源仓库根 |
+| `WS_WORKTREE` | 绑定 worktree 根 |
+| `WS_GIT_COMMON_DIR` | Git 公共目录 |
+| `WS_OPERATION_ID` | 持久 operation 标识 |
+| `WS_DSH_HOME`、`DSH_HOME` | 当前 operation 的隔离 home |
+| `WS_SOURCE_DSH_HOME` | 调用 Host 的 home，未指定时为 `~/.dsh` |
+| `WS_HOOK` | `prepare-preview` 或 `teardown-preview` |
+
+准备前，隔离 home 若不存在，只有路径归属证明通过才会重建。最近一次结果通过 `ws status` 的 `preview` 返回（`null` 表示未准备）。prepare 最长五分钟，合并输出最多保留 4 KiB；脚本不得打印凭据。hook 运行期间不占仓库锁，同一 worktree 的并发准备立即拒绝。失败不改变分支、依赖模式或绑定。
+
+clean 先通过所有安全门，再执行 teardown，最后删除 worktree；dry-run 只列动作，不执行。teardown 最长 30 秒。**失败只告警，仍继续清理**；出现告警后应确认是否仍有预览进程。clean 同时删除经证明属于该 operation 的隔离 home：目录已不存在不算错误，危险路径跳过并告警。
+
+hook 以当前用户身份执行，**不是安全沙箱**。接入方须保证幂等、校验写入目标、只写 worktree/隔离 home，并仅停止身份可证明属于自己的预览进程。ws 不复制项目配置、不分配端口、不启动服务，这些由具体仓库负责。
+
 ## 安全守卫
 
 已绑定的 Session 在 worktree 之外 fail closed：

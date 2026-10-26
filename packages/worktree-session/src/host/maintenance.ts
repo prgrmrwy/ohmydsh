@@ -8,6 +8,7 @@ import { withMkdirLock } from './fs.js'
 import { createGitClient, discoverRepo, listWorktrees, worktreeStatus, type GitClient } from './git.js'
 import { findBySourceSession, loadOperation, operationFile, saveOperation } from './operation.js'
 import { runProcess, type ProcessRunner } from './process.js'
+import { acquirePreviewLock, ensureIsolatedHome, removeIsolatedHome, runPreviewHook } from './prepare-preview.js'
 
 function statusOf(operation: OperationRecord): StatusResult {
   return {
@@ -22,6 +23,7 @@ function statusOf(operation: OperationRecord): StatusResult {
     packageManager: operation.packageManager ?? 'npm',
     ...(operation.lockFingerprint === undefined ? {} : { lockFingerprint: operation.lockFingerprint }),
     dshHome: operation.dshHome,
+    preview: operation.preview ?? null,
   }
 }
 
@@ -69,6 +71,34 @@ export async function wsStatus(target: string | MaintenanceTarget, git = createG
   return statusOf(await resolveMaintenanceTarget(target, git))
 }
 
+export async function wsPreparePreview(target: string | MaintenanceTarget, options: {
+  git?: GitClient
+  timeoutMs?: number
+  env?: NodeJS.ProcessEnv
+} = {}): Promise<StatusResult> {
+  const git = options.git ?? createGitClient()
+  const initial = await resolveMaintenanceTarget(target, git)
+  const lock = join(initial.gitCommonDir, 'ws', 'locks', 'repo.lock')
+  let release: (() => Promise<void>) | undefined
+  try {
+    const operation = await withMkdirLock(lock, async () => {
+      const current = await resolveMaintenanceTarget(target, git)
+      if (current.phase !== 'prepared' || bindingOf(current)?.state !== 'bound') throw new WsError('OPERATION_INVALID', 'prepare-preview requires a prepared, bound Worktree Session')
+      release = await acquirePreviewLock(current)
+      await ensureIsolatedHome(current)
+      return current
+    })
+    const preview = await runPreviewHook(operation, 'prepare-preview', git, options)
+    return await withMkdirLock(lock, async () => {
+      const current = await loadOperation(operation.gitCommonDir, operation.operationId)
+      if (current === undefined || current.phase !== 'prepared' || bindingOf(current)?.state !== 'bound' || current.worktreePath !== operation.worktreePath || bindingOf(current)?.sourceSessionId !== bindingOf(operation)?.sourceSessionId) {
+        throw new WsError('OPERATION_CONFLICT', 'Binding changed while preparing preview; result was not persisted')
+      }
+      return statusOf(await saveOperation({ ...current, preview }))
+    })
+  } finally { await release?.() }
+}
+
 export async function wsPromote(target: string | MaintenanceTarget, options: { runner?: ProcessRunner; git?: GitClient } = {}): Promise<PromoteResult> {
   const initial = await resolveMaintenanceTarget(target, options.git)
   const lock = join(initial.gitCommonDir, 'ws', 'locks', 'repo.lock')
@@ -85,6 +115,7 @@ export async function wsPromote(target: string | MaintenanceTarget, options: { r
 
 export async function wsClean(targetInput: string | MaintenanceTarget, options: {
   dryRun?: boolean
+  hookTimeoutMs?: number
   activePaths?: readonly string[]
   activeBoundSessionIds?: readonly string[]
   cwd?: string
@@ -175,13 +206,26 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
     // carries it out; an ancestry-proven branch keeps `-d` so Git's check
     // stays an independent second opinion.
     const deleteFlag = mergeProof === 'patch-equivalent' ? '-D' : '-d'
+    const warnings: string[] = []
     const actions = [
       `git worktree remove ${target}`,
       `git branch ${deleteFlag} ${operation.taskBranch}`,
       `retain cleaned tombstone ${operationFile(operation.gitCommonDir, operation.operationId)}`,
     ]
+    const teardownPath = join(target, '.ws', 'teardown-preview')
+    const declared = await (await import('node:fs/promises')).lstat(teardownPath).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error })
+    if (declared) actions.unshift(`run teardown-preview ${teardownPath}`)
     if (options.dryRun === true) return { dryRun: true, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: false, mergeProof }
+    if (declared) {
+      const teardown = await runPreviewHook(operation, 'teardown-preview', git, options.hookTimeoutMs === undefined ? {} : { timeoutMs: options.hookTimeoutMs })
+      if (teardown.status === 'failed') warnings.push(`teardown-preview failed: ${teardown.outputTail}; preview processes may still be running; confirm and stop them manually`)
+    }
     await git.run(operation.repoRoot, ['worktree', 'remove', target])
+    let isolatedHome: NonNullable<CleanResult['isolatedHome']>
+    try { isolatedHome = { status: 'removed', path: await removeIsolatedHome(operation) } } catch (error) {
+      isolatedHome = { status: 'skipped', path: operation.dshHome }
+      warnings.push(`Isolated home was not removed: ${messageOf(error)}`)
+    }
     await git.run(operation.repoRoot, ['branch', deleteFlag, operation.taskBranch])
     const { diagnostics: _diagnostics, cacheNodeModules: _cacheNodeModules, ...tombstone } = operation
     // Record the archive membership as of THIS moment. A Session archived
@@ -193,7 +237,7 @@ export async function wsClean(targetInput: string | MaintenanceTarget, options: 
       phase: 'cleaned',
       binding: { ...sourceBinding, state: cleanedState, archiveLifecycle: { version: 1 }, updatedAt: new Date().toISOString() },
     })
-    return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true, mergeProof }
+    return { dryRun: false, operationId: operation.operationId, worktreePath: target, taskBranch: operation.taskBranch, actions, cleaned: true, mergeProof, isolatedHome, ...(warnings.length ? { warnings } : {}) }
   }, { timeoutMs: 30_000, staleMs: 30 * 60_000 })
 }
 

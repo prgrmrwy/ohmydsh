@@ -53,6 +53,37 @@ Clicking the bound task branch asks an editor to open that Session's managed wor
 - **Editor open behavior.** Default `vscode://file/<path>`; another plugin can replace it at runtime through the client registration point described above.
 - **Managed `.env.local` block.** The source `.env.local` is copied into the worktree only if Git ignores it (otherwise preparation is refused). WS then writes a managed block that points `DSH_HOME` at an isolated directory under `<git-common-dir>/ws/dsh-home/<operationId>`. The block affects `bin/dsh build` executed inside the worktree only; it does not change the process home of an already-running GUI Host.
 
+## Optional preview preparation
+
+Call the `ws` tool with `action=prepare-preview` only when a bound Session needs a preview/acceptance environment. The operator equivalent is `dsh-ws prepare-preview /absolute/worktree/path`. Nothing runs automatically during WS start, and repositories without hooks require no configuration: preparation reports `skipped`.
+
+Repositories may track executable regular files at `.ws/prepare-preview` and `.ws/teardown-preview`. Symlinks (including a symlinked `.ws` directory), untracked files and non-executable files are refused. Hooks run without a shell, with the worktree as cwd. There is no hook-path configuration. A minimal Node hook is:
+
+```js
+#!/usr/bin/env node
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+await writeFile(join(process.env.WS_DSH_HOME, 'preview-ready'), 'ready\n', { mode: 0o600 })
+```
+
+Commit the hook with its executable bit (`chmod +x .ws/prepare-preview`). Hooks receive:
+
+| Variable | Trusted source |
+| --- | --- |
+| `WS_SOURCE_REPO` | Source checkout root |
+| `WS_WORKTREE` | Bound worktree root |
+| `WS_GIT_COMMON_DIR` | Repository Git common directory |
+| `WS_OPERATION_ID` | Persistent operation identity |
+| `WS_DSH_HOME`, `DSH_HOME` | Operation-owned isolated home |
+| `WS_SOURCE_DSH_HOME` | Calling Host's home, defaulting to `~/.dsh` |
+| `WS_HOOK` | `prepare-preview` or `teardown-preview` |
+
+Preparation recreates a missing isolated home only after proving its operation-owned path. Its latest result is available as `preview` in `ws status` (`null` means not prepared). Preparation has a five-minute timeout and retains at most 4 KiB of combined output; do not print credentials. It does not hold the repository lock while the hook runs. A second preparation for the same worktree is refused immediately. Failed preparation leaves the branch, dependency mode and binding unchanged.
+
+Cleanup calls teardown after all safety gates pass but before removing the worktree; dry runs only list it. Teardown has a maximum 30-second deadline. **Teardown failure only warns and cleanup continues**, so check for surviving preview processes after a warning. Cleanup also removes the proven operation-owned isolated home; missing homes are harmless, and unsafe paths are skipped with a warning.
+
+Hooks run as the current user, **not inside a security sandbox**. Keep them idempotent, validate destinations, write only inside the worktree/isolated home, and stop only processes whose identity belongs to that preview. WS does not copy project configuration, allocate ports or start servers; each repository owns those choices.
+
 ## Safety guards
 
 A bound Session fails closed outside its worktree:

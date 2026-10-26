@@ -8,6 +8,7 @@ import { loadEnvironment } from './environment.mjs'
 import { run as defaultRun } from './runner.mjs'
 import { autoUpdate, appendEvent, ensurePrerequisites } from './maintenance.mjs'
 import { probePort, stopServer } from './process.mjs'
+import { isolatedHome, readPreview, writePreview, matchesPreview, stopPreview, previewPorts } from './preview.mjs'
 import { openUi, closeUi } from './ui.mjs'
 import packageManager from '../lib/package-manager.cjs'
 
@@ -43,6 +44,19 @@ export async function runLauncher(argv, options = {}) {
     const doc = getManifest()
     return (await runScript('dsh-cli.mjs', argv, { env: { ...npmEnv, DSH_CLI_VERSION: doc.dshVersion } })).status
   }
+  const preview = (options.isolatedHome ?? isolatedHome)(repo, home)
+  if (preview) {
+    // OpenSpec schema installation uses XDG rather than DSH_HOME.
+    for (const target of [env, npmEnv, hostEnv]) target.XDG_DATA_HOME = path.join(home, 'xdg-data')
+  }
+  flags.port ??= Number(env.DSH_PORT ?? 3080)
+  if (!Number.isInteger(flags.port) || flags.port < 1 || flags.port > 65535) throw new Error('DSH_PORT must be an integer in 1..65535')
+  const hostAction = !flags.buildOnly && !flags.history && !flags.doctor && !flags.reset && !flags.pluginUpdate
+  if (preview && hostAction && flags.port === 3080) throw new Error('隔离环境禁止操作 3080；请先 ws prepare-preview')
+  const previewRecord = preview && hostAction ? readPreview(home) : undefined
+  if (preview && !flags.portExplicit && previewRecord && hostAction) flags.port = previewRecord.port
+  if (preview && (flags.buildOnly || flags.build)) log(`隔离构建 → ${home}（日常 GUI 未更新）`)
+  const announcePreview = () => { if (preview) { log(`隔离预览环境 home=${home} port=${flags.port}`); log(`DSH_PREVIEW ${JSON.stringify({ url: `http://127.0.0.1:${flags.port}`, port: flags.port, home })}`) } }
   const uiOptions = { port: flags.port, platform, env, warn, ...(options.run ? { run } : {}) }
   const showPlugins = async () => {
     const result = await runScript('plugin-list.mjs', [], { capture: true })
@@ -56,6 +70,12 @@ export async function runLauncher(argv, options = {}) {
     return result.opened
   }
   const doStop = async () => {
+    if (preview) {
+      if (flags.portExplicit && previewRecord?.port !== flags.port) { log('no recorded preview on this port'); return }
+      await stopPreview(home, { env, probe, stop, warn })
+      log('preview stopped or no matching preview is running')
+      return
+    }
     const result = await stop(flags.port, { env, warn })
     await closeUi(uiOptions)
     if (!result.ok) throw new Error(result.error || `port ${flags.port} listener is not provably DSH; refusing to kill`)
@@ -73,6 +93,11 @@ export async function runLauncher(argv, options = {}) {
   let current
   if (!flags.buildOnly) {
     current = await probe(flags.port, { env })
+    if (preview) {
+      if (previewRecord && matchesPreview(current, previewRecord)) current = { ...current, state: 'owned' }
+      else if (!flags.portExplicit) current = { state: 'empty' }
+      else if (current.state !== 'empty') throw new Error('Explicit preview port is occupied by another process')
+    }
     if (!['empty', 'owned'].includes(current.state)) throw new Error(current.error || `port ${flags.port} listener is not provably DSH; refusing start`)
   }
   if (flags.buildOnly || flags.build || flags.restart || current.state === 'empty') {
@@ -97,77 +122,93 @@ export async function runLauncher(argv, options = {}) {
   }
   if (flags.restart) { prepared = await prepare(); await doStop(); current = { state: 'empty' } }
   if (current.state === 'owned') {
+    announcePreview()
     await ui(doc)
     log(`dsh 已在运行: http://127.0.0.1:${flags.port} (未自动打开 UI 时可 dsh --open)`)
     await showPlugins()
     return 0
   }
   prepared ??= await prepare()
-  const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', '--port', String(flags.port), '--no-open', ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
-  fs.mkdirSync(home, { recursive: true })
-  const fd = flags.foreground ? undefined : fs.openSync(path.join(home, 'dsh.log'), 'a')
-  let child
-  try {
-    child = spawn(resolved.command, resolved.args, { env: hostEnv, cwd: process.cwd(), shell: false, detached: !flags.foreground, windowsHide: true, stdio: flags.foreground ? 'inherit' : ['ignore', fd, fd] })
-  } finally { if (fd !== undefined) fs.closeSync(fd) }
-  let childError
-  const closed = new Promise(resolve => {
-    child.once('error', error => { childError = error })
-    child.once('close', (status, signal) => resolve({ status, signal }))
-  })
-  const deadline = Date.now() + 30_000
-  let ready = false
-  let racedOwner = false
-  while (Date.now() < deadline) {
-    if (childError || child.exitCode !== null || child.signalCode !== null) break
-    if (await canConnect(flags.port)) {
-      const candidate = await probe(flags.port, { env, deadline })
-      ready = candidate.state === 'owned' && candidate.processes.some(record => record.pid === child.pid)
-      racedOwner = candidate.state === 'owned' && !ready
-      if (ready || candidate.state !== 'empty') break
-    }
-    await new Promise(resolve => setTimeout(resolve, 100))
-  }
-  if (!ready) {
-    // The native ChildProcess handle belongs to this launch; never kill a PID
-    // inferred from a reachable port. Reclaim only while our child is alive.
-    if (child.exitCode === null && child.signalCode === null && !childError) {
-      if (platform === 'win32') {
-        try {
-          const killed = await run('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { capture: true, timeoutMs: 5_000 })
-          if (killed.status !== 0) warn(`Failed to reclaim this launch’s Windows child PID ${child.pid}; inspect dsh.log and the owned child manually`)
-        } finally { child.unref() }
-      } else {
-        // The detached group was created by this exact ChildProcess. Reclaim
-        // it before returning; an ignored TERM must not keep dsh alive forever.
-        const signal = kind => { try { process.kill(flags.foreground ? child.pid : -child.pid, kind) } catch (error) { if (error.code !== 'ESRCH') warn(error.message) } }
-        signal('SIGTERM')
-        await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 500))])
-        if (child.exitCode === null && child.signalCode === null) signal('SIGKILL')
-        await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 500))])
-        child.unref()
+  const ports = preview ? previewPorts(flags.port, flags.portExplicit) : [flags.port]
+  for (const port of ports) {
+    flags.port = port
+    uiOptions.port = port
+    if (preview && (await probe(port, { env })).state !== 'empty') continue
+    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', '--port', String(flags.port), '--no-open', ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
+    fs.mkdirSync(home, { recursive: true })
+    const fd = flags.foreground ? undefined : fs.openSync(path.join(home, 'dsh.log'), 'a')
+    let child
+    try {
+      child = (options.spawn ?? spawn)(resolved.command, resolved.args, { env: hostEnv, cwd: process.cwd(), shell: false, detached: !flags.foreground, windowsHide: true, stdio: flags.foreground ? 'inherit' : ['ignore', fd, fd] })
+    } finally { if (fd !== undefined) fs.closeSync(fd) }
+    let childError
+    const closed = new Promise(resolve => {
+      child.once('error', error => { childError = error })
+      child.once('close', (status, signal) => resolve({ status, signal }))
+    })
+    const deadline = Date.now() + 30_000
+    let ready = false
+    let racedOwner = false
+    let readyIdentity
+    while (Date.now() < deadline) {
+      if (childError || child.exitCode !== null || child.signalCode !== null) break
+      if (await (options.connect ?? canConnect)(flags.port)) {
+        const candidate = await probe(flags.port, { env, deadline })
+        ready = candidate.state === 'owned' && candidate.processes.some(record => record.pid === child.pid)
+        racedOwner = candidate.state === 'owned' && !ready
+        if (ready) readyIdentity = candidate.processes.find(record => record.pid === child.pid)
+        if (ready || candidate.state !== 'empty') break
       }
+      await new Promise(resolve => setTimeout(resolve, 100))
     }
-    if (racedOwner || child.exitCode !== null) {
-      const winner = await probe(flags.port, { env })
-      if (winner.state === 'owned') {
-        await ui(doc)
-        log(`dsh 已在运行: http://127.0.0.1:${flags.port} (another verified launcher won startup)`)
-        await showPlugins()
-        return 0
+    if (!ready) {
+      // The native ChildProcess handle belongs to this launch; never kill a PID
+      // inferred from a reachable port. Reclaim only while our child is alive.
+      if (child.exitCode === null && child.signalCode === null && !childError) {
+        if (platform === 'win32') {
+          try {
+            const killed = await run('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { capture: true, timeoutMs: 5_000 })
+            if (killed.status !== 0) warn(`Failed to reclaim this launch’s Windows child PID ${child.pid}; inspect dsh.log and the owned child manually`)
+          } finally { child.unref() }
+        } else {
+          // The detached group was created by this exact ChildProcess. Reclaim
+          // it before returning; an ignored TERM must not keep dsh alive forever.
+          const signal = kind => { try { process.kill(flags.foreground ? child.pid : -child.pid, kind) } catch (error) { if (error.code !== 'ESRCH') warn(error.message) } }
+          signal('SIGTERM')
+          await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 500))])
+          if (child.exitCode === null && child.signalCode === null) signal('SIGKILL')
+          await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 500))])
+          child.unref()
+        }
       }
+      if (preview) continue
+      if (racedOwner || child.exitCode !== null) {
+        const winner = await probe(flags.port, { env })
+        if (winner.state === 'owned') {
+          await ui(doc)
+          log(`dsh 已在运行: http://127.0.0.1:${flags.port} (another verified launcher won startup)`)
+          await showPlugins()
+          return 0
+        }
+      }
+      warn(`error: server ${childError ? 'cannot start' : child.exitCode !== null ? 'exited early' : 'readiness failed (ownership unknown or 30s deadline)'} — see ${path.join(home, 'dsh.log')}`)
+      return child.exitCode || 1
     }
-    warn(`error: server ${childError ? 'cannot start' : child.exitCode !== null ? 'exited early' : 'readiness failed (ownership unknown or 30s deadline)'} — see ${path.join(home, 'dsh.log')}`)
-    return child.exitCode || 1
+    if (preview) {
+      if (!readyIdentity?.created) throw new Error('Preview listener creation identity missing')
+      writePreview(home, { port, pid: child.pid, created: readyIdentity.created })
+      announcePreview()
+    }
+    const pluginNames = await runScript('plugin-list.mjs', ['--names'], { capture: true })
+    appendEvent(home, `dshVersion=${doc.dshVersion} runtime=${prepared.DSH_RUNTIME_KIND} owner=${prepared.DSH_RUNTIME_OWNER || 'none'} compat=${prepared.DSH_RUNTIME_COMPAT || 'none'} fingerprint=${prepared.DSH_RUNTIME_FINGERPRINT || 'none'} port=${flags.port} plugins=[${pluginNames.status === 0 ? pluginNames.stdout.trim() : ''}]`)
+    log(`Host runtime: ${prepared.DSH_RUNTIME_KIND}${prepared.DSH_RUNTIME_OWNER ? ` (${prepared.DSH_RUNTIME_OWNER})` : ''}`)
+    await ui(doc)
+    log(`dsh 已启动: http://127.0.0.1:${flags.port} (dshVersion=${doc.dshVersion};未自动打开 UI 时可 dsh --open)`)
+    await showPlugins()
+    if (!flags.foreground) { child.unref(); return 0 }
+    const signal = () => child.kill('SIGTERM')
+    process.once('SIGINT', signal); process.once('SIGTERM', signal)
+    try { const result = await closed; return result.status ?? 1 } finally { process.off('SIGINT', signal); process.off('SIGTERM', signal) }
   }
-  const pluginNames = await runScript('plugin-list.mjs', ['--names'], { capture: true })
-  appendEvent(home, `dshVersion=${doc.dshVersion} runtime=${prepared.DSH_RUNTIME_KIND} owner=${prepared.DSH_RUNTIME_OWNER || 'none'} compat=${prepared.DSH_RUNTIME_COMPAT || 'none'} fingerprint=${prepared.DSH_RUNTIME_FINGERPRINT || 'none'} port=${flags.port} plugins=[${pluginNames.status === 0 ? pluginNames.stdout.trim() : ''}]`)
-  log(`Host runtime: ${prepared.DSH_RUNTIME_KIND}${prepared.DSH_RUNTIME_OWNER ? ` (${prepared.DSH_RUNTIME_OWNER})` : ''}`)
-  await ui(doc)
-  log(`dsh 已启动: http://127.0.0.1:${flags.port} (dshVersion=${doc.dshVersion};未自动打开 UI 时可 dsh --open)`)
-  await showPlugins()
-  if (!flags.foreground) { child.unref(); return 0 }
-  const signal = () => child.kill('SIGTERM')
-  process.once('SIGINT', signal); process.once('SIGTERM', signal)
-  try { const result = await closed; return result.status ?? 1 } finally { process.off('SIGINT', signal); process.off('SIGTERM', signal) }
+  throw new Error('Preview startup failed: exhausted candidate ports; stop unused preview Hosts or ws clean')
 }

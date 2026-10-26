@@ -2,7 +2,7 @@
 import { realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { wsClean, wsPromote, wsStatus } from './host/maintenance.js'
+import { wsClean, wsPreparePreview, wsPromote, wsStatus } from './host/maintenance.js'
 import { wireError } from './host/errors.js'
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -14,12 +14,14 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       ? await wsStatus(path)
       : command === 'promote'
         ? await wsPromote(path)
-        : command === 'clean'
+        : command === 'prepare-preview'
+          ? await wsPreparePreview(path)
+          : command === 'clean'
           ? await wsClean(path, { dryRun })
           : undefined
-    if (result === undefined) throw new Error('Usage: dsh-ws status [path] | promote [path] | clean [--dry-run] [path]')
+    if (result === undefined) throw new Error('Usage: dsh-ws status [path] | promote [path] | prepare-preview [path] | clean [--dry-run] [path]')
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
-    return 0
+    return command === 'prepare-preview' && 'preview' in result && result.preview?.status === 'failed' ? 1 : 0
   } catch (error) {
     process.stderr.write(`${JSON.stringify({ ok: false, error: wireError(error) }, null, 2)}\n`)
     return 1

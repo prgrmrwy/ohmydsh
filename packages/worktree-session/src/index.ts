@@ -87,4 +87,4 @@ export function apply(ctx: Context, config: Config = {}): void {
 
 export * from './wire.js'
 export { startOperation, loadOperation } from './host/operation.js'
-export { wsStatus, wsPromote, wsClean } from './host/maintenance.js'
+export { wsStatus, wsPreparePreview, wsPromote, wsClean } from './host/maintenance.js'
