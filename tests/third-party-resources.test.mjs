@@ -44,10 +44,12 @@ const mcp = {
   integrity: I,
   bridge: { spec: '@deepseek-ai/dsh-mcp-client@0.1.5-rc.2', version: '0.1.5-rc.2', integrity: I },
   serverName: 'jev',
+  jevProvider: 'typesafe',
   credentialEnv: 'TYPESAFE_API_KEY',
   toolCallTimeoutMs: 15000,
   reconnect: { enabled: true, initialDelayMs: 250, maxDelayMs: 2000, maxAttempts: 3 },
 }
+const openrouterMcp = { ...mcp, jevProvider: 'openrouter', credentialEnv: 'OPENROUTER_API_KEY' }
 const schema = {
   id: 'anvil',
   type: 'openspec-schema',
@@ -93,6 +95,47 @@ test('validates all resource shape before a caller side effect and rejects float
   assert.throws(() => validateThirdPartyResources([{ ...schema, sourcePath: '../escape' }]), /must not escape/)
   assert.throws(() => validateThirdPartyResources([{ ...schema, target: '../escape' }]), /safe schema name/)
   assert.throws(() => validateThirdPartyResources([{ ...schema, scope: 'parent' }]), /must be user or project/)
+})
+
+test('jevProvider openrouter entry validates with mapped credential', () => {
+  const [resource] = validated(openrouterMcp)
+  assert.equal(resource.jevProvider, 'openrouter')
+  assert.equal(resource.credentialEnv, 'OPENROUTER_API_KEY')
+})
+
+test('credentialEnv mismatch with jevProvider is rejected before side effects', () => {
+  let sideEffects = 0
+  assert.throws(() => {
+    validateThirdPartyResources([{ ...openrouterMcp, credentialEnv: 'TYPESAFE_API_KEY' }])
+    sideEffects++
+  }, /credentialEnv: must be OPENROUTER_API_KEY for jevProvider openrouter/)
+  assert.equal(sideEffects, 0)
+})
+
+test('unknown or missing jevProvider is rejected', () => {
+  const { jevProvider: _omitted, ...missing } = mcp
+  for (const resource of [{ ...mcp, jevProvider: 'cloudflare' }, missing]) {
+    assert.throws(() => validateThirdPartyResources([resource]), /jevProvider: must be one of typesafe, openrouter/)
+  }
+})
+
+test('mixed workflow and MCP pin enumeration excludes transport enum', async () => {
+  const resources = validated(workflow, openrouterMcp)
+  const pins = packagePins(resources)
+  for (const pin of pins) {
+    assert.equal(typeof pin, 'object')
+    for (const key of ['name', 'spec', 'integrity']) assert.equal(typeof pin[key], 'string', key)
+  }
+  assert.ok(resourcePackageItems(resources).every((item) => typeof item.spec === 'string'))
+  const seen = []
+  await preflightResourceIntegrities(resources, { resolver: async (pin) => { seen.push(pin); return pin.integrity } })
+  assert.deepEqual(seen.map((pin) => pin.spec).sort(), [
+    '@deepseek-ai/dsh-mcp-client@0.1.5-rc.2',
+    '@deepseek-ai/dsh-skill-filesystem@0.1.5-rc.2',
+    '@jkudish/jev-mcp@0.6.0',
+    'spec-superflow@2.0.1',
+  ])
+  assert.ok(!JSON.stringify(seen).includes('openrouter'))
 })
 
 test('translates enabled workflow and MCP packages to unique synthetic remote package pins', () => {
@@ -184,7 +227,7 @@ test('strict launcher passes only key and typesafe provider, forwards signals, a
   const launcher = path.join(root, 'launcher.mjs')
   const output = path.join(root, 'env.json')
   await writeFile(server, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(output)}, JSON.stringify(process.env))\nprocess.exit(7)\n`)
-  const source = renderMcpLauncher(server)
+  const source = renderMcpLauncher(server, { jevProvider: 'typesafe', credentialEnv: 'TYPESAFE_API_KEY' })
   assert.doesNotMatch(source, /\.\.\.process\.env/)
   assert.match(source, /env: \{ TYPESAFE_API_KEY: key, JEV_PROVIDER: 'typesafe' \}/)
   assert.match(source, /SIGINT.*SIGTERM.*SIGHUP/s)
@@ -209,13 +252,87 @@ test('strict launcher passes only key and typesafe provider, forwards signals, a
   assert.equal(missing.stderr, '')
 
   const deadEntry = path.join(root, 'missing-entry.mjs')
-  await writeFile(launcher, renderMcpLauncher(deadEntry))
+  await writeFile(launcher, renderMcpLauncher(deadEntry, { jevProvider: 'typesafe', credentialEnv: 'TYPESAFE_API_KEY' }))
   const failed = spawnSync(process.execPath, [launcher], {
     encoding: 'utf8',
     env: { TYPESAFE_API_KEY: 'must-not-appear-in-child-error' },
   })
   assert.notEqual(failed.status, 0)
   assert.doesNotMatch(`${failed.stdout}${failed.stderr}`, /must-not-appear-in-child-error/)
+})
+
+async function launcherFixture(prefix, options) {
+  const root = await mkdtemp(path.join(os.tmpdir(), prefix))
+  const server = path.join(root, 'server.mjs')
+  const output = path.join(root, 'env.json')
+  const launcher = path.join(root, 'launcher.mjs')
+  await writeFile(server, `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(output)}, JSON.stringify(process.env))\nprocess.exit(7)\n`)
+  await writeFile(launcher, renderMcpLauncher(server, options))
+  return { root, launcher, output }
+}
+
+async function renderedMcpRow(resource) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'third-party-row-'))
+  const profile = path.join(root, 'profile')
+  const assets = path.join(root, 'assets')
+  await packageFixture(profile, '@jkudish/jev-mcp', '0.6.0', ['dist/index.js'])
+  await packageFixture(profile, '@deepseek-ai/dsh-mcp-client', '0.1.5-rc.2')
+  await mkdir(assets, { recursive: true })
+  await writeFile(path.join(assets, 'jev-launcher.mjs'), '// generated\n')
+  const resources = validated(resource)
+  const health = await resourceHealth(resources, { profileDir: profile, managedAssetsDir: assets })
+  return renderResourcePatch(resources, { profileDir: profile, managedAssetsDir: assets, health }).join('\n')
+}
+
+test('openrouter row and launcher pass only the openrouter credential', async () => {
+  const text = await renderedMcpRow(openrouterMcp)
+  assert.match(text, /disabled: !!js >-\n\s+!process\.env\.OPENROUTER_API_KEY/)
+  assert.match(text, /OPENROUTER_API_KEY: !!js process\.env\.OPENROUTER_API_KEY/)
+  assert.doesNotMatch(text, /TYPESAFE_API_KEY/)
+
+  const { launcher, output } = await launcherFixture('third-party-openrouter-', { jevProvider: 'openrouter', credentialEnv: 'OPENROUTER_API_KEY' })
+  const result = spawnSync(process.execPath, [launcher], {
+    encoding: 'utf8',
+    env: { OPENROUTER_API_KEY: 'unit-test-key', TYPESAFE_API_KEY: 'other', SHOULD_NOT_LEAK: 'nope' },
+  })
+  assert.equal(result.status, 7, result.stderr)
+  const childEnv = JSON.parse(await readFile(output, 'utf8'))
+  assert.deepEqual(Object.keys(childEnv).filter((key) => !key.startsWith('__CF_')).sort(), ['JEV_PROVIDER', 'OPENROUTER_API_KEY'])
+  assert.equal(childEnv.JEV_PROVIDER, 'openrouter')
+  assert.equal(childEnv.OPENROUTER_API_KEY, 'unit-test-key')
+})
+
+test('openrouter launcher exits 78 silently without its credential', async () => {
+  const { launcher } = await launcherFixture('third-party-openrouter-missing-', { jevProvider: 'openrouter', credentialEnv: 'OPENROUTER_API_KEY' })
+  const result = spawnSync(process.execPath, [launcher], { encoding: 'utf8', env: { TYPESAFE_API_KEY: 'only-other-provider' } })
+  assert.equal(result.status, 78)
+  assert.equal(result.stdout, '')
+  assert.equal(result.stderr, '')
+})
+
+test('openrouter launcher missing entry diagnostics omit credential', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'third-party-openrouter-dead-'))
+  const launcher = path.join(root, 'launcher.mjs')
+  await writeFile(launcher, renderMcpLauncher(path.join(root, 'missing-entry.mjs'), { jevProvider: 'openrouter', credentialEnv: 'OPENROUTER_API_KEY' }))
+  const failed = spawnSync(process.execPath, [launcher], { encoding: 'utf8', env: { OPENROUTER_API_KEY: 'must-not-appear' } })
+  assert.notEqual(failed.status, 0)
+  assert.doesNotMatch(`${failed.stdout}${failed.stderr}`, /must-not-appear/)
+})
+
+test('generated row and launcher contain variable names but no credential values', async () => {
+  const previous = process.env.OPENROUTER_API_KEY
+  process.env.OPENROUTER_API_KEY = 'deploy-secret'
+  try {
+    const row = await renderedMcpRow(openrouterMcp)
+    const launcher = renderMcpLauncher('/x/index.js', { jevProvider: 'openrouter', credentialEnv: 'OPENROUTER_API_KEY' })
+    for (const text of [row, launcher]) {
+      assert.doesNotMatch(text, /deploy-secret/)
+      assert.match(text, /OPENROUTER_API_KEY/)
+    }
+  } finally {
+    if (previous === undefined) delete process.env.OPENROUTER_API_KEY
+    else process.env.OPENROUTER_API_KEY = previous
+  }
 })
 
 test('managed launcher ownership is idempotent, drift-safe, and removable on disable', async () => {

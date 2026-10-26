@@ -142,7 +142,13 @@ test('skill is an observation-only closed two-step shadow router', async () => {
   }
   for (const forbidden of ['full prompt', 'source fragments', 'diff', 'attachment', 'provider errors']) {
     assert.match(source, new RegExp(forbidden, 'iu'))
-  }
+  }  assert.match(source, /`jevCalls`/u)
+  assert.match(source, /`region-blocked`/u)
+  assert.match(source, /"errorCategory":"none"/u)
+  assert.match(source, /node recorder\.mjs record < /u)
+  assert.match(source, /never (?:interpolate|paste|splice)[^.]*(?:shell|heredoc|argument)/iu)
+  assert.match(source, /delete the (?:temporary|staging) file/iu)
+  assert.match(source, /current user/iu)
 })
 
 test('record persists only normalized bounded fields and never attacker observation ids', async t => {
@@ -165,8 +171,8 @@ test('record persists only normalized bounded fields and never attacker observat
   const [record] = await storedRecords(home)
   assert.deepEqual(Object.keys(record).sort(), [
     'actualRoute', 'candidateCatalogVersion', 'eligibleCandidates', 'errorCategory', 'features',
-    'metrics', 'observationId', 'overrideSource', 'recommendation', 'recordedAt', 'routerVersion',
-    'sampleProvenance', 'schemaVersion',
+    'jevProvider', 'metrics', 'observationId', 'overrideSource', 'recommendation', 'recordedAt',
+    'routerVersion', 'sampleProvenance', 'schemaVersion',
   ].sort())
   assert.deepEqual(record.eligibleCandidates, ['direct', 'standard-openspec', 'anvil'])
   assert.deepEqual(Object.keys(record.recommendation.classificationProbabilities), [
@@ -241,7 +247,40 @@ test('legacy v1 records remain readable without invented provenance or latency',
   const [rewritten] = await storedRecords(home)
   assert.equal(rewritten.schemaVersion, 2)
   assert.equal(rewritten.sampleProvenance, 'unknown')
+  assert.equal(rewritten.jevProvider, 'unknown')
   assert.deepEqual(rewritten.metrics.latency, { availability: 'unavailable', milliseconds: null })
+
+  // A proven positive legacy latency survives even though jevProvider is absent.
+  const proven = { ...legacy, metrics: { latencyMs: 42, usage: current.metrics.usage } }
+  delete proven.jevProvider
+  await writeFile(recordsPath(home), `${JSON.stringify(proven)}\n`, 'utf8')
+  assert.equal((await run(home, ['label', id, 'anvil', 'agent'])).code, 0)
+  const [kept] = await storedRecords(home)
+  assert.deepEqual(kept.metrics.latency, { availability: 'measured', milliseconds: 42 })
+  assert.equal(kept.jevProvider, 'unknown')
+})
+
+test('region-blocked category is kept and counted in summary', async t => {
+  const home = await temporaryHome(t)
+  const input = sample()
+  input.errorCategory = 'region-blocked'
+  assert.equal((await run(home, ['record'], input)).code, 0)
+  const [record] = await storedRecords(home)
+  assert.equal(record.errorCategory, 'region-blocked')
+  const summary = JSON.parse((await run(home, ['summary'])).stdout)
+  assert.equal(summary.errors['region-blocked'], 1)
+})
+
+test('jevProvider outside closed set or missing is stored as unknown', async t => {
+  const home = await temporaryHome(t)
+  const foreign = sample(1)
+  foreign.jevProvider = 'cloudflare'
+  const missing = sample(2)
+  delete missing.jevProvider
+  assert.equal((await run(home, ['record'], foreign)).code, 0)
+  assert.equal((await run(home, ['record'], missing)).code, 0)
+  const records = await storedRecords(home)
+  assert.deepEqual(records.map(record => record.jevProvider), ['unknown', 'unknown'])
 })
 
 test('record enforces workflow consistency and conservative status', async t => {
@@ -336,7 +375,7 @@ test('corrupt JSONL is ignored and does not block record or summary', async t =>
 test('disabled mode prevents record, label, and clear writes', async t => {
   const home = await temporaryHome(t)
   const disabledEnv = { DSH_JEV_WORKFLOW_ROUTER_DISABLED: 'true' }
-  const record = await run(home, ['record'], sample(), disabledEnv)
+  const record = await run(home, ['record'], { ...sample(), jevCalls: [{ outcome: 'error', message: 'OpenRouter decisions API 451' }] }, disabledEnv)
   assert.deepEqual(JSON.parse(record.stdout), { disabled: true, recorded: false })
   await assert.rejects(access(recordsPath(home)))
 
@@ -391,4 +430,136 @@ test('summary is aggregate-only and clear removes records', async t => {
   const cleared = await run(home, ['clear'])
   assert.deepEqual(JSON.parse(cleared.stdout), { disabled: false, cleared: true, removed: true })
   await assert.rejects(access(recordsPath(home)))
+})
+
+const ok = provider => ({ outcome: 'success', provider, semantic: 'ok' })
+const invalid = provider => ({ outcome: 'success', provider, semantic: 'invalid-response' })
+const fail = message => ({ outcome: 'error', message })
+
+function withCalls(index, jevCalls, errorCategory = 'none') {
+  const input = sample(index)
+  input.sampleProvenance = 'real-vibe'
+  input.errorCategory = errorCategory
+  if (jevCalls !== undefined) input.jevCalls = jevCalls
+  return input
+}
+
+async function recordAll(home, inputs) {
+  const outputs = []
+  for (const input of inputs) {
+    const result = await run(home, ['record'], input)
+    assert.equal(result.code, 0, result.stderr)
+    outputs.push(result.stdout + result.stderr)
+  }
+  return outputs.join('')
+}
+
+test('jevCalls projections yield deterministic provider and category', async t => {
+  const home = await temporaryHome(t)
+  const output = await recordAll(home, [
+    withCalls(1, [ok('openrouter')]),
+    withCalls(2, [fail('OpenRouter decisions API 451')]),
+    withCalls(3, [fail('Jev provider typesafe: request failed (HTTP 451)')]),
+    withCalls(4, [ok('openrouter'), fail('fetch failed')]),
+    withCalls(5, [ok('openrouter'), ok('typesafe')]),
+    withCalls(6, [fail('socket hang up SECRET-ECHO')]),
+  ])
+  const records = await storedRecords(home)
+  assert.deepEqual(records.map(record => [record.jevProvider, record.errorCategory]), [
+    ['openrouter', 'none'],
+    ['openrouter', 'region-blocked'],
+    ['typesafe', 'region-blocked'],
+    ['openrouter', 'network'],
+    ['unknown', 'none'],
+    ['unknown', 'network'],
+  ])
+  const text = await readFile(recordsPath(home), 'utf8')
+  for (const forbidden of ['jevCalls', 'SECRET-ECHO', 'decisions API', 'fetch failed']) {
+    assert.equal(text.includes(forbidden), false, forbidden)
+    assert.equal(output.includes(forbidden), false, forbidden)
+  }
+})
+
+test('incidental numbers are not HTTP statuses and pinned deadline is timeout', async t => {
+  const home = await temporaryHome(t)
+  await recordAll(home, [
+    withCalls(1, [fail('socket hang up on port 451')]),
+    withCalls(2, [fail('network failed after 503 ms')]),
+    withCalls(3, [fail('Jev request exceeded the 60000ms deadline.')]),
+  ])
+  const records = await storedRecords(home)
+  assert.deepEqual(records.map(record => record.errorCategory), ['network', 'network', 'timeout'])
+  assert.deepEqual(records.map(record => record.jevProvider), ['unknown', 'unknown', 'unknown'])
+})
+
+test('semantic and agent-observed failures survive jevCalls and stay needs-review', async t => {
+  const home = await temporaryHome(t)
+  await recordAll(home, [
+    withCalls(1, [invalid('openrouter')]),
+    withCalls(2, [ok('openrouter'), invalid('openrouter')]),
+    withCalls(3, undefined, 'missing-credential'),
+    withCalls(4, [ok('openrouter')], 'cancelled'),
+    withCalls(5, [invalid('openrouter')]),
+    withCalls(6, [invalid('openrouter')]),
+  ])
+  const records = await storedRecords(home)
+  assert.deepEqual(records.map(record => record.errorCategory), [
+    'malformed-response', 'malformed-response', 'missing-credential', 'cancelled', 'malformed-response', 'malformed-response',
+  ])
+  assert.ok(records.every(record => record.recommendation.status === 'needs-review'))
+  const report = JSON.parse((await run(home, ['report'])).stdout)
+  assert.equal(report.quality.providerFailures, 6)
+})
+
+test('provider error text never persists in records or recorder output', async t => {
+  const home = await temporaryHome(t)
+  const output = await recordAll(home, [withCalls(1, [fail('OpenRouter decisions API 401 (Bearer sk-or-ECHOED-SECRET)')])])
+  const text = await readFile(recordsPath(home), 'utf8')
+  for (const value of [text, output]) assert.equal(value.includes('ECHOED-SECRET'), false)
+  const [record] = await storedRecords(home)
+  assert.equal(record.errorCategory, 'unauthorized')
+  assert.equal(record.jevProvider, 'openrouter')
+})
+
+function runFromFile(home, cwd, file) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('/bin/sh', ['-c', `"${process.execPath}" "${recorder.pathname}" record < "$1"`, 'sh', file], {
+      cwd,
+      env: { ...process.env, DSH_HOME: home, DSH_JEV_WORKFLOW_ROUTER_DISABLED: '' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const stdout = []
+    const stderr = []
+    child.stdout.on('data', chunk => stdout.push(chunk))
+    child.stderr.on('data', chunk => stderr.push(chunk))
+    child.on('error', reject)
+    child.on('close', code => resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }))
+  })
+}
+
+test('malformed stdin gets fixed diagnostic and shell-shaped text stays inert', async t => {
+  const home = await temporaryHome(t)
+  const work = join(home, 'work')
+  await mkdir(work, { recursive: true })
+  const sentinel = 'SECRET-ECHO-ONLY-FIXTURE'
+
+  const badFile = join(work, 'bad.json')
+  await writeFile(badFile, `{"errorCategory": "none", "x": ${sentinel}`, 'utf8')
+  const bad = await runFromFile(home, work, badFile)
+  assert.notEqual(bad.code, 0)
+  assert.equal(bad.stderr, 'jev-workflow-router recorder: invalid JSON input\n')
+  await assert.rejects(access(recordsPath(home)))
+
+  const shellText = `'"; EOF $(touch PWNED) \`touch PWNED2\` ${sentinel}`
+  const goodFile = join(work, 'good.json')
+  await writeFile(goodFile, JSON.stringify(withCalls(1, [fail(shellText)])), 'utf8')
+  const good = await runFromFile(home, work, goodFile)
+  assert.equal(good.code, 0, good.stderr)
+
+  const records = await readFile(recordsPath(home), 'utf8')
+  for (const value of [bad.stdout, bad.stderr, good.stdout, good.stderr, records]) {
+    assert.equal(value.includes(sentinel), false)
+  }
+  await assert.rejects(access(join(work, 'PWNED')))
+  await assert.rejects(access(join(work, 'PWNED2')))
 })

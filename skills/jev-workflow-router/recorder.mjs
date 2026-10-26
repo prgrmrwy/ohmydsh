@@ -60,11 +60,13 @@ const SAFETY_RISKS = ['none', 'low', 'high', 'unknown']
 const MIGRATION_RISKS = ['none', 'reversible', 'irreversible', 'unknown']
 const CHANGE_NECESSITY = ['direct', 'formal-workflow', 'unknown']
 const STATUSES = ['auto-candidate', 'needs-review', 'unavailable']
+const JEV_PROVIDERS = ['typesafe', 'openrouter', 'unknown']
 const ERROR_CATEGORIES = [
   'none',
   'missing-credential',
   'unauthorized',
   'rate-limited',
+  'region-blocked',
   'provider-5xx',
   'network',
   'timeout',
@@ -207,6 +209,74 @@ function normalizeLatency(input) {
   return { availability: 'measured', milliseconds: finiteInteger(source.milliseconds, 0, 0, 60_000) }
 }
 
+const MAX_JEV_CALLS = 2
+const MAX_CALL_MESSAGE = 512
+// Anchored upstream formats only (jev-mcp 0.14.5 / jev-agent-tools 0.2.1); never scan free text for numbers.
+const FAILURE_PROVIDER_PATTERNS = [
+  [/^OpenRouter decisions API /u, 'openrouter'],
+  [/^TypeSafe API /u, 'typesafe'],
+  [/^Jev provider (typesafe|openrouter):/u, null],
+]
+const HTTP_STATUS_PATTERNS = [
+  /^OpenRouter decisions API (\d{3})\b/u,
+  /^TypeSafe API HTTP (\d{3})\b/u,
+  /^Jev provider \w+: .*\(HTTP (\d{3})\)$/u,
+]
+
+function validJevCalls(value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_JEV_CALLS) return null
+  const calls = []
+  for (const call of value) {
+    if (!call || typeof call !== 'object' || Array.isArray(call)) return null
+    if (call.outcome === 'success' && ['ok', 'invalid-response'].includes(call.semantic)) {
+      calls.push({ outcome: 'success', provider: enumValue(call.provider, JEV_PROVIDERS, 'unknown'), semantic: call.semantic })
+    } else if (call.outcome === 'error' && typeof call.message === 'string') {
+      calls.push({ outcome: 'error', message: call.message.slice(0, MAX_CALL_MESSAGE) })
+    } else {
+      return null
+    }
+  }
+  return calls
+}
+
+function failureProvider(message) {
+  for (const [pattern, provider] of FAILURE_PROVIDER_PATTERNS) {
+    const match = pattern.exec(message)
+    if (match) return provider ?? match[1]
+  }
+  return 'unknown'
+}
+
+function failureCategory(message) {
+  for (const pattern of HTTP_STATUS_PATTERNS) {
+    const match = pattern.exec(message)
+    if (!match) continue
+    const status = Number(match[1])
+    if (status === 451) return 'region-blocked'
+    if (status === 401 || status === 403) return 'unauthorized'
+    if (status === 429) return 'rate-limited'
+    if (status >= 500 && status <= 599) return 'provider-5xx'
+    return 'unknown'
+  }
+  if (/^Jev request exceeded the \d+ms deadline/u.test(message) || /timed out|timeout/iu.test(message)) return 'timeout'
+  if (/fetch failed|socket|ECONN|ENOTFOUND|network/u.test(message)) return 'network'
+  return 'unknown'
+}
+
+/** Deterministic attribution from bounded call projections; raw messages never leave this function. */
+function attributeJevCalls(rawCalls, suppliedCategory) {
+  const calls = validJevCalls(rawCalls)
+  if (!calls) return { jevProvider: 'unknown', errorCategory: suppliedCategory }
+  const known = [...new Set(calls
+    .map(call => call.outcome === 'success' ? call.provider : failureProvider(call.message))
+    .filter(provider => provider !== 'unknown'))]
+  const jevProvider = known.length === 1 ? known[0] : 'unknown'
+  const failed = calls.find(call => call.outcome === 'error')
+  if (failed) return { jevProvider, errorCategory: failureCategory(failed.message) }
+  if (calls.some(call => call.semantic === 'invalid-response')) return { jevProvider, errorCategory: 'malformed-response' }
+  return { jevProvider, errorCategory: suppliedCategory }
+}
+
 function normalizeRecord(input) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
   const recommendation = source.recommendation && typeof source.recommendation === 'object'
@@ -257,7 +327,10 @@ function normalizeRecord(input) {
     && recommendation.margin >= 0
     && recommendation.margin <= 1
   const escape = bool(recommendation.escape)
-  const errorCategory = enumValue(source.errorCategory, ERROR_CATEGORIES, 'unknown')
+  const attribution = Object.hasOwn(source, 'jevCalls')
+    ? attributeJevCalls(source.jevCalls, enumValue(source.errorCategory, ERROR_CATEGORIES, 'unknown'))
+    : { jevProvider: enumValue(source.jevProvider, JEV_PROVIDERS, 'unknown'), errorCategory: enumValue(source.errorCategory, ERROR_CATEGORIES, 'unknown') }
+  const errorCategory = attribution.errorCategory
   const conservativePass = workflow !== 'unknown'
     && completeProbabilities
     && confidenceValid
@@ -301,6 +374,7 @@ function normalizeRecord(input) {
       },
     },
     errorCategory,
+    jevProvider: attribution.jevProvider,
     actualRoute: 'unknown',
     overrideSource: 'unknown',
   }
@@ -437,7 +511,13 @@ async function readStdin() {
     chunks.push(chunk)
   }
   const text = Buffer.concat(chunks).toString('utf8')
-  return text.trim() ? JSON.parse(text) : {}
+  if (!text.trim()) return {}
+  try {
+    return JSON.parse(text)
+  } catch {
+    // Node's parser message quotes input fragments; never echo them.
+    throw new Error('invalid JSON input')
+  }
 }
 
 async function recordCommand() {
@@ -847,6 +927,9 @@ async function reportCommand() {
       actualRoute: groupedAggregates(realVibeRecords, record => record.actualRoute, ACTUAL_ROUTES),
       routerVersion: groupedAggregates(realVibeRecords, record => record.routerVersion),
       candidateSet: groupedAggregates(realVibeRecords, candidateSetKey),
+      jevProvider: groupedAggregates(realVibeRecords, record => record.jevProvider, JEV_PROVIDERS),
+      // Failed calls often cannot be attributed; the unknown group keeps them visible.
+      jevProviderScope: 'attributed-records-only',
     },
     coverage: {
       phase2Admission: 'not-established',

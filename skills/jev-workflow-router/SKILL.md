@@ -70,7 +70,18 @@ Otherwise, after deterministic rules are known, make these observation-only call
 1. Call `mcp__jev__jev_classify` to classify `direct` versus `formal-workflow`. Include only the enum/numeric/boolean features above, the two fixed class descriptions, the fixed `manual-review` escape, and a bounded timeout. Do not include prose evidence. Preserve the complete closed-key classification distribution: `direct`, `formal-workflow`, `manual-review`.
 2. Only when the first shadow result recommends `formal-workflow`, call `mcp__jev__jev_decide` over the eligible subset of `standard-openspec`, `anvil`, and `spec-superflow`, using catalog-version-1 descriptions and the same bounded features. Preserve confidence, winner margin, requirement-check booleans, and the complete closed-key workflow distribution: all three workflow keys plus the fixed escape keys `ask_user`, `investigate`, and `none`. Ineligible workflow keys remain bounded fields with probability zero; never discard an escape probability.
 
-Do not retry ambiguous failures. Normalize provider/MCP failures to one of: `missing-credential`, `unauthorized`, `rate-limited`, `provider-5xx`, `network`, `timeout`, `cancelled`, `malformed-response`, or `unknown`. Never put raw error messages/bodies in arguments, records, or user output.
+Do not retry ambiguous failures. The error category closed set is `none`, `missing-credential`, `unauthorized`, `rate-limited`, `region-blocked`, `provider-5xx`, `network`, `timeout`, `cancelled`, `malformed-response`, and `unknown`. Never put raw error messages/bodies in command arguments, records, or user output.
+
+### Call projections (`jevCalls`)
+
+The recorder, not you, derives the service provider (`jevProvider`) and the transport error category. For each Jev call you actually made (at most two, in order), add one bounded projection to `jevCalls`:
+
+- Successful call: `{"outcome":"success","provider":P,"semantic":S}`. `P` is the `provider` field of the tool result JSON (`typesafe`, `openrouter`, or anything else, which becomes `unknown`). `S` is `invalid-response` when the result cannot be fully parsed, was truncated, lacks the required classify/decide structure, or has any classify `results[].status` or decide `recommendation.status` equal to `invalid_response`; otherwise `ok`.
+- Failed call: `{"outcome":"error","message":M}` where `M` is the tool error text cut to 512 characters.
+
+When every call succeeded, set `"errorCategory":"none"` explicitly; when you observed a failure that is not a call result (missing credential, cancellation), set that category and include only the calls that ran. Do not copy any other result content.
+
+This is the only place raw error text may appear, and only on the recorder's stdin. Never interpolate, paste, or splice tool output into a shell command, heredoc, or command argument.
 
 ## Conservative post-call policy
 
@@ -80,10 +91,10 @@ A result may be labelled `auto-candidate` only for offline evaluation when all c
 
 ## Local recorder
 
-Use the zero-dependency Node >=22 recorder next to this file. Pass JSON only on stdin; never put observations in command arguments. The bounded record object must contain `"sampleProvenance":"real-vibe"` for an ordinary Agent call and `"metrics":{"latency":{"availability":"measured","milliseconds":N},"usage":{...}}` when the local monotonic measurement succeeded. Never reuse the legacy `latencyMs` field.
+Use the zero-dependency Node >=22 recorder next to this file. Pass JSON only on stdin; never put observations in command arguments. Write the record JSON with the file-writing tool to a temporary file readable only by the current user (for example under the system temp directory with mode 0600), run `node recorder.mjs record < <that file>`, and delete the temporary file afterwards whether the command succeeded or failed. The bounded record object must contain `"sampleProvenance":"real-vibe"` for an ordinary Agent call and `"metrics":{"latency":{"availability":"measured","milliseconds":N},"usage":{...}}` when the local monotonic measurement succeeded. Never reuse the legacy `latencyMs` field.
 
 ```sh
-printf '%s' "$BOUNDED_JSON" | node recorder.mjs record
+node recorder.mjs record < "$RECORD_JSON_FILE"
 node recorder.mjs label OBSERVATION_ID ACTUAL_ROUTE SOURCE
 node recorder.mjs summary
 node recorder.mjs report
