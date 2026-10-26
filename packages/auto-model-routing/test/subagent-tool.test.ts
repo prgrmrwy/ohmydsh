@@ -1,4 +1,4 @@
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { routeSubagentTool, type ToolDeps } from '../src/subagent-tool.js'
 import { DEFAULT_SETTINGS as CURRENT_DEFAULTS, type Settings, type RoutingCatalog } from '../src/settings-contract.js'
 import { JevClient } from '../src/jev.js'
@@ -36,13 +36,13 @@ it('policy-v2 preview is recommended not applied and respects explicit dimension
  expect(await def.execute({task:'synthetic',provider:'claude',path:'fork'},exec())).toMatchObject({status:'unsupported'})
  expect(server.bodies).toHaveLength(1)
 })
-it('Magpie preview uses exact provider/model and legacy rejects before Jev',async()=>{
- const model={provider:'dsh-magpie-connect',model:'codex/gpt-6-luna',name:'Luna',reasoningEfforts:['low','medium','high','xhigh']}
+it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s preview uses exact provider/model and legacy rejects before Jev',async(provider)=>{
+ const model={provider:provider,model:'codex/gpt-6-luna',name:'Luna',reasoningEfforts:['low','medium','high','xhigh']}
  let policy:'legacy'|'policy-v2'='policy-v2'
  const {def,server}=await tool(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'baseline'}}}),undefined,undefined,{readSettings:()=>({...DEFAULT_SETTINGS,policy}),catalog:async()=>({models:[model],childAllowlist:{status:'enabled',allowedModels:[model]}})})
- expect(await def.execute({task:'synthetic',provider:'dsh-magpie-connect',family:'codex'},exec())).toMatchObject({provider:'dsh-magpie-connect',model:'codex/gpt-6-luna',reasoning_effort:'high',status:'recommended'})
+ expect(await def.execute({task:'synthetic',provider:provider,family:'codex'},exec())).toMatchObject({provider:provider,model:'codex/gpt-6-luna',reasoning_effort:'high',status:'recommended'})
  policy='legacy'
- await expect(def.execute({task:'synthetic',provider:'dsh-magpie-connect'},exec())).rejects.toThrow('policy-v2')
+ await expect(def.execute({task:'synthetic',provider:provider},exec())).rejects.toThrow('policy-v2')
  expect(server.bodies).toHaveLength(1)
 })
 it('tool_returns_table_entry', async () => {
@@ -117,6 +117,24 @@ it('manual_root_skips_jev', async () => {
  expect(await def.execute({ task: 'x', provider: 'claude' }, exec(session('S1')))).toEqual(manual)
  expect(server.bodies).toHaveLength(0)
  expect(judged).toHaveLength(0)
+})
+
+// Spec regression: the existing MANUAL early return takes precedence over legacy rejection.
+it.each(['dsh-magpie-connect', 'dsh-magpie'] as const)('%s MANUAL root with explicit legacy skips routing without writes', async provider => {
+ const readSettings = vi.fn(() => ({ ...DEFAULT_SETTINGS, policy: 'legacy' as const }))
+ const catalog = vi.fn((): RoutingCatalog => ({ models: [], childAllowlist: { status: 'enabled', allowedModels: [] } }))
+ const { def, server, state, disk, judged } = await tool(tier('complex'), { S1: 'MANUAL' }, undefined, { readSettings, catalog })
+ const before = structuredClone([...disk])
+ const write = vi.spyOn(disk, 'set')
+ const result = await def.execute({ task: 'synthetic', provider }, exec())
+ expect(result).toEqual({ routed: false, reason: 'manual' })
+ expect(server.bodies).toHaveLength(0)
+ expect(judged).toHaveLength(0)
+ expect(readSettings).not.toHaveBeenCalled()
+ expect(catalog).not.toHaveBeenCalled()
+ expect(write).not.toHaveBeenCalled()
+ expect([...disk]).toEqual(before)
+ expect(state.read('S1')).toEqual({ mode: 'MANUAL' })
 })
 
 it('nested_child_follows_root_mode', async () => {

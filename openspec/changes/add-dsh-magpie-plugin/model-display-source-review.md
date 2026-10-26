@@ -1,0 +1,53 @@
+# What this change does:
+
+This change adds optional model display groups without changing the real provider or model. It also shows the last actual effort beside the next selected effort, without writing selection state or global defaults.
+
+## Review boundary
+
+- Independent, source-first review in `/home/prgrmr/opensource/ohmydsh`; no delegation, implementation, build, deployment, restart, commit, credential access, or raw-secret read. Assumed load: one personal DSH Host, several sessions and connected clients, with catalog refresh and user selection allowed to overlap.
+- Review started **2026-10-25 14:08:59 -04:00**; source/check boundary **2026-10-25 14:19:07 -04:00**. Repository HEAD: `8aeca83d47e32231a46c62fff10fd0625e45847a`. The working tree includes other owners' unfinished work; this is not a whole-change release receipt.
+- Reviewed [model-display.patch](<../../../packages/dsh-pet/compat/subagent/model-display.patch>) SHA-256: `0a9980ef42f621ba1977c3541196c1cb13bbcfab0eb146104b352f2c17f8ae19` (306 lines). It was unchanged at the closing check. Pinned upstream: `639ed015397290b3745d163aafe02ffee4aa3f84`.
+- Read connected upstream callers from the owner's isolated checkout, not the shared `.upstream`. That checkout had already been restored to the pinned base when inspected; proposed behavior was reviewed from the patch, with its compiled artifacts used only for the bounded codec probes below. No generated file was edited.
+- Builder work was concurrent. Closing sampled hashes: [build.mjs](<../../../packages/dsh-pet/compat/subagent/build.mjs>) `3b2dcaa842b71eb9ded926515470f49bf9691baf99bbd64352cb5f6fdbaaa9a0`; [build-launcher.cjs](<../../../packages/dsh-pet/compat/subagent/build-launcher.cjs>) `1a6fc4dee3b0fb76b5a28e9a5dee7c5fc4a9ff70ff958f7d0f7f97a4f611e923`; [verify-model-display.mjs](<../../../packages/dsh-pet/compat/subagent/verify-model-display.mjs>) `b11112c646958bd473f83fd3b2697b3f45f765c656b340b1c8aeebdaff4818ab`. These identify samples, not a frozen shipping graph.
+
+## Must fix
+
+1. **The new legacy-preview rule also covers MANUAL, where the tool must return normally** ([AUTO delta:4–14](<specs/auto-model-routing/spec.md#L4-L14>)).
+   - **What this is:** The requirement says both Magpie previews reject under legacy. The scenario's GIVEN says only legacy plus a Magpie transport; it does not require the root session to be AUTO.
+   - **Problem:** A live MANUAL root using legacy and `provider: 'dsh-magpie'` or `'dsh-magpie-connect'` is a reachable counterexample: [the tool:74–89](<../../../packages/auto-model-routing/src/subagent-tool.ts#L74-L89>) returns `{routed:false, reason:'manual'}` before reading policy. This agrees with the [current MANUAL isolation rule:294–305](<../../specs/auto-model-routing/spec.md#L294-L305>), but contradicts the new blanket error expectation.
+   - **Fix:** Limit the new requirement's rejection clause and the scenario GIVEN to **root AUTO + explicit legacy**. Keep the MANUAL early return in place; add a small dual-transport MANUAL regression rather than moving the policy check above it.
+   - **If we skip it:** Acceptance can demand an error for valid MANUAL calls and push a later implementation toward breaking manual isolation. This is a spec defect, not a source-routing defect.
+
+## Should fix
+
+2. **The new keyboard-search test can accept the wrong model** ([React test:43–53](<../../../packages/dsh-pet/test/model-display-react.spec.tsx#L43-L53>)).
+   - **What this is:** The parameterized search test presses ArrowDown and Enter, then only checks that any submitted provider belongs to `gateway` or `ordinary`. It permits zero submissions too.
+   - **Problem:** With query `codex`, the displayed order is `GPT`, `Second`, `Local GPT`; ArrowDown should accept `gateway/second`. A handler that instead submits `gateway/codex/gpt` or `ordinary/codex/gpt` and closes the menu still satisfies these assertions. The separate Tab test checks one Claude result, not this cross-group arrow path.
+   - **Fix:** Assert the exact highlighted row and exact `{provider, model}` for one cross-group ArrowDown/Enter case, and require a submission when the target differs from current. Do not change the production selection logic, which currently uses the same filtered order as rendering.
+   - **If we skip it:** A future mismatch between visible rows and keyboard indexing can pass the new regression. This is a test gap, not a reproduced current UI bug.
+
+## Source conclusions
+
+- **Metadata and identity:** [plugin catalog:11–23](<../../../packages/dsh-magpie/src/host/catalog.ts#L11-L23>) uses raw `owned_by`, not the settings fallback. Missing ownership uses `other`; literal `other` and namespace-like owners use distinct `owned-by:` ids. Misleading model names do not change ownership. Existing settings/visibility provider keys and `model.name` stay unchanged. [Plugin tests](<../../../packages/dsh-magpie/test/display-group.test.ts>) exercise direct list/resolve/prepare output, visibility, defaults, misleading ids, missing owners, and detachment; this is not Host end-to-end proof.
+- **Normalization and catalog:** [patch:226–259](<../../../packages/dsh-pet/compat/subagent/model-display.patch#L226-L259>) accepts omission, rejects malformed/blank id or label with `INVALID_MODEL_INFO`, and copies only id/label. Real resolve and prepared-call normalization share this path. [Host catalog projection:1–25](<../../../packages/dsh-pet/compat/subagent/model-display.patch#L1-L25>) copies it again; no fake provider is registered.
+- **Grouping and search:** [private helper:263–306](<../../../packages/dsh-pet/compat/subagent/model-display.patch#L263-L306>) uses a JSON tuple key separate from the real provider id. It preserves provider order, first bucket occurrence, model order within buckets, and localized account labels. [Both selector entries](<../../../packages/dsh-pet/compat/subagent/model-display.patch#L52-L205>) share those buckets. Rendered rows and `visibleModels` flatten the same filtered groups; click, arrows, current, pending and effort actions retain real identities. `/model` keeps ordinary `group.name` ids and resolves row ids against original catalog groups. Optional search aliases extend label/name/id matching without replacing visible names.
+- **Effort and state:** [display-only changes](<../../../packages/dsh-pet/compat/subagent/model-display.patch#L85-L175>) forward existing `lastUsed`; they do not change projection, current, pending, or selection submission. Default effort still resolves through the existing selector/Host path. The last-used/next caption is gated by exact provider/model plus available reasoning metadata. Missing actual, foreign provider/model, equal effort, unavailable current, and no reasoning fall back safely; an undefined actual effort is shown as Default, while a removed effort id remains explicit rather than being guessed.
+- **AUTO compatibility:** The four source deltas preserve exact transports, full ids, live capability/cap checks and allowlists. The unchanged [policy Host:123–160](<../../../packages/auto-model-routing/src/policy-host.ts#L123-L160>) retains the parent captured-list check and post-await MANUAL check. No display fix calls `selectModel`; that would violate [current spec:22–38](<../../specs/auto-model-routing/spec.md#L22-L38>). Real AgentLoop/header tests use request-local high while a later low intent survives; actual high/next medium is not a wire failure.
+- **Data exposure:** Display metadata contains only public id/label. Catalog intake redacts gateway strings before mapping; normalization drops extra metadata properties. The patch does not add metadata to request config or generation payloads. This is a source conclusion, not a fresh real-gateway capture.
+
+## Evidence actually checked
+
+- Ran `node --check` on the builder, launcher builder and verifier; final syntax checks passed. Ran `node --test packages/dsh-pet/test/model-display-builder.test.cjs`: **1/1 passed**. This checks pins/wiring, not a compiled installation.
+- Ran no-file, in-memory probes from actual source/patch text: bucket keys/order/account label/name preservation; actual/next fallback matrix; and both Magpie transports under MANUAL versus AUTO+legacy. The last probe returned MANUAL `routed:false`, AUTO+legacy rejection, **zero Jev calls**.
+- Read and exercised generated modelCatalog schemas from isolated Host, Remote-client and aggregate api-remotes artifacts: optional id/label survived JSON/parse, extra properties were stripped, omission remained accepted. Also imported the **actual generated Remote descriptor** and called its modelCatalog `result.create().parse(...)` successfully. This is stronger than a string marker, but is not a network roundtrip or final launcher-graph proof.
+- Independently read the owner's build log:112–119 (`/tmp/pet-model-display-20261025/build.log#L112-L119`) showing **21/21** focused tests, and build log:218–221 (`/tmp/pet-model-display-20261025/build.log#L218-L221`) showing **339/339** regressions. I did not rerun those suites. I read all three focused Host/routing/React tests and the relevant upstream catalog, projection, selection/default, popup controller/view and other catalog consumers.
+
+## Shipping evidence pending — not source findings
+
+The [five-package template](<../../../packages/dsh-pet/compat/subagent/model-display.package.template.json>) names llm, api-session-controller, **api-remotes**, client-ui-model-selection and client-ui-commands. The builders include patch/template hashes, provenance, copying, overrides, Host build and Client builds. The owner was still completing this work; artifact presence or a source test pass must not be called final delivery. A complete immutable launcher graph, its final verifier result, current bilingual compat documentation/retirement evidence, and actual assembled client loading remain the owner's completion gate. I did not treat an unfinished verifier or absent final launcher as an existing source bug.
+
+The [99-scenario ledger](<test-plan.md#L105-L121>) explicitly leaves group/display evidence pending. This review does not change its states, central documents, historical verdicts, or archive status. No additional current-source defect with a concrete reachable case was established in this pass.
+
+**Verdict: fix 1 first; strengthen test 2. Shipping remains pending the owner's final artifact/graph evidence.**
+
+**Not checked:** live GUI, real gateway or credentials, full plugin/AUTO test reruns, final launcher installation/network RPC, platform matrix, and deployment. No build, shared-checkout scrub, implementation, restart, commit, or archive was performed.

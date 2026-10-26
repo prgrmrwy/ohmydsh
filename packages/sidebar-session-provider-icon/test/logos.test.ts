@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { badgeBrands, badgeInnerHTML, brandKeyOf } from '../src/client/logos.js'
 
 describe('downloaded brand logo mapping', () => {
-  it('maps the expected DeepSeek/OpenAI/OpenCode brands', () => {
+  it('spec Scenario "DeepSeek/OpenAI/OpenCode 显示正确品牌"', () => {
     expect(brandKeyOf('deepseek-official', 'deepseek-v4-flash')).toBe('deepseek')
     expect(brandKeyOf('codex', 'gpt-5.6-sol')).toBe('openai')
     expect(brandKeyOf('opencode', 'opencode-go')).toBe('opencode')
   })
 
-  it('maps Kimi, GLM, MiniMax, and Pi provider routes', () => {
+  it('spec Scenario "Kimi/GLM/MiniMax/Pi 显示正确品牌"', () => {
     expect(brandKeyOf('moonshotai-cn', 'kimi-k2-thinking')).toBe('kimi')
     expect(brandKeyOf('kimi-coding', 'kimi-for-coding')).toBe('kimi')
     expect(brandKeyOf('zai-coding-cn', 'glm-5')).toBe('glm')
@@ -17,20 +17,20 @@ describe('downloaded brand logo mapping', () => {
     expect(brandKeyOf('pi-ai', 'pi')).toBe('pi')
   })
 
-  it('maps OpenClaw and Hermes routes, including the requested Hermas alias', () => {
+  it('spec Scenario "OpenClaw/Hermes 显示正确品牌"', () => {
     expect(brandKeyOf('openclaw', 'openclaw-agent')).toBe('openclaw')
     expect(brandKeyOf('hermes-agent', 'hermes-4')).toBe('hermes')
     expect(brandKeyOf('hermas', 'custom')).toBe('hermes')
     expect(brandKeyOf('nousresearch', 'hermes-3')).toBe('hermes')
   })
 
-  it('keeps known provider identity ahead of a cross-brand model name', () => {
+  it('spec Scenario "OpenCode route 不被模型名误判"', () => {
     expect(brandKeyOf('opencode-go', 'deepseek-v4-flash')).toBe('opencode')
     expect(brandKeyOf('deepseek-official', 'gpt-compatible')).toBe('deepseek')
     expect(brandKeyOf('opencode-go', 'glm-5.3')).toBe('opencode')
   })
 
-  it('uses model identity only when the provider route is generic or unknown', () => {
+  it('spec Scenario "未知兼容 route 使用 model fallback"', () => {
     expect(brandKeyOf('generic-compatible', 'deepseek-v4')).toBe('deepseek')
     expect(brandKeyOf('private-proxy', 'gpt-5')).toBe('openai')
   })
@@ -49,7 +49,7 @@ describe('downloaded brand logo mapping', () => {
     expect(badgeInnerHTML('openclaw', 'openclaw-agent')).toContain('<title>OpenClaw</title>')
   })
 
-  it('maps Trae routes by exact name or traex prefix, never by substring or model', () => {
+  it('spec Scenario "Trae route 显示 Trae 品牌"', () => {
     expect(brandKeyOf('traex', 'GPT-5.6-Sol[1m]')).toBe('trae')
     expect(brandKeyOf('trae', 'DeepSeek-V4-Flash')).toBe('trae')
     expect(brandKeyOf('extraeval', 'private-model')).toBeUndefined()
@@ -65,7 +65,7 @@ describe('downloaded brand logo mapping', () => {
 })
 
 describe('OpenCode catalog model brands', () => {
-  it('recognizes every model family in the OpenCode Go/Zen catalogs that has a vendored mark', () => {
+  it('spec Scenario "OpenCode 目录模型族得到品牌"', () => {
     const cases: Array<[string, string]> = [
       ['qwen3.8-flash', 'qwen'], ['qwen3.7-max', 'qwen'],
       ['hy3', 'hunyuan'], ['hy4-preview', 'hunyuan'],
@@ -107,7 +107,7 @@ describe('composite provider + model badge', () => {
     expect(badgeBrands('deepseek-official', 'deepseek-v4-pro')).toEqual({ primary: 'deepseek', secondary: undefined })
   })
 
-  it('adds the model brand as a sub-icon for aggregator routes', () => {
+  it('spec Scenario "TraeX 目录模型族得到品牌"', () => {
     expect(badgeBrands('opencode-go', 'deepseek-v4-flash')).toEqual({ primary: 'opencode', secondary: 'deepseek' })
     expect(badgeBrands('opencode-go', 'deepseek-v4-flash-vision-exp')).toEqual({ primary: 'opencode', secondary: 'deepseek' })
     expect(badgeBrands('opencode-go', 'minimax-m3')).toEqual({ primary: 'opencode', secondary: 'minimax' })
@@ -158,6 +158,51 @@ describe('composite provider + model badge', () => {
     expect(refs.every((ref) => ids.includes(ref))).toBe(true)
     // The primary single logo keeps the downloaded ids untouched.
     expect(badgeInnerHTML('minimax', 'MiniMax-M3')).toMatch(/id=["']lobe-icons-minimax-_R_0_["']/)
+  })
+})
+
+describe('dsh-magpie current-spec regressions', () => {
+  const routes = ['dsh-magpie', 'dsh-magpie-connect']
+  it('spec Scenario "Magpie route 显示 Magpie 品牌"', () => {
+    for (const route of [...routes, 'magpie', 'magpie-home']) expect(brandKeyOf(route, 'codex/gpt-6-luna')).toBe('magpie')
+  })
+  it('spec Scenario "Magpie 只按精确名或前缀匹配"', () => {
+    expect(brandKeyOf('not-magpie', 'gpt-5')).toBe('openai')
+  })
+  it('spec Scenario "相似但不同的 route 名不被识别"', () => {
+    expect(brandKeyOf('dsh-magpie2', 'gpt-5')).toBe('openai')
+    expect(brandKeyOf('dsh-magpie2', 'private-model')).toBeUndefined()
+  })
+  it('spec Scenario "网关模型 id 按上游 provider 段识别"', () => {
+    for (const route of routes) expect(badgeBrands(route, 'opencode-go/private-model')).toEqual({ primary: 'magpie', secondary: 'opencode', transit: undefined })
+  })
+  it('spec Scenario "上游段无法识别时退回模型名"', () => {
+    for (const route of routes) {
+      expect(badgeBrands(route, 'auto/claude-haiku-5.5')).toEqual({ primary: 'magpie', secondary: 'anthropic', transit: undefined })
+      expect(badgeBrands(route, 'group/deepseek-v4-flash')).toEqual({ primary: 'magpie', secondary: 'deepseek', transit: undefined })
+    }
+  })
+  it('spec Scenario "网关小图标取模型厂商而不是上游平台"', () => {
+    for (const route of routes) {
+      expect(badgeBrands(route, 'opencode-go/deepseek-v4.1-flash')).toEqual({ primary: 'magpie', secondary: 'deepseek', transit: 'opencode' })
+      expect(badgeBrands(route, 'claude/claude-haiku-5-5')).toEqual({ primary: 'magpie', secondary: 'anthropic', transit: undefined })
+      expect(badgeBrands(route, 'codex/gpt-6-luna')).toEqual({ primary: 'magpie', secondary: 'openai', transit: undefined })
+    }
+  })
+  it('spec Scenario "模型名优先于上游段"', () => {
+    for (const route of routes) expect(badgeBrands(route, 'opencode-go/glm-5.3-flash').secondary).toBe('glm')
+  })
+  it('spec Scenario "网关中转层单独识别"', () => {
+    for (const route of routes) {
+      expect(badgeBrands(route, 'opencode-go/deepseek-v4.1-flash').transit).toBe('opencode')
+      expect(badgeBrands(route, 'opencode-go/glm-5.3-flash').transit).toBe('opencode')
+    }
+  })
+  it('spec Scenario "上游段不是品牌时没有中转层"', () => {
+    for (const route of routes) for (const model of ['auto/claude-haiku-5.5', 'group/deepseek-v4-flash', 'custom/omen-alpha']) {
+      expect(badgeBrands(route, model).transit).toBeUndefined()
+      expect(badgeInnerHTML(route, model)).not.toContain('data-transit-brand')
+    }
   })
 })
 

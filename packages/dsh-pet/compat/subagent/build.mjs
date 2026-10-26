@@ -35,6 +35,9 @@ const patchFile = join(here, 'settlement-notice.patch')
 const inquiryPatchFile = join(here, 'inquiry-isolation.patch')
 const toolsPatchFile = join(here, 'newinquiry-tools-guard.patch')
 const managedEffectsPatchFile = join(here, 'native-managed-effects.patch')
+const modelDisplayPatchFile = join(here, 'model-display.patch')
+const modelDisplayTemplateFile = join(here, 'model-display.package.template.json')
+const modelDisplayTemplate = JSON.parse(readFileSync(modelDisplayTemplateFile, 'utf8'))
 const nativeToolsTemplateFile = join(here, 'native-tools.package.template.json')
 const nativeToolsVerifier = join(here, 'verify-native-managed-effects.mjs')
 const agentLoopPackageDir = 'packages/core/agent-loop'
@@ -90,6 +93,7 @@ const UPSTREAM = {
   toolsPatchSha256: '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04654f7b13a3',
   /** SHA-256 of the managed-effects owner patch. */
   managedEffectsPatchSha256: '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61',
+  modelDisplayPatchSha256: '0a9980ef42f621ba1977c3541196c1cb13bbcfab0eb146104b352f2c17f8ae19',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
@@ -121,6 +125,8 @@ const actualManagedEffectsPatchHash = createHash('sha256').update(readFileSync(m
 if (actualManagedEffectsPatchHash !== UPSTREAM.managedEffectsPatchSha256) {
   fail(`managed-effects patch hash mismatch\\n  expected ${UPSTREAM.managedEffectsPatchSha256}\\n  actual   ${actualManagedEffectsPatchHash}`)
 }
+const actualModelDisplayHash = createHash('sha256').update(readFileSync(modelDisplayPatchFile)).digest('hex')
+if (actualModelDisplayHash !== UPSTREAM.modelDisplayPatchSha256 || modelDisplayTemplate.patchSha256 !== actualModelDisplayHash) fail('model display patch or template hash mismatch')
 const nativeToolsTemplate = JSON.parse(readFileSync(nativeToolsTemplateFile, 'utf8'))
 if (nativeToolsTemplate.patchSha256 !== UPSTREAM.managedEffectsPatchSha256) fail('native tool template patch hash differs from the reviewed patch pin')
 if (actualPatchHash !== UPSTREAM.patchSha256) {
@@ -166,7 +172,7 @@ console.log(`[compat/subagent] base ${head}`)
 // `git checkout -- .` restores tracked files only. Reuse ignored build output
 // (node_modules, lib/) only when it was produced for exactly these inputs;
 // otherwise remove every untracked and ignored file before building.
-const combinedPatchHash = createHash('sha256').update(readFileSync(patchFile)).update(readFileSync(inquiryPatchFile)).update(readFileSync(toolsPatchFile)).update(readFileSync(managedEffectsPatchFile)).update(readFileSync(nativeToolsTemplateFile)).digest('hex')
+const combinedPatchHash = createHash('sha256').update(readFileSync(patchFile)).update(readFileSync(inquiryPatchFile)).update(readFileSync(toolsPatchFile)).update(readFileSync(managedEffectsPatchFile)).update(readFileSync(nativeToolsTemplateFile)).update(readFileSync(modelDisplayPatchFile)).update(readFileSync(modelDisplayTemplateFile)).digest('hex')
 const cache = prepareUpstreamCache({ checkout, commit: UPSTREAM.commit, patchSha256: combinedPatchHash, run })
 console.log(`[compat/subagent] upstream cache ${cache.reused ? 'reused (same commit and patch)' : 'scrubbed (inputs changed or unknown)'}`)
 
@@ -175,6 +181,7 @@ try {
   run('git', ['apply', '--check', inquiryPatchFile], checkout)
   run('git', ['apply', '--check', toolsPatchFile], checkout)
   run('git', ['apply', '--check', managedEffectsPatchFile], checkout)
+  run('git', ['apply', '--check', modelDisplayPatchFile], checkout)
 } catch {
   fail(
     'the recorded patch does not apply to the pinned upstream source.\n'
@@ -186,6 +193,7 @@ run('git', ['apply', patchFile], checkout)
 run('git', ['apply', inquiryPatchFile], checkout)
 run('git', ['apply', toolsPatchFile], checkout)
 run('git', ['apply', managedEffectsPatchFile], checkout)
+run('git', ['apply', modelDisplayPatchFile], checkout)
 
 // The checkout is now PATCHED, and it stays patched for the whole build below
 // (install, native build, tests, tsc, tsdown all read the patched source).
@@ -206,6 +214,8 @@ run('git', ['apply', managedEffectsPatchFile], checkout)
 // when the tree would otherwise be left dirty.
 process.on('exit', () => {
   try {
+    // Reversing also removes new helper files that tracked checkout cannot restore.
+    run('git', ['apply', '--reverse', modelDisplayPatchFile], checkout)
     run('git', ['checkout', '--', '.'], checkout)
   } catch {
     // Restoration is hygiene, not correctness: the artifact is already
@@ -230,11 +240,19 @@ run(process.execPath, [
   '--reporter=dot',
 ], checkout, { env: { CI: 'true' } })
 
+run(process.execPath, ['./node_modules/vitest/vitest.mjs', 'run', '--config', join(here, 'model-display.vitest.config.mjs'), '--reporter=dot'], checkout, { env: { CI: 'true', DSH_COMPAT_SUBAGENT_CHECKOUT: checkout } })
+run(process.execPath, ['./node_modules/vitest/vitest.mjs', 'run', 'packages/llm/llm/tests/service.spec.ts', 'packages/api/session-controller/tests/session-models.host.spec.ts', 'packages/client/ui-model-selection/tests', 'packages/client/ui-commands/tests', '--reporter=dot'], checkout, { env: { CI: 'true' } })
+
 console.log('[compat/subagent] building upstream host libraries')
 run('corepack', ['pnpm@11.7.0', 'install', '--prefer-offline'], checkout, { env: { CI: 'true' } })
 run(process.execPath, ['--max-old-space-size=4096', './node_modules/typescript/bin/tsc', '-b', 'tsconfig.host.json'], checkout)
 run(process.execPath, ['./node_modules/tsdown/dist/run.mjs', '--env.DSH_BUILD_FACE', 'host'], checkout)
 
+// Client presentation and generated Remote response codecs must ship together.
+run(process.execPath, ['--max-old-space-size=4096', './node_modules/typescript/bin/tsc', '-b', ...modelDisplayTemplate.packages.filter(spec => spec.client).map(spec => spec.sourceDir + (spec.sourceDir.includes('/api/') ? '/tsconfig.client.json' : ''))], checkout)
+for (const spec of modelDisplayTemplate.packages.filter(spec => spec.client)) {
+  run(process.execPath, [join(checkout, 'node_modules/tsdown/dist/run.mjs'), '--env.DSH_BUILD_FACE', 'client'], join(checkout, spec.sourceDir))
+}
 const built = join(checkout, UPSTREAM.packageDir)
 const libSource = join(built, 'lib')
 if (!existsSync(libSource)) fail('upstream build produced no lib directory')
@@ -357,6 +375,27 @@ for (const spec of nativeToolsTemplate.packages) {
   }
   writeFileSync(join(targetDir, 'package.json'), `${JSON.stringify(nativeManifest, null, 2)}\n`)
   if (!existsSync(join(targetDir, 'lib', 'index.js')) || !existsSync(join(targetDir, 'lib', 'types', 'index.d.ts'))) fail(`native tool artifact is missing runtime or declaration entry: ${spec.name}`)
+}
+const modelDisplayRoot = join(outputRoot, 'agent-artifacts', 'model-display-artifacts')
+mkdirSync(modelDisplayRoot, { recursive: true })
+for (const spec of modelDisplayTemplate.packages) {
+  const sourceDir = join(checkout, spec.sourceDir)
+  const upstreamManifest = JSON.parse(readFileSync(join(sourceDir, 'package.json'), 'utf8'))
+  if (upstreamManifest.name !== spec.name) fail(`model display source identity mismatch: ${spec.name}`)
+  const destination = join(modelDisplayRoot, spec.sourceDir.split('/').at(-1))
+  rmSync(destination, { recursive: true, force: true })
+  mkdirSync(destination, { recursive: true })
+  cpSync(join(sourceDir, 'lib'), join(destination, 'lib'), { recursive: true })
+  const { devDependencies: _modelDev, publishConfig: _modelPublish, ...pkg } = upstreamManifest
+  const scripts = { ...(pkg.scripts ?? {}) }; delete scripts.postinstall
+  const generated = { ...pkg, scripts, version: modelDisplayTemplate.version, dsh_compat: {
+    replaces: `${spec.name}@${upstreamManifest.version}`, upstreamTag: UPSTREAM.tag, upstreamBase: UPSTREAM.commit,
+    patchSha256: UPSTREAM.modelDisplayPatchSha256, reason: 'presentation-only model groups and actual-versus-next reasoning effort',
+  } }
+  writeFileSync(join(destination, 'package.json'), `${JSON.stringify(generated, null, 2)}\n`)
+  for (const entry of [pkg.main, pkg.types, ...(spec.client ? ['lib/client.js'] : [])]) {
+    if (!entry || !existsSync(join(destination, entry))) fail(`model display artifact missing entry: ${spec.name} ${entry}`)
+  }
 }
 if (!existsSync(join(loopTarget, 'lib', 'index.js'))) fail('agent-loop artifact has no runtime entry')
 if (!existsSync(join(toolsTarget, 'lib', 'index.js'))) fail('tools artifact has no runtime entry')

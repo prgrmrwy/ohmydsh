@@ -1,0 +1,306 @@
+diff --git a/packages/api/session-controller/src/catalog.ts b/packages/api/session-controller/src/catalog.ts
+index 83ee7a8..14a4f76 100644
+--- a/packages/api/session-controller/src/catalog.ts
++++ b/packages/api/session-controller/src/catalog.ts
+@@ -44,6 +44,7 @@ export async function buildModelCatalog(
+           name: model.name,
+           ...(model.description === undefined ? {} : { description: model.description }),
+           ...(reasoning === undefined ? {} : { reasoning }),
++          ...(resolved.displayGroup === undefined ? {} : { displayGroup: { ...resolved.displayGroup } }),
+         }
+       }))
+       return {
+diff --git a/packages/api/session-controller/src/types.ts b/packages/api/session-controller/src/types.ts
+index a8f0d7e..6e9f33a 100644
+--- a/packages/api/session-controller/src/types.ts
++++ b/packages/api/session-controller/src/types.ts
+@@ -134,6 +134,8 @@ export interface ModelReasoning {
+ 
+ /** One model displayed inside its provider group. */
+ export interface ModelCatalogModel {
++  /** Optional presentation subgroup; selection still uses the containing provider id. */
++  readonly displayGroup?: { readonly id: string; readonly label: string }
+   readonly id: string
+   readonly name: string
+   readonly description?: string
+diff --git a/packages/client/ui-commands/src/client/contract.ts b/packages/client/ui-commands/src/client/contract.ts
+index 5cca3ee..0144136 100644
+--- a/packages/client/ui-commands/src/client/contract.ts
++++ b/packages/client/ui-commands/src/client/contract.ts
+@@ -30,6 +30,8 @@ export type PopupSearchMode = 'substring' | 'fuzzy-label'
+ export interface SelectOption {
+   readonly id: string
+   readonly label: string
++  /** Optional fuzzy-search aliases; the visible label and row identity stay unchanged. */
++  readonly searchText?: string
+   /** Optional short marker rendered as a superscript beside the label. */
+   readonly badge?: string
+   readonly detail?: string
+diff --git a/packages/client/ui-commands/src/client/popup.ts b/packages/client/ui-commands/src/client/popup.ts
+index 1446cc4..78b076a 100644
+--- a/packages/client/ui-commands/src/client/popup.ts
++++ b/packages/client/ui-commands/src/client/popup.ts
+@@ -108,7 +108,7 @@ export function filterOptions(
+   if (query === '') return ordered
+   if (mode === 'fuzzy-label') {
+     return groups.flatMap(group => rankByName(
+-      group.rows.map(option => ({ name: option.label, option })), query,
++      group.rows.map(option => ({ name: option.label, ...option.searchText === undefined ? {} : { label: option.searchText }, option })), query,
+     ).map(row => row.option))
+   }
+   return ordered.filter(o => o.label.toLowerCase().includes(query) || (o.detail?.toLowerCase().includes(query) ?? false))
+diff --git a/packages/client/ui-model-selection/src/client/ModelSelect.tsx b/packages/client/ui-model-selection/src/client/ModelSelect.tsx
+index fbeda5d..3245c68 100644
+--- a/packages/client/ui-model-selection/src/client/ModelSelect.tsx
++++ b/packages/client/ui-model-selection/src/client/ModelSelect.tsx
+@@ -40,7 +40,7 @@ import {
+ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+ import type { ModelSelectInjected } from './slots.ts'
+ import css from './ModelSelect.module.css'
+-import { orderModelProviders } from './provider-order.ts'
++import { displayModelGroups, modelSearchText } from './display-groups.ts'
+ 
+ /** Which pane the dropdown shows: the two-row root or one drilled-in list. */
+ type Pane = 'root' | 'model' | 'effort'
+@@ -90,7 +90,7 @@ export function ModelSelect(
+   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
+   const id = useId()
+ 
+-  const groups = useMemo(() => orderModelProviders(state.groups), [state.groups])
++  const groups = useMemo(() => displayModelGroups(state.groups, t('provider.account')), [state.groups, t])
+   const choices = useMemo(() => groups.flatMap(group =>
+     group.models.map(model => ({
+       group,
+@@ -105,7 +105,9 @@ export function ModelSelect(
+     }))), [groups])
+   const showSearch = choices.length > 4
+   const filteredGroups = useMemo(() => groups.map(group => ({
+-    ...group, models: rankByName(group.models, showSearch ? query.trim() : ''),
++    ...group, models: rankByName(group.models.map(model => ({
++      name: model.name, label: modelSearchText(model, group.name), model,
++    })), showSearch ? query.trim() : '').map(row => row.model),
+   })).filter(group => group.models.length > 0), [groups, query, showSearch])
+   const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map(model => ({
+     provider: group.id, model: model.id,
+@@ -124,6 +126,16 @@ export function ModelSelect(
+     : effectiveEffort === undefined
+       ? t('effort.providerDefault')
+       : reasoning.efforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort
++  const lastUsed = state.lastUsed
++  const actualEffort = lastUsed?.reasoningEffort
++  const actualLabel = actualEffort === undefined
++    ? t('effort.providerDefault')
++    : reasoning?.efforts.find(level => level.id === actualEffort)?.name ?? actualEffort
++  const displayEffortLabel = lastUsed != null && reasoning !== undefined
++    && lastUsed.provider === state.current?.provider && lastUsed.model === state.current.model
++    && actualEffort !== effectiveEffort
++    ? t('effort.actualAndNext', { actual: actualLabel, next: effortLabel ?? t('effort.providerDefault') })
++    : effortLabel
+   const effortChoices = useMemo<readonly EffortChoice[]>(() => reasoning === undefined
+     ? []
+     : [
+@@ -416,14 +428,14 @@ export function ModelSelect(
+     ? t('trigger.loading')
+     : currentChoice?.model.name
+       ?? (state.current === null ? t('trigger.fallback') : `${state.current.provider}/${state.current.model}`)
+-  const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
++  const triggerLabel = displayEffortLabel === undefined ? modelLabel : `${modelLabel} · ${displayEffortLabel}`
+   const triggerAria = waiting
+     ? t('trigger.loading')
+     : state.current === null
+       ? t('trigger.selectAria')
+-      : effortLabel === undefined
++      : displayEffortLabel === undefined
+         ? t('trigger.aria', { model: modelLabel })
+-        : t('trigger.ariaEffort', { model: modelLabel, effort: effortLabel })
++        : t('trigger.ariaEffort', { model: modelLabel, effort: displayEffortLabel })
+   itemRefs.current = []
+   let itemIndex = 0
+   let modelIndex = 0
+@@ -466,7 +478,7 @@ export function ModelSelect(
+       >
+         <IconDataOutlineRegular className={css.triggerIcon} size={16} />
+         <span className={css.triggerLabel}>{modelLabel}</span>
+-        {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
++        {displayEffortLabel !== undefined && <span className={css.triggerEffort}>{displayEffortLabel}</span>}
+         {busy
+           ? <StateDot state="ongoing" />
+           : <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
+@@ -495,7 +507,7 @@ export function ModelSelect(
+               {reasoning !== undefined && (
+                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
+                   <span className={css.cellLabel}>{t('menu.effort')}</span>
+-                  <span className={css.cellValue}>{effortLabel}</span>
++                  <span className={css.cellValue}>{displayEffortLabel}</span>
+                   <IconChevronRightOutlineRegular className={css.cellChevron} />
+                 </button>
+               )}
+@@ -558,7 +570,7 @@ export function ModelSelect(
+               >
+                 {filteredGroups.map((group) => {
+                   return (
+-                    <MenuGroup key={group.id} label={group.id === 'deepseek-account' ? t('provider.account') : group.name}>
++                    <MenuGroup key={group.key} label={group.name}>
+                       {group.models.map((model) => {
+                         const index = modelIndex++
+                         const selected = state.current?.provider === group.id && state.current.model === model.id
+diff --git a/packages/client/ui-model-selection/src/client/directory.ts b/packages/client/ui-model-selection/src/client/directory.ts
+index 41f6783..ae3b7ce 100644
+--- a/packages/client/ui-model-selection/src/client/directory.ts
++++ b/packages/client/ui-model-selection/src/client/directory.ts
+@@ -18,6 +18,8 @@ import type { ModelCatalogDirectory } from './catalog.ts'
+ export interface ModelDirectoryState {
+   /** Saved selection, retained even when its provider or model leaves the catalog. */
+   current: ModelSelection | null
++  /** Latest actual request selection, for display only; never replaces next intent. */
++  lastUsed?: ModelSelection | null
+   /** Saved effort caption retained when the selected model is unavailable. */
+   retainedEffort?: string
+   /** Whether the current selection is present in the available catalog; null while unresolved. */
+@@ -166,6 +168,7 @@ export class ModelDirectory {
+     if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
+       this.store.set({
+         current: catalog.value === null ? null : this.store.getSnapshot().current,
++        lastUsed: projected?.lastUsed ?? null,
+         ...retainedEffort === undefined ? {} : { retainedEffort },
+         routable: null,
+         groups: catalog.value?.groups ?? [],
+@@ -181,6 +184,7 @@ export class ModelDirectory {
+       && group.models.some(model => model.id === selection.model))
+     this.store.set({
+       current: selection,
++      lastUsed: projected.lastUsed,
+       ...retainedEffort === undefined ? {} : { retainedEffort },
+       routable,
+       groups: catalog.value.groups,
+diff --git a/packages/client/ui-model-selection/src/client/index.ts b/packages/client/ui-model-selection/src/client/index.ts
+index ca30921..429a95c 100644
+--- a/packages/client/ui-model-selection/src/client/index.ts
++++ b/packages/client/ui-model-selection/src/client/index.ts
+@@ -28,7 +28,7 @@ import { ModelDirectoryResolver } from './service.ts'
+ import type { ModelSelectInjected } from './slots.ts'
+ import { ModelSelect } from './ModelSelect.tsx'
+ import { en, zh, type ModelKey } from './locales.ts'
+-import { orderModelProviders } from './provider-order.ts'
++import { displayModelGroups, modelSearchText } from './display-groups.ts'
+ 
+ export { ModelDirectory } from './directory.ts'
+ export type { ModelDirectoryState } from './directory.ts'
+@@ -51,13 +51,13 @@ function rowId(providerId: string, modelId: string): string {
+ /** Flatten the directory into popup rows; failure rows are listed for visibility but never selectable. */
+ function optionsOf(directory: ModelDirectoryState, t: TranslateNS<'model'>): SelectOption[] {
+   const rows: SelectOption[] = []
+-  for (const group of orderModelProviders(directory.groups)) {
+-    const name = group.id === 'deepseek-account' ? t('provider.account') : group.name
++  for (const group of displayModelGroups(directory.groups, t('provider.account'))) {
+     for (const model of group.models) {
+       rows.push({
+         id: rowId(group.id, model.id),
+         label: model.name,
+-        group: { name: group.id, label: name },
++        group: { name: group.models[0]?.displayGroup === undefined ? group.id : group.key, label: group.name },
++        searchText: modelSearchText(model, group.name),
+         ...(directory.current !== null
+           && directory.current.provider === group.id
+           && directory.current.model === model.id
+diff --git a/packages/client/ui-model-selection/src/client/locales.ts b/packages/client/ui-model-selection/src/client/locales.ts
+index a522b55..98443bb 100644
+--- a/packages/client/ui-model-selection/src/client/locales.ts
++++ b/packages/client/ui-model-selection/src/client/locales.ts
+@@ -23,6 +23,7 @@ export const zh = {
+   'menu.model': '模型',
+   'menu.effort': '推理等级',
+   'effort.providerDefault': 'Default',
++  'effort.actualAndNext': '最近实际：{actual} · 下次：{next}',
+   'status.loading': '正在刷新模型列表…',
+   'error.action': '模型操作失败：{message}',
+   'error.sessionInUse': '当前会话已被占用，可能是其他正在运行的 DSH 导致的（如其他 dsh web、桌面端），请退出其他正在运行的 DSH 后重试。',
+@@ -53,6 +54,7 @@ export const en = {
+   'menu.model': 'Model',
+   'menu.effort': 'Effort',
+   'effort.providerDefault': 'Default',
++  'effort.actualAndNext': 'Last used: {actual} · Next: {next}',
+   'status.loading': 'Refreshing model list…',
+   'error.action': 'Model operation failed: {message}',
+   'error.sessionInUse': 'This session is already in use, possibly by another running DSH instance (such as dsh web or the desktop app). Quit other running DSH instances and try again.',
+diff --git a/packages/llm/llm/src/index.ts b/packages/llm/llm/src/index.ts
+index d67245d..9cb8dd2 100644
+--- a/packages/llm/llm/src/index.ts
++++ b/packages/llm/llm/src/index.ts
+@@ -809,7 +809,19 @@ export class LlmRuntime extends TypertRemoteService {
+         'INVALID_MODEL_MAX_TOKENS',
+       )
+     }
++    const displayGroup = resolved.displayGroup
++    if (displayGroup !== undefined && (
++      typeof displayGroup !== 'object' || displayGroup === null || Array.isArray(displayGroup)
++      || typeof displayGroup.id !== 'string' || displayGroup.id.trim().length === 0
++      || typeof displayGroup.label !== 'string' || displayGroup.label.trim().length === 0
++    )) {
++      throw new LlmError(
++        `adapter returned invalid display group for provider "${provider}" model "${model}"`,
++        'INVALID_MODEL_INFO',
++      )
++    }
+     const info: LlmResolvedModelInfo = {
++      ...displayGroup === undefined ? {} : { displayGroup: { id: displayGroup.id, label: displayGroup.label } },
+       provider,
+       id: model,
+       name: resolved.name,
+diff --git a/packages/llm/llm/src/types.ts b/packages/llm/llm/src/types.ts
+index 5445360..2dfd740 100644
+--- a/packages/llm/llm/src/types.ts
++++ b/packages/llm/llm/src/types.ts
+@@ -408,6 +408,8 @@ export type ToolUpdate = 'in-history' | 'addition-only'
+ 
+ /** Exact-route model metadata resolved by its owning adapter. */
+ export interface LlmResolvedModelInfo extends LlmModelInfo {
++  /** Optional presentation subgroup; never a provider route or model identity. */
++  displayGroup?: { id: string; label: string }
+   /** Provider-owned context capacity when known. */
+   context?: LlmModelContext
+   /** Adapter-configured per-request output cap materialized when callers omit one. */
+diff --git a/packages/client/ui-model-selection/src/client/display-groups.ts b/packages/client/ui-model-selection/src/client/display-groups.ts
+new file mode 100644
+index 0000000..bbb40df
+--- /dev/null
++++ b/packages/client/ui-model-selection/src/client/display-groups.ts
+@@ -0,0 +1,38 @@
++/** Private presentation buckets shared by the two model-selection entries. */
++import type { ModelCatalogModel, ModelProviderGroup } from '@deepseek-ai/dsh-api-session-controller/types'
++import { orderModelProviders } from './provider-order.ts'
++
++interface DisplayGroup {
++  /** Collision-free presentation key; never submitted as a provider. */
++  key: string
++  /** The real registered provider route. */
++  id: string
++  name: string
++  models: ModelCatalogModel[]
++}
++
++/** Derive ordered buckets without mutating provider catalogs or model names. */
++export function displayModelGroups(groups: readonly ModelProviderGroup[], accountLabel: string): DisplayGroup[] {
++  return orderModelProviders(groups).flatMap(provider => {
++    const buckets = new Map<string, DisplayGroup>()
++    for (const model of provider.models) {
++      const key = JSON.stringify([provider.id, model.displayGroup?.id ?? null])
++      let bucket = buckets.get(key)
++      if (bucket === undefined) {
++        bucket = {
++          key, id: provider.id,
++          name: model.displayGroup?.label ?? (provider.id === 'deepseek-account' ? accountLabel : provider.name),
++          models: [],
++        }
++        buckets.set(key, bucket)
++      }
++      bucket.models.push(model)
++    }
++    return [...buckets.values()]
++  })
++}
++
++/** Search aliases remain separate from displayed names and submitted ids. */
++export function modelSearchText(model: ModelCatalogModel, groupLabel: string): string {
++  return `${groupLabel} ${model.name} ${model.id}`
++}

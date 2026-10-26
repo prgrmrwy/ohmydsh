@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import Agents from '@deepseek-ai/dsh-agent'
+import Agents, { installModelSelection } from '@deepseek-ai/dsh-agent'
 import Loop from '@deepseek-ai/dsh-agent-loop'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
@@ -11,14 +11,19 @@ import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environ
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import * as Plugin from '../src/index.js'
 import { fakeJev, json } from './fake-jev.js'
 import { PolicyStore } from '../src/policy-store.js'
+// Test the installed SDK's real fold, not a local reimplementation of picker semantics.
+const { installModelSelectionProjection } = await import(new URL('./types/model-selection-projection.js', pathToFileURL(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-api-session-controller'))).href)
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.(); close = undefined })
-async function harness(magpie = false) {
-  const provider = magpie ? 'dsh-magpie-connect' : 'claude'
-  const modelId = (id: string) => magpie ? `claude/${id}` : id
+async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie' = false, pendingPick = false, family: 'claude' | 'codex' = 'claude') {
+  const provider = magpie || family
+  const modelId = (id: string) => magpie ? `${family}/${id}` : id
+  const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : ['gpt-6.1-sol','gpt-6-luna']
   const home = mkdtempSync(join(tmpdir(), 'policy-host-'))
   const config = join(home, 'plugins/dsh-auto-model-routing/config.json')
   mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true })
@@ -28,21 +33,26 @@ async function harness(magpie = false) {
   const ctx = new Context(), forks: { dispose(): unknown }[] = [], handles: Awaited<ReturnType<typeof ctx.agents.create>>[] = []
   const calls: GenerateOptions[] = []
   class Adapter extends LlmAdapter {
-    async listModels(provider: string) { return ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'].map(id => ({ provider, id: modelId(id), name: id })) }
+    async listModels(provider: string) { return modelIds.map(id => ({ provider, id: modelId(id), name: id })) }
     async resolveModel(provider: string, id: string) { return { provider, id, name: id, reasoning: { efforts: ['low','medium','high','xhigh'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
     async *stream(r: GenerateOptions): AsyncIterable<StreamChunk> { calls.push(r); yield { type: 'finish', reason: { kind: 'stop' } } }
   }
   for (const p of [Projections,Sessions,Agents,Prompt,Tools,Llm]) forks.push(await ctx.plugin(p))
+  installModelSelectionProjection(ctx)
   forks.push(await ctx.plugin(Loop,{ agents: [] }))
   ctx.llm.registerAdapter([provider], new Adapter())
   ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: 'synthetic-key' } }]) as never)
-  ctx.provide('subagentModelSelection' as never, { current: () => ({ enabled: true, allowedModels: ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'].map(model => ({ provider, model: modelId(model) })) }) } as never)
+  ctx.provide('subagentModelSelection' as never, { current: () => ({ enabled: true, allowedModels: modelIds.map(model => ({ provider, model: modelId(model) })) }) } as never)
+  const selections: unknown[] = []
+  ctx.provide('sessionController', { selectModel: async (request: unknown) => { selections.push(request) } } as never)
   let plugin = await ctx.plugin(Plugin, { home, jevBase: jev.base })
-  const parent = await ctx.agents.create({ sessionId: SessionId('parent'), agentOptions: { provider, model: modelId('claude-opus-5-5'), reasoningEffort: ReasoningEffortId('medium') } }); handles.push(parent)
+  const picked = { provider, model: modelId(modelIds[0]!), reasoningEffort: ReasoningEffortId('medium') }
+  const parent = await ctx.agents.create({ sessionId: SessionId('parent'), agentOptions: picked, ...(pendingPick ? { setup: (agentCtx: Context) => { installModelSelection(agentCtx, { current: picked, assembled: undefined }) } } : {}) }); handles.push(parent)
+  if (pendingPick) parent.agent.session.append('model/selection', picked)
   const run = async (agent: typeof parent.agent, text: string) => { agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })); await agent.whenIdle() }
   let n = 0
   ctx.tools.register(defineTool({ name: 'subagent', description: 'Test official tool-dispatch boundary; not a real provider test', output: { schema: { type: 'object', additionalProperties: false, properties: { childId: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: value.childId ?? '' }] }, parameters: { model: { type: 'string' }, reasoning_effort: { type: 'string' } }, execute: async (args, exec) => {
-    const child = await ctx.agents.create({ sessionId: SessionId(`child-${++n}`), parentAgent: exec.agent!, meta: { origin: 'subagent', parentSession: parent.agent.id }, agentOptions: { provider, model: args.model ?? modelId('claude-opus-5-5') } }); handles.push(child)
+    const child = await ctx.agents.create({ sessionId: SessionId(`child-${++n}`), parentAgent: exec.agent!, meta: { origin: 'subagent', parentSession: parent.agent.id }, agentOptions: { provider, model: args.model ?? modelId(modelIds[0]!) } }); handles.push(child)
     await run(child.agent, 'Apply the exact supplied mechanical transformation')
     return { childId: child.agent.id }
   } }))
@@ -53,11 +63,11 @@ async function harness(magpie = false) {
   const modes = new FileStateStore(join(home, 'state/auto-model-routing/sessions'))
   modes.set(parent.agent.id, { mode: 'AUTO' })
   close = async () => { for (const h of handles.reverse()) await h.dispose(); await plugin.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
-  return { ctx, parent: parent.agent, handles, calls, invoke, store, modes, run, jev, configure, home,
+  return { ctx, parent: parent.agent, handles, calls, invoke, store, modes, run, jev, configure, home, selections,
     restart: async () => { await plugin.dispose(); plugin = await ctx.plugin(Plugin,{ home, jevBase: jev.base }) } }
 }
 it('child decision persists separate confidences and actual application without task text',async()=>{
- const h=await harness(true)
+ const h=await harness('dsh-magpie-connect')
  h.jev.set(json(200,{answers:{capability:{choice:'bounded',confidence:.71,probabilities:{bounded:.8,analytical:.2}},depth:{choice:'baseline',confidence:.94}}}))
  await h.invoke()
  const child=h.handles[1]!.agent
@@ -66,21 +76,45 @@ it('child decision persists separate confidences and actual application without 
  expect(JSON.stringify(record)).not.toContain('mechanical transformation')
  await h.restart();expect(h.store.get(child.id)?.decision?.capabilityConfidence).toBe(.71)
 })
-it('Magpie children retain exact transport routes across mode changes and plugin reload',async()=>{
- const h=await harness(true)
- await h.invoke()
+it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s children retain exact transport routes across mode changes and plugin reload',async(provider)=>{
+ const h=await harness(provider)
+ expect((await h.invoke()).isError).not.toBe(true)
  const child=h.handles[1]!.agent
- expect(h.store.get(child.id)).toMatchObject({status:'applied',family:'claude',route:{provider:'dsh-magpie-connect',model:'claude/claude-haiku-5-5',reasoningEffort:'medium'}})
+ expect(h.store.get(child.id)).toMatchObject({status:'applied',family:'claude',route:{provider,model:'claude/claude-haiku-5-5',reasoningEffort:'medium'}})
  await h.restart();h.configure('legacy');h.modes.set(h.parent.id,{mode:'MANUAL'})
  await h.run(child,'later task')
  expect(h.calls.at(-1)).toMatchObject({model:'claude/claude-haiku-5-5',reasoningEffort:'medium'})
  expect(h.jev.bodies).toHaveLength(1)
 })
-it('Magpie main keeps transport and model unchanged',async()=>{
- const h=await harness(true)
+it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s main keeps transport and model unchanged',async(provider)=>{
+ const h=await harness(provider)
  h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}))
  await h.run(h.parent,'main task')
- expect(h.calls.at(-1)).toMatchObject({model:'claude/claude-opus-5-5',reasoningEffort:'high'})
+ expect(h.calls.at(-1)).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
+ expect(h.parent.session.requestHeader()?.config).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
+})
+it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s AUTO reaches the adapter while the official picker retains a differing pending selection',async(provider)=>{
+ const h=await harness(provider,true)
+ h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}))
+ await h.run(h.parent,'Main task with a pending explicit medium pick')
+ expect(h.calls.at(-1)).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
+ const projection=h.ctx.sessionProjections.snapshot(h.parent.session,['modelSelection']).values.modelSelection
+ expect(projection).toMatchObject({lastUsed:{provider,reasoningEffort:'high'},next:{provider,reasoningEffort:'medium'}})
+ expect(h.selections).toEqual([])
+})
+it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s GPT main and child use supported efforts on the same transport',async(provider)=>{
+ const h=await harness(provider,true,'codex')
+ h.jev.set(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'higher'}}}))
+ await h.run(h.parent,'GPT main task')
+ expect(h.calls.at(-1)).toMatchObject({provider,model:'codex/gpt-6.1-sol',reasoningEffort:'high'})
+ expect((await h.invoke()).isError).not.toBe(true)
+ const child=h.handles[1]!.agent
+ expect(h.store.get(child.id)).toMatchObject({status:'applied',family:'codex',route:{provider,model:'codex/gpt-6-luna',reasoningEffort:'xhigh'}})
+ await h.restart();h.configure('legacy');h.modes.set(h.parent.id,{mode:'MANUAL'})
+ await h.run(child,'Restore GPT child')
+ expect(h.calls.at(-1)).toMatchObject({provider,model:'codex/gpt-6-luna',reasoningEffort:'xhigh'})
+ expect(h.selections).toEqual([])
+ expect(h.jev.bodies).toHaveLength(2)
 })
 it('binds concurrent tool-created identities, records actual requests, and restores plugin decisions', async () => {
   const h = await harness()
@@ -166,9 +200,9 @@ it('Jev failure stops child execution and preserves the failure across later mes
   await h.run(child,'Try again without a new resource decision')
   expect(h.jev.bodies).toHaveLength(1)
 })
-it('does not broaden the parent session captured allowlist with a newer global catalog', async () => {
-  const h = await harness()
-  ;(h.parent.session.append as unknown as (type:string,data:unknown)=>unknown)('subagent/model-selection-policy',{ allowedModels: [{provider:'claude',model:'claude-opus-5-5'}] })
+it.each([false,'dsh-magpie-connect','dsh-magpie'] as const)('does not broaden the %s parent captured allowlist with a newer global catalog', async (magpie) => {
+  const h = await harness(magpie)
+  ;(h.parent.session.append as unknown as (type:string,data:unknown)=>unknown)('subagent/model-selection-policy',{ allowedModels: [{provider:magpie||'claude',model:magpie?'claude/claude-opus-5-5':'claude-opus-5-5'}] })
   await h.invoke()
   const child = h.handles[1]!.agent
   expect(h.calls.filter(c=>c.sessionId===child.id)).toHaveLength(0)

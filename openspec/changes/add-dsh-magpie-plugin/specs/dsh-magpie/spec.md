@@ -166,7 +166,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - 流在终止事件之前中断 → `error`，不得当作 `stop`；
 - 流中出现错误事件 → `error`，即使之后还收到 `[DONE]` 或完成事件。错误事件包括 Chat 的 SSE `error` 对象、Responses 的 `error` 事件，以及 Responses 的 `response.failed`（不论是否带 error 对象）。
 
-**取消与超时**：SHALL 响应 `options.signal` 并以 `aborted` 结束。首事件超时 90 秒、空闲超时 60 秒，超时时关闭连接并以 `error` 结束。已经输出过内容的请求 SHALL NOT 被插件自动重放；轮次级重试归 DSH 负责。
+**取消与超时**：SHALL 响应 `options.signal` 并以 `aborted` 结束。从调用 pi-ai 前启动的首实际内容预算为 90 秒；只有非空 pi `text_delta`、`thinking_delta` 或 `toolcall_delta`（`delta.length > 0`）SHALL 切换或重置 60 秒空闲预算。HTTP headers、pi `start`、block start/end、空 delta、SSE comments 与 Responses created/in_progress SHALL NOT 缩短或延长当前预算；toolcall_start 仅带 name/id、没有非空参数 delta 时仍保留首实际内容预算。block end 不重置预算；无 delta 但最终 block 后直接 done 的正常完成 SHALL 立即结束，不等看门狗。超时时 SHALL 关闭连接并以 `error` 和 `MAGPIE_STREAM_TIMEOUT` 结束。已经开始的流因超时 SHALL NOT 被插件自动重放，已经输出过内容的请求同样 SHALL NOT 自动重放；轮次级重试归 DSH 负责。
 
 #### Scenario: 两种协议的文本生成与 effort
 - **GIVEN** Responses 模型 `codex/gpt-6.1-sol`（`native_endpoints` 含 `/v1/responses`）和 Chat 模型 `deepseek/deepseek-flash`；两个网关 mock 都返回文本 `hi`、usage、完成
@@ -231,9 +231,24 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - **THEN** 两次的流都以 `finish` 原因 `error` 结束
 
 #### Scenario: 首事件与空闲超时
-- **GIVEN** 测试使用虚拟时钟；mock A 接受连接后不发任何事件，mock B 发出一段文本后停止发送
-- **WHEN** 分别对 A 和 B 发起生成；对 A 时钟前进 90 秒，对 B 前进 60 秒
-- **THEN** 两次都以 `error` 结束，连接被关闭，各自 mock 只收到 1 次请求
+- **GIVEN** 测试使用虚拟时钟；mock A 接受连接后不发实际内容，mock B 发出一段非空文本 delta 后停止发送
+- **WHEN** 分别对 A 和 B 发起生成；对 A 从调用 pi-ai 前前进 90 秒，对 B 从最后非空 delta 前进 60 秒
+- **THEN** 两次都以 `error` 和 `MAGPIE_STREAM_TIMEOUT` 结束，连接被关闭，各自 mock 只收到 1 次请求；headers、start、created/in_progress 或 comments 不重置 A 的 90 秒预算
+
+#### Scenario: 空 block start 不提前耗尽首内容预算
+- **GIVEN** mock 在 t=0 发出空 reasoning、message 或 function_call item start；工具 item 可含 name/id 但无参数
+- **WHEN** 对三种类型分别发起生成，在 t=65 秒发送对应非空 delta、最终 block 与完成事件
+- **THEN** 三次在 t=60 秒均未结束，在 t=65 秒正常结束（文本/推理为 stop，工具为 tool-calls），每次仅 1 个 POST；同样的空 start 若始终没有实际内容或完成，SHALL 在 t=90 秒而非 t=60 秒超时关闭
+
+#### Scenario: 首内容前的空 delta 不续期
+- **GIVEN** mock 在 t=0 发出空 block start，t=55 秒发出空 delta，之后不发实际内容或完成
+- **WHEN** 时钟推进至 t=89.999 秒，再推进 1 毫秒
+- **THEN** 前者仍未结束，后者以 MAGPIE_STREAM_TIMEOUT 关闭，仅 1 个 POST；空 delta 不把期限推到 t=115 秒
+
+#### Scenario: 已有内容后的空结构与空 delta 不续期
+- **GIVEN** mock 在 t=55 秒发出最后一个非空 text/thinking/toolcall delta，当前期限为 t=115 秒
+- **WHEN** 在 t=110 秒仅发空 block end/start、空 delta 或 comments，之后时钟推进至 t=115 秒
+- **THEN** 仍在 t=115 秒以 MAGPIE_STREAM_TIMEOUT 关闭，仅 1 个 POST；空事件不能无限续命
 
 #### Scenario: 截断不当成功
 - **GIVEN** 网关 mock 输出部分文本后关闭连接，没有发终止事件
@@ -485,6 +500,41 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **GIVEN** 会话 S 处于标准
 - **WHEN** 客户端为 S 设置速度 `turbo`
 - **THEN** 响应状态为 400，S 仍为标准
+
+### Requirement: 选择器按网关归属展示分组（AMD2）
+模型选择菜单 SHALL 按网关 `owned_by` 显示组标题及具体型号：`claude` 显示 `Magpie (Claude)`、`codex` 显示 `Magpie (GPT)`，其它非空归属显示 `Magpie (<owned_by>)`。缺失归属 SHALL 显示 `Magpie (Other)`，SHALL NOT 按模型名猜测归属。该展示分组 SHALL 通过官方逐模型展示扩展实现；真实 route SHALL 始终是单一 `dsh-magpie`，模型 id SHALL 保持网关原值。
+
+统一搜索 SHALL 同时覆盖展示组标签与具体型号/id；可见性过滤和 effort SHALL 保持既有行为，`/model` 搜索与 actions SHALL 使用同一真实身份。缺少官方字段的 rc.2 SHALL 经本轮已授权的 Pet 现有 compat 唯一 owner 受管 patch 增加可选 resolved-model `displayGroup {id,label}`，经 LLM 校验/detach、host catalog 与原选择器展示 buckets；没有该字段的模型 SHALL 保持原展示。SHALL NOT 新建 runtime owner、手改 generated dirs、注册伪 provider 或 hack DOM 文本改变实际路由；插件 SHALL NOT 为映射展示组修改既有 CatalogModel.provider fallback 或设置偏好键。
+
+#### Scenario: owned_by 分组不随型号名猜测
+- **GIVEN** 网关模型 id 为 `custom/claude-looking`、显示名含 Claude，但 `owned_by` 为 `codex`；另有 owned_by 为 claude 的模型
+- **WHEN** 打开官方模型菜单
+- **THEN** 前者在 `Magpie (GPT)` 下，后者在 `Magpie (Claude)` 下；选中任何一项的 provider 都是 `dsh-magpie`，model 为原 id
+
+#### Scenario: 分组搜索保留可见性与 effort
+- **GIVEN** Claude/GPT 组均有可见模型，另有隐藏模型，可见模型具有已保存默认 effort
+- **WHEN** 在统一菜单按组标签或型号/id 搜索并选择可见模型
+- **THEN** 能匹配对应可见型号，隐藏模型不出现，选中后真实 provider/model 与默认 effort 保持不变
+
+#### Scenario: 缺失归属不冒充分组
+- **GIVEN** 模型名含 GPT，但没有 owned_by
+- **WHEN** 打开官方模型菜单
+- **THEN** 它属于 `Magpie (Other)`，不属于按名字推测的 GPT 组；既有设置分组 fallback 与偏好键不变，普通无 displayGroup 的宿主模型仍使用原 provider 展示；畸形 displayGroup 在宿主 resolve 边界报 INVALID_MODEL_INFO，不以错误元数据改变路由
+
+### Requirement: 设置导航自身行使用 Magpie 鸟形图标（AMD2）
+插件 SHALL 在自身 Magpie 设置导航行显示本地鸟形品牌图标，随 `currentColor` 适应主题，保留文字、点击和可访问性语义。若宿主没有官方 icon 字段，SHALL 仅对可唯一定位的自身导航行添加私有 marker 并使用限定 CSS；SHALL NOT 修改旧 connect 或其它设置行。重复同名无法唯一定位、唯一行已带 foreign connect marker、缺 document/body/head 时 SHALL 静默保留宿主行为。
+
+插件 SHALL 管理 observer 和样式的生命周期：支持对话框晚挂载和重建，卸载时断开 observer、清除 marker 和自身样式。来源许可 SHALL 随包保留。
+
+#### Scenario: 鸟形图标只标记自身导航行
+- **GIVEN** 设置导航中同时有本插件 Magpie 行、旧 connect 行和其它行
+- **WHEN** client apply，之后导航重新挂载
+- **THEN** 只有本插件行带私有 marker 和 currentColor 鸟形图标 CSS，旧 connect/其它行及自身原始 SVG/文字/点击行为不被改写
+
+#### Scenario: 卸载清理与缺失入口静默降级
+- **GIVEN** observer 已安装，本插件入口可能不存在或有重复同名行
+- **WHEN** 导航变化，然后卸载 client，再重新插入导航
+- **THEN** 无法唯一定位时不标记；卸载后无 marker/自身样式且不再标记新行，无 DOM 环境不抛错
 
 ### Requirement: 禁用不删除用户数据
 在 manifest 中把插件设为 `enabled: false` 并重新 build 后，插件 SHALL NOT 删除 credentials 中的 `MAGPIE_API_KEY`，也 SHALL NOT 删除插件设置文件。插件的 dispose 路径 SHALL 只释放 route 注册、设置路由、计时器与连接，不执行任何删除操作。

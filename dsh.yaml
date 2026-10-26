@@ -386,12 +386,20 @@ customizations:
     brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;暂用 PR #16 构建)
     note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。现装 PR #16 构建,发布于本人 fork 的 release(commit e28856d,tarball SHA256 586c1c62…2226a),相对 1.0.4 只去掉 persona 与空工具白名单。B049 实测:该构建在父子工具集一致时 Claude/codex 首请求均近全量命中主会话 cache,1.0.4 恒为 0;experimental-schedule 启用时工具集不一致,同样不命中。合入发版后改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
 
+  - id: dsh-magpie
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 自托管 Magpie provider、分组用量与默认 effort、会话快速档
+    note: '自研 MIT,change add-dsh-magpie-plugin。单 route dsh-magpie,pi-ai 处理 Responses/Chat。信任面:读取 DSH credentials MAGPIE_API_KEY;地址与偏好单独存盘,设置接口不回显 key。私有 undici dispatcher 只直连配置 baseUrl 的白名单 API,拒绝重定向,不调用 Magpie GUI 管理接口;手动刷新会访问上游用量。更换连接不取消已准备或在途生成,它们按旧地址与 key 跑完。2026-10-26 用户确认停用旧 connect 与显示名 shim,选择器仅保留新分组入口;旧配置保留,旧会话不自动迁移。移除:enabled:false → dsh build → 重启;凭据与设置保留,确认不再共用后手动清理。'
+
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   - id: magpie-display-name-shim
     type: package
     source: local
     version: 0.1.0
-    enabled: true
+    enabled: false
     brief: Magpie 模型在选择器里显示网关显示名(Claude Haiku 5.5)而非 route id
     note: '自研过渡 shim:dsh-magpie-connect 0.4.1 的 listModels/resolveModel 报 name: id,选择器显示 claude/claude-haiku-5-5。本插件在 llm/adapters-updated 时包装 dsh-magpie-connect route 的 adapter,把 name 换成它自己目录缓存 ~/.dsh-magpie-connect/magpie-models.json 里的网关 display_name;id 不变(路由/会话历史不受影响),无网络请求,读缓存失败保持原名。上游修复 https://github.com/bitxeno/dsh-magpie-connect/pull/1。退役:test/real-adapter.test.mjs 断言已 pin 版本仍为 name: id,升级后该断言失败即说明上游已修,enabled:false → dsh build → 重启。'
 
@@ -401,6 +409,6 @@ customizations:
     source: remote
     spec: dsh-magpie-connect@0.4.1
     version: 0.4.1
-    enabled: true
+    enabled: false
     brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
     note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='

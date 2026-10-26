@@ -7,7 +7,7 @@ import { CATEGORY_HINTS, type JevClient } from './jev.js'
 import { buildState } from './context.js'
 import type { Judgement } from './router.js'
 import type { RoutingState } from './state.js'
-import { choosePolicyRoute, modelFamily, type PolicyProvider } from './policy-v2.js'
+import { choosePolicyRoute, magpieProvider, modelFamily, POLICY_PROVIDERS, type PolicyProvider } from './policy-v2.js'
 import { policyVersion } from './jev.js'
 
 interface SessionLike { id: string; session: { header: { origin?: string; parentSession?: string } } }
@@ -41,7 +41,7 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
     timeoutMs: 5000,
     parameters: {
       task: { type: 'string', required: true, description: 'The task the sub-agent will do.' },
-      provider: { type: 'string', required: true, enum: ['claude', 'codex', 'dsh-magpie-connect'], description: 'Exact transport provider. Magpie is available only under policy-v2.' },
+      provider: { type: 'string', required: true, enum: [...POLICY_PROVIDERS], description: 'Exact transport provider. Magpie is available only under policy-v2.' },
       model: { type: 'string', description: 'Sub-agent model already chosen by the user or lead; when given, only reasoning_effort is routed.' },
       reasoning_effort: { type: 'string', description: 'Explicit effort constraint for policy-v2; preserved and validated, never silently replaced.' },
       family: { type: 'string', enum: ['claude','codex'], description: 'Magpie automatic capability family; required when no model is explicitly supplied.' },
@@ -86,7 +86,7 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
         const route = choosePolicyRoute(args.provider as PolicyProvider, result.capability ?? 'bounded', result.depth, await deps.catalog!(), deps.readSettings!().effortCap, explicit, args.family ?? (args.model ? modelFamily(args.provider, args.model) : undefined))
         return { status: 'recommended', policyVersion, ...(result.capability ? { capability: result.capability } : {}), depth: result.depth, provider: route.provider, model: route.model, reasoning_effort: route.reasoningEffort }
       }
-      if (args.provider === 'dsh-magpie-connect') throw new Error('Magpie 路由需显式选择 policy-v2；原策略不变')
+      if (magpieProvider(args.provider)) throw new Error('Magpie 路由需显式选择 policy-v2；原策略不变')
       const result = await jev.judge(buildState({ text: args.task }), exec.signal)
       if (result.kind === 'cancelled') throw new Error('route_subagent 已取消。')
       if (result.kind === 'failed') throw new Error(`Jev 判档失败：${CATEGORY_HINTS[result.category]}（${result.category}）。请暂停委派并询问用户，不要自行猜测档位或换用其它模型。`)

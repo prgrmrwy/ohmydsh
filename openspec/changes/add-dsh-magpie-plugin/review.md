@@ -469,3 +469,150 @@ D2 total概括现已与后文一致采用“未缓存输入大于0时求和，�
 **R3-RC5-M1 applied；R3-RC4-M2此前已落实的目标覆盖/串行闸门规则现与结果序号一致，剩余阻断已关闭。未发现本次修订直接引入的新 Moderate 或以上问题（0 Moderate / 0 Critical）。** 唯一状态行改为 **CHANGES_APPLIED: yes**；`VERDICT: APPROVE_WITH_CHANGES` 原行保持不变。此前小节的no是历史结论，不改写。
 
 `OPENSPEC_TELEMETRY=0 openspec validate add-dsh-magpie-plugin --strict` 返回 `Change 'add-dsh-magpie-plugin' is valid`，前后两次制品散列一致。只做本地只读制品检查、时序推演、sha256sum和禁遥测strict validate；未执行实现测试或上述并发fixture，未联网、部署、重启或读取凭据。主动文件写入仅限本报告状态行及末尾本节；依严格写入限制未写记忆卡片、测试或其它文件。
+
+
+## AMD-1 — sidebar delta rebase onto current semantics (pending)
+
+实施时发现当前 sidebar 主规范与实现已采用模型厂商优先和独立中转品牌；旧 delta 整段复制会回滚这些行为。按 design D1 的“只补新 route 回归，不改源码”边界，将本 delta rebase 到当前主规范的完整 requirement，仅新增 dsh-magpie 别名及 dsh-magpie2 负例。原有场景保留，新近加入主规范的四个场景补入 test-plan，等待具名回归核验，不预判 green。暂停 sidebar 实施，CHANGES_APPLIED 改回 no；不改变 dsh-magpie host/UI 行为。
+
+## AMD-1 targeted re-check
+
+独立定向复核（codex，fresh context，2026-10-25）：仅核对当前 sidebar 主规范、sidebar delta、design D1、test-plan、tasks 14，以及 sidebar 的 logos.ts / logos.test.ts。未重开 host/UI 或其它已批准决策。以下结论仅涉及规范保真与回归计划，不代表测试或线上行为已验证。
+
+### Artifact SHA-256
+
+```text
+30b507b447d3cc3f61487cb3ff4767abb206095a37211b28b43946387bfc5007  openspec/specs/sidebar-session-provider-icon/spec.md
+52925e21b168f0621ac30a6f61644cb9cd96303a899c114a5351d3757c92d4b2  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
+84629b8a3ab17441d47fc3b11040e0c44831d9ccfdd89f71c56f9af234f13ae8  openspec/changes/add-dsh-magpie-plugin/design.md
+2fc2e7343534264abb1a1fe4bfc88f338956e8fe514fe877dcca08a9a2a1d58b  openspec/changes/add-dsh-magpie-plugin/test-plan.md
+e92bac1ad11a3f5511adf83b3f42f37e166565c0d113c23e38ff4227129ea224  openspec/changes/add-dsh-magpie-plugin/tasks.md
+9e8b9a06ab932947632787de2d4d1b0707457fd82f7e9a9e6256ab244304ab18  packages/sidebar-session-provider-icon/src/client/logos.ts
+0de7a93c8208c6da45cfbe88da81520a1aa777c6e5ae9c09eccb9b3eee4b5e1c  packages/sidebar-session-provider-icon/test/logos.test.ts
+```
+
+### 规范与源码对照 — acceptable
+
+- delta:4 完整保留当前主规范:72 的模型厂商优先（先读斜杠后的模型名，未知才回退上游段）、独立中转平台识别、仅网关 route 启用该解析、未知中性 fallback 及本地资产约束；只增加 `dsh-magpie` 别名。当前该 requirement 的16个场景全部保留；网关场景增加新别名而没有删除旧 route；末尾只新增 `dsh-magpie2` 相似名负例，没有回滚当前语义。
+- design D1:56 与源码:50–63 一致：`dsh-magpie` 规范化为 `magpie`，`dsh-magpie2` 为 `magpie2`，后者不命中精确名/`magpie-` 前缀。源码:140–155 分别计算模型厂商与中转平台，:179–187 再按重复身份去重渲染，符合主规范；不需要改源码。
+- test-plan:73–89 已列出 delta 全部17个场景，包括新近加入主规范的四个场景。现有 logos.test.ts:173–195、203–228 对旧 route 已有对应的厂商优先、GLM优先、独立中转以及非品牌无中转断言；但尚没有新 route 的对应具名回归，此阶段不可声称已执行通过。
+
+### AMD-1-M1 — 四个新增回归未落实到 tasks 14，Coverage Notes 与表格冲突（Moderate）
+
+- **位置**：test-plan:86–89、101；tasks:137–138；logos.test.ts:173–195、203–228。
+- **具体遗漏**：表格已把「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」列为待核验 red；但 Coverage Notes 仍限定“只新增”新 route 正向和相似名负向两条，tasks 14 也只安排这两条、green 场景改标题和上游未知模型 fallback。现有四类断言只使用 `dsh-magpie-connect`，任务既没有要求给四条 red 场景补具名测试，也没有要求将相应断言扩展到 `dsh-magpie`。因此完全照 tasks 14 实施，可以结束该组却仍遗漏 AMD-1 明确要求的四条回归；只测主图别名不等于锁住新 route 的模型/中转维度。
+- **最小修法**：仅同步 test-plan 的 Coverage Notes 和 tasks 14，明确为四场景建立 `spec Scenario` 具名回归，并将相关 badgeBrands/渲染断言参数化到 `dsh-magpie` 与 `dsh-magpie-connect`：DeepSeek/GLM 模型角、OpenCode 独立中转角，以及 auto/group/custom 无中转角（同时保留原来的上游未知模型 fallback）。允许复用现有测试，不要求新增实现、资产、host/UI 功能或重开渲染决策。新断言通过后再按实际结果更新表格，不预判 green。
+
+### AMD-1 conclusion
+
+**delta 保真与 D1 acceptable；回归执行计划尚有 1 Moderate / 0 Critical（AMD-1-M1），AMD-1 暂不关闭。** 唯一独立状态行保持 no，原 VERDICT 与全部旧历史正文保持不变。上述最小修法完成后仅需定向复核四场景的计划闭环。
+
+`OPENSPEC_TELEMETRY=0 openspec validate add-dsh-magpie-plugin --strict` 返回 `Change 'add-dsh-magpie-plugin' is valid`（exit 0）。只做本地只读源码/规范核对、SHA-256 和 strict validate；未运行测试、部署、联网、读取凭据或下派。唯一文件写入为本报告末尾追加结果，未修改其它文件；依严格写入限制未写记忆卡片。
+
+## AMD-1-M1 targeted re-check (plan closure)
+
+独立定向复核（codex，fresh context，2026-10-25）：仅复核 AMD-1-M1 的计划遗漏修订及其直接引入的问题。已重读当前 sidebar 主规范、sidebar delta、design D1、test-plan 和 tasks（重点为第14组），并核对上次 AMD-1 报告的具体缺口；不重开其它已批准决策。本节的关闭仅指规范与回归执行计划闭环，不代表测试已实现或通过。
+
+### Artifact SHA-256
+
+```text
+30b507b447d3cc3f61487cb3ff4767abb206095a37211b28b43946387bfc5007  openspec/specs/sidebar-session-provider-icon/spec.md
+52925e21b168f0621ac30a6f61644cb9cd96303a899c114a5351d3757c92d4b2  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
+84629b8a3ab17441d47fc3b11040e0c44831d9ccfdd89f71c56f9af234f13ae8  openspec/changes/add-dsh-magpie-plugin/design.md
+0859d0c5be5f3d1d473249a712564f719136c4826da3a4313c9ebb4fa7c9b956  openspec/changes/add-dsh-magpie-plugin/test-plan.md
+e77caeba0966d11da86e647e29e59154b35c7a7db15d6045d0b930dd40ad844c  openspec/changes/add-dsh-magpie-plugin/tasks.md
+9e8b9a06ab932947632787de2d4d1b0707457fd82f7e9a9e6256ab244304ab18  packages/sidebar-session-provider-icon/src/client/logos.ts
+0de7a93c8208c6da45cfbe88da81520a1aa777c6e5ae9c09eccb9b3eee4b5e1c  packages/sidebar-session-provider-icon/test/logos.test.ts
+```
+
+### AMD-1-M1 — applied / closed
+
+- **四场景均进入执行计划**：test-plan:86–89 的四条 red 行仍保留独立 `spec Scenario` 测试名；Coverage Notes:101 与 tasks:138（14.2）现在同时明确列出「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」，要求分别提供具名回归，并对 `dsh-magpie` 与 `dsh-magpie-connect` 两 route 参数化断言。不再存在照 tasks 实施却漏掉四条 red 的计划缺口。
+- **断言语义可从规范机械导出**：当前主规范:122–136 与 delta:54–68 一致保留模型名优先（DeepSeek/Anthropic/OpenAI、GLM）、独立 OpenCode 中转品牌，以及 auto/group/custom 无中转品牌。参数化场景没有放宽这些 THEN，也没有把模型角与中转角合并。原有未知模型回退上游段仍由 delta:46–48、test-plan:84 和 tasks:138 显式保留。
+- **边界与状态一致**：design D1:53–56 和 tasks:137–138 均维持只补规范/回归、不改运行时源码；14.1 保留新 route 正例、相似名负例及不符预期即停止报告的要求。Coverage Notes:101 明示 green 只是基线、最终须重跑；四条目标行仍为 red，tasks 14 仍未勾选，没有预判测试成功。主规范、delta、design 及 sidebar 源码/测试散列与上次 AMD-1 报告一致，变化落在本次要求修订的两份计划中。
+
+### Conclusion
+
+**AMD-1-M1 applied，AMD-1 的唯一计划遗漏已关闭；未发现本次修订直接引入的 Moderate 或以上问题（0 Moderate / 0 Critical）。** 唯一独立状态行已由 no 改为 yes，原 `VERDICT: APPROVE_WITH_CHANGES` 保持不变；历史结论未改写。
+
+本次仅做本地文档对照与 SHA-256（exit 0）；未运行测试或 strict validate，未联网、部署、读取凭据或下派。主动文件写入仅限本报告独立状态行及末尾本节；未修改源码、测试或其它文件，依唯一可写文件限制未写记忆卡片。
+
+## AMD2 — selector display groups and own settings bird icon
+
+**Status: PENDING INDEPENDENT RECHECK.** 用户已明确确认将这两项加入当前 change，无需再次征求产品确认。原规划（Re-check 6）与 AMD-1-M1 的批准结论和既有 `VERDICT` / `CHANGES_APPLIED` 原行均保留为对应历史范围的证据；它们不批准本次 AMD2 delta，也不证明实现/GUI通过。本节由实现者追加，不是独立评审结论。
+
+待独立复核范围：proposal 的 AMD2 两项、design D1/non-goal 与 D13/D14、dsh-magpie spec 新增两条 requirement/五个场景、tasks 17、test-plan AMD2 ledger。selector 需按 owned_by 展示 Magpie (Claude)/(GPT) 与具体型号，真实单 route/model ID 不变，统一搜索及可见性/effort 保留；无官方逐模型展示接缝则先停并报告最小 host patch，不伪造多个 provider 或 DOM 路由 hack。settings 图标按本仓 Pet/Memex 模式仅标记自身行，CSS currentColor，observer/样式卸载，不影响旧 connect，保留 notices。
+
+本次仅 AMD2 增量待 recheck；不得将旧批准扩大为 AMD2 已通过，不改变旧报告文字、VERDICT，也不将整个 change 标 PASS。独立 recheck 由 lead 安排，本执行会话不下派。
+
+
+## AMD2 approved-scope reconciliation — host seam + AUTO extension (author ledger, not review)
+
+**Status: PENDING INDEPENDENT RECHECK (expanded scope).** 本轮用户明确批准“纳入本轮，继续完成”：原 AMD2 菜单组/图标以外，纳入必要的 Pet 现有 compat 唯一 owner 受管宿主 patch，以及 AUTO 双 Magpie transport 兼容和 actual/next effort 纯显示。上节“缺接缝先停/等新授权”仅为旧时间点记录，现已获授权，不是最终 block；仍禁止伪 provider、额外 runtime owner、手改 generated dirs、显示写回全局 defaults、扩大 allowlist 或停用 connect/shim。
+
+待独立复核闭集扩大为：proposal；design D13/D14事实纠正及D15；dsh-magpie AMD2两requirement；新增 specs/auto-model-routing/spec.md 四requirement/九scenario；tasks17/18与16.1的baseline纠正；test-plan增量ledger；implementation-log/verify interim。D14按实物纠正：connect同为marker/currentColor CSS mask/observer/dispose，Pet/Memex旧实现不保证唯一，新图标唯一匹配及foreign marker排除是增强。旧审查历史及唯一状态行保持不变；既有yes仅属原规划/AMD-1，不是本轮独立认可。此处无新独立VERDICT或CHANGES_APPLIED，且不能以strict valid、作者GREEN或主wire调查替代recheck。
+
+## AMD2 final focused independent source/planning recheck — 2026-10-25
+
+### What this change does:
+
+本增量把网关归属作为模型菜单的展示组，并为自身设置行增加鸟形图标。它同时补齐新旧 Magpie 的 AUTO transport 兼容和实际/下次 effort 双事实展示；不改变真实 provider/model、不把显示同步写回用户选择或全局默认值。
+
+**AMD2_RECHECK: APPROVE** — 仅批准下面冻结哈希的扩大后 AMD2 规划与独立源码复核范围。两项既有 finding 均 accepted closure；本次未建立新的可达 Must-fix/Should-fix 源码缺陷。不是 full verify PASS、最终部署图验收或 archive 授权。
+
+### Review boundary and frozen identities
+
+- 独立 reviewer，fresh context；先加载 ponytail-review，再读旧 source review、原规划/AMD-1 历史、当前规范及本轮增量。审查窗口为 **2026-10-25 14:50:58–14:56:59 -04:00**（随后只追加报告/封口检查）；仓库 HEAD `8aeca83d47e32231a46c62fff10fd0625e45847a`。假定一个个人长期 Host、多个 session/client，目录刷新与用户选择可重叠。
+- 旧原始 scope、Re-check 6、AMD-1 的历史批准完整保留，不借其批准 AMD2。此次明确覆盖用户新增的 **UI 分组、设置图标、受管 Host seam、actual/next display、双 route compatibility** 及两项修复；不重开已接受的生成捕获/usage/刷新政策，不声称整包重新安全审计。
+- 读取连接源码而非只看 diff：plugin catalog→adapter list/resolve/prepare；patch 的 LLM normalize→Host catalog→generated Remote→ModelDirectory→composer 与 `/model`；AUTO 四源码完整差异及未改 policy-host 的 caller/allowlist/主 request；设置 icon apply/dispose 与已安装 connect 实物；相关真实 Host/React/popup/routing 与 plugin/AUTO/sidebar 测试。
+- 上游连接源码来自 owner 已恢复的只读隔离 checkout；实际核对 pin 为 `639ed015397290b3745d163aafe02ffee4aa3f84` 且 `git status --porcelain` 空。未 apply、scrub、build 或抢占该 checkout/收尾作者 testcopy，未修改 shared `.upstream` 或 active launcher。
+- 唯一文件写入为本报告末尾追加；不改历史正文、唯一全局状态行、current specs、实现/测试/中央收尾文档。无下派、commit、部署、重启、真实凭据读取/初始化或真实网关请求；依严格写入边界不写记忆卡片。
+
+下列五份规划与 patch 在开始及关闭采样时 SHA-256 相同：
+
+```text
+3666d0a0760c8784098eefb6a1415723c1350a0bd5a6a0d8f2a19cd9b246466a  openspec/changes/add-dsh-magpie-plugin/proposal.md
+5e88dbc4371f309e9e5e0772ba16766b124306fdac1c05c34a01ad186767222e  openspec/changes/add-dsh-magpie-plugin/design.md
+b2deb7881c6021f04d0d68453d3d24611b4b8bd1a8cc6d2a5cac06326b882a3e  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+52925e21b168f0621ac30a6f61644cb9cd96303a899c114a5351d3757c92d4b2  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
+347b4894a8397df22bfae88b0c425c09678b24e624675c09b37d4e7fbc9a5707  openspec/changes/add-dsh-magpie-plugin/specs/auto-model-routing/spec.md
+0a9980ef42f621ba1977c3541196c1cb13bbcfab0eb146104b352f2c17f8ae19  packages/dsh-pet/compat/subagent/model-display.patch
+```
+
+稳定 patch 仍为旧 source review 所审的 **306 行相同字节**；本次两项 closure 没有生产 patch 修订。精确测试采样：React `3b3e24d412cc97b1f35c0931305b2974e56de15bb1b7fab5e396e88872ff5087`；subagent-tool test `03056f8bc79f337acd0c78bd6a8d60bfb6c4b5e47f4b88cb629fd6c6267c8fa6`。current AUTO spec 仍为 `3e0626e95d44a8a69a6b9cf8c80fcaae7982ad48defbfada7babbfccb1ce6b0c`；current sidebar spec `30b507b447d3cc3f61487cb3ff4767abb206095a37211b28b43946387bfc5007`。追加前本报告旧前缀 SHA-256 为 `777f08c074545e9ca0fbdce63384aa4ec7ede59501c756b8d05c7f1233a18598`（553 行）。
+
+### Accepted closure of the two findings
+
+1. **Finding 1 (Must, spec contradiction) — accepted / closed.** [AUTO delta:4,12](<specs/auto-model-routing/spec.md#L4-L14>) 现明确只有 **所属根 AUTO + explicit legacy** 拒绝两个 Magpie 新预览；MANUAL 正常返回 `{routed:false,reason:'manual'}`。与 [current MANUAL:294–305](<../../specs/auto-model-routing/spec.md#L294-L305>) 一致。[生产 execute:74–90](<../../../packages/auto-model-routing/src/subagent-tool.ts#L74-L90>) 仍先判根 MANUAL，未把 policy/legacy 检查搬到早返回之前。[双 provider regression:122–138](<../../../packages/auto-model-routing/test/subagent-tool.test.ts#L122-L138>) 精确断言 routed:false、Jev0、judged0、settings0/catalog0、store write0、状态不变；state-store spy 是测试存储边界，不冒充真实磁盘/Host selection trace。[修复回执](<amd2-manual-review-fix.md>) 的 focused15/package222/typecheck/strict 是作者实际运行的证据，本 reviewer 未重跑该套件。另已亲跑当前 execute 的无文件 in-memory probe（仅 stub 依赖）：两 transport MANUAL 返回正确且无 Jev/settings/catalog/judged，AUTO+explicit legacy 在 Jev 前拒绝。此项是 spec/test regression closure，不虚构生产 RED。
+2. **Finding 2 (Should, keyboard test gap) — accepted / closed.** [新增独立 React case:55–69](<../../../packages/dsh-pet/test/model-display-react.spec.tsx#L55-L69>) 在 codex 搜索下锁定 `GPT, Second, Local GPT`；ArrowDown 后唯一高亮必须是 Second，searchbox 的 aria-activedescendant 必须等于其 id；Enter 后 `mock.calls` 必须精确等于 `[[{provider:'gateway',model:'second'}]]` 且菜单关闭。因此旧测试容许的零 submit/错误 gateway 或 ordinary model 都不再能通过这一 case。原参数化 case 保留。读取并沿用 unchanged 生产 keyboard/visibleModels/render 顺序，未发现当前选择逻辑缺陷；该新增测试直接 GREEN 是补测试，不是新生产修复的 RED→GREEN。本 reviewer 实读 收尾 source output:5–32 (`/tmp/magpie-closeout-20261025-J77E6m/source-tests.log#L5-L32`) 的具名 exactcase 与25/25成功，未独立重放 React suite。
+
+### Connected source and planning conclusions
+
+- **raw ownership 与设置 fallback 分离。** [catalog:11–23](<../../../packages/dsh-magpie/src/host/catalog.ts#L11-L23>) 仅从原始非空 string owned_by 建 displayGroup；claude/codex 映射 Claude/GPT，缺失为 Other；literal other 与其它 namespace owner 不冲突。没有按误导性型号名猜归属。`CatalogModel.provider` 仍按原 `ownedBy ?? id-prefix` 回退供设置/visibility 使用，name/id 不改。[adapter:65–88](<../../../packages/dsh-magpie/src/host/adapter.ts#L65-L88>) 在 list/resolve/prepare 保留 clone 和 default-effort 行为；plugin 投影测试只证明插件边界，不当成 Host E2E。
+- **Host identity、detach 与搜索。** [patch](<../../../packages/dsh-pet/compat/subagent/model-display.patch>) normalize 接受 omission、拒绝畸形/空白 id/label，复制且仅留 id/label；真实 resolve 与 prepared dispatch 共用 normalize，Host catalog 再 detach。展示 buckets 用 `[realProvider,displayGroupId]` JSON tuple 做 key；真实 provider/model 不变，保留原 provider 顺序/同桶模型顺序和 account 本地化。composer 的渲染与 visibleModels flatten 共用 filteredGroups；click/arrow/current/pending/effort 保持真实身份。`/model` actions 仍用原 catalog lookup、不把展示 key 当 provider；searchText 只是组标签/name/id 的别名，不改可见名称。普通无元数据模型保持原分组行为。
+- **actual/next 只显示，不写回。** ModelDirectory 只透出已有 lastUsed，current 继续取 next/default。trigger/root effort caption 仅在同 provider/model 且有 reasoning、实际与 effective-next effort 不同时显示；不同模型、无 actual、相同 effort 安全降级。effort checked/submission 继续按 next；没有改 projection、request identity 或额外调用 selectModel。既有默认 effort 路径仍保留。真实 AgentLoop/header/projection 测试与 React/display 是分层证据，不是网络 GUI 验收。
+- **AUTO 不退化。** [policy-v2](<../../../packages/auto-model-routing/src/policy-v2.ts>) 精确白名单只有 claude/codex/新旧两 transport；不 alias、不剥完整 model id。自动 capability family 仍仅 claude/codex；未知 family 要 explicit model，并需 explicit effort 或可验证 default。实时目录、supported effort、cap（不自动 max）、全局 allowlist 均按 exact provider/model 检查。[policy-host:123–160](<../../../packages/auto-model-routing/src/policy-host.ts#L123-L160>) 另保留父 captured allowlist 与 post-await MANUAL 检查；主 request 仅返回 `{...config,reasoningEffort}`，不换 provider/model、无 selectModel。已绑定 child 在父 MANUAL/legacy 后恢复原 route，仍做 live validation，损坏持久化 fail closed；新预览拒绝规则不误伤恢复。四源码差异仅扩大精确 transport 接受集，未改 legacy 本地算法。
+- **D14 connect 事实已纠正。** 亲读 installed connect client:168–236 (`/home/prgrmr/.dsh/profiles/web/node_modules/dsh-magpie-connect/lib/client.js#L168-L236`)：确为 marker + currentColor CSS mask + observer/dispose，**不是 SVG DOM replacement**。本插件 [icon:13–41](<../../../packages/dsh-magpie/src/client/settings-nav-icon.ts#L13-L41>) 独立 marker、限定 selector/CSS、重复 label fail-soft、foreign connect marker 排除、无 DOM no-op、卸载清理；没有属性观察自触发。唯一性/foreign-owner 排除是本插件增强，不误称 Pet/Memex 原有保证；设计已这样写。只读 [notices:33–63](<../../../packages/dsh-magpie/THIRD-PARTY-NOTICES#L33-L63>) 具有来源/MIT，旧 connect 行不由本插件改写。未声称消除旧 connect 自身同名匹配的全部行为。
+- **旧 AMD-1/current 语义不回滚。** sidebar delta 保留模型厂商优先、独立中转品牌及非品牌无中转层；源码 normalize 已让 dsh-magpie 命中，而 dsh-magpie2 不命中。双 transport 的具名 regression 保留，运行时代码无需更改。
+
+### Evidence tiers — what this reviewer actually ran/read
+
+**亲跑、无网络/无文件 probe：**
+
+- `node packages/dsh-pet/compat/subagent/verify-model-display.mjs --graph /tmp/pet-model-display-20261025/artifacts-final2/launcher` 成功输出 compiled metadata/controller catalog/generated codecs/UI artifacts verified。已先读 verifier：真实 Llm normalize 与真实 controller 方法执行，generated Remote descriptor 的 `result.create().parse(catalog)` 保留元数据，五包 provenance/依赖一致；aggregate/client 部分含 artifact marker 检查，不把它夸大为 live browser/network roundtrip。
+- 当前 policy-v2 源码经 TypeScript **仅内存转译** probe：双 exact transport、未知 family/default、supported effort、cap、cross-transport allowlist 均按预期接受或拒绝；另有上述 actual execute MANUAL/legacy probe。它们是小范围源码检查，不是整套 Host 测试。
+- `OPENSPEC_TELEMETRY=0 openspec validate add-dsh-magpie-plugin --strict`：valid，exit0；规划/patch 前后 hash 一致。strict 仅证明结构，不替代语义 review。
+
+**实读作者输出，非本 reviewer 重跑：** source log (`/tmp/magpie-closeout-20261025-J77E6m/source-tests.log`) 25/25、原339/339、continuation161/161；root log:613–623 (`/tmp/magpie-closeout-20261025-J77E6m/root.log#L613-L623`) 598 total /596 pass /0 fail /2 existing MCP skips；plugin log (`/tmp/magpie-closeout-20261025-J77E6m/magpie-test.log`)179、AUTO log (`/tmp/magpie-closeout-20261025-J77E6m/auto-test.log`)222；两包 typecheck/build 的 EXIT=0；sidebar68/builder5见作者收尾回执。测试 copy 的五 patch apply/逆向恢复 provenance 采用 [收尾记录](<implementation-log.md#L90-L104>)，本 reviewer 没有接管或重新执行其 apply/testcopy。
+
+**RED 来源分开记：**亲读 clean source RED:1069–1072 (`/tmp/pet-model-display-20261025/red-final.log#L1069-L1072`) 为24=20fail/4pass；builder GREEN:20–33 (`/tmp/pet-model-display-20261025/build-final2.log#L20-L33`) 为24通过，并有339/161及 compiled verifier。新增25th exactcase直接GREEN，不制造新RED。Plugin display18 的 **18fail→18pass** 是本轮提供的真实作者 message reported receipt；未物理保存原RED时只按 **author-reported receipt，非独立重放/原始日志复核** 归档，不因缺raw日志自动报 production bug，也不把 current18绿当成独立证明历史先红。中央17.2旧pending文字由收尾文档 owner 按该证据等级 reconcile；本 reviewer 不越权改写。
+
+### Shipping remaining — not new source bugs
+
+1. **最终 graph freshness 尚未满足。** 旧 final2 isolated graph 对应 fingerprint `6f273ad57caeaa5e010c302394e29a587176f49e4e633719a8411e1cc54da930`；虽本次 verifier通过、生产patch未变，新增 React test及compat README仍是 [fingerprint inputs:217–253](<../../../packages/dsh-pet/compat/subagent/build-launcher.cjs#L217-L253>)，旧 fingerprint已经过期。后续获授权的正式 build 必须重新计算并对其精确输出图验证，覆盖 llm/controller/**api-remotes**/两个client的五包，不得称本次已发布/已部署。没有重新 build 或 scrub 共享缓存。
+2. **操作验收仍未完成：**2.5历史 unconfigured 首RED欠账不能补造；16.2真实 CT105 smoke未执行，现有preflight因 credentials-local初始化可迁移写入而止步，0network不等于HTTP成功；16.4未重启/未真实GUI或工具回合验收。旧connect/shim保持启用；部署、真实凭据/网络和是否禁用旧插件仍须授权。
+3. **范围完成不等于全目标完成。** 本节可作为18.8扩大独立review的证据，由中央文档owner更新其状态；16.3完整验收、最终fingerprint/graph与现场证据仍不得借本节标PASS或archive。原批准与AMD-1历史、唯一全局状态行保持原样。
+
+**Verdict for this bounded review: Ship the reviewed source/planning scope. Shipping/operational acceptance remains pending the gates above.**
+
+**Not checked:** 未重跑长 root/full/source suites、未重建最终图、未做真实 gateway/凭据/RPC网络或live GUI、未部署/重启/commit；只读代码批准不代表上述验收成功。

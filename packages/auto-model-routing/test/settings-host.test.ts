@@ -18,17 +18,17 @@ function fixture(credentials?: unknown) {
  } as never)
  return settingsHost(ctx,new SettingsStore(join(mkdtempSync(join(tmpdir(),'amr-settings-host-')),'config.json')))
 }
-it('Magpie catalog is isolated from legacy yet available for persisted v2 replay',async()=>{
+it.each(['dsh-magpie-connect','dsh-magpie'])('%s catalog is isolated from legacy yet available for persisted v2 replay',async(provider)=>{
  const ctx=new Context()
  ctx.provide('launchEnvironment',createLaunchEnvironmentSnapshot([{source:'process',values:{}}]) as never)
- ctx.provide('llm',{listProviders:()=>[{id:'dsh-magpie-connect'}],listModels:async()=>[{id:'opencode-go/kimi-k3',name:'Kimi'}],resolveModelInfo:async()=>({reasoning:{efforts:[{id:'high'}],defaultEffort:'high'}})} as never)
- ctx.provide('subagentModelSelection' as never,{current:()=>({enabled:true,allowedModels:[{provider:'dsh-magpie-connect',model:'opencode-go/kimi-k3'}]})} as never)
+ ctx.provide('llm',{listProviders:()=>[{id:provider}],listModels:async()=>[{id:'opencode-go/kimi-k3',name:'Kimi'}],resolveModelInfo:async()=>({reasoning:{efforts:[{id:'high'}],defaultEffort:'high'}})} as never)
+ ctx.provide('subagentModelSelection' as never,{current:()=>({enabled:true,allowedModels:[{provider:provider,model:'opencode-go/kimi-k3'}]})} as never)
  const store=new SettingsStore(join(mkdtempSync(join(tmpdir(),'magpie-catalog-')),'config.json'))
  const host=settingsHost(ctx,store)
  expect((await host.catalog()).models).toHaveLength(1)
  store.save({policy:'legacy'},{models:[],childAllowlist:{status:'enabled',allowedModels:[]}})
  expect((await host.catalog()).models).toEqual([])
- expect((await host.catalog(true)).models[0]).toMatchObject({provider:'dsh-magpie-connect',model:'opencode-go/kimi-k3',defaultEffort:'high'})
+ expect((await host.catalog(true)).models[0]).toMatchObject({provider:provider,model:'opencode-go/kimi-k3',defaultEffort:'high'})
  store.save({policy:'policy-v2'},{models:[],childAllowlist:{status:'enabled',allowedModels:[]}})
  expect((await host.catalog()).childAllowlist.allowedModels).toHaveLength(1)
 })

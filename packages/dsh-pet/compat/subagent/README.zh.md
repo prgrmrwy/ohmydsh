@@ -13,7 +13,7 @@
 的 hunk 作废——上游已删除它修改的那个用例。上游 subagent 规格：未打补丁 316 通过、打补丁后 328 通过
 （多出的 12 例即 seam 用例，包含全新 runtime 冷恢复后仍保持 silent settlement 的回归测试）。
 
-**当前 overlay 替换三个上游包：`@deepseek-ai/dsh-subagent`、`@deepseek-ai/dsh-agent-loop` 和 `@deepseek-ai/dsh-tools`。**
+**当前 overlay 保留 `@deepseek-ai/dsh-subagent`、`@deepseek-ai/dsh-agent-loop`、`@deepseek-ai/dsh-tools`，以及 native-managed-effects 的四个工具 owner 包（`tool-subagent`、`tool-subagent-control`、`tool-workflow`、`tool-ralph`）；另有下述 model-display 五包扩展。所有包均使用 `@deepseek-ai/dsh-` 前缀。**
 
 承载的 seam（对应 5 个能力 marker）：
 
@@ -39,6 +39,16 @@
   Session。官方泛化 Session 路由**有意**不解析 continuation-owned child。
 
 - `dispatchToolBody` 最终 guard 重检——async `tools/execute` wrapper 等待期间撤销 scoped guard 时，在注册工具 body 尚未开始前拒绝调用；不取消已开始的 body，也不约束绕过 ToolRuntime 的任意副作用。
+
+### model-display 五包扩展（AMD2）
+
+`model-display.patch` 在既有 owner/build 中增加可选 resolved-model `displayGroup {id,label}` 的校验与 detach、Host catalog 投影、模型菜单和 `/model` 共用的展示 buckets/搜索，以及只读透出已有 `lastUsed` 的 actual/next effort 文案。一起重建 `@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-api-remotes`、`@deepseek-ai/dsh-client-ui-model-selection`、`@deepseek-ai/dsh-client-ui-commands`；不能漏掉 aggregate `api-remotes`，否则生成 Remote codec 会丢字段。
+
+精确 pin 为 `639ed015397290b3745d163aafe02ffee4aa3f84`，patch SHA-256 为 `0a9980ef42f621ba1977c3541196c1cb13bbcfab0eb146104b352f2c17f8ae19`，五包版本为 `0.2.0-rc.2-model-display.1`。stock rc.2 仍可正常用 Magpie 插件 route/生成，但列表保持 flat、不显示实际/下次 effort 差异。metadata 不改真实 provider/model id 或名字；同模型“最近实际：High · 下次：Medium”是两个真实事实，不是 effort 未生效。current/pending/check/提交仍按 Next；展示不调用会保存全局 defaults 的官方 `selectModel`，不覆盖投影、不改变 MANUAL 请求。
+
+**正面证据**：reviewed stock rc.2 发布产物 `@deepseek-ai/dsh-llm/lib/types/types.d.ts:304–315` 的 `LlmModelInfo` 无展示 metadata；`@deepseek-ai/dsh-client-ui-model-selection/lib/client.js:537–557、980–1022` 直接用 `group.id` 作选择/current/pending 真实身份，公开 `ModelSelectInjected` 仅提供 directory/load/select，不提供子组 renderer。伪 provider 不能安全表达纯展示归属。授权接缝与证据边界见[change design D13–D15](<../../../../openspec/changes/add-dsh-magpie-plugin/design.md#d13-amd2-选择器展示分组本轮已授权受管宿主扩展待独立-recheck>)。
+
+**退役条件**：reviewed 官方 release 须同时支持 resolve/prepare 校验 detach、Host catalog、controller 与 aggregate Remote codec 保留字段、两种 selector 入口一致分组搜索且 actions 保持真实 route，以及 actual/next 无写回展示。逐项行为与实际加载图通过后，才一并退役本 patch、五包 override/template/pins/测试；不要连带移除其它 Pet seam。本处没有完整 seam 的上游报告或已发布版本记录。本地隔离 build 不等于已部署或 live GUI 验收。
 
 ### 已移除的 seam（不要加回来）
 
@@ -92,16 +102,16 @@ Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻
 不 clone、build、install 或访问 registry。fingerprint 覆盖：
 
 - 固定 DSH 版本与 checkout canonical path；
-- 三个 patch 及其固定 SHA、tools package template；
+- 五个 patch 及其固定 SHA、tools/native-tools/model-display package templates；
 - Subagent/launcher/lock/timeout builders；
-- Subagent / agent-loop package templates。
+- Subagent / agent-loop package templates；model-display 四个专用测试文件、config 与 verifier。
 
 重建时使用一把跨进程、可恢复 stale owner 的共享锁，覆盖 Subagent 源码与 launcher
 整条链，并固定 `npm@11.19.0`（launcher）及上游声明的 `pnpm@11.7.0`（源码构建），以消除机器全局包管理器漂移。源码 checkout 仅在 install 子进程设置 `CI=true` 跳过无关的开发仓库 Lefthook 安装，依赖自身 install scripts 仍执行；tsc/tsdown 构建不继承该环境。reviewed DSH 源码要求 Node `^22.19.0 || >=24.0.0`，旧 Node 会在 clone/install 前明确失败。所有外部 git/corepack/npm 子进程通过有界 supervisor
 运行，超时会终止进程组。launcher 在同文件系统 sibling staging 中完成：
 
 1. 固定 tag 构建并验证各 patch 的 capability marker 与运行时行为；
-2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、三个 reviewed overrides（subagent、agent-loop、tools）
+2. 安装官方 `@deepseek-ai/dsh@0.2.0-rc.2`、上述 reviewed overrides（含 native-tools 与 model-display 五包）
    与显式声明的框架版本（cordis / cordis-plugin-include，值从 reviewed 上游树读取）；
 3. 从源码 `install-script-policy.json` 生成精确版本脚本策略；固定 npm 强制项目模式、strict=true、ignore/dangerously-allow-all=false，未知脚本版本拒绝，不自动 approve-all。新执行许可须单独审查确认；当前策略仅包含已分别确认的精确许可和禁止项；
 4. 验证依赖树唯一性、package identity/version/provenance、实际能力与 DSH
@@ -113,6 +123,19 @@ Host 首次准备会执行 `build-launcher.cjs`；fingerprint 命中时只做轻
 任一步失败都不会删除已有 `.launcher`；本次 Host 启动 fail closed，不静默回退
 官方 runtime。启动控制台和 `dsh-startup.log` 会记录 runtime kind、owner、compat
 kind 与版本。
+
+### model-display 独立源码测试
+
+只对 pin 上的 clean checkout 创建独立 copy/worktree，按 builder 顺序 apply 五个受管 patch；在该 copy 中运行：
+
+```sh
+DSH_COMPAT_SUBAGENT_CHECKOUT=/absolute/isolated/upstream node ./node_modules/vitest/vitest.mjs run --config /absolute/ohmydsh/packages/dsh-pet/compat/subagent/model-display.vitest.config.mjs
+node ./node_modules/vitest/vitest.mjs run packages/llm/llm/tests/service.spec.ts packages/api/session-controller/tests/session-models.host.spec.ts packages/client/ui-model-selection/tests packages/client/ui-commands/tests
+```
+
+用 `finally`/EXIT 逆序恢复 patch，保留原 node_modules/生成物；不 apply/scrub shared `.upstream` 或在用 launcher。builder 在 semantic gate 后恢复源码，故 build 后未 patched 源码测试失败不是产品回归。专用测试现为25（owner 的24 + finding2跨组键盘精确回归）；新增用例是 test gap 修复，对正确且未改的生产代码直接 GREEN，不虚构新代码 RED/GREEN。
+
+`node verify-model-display.mjs --graph /absolute/isolated/launcher` 检查 compiled provenance、真实 controller catalog、生成 Remote schema 与 client artifacts。测试本身也是 fingerprint input；修改测试后旧 graph 不再等于最终 source。后续正式 build 必须重算 fingerprint、复核 resulting graph 后才能部署，旧隔离 graph 通过不证明最终源码新鲜。
 
 ## 版本升级与移除
 

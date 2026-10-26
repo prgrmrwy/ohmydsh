@@ -4,6 +4,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { DEFAULT_SETTINGS, SettingsStore, SettingsValidationError } from './settings.js'
 import type { RoutingCatalog } from './settings-contract.js'
+import { magpieProvider } from './policy-v2.js'
 import rubric from './rubric.json' with { type: 'json' }
 
 import { JevClient } from './jev.js'
@@ -16,7 +17,7 @@ export function settingsHost(ctx: Context, store: SettingsStore) {
   const environment = launchEnvironmentOf(ctx)
   const credentials = () => ctx.get('credentials')
   const catalog = async (includeMagpie = store.read().settings.policy === 'policy-v2'): Promise<RoutingCatalog> => {
-    const models = (await Promise.all(ctx.llm.listProviders().filter(p => p.id === 'claude' || p.id === 'codex' || (includeMagpie && p.id === 'dsh-magpie-connect')).map(async provider => {
+    const models = (await Promise.all(ctx.llm.listProviders().filter(p => p.id === 'claude' || p.id === 'codex' || (includeMagpie && magpieProvider(p.id))).map(async provider => {
       try {
         return await Promise.all((await ctx.llm.listModels(provider.id)).map(async model => {
           try {
@@ -31,7 +32,7 @@ export function settingsHost(ctx: Context, store: SettingsStore) {
     try {
       if (service) {
         const current = service.current()
-        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => r.provider === 'claude' || r.provider === 'codex' || (includeMagpie && r.provider === 'dsh-magpie-connect')) } }
+        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => r.provider === 'claude' || r.provider === 'codex' || (includeMagpie && magpieProvider(r.provider))) } }
       }
     } catch { /* An unavailable policy must never broaden the allowed routes. */ }
     return { models, childAllowlist: { status: 'unavailable', allowedModels: [] } }

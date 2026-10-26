@@ -1,0 +1,63 @@
+dsh-magpie third-party notices
+
+The adapter's replay projection/reconstruction follows the design and portions
+of the implementation of @deepseek-ai/dsh-llm-pi-ai 0.2.0-rc.2:
+https://github.com/deepseek-ai/deepseek-harness
+packages/llm/llm-pi-ai
+
+MIT License
+
+Copyright (c) 2026 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Runtime dependencies @earendil-works/pi-ai and undici are distributed under
+their own MIT licenses. Their license files remain in their distributions.
+
+The local settings-navigation bird SVG in src/client/bird-svg.ts is copied
+from dsh-magpie-connect 0.4.1, lib/client.js (src/client/nav-icon.ts,
+BIRD_PATH and birdMaskSvg), https://github.com/bitxeno/dsh-magpie-connect.
+The bird is Magpie brand artwork; upstream Magpie artwork is MIT licensed,
+Copyright (c) 2026 yetone (https://github.com/yetone/magpie). The permission
+and warranty terms reproduced below apply to that artwork as well.
+It is rendered as a local CSS mask with currentColor; no external asset is
+requested. Navigation lifecycle/marker integration follows this repository's
+Pet/Memex pattern rather than modifying the connect plugin's row.
+
+MIT License
+
+Copyright (c) 2026 dsh-magpie-connect contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

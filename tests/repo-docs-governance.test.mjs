@@ -553,6 +553,7 @@ test('package tiers match the design (D6)', () => {
     'cockpit-worktree-open-shim': 'C',
     'collab-kernel': 'C',
     'dsh-collab': 'C',
+    'dsh-magpie': 'C',
     'dsh-memex': 'A',
     'dsh-openspec': 'A',
     'dsh-pet': 'A',

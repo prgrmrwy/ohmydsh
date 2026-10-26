@@ -36,23 +36,24 @@
 - 一个可发布的自研插件，替代 `dsh-magpie-connect` 和 `magpie-display-name-shim`，并能作为日常执行入口：工具往返、取消、超时都可验收。
 - 设置页按 provider 分组，包括只读卡片、手动刷新（单卡和全部）、模型可见性、DSH 侧默认 effort。
 - Codex 速度切换。
+- 本轮授权的逐模型展示组与 AUTO 双 Magpie transport 兼容、actual/next effort 纯显示，保持真实路由与用户下一次选择不变。
 
 **Non-Goals:**
-- 选择器按上游 provider 原生分组（多 route）。
+- 按上游 provider 注册多个真实 route。AMD2 的选择器展示分组不属于这一 non-goal；它须与真实 route 身份分离。
 - 使用 Codex 重置卡。
 - 账号登录与管理；写入 Magpie 配置。
 - 插件级代理；多网关地址自动切换。
 - 用量历史、请求统计、`/v1/magpie/route` 实时路由展示。
 - `/v1/messages` 直通；图片和视频生成工具。
 - 目录持久化缓存；后台定时轮询目录或卡片。
-- 适配 auto-model-routing 与 home-network-model-guard。
+- 改变 AUTO 策略/legacy 语义或扩大 allowlist；本轮仅纳入必要 transport 兼容与显示接缝。home-network-model-guard 改动仍不在范围内。
 - 推送独立仓库、发布 npm、提交商店 PR，这些按发布文档另行进行。
 
 ## Decisions
 
-### D1 单 route `dsh-magpie`，分组只在设置页
+### D1 单 route `dsh-magpie`，展示分组与路由身份分离（AMD2）
 只注册一个 route，模型 id 保持网关原样。
-- **备选**：每个 `owned_by` 一个 route。**否决理由**：Magpie 的 provider 集合是动态的，route 会跟着变化，生命周期和孤儿会话都更复杂；用户也只要求在设置页分组。
+- **备选**：每个 `owned_by` 一个 route。**否决理由**：Magpie 的 provider 集合是动态的，route 会跟着变化，生命周期和孤儿会话都更复杂；AMD2 用户确认的菜单分组只是展示，不能改变真实 route。
 - sidebar-icon 的 `normalizeIdentity` 会先去掉 `dsh-`，所以 `dsh-magpie` 已经能命中现有的 `magpie` 规则。本 change 只给它补 spec 和回归测试，不改源码。
 
 ### D2 线协议：复用 pi-ai，按 `native_endpoints` 选择 Responses 或 Chat
@@ -75,7 +76,7 @@
   - 输出上限：Chat 用 `max_completion_tokens`，Responses 用 `max_output_tokens`。
   - usage：`inputTokens = max(总输入 - cacheRead - cacheWrite, 0)`，没有缓存详情时缓存按 0 计，这部分由 pi-ai 完成。`totalTokens` 由插件自己的 `mapUsage` 推导：未缓存输入大于 0 时取四项之和，否则省略（见下）。不采用官方 dsh-llm-pi-ai 直接透传的做法，原因是 Magpie 透传同协议上游时，`total_tokens` 可能缺失（`gateway.go:3795–3797、4911–4944`；见 `pi_responses_test.go:32–35`），此时 pi-ai 会给出 0（`openai-responses-shared.js:450`）。实现：pi-ai 归一化后，`input + cacheRead + cacheWrite` 就是原始完整输入，因此 `input > 0` 时 `totalTokens = input + cacheRead + cacheWrite + output`；`input === 0` 时省略。这一条就能覆盖缺少完整输入（pi-ai 记为 0）和计数不一致（pi-ai 钳到 0）两种情况，不需要额外钩子。代价是恰好全部命中缓存的合法请求也会省略 total。total 是可选字段，各分项仍然正确，按评审 Re-check 4 的意见只算 Suggestion，可以接受。（Chat 和 Responses 都不采用 pi-ai 的 total。）缓存字段只在大于 0 时输出。
   - 流中出现错误事件即判为 error，之后再收到 `[DONE]` 或完成事件也不改判。
-- **超时与重试**：首事件超时 90s、空闲超时 60s。看门狗包在 pi-ai 事件流外层，做法与 connect 的 `withStallTimeout` 相同。插件只在建连阶段（还没收到任何事件时）对 429 和 5xx 做有限重试；一旦已经输出过内容，就不再重放，轮次级重试由 DSH 负责。
+- **超时与重试**：首实际内容预算 90s，从调用 pi-ai 前启动；只在收到非空 `text_delta`、`thinking_delta` 或 `toolcall_delta`（`delta.length > 0`）时切换或重置 60s 空闲预算。HTTP headers、pi `start`、空 block start/end、空 delta、SSE comments 与 Responses created/in_progress 都不缩短或延长当前预算；工具 start 只有 name/id、尚无参数 delta 时仍属首内容预算。block end 本身不重置预算；无 delta 而以最终 block + done 直接完成仍正常结束，不等待超时。这里澄清原“首事件”歧义，不增加 90/60 数值、不新增配置或看门狗。看门狗仍包在 pi-ai 事件流外层。插件只在建连阶段（还没收到任何事件时）对 429 和 5xx 做有限重试；已经开始的流因超时不自动重放，轮次级重试由 DSH 负责。
 
 ### D3 统一传输层：私有直连 dispatcher，拒绝重定向，所有 hop 都校验
 插件内只有一个 `gatewayFetch(gen, method, path, init)`：
@@ -171,6 +172,27 @@ dispose 时释放 route 注册、设置路由、credentials 事件订阅和私�
 
 README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提供一个元数据自检测试：断言 prepare、prepack、files、exports 都存在。本 change 不推送仓库，也不发布。
 
+### D13 AMD2 选择器展示分组（本轮已授权受管宿主扩展，待独立 recheck）
+- 目标是在具体型号上方显示 `Magpie (Claude)`、`Magpie (GPT)`；组键只取网关 `owned_by`，其中 `claude` 展示 Claude、`codex` 展示 GPT，其它非空 owned_by 原文展示。缺失时显示中性 `Magpie (Other)`，不靠型号名猜测；不改变既有设置页缺 owned_by 的兼容分组或偏好键。
+- 展示分组必须是官方选择器的逐模型元数据或官方受管扩展，不是额外 LLM provider。所有选项的真实选择仍为 `{provider:'dsh-magpie', model:<原id>}`；统一搜索同时覆盖展示组标签与型号/id，可见性求交集、effort 与目录 replace 失效保持原契约。
+- 已核验原 rc.2 ModelSelect 从 `group.id` 构造 `selection.provider`，没有独立展示组字段，不能用伪 group/provider id 分组。此前暂停待授权只属历史；本轮用户已明确批准扩展，由 Pet 现有 compat 唯一 owner 维护 pinned-source patch、README/provenance、hash/build 与测试，不另造 runtime owner，不手改 `.source`、`.build`、`.launcher*` 等 generated dirs。链路为 adapter 可选 resolved-model `displayGroup {id,label}` → LLM 校验并 detach → host catalog 再 detach → client directory → 原 ModelSelect 展示 buckets；click/keyboard/current/pending/effort 与 `/model` actions 始终取原 provider/model。统一搜索覆盖组 label、型号 name/id；没有 displayGroup 的普通模型沿用原展示。
+- Plugin catalog owner 只在 raw owned_by 上映射 displayGroup，claude→Claude、codex→GPT、缺失→Other；不修改既有 CatalogModel.provider fallback、设置分组和偏好键。插件投影测试与宿主真实链测试分别提供证据，不能互相冒充完成。
+- 测试必须覆盖 owned_by 与误导性型号名不一致、缺 owned_by、跨组搜索、隐藏模型、选择后的真实路由身份和 effort。不能用本包自制 selector 替身冒充官方端到端通过。
+
+### D14 AMD2 设置导航鸟形图标（待独立 recheck）
+- `settings.section` 当前没有官方 icon 字段。实物 connect 0.4.1 `lib/client.js:168–236` 也是 marker + `currentColor` CSS mask + MutationObserver/dispose，不是 SVG DOM replacement；Pet 用 emoji 伪元素，Memex 用 mask，均按 label 循环匹配且不检查唯一性。本插件复用这种受限生命周期方式，并增强唯一匹配/foreign-marker 排除；不把增强误称为 Pet/Memex 已有保证。
+- 仅在 `[role="dialog"] nav button` 中精确匹配本插件当前 label `Magpie`，添加私有 `data-dsh-magpie-settings-nav` marker；若重复匹配无法唯一证明自身行，则不标记。旧 connect 的中文 label `Magpie 网关` 不匹配；英文也为 `Magpie` 时两个行同名，无法唯一定位则不标记任何行。两种情况下均不改旧 connect 的 SVG/属性。
+- 即使只有一个英文 `Magpie` 行，若已带 connect 的 `data-dsh-magpie-nav-icon`，也不认领；无 document/body/head 时 no-op。当前源码已包含这些保护，不在本轮规划中覆盖或重复实现。
+- CSS 仅作用于该 marker：隐藏自身行 fallback SVG，用本地鸟形 SVG mask 和 `background-color:currentColor` 显示 16px 图标，不依赖外网资源、不写颜色常量、不改变 label/click/焦点行为。SVG 来源和 MIT notice 追加至本包 THIRD-PARTY-NOTICES，既有 notices 不变。
+- apply 安装一次样式与 observer，支持设置对话框晚挂载/重建；dispose 断开 observer、移除所有自身 marker 和样式。找不到自身行、缺 document/body 时静默不修改页面。不观察自身写入的 attributes，以免自触发循环。
+
+### D15 AUTO transport 兼容与 actual/next effort 纯显示（本轮授权，待独立 recheck）
+- **事实**：`policy-host.ts` 的主 pre-step/request 不按 provider 过滤；新旧 Magpie 的真实 mock adapter 与 request-header 都收到 high。官方 modelSelection 投影保留 pending medium，因此 lastUsed=high、next=medium，selectModel 调用数为0。主 wire 调查证明执行已生效，不证明选择器显示已修复。current auto-model-routing spec:22–34 明确禁止新默认策略为同步显示调用会保存全局 defaults 的 selectModel；legacy:36 起仅限显式回滚，保持原语义。
+- **兼容选择**：只扩展 AUTO 的4个源码面（policy-v2 的 POLICY_PROVIDERS/magpieProvider、policy-store、settings-host、subagent-tool）及5份回归测试。新旧 transport 共用分类但不互为 alias；目录、允许列表、持久记录、实际请求仍核对精确 provider + 完整 model ID，保留实时能力、effort cap 与父 captured allowlist。未知能力家族仍须显式模型，不自动把 Magpie 切为本地 claude/codex，不扩大 allowlist。
+- **显示选择**：同一 Pet compat owner 在 ModelDirectory 只透出官方已有 lastUsed；当 lastUsed 与 next 的 provider/model 相同且 effort 不同时，在 trigger 和 root effort 行展示“实际 High · 下次 Medium”（英文对应文案亦区分 actual/next）。current/pending/check、effort menu 选中态与提交继续取 next。不同 provider/model、没有 actual 或 effort 相同时沿用普通展示，不凭名称推断请求，不写 selection/projection/global defaults。
+- **备选否决**：调用 selectModel 会污染全局默认且覆盖用户 pending intent；把 current 改成 lastUsed 会改变下一次选择与提交；另建 runtime owner 或改 generated dirs 会破坏现有受管构建/provenance边界。
+- **验证边界**：兼容套件作者报告 RED45(39pass/6fail)→GREEN45、最终31files/220tests与typecheck通过；显示接缝、宿主产物/build/hash及GUI由各自owner交证，不以兼容套件或主wire调查代验。
+
 ## Risks / Trade-offs
 
 - **[pi-ai 升级改变 wire 行为]** → pin 主版本，spec 中的 wire 场景作为回归测试。
@@ -183,8 +205,8 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 - **[受限 key 冷启动时用量为空]** → 空状态给出管理员操作指引。这是 Magpie 当前版本的行为，插件不绕过。
 - **[换 key 后，进行中的生成仍用旧 key 跑完]** → 这是有意的取舍，用户已确认。旧 key 是否失效由 Magpie 管理员决定。
 - **[两个 Magpie 插件并存期间，选择器里有两个分组]** → 过渡期可以接受。稳定后禁用旧插件。
-- **[auto-model-routing 不认 `dsh-magpie`]** → AUTO 模式暂不判档，与现状相同，另行适配。
-- **[外出走 Tailscale 时经 DERP 中继，延迟变高]** → 只影响首 token 延迟。首事件超时 90s 足够。
+- **[AUTO 实际 effort 与下一次手选不一致]** → 本轮纳入兼容与纯显示；保留 lastUsed/next 双事实，不为显示调用 selectModel、不写全局 defaults，独立验证仍 open。
+- **[外出走 Tailscale 时经 DERP 中继，延迟变高]** → 首实际内容前保留既定 90s 预算，空结构事件不提前切为 60s；该边界不保证任意真实上游延迟都能在预算内完成。
 
 ## Migration Plan
 
@@ -195,4 +217,4 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 
 ## Open Questions
 
-无阻断项。以下属于后续事项：Magpie 上游是否在网关端口提供「使用 Codex 重置」的端点；Ken-WSL 是否移除 usip TUN（属网络运维）。
+原官方接缝缺失已经核实，所需 Pet compat 受管扩展已获本轮授权，不再作为待用户授权的最终 block。菜单分组与 actual/next 显示仍待实现 owner 的证据、独立 recheck 与真实 GUI 验收；未完成不算通过。以下仍属后续事项：Magpie 上游是否在网关端口提供「使用 Codex 重置」的端点；Ken-WSL 是否移除 usip TUN（属网络运维）。

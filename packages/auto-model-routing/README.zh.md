@@ -44,6 +44,12 @@ AUTO 直接使用新策略，无需版本选择或额外开启。下面及前面
 
 见 [Jev 验证](docs/jev-policy-v2-validation.md)和[开发验收/支持矩阵](docs/policy-v2-development.md)。本地开发完成不代表已部署、默认推广或真实子模型收益验证。
 
+### Magpie transport 与选择器展示
+
+默认策略接受 `dsh-magpie`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。未知家族需显式 model。根会话 AUTO 且显式 `policy: legacy` 时，两种 Magpie 预览均在 Jev 前拒绝；MANUAL 仍直接返回 `routed: false`，不判档、不写状态。已绑定子实例恢复原路线。
+
+主请求可以正确使用 High，同时官方投影保留用户的 Next Medium。默认 AUTO 不为抹平显示调用 `selectModel`，因为官方 API 会保存全局 defaults，并可能覆盖下次 intent；MANUAL 请求保持原样。在 ohmydsh 中，Pet 受管 Host 扩展在同模型 trigger/根 effort 行展示 **最近实际：High · 下次：Medium**，勾选与提交仍按 Next。扩展一起重建 `llm`、`api-session-controller`、`api-remotes`、`client-ui-model-selection`、`client-ui-commands`（均为 `@deepseek-ai/dsh-` 包）。stock rc.2 仍可使用插件 route，但模型列表保持 flat、无 actual/next 文案。展示 metadata 不改变 route、model id 或名字。见 [Magpie 配置与展示前提](<../dsh-magpie/README.zh.md#模型菜单分组与实际下次-effort>)；本地测试不等于已部署或 live GUI 验收。
+
 ## 须知
 
 - **新会话缺省 MANUAL**，可在设置中改。
@@ -58,7 +64,7 @@ AUTO 直接使用新策略，无需版本选择或额外开启。下面及前面
 
 ![auto-model-routing 架构图：芯片与 RPC 端点、agent/pre-step 钩子经 OpenRouter 请求 Jev、agent/request 钩子只改推理强度、route_subagent 工具共用同一判断](docs/architecture.dual.svg)
 
-`agent/pre-step` 钩子在每个用户回合的第 1 步判档；随后以 prepend 注册的 `agent/request` 钩子只改写 `reasoningEffort`，并同步到官方模型选择。入口 [`src/index.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/index.ts)，判档规则 [`src/rubric.json`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/rubric.json)，强度表 [`src/effort.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/effort.ts)，界面 [`src/client/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/client/index.ts)，回归用例 [`eval/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/eval/README.zh.md)，图源 [`docs/architecture.json`](docs/architecture.json)（archify）。
+`agent/pre-step` 钩子在每个用户回合的第 1 步判档；随后以 prepend 注册的 `agent/request` 钩子只改写 `reasoningEffort`；默认策略不改官方 next intent/全局 defaults，仅显式 legacy 回滚同步选择。入口 [`src/index.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/index.ts)，判档规则 [`src/rubric.json`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/rubric.json)，强度表 [`src/effort.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/effort.ts)，界面 [`src/client/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/client/index.ts)，回归用例 [`eval/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/eval/README.zh.md)，图源 [`docs/architecture.json`](docs/architecture.json)（archify）。
 
 ## 开发验证
 

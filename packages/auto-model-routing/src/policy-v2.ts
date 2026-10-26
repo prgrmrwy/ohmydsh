@@ -2,18 +2,19 @@ import type { Capability, Depth } from './jev.js'
 import { targetEffort, type ChildProvider } from './effort.js'
 import { AUTO_EFFORTS, type AutomaticEffort, type RoutingCatalog } from './settings-contract.js'
 import { MODEL_ID_PATTERN } from './settings-validation.js'
-export const MAGPIE_PROVIDER = 'dsh-magpie-connect'
-export type PolicyProvider = ChildProvider | typeof MAGPIE_PROVIDER
-export function policyProvider(value: string): value is PolicyProvider { return value === MAGPIE_PROVIDER || value === 'claude' || value === 'codex' }
+export const POLICY_PROVIDERS = ['claude', 'codex', 'dsh-magpie-connect', 'dsh-magpie'] as const
+export type PolicyProvider = typeof POLICY_PROVIDERS[number]
+export function magpieProvider(value: string): value is 'dsh-magpie-connect' | 'dsh-magpie' { return value === 'dsh-magpie-connect' || value === 'dsh-magpie' }
+export function policyProvider(value: string): value is PolicyProvider { return POLICY_PROVIDERS.some(provider => provider === value) }
 export function modelFamily(provider: string, model: string): ChildProvider | undefined {
   if (provider === 'claude' || provider === 'codex') return provider
-  if (provider !== MAGPIE_PROVIDER) return undefined
+  if (!magpieProvider(provider)) return undefined
   const family = model.split('/')[0]
   return family === 'claude' || family === 'codex' ? family : undefined
 }
 export function validatePolicyRoute(catalog: RoutingCatalog, provider: string, model: string, effort: string, cap: AutomaticEffort): void {
   const entry = catalog.models.find(m => m.provider === provider && m.model === model)
-  const validId = provider === MAGPIE_PROVIDER ? /^[A-Za-z0-9._:-]+(?:\/[A-Za-z0-9._:-]+)+$/.test(model) && model.length <= 128 : MODEL_ID_PATTERN.test(model)
+  const validId = magpieProvider(provider) ? /^[A-Za-z0-9._:-]+(?:\/[A-Za-z0-9._:-]+)+$/.test(model) && model.length <= 128 : MODEL_ID_PATTERN.test(model)
   if (!policyProvider(provider) || !validId || !entry || !AUTO_EFFORTS.includes(effort as AutomaticEffort) || AUTO_EFFORTS.indexOf(effort as AutomaticEffort) > AUTO_EFFORTS.indexOf(cap) || !entry.reasoningEfforts.includes(effort) || catalog.childAllowlist.status !== 'enabled' || !catalog.childAllowlist.allowedModels.some(m => m.provider === provider && m.model === model)) throw new Error('策略路由不在当前目录/允许列表或 effort 上限内；暂停委派并询问用户')
 }
 
@@ -40,9 +41,9 @@ export function policyEffort(model: string, depth: Depth, supported: readonly st
 }
 export interface PolicyRoute { provider: PolicyProvider; model: string; reasoningEffort: AutomaticEffort }
 export function choosePolicyRoute(provider: PolicyProvider, capability: Capability, depth: Depth, catalog: RoutingCatalog, cap: AutomaticEffort, explicit: { model?: string | undefined; reasoningEffort?: string | undefined } = {}, family?: ChildProvider): PolicyRoute {
-  const selectedFamily = provider === MAGPIE_PROVIDER ? family : provider
+  const selectedFamily = magpieProvider(provider) ? family : provider
   if (!explicit.model && !selectedFamily) throw new Error('unsupported：没有已定义的模型能力家族；请显式指定模型')
-  const model = explicit.model ?? `${provider === MAGPIE_PROVIDER ? `${selectedFamily}/` : ''}${POLICY_MODELS[selectedFamily!][capability]}`
+  const model = explicit.model ?? `${magpieProvider(provider) ? `${selectedFamily}/` : ''}${POLICY_MODELS[selectedFamily!][capability]}`
   const entry = catalog.models.find(m => m.provider === provider && m.model === model)
   const reasoningEffort = explicit.reasoningEffort ?? policyEffort(model, depth, entry?.reasoningEfforts ?? [], cap, entry?.defaultEffort)
   validatePolicyRoute(catalog, provider, model, reasoningEffort, cap)
