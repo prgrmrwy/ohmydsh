@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - Add the on-demand `auto-model-routing-report` skill and read-only `lib/usage-report.js`: joins policy-v2 decisions to actual per-call usage by message ID, grouped by version × model × depth, with coverage gaps, sample thresholds and fixed caveats. Observational only; never writes, spawns or uses the network, and never prints message text, paths or session IDs.
 
