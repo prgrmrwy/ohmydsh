@@ -21,6 +21,7 @@ const GIT_TIMEOUT_MS = 1_000
 
 function git(home: string, args: readonly string[]): string {
   return execFileSync('git', ['--no-optional-locks', '-C', home, ...args], {
+    windowsHide: true,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
     timeout: GIT_TIMEOUT_MS,

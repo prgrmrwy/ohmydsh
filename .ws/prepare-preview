@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+import { seedPreview } from '../scripts/lib/ws-preview-seed.mjs'
+try { await seedPreview() } catch (error) { console.error(`prepare-preview: ${error.reason || error.message}`); process.exitCode = 1 }

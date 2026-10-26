@@ -31,3 +31,16 @@ test('strict environment validates entire file before publishing any value',asyn
   assert.throws(()=>loadEnvironment(repo,input))
   assert.deepEqual(input,{SAFE:'original'})
 })
+test('literal OPENROUTER_API_KEY in env.local reaches hostEnv',async t=>{
+  const repo=await fixture(t,'export OPENROUTER_API_KEY=sk-or-fixture-value\n')
+  const result=loadEnvironment(repo,{})
+  assert.equal(result.hostEnv.OPENROUTER_API_KEY,'sk-or-fixture-value')
+})
+test('shell-expanded credential line is rejected without echoing value',async t=>{
+  const repo=await fixture(t,'export OPENROUTER_API_KEY=$SECRET_SOURCE\n')
+  assert.throws(()=>loadEnvironment(repo,{}),error=>{
+    assert.match(error.message,/shell expansion/)
+    assert.doesNotMatch(error.message,/SECRET_SOURCE/)
+    return true
+  })
+})

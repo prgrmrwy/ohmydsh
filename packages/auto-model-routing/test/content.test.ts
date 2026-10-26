@@ -1,13 +1,37 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, dirname, relative, isAbsolute } from 'node:path'
 import { expect, it } from 'vitest'
 
 const skillPath = resolve(import.meta.dirname, '../skills/subagent-model-routing/SKILL.md')
 const skill = () => existsSync(skillPath) ? readFileSync(skillPath, 'utf8') : ''
+it('report_skill_is_on_demand_only', () => {
+ const text = readFileSync(resolve(import.meta.dirname, '../skills/auto-model-routing-report/SKILL.md'), 'utf8')
+ const [, front = '', body = ''] = text.split(/^---$/m)
+ for (const part of [front, body]) { expect(part).toContain('仅当用户明确要求'); expect(part).toMatch(/不得主动执行[^。\n]*定时任务/) }
+ const files = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')).files as string[]
+ expect(files).toEqual(expect.arrayContaining(['lib', 'skills', 'scripts/label-report.mjs']))
+})
 const sources = () => {
  const root=resolve(import.meta.dirname,'../src')
  return readdirSync(root,{recursive:true,encoding:'utf8'}).filter(name=>name.endsWith('.ts')).map(file=>[file,readFileSync(resolve(root,file),'utf8')] as const)
 }
+it('runtime_relative_imports_resolve_inside_the_standalone_package', () => {
+ const root = resolve(import.meta.dirname, '..')
+ for (const [file, text] of sources()) {
+  for (const match of text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)['"](\.[^'"]+)['"]/g)) {
+   const target = resolve(root, 'src', dirname(file), match[1]!)
+   const rel = relative(root, target)
+   expect(rel, `${file}: ${match[1]}`).not.toMatch(/^\.\.(?:[/\\]|$)/)
+   expect(isAbsolute(rel), file).toBe(false)
+   const source = target.replace(/\.js$/, '.ts')
+   expect(existsSync(target) || existsSync(source), `${file}: ${match[1]}`).toBe(true)
+  }
+ }
+ const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+ for (const dependencies of [pkg.dependencies, pkg.devDependencies, pkg.peerDependencies]) {
+  for (const value of Object.values(dependencies ?? {})) expect(value).not.toMatch(/^(?:workspace:|file:|link:)/)
+ }
+})
 it('no_local_classifier_or_other_egress', () => {
  for(const [file,text] of sources()) {
   expect(text,file).not.toMatch(/export function (classify|resolveLevel)\b/)

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './child-process.mjs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveExecutable } from './package-manager.cjs'
@@ -30,11 +30,13 @@ const SAFE_TARGET = /^[a-z0-9][a-z0-9._-]*$/
 const COMMON_FIELDS = ['id', 'type', 'enabled']
 const FIELDS = {
   'npm-workflow': [...COMMON_FIELDS, 'spec', 'version', 'integrity', 'provider', 'providerName', 'skills'],
-  'npm-mcp-server': [...COMMON_FIELDS, 'spec', 'version', 'integrity', 'bridge', 'serverName', 'credentialEnv', 'toolCallTimeoutMs', 'reconnect'],
+  'npm-mcp-server': [...COMMON_FIELDS, 'spec', 'version', 'integrity', 'bridge', 'serverName', 'jevProvider', 'credentialEnv', 'toolCallTimeoutMs', 'reconnect'],
   'openspec-schema': [...COMMON_FIELDS, 'archiveUrl', 'commit', 'archiveSha256', 'treeSha256', 'sourcePath', 'target', 'scope'],
 }
 const PACKAGE_PIN_FIELDS = new Set(['spec', 'version', 'integrity'])
 const RECONNECT_FIELDS = new Set(['enabled', 'initialDelayMs', 'maxDelayMs', 'maxAttempts'])
+/** Closed Jev MCP transport set; each maps to exactly one credential variable. */
+export const JEV_PROVIDER_CREDENTIALS = Object.freeze({ typesafe: 'TYPESAFE_API_KEY', openrouter: 'OPENROUTER_API_KEY' })
 
 function mapping(value, label) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${label}: mapping required`)
@@ -95,7 +97,15 @@ function validateMcp(resource, label) {
   if (typeof resource.serverName !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(resource.serverName)) {
     throw new Error(`${label}.serverName: [A-Za-z0-9_-]{1,32} required`)
   }
-  if (resource.credentialEnv !== 'TYPESAFE_API_KEY') throw new Error(`${label}.credentialEnv: must be TYPESAFE_API_KEY`)
+  // `jevProvider` is a transport enum, deliberately not named `provider`: that name is a
+  // package pin on npm-workflow entries and pin traversal must never see a string.
+  if (!Object.hasOwn(JEV_PROVIDER_CREDENTIALS, resource.jevProvider ?? '')) {
+    throw new Error(`${label}.jevProvider: must be one of ${Object.keys(JEV_PROVIDER_CREDENTIALS).join(', ')}`)
+  }
+  const expectedCredential = JEV_PROVIDER_CREDENTIALS[resource.jevProvider]
+  if (resource.credentialEnv !== expectedCredential) {
+    throw new Error(`${label}.credentialEnv: must be ${expectedCredential} for jevProvider ${resource.jevProvider}`)
+  }
   const toolCallTimeoutMs = positiveInteger(resource.toolCallTimeoutMs, `${label}.toolCallTimeoutMs`)
   const reconnect = mapping(resource.reconnect, `${label}.reconnect`)
   noUnknown(reconnect, [...RECONNECT_FIELDS], `${label}.reconnect`)
@@ -346,15 +356,19 @@ export function renderResourcePatch(resources, { profileDir, managedAssetsDir, h
   return parts
 }
 
-export function renderMcpLauncher(entryFile) {
+export function renderMcpLauncher(entryFile, { jevProvider, credentialEnv }) {
+  // Both values come from the closed mapping validated in validateMcp; refuse anything else
+  // so the generated literal can never carry an arbitrary variable name or provider.
+  if (JEV_PROVIDER_CREDENTIALS[jevProvider] !== credentialEnv) throw new Error('renderMcpLauncher: unsupported jevProvider/credentialEnv pair')
   return `#!/usr/bin/env node
 import { spawn } from 'node:child_process'
 
-const key = process.env.TYPESAFE_API_KEY
+const key = process.env.${credentialEnv}
 if (!key) process.exit(78)
 const child = spawn(process.execPath, [${JSON.stringify(entryFile)}], {
+  windowsHide: true,
   stdio: 'inherit',
-  env: { TYPESAFE_API_KEY: key, JEV_PROVIDER: 'typesafe' },
+  env: { ${credentialEnv}: key, JEV_PROVIDER: '${jevProvider}' },
 })
 let forwarding = false
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
@@ -575,7 +589,7 @@ export async function syncManagedLaunchers(resources, { profileDir, managedAsset
     const entry = path.join(installedPackageDir(profileDir, resource.package.name), 'dist', 'index.js')
     if (!existsSync(entry)) continue
     const target = path.join(managedAssetsDir, `${id}-launcher.mjs`)
-    const content = renderMcpLauncher(entry)
+    const content = renderMcpLauncher(entry, { jevProvider: resource.jevProvider, credentialEnv: resource.credentialEnv })
     const desiredHash = createHash('sha256').update(content).digest('hex')
     const record = state.thirdPartyLaunchers[id]
     if (existsSync(target)) {

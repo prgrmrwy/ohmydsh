@@ -24,6 +24,9 @@ whenToUse: 用户要求安装/添加某个 DSH 插件(给出包名、npm 链接�
    ```
    版本必须精确(禁止 ^/~);id 用短横线命名,可与包名不同;`brief` 显示在 `dsh` 启动清单的插件行后,`note` 做完整来源/审查记录。
 3. **build**:执行 `dsh build`(等效 `node scripts/sync.mjs`),确认输出:插件安装成功、bundles 更新、无失败条目。失败 → 报告错误并停止,不进下一步。
+   - **先隔离验收，再生产部署。** Worktree Session 内的 `dsh build` 默认使用隔离 home，不更新日常 GUI。有验收需要时，按 `dsh build` → `ws prepare-preview` → `dsh` 启动预览，以 `DSH_PREVIEW` 行的实际端口为准；3080 在隔离环境中禁止操作。准备脚本按白名单复制运行配置快照、不复制 Session；订阅刷新与 memex 共享风险按输出提示处理。
+   - 验收通过后提交改动，经用户批准使用受控命令合入，再从主 checkout 执行生产 build。生产 sync 会把 local package 写成该 checkout 的绝对 `file:` 路径，因此绝不能把真实 home 部署指向临时 worktree。
+   - 校验:`grep -c '.worktrees/' ~/.dsh/profiles/web/package.json` 应为 0;连续第二次 build 应报告 no changes。
 4. **询问重启**(必须问,不得擅自重启):问用户是否现在重启 DSH 使插件生效,给出两个选项:
    - **立即重启**:请用户自己执行 `dsh restart`。它是完整重启(`bin/dsh` 的 `do_restart` = stop → `nc -z` 确认端口释放 → 继续走 start),比手敲 `dsh stop && dsh` 更稳:端口没释放会直接报错而不是撞 EADDRINUSE。**由用户执行**——重启会中断当前会话,agent 在会话内执行等于自断;
    - **稍后手动重启**:插件已装好,下次 `dsh` 启动自动加载,什么都不用做。

@@ -216,7 +216,7 @@ async function contribute(child: Context, config: Config, settings: DshOpenSpecO
     },
     checkPathVersion: async () => {
       const { spawnSync } = await import('node:child_process')
-      const result = spawnSync('openspec', ['--version'], { encoding: 'utf8', timeout: 2_000, env: process.env })
+      const result = spawnSync('openspec', ['--version'], { windowsHide: true, encoding: 'utf8', timeout: 2_000, env: process.env })
       if (result.status !== 0) return null
       return `${result.stdout}${result.stderr}`.match(/\b\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/)?.[0] ?? null
     },
@@ -229,7 +229,7 @@ async function contribute(child: Context, config: Config, settings: DshOpenSpecO
     // invocation's Bash uses when it is not given an absolute path, and may differ from the Host's node.
     checkBashNodeVersion: async cwd => {
       const { spawnSync } = await import('node:child_process')
-      const result = spawnSync('node', ['--version'], { encoding: 'utf8', timeout: 2_000, ...(cwd ? { cwd } : {}), env: process.env })
+      const result = spawnSync('node', ['--version'], { windowsHide: true, encoding: 'utf8', timeout: 2_000, ...(cwd ? { cwd } : {}), env: process.env })
       return result.status === 0 ? result.stdout.trim().replace(/^v/, '') || null : null
     },
   })

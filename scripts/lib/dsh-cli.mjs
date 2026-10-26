@@ -5,7 +5,7 @@
 // npm/libnpmexec by default because its prerelease peer graph can hang inside
 // Arborist. Remove the single policy entry (and its regression tests) after an
 // isolated cold npx install, consecutive builds and repeated restarts are stable.
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './child-process.mjs'
 import packageManager from './package-manager.cjs'
 import {
   existsSync,

@@ -218,6 +218,7 @@ tests/                   仓库级测试
 - [ws](skills/ws/SKILL.md) — 查看、提升并清理 Worktree Session 绑定。
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — 仅观察的路由提示：判断工作是否应走正式工作流。
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — 统计记忆召回情况，并列出从未被召回的卡片。
+- [weekly-insights](skills/weekly-insights/SKILL.md) — 类似 Claude Code `/insights` 的本地会话复盘：流式读取会话日志，逐会话打标签并缓存，生成带改进建议的 HTML 报告。
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — 把远端插件加入 manifest、build，并在重启前询问。
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — 从 manifest 移除插件、build，并在重启前询问。
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。

@@ -2,12 +2,39 @@
 
 English · [简体中文](README.zh.md)
 
-![AUTO in action: a refactor-and-debug turn is judged complex and runs at high, a follow-up rename is judged simple and drops to low; hovering the AUTO chip shows the decision, clicking it switches to MANUAL](docs/auto-routing.gif)
+![AUTO interaction: toggle AUTO/MANUAL and inspect the decision](docs/auto-routing.gif)
+
+*Interaction recording from the earlier four-tier UI (isolated mock Host); current decisions use independent capability and depth as described below.*
+
+[Repository](https://github.com/prgrmrwy/dsh-auto-model-routing) · [Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
 
 <!-- problem -->
-You should not have to raise or lower reasoning effort by hand for every message. In AUTO, each user turn is judged by the Jev decision model (via OpenRouter) as `simple` / `standard` / `complex` / `escalated`, and the plugin changes **only the reasoning effort** of the model you already picked. Provider and model are never changed. If Jev fails for any reason, AUTO switches itself off and the chip shows why.
+**Add AUTO mode to DSH: automatic effort for the main agent, automatic model + effort for sub-agents.** Stop adjusting reasoning investment every turn or choosing a model for every delegated task.
 
-**Install.** DSH `0.2.0-rc.2`, Node.js `>=22.19`.
+- **Main agent: keep your selected model and adjust reasoning effort per user turn.**
+- **Sub-agents: judge capability needs and reasoning investment independently, then select model + effort.** A stronger model does not automatically mean deeper reasoning.
+- **Visible decisions, local feedback:** inspect candidate distributions and actual application status, then rate the allocation below a reply.
+
+### Which DSH scenarios does AUTO cover?
+
+| Scenario | AUTO behavior | Current boundary |
+|---|---|---|
+| Main-agent user turn | Judge effort for each new user turn; keep the main model | Not rejudged at every tool step; model must support the effort |
+| Official fresh `subagent` | Select and bind child model + effort before its first request | Real Magpie Claude/GPT ordinary child calls verified; catalog and allowlist apply |
+| Official fresh `spawn_teammate` | Bind the new teammate's model + effort using the same policy | Mock-host coverage; real-provider teammate acceptance remains unverified |
+| Resume or continue a bound child | Replay its initial allocation without rejudging | Requires the plugin enabled and intact route records |
+| Explicit model / effort | Preserve the specified dimension; judge only the other | Both specified: validate without calling Jev |
+| Fork, third-party or unbound creation paths | No automatic-allocation guarantee | Fork and unbound AUTO child paths are explicitly rejected, not silently replaced |
+
+This describes official integration paths—not acceptance of every DSH entry point, CLI/TUI interface or third-party plugin. The Web UI is the currently verified interface. MANUAL makes no new judgments. `route_subagent` is a preview, not a required step before dispatch.
+
+### Local feedback → future learning and adjustment
+
+**Available now:** rate a decision-bound reply as appropriate, too high, too low or unknown; change or clear the rating. Feedback and decision snapshots stay on your machine. Submitting feedback does not upload it to the decision service or immediately change routing; AUTO task judgments themselves still use your selected external service.
+
+**Planned direction:** add learning, evaluation and policy adjustment based on local feedback and execution outcomes, so AUTO can better fit your tasks. **Automatic learning and feedback-driven tuning are not implemented yet.** Today's records support later evaluation; they are not evidence of measured quality gains or cost savings.
+
+**Install.** Tested with DSH `0.2.0-rc.2`, Web UI, Node.js `>=22.19`.
 
 ```sh
 dsh plugin --profile web add dsh-auto-model-routing
@@ -15,32 +42,37 @@ dsh plugin --profile web add dsh-auto-model-routing
 dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 ```
 
-Restart DSH, refresh the Web page, then configure your OpenRouter key in **Settings → 自动模型路由**. The companion skill is included; it guides delegation but does not enforce every dispatch. Unlike model-pool routers or local classifiers, this plugin uses external Jev judgments and never switches the main model. The demos use an isolated Host with local mock Jev/model responses.
-
-In [ohmydsh](https://github.com/prgrmrwy/ohmydsh), enable only the local `auto-model-routing` entry and run `dsh build`; no separate skill customization is needed.
+Restart DSH and refresh the Web page. In **Settings → Auto model routing**, choose a decision service, save its API key, and use **Test connection** with a fixed public sample. These are English descriptions of the controls; the plugin's interface labels are currently in Chinese. New chats default to **MANUAL**; click the chip to use AUTO. The companion delegation skill is included—no separate skill installation is needed.
 
 ## Use
 
 | Where | What you do |
 |---|---|
-| **AUTO / MANUAL chip** (left of the model picker) | Click to switch. Hover to see this turn's effort, the latest Jev decision and its distribution. |
-| **Decision hint** | Appears above the chip for 3 s after each judgment, e.g. `complex → high · 0.70s`. |
-| **Gauge button** on a reply | Hover for the judgment; click to record which tier the turn should have used. |
-| **Settings → 自动模型路由** | OpenRouter key, default mode, effort cap, Jev deadline, hint switch and the routing maps (below). |
+| **AUTO / MANUAL chip**, left of the model picker | Click to switch. Hover for the decision, candidate distribution, certainty, model/effort and application status. |
+| **Decision hint** | Shows new decisions briefly; its Settings switch does not hide the hover panel. |
+| **Gauge button** below an eligible reply | Mark the allocation appropriate, too high, too low or unknown; change or clear your feedback later. Only replies bound to an applied main decision qualify. |
+| **Settings → Auto model routing** | Choose service/model, manage its separate key, test the connection, set defaults/cap/deadline, or expand **View decision strategy** to inspect the actual rubric and model slots. |
 
-![Settings → Auto model routing: judging service, session defaults, and the Claude / GPT routing maps with main-chat effort and sub-agent recommendation per tier](docs/settings.gif)
+### Main model stays fixed; children are selected separately
 
-**Default effort.** Each model starts at its officially recommended effort: `standard` keeps it, `simple` goes one step down, `complex` one up, `escalated` two up. The result is capped (default `xhigh`), and AUTO never picks `max`. Each cell of the routing map can override this: main efforts apply to every model of a provider family, and sub-agent cells are full model + effort pairs.
+- **Main chat:** `lower / baseline / higher` moves at most one supported effort step below/at/above the model's verified recommended starting point. The cap defaults to `xhigh`; AUTO never selects `max`. It does not change the main provider/model or write global model defaults.
+- **Fresh children:** capability is `bounded / analytical / frontier`; effort is judged separately. Claude slots are Haiku / Sonnet / Opus 5.5; GPT slots are Luna / Sol / Sol. The current catalog, supported efforts and official child allowlist must all permit the route. Magpie uses its exact provider and full family-prefixed model IDs, not a fallback to local transports.
+- **Explicit choices win:** specifying a model or effort leaves only the other dimension to judge. Specifying both skips Jev and validates the route. Missing task scope stops delegation rather than guessing.
+- **Official creation binds the route:** fresh `subagent` and fresh `spawn_teammate` paths bind an exact child identity before its first request. `route_subagent` is an optional preview—not proof of application and not a user constraint to copy into a subsequent call. Fork and unbound creation paths are unsupported; there is no silent substitution.
+- **Resume keeps the initial route.** Switching the root to MANUAL stops new judgments; already bound children retain their initial route. `applied` means the actual request configuration matched, **not** that the task succeeded. Real Magpie Claude/GPT ordinary calls were tested; fresh teammate routing and cold resume have mock-host coverage, not real-provider teammate acceptance.
 
-**Sub-agents.** The `route_subagent` tool uses the same judgment and returns provider/model/effort (Claude: Haiku → Sonnet → Opus → Opus; GPT: Luna → Sol → Sol → Sol). It only judges when the root chat is AUTO, and otherwise returns `routed: false`. These routes must be in the official sub-agent allowlist, which is fixed when a chat is created.
+### Choose the decision service
 
-## AUTO automatic resource selection (default)
+| Service | Endpoint | Default model | Credential reference |
+|---|---|---|---|
+| OpenRouter (default, preserves existing installations) | `https://openrouter.ai/api/alpha/decisions` | `typesafe/jev-1.13` | `OPENROUTER_API_KEY` |
+| TypeSafe | `https://api.typesafe.ai/v1/systemone` | `jev-1.13.0` | `TYPESAFE_API_KEY` |
+| Concentrate | `https://api.concentrate.ai/v1/systemone` | `jev-1.13.0` | `CONCENTRATE_API_KEY` |
+| Custom System One | Your full endpoint | Editable | `AUTO_DECISION_CUSTOM_API_KEY` |
 
-AUTO now directly uses independent capability and effort judgments; no version selector or extra activation is required. Earlier four-tier examples describe only the explicit legacy rollback. The main model stays fixed. Official fresh `subagent` / `spawn_teammate` calls bind decisions to exact child IDs before the first request; persisted decisions are replayed on resume. The legacy tier tables remain unchanged and apply only to the original policy.
+Preset model menus expose documented versions, not live availability guarantees. Custom services keep an editable model ID and must support `state + questions → answers`; an OpenAI chat-completions endpoint alone is not compatible. Custom endpoints require HTTPS (loopback HTTP is allowed), reject URL credentials/query/fragment and redirects. Only configure endpoints you trust with the dedicated key. TypeSafe and Concentrate have contract/mock coverage; their live authentication and regional availability were not verified here. No service failover occurs automatically.
 
-Here `route_subagent` is an optional **preview**, not proof of application; do not copy a preview as an explicit user constraint. Explicit model/effort are preserved. Fork remains unsupported until real-provider history compatibility is verified; unbound creation paths stop rather than silently claim routing. Use the `auto-model-routing.childRouting` RPC with `{sessionId}` for `recommended/applied/unsupported/needs-context/failed` evidence. Applied means the actual request configuration matched, not that the task succeeded.
-
-Switching to MANUAL/legacy stops new decisions; existing bound children retain their initial route. Disabling the plugin removes replay and lets the host restore its original creation configuration. See [Jev validation](docs/jev-policy-v2-validation.md) and [development verification / coverage](docs/policy-v2-development.md). The user approved default promotion on 2026-10-25 after minimal real Magpie acceptance. Set `policy: legacy` only for rollback via configuration/RPC; historical mappings are retained. Broader task-quality benefits remain unverified.
+**Certainty is not the selected probability.** Choice certainty is `(pmax − 1/n) / (1 − 1/n)`: with three candidates, a 70% top probability gives 55% certainty. The panel shows the service's returned certainty and full candidate distribution separately, including returned zeroes; missing values are marked unavailable. Neither number is task success rate.
 
 ### Magpie transports and picker display
 
@@ -50,20 +82,30 @@ The main request can correctly use High while the official projection retains th
 
 ## Good to know
 
-- **New chats default to MANUAL.** You can change this in Settings.
-- **Fail closed.** No key, out of credits, rate limit, region block, timeout or a bad reply: the chat goes to `MANUAL · Jev 停用` with the reason. Click AUTO to retry. There is no local fallback and no retry.
-- **MANUAL only stops changes.** Requests use the official current selection without restoring an old value. Default AUTO applies effort per request and never calls `selectModel` to update global defaults; selection synchronization belongs only to the explicit legacy rollback.
-- **Data sent out.** In AUTO, every user turn sends up to 8000 characters of your message and short parts of the previous turn to OpenRouter / TypeSafe (`typesafe/jev-1.13`). The text is redacted by shape first (keys, tokens, URL credentials, IPs). This is best effort and does not guarantee that every secret is removed.
-- **The key** is stored through the official DSH credentials service, never in the plugin config. A key in the launch environment (`OPENROUTER_API_KEY`) takes precedence and is read-only. To move it to the GUI, remove it from the launch environment, restart once, then save it in Settings.
-- **Files.** Settings live in `$DSH_HOME/plugins/dsh-auto-model-routing/config.json`; per-chat mode and judgments live in `$DSH_HOME/state/auto-model-routing/`. Changes take effect on the next request; no restart is needed.
-
+- **Failures are visible.** Main judgment failure disables AUTO with a reason; child judgment/route failure stops dispatch. No local classifier, automatic retry, upgrade or cross-service fallback.
+- **MANUAL stops adjustments, not history.** It does not restore an earlier effort. The official current selection remains in control; existing bound children keep their route while the plugin is enabled.
+- **Data leaves the machine.** AUTO sends shape-redacted task text (up to 8000 characters) and short previous-turn excerpts to your chosen service. Redaction is best effort, not a guarantee that all secrets are removed. Test Connection sends only a fixed public sample and can incur a small charge.
+- **Keys use official DSH credentials**, never plugin configuration. Launch-environment keys take precedence and are read-only. Service changes clear key drafts; save the service before managing its separate key. Changing a custom endpoint does not create a new credential namespace—review the key before trusting a new host.
+- **Local state:** configuration is under `$DSH_HOME/plugins/dsh-auto-model-routing/`; mode, child routes and feedback are under `$DSH_HOME/state/auto-model-routing/`. Feedback stores resource metadata, IDs, versions, returned distributions and timestamps—not task/reply text. Request event IDs allow later usage correlation; costs are not fabricated when unavailable. See [feedback and evaluation](docs/feedback-evaluation.md).
+- **No automatic learning.** Human allocation feedback is observational. It does not change routing or prove quality/cost benefits. Old messages without decision bindings are not backfilled; old records with missing evaluation fields remain unknown.
+- **Upgrade:** existing AUTO sessions use the new policy without a version switch or rewriting their stored mode. New chats still default to MANUAL unless configured otherwise. Historical four-tier mappings remain only for explicit `policy: "legacy"` rollback in plugin configuration; they are not the current policy or feedback menu.
 ## Architecture
 <!-- section: architecture -->
 
-![auto-model-routing architecture: the chip and RPC endpoints, the agent/pre-step hook asking Jev through OpenRouter, the agent/request hook rewriting only reasoning effort, and the route_subagent tool sharing the same judgment](docs/architecture.dual.svg)
+![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
 
-An `agent/pre-step` hook judges step 1 of each user turn. An `agent/request` hook (prepended) then rewrites only `reasoningEffort`; the default policy leaves official next intent/global defaults untouched (only explicit legacy synchronizes selection). Entry point: [`src/index.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/index.ts). Rubric: [`src/rubric.json`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/rubric.json). Effort table: [`src/effort.ts`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/effort.ts). UI: [`src/client/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/src/client/index.ts). Regression cases: [`eval/`](https://github.com/prgrmrwy/dsh-auto-model-routing/blob/main/eval/README.md). Diagram source: [`docs/architecture.json`](docs/architecture.json) (archify).
+Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. The diagram shows the AUTO paths; MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
+Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [policy-v2-rubric.json](src/policy-v2-rubric.json). Model slots: [policy-v2.ts](src/policy-v2.ts). UI: [client](src/client/index.ts). Coverage and limitations: [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
+
+<details>
+<summary>Earlier four-tier UI demos (legacy rollback only)</summary>
+
+These isolated-host recordings use mock Jev/model responses and show the previous UI, not the current default policy.
+
+![Legacy four-tier routing settings](docs/settings.gif)
+
+</details>
 ## Development
 
 ```sh
@@ -72,11 +114,17 @@ npm run typecheck
 npm run build
 ```
 
-Tests use the real AgentLoop with a fake LLM stream and a loopback fake Jev; they never call OpenRouter. `node scripts/label-report.mjs` summarizes your tier labels per rubric version.
+Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. `scripts/label-report.mjs` reports **legacy tier labels only**. To observe AUTO decisions and their actual token usage, ask the agent to use the `auto-model-routing-report` skill (on demand only; it runs the read-only `lib/usage-report.js`). It is observational, not a savings measurement. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
 
-Specs and design: the current spec is [`openspec/specs/auto-model-routing`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md). The archived changes record the design history: [routing](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-22-auto-model-routing/design.md) (decisions D1–D14) and [settings](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-23-auto-model-routing-settings/design.md). The companion skill is [`skills/subagent-model-routing`](skills/subagent-model-routing/SKILL.md). Before you change the hooks, read [DSH plugin integration pitfalls](https://github.com/prgrmrwy/ohmydsh/blob/main/docs/architecture/dsh-plugin-integration-pitfalls.md).
+Development stays in the source monorepo; this repository is its release mirror. The package builds and loads independently using its declared dependencies, bundled skill and official DSH services; no monorepo checkout or monorepo instruction file is required. External design references are optional background, not runtime inputs.
+
+The [current specification](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md) lives in the source monorepo. The bundled [delegation skill](skills/subagent-model-routing/SKILL.md) supplies guidance; enforcement belongs to the official host hooks, not the prompt. No measured task-quality or token-savings claim is made.
 
 ## Removal
 <!-- section: removal -->
 
-Run `dsh plugin --profile web remove dsh-auto-model-routing`, then restart DSH and refresh the page. In ohmydsh, set `enabled: false` and rebuild instead. The plugin-owned skill and tools disappear; settings and logs remain. Chats keep the last effort AUTO set until you pick another one.
+```sh
+dsh plugin --profile web remove dsh-auto-model-routing
+```
+
+Restart DSH and refresh the page. The plugin's skill/tools and request hooks disappear; settings and logs remain. Without the plugin, child replay is no longer enforced and host restoration uses the original creation configuration. In [ohmydsh](https://github.com/prgrmrwy/ohmydsh), disable the local entry and rebuild instead.

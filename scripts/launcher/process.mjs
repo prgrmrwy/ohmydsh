@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile } from '../lib/child-process.mjs'
 import { readFile, realpath } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import net from 'node:net'

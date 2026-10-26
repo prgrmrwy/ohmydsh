@@ -76,6 +76,13 @@ export function publicBindingLifecycle(binding: SourceSessionBinding): PublicBin
   return binding.state === 'cleaned-archived' ? 'cleaned' : binding.state
 }
 
+export interface PreviewResult {
+  status: 'ok' | 'failed' | 'skipped'
+  exitCode: number | null
+  outputTail: string
+  at: string
+}
+
 export interface OperationRecord {
   schemaVersion: 2
   operationId: string
@@ -95,6 +102,7 @@ export interface OperationRecord {
   phase: OperationPhase
   createdAt: string
   updatedAt: string
+  preview?: PreviewResult
   diagnostics?: readonly string[]
   binding?: SessionBinding
 }
@@ -196,6 +204,7 @@ export interface StatusResult {
   packageManager: PackageManager
   lockFingerprint?: string
   dshHome: string
+  preview: PreviewResult | null
 }
 
 export interface PromoteResult extends StatusResult {
@@ -228,6 +237,8 @@ export interface CleanResult {
    * THIS call, after the user confirmed finishing it. Absent for an
    * already-archived candidate, keeping the two paths distinguishable.
    */
+  warnings?: readonly string[]
+  isolatedHome?: { status: 'removed' | 'skipped'; path: string }
   archivedBeforeClean?: true
 }
 

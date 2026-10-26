@@ -13,6 +13,7 @@ function runCompatCommand(command, args, cwd, { capture = false, timeoutMs = DEF
   const executable = resolveExecutable(command, args, { cwd, env: childEnv })
   const request = JSON.stringify({ command: executable.command, args: executable.args, cwd, timeoutMs, killGraceMs: KILL_GRACE_MS, ...(env === undefined ? {} : { env }) })
   const result = spawnSync(process.execPath, [supervisor], {
+    windowsHide: true,
     cwd,
     env: childEnv,
     input: request,

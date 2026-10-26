@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn } from '../lib/child-process.mjs'
 import { appendFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'

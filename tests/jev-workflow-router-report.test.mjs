@@ -33,12 +33,13 @@ function features(extra = {}) {
   return { intent: 'feature', scope: 'single-module', behaviorChange: true, persistence: false, concurrency: false, existingChange: false, safetyGateConflict: false, externalSystems: 0, safetyRisk: 'low', migrationRisk: 'none', explicitRoute: 'unknown', ...extra }
 }
 
-async function add(home, { actual, recommended, status, errorCategory = 'none', latencyMs, usage, feature = {}, sampleProvenance = 'real-vibe' }) {
+async function add(home, { actual, recommended, status, errorCategory = 'none', latencyMs, usage, feature = {}, sampleProvenance = 'real-vibe', jevProvider }) {
   const output = run(home, ['record'], {
     sampleProvenance,
     features: features(feature), eligibleCandidates: ROUTES,
     recommendation: recommendation(recommended, status),
     metrics: { latency: latencyMs === undefined ? undefined : { availability: latencyMs === null ? 'unavailable' : 'measured', milliseconds: latencyMs }, usage }, errorCategory,
+    ...(jevProvider === undefined ? {} : { jevProvider }),
     rawProviderError: 'SECRET https://private.example user@example.com /private/path',
   })
   if (actual) run(home, ['label', output.observationId, actual, feature.existingChange ? 'existing-change' : feature.explicitRoute && feature.explicitRoute !== 'unknown' ? 'user-explicit' : 'agent'])
@@ -78,9 +79,10 @@ test('report emits aggregate confusion, cost, reliability, latency and coverage 
 
 test('synthetic fixtures never contribute to real-vibe admission metrics', async t => {
   const home = await mkdtemp(join(tmpdir(), 'jev-report-provenance-')); t.after(() => rm(home, { recursive: true, force: true }))
-  await add(home, { actual: 'anvil', recommended: 'direct', latencyMs: 1, usage: {}, sampleProvenance: 'synthetic-fixture', feature: { intent: 'security', safetyRisk: 'high' } })
+  await add(home, { actual: 'anvil', recommended: 'direct', latencyMs: 1, usage: {}, sampleProvenance: 'synthetic-fixture', feature: { intent: 'security', safetyRisk: 'high' }, jevProvider: 'openrouter' })
   const report = run(home, ['report'])
   assert.deepEqual(report.dataset.provenance, { 'real-vibe': 0, 'synthetic-fixture': 1, unknown: 0 })
+  assert.equal(report.breakdowns.jevProvider.openrouter.total, 0)
   assert.deepEqual(report.dataset.realVibe, { total: 0, labelled: 0, unknownLabels: 0 })
   assert.equal(report.cost.weightedTotal, 0)
   assert.equal(report.cost.highCostMisses, 0)
@@ -142,4 +144,19 @@ test('empty and corrupt record sets produce a valid conservative report', async 
   await writeFile(file, '{bad json}\n')
   report = run(home, ['report'])
   assert.equal(report.dataset.total, 0)
+})
+
+test('report breaks down real-vibe records by jevProvider including unknown', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'jev-report-provider-')); t.after(() => rm(home, { recursive: true, force: true }))
+  await add(home, { recommended: 'direct', status: 'needs-review', errorCategory: 'region-blocked', latencyMs: 1, usage: {}, jevProvider: 'typesafe' })
+  await add(home, { recommended: 'direct', status: 'needs-review', errorCategory: 'unauthorized', latencyMs: 1, usage: {}, jevProvider: 'typesafe' })
+  await add(home, { recommended: 'direct', latencyMs: 1, usage: {}, jevProvider: 'openrouter' })
+  await add(home, { recommended: 'direct', status: 'needs-review', errorCategory: 'network', latencyMs: 1, usage: {}, jevProvider: 'unknown' })
+  const report = run(home, ['report'])
+  assert.equal(report.breakdowns.jevProvider.typesafe.providerFailures, 2)
+  assert.equal(report.breakdowns.jevProvider.openrouter.providerFailures, 0)
+  assert.equal(report.breakdowns.jevProvider.openrouter.total, 1)
+  assert.equal(report.breakdowns.jevProvider.unknown.providerFailures, 1)
+  assert.equal(report.breakdowns.jevProviderScope, 'attributed-records-only')
+  assert.equal(report.coverage.gates.providerFailureRate.actual, 0.75)
 })

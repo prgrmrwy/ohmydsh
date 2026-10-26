@@ -1,0 +1,281 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AUTO 自动资源选配",
+    "output": ".archify/architecture-auto-routing-20261026-014646/auto-routing.zh.html",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "revision": "79f9eab467047e054a2d66f8bce060834a261a2a",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "turn",
+      "type": "frontend",
+      "label": "AUTO 用户回合",
+      "sublabel": "主模型保持不变",
+      "pos": [
+        40,
+        80
+      ],
+      "size": [
+        190,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 68,
+          "end_line": 88
+        }
+      ]
+    },
+    {
+      "id": "judge",
+      "type": "cloud",
+      "label": "所选 Jev 决策服务",
+      "sublabel": "能力与投入独立判断",
+      "pos": [
+        360,
+        80
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/decision-service.ts",
+          "line": 1,
+          "end_line": 23
+        },
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 81,
+          "end_line": 88
+        }
+      ]
+    },
+    {
+      "id": "route",
+      "type": "backend",
+      "label": "校验后的资源分配",
+      "sublabel": "模型目录 / 允许列表 / 投入上限",
+      "pos": [
+        710,
+        80
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 122,
+          "end_line": 150
+        }
+      ]
+    },
+    {
+      "id": "child",
+      "type": "backend",
+      "label": "fresh 子任务绑定",
+      "sublabel": "精确 child 身份; 尊重显式选择",
+      "pos": [
+        360,
+        270
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 94,
+          "end_line": 132
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "type": "backend",
+      "label": "官方模型请求",
+      "sublabel": "主 effort / 子完整路线",
+      "pos": [
+        710,
+        270
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 138,
+          "end_line": 160
+        }
+      ]
+    },
+    {
+      "id": "persist",
+      "type": "database",
+      "label": "持久化子路由",
+      "sublabel": "恢复保持初始配置",
+      "pos": [
+        40,
+        270
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 132,
+          "end_line": 160
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "type": "backend",
+      "label": "请求匹配证据",
+      "sublabel": "配置匹配才标记已应用",
+      "pos": [
+        710,
+        460
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 178,
+          "end_line": 201
+        }
+      ]
+    },
+    {
+      "id": "feedback",
+      "type": "frontend",
+      "label": "决策与回复反馈",
+      "sublabel": "只观察分配; 不自动训练",
+      "pos": [
+        360,
+        460
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 162,
+          "end_line": 174
+        }
+      ]
+    },
+    {
+      "id": "snapshot",
+      "type": "database",
+      "label": "绑定决策快照",
+      "sublabel": "元数据与身份; 无任务正文",
+      "pos": [
+        40,
+        460
+      ],
+      "size": [
+        220,
+        68
+      ],
+      "sources": [
+        {
+          "path": "packages/auto-model-routing/src/policy-host.ts",
+          "line": 167,
+          "end_line": 172
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "main-judge",
+      "from": "turn",
+      "to": "judge",
+      "label": "投入"
+    },
+    {
+      "id": "judge-route",
+      "from": "judge",
+      "to": "route",
+      "label": "决策"
+    },
+    {
+      "id": "child-judge",
+      "from": "child",
+      "to": "judge",
+      "label": "任务",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "child-store",
+      "from": "child",
+      "to": "persist",
+      "label": "绑定"
+    },
+    {
+      "id": "route-request",
+      "from": "route",
+      "to": "request",
+      "label": "应用"
+    },
+    {
+      "id": "request-match",
+      "from": "request",
+      "to": "evidence",
+      "label": "请求头"
+    },
+    {
+      "id": "match-feedback",
+      "from": "evidence",
+      "to": "feedback",
+      "label": "匹配"
+    },
+    {
+      "id": "feedback-snapshot",
+      "from": "feedback",
+      "to": "snapshot",
+      "label": "绑定回复"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "决策服务",
+      "items": [
+        "OpenRouter / TypeSafe / Concentrate / 自定义 System One",
+        "不自动切换服务或重试"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "支持边界",
+      "items": [
+        "MANUAL 不做新判断; 保留显式约束",
+        "fork 暂不支持; 已应用不等于任务成功"
+      ]
+    }
+  ]
+}

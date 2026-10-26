@@ -49,7 +49,7 @@ function sanitize(text: string): string {
 }
 
 async function probeVersion(binary: string): Promise<string> {
-  const result = await run(binary, ['--version'], { timeout: VERSION_TIMEOUT_MS, maxBuffer: 4096 })
+  const result = await run(binary, ['--version'], { windowsHide: true, timeout: VERSION_TIMEOUT_MS, maxBuffer: 4096 })
   return typeof result.stdout === 'string' ? result.stdout : String(result.stdout ?? '')
 }
 

@@ -4,7 +4,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 // Type-only side-effect import: augments `Context` with `userQuestions`.
 import type {} from '@deepseek-ai/dsh-user-questions'
 import type { MaintenanceTarget } from './maintenance.js'
-import { wsCleanRepository, wsPromote, wsStatus } from './maintenance.js'
+import { wsCleanRepository, wsPreparePreview, wsPromote, wsStatus } from './maintenance.js'
 import { activeBoundSessionIds } from './policy.js'
 
 /**
@@ -329,17 +329,17 @@ export function cleanTargetFor(
  * untrusted until the user approves that exact call.
  */
 export const WS_TOOL_PARAMETERS = {
-  action: { type: 'string', required: true, enum: ['status', 'promote', 'clean'] as const, description: 'Maintenance action. status/promote target the exact calling Session binding; clean scans the calling repository.' },
+  action: { type: 'string', required: true, enum: ['status', 'promote', 'prepare-preview', 'clean'] as const, description: 'Maintenance action. status/promote/prepare-preview target the exact calling Session binding; clean scans the calling repository.' },
   dry_run: { type: 'boolean', description: 'For clean only, preview the safety-proven actions without removing resources.' },
   scope: { type: 'string', enum: ['repository', 'specified'] as const, description: "For clean only. 'repository' (default) scans every Worktree Session in the repository. 'specified' handles exactly one, so finishing a single worktree asks one question instead of one per candidate: the target is the calling Session's own binding, or — when `path` is given — the worktree that path belongs to. Use the latter when your own working directory is outside the repository." },
-  path: { type: 'string', description: "Optional absolute path targeting a repository main checkout (clean) or a worktree (status/promote) other than the calling Session's own. Every use requires one-shot user authorization, granted per call and never reused, and all safety gates still apply. Omit it whenever the calling Session already sits at the intended target." },
+  path: { type: 'string', description: "Optional absolute path targeting a repository main checkout (clean) or a worktree (status/promote/prepare-preview) other than the calling Session's own. Every use requires one-shot user authorization, granted per call and never reused, and all safety gates still apply. Omit it whenever the calling Session already sits at the intended target." },
 } as const
 
 /** Register the Session-oriented maintenance tool. */
 export function registerWsTool(ctx: Context): () => void {
   return ctx.tools.register(defineTool({
     name: 'ws',
-    description: "Inspect or promote the exact current Worktree Session binding. Clean runs from an ordinary main-checkout Session and cleans this repository's archived Worktree Sessions, applying the active/dirty/merge safety gates to each candidate. To target a repository or worktree other than the calling Session's own, pass an absolute path: it is refused unless the user grants one-shot authorization for that exact call, and all safety gates still apply. Unattended path-oriented operator recovery remains available through dsh-ws or the Skill shell wrapper.",
+    description: "Inspect or promote the exact current Worktree Session binding. Call prepare-preview only when preview or acceptance is needed; it runs the optional repository .ws/prepare-preview hook. Clean runs from an ordinary main-checkout Session and cleans this repository's archived Worktree Sessions, applying the active/dirty/merge safety gates to each candidate. To target a repository or worktree other than the calling Session's own, pass an absolute path: it is refused unless the user grants one-shot authorization for that exact call, and all safety gates still apply. Unattended path-oriented operator recovery remains available through dsh-ws or the Skill shell wrapper.",
     parameters: WS_TOOL_PARAMETERS,
     output: {
       schema: {
@@ -398,7 +398,7 @@ export function registerWsTool(ctx: Context): () => void {
         return { json: JSON.stringify(result, null, 2) }
       }
       const target = targetFor(args, exec, authorizedPath)
-      const result = args.action === 'status' ? await wsStatus(target) : await wsPromote(target)
+      const result = args.action === 'status' ? await wsStatus(target) : args.action === 'prepare-preview' ? await wsPreparePreview(target) : await wsPromote(target)
       return { json: JSON.stringify(result, null, 2) }
     },
   }))

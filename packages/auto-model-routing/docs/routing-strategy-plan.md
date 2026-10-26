@@ -95,7 +95,7 @@ Jev 的价值不仅是体验和性能；误判会损害质量。但策略质量�
 
 - [核心诉求与差距](routing-intent-and-gaps.md)
 - [外部调研](routing-community-research-2026-10-24.md)：历史调研建议，实施优先级以本修订为准。
-- [现行规范](../../../openspec/specs/auto-model-routing/spec.md)：仍描述当前行为，本稿不静默替换它。
+- [现行规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)：仍描述当前行为，本稿不静默替换它。
 - [Claude Code model configuration](https://code.claude.com/docs/en/model-config.md)：opusplan 是规划阶段 Opus、执行阶段 Sonnet，不等于固定强主监督轻子。
 - [Claude Code subagents](https://code.claude.com/docs/en/sub-agents.md)：主模型根据职责描述委派。
 - [Claude Code Agent Teams](https://code.claude.com/docs/en/agent-teams.md)：Lead 组织共享任务与协作，不天然保证异构模型或低成本。

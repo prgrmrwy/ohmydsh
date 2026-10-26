@@ -3,7 +3,7 @@
 // its lifetime. The synchronous launcher waits on this short-lived supervisor;
 // the supervisor can still TERM/KILL the whole npm/pnpm descendant tree.
 import { readFileSync } from 'node:fs'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from './child-process.mjs'
 
 const EXIT_TIMEOUT = 124
 const fail = (message, code = 2) => {

@@ -218,6 +218,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [ws](skills/ws/SKILL.md) — Inspects, promotes and cleans Worktree Session bindings.
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Observation-only routing hint on whether work should use a formal workflow.
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — Reports memory recall statistics and which cards are never recalled.
+- [weekly-insights](skills/weekly-insights/SKILL.md) — Local session retrospective like Claude Code `/insights`: streams session logs, tags each session and caches the result, writes an HTML report with improvement prompts.
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.

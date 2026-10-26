@@ -19,10 +19,10 @@ export type SessionUpdaterDependencies = {
 const defaults: SessionUpdaterDependencies = {
   stage: (checkout, target) => stageTarget(checkout, target, officialStageDependencies(checkout)),
   sync: async (checkout, home) => spawnSync(process.execPath, [join(checkout, 'scripts/sync.mjs')], {
-    cwd: checkout, timeout: 120_000, stdio: 'inherit', env: { ...process.env, DSH_HOME: home },
+    windowsHide: true, cwd: checkout, timeout: 120_000, stdio: 'inherit', env: { ...process.env, DSH_HOME: home },
   }).status === 0,
   refresh: async (cli, cwd, telemetry) => spawnSync(process.execPath, [cli, 'update'], {
-    cwd, timeout: 120_000, stdio: 'inherit', env: { ...process.env, OPENSPEC_NO_UPDATE_CHECK: '1', ...(telemetry === 'adapter-off' ? { OPENSPEC_TELEMETRY: '0' } : {}) },
+    windowsHide: true, cwd, timeout: 120_000, stdio: 'inherit', env: { ...process.env, OPENSPEC_NO_UPDATE_CHECK: '1', ...(telemetry === 'adapter-off' ? { OPENSPEC_TELEMETRY: '0' } : {}) },
   }).status === 0,
 }
 

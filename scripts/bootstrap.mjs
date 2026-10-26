@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Zero-dependency initialization. npm link is deliberately a separate action.
 import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'

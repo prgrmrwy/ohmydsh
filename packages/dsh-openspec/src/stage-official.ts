@@ -7,7 +7,7 @@ import { ADAPTER_BLOCK_END, ADAPTER_BLOCK_START, WORKFLOWS } from './upstream-co
 
 function run(command: string, args: string[], options: { cwd: string; timeoutMs: number; env?: NodeJS.ProcessEnv }): Promise<{ status: number | null; output: string }> {
   return new Promise(resolve => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(command, args, { windowsHide: true, cwd: options.cwd, env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     child.stdout.on('data', chunk => { output += chunk })
     child.stderr.on('data', chunk => { output += chunk })

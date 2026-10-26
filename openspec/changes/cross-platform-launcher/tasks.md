@@ -209,6 +209,12 @@
 - [x] 12.4 Host调用方共享锁覆盖后续读取、返回真实generation、并发/失败释放锁 RED→GREEN。实default prepare/supervisor/双层builder/fingerprint读取竞争者，4类结果finally与物理入口换指针后可执行；提前释放mutation RED，独立最终复评PASS。
 - [x] 12.5 完整回归与原生无副作用发布测试；新增脚本执行另行确认后才重跑真实Host。root593/591/0/2既有skip，native19/19；用户单独批准3个精确版本后bash-354真实Host63120启动/同PID存活/stop通过；全change验收仍FAIL。
 
+## 13. Windows 子进程闪窗修复（2026-10-25 用户直接授权）
+
+- [x] 13.1 配置/构建/更新/启动脚本共用零依赖 child-process 封装，默认 windowsHide:true，保留 Node 参数和 callback 重载及显式 false；独立插件与生成 launcher 在各自边界设置选项。
+- [x] 13.2 补充默认值/覆盖/重载、真实 argv/stdout/stderr/退出码与配置入口接线测试；同步隔离夹具和 Windows test driver。
+- [x] 13.3 定向脚本测试27/27（随后新增接线guard，wrapper4/4）；Windows根lane通过；四包typecheck通过；Pet bootstrap/subscription/lark与memex kernel-absent共97/97；artifact/diff通过。third-party-resources两项失败在HEAD基线同样复现（Windows路径转义、PATH注入）；Pet两个POSIX可执行脚本夹具11项失败，原生Windows不能执行shebang文件；未宣称插件全量测试通过。strict validation exit1仅报告既有三条需求正文>500字符警告。未生产部署/重启，未实际观察GUI闪窗。
+
 ## Evidence reconciliation (2026-10-24)
 
 GREEN/REFACTOR checks above mean the mapped implementation/unit contracts pass in the stated available environment; they do not waive11.7 or imply all platforms passed. Historical RED tasks remain unchecked wherever a distinct expected-failure receipt was not captured. Current Linux/macOS whole-root each595/593pass/0fail/2existing skips; standalone exact MCP bridge now2/2pass0skip (round11), not a rewrite of root counts. Windows noBash61/61+7/7lifecycle and safety20/20; actual user-assisted window-close event2/shell-exit/sameHostPASS. Mac realPTY25-focusedPASS and isolated fullbuild×2/nochange/doctor/dump/HostPASS. Earlier snapshots remain in reports; actual external cockpit/PWA/tab interaction unrun, ShellCheck unavailable, final review/task reconciliation outstanding. Round11 mapping audit50/50 file/exact-name links (47original+3D8), install/gate tests4/4, artifact/diff/strictPASS. No claims of whole-change acceptance or fabricated historical RED.

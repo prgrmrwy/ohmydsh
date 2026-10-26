@@ -150,14 +150,14 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
   const gitRemote = options.gitRemote ?? ((cwd: string) => {
     try {
       return execFileSync('git', ['-C', cwd, 'remote', 'get-url', 'origin'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000,
+        windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000,
       }).trim() || undefined
     } catch { return undefined }
   })
   const gitRoot = options.gitRoot ?? ((cwd: string) => {
     try {
       return execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000,
+        windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000,
       }).trim() || undefined
     } catch { return undefined }
   })

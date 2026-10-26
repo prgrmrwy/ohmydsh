@@ -211,7 +211,7 @@ export class ChannelSubscription {
         // not, and an `'ignore'` stdin once produced an invisible restart loop
         // (pitfalls §2); keep the safe default. `detached` puts the child in its
         // own process group so stop can signal the shim AND the native binary.
-        spawn(command, [...commandArgs], { stdio: ['pipe', 'pipe', 'pipe'], detached: true }))
+        spawn(command, [...commandArgs], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], detached: true }))
 
     let child: ChildProcess
     try {

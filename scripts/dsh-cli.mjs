@@ -10,7 +10,7 @@
 // 本脚本是启动器的转发出口:解析出与 dsh.yaml pin 同版本的官方 CLI bin
 // (复用 scripts/lib/dsh-cli.mjs 的 npx 缓存 / pnpm 直装通道,不额外触发
 // npx 安装锁竞争),以 node 直连执行并透传 stdio 与退出码。
-import { spawnSync } from 'node:child_process'
+import { spawnSync } from './lib/child-process.mjs'
 import { resolveCliBin } from './lib/dsh-cli.mjs'
 import packageManager from './lib/package-manager.cjs'
 

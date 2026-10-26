@@ -6,7 +6,7 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const repo = path.resolve(new URL('..', import.meta.url).pathname)
+const repo = process.env.DSH_REPO_ROOT ? path.resolve(process.env.DSH_REPO_ROOT) : path.resolve(new URL('..', import.meta.url).pathname)
 const dshHome = process.env.DSH_HOME || path.join(homedir(), '.dsh')
 const profile = process.env.DSH_PROFILE || 'web'
 const sessionId = process.env.DSH_SESSION_ID || ''
@@ -26,10 +26,12 @@ function findSessionFile() {
   if (!sessionId) return undefined
   const root = path.join(dshHome, 'sessions')
   if (!existsSync(root)) return undefined
-  for (const workspace of readdirSync(root)) {
-    const directory = path.join(root, workspace, sessionId)
-    const file = path.join(directory, 'session.v3.jsonl.zstd')
-    if (existsSync(file) && statSync(file).isFile()) return file
+  // Prefer the current v4 log; fall back to v3 for sessions written before the format bump.
+  for (const name of ['session.v4.jsonl.zstd', 'session.v3.jsonl.zstd']) {
+    for (const workspace of readdirSync(root)) {
+      const file = path.join(root, workspace, sessionId, name)
+      if (existsSync(file) && statSync(file).isFile()) return file
+    }
   }
   return undefined
 }
@@ -75,6 +77,7 @@ function expectedVersions() {
   const jev = resources.get('jev')
   const superflow = resources.get('spec-superflow')
   return {
+    credentialEnv: typeof jev?.credentialEnv === 'string' ? jev.credentialEnv : undefined,
     jev: jev?.version,
     bridge: jev?.bridge?.version,
     specSuperflow: superflow?.version,
@@ -94,8 +97,9 @@ const session = inspectSession(findSessionFile())
 const report = {
   reportVersion: 1,
   credential: {
-    currentProcess: Boolean(process.env.TYPESAFE_API_KEY),
-    privateEnvDeclaration: localEnvVariables.includes('TYPESAFE_API_KEY'),
+    variable: expected.credentialEnv ?? null,
+    currentProcess: expected.credentialEnv ? Boolean(process.env[expected.credentialEnv]) : false,
+    privateEnvDeclaration: expected.credentialEnv ? localEnvVariables.includes(expected.credentialEnv) : false,
     valueInspected: false,
   },
   profile: {

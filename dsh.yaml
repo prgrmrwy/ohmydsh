@@ -42,7 +42,8 @@ thirdPartyResources:
       version: 0.2.0-rc.2
       integrity: sha512-UqP2sY1r6qAhBPFeuclqrXiMBBxPaCNrXlXRqKxAON7uI1wmZZ0B3/1GmBviQ3/WjjTQlOOkj0su2v4e5DMkug==
     serverName: jev
-    credentialEnv: TYPESAFE_API_KEY
+    jevProvider: openrouter          # 闭集 typesafe|openrouter;TypeSafe 直连对本机出口返回 451(change configurable-jev-provider)
+    credentialEnv: OPENROUTER_API_KEY  # 必须与 jevProvider 的固定映射一致;回滚:改回 typesafe / TYPESAFE_API_KEY
     toolCallTimeoutMs: 30000
     reconnect:
       enabled: true
@@ -120,7 +121,7 @@ customizations:
   - id: dsh-memex
     type: package
     source: local
-    version: 0.4.0
+    version: 0.4.1
     enabled: true
     enabledEnv: DSH_MEMEX_ENABLED  # 紧急熔断：设 DSH_MEMEX_ENABLED=0 即可在下次 build 时移除
     brief: memex 持久记忆原生接入(scope 隔离/跨库检索/守门 + 「记忆」设置页)
@@ -134,7 +135,7 @@ customizations:
       - kind: npm-global
         package: "@touchskyer/memex"
         version: "0.4.1"
-    note: '自研,spec dsh-memex-scope/-settings-ui/-card-browser(0.3.0 起工作区开关改为路径声明 workspaces)。依赖全局安装的内核 @touchskyer/memex@0.4.1(MIT,不改上游):由 hostPrerequisites 在 bin/dsh 启动前自愈(sync 只校验不安装),pin 须等于生成物 KERNEL_VERSION,全局安装需显式 --registry=https://registry.npmjs.org/。卡片浏览按需起内核 serve(配远端须 --local,注入 MEMEX_NO_OPEN,取 stdout 最后一个端口);跨机器注册方失败绝不回落本机地址。升级复核:内核 --init 的英文错误串(调用已注入 LC_ALL=C)与 serve 文本解析。回滚:enabled:false + sync(重启须脱离调用方进程);退到 0.2.0 前先把关闭开关写回条目级;紧急熔断 DSH_MEMEX_ENABLED=0。0.4.0 起遥测补记复用证据并另存写卡事件、注入要求卡片首段可独立使用(只读、不写库、不外发,详见 CHANGELOG)。'
+    note: '自研,spec dsh-memex-scope/-settings-ui/-card-browser(0.3.0 起工作区开关改为路径声明 workspaces)。依赖全局安装的内核 @touchskyer/memex@0.4.1(MIT,不改上游):由 hostPrerequisites 在 bin/dsh 启动前自愈(sync 只校验不安装),pin 须等于生成物 KERNEL_VERSION,全局安装需显式 --registry=https://registry.npmjs.org/。卡片浏览按需起内核 serve(配远端须 --local,注入 MEMEX_NO_OPEN,取 stdout 最后一个端口);跨机器注册方失败绝不回落本机地址。升级复核:内核 --init 的英文错误串(调用已注入 LC_ALL=C)与 serve 文本解析。回滚:enabled:false + sync(重启须脱离调用方进程);退到 0.2.0 前先把关闭开关写回条目级;紧急熔断 DSH_MEMEX_ENABLED=0。0.4.0 起遥测补记复用证据并另存写卡事件、注入要求卡片首段可独立使用(只读、不写库、不外发,详见 CHANGELOG);0.4.1 注入用时发现过期即修卡的提示(回滚退回 0.4.0)。'
   # 自研(local):sidebar 会话行前动态 provider logo
   - id: sidebar-session-provider-icon
     type: package
@@ -170,10 +171,10 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.3.0
+    version: 0.4.1
     enabled: true
-    brief: 主会话按任务自动调整推理强度，保留用户模型选择
-    note: '自研,change auto-model-routing-standalone-release;0.3.0 自带 subagent-model-routing skill,与插件同启停。Jev(OpenRouter decisions,typesafe/jev-1.13)判档;AUTO 外发≤8000字当前消息及前轮用户前500/助手末1200字,子任务仅根会话 AUTO 时外发,形态脱敏尽力而为,OpenRouter/TypeSafe 保留条款未确认。凭据经官方 credentials(~/.dsh/.credentials.yaml,0600)或只读启动环境;GUI 不回传值。非密钥设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json。Claude/GPT 分页配置主 effort 与子 model+effort,受目录/允许列表/上限约束,不自动选 max。不换主模型;新会话默认 MANUAL,可设 AUTO,已有会话不变。Jev 失败即 MANUAL,无本地降级;MANUAL 不复原 effort。无文本判档记录在 $DSH_HOME/state/auto-model-routing/judgements.jsonl。设置验收缺口见归档 change。停用:enabled:false → dsh build。'
+    brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
+    note: '自研,0.4.0 默认独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义System One可选,独立credentials或只读启动环境;AUTO外发≤8000字当前任务及前轮摘要,形态脱敏尽力而为,所选服务保留条款须自行确认。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json;路由与无正文反馈快照:$DSH_HOME/state/auto-model-routing。反馈仅观察不自动调优。fork不支持;真实Magpie普通子任务已验,teammate仅mock覆盖。legacy四档仅显式回滚。停用:enabled:false → dsh build,撤销路由恢复。'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package
@@ -203,7 +204,7 @@ customizations:
     type: skill
     enabled: true
     brief: Jev 流程分流 shadow 评估(无自动副作用)
-    note: '自研,spec jev-workflow-routing。仅在 Agent 已独立到达流程选择点后调用 pinned Jev MCP(见 thirdPartyResources jev,凭据由本机环境 TYPESAFE_API_KEY 提供,不入仓库);候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;只做 shadow observation,无自动副作用;用户显式选择、existing change、安全门禁与 Worktree Session 始终优先;低置信度/失败均 needs-review,记录仅含本地有界特征。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
+    note: '自研,spec jev-workflow-routing。仅在 Agent 已独立到达流程选择点后调用 pinned Jev MCP(见 thirdPartyResources jev;现经 OpenRouter 转发,其数据保留条款未单独复核,只发有界特征;凭据 OPENROUTER_API_KEY 由仓库 .env.local 注入 Host 环境,与官方凭据库中 auto-model-routing 用的同名 key 各存一份,不入仓库);候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;只做 shadow observation,无自动副作用;用户显式选择、existing change、安全门禁与 Worktree Session 始终优先;低置信度/失败均 needs-review,记录仅含本地有界特征与服务方 jevProvider(recorder 从调用投影确定性归因,错误原文不落盘)。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
   # 自研 skill:「统计一下召回」→ 跑 dsh-memex-recall-report 并按口径解读
   # 命令本身随 dsh-memex 包的 bin 分发(openspec 2026-09-24-memex-recall-report-cli);
   # 这里只提供触发词、定位命令的包装脚本与解读纪律。只读,不改卡片。
@@ -212,6 +213,12 @@ customizations:
     enabled: true
     brief: memex 召回报告 skill(只读:空结果率/死卡/高频卡与建议)
     note: '自研 skill,change memex-recall-report-cli(2026-09-24 归档)。命令随 dsh-memex 包的 bin 分发,本 skill 只提供触发词、定位脚本与解读纪律。只读:读本机召回遥测与卡片文件名,不写文件、不联网、不改卡片。升级复核:dsh-memex 遥测格式或 bin 变化时回归 report.sh。移除:enabled:false → dsh build。'
+  # 自研 skill:会话洞察(对标 Claude /insights),替代 dsh-session-insights(其 64 MiB 单次上限读不了本机会话量)
+  - id: weekly-insights
+    type: skill
+    enabled: true
+    brief: 会话洞察 skill(流式读会话日志,逐会话打标签并按 id 缓存,出 HTML 改进建议)
+    note: '自研 skill,思路参考社区 dsh-insights(切段、逐会话缓存、子会话并行打标签)。scripts/insights.mjs 用 zstd CLI 流式解码 v4 日志(多帧),只取窗口内事件,跳过 seeded 继承段,子会话并入根会话;facet 按 session id 缓存在 $DSH_HOME/insights/weekly/facets,指纹为最后事件 seq,会话增长即重打。只读会话日志、只写 $DSH_HOME/insights/weekly、不联网;打标签由当前模型完成,会话摘录会发给该模型。需 zstd 与 Node 22+。升级复核:会话日志格式变化时回归 tests/weekly-insights。移除:enabled:false → dsh build,手删 $DSH_HOME/insights/weekly。'
   # 自研 skill:添加远端插件的标准流程
   - id: add-dsh-plugin
     type: skill
