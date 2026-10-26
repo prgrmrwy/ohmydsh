@@ -176,6 +176,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — Sends the session header that OpenCode Go requires, fixing missing-session errors.
 - [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context, without running tools or writing back to the main conversation. Temporarily installed from a fork release of upstream MichengAI/dsh-btw PR #16.
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — Brings the models of a Magpie AI gateway into the model picker, alongside the direct providers.
+- [dsh-session-insights](https://github.com/GreenLv/dsh-session-insights) — Adds `/session-insights`, a local retrospective of past sessions similar to Claude Code `/insights`, written as an HTML and JSON report. Pinned to an older release that supports the current DSH version; large session histories need `--project` and a small `--days`.
 
 ### Official optional
 
