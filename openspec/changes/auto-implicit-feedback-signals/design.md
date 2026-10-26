@@ -45,24 +45,31 @@
 
 备选：观察整条回复正文。放弃原因：正文由官方组件渲染，插件只拿得到操作栏槽位；长回复也很难定义“看完”。
 
-### D4 切 MANUAL：复用 `applied` map
-`policy-host` 暴露 `appliedDecision(sessionId)`，返回 `applied` map 中最近一次已应用的主决策 id。`index.ts` 的 `setMode` 成功切到 MANUAL 时，若有值就写 `manual-switch`。`applied` 在下一个 `request/header` 时清空，所以“下一次模型请求之前”的口径由现有逻辑自然保证，不加新状态。
+### D4 切 MANUAL：复用 `applied` map，先读后清
+`policy-host` 暴露 `appliedDecision(sessionId)`，返回 `applied` map 中最近一次已应用的主决策 id。`applied` 在下一个 `request/header` 时被替换或清空，所以“尚未被新请求取代”的口径由现有逻辑自然保证，不加新状态。
 
-### D5 报告：从日志推导回合结束与继续
-`readSession` 增加记录：每个用户回合的 `turn/end` 原因（映射为 `completed | aborted-user | aborted-other | blocked | other`，缺失为 `unknown`），以及会话内由用户发起的回合号列表。决策单位的回合取其最后一次关联调用的 `userTurn`；“继续”定义为该回合之后存在用户发起的回合。
+顺序是关键：`index.ts` 的 `setMode` 路由在调用 `endpoint('setMode')` **之前**就执行 `policy.invalidate(id)`，而 `invalidate` 会清空 `applied`。因此 `appliedDecision` 必须在 `invalidate` 之前读出并暂存；等 `setMode` 响应成功、且目标模式为 MANUAL 时，才用暂存值写 `manual-switch`。响应失败则不写。测试必须走真实的 `setMode` RPC 路由，不能只调钩子，否则测不出这个顺序问题。
+
+### D5 报告：从日志推导回合结束、继续与有效曝光
+`readSession` 增加三项：每个调用的**实际回合号** `turn`（现有的 `userTurn` 是它归属的用户回合，二者在子会话结果或定时提醒唤醒的回合里不同）；每个回合的 `turn/end` 原因（映射为 `completed | aborted-user | aborted-other | blocked | other`，缺失为 `unknown`）；会话内由用户发起的回合及其开始时间。
+
+决策所在回合取其最后一次关联调用的实际回合号 `turn`，不用 `userTurn`。原因：`policy-host` 在非用户发起的回合沿用原决策，若用 `userTurn`，用户中止这类后续回合会被读成前一个正常结束的回合。
+
+“继续”定义为决策所在回合之后存在用户发起的回合，第一个这样的回合的 `turn/start` 时间为继续时间。曝光事实只有在 `at` 早于继续时间时才有效：事后翻看旧会话会让旧回复补上曝光，若不加这个约束，这些回复会被算成当时看过且无异议。
 
 映射：`completed` → `completed`；`aborted` 且 cause `user` → `aborted-user`；其它 `aborted` → `aborted-other`；`blocked` → `blocked`；其余（含插件扩展的未知种类与错误）→ `other`。只有 `aborted-user` 计入负向。
 
 ### D6 五类归类
-对每个决策单位按规范的优先级归类：显式 → 负向 → 隐式无异议 → 未继续 → 未曝光。“曝光且有显式评价”另外单列，用来对照隐式口径是否可信。输出只有类别名和计数，满足白名单要求。
+对每个决策单位按规范的优先级归类：显式 → 负向 → 隐式无异议 → 无定论（`inconclusive`）→ 未曝光。第 4 类不叫“未继续”，因为它也包含继续了但结束类别非 `completed` 的决策（例如父会话取消）。“有效曝光且有显式评价”另外单列，用来对照隐式口径是否可信。输出只有类别名和计数，满足白名单要求。
 
 ## Risks / Trade-offs
 
 - [曝光不代表读过] → 3 秒阈值和前台条件只能排除“一闪而过”；caveats 固定说明，`implicit-ok` 不与显式 `appropriate` 合并。
 - [`hasFocus` 在多窗口下可能误判] → 只会漏记曝光，不会多记；偏保守。
 - [用户先继续、后来才发现问题] → 不在本变更范围；显式反馈仍可随时补点，归类中显式优先。
-- [日志缺失或尾段不完整] → 该决策结束类别为 `unknown`，归入 `not-continued` 而非 `implicit-ok`；偏保守。
-- [决策跨多个用户回合] → 取最后一次关联调用的回合作为“决策所在回合”，与报告已有的“决策单位按首次关联调用归属时间”口径不同但各自明确；在文档中写明。
+- [日志缺失或尾段不完整] → 该决策结束类别为 `unknown`，归入 `inconclusive` 而非 `implicit-ok`；偏保守。
+- [决策跨多个回合] → 取最后一次关联调用的实际回合作为“决策所在回合”，与报告已有的“决策单位按首次关联调用归属时间”口径不同但各自明确；在文档中写明。
+- [浏览器与 Host 时钟] → 曝光的 `at` 由 Host 写入时取时间，与会话日志同一时钟，可直接比较。
 
 ## Migration Plan
 

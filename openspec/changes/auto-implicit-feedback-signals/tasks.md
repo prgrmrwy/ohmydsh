@@ -5,8 +5,8 @@
 
 ## 2. Host 侧事实
 
-- [ ] 2.1 先写测试：`observe` 端点（`test/endpoints.test.ts`）参数非法 400；无已应用绑定返回空且不写；有绑定按决策写一次 `exposed`，重复调用不新增。`setMode` 钩子（`test/policy-host.integration.test.ts`）：已应用决策后切 MANUAL 写一次 `manual-switch`；下一个 `request/header` 之后再切不写；MANUAL 回合与子会话不写。验证：在旧实现上失败。
-- [ ] 2.2 在 `src/policy-host.ts` 暴露 `appliedDecision(sessionId)`；在 `src/endpoints.ts`、`src/index.ts` 新增 RPC `auto-model-routing.observe` 并在 `setMode` 成功切到 MANUAL 时写事实。写入失败只记 warn。验证：2.1 通过。
+- [ ] 2.1 先写测试：`observe` 端点（`test/endpoints.test.ts`）参数非法 400；无已应用绑定返回空且不写；有绑定按决策写一次 `exposed`，重复调用不新增。`setMode` 钩子（走真实 `auto-model-routing.setMode` RPC 路由的集成测试，含路由里先执行的 `invalidate`）：已应用决策的回合进行中切 MANUAL 写一次；回合结束后切 MANUAL 写一次；`setMode` 失败不写；下一个 `request/header` 之后再切不写；MANUAL 回合与子会话不写。验证：在旧实现上失败。
+- [ ] 2.2 在 `src/policy-host.ts` 暴露 `appliedDecision(sessionId)`；在 `src/endpoints.ts`、`src/index.ts` 新增 RPC `auto-model-routing.observe`；在 `setMode` 路由中于 `invalidate` 之前读出已应用决策，响应成功且目标为 MANUAL 时写事实。写入失败只记 warn。验证：2.1 通过。
 
 ## 3. 客户端曝光
 
@@ -15,11 +15,11 @@
 
 ## 4. 报告
 
-- [ ] 4.1 先写测试（`test/` 下报告用例）：`readSession` 记录每个用户回合的 `turn/end` 类别与用户发起的回合列表；覆盖规范中的五类互斥归类、父会话取消不算负向、尾段不完整归 `not-continued`、旧数据全部 `unobserved`、“曝光且有显式评价”对照计数，以及正文与 sessionId 不泄漏。验证：在旧实现上失败。
-- [ ] 4.2 在 `src/usage-report.ts` 实现回合结束类别映射、继续推导、`implicit` 字段与新增 caveats；同步包内 `auto-model-routing-report` skill 对新字段的解读说明。验证：4.1 通过，既有报告与只读权限测试不变。
+- [ ] 4.1 先写测试（`test/` 下报告用例）：`readSession` 记录每个调用的实际回合号、每个回合的 `turn/end` 类别、用户发起的回合及其开始时间；覆盖规范中的五类互斥归类、父会话取消不算负向、尾段不完整归 `inconclusive`、事后翻看不算看过、后续非用户回合被中止计为负向、旧数据全部 `unobserved`、“有效曝光且有显式评价”对照计数，以及正文与 sessionId 不泄漏。验证：在旧实现上失败。
+- [ ] 4.2 在 `src/usage-report.ts` 实现实际回合号、回合结束类别映射、继续时间与有效曝光推导、`implicit` 字段与新增 caveats；同步包内 `auto-model-routing-report` skill 对新字段的解读说明。验证：4.1 通过，既有报告与只读权限测试不变。
 
 ## 5. 文档与交付
 
-- [ ] 5.1 更新 `docs/feedback-evaluation.md`：事实事件格式、两类运行时事实与两类推导事实的口径、五类归类与局限、“决策所在回合”的定义。
+- [ ] 5.1 更新 `docs/feedback-evaluation.md`：事实事件格式、两类运行时事实与两类推导事实的口径、五类归类与局限、“决策所在回合”（实际回合号）与“有效曝光”（早于继续时间）的定义。
 - [ ] 5.2 运行包内 typecheck、vitest、build；`openspec validate auto-implicit-feedback-signals --strict`。验证：均退出码 0。
 - [ ] 5.3 `dsh build` 物化并重启 DSH（需用户确认时机），在 3080 GUI 发一条 AUTO 消息，停留 3 秒后继续下一回合，只读核对账本中出现 `exposed`，并跑一次报告确认该决策归入 `implicit-ok`。验证：记录在 verification.md，不提交原始账本内容。
