@@ -763,6 +763,15 @@
 - **验证**: `test/row-locator.test.ts` 新增 4 条用例（行键优先、同名不互换、无属性回退、缺失/畸形/重复 key 不显示），旧实现下 3 条 RED——失败信息即互换本身（`expected 'newer' to be 'older'`）。包内 51 tests、host/client typecheck、`npm run build` 通过；版本 0.1.7。
 - **更新**: 2026-10-12 记录。部署须从主 checkout sync 并刷新页面。
 
+### [D012] AUTO 回复末尾的人工反馈图标时有时无：沿用上一请求配置的回合不绑定决策
+- **状态**: 待排查
+- **现象**: 2026-10-26 实机：AUTO 会话里，一部分回复的操作栏没有“分配合适/偏高/不足”图标，但输入框旁的 AUTO 浮层仍然显示“主会话 · 已判断/待应用”，并给出 baseline、确定度和分布。
+- **实证（会话 `0fb1ad85`，只读解码日志并对照 `allocation-feedback.jsonl`）**: 17 个用户回合里，有 `request/header` 的回合（1–4、7、11、13–15），回复全部有绑定；没有 `request/header` 的回合（5、6、8–10、12、16、17），回复全部没有绑定。两者一一对应，没有例外。
+- **推测根因（未改代码核实）**: `policy-host.ts` 只在 `request/header` 事件里把决策从“已判断”推进到“已应用”（`applied.set`），而 `assistant/message` 只为已应用的决策写绑定。本回合判断出的 effort 和上一回合实际生效的配置一样时，宿主不会写新的请求头，于是决策停在“待应用”，这一回合既不绑定也不显示图标。实际上请求确实按这个配置发出了。另外，`pre-step` 在每个用户回合开头都会 `applied.delete`，所以上一回合的已应用状态也延续不过来。
+- **影响**: 反馈入口缺失，而且缺失不是随机的，会系统性漏掉“判断结果等于当前配置”的回合。usage report 也会把这些回合算进“无记录回合”。这同样影响 `auto-implicit-feedback-signals` 的覆盖面。
+- **待查方向**: 在 `agent/request` waterfall 里拿到最终 config 时就判定应用（那里已经有 `reasoningEffort` 和 provider/model），不再等 `request/header`；或者在没有新请求头时，用 `session.requestHeader()` 的当前值确认。修复前先补一个“相邻两回合同 effort，第二回合仍有绑定”的集成测试，并确认会话日志里没有请求头是宿主“配置未变则不重写”的行为。
+- **更新**: 2026-10-26 记录（讨论 AUTO 隐式反馈时发现）。
+
 ---
 
 ## 待立项
