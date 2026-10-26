@@ -42,7 +42,8 @@ thirdPartyResources:
       version: 0.2.0-rc.2
       integrity: sha512-UqP2sY1r6qAhBPFeuclqrXiMBBxPaCNrXlXRqKxAON7uI1wmZZ0B3/1GmBviQ3/WjjTQlOOkj0su2v4e5DMkug==
     serverName: jev
-    credentialEnv: TYPESAFE_API_KEY
+    jevProvider: openrouter          # 闭集 typesafe|openrouter;TypeSafe 直连对本机出口返回 451(change configurable-jev-provider)
+    credentialEnv: OPENROUTER_API_KEY  # 必须与 jevProvider 的固定映射一致;回滚:改回 typesafe / TYPESAFE_API_KEY
     toolCallTimeoutMs: 30000
     reconnect:
       enabled: true
@@ -203,7 +204,7 @@ customizations:
     type: skill
     enabled: true
     brief: Jev 流程分流 shadow 评估(无自动副作用)
-    note: '自研,spec jev-workflow-routing。仅在 Agent 已独立到达流程选择点后调用 pinned Jev MCP(见 thirdPartyResources jev,凭据由本机环境 TYPESAFE_API_KEY 提供,不入仓库);候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;只做 shadow observation,无自动副作用;用户显式选择、existing change、安全门禁与 Worktree Session 始终优先;低置信度/失败均 needs-review,记录仅含本地有界特征。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
+    note: '自研,spec jev-workflow-routing。仅在 Agent 已独立到达流程选择点后调用 pinned Jev MCP(见 thirdPartyResources jev;现经 OpenRouter 转发,其数据保留条款未单独复核,只发有界特征;凭据 OPENROUTER_API_KEY 由仓库 .env.local 注入 Host 环境,与官方凭据库中 auto-model-routing 用的同名 key 各存一份,不入仓库);候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;只做 shadow observation,无自动副作用;用户显式选择、existing change、安全门禁与 Worktree Session 始终优先;低置信度/失败均 needs-review,记录仅含本地有界特征与服务方 jevProvider(recorder 从调用投影确定性归因,错误原文不落盘)。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
   # 自研 skill:「统计一下召回」→ 跑 dsh-memex-recall-report 并按口径解读
   # 命令本身随 dsh-memex 包的 bin 分发(openspec 2026-09-24-memex-recall-report-cli);
   # 这里只提供触发词、定位命令的包装脚本与解读纪律。只读,不改卡片。

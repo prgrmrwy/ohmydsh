@@ -55,7 +55,7 @@
 ## 10. Manifest switch and deployment
 
 - [x] 10.1 Run `npm test` and `npm run check:artifacts`; confirm both pass — artifacts pass; npm test 613 pass / 7 fail, the 7 identical to the pre-change baseline (launcher host-lifecycle tests, `test_link_from_external_cwd`, auto-model-routing bundle migration), none touching this change
-- [ ] 10.2 Update `dsh.yaml` Jev entry: `jevProvider: openrouter`, `credentialEnv: OPENROUTER_API_KEY`; update the jev-workflow-router note (OpenRouter processor, terms not separately reviewed, key kept in `.env.local` and credentials store separately)
+- [x] 10.2 Update `dsh.yaml` Jev entry: `jevProvider: openrouter`, `credentialEnv: OPENROUTER_API_KEY`; update the jev-workflow-router note (OpenRouter processor, terms not separately reviewed, key kept in `.env.local` and credentials store separately)
 - [ ] 10.3 User adds `export OPENROUTER_API_KEY=...` to `.env.local` (agent does not read or copy the key); confirm via `node scripts/jev-readiness.mjs` that `privateEnvDeclaration` is true
 - [ ] 10.4 Run `dsh build` twice; confirm the second run reports no changes
 - [ ] 10.5 Restart Host (user-approved); in a new session confirm `mcp__jev__jev_classify`/`jev_decide` are present and `liveProbeReady: true`
