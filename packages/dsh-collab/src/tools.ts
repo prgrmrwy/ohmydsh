@@ -99,9 +99,9 @@ export const toolSpecs: Record<string, Spec> = {
     run: (a, s, c) => s.ackItem(c, { itemId: a.itemId, revision: a.revision }),
   },
   collab_send_message: {
-    description: '发消息；只有需要对方接续时 needsReply=true。接续同一件事时 ref 填相关消息或条目的 seq，另起一件事不填。', kind: 'write',
-    parameters: { ...common, to: str, body: str, needsReply: { type: 'boolean' }, ref },
-    run: (a, s, c) => s.sendMessage(c, { to: a.to, body: a.body, needsReply: a.needsReply, ...pick(a, 'ref', 'ext') }),
+    description: '发消息；notify 控制唤醒（未填沿用 needsReply），needsReply 控制要求回复。结果需对方继续时 notify=true、needsReply=false。接续同一件事时 ref 填相关消息或条目的 seq，另起一件事不填。', kind: 'write',
+    parameters: { ...common, to: str, body: str, needsReply: { type: 'boolean' }, notify: { type: 'boolean' }, ref },
+    run: (a, s, c) => s.sendMessage(c, { to: a.to, body: a.body, needsReply: a.needsReply, ...pick(a, 'notify', 'ref', 'ext') }),
   },
   collab_set_status: {
     description: '更新自己的状态文本，不唤醒他人。', kind: 'write',

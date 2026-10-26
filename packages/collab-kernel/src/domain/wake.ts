@@ -1,9 +1,9 @@
-import type { CollabEvent, Member, SpaceState } from '../model/index.js'
+import { messageNotifies, type CollabEvent, type Member, type SpaceState } from '../model/index.js'
 
 export interface Recipient { member: Member; invited: boolean; thread?: number }
 
 /**
- * The three wake triggers: a needsReply message wakes its recipient, an
+ * The three wake triggers: a notifying message wakes its recipient, an
  * invitation wakes the invitee, and terminal request progress notifies the
  * request's author. Every other event, including item edits, acks, agreement,
  * `accepted` and leader changes, wakes nobody. The actor never wakes itself.
@@ -18,7 +18,7 @@ export function wakeRecipients(state: SpaceState, events: CollabEvent[]): Map<st
   }
   for (const e of events) {
     switch (e.type) {
-      case 'message/sent': if (e.message.needsReply) add(e.message.to, e.actor, { thread: e.message.ref === undefined ? seq : state.topicOf[e.message.ref]! }); break
+      case 'message/sent': if (messageNotifies(e.message)) add(e.message.to, e.actor, { thread: e.message.ref === undefined ? seq : state.topicOf[e.message.ref]! }); break
       case 'member/invited': add(e.member.name, e.actor, { invitation: e.member }); break
       case 'request/progressed': {
         if (e.progress !== 'done' && e.progress !== 'rejected') break

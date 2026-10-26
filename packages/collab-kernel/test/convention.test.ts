@@ -8,10 +8,14 @@ const V1_SHA256 = '5df2524d42641e3885f4e2ec0314d4b03f0922662d933f9283fe1ddd4c8cd
 const V2_SHA256 = '70b660c57e72ccb04d575212d99ce045f6ce2d4029b8313d5591382e614afec9'
 
 describe('convention', () => {
-  it('默认版本为 3，正文可读取且摘要与全文匹配', () => {
-    const text = readConvention('3')
+  it('v4 distinguishes notification, reply and pending questions', () => {
+    const text = readConvention('4')
+    for (const required of ['notify:true, needsReply:false', 'notify:false, needsReply:true', '未填 `notify`', '不是未读消息列表', '无论是否需要回复']) expect(text).toContain(required)
+  })
+  it('默认版本为 4，正文可读取且摘要与全文匹配', () => {
+    const text = readConvention('4')
     expect(text).toBe(defaultConvention.text)
-    expect(defaultConvention.version).toBe('3')
+    expect(defaultConvention.version).toBe('4')
     expect(defaultConvention.sha256).toBe(sha(text))
     expect(text).toContain('先分清事实与权限')
     expect(text).toContain('成员信任')
@@ -27,7 +31,8 @@ describe('convention', () => {
     expect(conventions['1']!.sha256).toBe(V1_SHA256)
     expect(sha(readConvention('2'))).toBe(V2_SHA256)
     expect(conventions['2']!.sha256).toBe(V2_SHA256)
-    expect(Object.keys(conventions).sort()).toEqual(['1', '2', '3'])
+    expect(sha(readConvention('3'))).toBe('281b1d24292540724263f1f99513d6d8a0f8eea54689258cda8d1c6cfd15eba7')
+    expect(Object.keys(conventions).sort()).toEqual(['1', '2', '3', '4'])
   })
 
   it('convention-05：v3 写明新规则且不含已移除机制', () => {

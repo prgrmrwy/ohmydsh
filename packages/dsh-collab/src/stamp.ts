@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { CollabError, principals, reduce, type CollabEvent, type CollabService, type CommitRecord, type Delivery, type Ext, type Item, type Message, type Overview, type ReadContext, type SpaceState } from 'collab-kernel'
+import { CollabError, principals, reduce, messageNotifies, type CollabEvent, type CollabService, type CommitRecord, type Delivery, type Ext, type Item, type Message, type Overview, type ReadContext, type SpaceState } from 'collab-kernel'
 import type { CollabHost } from './host.js'
 import type { Caller } from './session-provider.js'
 
@@ -107,7 +107,7 @@ export function refusal(state: SpaceState, self: string, view: StampView, target
 
 type Business = { item?: Item; message?: Message; statusText?: string }
 /**
- * The subject that caused each wake, by deliveryId: a needsReply message to the
+ * The subject that caused each wake, by deliveryId: a notifying message to the
  * recipient, a terminal request notice to its author, or an invitation
  * (structural). Built from the complete log so completions find their intent.
  */
@@ -118,7 +118,7 @@ function wakeSources(records: CommitRecord[], state: SpaceState): Map<string, Bu
     const member = e.delivery.member
     let source: Business | 'structural' | undefined
     for (const b of record.events) {
-      if (b.type === 'message/sent' && b.message.needsReply && b.message.to === member) source = { message: b.message }
+      if (b.type === 'message/sent' && messageNotifies(b.message) && b.message.to === member) source = { message: b.message }
       else if (b.type === 'member/invited' && b.member.name === member) source = 'structural'
       else if (b.type === 'request/progressed' && state.items[b.itemId]?.author === member) source = { item: state.items[b.itemId] }
       if (source) break

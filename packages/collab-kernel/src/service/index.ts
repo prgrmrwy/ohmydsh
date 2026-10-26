@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { authorization, isPrincipal, type CommandName, type Principal } from '../auth/index.js'
 import { reduce } from '../domain/reduce.js'
 import { decideDispatch } from '../domain/decide.js'
-import { CollabError, TOPIC_LIMIT, type DispatchCompletedEvent, type Presence } from '../model/index.js'
+import { CollabError, TOPIC_LIMIT, messageNotifies, type DispatchCompletedEvent, type Presence } from '../model/index.js'
 import { checkedItem, checkFields, checkRevision, rejectDeciders } from '../domain/items.js'
 import { fail, type Ext, type Address, type Binding, type CollabEvent, type CommandResult, type CommitRecord, type CreateItemInput, type Item, type Member, type MemberKind, type Overview, type Progress, type ReceiptScope, type ReviseItemInput, type SpaceState } from '../model/index.js'
 import type { ChannelProvider } from '../spi/index.js'
@@ -326,9 +326,9 @@ export class CollabService {
     if (m.status !== 'active') fail('COLLAB_MEMBER_INACTIVE')
     return m
   }
-  /** Synchronous, inside the serial transaction: format, needsReply, and the recipient provider's support. */
-  private checkMode(recipient: Member, mode: unknown, needsReply: boolean): void {
-    if (typeof mode !== 'string' || !MODE_FORMAT.test(mode) || !needsReply) fail('COLLAB_BAD_MODE')
+  /** Synchronous, inside the serial transaction: format, notification intent, and provider support. */
+  private checkMode(recipient: Member, mode: unknown, notify: boolean): void {
+    if (typeof mode !== 'string' || !MODE_FORMAT.test(mode) || !notify) fail('COLLAB_BAD_MODE')
     const provider = this.options.providers.find(p => p.channel === recipient.binding.channel)
     let supported = false
     try { supported = provider?.supportsMode?.(mode) === true } catch { supported = false }
@@ -433,13 +433,14 @@ export class CollabService {
     if (item.requiredAcks.length && item.requiredAcks.every(n => item.acks[n] === item.revision)) item.status = 'agreed'
     return [{ type: 'item/acked', actor, item }]
   }) }
-  async sendMessage(ctx: CommandContext, input: { to: string; body: string; needsReply?: boolean; ref?: number; ext?: Ext; mode?: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = cloneInput(input); return this.command(ctx, 'sendMessage', input, (s, actor) => {
+  async sendMessage(ctx: CommandContext, input: { to: string; body: string; needsReply?: boolean; notify?: boolean; ref?: number; ext?: Ext; mode?: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = cloneInput(input); return this.command(ctx, 'sendMessage', input, (s, actor) => {
     if (input.to === actor || !Object.hasOwn(s.members, input.to) || s.members[input.to]!.status !== 'active') fail('COLLAB_BAD_RECIPIENT')
-    if (typeof input.body !== 'string' || Buffer.byteLength(input.body) < 1 || Buffer.byteLength(input.body) > 16384 || (input.needsReply !== undefined && typeof input.needsReply !== 'boolean')) fail('COLLAB_BAD_MESSAGE')
+    if (typeof input.body !== 'string' || Buffer.byteLength(input.body) < 1 || Buffer.byteLength(input.body) > 16384 || (input.needsReply !== undefined && typeof input.needsReply !== 'boolean') || (input.notify !== undefined && typeof input.notify !== 'boolean')) fail('COLLAB_BAD_MESSAGE')
     checkExt(input.ext)
     this.checkRef(s, input.ref)
-    if (input.mode !== undefined) this.checkMode(s.members[input.to]!, input.mode, input.needsReply === true)
-    return [{ type: 'message/sent', actor, message: { id: `${s.lastSeq + 1}`, actor, to: input.to, body: input.body, needsReply: input.needsReply === undefined ? false : input.needsReply, ...(input.ref === undefined ? {} : { ref: input.ref }), ...(input.ext === undefined ? {} : { ext: input.ext }), ...(input.mode === undefined ? {} : { mode: input.mode }) } }]
+    const notify = messageNotifies(input)
+    if (input.mode !== undefined) this.checkMode(s.members[input.to]!, input.mode, notify)
+    return [{ type: 'message/sent', actor, message: { id: `${s.lastSeq + 1}`, actor, to: input.to, body: input.body, needsReply: input.needsReply ?? false, notify, ...(input.ref === undefined ? {} : { ref: input.ref }), ...(input.ext === undefined ? {} : { ext: input.ext }), ...(input.mode === undefined ? {} : { mode: input.mode }) } }]
   }) }
   async setStatus(ctx: CommandContext, input: { text: string }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'setStatus', input, (_s, actor) => { if (typeof input.text !== 'string' || input.text.length > 500) fail('COLLAB_BAD_STATUS'); return [{ type: 'member/statusText', actor, name: actor, text: input.text }] }) }
   async advanceRequest(ctx: CommandContext, input: { itemId: string; progress: Progress }): Promise<CommandResult> { ctx = this.snapshot(ctx); input = structuredClone(input); return this.command(ctx, 'advanceRequest', input, (s, actor) => {

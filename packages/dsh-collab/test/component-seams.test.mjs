@@ -112,6 +112,57 @@ function input(text, source = { kind: 'user' }) {
 
 function requestText(request) { return JSON.stringify(request.messages) }
 
+for (const busy of [false, true]) test(`component-notify: result without reply wakes ${busy ? 'busy' : 'idle'} recipient`, { timeout: 10000 }, async t => {
+  const entered = deferred(), release = deferred()
+  const script = [textResponse('invited'), ...(busy ? [async () => { entered.resolve(); await release.promise; return textResponse('first') }] : []), textResponse('result received')]
+  const { ctx, agent: target, adapter, root, assertCompleted } = await harness(t, script)
+  const { agent: sender } = await ctx.agents.create({ sessionId: SessionId('component-a'), meta: { cwd: join(root, 'workspace-a') }, agentOptions: { provider: 'scripted', model: 'scripted' } })
+  // Only metadata/controller lookup is substituted; the plugin, FileStore, provider and AgentLoop are real.
+  ctx.provide('workspaceRegistry', { archivedSessionIds: [], list: () => [] })
+  ctx.provide('sessionQuery', { listSessions: async () => [sender, target].map(agent => ({ header: agent.session.header, live: true, persisted: true })) })
+  ctx.provide('sessionController', { resolveAgent: async id => ({ agent: ctx.agents.get(id) }) })
+  const plugin = await import('../lib/index.js')
+  const handle = ctx.plugin(plugin, { dataDir: join(root, 'ledger'), admission: 'allowlist', allowedSessionIds: [sender.id, target.id], denySessionIds: [], memberTrust: true, managedChannels: [] })
+  await handle.inertia; assert.equal(handle.state, 2)
+  const call = async (name, args, agent = sender) => {
+    const out = await ctx.tools.execute({ callId: `notify-${name}`, name, arguments: args, agent, signal: AbortSignal.timeout(5000) })
+    assert.ok(!out.isError && !out.value.error, JSON.stringify(out)); return out.value
+  }
+  const nextPointer = () => {
+    let stop, timeout
+    const promise = new Promise((resolve, reject) => {
+      timeout = setTimeout(() => { stop?.(); reject(new Error('pointer was not consumed')) }, 5000)
+      stop = ctx.on('agent/inbox/claimed', event => {
+        if (event.agent.id === target.id && event.message.source.kind === 'plugin:dsh-collab') { clearTimeout(timeout); stop(); resolve(event.message) }
+      })
+    })
+    t.after(() => { clearTimeout(timeout); stop?.() })
+    return promise
+  }
+  await call('collab_space', { action: 'create', spaceId: 'notify-space', cmdId: 'create', name: 'a' })
+  const invitation = nextPointer()
+  await call('collab_invite', { spaceId: 'notify-space', cmdId: 'invite', name: 'b', recipientSessionId: target.id })
+  await invitation; await target.whenIdle()
+  if (busy) { target.followup(input('unrelated work')); await entered.promise }
+  try {
+    const received = nextPointer()
+    const sent = await call('collab_send_message', { spaceId: 'notify-space', cmdId: 'result', to: 'b', body: 'PRIVATE_RESULT', notify: true, needsReply: false })
+    if (busy) { assert.equal(adapter.requests.length, 2); assert.ok(!requestText(adapter.requests[1]).includes(`\"toSeq\":${sent.seq}`)) }
+    release.resolve()
+    const pointer = await received
+    await target.whenIdle()
+    assert.ok(pointer.content.some(block => block.type === 'text' && block.text.includes(`"toSeq":${sent.seq}`)))
+    assert.ok(!JSON.stringify(pointer).includes('PRIVATE_RESULT'))
+    assert.equal(target.session.snapshotEvents().filter(e => e.type === 'user/message' && e.data.id === pointer.id).length, 1)
+    const status = await call('collab_status', { spaceId: 'notify-space' }, target)
+    assert.deepEqual(status.spaces[0].pending.replies, [])
+    assertCompleted(busy ? 3 : 2, busy ? 3 : 2)
+    const schemas = target.session.snapshotEvents().filter(e => e.type === 'request/header').at(-1).data.header.tools.filter(tool => tool.name.startsWith('collab_'))
+    assert.equal(schemas.length, 11)
+    assert.ok(JSON.stringify(schemas).length <= 4200, 'collab schema budget exceeded')
+  } finally { release.resolve() }
+})
+
 test('component-persistence: plugin source and exact message ID survive JSONL checkpoint/reopen', { timeout: 10000 }, async t => {
   const { ctx, agent, root, handle, assertCompleted } = await harness(t, [textResponse('persisted')], { persistence: true })
   const message = input('collab-pointer-persisted', { kind: 'plugin:dsh-collab' })

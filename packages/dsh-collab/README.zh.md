@@ -23,16 +23,16 @@
 
 **准入模式。** `invite`（默认）：通过普通会话校验的一级会话都可以建空间；被Leader用完整session ID邀请并认领的会话即获准进入该空间，授权记录就是台账里的`member/invited`提交，无需改配置或重启。`allowlist`：额外要求调用者与被邀请者在`allowedSessionIds`中，旧配置原样可用。两种模式下subagent、非零delegationDepth、已归档、官方所有权拒绝或位于`denySessionIds`的会话都不能调用、不能被认领。非法`admission`、列表含空串/首尾空白/重复项、或同一ID同时在两个列表时插件拒绝启动（`COLLAB_BAD_CONFIG`），不注册工具也不创建dataDir。**修改排除名单或准入模式后必须`dsh build`并`dsh restart`才生效**，没有热更新。
 
-**成员信任。** `memberTrust: true`（默认，两种准入模式都生效）表示操作者预先同意：`collab_invite`成功后，宿主以刚认领的被邀请会话身份代为join（保留cmdId `dsh-collab:auto-join`，重试幂等；返回多一个`autoJoined`），唤醒说明告诉成员可以承接空间成员派发的request，并**在本会话原有权限边界内**直接执行，无需再向用户确认。沙箱、审批、worktree限制不变；需要用户决定时，成员在本会话问自己的用户，再把结论写回台账。`memberTrust: false`恢复手动join，唤醒说明逐字恢复原文。新空间记录约定v3，v1、v2空间继续读取各自记录的版本。
+**成员信任。** `memberTrust: true`（默认，两种准入模式都生效）表示操作者预先同意：`collab_invite`成功后，宿主以刚认领的被邀请会话身份代为join（保留cmdId `dsh-collab:auto-join`，重试幂等；返回多一个`autoJoined`），唤醒说明告诉成员可以承接空间成员派发的request，并**在本会话原有权限边界内**直接执行，无需再向用户确认。沙箱、审批、worktree限制不变；需要用户决定时，成员在本会话问自己的用户，再把结论写回台账。`memberTrust: false`恢复手动join，唤醒说明逐字恢复原文。新空间记录约定v4，v1–v3空间继续读取各自记录的版本。
 
-**信任面。** 同一Host上任一普通会话的agent都可按完整ID邀请并唤醒另一个普通会话，每次唤醒消耗对方一次模型调用。开启成员信任（默认）时，邀请还意味着邀请方可以在被邀请方自身权限内指挥其工作。插件**不限制邀请数量，也不限制累计唤醒次数**；只有三种情况会唤醒成员：需要回复（`needsReply`）的消息、邀请、自己创建的request进入`done`/`rejected`；条目修改、ack、达成一致、`accepted`与Leader变化只记账不唤醒。循环按话题限制：消息可用`ref`引用同一空间中先前的消息或条目，一个话题至多20条唤醒消息，再发返回`COLLAB_THREAD_LIMIT`（不写`ref`即开新话题）。其余约束是排除名单，以及（关闭成员信任时）被邀请方可以拒绝。需要时把会话加入排除名单、设`memberTrust: false`，或切回`allowlist`。
+**信任面。** 同一Host上任一普通会话的agent都可按完整ID邀请并唤醒另一个普通会话，每次唤醒消耗对方一次模型调用。开启成员信任（默认）时，邀请还意味着邀请方可以在被邀请方自身权限内指挥其工作。插件**不限制邀请数量，也不限制累计唤醒次数**；只有三种情况会唤醒成员：有效通知意图为真的消息（`notify`未填时兼容`needsReply`）、邀请、自己创建的request进入`done`/`rejected`；条目修改、ack、达成一致、`accepted`与Leader变化只记账不唤醒。循环按话题限制：消息可用`ref`引用同一空间中先前的消息或条目，一个话题至多20条唤醒消息，再发返回`COLLAB_THREAD_LIMIT`（不写`ref`即开新话题）。其余约束是排除名单，以及（关闭成员信任时）被邀请方可以拒绝。需要时把会话加入排除名单、设`memberTrust: false`，或切回`allowlist`。
 
 **数据目录前提。** 一个dataDir在整个生命周期内只能由**一个Host进程**使用，且不经网络盘、VM共享目录或容器挂载被其它pid命名空间访问（例如宿主机与LumeVM共用目录即违反）。违反时启动清锁可能删掉另一个Host正持有的锁，造成双写；同机两个Host误配也不保证安全。数据目录不能在任何声明workspace或node_modules部署目录内。新目录0700；既有目录若group/other可访问则拒绝，不偷偷改权限。serviceId由canonical dataDir摘要稳定派生。构建内联当前内核源码，运行不依赖workspace内核包。
 
 **接入方（托管成员）。** `managedChannels` 列出允许接入的 channel（匹配`^[a-z][a-z0-9-]{0,31}$`、不能是`dsh-session`、不重复，否则`COLLAB_BAD_CONFIG`）。插件以 cordis 服务`dshCollab`提供`attach(channel, adapter)`，接入方据此取得句柄，句柄提供以下能力：
 
 - 接纳、换代、退役成员（`admit`/`rebind`/`retire`）；
-- 以真实执行会话的身份写入（`command`/`read`）；条目和消息可带不透明的`ext`（JSON 对象，≤4 KiB，创建后不可改），需回复的消息可带投递方式`mode`；
+- 以真实执行会话的身份写入（`command`/`read`）；条目和消息可带不透明的`ext`（JSON 对象，≤4 KiB，创建后不可改），通知消息可带投递方式`mode`；
 - 为普通会话收件人注册投递方式（`registerSessionMode`）。带`mode`的唤醒交给接入方的处理函数，不走 followup，也不降级。
 
 托管成员要能被接纳，需要该空间的 Leader 先用`collab_space`的`allow_manager`授权该 channel；`revoke_manager`撤销授权，并在同一提交里退役该 channel 的全部托管成员。托管成员不能成为 Leader，也不能自己 join、decline 或 leave。
@@ -40,6 +40,10 @@
 **身份按两份事实的交集判断。** 台账记录与接入方的当前绑定必须同时成立：每次调用都由宿主创建一个调用级守卫，内核在提交或返回数据前同步重验。守卫失败时返回`COLLAB_CALLER_UNAVAILABLE`。命令采样后、提交前收件人恰好换代时，返回`COLLAB_BINDING_CHANGED`，可用原 cmdId 重试。
 
 未配置`managedChannels`时，行为与之前完全相同。
+
+## 消息意图
+
+`notify` 控制通知／唤醒，`needsReply` 控制是否要求回复。结果需要对方继续执行、无需再回信时用 `notify:true, needsReply:false`；显式 `notify:false` 只记账，即使 `needsReply:true` 也不唤醒。未填 `notify` 时沿用 `needsReply`，两者都未填时均为 false。所有实际产生唤醒意图的消息都计入话题上限。`collab_status.pending.replies` 是待回复问题，不是未读通知列表；被通知后即使没有待回复，也应按保存的 seq 读取增量账本。旧收据与日志无需迁移。
 
 ## 工具与信任
 

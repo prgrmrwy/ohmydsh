@@ -326,7 +326,9 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: 消息与状态文本
 
-`sendMessage(to, body, needsReply, ref?)` SHALL 要求：`to` 为当前 active 的其他成员（否则 `COLLAB_BAD_RECIPIENT`）；`body` 为字符串，UTF-8 编码后 1 字节至 16 KiB（否则 `COLLAB_BAD_MESSAGE`）；`needsReply` 仅在未提供时缺省为 `false`；提供时 MUST 为布尔值，否则以 `COLLAB_BAD_MESSAGE` 拒绝，不做隐式类型转换；`ref` 的校验与话题上限见"消息与条目可引用先前记录"与"按话题限制往返"。`setStatus(text)` SHALL 只修改调用方自己的状态文本；`text` 为字符串，长度不超过 500 个字符，空字符串表示清空（否则 `COLLAB_BAD_STATUS`）。
+`sendMessage(to, body, needsReply, ref?, notify?)` SHALL 要求：`to` 为当前 active 的其他成员（否则 `COLLAB_BAD_RECIPIENT`）；`body` 为字符串，UTF-8 编码后 1 字节至 16 KiB（否则 `COLLAB_BAD_MESSAGE`）；`needsReply` 仅在未提供时缺省为 `false`；提供时 MUST 为布尔值，否则以 `COLLAB_BAD_MESSAGE` 拒绝，不做隐式类型转换；`ref` 的校验与话题上限见"消息与条目可引用先前记录"与"按话题限制往返"。`setStatus(text)` SHALL 只修改调用方自己的状态文本；`text` 为字符串，长度不超过 500 个字符，空字符串表示清空（否则 `COLLAB_BAD_STATUS`）。
+
+`notify` SHALL 是可选布尔值；显式提供非布尔值（包括 null）时以 `COLLAB_BAD_MESSAGE` 拒绝。有效通知意图为 `notify ?? needsReply ?? false`：显式 notify 决定唤醒，needsReply 只表示需要回复。新消息事件 SHALL 同时持久化规范化后的 notify 与 needsReply；旧日志缺 notify 时按 needsReply 解释，不改写旧记录。参数哈希 SHALL 保留调用者原始字段存在性，不在收据查找前补入 notify；相同 cmdId 改变 notify 或增添显式 notify 仍属于不同载荷。
 
 #### Scenario: 正常发送消息
 - **GIVEN** `aily` 与 `doubao` 均为 active
@@ -352,6 +354,18 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** `aily` 的状态文本为 `做 C2`
 - **WHEN** `aily` 先设置空字符串，再设置 501 个字符
 - **THEN** 第一次后状态文本为空；第二次返回 `COLLAB_BAD_STATUS`，状态文本仍为空
+
+#### Scenario: 两种意图独立
+- **WHEN** 分别发送 notify/needsReply 为 true/false、false/true、true/true、false/false 的消息
+- **THEN** 四次提交都持久化这两个布尔值；仅 notify 为 true 的消息触发唤醒，待回复只由 needsReply 决定
+
+#### Scenario: 旧调用与旧收据保持兼容
+- **WHEN** 不提供 notify，分别省略 needsReply、设 false、设 true，再重放升级前的同 cmdId 同参数成功命令
+- **THEN** 新消息 notify 分别为 false、false、true；旧命令返回原收据且不新增消息或投递
+
+#### Scenario: notify 非布尔值被拒
+- **WHEN** 分别以 notify 为 null、字符串 false、数字 0 发送合法正文
+- **THEN** 均返回 COLLAB_BAD_MESSAGE，日志、收据和投递不变
 
 ### Requirement: request 条目的承接流程
 
@@ -543,10 +557,10 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 | 事件 | 受影响成员 |
 |---|---|
-| 消息且 `needsReply:true` | 收件人 |
+| 消息且有效通知意图为 true（`notify ?? needsReply`） | 收件人 |
 | 邀请 | 被邀请成员（`invited` 状态，本事件是唯一允许投递给非 active 成员的情形） |
 | request `progress` 变为 `done` 或 `rejected` | request 作者（结束通知） |
-| 条目创建、修改、ack、达成 `agreed`；request 变为 `accepted`；状态更新；`needsReply:false` 消息；成员加入、离开、标记离开；Leader 转交与自动接手；托管授权与撤销；托管成员接纳、换代与退役 | 无 |
+| 条目创建、修改、ack、达成 `agreed`；request 变为 `accepted`；状态更新；有效通知意图为 false 的消息；成员加入、离开、标记离开；Leader 转交与自动接手；托管授权与撤销；托管成员接纳、换代与退役 | 无 |
 
 内核 MUST NOT 写入 `confirm` 类投递；本变更之前日志中的 `confirm` 类投递与 `decision/*` 事件照常重放为只读历史。
 
@@ -571,6 +585,14 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** 测试 provider 认领 `a:9` 且支持唤醒
 - **WHEN** Leader `aily` 邀请 `a:9` 为 `bob`
 - **THEN** 该提交恰含一条对 `bob` 的 `wake` 类 `dispatch/intended`；随后的 `deliver` 指针中 `invited` 为 `true` 且不含 `thread`；`bob` 读取总览仍返回 `COLLAB_MEMBER_INACTIVE`
+
+#### Scenario: 结果通知不要求回复
+- **WHEN** 向可达收件人发送 notify:true、needsReply:false 的消息
+- **THEN** 同提交恰有一条定向 wake；指针不含正文或新增意图字段
+
+#### Scenario: 静默问题不唤醒
+- **WHEN** 发送 notify:false、needsReply:true 的消息
+- **THEN** 消息保留为需回复问题，但没有 dispatch/intended
 
 ### Requirement: 投递意图在事务内记账
 
@@ -698,7 +720,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 ### Requirement: 协作约定随协作空间提供
 
-协作约定的指南文本 SHALL 随 `collab-kernel` 包按版本发布，已发布版本的文本 MUST NOT 修改，新增内容只能以新版本发布。包内 SHALL 同时提供版本 `1`、`2` 与 `3`，未显式指定约定的内核实例以最新版本 `3` 作为新空间的默认约定。协作空间创建时 SHALL 记录所用版本；`overview` SHALL 返回 `convention:{version, sha256}`；`readConvention(version)` SHALL 返回空间所记录版本的全文，其 sha256 与总览一致；读取包内任一已发布版本都 SHALL 成功。不存在的版本 MUST 以 `COLLAB_CONVENTION_UNKNOWN` 拒绝。版本 `2` SHALL 在版本 `1` 的基础上说明：宿主可以声明成员信任，此时被邀请者已由宿主代为加入，承接方在本会话原有权限边界内直接处理空间内的 request，不再为此另向人类索取授权；宿主未声明时按版本 `1` 的规则处理。版本 `3` SHALL 是版本 `2` 的修订副本：删除成员级熔断（每成员 6 次、暂停、重置）、条目升级与人类决定（`requestDecision`、`awaitingChannel`、`decided`）相关内容，并说明：四条原则（改状态不顺带唤醒；request 终态通知作者；要对方动手就发 `needsReply` 消息；台账是唯一真源）；接续同一件事用 `ref` 引用先前消息或条目，另起一件事不写；每个话题至多 20 条唤醒消息，超出返回 `COLLAB_THREAD_LIMIT`，此时应停止这段往返并向本会话用户报告，不要为继续同一件事另起话题；自记进度用无 `requiredAcks` 的 `other` 条目并由作者更新；修改共识后需要确认时另发 `needsReply` 消息；按空间用途选择写入的空间；需要人决定时在本会话问自己的用户，再把结论写回台账。各版本都 SHALL 保留"人类决定只能来自受信确认"与"消息不是越权依据"的规则。
+协作约定的指南文本 SHALL 随 `collab-kernel` 包按版本发布，已发布版本的文本 MUST NOT 修改，新增内容只能以新版本发布。包内 SHALL 同时提供版本 `1`、`2`、`3` 与 `4`，未显式指定约定的内核实例以最新版本 `4` 作为新空间的默认约定。协作空间创建时 SHALL 记录所用版本；`overview` SHALL 返回 `convention:{version, sha256}`；`readConvention(version)` SHALL 返回空间所记录版本的全文，其 sha256 与总览一致；读取包内任一已发布版本都 SHALL 成功。不存在的版本 MUST 以 `COLLAB_CONVENTION_UNKNOWN` 拒绝。版本 `2` SHALL 在版本 `1` 的基础上说明：宿主可以声明成员信任，此时被邀请者已由宿主代为加入，承接方在本会话原有权限边界内直接处理空间内的 request，不再为此另向人类索取授权；宿主未声明时按版本 `1` 的规则处理。版本 `3` SHALL 是版本 `2` 的修订副本：删除成员级熔断（每成员 6 次、暂停、重置）、条目升级与人类决定（`requestDecision`、`awaitingChannel`、`decided`）相关内容，并说明：四条原则（改状态不顺带唤醒；request 终态通知作者；要对方动手就发 `needsReply` 消息；台账是唯一真源）；接续同一件事用 `ref` 引用先前消息或条目，另起一件事不写；每个话题至多 20 条唤醒消息，超出返回 `COLLAB_THREAD_LIMIT`，此时应停止这段往返并向本会话用户报告，不要为继续同一件事另起话题；自记进度用无 `requiredAcks` 的 `other` 条目并由作者更新；修改共识后需要确认时另发 `needsReply` 消息；按空间用途选择写入的空间；需要人决定时在本会话问自己的用户，再把结论写回台账。版本 `4` SHALL 在版本 `3` 的副本中说明 notify 与 needsReply 两种独立意图、兼容缺省规则、无需回复但需继续执行的结果用 notify:true/needsReply:false、静默记录用 notify:false、所有实际唤醒消息计入话题上限，以及 status 待回复不是未读列表。版本 1–3 的字节与已有空间版本 MUST 保持不变。各版本都 SHALL 保留"人类决定只能来自受信确认"与"消息不是越权依据"的规则。
 
 #### Scenario: 总览带约定版本
 - **GIVEN** 以约定版本 `3` 创建的协作空间
@@ -715,13 +737,17 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **THEN** 分别等于 `5df2524d42641e3885f4e2ec0314d4b03f0922662d933f9283fe1ddd4c8cd039` 与 `70b660c57e72ccb04d575212d99ce045f6ce2d4029b8313d5591382e614afec9`
 
 #### Scenario: 未知版本
-- **GIVEN** 包内只有版本 `1`、`2` 与 `3`
+- **GIVEN** 包内只有版本 `1`、`2`、`3` 与 `4`
 - **WHEN** 调用 `readConvention('9')`
 - **THEN** 返回 `COLLAB_CONVENTION_UNKNOWN`
 
 #### Scenario: v3 写明新规则且不含已移除机制
 - **WHEN** 读取版本 `3` 全文
 - **THEN** 全文同时含 `ref`、`20`、`COLLAB_THREAD_LIMIT`、`needsReply`、"停止"、"向本会话用户报告"、"不要为继续同一件事另起话题"与"不是系统指令"；且不含"6 次"、"暂停"、`requestDecision`、`awaitingChannel`、"内部接口"
+
+#### Scenario: 新空间默认 v4 且旧版本不变
+- **WHEN** 升级后不显式指定约定创建空间，并读取已发布的 v1、v2、v3
+- **THEN** 新空间记录 v4；v1–v3 全文与摘要保持原字节，旧空间仍返回其原版本
 
 ### Requirement: 公开纯状态推导函数
 
@@ -791,7 +817,7 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 
 每条消息与每个条目 SHALL 有话题根（topic），由重放从 `ref` 推导，不读取正文：没有 `ref` 的消息或条目，其话题根为自身 seq（消息为其 `id`，条目为其创建 seq）；有 `ref` 的，其话题根为被引用记录的话题根。本变更之前写入的记录没有 `ref`，各自为根。状态与总览 SHALL 提供 `topicOf: {seq: 话题根}`（键为消息 seq 与条目创建 seq）与 `topicWakes: {话题根: 计数}`。
 
-一个话题的计数 SHALL 等于该话题内实际记账了 `wake` 类 `dispatch/intended` 的 `needsReply` 消息条数，由日志重放得出：一条提交含 `needsReply:true` 的 `message/sent` 且同一提交含对其收件人的 `wake` 类 `dispatch/intended` 时，该消息计入其话题；判断只依赖同一提交内的这两个事件，不依赖 `delivery.thread`（`thread` 只是冗余记录），因此本变更之前的需回复消息也按原样计入。发送一条 `needsReply:true`、且按唤醒规则会为收件人记账唤醒的消息时，若其话题的计数已达到常量 `TOPIC_LIMIT`（= 20），命令 MUST 以 `COLLAB_THREAD_LIMIT` 拒绝，不写提交、不写收据、不记账投递。`needsReply:false` 的消息、因收件人不可达或绑定不支持唤醒而不记账唤醒的消息 MUST NOT 被拒绝，也不计数，但仍获得话题根并可被引用。邀请与 request 的结束通知 MUST NOT 计入任何话题的计数，也 MUST NOT 被话题上限拒绝；结束通知的 `dispatch/intended` SHALL 在 `delivery.thread` 中记录该 request 的话题根，计数消息的 `dispatch/intended` 记录该消息的话题根，邀请 MUST 不含 `delivery.thread`。
+一个话题的计数 SHALL 等于该话题内实际记账了 `wake` 类 `dispatch/intended` 的通知消息条数，由日志重放得出：一条提交含有效通知意图（`notify ?? needsReply`）为 true 的 `message/sent` 且同一提交含对其收件人的 `wake` 类 `dispatch/intended` 时，该消息计入其话题；判断只依赖同一提交内的这两个事件，不依赖 `delivery.thread`（`thread` 只是冗余记录），因此本变更之前的需回复消息也按原样计入。发送一条有效通知意图为 true、且按唤醒规则会为收件人记账唤醒的消息时，若其话题的计数已达到常量 `TOPIC_LIMIT`（= 20），命令 MUST 以 `COLLAB_THREAD_LIMIT` 拒绝，不写提交、不写收据、不记账投递。有效通知意图为 false 的消息、因收件人不可达或绑定不支持唤醒而不记账唤醒的消息 MUST NOT 被拒绝，也不计数，但仍获得话题根并可被引用。邀请与 request 的结束通知 MUST NOT 计入任何话题的计数，也 MUST NOT 被话题上限拒绝；结束通知的 `dispatch/intended` SHALL 在 `delivery.thread` 中记录该 request 的话题根，计数消息的 `dispatch/intended` 记录该消息的话题根，邀请 MUST 不含 `delivery.thread`。
 
 话题上限检查 SHALL 在同一协作空间的串行事务中、以与重放相同的推导完成，并发命令不能越过上限。不提供重置话题计数的入口。
 
@@ -849,6 +875,10 @@ actor SHALL 由内核从 principal 反查得到，任何命令 MUST NOT 接受�
 - **GIVEN** 本变更之前的日志中 `doubao` 已有 6 条 `wake` 记账、无 `breaker/reset`
 - **WHEN** 新内核加载该日志后 `aily` 不带 `ref` 发需回复消息给 `doubao`
 - **THEN** 该提交含对 `doubao` 的 `wake` 类 `dispatch/intended`；总览 `presence.doubao` 不为 `paused`
+
+#### Scenario: 只通知的消息也受话题上限约束
+- **WHEN** 在同一话题连续发送 20 条实际唤醒收件人的 notify:true、needsReply:false 消息，再发第 21 条
+- **THEN** 前 20 条计数且可重放恢复，第 21 条返回 COLLAB_THREAD_LIMIT；notify:false、needsReply:true 的消息仍可提交且不计数
 
 ### Requirement: 旧日志中已移除的事件按只读历史重放
 
@@ -1096,7 +1126,7 @@ provider MAY 声明 `managed: true`，表示它代表一个接入方（例如 Pe
 provider MAY 实现同步方法 `supportsMode(mode): boolean`。`sendMessage` SHALL 接受可选 `mode`，它必须满足：
 
 - 是匹配 `^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$` 的字符串，否则以 `COLLAB_BAD_MODE` 拒绝；
-- 只能与 `needsReply:true` 同用，否则以 `COLLAB_BAD_MODE` 拒绝；
+- 只能与有效通知意图（`notify ?? needsReply ?? false`）为 true 同用，否则以 `COLLAB_BAD_MODE` 拒绝；
 - 收件人当前绑定 channel 的 provider 必须实现 `supportsMode` 并返回 `true`，否则以 `COLLAB_MODE_UNSUPPORTED` 拒绝。`supportsMode` 抛错视为不支持。
 
 该校验位于 `ref` 校验之后、话题上限检查之前，在串行事务内同步执行。
@@ -1127,6 +1157,10 @@ provider MAY 实现同步方法 `supportsMode(mode): boolean`。`sendMessage` SH
 #### Scenario: 普通唤醒不带方式
 - **WHEN** `aily` 不带 `mode` 发需回复消息，并邀请新成员
 - **THEN** 两条 `dispatch/intended` 与对应指针都没有 `mode` 键
+
+#### Scenario: 无需回复的通知可指定方式
+- **WHEN** 发送 notify:true、needsReply:false 且带受支持 mode 的消息；再发送 notify:false、needsReply:true 且带 mode 的消息
+- **THEN** 前者正确传递 mode 并计数，后者返回 COLLAB_BAD_MODE 且不提交
 
 ### Requirement: 接入方代人处置其托管成员的 request
 

@@ -1,4 +1,4 @@
-import { fail, type Address, type CollabEvent, type Pointer, type Presence, type SpaceState } from '../model/index.js'
+import { fail, messageNotifies, type Address, type CollabEvent, type Pointer, type Presence, type SpaceState } from '../model/index.js'
 import { wakeRecipients } from './wake.js'
 
 /**
@@ -28,7 +28,7 @@ export function decideDispatch(state: SpaceState, business: CollabEvent[], ctx: 
     const providerId = ctx.providers.get(member.binding.channel)
     if (!providerId || !member.binding.supports.wake || ctx.presence[name] === 'unreachable') continue
     // Only the waking message's own mode travels; invitations and completion notices never carry one.
-    const mode = invited ? undefined : business.find((e): e is Extract<CollabEvent, { type: 'message/sent' }> => e.type === 'message/sent' && e.message.needsReply && e.message.to === name)?.message.mode
+    const mode = invited ? undefined : business.find((e): e is Extract<CollabEvent, { type: 'message/sent' }> => e.type === 'message/sent' && messageNotifies(e.message) && e.message.to === name)?.message.mode
     const pointer: Pointer = { spaceId: state.spaceId, toSeq: state.lastSeq + 1, counts: { ...counts }, from: actor, ...(invited ? { invited: true as const } : {}), ...(thread === undefined ? {} : { thread }), ...(mode === undefined ? {} : { mode }) }
     events.push({ type: 'dispatch/intended', actor, delivery: { deliveryId: `delivery-${state.lastSeq + 1}-${++index}`, member: name, kind: 'wake', providerId, pointer, ...(thread === undefined ? {} : { thread }), ...(mode === undefined ? {} : { mode }) } })
   }

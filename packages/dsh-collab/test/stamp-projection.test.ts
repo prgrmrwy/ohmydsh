@@ -89,6 +89,22 @@ const sinceItems = (records: any[]) => records.flatMap(r => r.events).filter((e:
 const OVERVIEW_KEYS = ['spaceId', 'serviceId', 'status', 'leader', 'convention', 'purpose', 'lastSeq', 'members', 'items', 'messages', 'deliveries', 'pendingDeliveries', 'inFlightDeliveries', 'presence'].sort()
 
 describe('托管调用者的戳、可见投影、写目标授权与 cmdId 命名空间', () => {
+  it('notify-only wake and completion stay visible only to their own stamp', () => world(async host => {
+    const { main, l, m } = await locusSpace(host)
+    const sent = ok(await l.send('main', 'result ready', { notify: true, needsReply: false }))
+    await settle()
+    const full = ok(await main.since()).flatMap((r: any) => r.events)
+    const intent = full.find((e: any) => e.type === 'dispatch/intended' && e.delivery.pointer.toSeq === sent.seq)
+    expect(intent).toBeDefined()
+    const id = intent.delivery.deliveryId
+    await expect.poll(async () => ok(await main.overview()).deliveries[id]?.outcome).toBe('succeeded')
+    for (const [reader, visible] of [[l, true], [m, false]] as const) {
+      const events = ok(await reader.since()).flatMap((r: any) => r.events)
+      expect(events.some((e: any) => e.type === 'dispatch/intended' && e.delivery.deliveryId === id)).toBe(visible)
+      expect(events.some((e: any) => e.type === 'dispatch/completed' && e.deliveryId === id)).toBe(visible)
+    }
+    expect((await main.status()).space.pending.replies).toEqual([])
+  }))
   it('stamp-01：托管调用者写入带戳且 cmdId 带命名空间', () => world(async host => {
     const { l } = await locusSpace(host)
     const args = { spaceId: 's', cmdId: 'c-1', itemId: 'todo-1', kind: 'request', assignee: 'main', title: 'T', body: 'B', requiredAcks: [] }

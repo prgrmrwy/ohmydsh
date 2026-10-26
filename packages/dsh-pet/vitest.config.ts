@@ -11,7 +11,12 @@ const LOTTIE_STUB = fileURLToPath(new URL('./test/fixtures/lottie-stub.ts', impo
 export default defineConfig({
   esbuild: { jsx: 'automatic' },
   resolve: {
-    alias: [{ find: /^lottie-web\/build\/player\/lottie_light\.min\.js$/, replacement: LOTTIE_STUB }],
+    alias: [
+      { find: /^lottie-web\/build\/player\/lottie_light\.min\.js$/, replacement: LOTTIE_STUB },
+      // Collaboration integration tests must exercise this checkout, including in lean worktrees.
+      { find: /^dsh-collab$/, replacement: fileURLToPath(new URL('../dsh-collab/src/index.ts', import.meta.url)) },
+      { find: /^collab-kernel$/, replacement: fileURLToPath(new URL('../collab-kernel/src/index.ts', import.meta.url)) },
+    ],
   },
   test: {
     include: ['test/**/*.test.ts'],

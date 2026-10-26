@@ -26,7 +26,9 @@ export interface Decision { requestId: string; itemId: string; actor: string; ch
 export interface Pointer { spaceId: string; toSeq: number; counts: { message: number; item: number; decision: number; member: number }; from: string; invited?: true; thread?: number; mode?: string }
 /** `confirm` deliveries exist only in pre-change logs. `thread` is the topic root of a message or completion wake. */
 export interface Delivery { deliveryId: string; member: string; kind: 'wake' | 'confirm'; providerId: string; requestId?: string; pointer?: Pointer; outcome?: 'succeeded' | 'failed'; messageRef?: string; thread?: number; mode?: string }
-export interface Message { id: string; actor: string; to: string; body: string; needsReply: boolean; ref?: number; ext?: Ext; mode?: string }
+export interface Message { id: string; actor: string; to: string; body: string; needsReply: boolean; notify?: boolean; ref?: number; ext?: Ext; mode?: string }
+/** Old messages and callers without notify retain their original wake behavior. */
+export const messageNotifies = (message: { notify?: boolean; needsReply?: boolean }): boolean => message.notify ?? message.needsReply ?? false
 export interface ConventionInfo { version: string; sha256: string }
 export interface SpaceState {
   spaceId: string; serviceId: string; status: 'open' | 'closed'; leader: string; convention: ConventionInfo; purpose?: string

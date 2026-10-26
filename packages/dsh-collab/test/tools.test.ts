@@ -47,6 +47,8 @@ it('tool-mapping: every closed enum value invokes its exact kernel method with t
     ['collab_revise_item', { itemId: 'i', expectedRevision: 2, changes: { title: 'T2' } }, 'reviseItem', { itemId: 'i', expectedRevision: 2, changes: { title: 'T2' } }, true],
     ['collab_ack_item', { itemId: 'i', revision: 2 }, 'ackItem', { itemId: 'i', revision: 2 }, true],
     ['collab_send_message', { to: 'a', body: 'B', needsReply: true }, 'sendMessage', { to: 'a', body: 'B', needsReply: true }, true],
+    ['collab_send_message', { to: 'a', body: 'result', notify: true, needsReply: false }, 'sendMessage', { to: 'a', body: 'result', notify: true, needsReply: false }, true],
+    ['collab_send_message', { to: 'a', body: 'question', notify: false, needsReply: true }, 'sendMessage', { to: 'a', body: 'question', notify: false, needsReply: true }, true],
     ['collab_set_status', { text: 'working' }, 'setStatus', { text: 'working' }, true],
     ['collab_advance_request', { itemId: 'i', progress: 'done' }, 'advanceRequest', { itemId: 'i', progress: 'done' }, true],
     ['collab_create_item', { itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [] }, 'createItem', { itemId: 'i', kind: 'other', title: 'T', body: 'B', requiredAcks: [] }, true],
@@ -88,6 +90,27 @@ it('tool-error: native failures, lock identity and paths never enter model data'
 })
 
 describe('named tools adapt the kernel faithfully', () => {
+  it('notify and needsReply independently control delivery and pending questions', () => world(async host => {
+    host.session('session-a', { live: true }); host.session('session-b', { live: true })
+    await start(host); const op = ops(host)
+    await op.create('session-a', 's', 'a')
+    await op.invite('session-a', 's', 'b', 'session-b'); await settle()
+    const before = host.followups.length
+    const sent = await op.send('session-a', 's', 'b', 'result', false, 'notice', { notify: true })
+    expect(sent.error).toBeUndefined(); await settle()
+    expect(host.followups).toHaveLength(before + 1)
+    let status = await call(host, 'session-b', 'collab_status', { spaceId: 's' })
+    expect(status.spaces[0].pending.replies).toEqual([])
+    const silent = await op.send('session-a', 's', 'b', 'question for later', true, 'silent', { notify: false })
+    expect(silent.error).toBeUndefined(); await settle()
+    expect(host.followups).toHaveLength(before + 1)
+    status = await call(host, 'session-b', 'collab_status', { spaceId: 's' })
+    expect(status.spaces[0].pending.replies).toEqual([{ seq: silent.seq, from: 'a' }])
+    const beforeRetry = await bytes(ledger(host, 's'))
+    expect(await op.send('session-a', 's', 'b', 'result', false, 'notice', { notify: true })).toEqual(sent)
+    expect(await bytes(ledger(host, 's'))).toEqual(beforeRetry)
+    expect(host.followups).toHaveLength(before + 1)
+  }))
   it('tool-01：创建邀请加入与协商闭环', () => world(async host => {
     host.session('session-a', { live: true }); host.session('session-b', { live: true })
     await start(host); const op = ops(host)
@@ -242,6 +265,7 @@ describe('named tools adapt the kernel faithfully', () => {
     const root = await op.send('session-a', 's', 'b', 'topic root', true); await settle()
     expect(root.error).toBeUndefined()
     for (let i = 2; i <= 20; i++) { expect((await op.send('session-a', 's', 'b', `turn ${i}`, true, undefined, { ref: root.seq })).error).toBeUndefined(); await settle() }
+    await expect.poll(async () => (await op.overview('session-a', 's')).inFlightDeliveries.length).toBe(0)
     const wakes = host.followups.filter(f => f.id === 'session-b').length
     const before = await bytes(ledger(host, 's'))
     expect(await op.send('session-a', 's', 'b', 'turn 21', true, undefined, { ref: root.seq })).toEqual({ error: { code: 'COLLAB_THREAD_LIMIT' } })
