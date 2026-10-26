@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { previewContext, noLinks } from '../scripts/lib/ws-preview-seed.mjs'
+import { stopPreview } from '../scripts/launcher/preview.mjs'
+try {
+  const { home } = await previewContext()
+  await stopPreview(home)
+  for (const file of ['.credentials.yaml', 'plugins/subscriptions/auth.json']) {
+    await noLinks(home, path.join(home, file))
+    await fs.rm(path.join(home, file), { force: true })
+  }
+} catch (error) { console.error(`teardown-preview: ${error.reason || error.message}`); process.exitCode = 1 }

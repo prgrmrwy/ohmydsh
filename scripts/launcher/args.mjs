@@ -4,7 +4,7 @@ export function isOfficialInvocation(argv) {
 }
 
 export function parseArgs(argv) {
-  const flags = { port: 3080, passthrough: [] }
+  const flags = { port: undefined, portExplicit: false, passthrough: [] }
   const commandFlags = { build: 'buildOnly', stop: 'stop', restart: 'restart', reset: 'reset', history: 'history', doctor: 'doctor', 'plugin-update': 'pluginUpdate' }
   const options = { '-b': 'build', '--build': 'build', '--foreground': 'foreground', '--open': 'open', '--no-open': 'noOpen', '--check': 'check', '--dry-run': 'dryRun', '-y': 'yes', '--yes': 'yes', '-h': 'help', '--help': 'help' }
   for (let index = 0; index < argv.length; index++) {
@@ -15,16 +15,16 @@ export function parseArgs(argv) {
     else if (['-p', '--port', '--host', '--trusted-host'].includes(arg)) {
       const value = argv[++index]
       if (value === undefined || value === '' || value.startsWith('--')) throw new Error(`参数 ${arg} requires a value`)
-      if (arg === '-p' || arg === '--port') flags.port = value
+      if (arg === '-p' || arg === '--port') { flags.port = value; flags.portExplicit = true }
       else flags.passthrough.push(arg, value)
-    } else if (arg.startsWith('--port=')) flags.port = arg.slice(7)
+    } else if (arg.startsWith('--port=')) { flags.port = arg.slice(7); flags.portExplicit = true }
     else if (/^--(?:host|trusted-host)=/.test(arg)) {
       if (arg.endsWith('=')) throw new Error(`参数 ${arg.split('=')[0]} requires a value`)
       flags.passthrough.push(arg)
     } else throw new Error(`无法识别的参数 '${arg}'; see dsh --help`)
   }
-  if (!/^\d+$/.test(String(flags.port)) || Number(flags.port) < 1 || Number(flags.port) > 65535) throw new Error('参数 --port must be an integer in 1..65535')
-  flags.port = Number(flags.port)
+  if (flags.port !== undefined && (!/^\d+$/.test(String(flags.port)) || Number(flags.port) < 1 || Number(flags.port) > 65535)) throw new Error('参数 --port must be an integer in 1..65535')
+  if (flags.port !== undefined) flags.port = Number(flags.port)
   if (flags.check && !flags.doctor) throw new Error('--check 只能与 doctor 一起使用')
   return flags
 }
@@ -39,7 +39,7 @@ Usage: dsh [web] [options]
   doctor [--check]            heal/check machine prerequisites
   plugin-update [--dry-run] [--yes]
   --foreground               wait for Host and propagate its status
-  -p, --port <1..65535>       default 3080
+  -p, --port <1..65535>       override DSH_PORT (default 3080); previews auto-backoff unless explicit
   --open | --no-open         override manifest UI opening
   --host <host> --trusted-host <host>
   plugin / --profile / --patch / --dump-config are forwarded to the pinned official CLI

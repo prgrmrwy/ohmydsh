@@ -118,11 +118,11 @@
 - **五层隔离模型**:
   1. **源码隔离**：每个任务使用独立 branch/worktree，Agent 本地工具只访问 managed root；默认必须。
   2. **依赖隔离**：默认 lean、同 fingerprint 共享 cache；依赖变更前 promote，之后使用 worktree-local mutable dependencies。
-  3. **部署隔离**：task `DSH_HOME=<git-common-dir>/ws/dsh-home/<operationId>` 只用于 `dsh build`、bundle composition、隔离安装与独立 preview，不读取真实用户配置。
+  3. **部署隔离**：task `DSH_HOME=<git-common-dir>/ws/dsh-home/<operationId>` 用于 `dsh build`、bundle composition、隔离安装与独立 preview；按需 prepare-preview 可带入白名单配置快照，Session/storage 不复制。
   4. **真实配置验收**：显式 opt-in 使用 `DSH_HOME=$HOME/.dsh` 部署/加载候选 bundle，以真实 Workspace/Session/provider 验收；属于影响日常 profile 的部署动作，必须可识别、可回滚。
   5. **日常运行**：实现合入 main 后，由 main launcher 对真实 `~/.dsh` build/restart；不得依赖 task worktree 路径。
 - **设计原则**:
-  - 完全隔离本身符合预期，不应通过共享凭据/Session 来削弱第 3 层；应解决 build home 与 runtime home 粗粒度耦合及 launcher UX。
+  - Session/storage 必须隔离；运行配置可在显式 prepare-preview 时按白名单复制快照（不共享文件链接），并明示订阅刷新与 memex 共享风险。通用 hook 与 home 回收由 ws-prepare-preview-hook 覆盖；配置播种、身份停止、3080 护栏和端口退避由 ohmydsh-worktree-preview 覆盖。
   - `DSH_HOME` 是进程级总根，当前同时承载 bundle/profile、Workspace/Session、provider 凭据、storage、skills 和日志，不能再把它描述成单纯“构建输出目录”。
   - 隔离 preview 与真实 profile acceptance 必须是两种显式模式；不得把 task launcher 的 restart 当作真实 GUI 无副作用重启。
 - **优化候选**:
@@ -132,7 +132,7 @@
   - Worktree Session 运行上下文应明确：worktree 的 `bin/dsh build` 默认是隔离构建，不代表当前日常 GUI 已更新；真实部署需独立授权步骤。
 - **验收标准**:
   - task build 不写真实 `~/.dsh`，两个并行任务仍拥有不同部署根；
-  - task preview 不读取或复制真实凭据/Session，且使用独立端口并显著标识隔离环境；
+  - task preview 仅在按需 prepare-preview 时按白名单复制运行配置与凭据快照，不复制真实 Session；使用独立端口并显著标识隔离环境；
   - 日常 restart 不会因 cwd/worktree `.env.local` 改变 runtime home；
   - 真实 profile deploy 前后可展示目标、差异与回滚路径，restart 后保留原 Workspace/Session/provider；
   - 自动化验收能分别声明 isolated preview 与 real-profile acceptance，且不会混用。

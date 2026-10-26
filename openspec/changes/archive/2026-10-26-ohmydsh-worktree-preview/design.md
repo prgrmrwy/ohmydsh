@@ -47,7 +47,8 @@ ohmydsh 侧现状：
 ### D3：launcher 改动
 
 - `args.mjs`：`flags.port` 的初值改为 `undefined`，并记录 `portExplicit`。主 checkout（非隔离 home）按 `flags.port ?? env.DSH_PORT ?? 3080` 解析，行为与现在一致。
-- 隔离 home 判定：`isolatedHome(repo, home)` 用 `git rev-parse --git-common-dir` 加 realpath 判定。
+- 隔离 home 判定：`isolatedHome(repo, home)` 用 `git rev-parse --git-common-dir` 加 realpath 判定。普通 home 不额外执行 Git 查询。
+- 自举实测发现 OpenSpec 用户 schema 使用 XDG 而非 DSH_HOME；隔离 launcher 同时把子进程 `XDG_DATA_HOME` 指向 `<隔离 home>/xdg-data`，避免碰用户级 schema 目录。此补充只限隔离模式，不改变普通 Host。
 - 护栏：在隔离 home 下，如果目标端口是 3080（显式指定，或缺少 `DSH_PORT`），在 `probe`、`stop` 和任何 `runScript` 之前直接抛错；退避序列也跳过 3080。`dsh build` 只打印 `隔离构建 → <绝对 home>（日常 GUI 未更新）`。
 - **预览记录** `<隔离 home>/preview.json`：`{port, pid, created}`，其中 `created` 取自 `probePort` 返回的进程记录，与 `sameProcessIdentity` 使用同一身份字段。这是判定"本 worktree 的预览 Host"的唯一身份来源。
 - **stop**：读取 `preview.json`，对记录端口执行 probe；只有监听者的 pid 和 created 都一致时，才调用现有的 `stopServer`。否则删除过期记录并报告未运行，不发任何信号。
@@ -76,7 +77,7 @@ ohmydsh 侧现状：
 
 ## Migration Plan
 
-1. `ws-prepare-preview-hook` 先实现、合入，并在主 checkout 部署（ws 工具需要加载新版本）。
+1. `ws-prepare-preview-hook` 先实现。当前日常 Host 尚未部署新版工具时，自举可调用 worktree 构建后的 `dsh-ws prepare-preview <worktree>`；无需先合入或重启日常 Host。
 2. 实现本 change 并通过测试。
 3. 在一个 worktree 中自举验收：执行 `dsh build` → `ws prepare-preview` → `dsh`；在 `DSH_PREVIEW` 给出的端口上通过 Host API 完成一次真实模型回合；确认 3080 的 pid 不变、真实 home 白名单文件的哈希不变、预览中订阅账号可用；在首选端口上放一个占位监听，确认会偏移到其它端口。
 4. 合入主干后执行一次生产 `dsh build`。
