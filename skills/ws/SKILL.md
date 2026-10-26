@@ -36,6 +36,14 @@ calling Session binding. Omit `path` whenever the calling Session already sits
 at the intended target — supplying it needlessly puts an avoidable decision in
 front of the user.
 
+### Prepare a preview environment on demand
+
+Only when preview/acceptance is needed, call `ws` with `action=prepare-preview`, omitting `path` for the current binding. Do not run it at every WS start. It runs the repository's optional tracked executable `.ws/prepare-preview`; absent hooks report `skipped` without an error. `ws status` returns the last result in `preview` (`null` means not prepared). The operator CLI and wrappers accept `prepare-preview /absolute/worktree/path`.
+
+Hook cwd is the worktree. Trusted context is supplied as `WS_SOURCE_REPO`, `WS_WORKTREE`, `WS_GIT_COMMON_DIR`, `WS_OPERATION_ID`, `WS_DSH_HOME`, `WS_SOURCE_DSH_HOME`, and `WS_HOOK`; `DSH_HOME` is overridden to the isolated home. Preparation has a five-minute timeout, retains at most 4 KiB output, and never holds the repository lock while running. Hooks are trusted repository code, not a sandbox; they must be idempotent and must not print secrets. WS provides the mechanism only; project configuration copies, port allocation and service startup belong to the repository.
+
+Clean runs optional `.ws/teardown-preview` after safety checks and before removing the worktree. Teardown has a 30-second deadline; failure warns but does not stop cleanup. Read warnings and check for surviving preview processes. Clean removes the proven operation-owned isolated home too; missing homes are harmless and unsafe paths are skipped.
+
 ### Targeting another repository or worktree
 
 When the calling Session's own working directory is not the intended target —
