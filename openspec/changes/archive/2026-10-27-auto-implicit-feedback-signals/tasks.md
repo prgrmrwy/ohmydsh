@@ -28,4 +28,4 @@
 
 - [x] 5.1 更新 `docs/feedback-evaluation.md`：事实事件格式、两类运行时事实与两类推导事实的口径、五类归类与局限、“决策所在回合”（实际回合号）与“有效曝光”（早于继续时间）的定义。
 - [x] 5.2 运行包内 typecheck、vitest、build；`openspec validate auto-implicit-feedback-signals --strict`。验证：均退出码 0。
-- [ ] 5.3 `dsh build` 物化并重启 DSH（需用户确认时机），在 3080 GUI 发一条 AUTO 消息，停留 3 秒后继续下一回合，只读核对账本中出现 `exposed`，并跑一次报告确认该决策归入 `implicit-ok`。验证：记录在 verification.md，不提交原始账本内容。
+- [x] 5.3 `dsh build` 物化并重启 DSH（需用户确认时机），在 3080 GUI 发一条 AUTO 消息，停留 3 秒后继续下一回合，只读核对账本中出现 `exposed`，并跑一次报告确认该决策归入 `implicit-ok`。验证：记录在 verification.md，不提交原始账本内容。

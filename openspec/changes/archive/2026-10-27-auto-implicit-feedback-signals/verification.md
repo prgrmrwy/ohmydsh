@@ -24,5 +24,9 @@
 - 继续查找预先按回合索引，不在每次调用上重复扫描全部用户回合。
 - 无新增模型调用、定时任务或策略回灌；无新增依赖。
 
-## 尚未完成
-任务 5.3：需用户确认部署/重启时机，在既有 3080 GUI 验证反馈图标、真实曝光事实及 implicit-ok。未上传或回填真实会话数据；未运行生产用量报告。当前分支比主 checkout 旧，不能直接从此 worktree 跑全仓 sync。
+## 生产本地验收完成（2026-10-27）
+用户从主 checkout 部署并重启后，在既有 GUI 确认人工反馈图标恢复，并选择了分配合适。只读核对当前 session 账本：appropriate 事件与此前 exposed 事实均存在。
+
+2026-10-27 运行已部署的 buildReport（since 2026-10-26）：decode-failed、tail-incomplete、parse-failed、missing-log 均为 0，unlinkedBindings 为 0。报告存在 exposedExplicit.appropriate=1、implicit-ok=3，证明真实曝光/人工评价/继续行为已进入预期分类。没有上传或保存原始会话记录。
+
+范围说明：未额外做生产 MANUAL 切换验收，相关分支已由真实 RPC 集成测试覆盖。样本不足以验证策略质量：implicit-ok 不是满意或准确率；历史未曝光不可当负例。数据为观察样本，只记录实际应用的主会话决策，不含子会话等成本，不用于因果、质量不变或节省结论。模式历史不完整、provider token 口径不同、首个 AUTO 之前的数据有混杂；当前重点仅是功能闭环。至此任务 5.3 完成，进入正常使用积累数据阶段。
