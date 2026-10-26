@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "paths": { "collab-kernel": ["../collab-kernel/src/index.ts"] },
     "strict": true,
     "skipLibCheck": true,
     "types": ["node"],

@@ -6,7 +6,7 @@ const world = (run: (host: Host) => Promise<void>) => tempRoot('collab-smode-', 
 /** Deliveries to `member` once each has a recorded outcome (completion is persisted asynchronously). */
 const deliveriesTo = async (host: Host, member: string) => {
   const read = async () => Object.values((await ops(host).overview('session-a', 's')).deliveries as Record<string, any>).filter(d => d.member === member)
-  for (let i = 0; i < 50; i++) { const list = await read(); if (list.length && list.every(d => d.outcome)) return list; await settle() }
+  await expect.poll(async () => { const list = await read(); return list.length > 0 && list.every(d => d.outcome) }).toBe(true)
   return read()
 }
 

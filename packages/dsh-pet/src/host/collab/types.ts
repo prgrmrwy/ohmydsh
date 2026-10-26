@@ -34,6 +34,7 @@ export interface CollabMessage {
   readonly to: string
   readonly body: string
   readonly needsReply: boolean
+  readonly notify?: boolean
   readonly ref?: number
   readonly ext?: CollabExt
 }

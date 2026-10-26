@@ -1,11 +1,11 @@
-import type { CommitRecord, SpaceState } from '../model/index.js'
+import { messageNotifies, type CommitRecord, type SpaceState } from '../model/index.js'
 
 const own = <T>(target: Record<string, T>, key: string, value: T) => Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true })
 
 /**
  * Pure fold of one commit. Besides the business state it derives the topic of
  * every message and item creation from `ref`, and counts a topic's waking
- * messages: a needsReply `message/sent` counts when the same commit holds a
+ * messages: a notifying `message/sent` counts when the same commit holds a
  * `wake` intent for its recipient. `delivery.thread` is never consulted, so
  * pre-change logs count the same way. A dangling `ref` throws: the space
  * fails closed instead of loading with a broken chain.
@@ -44,7 +44,7 @@ export function reduce(previous: SpaceState | undefined, record: CommitRecord): 
         const root = topicOf(record.seq, e.message.ref)
         state.topicOf[record.seq] = root
         state.messages.push(structuredClone(e.message))
-        const counted = e.message.needsReply && record.events.some(d => d.type === 'dispatch/intended' && d.delivery.kind === 'wake' && d.delivery.member === e.message.to)
+        const counted = messageNotifies(e.message) && record.events.some(d => d.type === 'dispatch/intended' && d.delivery.kind === 'wake' && d.delivery.member === e.message.to)
         if (counted) state.topicWakes[root] = (state.topicWakes[root] ?? 0) + 1
         break
       }

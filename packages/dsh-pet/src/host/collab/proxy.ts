@@ -312,7 +312,7 @@ export class LocusCollabProxy {
   }
 
   /**
-   * Register every new wake source up to `pointer.toSeq` (D4/D5): needsReply
+   * Register every new wake source up to `pointer.toSeq` (D4/D5): notifying
    * messages to `pet`, and terminal progress of requests authored by `pet`.
    * Registration only — no turn, no outbound message.
    */
@@ -333,7 +333,7 @@ export class LocusCollabProxy {
       if (record.seq <= from || record.seq > pointer.toSeq) continue
       last = Math.max(last, record.seq)
       for (const event of record.events as readonly Record<string, any>[]) {
-        if (event.type === 'message/sent' && event.message.to === PET_MEMBER && event.message.needsReply === true && event.actor !== PET_MEMBER) {
+        if (event.type === 'message/sent' && event.message.to === PET_MEMBER && (event.message.notify ?? event.message.needsReply) === true && event.actor !== PET_MEMBER) {
           const subject: CollabRecordAt = { kind: 'message', message: event.message }
           this.register({ spaceId, parentSessionId: parent, seq: record.seq, ...(record.at === undefined ? {} : { at: record.at }), subject: 'message', messageId: event.message.id, route: routeToLocus(subject, lookup, loci) })
         } else if (event.type === 'request/progressed' && (event.progress === 'done' || event.progress === 'rejected')) {

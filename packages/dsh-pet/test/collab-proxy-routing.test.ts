@@ -51,6 +51,17 @@ const createRequest = (w: CollabWorld, agent: unknown, cmdId: string, itemId: st
   w.call(agent, 'collab_create_item', { spaceId: SPACE, cmdId, itemId, kind: 'request', title: 'T', body: '{}', requiredAcks: [], assignee: 'main', ...extra }).then(result)
 
 describe('协作层发给代理的记录按 locus 路由', () => {
+  it('notify-only result registers while a silent question is not swept in', async () => {
+    const { w, proxy, main } = await setup()
+    const silent = await send(w, main, 'silent', { to: 'pet', body: `请 ${B} 之后回答`, notify: false, needsReply: true })
+    const notice = await send(w, main, 'notice', { to: 'pet', body: `${B} 结果已就绪`, notify: true, needsReply: false })
+    expect(silent.error).toBeUndefined(); expect(notice.error).toBeUndefined()
+    await settle()
+    expect(proxy.inbox().map(entry => entry.seq)).toEqual([notice.seq])
+    expect(proxy.inbox()[0]?.route).toEqual({ kind: 'locus', locusId: B, via: 'mention' })
+    expect(w.counts.resolveAgent).toBe(0)
+    expect(w.counts.followup).toBe(0)
+  })
   it('routing-01：回应消息沿 ref 路由到最近的戳', async () => {
     // The spec GIVEN (B's Rb refs A's Ra) cannot be written through the tools:
     // dsh-collab refuses a stamped child's ref to a sibling's record

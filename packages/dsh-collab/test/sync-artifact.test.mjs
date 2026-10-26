@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { overlayFixture, snapshotTree } from '../../../tests/helpers/overlay-fixture.mjs'
+import { createRequire } from 'node:module'
+
+const buildModules = dirname(dirname(createRequire(import.meta.url).resolve('tsdown/package.json')))
 
 const workspace = fileURLToPath(new URL('../../../', import.meta.url))
 // The repository's fake installer copies bytes only. Real tsdown builds and
@@ -15,6 +18,7 @@ test('consumer-sync: current source changes deployed bytes and repeated sync is 
   try {
     const pkg = join(fx.repo, 'packages/dsh-collab')
     await cp(join(workspace, 'packages/dsh-collab'), pkg, { recursive: true, filter: path => !/(?:^|\/)(?:lib|test|node_modules)(?:\/|$)/.test(path.slice(join(workspace, 'packages/dsh-collab').length)) })
+    await symlink(buildModules, join(pkg, 'node_modules'), 'dir')
     await cp(join(workspace, 'packages/collab-kernel/src'), join(fx.repo, 'packages/collab-kernel/src'), { recursive: true })
     await cp(join(workspace, 'packages/collab-kernel/package.json'), join(fx.repo, 'packages/collab-kernel/package.json'))
     // sync invokes the real workspace build via npm, but does not install deps.
@@ -29,16 +33,16 @@ test('consumer-sync: current source changes deployed bytes and repeated sync is 
     assert.deepEqual(await snapshotTree(fx.dshHome), snapshot)
     assert.equal(await fx.actionLog(), actions)
     const src = join(fx.repo, 'packages/collab-kernel/src/convention/index.ts')
-    const md = join(fx.repo, 'packages/collab-kernel/src/convention/v3.md')
-    await writeFile(src, (await readFile(src, 'utf8')).replace("export const defaultConvention = conventions['3']!", "export const defaultConvention = { ...conventions['3']!, version: 'sync-fixture' }"))
+    const md = join(fx.repo, 'packages/collab-kernel/src/convention/v4.md')
+    await writeFile(src, (await readFile(src, 'utf8')).replace("export const defaultConvention = conventions['4']!", "export const defaultConvention = { ...conventions['4']!, version: 'sync-fixture' }"))
     await writeFile(md, `${await readFile(md, 'utf8')}\nSYNC_CURRENT_SOURCE\n`)
     sync()
     assert.notDeepEqual(await readFile(join(deployed, 'index.js')), before)
-    assert.equal(await readFile(join(deployed, 'v3.md'), 'utf8'), await readFile(md, 'utf8'))
-    for (const name of ['v1.md', 'v2.md']) assert.equal(await readFile(join(deployed, name), 'utf8'), await readFile(join(fx.repo, 'packages/collab-kernel/src/convention', name), 'utf8'))
+    assert.equal(await readFile(join(deployed, 'v4.md'), 'utf8'), await readFile(md, 'utf8'))
+    for (const name of ['v1.md', 'v2.md', 'v3.md']) assert.equal(await readFile(join(deployed, name), 'utf8'), await readFile(join(fx.repo, 'packages/collab-kernel/src/convention', name), 'utf8'))
     // Supply DSH peers explicitly from one graph, never kernel runtime.
     await mkdir(join(fx.profile, 'node_modules/@deepseek-ai'), { recursive: true })
-    for (const name of ['schemastery', 'dsh-tools', 'dsh-llm', 'dsh-session']) await symlink(join(workspace, 'node_modules/@deepseek-ai', name), join(fx.profile, 'node_modules/@deepseek-ai', name), 'dir')
+    for (const name of ['schemastery', 'dsh-tools', 'dsh-llm', 'dsh-session']) await symlink(join(buildModules, '@deepseek-ai', name), join(fx.profile, 'node_modules/@deepseek-ai', name), 'dir')
     const loaded = spawnSync(process.execPath, ['--input-type=module', '-e', `const m=await import(${JSON.stringify(pathToFileURL(join(deployed, 'index.js')).href)});console.log(JSON.stringify(m.readBundledConvention()))`], { cwd: fx.root, encoding: 'utf8' })
     assert.equal(loaded.status, 0, loaded.stderr)
     const convention = JSON.parse(loaded.stdout)

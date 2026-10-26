@@ -7,14 +7,16 @@ Independent sessions need a shared record of agreements, requests and messages w
 
 ## Scope
 
-The kernel provides named, principal-authorized commands, revision-bound acknowledgments, durable command receipts, a local JSONL store, provider-based delivery, three wake triggers (a `needsReply` message, an invitation, a request reaching `done`/`rejected`), per-topic loop limits through optional `ref` (20 waking messages per topic, then `COLLAB_THREAD_LIMIT`) and a pure Markdown overview. Logs written before per-topic limits replay unchanged; their decision, breaker and escalation records are read-only history.
+The kernel provides named, principal-authorized commands, revision-bound acknowledgments, durable command receipts, a local JSONL store, provider-based delivery, three wake triggers (a notifying message, an invitation, a request reaching `done`/`rejected`), per-topic loop limits through optional `ref` (20 waking messages per topic, then `COLLAB_THREAD_LIMIT`) and a pure Markdown overview. Logs written before per-topic limits replay unchanged; their decision, breaker and escalation records are read-only history.
+
+`notify` controls wake delivery; `needsReply` controls whether an answer is required. Omitting `notify` preserves the old `needsReply` behavior. For a result that should resume work without asking for a reply, send `notify: true, needsReply: false`; for a silent record, send `notify: false`. Every message that produces a wake counts toward its topic limit. New spaces use convention v4; published v1–v3 text and existing spaces remain unchanged.
 
 Integrator extension points:
 
 - **Managed members.** A provider declaring `managed: true` is an integrator. After a Leader grants its channel per space with `allowManager`, it runs `admitMember`/`rebindMember`/`retireMember` as `principals.manager`. A rebind keeps the member name, and an old address is never reused. `disposeManagedRequest` lets it settle, on the user's behalf, a request authored by one of its managed members (`open → accepted|done|rejected`, `accepted → done|rejected`); it wakes nobody.
 - **Commit time.** Every new commit record carries `at`, epoch milliseconds from `ServiceOptions.now` (default `Date.now`), covered by the row checksum. Receipt replays write nothing; commits written before `at` existed replay without it.
 - **`ext`.** Items and messages may carry an opaque JSON object of at most 4096 canonical bytes. The kernel stores it without interpreting it, and keeps it out of projections and pointers.
-- **`mode`.** A needs-reply message may name a delivery mode. The recipient provider's synchronous `supportsMode` decides whether it is accepted; an unsupported mode is rejected.
+- **`mode`.** A notifying message may name a delivery mode. The recipient provider's synchronous `supportsMode` decides whether it is accepted; an unsupported mode is rejected.
 - **Call guard.** Read and write contexts may carry a host-created synchronous `guard`, called after the last await and before any commit or returned data. Managed-channel and manager calls must carry one.
 
 There is no real host integration in this package, and new members are agents only. The host verifies identities and constructs principals; providers are trusted code, not an authentication sandbox.

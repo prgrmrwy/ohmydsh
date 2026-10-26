@@ -10,10 +10,10 @@ const load = (version: string): Convention => {
 }
 
 /** Published conventions are immutable; new content ships only as a new version. */
-export const conventions: Readonly<Record<string, Convention>> = Object.freeze({ '1': load('1'), '2': load('2'), '3': load('3') })
+export const conventions: Readonly<Record<string, Convention>> = Object.freeze({ '1': load('1'), '2': load('2'), '3': load('3'), '4': load('4') })
 
 /** Latest version: recorded by spaces created without an explicit convention. */
-export const defaultConvention = conventions['3']!
+export const defaultConvention = conventions['4']!
 
 export function readConvention(version: string): string {
   if (!Object.hasOwn(conventions, version)) throw new CollabError('COLLAB_CONVENTION_UNKNOWN')
