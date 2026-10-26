@@ -6,6 +6,7 @@ AUTO 的分配反馈目前只有用户主动点击的显式评价。实际使用
 
 ## What Changes
 
+- **修复反馈入口时有时无（BACKLOG D012）**：宿主只在请求配置变化时才写 `request/header`，而插件只在看到新请求头时才把主决策标为“已应用”。于是判断结果和上一回合配置相同的回合，决策停在“待应用”，回复既不绑定决策，也不显示反馈图标。改为在请求配置确定时就判定是否已应用；配置未变、宿主不写新请求头时，以当前生效的请求头为准。这个修复是隐式事实的前提：不修的话，这类回合连记录对象都没有。
 - 运行时只记录会话日志里**没有**的两类事实：**曝光**（回复在前台持续可见达到阈值）和**切换 MANUAL**（用户在决策之后把会话切到 MANUAL）。作为独立事件追加到现有反馈账本，按 `(sessionId, decisionId)` 关联；不改写决策快照，不合并到显式反馈。
 - 回合结束原因与是否继续下一回合**不在运行时重复记录**：报告脚本本来就在解码会话日志，从 `turn/end` 和后续用户回合推导即可。
 - 按需报告为每个比较子组增加隐式信号分布：显式评价、负向信号、隐式无异议、未继续、未曝光，五类互斥；并加入固定说明，强调隐式无异议不等于合适。
@@ -19,12 +20,12 @@ AUTO 的分配反馈目前只有用户主动点击的显式评价。实际使用
 
 ### Modified Capabilities
 
-- `auto-allocation-feedback`：新增“隐式反馈事实”要求——曝光与行为事实的记录口径、关联单位、隔离与隐私约束。
+- `auto-allocation-feedback`：修改“资源分配反馈”，要求配置未变的回合同样显示入口；新增“隐式反馈事实”要求——曝光与行为事实的记录口径、关联单位、隔离与隐私约束。
 - `auto-routing-usage-report`：新增“隐式信号分布”要求——五类互斥归类、优先级、与显式评价分列及固定说明。
 
 ## Impact
 
-- 代码：`packages/auto-model-routing/src/feedback.ts`（新事件类型与读取）、`src/policy-host.ts`（暴露最近已应用决策供切换钩子使用）、`src/endpoints.ts` 与 `src/index.ts`（observation RPC、`setMode` 钩子）、`src/client/label.ts`（曝光判定）、`src/usage-report.ts`（从日志推导回合结束与继续，并做五类归类）。
+- 代码：`packages/auto-model-routing/src/policy-host.ts`（主决策“已应用”的判定时机）、`src/feedback.ts`（新事件类型与读取）、`src/policy-host.ts`（暴露最近已应用决策供切换钩子使用）、`src/endpoints.ts` 与 `src/index.ts`（observation RPC、`setMode` 钩子）、`src/client/label.ts`（曝光判定）、`src/usage-report.ts`（从日志推导回合结束与继续，并做五类归类）。
 - 数据：`$DSH_HOME/state/auto-model-routing/allocation-feedback.jsonl` 新增两类事件行；旧版读取逻辑会跳过不认识的行，旧记录照常可读。
 - 文档：`packages/auto-model-routing/docs/feedback-evaluation.md`、包内 report skill 文案。
 - 部署：`dsh build` 后需重启 DSH 加载 Host 侧变化；不涉及 manifest pin 或第三方依赖变化。

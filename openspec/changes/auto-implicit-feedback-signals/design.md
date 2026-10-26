@@ -7,9 +7,12 @@
 - 模式切换：`index.ts` 的 RPC 分派里已有 `setMode` 分支，可以在成功后加钩子。模式切换不进会话日志。
 - 报告：`usage-report.ts` 通过 `FeedbackBook` 读取，按 `(sessionId, decisionId)` 聚合，且受只读与输出白名单约束。
 
+- 已应用判定（D012 的根因）：`policy-host` 只在 `request/header` 事件里比较实际配置与判断，`applied.set` 只发生在这里；而 `pre-step` 在每个用户回合开头 `applied.delete`。宿主 `dsh-agent-loop` 的 `buildRequest` 只在首个请求、配置变化（`!headerEquals`）或新请求序列时写 `request/header`。所以判断结果等于当前配置的回合不会产生新请求头，决策永远停在“待应用”。本会话日志实证：有请求头的回合全部绑定，没有请求头的回合全部未绑定，一一对应。
+
 ## Goals / Non-Goals
 
 **Goals:**
+- 配置未变的回合同样判定“已应用”并绑定回复（修复 D012），这是隐式事实覆盖面的前提。
 - 只在运行时记录日志里拿不到的事实（曝光、切 MANUAL）；其它事实报告时从日志推导，不重复记账。
 - 每类事实每决策至多一条，重复触发、刷新和多条回复不产生重复。
 
@@ -20,6 +23,15 @@
 - 不在 Host 侧维护每会话的回合状态机。
 
 ## Decisions
+
+### D0 已应用判定不依赖新请求头
+主会话在 `agent/request` waterfall 里已经拿到本次请求的最终配置（provider、model、`reasoningEffort`）。在这里做“实际配置与判断是否一致”的比较，并记下待确认的结果。随后两种情况：
+- 宿主写了 `request/header`：沿用现有逻辑，以请求头内容为准并记录其 `seq`。
+- 宿主没写（配置未变）：在本回合第一条 `assistant/message` 到来、准备绑定时，用 `session.requestHeader()` 的当前值确认配置一致，`requestSeq` 取当时生效的那个请求头事件的 seq。
+
+备选：只在 `agent/request` 里直接 `applied.set`。放弃原因：waterfall 返回的 config 之后还可能被宿主的 `prepareCall` 调整，`requestHeader()` 才是实际生效的记录；用它确认能保持“以实际请求为准”的既有口径，不会把推荐当成应用。
+
+`requestSeq` 的含义因此从“本回合新写的请求头”变为“本回合生效的请求头”。快照字段本身不变，旧记录口径一致（旧记录都是新写请求头的回合）。
 
 ### D1 账本：同一文件、新增一个事件类型
 新增 `{ type:'fact', version:1, sessionId, decisionId, fact, at }`，`fact` ∈ `exposed | manual-switch`。`FeedbackBook` 读取时按 `(sessionId, decisionId, fact)` 保留首条，提供 `facts(sessionId, decisionId)` 与写入方法 `fact(...)`，写入前查重。
@@ -63,6 +75,8 @@
 对每个决策单位按规范的优先级归类：显式 → 负向 → 隐式无异议 → 无定论（`inconclusive`）→ 未曝光。第 4 类不叫“未继续”，因为它也包含继续了但结束类别非 `completed` 的决策（例如父会话取消）。“有效曝光且有显式评价”另外单列，用来对照隐式口径是否可信。输出只有类别名和计数，满足白名单要求。
 
 ## Risks / Trade-offs
+
+- [修复后绑定数突然增加] → 报告里“无记录回合”会明显下降，这是修复缺口而非行为变化；在 `docs/feedback-evaluation.md` 记下修复日期，前后数据不要直接比较。
 
 - [曝光不代表读过] → 3 秒阈值和前台条件只能排除“一闪而过”；caveats 固定说明，`implicit-ok` 不与显式 `appropriate` 合并。
 - [`hasFocus` 在多窗口下可能误判] → 只会漏记曝光，不会多记；偏保守。

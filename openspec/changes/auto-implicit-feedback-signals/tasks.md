@@ -1,3 +1,9 @@
+## 0. 修复配置未变回合不绑定（D012）
+
+- [ ] 0.1 先写正式宿主集成测试（`test/host.integration.test.ts`）：AUTO 下连续两个用户回合判断都是 baseline，断言第二回合没有新的 `request/header`，且其最后一条回复的 `label` 查询返回 policy-v2 绑定（含 `snapshot.requestSeq`），`state` 的决策状态为 applied；另加一例：实际配置被改成与判断不一致时，第二回合不绑定。验证：在旧实现上第一例失败。
+- [ ] 0.2 按 design D0 修改 `src/policy-host.ts`：配置未变时以 `session.requestHeader()` 确认已应用并绑定；保留有新请求头时的原逻辑。验证：0.1 通过，既有 host/policy-host 集成测试不变。
+- [ ] 0.3 BACKLOG D012 状态改为已修复，注明本 change。
+
 ## 1. 账本
 
 - [ ] 1.1 先写测试（`test/feedback.test.ts`）：写入 `exposed` 与 `manual-switch` 后可按决策读回；同类事实重复写入只保留首条；事实不改变 `lookup` 返回的绑定与显式反馈；混合旧完整记录、显式反馈与事实行，重启读取结果一致。验证：在旧实现上失败。
