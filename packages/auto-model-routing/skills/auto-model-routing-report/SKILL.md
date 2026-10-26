@@ -39,6 +39,11 @@ description: 仅当用户明确要求评估 AUTO 效果、观察 AUTO 期间的 
      - `token-semantics-differ-by-provider`：不同 provider 的 token 口径可能不同，不要跨模型比较。
      - `reference-before-auto-effort-only-confounded`：`referenceBeforeAuto` 只用于看 effort 起点的变化；它受会话阶段、任务类型、模型切换等因素混杂，不能当作对照组。
      - `mode-history-not-persisted`：会话模式的切换历史没有保存，会话计数只是粗略参考。
+     - `implicit-ok-not-appropriateness`：隐式无异议不等于分配合适，不能计作显式好评。
+     - `exposure-not-proof-of-reading`：前台可见 3 秒只是曝光，不证明用户读过。
+     - `historical-exposure-unknown`：上线前的曝光未知，不回填。
+     - `exposure-after-continuation-excluded`：下一用户回合之后才出现的曝光不算，避免翻看旧记录制造认可。
+   - `implicit.counts` 按优先级把决策分为显式评价、负向行为、隐式无异议、无定论、未曝光，五类合计为决策数；`implicit.negative` 的两个原因可重叠。`implicit.exposedExplicit` 是有效曝光且有显式评价的参照，不是准确率。
    - 不要自行计算节省百分比，不要说“质量不变”，也不要把“首个记录之前”称为 MANUAL。
    - token 均值的分母是**出现该字段的调用数**（`present`）；值为 `null` 表示该字段从未出现，不是 0。
 

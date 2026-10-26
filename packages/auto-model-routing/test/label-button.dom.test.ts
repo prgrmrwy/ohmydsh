@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createElement as h, act, type ReactElement, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { LabelButton, type LabelUi } from '../src/client/label.js'
@@ -26,6 +26,51 @@ function rpcFrom(answer: (payload: Call['payload']) => { ok: boolean; value?: un
 const mount = async (messageId: string, rpc: unknown) => { await act(async () => { root.render(h(LabelButton, { sessionId: 'S1', messageId, rpc: rpc as never, ui })) }) }
 const tooltip = () => host.querySelector('[data-tooltip]')?.getAttribute('data-tooltip')
 
+it('observes only after three continuous foreground seconds and cleans up',async()=>{
+ vi.useFakeTimers();let intersect!:(entries:unknown[])=>void
+ const disconnect=vi.fn()
+ vi.stubGlobal('IntersectionObserver',class {constructor(cb:(entries:unknown[])=>void){intersect=cb}observe(){}disconnect=disconnect})
+ vi.spyOn(document,'hasFocus').mockReturnValue(true)
+ vi.spyOn(document,'visibilityState','get').mockReturnValue('visible')
+ const {rpc,calls}=rpcFrom(()=>({ok:true,value:{policy:'policy-v2',depth:'baseline'}}))
+ try{
+  await mount('m',rpc)
+  intersect([{isIntersecting:true,intersectionRatio:1}]);await vi.advanceTimersByTimeAsync(1000)
+  intersect([{isIntersecting:false,intersectionRatio:0}]);await vi.advanceTimersByTimeAsync(3000)
+  expect(calls.filter(c=>c.endpoint.endsWith('.observe'))).toHaveLength(0)
+  intersect([{isIntersecting:true,intersectionRatio:1}]);await vi.advanceTimersByTimeAsync(2999)
+  expect(calls.filter(c=>c.endpoint.endsWith('.observe'))).toHaveLength(0)
+  await vi.advanceTimersByTimeAsync(1);await vi.advanceTimersByTimeAsync(6000)
+  expect(calls.filter(c=>c.endpoint.endsWith('.observe'))).toHaveLength(1)
+ }finally{vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals()}
+})
+it('resets the exposure timer on hidden pages and focus loss',async()=>{
+ vi.useFakeTimers();let intersect!:(entries:unknown[])=>void;let state:DocumentVisibilityState='visible';let focused=true
+ const disconnect=vi.fn()
+ vi.stubGlobal('IntersectionObserver',class {constructor(cb:(entries:unknown[])=>void){intersect=cb}observe(){}disconnect=disconnect})
+ vi.spyOn(document,'hasFocus').mockImplementation(()=>focused)
+ vi.spyOn(document,'visibilityState','get').mockImplementation(()=>state)
+ const {rpc,calls}=rpcFrom(()=>({ok:true,value:{policy:'policy-v2',depth:'baseline'}}))
+ try{
+  await mount('m',rpc);intersect([{isIntersecting:true,intersectionRatio:1}])
+  await vi.advanceTimersByTimeAsync(2000);state='hidden';document.dispatchEvent(new Event('visibilitychange'))
+  await vi.advanceTimersByTimeAsync(5000);state='visible';document.dispatchEvent(new Event('visibilitychange'))
+  await vi.advanceTimersByTimeAsync(2000);focused=false;window.dispatchEvent(new Event('blur'))
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(calls.filter(c=>c.endpoint.endsWith('.observe'))).toHaveLength(0)
+  focused=true;window.dispatchEvent(new Event('focus'));await vi.advanceTimersByTimeAsync(3000)
+  expect(calls.filter(c=>c.endpoint.endsWith('.observe'))).toHaveLength(1)
+  await act(async()=>{root.render(null)});expect(disconnect).toHaveBeenCalled()
+ }finally{vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals()}
+})
+it('unbound and legacy replies do not register an exposure observer',async()=>{
+ const observer=vi.fn();vi.stubGlobal('IntersectionObserver',observer)
+ try{
+  await mount('unbound',rpcFrom(()=>({ok:true,value:{}})).rpc)
+  await mount('legacy',rpcFrom(()=>({ok:true,value:{tier:'simple'}})).rpc)
+  expect(observer).not.toHaveBeenCalled()
+ }finally{vi.unstubAllGlobals()}
+})
 it('allocation menu supports feedback change cancel and visible failure',async()=>{
  let feedback:string|null|undefined;let fail=false
  const {rpc}=rpcFrom(p=>{if(Object.hasOwn(p,'feedback')){if(fail)return {ok:false};feedback=p.feedback}return {ok:true,value:{policy:'policy-v2',depth:'baseline',effort:'medium',model:'sol',feedback}}})

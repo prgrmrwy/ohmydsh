@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildReport } from '../src/usage-report.js'
-import { bind, bindAll, call, feedback, header, judge, makeHome, mode, turn, user, userTurn, writeSession } from './usage-report-fixture.js'
+import { bind, bindAll, call, feedback, header, judge, makeHome, mode, turn, user, userTurn, writeSession, T0 } from './usage-report-fixture.js'
 
 const tz = process.env.TZ
 beforeEach(() => { process.env.TZ = 'Asia/Shanghai' })
@@ -10,6 +10,38 @@ afterEach(() => { process.env.TZ = tz })
 const group = (r: ReturnType<typeof buildReport>, version: string, model = 'gpt-6.1-sol', depth = 'baseline') =>
   r.groups.find(g => g.version === version)?.subgroups.find(s => s.model === model && s.depth === depth)
 
+it('classifies implicit facts without treating late exposure or parent cancellation as approval',()=>{
+ const h=makeHome()
+ const end=(n:number,reason:unknown)=>({type:'turn/end',time:T0+n*60000,data:{turn:n,reason}})
+ const fact=(id:number,name:string,at=T0+90000)=>appendFileSync(join(h,'state/auto-model-routing/allocation-feedback.jsonl'),JSON.stringify({type:'fact',version:1,sessionId:`S${id}`,decisionId:id,fact:name,at})+'\n')
+ for(let id=1;id<=8;id++){
+  const reason=id===1||id===2?{kind:'aborted',reason:{kind:'user'}}:id===7?{kind:'aborted',reason:{kind:'parent'}}:{kind:'completed'}
+  const events=[...userTurn(1,'a',1),end(1,reason),...(id===4?[]:[turn(2),user(2)])]
+  writeSession(h,`S${id}`,events);bindAll(h,`S${id}`,'a',1,id)
+  if(id!==5)fact(id,'exposed',id===8?T0+180000:T0+90000)
+  if(id===6)fact(id,'manual-switch')
+ }
+ feedback(h,'S1','a-0',1,'too-high')
+ const r=buildReport(h);const implicit=group(r,'policy-v2-aaaa/map-1')!.implicit
+ expect(implicit.counts).toEqual({explicit:1,negative:2,'implicit-ok':1,inconclusive:2,unobserved:2})
+ expect(Object.values(implicit.counts).reduce((a,b)=>a+b,0)).toBe(8)
+ expect(JSON.stringify(r)).not.toContain('S1')
+})
+it('uses the actual resumed turn when a shared decision is aborted',()=>{
+ const h=makeHome()
+ writeSession(h,'R',[...userTurn(1,'a',1),{type:'turn/end',data:{turn:1,reason:{kind:'completed'}}},turn(2),user(2,'plugin'),call('b-0',2,2),{type:'turn/end',data:{turn:2,reason:{kind:'aborted',reason:{kind:'user'}}}}])
+ bindAll(h,'R','a',1,1);bindAll(h,'R','b',1,1)
+ expect(group(buildReport(h),'policy-v2-aaaa/map-1')!.implicit.counts.negative).toBe(1)
+})
+it('keeps incomplete ends inconclusive and legacy exposure unknown',()=>{
+ const h=makeHome()
+ writeSession(h,'tail',[...userTurn(1,'a',1),user(3)],{truncateTail:5});bindAll(h,'tail','a',1,1)
+ appendFileSync(join(h,'state/auto-model-routing/allocation-feedback.jsonl'),JSON.stringify({type:'fact',version:1,sessionId:'tail',decisionId:1,fact:'exposed',at:T0+90000})+'\n')
+ writeSession(h,'old',[...userTurn(1,'b',1),{type:'turn/end',data:{turn:1,reason:{kind:'completed'}}},turn(2),user(2)]);bindAll(h,'old','b',1,2)
+ const r=buildReport(h)
+ expect(group(r,'policy-v2-aaaa/map-1')!.implicit.counts).toMatchObject({inconclusive:1,unobserved:1,'implicit-ok':0})
+ expect(r.failures['tail-incomplete']).toBe(1)
+})
 it('reads every zstd frame', () => {
  const h = makeHome()
  writeSession(h, 'S1', [...userTurn(1, 'a', 2), call('b-0', 1, 2), call('b-1', 1, 2)])
