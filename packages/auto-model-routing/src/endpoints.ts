@@ -15,6 +15,17 @@ export async function endpoint(operation: 'state' | 'setMode', body: unknown, re
   return Response.json({ ...state.read(sessionId), ...router.status(agent), ...(decision ? { decision } : {}), ...(toastOn() ? { decisionToast: true } : {}) })
 }
 
+export async function observeEndpoint(body:unknown,resolveAgent:(id:string)=>Promise<AgentRef|undefined>,book:FeedbackBook,warn:()=>void):Promise<Response>{
+  if(typeof body!=='object'||body===null)return Response.json({error:'invalid request'},{status:400})
+  const {sessionId,messageId}=body as {sessionId?:unknown;messageId?:unknown}
+  if(typeof sessionId!=='string'||!sessionId||typeof messageId!=='string'||!messageId)return Response.json({error:'invalid request'},{status:400})
+  const agent=await resolveAgent(sessionId)
+  if(!agent||agent.origin==='subagent')return Response.json({error:'unknown ordinary session'},{status:404})
+  const binding=book.lookup(sessionId,messageId)
+  if(binding)try{book.fact(sessionId,binding.decisionId,'exposed')}catch{warn()}
+  return Response.json({})
+}
+
 export interface LabelBook {
   lookup(sessionId: string, messageId: string): TurnRecord | undefined
   label(sessionId: string, turn: number, label: Tier): void

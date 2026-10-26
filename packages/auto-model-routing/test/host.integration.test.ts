@@ -66,7 +66,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
   selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
- await expect.poll(() => routes.size).toBe(8)
+ await expect.poll(() => routes.size).toBe(9)
  const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
  const handle = await ctx.agents.create({
   ...(options.seed ? { seed: options.seed } : {}),
@@ -81,7 +81,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
  cleanup = async () => { await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
  // Simulate a Host restart for this plugin: all its memory is dropped, only the state directory remains.
- const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(8) }
+ const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(9) }
  const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ policy: 'legacy', decisionToast: on })) }
  return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
@@ -109,6 +109,68 @@ it('policy feedback binds only applied messages and survives reload without leak
  await h.restart();expect(await h.invoke('label',{sessionId:h.agent.id,messageId:first})).toMatchObject({feedback:'too-high'})
  await h.setMode('MANUAL');await h.run('manual task')
  expect(await h.invoke('label',{sessionId:h.agent.id,messageId:ids().at(-1)!})).toEqual({})
+})
+it('records a mid-turn MANUAL switch without recording failed or unbound switches',async()=>{
+ const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'reply'})
+ writeFileSync(join(h.home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({}))
+ await h.setMode('AUTO')
+ h.ctx.on('session/event',(session,event)=>{
+  if(session.id===h.agent.id&&event.type==='request/header')void h.setMode('MANUAL')
+ })
+ await h.run('task')
+ const rows=readFileSync(join(h.home,'state/auto-model-routing/allocation-feedback.jsonl'),'utf8').trim().split('\n').map(l=>JSON.parse(l))
+ expect(rows.filter(r=>r.type==='fact')).toEqual([expect.objectContaining({fact:'manual-switch'})])
+ await h.invoke('setMode',{sessionId:'missing',mode:'MANUAL'})
+ expect(readFileSync(join(h.home,'state/auto-model-routing/allocation-feedback.jsonl'),'utf8').trim().split('\n')).toHaveLength(rows.length)
+})
+it('MANUAL facts follow the current decision and failed switches write nothing',async()=>{
+ const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'reply'})
+ writeFileSync(join(h.home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({}))
+ await h.setMode('AUTO');await h.run('first')
+ const first=await h.invoke('label',{sessionId:h.agent.id,messageId:lastAssistantId(h)})
+ h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}));await h.run('second')
+ const second=await h.invoke('label',{sessionId:h.agent.id,messageId:lastAssistantId(h)})
+ await h.invoke('setMode',{sessionId:h.agent.id,mode:'invalid'})
+ const facts=()=>readFileSync(join(h.home,'state/auto-model-routing/allocation-feedback.jsonl'),'utf8').trim().split('\n').map(l=>JSON.parse(l)).filter(r=>r.type==='fact')
+ expect(facts()).toEqual([])
+ await h.setMode('MANUAL')
+ expect(facts()).toEqual([expect.objectContaining({decisionId:second.decisionId,fact:'manual-switch'})])
+ expect(facts()[0].decisionId).not.toBe(first.decisionId)
+})
+it('records MANUAL switches before invalidate clears the applied decision',async()=>{
+ const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'reply'})
+ writeFileSync(join(h.home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({}))
+ await h.setMode('AUTO');await h.run('task')
+ const view=await h.invoke('label',{sessionId:h.agent.id,messageId:lastAssistantId(h)})
+ await h.setMode('MANUAL');await h.setMode('MANUAL')
+ const rows=readFileSync(join(h.home,'state/auto-model-routing/allocation-feedback.jsonl'),'utf8').trim().split('\n').map(l=>JSON.parse(l))
+ expect(rows.filter(r=>r.type==='fact')).toEqual([expect.objectContaining({decisionId:view.decisionId,fact:'manual-switch'})])
+ await h.run('manual task');expect(await h.invoke('observe',{sessionId:h.agent.id,messageId:lastAssistantId(h)})).toEqual({})
+})
+it('unchanged requests bind the new main decision to the effective header', async () => {
+ const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'reply'})
+ writeFileSync(join(h.home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({}))
+ await h.setMode('AUTO');await h.run('first')
+ const headers=()=>h.agent.session.snapshotEvents().filter(e=>e.type==='request/header')
+ const firstHeader=headers().at(-1)!
+ const firstId=lastAssistantId(h)
+ const first=await h.invoke('label',{sessionId:h.agent.id,messageId:firstId})
+ await h.run('second')
+ expect(headers()).toHaveLength(1)
+ const second=await h.invoke('label',{sessionId:h.agent.id,messageId:lastAssistantId(h)})
+ expect(second).toMatchObject({policy:'policy-v2',snapshot:{requestSeq:firstHeader.seq,requestTurn:2}})
+ expect(second.decisionId).not.toBe(first.decisionId)
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({decision:{status:'applied'}})
+})
+it('a request changed after routing never binds the recommended decision', async () => {
+ const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'reply'})
+ writeFileSync(join(h.home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({}))
+ await h.setMode('AUTO');await h.run('first')
+ h.ctx.on('agent/request',async (_payload,next)=>({...await next(),reasoningEffort:ReasoningEffortId('high')}),{prepend:true})
+ await h.run('second')
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
+ expect(await h.invoke('label',{sessionId:h.agent.id,messageId:lastAssistantId(h)})).toEqual({})
+ expect(await h.invoke('state',{sessionId:h.agent.id})).toMatchObject({decision:{status:'failed'}})
 })
 it('policy-v2 mode roundtrip invalidates existing and pending decisions', async () => {
  const h=await harness(json(200,{answers:{depth:{choice:'higher'}}}))

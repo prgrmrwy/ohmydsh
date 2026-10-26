@@ -19,11 +19,15 @@ const CAVEATS = [
   'token-semantics-differ-by-provider',
   'reference-before-auto-effort-only-confounded',
   'mode-history-not-persisted',
+  'implicit-ok-not-appropriateness',
+  'exposure-not-proof-of-reading',
+  'historical-exposure-unknown',
+  'exposure-after-continuation-excluded',
 ]
 type Failure = 'decode-failed' | 'tail-incomplete' | 'parse-failed' | 'missing-log'
 type Usage = Partial<Record<(typeof FIELDS)[number], number>>
-interface Call { id: string; userTurn?: number; time: number; usage: Usage; model?: string; effort?: string }
-interface Decision { session: string; version: string; model: string; depth: string; effort: string; calls: Call[]; feedback: Set<string> }
+interface Call { id: string; turn?: number; userTurn?: number; time: number; usage: Usage; model?: string; effort?: string }
+interface Decision { session: string; id: number; version: string; model: string; depth: string; effort: string; calls: Call[]; feedback: Set<string>; end?: string; continuation?: number | undefined }
 
 const sorted = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)))
 const round = (n: number) => Math.round(n * 100) / 100
@@ -67,7 +71,7 @@ function logPaths(home: string): Map<string, string> {
 }
 
 /** Calls in one session log, with the user turn each belongs to and the config in effect. */
-function readSession(file: string, failures: Record<Failure, number>): { header: Record<string, unknown>; calls: Call[] } | undefined {
+function readSession(file: string, failures: Record<Failure, number>): { header: Record<string, unknown>; calls: Call[]; ends: Map<number,string>; userStarts: Map<number,number> } | undefined {
   let decoded: ReturnType<typeof decode>
   try { decoded = decode(readFileSync(file)) } catch { decoded = undefined }
   if (!decoded) { failures['decode-failed']++; return undefined }
@@ -81,12 +85,21 @@ function readSession(file: string, failures: Record<Failure, number>): { header:
   if (header?.type !== 'session') { failures['decode-failed']++; return undefined }
   const calls: Call[] = []
   const seen = new Set<string>()
+  const ends = new Map<number,string>(), userStarts = new Map<number,number>()
+  let startedAt: number | undefined
   let turn: number | undefined, userTurn: number | undefined
   let config: { model?: string; reasoningEffort?: string } = {}
   for (const event of events) {
     const data = event.data ?? {}
-    if (event.type === 'turn/start') turn = data.turn
-    else if (event.type === 'user/message' && data.source?.kind === 'user' && turn !== undefined) userTurn = turn
+    if (event.type === 'turn/start') { turn = data.turn; startedAt = event.time }
+    else if (event.type === 'user/message' && data.source?.kind === 'user' && turn !== undefined) {
+      userTurn = turn
+      if (typeof startedAt === 'number') userStarts.set(turn, startedAt)
+    }
+    else if (event.type === 'turn/end' && typeof data.turn === 'number') {
+      const reason = data.reason
+      ends.set(data.turn, reason?.kind === 'aborted' ? reason.reason?.kind === 'user' ? 'aborted-user' : 'aborted-other' : ['completed','blocked'].includes(reason?.kind) ? reason.kind : 'other')
+    }
     else if (event.type === 'request/header' && data.header?.config) config = data.header.config
     else if (event.type === 'assistant/message') {
       const op = event.surfaceOp
@@ -96,10 +109,10 @@ function readSession(file: string, failures: Record<Failure, number>): { header:
       seen.add(id)
       const usage: Usage = {}
       for (const field of FIELDS) if (typeof data.usage?.[field] === 'number') usage[field] = data.usage[field]
-      calls.push({ id, ...(userTurn === undefined ? {} : { userTurn }), time: event.time, usage, ...(config.model ? { model: config.model } : {}), ...(config.reasoningEffort ? { effort: config.reasoningEffort } : {}) })
+      calls.push({ id, ...(typeof data.turn === 'number' ? { turn: data.turn } : turn === undefined ? {} : { turn }), ...(userTurn === undefined ? {} : { userTurn }), time: event.time, usage, ...(config.model ? { model: config.model } : {}), ...(config.reasoningEffort ? { effort: config.reasoningEffort } : {}) })
     }
   }
-  return { header, calls }
+  return { header, calls, ends, userStarts }
 }
 
 function localMidnight(date: string): { ms: number; label: string } {
@@ -158,6 +171,13 @@ export function buildReport(home: string, options: { since?: string } = {}) {
     if (log.header.origin) { excluded.child++; continue }
     if (log.header.isSeeded === true) { excluded.seeded++; continue }
 
+    const nextUserStart = new Map<number,number>()
+    let next: number | undefined
+    const turns = [...new Set([...log.calls.flatMap(call => call.turn === undefined ? [] : [call.turn]), ...log.userStarts.keys()])].sort((a,b) => b-a)
+    for (const turn of turns) {
+      if (next !== undefined) nextUserStart.set(turn, next)
+      if (log.userStarts.has(turn)) next = log.userStarts.get(turn)
+    }
     const linked = new Set<string>()
     let v2First: number | undefined
     for (const call of log.calls) {
@@ -168,10 +188,12 @@ export function buildReport(home: string, options: { since?: string } = {}) {
       const key = JSON.stringify([session, b.decisionId])
       let d = decisions.get(key)
       if (!d) {
-        d = { session, version: b.snapshot ? `${b.snapshot.policyVersion}/${b.snapshot.mappingVersion}` : 'unknown', model: b.model, depth: b.depth, effort: b.effort, calls: [], feedback: new Set() }
+        d = { session, id: b.decisionId, version: b.snapshot ? `${b.snapshot.policyVersion}/${b.snapshot.mappingVersion}` : 'unknown', model: b.model, depth: b.depth, effort: b.effort, calls: [], feedback: new Set() }
         decisions.set(key, d)
       }
       d.calls.push(call)
+      d.end = call.turn === undefined ? 'unknown' : log.ends.get(call.turn) ?? 'unknown'
+      d.continuation = call.turn === undefined ? undefined : nextUserStart.get(call.turn)
       if (b.feedback) d.feedback.add(b.feedback)
     }
     unlinkedBindings += bindings.filter(b => b.sessionId === session && !linked.has(b.messageId)).length
@@ -214,12 +236,33 @@ export function buildReport(home: string, options: { since?: string } = {}) {
       const sessions = new Set(list.map(d => d.session)).size
       const feedback: Record<string, number> = { ...Object.fromEntries(FEEDBACK.map(f => [f, 0])), conflict: 0, unrated: 0 }
       for (const d of list) bump(feedback, d.feedback.size === 0 ? 'unrated' : d.feedback.size > 1 ? 'conflict' : [...d.feedback][0]!)
+      const implicit = {
+        counts: { explicit: 0, negative: 0, 'implicit-ok': 0, inconclusive: 0, unobserved: 0 },
+        explicit: { ...Object.fromEntries(FEEDBACK.map(f => [f, 0])), conflict: 0 },
+        exposedExplicit: { ...Object.fromEntries(FEEDBACK.map(f => [f, 0])), conflict: 0 },
+        negative: { 'aborted-user': 0, 'manual-switch': 0 },
+      }
+      for (const d of list) {
+        const facts = book.facts(d.session, d.id)
+        const exposed = facts.exposed !== undefined && (d.continuation === undefined || facts.exposed < d.continuation)
+        const label = d.feedback.size > 1 ? 'conflict' : [...d.feedback][0]
+        if (label) {
+          implicit.counts.explicit++; bump(implicit.explicit, label)
+          if (exposed) bump(implicit.exposedExplicit, label)
+        } else if (d.end === 'aborted-user' || facts['manual-switch'] !== undefined) {
+          implicit.counts.negative++
+          if (d.end === 'aborted-user') implicit.negative['aborted-user']++
+          if (facts['manual-switch'] !== undefined) implicit.negative['manual-switch']++
+        } else if (exposed && d.end === 'completed' && d.continuation !== undefined) implicit.counts['implicit-ok']++
+        else if (exposed) implicit.counts.inconclusive++
+        else implicit.counts.unobserved++
+      }
       const byEffort: Record<string, { decisions: number; calls: number }> = {}
       for (const d of list) { const e = (byEffort[d.effort] ??= { decisions: 0, calls: 0 }); e.decisions++; e.calls += d.calls.length }
       return {
         model, depth, decisions: list.length, sessions, calls: calls.length,
         callsPerDecision: { median: median(list.map(d => d.calls.length)), max: Math.max(...list.map(d => d.calls.length)) },
-        tokens: tokens(calls), byEffort: sorted(byEffort), feedback,
+        tokens: tokens(calls), byEffort: sorted(byEffort), feedback, implicit,
         conclusion: list.length >= 20 && sessions >= 3 ? 'observed' : 'insufficient-sample',
       }
     }),

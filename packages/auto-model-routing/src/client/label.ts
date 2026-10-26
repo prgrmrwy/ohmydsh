@@ -33,6 +33,7 @@ export function LabelButton({ sessionId, messageId, rpc, ui }: { sessionId: stri
   const [view, setView] = useState<Labelled | undefined>(undefined)
   const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
+  const exposureTarget = useRef<HTMLSpanElement>(null)
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
   useEffect(() => {
@@ -42,6 +43,34 @@ export function LabelButton({ sessionId, messageId, rpc, ui }: { sessionId: stri
     callLabel(rpc, sessionId, messageId).then(value => { if (active && ('tier' in value || value.policy === 'policy-v2')) setView(value as Labelled) }, () => {})
     return () => { active = false }
   }, [rpc, sessionId, messageId])
+  useEffect(() => {
+    const target = exposureTarget.current
+    if (view?.policy !== 'policy-v2' || !target || typeof IntersectionObserver === 'undefined') return
+    let visible = false, sent = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const update = () => {
+      clearTimeout(timer); timer = undefined
+      if (!sent && visible && document.visibilityState === 'visible' && document.hasFocus()) {
+        timer = setTimeout(() => {
+          if (!visible || document.visibilityState !== 'visible' || !document.hasFocus()) return
+          sent = true
+          void rpc.call('/api', 'auto-model-routing.observe', { sessionId, messageId }).catch(() => {})
+        }, 3000)
+      }
+    }
+    const observer = new IntersectionObserver(entries => {
+      visible = entries.some(entry => entry.isIntersecting && entry.intersectionRatio >= 1)
+      update()
+    }, { threshold: 1 })
+    observer.observe(target)
+    document.addEventListener('visibilitychange', update)
+    window.addEventListener('focus', update); window.addEventListener('blur', update)
+    return () => {
+      clearTimeout(timer); observer.disconnect()
+      document.removeEventListener('visibilitychange', update)
+      window.removeEventListener('focus', update); window.removeEventListener('blur', update)
+    }
+  }, [view?.policy, rpc, sessionId, messageId])
   if (!view) return null
   const choose = (label: Tier) => {
     setOpen(false)
@@ -54,7 +83,7 @@ export function LabelButton({ sessionId, messageId, rpc, ui }: { sessionId: stri
     callLabel(rpc, sessionId, messageId, undefined, id === 'clear' ? null : id).then(value => { if (alive.current && value.policy === 'policy-v2') setView(value as Labelled) }, () => { if (alive.current) setError('反馈未保存，请重试') })
   }
   const button = h('button', { type: 'button', className: 'amr-label-action', 'aria-label': tooltipText(view), onClick: () => setOpen(value => !value) }, h(ui.Icon))
-  return h('span', null,
+  return h('span', { ref: exposureTarget },
     h('style', null, CSS),
     h(ui.Menu, {
       open, side: 'top', portal: true, onClose: () => setOpen(false),

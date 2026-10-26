@@ -2,7 +2,7 @@ import type { FeedbackBook } from './feedback.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import type { JevClient, Depth, PolicyMeasure } from './jev.js'
 import { policyVersion, CATEGORY_HINTS } from './jev.js'
 import { choosePolicyRoute, mappingVersion, policyEffort, modelFamily, policyProvider, validatePolicyRoute } from './policy-v2.js'
@@ -159,8 +159,24 @@ export function policyHost(ctx: Context, deps: { feedback: FeedbackBook; jev: Je
     validatePolicyRoute(await deps.catalog(), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap)
     return { ...config, ...record.route } as typeof config
   }, { prepend: true })
+  const confirmMainRequest = (session: Session, requestSeq: number, turn?: number) => {
+    const status = mainStatus.get(session.id)
+    const actual = session.requestHeader()?.config
+    if (!enabled(session.id) || !status?.decision || !actual) return
+    const d = { ...status.decision, status: status.decision.status === 'unsupported' ? 'unsupported' : actual.reasoningEffort === status.effort && actual.provider === status.decision.provider && actual.model === status.decision.model ? 'applied' : 'failed', ...(actual.model ? { model: actual.model } : {}), ...(actual.provider ? { provider: actual.provider } : {}) }
+    mainStatus.set(session.id, { ...status, decision: d }); latest.set(session.id, d)
+    if (d.status === 'applied') {
+      applied.set(session.id, d)
+      requestMetadata.set(session.id, { requestSeq, appliedAt: Date.now(), ...(turn !== undefined ? { requestTurn: turn } : {}) })
+    } else applied.delete(session.id)
+  }
   ctx.on('session/event', (session, event) => {
     if (event.type === 'assistant/message') {
+      // Unchanged requests reuse the durable header and emit no request/header event.
+      if (!applied.has(session.id) && mainStatus.get(session.id)?.decision?.status === 'recommended') {
+        const header = session.snapshotEvents().findLast(e => e.type === 'request/header')
+        if (header) confirmMainRequest(session, header.seq, event.data.turn)
+      }
       const d = applied.get(session.id)
       const data = event.data as { message?: { id?: string } }
       if (d?.status === 'applied' && enabled(session.id) && data.message?.id && d.model) {
@@ -180,17 +196,7 @@ export function policyHost(ctx: Context, deps: { feedback: FeedbackBook; jev: Je
     requestMetadata.delete(session.id)
     const record = deps.store.get(session.id)
     if (!record?.route) {
-      const status = mainStatus.get(session.id)
-      const actual = (event.data as { header?: { config?: { provider?: string; model?: string; reasoningEffort?: string } } }).header?.config
-      if (enabled(session.id) && status?.decision && actual) {
-        const d = { ...status.decision, status: status.decision.status === 'unsupported' ? 'unsupported' : actual.reasoningEffort === status.effort && actual.provider === status.decision.provider && actual.model === status.decision.model ? 'applied' : 'failed', ...(actual.model ? { model: actual.model } : {}), ...(actual.provider ? { provider: actual.provider } : {}) }
-        mainStatus.set(session.id, { ...status, decision: d }); latest.set(session.id, d)
-        if (d.status === 'applied') {
-          applied.set(session.id, d)
-          const data = event.data as { turn?: number }
-          requestMetadata.set(session.id, { requestSeq: event.seq, appliedAt: Date.now(), ...(typeof data.turn === 'number' ? { requestTurn: data.turn } : {}) })
-        }
-      }
+      confirmMainRequest(session, event.seq, (event.data as { turn?: number }).turn)
       return
     }
     const actual = (event.data as { header?: { config?: { provider?: string; model?: string; reasoningEffort?: string } } }).header?.config
@@ -201,6 +207,7 @@ export function policyHost(ctx: Context, deps: { feedback: FeedbackBook; jev: Je
     if (!matches) throw new Error('policy-v2 实际请求配置不匹配')
   })
   return {
+    appliedDecision: (id: string) => enabled(id) ? applied.get(id)?.id : undefined,
     invalidate: (id: string) => { epochs.set(id, epoch(id) + 1); mainStatus.delete(id); latest.delete(id); applied.delete(id) },
     status: (id: string) => deps.store.get(id), mainStatus: (id: string) => enabled(id) ? { ...mainStatus.get(id), ...(latest.get(id) ? { decision: latest.get(id) } : {}) } : undefined,
   }

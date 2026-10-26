@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { FileStateStore, RoutingState } from './state.js'
 import { Router, type AgentRef, type RequestConfig } from './router.js'
 import type { Effort } from './effort.js'
-import { endpoint, labelEndpoint } from './endpoints.js'
+import { endpoint, labelEndpoint, observeEndpoint } from './endpoints.js'
 import { FeedbackBook } from './feedback.js'
 import { JudgementBook } from './judgements.js'
 import { userInput } from './input.js'
@@ -114,7 +114,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['connection', 'sessionController'], child => {
-    for (const operation of ['state', 'setMode', 'label', 'settings', 'saveSettings', 'setKey', 'testDecision', 'childRouting'] as const) {
+    for (const operation of ['state', 'setMode', 'label', 'observe', 'settings', 'saveSettings', 'setKey', 'testDecision', 'childRouting'] as const) {
       child.effect(() => child.connection.fetch.register({
         path: `/api/auto-model-routing.${operation}`,
         methods: ['POST'], requestBody: 'buffered',
@@ -129,10 +129,15 @@ export function apply(ctx: Context, config: Config = {}): void {
             return 'agent' in result ? ref(result.agent) : undefined
           }
           const payload = enveloped ? wire.payload : body
+          let manualDecision: { sessionId: string; decisionId: number } | undefined
           if (operation === 'setMode' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
             const id = (payload as { sessionId: string }).sessionId
             const mode = (payload as { mode?: unknown }).mode
-            if ((mode === 'AUTO' || mode === 'MANUAL') && state.read(id).mode !== mode && await resolveAgent(id)) policy.invalidate(id)
+            if ((mode === 'AUTO' || mode === 'MANUAL') && state.read(id).mode !== mode && await resolveAgent(id)) {
+              const decisionId = policy.appliedDecision(id)
+              if (mode === 'MANUAL' && decisionId !== undefined) manualDecision = { sessionId: id, decisionId }
+              policy.invalidate(id)
+            }
           }
           const response = operation === 'childRouting'
             ? (typeof (payload as { sessionId?: unknown })?.sessionId === 'string'
@@ -140,7 +145,12 @@ export function apply(ctx: Context, config: Config = {}): void {
               : Response.json({ error: 'invalid request' }, { status: 400 }))
             : operation === 'settings' || operation === 'saveSettings' || operation === 'setKey' || operation === 'testDecision'
             ? await hostSettings.endpoint(operation, payload)
+            : operation === 'observe' ? await observeEndpoint(payload, resolveAgent, feedback, () => ctx.logger.warn('auto-model-routing: could not record exposure'))
             : operation === 'label' ? await labelEndpoint(payload, resolveAgent, book, feedback) : await endpoint(operation, payload, resolveAgent, router, state, toastOn)
+          if (manualDecision && response.ok) {
+            try { feedback.fact(manualDecision.sessionId, manualDecision.decisionId, 'manual-switch') }
+            catch { ctx.logger.warn('auto-model-routing: could not record MANUAL switch') }
+          }
           if ((operation === 'state' || operation === 'setMode') && response.ok && settings.read().settings.policy === 'policy-v2') {
             const value = await response.json()
             const main = policy.mainStatus((payload as { sessionId: string }).sessionId)
