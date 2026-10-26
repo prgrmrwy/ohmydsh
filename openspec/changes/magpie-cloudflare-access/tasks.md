@@ -13,5 +13,5 @@
 ## 3. Verification and delivery
 
 - [x] 3.1 Run package tests/typecheck/build and strict change validation; report exact failures/baseline and verify primary routing/effort remain unchanged.
-- [ ] 3.2 Conduct scoped review with mainline owner, verify public real-plugin catalog/cards/SSE/Responses tool round trip without changing the existing production connection; retain credential-free evidence.
+- [x] 3.2 Conduct scoped review with mainline owner, verify public real-plugin catalog/cards/SSE/Responses tool round trip without changing the existing production connection; retain credential-free evidence.
 - [x] 3.3 Deliver private credential setup instructions, rollback and company-side acceptance steps; update tasks with actual evidence, not standalone infrastructure probe claims.
