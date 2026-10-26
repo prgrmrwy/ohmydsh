@@ -40,7 +40,7 @@
 ### Warnings
 
 1. Full suite has one failing test unrelated to this change (auto-model-routing bundle migration), present on the pre-change baseline.
-2. The first real observation recorded `latency: unavailable`: the agent's start timestamp used `date +%s%3N`, which macOS `date` does not support. SKILL.md asks for a local monotonic measurement but names no portable method. Follow-up: name a portable timing method in SKILL.md (e.g. `node -e "console.log(Math.round(performance.timeOrigin + performance.now()))"`). Not in this change's scope; the latency gate correctly treats the sample as unavailable.
+2. Resolved after verification: the first real observation recorded `latency: unavailable` because the agent's start timestamp used `date +%s%3N`, which macOS `date` does not support. SKILL.md now names the portable command `node -e "console.log(Date.now())"` for both readings and requires `unavailable` only when a reading is missing or the difference is negative; `tests/jev-workflow-router.test.mjs` asserts this wording (18/18 pass). That one sample keeps its honest `unavailable` value.
 3. OpenRouter's data-retention terms were not separately reviewed; recorded in the manifest note per user decision.
 
 ## Overall Decision

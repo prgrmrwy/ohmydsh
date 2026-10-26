@@ -61,7 +61,13 @@ Use `unknown`/conservative values when evidence is absent. Never include or deri
 
 ## Two bounded shadow calls
 
-Before the first call, capture a local monotonic start time. After classify plus the conditional decide has settled (success, error, timeout, or cancellation), compute the complete shadow-sequence duration. Record it as `{ "availability": "measured", "milliseconds": N }`; only use `{ "availability": "unavailable", "milliseconds": null }` when a monotonic local measurement genuinely cannot be obtained. Timing and provenance are local recorder metadata and MUST NOT be sent to Jev.
+Before the first call, capture a local start time in milliseconds; after classify plus the conditional decide has settled (success, error, timeout, or cancellation), capture the end time and record the difference as the complete shadow-sequence duration. The two Jev calls are separate tool invocations, so a per-process monotonic clock cannot span them; use this portable command for both readings (it works on macOS, Linux and Windows, unlike `date +%s%3N`, which macOS `date` does not support):
+
+```sh
+node -e "console.log(Date.now())"
+```
+
+Record `{ "availability": "measured", "milliseconds": END - START }`. Use `{ "availability": "unavailable", "milliseconds": null }` only when either reading is missing or the difference is negative (clock adjusted) — never guess a value. Timing and provenance are local recorder metadata and MUST NOT be sent to Jev.
 
 If `DSH_JEV_WORKFLOW_ROUTER_DISABLED` is `1`, `true`, `yes`, or `on` (case-insensitive), make no Jev calls and write no records.
 
