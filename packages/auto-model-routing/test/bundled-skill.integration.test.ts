@@ -19,7 +19,7 @@ it('bundle provider loads one real registry skill and disposes it', async () => 
   const mounted = await ctx.plugin(Filesystem, { providerName: 'auto-model-routing-plugin', includeDefaultRoots: false, bundledSkillDir, watch: false })
   try {
     const list = await ctx.skills.list()
-    expect(list.map(s => s.name)).toEqual(['subagent-model-routing'])
+    expect(list.map(s => s.name).sort()).toEqual(['auto-model-routing-report', 'subagent-model-routing'])
     expect((await ctx.skills.get('subagent-model-routing'))?.content).toContain('reasoning_effort')
     const scope = {}
     createScope(ctx, scope)

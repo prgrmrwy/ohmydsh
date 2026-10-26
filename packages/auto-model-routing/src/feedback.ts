@@ -30,6 +30,8 @@ export class FeedbackBook {
   }
   private key(sessionId:string,messageId:string){return JSON.stringify([sessionId,messageId])}
   lookup(sessionId:string,messageId:string){const r=this.records.get(this.key(sessionId,messageId));return r&&structuredClone(r)}
+  /** All folded bindings in file order (read-only; used by the usage report). */
+  entries(){return [...this.records.values()].map(r=>structuredClone(r))}
   bind(record:FeedbackRecord){if(this.lookup(record.sessionId,record.messageId))return;const r=schema.parse({...record,boundAt:Date.now()});this.append(r);this.records.set(this.key(r.sessionId,r.messageId),r)}
   set(sessionId:string,messageId:string,feedback:typeof allocationFeedback[number]|null){
     const r=this.lookup(sessionId,messageId);if(!r)throw Error('No applied decision')

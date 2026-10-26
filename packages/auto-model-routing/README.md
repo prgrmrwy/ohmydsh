@@ -110,7 +110,7 @@ npm run typecheck
 npm run build
 ```
 
-Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. `scripts/label-report.mjs` reports **legacy tier labels only**; it is not a report for new allocation feedback. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
+Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. `scripts/label-report.mjs` reports **legacy tier labels only**. To observe AUTO decisions and their actual token usage, ask the agent to use the `auto-model-routing-report` skill (on demand only; it runs the read-only `lib/usage-report.js`). It is observational, not a savings measurement. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
 
 Development stays in the source monorepo; this repository is its release mirror. The package builds and loads independently using its declared dependencies, bundled skill and official DSH services; no monorepo checkout or monorepo instruction file is required. External design references are optional background, not runtime inputs.
 

@@ -110,7 +110,7 @@ npm run typecheck
 npm run build
 ```
 
-测试使用官方 AgentLoop、假 LLM 流和 mock/回环 Jev，不产生真实模型费用。`scripts/label-report.mjs` **仅汇总旧四档标注**，不是新分配反馈报表；新数据结构与去重口径见[feedback-evaluation.md](docs/feedback-evaluation.md)。
+测试使用官方 AgentLoop、假 LLM 流和 mock/回环 Jev，不产生真实模型费用。`scripts/label-report.mjs` **仅汇总旧四档标注**。如需观察 AUTO 决策及实际 token 用量，请明确让 agent 使用 `auto-model-routing-report` skill（仅按需调用，运行只读的 `lib/usage-report.js`）；它是观察统计，不衡量节省；新数据结构与去重口径见[feedback-evaluation.md](docs/feedback-evaluation.md)。
 
 继续在主仓开发，本仓库仅作发布镜像。插件使用自身声明的依赖、包内 skill 和官方 DSH 服务即可独立构建与加载，不要求检出主仓，也不要求安装主仓环境指令。外部设计链接仅供背景阅读，不是运行输入。
 

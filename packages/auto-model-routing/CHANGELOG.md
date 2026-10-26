@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add the on-demand `auto-model-routing-report` skill and read-only `lib/usage-report.js`: joins policy-v2 decisions to actual per-call usage by message ID, grouped by version × model × depth, with coverage gaps, sample thresholds and fixed caveats. Observational only; never writes, spawns or uses the network, and never prints message text, paths or session IDs.
+
 ## 0.4.0
 
 - Upgrade AUTO by default: keep the main model fixed, independently judge child capability and reasoning investment, and enforce exact fresh-child bindings with persisted replay. Preserve explicit legacy rollback and MANUAL behavior.

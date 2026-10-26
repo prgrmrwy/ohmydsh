@@ -12,7 +12,7 @@
 - appropriate/too-high/too-low分别统计；unknown不是满意，null撤销不计有效评价；未评价不能计为合适。多条消息评价冲突也应单独报告。
 - 按策略版本/映射版本/服务模型及depth/实际路由分组；旧缺字段独立unknown组，不混进新策略精确对照。
 - 以requestSeq和消息ID关联实际usage/延迟/返工证据；拿不到价格或token就未知。用户主观反馈不等于正确性oracle，适合率也不能单独证明质量或节省。
-- 本期只提供采集与可追溯性，不做报表、自动阈值调整、自动训练或换模重试。
+- 按需观察报表见包内 skill `auto-model-routing-report`（`lib/usage-report.js`，只读）；仍不做自动阈值调整、自动训练或换模重试。
 
 ## 确定度
 UI称“判定确定度”，Choice公式为`(pmax - 1/n)/(1 - 1/n)`；n为该维候选数。三选一最高概率70%得到55%，不等于选中概率或任务成功率。插件直接展示服务返回值，分布独立保留，不从四舍五入后的百分比反推。官方定义：https://docs.typesafe.ai/confidence.md 。

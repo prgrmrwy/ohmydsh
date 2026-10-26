@@ -4,6 +4,13 @@ import { expect, it } from 'vitest'
 
 const skillPath = resolve(import.meta.dirname, '../skills/subagent-model-routing/SKILL.md')
 const skill = () => existsSync(skillPath) ? readFileSync(skillPath, 'utf8') : ''
+it('report_skill_is_on_demand_only', () => {
+ const text = readFileSync(resolve(import.meta.dirname, '../skills/auto-model-routing-report/SKILL.md'), 'utf8')
+ const [, front = '', body = ''] = text.split(/^---$/m)
+ for (const part of [front, body]) { expect(part).toContain('仅当用户明确要求'); expect(part).toMatch(/不得主动执行[^。\n]*定时任务/) }
+ const files = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')).files as string[]
+ expect(files).toEqual(expect.arrayContaining(['lib', 'skills', 'scripts/label-report.mjs']))
+})
 const sources = () => {
  const root=resolve(import.meta.dirname,'../src')
  return readdirSync(root,{recursive:true,encoding:'utf8'}).filter(name=>name.endsWith('.ts')).map(file=>[file,readFileSync(resolve(root,file),'utf8')] as const)
