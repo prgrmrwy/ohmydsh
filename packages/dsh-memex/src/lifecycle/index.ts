@@ -51,6 +51,10 @@ const RECALL_TEXT = [
   // results show only the title and first paragraph, so that paragraph is what
   // a later session actually reuses. Card format and frontmatter stay the kernel's.
   'Search results show only the title and first paragraph, so make the first paragraph usable on its own: when it applies, the conclusion or steps, its boundaries (project, version, environment), and the minimum check before reuse. Put background after it.',
+  // Local addition (dsh-memex-fix-stale-card-on-use): a card found stale while it
+  // is being used is fixed then, so the next session does not re-investigate it.
+  // It names memex_write because memex_retro re-stamps `created` on overwrite.
+  'When you check a recalled card against the current code or environment and find it wrong or outdated, fix it in the same turn: read it, rewrite it with memex_write keeping its original title and created date, correct the first paragraph to the current fact, and append a dated note saying what changed and the file:line you checked. If its conclusion no longer applies at all, say so in the card rather than deleting it. Change only the facts you actually checked in this session.',
   'When calling memex_recall or memex_search, pass intent (gap, background, by-name, dedupe or verify) to say why you are recalling.',
   'Never include actual secrets, credentials, tokens, or exact secret file contents.',
   'Recall guardrails: follow at most 3 link hops and read at most 20 cards.',

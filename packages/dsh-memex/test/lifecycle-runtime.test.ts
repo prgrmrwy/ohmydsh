@@ -141,6 +141,30 @@ describe('memex lifecycle with the real AgentLoop', () => {
     expect(text).toContain('follow at most 3 link hops and read at most 20 cards')
   })
 
+  /** The fix-on-use guidance (dsh-memex-fix-stale-card-on-use), as one injected line. */
+  function expectFixOnUseGuidance(text: string): void {
+    expect(text).toMatch(/recalled card.*(wrong|outdated)/i)
+    expect(text).toMatch(/fix (it|the card) in the same turn/i)
+    // memex_retro re-stamps `created`, so the revision has to go through memex_write.
+    expect(text).toContain('memex_write')
+    expect(text).toMatch(/keep(ing)? its original title and created date/i)
+    expect(text).toMatch(/dated note.*(file:line|file and line)/i)
+    expect(text).toMatch(/rather than deleting/i)
+    expect(text).toMatch(/only .*facts you actually (checked|verified)/i)
+  }
+
+  it('asks to fix a recalled card found outdated, without dropping the existing guidance', async () => {
+    const { adapter, handle } = await harness(1)
+    await step(handle.agent, 'start')
+    const text = requestText(adapter.requests[0]!)
+    expectFixOnUseGuidance(text)
+    expect(text).toContain('call memex_recall')
+    expect(text).toContain('save only non-obvious reusable learnings with memex_retro')
+    expect(text).toContain('only the title and first paragraph')
+    expect(text).toContain('intent')
+    expect(text).toContain('follow at most 3 link hops and read at most 20 cards')
+  })
+
   describe('write reminder', () => {
     /** Every assistant message the session recorded, in order, with the turn it belongs to. */
     function assistantMessages(ctx: Context, agent: Agent): { turn: number; text: string }[] {
@@ -241,6 +265,8 @@ describe('memex lifecycle with the real AgentLoop', () => {
     await step(handle.agent, 'after compact')
     expect(adapter.requests).toHaveLength(1)
     expect(requestText(adapter.requests[0]!)).toContain('Memex Memory System Active')
+    // Compaction summarizes the earlier guidance away; the fix-on-use line must come back with it.
+    expectFixOnUseGuidance(requestText(adapter.requests[0]!))
   })
 
   describe('switching memory while a session runs', () => {

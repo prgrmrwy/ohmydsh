@@ -1,6 +1,6 @@
 {
   "name": "dsh-memex",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Memex-backed persistent memory for DSH: registers the memex tool surface in-process and adds a scope dimension so each knowledge domain keeps its own library",
   "license": "MIT",
   "type": "module",
