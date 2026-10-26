@@ -51,6 +51,17 @@ describe('Worktree Session stable runtime context', () => {
     expect(boundContextText(mutable, bindingOf(mutable))).toBe(before)
   })
 
+  it('separates worktree-relative reply links from absolute tool paths only for active bindings', () => {
+    const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' } })
+    const text = boundContextText(record, bindingOf(record))!
+    expect(text).toContain('所有本地文件与搜索工具必须使用托管执行目录中的绝对路径')
+    expect(text).toContain('相对于托管执行目录的路径，例如 [报告](docs/report.md)')
+    expect(text).toContain('不要添加源仓库绝对路径或 .worktrees/任务目录前缀')
+    expect(text).toContain('此规则仅用于回复中的文件链接')
+    const cleaned = operation({ binding: { ...record.binding!, state: 'cleaned' } })
+    expect(boundContextText(cleaned, bindingOf(cleaned))).not.toContain('[报告](docs/report.md)')
+  })
+
   it('returns undefined when no source-session binding exists', () => {
     const unbound = operation({ binding: undefined })
     expect(boundContextText(unbound, bindingOf(unbound))).toBeUndefined()
