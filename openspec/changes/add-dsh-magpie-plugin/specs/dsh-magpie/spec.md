@@ -548,3 +548,5 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **GIVEN** 一次目录同步正在进行
 - **WHEN** 卸载插件
 - **THEN** 该同步被中止，之后它的响应不会写入任何状态，进程中没有未处理的 Promise rejection
+
+<!-- AMD3 2026-10-26：本文件的分组/真实身份与品牌要求保留；AUTO effort 官方同步及单值展示仅见同 change auto-model-routing delta，不改变 adapter/传输或 sidebar 源码。 -->

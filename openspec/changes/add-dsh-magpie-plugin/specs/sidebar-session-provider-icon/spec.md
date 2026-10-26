@@ -71,3 +71,5 @@
 - **GIVEN** provider route 为 `dsh-magpie2`（规范化为 `magpie2`，不等于 `magpie`，也不以 `magpie-` 开头）
 - **WHEN** 计算该行品牌
 - **THEN** 不识别为 Magpie，按 model fallback 处理
+
+<!-- AMD3 2026-10-26：本文件的分组/真实身份与品牌要求保留；AUTO effort 官方同步及单值展示仅见同 change auto-model-routing delta，不改变 adapter/传输或 sidebar 源码。 -->

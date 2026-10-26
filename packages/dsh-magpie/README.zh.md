@@ -31,13 +31,13 @@ key 通过 DSH credentials 以 `MAGPIE_API_KEY` 保存。若来自启动环境�
 - 非空 `stop` 序列会在请求发出前报 `MAGPIE_STOP_UNSUPPORTED`，因为 Magpie 无法保证所有协议转换保留 stop。
 - 快速档按会话保存在内存，host 重启回到标准。priority 服务档可能消耗更多上游额度。
 
-### 模型菜单分组与实际/下次 effort
+### 模型菜单分组与 effort
 
-在 ohmydsh 中，这些菜单能力依赖 Pet 在 reviewed DSH `0.2.0-rc.2` pin 上的受管 Host 扩展，须一起重建五个包：`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-api-remotes`、`@deepseek-ai/dsh-client-ui-model-selection`、`@deepseek-ai/dsh-client-ui-commands`。stock rc.2 仍可正常使用插件 route 与生成，但 provider 内列表保持 flat，也不展示实际/下次 effort 差异。
+在 ohmydsh 中，这些菜单能力依赖 Pet 在 reviewed DSH `0.2.0-rc.2` pin 上的受管 Host 扩展，须一起重建五个包：`@deepseek-ai/dsh-llm`、`@deepseek-ai/dsh-api-session-controller`、`@deepseek-ai/dsh-api-remotes`、`@deepseek-ai/dsh-client-ui-model-selection`、`@deepseek-ai/dsh-client-ui-commands`。stock rc.2 仍可正常使用插件 route 与生成，但 provider 内列表保持 flat。
 
 加载扩展后，模型菜单与 `/model` 按网关 `owned_by` 展示标题：`claude` 为 `Magpie (Claude)`、`codex` 为 `Magpie (GPT)`，其它非空归属原文展示，缺失时为 `Magpie (Other)`。统一搜索覆盖组标题、型号名与完整 id。展示 metadata 不改变真实 `dsh-magpie` route、model id、名字、可见性偏好键或默认 effort。
 
-同 provider/model 的 effort 不同时，trigger 与根 effort 行显示 **最近实际：High · 下次：Medium**（按界面语言本地化）。这是保留用户下次 intent，不是 High 未应用到请求；勾选与主动提交仍按 Next。默认 AUTO 只按请求应用 effort，不为同步显示调用官方 `selectModel`，因为该 API 还会保存全局 defaults。这些是本地源码/构建保证，不代表已部署或完成 live GUI 验收。
+选择器使用官方单一 effort 值。默认 AUTO 在主 effort 改变时，经官方 `selectModel` 同步同一 provider/model，并允许保存全局默认值；MANUAL 不变，已绑定子实例不写主选择。Host 展示扩展只负责分组与搜索 metadata，不维护第二套 effort 文案。本地源码测试不代表已部署或完成 live GUI 验收。
 
 ### 用量与手动刷新
 

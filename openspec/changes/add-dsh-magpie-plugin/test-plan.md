@@ -136,3 +136,18 @@
 - **sidebar 包**：源码不改；新增 `dsh-magpie` 正向和 `dsh-magpie2` 负向回归。AMD-1 另补四个具名场景：「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」，对 `dsh-magpie` 与 `dsh-magpie-connect` 参数化核验。所有 sidebar 场景须按账本提供具名测试；现有 green 只表示基线回归，最终仍须重新运行套件验证。
 - **2026-10-26 evidence reconciliation**：17.2按独立review接受的分层TDD receipt完成（Host clean RED24物理历史实读；plugin18fail→18pass仅author-reported消息回执，不声称rawlog重放）。18.8独立APPROVE不变更99行localgreen的层级。当前正式d1fb图descriptor动态probe与fingerprint重算通过，五包同physical LLM；新incognito3080得401且无安全官方existing-server auth交付，未观察GUI。Responses optional-tools strict另owner调查中，无本轮已修结论；2.5/16.2/16.3/16.4仍open。
 - **不进 test-plan、但在 tasks 里机械验证的项**：README 治理（`npm test` 中的 repo-docs-governance）、包元数据自检（prepare、prepack、files、exports）、`npm run check:artifacts`、`node scripts/sync.mjs` 连续两次不产生变化，以及只读冒烟：对 CT105 跑一次目录同步、一次生成、一次读卡片。
+
+## AMD3 ledger — supersedes AMD2 no-write/dual-value rows (2026-10-26)
+
+上文118–122行及102 localgreen计数是旧冻结历史，不是新需求通过；禁止selectModel和双值显示明确废止。新需求由下表独立验证，旧分组/transport/cap/identity回归保留。
+
+| Requirement | Scenario | Test File | Test Name / explicit mapping | State |
+|---|---|---|---|---|
+| AUTO 主 effort 同步官方选择 | 同次主请求同步官方 effort 与 defaults | packages/auto-model-routing/test/policy-host.integration.test.ts | AUTO synchronizes the same request, official selection and global defaults | 🟢 local green — actual RED→GREEN |
+| AUTO 主 effort 同步官方选择 | 同步失败不丢本次请求 | packages/auto-model-routing/test/policy-host.integration.test.ts | selection sync failure true/missing keeps the official effort and logs the failure | 🟢 local green — parent RED26=2fail24pass→GREEN26，失败保留原官方 effort |
+| AUTO 主 effort 同步官方选择 | 手动与子请求不污染默认 | packages/auto-model-routing/test/policy-host.integration.test.ts | same effort and MANUAL do not sync; GPT main and child use supported efforts on the same transport | 🟢 local green — no extra selection/default write |
+| AUTO 主 effort 同步官方选择 | 异步解析期间切 MANUAL 不覆盖主请求 | packages/auto-model-routing/test/policy-host.integration.test.ts | main request rechecks MANUAL after asynchronous model resolution | 🟢 local green — fresh regression |
+| 选择器恢复官方单值 effort | 单值 effort 与选择一致 | packages/dsh-pet/test/model-display-react.spec.tsx + model-display-host.spec.ts | displays one official effort; directory keeps official current selection | 🟢 local green — actual RED→GREEN |
+| 选择器恢复官方单值 effort | 分组搜索与精确选择保留 | packages/dsh-pet/test/model-display-react.spec.tsx + model-display-popup.spec.ts | existing exact keyboard/click/search regressions | 🟢 local green — fresh regression |
+
+AMD3 实跑：实施者 AUTO33files261tests/typecheck/build，parent 同步失败复核后最终 AUTO33files262tests/typecheck/build；隔离pinned Host4files24tests（RED2fail22pass→GREEN24），原selector3files78tests；builder5、governance30、artifacts/strict/whitespace通过。不代表编译图或live GUI验收。官方全局默认使用inert saveSelection port证明真实controller调用，不声称本轮真实defaults落盘。

@@ -13,7 +13,7 @@ import { userInput } from './input.js'
 import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
 
-export function policyHost(ctx: Context, deps: { feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
+export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
   const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: 'claude' | 'codex' }>()
   const rootOf = (agent: Agent): Agent | undefined => {
     let current: Agent | undefined = agent
@@ -147,6 +147,10 @@ export function policyHost(ctx: Context, deps: { feedback: FeedbackBook; jev: Je
       if (!efforts.length) { const old = mainStatus.get(agent.id); mainStatus.set(agent.id, { ...old, policyVersion, depth: runtime.depth, reason: 'no-effort-support', ...(old?.decision ? { decision: { ...old.decision, status: 'unsupported', model: config.model, provider: config.provider, effort: '模型不支持调整' } } : {}) }); return config }
       const reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined)
       mainStatus.set(agent.id, { ...mainStatus.get(agent.id), policyVersion, depth: runtime.depth, effort: reasoningEffort, reason: 'jev', ...(mainStatus.get(agent.id)?.decision ? { decision: { ...mainStatus.get(agent.id)!.decision!, effort: reasoningEffort, model: config.model, provider: config.provider } } : {}) })
+      if (reasoningEffort !== config.reasoningEffort) {
+        try { await deps.selectModel({ sessionId: agent.id, provider: config.provider, model: config.model, reasoningEffort }) }
+        catch (error) { ctx.logger.warn(`auto-model-routing: could not sync the model selection: ${String(error)}`); return config }
+      }
       return { ...config, reasoningEffort } as typeof config
     }
     const record = deps.store.get(agent.id)

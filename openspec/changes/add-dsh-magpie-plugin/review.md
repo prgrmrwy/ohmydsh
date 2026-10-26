@@ -616,3 +616,15 @@ b2deb7881c6021f04d0d68453d3d24611b4b8bd1a8cc6d2a5cac06326b882a3e  openspec/chang
 **Verdict for this bounded review: Ship the reviewed source/planning scope. Shipping/operational acceptance remains pending the gates above.**
 
 **Not checked:** 未重跑长 root/full/source suites、未重建最终图、未做真实 gateway/凭据/RPC网络或live GUI、未部署/重启/commit；只读代码批准不代表上述验收成功。
+
+## AMD3 — official effort synchronization and single-value picker (2026-10-26)
+
+**Status: PENDING INDEPENDENT RECHECK.** 用户明确授权去掉禁止 selectModel/global-default 的限制，以官方单值 effort 代替 actual/next 双值。新增闭集：proposal AMD3、design D16、AUTO delta、tasks19/test-plan AMD3，以及 policy-host/index writer接缝、真实AgentLoop回归、model-display patch删双值独有hunks及对应测试/README/pin/verifier。分组/search/coremetadata、主 provider/model、child 绑定/cap/MANUAL/legacy 保留。D15/AMD2 的 no-write 与双值结论仅是旧冻结范围，现已被新授权废止；旧报告/唯一 VERDICT/CHANGES_APPLIED 原行不改。本节不是独立批准，不借用旧 APPROVE，不作 full PASS/归档/部署授权。
+
+### AMD3 parent bounded review and delivery (2026-10-27)
+
+**AMD3_PARENT_RECHECK: APPROVE — source/build scope only.** Lead reviewed the complete current uncommitted AMD3 scope against HEAD `0b96fc12980b9e73fffd2ffba7c61a818aa490aa`, plus official controller `selectModel`/selection lifecycle. A separate GPT performed read-only call-order analysis; it did not run tests or approve the complete implementation. Its concrete finding was verified: optional missing writer and warning-only rejection could still leave differing effort values. Lead repaired that finding: missing writer throws to the shared warning path, and failed synchronization returns the official original config. A new focused RED26=2fail/24pass became GREEN26; final full AUTO33files/262tests, typecheck/build pass. Thus unavailable/rejected selection cannot be called a successful target-effort application. No new state machine, retry, configuration or global-file writer was added.
+
+Official `selectModel` commits session selection before returning and saves defaults asynchronously; tests prove its invocation, not successful real-disk default persistence. Already issued selection is an in-flight operation without cancellation/CAS; MANUAL stops future AUTO changes, no post-call restore overwrites later user choices. Child routes, root model and capability/allowlist checks remain unchanged. UI patch removes only dual-value-specific hunks, retaining metadata/group/search; static pin verifier and fresh compiled five-package verification pass.
+
+The first formal build began while the implementation owner finalized patch bytes: artifact e77ef4d versus final7ac67ea was rejected by the staged graph verifier before publication. Rebuilding after handoff succeeded. Final patch SHA256 `7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f`; new formal fingerprint `03cc489863f6c35b679c22e8af3885d6a30408e4773980d34df87c79a0082cbf`, compiled metadata/controller/aggregate codecs/UI verifier exit0. Production sync exit0, second sync exit0/no changes. No Host restart, GUI observation, credential/history read, commit or push performed by this revision. Task19.5 still includes live GUI and therefore remains open; global DECISION remains INTERIM.

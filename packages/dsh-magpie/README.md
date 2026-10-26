@@ -31,13 +31,13 @@ The key is stored through DSH's credentials service as `MAGPIE_API_KEY`. If supp
 - Nonempty `stop` sequences fail before network access with `MAGPIE_STOP_UNSUPPORTED`: Magpie cannot preserve them across all upstream translations.
 - Fast mode is per session and in memory. Restarting the host restores standard mode. Priority service can consume more upstream quota.
 
-### Model menu groups and actual/next effort
+### Model menu groups and effort
 
-In ohmydsh, these menu features require the Pet managed Host extension at the reviewed DSH `0.2.0-rc.2` pin. It rebuilds five packages together: `@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-api-remotes`, `@deepseek-ai/dsh-client-ui-model-selection`, and `@deepseek-ai/dsh-client-ui-commands`. Stock rc.2 can still use the plugin's route and generation, but keeps a flat provider list and does not show the actual/next effort distinction.
+In ohmydsh, these menu features require the Pet managed Host extension at the reviewed DSH `0.2.0-rc.2` pin. It rebuilds five packages together: `@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-api-remotes`, `@deepseek-ai/dsh-client-ui-model-selection`, and `@deepseek-ai/dsh-client-ui-commands`. Stock rc.2 can still use the plugin's route and generation, but keeps a flat provider list.
 
 With that extension, the model picker and `/model` use gateway `owned_by` for headings: `Magpie (Claude)`, `Magpie (GPT)` for `codex`, other nonempty owners verbatim, and `Magpie (Other)` when absent. Search covers heading, model name and full id. Display metadata does not change the real `dsh-magpie` route, model ids, names, visibility keys or default effort.
 
-For the same provider/model with differing efforts, the trigger and root effort row show **Last used: High · Next: Medium** (or the localized equivalent). This preserves the user's next intent; it does not mean High failed to reach the request. Checks and explicit selections still use Next. Default AUTO applies effort per request and does not call official `selectModel` just to synchronize display: that API also saves global defaults. These are local source/build guarantees, not a claim of deployment or live GUI acceptance.
+The picker uses the official single effort value. Default AUTO synchronizes a changed main effort through official `selectModel` on the same provider/model and allows its global-default save; MANUAL remains unchanged and bound children do not write that selection. The Host display extension only handles grouping/search metadata, not a second effort caption. Local source tests do not establish deployment or live GUI acceptance.
 
 ### Usage cards and refresh
 

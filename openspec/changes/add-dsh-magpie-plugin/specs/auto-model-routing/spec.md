@@ -26,33 +26,38 @@
 - **WHEN** 创建需要该目标的子实例
 - **THEN** 拒绝该路由且无越权实际子请求；另一 Magpie transport 的许可与不支持/超过 cap 的 effort 也不能放行
 
-### Requirement: 主 actual effort 不借显示写回选择
-新默认 AUTO 主请求 SHALL 不按 transport 名称跳过已支持的 effort 调整；provider/model SHALL 保持不变。实际应用 SHALL 由 adapter/request-header 验证，不因选择器仍有 pending effort 就宣称未判档。系统 SHALL NOT 为同步显示调用会保存全局 defaults 的 selectModel，不覆盖官方 next/pending；MANUAL 请求 SHALL 继续原样通过。该限定仅针对新默认策略，不改写 current spec 中显式 legacy 的历史同步规则。
+### Requirement: AUTO 主 effort 同步官方选择
+默认 policy-v2 主请求 SHALL 保持官方合成 provider/model，按既有 depth 算法、实时支持与 effort cap 选 effort；与官方合成 effort 不同时 SHALL 等待官方 sessionController.selectModel，以同 sessionId/provider/model 和选定 reasoningEffort 更新选择，允许官方保存全局 defaults。相同 effort SHALL 不重复同步。官方同步失败或 writer 尚不可用 SHALL 记录可诊断告警，保留官方原请求 effort 以避免再次产生显示差异，不将目标 effort 标为 applied、不静默吞错、不换模型；MANUAL、无 effort 支持及已绑定 child 请求 SHALL 不因此写官方选择。此授权废止 AMD2 禁止 selectModel/global-default 的限定，判档、child 精确绑定与 legacy 不变。
 
-#### Scenario: 主请求已应用而官方 pending 保留
-- **GIVEN** 新旧 Magpie AUTO 主模型 pending medium，模型支持 high，Jev depth 为 higher
-- **WHEN** 实际主请求执行
-- **THEN** adapter 与 request-header 为原 provider/model 和 high，官方投影 lastUsed=high/next=medium，selectModel 调用数为零；此证据不等于 GUI 显示完成
+#### Scenario: 同次主请求同步官方 effort 与 defaults
+- **GIVEN** 默认 AUTO 主模型 pending medium，模型支持 high，Jev depth 为 higher
+- **WHEN** 真实主请求执行（包含新旧 Magpie 与普通 route）
+- **THEN** adapter/header、官方选择与默认保存均为同 provider/model 的 high；同步完成后才发出该请求，不产生递归请求，后续相同 effort 不重复写
+
+#### Scenario: 同步失败不丢本次请求
+- **GIVEN** 官方当前选择 medium、AUTO 目标 high，但官方 selectModel 拒绝或 writer 不可用
+- **WHEN** 主请求执行
+- **THEN** 记录同步告警，实际请求保留原 provider/model/medium，使选择与请求一致；不停用 AUTO、不伪造目标 high 已同步或 applied
+
+#### Scenario: 手动与子请求不污染默认
+- **GIVEN** MANUAL 主会话、同 effort AUTO 主请求，或此前精确绑定的 child
+- **WHEN** 对应请求执行或恢复
+- **THEN** MANUAL 请求原样通过，child 保持既定路由；均无额外 selectModel/defaults 保存
 
 #### Scenario: 异步解析期间切 MANUAL 不覆盖主请求
 - **GIVEN** AUTO 主请求正在异步解析模型能力
 - **WHEN** 会话切为 MANUAL 后解析完成
-- **THEN** 输出保持官方合成请求不被 AUTO 覆盖，不为显示保存 selection 或全局 defaults
+- **THEN** 输出保持官方合成请求，不写官方选择或全局 defaults
 
-### Requirement: actual 与 next effort 仅展示分离
-受管宿主 SHALL 通过 Pet 现有 compat 唯一 owner 的 pinned-source patch，使 ModelDirectory 仅透出官方已有 lastUsed。lastUsed 与 next 的 provider/model 相同且 effort 不同时，选择器 trigger 与 root effort 行 SHALL 同时显示实际与下次值，例如“实际 High · 下次 Medium”（英文亦区分 last used/next）。current、pending、check、effort menu 选中态和提交 SHALL 仍取 next，展示 SHALL NOT 改写 projection、调用 selectModel 或保存全局 defaults。用户主动选择仍按原流程提交，不把展示 no-write 误解为禁用用户操作。
+### Requirement: 选择器恢复官方单值 effort
+受管宿主 SHALL 删除仅服务 actual/next 双值展示的 ModelDirectory.lastUsed 接缝、caption helper 与 locale；trigger、root effort 行和 menu SHALL 依官方 current 展示单一 effort，不出现“最近实际/下次”或 Last used/Next 双值文案。展示分组、统一搜索、真实 provider/model 的 click/keyboard/effort 提交、core modelSelection 投影及 metadata 校验/detach SHALL 保留；不得维护两套 value helper 或手改 generated dirs。
 
-#### Scenario: 同模型 actual 与 next effort 同时可见
-- **GIVEN** 同 provider/model 的 lastUsed high、next medium
-- **WHEN** 渲染选择器 trigger、root effort 行并打开 effort 子菜单
-- **THEN** 前两处同时显示实际 High 与下次 Medium，effort 子菜单仍勾选 Medium，未发生选择写入；用户主动选 High 才提交原 provider/model 与 High
+#### Scenario: 单值 effort 与选择一致
+- **GIVEN** 官方 current 为同模型 high（或手选 medium/low）
+- **WHEN** 渲染 trigger、root effort 行和 effort menu
+- **THEN** 只展示官方 current 的一个 effort，menu 勾选相同值；主动选择仍按原 provider/model 与选定 effort 提交，无展示写入
 
-#### Scenario: 新手选 intent 不被实际请求抹除
-- **GIVEN** 已有 lastUsed high、next medium，用户后来选择 low
-- **WHEN** 官方投影再记录同模型实际 high 并重新渲染
-- **THEN** next/current/pending 仍表示 low，显示实际 High 与下次 Low，lastUsed仍high，不产生显示写回或defaults保存
-
-#### Scenario: 无差异或不同模型维持普通展示
-- **GIVEN** lastUsed 缺失、与 next effort 相同，或 lastUsed 和 next 的 provider/model 不同
-- **WHEN** 渲染选择器
-- **THEN** 不显示同模型 effort 差异提示，不伪造实际 effort，普通选择与 MANUAL 请求行为不变
+#### Scenario: 分组搜索与精确选择保留
+- **GIVEN** Claude/GPT 展示组与普通 provider 共存
+- **WHEN** 搜索组标签、型号或完整 id，并使用 click 或 keyboard 接受
+- **THEN** 保持既有可见顺序、唯一高亮与真实 provider/model/effort 提交，展示组 key 不充当 provider

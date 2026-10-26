@@ -44,7 +44,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     catch (error) { ctx.logger.warn(`auto-model-routing: could not record the judgement: ${String(error)}`) }
   }, () => settings.read().settings)
   const feedback = new FeedbackBook(resolve(home, 'state/auto-model-routing/allocation-feedback.jsonl'))
-  const policy = policyHost(ctx, { feedback, jev, state, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2')), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(true) })
+  // Official writer is available only while the session controller is mounted.
+  let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
+  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2')), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(true) })
   const toastOn = (): boolean => settings.read().settings.decisionToast
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, judged: (sessionId, value) => router.judged(sessionId, value) })))
   ctx.on('agent/created', ({ agent, source }) => {
@@ -84,7 +86,6 @@ export function apply(ctx: Context, config: Config = {}): void {
     book.assistant(session.id, data.message.id, data.turn)
   })
   // Official selection writer, set while the session controller is available.
-  let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
   const inflight = new Map<string, string>()
   ctx.on('agent/request', async (payload, next) => {
     const config = await next()

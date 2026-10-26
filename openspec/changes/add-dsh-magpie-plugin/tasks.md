@@ -185,3 +185,15 @@
 - 当前正式launcher d1fbbf15…ab279图的model-display、native-effects、isolated-loop probe通过；30项当前fingerprint inputs重算与published相等。五包同physical LLM。证明的是当前编译图与source-input新鲜度，不是丢失deployment584 receipt、clean upstream source、网络Remote或GUI E2E。
 - 现成Playwright1.64/Chrome可启动；新incognito仅GET既有3080得401，未读HTTPbody/DOM/boot/cookies，不能勾GUI。官方CLI的token URL仅在新boot首次宣布；未发现安全attach/reprint既有server入口，未执行会boot的命令。
 - Responses optional-tools strict兼容由另一GPT owner调查，当前无本收尾验证结果；等待parent独立review后统一部署。本轮不import该plugin lib、不碰其源码/test/build。后续GPT tool实测须用既有initialized宿主和独立临时session，不写全局defaults、不读key、不用旧会话或本机Claude/codex代替。
+
+## 19. AMD3 — 用户新授权的官方同步与单值 effort
+
+旧119条及已勾选历史不改；原18.3/18.5/18.6的no-select/双值要求由本组明确废止，不当作当前待实现目标。仍保留原4个未完成项。
+
+- [x] 19.1 先修订现有规划，废止禁止 selectModel/global-default 与 actual/next 需求；追加有界 review pending/test ledger，不伪造旧审批。
+- [x] 19.2 先跑真实 AgentLoop/controller 主请求与官方选择/defaults同 effort、失败告警、无额外 child/MANUAL 写入的 RED；选择器单值 RED，保留分组/search/真实identity回归。
+- [x] 19.3 最小接通 policy-v2 主请求官方同路由 effort 同步；删 actual/next 独有 patch/tests/helper，更新 pin/verifier及双方双语README，不增加配置、不改adapter/传输。
+- [x] 19.4 实跑 focused/full AUTO、typecheck/build、隔离 pinned Host-source dedicated suite、patch apply check、governance/whitespace/strict；记录source SHA和实际RED/GREEN及未验收边界，不启动fullgraph/restart/sync/deploy。
+- [ ] 19.5 parent 独立复核 AMD3 源码/规划及正式图 freshness、GUI验收：parent 源码/构建复核已 APPROVE；最终正式图验证、production sync×2（第二次no changes）完成；只剩用户重启后的GUI验收，不能将该整项或full change标PASS。
+
+AMD3 local snapshot：119/124 complete（旧115/119历史保留；新增19.1–19.4完成，19.5独立复核/正式图/GUI仍pending），不是0pending或全目标PASS。

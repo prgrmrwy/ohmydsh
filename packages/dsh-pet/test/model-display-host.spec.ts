@@ -56,7 +56,7 @@ it('keeps ungrouped model metadata unchanged', async () => {
   expect(await ctx.llm.resolveModelInfo('ordinary', 'plain')).toEqual({ provider: 'ordinary', id: 'plain', name: 'Plain' })
 })
 
-it('renders actual request use separately while preserving both stale and newer user intent in real projection state', async () => {
+it('directory keeps official current selection without a lastUsed display value', async () => {
   const ctx = await harness()
   await ctx.plugin(Sessions)
   await ctx.plugin(Projections)
@@ -74,12 +74,14 @@ it('renders actual request use separately while preserving both stale and newer 
   await catalog.load()
   const selectModel = async () => { throw new Error('display must not write selection or global defaults') }
   const directory = new ModelDirectory({ selectModel }, session.id, () => true, catalog, projected, () => false)
-  expect(directory.store.getSnapshot()).toMatchObject({ current: next, lastUsed: actual })
+  expect(directory.store.getSnapshot().current).toEqual(next)
+  expect(directory.store.getSnapshot()).not.toHaveProperty('lastUsed')
   const newer = { ...next, reasoningEffort: 'low' }
   session.append('model/selection', newer)
   session.append('request/header', { header: { config: actual }, reason: 'initial' })
   projected.set(ctx.sessionProjections.snapshot(session).values.modelSelection)
-  expect(directory.store.getSnapshot()).toMatchObject({ current: newer, lastUsed: actual })
+  expect(directory.store.getSnapshot().current).toEqual(newer)
+  expect(directory.store.getSnapshot()).not.toHaveProperty('lastUsed')
   expect(ctx.sessionProjections.snapshot(session).values.modelSelection).toEqual({ next: newer, lastUsed: actual })
   directory.dispose()
 })

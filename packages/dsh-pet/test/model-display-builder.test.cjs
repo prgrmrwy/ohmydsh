@@ -19,6 +19,8 @@ test('model display patch is pinned, built, copied, overridden, fingerprinted an
   assert.ok(launcher.includes("[join(here, 'verify-model-display.mjs'), '--graph', directory]"))
   for (const test of ['host', 'react', 'routing', 'popup']) assert.ok(launcher.includes(`model-display-${test}.spec.`), `fingerprint ${test} test`)
   assert.ok(build.includes("join(outputRoot, 'agent-artifacts', 'model-display-artifacts')"), 'formal build output must stay under the existing ignored artifacts root')
+  assert.doesNotMatch(patch.toString(), /actualAndNext|displayEffortLabel|lastUsed/)
+  assert.doesNotMatch(patch.toString(), /^diff --git a\/packages\/client\/ui-model-selection\/src\/client\/(directory|locales)\.ts/m)
   assert.equal(template.packages.length, 5)
   assert.ok(template.packages.some(pkg => pkg.name === '@deepseek-ai/dsh-api-remotes'), 'generated Remote consumer must not retain the old response codec')
   assert.doesNotMatch(patch.toString(), /^diff --git a\/packages\/core\/agent\//m)

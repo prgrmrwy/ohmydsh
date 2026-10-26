@@ -83,27 +83,21 @@ it('preserves Tab acceptance, Escape/back and Shift+Tab focus paths with filtere
   expect(screen.getByRole('menuitem', { name: /^Model/ })).toBe(document.activeElement)
 })
 
-it('visibly shows actual effort and next intent without mutating either; effort checks still use next', async () => {
-  const actual = { ...next, reasoningEffort: 'high' }
-  const b = setup({ lastUsed: actual })
-  expect(b.trigger.textContent).toContain('Last used: High · Next: Medium')
+it('displays one official effort in the trigger, root and menu and submits the exact route', async () => {
+  // Stale external state must not restore the removed dual-value caption.
+  const b = setup({ lastUsed: { ...next, reasoningEffort: 'high' } })
+  expect(b.trigger.textContent).toBe('GPTMedium')
+  expect(b.trigger.getAttribute('aria-label')).not.toMatch(/Last used:|Next:/)
   fireEvent.click(b.trigger)
-  expect(screen.getByRole('menuitem', { name: /^Effort/ }).textContent).toContain('Last used: High · Next: Medium')
+  expect(screen.getByRole('menuitem', { name: /^Effort/ }).textContent).toBe('EffortMedium')
   fireEvent.click(screen.getByRole('menuitem', { name: /^Effort/ }))
   expect(screen.getByRole('menuitemradio', { name: 'Medium' }).getAttribute('aria-checked')).toBe('true')
   expect(b.select).not.toHaveBeenCalled()
-  act(() => b.directory.set({ ...b.directory.getSnapshot(), current: { ...next, reasoningEffort: 'low' } }))
-  expect(b.trigger.textContent).toContain('Last used: High · Next: Low')
-  expect(b.directory.getSnapshot().lastUsed).toEqual(actual)
   fireEvent.click(screen.getByRole('menuitemradio', { name: 'High' }))
-  await waitFor(() => expect(b.select).toHaveBeenCalledWith(actual))
-})
-
-it('leaves ordinary matching efforts and different-route intents unchanged', () => {
-  const b = setup({ lastUsed: { ...next } })
-  expect(b.trigger.textContent).not.toContain('Last used:')
-  act(() => b.directory.set({ ...b.directory.getSnapshot(), lastUsed: { ...next, provider: 'other', reasoningEffort: 'high' } }))
-  expect(b.trigger.textContent).not.toContain('Last used:')
+  await waitFor(() => expect(b.select.mock.calls).toEqual([[{ ...next, reasoningEffort: 'high' }]]))
+  expect(b.trigger.textContent).toBe('GPTHigh')
+  act(() => b.directory.set({ ...b.directory.getSnapshot(), current: { ...next, reasoningEffort: 'low' } }))
+  expect(b.trigger.textContent).toBe('GPTLow')
 })
 
 it('popup fuzzy search uses optional aliases without replacing labels or changing ordinary commands', () => {

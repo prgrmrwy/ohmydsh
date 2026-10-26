@@ -55,7 +55,7 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 ### 主模型不换，子任务独立选配
 
-- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；不修改主 provider/model，也不改写全局模型默认值。
+- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；通过官方 `selectModel` 同步选定 effort，同时保存全局默认值。
 - **fresh 子任务**：能力需求为 `bounded / analytical / frontier`，推理投入独立判断。Claude 能力槽为 Haiku / Sonnet / Opus 5.5；GPT 为 Luna / Sol / Sol。实际路由必须同时满足当前目录、支持的 effort 和官方子智能体允许列表。Magpie 保留真实 provider 与家族前缀完整模型 ID，不回退到本地入口。
 - **尊重显式选择**：只指定模型或投入时，仅判断另一维；两者都指定则不请求 Jev，只校验路由。缺少任务目标或范围时停止委派，不猜。
 - **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在子任务首次请求前绑定精确身份。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束。fork 和未绑定创建路径暂不支持，不静默替换。
@@ -78,7 +78,7 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 默认策略接受 `dsh-magpie`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。未知家族需显式 model。根会话 AUTO 且显式 `policy: legacy` 时，两种 Magpie 预览均在 Jev 前拒绝；MANUAL 仍直接返回 `routed: false`，不判档、不写状态。已绑定子实例恢复原路线。
 
-主请求可以正确使用 High，同时官方投影保留用户的 Next Medium。默认 AUTO 不为抹平显示调用 `selectModel`，因为官方 API 会保存全局 defaults，并可能覆盖下次 intent；MANUAL 请求保持原样。在 ohmydsh 中，Pet 受管 Host 扩展在同模型 trigger/根 effort 行展示 **最近实际：High · 下次：Medium**，勾选与提交仍按 Next。扩展一起重建 `llm`、`api-session-controller`、`api-remotes`、`client-ui-model-selection`、`client-ui-commands`（均为 `@deepseek-ai/dsh-` 包）。stock rc.2 仍可使用插件 route，但模型列表保持 flat、无 actual/next 文案。展示 metadata 不改变 route、model id 或名字。见 [Magpie 配置与展示前提](<../dsh-magpie/README.zh.md#模型菜单分组与实际下次-effort>)；本地测试不等于已部署或 live GUI 验收。
+AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方 `selectModel` 同步同一 provider/model，并允许保存全局默认值。官方选择器只显示一个 effort。MANUAL 请求原样通过，已绑定子会话不写主选择；同步失败会记录告警，本次请求仍保留选定 effort。Magpie 菜单分组仍需 ohmydsh 受管五包 Host 扩展，stock rc.2 保持 flat 列表。见 [Magpie 配置与展示前提](<../dsh-magpie/README.zh.md#模型菜单分组与-effort>)；本地测试不等于已部署或 live GUI 验收。
 
 ## 须知
 

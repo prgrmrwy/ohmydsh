@@ -50,7 +50,7 @@ index 1446cc4..78b076a 100644
    }
    return ordered.filter(o => o.label.toLowerCase().includes(query) || (o.detail?.toLowerCase().includes(query) ?? false))
 diff --git a/packages/client/ui-model-selection/src/client/ModelSelect.tsx b/packages/client/ui-model-selection/src/client/ModelSelect.tsx
-index fbeda5d..3245c68 100644
+index fbeda5d..7ba8cc6 100644
 --- a/packages/client/ui-model-selection/src/client/ModelSelect.tsx
 +++ b/packages/client/ui-model-selection/src/client/ModelSelect.tsx
 @@ -40,7 +40,7 @@ import {
@@ -82,60 +82,7 @@ index fbeda5d..3245c68 100644
    })).filter(group => group.models.length > 0), [groups, query, showSearch])
    const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map(model => ({
      provider: group.id, model: model.id,
-@@ -124,6 +126,16 @@ export function ModelSelect(
-     : effectiveEffort === undefined
-       ? t('effort.providerDefault')
-       : reasoning.efforts.find(level => level.id === effectiveEffort)?.name ?? effectiveEffort
-+  const lastUsed = state.lastUsed
-+  const actualEffort = lastUsed?.reasoningEffort
-+  const actualLabel = actualEffort === undefined
-+    ? t('effort.providerDefault')
-+    : reasoning?.efforts.find(level => level.id === actualEffort)?.name ?? actualEffort
-+  const displayEffortLabel = lastUsed != null && reasoning !== undefined
-+    && lastUsed.provider === state.current?.provider && lastUsed.model === state.current.model
-+    && actualEffort !== effectiveEffort
-+    ? t('effort.actualAndNext', { actual: actualLabel, next: effortLabel ?? t('effort.providerDefault') })
-+    : effortLabel
-   const effortChoices = useMemo<readonly EffortChoice[]>(() => reasoning === undefined
-     ? []
-     : [
-@@ -416,14 +428,14 @@ export function ModelSelect(
-     ? t('trigger.loading')
-     : currentChoice?.model.name
-       ?? (state.current === null ? t('trigger.fallback') : `${state.current.provider}/${state.current.model}`)
--  const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
-+  const triggerLabel = displayEffortLabel === undefined ? modelLabel : `${modelLabel} · ${displayEffortLabel}`
-   const triggerAria = waiting
-     ? t('trigger.loading')
-     : state.current === null
-       ? t('trigger.selectAria')
--      : effortLabel === undefined
-+      : displayEffortLabel === undefined
-         ? t('trigger.aria', { model: modelLabel })
--        : t('trigger.ariaEffort', { model: modelLabel, effort: effortLabel })
-+        : t('trigger.ariaEffort', { model: modelLabel, effort: displayEffortLabel })
-   itemRefs.current = []
-   let itemIndex = 0
-   let modelIndex = 0
-@@ -466,7 +478,7 @@ export function ModelSelect(
-       >
-         <IconDataOutlineRegular className={css.triggerIcon} size={16} />
-         <span className={css.triggerLabel}>{modelLabel}</span>
--        {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
-+        {displayEffortLabel !== undefined && <span className={css.triggerEffort}>{displayEffortLabel}</span>}
-         {busy
-           ? <StateDot state="ongoing" />
-           : <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
-@@ -495,7 +507,7 @@ export function ModelSelect(
-               {reasoning !== undefined && (
-                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
-                   <span className={css.cellLabel}>{t('menu.effort')}</span>
--                  <span className={css.cellValue}>{effortLabel}</span>
-+                  <span className={css.cellValue}>{displayEffortLabel}</span>
-                   <IconChevronRightOutlineRegular className={css.cellChevron} />
-                 </button>
-               )}
-@@ -558,7 +570,7 @@ export function ModelSelect(
+@@ -558,7 +560,7 @@ export function ModelSelect(
                >
                  {filteredGroups.map((group) => {
                    return (
@@ -144,35 +91,6 @@ index fbeda5d..3245c68 100644
                        {group.models.map((model) => {
                          const index = modelIndex++
                          const selected = state.current?.provider === group.id && state.current.model === model.id
-diff --git a/packages/client/ui-model-selection/src/client/directory.ts b/packages/client/ui-model-selection/src/client/directory.ts
-index 41f6783..ae3b7ce 100644
---- a/packages/client/ui-model-selection/src/client/directory.ts
-+++ b/packages/client/ui-model-selection/src/client/directory.ts
-@@ -18,6 +18,8 @@ import type { ModelCatalogDirectory } from './catalog.ts'
- export interface ModelDirectoryState {
-   /** Saved selection, retained even when its provider or model leaves the catalog. */
-   current: ModelSelection | null
-+  /** Latest actual request selection, for display only; never replaces next intent. */
-+  lastUsed?: ModelSelection | null
-   /** Saved effort caption retained when the selected model is unavailable. */
-   retainedEffort?: string
-   /** Whether the current selection is present in the available catalog; null while unresolved. */
-@@ -166,6 +168,7 @@ export class ModelDirectory {
-     if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
-       this.store.set({
-         current: catalog.value === null ? null : this.store.getSnapshot().current,
-+        lastUsed: projected?.lastUsed ?? null,
-         ...retainedEffort === undefined ? {} : { retainedEffort },
-         routable: null,
-         groups: catalog.value?.groups ?? [],
-@@ -181,6 +184,7 @@ export class ModelDirectory {
-       && group.models.some(model => model.id === selection.model))
-     this.store.set({
-       current: selection,
-+      lastUsed: projected.lastUsed,
-       ...retainedEffort === undefined ? {} : { retainedEffort },
-       routable,
-       groups: catalog.value.groups,
 diff --git a/packages/client/ui-model-selection/src/client/index.ts b/packages/client/ui-model-selection/src/client/index.ts
 index ca30921..429a95c 100644
 --- a/packages/client/ui-model-selection/src/client/index.ts
@@ -203,26 +121,6 @@ index ca30921..429a95c 100644
          ...(directory.current !== null
            && directory.current.provider === group.id
            && directory.current.model === model.id
-diff --git a/packages/client/ui-model-selection/src/client/locales.ts b/packages/client/ui-model-selection/src/client/locales.ts
-index a522b55..98443bb 100644
---- a/packages/client/ui-model-selection/src/client/locales.ts
-+++ b/packages/client/ui-model-selection/src/client/locales.ts
-@@ -23,6 +23,7 @@ export const zh = {
-   'menu.model': '模型',
-   'menu.effort': '推理等级',
-   'effort.providerDefault': 'Default',
-+  'effort.actualAndNext': '最近实际：{actual} · 下次：{next}',
-   'status.loading': '正在刷新模型列表…',
-   'error.action': '模型操作失败：{message}',
-   'error.sessionInUse': '当前会话已被占用，可能是其他正在运行的 DSH 导致的（如其他 dsh web、桌面端），请退出其他正在运行的 DSH 后重试。',
-@@ -53,6 +54,7 @@ export const en = {
-   'menu.model': 'Model',
-   'menu.effort': 'Effort',
-   'effort.providerDefault': 'Default',
-+  'effort.actualAndNext': 'Last used: {actual} · Next: {next}',
-   'status.loading': 'Refreshing model list…',
-   'error.action': 'Model operation failed: {message}',
-   'error.sessionInUse': 'This session is already in use, possibly by another running DSH instance (such as dsh web or the desktop app). Quit other running DSH instances and try again.',
 diff --git a/packages/llm/llm/src/index.ts b/packages/llm/llm/src/index.ts
 index d67245d..9cb8dd2 100644
 --- a/packages/llm/llm/src/index.ts

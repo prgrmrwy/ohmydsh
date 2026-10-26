@@ -32,17 +32,21 @@ Magpie 已经通过 gateway key 对外提供了只读的模型目录（含 `owne
 - `dsh-magpie`：Magpie 网关 provider 插件，覆盖连接与凭据、模型目录与可见性、默认 effort、按 provider 分组的只读用量卡片、Codex 速度切换，以及只读和直连的边界。
 
 ### Modified Capabilities
-- `auto-model-routing`：为当前默认策略新增双 Magpie transport 兼容与 actual/next effort 纯显示契约；不改 current specs，不把 legacy 的 selectModel 同步语义搬到新默认策略。
+- `auto-model-routing`：为当前默认策略新增双 Magpie transport 兼容；AMD3 按用户新授权同步官方选择与全局 defaults，恢复单值 effort（不在本轮同步 current specs）。
 - `sidebar-session-provider-icon`：在 Magpie 品牌的 route 名单中明确列出 `dsh-magpie`，并为它补一个正向回归场景。原有前缀规则不变。
 
 ## Impact
 
 - 依赖：`@earendil-works/pi-ai`（MIT，0.87.x）、`undici`（私有直连 dispatcher）。
 - 代码：新增 `packages/dsh-magpie/`，包括 host 半区（LLM adapter、目录与用量同步、设置路由）和 web 半区（设置页、速度切换）。另外给 `packages/sidebar-session-provider-icon` 增加回归测试（源码不变）。
-- 宿主：复用 `packages/dsh-pet/compat/subagent/` 的 pinned-source 受管 patch/build/provenance/hash 与测试 owner，覆盖模型展示组和 actual/next effort；plugin catalog owner 仅从 raw owned_by 输出 displayGroup，不改变 CatalogModel.provider fallback 或设置偏好键。宿主测试/构建由其 owner 提供证据，本轮规划 reconcile 不代跑或代宣称通过。
+- 宿主：复用 `packages/dsh-pet/compat/subagent/` 的 pinned-source 受管 patch/build/provenance/hash 与测试 owner，覆盖模型展示组；AMD3 删除 actual/next 独有显示接缝；plugin catalog owner 仅从 raw owned_by 输出 displayGroup，不改变 CatalogModel.provider fallback 或设置偏好键。宿主测试/构建由其 owner 提供证据，本轮规划 reconcile 不代跑或代宣称通过。
 - 配置：`dsh.yaml` 新增条目；两个 README 的 Plugins 段要加上；新包要声明 `ohmydsh.docTier`，并满足 `tests/repo-docs-governance.test.mjs` 对该 tier 的 README 规则。
 - 外部依赖：Magpie 网关端点 `/v1/models`、`/v1/responses`、`/v1/chat/completions`、`/v1/magpie/quotas/cards`、`POST /v1/magpie/quotas/refresh`。前提：网关允许远端访问（打开了局域网共享，或 `MAGPIE_ADDR` 监听在非回环地址，CT105 属于后一种）；key 为启用状态，并且 key 本身有权读取卡片（不受限的 key 天然可以；受限的 held key 需要 Quotas 权限，而且只看得到自己范围内的卡片）。2026-10-25 已用当前 key 实测通过。
 - AUTO（本轮用户明确批准“纳入本轮，继续完成”）：新默认策略兼容 `dsh-magpie` 与旧 `dsh-magpie-connect` 精确 transport，保留完整 model ID、实时能力/effort cap、父 captured allowlist，不扩大允许列表、不改 legacy 语义。主 request 原本不按 provider 过滤，实测 mock adapter/request-header 已为 high，而官方投影可保留 lastUsed high / next medium；这不是“新 route 暂不判档”，也不是显示已修复。经 Pet compat 仅透出已有 lastUsed，在同 provider/model 的 effort 不同时显示“实际 High · 下次 Medium”；pending/check/提交仍按 next，不调用会保存全局默认值的 selectModel，MANUAL 请求不变。
 - 仍在本 change 之外：`home-network-model-guard` 的停用与网络代理运维；不得借本轮兼容/显示修改它们。
 - 网络运维（本 change 之外）：Magpie 稳定后，可以移除 Ken-WSL 的 usip TUN。
 - 后续：在 DSH 里「使用 Codex 重置卡」，需要 Magpie 在网关端口新增端点。目前只有 Magpie GUI 的 `POST /api/usage/codex-reset`，它走 GUI 自己的认证，插件按边界不使用。本 change 只做只读展示。
+
+## AMD3 — 用户授权的 effort 单值同步（2026-10-26）
+
+本节废止上文 AMD2 的“禁止 selectModel/全局 defaults 写入”与 actual/next 双值显示要求：用户明确允许 AUTO 调档更新全局默认，以免区分更多概念。默认 policy-v2 主请求在当前 provider/model 不变的前提下，以选定 effort 调用并等待官方 selectModel；官方同时保存全局 defaults。选择器恢复官方单值 effort，移除仅服务双值的目录/locale/helper 接缝，分组/搜索/metadata 保留。MANUAL、精确 child 绑定、effort cap 与 legacy 不变；无新配置，不动 Magpie adapter/传输。旧119任务与审查报告是历史，不覆盖本修订；本增量待独立 recheck，不宣称全 change PASS。

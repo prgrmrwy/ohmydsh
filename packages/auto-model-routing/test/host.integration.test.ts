@@ -86,7 +86,7 @@ async function harness(reply: Reply, options: { reject?: () => boolean; selectFa
  return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
-it('policy-v2 state does not leak old tier decisions or global selection sync', async () => {
+it('policy-v2 state does not leak old tier decisions or sync an unchanged effort', async () => {
  const h=await harness(tier('complex'))
  await h.setMode('AUTO');await h.run('legacy task')
  const before=h.selections.length

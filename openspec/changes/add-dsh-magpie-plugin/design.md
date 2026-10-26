@@ -36,7 +36,7 @@
 - 一个可发布的自研插件，替代 `dsh-magpie-connect` 和 `magpie-display-name-shim`，并能作为日常执行入口：工具往返、取消、超时都可验收。
 - 设置页按 provider 分组，包括只读卡片、手动刷新（单卡和全部）、模型可见性、DSH 侧默认 effort。
 - Codex 速度切换。
-- 本轮授权的逐模型展示组与 AUTO 双 Magpie transport 兼容、actual/next effort 纯显示，保持真实路由与用户下一次选择不变。
+- 本轮授权的逐模型展示组与 AUTO 双 Magpie transport 兼容、主 effort 官方单值同步（AMD3），保持真实 provider/model 不变。
 
 **Non-Goals:**
 - 按上游 provider 注册多个真实 route。AMD2 的选择器展示分组不属于这一 non-goal；它须与真实 route 身份分离。
@@ -46,7 +46,7 @@
 - 用量历史、请求统计、`/v1/magpie/route` 实时路由展示。
 - `/v1/messages` 直通；图片和视频生成工具。
 - 目录持久化缓存；后台定时轮询目录或卡片。
-- 改变 AUTO 策略/legacy 语义或扩大 allowlist；本轮仅纳入必要 transport 兼容与显示接缝。home-network-model-guard 改动仍不在范围内。
+- 改变 AUTO 判档算法/legacy 语义或扩大 allowlist；AMD3 仅同步主请求选定的 effort 到官方选择。home-network-model-guard 改动仍不在范围内。
 - 推送独立仓库、发布 npm、提交商店 PR，这些按发布文档另行进行。
 
 ## Decisions
@@ -186,12 +186,19 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 - CSS 仅作用于该 marker：隐藏自身行 fallback SVG，用本地鸟形 SVG mask 和 `background-color:currentColor` 显示 16px 图标，不依赖外网资源、不写颜色常量、不改变 label/click/焦点行为。SVG 来源和 MIT notice 追加至本包 THIRD-PARTY-NOTICES，既有 notices 不变。
 - apply 安装一次样式与 observer，支持设置对话框晚挂载/重建；dispose 断开 observer、移除所有自身 marker 和样式。找不到自身行、缺 document/body 时静默不修改页面。不观察自身写入的 attributes，以免自触发循环。
 
-### D15 AUTO transport 兼容与 actual/next effort 纯显示（本轮授权，待独立 recheck）
+### D15 AUTO transport 兼容与 actual/next effort 纯显示（AMD2 历史，显示部分由 D16 废止）
 - **事实**：`policy-host.ts` 的主 pre-step/request 不按 provider 过滤；新旧 Magpie 的真实 mock adapter 与 request-header 都收到 high。官方 modelSelection 投影保留 pending medium，因此 lastUsed=high、next=medium，selectModel 调用数为0。主 wire 调查证明执行已生效，不证明选择器显示已修复。current auto-model-routing spec:22–34 明确禁止新默认策略为同步显示调用会保存全局 defaults 的 selectModel；legacy:36 起仅限显式回滚，保持原语义。
 - **兼容选择**：只扩展 AUTO 的4个源码面（policy-v2 的 POLICY_PROVIDERS/magpieProvider、policy-store、settings-host、subagent-tool）及5份回归测试。新旧 transport 共用分类但不互为 alias；目录、允许列表、持久记录、实际请求仍核对精确 provider + 完整 model ID，保留实时能力、effort cap 与父 captured allowlist。未知能力家族仍须显式模型，不自动把 Magpie 切为本地 claude/codex，不扩大 allowlist。
 - **显示选择**：同一 Pet compat owner 在 ModelDirectory 只透出官方已有 lastUsed；当 lastUsed 与 next 的 provider/model 相同且 effort 不同时，在 trigger 和 root effort 行展示“实际 High · 下次 Medium”（英文对应文案亦区分 actual/next）。current/pending/check、effort menu 选中态与提交继续取 next。不同 provider/model、没有 actual 或 effort 相同时沿用普通展示，不凭名称推断请求，不写 selection/projection/global defaults。
 - **备选否决**：调用 selectModel 会污染全局默认且覆盖用户 pending intent；把 current 改成 lastUsed 会改变下一次选择与提交；另建 runtime owner 或改 generated dirs 会破坏现有受管构建/provenance边界。
 - **验证边界**：兼容套件作者报告 RED45(39pass/6fail)→GREEN45、最终31files/220tests与typecheck通过；显示接缝、宿主产物/build/hash及GUI由各自owner交证，不以兼容套件或主wire调查代验。
+
+### D16 AMD3 官方 effort 同步与单值选择器（2026-10-26，新授权）
+- 用户明确废止 D15 的“不调用 selectModel/不写全局 defaults”限制及 actual/next 双值需求；D15 的精确 transport、能力/cap/allowlist 与 child 恢复不变量继续生效。current AUTO spec:23/34 仍是旧发布契约，本 change delta 覆盖新授权范围，暂不做 current-spec sync。
+- 默认 policy-v2 在主 `agent/request` 的 `await next()` 与能力解析/模式复核之后得到最终 effort；与官方合成值不同时，复用 index 内 sessionController 生命周期接缝，等待 `selectModel({sessionId,provider:config.provider,model:config.model,reasoningEffort})`，不修改 provider/model。官方 commands.selectModel 验证后 selectForNextRequest，并后台 saveSelection 全局 defaults（rc.2 published types/commands.js:145–168）。不能自行写 defaults 文件或引入第二套 value helper。
+- 官方同步异常或 writer 尚不可用时记录 logger warning，保留官方原请求 effort，避免选择器与实际请求再次分裂，也不将目标 effort 标为 applied；相同官方 effort 不调用，MANUAL/无支持/child 不同步。writer 随 controller 注入/卸载而更新，缺失不得静默视为成功；legacy 路径保持原状。真实 AgentLoop 回归证明同次请求同步顺序与无递归。已进入官方 selectModel 的调用不支持取消；切 MANUAL 阻止后续 AUTO 请求，不事后恢复旧值或覆盖用户后来的手选。
+- 删除 patch 中 ModelDirectory.lastUsed 透出、actualAndNext locale/caption 及其独有 helper；trigger/root/menu 使用原官方 effortLabel/current 语义。保留 displayGroup 校验/detach、bucket tuple keys、统一 search、click/keyboard 精确真实 identity 和 `/model`。不手改 generated dirs；更新 patch SHA pin，后续正式图须重建五包与 aggregate codec 并重新核对 fingerprint。
+- 测试先按新 delta 写 RED：同次真实请求 adapter/header 与官方选择/全局 defaults 一致；同步错误可见且请求不丢；相同 effort、MANUAL、child 零额外同步；单值 trigger/root/effort 与已有分组搜索精确选择回归。此增量待独立 recheck，旧 AMD2 APPROVE 不借用。
 
 ## Risks / Trade-offs
 
@@ -205,7 +212,7 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 - **[受限 key 冷启动时用量为空]** → 空状态给出管理员操作指引。这是 Magpie 当前版本的行为，插件不绕过。
 - **[换 key 后，进行中的生成仍用旧 key 跑完]** → 这是有意的取舍，用户已确认。旧 key 是否失效由 Magpie 管理员决定。
 - **[两个 Magpie 插件并存期间，选择器里有两个分组]** → 过渡期可以接受。稳定后禁用旧插件。
-- **[AUTO 实际 effort 与下一次手选不一致]** → 本轮纳入兼容与纯显示；保留 lastUsed/next 双事实，不为显示调用 selectModel、不写全局 defaults，独立验证仍 open。
+- **[AUTO 官方选择同步失败]** → D16 等待官方接口并记录告警，不吞掉失败；保留官方原 effort，使请求与选择保持一致，不静默换模型或停用 AUTO。
 - **[外出走 Tailscale 时经 DERP 中继，延迟变高]** → 首实际内容前保留既定 90s 预算，空结构事件不提前切为 60s；该边界不保证任意真实上游延迟都能在预算内完成。
 
 ## Migration Plan
@@ -217,4 +224,4 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 
 ## Open Questions
 
-原官方接缝缺失已经核实，所需 Pet compat 受管扩展已获本轮授权，不再作为待用户授权的最终 block。菜单分组与 actual/next 显示仍待实现 owner 的证据、独立 recheck 与真实 GUI 验收；未完成不算通过。以下仍属后续事项：Magpie 上游是否在网关端口提供「使用 Codex 重置」的端点；Ken-WSL 是否移除 usip TUN（属网络运维）。
+原官方接缝缺失已经核实，所需 Pet compat 受管扩展已获本轮授权，不再作为待用户授权的最终 block。AMD3 官方同步与单值显示待本轮证据、独立 recheck 与真实 GUI 验收；未完成不算通过。以下仍属后续事项：Magpie 上游是否在网关端口提供「使用 Codex 重置」的端点；Ken-WSL 是否移除 usip TUN（属网络运维）。

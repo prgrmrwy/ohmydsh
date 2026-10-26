@@ -93,7 +93,7 @@ const UPSTREAM = {
   toolsPatchSha256: '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04654f7b13a3',
   /** SHA-256 of the managed-effects owner patch. */
   managedEffectsPatchSha256: '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61',
-  modelDisplayPatchSha256: '0a9980ef42f621ba1977c3541196c1cb13bbcfab0eb146104b352f2c17f8ae19',
+  modelDisplayPatchSha256: '7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f',
 }
 
 const run = (command, args, cwd = here, options) => runCompatCommand(command, args, cwd, options)
