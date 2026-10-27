@@ -416,3 +416,13 @@ customizations:
     enabled: true
     brief: 出口守卫默认豁免 dsh-magpie provider
     note: 'change guard-provider-exemptions。仅按真实 route ID 精确匹配，UI 分组无关；本机设置可用 exemptProviders:[] 撤销。删除旧 dsh-magpie-connect 接入，本机数据与旧会话保留。回滚：禁用本 patch 并确认本机配置无显式豁免，再 build+重启。'
+
+  - id: dsh-mobile
+    type: package
+    source: remote
+    spec: dsh-mobile@0.6.18
+    version: 0.6.18
+    integrity: sha512-rpbKuW7BnCwdeh3FEYpMD1JZRitO/bneM/cgBUVdz7/Xvyjltv6hFx4XVfD9N8hcgjjEXqz9S+uqoz26TndEJA==
+    enabled: true
+    brief: 手机访问同一 DSH 会话(Android App/浏览器,局域网与可选远程网关)
+    note: '第三方 https://github.com/saya-ch/dsh-mobile(Apache-2.0)。2026-10-27 核对 npm 0.6.18 来源、peer/client inject、上游 README 与 bundle:Host 配对 HTTPS 网关+移动 UI+提问卡片修复,默认 initiallyEnabled:false,不开放原 3080。README 记录 DSH 0.2.0-rc.2 回归,不等于本机真机验收。信任面:配对手机可完整控制 DSH;证书/设备/定制保存在 $DSH_HOME/mobile-access;可选隧道组件按需确认下载,远程须可靠 HTTPS,非 Relay E2EE 方案;/mobile 扩展以本机权限运行。问题记录:旧 WebView 语法与自定义 CSS 可能不兼容,第三方 WS 须精确路径放行。升级复核:peer/inject、网关鉴权及实际手机跨网;不自动运行 setup/启用通道。移除:enabled:false → dsh build → 用户重启,配对与证书保留。'

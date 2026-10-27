@@ -177,6 +177,8 @@ tests/                   仓库级测试
 - [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — 增加 `/btw` 旁问：只依据当前上下文一次性作答，不执行工具，也不写回主会话。暂时从 fork 的 release 安装上游 MichengAI/dsh-btw 的 PR #16 构建。
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — 把 Magpie AI 网关的模型接入模型选择器，与直连 provider 并存。
 
+- [dsh-mobile](https://github.com/saya-ch/dsh-mobile) — 通过 Android App 或手机浏览器访问同一份 DSH 会话，支持配对局域网与可选远程网关。
+
 ### 官方可选
 
 - [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — 官方的定时自动化页面、schedule 工具与时间上下文。
