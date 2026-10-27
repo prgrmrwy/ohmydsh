@@ -92,6 +92,6 @@
 
 ## 9. Verification and archive
 
-- [ ] 9.1 Generate `verify.md` according to the Anvil verify instructions: every test-plan row is green, the whole suite introduces no new skips, and the review is not stale. Report the strict validation exit code as it actually is.
+- [x] 9.1 Generate `verify.md` according to the Anvil verify instructions: every test-plan row is green, the whole suite introduces no new skips, and the review is not stale. Report the strict validation exit code as it actually is.
 - [ ] 9.2 After the delta specs are merged, rewrite the Purpose in `openspec/specs/auto-model-routing/spec.md`, together with lines 5–7 (remove the legacy rollback and the "前七条" explanation) and the Purpose in `openspec/specs/auto-routing-usage-report/spec.md`. Scan the merged main specs and confirm they impose no remaining obligations around legacy or version selection.
 - [ ] 9.3 Archive only with the user's authorization.
