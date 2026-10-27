@@ -75,15 +75,6 @@ dsh plugin --profile web add dsh-magpie-connector
 
 入口：[index.ts](src/index.ts)。适配器与请求/流映射：[adapter.ts](src/host/adapter.ts)。路由：[routes.ts](src/host/routes.ts)。传输白名单：[transport.ts](src/host/transport.ts)。设置页：[SettingsPage.ts](src/client/SettingsPage.ts)。不含凭据的图源与仓库证据：[architecture.zh.json](docs/architecture.zh.json)。
 
-### 从旧插件名迁移
-
-插件此前名为 `dsh-magpie`。现在 route、设置目录与插件 id 都是 `dsh-magpie-connector`：
-
-- `MAGPIE_API_KEY` 和可选的 Access 凭据名称不变，key 可以继续使用。
-- 首次启动时，如果新设置文件不存在，插件会读取一次 `$DSH_HOME/plugins/dsh-magpie/settings.json`；旧文件不会被改写或删除。
-- 保存了旧 `dsh-magpie` route 的会话需要手动重选模型；旧 route 不再注册。
-- AUTO 策略与出口守卫豁免列表都已改用新 route id。
-
 ### 开发
 
 ```sh

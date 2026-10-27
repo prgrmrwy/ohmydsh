@@ -18,7 +18,7 @@ export interface Config { home?: string }
 export function apply(ctx: Context, config: Config = {}) {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
   let registration: ReturnType<typeof ctx.llm.registerAdapter> | undefined
-  const runtime = new MagpieRuntime(ctx.credentials, new SettingsStore(resolve(home, 'plugins/dsh-magpie-connector/settings.json'), resolve(home, 'plugins/dsh-magpie/settings.json')), () => registration?.replace(['dsh-magpie-connector']))
+  const runtime = new MagpieRuntime(ctx.credentials, new SettingsStore(resolve(home, 'plugins/dsh-magpie-connector/settings.json')), () => registration?.replace(['dsh-magpie-connector']))
   const speed = new SpeedController()
   const adapter = new MagpieAdapter(runtime, ctx.get('attachments'), session => speed.get(session).tier === 'fast')
   registration = ctx.llm.registerAdapter(['dsh-magpie-connector'], adapter)

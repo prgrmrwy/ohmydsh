@@ -1,18 +1,10 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { dirname } from 'node:path'
 export interface Settings { baseUrl: string; visibleModels: Record<string, string[]>; defaultEfforts: Record<string, string>; credentialUpdatePending?: string[] }
-/**
- * Settings file store. `legacyPath` is read-only: it lets a renamed plugin keep
- * the address, visibility and default-effort preferences saved by its previous
- * plugin id. The first `save` writes the new path; the legacy file is never
- * rewritten or deleted, so downgrading still finds its own data.
- */
 export class SettingsStore {
   value: Settings = { baseUrl: '', visibleModels: {}, defaultEfforts: {} }
-  constructor(readonly path?: string, legacyPath?: string) {
-    for (const candidate of [path, legacyPath]) {
-      if (candidate && existsSync(candidate)) { this.value = { ...this.value, ...JSON.parse(readFileSync(candidate, 'utf8')) }; break }
-    }
+  constructor(readonly path?: string) {
+    if (path && existsSync(path)) this.value = { ...this.value, ...JSON.parse(readFileSync(path, 'utf8')) }
   }
   save(value: Settings) {
     if (this.path) {

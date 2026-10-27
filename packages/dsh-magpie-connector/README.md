@@ -75,15 +75,6 @@ Need another method — custom headers, mTLS, another zero-trust gateway? **Issu
 
 Entry: [index.ts](src/index.ts). Adapter and request/stream mapping: [adapter.ts](src/host/adapter.ts). Routes: [routes.ts](src/host/routes.ts). Transport allowlist: [transport.ts](src/host/transport.ts). Settings page: [SettingsPage.ts](src/client/SettingsPage.ts). The diagram source, with credential-free repository evidence: [architecture.en.json](docs/architecture.en.json).
 
-### Migrating from the old plugin id
-
-The plugin was previously named `dsh-magpie`. The route, settings directory and plugin id are now `dsh-magpie-connector`:
-
-- `MAGPIE_API_KEY` and the optional Access credentials keep their names, so the key keeps working.
-- On first start the plugin reads `$DSH_HOME/plugins/dsh-magpie/settings.json` once if the new file does not exist. The old file is neither rewritten nor deleted.
-- Sessions that saved the old `dsh-magpie` route need a manual model re-selection; the old route is no longer registered.
-- AUTO and the egress-guard exemption list use the new route id.
-
 ### Development
 
 ```sh
