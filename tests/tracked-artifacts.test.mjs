@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { artifactPolicyViolations, REQUIRED_TRACKED_PATHS } from '../scripts/check-tracked-artifacts.mjs'
 
 const allowed = [
@@ -7,13 +8,29 @@ const allowed = [
   'packages/worktree-session/src/index.ts',
   'packages/subscriptions-sandbox-shim/src/index.js',
   'openspec/changes/example/checking/report.md',
-  'openspec/changes/example/checking/trails/T1.md',
+  'openspec/changes/example/checking/summary.md',
   'docs/adr/ADR-0001-example.md',
   'docs/architecture/example.md',
 ]
 
 test('allows root lock, selected architecture assets, source, and summarized evidence', () => {
   assert.deepEqual(artifactPolicyViolations(allowed), [])
+})
+
+test('test_cv_069', () => {
+  const paths = ['openspec/changes/x/checking/plan.json', 'openspec/changes/x/checking/trails/T1.json', 'openspec/changes/x/checking/gates/adapter.txt', 'openspec/changes/archive/2026-x/checking/observations.jsonl']
+  for (const file of paths) {
+    assert.ok(artifactPolicyViolations([...allowed, file]).some(v => v.startsWith(`${file}:`)), file)
+    assert.equal(spawnSync('git', ['check-ignore', '--no-index', file]).status, 0, file)
+  }
+})
+
+test('test_cv_070', () => {
+  const files = ['skills/case-verify/tests/fixtures/minimal/observations.jsonl', 'openspec/changes/x/checking/report.md', 'openspec/changes/x/checking/summary.md']
+  assert.deepEqual(artifactPolicyViolations([...allowed, ...files]), [])
+  const v = artifactPolicyViolations([...allowed, 'docs/checking/x/report.md'])
+  assert.equal(v.length, 1)
+  assert.match(v[0], /docs whitelist/)
 })
 
 test('rejects generated package output and nested locks', () => {

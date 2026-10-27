@@ -170,6 +170,42 @@ function dispositionDifferences(files, tableRows) {
   return problems
 }
 
+function migratedBody(row) {
+  if (!row.retired) return readFileSync(path.join(REPO, row.target), 'utf8')
+  assert.ok(/^openspec\/changes\/archive\/[^/]+\/checking\/.+\.md$/.test(row.target), 'only archived checking Markdown can be retired')
+  assert.ok(['move', 'move-rewrite'].includes(row.action), 'only migrated checking documents can be retired')
+  assert.equal(row.retired.reason, 'case-verify-checking-privacy-cleanup')
+  assert.match(row.retired.commit, /^[0-9a-f]{40}$/)
+  assert.match(row.retired.blob, /^[0-9a-f]{40}$/)
+  const hash = spawnSync('git', ['rev-parse', `${row.retired.commit}:${row.target}`], { cwd: REPO, encoding: 'utf8' })
+  assert.equal(hash.status, 0, hash.stderr)
+  assert.equal(hash.stdout.trim(), row.retired.blob)
+  const body = spawnSync('git', ['show', `${row.retired.commit}:${row.target}`], { cwd: REPO, encoding: 'utf8' })
+  assert.equal(body.status, 0, body.stderr)
+  return body.stdout
+}
+
+test('retirement rejects nonchecking targets, wrong source identity and invalid reasons', () => {
+  const original = disposition().files.find(row => row.retired)
+  for (const row of [
+    { ...original, target: 'packages/example/docs/retained.md' },
+    { ...original, action: 'backlog' },
+    { ...original, retired: { ...original.retired, reason: 'waiver' } },
+    { ...original, retired: { ...original.retired, commit: 'HEAD' } },
+    { ...original, retired: { ...original.retired, blob: '0'.repeat(40) } },
+  ]) assert.throws(() => migratedBody(row))
+})
+
+test('retired migrated artifacts retain exact historical bodies without current-tree copies', () => {
+  const retired = disposition().files.filter(row => row.target?.includes('/checking/'))
+  assert.equal(retired.length, 9)
+  for (const row of retired) {
+    assert.ok(row.retired, `${row.target} needs an auditable retirement record`)
+    assert.equal(existsSync(path.join(REPO, row.target)), false)
+    assert.ok(migratedBody(row).startsWith(`> Migrated from ${row.source}.`))
+  }
+})
+
 test('notes migration matches notes-disposition.json and design table', () => {
   const { files } = disposition()
   const tracked = trackedFiles()
@@ -179,10 +215,11 @@ test('notes migration matches notes-disposition.json and design table', () => {
   for (const row of files) {
     assert.ok(!tracked.includes(row.source), `${row.source} must no longer be tracked`)
     if (row.action === 'move' || row.action === 'move-rewrite') {
-      assert.ok(tracked.includes(row.target), `${row.target} must be tracked`)
+      if (row.retired) assert.ok(!tracked.includes(row.target), `${row.target} must be removed after retirement`)
+      else assert.ok(tracked.includes(row.target), `${row.target} must be tracked`)
     }
     if (row.action === 'move') {
-      const first = readFileSync(path.join(REPO, row.target), 'utf8').split('\n')[0]
+      const first = migratedBody(row).split('\n')[0]
       assert.equal(first, `> Migrated from ${row.source}.`, `${row.target} first line`)
     }
     if (row.action === 'backlog') assert.ok(tracked.includes(row.target))
@@ -206,6 +243,11 @@ function h1Problems(rows, readFile, tracked) {
   const markdown = tracked.filter((file) => file.endsWith('.md'))
   for (const row of rows.filter((entry) => entry.action === 'move')) {
     const holders = markdown.filter((file) => firstH1(readFile(file) ?? '') === row.h1)
+    if (row.retired) {
+      assert.equal(firstH1(migratedBody(row)), row.h1)
+      if (holders.length) problems.push(`${JSON.stringify(row.h1)} retired but still copied at ${JSON.stringify(holders)}`)
+      continue
+    }
     if (holders.length !== 1 || holders[0] !== row.target) {
       problems.push(`${JSON.stringify(row.h1)} found in ${JSON.stringify(holders)}, expected only ${row.target}`)
     }
@@ -251,7 +293,7 @@ test('migrated targets contain no redaction-rule matches or registered manual it
   const manual = files.flatMap((row) => row.manualRedactions ?? [])
   const hits = []
   for (const row of files.filter((entry) => entry.action === 'move' || entry.action === 'move-rewrite')) {
-    hits.push(...redactionHits(row.target, readFileSync(path.join(REPO, row.target), 'utf8'), redactionRules, manual))
+    hits.push(...redactionHits(row.target, migratedBody(row), redactionRules, manual))
   }
   const backlog = readFileSync(path.join(REPO, 'BACKLOG.md'), 'utf8')
   for (const row of files.filter((entry) => entry.action === 'backlog')) {

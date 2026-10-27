@@ -141,7 +141,7 @@ command / prompt）、`host/context-tool.ts`、`host/capture.ts`、`wire.ts`、
 **宿主依赖**：新增对 `@deepseek-ai/dsh-sandbox-policy` 的 `setSandboxMode` 使用
 （可选探测，缺席时权限档位不可用而非 Pet 无法加载）。
 
-**已验证的约束**（详见 `docs/notes/pet-locus-spike-findings.md`）：
+**已验证的约束**（详见 `120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md`）：
 fork child 无法指定 cwd；`workspace-write` 的可写根等于 session cwd，因而在
 `sw`（兄弟目录）与 `ws`（子目录）两种 worktree 布局下都无法正确圈定受管执行目录——
 `write` 档因此**不是**沙箱级的目录保证，必须如实声明。

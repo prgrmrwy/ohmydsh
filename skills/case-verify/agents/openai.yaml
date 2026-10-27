@@ -1,0 +1,6 @@
+interface:
+  display_name: "Case Verify"
+  short_description: "独立 oracle 浏览器验收与可回溯证据"
+  default_prompt: "使用 $case-verify 规划并执行验收自测，先展示 oracle 等待确认。"
+policy:
+  allow_implicit_invocation: true

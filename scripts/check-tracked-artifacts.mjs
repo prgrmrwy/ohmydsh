@@ -22,7 +22,10 @@ export function artifactPolicyViolations(files) {
     const file = original.split(path.sep).join('/')
     if (/^packages\/[^/]+\/lib\//.test(file)) violations.push(`${file}: generated package lib must not be tracked`)
     if (/^packages\/[^/]+\/package-lock\.json$/.test(file)) violations.push(`${file}: nested package lock must not be tracked`)
-    if (/^openspec\/changes\/.+\/checking\/(baselines|screenshots)\//.test(file)) violations.push(`${file}: raw acceptance evidence must not be tracked`)
+    const checking = file.match(/^(?:openspec\/changes\/.+\/checking|docs\/checking\/[^/]+)\/(.+)$/)
+    if (checking && !['report.md', 'summary.md'].includes(checking[1])) {
+      violations.push(`${file}: raw acceptance data must not be tracked; retain a redacted report or summary`)
+    }
     // `archify-out/` is a LOCAL scratch directory for understanding the
     // system; nothing in it is tracked. The two files the README shows moved
     // to `docs/assets/`, where a documentation asset belongs.

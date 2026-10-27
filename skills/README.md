@@ -12,5 +12,7 @@ skills/<name>/
   SKILL.md            # required: the skill definition (markdown with name/description)
 ```
 
+- **case-verify**: independent-oracle browser acceptance, JSON trail planning, and append-only evidence. See [skill](case-verify/SKILL.md). Optional trusted adapters are discovered through `CASE_VERIFY_ADAPTERS`, not registered as additional skills.
+
 - Sync **copies** `skills/<name>` to `~/.dsh/skills/<name>` (the user-dsh source: globally available, independent of the session's cwd);
 - Other DSH skill sources, for reference: the project-root `.dsh/skills/` (project-dsh) and `.agents/skills/` (project-agents, where the openspec skills live).

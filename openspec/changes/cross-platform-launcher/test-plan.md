@@ -70,9 +70,12 @@
 - Test isolation: 独立 DSH_HOME/端口、临时 prefix、空 overlay、合成 secrets；cleanup 只回收 fixture 拥有的进程/路径。环境 parser 测试不能读真实 .env.local。
 - tests/launcher-bootstrap.test.mjs 对缺 Node 用文档检查及保留 wrapper 的隔离 PATH 子进程；Node 本体缺失不能通过 Node 程序自行报告，不能伪造这一前提。
 - 补充回归（映射下限以外）：无源码副作用 source/import、foreground 非零退出、reset 不改 manifest、history 末20行、autoUpdate/offline/dirty/rollback、doctor 非阻塞与只读、npm/Corepack resolver 布局、bounded timeout树清理、Windows argv 反斜杠、opener host不注入、显式 registry来源、DSH_PROFILE 与 runtime compat pin。
-- 实施前完整根基线尚需在 promote/恢复依赖后重跑。checking/planning-baseline.md 已记录当前缺 tsc 与未 stage archive 对 git-ls-files 治理测试的影响；不把这些失败静默忽略。
+- 实施前完整根基线尚需在 promote/恢复依赖后重跑。120f9140:openspec/changes/cross-platform-launcher/checking/planning-baseline.md 已记录当前缺 tsc 与未 stage archive 对 git-ls-files 治理测试的影响；不把这些失败静默忽略。
 - apply 时依次更新每行 red→green；verify 需要全部映射真实存在、完整测试结果与三平台证据，不生成空 verify 占位来凑 artifact completion。
 
 ## Implementation mapping reconciliation
 
 Exact names above now reference retained tests where their existing assertions already cover the scenario. The enabledEnv test covers public and overlay in one test (two requirement/scenario rows intentionally share that single exact test). Node process identities map to the new Node suite, not the historical Bash oracle. macOS argv contract does not prove a real PWA/tab surface was cleaned; that row remains red until native surface acceptance. Terminal-close remains red until an actual controlling-terminal/console-close harness executes.
+
+
+> Retention update (2026-10-27): removed checking details cited above are historical Git references at revision `120f9140`, not live evidence files. See [redacted historical summary](checking/summary.md) for retained conclusions and limitations; it does not replace detailed receipts or change the original verdict.

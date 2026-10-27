@@ -214,6 +214,7 @@ tests/                   仓库级测试
 
 ### 自研 skill、preset 与 patch
 
+- [case-verify](skills/case-verify/SKILL.md) — 从独立 oracle 构造浏览器验收 trail，记录只追加、精确关联的证据；可信可执行 adapter 可接入外部用例和报告输出。
 - [ws](skills/ws/SKILL.md) — 查看、提升并清理 Worktree Session 绑定。
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — 仅观察的路由提示：判断工作是否应走正式工作流。
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — 统计记忆召回情况，并列出从未被召回的卡片。

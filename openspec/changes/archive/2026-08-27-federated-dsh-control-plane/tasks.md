@@ -1,5 +1,7 @@
 ## 1. M0 — 先证明不可替代的架构接缝
 
+> 2026-10-27 证据退役：本文件保留历史任务/判定，不是当前复验。被清理的细节引用已改为 Git 对象定位；以 `git show <commit>:<path>` 读取原件。轻量结论见本 change 的 checking/summary.md，摘要不替代原始证据，也不保证外部原始资产留存。
+
 - [x] 1.1 记录中央 rc.2 composed Connection 实际调用的 session/workspace/respond route 清单、请求响应 schema、mux/host 帧与 interceptor 顺序，生成仅含合成数据的脱敏 fixtures。
 - [x] 1.2 以固定上游 commit `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` 和已验证 `WorkspaceBrowser.tsx` blob `08f22ed400ac3a80852df186e5a899bc8ba53c33` 建立完整源码依赖 blob manifest、MIT license/NOTICE 记录和确定性输入清单。
 - [x] 1.3 实现固定 Git archive + 内容寻址缓存的可复现源码获取方式，证明首次 bootstrap、缓存后离线重复构建、不修改 npx cache/`~/.dsh`、不提交生成上游 bundle四项约束。
@@ -64,7 +66,7 @@
 - [x] 6.5 实现有效 composed Connection `/api` handler 的本机 pass-through，验证 Typert/interceptor-before-fallback 语义不被绕过。
 - [x] 6.6 实现 route registration transaction、冲突诊断和反向 disposer；用每个注册位置故障注入证明无部分接管。
 - [x] 6.7 实现进程级 Host activation coordinator，只在 Core/registry/local adapter/inventory routes ready 后提交，并安全支持官方裸本机 ID 与联合 ID。（host `apply()` 已真实接线并验证：无 registry/无启用远端时完全不接管）
-- [x] 6.8 实现 per-client UI activation：bridge/Node Shell/Workspace Embed/Picker ready 才 shadow 官方 slots；timeout/entry crash 只回退当前 Client，不影响 Host 或其他 tab。（bridge/Node Shell/Embed/Picker 均已真实接线并对真实 rc.2 SlotCore 验证：远端节点由 `NodeProjectionRuntime` 提供投影、baseline 就绪才激活、baseline 失败则整个浏览器保持官方、entry crash 同时处置两个面、Hero 渲染真实 `FederatedHeroPicker`。见 `checking/client-bridge-report.md`）
+- [x] 6.8 实现 per-client UI activation：bridge/Node Shell/Workspace Embed/Picker ready 才 shadow 官方 slots；timeout/entry crash 只回退当前 Client，不影响 Host 或其他 tab。（bridge/Node Shell/Embed/Picker 均已真实接线并对真实 rc.2 SlotCore 验证：远端节点由 `NodeProjectionRuntime` 提供投影、baseline 就绪才激活、baseline 失败则整个浏览器保持官方、entry crash 同时处置两个面、Hero 渲染真实 `FederatedHeroPicker`。见 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-08-27-federated-dsh-control-plane/checking/client-bridge-report.md`）
 - [x] 6.9 增加 unknown/forged node id、错误对象种类、跨节点 anchor 和过期 generation 请求的安全拒绝测试。
 
 ## 7. 联邦 Node Shell 与官方 Workspace Embed
@@ -108,4 +110,4 @@
 - [x] 10.5 运行 package typecheck/lint/unit/integration/UI tests、根 `npm test`、`npm run check:artifacts` 和 OpenSpec strict validation，并记录实际结果。
 - [ ] 10.6 在启用前运行 `node scripts/sync.mjs`/`dsh build` 两次验证幂等；确认旧 profile 可安全回滚后才将 `dsh.yaml` 条目切为 enabled。（隔离 DSH_HOME 下的 build/deploy/幂等/回滚/再启用已由 `tests/federation-sync-rollback.test.mjs` 证明。**真实 `~/.dsh` 幂等已在 `enabled:false` 下验证**：修掉 `llm-subscriptions` 的装饰版本 `0.5.2+pr40`→`0.5.2` 后，连续两次 sync 均报 `no changes`，部署面与基线逐项一致（104 模块 / 89 版本 / AGENTS.md 全同），现有 Host 未受影响；该幂等缺陷已由 `tests/manifest-version-drift.test.mjs` 固化防回归。仅剩切换 `enabled:true` 后的真实部署待操作者决定。）
 - [ ] 10.7 重启现有 DSH Web Host、刷新 `http://127.0.0.1:3080` 验证实际注入 GUI；不得启动替代 server 冒充现有页面。
-- [ ] 10.8 完成最终安全/兼容审查和 M0–M3 验收报告，确认无剩余阻断项后再进入 change 归档流程。（仓库侧安全/兼容审查与 M0–M3 报告已完成：`checking/m0-m3-acceptance-report.md`，含禁止面静态审查、24 项 mutation 覆盖汇总与已知限制清单。剩余部分依赖 10.2/10.6/10.7 的操作者执行结果，故不勾选。）
+- [ ] 10.8 完成最终安全/兼容审查和 M0–M3 验收报告，确认无剩余阻断项后再进入 change 归档流程。（仓库侧安全/兼容审查与 M0–M3 报告已完成：`Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-08-27-federated-dsh-control-plane/checking/m0-m3-acceptance-report.md`，含禁止面静态审查、24 项 mutation 覆盖汇总与已知限制清单。剩余部分依赖 10.2/10.6/10.7 的操作者执行结果，故不勾选。）

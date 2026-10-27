@@ -3,6 +3,7 @@
 
 > measured 2026-09-23 · 仓库 HEAD `6365f222` · DSH pin `0.1.5-rc.2`
 > 本文只做成本分析，不给架构建议。
+> 2026-10-27 维护说明：下文checking文件/行数是测量时的历史证据，现已按隐私制品政策清理，不是当前树路径。需要复核原文时用 `git show 120f9140:<下文完整路径>`；当前轻量摘要不能替代原逐行证明。
 > 每个数字标注 **[实测]**（附命令/文件行号）或 **[估算]**（附依据）。
 
 ---
@@ -961,5 +962,5 @@ grep -rn "archiv" packages/dsh-pet/src/host/locus/*.ts | wc -l                  
 
 # §4.1 风险
 grep -rn "单测全绿\|测试全绿\|全绿却" <former notes directory>/                                    # → 3
-grep -n '^| [A-G] ' openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md  # → 7 用例
+git show 120f9140:openspec/changes/archive/2026-09-19-pet-locus-delivery-safety-hardening/checking/live-acceptance.md | grep -n '^| [A-G] '  # 历史快照 → 7 用例
 ```

@@ -112,7 +112,7 @@ Pet 的设置面板有六个页签，`Locus 管理` 是其中之一（`packages/
 - **`settings.tsx` 现有大量源码文本断言会在重写时失效** → 属预期成本，随重写更新；同时把可行为断言的部分转移到 `locus-view.ts` 的纯函数测试，净减少文本断言的比重。
 - **570px 内容列宽下信息密度高** → 行内两行式布局（身份/状态 + 会话），右侧固定动作列；身份列不参与收缩，让元信息先截断；长标题截断 + `title` 属性保留全文。
 - **兜底名不如真名好看** → 这是"不新增能力"约束下的必然结果，已在 name 边界说明中如实呈现；日后若引入群名同步，必须同时解决同名，规则已在 D9 固定。
-- **话题跳转依赖 `applink` 的 thread 形态** → 仓库内已有生产先例（`docs/notes/pet-locus-spike-findings.md:38` 指向 `infra-service/service/ux-issue-group-dispatch.ts:127-144`），但本仓库没有调用点，参数形态需在实现时按该处确认；证明不了就退化为所属群，不伪造目标。
+- **话题跳转依赖 `applink` 的 thread 形态** → 仓库内已有生产先例（`120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md:38` 指向 `infra-service/service/ux-issue-group-dispatch.ts:127-144`），但本仓库没有调用点，参数形态需在实现时按该处确认；证明不了就退化为所属群，不伪造目标。
 - **`provisioning` 是瞬时态且可能长期卡住**（主干 B040 已记录：provisioning 失败后运行期永久阻塞同一 endpoint，需重启 Host） → 面板按只读如实呈现「准备中」，不提供会破坏在建过程的动作；本轮不解决阻塞问题（B040 的范围），但 MUST NOT 把该状态显示成空白、跳过或伪装成活跃。
 
 ## Migration Plan

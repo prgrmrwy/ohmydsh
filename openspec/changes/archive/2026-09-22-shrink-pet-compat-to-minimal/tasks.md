@@ -1,6 +1,8 @@
 ## 1. 冻结基线与目标身份
 
-- [x] 1.1 记录当前 compat 身份到 `checking/baseline-compat-identity.md`：两个 patch 的 SHA-256、launcher fingerprint、`.launcher` 与 profile 两条通道各自的 `dsh_compat`（`replaces`/`upstreamTag`/`upstreamBase`/`patchSha256`）、能力 marker 清单（5 项）
+> 2026-10-27 证据退役：本文件保留历史任务/判定，不是当前复验。被清理的细节引用已改为 Git 对象定位；以 `git show <commit>:<path>` 读取原件。轻量结论见本 change 的 checking/summary.md，摘要不替代原始证据，也不保证外部原始资产留存。
+
+- [x] 1.1 记录当前 compat 身份到 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/baseline-compat-identity.md`：两个 patch 的 SHA-256、launcher fingerprint、`.launcher` 与 profile 两条通道各自的 `dsh_compat`（`replaces`/`upstreamTag`/`upstreamBase`/`patchSha256`）、能力 marker 清单（5 项）
 - [x] 1.2 记录升级前 Pet 能力基线：locus 创建、冷恢复、飞书端到端、inquiry fail-closed 状态、Pet 测试套件通过数，作为每批次的回归对照
 - [x] 1.3 确认与 `pet-locus-independent-agent-inquiries` 的 single writer 边界：列出共享文件清单，确认该 change 当前无在途编辑
 
@@ -8,12 +10,12 @@
 
 - [x] 2.1 在 `scripts/sync.mjs` 的 `compatDependencies` 新鲜度判定中加入 `dsh_compat.upstreamBase` 与 patch 身份比对，不一致时 fail closed 并给出明确诊断
 - [x] 2.2 为该校验补根测试：名称与路径不变但 `upstreamBase` 不同时必须判定需重新物化
-- [x] 2.3 用该校验复现并修复现网漂移（profile 侧 `0.1.2-rc.1-locus-atomic.1` → 与源产物一致），记录修复前后 provenance 到 `checking/deployed-overlay-drift.md`
+- [x] 2.3 用该校验复现并修复现网漂移（profile 侧 `0.1.2-rc.1-locus-atomic.1` → 与源产物一致），记录修复前后 provenance 到 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/deployed-overlay-drift.md`
 - [x] 2.4 验证 `sync` 连续两次幂等，第二次不产生变化
 
 ## 3. 批 A：移除未启用的 isolateQueuedTurnClaim 负债
 
-- [x] 3.1 确认该 seam 在生产从未启用：记录 `build-launcher.cjs` 的 `overrideRuntimeAgent = false` 与其注释所述 npm arborist 崩溃原因到 `checking/batch-a-unused-seam.md`
+- [x] 3.1 确认该 seam 在生产从未启用：记录 `build-launcher.cjs` 的 `overrideRuntimeAgent = false` 与其注释所述 npm arborist 崩溃原因到 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/batch-a-unused-seam.md`
 - [x] 3.2 从 `settlement-notice.patch` 中移除 `isolateQueuedTurn` / `isolateQueuedTurnClaim` 相关 hunks（`agent-loop/src/inbox.ts`、`agent-loop/src/agent.ts`、`agent/src/runtime-types.ts` 及其测试）
 - [x] 3.3 移除 `agent-artifacts/` 构建路径、`overrideRuntimeAgent` 开关及 launcher 中对应的 marker 校验与 Inbox 行为实验
 - [x] 3.4 重建 launcher，验证构建成功、`--version` 相符、能力 marker 集合按预期从 5 项缩小
@@ -21,8 +23,8 @@
 
 ## 4. Spike 环境与静态核验（先于一切运行时核验）
 
-- [x] 4.0 建立隔离核验环境：独立 `DSH_HOME`、独立端口（非 3080）、独立缓存；不触碰现网 Host 与生产 Pet 数据。记录环境身份到 `checking/spike-environment.md`
-- [x] 4.a 静态核验（只读，不需运行时）：对照目标版本已发布类型声明逐条确认 `spec.childId`、`toolFilter` 持久化、`composeFrom` bind 语义、`announced` 语义，产出 `checking/spike-static-api-evidence.md`，作为后续运行时核验的预期基准
+- [x] 4.0 建立隔离核验环境：独立 `DSH_HOME`、独立端口（非 3080）、独立缓存；不触碰现网 Host 与生产 Pet 数据。记录环境身份到 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/spike-environment.md`
+- [x] 4.a 静态核验（只读，不需运行时）：对照目标版本已发布类型声明逐条确认 `spec.childId`、`toolFilter` 持久化、`composeFrom` bind 语义、`announced` 语义，产出 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/spike-static-api-evidence.md`，作为后续运行时核验的预期基准
 - [x] 4.b 列出全部待确认事项清单并逐项标记「静态已确认 / 需运行时验证 / 阻塞」，coding 开始前该清单 MUST 无「阻塞」项
 
 ## 5. 批 B 核验：storage 自持可行性（准入闸，失败则保留 patch）
@@ -31,7 +33,7 @@
 - [x] 5.2 证明介质独占：第二个进程尝试写入时明确失败且可诊断，不并发写入
 - [x] 5.3 证明保证不可得时 fail closed：模拟无法取得原子提交或独占时，写入路径拒绝执行而非降级
 - [x] 5.4 证明 `ctx.on('domain/changed')` 对 workspace 域的订阅不受 Pet 介质变更影响
-- [x] 5.5 将 5.1–5.4 结果写入 `checking/batch-b-self-hosted-storage.md`；任一项失败则停止批 B 并保留 `storage-atomic.patch`，记录失败证据
+- [x] 5.5 将 5.1–5.4 结果写入 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/batch-b-self-hosted-storage.md`；任一项失败则停止批 B 并保留 `storage-atomic.patch`，记录失败证据
 
 ## 6. 批 B 实施：storage 自持
 
@@ -63,11 +65,11 @@
 - [x] 7.2 证明官方 `toolFilter` 在创建与冷恢复两条路径上都生效，descriptor 往返保持 `allow`/`deny`
 - [x] 7.3 证明 `composeFrom` 的 bind 语义在 `dsh-pet-executor` 自定义 preset 下一致：父在 child 存活期间切换 preset，child 组合不变
 - [x] 7.4 证明移除 `independent-v1` 后 `attestLocusComposition` 仍能拦截 own 层注册的越界工具（针对历史 `subagent` 穿透事故构造用例）
-- [x] 7.5 将 7.1–7.4 结果写入 `checking/batch-c-official-subagent-api.md`；任一项失败则该项保留 patch 并记录失败证据，其余项仍可推进
+- [x] 7.5 将 7.1–7.4 结果写入 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/batch-c-official-subagent-api.md`；任一项失败则该项保留 patch 并记录失败证据，其余项仍可推进
 
 ## 8. 批 C 实施：已核验不成立，不执行
 
-> **实施期复核推翻了 §7 的静态结论**（证据见 `checking/batch-c-official-subagent-api.md`
+> **实施期复核推翻了 §7 的静态结论**（证据见 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/batch-c-official-subagent-api.md`
 > 的「实施期复核」节）：
 > - `createIdleContinuable` 不可退 —— 官方 `SubagentStartRequest.prompt` 必填，而
 >   Pet 的 locus 创建是两阶段的（建 child → 建群 → 提交 locus → 才投递首条内容），
@@ -80,7 +82,7 @@
 > 原 §7 核验的缺陷是**只验证了官方 API 的一部分语义**就判定等价。该教训已固化为
 > `pet-compat-minimization` 的新 Requirement「判定 seam 可移除必须覆盖其全部语义」。
 
-- [x] 8.1 复核 §7 结论并记录证伪证据；更正 `checking/batch-c-official-subagent-api.md` 的作废结论
+- [x] 8.1 复核 §7 结论并记录证伪证据；更正 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/batch-c-official-subagent-api.md` 的作废结论
 - [x] 8.2 将方法论教训写入 `pet-compat-minimization` spec（移除判定与新增判定适用同一举证标准）
 - [x] 8.3 **不改动** `attestLocusComposition` 与 `dsh-pet-executor` preset（批 C 不执行，护栏自然保持零改动）
 
@@ -113,7 +115,7 @@
   - 回滚路径本身已具备且有文档：`CUTOVER.md` 第 6 步给出顺序（先 `dsh stop` → 恢复备份 → `git revert` → `sync` → 启动），顺序不可换的理由已写明（新旧实现共享同一介质是唯一真正危险的状态）
   - 回滚素材已验证可用：`state.sqlite.pre-storage-cutover-…bak` 经 `integrity_check ok`、v15、441 条；预检脚本在副本上演练过 `wal → delete` 且记录数不变
   - 未做的是**演练动作本身**（需再次停机）。风险已由上述两点覆盖：脚本与文档经实机验证，备份可读且内容已核对
-- [x] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `checking/final-compat-footprint.md`
+- [x] 10.7 将最终 compat 规模（包数 / patch 数 / hunks / 磁盘）与基线对比写入 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/final-compat-footprint.md`
 
 ## 11. 上游报告与收尾
 

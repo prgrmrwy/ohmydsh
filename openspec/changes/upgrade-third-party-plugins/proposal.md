@@ -24,11 +24,11 @@
 > 移除原因：用户确认不再需要皮肤/主题中心。`$DSH_HOME/skins` 下的用户数据未删除（本仓不清理插件数据目录）。
 
 - 修订 `dsh.yaml` sha256 `a725bbdff83efeed0cc309711ee6c2edfe713e4226a5b5eef5d84c77f7650bfb`；`git diff` = 20 insertions / 20 deletions（仅这 6 个条目）。
-- 独立复验结论见 [`checking/independent-verification.md`](checking/independent-verification.md)：
+- 独立复验结论见 Git 历史 `120f9140:openspec/changes/upgrade-third-party-plugins/checking/independent-verification.md`：
   11/11 声明 pin 与 live registry 逐字节一致；隔离 `DSH_HOME` 连跑两次幂等（34,092 项快照 0 增 0 删 0 改）；
   装后版本 9/9 正确；`width-tiers` 在 loader 表中**恰好一行**、`better-sidebar` **单实例**；
   `npm test` = 426 tests / 416 pass / 8 fail / 2 skipped，失败集合与改动前**逐一相同**（无新增失败）；`check:artifacts` exit 0。
-- 制品级审计报告：[`archify-1.0.0-behavior.md`](checking/archify-1.0.0-behavior.md)、[`jev-0.14.1-supply-chain.md`](checking/jev-0.14.1-supply-chain.md)。
+- 制品级审计报告：`archify-1.0.0-behavior.md` (historical Git `120f9140:openspec/changes/upgrade-third-party-plugins/checking/archify-1.0.0-behavior.md`)、`jev-0.14.1-supply-chain.md` (historical Git `120f9140:openspec/changes/upgrade-third-party-plugins/checking/jev-0.14.1-supply-chain.md`)。
 - **未验证**：DSH 宿主启动冒烟（真实运行时未重启）；离线行为（实测 sync 需要网络）。
 - **生产物化尚未执行**：需用户批准后合入任务分支 → `dsh build`（连跑两次）→ `dsh restart`。
 - 已知环境问题（与本变更无关，复验中第 3 次复现）：在**全新**隔离 home 上 sync 会在
@@ -454,3 +454,6 @@ spec 是 GitHub release tarball（非 npm），检测器按设计跳过（`:181-
 - **`jev` 与 bridge 的协议兼容是强静态推断**，未实跑握手。
 - **`pnpm why` 单一实例无法静态验证**，必须装后复核。
 - 采集用的临时目录 `.plugin-audit/` 属未跟踪产物，**不在交付内容内**（收尾时清理）。
+
+
+> Retention update (2026-10-27): removed checking details cited above are historical Git references at revision `120f9140`, not live evidence files. See [redacted historical summary](checking/summary.md) for retained conclusions and limitations; it does not replace detailed receipts or change the original verdict.

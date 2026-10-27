@@ -1,5 +1,7 @@
 # 验收自测报告：auto-model-routing-settings
 
+> 2026-10-27 证据退役：本文件保留历史任务/判定，不是当前复验。被清理的细节引用已改为 Git 对象定位；以 `git show <commit>:<path>` 读取原件。轻量结论见本 change 的 checking/summary.md，摘要不替代原始证据，也不保证外部原始资产留存。
+
 **日期**：2026-10-23（Asia/Shanghai），Loop 1。
 **Base commit**：e35fedb7a083c00a5473ef610dd61f757a6d47e0（与执行时HEAD一致）。
 **设备/引擎**：PC1280×800，agent-browser 0.39.1，amr-accept。
@@ -8,11 +10,11 @@
 
 ## Verdict
 
-**needs-human / BLOCKED，验收未完成，不是PASS。** 仅CP01完成；20个活跃CP因执行安全前置未绑定而未运行/未完成，另外CP21/22/23是用户明确跳过。未观测到可判定产品FAIL，不能从blocked推断实现正确或错误。执行门禁结果另见[gates/execution-gate.txt](<gates/execution-gate.txt>)：门禁仅验证记录结构，不证明验收通过。
+**needs-human / BLOCKED，验收未完成，不是PASS。** 仅CP01完成；20个活跃CP因执行安全前置未绑定而未运行/未完成，另外CP21/22/23是用户明确跳过。未观测到可判定产品FAIL，不能从blocked推断实现正确或错误。执行门禁结果另见`Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/gates/execution-gate.txt`：门禁仅验证记录结构，不证明验收通过。
 
 ## 独立性
 
-低。oracle 与实现同源，绿不等于免人工。原始确认沿用，未修改[checkpoints.yaml](<checkpoints.yaml>)；本轮没有独立QA或视觉基准。
+低。oracle 与实现同源，绿不等于免人工。原始确认沿用，未修改`Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/checkpoints.yaml`；本轮没有独立QA或视觉基准。
 
 ## 范围声明
 
@@ -24,7 +26,7 @@
 
 | 场景 | 状态 | 证据 | 启用方式 | CP | 用户决定 |
 |---|---|---|---|---|---|
-| 正常设置/env只读/目录 | not_needed | [既有探测](<mock-discovery.md>)及[本轮事实](<execution-facts.md>) | 既有3080 | CP01/02/20 | 真实只读观察 |
+| 正常设置/env只读/目录 | not_needed | `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/mock-discovery.md`及`Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/execution-facts.md` | 既有3080 | CP01/02/20 | 真实只读观察 |
 | 固定2000ms Jev延迟 | missing | mock-discovery.md：test-only seam，无既有Host启用入口 | 未启用 | CP21 | skip，不计通过 |
 | 共享列表收缩竞态 | missing | mock-discovery.md：无隔离原生动态列表 | 未启用，不改共享名单 | CP22 | skip，不计通过 |
 | 不兼容effort能力 | missing | 真实7模型均五级，UT fixture非现网 | 未启用 | CP23 | skip，不计通过 |
@@ -48,7 +50,7 @@
 
 ## 执行策略
 
-推荐single_only，用户选择single_agent。授权原文：“确认开始，当前无其他 AUTO 任务”，授权日期2026-10-23。共享全局配置、官方默认和浏览器profile，故不并发；仅本专用执行agent，无下派。费用阈值、安静窗口、非密钥byte恢复和官方当前/默认恢复授权均记录于[计划](<plan.yaml>)，不重复请求。
+推荐single_only，用户选择single_agent。授权原文：“确认开始，当前无其他 AUTO 任务”，授权日期2026-10-23。共享全局配置、官方默认和浏览器profile，故不并发；仅本专用执行agent，无下派。费用阈值、安静窗口、非密钥byte恢复和官方当前/默认恢复授权均记录于`Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/plan.yaml`，不重复请求。
 
 ## 期望来源缺口
 
@@ -62,7 +64,7 @@
 
 | CP | 声明 | Trail | 结果 | 证据 | 缺口 |
 |---|---|---|---|---|---|
-| CP01 | env key只读不预填不回传 | T1 | pass | [事实](<execution-facts.md>)：HTTP200；key仅四个状态字段；DOM禁用且空 | 无key写入/迁移 |
+| CP01 | env key只读不预填不回传 | T1 | pass | `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/execution-facts.md`：HTTP200；key仅四个状态字段；DOM禁用且空 | 无key写入/迁移 |
 | CP02 | 草稿不改真实/default | T1 | blocked-not-run | 事实：未编辑/保存 | 默认独立快照未绑定 |
 | CP03 | 主精确effort请求 | T2 | blocked-not-run，partial保留 | 事实：未发送 | 无真实请求/线级 |
 | CP04 | 另一模型缺省 | T9 | blocked-not-run，partial保留 | 事实：未发送 | 无真实tier/request |
@@ -159,4 +161,4 @@ provider/Jev线级、adapter内部重试、MANUAL零出站、raw工具结构化�
 
 本次未覆盖(需其它手段): UT(type=unit) · e2e接口契约 · SAST/安全 · 扫描准确性 · 可维护性 · 性能
 
-**门禁**：最终执行gate输出见[gates/execution-gate-loop2.txt](<gates/execution-gate-loop2.txt>)；结构PASS不等于产品PASS。
+**门禁**：最终执行gate输出见`Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-23-auto-model-routing-settings/checking/gates/execution-gate-loop2.txt`；结构PASS不等于产品PASS。

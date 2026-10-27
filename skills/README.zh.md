@@ -12,5 +12,7 @@ skills/<name>/
   SKILL.md            # 必须:skill 定义(带 name/description 的 markdown)
 ```
 
+- **case-verify**：独立 oracle 浏览器验收、JSON trail 规划与只追加证据，见 [skill](case-verify/SKILL.md)。可信外部 adapter 通过 `CASE_VERIFY_ADAPTERS` 发现，不额外注册成 skill。
+
 - sync 把 `skills/<name>` **复制**到 `~/.dsh/skills/<name>`（user-dsh 源，全局可用，不依赖会话 cwd）；
 - DSH 其他可用源（备查）：项目根 `.dsh/skills/`（project-dsh）、`.agents/skills/`（project-agents，openspec 技能所在）。

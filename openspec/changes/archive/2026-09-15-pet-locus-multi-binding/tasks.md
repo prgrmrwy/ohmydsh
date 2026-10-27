@@ -103,7 +103,7 @@ A7 → 第 6/7 组；A10 → 第 8 组；A11 与故障矩阵 → 第 9/10 组。
 - [ ] 9.4 真机验收：话题群内两个话题绑不同会话，各自路由正确；未绑定话题回退 workspace
 - [ ] 9.5 真机验收：`read` 档下 child 写入被沙箱拒绝；`-s write` 后可写；`-s read` 后再次被拒
 - [ ] 9.6 真机验收：存量答疑群经迁移后继续可用，档位为 read
-- [ ] 9.7 回填 `docs/notes/pet-locus-spike-findings.md`：话题群 `thread_id` 的真机确认结果
+- [ ] 9.7 回填 `120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md`：话题群 `thread_id` 的真机确认结果
 - [ ] 9.8 更新 `BACKLOG.md` [B022] 状态为已完成并注明由本 change 承接
 - [ ] 9.9 仅在用户另行明确授权后清理 spike 测试群及相关绑定；验证旧 Task/child 没有在途工作，不将本规划视为清理授权
 

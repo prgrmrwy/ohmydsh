@@ -58,6 +58,8 @@ AI prompt 以 `[ASK-PATH]` 等固定英文规则标签组织，测试只断言�
 
 `docs/architecture/` 中的文件必须被 `README.md`、`CLAUDE.md` 或 `CONTRIBUTING.md` 链接，否则视为未准入。白名单检查放进 `scripts/check-tracked-artifacts.mjs`（与既有产物策略同一入口，CI 已运行）；markdown 相对链接可达、`docs/assets` 孤立资产、处置表一致性、全仓文本 `docs/notes/` 字面清零放进 `tests/repo-docs-governance.test.mjs`（review M3）。
 
+2026-10-27 后续保留政策：下表记录当时迁移，不保证checking目标永久存在。用户在case-verify实施中批准清理历史checking；对应9项在notes-disposition.json增加retired记录（固定完整commit与blob），治理测试仍逐字读取该历史快照、验证原H1/脱敏规则，并禁止当前树出现副本。其余目标仍按原策略验证。此为后续保留变更，不重写当时迁移结论。
+
 `docs/notes/` 逐文件处置表（review M5）。移动的文件只改相对链接与开头归属说明；`archive/` 下只新增文件，不改既有文件。
 
 | # | 源文件 | 处置 | 目标 | 理由 |

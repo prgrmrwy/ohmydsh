@@ -27,7 +27,7 @@ current specs——一个未采用且未部署的路线不应污染 `openspec/sp
 1. 语义联合 Host 路径**技术上可行**，77 项任务含真实 OpenSSH 隧道、真实 rc.2
    双流、真实远端重启重连、浏览器 envelope 驱动的远端 session reorder 等实测。
 2. 记录了 10 个经独立只读评估以反例证伪后修复的真实缺陷（见 commit
-   `5060459` 与 `checking/` 下报告），其中安全与清理类修复已作为资产迁移。
+   `5060459` 与当时 `checking/` 报告；2026-10-27 清理后仅保留 checking/summary.md 的轻量结论，逐文件原件通过 `git show 120f91403a36b44c47baf6f740e0fca2184e4b83:<原仓库相对路径>` 追溯），其中安全与清理类修复已作为资产迁移。
 3. 记录了该路径的**真实成本结构**——两个钉死上游 commit 的 compatibility
    patch，以及“中央一旦要操作远端就必须自行承担联合 ID／命令路由／写 ledger／
    generation 对账”这一连锁。这是 ADR-0003 决策的直接依据。

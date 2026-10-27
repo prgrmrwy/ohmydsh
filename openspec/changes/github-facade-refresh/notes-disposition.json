@@ -41,7 +41,12 @@
       "manualRedactions": [],
       "reason": "为该 change 的串行队列设计所做的调研",
       "autoRedact": true,
-      "h1": "Pet Locus 串行队列与并发调研：auto-thread 模式与父会话争用"
+      "h1": "Pet Locus 串行队列与并发调研：auto-thread 模式与父会话争用",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "4c062e77e53a36c7bbde47c9d937e6c290522dc4"
+      }
     },
     {
       "n": 2,
@@ -51,7 +56,12 @@
       "manualRedactions": [],
       "reason": "正文锚定该 change design.md:269",
       "autoRedact": true,
-      "h1": "并发 Agent 写隔离与冲突协商调研"
+      "h1": "并发 Agent 写隔离与冲突协商调研",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "63e54fda3b7c91c90c25253a3510b302c64142ee"
+      }
     },
     {
       "n": 3,
@@ -86,7 +96,12 @@
       ],
       "reason": "属于 0.2 升级的部署验收",
       "autoRedact": true,
-      "h1": "Bridge 0.6.1 正式发布与部署（2026-10-08）"
+      "h1": "Bridge 0.6.1 正式发布与部署（2026-10-08）",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "3001d43a2424abaca562202a041737daa7f5ba53"
+      }
     },
     {
       "n": 6,
@@ -96,7 +111,12 @@
       "manualRedactions": [],
       "reason": "为收缩 Pet compat 所做的上游勘察",
       "autoRedact": true,
-      "h1": "DSH 0.1.5-rc.2 扩展点勘察报告"
+      "h1": "DSH 0.1.5-rc.2 扩展点勘察报告",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "15a36fc32e808ae9cc44e0dc717a983b280deed0"
+      }
     },
     {
       "n": 7,
@@ -210,7 +230,12 @@
       ],
       "reason": "该 change 的真机验收清单",
       "autoRedact": true,
-      "h1": "Pet Locus Delivery Safety Hardening · 真实群验收清单"
+      "h1": "Pet Locus Delivery Safety Hardening · 真实群验收清单",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "3256daa189e9ca31545383d3aea1cd96668c5f5f"
+      }
     },
     {
       "n": 15,
@@ -220,7 +245,12 @@
       "manualRedactions": [],
       "reason": "正文声明为该 change 的边界审计",
       "autoRedact": true,
-      "h1": "Pet unified locus host-capability audit"
+      "h1": "Pet unified locus host-capability audit",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "ab8c92e05cf469958dfc1b48f621ba2b1434dd46"
+      }
     },
     {
       "n": 16,
@@ -261,7 +291,12 @@
       ],
       "reason": "正文声明对应该 change",
       "autoRedact": true,
-      "h1": "pet-locus-on-demand-tree 真实验收记录（2026-09-15）"
+      "h1": "pet-locus-on-demand-tree 真实验收记录（2026-09-15）",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "ad1ce6e97fb98c1ce6702fc0e276a53237b4bb2d"
+      }
     },
     {
       "n": 18,
@@ -310,7 +345,12 @@
       ],
       "reason": "该 change proposal 引用的 spike",
       "autoRedact": true,
-      "h1": "Pet locus 模型 spike 结论"
+      "h1": "Pet locus 模型 spike 结论",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "a4bac4a8cec963a5218ebf221f11930fc278bc18"
+      }
     },
     {
       "n": 20,
@@ -372,7 +412,12 @@
       ],
       "reason": "该进行中 change 的验收记录",
       "autoRedact": true,
-      "h1": "DSH 0.2.0-rc.2 devbox 验证：当前状态 NO-GO"
+      "h1": "DSH 0.2.0-rc.2 devbox 验证：当前状态 NO-GO",
+      "retired": {
+        "reason": "case-verify-checking-privacy-cleanup",
+        "commit": "120f91403a36b44c47baf6f740e0fca2184e4b83",
+        "blob": "e4cbc5c36131b9bbd83c7cc250f1243c784eb3df"
+      }
     },
     {
       "n": 25,

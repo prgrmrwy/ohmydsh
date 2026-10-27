@@ -22,10 +22,13 @@ packages/dsh-federation/.generated/
 # The root lockfile is the only dependency lock source.
 packages/*/package-lock.json
 
-# Acceptance raw evidence is ephemeral or externally retained; keep reports,
-# trails, gates, scripts, and explicitly reviewed test fixtures in Git.
-openspec/changes/**/checking/baselines/
-openspec/changes/**/checking/screenshots/
+# Real acceptance data may contain private normalized text as well as images.
+# Only manually redacted root reports/summaries are eligible for review.
+openspec/changes/**/checking/**
+!openspec/changes/**/checking/report.md
+!openspec/changes/**/checking/summary.md
+docs/checking/**
+__pycache__/
 
 # Host-capability spikes are throwaway probes. Their CONCLUSIONS live in the
 # owning change's design doc; the scripts and raw output are not artifacts the

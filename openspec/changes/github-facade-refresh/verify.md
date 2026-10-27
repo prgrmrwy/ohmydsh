@@ -1,6 +1,7 @@
 ## Manual gates and one-time acceptance evidence (in progress)
 
 > Final Verification Results / DECISION sections are appended after P5. This section accumulates evidence per phase.
+> 2026-10-27 retention follow-up: checking targets below are historical citations, not current-tree files. User-authorized case-verify cleanup retired9 such migrated targets; notes-disposition.json pins their original full commit/blob. Original migration/redaction conclusions remain testable against that snapshot; current summaries do not replace detailed historical proof.
 
 ### P1 · docs/notes migration (tasks 4.4, 4.5)
 

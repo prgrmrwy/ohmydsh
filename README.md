@@ -214,6 +214,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 
 ### Self-developed skills, preset and patch
 
+- [case-verify](skills/case-verify/SKILL.md) — Plans independent-oracle browser acceptance trails and records append-only, precisely linked evidence; optional trusted executable adapters supply external cases and report sinks.
 - [ws](skills/ws/SKILL.md) — Inspects, promotes and cleans Worktree Session bindings.
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Observation-only routing hint on whether work should use a formal workflow.
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — Reports memory recall statistics and which cards are never recalled.

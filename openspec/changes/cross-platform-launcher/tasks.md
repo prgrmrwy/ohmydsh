@@ -203,8 +203,8 @@
 
 ## 12. Windows 实测后的已批准修订
 
-- [x] 12.1 D8/spec/proposal/test-plan 一致性针对复评；原评审不覆盖修订。checking/windows-d8-planning-review.md followup APPROVE，三项规划缺口已闭合。
-- [x] 12.2 精确脚本策略、strict拒绝未知、环境逃逸剥离和缓存策略核验 RED→GREEN；不授予新增 true。实现/独立最终复评先在无新增true下完成；随后用户另行明确批准3个精确版本才加入，详见checking/native-runtime-script-review.md。
+- [x] 12.1 D8/spec/proposal/test-plan 一致性针对复评；原评审不覆盖修订。120f9140:openspec/changes/cross-platform-launcher/checking/windows-d8-planning-review.md followup APPROVE，三项规划缺口已闭合。
+- [x] 12.2 精确脚本策略、strict拒绝未知、环境逃逸剥离和缓存策略核验 RED→GREEN；不授予新增 true。实现/独立最终复评先在无新增true下完成；随后用户另行明确批准3个精确版本才加入，详见 Git 历史 `120f9140:openspec/changes/cross-platform-launcher/checking/native-runtime-script-review.md`。
 - [x] 12.3 Windows备份/发布/失败恢复、未知实体拒绝、保留generation RED→GREEN，POSIX原子替换不回退。实测next/active身份替换和POSIX恢复失败回归；独立最终复评PASS；Linux20/20、原生Windows19/19（不枚举POSIX-only）。
 - [x] 12.4 Host调用方共享锁覆盖后续读取、返回真实generation、并发/失败释放锁 RED→GREEN。实default prepare/supervisor/双层builder/fingerprint读取竞争者，4类结果finally与物理入口换指针后可执行；提前释放mutation RED，独立最终复评PASS。
 - [x] 12.5 完整回归与原生无副作用发布测试；新增脚本执行另行确认后才重跑真实Host。root593/591/0/2既有skip，native19/19；用户单独批准3个精确版本后bash-354真实Host63120启动/同PID存活/stop通过；全change验收仍FAIL。
@@ -218,3 +218,6 @@
 ## Evidence reconciliation (2026-10-24)
 
 GREEN/REFACTOR checks above mean the mapped implementation/unit contracts pass in the stated available environment; they do not waive11.7 or imply all platforms passed. Historical RED tasks remain unchecked wherever a distinct expected-failure receipt was not captured. Current Linux/macOS whole-root each595/593pass/0fail/2existing skips; standalone exact MCP bridge now2/2pass0skip (round11), not a rewrite of root counts. Windows noBash61/61+7/7lifecycle and safety20/20; actual user-assisted window-close event2/shell-exit/sameHostPASS. Mac realPTY25-focusedPASS and isolated fullbuild×2/nochange/doctor/dump/HostPASS. Earlier snapshots remain in reports; actual external cockpit/PWA/tab interaction unrun, ShellCheck unavailable, final review/task reconciliation outstanding. Round11 mapping audit50/50 file/exact-name links (47original+3D8), install/gate tests4/4, artifact/diff/strictPASS. No claims of whole-change acceptance or fabricated historical RED.
+
+
+> Retention update (2026-10-27): removed checking details cited above are historical Git references at revision `120f9140`, not live evidence files. See [redacted historical summary](checking/summary.md) for retained conclusions and limitations; it does not replace detailed receipts or change the original verdict.

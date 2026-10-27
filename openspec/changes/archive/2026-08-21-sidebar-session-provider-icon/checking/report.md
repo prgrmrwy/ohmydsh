@@ -1,5 +1,7 @@
 # sidebar-session-provider-icon 验收报告
 
+> 2026-10-27 证据退役：本文件保留历史任务/判定，不是当前复验。被清理的细节引用已改为 Git 对象定位；以 `git show <commit>:<path>` 读取原件。轻量结论见本 change 的 checking/summary.md，摘要不替代原始证据，也不保证外部原始资产留存。
+
 > **证据留存说明（2026-08 slim-repository-artifacts）**：本报告与 trails 中引用的 `screenshots/*` 原始截图证据为一次性会话产物，未托管于任何外部 artifact 存储，已按仓库派生资产保留规则移出当前版本树（历史 commit 仍可追溯）——后续 raw evidence 视为 ephemeral。验收结论与检查点台账完整保留于本目录。
 
 ## Loop 3 — Real GUI user acceptance
@@ -130,7 +132,7 @@ T1 的当前 session、空白 session、StateDot、时间、菜单和拖拽 surf
 | Trail | 状态 | 事实 | 证据 |
 |---|---|---|---|
 | T1 | blocked | 3091 加载成功，但显示“选择工作区”“暂无会话”；不存在 session treeitem 或 provider logo | `screenshots/T1-blocked-no-workspace.png`; DOM `treeitems=0`, `providerLogos=0` |
-| T2 | manual | 按已确认计划不自动执行 | `trails/T2.yaml` |
+| T2 | manual | 按已确认计划不自动执行 | `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-08-21-sidebar-session-provider-icon/checking/trails/T2.yaml` |
 
 ### Surface × 数据态覆盖
 

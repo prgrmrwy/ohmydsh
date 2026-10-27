@@ -238,7 +238,7 @@
 - **要点**:
   - 需要先定位 GUI 侧是靠什么信号刷新 workspace 分组视图——是否存在一次实时推送/事件通知，`attachSession` 是否触发了对应的广播；还是纯前端轮询/缓存导致的滞后。
   - 影响面不止 locus：任何「代码路径写完 workspace.json 后没有显式触发侧栏刷新」的场景都可能复现，值得先确认这是否是一个更通用的 workspace 变更通知缺口，而不是 locus 专属问题。
-  - 复现步骤已在 `openspec/changes/archive/2026-09-15-pet-locus-on-demand-tree/checking/live-acceptance.md` 记录：新建群 → bot 首个 @ 触发自动建 main → 观察侧栏 → 手动刷新对比。
+  - 复现步骤原记录保存在 Git 快照 `120f9140:openspec/changes/archive/2026-09-15-pet-locus-on-demand-tree/checking/live-acceptance.md`（旧详细产物已清理）：新建群 → bot 首个 @ 触发自动建 main → 观察侧栏 → 手动刷新对比。
 - **更新**: 2026-09-15 从 `pet-locus-on-demand-tree` 真实验收中发现，转入本条独立处理。
 
 ### [B040] Locus provisioning 失败补偿只在 Host 重启时跑，运行中永久阻塞同一 endpoint
@@ -336,7 +336,7 @@
       - **决定（2026-09-15，所有者）：本轮不做。** 本次迭代限定为**纯面板调整，不新增任何 Host / wire 能力**。因此面板不做群名同步，「刷新群名」按钮与相关状态一并从设计中撤除；面板也不在打开时打飞书接口。
       - **连带取舍（已在设计中登记）**：兜底名**不写「群」** —— `chatType` 未持久化，写了就是猜。规则 = 有 `threadId` 写 `话题 · 19cd`，否则写 `入口 · a27b`；哪天把 `chatType` 存下来，这里自动变成 `群 · a27b`。这条与「不以不稳定名称替代真实标识」一致：宁可显式说明是兜底显示，也不猜一个看起来更像人话的名字。
       - **为将来保留的规则**：若日后引入群名同步，**必须同时**解决同名问题（实测同一父会话下会出现两个「答疑 · DSH」），因此「名称与短码成对出现、名称单独不构成身份」这条现在就先写进设计，避免加名字时退化。
-    - 要点 2（可导航控件 + 目标不可达时 fail closed 并解释）→ **收编**。每行右侧固定 `会话 ↗ / 飞书 ↗`（按入口读法另有 `父会话 ↗`），归档时按钮不可点并给出原因。**话题跳转订正**：此前设计稿写「飞书没有稳定的话题深链」是错的——仓库内已有证据 `openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md:38`（生产先例 `infra-service/service/ux-issue-group-dispatch.ts:127-144` 用 `result.data.thread_id` 拼 `applink.feishu.cn/client/thread/open`）。按该 spike 的 fail-closed 要求：拿不到 `threadId` 即退化为 chat 级链接，不得猜测。
+    - 要点 2（可导航控件 + 目标不可达时 fail closed 并解释）→ **收编**。每行右侧固定 `会话 ↗ / 飞书 ↗`（按入口读法另有 `父会话 ↗`），归档时按钮不可点并给出原因。**话题跳转订正**：此前设计稿写「飞书没有稳定的话题深链」是错的——Git 历史快照已有证据 `120f9140:openspec/changes/archive/2026-09-15-pet-locus-multi-binding/checking/spike-findings.md` 第38行（生产先例 `infra-service/service/ux-issue-group-dispatch.ts:127-144` 用 `result.data.thread_id` 拼 `applink.feishu.cn/client/thread/open`）。按该 spike 的 fail-closed 要求：拿不到 `threadId` 即退化为 chat 级链接，不得猜测。
     - 要点 3（「第 N 代」紧邻说明）→ **收编**。行内 `第 N 代` + `历史 N 代` 折叠；紧邻文案说明：新代由**显式重建**或**切换来源**产生（`controller.ts:811/1152/1286`），模型 turn 结束、超时推进**不**产生新代（spec:163），且新一代**默认回到只读、不继承旧代写权限**。
     - 要点 4（owner-only、Host 真相源、ID 可复制）→ **收编为不变量**：名称全部来自 Host 投影，短码只在显示层派生，浏览器不猜测名称/身份/关联。
     - 更新 2026-09-13 T8 的**回执侧**诉求（「验收对话里只能用 `omt_…` 指代话题」，要求管理面**与回执**都提供人类可对照标识）→ **超出本次 scope，按无效需求处理**。本 change 只动 settings 面板；回执文案在 channel 层（`channel/feedback.ts`、`locus/switch-notice.ts`）。如仍需，单开一条。
@@ -756,7 +756,7 @@
   - 个别内部 bridge 名与 devbox 辅助脚本名:`openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/**`(2026-10-24 已归档);
   - git 历史对上述所有类别仍保留原文,改当前文件不能抹去。
 - **建议**: 先决定是否值得为此重写历史;若只清当前树,为夹具改用明显合成的值,并给 `redactionRules` 式扫描加一个全仓测试;进行中 change 的 checking 文件在其归档前处理。
-- **更新**: 2026-10-10 新增。
+- **更新**: 2026-10-10 新增。2026-10-27 用户授权在case-verify实施中清理旧checking产物；上述checking路径的违规文件正从当前树删除并保留轻量摘要，不代表其它目录或Git历史的脱敏已完成。
 
 ### [D007] worktree 缺依赖时,sync 的 local build 会清空 `lib/` 并连带打穿部署目录
 - **状态**: 待处理(2026-09-15 在某个 worktree 实测复现;当次故障由一次来自主 checkout 的重建自行恢复,根因未修,同一 worktree 再次 sync 会复发)

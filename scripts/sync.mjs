@@ -1466,7 +1466,8 @@ async function syncPackages(manifest, items, names) {
     // wrote; it cannot see a deployed artifact that was built from a different
     // upstream base — which is exactly how the profile's storage overlays sat a
     // whole version family behind the launcher's while every name, path and
-    // recorded hash still matched (see `checking/baseline-compat-identity.md`).
+    // recorded hash still matched (historical identity investigation, retained in
+    // openspec/changes/archive/2026-09-22-shrink-pet-compat-to-minimal/checking/summary.md).
     const compatDrifted = compatEntries.filter(entry => {
       if (installedVersion(entry.name) === undefined) return false
       const expected = compatProvenance[entry.name]

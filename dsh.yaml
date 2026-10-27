@@ -186,6 +186,11 @@ customizations:
     enabled: true
     brief: Pet 执行会话专用 preset(不加载 skill-filesystem)
     note: '自研 preset,理由见 packages/dsh-pet/docs/adr/ADR-0001-executor-preset.md。与官方 standard 的唯一差别是移除 skill-filesystem(保留 tool-skill):dsh-skill 的 collectFresh 总会并入 global 层,provider 无法被减去,Pet 允许清单只能靠不加载它来保证。0.2+ 由 sync 渲染为 @deepseek-ai/dsh-agent-preset 声明行(id preset-dsh-pet-executor)。升级复核:官方 standard preset 变化时对照差异。移除:随 dsh-pet 一并 enabled:false。'
+  - id: case-verify
+    type: skill
+    enabled: true
+    brief: 独立 oracle 浏览器验收与只追加证据(case-verify)
+    note: '自研,由原 verifying-acceptance 流程重构(JSON模型与plan_rev,不兼容旧checking)。Python3.9+标准库/POSIX锁;执行浏览器操作,不运行项目UT/e2e。CASE_VERIFY_ADAPTERS仅配置可信可执行脚本目录,以用户权限执行,不受manifest管理;真实验收数据默认本地。升级复核:oracle/确认/观察schema、门禁、adapter信任面与状态统计回归。移除:enabled:false → dsh build;证据保留。部署验证后只unlink已证明指向旧源的旧软链;需其他agent入口可手动ln -s ~/.dsh/skills/case-verify ~/.agents/skills/case-verify。'
   - id: ws
     type: skill
     enabled: true

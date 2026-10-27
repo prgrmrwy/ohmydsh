@@ -1,5 +1,7 @@
 ## 归档说明（2026-10-24）
 
+> 2026-10-27 证据退役：本文件保留历史任务/判定，不是当前复验。被清理的细节引用已改为 Git 对象定位；以 `git show <commit>:<path>` 读取原件。轻量结论见本 change 的 checking/summary.md，摘要不替代原始证据，也不保证外部原始资产留存。
+
 用户确认运行体升级已完成，并明确授权在 `ws/win` 当前分支归档、同步 delta specs。不重新执行生产部署、重启或历史验收；下方 27 项未勾选记录保留原状，表示缺少完整验收记录或历史步骤已被后续决定替代，不将用户的收尾决定伪记为测试通过。7 份 delta 已与 current specs 合并，保留现有较新的要求与场景。
 
 ## 0. 冻结目标与基线
@@ -39,7 +41,7 @@
 - [x] 3.6 worktree-session：适配运行中归档抛 `WorkspaceActiveSessionError` 的清理路径；handoff 对 `input.submit` 透传新增的 `source` 参数；测试覆盖 Enter 与点击两种提交方式
 - [x] 3.7 第三方插件：better-sidebar 0.24.1、skin-center/session-archive 0.4.4 审查后改 pin；历史候选核对 cockpit-bridge 0.5.1 与 0.6.0。移植到较新主干 b6e5c474 后保留其既有 0.5.2 pin，不回退为旧候选0.5.1，也不机械升0.6.0；当前0.5.2组合的实测仍由3.11/6.1放行
 - [ ] 3.8 候选上实测 D3 增强方案 B：`dsh-memex` 实际设置编辑成功，org 键即时共存，build×2 后用户值与 org 键仍生效；`session-links` 仅验证既有链接/产物能力与声明式 rule hosts 的保留，不新增 Config/设置编辑功能（按用户范围纠正）；不以文档或单测代替此验收（部分：合成org两键+真实configForms编辑/立即回读→sync×2第二次no changes→official dump→Host重启回读→恢复用户值/退休合成org PASS，未读真实private overlay；session-links真实v4会话整日志基线+合成声明式rule hosts经mergeConfig sync×2后由Host下发并按规则分类PASS；仍缺真实private overlay值逐项比对，见checking/current-main-remaining-host-gates.md）
-- [x] 3.9 候选上验证 connection 405 修复片段仍然需要且有效：去掉它时插件 RPC 返回 405，加上后返回 200（83c69cf devbox：支持的 --patch 恢复 dump-default-config 中原始 connection 行，已认证 RPC 405；正常 composition 已认证200/未认证401；见 checking/devbox-final-regression.md）
+- [x] 3.9 候选上验证 connection 405 修复片段仍然需要且有效：去掉它时插件 RPC 返回 405，加上后返回 200（83c69cf devbox：支持的 --patch 恢复 dump-default-config 中原始 connection 行，已认证 RPC 405；正常 composition 已认证200/未认证401；见 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-final-regression.md`）
 - [ ] 3.10 Session v4 演练：脱敏副本上首次写入发布 v4；重启后状态一致；损坏与截断样本按预期处理；回滚到 0.1.5 并恢复备份后可读（部分：合成样本+候选built storage已验证v4发布/新Context重载/损坏拒绝/截断非破坏读取；0.1.5-rc.2独立进程拒绝v4、恢复v3后读回7事件；755上游测试通过。后续三个远端原样私有zstd副本1009/1093/597事件已完成built组件read/write/独立进程reopen匹配与备份恢复后old-read，临时副本删除；不外传内容。2026-10-08补隔离回滚演练：备份→0.2发布v4+Pet DB切换后写入→恢复备份逐字节一致→0.1.5 reader读回一致、Pet DB切换后写入消失；真实0.1.5-rc.2 launcher在恢复数据上启动并列出78会话。仍缺旧Host续写已恢复会话的GUI路径、旧Pet live行为与npm ci/compat重建全流程，见checking/current-main-remaining-host-gates.md）
 - [ ] 3.11 候选中禁用 memex 与 Pet，组合其余全部定制；记录启动清单（每项各出现一次）、loader 结果和各插件功能证据，与 0.2 基线比对
 
@@ -57,7 +59,7 @@
 
 - [ ] 5.1 先实测子代激活名额池：确认 locus 创建、只读访问、冷恢复各自怎样占用和释放名额，据此确定 5.5 的改动面
 - [x] 5.2 `compat/subagent` 改为以 `dsh-v0.2.0-rc.2` 为基线：重写失败的 `child-agent.ts` hunk 和测试 hunk；4 个 seam 逐项重新举证并记录被排除的官方替代路径；更新 tag、commit、patch hash、能力 marker 和 README
-- [x] 5.3 launcher 的依赖范围改写（`~`/`*`→`^`）后，证明 cordis 等运行体包在依赖树中只有一个实例；`supportedDshVersion` 与 `dshVersion` 精确一致（devbox bab1a536：npm ls --all 无 problems、Cordis 4.0.4 单实体、builder/cache 验证通过；见 checking/devbox-runtime-continuation.md）
+- [x] 5.3 launcher 的依赖范围改写（`~`/`*`→`^`）后，证明 cordis 等运行体包在依赖树中只有一个实例；`supportedDshVersion` 与 `dshVersion` 精确一致（devbox bab1a536：npm ls --all 无 problems、Cordis 4.0.4 单实体、builder/cache 验证通过；见 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-runtime-continuation.md`）
 - [x] 5.4 `dsh-pet-executor` 改为由 sync 渲染成 `dsh-agent-preset` 声明行；清理 sync 账本中记录的 `.agent-presets` 产物；Pet 依赖从 `dsh-agent-presets` 迁到 `dsh-agent-preset-registry`
 - [x] 5.5 child 存在证明改为依赖 catalog 现存字段（`child.ts:1701`、`qa/subagents.ts`）；名额不足时进入可重试状态，不丢投递
 - [ ] 5.6 Pet 全量测试与运行时探针：silent 结算、idle child、independent 冷恢复 + 已保存 preset、精确 child Session、Storage 原子性，任一项退化即判定 NO-GO（部分：真实Host locus子代创建→Host重启后durable同child/generation、header标记preset dsh-pet-executor→幂等重绑→归档PASS（未证恢复后实际turn/preset重新挂载）；实测发现本候选新home缺attachments时locus子代每次创建失败，已RED→GREEN修复project-read-guard；silent结算/投递未验）
@@ -78,7 +80,7 @@
 
 - [x] 6a.1 补官方含注释空数组 scaffold 与写前拒绝回归，在 devbox 证明 RED → GREEN
 - [x] 6a.2 仅规范化空序列括号、保留注释，完整组合在写 patch/backup 前校验；对齐 D3 的 proposal/design/delta spec
-- [x] 6a.3 devbox 精确修复提交：完整根测试、真实新 profile sync×2 + dump、既有失败候选自然修复 + dump，记录证据；不替代 6.1 的全部 loader/功能验收（20a498a，293 total / 291 pass / 2 skipped；见 checking/devbox-profile-fix.md）
+- [x] 6a.3 devbox 精确修复提交：完整根测试、真实新 profile sync×2 + dump、既有失败候选自然修复 + dump，记录证据；不替代 6.1 的全部 loader/功能验收（20a498a，293 total / 291 pass / 2 skipped；见 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-profile-fix.md`）
 
 ## 6b. devbox 完整运行体实测阻断（2026-10-05）
 
@@ -96,7 +98,7 @@
 ## 6d. Header/cost-meter无需源码patch的组合选择（2026-10-07）
 
 - [x] 6d.1 核对正式版本边界：0.2 peer从1.7.44支持，fetch observer从1.8.5引入；22个发布物SHA512核验，候选pin改1.8.4，header保留原0.1.0，不修改第三方源码或为此patch DSH
-- [x] 6d.2 devbox原样安装、Cost RPC/真实Settings→Cost、原header进程内无网络注入探针、sync×2第二次no changes及官方dump各一条；sync后再启动/browser通过，干净storage候选亦通过；沿用先前acceptance-only bridge，不替代正式完整组合，见checking/header-community-options.md
+- [x] 6d.2 devbox原样安装、Cost RPC/真实Settings→Cost、原header进程内无网络注入探针、sync×2第二次no changes及官方dump各一条；sync后再启动/browser通过，干净storage候选亦通过；沿用先前acceptance-only bridge，不替代正式完整组合，见 Git 历史 `120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/header-community-options.md`
 - [ ] 6d.3 现役1.7.30账本脱敏副本→1.8.4读取兼容、真实模型usage费用累加与Go/Zen实际调用（部分：devbox20天/80会话历史读取/写回/重载完全保留，合成监听器usage入账一次/固定计价正确，两种stream listener顺序并发会话独立；2026-10-08经用户授权复用主干Go凭据：候选真实opencode-go/deepseek-v4-flash一次调用成功，cost-meter1.8.4按provider/model/session计入token与calls，Go按订阅plan计0元；原header在线未触发MissingSessionID；Zen经用户确认不在范围（主干只用Go，未配置Zen））；若完整验证失败，按用户最新优先级保留OpenCode/header、显式禁用cost-meter，不修改插件/DSH源码（1.8.11已写过的候选价表有旧codec告警，不得删用户价表换取PASS）
 
 ## 6e. bridge 0.6.1 消费方迁移与正式部署（2026-10-08）
@@ -105,9 +107,9 @@
 
 - [x] 6e.1 清理已授权 .local-repair；保留在用 launcher 与未授权 staging/其他 worktree
 - [x] 6e.2 真实 memex registry + 仅 forwards 服务回归证明旧 shim RED；迁移新 API 与错误分类、等待/取消/释放/单飞，package 测试和类型检查通过
-- [x] 6e.3 完成完整 diff 自审、package build、根测试、artifact 与严格 OpenSpec 校验，受控合入并推送主干（d1c4c15；见 checking/devbox-main-d1c4c15-deployment.md）
+- [x] 6e.3 完成完整 diff 自审、package build、根测试、artifact 与严格 OpenSpec 校验，受控合入并推送主干（d1c4c15；见 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-main-d1c4c15-deployment.md`）
 - [ ] 6e.4 devbox 从主干拉取，正式 build×2 幂等、restart、真实功能/浏览器验收；保留私有 overlay 和历史（部署/start已过，第二build no changes，3080 PID656211；未认证401不作业务API通过；专用单agent待oracle/入口确认，浏览器验收未执行）
-- [ ] 6e.5 已撤销：不在devbox部署隔离新服务。用户2026-10-09明确新机验收指其他设备，devbox只验现有主干正式3080；其他设备待后续独立决定。执行者此前误解范围额外做了隔离home启动检查，临时39522已停止，该检查不计用户要求的新机验收（历史事实保留于 checking/devbox-main-d1c4c15-deployment.md）。
+- [ ] 6e.5 已撤销：不在devbox部署隔离新服务。用户2026-10-09明确新机验收指其他设备，devbox只验现有主干正式3080；其他设备待后续独立决定。执行者此前误解范围额外做了隔离home启动检查，临时39522已停止，该检查不计用户要求的新机验收（历史事实保留于 `Git历史 120f91403a36b44c47baf6f740e0fca2184e4b83:openspec/changes/archive/2026-10-24-upgrade-dsh-0-2-0-runtime/checking/devbox-main-d1c4c15-deployment.md`）。
 
 ## 7. 收尾
 
