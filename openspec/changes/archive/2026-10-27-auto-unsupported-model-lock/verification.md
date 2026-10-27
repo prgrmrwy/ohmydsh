@@ -27,3 +27,19 @@
 - 未对真实 DeepSeek / Claude 订阅发起付费模型调用；落锁与映射降级由 fake adapter 集成测试覆盖，不声称真机 provider 行为已验收。
 - 子任务路由（fail-closed）与 legacy 回滚未改动，既有相关测试全部通过。
 - `usage-report` 在上述 Node 版本下的截断帧识别缺陷属于既有风险，未在本 change 内修复。
+
+
+## 隔离预览验收（2026-10-27，实际执行）
+
+- **环境**：worktree 内隔离 DSH home `.git/ws/dsh-home/e306ecb1-…`（由 `ws prepare-preview` 拥有），预览端口 **3276**，日常 3080 未改动、未重启。
+- **隔离构建**：干净 worktree 的 `bin/dsh` 因 lean 依赖判定失败，改为 `scripts/launcher/environment.mjs` 载入 worktree `.env.local`（`DSH_HOME`=隔离 home）后执行 `node scripts/sync.mjs`；首次构建需预置隔离 profile 的 `.npmrc`（`@byted`/`@dp`/`@logsdk` scope registry）与 `pnpm-workspace.yaml` 的 `allowBuilds` 决策，并需在 worktree 内完成本地 package 构建（`packages/*/lib`），否则 local plugin 会以缺 lib 形态部署。修复后 `sync` 完成，`ws prepare-preview` 返回 `status: ok`（8 writes，preferred port=3276）。
+- **加载**：预览 `dsh.log` 在最后一次 `dsh web:` 之后 **0 条 “failed to import”**；`dsh-auto-model-routing` 正常加载。
+- **Host API（真实 HTTP + cookie）**：
+  - `POST /api/auto-model-routing.state` 对真实预览会话返回 `{"mode":"MANUAL","policy":"policy-v2","autoSupport":{"supported":false,"provider":"opencode-go","model":"deepseek-v4.1-flash"}}`；
+  - `POST /api/auto-model-routing.setMode {mode:"AUTO"}` 仍返回同上的 `MANUAL` + `autoSupport.supported=false`（拒绝进入 AUTO）；
+  - `POST /api/auto-model-routing.settings` 返回 `policy-v2` 配置（来自源 home 种子）。
+- **真实 GUI（Chrome headless + Playwright，打开 token URL）**：
+  - 默认模型 `DeepSeek V4.1 Flash` 下芯片渲染为 `MANUAL`，`data-locked="true"`、`aria-disabled="true"`、原生 `disabled=false`、含描边 info 图标、**不含切换箭头**；
+  - 悬停整个按钮后面板可见，文本包含「AUTO 不支持当前模型 / opencode-go / deepseek-v4.1-flash 不在自动路由支持范围，已切换为 MANUAL。/ 目前仅支持 Claude / GPT 系列模型…」，链接为 `https://github.com/prgrmrwy/dsh-auto-model-routing`（`target=_blank`、`rel=noopener noreferrer`）；
+  - 页面无 pageerror；截图 `/tmp/preview-accept2.png`（未提交，避免仓库留存截图）。
+- **未覆盖边界**：预览目录只有 DeepSeek 模型可选，未能在真实 GUI 中走到「切回 Claude/GPT 后芯片解锁并手动启用」的正向路径（该路径由 `policy-host.integration.test.ts` 的 fake adapter 用例覆盖）；未发送真实模型请求，不验证 provider 侧实际 effort 消费。
