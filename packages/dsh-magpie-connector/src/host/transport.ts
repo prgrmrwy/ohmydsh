@@ -28,7 +28,8 @@ export class GatewayTransport {
   readonly signal = new AbortController()
   /** Called when a request fails before the connection was established. */
   onConnectionFailure?: (lineId: string) => void
-  private readonly agent = new Agent()
+  // undici's default 10s connect timeout fails cold TLS handshakes to the Cloudflare ingress.
+  private readonly agent = new Agent({ connect: { timeout: 25_000 } })
   async request(identity: ConnectionIdentity, method: string, path: string, init: RequestInit = {}): Promise<Response> {
     validateIdentity(identity)
     const base = new URL(identity.baseUrl)
