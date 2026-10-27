@@ -1,9 +1,9 @@
 ## 0. Preparation
 
-- [ ] 0.1 Do this change in its own Worktree Session. Confirm review.md says `VERDICT: APPROVE_WITH_CHANGES` and `CHANGES_APPLIED: yes`, and that no file under proposal / design / specs has changed since the review.
-- [ ] 0.2 Before touching any source, run the oracle inputs from test-plan "Equivalence oracle" against `packages/auto-model-routing/lib/policy-v2.js` (the 0.4.1 build output). Save the results as `test/fixtures/routing-oracle-0.4.1.json`. Also save the 0.4.1 `lib/` file list as `test/fixtures/lib-files-0.4.1.json`, and save copies of the 0.4.1 legacy artifacts (`router.js`, `judgements.js`, `policy-v2.js`, `policy-v2-rubric.json`) under `test/fixtures/lib-0.4.1/` for the dirty-output build test.
-- [ ] 0.3 Record the sha256 of `src/policy-v2-rubric.json` in the fixture (used by "源码与文案不含版本").
-- [ ] 0.4 Run the full suite once inside the package and once at the root, and record the baseline pass/skip counts in `implementation-log.md`.
+- [x] 0.1 Do this change in its own Worktree Session. Confirm review.md says `VERDICT: APPROVE_WITH_CHANGES` and `CHANGES_APPLIED: yes`, and that no file under proposal / design / specs has changed since the review.
+- [x] 0.2 Before touching any source, run the oracle inputs from test-plan "Equivalence oracle" against `packages/auto-model-routing/lib/policy-v2.js` (the 0.4.2 build output). Save the results as `test/fixtures/routing-oracle-0.4.2.json`. Also save the 0.4.2 `lib/` file list as `test/fixtures/lib-files-0.4.2.json`, and save copies of the 0.4.2 legacy artifacts (`router.js`, `judgements.js`, `policy-v2.js`, `policy-v2-rubric.json`) under `test/fixtures/lib-0.4.2/` for the dirty-output build test.
+- [x] 0.3 Record the sha256 of `src/policy-v2-rubric.json` in the fixture (used by "源码与文案不含版本").
+- [x] 0.4 Run the full suite once inside the package and once at the root, and record the baseline pass/skip counts in `implementation-log.md`.
 
 ## 1. Registry and built-in strategies (家族策略注册表, 内置家族策略)
 

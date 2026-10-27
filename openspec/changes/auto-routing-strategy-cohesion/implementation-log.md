@@ -1,0 +1,20 @@
+# Implementation log — auto-routing-strategy-cohesion
+
+## 0. Preparation (2026-10-28)
+
+### 0.1 Gate and drift correction
+
+- Base commit `3ba705c0a`. Reviewed artifacts had drifted from the code before apply started: `8f3799b07` renamed Magpie route `dsh-magpie` → `dsh-magpie-connector`, and `64c7fdcaa` released 0.4.2. With user approval, corrected only these facts in proposal/design/specs/tasks/test-plan (provider ID; baseline and rollback pin 0.4.1 → 0.4.2), then ran a fresh-context codex re-review (review.md "Round 2b"): `APPROVE_WITH_CHANGES`, one required change R2b-M1 (spec.md:61 provider), applied → `CHANGES_APPLIED: yes`.
+- Dependencies: Worktree promoted to mutable, `npm ci` at root.
+
+### 0.2 / 0.3 Fixtures
+
+- `npm run build` in the package on the unmodified 0.4.2 source; `lib/` is that build.
+- `test/fixtures/routing-oracle-0.4.2.json`: `policyEffort` for 12 models × {no default, default `low`} × 3 depths, the 6 boundary cases, and all 54 `choosePolicyRoute` built-in combinations (claude, codex, and both Magpie transports × both families × 3 capabilities × 3 depths), run against `lib/policy-v2.js`. Values match the spec tables (e.g. Luna `medium/high/xhigh`, Astra `low/low/medium`, unknown+default low `low/low/medium`, no default → unsupported error).
+- `rubricSha256` (sha256 of `src/policy-v2-rubric.json`) is recorded in the same fixture.
+- `test/fixtures/lib-files-0.4.2.json` and `test/fixtures/lib-0.4.2/{router.js,judgements.js,policy-v2.js,policy-v2-rubric.json}`.
+
+### 0.4 Baseline suites (unmodified source)
+
+- Package `npx vitest run`: 34 files, **266 passed / 2 failed** of 268. Both failures are in `usage-report.test.ts` (`keeps incomplete ends inconclusive and legacy exposure unknown`, `keeps complete frames when only the tail is incomplete`): with Node v24.16.0, `zstdDecompressSync` on a frame truncated by 5 bytes returns without throwing, so `tail-incomplete` stays 0. This is environmental and predates this change.
+- Root `npm test`: 633 tests, **627 pass / 2 fail / 4 skipped**. Failures: `tests/jev-readiness.test.mjs` "readiness prefers v4 session file…" (no `zstd` CLI on this machine) and `tests/repo-docs-governance.test.mjs` "every repo-relative markdown link resolves…" (pre-existing repo-root-relative links in this change's `review.md`). Both also fail on a clean checkout of the base.

@@ -1,6 +1,6 @@
 ## Context
 
-`packages/auto-model-routing` 0.4.1 有两条链路：
+`packages/auto-model-routing` 0.4.2 有两条链路：
 
 - 默认链路（内部叫 policy-v2）：`policy-host.ts` 在 `agent/pre-step` 判断主会话 depth、在 `agent/request` 改写 effort；子任务在官方 fresh 创建工具的 async 生命周期内绑定精确 child，首次请求前判断 capability/depth 并持久化 route。
 - legacy 链路：`router.ts` + `rubric.json` 四档 + `CHILD_MODELS` + `mainEfforts`/`childRoutes` 设置 + 回复栏四档标注 + `judgements.jsonl`。只有 `config.json` 显式写 `policy: "legacy"` 时生效（`index.ts:73,96`、`subagent-tool.ts:79`）。
@@ -59,13 +59,13 @@ ids()                             -> string[]
 labels()                          -> string[]
 ```
 
-三种匹配有意用了不同的归一化，目的是逐项保持现有行为（review M3；用 0.4.1 构建产物实测的输出见 spec「effort 起点按模型名查找且保持原结果」）：
+三种匹配有意用了不同的归一化，目的是逐项保持现有行为（review M3；用 0.4.2 构建产物实测的输出见 spec「effort 起点按模型名查找且保持原结果」）：
 
 - 支持判定：现状是 `/^(claude|gpt)-/i`，作用于最后一段（`support.ts:17-18`），所以忽略大小写。
 - effort 起点：现状是一条大小写敏感的已知模型正则，作用于最后一段（`policy-v2.ts:28-30`），并且不看 provider 和家族。所以 `opencode-go/gpt-6-luna` 的起点是 high，`CLAUDE-OPUS-5-5` 用目录默认值。
 - 子模型家族识别：现状只在 Magpie 下按 `claude/`、`codex/` 前缀识别，本地 transport 直接用 provider 作为家族（`policy-v2.ts:9-14`）。新规则“该 provider 下按前缀识别；空前缀的 provider 只属于一个家族”能覆盖这两种情况。
 
-`effort.ts` 的 `STARTING_POINTS` 与 `targetEffort` 删除。`policyEffort` 的起点改为 `registry.effortStart(model) ?? catalog.defaultEffort`。0.4.1 的已知模型正则恰好等于两张起点表的键集合（review 已核对），所以结果逐项相同。
+`effort.ts` 的 `STARTING_POINTS` 与 `targetEffort` 删除。`policyEffort` 的起点改为 `registry.effortStart(model) ?? catalog.defaultEffort`。0.4.2 的已知模型正则恰好等于两张起点表的键集合（review 已核对），所以结果逐项相同。
 
 以下位置只通过注册表取家族信息：
 
@@ -142,35 +142,35 @@ labels()                          -> string[]
 
 ### D7 发布版本与回滚
 
-包的 npm 版本从 0.4.1 升到 0.5.0（删除配置字段和 `label` 参数，属于对外行为变化）。这只是发布元数据。`dsh.yaml` 同步 version 与 note：去掉“legacy四档仅显式回滚”，改为说明回滚方式。CHANGELOG 新增 0.5.0 条目。
+包的 npm 版本从 0.4.2 升到 0.5.0（删除配置字段和 `label` 参数，属于对外行为变化）。这只是发布元数据。`dsh.yaml` 同步 version 与 note：去掉“legacy四档仅显式回滚”，改为说明回滚方式。CHANGELOG 新增 0.5.0 条目。
 
 **回滚**（review M1）：`dsh.yaml` 中的 local 条目只改 version 并不会换代码，因为 sync 对 local 包总是安装当前源码（`scripts/sync.mjs:1352,1378`）。可执行的回滚是把该条目临时改为：
 
 ```yaml
 source: remote
-spec: dsh-auto-model-routing@0.4.1
-version: 0.4.1
+spec: dsh-auto-model-routing@0.4.2
+version: 0.4.2
 ```
 
-0.4.1 已发布在 npm 上。改完后 `dsh build`，再由用户重启 Host，最后用 `dsh --dump-config` 或 profile 中 `node_modules/dsh-auto-model-routing/package.json` 的版本号确认已切换。
+0.4.2 已发布在 npm 上。改完后 `dsh build`，再由用户重启 Host，最后用 `dsh --dump-config` 或 profile 中 `node_modules/dsh-auto-model-routing/package.json` 的版本号确认已切换。
 
 回滚后的数据边界：
 
-- 0.5.0 写入或重写过的子会话记录没有 `version`、`policyVersion`、`mappingVersion`，0.4.1 读取时会 fail closed。这包括在 0.5.0 下继续使用过的旧子会话，这些子会话需要新建。
-- 0.5.0 写入的反馈绑定、反馈事件和事实行，0.4.1 读不到。受影响的是反馈入口与用量报告。
+- 0.5.0 写入或重写过的子会话记录没有 `version`、`policyVersion`、`mappingVersion`，0.4.2 读取时会 fail closed。这包括在 0.5.0 下继续使用过的旧子会话，这些子会话需要新建。
+- 0.5.0 写入的反馈绑定、反馈事件和事实行，0.4.2 读不到。受影响的是反馈入口与用量报告。
 - 在 0.5.0 下保存过设置时，`childRoutes` 等旧字段已经被移除。
 
 升级前，实施任务会把 `state/auto-model-routing/` 与 `plugins/dsh-auto-model-routing/config.json` 整体复制到带时间戳的备份目录。回滚时可以选择恢复备份，但要接受备份之后的新数据会丢失。任何情况下都不删除绑定标记来绕过 fail closed。
 
 ## Risks / Trade-offs
 
-- **[行为等价无法逐一证明]**：test-plan 把现有默认链路测试列为回归集合，只允许改 import 路径、去掉写入的 `policy` 配置、去掉对版本字段的断言，期望值不改。回归集合包括：`policy-host.integration`、`policy-v2`、`policy-v2-jev`、`subagent-tool` 的默认分支、`host.integration` 中 policy 与 feedback 相关部分、`toast`、`lock`、`label-button` 的分配部分、`feedback`、`policy-store`、`usage-report`。另外加两类测试：一是 spec 中以 0.4.1 构建产物实测输出为固定期望的等价表测试；二是升级、降级兼容 fixture 矩阵，覆盖旧配置、旧记录、旧账本、旧状态文件。
+- **[行为等价无法逐一证明]**：test-plan 把现有默认链路测试列为回归集合，只允许改 import 路径、去掉写入的 `policy` 配置、去掉对版本字段的断言，期望值不改。回归集合包括：`policy-host.integration`、`policy-v2`、`policy-v2-jev`、`subagent-tool` 的默认分支、`host.integration` 中 policy 与 feedback 相关部分、`toast`、`lock`、`label-button` 的分配部分、`feedback`、`policy-store`、`usage-report`。另外加两类测试：一是 spec 中以 0.4.2 构建产物实测输出为固定期望的等价表测试；二是升级、降级兼容 fixture 矩阵，覆盖旧配置、旧记录、旧账本、旧状态文件。
 - **[用户本机 `childRoutes` 失效]**：它在默认链路下本来就没有效果。设置页显示“不再生效”，保存时清除，不需要迁移。
 - **[有人依赖 `policy: legacy` 回滚]**：本机未使用。按 D7 用 remote pin 回滚，README 和 CHANGELOG 中写明。
 - **[公开包遗漏或残留文件与链接]**：`package.json` 的 `files`、两份 README、`docs/feedback-evaluation.md`、`docs/` 中指向改名文件的链接，都列入 tasks 逐项改写。历史验收文档（`docs/policy-v2-development.md`、`docs/jev-policy-v2-validation.md`、`docs/magpie-live-acceptance.md` 等）保留原有事实，只在文首加一行“历史记录，命名与路径以 0.4.x 为准”，并修正其中失效的链接。`content.test` 增加对包内 Markdown 相对链接的检查。
 - **[规则文件改名导致 Jev 请求漂移]**：spec 要求改名前后 sha256 相同，test-plan 中加断言。
 - **[主 spec 的 Purpose 与权威说明过期]**（review M2）：OpenSpec 合并时不改 Purpose。归档前由 tasks 显式改写 `openspec/specs/auto-model-routing/spec.md` 第 5–7 行（去掉 legacy 回滚与“前七条”的说明）和 `openspec/specs/auto-routing-usage-report/spec.md` 第 5 行的分组描述，并检查合并后的主 spec 中不再有 legacy 或版本选择方面的义务。未改动的 requirement「手动隔离与失败可见」中“新判断”一词指“新的一次判断”，不是指新策略，保留。
-- **[构建产物残留]**（review R2-M2）：`tsc` 不清理输出目录，`tsdown` 配置为 `clean: false`，所以在已有 0.4.1 产物的工作区构建时，`lib/router.js`、`lib/policy-v2.js` 等会留在包里。包的 `build` 脚本改为先删除 `lib/`，再执行 `tsc`，最后执行 `tsdown`（`tsdown` 保持 `clean: false`，避免删掉 `tsc` 产物）。删除只用 Node 内置的 `fs.rmSync` 删固定的包内 `lib` 路径，不引入依赖。验收时从含旧产物的 `lib/` 出发执行构建与 `npm pack --dry-run`，检查文件列表。
+- **[构建产物残留]**（review R2-M2）：`tsc` 不清理输出目录，`tsdown` 配置为 `clean: false`，所以在已有 0.4.2 产物的工作区构建时，`lib/router.js`、`lib/policy-v2.js` 等会留在包里。包的 `build` 脚本改为先删除 `lib/`，再执行 `tsc`，最后执行 `tsdown`（`tsdown` 保持 `clean: false`，避免删掉 `tsc` 产物）。删除只用 Node 内置的 `fs.rmSync` 删固定的包内 `lib` 路径，不引入依赖。验收时从含旧产物的 `lib/` 出发执行构建与 `npm pack --dry-run`，检查文件列表。
 - **[OpenSpec strict 对长 requirement 报 warning]**：`openspec validate --strict` 只因长度 warning 退出 1（条数随修订变化，以实际输出为准），没有 ERROR；非 strict 通过。按 review S2 如实报告 strict 的退出码，不为了消掉 warning 而改变行为。
 
 ## Migration Plan

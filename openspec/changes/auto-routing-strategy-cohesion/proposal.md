@@ -31,5 +31,5 @@ auto-model-routing 的家族知识（哪些主模型受支持、transport 前缀
 
 - 代码：`packages/auto-model-routing/src/`（新增 `strategies/`；删除 `router.ts`、四档 `rubric.json`、`judgements.ts`、`client/route-picker.ts`；重写 `support.ts`、`policy-v2.ts`（改名 `routing.ts`）、`effort.ts`、`settings*.ts`、`subagent-tool.ts`、`index.ts`、`endpoints.ts`、`feedback.ts`、`policy-store.ts`、`policy-host.ts`、`usage-report.ts`、`client/*`）；对应测试；删除 `scripts/label-report.mjs`、`eval/run.mjs`、`eval/baseline.json`、`eval/cases.json`；改写 `eval/policy-v2-*`、`scripts/magpie-live-acceptance.mjs`、`scripts/policy-v2-host-probe.mjs` 的命名与输出。
 - 配置：`$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 中的 legacy 字段不再生效（用户本机配置含 `childRoutes`）。
-- 发布：包版本 0.5.0；`dsh.yaml` 中该条目版本与 note 同步；公开镜像随提交生成。回滚通过把该条目临时改为 `source: remote`、`spec: dsh-auto-model-routing@0.4.1`（npm 上已有）完成。
+- 发布：包版本 0.5.0；`dsh.yaml` 中该条目版本与 note 同步；公开镜像随提交生成。回滚通过把该条目临时改为 `source: remote`、`spec: dsh-auto-model-routing@0.4.2`（npm 上已有）完成。
 - 不变：Jev 请求协议与 `policy-v2-rubric.json` 内容（可改文件名，内容不变）、状态目录、会话模式存储、凭据与决策服务、官方 selectModel 同步、环境级指令。

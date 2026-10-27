@@ -13,10 +13,10 @@
 #### Scenario: 内置注册表可构造且允许跨 provider 共用前缀
 - **GIVEN** 内置两个策略，以及内置策略加合成策略 `deepseek`（`modelPrefixes: ["deepseek-"]`，`transports: {"opencode-go": ""}`，`effortStarts: {"deepseek-v5": "medium"}`，三个能力槽均为 `deepseek-v5`）
 - **WHEN** 分别构造注册表
-- **THEN** 两次构造都成功；第二个注册表的 provider 集合为 `claude`、`codex`、`dsh-magpie`、`dsh-magpie-connect`、`opencode-go`
+- **THEN** 两次构造都成功；第二个注册表的 provider 集合为 `claude`、`codex`、`dsh-magpie-connector`、`dsh-magpie-connect`、`opencode-go`
 
 #### Scenario: 冲突的注册表拒绝构造
-- **GIVEN** 七份策略列表（每份均为内置策略加一个除所述缺陷外合法的合成策略，或两个内置策略之一被改动）：两个策略 `id` 同为 `codex`；一个策略 `modelPrefixes` 为 `GPT-6-`，与内置 `gpt-` 忽略大小写后重叠；一个策略起点为 `max`；一个策略在 `dsh-magpie` 下前缀为 `codex/x`，与内置 `codex/` 重叠；一个策略在 `claude` provider 下使用空前缀；一个策略的 `effortStarts` 重复内置键 `gpt-6-luna`；一个策略的 `childModels` 缺少 `frontier`
+- **GIVEN** 七份策略列表（每份均为内置策略加一个除所述缺陷外合法的合成策略，或两个内置策略之一被改动）：两个策略 `id` 同为 `codex`；一个策略 `modelPrefixes` 为 `GPT-6-`，与内置 `gpt-` 忽略大小写后重叠；一个策略起点为 `max`；一个策略在 `dsh-magpie-connector` 下前缀为 `codex/x`，与内置 `codex/` 重叠；一个策略在 `claude` provider 下使用空前缀；一个策略的 `effortStarts` 重复内置键 `gpt-6-luna`；一个策略的 `childModels` 缺少 `frontier`
 - **WHEN** 分别构造注册表
 - **THEN** 七次都抛错，错误信息分别含重复的 id、两个重叠的模型前缀、非法 effort、两个重叠的子模型前缀、冲突的 provider、重复的起点键与缺失的槽位名；不返回部分注册表
 
@@ -47,18 +47,18 @@
 
 ### Requirement: 内置家族策略
 内置注册表 SHALL 恰含两个策略，数据与本变更前的行为逐项相等：
-- `claude`（label `Claude`）：`modelPrefixes: ["claude-"]`；`transports`：`claude`→空串，`dsh-magpie`、`dsh-magpie-connect`→`claude/`；`effortStarts`：`claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5` 为 medium，`claude-fable-5-1` 为 high；`childModels`：bounded `claude-haiku-5-5`、analytical `claude-sonnet-5-5`、frontier `claude-opus-5-5`。
-- `codex`（label `GPT`）：`modelPrefixes: ["gpt-"]`；`transports`：`codex`→空串，`dsh-magpie`、`dsh-magpie-connect`→`codex/`；`effortStarts`：`gpt-6.1-sol` 为 medium，`gpt-6-luna` 为 high，`gpt-6-astra` 为 low；`childModels`：bounded `gpt-6-luna`、analytical `gpt-6.1-sol`、frontier `gpt-6.1-sol`。
+- `claude`（label `Claude`）：`modelPrefixes: ["claude-"]`；`transports`：`claude`→空串，`dsh-magpie-connector`、`dsh-magpie-connect`→`claude/`；`effortStarts`：`claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5` 为 medium，`claude-fable-5-1` 为 high；`childModels`：bounded `claude-haiku-5-5`、analytical `claude-sonnet-5-5`、frontier `claude-opus-5-5`。
+- `codex`（label `GPT`）：`modelPrefixes: ["gpt-"]`；`transports`：`codex`→空串，`dsh-magpie-connector`、`dsh-magpie-connect`→`codex/`；`effortStarts`：`gpt-6.1-sol` 为 medium，`gpt-6-luna` 为 high，`gpt-6-astra` 为 low；`childModels`：bounded `gpt-6-luna`、analytical `gpt-6.1-sol`、frontier `gpt-6.1-sol`。
 子模型 id 为该 transport 的前缀加能力槽模型。
 
 #### Scenario: 内置子路由与原行为一致
 - **GIVEN** 内置注册表，目录与允许列表包含两个家族在四个 transport 下的全部能力槽模型，均支持 `low..xhigh`
 - **WHEN** 对 `claude`、`codex` 与两个 Magpie transport（分别给出家族 `claude`、`codex`）计算 bounded/analytical/frontier × lower/baseline/higher 的子路由
-- **THEN** 每个结果与本变更前 `choosePolicyRoute` 的输出深度相等，例如 `codex` bounded baseline → `gpt-6-luna` / `high`，`dsh-magpie` + `claude` frontier lower → `claude/claude-opus-5-5` / `low`，`claude` bounded baseline → `claude-haiku-5-5` / `medium`
+- **THEN** 每个结果与本变更前 `choosePolicyRoute` 的输出深度相等，例如 `codex` bounded baseline → `gpt-6-luna` / `high`，`dsh-magpie-connector` + `claude` frontier lower → `claude/claude-opus-5-5` / `low`，`claude` bounded baseline → `claude-haiku-5-5` / `medium`
 
 #### Scenario: 未给出家族且 provider 有多个家族时不猜测
 - **GIVEN** 内置注册表，所属根会话为 AUTO
-- **WHEN** 以 `provider: dsh-magpie` 且不给 `model` 与 `family` 调用 `route_subagent`
+- **WHEN** 以 `provider: dsh-magpie-connector` 且不给 `model` 与 `family` 调用 `route_subagent`
 - **THEN** 返回错误，内容含 unsupported 与“显式指定模型”，不返回任何路由，会话模式与 `disabled` 不变
 ### Requirement: 无策略版本
 系统 MUST NOT 存在策略、规则、映射或记录格式的版本概念：设置 MUST NOT 有 `policy` 字段；以下新写入 MUST NOT 含 `policy`、`policyVersion`、`mappingVersion`、`rubricVersion`、`pluginVersion`、`schema` 或 `version` 键：Host 状态响应、`label` 端点响应、`route_subagent` 输出、子会话决策记录、反馈账本的绑定行、反馈事件行与隐式事实行、用量报告输出、`eval/` 实测脚本的报告。子会话恢复 MUST NOT 以版本比对作为门禁。`label` 端点 SHALL 把绑定投影为不含上述键的公开形状后返回，历史快照在账本中保持原样，供用量报告的历史分组使用。发布包 MUST NOT 含已删除或改名源文件的旧构建产物。Jev 规则文件 SHALL 为包内唯一的 `src/rubric.json`，内容与本变更前的 `policy-v2-rubric.json` 逐字节相同。工具描述、参数说明、错误信息、client 渲染文本与包内 skill MUST NOT 出现 `policy-v2`、`legacy`、`新策略`、`旧策略`、`原策略` 或“回滚”。插件行为随包版本迭代，包的发布版本号只属于发布元数据，不进入运行时记录。唯一保留的历史名称是子会话决策记录目录 `state/auto-model-routing/policy-v2/`：该路径不迁移，只在一处常量中定义。
@@ -76,7 +76,7 @@
 #### Scenario: 源码与文案不含版本
 - **GIVEN** 包内 `src/`、`eval/`、`skills/` 与 `route_subagent` 工具定义
 - **WHEN** 测试扫描文本
-- **THEN** 从已含 0.4.1 构建产物的 `lib/` 出发执行包构建与 `npm pack --dry-run` 后，文件列表不含 `lib/router.js`、`lib/judgements.js`、`lib/policy-v2.js`、`lib/policy-v2-rubric.json`，且仍含 `lib/index.js`、`lib/client.js`、`lib/usage-report.js` 与 `skills/` 下两个 skill；`src/` 中字符串字面量 `policy-v2` 恰出现一次（决策记录目录常量）；不存在字符串字面量 `legacy`，不存在标识符 `rubricVersion`、`pluginVersion`；`policyVersion` 与 `mappingVersion` 只出现在 `feedback.ts`、`policy-store.ts`、`usage-report.ts` 的旧记录读取处；工具描述、参数说明与两个 skill 不含 `policy-v2`、`legacy`、`原策略`、`旧策略`、`回滚`；`src/rubric.json` 与变更前规则文件的 sha256 相同
+- **THEN** 从已含 0.4.2 构建产物的 `lib/` 出发执行包构建与 `npm pack --dry-run` 后，文件列表不含 `lib/router.js`、`lib/judgements.js`、`lib/policy-v2.js`、`lib/policy-v2-rubric.json`，且仍含 `lib/index.js`、`lib/client.js`、`lib/usage-report.js` 与 `skills/` 下两个 skill；`src/` 中字符串字面量 `policy-v2` 恰出现一次（决策记录目录常量）；不存在字符串字面量 `legacy`，不存在标识符 `rubricVersion`、`pluginVersion`；`policyVersion` 与 `mappingVersion` 只出现在 `feedback.ts`、`policy-store.ts`、`usage-report.ts` 的旧记录读取处；工具描述、参数说明与两个 skill 不含 `policy-v2`、`legacy`、`原策略`、`旧策略`、`回滚`；`src/rubric.json` 与变更前规则文件的 sha256 相同
 
 #### Scenario: 旧子会话记录恢复不比较版本
 - **GIVEN** 决策记录目录中有一个已应用子任务的旧记录，含 `version: 1`、`policyVersion: "policy-v2-0000aaaa"`、`mappingVersion: "capability-slots-1"` 与 route `claude` / `claude-haiku-5-5` / `medium`
@@ -126,7 +126,7 @@
 - **THEN** S1 返回 `{routed: false, reason: manual}` 且 Jev 请求数为 0；S2 返回错误，内容含“暂停委派并询问用户”，不返回其它模型；两个会话的模式与 `disabled` 不变
 
 ### Requirement: AUTO 的双 Magpie 精确 transport 兼容
-AUTO SHALL 在目录、子任务路由、预览工具与持久化恢复中接受 `dsh-magpie` 和 `dsh-magpie-connect`，保持各自精确 provider 与网关完整 model ID，不把两者互为 alias，也不转到本地 claude/codex。自动推荐 SHALL 仅使用注册表中已定义的家族；模型不属于任何已注册家族且未显式给出模型时 SHALL 报 unsupported 并要求显式指定模型，其它家族须显式模型及可验证 effort。所属根会话为 MANUAL 时预览工具 SHALL 返回 `{routed: false, reason: "manual"}`，不判断、不外发、不写状态；此前已绑定实例继续按既定精确身份恢复。
+AUTO SHALL 在目录、子任务路由、预览工具与持久化恢复中接受 `dsh-magpie-connector` 和 `dsh-magpie-connect`，保持各自精确 provider 与网关完整 model ID，不把两者互为 alias，也不转到本地 claude/codex。自动推荐 SHALL 仅使用注册表中已定义的家族；模型不属于任何已注册家族且未显式给出模型时 SHALL 报 unsupported 并要求显式指定模型，其它家族须显式模型及可验证 effort。所属根会话为 MANUAL 时预览工具 SHALL 返回 `{routed: false, reason: "manual"}`，不判断、不外发、不写状态；此前已绑定实例继续按既定精确身份恢复。
 
 #### Scenario: 新旧 Magpie 子实例保持精确身份并恢复
 - **GIVEN** AUTO 主会话，transport 分别为新旧 Magpie，目录和允许列表包含同 transport 的目标模型

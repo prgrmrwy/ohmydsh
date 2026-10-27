@@ -112,3 +112,41 @@ CHANGES_APPLIED: yes
 ## Rebuttals
 
 _Author responses pending._
+
+
+## Round 2b — Post-drift Re-review
+
+### Verification and evidence
+
+- Reviewed the complete uncommitted artifact diff, `git show 8f3799b07 --stat`, that commit's AUTO source diff, and `git show 64c7fdcaa`. The rename changes the exact accepted route, not an alias: `packages/auto-model-routing/src/policy-v2.ts:5–13` accepts `dsh-magpie-connect` and `dsh-magpie-connector`, matching `openspec/specs/auto-model-routing/spec.md:39`. The corrected built-in transports, prefix-collision fixture, route example and dual-transport requirement agree (`specs/auto-model-routing/spec.md:16–19,50–57,129`). One live scenario was missed; see R2b-M1.
+- The 0.4.2 baseline/rollback replacements in proposal, design, tasks, test plan and delta are correct. `packages/auto-model-routing/package.json:3`, `CHANGELOG.md:3–10`, and `dsh.yaml:171–177` identify the current package. Read-only `npm view dsh-auto-model-routing versions --json --registry=https://registry.npmjs.org/` succeeded and returned 0.4.2 among the published versions, so the remote exact-version rollback is available. The old readers still require child record version/provenance (`src/policy-store.ts:8–16`) and versioned feedback/fact shapes (`src/feedback.ts:6–14`); the downgrade data boundary in `design.md:159–163` remains accurate.
+- Searched all change artifacts for bare `dsh-magpie` and 0.4.1. The only remaining live bare provider is R2b-M1. All remaining 0.4.1 references are in the preserved round-1/round-2 review history (`review-round1.md:43–45,69,109,111`; earlier `review.md:106`), not current baseline or rollback instructions. Those historical review statements should not be mechanically rewritten.
+- Provider ordering is not a defect: `specs/auto-model-routing/spec.md:16` explicitly describes a **set**, and `design.md:57` defines the transport-key union, not order equality with `POLICY_PROVIDERS`. The connector/connect order differs from the current constant but preserves membership. Tests should compare sets rather than invent an ordering guarantee. All seven rejection fixtures remain independently meaningful under the renamed connector: duplicate id, case-insensitive model-prefix overlap, invalid automatic start `max`, same-provider child-prefix overlap, exclusive empty prefix, duplicate effort key, and missing frontier (`specs/auto-model-routing/spec.md:18–21`; `design.md:85–94`). No new constructor fix is required.
+- Rechecked built-in models, case/slash normalization, effort starts, sparse-effort movement and caps against `src/policy-v2.ts:9–14,22–50` and `src/effort.ts:8–16`. The corrected baseline does not change these algorithms or the listed oracle expectations (`design.md:62–68`; routing delta:23–31,48–57). Capturing a verified 0.4.2 oracle before implementation is still required by `tasks.md:4`; no build output was executed in this re-review.
+- Rechecked 0.4.2's unchanged-request feedback fix: `src/policy-host.ts:190–218` confirms against the effective header when no new header was emitted. The untouched main feedback requirement and scenario preserve this behavior (`openspec/specs/auto-allocation-feedback/spec.md:8–19`); `design.md:28,167` requires default-chain/feedback regression expectations to stay unchanged. No design change is needed.
+- Rechecked implicit facts and report behavior: strict versioned fact reads/writes are at `src/feedback.ts:14,24–29,46–51`, MANUAL capture precedes invalidation at `src/index.ts:145–160`, and report classification remains mutually exclusive at `src/usage-report.ts:239–265`. Design D5 explicitly covers fact-version compatibility and version-free writes (`design.md:126–136`), and the revised scenarios exercise new facts plus old exposure preservation (`specs/auto-model-routing/spec.md:66–74`; feedback delta:4–14). Untouched main requirements retain exposure/MANUAL semantics and the implicit breakdown/caveats (`openspec/specs/auto-allocation-feedback/spec.md:34–71`; `openspec/specs/auto-routing-usage-report/spec.md:160–209`). These additions were not dropped by the revised design.
+- Rechecked the Claude/GPT family lock in `src/support.ts:15–24`, `src/policy-host.ts:85–86,154–170`, and `src/index.ts:163–173`. Registry-derived support and the retained MANUAL/no-effort-support cases preserve the current behavior (`design.md:64,72–79`; routing delta:503–527). Official effort selection synchronization remains unchanged (`src/policy-host.ts:174–178`; routing delta:377–398). Shifted source citations alone do not change the design's meaning and are not findings.
+- The four round-2 required corrections remain represented: historical label projection (`design.md:136`; routing delta:71–74), pre-TypeScript output cleanup (`design.md:173`; `tasks.md:55–56`), deterministic effort/preview inputs (routing delta:29–31,137–139), and complete report coverage/reference replacements (usage delta:39–78). No new architectural blocker was found.
+
+### Findings
+
+**Critical:** None.
+
+**Moderate — R2b-M1: One ambiguous-family scenario still supplies the removed provider ID.**
+
+- Evidence: `specs/auto-model-routing/spec.md:61` calls `route_subagent` with `provider: dsh-magpie`, but its expected result at line 62 is the supported-Magpie/missing-family error requiring an explicit model. Current provider membership and the tool parameter enum exclude that ID (`packages/auto-model-routing/src/policy-v2.ts:5–8`; `src/subagent-tool.ts:44`). The proposed registry's built-ins likewise exclude it (routing delta:50–51,114).
+- Impact: A conforming implementation rejects the input as an invalid provider before reaching the intended ambiguity branch; the acceptance case no longer verifies the behavior named by its title and can fail for the wrong reason.
+- Smallest required fix: Replace only `provider: dsh-magpie` on line 61 with `provider: dsh-magpie-connector`. Keep the missing model/family inputs and all expected outcomes unchanged. Do not add an alias or expand accepted providers.
+
+**Suggestions:** No additional required design change. Preserve historical review evidence and use set membership for the provider-set assertion.
+
+### Disposition
+
+The round-2 conditional approval remains appropriate. Its original required edits are present, and the drift correction is otherwise sound; one missed live provider literal must be corrected before implementation proceeds. This is artifact approval, not implementation acceptance.
+
+Required change: R2b-M1, the one-token provider replacement described above.
+VERDICT: APPROVE_WITH_CHANGES
+
+CHANGES_APPLIED: yes
+
+- **R2b-M1 — Applied (author, 2026-10-28).** `specs/auto-model-routing/spec.md:61` now reads `provider: dsh-magpie-connector`; inputs and expected outcomes unchanged; no bare `dsh-magpie` provider remains in proposal/design/specs/tasks/test-plan.
