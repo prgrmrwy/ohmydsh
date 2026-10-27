@@ -5,14 +5,14 @@ English · [简体中文](README.zh.md)
 ![Settings → Egress guard in DSH: the current verdict, country and source, and the blocklist configuration](docs/settings.png)
 
 <!-- problem -->
-Some regions are not permitted to use Claude models, and your DSH host may sit on such a network without you noticing, for example behind a home connection or VPN exit. This guard checks the country of the DSH host's egress and blocks every Claude-family request, both in the input box and at the host, whenever that country is on your blocklist or cannot be determined.
+Some regions are not permitted to use Claude models, and your DSH host may sit on such a network without you noticing, for example behind a home connection or VPN exit. This guard checks the country of the DSH host's egress and blocks non-exempt Claude-family requests, both in the input box and at the host, whenever that country is on your blocklist or cannot be determined.
 
 
 **Install.** Managed through `dsh.yaml` (entry `home-network-model-guard`, `source: local`): set `enabled: true`, run `dsh build`, then restart DSH. Setting `enabled: false` and rebuilding unloads the host gate and the web prompt, which removes the restriction entirely. Designs: the OpenSpec changes `block-claude-on-home-network`, `trusted-egress-claude-guard` and `fix-geo-timeout-budget-starvation`; the current behavior is specified in `openspec/specs/home-network-model-guard`.
 
 ## How it behaves
 
-**The rule.** A request is blocked when the selection is a **Claude-family** model **and** the host egress verdict is anything other than `allowed`. The verdict is one of:
+**The rule.** An exact provider route in `exemptProviders` bypasses this guard. Other requests are blocked when the selection is a **Claude-family** model **and** the host egress verdict is anything other than `allowed`. The verdict is one of:
 
 - `allowed`: the egress country was resolved and is **not** in the blocklist. This is a blocklist, not an allowlist: every other country is allowed.
 - `blocked`: the egress country was resolved and is in the blocklist (default `CN`).
@@ -41,6 +41,12 @@ Non-Claude models are never affected, including while the verdict is `unknown`.
 
 **Settings page.** An **Egress Guard** section (order 290) shows the current verdict, the resolved country, which service answered (primary or fallback) and any degradation reason. It also edits the blocklist and the two endpoints. This view is diagnostic only: it never changes configuration by itself and never auto-allows an observed egress.
 
+## Provider exemptions
+
+In Egress Guard settings, enter actual provider route IDs, separated by commas. Use `dsh-magpie` for both Magpie (Claude) and Magpie (GPT): those are display groups sharing one route. Matching is exact and case-sensitive, without wildcard, prefix, model-name or display-group inference. Direct `claude` / `anthropic` routes remain guarded.
+
+The generic default is empty. ohmydsh explicitly sets a deployment default of `["dsh-magpie"]` through the `home-network-model-guard-config` patch. An explicit host JSON list overrides it; saving `[]` revokes all exemptions. The Host reads policy per new call and skips Geo for exempt routes. The Web reads the independent `policy` RPC first; no exemption applies until policy is available. Saving refreshes this client immediately; other clients refresh within about 10 seconds. Policy-read failures revoke client exemptions. Other components' sending restrictions remain effective.
+
 ## Configuration
 
 The configuration lives on the host, outside the repository:
@@ -53,6 +59,7 @@ $DSH_HOME/plugins/dsh-home-network-model-guard/config.json
 
 | Field | Default | Rules |
 |---|---|---|
+| `exemptProviders` | `[]` (deployment default may override) | Up to 64 nonempty route IDs of up to 128 characters; deduplicated; alphanumeric first character, then alphanumeric or `._:/-`; no wildcard; `[]` revokes all exemptions |
 | `blockedCountries` | `["CN"]` | 1 to 64 two-letter uppercase ISO alpha-2 codes; duplicates are removed |
 | `geoEndpoints` | `["https://ipinfo.io/json", "https://ipwho.is/"]` | Exactly `[primary, fallback]`; credential-free HTTPS URLs, at most 512 characters; the country is read from `country`, `countryCode` or `country_code` |
 | `timeoutMs` | `5000` | Positive number; budget of **each** endpoint, not of the whole resolution |
@@ -62,14 +69,14 @@ $DSH_HOME/plugins/dsh-home-network-model-guard/config.json
 
 - Writing is validated and atomic (owner-only file mode `0600`, directory `0700`). Any field whose name looks like a credential (password, secret, token, credential, private key, API key), a non-HTTPS endpoint, or a URL with embedded userinfo is **rejected**; the guard accepts only country codes, endpoint URLs and non-secret tuning values.
 - A write changes the configuration generation, which invalidates the cached verdict. The blocklist and endpoints are re-read on every resolution; `timeoutMs`, `ttlMs`, `backoffBaseMs` and `backoffMaxMs` are read when the plugin loads (the code path reads them once at mount), so changing those needs a restart.
-- The settings page edits only `blockedCountries` and `geoEndpoints`; the timing fields are edited in the file.
-- **A missing, unreadable or invalid file falls back to the full defaults** (blocklist `CN`) and Claude stays fail-closed.
+- The settings page edits `exemptProviders`, `blockedCountries` and `geoEndpoints`, preserving current timing fields when saving; timing fields are edited in the file.
+- A missing file or exemption field inherits the deployment default; an explicit `[]` overrides it. An unreadable or invalid file falls back to the full defaults (blocklist `CN`, no exemptions), keeping non-exempt Claude fail-closed.
 
 ## Boundaries & safety
 
-- **Fail-closed, summarized.** For Claude, both a resolved blocked country and an unresolved verdict (both services down, unparseable response, change not yet confirmed, RPC unavailable, judgment error) deny sending. Non-Claude is never denied by this guard. The only ways out are a resolved `allowed` verdict, switching to a non-Claude model, or disabling the plugin in the manifest.
+- **Fail-closed, summarized.** For Claude, both a resolved blocked country and an unresolved verdict (both services down, unparseable response, change not yet confirmed, RPC unavailable, judgment error) deny sending. Non-Claude is never denied by this guard. Confirmed exempt providers bypass this guard; otherwise the ways out are a resolved `allowed` verdict, switching to a non-Claude model, or disabling the plugin in the manifest.
 - **Network.** The host half is the only half that calls out, and only to the two configured Geo services (they can see the host's public IP, so they may log it). No Anthropic or Cloudflare diagnostic endpoint is contacted. The browser never performs a lookup of its own.
-- **What is exposed.** The RPC channel `/dsh-home-network-model-guard` (`check`, `status`, `set-config`) is served through the Connection layer's host fence; this deployment configures no `trustedHosts`, so it is loopback-only. `check` returns the classification, freshness and a coarse degradation code (`fetch-failed`, `timeout`, `invalid-response`). `status` adds the resolved country, the answering service and the current configuration (which includes the configured endpoints) for the settings page. The raw IP is never persisted, logged or returned, and no conversation text or credentials are stored.
+- **What is exposed.** The RPC channel `/dsh-home-network-model-guard` (`policy`, `check`, `status`, `set-config`) is served through the Connection layer's host fence; this deployment configures no `trustedHosts`, so it is loopback-only. `check` returns the classification, freshness and a coarse degradation code (`fetch-failed`, `timeout`, `invalid-response`). `status` adds the resolved country, the answering service and the current configuration (which includes the configured endpoints) for the settings page. The raw IP is never persisted, logged or returned, and no conversation text or credentials are stored.
 - **Temporary compensation in the web half.** The web half also injects `[data-input-scroll] > div{min-height:24px}` (`COMPOSER_FALLBACK_CSS` in `src/client/index.ts`). When the runtime moved the composer from a native `<textarea>` to a Lexical contenteditable (seen on 0.1.2-rc.1) it dropped the hidden mirror that gave the content area its height. With a block raised and an empty draft the content area collapsed to zero height and its overflow clipped the reason text. The rule is a one-line floor anchored on stable `data-*` attributes and applied to the content wrapper, so states that already have height are unaffected. **Remove it** once the runtime again guarantees a minimum height for the non-hero composer, and check that "blocked with an empty draft" still shows the reason. The same collapse affects the official model selection when it blocks on `routable === false`, and the floor covers that case too, unconditionally.
 
 ## Development

@@ -226,6 +226,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
+- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts the `dsh-magpie` provider route from the host egress gate by exact provider id.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
 - [ponytail-skills](patches/ponytail-skills.yml) — Composition patch that mounts a dedicated skill provider for the ponytail package only.
 

@@ -226,6 +226,7 @@ tests/                   仓库级测试
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
 - [dsh-collab-config](patches/dsh-collab-config.yml) — dsh-collab 配置补丁：邀请即授权，并声明 `pet-locus` 托管 channel，供 Pet Locus 以代理成员接入。
+- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 让 `dsh-magpie` route 不受本机出口门禁约束。
 - [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — 配置补丁：把官方 gateway 的 WebSocket 心跳放宽到 5 秒，使大体量历史在短暂网络抖动时不被断开。
 

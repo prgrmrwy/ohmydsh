@@ -24,6 +24,29 @@ export function classifyCountry(country: string, blocked: readonly string[]): Ne
 }
 
 /**
+ * Whether this call must obey the host's egress policy.
+ *
+ * Exemption matches the ACTUAL provider route id exactly: Magpie's UI groups
+ * (Claude/GPT) are one route (`dsh-magpie`), so display names, model ids and
+ * prefixes never grant an exemption. Claude-family classification is unchanged
+ * by an exemption, so other senders still see the same selection.
+ *
+ * @param provider - the request's provider route id.
+ * @param model - the request's model id.
+ * @param exemptProviders - exact route ids exempt from this host's egress gate.
+ * @returns true when the gate must decide this call.
+ */
+export function requiresEgressGuard(provider: string, model: string, exemptProviders: readonly string[] = []): boolean {
+  return !exemptProviders.includes(provider) && isClaudeFamily(provider, model)
+}
+
+/** Validate a bounded list without normalizing provider identities. */
+export function isProviderList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 64 && value.every(entry =>
+    typeof entry === 'string' && entry.length <= 128 && /^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(entry))
+}
+
+/**
  * Whether a provider/model selection belongs to the Claude family.
  *
  * Reads BOTH fields (never the model name alone): the subscriptions plugin

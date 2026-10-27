@@ -34,7 +34,7 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-llm'
 import os from 'node:os'
 import path from 'node:path'
-import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, GUARD_SET_CONFIG_ENDPOINT, GUARD_STATUS_ENDPOINT, type GuardStatus } from './contract.js'
+import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, GUARD_POLICY_ENDPOINT, GUARD_SET_CONFIG_ENDPOINT, GUARD_STATUS_ENDPOINT, type GuardStatus } from './contract.js'
 import { configEpochOf, loadGuardConfig, writeGuardConfig, type GuardConfig } from './config.js'
 import { createEgressGate } from './egress-gate.js'
 import { GeoCountrySource } from './geo.js'
@@ -68,13 +68,13 @@ function resolveDshHome(): string {
  * before every resolution; a config write changes the epoch which invalidates
  * the cache, and the next resolution uses the new endpoints/blocklist.
  */
-function buildSource(configFile: string): VerdictSource {
-  let current: GuardConfig = loadGuardConfig(configFile)
+function buildSource(configFile: string, loadConfig: () => GuardConfig): VerdictSource {
+  let current: GuardConfig = loadConfig()
   return {
     fingerprint: () => fingerprintOf(os.networkInterfaces()),
     epoch: () => configEpochOf(configFile),
     fetchCountry: (signal, perEndpointTimeoutMs) => {
-      current = loadGuardConfig(configFile)
+      current = loadConfig()
       return new GeoCountrySource(current.geoEndpoints, fetch).resolveCountry(signal, perEndpointTimeoutMs)
     },
     classify: (country) => classifyCountry(country, current.blockedCountries),
@@ -82,11 +82,12 @@ function buildSource(configFile: string): VerdictSource {
 }
 
 /** Mount the verdict cache, the `llm/stream` gate and the loopback RPC channel. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: { exemptProviders?: readonly string[] } = {}): void {
   const configFile = configPathOf(resolveDshHome())
-  const initial = loadGuardConfig(configFile)
+  const loadConfig = (): GuardConfig => loadGuardConfig(configFile, config.exemptProviders)
+  const initial = loadConfig()
   const cache = new NetworkVerdictCache(
-    buildSource(configFile),
+    buildSource(configFile, loadConfig),
     () => Date.now(),
     {
       ttlMs: initial.ttlMs,
@@ -115,6 +116,7 @@ export function apply(ctx: Context): void {
       lastRefusal = line
       gateLogger.info(`refused Claude egress -> ${line}`)
     },
+    () => loadConfig().exemptProviders,
   ))
 
   ctx.inject(['connection'], (child) => {
@@ -133,6 +135,9 @@ export function apply(ctx: Context): void {
       GUARD_CHANNEL,
       async (endpoint, params?: unknown) => {
         try {
+          if (endpoint === GUARD_POLICY_ENDPOINT) {
+            return { ok: true as const, value: { exemptProviders: loadConfig().exemptProviders } }
+          }
           if (endpoint === GUARD_CHECK_ENDPOINT) {
             const result = await cache.check()
             logTransition(result.verdict, result.degraded)
@@ -141,7 +146,7 @@ export function apply(ctx: Context): void {
           if (endpoint === GUARD_STATUS_ENDPOINT) {
             const result = await cache.check()
             const resolved = cache.diagnostics()
-            const config = loadGuardConfig(configFile)
+            const config = loadConfig()
             const status: GuardStatus = {
               verdict: result.verdict,
               degraded: result.degraded,

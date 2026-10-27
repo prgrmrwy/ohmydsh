@@ -23,6 +23,7 @@ export type GuardKey =
   | 'configTitle'
   | 'blockedLabel'
   | 'endpointsLabel'
+  | 'exemptProvidersLabel'
   | 'save'
   | 'saved'
   | 'saveFailed'
@@ -40,6 +41,7 @@ export const en: Record<GuardKey, string> = {
   configTitle: 'Configuration',
   blockedLabel: 'Blocked countries (ISO alpha-2, comma-separated)',
   endpointsLabel: 'Geo endpoints (primary, fallback)',
+  exemptProvidersLabel: 'Exempt provider route IDs (comma-separated; e.g. dsh-magpie, not UI group names)',
   save: 'Save & apply',
   saved: 'Saved; verdict will refresh automatically',
   saveFailed: 'Save failed:',
@@ -58,6 +60,7 @@ export const zh: Record<GuardKey, string> = {
   configTitle: '配置',
   blockedLabel: '阻断国家/地区（ISO alpha-2，逗号分隔）',
   endpointsLabel: 'Geo 端点（主，备）',
+  exemptProvidersLabel: '豁免 provider route ID（逗号分隔，如 dsh-magpie；不填 UI 分组名称）',
   save: '保存并应用',
   saved: '已保存；判定将自动刷新',
   saveFailed: '保存失败：',

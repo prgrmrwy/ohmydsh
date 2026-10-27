@@ -15,7 +15,7 @@
  */
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { GuardCheckResult } from './contract.js'
-import { isClaudeFamily } from './rules.js'
+import { requiresEgressGuard } from './rules.js'
 
 /** Stable error marker for restricted Claude calls. */
 export class EgressRestrictedError extends Error {
@@ -54,9 +54,9 @@ export type RejectionObserver = (
  * observer never affects the refusal itself.
  * @returns the waterfall listener.
  */
-export function createEgressGate(check: () => Promise<GuardCheckResult>, onReject?: RejectionObserver): Listener {
+export function createEgressGate(check: () => Promise<GuardCheckResult>, onReject?: RejectionObserver, exemptProviders: () => readonly string[] = () => []): Listener {
   return (options, next) => {
-    if (!isClaudeFamily(options.provider, options.model)) return next()
+    if (!requiresEgressGuard(options.provider, options.model, exemptProviders())) return next()
     const run = (async function* gate(): AsyncIterable<StreamChunk> {
       const result = await check()
       if (result.verdict !== 'allowed') {

@@ -167,7 +167,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
-    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道仅回环可达(未配置 trustedHosts,不得添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
+    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 dsh-magpie,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道仅回环可达(未配置 trustedHosts,不得添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
   - id: auto-model-routing
     type: package
     source: local
@@ -410,12 +410,9 @@ customizations:
     brief: Magpie 模型在选择器里显示网关显示名(Claude Haiku 5.5)而非 route id
     note: '自研过渡 shim:dsh-magpie-connect 0.4.1 的 listModels/resolveModel 报 name: id,选择器显示 claude/claude-haiku-5-5。本插件在 llm/adapters-updated 时包装 dsh-magpie-connect route 的 adapter,把 name 换成它自己目录缓存 ~/.dsh-magpie-connect/magpie-models.json 里的网关 display_name;id 不变(路由/会话历史不受影响),无网络请求,读缓存失败保持原名。上游修复 https://github.com/bitxeno/dsh-magpie-connect/pull/1。退役:test/real-adapter.test.mjs 断言已 pin 版本仍为 name: id,升级后该断言失败即说明上游已修,enabled:false → dsh build → 重启。'
 
-  # 第三方(remote):Magpie 网关 provider —— 家庭 CT105 magpie(114.114.114.223:3425)的模型进入选择器,与现有直连 provider 并存
-  - id: dsh-magpie-connect
-    type: package
-    source: remote
-    spec: dsh-magpie-connect@0.4.1
-    version: 0.4.1
-    enabled: false
-    brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
-    note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='
+  # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。
+  - id: home-network-model-guard-config
+    type: patch
+    enabled: true
+    brief: 出口守卫默认豁免 dsh-magpie provider
+    note: 'change guard-provider-exemptions。仅按真实 route ID 精确匹配，UI 分组无关；本机设置可用 exemptProviders:[] 撤销。删除旧 dsh-magpie-connect 接入，本机数据与旧会话保留。回滚：禁用本 patch 并确认本机配置无显式豁免，再 build+重启。'

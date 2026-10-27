@@ -39,12 +39,13 @@ import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: ctx.conversation.blocks / ctx.modelDirectories merges.
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-model-selection/client'
-import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, type GuardCheckResult, type NetworkVerdict } from '../contract.js'
+import { GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, GUARD_POLICY_ENDPOINT, GUARD_CONFIG_CHANGED, type GuardPolicy, type GuardCheckResult, type NetworkVerdict } from '../contract.js'
 import { SessionBindings } from './bindings.js'
 import { ComposerGuardController, type ReasonBlock, type SessionGuardDeps } from './guard.js'
 import { NS, en, zh, type GuardKey } from './locales.js'
 import { GuardSettingsSection, type GuardSettingsInjected } from './settings.jsx'
 import { mainSessionId } from './main-session.js'
+import { isProviderList } from '../rules.js'
 
 /** Required services: slots, locale, connection RPC, sessions, composer blocks, model directories. */
 export const inject = ['slots', 'locale', 'connection', 'sessions', 'conversation', 'modelDirectories']
@@ -141,20 +142,40 @@ export function apply(ctx: ClientContext): void {
     verdict: NetworkVerdict
     lastAttempt: number
     resolved: boolean
-  } = { verdict: 'unknown', lastAttempt: 0, resolved: false }
-  const refreshNetwork = async (): Promise<void> => {
+    exemptProviders: readonly string[]
+  } = { verdict: 'unknown', lastAttempt: 0, resolved: false, exemptProviders: [] }
+  let refreshGeneration = 0
+  const refreshNetwork = async (force = false): Promise<void> => {
     const now = Date.now()
-    if (now - networkState.lastAttempt < MIN_NETWORK_RETRY_MS && networkState.verdict !== 'unknown') return
+    // Throttle settled verdicts; an unresolved one keeps retrying on every signal.
+    if (!force && now - networkState.lastAttempt < MIN_NETWORK_RETRY_MS && networkState.verdict !== 'unknown') return
     networkState.lastAttempt = now
+    const generation = ++refreshGeneration
+    try {
+      const policy = await connection.rpc.call(GUARD_CHANNEL, GUARD_POLICY_ENDPOINT, {}) as { ok?: boolean; value?: GuardPolicy }
+      if (generation !== refreshGeneration) return
+      if (policy.ok !== true || !isProviderList(policy.value?.exemptProviders)) throw new Error('invalid policy response')
+      networkState.exemptProviders = policy.value.exemptProviders
+      refreshBindings()
+    } catch {
+      if (generation !== refreshGeneration) return
+      networkState.exemptProviders = []
+      networkState.verdict = 'unknown'
+      networkState.resolved = false
+      refreshBindings()
+      return
+    }
     let result: { ok?: boolean; value?: GuardCheckResult; error?: { message?: string } }
     try {
       result = (await connection.rpc.call(GUARD_CHANNEL, GUARD_CHECK_ENDPOINT, {})) as typeof result
     } catch (error) {
+      if (generation !== refreshGeneration) return
       networkState.verdict = 'unknown'
       // 诊断信号:浏览器控制台可见;失败不泄漏任何 IP 信息。
       console.warn('[dsh-home-network-model-guard] verdict RPC failed:', error instanceof Error ? error.message : String(error))
       return
     }
+    if (generation !== refreshGeneration) return
     if (result.ok !== true || result.value === undefined) {
       networkState.verdict = 'unknown'
       console.warn('[dsh-home-network-model-guard] verdict RPC returned an error result')
@@ -171,6 +192,7 @@ export function apply(ctx: ClientContext): void {
   const guardKey: GuardKey = 'homeNetworkClaudeBlocked'
   const deps: SessionGuardDeps = {
     network: () => networkState.verdict,
+    exemptProviders: () => networkState.exemptProviders,
     read: (id) => {
       try {
         const directory = ctx.modelDirectories.directoryFor(id as SessionId)
@@ -263,14 +285,15 @@ export function apply(ctx: ClientContext): void {
       }
     }
 
+    const onConfigChanged = (): void => {
+      void refreshNetwork(true).then(refreshBindings)
+    }
+    window.addEventListener(GUARD_CONFIG_CHANGED, onConfigChanged)
     const stopList = ctx.sessions.list.subscribe(syncSessions)
     document.addEventListener('visibilitychange', onVisibility)
 
-    // 自愈心跳:判定不明(unknown,即 fail-open 态)时每 5s 重试,直到拿到结论。
-    // 原实现只在启动/切回标签页时重试——连接 RPC 在 bundle 装载瞬间可能尚
-    // 未就绪,导致永久 unknown、永远不拦截,且无任何可观测迹象。
+    // Keep policy changes from other clients fresh even after Geo has resolved.
     const heartbeat = window.setInterval(() => {
-      if (networkState.resolved) return
       void refreshNetwork().then(refreshBindings)
     }, 5_000)
 
@@ -280,6 +303,8 @@ export function apply(ctx: ClientContext): void {
     return () => {
       stopList()
       window.clearInterval(heartbeat)
+      ++refreshGeneration
+      window.removeEventListener(GUARD_CONFIG_CHANGED, onConfigChanged)
       document.removeEventListener('visibilitychange', onVisibility)
       bindings.stop()
     }

@@ -5,14 +5,14 @@
 ![DSH 设置 → 出口守卫：当前判定、国家/地区与来源，以及阻断名单配置](docs/settings.png)
 
 <!-- problem -->
-有些地区不允许使用 Claude 模型，而你的 DSH 主机可能在不知不觉中处于这样的网络里，比如家庭宽带或某个 VPN 出口。这个守卫检查 DSH 主机出口所在的国家/地区，只要该国家/地区在你的阻断清单里，或者无法判定，就在输入框和 host 两层拦截所有 Claude 系列模型的请求。
+有些地区不允许使用 Claude 模型，而你的 DSH 主机可能在不知不觉中处于这样的网络里，比如家庭宽带或某个 VPN 出口。这个守卫检查 DSH 主机出口所在的国家/地区，只要该国家/地区在你的阻断清单里，或者无法判定，就在输入框和 host 两层拦截未豁免 provider 的 Claude 系列模型请求。
 
 
 **安装。** 通过 `dsh.yaml` 管理（条目 `home-network-model-guard`，`source: local`）：设为 `enabled: true`，运行 `dsh build`，然后重启 DSH。设为 `enabled: false` 并重新 build 会卸载 host 门禁和 Web 提示，也就是彻底取消这项限制。设计见 OpenSpec change `block-claude-on-home-network`、`trusted-egress-claude-guard` 与 `fix-geo-timeout-budget-starvation`；当前行为规范见 `openspec/specs/home-network-model-guard`。
 
 ## 行为
 
-**规则。** 当选中的是 **Claude 系列**模型，**并且** host 出口判定结果不是 `allowed` 时，请求被拦截。判定结果有三种：
+**规则。** 实际 provider 在 `exemptProviders` 中时跳过本机出口门禁。其余请求当选中的是 **Claude 系列**模型，**并且** host 出口判定结果不是 `allowed` 时，请求被拦截。判定结果有三种：
 
 - `allowed`：已解析出出口国家/地区，且它**不在**阻断清单里。这是黑名单而不是白名单：其他所有国家/地区都放行。
 - `blocked`：已解析出出口国家/地区，且在阻断清单里（默认 `CN`）。
@@ -41,6 +41,12 @@
 
 **设置页。** **Egress Guard** 章节（order 290）显示当前判定、解析出的国家/地区、哪个服务给出了答复（主或备）以及降级原因，也可以编辑阻断清单和两个端点。这个视图只用于诊断：它自己不会修改配置，也绝不会把观察到的出口自动加入放行。
 
+## Provider 豁免
+
+出口守卫设置页的“豁免 provider route ID”填写真实调用 route，逗号分隔。例如 `dsh-magpie`：Magpie (Claude)、Magpie (GPT) 都只是展示分组，它们的实际 provider 同为 `dsh-magpie`。匹配区分大小写、无前缀或通配符，不依据模型名豁免。直连 `claude` / `anthropic` 继续受限。
+
+通用默认列表为空；ohmydsh 通过 `home-network-model-guard-config` patch 显式默认豁免 `dsh-magpie`。本机 JSON 的显式列表优先，保存空列表 `[]` 即撤销。Host 每次新调用读取策略，命中时不等待 Geo；Web 启动时先读取独立 `policy` RPC，尚未取得策略时不豁免。保存设置立即刷新本页，其它客户端在约 10 秒内刷新；策略读取失败撤销客户端豁免。其它组件的阻断仍有效。
+
 ## 配置
 
 配置放在主机本地，不在仓库里：
@@ -53,6 +59,7 @@ $DSH_HOME/plugins/dsh-home-network-model-guard/config.json
 
 | 字段 | 默认值 | 规则 |
 |---|---|---|
+| `exemptProviders` | `[]`（可由部署默认覆盖） | 最多 64 个非空 route ID，每项至多 128 字符，去重；允许字母数字与 `._:/-`，首字符须字母数字；不接受通配符；空列表撤销全部豁免 |
 | `blockedCountries` | `["CN"]` | 1 到 64 个两位大写 ISO alpha-2 码；重复项会去掉 |
 | `geoEndpoints` | `["https://ipinfo.io/json", "https://ipwho.is/"]` | 恰好 `[主, 备]`；不含凭据的 HTTPS URL，至多 512 字符；国家码从 `country`、`countryCode` 或 `country_code` 读取 |
 | `timeoutMs` | `5000` | 正数；**每个**端点的预算，而不是整次判定的预算 |
@@ -62,14 +69,14 @@ $DSH_HOME/plugins/dsh-home-network-model-guard/config.json
 
 - 写入会经过校验并且是原子的（文件权限仅属主可访问，`0600`；目录 `0700`）。名字像凭据的字段（password、secret、token、credential、private key、API key）、非 HTTPS 端点、URL 内嵌账号信息，都会被**拒绝**；守卫只接受国家码、端点 URL 和非秘密的调参值。
 - 写入会改变配置代际，使已缓存的判定失效。阻断清单和端点每次判定都会重新读取；`timeoutMs`、`ttlMs`、`backoffBaseMs`、`backoffMaxMs` 在插件加载时读取（代码只在挂载时读一次），所以改动它们需要重启。
-- 设置页只编辑 `blockedCountries` 和 `geoEndpoints`；调参字段要在文件里改。
-- **文件缺失、无法读取或不合法，一律回落到完整的默认值**（阻断清单 `CN`），Claude 保持 fail-closed。
+- 设置页编辑 `exemptProviders`、`blockedCountries` 和 `geoEndpoints`，保存时保留当前调参字段；调参字段要在文件里改。
+- 文件或豁免字段缺失时继承部署默认；显式 `[]` 覆盖默认。文件无法读取或不合法时回落到完整默认值（阻断清单 `CN`、无豁免），未豁免 Claude 保持 fail-closed。
 
 ## 边界与安全
 
-- **fail-closed 概括。** 对 Claude 而言，已解析为阻断地区，以及未能得出结论（两个服务都不可用、响应无法解析、变化尚未确认、RPC 不可用、判定出错），都会禁止发送。非 Claude 永远不会被本守卫拒绝。唯一的出路是：解析出 `allowed`、切换到非 Claude 模型，或在 manifest 中禁用本插件。
+- **fail-closed 概括。** 对 Claude 而言，已解析为阻断地区，以及未能得出结论（两个服务都不可用、响应无法解析、变化尚未确认、RPC 不可用、判定出错），都会禁止发送。非 Claude 永远不会被本守卫拒绝。已确认豁免的 provider 跳过此门禁；其余请求的出路是：解析出 `allowed`、切换到非 Claude 模型，或在 manifest 中禁用本插件。
 - **网络。** 只有 host 半区会对外发请求，且只发给配置里声明的两个 Geo 服务（它们能看到主机的公网 IP，因此可能会记录）。不访问 Anthropic 或 Cloudflare 的诊断端点。浏览器自己从不做任何查询。
-- **暴露了什么。** RPC 通道 `/dsh-home-network-model-guard`（`check`、`status`、`set-config`）经 Connection 层的 host 围栏提供服务；本部署没有配置 `trustedHosts`，所以只限 loopback。`check` 返回分类、新鲜度和粗粒度的降级码（`fetch-failed`、`timeout`、`invalid-response`）。`status` 额外给设置页返回解析出的国家/地区、答复的服务和当前配置（其中包含已配置的端点）。原始 IP 永不落盘、不进日志、不返回，也不保存会话文本或凭据。
+- **暴露了什么。** RPC 通道 `/dsh-home-network-model-guard`（`policy`、`check`、`status`、`set-config`）经 Connection 层的 host 围栏提供服务；本部署没有配置 `trustedHosts`，所以只限 loopback。`check` 返回分类、新鲜度和粗粒度的降级码（`fetch-failed`、`timeout`、`invalid-response`）。`status` 额外给设置页返回解析出的国家/地区、答复的服务和当前配置（其中包含已配置的端点）。原始 IP 永不落盘、不进日志、不返回，也不保存会话文本或凭据。
 - **Web 半区的临时补偿。** Web 半区还会注入 `[data-input-scroll] > div{min-height:24px}`（`src/client/index.ts` 中的 `COMPOSER_FALLBACK_CSS`）。运行体把输入框从原生 `<textarea>` 迁到 Lexical contenteditable 时（在 0.1.2-rc.1 上观察到），删掉了撑起内容区高度的隐藏 mirror。拦截生效且草稿为空时，内容区高度塌成零，溢出被裁掉，原因文案就看不见了。这条规则是一个一行的下界，锚定在稳定的 `data-*` 属性上并作用于内容包裹层，所以已有高度的状态不受影响。一旦运行体重新为非 hero 的输入框保证最小高度，就**应删除它**，并确认“拦截生效 + 空草稿”仍能显示原因。官方模型选择在 `routable === false` 拦截时同样会塌，这个下界无条件生效，也覆盖那种情况。
 
 ## 开发
