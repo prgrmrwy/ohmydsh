@@ -1,13 +1,26 @@
 {
   "name": "dsh-auto-model-routing",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "DeepSeek Harness plugin: independent Jev capability and effort decisions, enforced fresh-child routes, decision visibility and allocation feedback",
   "license": "MIT",
   "author": "prgrmrwy",
-  "repository": { "type": "git", "url": "git+https://github.com/prgrmrwy/dsh-auto-model-routing.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/dsh-auto-model-routing.git"
+  },
   "homepage": "https://github.com/prgrmrwy/dsh-auto-model-routing#readme",
-  "bugs": { "url": "https://github.com/prgrmrwy/dsh-auto-model-routing/issues" },
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "reasoning-effort", "model-routing", "jev", "subagent"],
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/dsh-auto-model-routing/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "reasoning-effort",
+    "model-routing",
+    "jev",
+    "subagent"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",

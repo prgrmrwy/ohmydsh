@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- Support the renamed `dsh-magpie-connector` Magpie route as an exact policy transport (replacing `dsh-magpie`); `dsh-magpie-connect` remains supported.
+- Fix the missing feedback entry on turns whose request configuration did not change: the main decision is marked applied from the effective request header instead of waiting for a new one.
+- Record two implicit feedback facts as separate ledger events keyed by session and decision: reply exposure and a later switch to MANUAL. No message text is stored; routing is unchanged.
+- The usage report adds a mutually exclusive implicit-signal breakdown per comparison group, with a fixed caveat that implicit no-objection is not the same as appropriate.
+- Sync the AUTO-selected effort through the official selection and simplify the picker display.
+
 ## 0.4.1
 
 - Add the on-demand `auto-model-routing-report` skill and read-only `lib/usage-report.js`: joins policy-v2 decisions to actual per-call usage by message ID, grouped by version × model × depth, with coverage gaps, sample thresholds and fixed caveats. Observational only; never writes, spawns or uses the network, and never prints message text, paths or session IDs.

@@ -9,7 +9,7 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.4.1
+    version: 0.4.2
     enabled: ${enabled}
 ${legacy ? '  - id: subagent-model-routing\n    type: skill\n    enabled: true\n' : ''}`
 

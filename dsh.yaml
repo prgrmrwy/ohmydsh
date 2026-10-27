@@ -171,7 +171,7 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.4.1
+    version: 0.4.2
     enabled: true
     brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
     note: '自研,0.4.0 默认独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义System One可选,独立credentials或只读启动环境;AUTO外发≤8000字当前任务及前轮摘要,形态脱敏尽力而为,所选服务保留条款须自行确认。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json;路由与无正文反馈快照:$DSH_HOME/state/auto-model-routing。反馈仅观察不自动调优。fork不支持;真实Magpie普通子任务已验,teammate仅mock覆盖。legacy四档仅显式回滚。停用:enabled:false → dsh build,撤销路由恢复。'
