@@ -36,12 +36,12 @@
 
 ## 4. Remove version concepts and make old data read-only compatible
 
-- [ ] 4.1 Write failing tests:
+- [x] 4.1 Write failing tests:
   - "新写入不含版本字段" and "旧绑定的 label 响应不暴露历史版本键" (`host.integration.test.ts`);
   - "旧子会话记录恢复不比较版本", "决策记录只容忍已知的历史键", "绑定标记存在但记录缺失或损坏" (`policy-host.integration.test.ts`);
   - "新旧记录并存", "新旧事件格式混读" (`feedback.test.ts`);
   - "缺快照记录独立成组", "不带版本字段的绑定同样计入覆盖", "不带版本字段的绑定确定同一分界" (`usage-report.test.ts`).
-- [ ] 4.2 Implement design D5:
+- [x] 4.2 Implement design D5:
   - `PolicyStore` uses a whitelist of three historical keys, then strict parsing; new writes carry no historical keys;
   - delete the version gate at `policy-host.ts:117`;
   - make the version fields in feedback snapshots and events optional, add `strategy`, and stop writing version fields;
@@ -52,9 +52,9 @@
   - keep the directory constant `CHILD_DECISIONS_DIR`.
 
   Make 4.1 pass.
-- [ ] 4.3 Write a failing test "源码与文案不含版本" (`package-output.test.ts`: dirty-output build + pack file list + text scans + rubric sha256).
-- [ ] 4.4 Change the `build` script to remove `lib/` with `fs.rmSync` first, then run `tsc`, then `tsdown` (`clean: false` stays). Rewrite the tool description, parameter descriptions, error messages and client copy so they mention no version. Make 4.3 pass.
-- [ ] 4.5 Refactor. Keep the full suite green.
+- [x] 4.3 Write a failing test "源码与文案不含版本" (`package-output.test.ts`: dirty-output build + pack file list + text scans + rubric sha256).
+- [x] 4.4 Change the `build` script to remove `lib/` with `fs.rmSync` first, then run `tsc`, then `tsdown` (`clean: false` stays). Rewrite the tool description, parameter descriptions, error messages and client copy so they mention no version. Make 4.3 pass.
+- [x] 4.5 Refactor. Keep the full suite green.
 
 ## 5. Behavior requirements whose scenarios changed (rewritten or new scenarios)
 

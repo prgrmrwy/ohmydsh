@@ -27,7 +27,7 @@ const CAVEATS = [
 type Failure = 'decode-failed' | 'tail-incomplete' | 'parse-failed' | 'missing-log'
 type Usage = Partial<Record<(typeof FIELDS)[number], number>>
 interface Call { id: string; turn?: number; userTurn?: number; time: number; usage: Usage; model?: string; effort?: string }
-interface Decision { session: string; id: number; version: string; model: string; depth: string; effort: string; calls: Call[]; feedback: Set<string>; end?: string; continuation?: number | undefined }
+interface Decision { session: string; id: number; group: string; historical: boolean; model: string; depth: string; effort: string; calls: Call[]; feedback: Set<string>; end?: string; continuation?: number | undefined }
 
 const sorted = <T>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)))
 const round = (n: number) => Math.round(n * 100) / 100
@@ -139,6 +139,13 @@ function median(values: number[]) {
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2
 }
 
+/** Group key: the strategy family; for snapshots written before 0.5.0 the original fields, verbatim (historical); else `unknown`. */
+function groupOf(snapshot: { strategy?: string | undefined; policyVersion?: string | undefined; mappingVersion?: string | undefined } | undefined): { group: string; historical: boolean } {
+  if (snapshot?.strategy) return { group: snapshot.strategy, historical: false }
+  if (snapshot?.policyVersion !== undefined || snapshot?.mappingVersion !== undefined) return { group: `${snapshot.policyVersion ?? ''}/${snapshot.mappingVersion ?? ''}`, historical: true }
+  return { group: 'unknown', historical: false }
+}
+
 export function buildReport(home: string, options: { since?: string } = {}) {
   const failures: Record<Failure, number> = { 'decode-failed': 0, 'tail-incomplete': 0, 'parse-failed': 0, 'missing-log': 0 }
   const state = join(home, 'state/auto-model-routing')
@@ -149,13 +156,14 @@ export function buildReport(home: string, options: { since?: string } = {}) {
   lines(feedbackFile, failures) // counts unparsable lines; FeedbackBook skips them silently
   const book = new FeedbackBook(feedbackFile)
   const bindings = book.entries()
-  const legacyFirst = new Map<string, number>()
+  // Historical four-tier ledger: read only to locate each session's first AUTO record.
+  const tierFirst = new Map<string, number>()
   for (const line of lines(join(state, 'judgements.jsonl'), failures) as Record<string, unknown>[]) {
     if (typeof line?.sessionId !== 'string' || !Number.isInteger(line.turn) || typeof line.tier !== 'string') continue
-    legacyFirst.set(line.sessionId, Math.min(legacyFirst.get(line.sessionId) ?? Infinity, line.turn as number))
+    tierFirst.set(line.sessionId, Math.min(tierFirst.get(line.sessionId) ?? Infinity, line.turn as number))
   }
 
-  const ledgerSessions = [...new Set([...bindings.map(b => b.sessionId), ...legacyFirst.keys()])].sort()
+  const ledgerSessions = [...new Set([...bindings.map(b => b.sessionId), ...tierFirst.keys()])].sort()
   const paths = logPaths(home)
   const excluded = { child: 0, seeded: 0 }
   const decisions = new Map<string, Decision>()
@@ -179,16 +187,16 @@ export function buildReport(home: string, options: { since?: string } = {}) {
       if (log.userStarts.has(turn)) next = log.userStarts.get(turn)
     }
     const linked = new Set<string>()
-    let v2First: number | undefined
+    let bindingFirst: number | undefined
     for (const call of log.calls) {
       const b = book.lookup(session, call.id)
       if (!b) continue
       linked.add(call.id)
-      if (call.userTurn !== undefined) v2First = Math.min(v2First ?? Infinity, call.userTurn)
+      if (call.userTurn !== undefined) bindingFirst = Math.min(bindingFirst ?? Infinity, call.userTurn)
       const key = JSON.stringify([session, b.decisionId])
       let d = decisions.get(key)
       if (!d) {
-        d = { session, id: b.decisionId, version: b.snapshot ? `${b.snapshot.policyVersion}/${b.snapshot.mappingVersion}` : 'unknown', model: b.model, depth: b.depth, effort: b.effort, calls: [], feedback: new Set() }
+        d = { session, id: b.decisionId, ...groupOf(b.snapshot), model: b.model, depth: b.depth, effort: b.effort, calls: [], feedback: new Set() }
         decisions.set(key, d)
       }
       d.calls.push(call)
@@ -198,11 +206,11 @@ export function buildReport(home: string, options: { since?: string } = {}) {
     }
     unlinkedBindings += bindings.filter(b => b.sessionId === session && !linked.has(b.messageId)).length
 
-    // Coverage: user turns from the first v2 record on, with calls in range but none linked.
-    if (v2First !== undefined) {
+    // Coverage: user turns from the first allocation binding on (any snapshot format), with calls in range but none linked.
+    if (bindingFirst !== undefined) {
       const turns = new Map<number, boolean>()
       for (const call of log.calls) {
-        if (call.userTurn === undefined || call.userTurn < v2First || !after(call.time)) continue
+        if (call.userTurn === undefined || call.userTurn < bindingFirst || !after(call.time)) continue
         turns.set(call.userTurn, (turns.get(call.userTurn) ?? false) || linked.has(call.id))
       }
       userTurns += turns.size
@@ -210,7 +218,7 @@ export function buildReport(home: string, options: { since?: string } = {}) {
     }
 
     // Reference: calls before the earliest record in either ledger (effort only, never tokens).
-    const first = Math.min(legacyFirst.get(session) ?? Infinity, v2First ?? Infinity)
+    const first = Math.min(tierFirst.get(session) ?? Infinity, bindingFirst ?? Infinity)
     for (const call of log.calls) {
       if (call.userTurn === undefined || call.userTurn >= first || !after(call.time) || !call.model) continue
       const r = (reference[call.model] ??= { calls: 0, sessions: new Set(), effort: {} })
@@ -221,15 +229,15 @@ export function buildReport(home: string, options: { since?: string } = {}) {
   const kept = [...decisions.values()].filter(d => after(Math.min(...d.calls.map(c => c.time))))
   for (const d of kept) bump((autoEffort[d.model] ??= {}), d.effort, d.calls.length)
 
-  const versions = new Map<string, Map<string, Decision[]>>()
+  const byGroup = new Map<string, { historical: boolean; subs: Map<string, Decision[]> }>()
   for (const d of kept) {
-    const byVersion = versions.get(d.version) ?? new Map<string, Decision[]>()
-    versions.set(d.version, byVersion)
+    const entry = byGroup.get(d.group) ?? { historical: d.historical, subs: new Map<string, Decision[]>() }
+    byGroup.set(d.group, entry)
     const key = JSON.stringify([d.model, d.depth])
-    byVersion.set(key, [...(byVersion.get(key) ?? []), d])
+    entry.subs.set(key, [...(entry.subs.get(key) ?? []), d])
   }
-  const groups = [...versions].sort(([a], [b]) => a.localeCompare(b)).map(([version, subs]) => ({
-    version,
+  const groups = [...byGroup].sort(([a], [b]) => a.localeCompare(b)).map(([group, { historical, subs }]) => ({
+    group, historical,
     subgroups: [...subs].sort(([a], [b]) => a.localeCompare(b)).map(([key, list]) => {
       const [model, depth] = JSON.parse(key) as [string, string]
       const calls = list.flatMap(d => d.calls)
@@ -279,7 +287,6 @@ export function buildReport(home: string, options: { since?: string } = {}) {
   }
 
   return {
-    schema: 1,
     since: since?.label ?? null,
     failures, excluded,
     coverage: { userTurns, turnsWithoutRecord, unlinkedBindings, autoSessionsWithoutRecord },

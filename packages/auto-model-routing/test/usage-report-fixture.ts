@@ -44,11 +44,12 @@ export function writeSession(home: string, id: string, events: Event[], options:
   writeFileSync(join(dir, 'session.v4.jsonl.zstd'), bytes)
 }
 
-export interface Bind { session: string; message: string; decision: number; model?: string; effort?: string; depth?: string; version?: string | null; provider?: string; requestSeq?: number }
+/** `version: null` omits the historical keys; `strategy` adds the current family key (a snapshot exists if either is present). */
+export interface Bind { session: string; message: string; decision: number; model?: string; effort?: string; depth?: string; version?: string | null; mapping?: string; strategy?: string; provider?: string; requestSeq?: number }
 export function bind(home: string, b: Bind) {
   const line = {
     sessionId: b.session, messageId: b.message, decisionId: b.decision, depth: b.depth ?? 'baseline', model: b.model ?? 'gpt-6.1-sol', effort: b.effort ?? 'medium',
-    ...(b.version === null ? {} : { snapshot: { decidedAt: T0, appliedAt: T0, policyVersion: b.version ?? 'policy-v2-aaaa', mappingVersion: 'map-1', decisionProvider: 'openrouter', decisionModel: 'jev', ms: 1, provider: b.provider ?? 'codex', requestSeq: b.requestSeq ?? 1 } }),
+    ...(b.version === null && !b.strategy ? {} : { snapshot: { decidedAt: T0, appliedAt: T0, ...(b.version === null ? {} : { policyVersion: b.version ?? 'policy-v2-aaaa', mappingVersion: b.mapping ?? 'map-1' }), ...(b.strategy ? { strategy: b.strategy } : {}), decisionProvider: 'openrouter', decisionModel: 'jev', ms: 1, provider: b.provider ?? 'codex', requestSeq: b.requestSeq ?? 1 } }),
     boundAt: T0,
   }
   appendFileSync(join(home, 'state/auto-model-routing/allocation-feedback.jsonl'), JSON.stringify(line) + '\n')

@@ -8,8 +8,7 @@ function schemaFor(registry: Registry) {
 const providers = enumOf(registry.providers())
 const route = z.object({ provider: providers, model: z.string().min(1).max(128), reasoningEffort: z.enum(['low','medium','high','xhigh']) }).strict()
 return z.object({
-  version: z.literal(1), childId: z.string(), parentId: z.string(), rootId: z.string(),
-  policyVersion: z.string(), mappingVersion: z.string(),
+  childId: z.string(), parentId: z.string(), rootId: z.string(),
   status: z.enum(['recommended','applied','unsupported','needs-context','failed']),
   path: z.enum(['ordinary','teammate','fork']),
   family: enumOf(registry.ids()).optional(),
@@ -19,6 +18,8 @@ return z.object({
 }).strict()
 }
 export type ChildDecision = z.infer<ReturnType<typeof schemaFor>>
+/** Records written before 0.5.0 carried these keys; reads accept exactly these values, then drop them. */
+const historical = z.object({ version: z.literal(1).optional(), policyVersion: z.string().optional(), mappingVersion: z.string().optional() })
 /** Strict per-child files: corrupt or mismatched records fail closed; no raw task or credentials. */
 export class PolicyStore {
   private readonly schema: ReturnType<typeof schemaFor>
@@ -34,10 +35,14 @@ export class PolicyStore {
   }
   get(id: string): ChildDecision | undefined {
     try {
-      const record = this.schema.parse(JSON.parse(readFileSync(this.path(id), 'utf8')))
+      const raw: unknown = JSON.parse(readFileSync(this.path(id), 'utf8'))
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('not an object')
+      const { version, policyVersion, mappingVersion, ...rest } = raw as Record<string, unknown>
+      historical.parse({ version, policyVersion, mappingVersion })
+      const record = this.schema.parse(rest)
       if (record.childId !== id) throw new Error('child identity mismatch')
       return record
-    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('policy-v2 决策无法恢复；暂停该子会话') }
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw new Error('子任务决策无法恢复；暂停该子会话') }
   }
   set(value: ChildDecision): void {
     const checked = this.schema.parse(value)

@@ -8,7 +8,8 @@ import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
 import Llm, { LlmAdapter, ReasoningEffortId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -36,11 +37,12 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
   const home = mkdtempSync(join(tmpdir(), 'policy-host-'))
   const config = join(home, 'plugins/dsh-auto-model-routing/config.json')
   mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true })
-  const configure = (policy = 'policy-v2') => writeFileSync(config, JSON.stringify({ policy }))
+  const configure = (value: Record<string, unknown> = {}) => writeFileSync(config, JSON.stringify(value))
   configure()
   const jev = await fakeJev(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }))
   const ctx = new Context(), forks: { dispose(): unknown }[] = [], handles: Awaited<ReturnType<typeof ctx.agents.create>>[] = []
   const calls: GenerateOptions[] = [], timeline: string[] = []
+  let answer: string | undefined
   class Adapter extends LlmAdapter {
     private described(provider: string) { return overridden && provider === mainProvider }
     async listModels(provider: string) { return (this.described(provider) ? [mainModel] : modelIds.map(modelId)).map(id => ({ provider, id, name: id })) }
@@ -52,7 +54,11 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
         ...(override && main.defaultEffort ? { defaultEffort: ReasoningEffortId(main.defaultEffort) } : {}),
       } }
     }
-    async *stream(r: GenerateOptions): AsyncIterable<StreamChunk> { calls.push(r); timeline.push('adapter'); yield { type: 'finish', reason: { kind: 'stop' } } }
+    async *stream(r: GenerateOptions): AsyncIterable<StreamChunk> {
+      calls.push(r); timeline.push('adapter')
+      if (answer) { yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text: answer }; yield { type: 'block-end', index: 0, block: { type: 'text', text: answer } } }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
   }
   for (const p of [Projections,Sessions,Agents,Prompt,Tools,Llm]) forks.push(await ctx.plugin(p))
   installModelSelectionProjection(ctx)
@@ -120,7 +126,7 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
   modes.set(parent.agent.id, { mode: 'AUTO' })
   close = async () => { for (const h of handles.reverse()) await h.dispose(); await plugin.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
   return { ctx, parent: parent.agent, handles, calls, invoke, callEndpoint, pickMain, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
-    tools: () => ctx.tools,
+    tools: () => ctx.tools, setAnswer: (text: string) => { answer = text },
     restart: async (next?: readonly FamilyStrategy[]) => { await plugin.dispose(); if (next) pluginConfig = { home, jevBase: jev.base, strategies: next }; plugin = await ctx.plugin(Plugin, pluginConfig) } }
 }
 it('child decision persists separate confidences and actual application without task text',async()=>{
@@ -138,7 +144,7 @@ it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s children ret
  expect((await h.invoke()).isError).not.toBe(true)
  const child=h.handles[1]!.agent
  expect(h.store.get(child.id)).toMatchObject({status:'applied',family:'claude',route:{provider,model:'claude/claude-haiku-5-5',reasoningEffort:'medium'}})
- await h.restart();h.configure('legacy');h.modes.set(h.parent.id,{mode:'MANUAL'})
+ await h.restart();h.modes.set(h.parent.id,{mode:'MANUAL'})
  await h.run(child,'later task')
  expect(h.calls.at(-1)).toMatchObject({model:'claude/claude-haiku-5-5',reasoningEffort:'medium'})
  expect(h.jev.bodies).toHaveLength(1)
@@ -198,7 +204,7 @@ it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s GPT main and
  expect((await h.invoke()).isError).not.toBe(true)
  const child=h.handles[1]!.agent
  expect(h.store.get(child.id)).toMatchObject({status:'applied',family:'codex',route:{provider,model:'codex/gpt-6-luna',reasoningEffort:'xhigh'}})
- await h.restart();h.configure('legacy');h.modes.set(h.parent.id,{mode:'MANUAL'})
+ await h.restart();h.modes.set(h.parent.id,{mode:'MANUAL'})
  await h.run(child,'Restore GPT child')
  expect(h.calls.at(-1)).toMatchObject({provider,model:'codex/gpt-6-luna',reasoningEffort:'xhigh'})
  expect(h.selections).toEqual([{sessionId:h.parent.id,provider,model:'codex/gpt-6.1-sol',reasoningEffort:'high'}])
@@ -262,7 +268,7 @@ it('missing routed-child record fails closed in MANUAL and legacy, without rejud
   const file=join(directory,readdirSync(directory).find(name=>name.endsWith('.json'))!)
   // Exact observed file in this test-owned temporary directory.
   expect(file.startsWith(directory+'/')).toBe(true);unlinkSync(file)
-  await h.restart();h.configure('legacy');h.modes.set(h.parent.id,{mode:'MANUAL'})
+  await h.restart();h.modes.set(h.parent.id,{mode:'MANUAL'})
   const before=h.calls.length
   await h.run(child,'Resume without route record')
   expect(h.calls).toHaveLength(before)
@@ -389,6 +395,97 @@ it('spec Scenario "记录中的家族已不在注册表"', async () => {
  const judged = h.jev.bodies.length, requests = h.calls.length
  await h.restart(BUILTIN_STRATEGIES)
  await h.run(child, 'later message')
+ expect(h.calls).toHaveLength(requests)
+ expect(h.jev.bodies).toHaveLength(judged)
+})
+const VERSION_KEYS = ['policy', 'policyVersion', 'mappingVersion', 'rubricVersion', 'pluginVersion', 'schema', 'version']
+/** Every key at any depth of a JSON value. */
+const keysOf = (value: unknown): string[] => Array.isArray(value) ? value.flatMap(keysOf) : value && typeof value === 'object' ? Object.entries(value).flatMap(([k, v]) => [k, ...keysOf(v)]) : []
+const noVersionKeys = (label: string, value: unknown) => { for (const key of VERSION_KEYS) expect(keysOf(value), `${label}: ${key}`).not.toContain(key) }
+it('spec Scenario "新写入不含版本字段"', async () => {
+ const h = await harness(); h.setAnswer('reply')
+ const ledger = join(h.home, 'state/auto-model-routing/allocation-feedback.jsonl')
+ const before = (() => { try { return readFileSync(ledger, 'utf8') } catch { return '' } })()
+ await h.run(h.parent, 'main task')
+ const reply = h.parent.session.deriveMessages().findLast(m => m.role === 'assistant')!.id
+ expect((await h.invoke()).isError).not.toBe(true)
+ const child = h.handles.at(-1)!.agent
+ noVersionKeys('state', await h.callEndpoint('state', { sessionId: h.parent.id }))
+ const label = await h.callEndpoint('label', { sessionId: h.parent.id, messageId: reply })
+ expect(label).toHaveProperty('depth')
+ noVersionKeys('label', label)
+ const preview = await h.ctx.tools.execute({ name: 'route_subagent', arguments: { task: 'x', provider: 'claude' }, agent: h.parent, callId: 'preview' as never, signal: new AbortController().signal })
+ noVersionKeys('route_subagent', preview)
+ const dir = join(h.home, 'state/auto-model-routing/policy-v2')
+ const record = readdirSync(dir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')))
+ expect(record.length).toBeGreaterThan(0)
+ noVersionKeys('child record', record)
+ await h.callEndpoint('label', { sessionId: h.parent.id, messageId: reply, feedback: 'too-high' })
+ await h.callEndpoint('label', { sessionId: h.parent.id, messageId: reply, feedback: null })
+ await h.callEndpoint('observe', { sessionId: h.parent.id, messageId: reply })
+ await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'MANUAL' })
+ const added = readFileSync(ledger, 'utf8').slice(before.length).trim().split('\n').map(l => JSON.parse(l))
+ expect(added.map(r => r.type ?? 'binding')).toEqual(expect.arrayContaining(['binding', 'feedback', 'fact']))
+ expect(added.filter(r => r.type === 'fact').map(r => r.fact).sort()).toEqual(['exposed', 'manual-switch'])
+ noVersionKeys('ledger rows', added)
+ expect(added.find(r => !r.type).snapshot).toMatchObject({ strategy: 'claude' })
+ const { buildReport } = await import('../src/usage-report.js')
+ noVersionKeys('usage report', buildReport(h.home))
+ void child
+})
+const legacyRecord = (childId: string, parentId: string, extra: Record<string, unknown> = {}) => ({ version: 1, childId, parentId, rootId: parentId, policyVersion: 'policy-v2-0000aaaa', mappingVersion: 'capability-slots-1', status: 'applied', path: 'ordinary', family: 'claude', explicit: { provider: 'claude' }, route: { provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' }, actual: { provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' }, ...extra })
+const childFile = (home: string, id: string) => join(home, 'state/auto-model-routing/policy-v2', `${createHash('sha256').update(id).digest('hex')}.json`)
+async function legacyChild(h: Awaited<ReturnType<typeof harness>>, id: string, record: object | undefined, marker: string | undefined = id) {
+ const dir = join(h.home, 'state/auto-model-routing/policy-v2'); mkdirSync(dir, { recursive: true })
+ if (record) writeFileSync(childFile(h.home, id), JSON.stringify(record))
+ if (marker !== undefined) writeFileSync(`${childFile(h.home, id)}.bound`, marker)
+ const child = await h.ctx.agents.create({ sessionId: SessionId(id), parentAgent: h.parent, meta: { origin: 'subagent', parentSession: h.parent.id }, agentOptions: { provider: 'claude', model: 'claude-opus-5-5' } })
+ h.handles.push(child)
+ return child.agent
+}
+it('spec Scenario "旧子会话记录恢复不比较版本"', async () => {
+ const h = await harness()
+ await h.restart()
+ const child = await legacyChild(h, 'old-child', legacyRecord('old-child', h.parent.id))
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ await h.run(child, 'next request')
+ expect(h.calls).toHaveLength(requests + 1)
+ expect(h.calls.at(-1)).toMatchObject({ provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' })
+ expect(h.jev.bodies).toHaveLength(judged)
+ const rewritten = JSON.parse(readFileSync(childFile(h.home, 'old-child'), 'utf8'))
+ for (const key of ['version', 'policyVersion', 'mappingVersion']) expect(rewritten).not.toHaveProperty(key)
+ expect(rewritten.route).toEqual({ provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' })
+})
+it('spec Scenario "决策记录只容忍已知的历史键"', async () => {
+ const h = await harness()
+ const ok = await legacyChild(h, 'c-ok', legacyRecord('c-ok', h.parent.id))
+ const bad = [
+  await legacyChild(h, 'c-task', legacyRecord('c-task', h.parent.id, { task: 'raw task text' })),
+  await legacyChild(h, 'c-rout', legacyRecord('c-rout', h.parent.id, { rout: {} })),
+  await legacyChild(h, 'c-v2', legacyRecord('c-v2', h.parent.id, { version: 2 })),
+  await legacyChild(h, 'c-id', legacyRecord('someone-else', h.parent.id)),
+ ]
+ await h.run(ok, 'restore')
+ expect(h.calls.at(-1)).toMatchObject({ model: 'claude-haiku-5-5', reasoningEffort: 'medium' })
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ for (const agent of bad) {
+  await h.run(agent, 'restore')
+ }
+ expect(h.calls).toHaveLength(requests)
+ expect(h.jev.bodies).toHaveLength(judged)
+ for (const id of ['c-task', 'c-rout', 'c-v2', 'c-id']) expect(() => h.store.get(id), id).toThrow('无法恢复')
+ const { task: _, ...valid } = legacyRecord('c-write', h.parent.id, { task: 'x' }) as Record<string, unknown>
+ const { version: _v, policyVersion: _p, mappingVersion: _m, ...canonical } = valid
+ expect(() => h.store.set({ ...canonical, task: 'raw' } as never)).toThrow()
+ expect(() => h.store.set(valid as never)).toThrow()
+ expect(() => h.store.set(canonical as never)).not.toThrow()
+})
+it('spec Scenario "绑定标记存在但记录缺失或损坏"', async () => {
+ const h = await harness()
+ const missing = await legacyChild(h, 'c-missing', undefined)
+ const mismatched = await legacyChild(h, 'c-marker', legacyRecord('c-marker', h.parent.id), 'other-id')
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ await h.run(missing, 'restore'); await h.run(mismatched, 'restore')
  expect(h.calls).toHaveLength(requests)
  expect(h.jev.bodies).toHaveLength(judged)
 })

@@ -79,7 +79,7 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
     setView(nextView); setMessage(results.join('；')); setSaving(false)
   }
   const keyState = !view.key.available ? '不可用' : !view.key.writable ? '来自启动环境' : view.key.configured ? '已配置' : '未配置'
-  const keyHint = !view.key.available ? 'DSH 凭据服务不可用。' : !view.key.writable ? '先自行保留现有 key，从启动环境（如 .env.local）删除 OPENROUTER_API_KEY 并重启，再在这里保存。' : view.key.configured ? '保存在 DSH 凭据存储，不写入设置文件；留空表示保持当前 key。' : '未配置时 AUTO 判档会停用；保存 key 后不会自动重启已停用的会话。'
+  const keyHint = !view.key.available ? 'DSH 凭据服务不可用。' : !view.key.writable ? '先自行保留现有 key，从启动环境（如 .env.local）删除 OPENROUTER_API_KEY 并重启，再在这里保存。' : view.key.configured ? '保存在 DSH 凭据存储，不写入设置文件；留空表示保持当前 key。' : '未配置时 AUTO 判断会停用；保存 key 后不会自动重启已停用的会话。'
   return h('div', { className: 'amr-settings' }, h('style', null, CSS), h(ui.SettingsForm, {
     labels: { unavailable: '无法读取设置', readOnly: '设置只读', saveFailed: '部分更改未保存，请检查提示', save: '保存', saving: '保存中…' },
     state: { available: true, writable: true, dirty, invalid: conflicts.length > 0 || invalidTimeout || invalidKey || invalidService, saving, failed }, onSave: () => { void save() }, onDiscard: () => {},
@@ -87,7 +87,7 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
       view.configStatus === 'invalid' && h('p', { role: 'status' }, '设置文件无法解析或含无效字段，已按可解析值与默认值显示；保存会覆盖损坏部分'),
       view.deprecated?.length ? h('p', { role: 'status', 'data-deprecated': 'true' }, `设置文件中的旧映射（${view.deprecated.join('、')}）已不再生效，下次保存设置时移除。`) : null,
       message && h('p', { role: 'status', className: failed ? 'amr-settings-error' : undefined }, message),
-      h('section', { className: 'amr-settings-section' }, h('h3', null, '判档服务'), h('p', null, 'AUTO 把脱敏任务发送给所选决策服务；不跨服务自动回退。'),
+      h('section', { className: 'amr-settings-section' }, h('h3', null, '决策服务'), h('p', null, 'AUTO 把脱敏任务发送给所选决策服务；不跨服务自动回退。'),
         h('div', { className: 'amr-settings-row' }, h('span', null, '决策服务'),
           h(ui.Menu, { open: serviceMenu, portal: true, side: 'bottom', selectedId: serviceProvider, onClose: () => setServiceMenu(false),
             items: Object.entries(DECISION_SERVICES).map(([id, service]) => ({ id, label: service.label })),
@@ -122,11 +122,11 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
         h(ui.SettingsSecretField, { id: 'amr-key', label: `${DECISION_SERVICES[serviceProvider].label} API Key`, hint: changingService ? '请先保存服务选择' : keyHint, text: key, disabled: changingService || saving || !view.key.available || !view.key.writable, onEdit: text => { setKey(text); setRemoveKey(false) }, configured: !changingService && view.key.configured, stateLabel: changingService ? '保存后读取' : keyState }),
         !changingService && view.key.available && view.key.writable && view.key.configured && h('button', { type: 'button', className: 'amr-settings-reset', onClick: () => { setRemoveKey(!removeKey); setKey('') } }, removeKey ? '取消删除 key' : '删除 key'),
         invalidKey && h('p', { className: 'amr-settings-error' }, 'API key 不能含空白，且不能超过 512 字符'),
-        h('div', { className: 'amr-settings-row' }, h('div', null, h('label', { htmlFor: 'amr-timeout' }, '判档等待上限'), h('p', null, '1000–4500 毫秒；超时后该会话停用 AUTO。')), h('span', null, h('input', { id: 'amr-timeout', type: 'number', className: 'amr-settings-number', min: 1000, max: 4500, step: 1, value: Number.isNaN(settings.jevTimeoutMs) ? '' : settings.jevTimeoutMs, 'aria-invalid': invalidTimeout, onChange: e => setPatch(old => ({ ...old, jevTimeoutMs: e.currentTarget.value === '' ? NaN : Number(e.currentTarget.value) })) }), ' 毫秒'))),
+        h('div', { className: 'amr-settings-row' }, h('div', null, h('label', { htmlFor: 'amr-timeout' }, '判断等待上限'), h('p', null, '1000–4500 毫秒；超时后该会话停用 AUTO。')), h('span', null, h('input', { id: 'amr-timeout', type: 'number', className: 'amr-settings-number', min: 1000, max: 4500, step: 1, value: Number.isNaN(settings.jevTimeoutMs) ? '' : settings.jevTimeoutMs, 'aria-invalid': invalidTimeout, onChange: e => setPatch(old => ({ ...old, jevTimeoutMs: e.currentTarget.value === '' ? NaN : Number(e.currentTarget.value) })) }), ' 毫秒'))),
       h('section', { className: 'amr-settings-section' }, h('h3', null, '会话'),
         h('p', null, '主模型不变；子任务独立选择模型能力与推理投入，并在创建时应用。MANUAL 不进行自动判断。'),
         h('div', { className: 'amr-settings-row' }, h('div', null, '新会话默认模式', h('p', null, settings.defaultMode === 'AUTO' ? '仅影响新会话；每个用户回合都会把脱敏任务发送给所选决策服务请求 Jev。' : '仅影响新会话，不改变已有会话。')), h(ui.SegmentedControl, { id: 'amr-default-mode', className: 'amr-settings-segments', label: '新会话默认模式', value: settings.defaultMode, options: [{ value: 'MANUAL', label: 'MANUAL' }, { value: 'AUTO', label: 'AUTO' }], onChange: value => setPatch(old => ({ ...old, defaultMode: value as Settings['defaultMode'] })) })),
-        h('div', { className: 'amr-settings-row' }, h('span', null, '判档提示'), h(ui.Switch, { checked: settings.decisionToast, label: '判档提示', onChange: value => setPatch(old => ({ ...old, decisionToast: value })) })),
+        h('div', { className: 'amr-settings-row' }, h('span', null, '判断提示'), h(ui.Switch, { checked: settings.decisionToast, label: '判断提示', onChange: value => setPatch(old => ({ ...old, decisionToast: value })) })),
         h('div', { className: 'amr-settings-row' }, h('span', null, '推理强度上限'), h(ui.SegmentedControl, { id: 'amr-cap', className: 'amr-settings-segments', label: '推理强度上限', value: cap, options: AUTO_EFFORTS.map(value => ({ value, label: value })), onChange: value => setPatch(old => ({ ...old, effortCap: value as AutomaticEffort })) }))),
       h('section', { className: 'amr-settings-section' }, h('h3', null, '自动选配'),
         h('p', null, '主会话仅调整推理投入；子任务按目标与范围选择合适的能力档，再确定投入。保留显式指定的模型和推理等级，不自动重试或升级。'),

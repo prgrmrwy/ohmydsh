@@ -46,10 +46,11 @@ it('no_local_classifier_or_other_egress', () => {
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
 })
-it('skill_contains_eight_rules',()=>{
+it('spec Scenario "skill 只含当前用法"',()=>{
  const text=skill()
- for(const rule of ['route_subagent','reasoning_effort','[model·effort]','独立','claude/codex','暂停委派并询问用户','新建','子会话 Jev 选模未启用','routed: false','按官方默认委派','只指定模型']) expect(text,rule).toContain(rule)
- expect(text).not.toMatch(/claude-haiku-5-5|claude-fable-5-1|gpt-6-luna|gpt-6-astra|claude-opus-5-5|gpt-6\.1-sol|claude-sonnet-5-5/)
+ for(const rule of ['route_subagent','fresh','recommended','routed: false','[model·effort]','fork','childRouting','暂停委派并询问用户','子会话 Jev 选模未启用','新建']) expect(text,rule).toContain(rule)
+ for(const word of ['simple','escalated','legacy','原策略','旧策略','回滚']) expect(text,word).not.toContain(word)
+ expect(text).not.toMatch(/\b(?:claude|gpt)-[A-Za-z0-9.]/)
 })
 it('client_sources_stay_browser_safe',()=>{
  // The client bundle runs in the browser: it may reach only browser-safe modules (no node: built-ins via jev.ts).

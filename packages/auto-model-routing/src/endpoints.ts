@@ -45,5 +45,5 @@ export async function labelEndpoint(body: unknown, resolveAgent: Resolve, book: 
     try { book.set(sessionId, messageId, feedback as typeof allocationFeedback[number] | null) }
     catch { return Response.json({ error: 'could not record feedback' }, { status: 500 }) }
   }
-  return Response.json(book.lookup(sessionId, messageId))
+  return Response.json(book.view(sessionId, messageId))
 }

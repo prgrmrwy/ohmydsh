@@ -298,3 +298,34 @@ it('spec Scenario "旧判档账本不再增长且标注参数被拒"', async () 
  expect(unbound.status).toBe(400)
  expect(readFileSync(ledger, 'utf8')).toBe(old)
 })
+it('spec Scenario "旧绑定的 label 响应不暴露历史版本键"', async () => {
+ const h = await harness(depth('baseline'), { answer: () => 'reply' })
+ await h.setMode('AUTO'); await h.run('first')
+ const m0 = lastAssistantId(h)
+ const ledger = join(h.home, 'state/auto-model-routing/allocation-feedback.jsonl')
+ // Replace the ledger with an upgrade-time history for m0: old snapshot, "appropriate", version:1 exposure.
+ const old = { sessionId: h.agent.id, messageId: m0, decisionId: 77, depth: 'baseline', model: 'claude-opus-5-5', effort: 'medium', snapshot: { decidedAt: 1, appliedAt: 2, policyVersion: 'policy-v2-d774ffe6', mappingVersion: 'capability-slots-2-magpie', decisionProvider: 'openrouter', decisionModel: 'typesafe/jev-1.13', ms: 5, provider: 'test', requestSeq: 3 }, boundAt: 4 }
+ const bindingLine = JSON.stringify(old)
+ writeFileSync(ledger, [bindingLine, JSON.stringify({ type: 'feedback', version: 2, sessionId: h.agent.id, messageId: m0, decisionId: 77, at: 5, feedback: 'appropriate' }), JSON.stringify({ type: 'fact', version: 1, sessionId: h.agent.id, decisionId: 77, fact: 'exposed', at: 6 })].join('\n') + '\n')
+ await h.restart()
+ const keys = (value: unknown): string[] => Array.isArray(value) ? value.flatMap(keys) : value && typeof value === 'object' ? Object.entries(value).flatMap(([k, v]) => [k, ...keys(v)]) : []
+ const responses = [
+  await h.invoke('label', { sessionId: h.agent.id, messageId: m0 }),
+  await h.invoke('label', { sessionId: h.agent.id, messageId: m0, feedback: 'too-high' }),
+  await h.invoke('label', { sessionId: h.agent.id, messageId: m0, feedback: null }),
+ ]
+ expect(responses[0]).toMatchObject({ depth: 'baseline', feedback: 'appropriate', snapshot: { decisionProvider: 'openrouter', requestSeq: 3 } })
+ expect(responses[1]).toMatchObject({ feedback: 'too-high' })
+ expect(responses[2]).toMatchObject({ feedback: null })
+ for (const r of responses) for (const key of ['policy', 'policyVersion', 'mappingVersion', 'version', 'strategy']) expect(keys(r), key).not.toContain(key)
+ const rows = readFileSync(ledger, 'utf8').trim().split('\n')
+ expect(rows[0]).toBe(bindingLine)
+ const added = rows.slice(3).map(l => JSON.parse(l))
+ expect(added.map(r => r.type)).toEqual(['feedback', 'feedback'])
+ for (const r of added) expect(r).not.toHaveProperty('version')
+ const { FeedbackBook } = await import('../src/feedback.js')
+ expect(new FeedbackBook(ledger).facts(h.agent.id, 77)).toEqual({ exposed: 6 })
+ expect(new FeedbackBook(ledger).lookup(h.agent.id, m0)!.snapshot).toMatchObject({ policyVersion: 'policy-v2-d774ffe6' })
+ // The report groups linked calls; this harness writes no session log, so check the grouping input it uses.
+ expect(new FeedbackBook(ledger).entries().find(b => b.messageId === m0)!.snapshot).toMatchObject({ policyVersion: 'policy-v2-d774ffe6', mappingVersion: 'capability-slots-2-magpie' })
+})

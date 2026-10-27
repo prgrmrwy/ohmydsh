@@ -19,6 +19,8 @@ import { currentMainSelection, mainSupported } from './support.js'
 import { createRegistry, registry as builtin, type FamilyStrategy } from './strategies/index.js'
 
 export const name = 'dsh-auto-model-routing'
+/** Child decision records. The historical directory name is kept on purpose: records are not migrated. */
+export const CHILD_DECISIONS_DIR = 'state/auto-model-routing/policy-v2'
 export const inject = ['llm', 'agents', 'tools']
 
 /** Test seams only; production uses the defaults. */
@@ -35,7 +37,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const feedback = new FeedbackBook(resolve(home, 'state/auto-model-routing/allocation-feedback.jsonl'))
   // Official writer is available only while the session controller is mounted.
   let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
-  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2'), registry), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(), registry })
+  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, CHILD_DECISIONS_DIR), registry), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(), registry })
   const toastOn = (): boolean => settings.read().settings.decisionToast
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, registry })))
   ctx.on('agent/created', ({ agent, source }) => {
@@ -111,7 +113,8 @@ export function apply(ctx: Context, config: Config = {}): void {
             if (!supported && state.read(sessionId).mode === 'AUTO') { state.setMode(sessionId, 'MANUAL'); policy.invalidate(sessionId) }
             const value = await response.json()
             const main = policy.mainStatus(sessionId)
-            const result = { ...value, mode: state.read(sessionId).mode, history: [], policy: 'policy-v2', ...main, ...(toastOn() ? { decisionToast: true } : {}), autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } }
+            const { previous: _previous, ...persisted } = value
+            const result = { ...persisted, mode: state.read(sessionId).mode, ...main, ...(toastOn() ? { decisionToast: true } : {}), autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } }
             return Response.json(enveloped ? { type: 'server-response', rpcId: wire.rpcId, result: { ok: true, value: result } } : result)
           }
           if (!enveloped) return response

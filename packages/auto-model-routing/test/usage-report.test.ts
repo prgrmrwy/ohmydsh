@@ -2,13 +2,13 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { buildReport } from '../src/usage-report.js'
-import { bind, bindAll, call, feedback, header, judge, makeHome, mode, turn, user, userTurn, writeSession, T0 } from './usage-report-fixture.js'
+import { bind, bindAll, call, feedback, header, judge, makeHome, mode, turn, user, userTurn, writeSession, T0, type Bind } from './usage-report-fixture.js'
 
 const tz = process.env.TZ
 beforeEach(() => { process.env.TZ = 'Asia/Shanghai' })
 afterEach(() => { process.env.TZ = tz })
-const group = (r: ReturnType<typeof buildReport>, version: string, model = 'gpt-6.1-sol', depth = 'baseline') =>
-  r.groups.find(g => g.version === version)?.subgroups.find(s => s.model === model && s.depth === depth)
+const group = (r: ReturnType<typeof buildReport>, key: string, model = 'gpt-6.1-sol', depth = 'baseline') =>
+  r.groups.find(g => g.group === key)?.subgroups.find(s => s.model === model && s.depth === depth)
 
 it('classifies implicit facts without treating late exposure or parent cancellation as approval',()=>{
  const h=makeHome()
@@ -112,7 +112,7 @@ it('links only bound messages and sums decisions across requests', () => {
  expect(r.coverage.unlinkedBindings).toBe(1)
 })
 
-it('puts bindings without a snapshot in an unknown version group', () => {
+it('puts bindings without a snapshot in the unknown group', () => {
  const h = makeHome()
  writeSession(h, 'S1', [...userTurn(1, 'a', 2), ...userTurn(2, 'b', 3)])
  bindAll(h, 'S1', 'a', 2, 1, { version: null }); bindAll(h, 'S1', 'b', 3, 2, { version: 'policy-v2-d774ffe6' })
@@ -216,4 +216,44 @@ it('produces byte-identical output for the same input', () => {
  writeSession(h, 'S1', [...userTurn(1, 'a', 3), ...userTurn(2, 'b', 2)])
  bindAll(h, 'S1', 'a', 3, 1, { depth: 'lower', effort: 'low' }); bindAll(h, 'S1', 'b', 2, 2)
  expect(JSON.stringify(buildReport(h))).toBe(JSON.stringify(buildReport(h)))
+})
+it('spec Scenario "缺快照记录独立成组"', () => {
+ const h = makeHome()
+ writeSession(h, 'S1', [...userTurn(1, 'a', 33), ...userTurn(2, 'b', 191), ...userTurn(3, 'c', 12)])
+ bindAll(h, 'S1', 'a', 33, 1, { version: null })
+ bindAll(h, 'S1', 'b', 191, 2, { version: 'policy-v2-d774ffe6', mapping: 'capability-slots-2-magpie' })
+ bindAll(h, 'S1', 'c', 12, 3, { strategy: 'claude' })
+ const r = buildReport(h)
+ expect(r).not.toHaveProperty('schema')
+ const byKey = Object.fromEntries(r.groups.map(g => [g.group, g]))
+ expect(Object.keys(byKey).sort()).toEqual(['claude', 'policy-v2-d774ffe6/capability-slots-2-magpie', 'unknown'])
+ expect(byKey['policy-v2-d774ffe6/capability-slots-2-magpie']!.historical).toBe(true)
+ expect(byKey.claude!.historical).toBe(false)
+ expect(byKey.unknown!.historical).toBe(false)
+ expect(byKey.claude!.subgroups[0]!.calls).toBe(12)
+ for (const g of r.groups) expect(g).not.toHaveProperty('version')
+})
+it('spec Scenario "不带版本字段的绑定同样计入覆盖"', () => {
+ const h = makeHome()
+ const events = []
+ for (let n = 1; n <= 17; n++) events.push(...userTurn(n, `t${n}`, 2))
+ events.push(turn(18), user(18, 'tool-jobs'), call('cont-0', 18, 18))
+ writeSession(h, 'S1', events)
+ for (let n = 1; n <= 10; n++) bindAll(h, 'S1', `t${n}`, 1, n, { version: null, strategy: 'claude' })
+ expect(buildReport(h).coverage).toMatchObject({ userTurns: 17, turnsWithoutRecord: 7 })
+})
+it('spec Scenario "不带版本字段的绑定确定同一分界"', () => {
+ const reference = (extra: Partial<Bind>) => {
+  const h = makeHome()
+  const events = [header('gpt-6.1-sol', 'high', 0)]
+  for (let n = 1; n <= 5; n++) events.push(...userTurn(n, `t${n}`, 2))
+  events.push(header('gpt-6.1-sol', 'medium', 6))
+  events.push(...userTurn(6, 't6', 2))
+  writeSession(h, 'S1', events)
+  bindAll(h, 'S1', 't6', 2, 1, extra)
+  return buildReport(h).referenceBeforeAuto
+ }
+ const historical = reference({})
+ expect(historical).toEqual([{ model: 'gpt-6.1-sol', calls: 10, sessions: 1, effort: { high: 10 }, autoEffort: { medium: 2 } }])
+ expect(reference({ version: null, strategy: 'codex' })).toEqual(historical)
 })
