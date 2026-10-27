@@ -19,7 +19,7 @@ const key=process.env.OPENROUTER_API_KEY??parseCredentialsDocument(await readFil
 assert(key,'Configured Jev credential required')
 const home=await mkdtemp(join(tmpdir(),'magpie-live-acceptance-'))
 await mkdir(join(home,'plugins/dsh-auto-model-routing'),{recursive:true})
-await writeFile(join(home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({policy:'policy-v2',defaultMode:'AUTO',timeoutMs:20000}))
+await writeFile(join(home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({defaultMode:'AUTO',timeoutMs:20000}))
 const ctx=new Context(),plugins=[],summary=[]
 const catalog=new ModelCatalog({baseUrl:settings.baseUrl,apiKey:settings.apiKey,refreshSeconds:3600})
 try{
@@ -53,7 +53,7 @@ try{
  assert.deepEqual(JSON.parse(output),[-3,0,2,7],'Independent deterministic oracle failed')
  assert.equal(request.provider,'dsh-magpie-connect')
  assert(request.model.startsWith(`${family}/`))
- summary.push({family,policy:'policy-v2',passed:true,request,ms:Math.round(performance.now()-start)})
+ summary.push({family,passed:true,request,ms:Math.round(performance.now()-start)})
  console.log(JSON.stringify(summary.at(-1)))
  await parent.dispose()
  }

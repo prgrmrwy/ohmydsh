@@ -75,3 +75,21 @@ it('spec Scenario "家族知识只有一个来源"', () => {
  }
  expect(offenders).toEqual([])
 })
+it('in-package Markdown relative links resolve', () => {
+ const root = resolve(import.meta.dirname, '..')
+ const docs = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && !f.includes('node_modules') && !f.startsWith('lib'))
+ const broken: string[] = []
+ for (const file of docs) {
+  const text = readFileSync(resolve(root, file), 'utf8')
+  for (const match of text.matchAll(/\]\(<?([^)>\s]+)>?\)/g)) {
+   const target = match[1]!
+   if (/^(?:[a-z]+:|#)/i.test(target)) continue
+   const path = decodeURI(target.split('#')[0]!)
+   const absolute = resolve(root, dirname(file), path)
+   // Links that leave the package (e.g. a sibling package in the monorepo) are not checked here.
+   if (relative(root, absolute).startsWith('..')) continue
+   if (!existsSync(absolute)) broken.push(`${file}: ${target}`)
+  }
+ }
+ expect(broken).toEqual([])
+})

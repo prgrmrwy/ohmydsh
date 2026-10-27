@@ -79,10 +79,10 @@
 
 ## 7. Docs, scripts, release metadata
 
-- [ ] 7.1 Rename `eval/policy-v2-live.mjs` and `eval/policy-v2-cases.json` and drop `rubricVersion` from their output. Make `scripts/magpie-live-acceptance.mjs` stop writing or returning `policy`. Rename `scripts/policy-v2-host-probe.mjs` to `scripts/host-probe-children.mjs`.
-- [ ] 7.2 Rewrite the source links, rubric links and `label-report` text in `README.md` / `README.zh.md`. Rewrite `docs/feedback-evaluation.md` to the version-free record format (keep a note that historical rows remain readable). Add a one-line historical-record note to the top of the historical acceptance docs and fix any links that broke after the renames. Add a relative-link check for in-package Markdown to `content.test.ts`.
-- [ ] 7.3 Bump `package.json` to 0.5.0. Add a 0.5.0 entry to `CHANGELOG.md` covering the deleted legacy chain, the deleted configuration fields, the remote-pin rollback method and the data boundary (design D7). Update `version` and `note` for this entry in `dsh.yaml`.
-- [ ] 7.4 Run inside the package: `npm run build`, `npm test`, and `npm pack --dry-run`. Run at the root: `npm test` and `npm run check:artifacts`. Record the actual results in `implementation-log.md`.
+- [x] 7.1 Rename `eval/policy-v2-live.mjs` and `eval/policy-v2-cases.json` and drop `rubricVersion` from their output. Make `scripts/magpie-live-acceptance.mjs` stop writing or returning `policy`. Rename `scripts/policy-v2-host-probe.mjs` to `scripts/host-probe-children.mjs`.
+- [x] 7.2 Rewrite the source links, rubric links and `label-report` text in `README.md` / `README.zh.md`. Rewrite `docs/feedback-evaluation.md` to the version-free record format (keep a note that historical rows remain readable). Add a one-line historical-record note to the top of the historical acceptance docs and fix any links that broke after the renames. Add a relative-link check for in-package Markdown to `content.test.ts`.
+- [x] 7.3 Bump `package.json` to 0.5.0. Add a 0.5.0 entry to `CHANGELOG.md` covering the deleted legacy chain, the deleted configuration fields, the remote-pin rollback method and the data boundary (design D7). Update `version` and `note` for this entry in `dsh.yaml`.
+- [x] 7.4 Run inside the package: `npm run build`, `npm test`, and `npm pack --dry-run`. Run at the root: `npm test` and `npm run check:artifacts`. Record the actual results in `implementation-log.md`.
 
 ## 8. Deployment and acceptance
 

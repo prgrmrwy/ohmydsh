@@ -1,18 +1,14 @@
-# 判档规则回归
+# Jev 规则核对
 
 [English](README.md)
 
-`cases.json` 收录 90 条用例，用于检验 `../src/rubric.json` 中的 Jev 判档规则：30 条合成样本（`t-`）；22 条在规则成稿后编写的合成样本（`h-`，也参与过草稿间的取舍，所以不算独立留出集）；38 条由本机真实回合改写的样本（`s-`，带上一轮文本，不含真实会话原文、会话 id、凭据或地址）。`exp` 列出可接受的档位，`prev`、`prevUser`、`prevAssistant` 模拟上一轮。
+`cases.json` 收录 10 条合成任务（分 development 与 holdout），每条都带独立编写的能力与投入预期，用于核对规则文件 `../src/rubric.json`。`live.mjs` 把它们发送到真实的 OpenRouter 决策接口，带硬性预算（最多 20 次调用、$0.10），并在本地写出报告，不含合成用例以外的任务文本。它是手动、付费的核对，不属于 `npm test`。
 
-`run.mjs`（随实现一起编写）导入规则与生产环境的 `state` 构造函数，每条用例请求 Jev 三次取多数。它调用真实的 OpenRouter 接口，每跑一次约花 $0.005。
-
-- 退出 0：所有未命中都在 `baseline.json` 里。
-- 退出 1：`knownMisses` 之外有用例未命中（回归）；同时列出已从未命中变为命中的条目。
-- 退出 2：有请求失败（不计为未命中）。
-
-有意修改规则时，重跑一次，逐条检查结果变化的用例，再在同一个提交里更新 `knownMisses`。
+早期四档回归集（`run.mjs`、90 条用例与 `baseline.json`）已在 0.5.0 随四档链路删除；如需使用，请安装 0.4.x 版本的包。
 
 ## effort 起点的出处（2026-10-21/22 抓取）
+
+起点数值本身写在策略文件 `../src/strategies/` 中。
 
 - Anthropic effort 文档：<https://platform.claude.com/docs/en/build-with-claude/effort>。Opus 5.5 与 Haiku 5.5 默认 medium，其余默认 high；Sonnet 5.5 做 agentic coding 从 medium 开始；Fable 5.1 从 high 开始；xhigh/max 只用于实测有收益的工作。
 - Anthropic 成本与能力：<https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence>。Opus 5.5 在 SWE-bench Pro 子集上 low/medium/high/xhigh 依次为 87.4/92.8/95.3/96.7%，每题 $0.11/0.21/0.29/0.74；“先用低档、失败再用 high 重跑”优于固定 high；派给便宜模型只在“常规工作且成本长尾”或“超过一个上下文窗口”时更省。

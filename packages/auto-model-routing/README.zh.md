@@ -77,7 +77,7 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 ### Magpie transport 与选择器展示
 
-默认策略接受 `dsh-magpie-connector`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。未知家族需显式 model。根会话 AUTO 且显式 `policy: legacy` 时，两种 Magpie 预览均在 Jev 前拒绝；MANUAL 仍直接返回 `routed: false`，不判档、不写状态。已绑定子实例恢复原路线。
+AUTO 接受 `dsh-magpie-connector`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。没有注册策略的家族需显式 model 及可验证的 effort。根会话为 MANUAL 时预览直接返回 `routed: false`，不判断、不写状态。已绑定子实例恢复原路线。
 
 AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方 `selectModel` 同步同一 provider/model，并允许保存全局默认值。官方选择器只显示一个 effort。MANUAL 请求原样通过，已绑定子会话不写主选择；同步失败会记录告警，本次请求仍保留选定 effort。Magpie 菜单分组仍需 ohmydsh 受管五包 Host 扩展，stock rc.2 保持 flat 列表。见 [Magpie 配置与展示前提](<../dsh-magpie-connector/README.zh.md#模型菜单分组与-effort>)；本地测试不等于已部署或 live GUI 验收。
 
@@ -87,9 +87,9 @@ AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方
 - **MANUAL 停止调整，不复原历史值**：使用官方当前选择；只要插件启用，已绑定子任务仍保留原路线。
 - **任务会外发**：AUTO 将按形态脱敏的任务文本（最多 8000 字符）及上一轮少量片段发送给所选服务。脱敏尽力而为，不保证去除全部秘密。测试连接只发送固定公开样例，可能产生少量费用。
 - **key 经官方 DSH 凭据服务保存**，不写入插件配置。启动环境 key 优先且只读；切换服务清空 key 草稿，先保存服务再管理新 key。修改自定义端点不会产生新凭据空间，换地址前请确认专用 key 的信任边界。
-- **本地状态**：配置在 `$DSH_HOME/plugins/dsh-auto-model-routing/`，模式、子路由及反馈在 `$DSH_HOME/state/auto-model-routing/`。反馈只保存资源元数据、身份、版本、返回分布及时间，不保存任务或回复正文。请求事件序号供后续关联用量，缺失成本不会编造。见[反馈评估说明](docs/feedback-evaluation.md)。
+- **本地状态**：配置在 `$DSH_HOME/plugins/dsh-auto-model-routing/`，模式、子路由及反馈在 `$DSH_HOME/state/auto-model-routing/`。反馈只保存资源元数据、身份、策略家族、返回分布及时间，不保存任务或回复正文。请求事件序号供后续关联用量，缺失成本不会编造。见[反馈评估说明](docs/feedback-evaluation.md)。
 - **不自动学习**：人工反馈仅作观察，不改变路由，也不能直接证明质量提升或节省。无决策绑定的旧消息不回填，旧记录缺少的评估字段保持未知。
-- **升级兼容**：已有 AUTO 会话直接使用新策略，无需版本开关，也不重写会话模式。新会话缺省仍为 MANUAL，除非你改过设置。旧四档映射仅供配置中显式 `policy: "legacy"` 回滚，不是当前策略或反馈菜单。
+- **升级到 0.5.0**：只有一套 AUTO 策略，没有版本设置。已有会话保留原模式；新会话缺省仍为 MANUAL，除非你改过设置。插件配置中残留的 `policy`、`mainEfforts`、`childRoutes` 会被忽略，设置页提示不再生效，下次保存时移除。0.4.x 记录的子任务决策与反馈仍可读取。如需退回，固定已发布的 `dsh-auto-model-routing@0.4.2`（数据边界见 [CHANGELOG](CHANGELOG.md)）。
 
 ## 架构
 <!-- section: architecture -->
@@ -98,14 +98,14 @@ AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方
 
 主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。图示为 AUTO 路径，MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
-入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[policy-v2-rubric.json](src/policy-v2-rubric.json)。模型槽：[policy-v2.ts](src/policy-v2.ts)。界面：[client](src/client/index.ts)。覆盖边界：[开发验证](docs/policy-v2-development.md)、[真实 Magpie 验收](docs/magpie-live-acceptance.md)。
+入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、transport、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[真实 Magpie 验收](docs/magpie-live-acceptance.md)。
 
 <details>
-<summary>旧四档界面演示（仅供 legacy 回滚参考）</summary>
+<summary>早期四档界面演示（已于 0.5.0 删除）</summary>
 
-下列隔离宿主录屏使用模拟 Jev/模型响应，展示旧界面，不代表当前默认策略。
+下列隔离宿主录屏使用模拟 Jev/模型响应，展示的界面已不存在。
 
-![旧版四档路由设置](docs/settings.gif)
+![早期四档路由设置](docs/settings.gif)
 
 </details>
 ## 开发验证
@@ -116,7 +116,7 @@ npm run typecheck
 npm run build
 ```
 
-测试使用官方 AgentLoop、假 LLM 流和 mock/回环 Jev，不产生真实模型费用。`scripts/label-report.mjs` **仅汇总旧四档标注**。如需观察 AUTO 决策及实际 token 用量，请明确让 agent 使用 `auto-model-routing-report` skill（仅按需调用，运行只读的 `lib/usage-report.js`）；它是观察统计，不衡量节省；新数据结构与去重口径见[feedback-evaluation.md](docs/feedback-evaluation.md)。
+测试使用官方 AgentLoop、假 LLM 流和 mock/回环 Jev，不产生真实模型费用。如需观察 AUTO 决策及实际 token 用量，请明确让 agent 使用 `auto-model-routing-report` skill（仅按需调用，运行只读的 `lib/usage-report.js`）；它是观察统计，不衡量节省；新数据结构与去重口径见[feedback-evaluation.md](docs/feedback-evaluation.md)。
 
 继续在主仓开发，本仓库仅作发布镜像。插件使用自身声明的依赖、包内 skill 和官方 DSH 服务即可独立构建与加载，不要求检出主仓，也不要求安装主仓环境指令。外部设计链接仅供背景阅读，不是运行输入。
 

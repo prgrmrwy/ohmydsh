@@ -77,7 +77,7 @@ Preset model menus expose documented versions, not live availability guarantees.
 
 ### Magpie transports and picker display
 
-The default policy accepts both exact transports, `dsh-magpie-connector` and `dsh-magpie-connect`. They are not aliases: full model ids, live model capabilities, supported effort/caps, the current allowlist and the parent's captured allowlist all retain their exact transport identity. Unknown families need an explicit model. With a root AUTO session and explicit `policy: legacy`, both Magpie previews reject before Jev; MANUAL still returns `routed: false` without judging or state writes. Already bound children replay their saved route.
+AUTO accepts both exact transports, `dsh-magpie-connector` and `dsh-magpie-connect`. They are not aliases: full model ids, live model capabilities, supported effort/caps, the current allowlist and the parent's captured allowlist all retain their exact transport identity. Families without a registered strategy need an explicit model and a verifiable effort. With a MANUAL root session the preview returns `routed: false` without judging or state writes. Already bound children replay their saved route.
 
 AUTO applies the selected effort to the current main request and awaits official `selectModel` on the same provider/model when the effort changes. This also updates global defaults; the official picker shows one effort value. MANUAL requests pass through unchanged and bound children never write the main selection. A selection-sync failure is logged while the current request retains its selected effort. Magpie menu grouping still requires ohmydsh's managed five-package Host extension; stock rc.2 keeps a flat list. See [Magpie setup and display requirements](<../dsh-magpie-connector/README.md#model-menu-groups-and-effort>); local tests do not establish deployment or live GUI acceptance.
 
@@ -87,9 +87,9 @@ AUTO applies the selected effort to the current main request and awaits official
 - **MANUAL stops adjustments, not history.** It does not restore an earlier effort. The official current selection remains in control; existing bound children keep their route while the plugin is enabled.
 - **Data leaves the machine.** AUTO sends shape-redacted task text (up to 8000 characters) and short previous-turn excerpts to your chosen service. Redaction is best effort, not a guarantee that all secrets are removed. Test Connection sends only a fixed public sample and can incur a small charge.
 - **Keys use official DSH credentials**, never plugin configuration. Launch-environment keys take precedence and are read-only. Service changes clear key drafts; save the service before managing its separate key. Changing a custom endpoint does not create a new credential namespace—review the key before trusting a new host.
-- **Local state:** configuration is under `$DSH_HOME/plugins/dsh-auto-model-routing/`; mode, child routes and feedback are under `$DSH_HOME/state/auto-model-routing/`. Feedback stores resource metadata, IDs, versions, returned distributions and timestamps—not task/reply text. Request event IDs allow later usage correlation; costs are not fabricated when unavailable. See [feedback and evaluation](docs/feedback-evaluation.md).
+- **Local state:** configuration is under `$DSH_HOME/plugins/dsh-auto-model-routing/`; mode, child routes and feedback are under `$DSH_HOME/state/auto-model-routing/`. Feedback stores resource metadata, IDs, the strategy family, returned distributions and timestamps—not task/reply text. Request event IDs allow later usage correlation; costs are not fabricated when unavailable. See [feedback and evaluation](docs/feedback-evaluation.md).
 - **No automatic learning.** Human allocation feedback is observational. It does not change routing or prove quality/cost benefits. Old messages without decision bindings are not backfilled; old records with missing evaluation fields remain unknown.
-- **Upgrade:** existing AUTO sessions use the new policy without a version switch or rewriting their stored mode. New chats still default to MANUAL unless configured otherwise. Historical four-tier mappings remain only for explicit `policy: "legacy"` rollback in plugin configuration; they are not the current policy or feedback menu.
+- **Upgrade to 0.5.0:** there is one AUTO strategy and no version setting. Existing sessions keep their stored mode; new chats still default to MANUAL unless configured otherwise. Retired `policy` / `mainEfforts` / `childRoutes` keys in the plugin configuration are ignored, shown as no longer effective in Settings, and removed on the next save. Child decisions and feedback recorded by 0.4.x stay readable. To go back, pin the published `dsh-auto-model-routing@0.4.2` (see [CHANGELOG](CHANGELOG.md) for the data boundary).
 ## Architecture
 <!-- section: architecture -->
 
@@ -97,14 +97,14 @@ AUTO applies the selected effort to the current main request and awaits official
 
 Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. The diagram shows the AUTO paths; MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
-Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [policy-v2-rubric.json](src/policy-v2-rubric.json). Model slots: [policy-v2.ts](src/policy-v2.ts). UI: [client](src/client/index.ts). Coverage and limitations: [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
+Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, transports, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
 
 <details>
-<summary>Earlier four-tier UI demos (legacy rollback only)</summary>
+<summary>Earlier four-tier UI demos (removed in 0.5.0)</summary>
 
-These isolated-host recordings use mock Jev/model responses and show the previous UI, not the current default policy.
+These isolated-host recordings use mock Jev/model responses and show a UI that no longer exists.
 
-![Legacy four-tier routing settings](docs/settings.gif)
+![Earlier four-tier routing settings](docs/settings.gif)
 
 </details>
 ## Development
@@ -115,7 +115,7 @@ npm run typecheck
 npm run build
 ```
 
-Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. `scripts/label-report.mjs` reports **legacy tier labels only**. To observe AUTO decisions and their actual token usage, ask the agent to use the `auto-model-routing-report` skill (on demand only; it runs the read-only `lib/usage-report.js`). It is observational, not a savings measurement. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
+Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. To observe AUTO decisions and their actual token usage, ask the agent to use the `auto-model-routing-report` skill (on demand only; it runs the read-only `lib/usage-report.js`). It is observational, not a savings measurement. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
 
 Development stays in the source monorepo; this repository is its release mirror. The package builds and loads independently using its declared dependencies, bundled skill and official DSH services; no monorepo checkout or monorepo instruction file is required. External design references are optional background, not runtime inputs.
 
