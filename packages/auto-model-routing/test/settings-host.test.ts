@@ -18,7 +18,7 @@ function fixture(credentials?: unknown) {
  } as never)
  return settingsHost(ctx,new SettingsStore(join(mkdtempSync(join(tmpdir(),'amr-settings-host-')),'config.json')))
 }
-it.each(['dsh-magpie-connect','dsh-magpie'])('%s catalog is isolated from legacy yet available for persisted v2 replay',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'])('%s catalog is isolated from legacy yet available for persisted v2 replay',async(provider)=>{
  const ctx=new Context()
  ctx.provide('launchEnvironment',createLaunchEnvironmentSnapshot([{source:'process',values:{}}]) as never)
  ctx.provide('llm',{listProviders:()=>[{id:provider}],listModels:async()=>[{id:'opencode-go/kimi-k3',name:'Kimi'}],resolveModelInfo:async()=>({reasoning:{efforts:[{id:'high'}],defaultEffort:'high'}})} as never)

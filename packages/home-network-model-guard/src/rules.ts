@@ -27,7 +27,7 @@ export function classifyCountry(country: string, blocked: readonly string[]): Ne
  * Whether this call must obey the host's egress policy.
  *
  * Exemption matches the ACTUAL provider route id exactly: Magpie's UI groups
- * (Claude/GPT) are one route (`dsh-magpie`), so display names, model ids and
+ * (Claude/GPT) are one route (`dsh-magpie-connector`), so display names, model ids and
  * prefixes never grant an exemption. Claude-family classification is unchanged
  * by an exemption, so other senders still see the same selection.
  *

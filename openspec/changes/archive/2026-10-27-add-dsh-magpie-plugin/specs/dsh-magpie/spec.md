@@ -11,7 +11,7 @@
 
 key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取。每个操作开始时解析一次 key，同一操作的后续请求复用该值。一个操作指一次目录同步、一次卡片读取或刷新，或一次生成（从 `prepareCall` 到流结束）。插件的任何 HTTP 响应、插件设置文件和日志 SHALL NOT 包含 key 明文，对外只报告 `configured` 与 `writable`。网关返回的任何文本在进入插件的 HTTP 响应或日志之前 SHALL 先脱敏：把当前代和仍在进行中的操作所用 key 的原文替换为 `[redacted]`。这些文本包括卡片字段、错误原因和生成错误。key 来自启动环境（不可写）时，SHALL 拒绝通过插件覆盖或清除。
 
-地址或 key 缺任一项时，插件 SHALL 视为未配置：`dsh-magpie` route 的模型目录为空；生成以 `kind: error` 结束，failure 消息包含 `MAGPIE_NOT_CONFIGURED`；不向网关发起任何请求。
+地址或 key 缺任一项时，插件 SHALL 视为未配置：`dsh-magpie-connector` route 的模型目录为空；生成以 `kind: error` 结束，failure 消息包含 `MAGPIE_NOT_CONFIGURED`；不向网关发起任何请求。
 
 #### Scenario: 保存 key 后不回显
 - **GIVEN** credentials 服务可写，`MAGPIE_API_KEY` 未配置
@@ -35,7 +35,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 
 #### Scenario: 未配置时不提供模型且不发请求
 - **GIVEN** 地址已保存，`MAGPIE_API_KEY` 未配置
-- **WHEN** DSH 列举 `dsh-magpie` 的模型，并以该 route 发起一次生成
+- **WHEN** DSH 列举 `dsh-magpie-connector` 的模型，并以该 route 发起一次生成
 - **THEN** 模型列表为空；生成以 `kind: error` 结束，消息包含 `MAGPIE_NOT_CONFIGURED`；网关 mock 收到的请求数为 0
 
 ### Requirement: 连接接入方式（AMD4）
@@ -72,7 +72,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 #### Scenario: 换地址后不显示旧目录
 - **GIVEN** 网关 A 同步成功，有 13 个模型；网关 B 对 `/models` 返回 503
 - **WHEN** 客户端把地址改为 B
-- **THEN** DSH 列举 `dsh-magpie` 的模型得到空列表，设置响应中 `lastSyncError` 非空；之后的生成请求只发往 B，不发往 A
+- **THEN** DSH 列举 `dsh-magpie-connector` 的模型得到空列表，设置响应中 `lastSyncError` 非空；之后的生成请求只发往 B，不发往 A
 
 #### Scenario: 换 key 后不显示旧卡片
 - **GIVEN** 用 key K1 读到 3 张卡片；网关对 key K2 的卡片请求返回 403
@@ -137,7 +137,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - **THEN** 设置响应中错误分类为 `unauthorized`
 
 ### Requirement: 模型目录字段映射
-插件 SHALL 按以下规则把网关 `GET /models` 的条目映射为 `dsh-magpie` route 的模型：
+插件 SHALL 按以下规则把网关 `GET /models` 的条目映射为 `dsh-magpie-connector` route 的模型：
 - 模型 id 保持网关返回值原样；
 - 显示名取 `display_name`，缺失或为空时取 id；
 - effort 档位取 `reasoning_levels`，保持网关给出的顺序和取值；
@@ -549,14 +549,14 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **THEN** 响应状态为 400，S 仍为标准
 
 ### Requirement: 选择器按网关归属展示分组（AMD2）
-模型选择菜单 SHALL 按网关 `owned_by` 显示组标题及具体型号：`claude` 显示 `Magpie (Claude)`、`codex` 显示 `Magpie (GPT)`，其它非空归属显示 `Magpie (<owned_by>)`。缺失归属 SHALL 显示 `Magpie (Other)`，SHALL NOT 按模型名猜测归属。该展示分组 SHALL 通过官方逐模型展示扩展实现；真实 route SHALL 始终是单一 `dsh-magpie`，模型 id SHALL 保持网关原值。
+模型选择菜单 SHALL 按网关 `owned_by` 显示组标题及具体型号：`claude` 显示 `Magpie (Claude)`、`codex` 显示 `Magpie (GPT)`，其它非空归属显示 `Magpie (<owned_by>)`。缺失归属 SHALL 显示 `Magpie (Other)`，SHALL NOT 按模型名猜测归属。该展示分组 SHALL 通过官方逐模型展示扩展实现；真实 route SHALL 始终是单一 `dsh-magpie-connector`，模型 id SHALL 保持网关原值。
 
 统一搜索 SHALL 同时覆盖展示组标签与具体型号/id；可见性过滤和 effort SHALL 保持既有行为，`/model` 搜索与 actions SHALL 使用同一真实身份。缺少官方字段的 rc.2 SHALL 经本轮已授权的 Pet 现有 compat 唯一 owner 受管 patch 增加可选 resolved-model `displayGroup {id,label}`，经 LLM 校验/detach、host catalog 与原选择器展示 buckets；没有该字段的模型 SHALL 保持原展示。SHALL NOT 新建 runtime owner、手改 generated dirs、注册伪 provider 或 hack DOM 文本改变实际路由；插件 SHALL NOT 为映射展示组修改既有 CatalogModel.provider fallback 或设置偏好键。
 
 #### Scenario: owned_by 分组不随型号名猜测
 - **GIVEN** 网关模型 id 为 `custom/claude-looking`、显示名含 Claude，但 `owned_by` 为 `codex`；另有 owned_by 为 claude 的模型
 - **WHEN** 打开官方模型菜单
-- **THEN** 前者在 `Magpie (GPT)` 下，后者在 `Magpie (Claude)` 下；选中任何一项的 provider 都是 `dsh-magpie`，model 为原 id
+- **THEN** 前者在 `Magpie (GPT)` 下，后者在 `Magpie (Claude)` 下；选中任何一项的 provider 都是 `dsh-magpie-connector`，model 为原 id
 
 #### Scenario: 分组搜索保留可见性与 effort
 - **GIVEN** Claude/GPT 组均有可见模型，另有隐藏模型，可见模型具有已保存默认 effort
@@ -589,7 +589,7 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 #### Scenario: dispose 不删除数据
 - **GIVEN** 已保存 key 与设置文件，插件处于挂载状态
 - **WHEN** 卸载插件（dispose）
-- **THEN** credentials 服务的 `unset` 未被调用，设置文件仍存在且字节不变，`dsh-magpie` route 已不在 provider 列表中
+- **THEN** credentials 服务的 `unset` 未被调用，设置文件仍存在且字节不变，`dsh-magpie-connector` route 已不在 provider 列表中
 
 #### Scenario: dispose 时有进行中的请求
 - **GIVEN** 一次目录同步正在进行

@@ -2,7 +2,7 @@
 
 ## 结论与边界
 
-已复现**可达的超时机制**，尚不能把用户那次真实长上下文 / AUTO high 请求唯一归因于它：本轮没有读取真实 conversation、会话 raw 文件、DSH logs、凭据或真实网关。只新增本报告与 [观测测试](<../../../packages/dsh-magpie/test/stream-timeout-investigation.test.ts>)，未改 production、manifest、spec、旧测试、ledger；未 build/sync/restart，未触其他 worker 的部署操作。
+已复现**可达的超时机制**，尚不能把用户那次真实长上下文 / AUTO high 请求唯一归因于它：本轮没有读取真实 conversation、会话 raw 文件、DSH logs、凭据或真实网关。只新增本报告与 [观测测试](<../../../packages/dsh-magpie-connector/test/stream-timeout-investigation.test.ts>)，未改 production、manifest、spec、旧测试、ledger；未 build/sync/restart，未触其他 worker 的部署操作。
 
 核心事实：
 
@@ -14,7 +14,7 @@
 
 ## 契约依据
 
-- 当前 `openspec/specs/` 尚无 dsh-magpie current spec；本 change 的 [delta spec:148–169](<specs/dsh-magpie/spec.md#L148-L169>) 规定 90s 首事件、60s 空闲、关闭连接、不重放已输出内容；[Scenario:233–236](<specs/dsh-magpie/spec.md#L233-L236>) 只覆盖“无任何事件”和“文本后静默”，没有定义 headers/start/空块/空 delta。
+- 当前 `openspec/specs/` 尚无 dsh-magpie-connector current spec；本 change 的 [delta spec:148–169](<specs/dsh-magpie-connector/spec.md#L148-L169>) 规定 90s 首事件、60s 空闲、关闭连接、不重放已输出内容；[Scenario:233–236](<specs/dsh-magpie-connector/spec.md#L233-L236>) 只覆盖“无任何事件”和“文本后静默”，没有定义 headers/start/空块/空 delta。
 - [design D2:59–79](<design.md#L59-L79>) 选择 pi-ai 外层看门狗，称参考 connect `withStallTimeout`。这支持 pi 事件层的解释，但没有明确“空结构 start 是否算首事件/活动”。
 - [design:209](<design.md#L209>) 的“90s 足够”未附 high 长上下文延迟分布，本调查不据此预设测试应成功，也不建议单纯增大两个常数。
 
@@ -22,10 +22,10 @@
 
 | 层 | 来源与结论 |
 |---|---|
-| adapter budget | [adapter:119–146](<../../../packages/dsh-magpie/src/host/adapter.ts#L119-L146>)：context 转换后 `arm(90000)`，之后调用 `provider.stream`；看门狗到期置 `timedOut=true` 并 abort controller。HTTP 429/5xx 建连重试最多 2 次，全部仍在同一预算内；SDK `maxRetries:0`。 |
-| adapter activity | [adapter:148–166](<../../../packages/dsh-magpie/src/host/adapter.ts#L148-L166>)：所有非 generic `start` 的 pi event 都 `arm(60000)`，包括空 start、空 delta、end、done/error。block-start 自身会输出给 DSH，但不必有内容。 |
-| termination | [adapter:163–171](<../../../packages/dsh-magpie/src/host/adapter.ts#L163-L171>)：pi error 分支读 timedOut，稳定返回 `MAGPIE_STREAM_TIMEOUT`；外层 catch 不用 timedOut 生成 code，只阻止 reason=aborted。finally 清 timer/abort/release。 |
-| real transport | [transport:17–31](<../../../packages/dsh-magpie/src/host/transport.ts#L17-L31>)：私有 undici fetch 合并 signal，未实现 raw 活动续命。新 loopback 测试跑了此真实路径，不是全 mock。 |
+| adapter budget | [adapter:119–146](<../../../packages/dsh-magpie-connector/src/host/adapter.ts#L119-L146>)：context 转换后 `arm(90000)`，之后调用 `provider.stream`；看门狗到期置 `timedOut=true` 并 abort controller。HTTP 429/5xx 建连重试最多 2 次，全部仍在同一预算内；SDK `maxRetries:0`。 |
+| adapter activity | [adapter:148–166](<../../../packages/dsh-magpie-connector/src/host/adapter.ts#L148-L166>)：所有非 generic `start` 的 pi event 都 `arm(60000)`，包括空 start、空 delta、end、done/error。block-start 自身会输出给 DSH，但不必有内容。 |
+| termination | [adapter:163–171](<../../../packages/dsh-magpie-connector/src/host/adapter.ts#L163-L171>)：pi error 分支读 timedOut，稳定返回 `MAGPIE_STREAM_TIMEOUT`；外层 catch 不用 timedOut 生成 code，只阻止 reason=aborted。finally 清 timer/abort/release。 |
+| real transport | [transport:17–31](<../../../packages/dsh-magpie-connector/src/host/transport.ts#L17-L31>)：私有 undici fetch 合并 signal，未实现 raw 活动续命。新 loopback 测试跑了此真实路径，不是全 mock。 |
 | pi version / dispatch | `node_modules/@earendil-works/pi-ai/package.json:2–3` = 0.87.1；`dist/models.js:449–459,496` 直接 dispatch 到选定 API 的 stream，无额外原始事件过滤层。 |
 | pi headers → start | `node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js:117–129`：await SDK `.withResponse()`（headers 到达），然后 push generic start，再消费 raw Responses 流；因此 start 可先于任何 raw created。 |
 | pi empty starts | `node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js:343–382,477–483`：reasoning / message / function_call 的 output_item.added 无论有无摘要/文本/参数，都 createSlot 并 push 对应 start。 |
@@ -105,9 +105,9 @@
 在仓库根运行（无build）：
 
 ```bash
-npm --prefix packages/dsh-magpie test -- --run test/stream-timeout-investigation.test.ts
-npm --prefix packages/dsh-magpie test
-npm --prefix packages/dsh-magpie run typecheck
+npm --prefix packages/dsh-magpie-connector test -- --run test/stream-timeout-investigation.test.ts
+npm --prefix packages/dsh-magpie-connector test
+npm --prefix packages/dsh-magpie-connector run typecheck
 ```
 
 调查作者原始观测case纳入普通suite，无skip、无预设RED失败、无临时config改默认测试。真实loopback只绑定127.0.0.1随机端口，不访问网关或DNS。fixture使用合成key和合成内容，不持久化设置；测试恢复fake clock/spy并dispose runtime/关闭server。
@@ -120,4 +120,4 @@ npm --prefix packages/dsh-magpie run typecheck
 - 最终全suite执行期间，获准新建的测试文件被另一owner并发改成23个期待修复行为的回归case（例如空start允许65s内容、90s才timeout）；调查作者未覆盖这些修改。该次suite在production旧行为下 **15 failed / 23**（该文件），其余30文件189条通过，进程exit1。后台job `bash-40`已收集。此RED表示文件已从观测转为修复回归，并非原13条观测失败；lead/fix owner需在其production变更完成后重新验收。
 - 最终typecheck exit0；`git diff --check` exit0。调查作者无production变更，也不宣称最终工作区suite GREEN。
 
-最新（并发回归RED）净化suite输出在 `/tmp/dsh-magpie-stream-timeout-suite-sanitized.txt`。不把 `/tmp` 证据当长期源文件、不把现有 `lib` 产物当src测试的完成依据。
+最新（并发回归RED）净化suite输出在 `/tmp/dsh-magpie-connector-stream-timeout-suite-sanitized.txt`。不把 `/tmp` 证据当长期源文件、不把现有 `lib` 产物当src测试的完成依据。

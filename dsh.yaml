@@ -167,7 +167,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
-    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 dsh-magpie,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道仅回环可达(未配置 trustedHosts,不得添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
+    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 dsh-magpie-connector,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道仅回环可达(未配置 trustedHosts,不得添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
   - id: auto-model-routing
     type: package
     source: local
@@ -393,13 +393,13 @@ customizations:
     brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;暂用 PR #16 构建)
     note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。现装 PR #16 构建,发布于本人 fork 的 release(commit e28856d,tarball SHA256 586c1c62…2226a),相对 1.0.4 只去掉 persona 与空工具白名单。B049 实测:该构建在父子工具集一致时 Claude/codex 首请求均近全量命中主会话 cache,1.0.4 恒为 0;experimental-schedule 启用时工具集不一致,同样不命中。合入发版后改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
 
-  - id: dsh-magpie
+  - id: dsh-magpie-connector
     type: package
     source: local
     version: 0.1.0
-    enabled: true
-    brief: 自托管 Magpie provider、分组用量与默认 effort、会话快速档
-    note: '自研 MIT,change add-dsh-magpie-plugin。单 route dsh-magpie,pi-ai 处理 Responses/Chat。信任面:读取 DSH credentials MAGPIE_API_KEY;地址与偏好单独存盘,设置接口不回显 key。私有 undici dispatcher 只直连配置 baseUrl 的白名单 API,拒绝重定向,不调用 Magpie GUI 管理接口;手动刷新会访问上游用量。更换连接不取消已准备或在途生成,它们按旧地址与 key 跑完。2026-10-26 用户确认停用旧 connect 与显示名 shim,选择器仅保留新分组入口;旧配置保留,旧会话不自动迁移。移除:enabled:false → dsh build → 重启;凭据与设置保留,确认不再共用后手动清理。'
+    enabled: false
+    brief: 接入自托管 Magpie 网关；按上游 provider 分组，含用量卡片与 Cloudflare Access
+    note: '自研 MIT,change add-dsh-magpie-plugin + magpie-connector-rename。单 route dsh-magpie-connector(原 dsh-magpie),pi-ai 处理 Responses/Chat;设置页按网关 owned_by 分组展示模型与只读用量卡片,支持默认 effort、会话快速档与 Cloudflare Access。信任面:读取 DSH credentials MAGPIE_API_KEY;地址与偏好单独存盘,设置接口不回显 key;私有 undici dispatcher 只直连配置 baseUrl 的白名单 API,拒绝重定向,不调用 Magpie GUI 管理接口。改名后首次启动从 $DSH_HOME/plugins/dsh-magpie/settings.json 只读导入旧偏好且不删旧文件;旧会话保存的 dsh-magpie route 需手动重选模型;AUTO 与出口守卫已同步新 route ID;凭据引用不变。npm 名 dsh-magpie-connector。移除:enabled:false → dsh build → 重启;凭据与设置保留。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   - id: magpie-display-name-shim
@@ -414,7 +414,7 @@ customizations:
   - id: home-network-model-guard-config
     type: patch
     enabled: true
-    brief: 出口守卫默认豁免 dsh-magpie provider
+    brief: 出口守卫默认豁免 dsh-magpie-connector provider
     note: 'change guard-provider-exemptions。仅按真实 route ID 精确匹配，UI 分组无关；本机设置可用 exemptProviders:[] 撤销。删除旧 dsh-magpie-connect 接入，本机数据与旧会话保留。回滚：禁用本 patch 并确认本机配置无显式豁免，再 build+重启。'
 
   - id: dsh-mobile

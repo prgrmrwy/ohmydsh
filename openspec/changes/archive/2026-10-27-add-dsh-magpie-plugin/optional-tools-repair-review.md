@@ -4,9 +4,9 @@
 
 ## Exact scope and identities
 
-- Read [instructions](<../../../AGENTS.md>), [manifest](<../../../dsh.yaml#L5-L8>), integration pitfalls, [generation contract](<specs/dsh-magpie/spec.md#L148-L199>), [D2/D3](<design.md#L59-L91>), [tasks](<tasks.md#L170-L187>), [latest AMD2 review](<review.md#L555-L618>), investigation/repair/live reports, and connected implementation, not just a diff.
-- [Adapter:128–130](<../../../packages/dsh-magpie/src/host/adapter.ts#L128-L130>): exactly +3/-2 relative to its previously staged implementation, extracting the existing ternary into `api`, then conditionally adding `supportsStrictMode:true` only for `openai-responses`. Adapter SHA-256 `6ff52a96f3608bbb68e23325b137810ceb177ac3cdd893289f4b0e477c31309e`.
-- Read the complete [151-line test](<../../../packages/dsh-magpie/test/optional-tools.test.ts#L1-L151>); SHA-256 `0237da70e369ea75ae95dfa90128d8659e39e211b8b6d30dd44c245023c558a7`. No source/test edit by this reviewer.
+- Read [instructions](<../../../AGENTS.md>), [manifest](<../../../dsh.yaml#L5-L8>), integration pitfalls, [generation contract](<specs/dsh-magpie-connector/spec.md#L148-L199>), [D2/D3](<design.md#L59-L91>), [tasks](<tasks.md#L170-L187>), [latest AMD2 review](<review.md#L555-L618>), investigation/repair/live reports, and connected implementation, not just a diff.
+- [Adapter:128–130](<../../../packages/dsh-magpie-connector/src/host/adapter.ts#L128-L130>): exactly +3/-2 relative to its previously staged implementation, extracting the existing ternary into `api`, then conditionally adding `supportsStrictMode:true` only for `openai-responses`. Adapter SHA-256 `6ff52a96f3608bbb68e23325b137810ceb177ac3cdd893289f4b0e477c31309e`.
+- Read the complete [151-line test](<../../../packages/dsh-magpie-connector/test/optional-tools.test.ts#L1-L151>); SHA-256 `0237da70e369ea75ae95dfa90128d8659e39e211b8b6d30dd44c245023c558a7`. No source/test edit by this reviewer.
 - Frozen five planning hashes and production host patch match [review:574–579](<review.md#L574-L579>), including patch `0a9980ef…ae19`; no host input changed in this repair.
 
 ## Connected-source reasoning
@@ -19,7 +19,7 @@ Tests retain deep schema/context/input equality, original required/optional fiel
 
 ## Evidence tiers
 
-- Reviewer actually ran `npm test --workspace=dsh-magpie -- --reporter=verbose test/optional-tools.test.ts`, **2026-10-26 10:47:09 -04:00**, exit0, **1 file/10 passed**, 510ms. Private log `/tmp/dsh-magpie-final-20261026/focused.log`, mode0600.
+- Reviewer actually ran `npm test --workspace=dsh-magpie-connector -- --reporter=verbose test/optional-tools.test.ts`, **2026-10-26 10:47:09 -04:00**, exit0, **1 file/10 passed**, 510ms. Private log `/tmp/dsh-magpie-connector-final-20261026/focused.log`, mode0600.
 - [Author's repair receipt](<optional-tools-repair.md#L9-L29>): 10:21:36 -04:00 RED10 =3fail/7pass; 10:22:56 GREEN10; typecheck/build exit0; 10:23:29 full30files/189pass. These are author-reported unchanged-source receipts, not a reviewer full189 replay.
 - No reason to repeat unchanged Host25/339/161 or whole package189. Their historical evidence remains distinct from this candidate and eventual live/deployment checks.
 

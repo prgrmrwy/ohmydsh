@@ -36,7 +36,7 @@ MANUAL SHALL 不触发新判断或主请求覆盖；此前绑定的子实例 SHA
 - **THEN** 请求按支持范围生效，主 provider/model 保持；effort 变化时只以同 provider/model 经官方 selectModel 同步
 
 ### Requirement: 新默认策略的双 Magpie 精确 transport 兼容
-当前默认 `policy-v2` SHALL 在目录、策略路由、预览工具与持久化恢复中接受 `dsh-magpie` 和 `dsh-magpie-connect`，保持各自精确 provider 与网关完整 model ID，不把两者互为 alias，也不转到本地 claude/codex。自动推荐 SHALL 仅使用已定义的 claude/codex 能力家族；其它家族仍须显式模型及可验证 effort。该增量 SHALL NOT 改变显式 legacy 回滚的既有语义：仅当所属根会话为 AUTO 且显式选择 legacy 时，两个 Magpie transport 的新预览均在请求 Jev 前拒绝；所属根会话为 MANUAL 时仍返回 `{routed: false, reason: "manual"}`，不判档、不外发、不写状态；此前已绑定实例继续按既定精确身份恢复。
+当前默认 `policy-v2` SHALL 在目录、策略路由、预览工具与持久化恢复中接受 `dsh-magpie-connector` 和 `dsh-magpie-connect`，保持各自精确 provider 与网关完整 model ID，不把两者互为 alias，也不转到本地 claude/codex。自动推荐 SHALL 仅使用已定义的 claude/codex 能力家族；其它家族仍须显式模型及可验证 effort。该增量 SHALL NOT 改变显式 legacy 回滚的既有语义：仅当所属根会话为 AUTO 且显式选择 legacy 时，两个 Magpie transport 的新预览均在请求 Jev 前拒绝；所属根会话为 MANUAL 时仍返回 `{routed: false, reason: "manual"}`，不判档、不外发、不写状态；此前已绑定实例继续按既定精确身份恢复。
 
 #### Scenario: 新旧 Magpie 子实例保持精确身份并恢复
 - **GIVEN** 当前默认策略下的 AUTO 主会话，transport 分别为新旧 Magpie，目录和允许列表包含同 transport 的目标模型

@@ -161,8 +161,8 @@ describe('composite provider + model badge', () => {
   })
 })
 
-describe('dsh-magpie current-spec regressions', () => {
-  const routes = ['dsh-magpie', 'dsh-magpie-connect']
+describe('dsh-magpie-connector current-spec regressions', () => {
+  const routes = ['dsh-magpie-connector', 'dsh-magpie-connect']
   it('spec Scenario "Magpie route 显示 Magpie 品牌"', () => {
     for (const route of [...routes, 'magpie', 'magpie-home']) expect(brandKeyOf(route, 'codex/gpt-6-luna')).toBe('magpie')
   })

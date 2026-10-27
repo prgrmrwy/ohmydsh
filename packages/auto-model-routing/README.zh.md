@@ -76,9 +76,9 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 ### Magpie transport 与选择器展示
 
-默认策略接受 `dsh-magpie`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。未知家族需显式 model。根会话 AUTO 且显式 `policy: legacy` 时，两种 Magpie 预览均在 Jev 前拒绝；MANUAL 仍直接返回 `routed: false`，不判档、不写状态。已绑定子实例恢复原路线。
+默认策略接受 `dsh-magpie-connector`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。未知家族需显式 model。根会话 AUTO 且显式 `policy: legacy` 时，两种 Magpie 预览均在 Jev 前拒绝；MANUAL 仍直接返回 `routed: false`，不判档、不写状态。已绑定子实例恢复原路线。
 
-AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方 `selectModel` 同步同一 provider/model，并允许保存全局默认值。官方选择器只显示一个 effort。MANUAL 请求原样通过，已绑定子会话不写主选择；同步失败会记录告警，本次请求仍保留选定 effort。Magpie 菜单分组仍需 ohmydsh 受管五包 Host 扩展，stock rc.2 保持 flat 列表。见 [Magpie 配置与展示前提](<../dsh-magpie/README.zh.md#模型菜单分组与-effort>)；本地测试不等于已部署或 live GUI 验收。
+AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方 `selectModel` 同步同一 provider/model，并允许保存全局默认值。官方选择器只显示一个 effort。MANUAL 请求原样通过，已绑定子会话不写主选择；同步失败会记录告警，本次请求仍保留选定 effort。Magpie 菜单分组仍需 ohmydsh 受管五包 Host 扩展，stock rc.2 保持 flat 列表。见 [Magpie 配置与展示前提](<../dsh-magpie-connector/README.zh.md#模型菜单分组与-effort>)；本地测试不等于已部署或 live GUI 验收。
 
 ## 须知
 

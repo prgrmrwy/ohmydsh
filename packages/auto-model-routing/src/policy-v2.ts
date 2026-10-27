@@ -2,9 +2,9 @@ import type { Capability, Depth } from './jev.js'
 import { targetEffort, type ChildProvider } from './effort.js'
 import { AUTO_EFFORTS, type AutomaticEffort, type RoutingCatalog } from './settings-contract.js'
 import { MODEL_ID_PATTERN } from './settings-validation.js'
-export const POLICY_PROVIDERS = ['claude', 'codex', 'dsh-magpie-connect', 'dsh-magpie'] as const
+export const POLICY_PROVIDERS = ['claude', 'codex', 'dsh-magpie-connect', 'dsh-magpie-connector'] as const
 export type PolicyProvider = typeof POLICY_PROVIDERS[number]
-export function magpieProvider(value: string): value is 'dsh-magpie-connect' | 'dsh-magpie' { return value === 'dsh-magpie-connect' || value === 'dsh-magpie' }
+export function magpieProvider(value: string): value is 'dsh-magpie-connect' | 'dsh-magpie-connector' { return value === 'dsh-magpie-connect' || value === 'dsh-magpie-connector' }
 export function policyProvider(value: string): value is PolicyProvider { return POLICY_PROVIDERS.some(provider => provider === value) }
 export function modelFamily(provider: string, model: string): ChildProvider | undefined {
   if (provider === 'claude' || provider === 'codex') return provider

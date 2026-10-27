@@ -11,7 +11,7 @@
 
 ## 3. 仓库接入
 
-- [x] 3.1 增加显式 dsh-magpie 部署默认，删除 dsh-magpie-connect manifest 条目；测试校验 manifest/patch 与启用行为。
+- [x] 3.1 增加显式 dsh-magpie-connector 部署默认，删除 dsh-magpie-connect manifest 条目；测试校验 manifest/patch 与启用行为。
 - [x] 3.2 同步当前规范，运行 guard 测试、双端 typecheck、build、OpenSpec strict 校验与 artifact 检查，并审查最终 diff。
 
 ## Workflow follow-up

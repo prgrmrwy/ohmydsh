@@ -1,6 +1,6 @@
 ## 1. 包骨架与测试基础设施
 
-- [x] 1.1 创建 `packages/dsh-magpie/`，参照 auto-model-routing：`package.json` 中 name 为 `dsh-magpie`、license 为 MIT，`prepare` 与 `prepack` 都执行 build，`dsh.bundle.patch`、`dsh.client`、`exports`、`files` 齐全，并设 `ohmydsh.docTier: "C"`；依赖 `@earendil-works/pi-ai@^0.87.1`、`undici`。另建 tsconfig、tsdown、vitest 配置和 `cordis.patch.yml`。验证：`npm run typecheck` 与 `npm run build` 通过，空测试套件能跑。
+- [x] 1.1 创建 `packages/dsh-magpie-connector/`，参照 auto-model-routing：`package.json` 中 name 为 `dsh-magpie-connector`、license 为 MIT，`prepare` 与 `prepack` 都执行 build，`dsh.bundle.patch`、`dsh.client`、`exports`、`files` 齐全，并设 `ohmydsh.docTier: "C"`；依赖 `@earendil-works/pi-ai@^0.87.1`、`undici`。另建 tsconfig、tsdown、vitest 配置和 `cordis.patch.yml`。验证：`npm run typecheck` 与 `npm run build` 通过，空测试套件能跑。
 - [x] 1.2 先写包元数据自检测试：断言存在 prepare、prepack、files、exports、dsh.client、docTier，而且 `files` 覆盖的实际产物在 build 后存在；再造一个缺 prepare 的负例，确认测试会失败。然后补齐元数据，让测试通过。
 - [x] 1.3 实现 `test/support/`：网关 mock（编排 JSON 和 SSE 响应、延迟、断连、307，记录并发数）、credentials mock、附件 mock、代理 dispatcher mock、卡片和模型 fixture（来自只读实测，全部改为占位值）。验证：给 mock 写一条自测，确认能记录 method、path、body 和最大并发。
 
@@ -12,7 +12,7 @@
 - [x] 2.4 编写失败测试 `spec Scenario "非法设置输入被拒绝"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [ ] 2.5 编写失败测试 `spec Scenario "未配置时不提供模型且不发请求"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 2.6 实现：settings 路由的地址与 key 校验、credentials 存取（`MAGPIE_API_KEY`）、key 脱敏、未配置时短路（design D6、D10），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 2.7 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 2.7 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 3. 连接身份与代际隔离
 
@@ -24,7 +24,7 @@
 - [x] 3.6 编写失败测试 `spec Scenario "外部改 key 触发换代"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 3.7 编写失败测试 `spec Scenario "未收到事件时新操作发现 key 变化"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 3.8 实现：Generation 代际、换代触发（自身保存、credentials 事件、操作开始时比对指纹）、bgAbort、prepareCall 捕获 origin 与 key（design D4），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 3.9 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 3.9 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 4. 目录同步与发布
 
@@ -34,14 +34,14 @@
 - [x] 4.4 编写失败测试 `spec Scenario "同步超时"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 4.5 编写失败测试 `spec Scenario "key 无效的分类"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 4.6 实现：目录同步的触发时机、15s 超时、同代共享进行中的 syncPromise、错误分类、通过注册句柄 replace 发布（design D5），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 4.7 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 4.7 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 5. 模型目录字段映射
 
 - [x] 5.1 编写失败测试 `spec Scenario "字段映射"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 5.2 编写失败测试 `spec Scenario "畸形条目被丢弃"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 5.3 实现：`/models` 到 DSH 模型信息的映射（display_name、reasoning_levels、context、modalities），丢弃畸形条目，使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 5.4 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 5.4 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 6. 生成
 
@@ -61,7 +61,7 @@
 - [x] 6.14 编写失败测试 `spec Scenario "取消"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 6.15 编写失败测试 `spec Scenario "向不可收图模型发图"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 6.16 实现：pi-ai 桥接：createProvider 加两个 API 模块、按 native_endpoints 选协议、`thinkingLevelMap.off: null`、拒绝 stop、图片 data URL、mapUsage 推导 total、看门狗、终止原因映射（design D2），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 6.17 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 6.17 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 7. 只读与传输边界
 
@@ -69,7 +69,7 @@
 - [x] 7.2 编写失败测试 `spec Scenario "重定向不被跟随"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 7.3 编写失败测试 `spec Scenario "存在全局代理时仍直连"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 7.4 实现：`gatewayFetch`：私有 undici Agent、`redirect: "error"`、origin 与路径白名单、Authorization 和 attribution 头，并作为 `options.fetch` 注入 pi-ai（design D3），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 7.5 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 7.5 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 8. 按 provider 分组的模型可见性
 
@@ -77,7 +77,7 @@
 - [x] 8.2 编写失败测试 `spec Scenario "设置后严格按白名单与目录求交集"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 8.3 编写失败测试 `spec Scenario "形状非法被拒绝"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 8.4 实现：按 provider 保存的 visibleModels（不存在表示跟随，存在则为严格白名单）、只校验形状、选择器取交集（design D6），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 8.5 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 8.5 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 9. DSH 侧默认 effort
 
@@ -85,7 +85,7 @@
 - [x] 9.2 编写失败测试 `spec Scenario "拒绝非法档位"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 9.3 编写失败测试 `spec Scenario "档位失效时不下发，恢复后重新下发"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 9.4 实现：defaultEfforts 存储与校验，只在属于当前档位时下发 `reasoning.defaultEffort`（design D7），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 9.5 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 9.5 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 10. 只读用量卡片
 
@@ -96,7 +96,7 @@
 - [x] 10.5 编写失败测试 `spec Scenario "冷启动空集合"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 10.6 编写失败测试 `spec Scenario "卡片字符串按字面渲染"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 10.7 实现：卡片投影与脱敏、按 provider 分组、窗口读数优先级、resets、空状态与受限 key 提示、文本渲染（design D8，client 设置页），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 10.8 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 10.8 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 11. 手动刷新用量
 
@@ -113,7 +113,7 @@
 - [x] 11.11 编写失败测试 `spec Scenario "受限 key 冷启动刷新全部仍为空"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 11.12 编写失败测试 `spec Scenario "刷新失败保留原卡片"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 11.13 实现：cards 路由：互斥请求形状的校验、目标完全匹配、刷新闸门（覆盖目标时复用，否则串行）、GET 跟随刷新、序号在实际发送时分配（design D8），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 11.14 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 11.14 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 12. Codex 速度切换
 
@@ -123,24 +123,24 @@
 - [x] 12.4 编写失败测试 `spec Scenario "host 重启后回到标准"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 12.5 编写失败测试 `spec Scenario "非法 tier 被拒绝"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 12.6 实现：按会话保存的快速集合、speed 路由、Responses 用 serviceTier、Chat 用 onPayload 写 service_tier、`conversation.input.right` 槽位组件（design D9），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 12.7 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 12.7 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 13. 禁用不删除用户数据
 
 - [x] 13.1 编写失败测试 `spec Scenario "dispose 不删除数据"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 13.2 编写失败测试 `spec Scenario "dispose 时有进行中的请求"`（test-plan 对应行），确认失败原因是功能尚未实现，而不是 fixture 写错
 - [x] 13.3 实现：dispose：释放 route、路由、事件订阅和 Agent，中止进行中的请求，不删除 key 与设置文件（design D11），使本组全部测试通过；test-plan 中对应行从 🔴 改为 🟢
-- [x] 13.4 重构；`npm test` 在 `packages/dsh-magpie` 下保持全绿
+- [x] 13.4 重构；`npm test` 在 `packages/dsh-magpie-connector` 下保持全绿
 
 ## 14. sidebar-session-provider-icon 回归
 
-- [x] 14.1 在 `packages/sidebar-session-provider-icon/test/logos.test.ts` 新增 `spec Scenario "Magpie route 显示 Magpie 品牌"` 中 `dsh-magpie` 的断言，以及 `spec Scenario "相似但不同的 route 名不被识别"`（`dsh-magpie2`）。按 design D1，现有 `normalizeIdentity` 应该直接通过，不改源码。如果没通过，停下来报告，不擅自修改 logos.ts。
-- [x] 14.2 给 test-plan 中标为 🟢 的 sidebar 现有场景补上 `spec Scenario` 标题（不改断言），并把 `dsh-magpie` 加入「网关模型 id 按上游 provider 段识别」的断言（仅在模型名无法识别厂商时回退上游段）。为「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」各补 test-plan 指定的具名回归，对 `dsh-magpie` 和 `dsh-magpie-connect` 两个 route 参数化断言，不改运行时源码；在 sidebar 包下运行 `npm test`，确认全绿。
+- [x] 14.1 在 `packages/sidebar-session-provider-icon/test/logos.test.ts` 新增 `spec Scenario "Magpie route 显示 Magpie 品牌"` 中 `dsh-magpie-connector` 的断言，以及 `spec Scenario "相似但不同的 route 名不被识别"`（`dsh-magpie2`）。按 design D1，现有 `normalizeIdentity` 应该直接通过，不改源码。如果没通过，停下来报告，不擅自修改 logos.ts。
+- [x] 14.2 给 test-plan 中标为 🟢 的 sidebar 现有场景补上 `spec Scenario` 标题（不改断言），并把 `dsh-magpie-connector` 加入「网关模型 id 按上游 provider 段识别」的断言（仅在模型名无法识别厂商时回退上游段）。为「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」各补 test-plan 指定的具名回归，对 `dsh-magpie-connector` 和 `dsh-magpie-connect` 两个 route 参数化断言，不改运行时源码；在 sidebar 包下运行 `npm test`，确认全绿。
 
 ## 15. 文档、manifest 与仓库集成
 
-- [x] 15.1 编写 `packages/dsh-magpie/README.md` 与 `README.zh.md`：`<!-- problem -->` 段、安装与配置（地址、key，以及 Magpie 端需要局域网共享或 `MAGPIE_ADDR`，key 要有 Quotas 权限）、受限 key 冷启动说明、从 connect 迁移的步骤（旧会话需要手动切换 route）、`## Removal` 加 `<!-- section: removal -->`（手动清理 `MAGPIE_API_KEY` 和设置文件）；如有复制的代码片段，写进 THIRD-PARTY-NOTICES。
-- [x] 15.2 在 `dsh.yaml` 中新增 `dsh-magpie` 条目（local，0.1.0，enabled: true；brief 不超过 80 字，note 不超过 600 码位；note 中写明信任面、出站只到配置的 baseUrl、key 存在 credentials、移除方法）；在两个 README 的 Plugins 段、`tests/repo-docs-governance.test.mjs` 的 tier 表中各加一行。验证：仓库根目录 `npm test` 通过。
+- [x] 15.1 编写 `packages/dsh-magpie-connector/README.md` 与 `README.zh.md`：`<!-- problem -->` 段、安装与配置（地址、key，以及 Magpie 端需要局域网共享或 `MAGPIE_ADDR`，key 要有 Quotas 权限）、受限 key 冷启动说明、从 connect 迁移的步骤（旧会话需要手动切换 route）、`## Removal` 加 `<!-- section: removal -->`（手动清理 `MAGPIE_API_KEY` 和设置文件）；如有复制的代码片段，写进 THIRD-PARTY-NOTICES。
+- [x] 15.2 在 `dsh.yaml` 中新增 `dsh-magpie-connector` 条目（local，0.1.0，enabled: true；brief 不超过 80 字，note 不超过 600 码位；note 中写明信任面、出站只到配置的 baseUrl、key 存在 credentials、移除方法）；在两个 README 的 Plugins 段、`tests/repo-docs-governance.test.mjs` 的 tier 表中各加一行。验证：仓库根目录 `npm test` 通过。
 - [x] 15.3 运行 `npm run check:artifacts` 并确认通过；运行 `node scripts/sync.mjs` 两次，确认第二次输出 no changes。
 
 ## 17. AMD2 — 用户确认的菜单分组与设置图标（仅本次 delta 待独立 recheck）
@@ -211,4 +211,4 @@ AMD3 local snapshot：119/124 complete（旧115/119历史保留；新增19.1–1
 
 ## 2026-10-27 归档说明
 
-经用户确认带未完成项归档：2.5（历史缺先红证据，无法补）、16.2（CT105 直连只读冒烟未执行）、16.3（最终 anvil verify 未单独收尾）保持未勾选。16.4、19.5 以用户 2026-10-27 GUI 验收为准勾选。归档时 delta 合入主 specs：新建 dsh-magpie；sidebar-session-provider-icon 替换「使用下载落盘的真实品牌资产」；auto-model-routing 先把当前默认 AUTO 三条 requirement 移入 `## Requirements`，并按 AMD3 改写“不调用 selectModel”条款与场景，再加入四条新增 requirement。
+经用户确认带未完成项归档：2.5（历史缺先红证据，无法补）、16.2（CT105 直连只读冒烟未执行）、16.3（最终 anvil verify 未单独收尾）保持未勾选。16.4、19.5 以用户 2026-10-27 GUI 验收为准勾选。归档时 delta 合入主 specs：新建 dsh-magpie-connector；sidebar-session-provider-icon 替换「使用下载落盘的真实品牌资产」；auto-model-routing 先把当前默认 AUTO 三条 requirement 移入 `## Requirements`，并按 AMD3 改写“不调用 selectModel”条款与场景，再加入四条新增 requirement。

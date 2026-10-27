@@ -2,7 +2,7 @@
 
 ## Context
 
-见 proposal.md。Guard 的 Host createEgressGate 和 Web judge 共用 isClaudeFamily；配置由本机 JSON 投影校验，设置页目前只保存两个字段。Magpie 的 info.provider 为 dsh-magpie，displayGroup 仅影响展示，CatalogModel.provider 表示网关上游而非 DSH route。
+见 proposal.md。Guard 的 Host createEgressGate 和 Web judge 共用 isClaudeFamily；配置由本机 JSON 投影校验，设置页目前只保存两个字段。Magpie 的 info.provider 为 dsh-magpie-connector，displayGroup 仅影响展示，CatalogModel.provider 表示网关上游而非 DSH route。
 
 ## Goals / Non-Goals
 
@@ -13,7 +13,7 @@
 ## Decisions
 
 1. 新增共享 requiresEgressGuard(provider, model, exemptProviders)。列表严格匹配原始 route ID，不做大小写或前缀匹配；保留 isClaudeFamily。避免把 UI/displayGroup 作为权限事实。
-2. 通用 DEFAULT_CONFIG.exemptProviders=[]；单独的仓库配置 patch 向 guard 插件传入默认 [dsh-magpie]。本机 JSON 中显式列表优先，[] 撤销；字段缺失时继承部署默认，非法文件回退无豁免。Host 每次流入口加载有效配置再决定是否调用 Geo。
+2. 通用 DEFAULT_CONFIG.exemptProviders=[]；单独的仓库配置 patch 向 guard 插件传入默认 [dsh-magpie-connector]。本机 JSON 中显式列表优先，[] 撤销；字段缺失时继承部署默认，非法文件回退无豁免。Host 每次流入口加载有效配置再决定是否调用 Geo。
 3. 新增轻量 policy RPC，仅读取配置，不等待 Geo。Web 先刷新策略并重评估，再刷新网络状态；失败撤销客户端豁免。保留既有 check/status 语义。定时刷新和页面可见时刷新策略；保存设置派发本插件配置变更事件，立即强制刷新与重评估。刷新用代际避免旧异步结果覆盖新策略。
 4. 设置页增加逗号分隔的 provider 输入，基于 status.config 提交完整配置，保留超时参数；保存成功触发重评估。不新增 provider 目录依赖。
 5. 移除 manifest 的 dsh-magpie-connect 条目。已停用的显示名 shim 另有退役范围，保留；历史文档、本机凭据与数据不删除。

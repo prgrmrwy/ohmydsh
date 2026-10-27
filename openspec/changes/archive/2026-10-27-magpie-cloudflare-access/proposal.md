@@ -15,8 +15,8 @@
 - `magpie-access-auth`: 自研 Magpie 插件的可选 Cloudflare Access 服务鉴权、安全配置与生命周期。
 
 ### Modified Capabilities
-无。基础 dsh-magpie 规范仍位于未归档主线，本 change 不复制或覆盖其内容。
+无。基础 dsh-magpie-connector 规范仍位于未归档主线，本 change 不复制或覆盖其内容。
 
 ## Impact
 
-涉及 dsh-magpie host runtime/settings/transport/routes、client SettingsPage/api、入口凭据变更订阅及定向测试；不改 AUTO、Pet compat、manifest、lock 或现有主线账本。公网基础设施由 private home-substore 管理。无新增网络依赖，不在本仓库存储凭据。
+涉及 dsh-magpie-connector host runtime/settings/transport/routes、client SettingsPage/api、入口凭据变更订阅及定向测试；不改 AUTO、Pet compat、manifest、lock 或现有主线账本。公网基础设施由 private home-substore 管理。无新增网络依赖，不在本仓库存储凭据。

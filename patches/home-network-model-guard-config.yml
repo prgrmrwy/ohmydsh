@@ -3,4 +3,4 @@
   name: dsh-home-network-model-guard
   config:
     exemptProviders:
-      - dsh-magpie
+      - dsh-magpie-connector

@@ -8,12 +8,12 @@
 
 #### Scenario: Magpie 的多个 UI 分组共用同一豁免
 
-- **WHEN** `exemptProviders` 包含 `dsh-magpie`，用户选择 Magpie (Claude) 或 Magpie (GPT) 分组中的模型，实际 provider 为 `dsh-magpie`
+- **WHEN** `exemptProviders` 包含 `dsh-magpie-connector`，用户选择 Magpie (Claude) 或 Magpie (GPT) 分组中的模型，实际 provider 为 `dsh-magpie-connector`
 - **THEN** Web 与 Host 均跳过本机出口门禁，即使 Geo 为 blocked 或 unknown
 
 #### Scenario: 相似名称与直连不产生隐式豁免
 
-- **WHEN** 列表仅含 `dsh-magpie`，Claude 调用的 provider 是 `claude`、`anthropic`、`dsh-magpie-connect` 或 `dsh-magpie-other`
+- **WHEN** 列表仅含 `dsh-magpie-connector`，Claude 调用的 provider 是 `claude`、`anthropic`、`dsh-magpie-connect` 或 `dsh-magpie-connector-other`
 - **THEN** 它仍受原有 blocked/unknown fail-closed 门禁约束；UI 分组和模型名称不改变该结论
 
 #### Scenario: 豁免请求不等待 Geo
@@ -23,11 +23,11 @@
 
 ### Requirement: 豁免配置校验持久化与两端同步
 
-通用豁免默认 SHALL 为空列表；部署 MAY 显式设置默认值，本仓库 SHALL 配置 `dsh-magpie`。配置 SHALL 校验有限长度的非空 route ID 字符串列表、去除重复项、拒绝通配符与非法值，并允许空列表撤销全部豁免。有效本机配置优先于部署默认；非法配置 MUST NOT 产生豁免。设置页 SHALL 编辑并完整保存当前有效配置；保存后无需重启即更新 Host 与 Web，其他已打开客户端 SHALL 在后续刷新中更新。Web 未取得有效策略或刷新失败时 MUST NOT 自行推测豁免。
+通用豁免默认 SHALL 为空列表；部署 MAY 显式设置默认值，本仓库 SHALL 配置 `dsh-magpie-connector`。配置 SHALL 校验有限长度的非空 route ID 字符串列表、去除重复项、拒绝通配符与非法值，并允许空列表撤销全部豁免。有效本机配置优先于部署默认；非法配置 MUST NOT 产生豁免。设置页 SHALL 编辑并完整保存当前有效配置；保存后无需重启即更新 Host 与 Web，其他已打开客户端 SHALL 在后续刷新中更新。Web 未取得有效策略或刷新失败时 MUST NOT 自行推测豁免。
 
 #### Scenario: 保存与清空豁免
 
-- **WHEN** 用户在出口守卫设置页保存 `dsh-magpie` 或清空该列表
+- **WHEN** 用户在出口守卫设置页保存 `dsh-magpie-connector` 或清空该列表
 - **THEN** 配置持久化，Host 下一次调用采用新列表，当前客户端重新判定现有会话；空列表撤销部署默认豁免
 
 #### Scenario: 保存其他字段不丢失配置

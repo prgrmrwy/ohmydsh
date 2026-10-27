@@ -23,7 +23,7 @@ const { SessionCommandController } = await import(new URL('./types/commands.js',
 const { ApiSessionAgentController } = await import(new URL('./types/agent.js', controllerEntry).href)
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.(); close = undefined })
-async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie' = false, pendingPick = false, family: 'claude' | 'codex' = 'claude', selectFails: boolean | 'missing' = false) {
+async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' = 'claude', selectFails: boolean | 'missing' = false) {
   const provider = magpie || family
   const modelId = (id: string) => magpie ? `${family}/${id}` : id
   const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : ['gpt-6.1-sol','gpt-6-luna']
@@ -104,7 +104,7 @@ it('child decision persists separate confidences and actual application without 
  expect(JSON.stringify(record)).not.toContain('mechanical transformation')
  await h.restart();expect(h.store.get(child.id)?.decision?.capabilityConfidence).toBe(.71)
 })
-it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s children retain exact transport routes across mode changes and plugin reload',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s children retain exact transport routes across mode changes and plugin reload',async(provider)=>{
  const h=await harness(provider)
  expect((await h.invoke()).isError).not.toBe(true)
  const child=h.handles[1]!.agent
@@ -114,14 +114,14 @@ it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s children retain exact 
  expect(h.calls.at(-1)).toMatchObject({model:'claude/claude-haiku-5-5',reasoningEffort:'medium'})
  expect(h.jev.bodies).toHaveLength(1)
 })
-it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s main keeps transport and model unchanged',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s main keeps transport and model unchanged',async(provider)=>{
  const h=await harness(provider)
  h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}))
  await h.run(h.parent,'main task')
  expect(h.calls.at(-1)).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
  expect(h.parent.session.requestHeader()?.config).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
 })
-it.each([false,'dsh-magpie-connect','dsh-magpie'] as const)('%s AUTO synchronizes the same request, official selection and global defaults',async(provider)=>{
+it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('%s AUTO synchronizes the same request, official selection and global defaults',async(provider)=>{
  const h=await harness(provider,true)
  h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}))
  await h.run(h.parent,'Main task with an explicit medium pick')
@@ -161,7 +161,7 @@ it('same effort and MANUAL do not sync',async()=>{
  expect(h.calls.map(c=>c.reasoningEffort)).toEqual(['medium','medium'])
  expect(h.selections).toEqual([]);expect(h.defaults).toEqual([])
 })
-it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s GPT main and child use supported efforts on the same transport',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s GPT main and child use supported efforts on the same transport',async(provider)=>{
  const h=await harness(provider,true,'codex')
  h.jev.set(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'higher'}}}))
  await h.run(h.parent,'GPT main task')
@@ -261,7 +261,7 @@ it('Jev failure stops child execution and preserves the failure across later mes
   await h.run(child,'Try again without a new resource decision')
   expect(h.jev.bodies).toHaveLength(1)
 })
-it.each([false,'dsh-magpie-connect','dsh-magpie'] as const)('does not broaden the %s parent captured allowlist with a newer global catalog', async (magpie) => {
+it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('does not broaden the %s parent captured allowlist with a newer global catalog', async (magpie) => {
   const h = await harness(magpie)
   ;(h.parent.session.append as unknown as (type:string,data:unknown)=>unknown)('subagent/model-selection-policy',{ allowedModels: [{provider:magpie||'claude',model:magpie?'claude/claude-opus-5-5':'claude-opus-5-5'}] })
   await h.invoke()

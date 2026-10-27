@@ -10,7 +10,7 @@
 ```text
 a5ac6bd096f32809856cb466f6fe8f419e15ee9bfc8abd97eb97b4c7bd5a443b  openspec/changes/add-dsh-magpie-plugin/proposal.md
 f0fa6caea524b89f5398a33989086631b78693727e82148648d3af307e196bcc  openspec/changes/add-dsh-magpie-plugin/design.md
-8389895983a13cec6a6a58fe29b76e591f2997793522594646afe2fe64727d4b  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+8389895983a13cec6a6a58fe29b76e591f2997793522594646afe2fe64727d4b  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 7ca88942b81aeeed875f3aba45fd8eab40d9c900b9cc2b2982bec5799e19c0fc  openspec/changes/add-dsh-magpie-plugin/review-round1.md
 b2ca0b6b3a09f519e38ac97c8f33c873e5c2892baf9287e78950aa3f910b2eb7  openspec/changes/add-dsh-magpie-plugin/review-round2.md
@@ -42,28 +42,28 @@ b2ca0b6b3a09f519e38ac97c8f33c873e5c2892baf9287e78950aa3f910b2eb7  openspec/chang
 
 #### R3-M1 — usage 减了缓存读取却没减缓存写入，规范直接要求重复计数
 
-- **位置**：[spec:160、180–185](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L160-L185>)；[design:68](</openspec/changes/add-dsh-magpie-plugin/design.md#L68>)。
+- **位置**：[spec:160、180–185](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L160-L185>)；[design:68](</openspec/changes/add-dsh-magpie-plugin/design.md#L68>)。
 - **问题**：总输入 1000、读缓存 600、写缓存 50，规范要求 `inputTokens:400` 后再加读 600、写 50，输入合计变成 1050。正确未缓存输入为 350。尤其 Claude 经 Chat 走缓存写入时不是理论边界，Magpie 本身已有对应测试。缺缓存详情时也不能用固定比例推断缓存。
 - **证据**：DSH TokenUsage:153–173 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L153-L173`)要求 input/read/write 三者不重叠。Magpie 的 Usage.prompt:426–430 (`/tmp/magpie-src/internal/gateway/ir.go#L426-L430`)明确总输入等于三者之和；Responses:1360–1372 (`/tmp/magpie-src/internal/gateway/responses.go#L1360-L1372`)自身也减读和写；Chat:978–982 (`/tmp/magpie-src/internal/gateway/chat.go#L978-L982`)使用同一总输入口径。Claude Chat 测试:61–66 (`/tmp/magpie-src/internal/gateway/claude_chat_usage_test.go#L61-L66`)实际断言 prompt=6426、cache_write=6416、cache_read=0。
 - **最小修法**：design/spec 同步改为 `inputTokens = max(totalInput - cacheRead - cacheWrite, 0)`，明确两协议实际字段为 `input_tokens_details` / `prompt_tokens_details` 中的 `cached_tokens`、`cache_write_tokens`；将该 THEN 的 400 改为 350。补无缓存详情时 total=1000 → input=1000、cache 字段省略或零的明确规则，不伪造缓存。对不一致计数不得生成负 input，亦不得保留一个与分项矛盾的 totalTokens。无需建设通用计费层。
 
 #### R3-M2 — 把带 stop 的 Codex 请求改为 Chat，网关第二跳仍会丢掉 stop
 
-- **位置**：[proposal:12](</openspec/changes/add-dsh-magpie-plugin/proposal.md#L12>)；[design:58–63](</openspec/changes/add-dsh-magpie-plugin/design.md#L58-L63>)；[spec:151、187–190](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L151-L190>)。
+- **位置**：[proposal:12](</openspec/changes/add-dsh-magpie-plugin/proposal.md#L12>)；[design:58–63](</openspec/changes/add-dsh-magpie-plugin/design.md#L58-L63>)；[spec:151、187–190](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L151-L190>)。
 - **问题**：`codex/gpt-6.1-sol` + stop=["END"] 到达 Chat 的确会被解析，但 ChatGPT 账号只提供 Responses，网关随后把内部 Request 再构造成 Responses，那里仍没有 stop。模型返回 `aENDb` 时插件按当前设计会全部输出，新场景却只检查第一跳 endpoint/body，仍然全绿。不能把“网关接收 Chat”当作“它能让任何上游实现 stop”。这是上一轮建议没有追完第二跳的评审遗漏，不应归咎作者未照做。
 - **证据**：DSH stop:513–518 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L513-L518`)要求停止串不进入输出。parseChat:83–98 (`/tmp/magpie-src/internal/gateway/chat.go#L83-L98`)保存 stop，但 Codex provider:1015 (`/tmp/magpie-src/internal/provider/account.go#L1015`)只设置 Responses endpoint。attempt:3883–3903 (`/tmp/magpie-src/internal/gateway/gateway.go#L3883-L3903`)选择上游协议，translate:6006–6047 (`/tmp/magpie-src/internal/gateway/gateway.go#L6006-L6047`)解析后进入 translated stream；build:6312–6317 (`/tmp/magpie-src/internal/gateway/gateway.go#L6312-L6317`)在 Responses 分支调用 buildResponses，后者1238–1269 (`/tmp/magpie-src/internal/gateway/responses.go#L1238-L1269`)不写 stop，也没有本地 stop 截断器。native_endpoints 还是转发优化元数据，不是 stop 能力声明。
 - **最小修法**：首版最省事且可证明的政策是对非空 stop 在发请求前明确失败，例如 `MAGPIE_STOP_UNSUPPORTED`，并同步 proposal/design/spec；不凭 native_endpoints 推断能端到端执行 stop。常规对话本来不带 stop，保留普通生成与 Fast 不受影响。若产品坚持成功处理 stop，再实现插件侧跨 chunk 截断与上游中止；不能继续写“Chat 一定解决”。验收需断言失败时零网关请求；若选择支持，则必须断言 `aE`/`N`/`Db` 等分片只输出 `a`，正常终止、关闭上游且不重放，而非只测 body 有 stop。
 
 #### R3-M3 — 后发的缓存 GET 可以抢先占序号，丢弃用户刷新出来的新值
 
-- **位置**：[design:125–127](</openspec/changes/add-dsh-magpie-plugin/design.md#L125-L127>)；[spec:361–365、392–395](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L361-L395>)。
+- **位置**：[design:125–127](</openspec/changes/add-dsh-magpie-plugin/design.md#L125-L127>)；[spec:361–365、392–395](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L361-L395>)。
 - **问题**：现有场景只测 GET 先发、刷新后发。反过来：用户刷新 F(seq=1) 正在等厂商；另一页打开后发 GET G(seq=2)，Magpie 立即返回刷新前缓存 T1，G 提交；F 最后返回新值 T2，却因 seq=1 被丢弃。结果同一代仍显示 T1，用户已经完成的刷新没有效果。刷新闸门只限制 POST，不限制 GET，代际检查也因仍为同一代而无效。
 - **证据**：quotaCards:844–856 (`/tmp/magpie-src/internal/gateway/gateway.go#L844-L856`)明确 GET 只读现有缓存；refresh:901–915 (`/tmp/magpie-src/internal/gateway/gateway.go#L901-L915`)等待读取完成后才 writeCards。故请求发起顺序不等于卡片新鲜度顺序。新 spec 允许打开页面发 GET，并要求较小已返回序号一律丢弃，已足够构成该确定性反例。
 - **最小修法**：保留一个刷新闸门；刷新在进行时，新卡片 GET 等待该刷新结算，再从结算结果或随后的一次 GET 回答，不让它从旧缓存产生一个更大的提交水位。无需增加全局分布式锁或凭 readAt 猜新旧。补 F 先发/G 后发/G 原本可先返旧缓存的场景，断言最终 T2。明确代际检查与同代序号都须通过；400/409 不是卡片结果，不得推进提交序号、替换卡片或释放另一个请求的 gate。409 的客户端应结束自己的 loading、保留原卡片并允许之后重试；“按钮禁用”指本客户端刷新请求未结算期间，不要求没有通知通道的其它页面预知 Host gate。
 
 #### R3-M4 — wire 验收仍未固定实际字段与 Responses 工具往返，错误编码可通过全部场景
 
-- **位置**：[spec:174–205](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L174-L205>)；[design:64–69](</openspec/changes/add-dsh-magpie-plugin/design.md#L64-L69>)。
+- **位置**：[spec:174–205](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L174-L205>)；[design:64–69](</openspec/changes/add-dsh-magpie-plugin/design.md#L64-L69>)。
 - **问题**：Chat 的“最大 token 字段为100”没有字段名，错误的 `maxTokens:100` 也能满足文字。图片只测一个 Chat 模型且只断言含 data URL，使用错误的 Responses/Chat 包装结构仍可通过。Responses 工具往返和 `response.failed` 仍没有自己的可执行 fixture；现有 Chat 工具场景不能证明 Responses 的 `call_id`/`function_call_output` 编码成立。这不是要求穷举 SDK，而是插件自己手写的不同分支尚未被验收锁住。
 - **证据**：Magpie cRequest/parseChat:59–87 (`/tmp/magpie-src/internal/gateway/chat.go#L59-L87`)只接受 `max_completion_tokens` / `max_tokens`，不接受 camelCase；chatParts:166–185 (`/tmp/magpie-src/internal/gateway/chat.go#L166-L185`)要求 `{type:"image_url", image_url:{url:...}}`，而 responsesParts:870–883 (`/tmp/magpie-src/internal/gateway/responses.go#L870-L883`)要求 `{type:"input_image", image_url:"..."}`。两者的 data URL 本身均被 imagePart:217–225 (`/tmp/magpie-src/internal/gateway/chat.go#L217-L225`)接受，因此不反对 data URL。Responses 工具输入:378–408 (`/tmp/magpie-src/internal/gateway/responses.go#L378-L408`)区分 `function_call` 与 `function_call_output`、以 call_id 配对；失败事件:1573–1588 (`/tmp/magpie-src/internal/gateway/responses.go#L1573-L1588`)即使没有 error 对象也属于失败。
 - **最小修法**：给 Chat 选择一个精确合法字段（例如统一 `max_completion_tokens`）并断言值=100、错误 camelCase 不存在；将发图场景表驱动到两协议，断言上述完整内容结构及字节。补一条 Responses 工具调用→匹配 call_id 的结果→下一次文本的往返，以及 response.failed 无 error 对象后不得成功的 edge。把已有 Fast 场景参数化到两协议，断言 Chat 用 reasoning_effort、两者都带 priority；如果按 R3-M2 拒绝所有 stop，不再要求不存在的 stop→Chat 成功分支。可以扩展现有场景，不新增 requirement、不增加第三套协议或在线测试。
@@ -72,7 +72,7 @@ b2ca0b6b3a09f519e38ac97c8f33c873e5c2892baf9287e78950aa3f910b2eb7  openspec/chang
 
 #### R3-S1 — “只改环境变量，下次 resolve 就发现”不符合实际 Host 的启动快照
 
-- **位置**：[design:27、89–90](</openspec/changes/add-dsh-magpie-plugin/design.md#L87-L90>)；[spec:89–92](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L89-L92>)。
+- **位置**：[design:27、89–90](</openspec/changes/add-dsh-magpie-plugin/design.md#L87-L90>)；[spec:89–92](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L89-L92>)。
 - **问题**：每操作 resolve 和指纹兜底本身正确，但宿主正常路径的进程环境不是实时可变来源。直接在 mock 里改环境能绿，不证明真实 Host 会热读；外部编辑凭据文件也要等 credentials watcher 发布快照，插件不能保证磁盘刚写完的那个瞬间已识别。
 - **证据**：credentials-local:428–430、473–489 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-credentials-local/lib/index.js#L428-L489`)通过 launchEnvironmentOf 解析 inherited；launch-environment:30–52 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-launch-environment/lib/index.js#L30-L52`)将启动变量复制为不可变 Map。文件热更新在 reconcile:723–733 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-credentials-local/lib/index.js#L723-L733`)提交 values 后发事件，事件的 fanOut:135–142 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-credentials/lib/index.js#L135-L142`)不等待异步 listener。
 - **最小修法**：把无事件场景改为“credentials.resolve 的有效结果在 mock 中由 K1 变 K2、未发事件”，保留防御性检查；说明启动环境换 key 需重启，文件变化以服务观察/发布为起点。实现时在事件入口先同步失效旧可见状态，再异步 resolve/同步目录；避免仅依赖 async listener 被 credentials.set 等待这一不存在的保证。无需让插件绕过 credentials 读取文件或自行 watch。
@@ -85,7 +85,7 @@ b2ca0b6b3a09f519e38ac97c8f33c873e5c2892baf9287e78950aa3f910b2eb7  openspec/chang
 
 **其余完整检查结论：**
 
-- dsh-magpie 的 12 条 requirement 均有至少一个 happy 和一个 failure/edge；sidebar modified requirement 保留原场景并增加新 route 正向与相似名负向场景。数量最低门槛通过；R3-M4 是内容可断言性而非单纯凑测试数。
+- dsh-magpie-connector 的 12 条 requirement 均有至少一个 happy 和一个 failure/edge；sidebar modified requirement 保留原场景并增加新 route 正向与相似名负向场景。数量最低门槛通过；R3-M4 是内容可断言性而非单纯凑测试数。
 - 代际切换后丢目录/卡片、旧生成只用捕获值，和 dispose 中止全部生成可以共存；D3 的生命周期 signal 应解释为 dispose signal，后台操作另加 bgAbort，D4 已明确。保持该决定，不要求生成 stream 再解析 key。
 - 固定投影排除未知 debug 字段，字符串文本渲染防执行，私有 dispatcher 防全局代理绕路，redirect:error 防正文/凭据进入第二目标，均接受。当前代与“进行中操作”的 key 脱敏范围须在错误构造/输出完成之后才释放；已准备对象也是进行中的生成操作，不能在 prepare 返回就移出集合。缓存只能保存已脱敏投影/错误；不要求为恶意网关永久保留全部历史秘密，也不把字面替换误称为防任意编码外传。
 - 单卡无 user 的真实卡片允许省略参数，但不能省略本来有 user 的身份；新 union/完整匹配已解决原放大入口。per-generation gate 加网关 tuple 节流能满足声明的并发边界，不把它说成逐卡冷却或跨代全局串行，也不另要求定时轮询。
@@ -152,17 +152,17 @@ CHANGES_APPLIED: yes
 ```text
 97baafe417cfbd8072a919de9a37a35b1a413524eb33422c0704377652af65cc  openspec/changes/add-dsh-magpie-plugin/proposal.md
 1dd47405631b028e5bb1b375e6520494a969652986e169719891ec0c448d202a  openspec/changes/add-dsh-magpie-plugin/design.md
-44e45ebf7f2ef93c88356d329fe7c60521441bf4c7e292fe5b8eebe021ecb346  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+44e45ebf7f2ef93c88356d329fe7c60521441bf4c7e292fe5b8eebe021ecb346  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 ```
 
 ### Required Changes 逐条结论
 
-1. **R3-M1 — not applied（主体已修，但 total 政策需纠正）**：[spec:162、193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L162-L204>) 与 [design:73](</openspec/changes/add-dsh-magpie-plugin/design.md#L73>) 已固定两协议字段、同时减读写、350 fixture、无缓存详情按零和不一致计数钳零，也新增了不透传矛盾 total 的机械断言。但最新修订改为**任何 usage 都禁止 totalTokens**，超出了「不一致时省略」，反而丢弃可得且一致的精确总量。DSH TokenUsage:164–168 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L164-L168`) 明确要求保留 provider total 或从权威总输入/输出导出，只在 unavailable/inconsistent 时省略。**需修改**：正常 1000 输入、20 输出、缓存 600/50 时保留或导出 `totalTokens:1020`；100 输入却缓存读600的异常 fixture 则省略 total。design/spec 同步，不直接信任 pi-ai 的 total。无需新增计费层。
-2. **R3-M2 — applied**：[proposal:12](</openspec/changes/add-dsh-magpie-plugin/proposal.md#L12>)、[design:68](</openspec/changes/add-dsh-magpie-plugin/design.md#L68>)、[spec:153、206–209](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L153-L209>) 已一致拒绝非空 stop；双协议 fixture 明确 `MAGPIE_STOP_UNSUPPORTED` 和零请求，不再把 Chat 第一跳误当成端到端保证。
-3. **R3-M3 — applied**：[design:131–133](</openspec/changes/add-dsh-magpie-plugin/design.md#L131-L133>)、[spec:382–386、413–426](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L382-L426>) 已规定 GET 等刷新并复用结果，F先发/G后发最终T2可断言；代际与序号须同时通过，400/409/失败不提交、不释放他人闸门，409结束本客户端loading、保留卡片并允许重试。
-4. **R3-M4 — applied（验收契约层面）**：[spec:171–226](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L171-L226>) 固定 Chat `max_completion_tokens:100` 且无 camelCase，双协议图片结构及解码字节、Responses `call_id` 工具往返、无 error 对象的 `response.failed` 均有机械断言；[Fast:445–448](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L445-L448>) 覆盖两协议。pi-ai 默认行为与部分既有 fixture 不同，属于下面新增的桥接问题，不否认这些验收要求已经补上。
-5. **R3-S1/S2 — applied**：[spec:89–92](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L89-L92>) 已用有效 credentials mock 变化而非热改启动环境；[design:95–96](</openspec/changes/add-dsh-magpie-plugin/design.md#L95-L96>) 明确启动快照、文件变化以服务观察发布为起点、事件入口同步失效且不等待 async listener；[Risks:178](</openspec/changes/add-dsh-magpie-plugin/design.md#L178>) 重定向诊断已统一，不声称状态码。
+1. **R3-M1 — not applied（主体已修，但 total 政策需纠正）**：[spec:162、193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L162-L204>) 与 [design:73](</openspec/changes/add-dsh-magpie-plugin/design.md#L73>) 已固定两协议字段、同时减读写、350 fixture、无缓存详情按零和不一致计数钳零，也新增了不透传矛盾 total 的机械断言。但最新修订改为**任何 usage 都禁止 totalTokens**，超出了「不一致时省略」，反而丢弃可得且一致的精确总量。DSH TokenUsage:164–168 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L164-L168`) 明确要求保留 provider total 或从权威总输入/输出导出，只在 unavailable/inconsistent 时省略。**需修改**：正常 1000 输入、20 输出、缓存 600/50 时保留或导出 `totalTokens:1020`；100 输入却缓存读600的异常 fixture 则省略 total。design/spec 同步，不直接信任 pi-ai 的 total。无需新增计费层。
+2. **R3-M2 — applied**：[proposal:12](</openspec/changes/add-dsh-magpie-plugin/proposal.md#L12>)、[design:68](</openspec/changes/add-dsh-magpie-plugin/design.md#L68>)、[spec:153、206–209](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L153-L209>) 已一致拒绝非空 stop；双协议 fixture 明确 `MAGPIE_STOP_UNSUPPORTED` 和零请求，不再把 Chat 第一跳误当成端到端保证。
+3. **R3-M3 — applied**：[design:131–133](</openspec/changes/add-dsh-magpie-plugin/design.md#L131-L133>)、[spec:382–386、413–426](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L382-L426>) 已规定 GET 等刷新并复用结果，F先发/G后发最终T2可断言；代际与序号须同时通过，400/409/失败不提交、不释放他人闸门，409结束本客户端loading、保留卡片并允许重试。
+4. **R3-M4 — applied（验收契约层面）**：[spec:171–226](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L171-L226>) 固定 Chat `max_completion_tokens:100` 且无 camelCase，双协议图片结构及解码字节、Responses `call_id` 工具往返、无 error 对象的 `response.failed` 均有机械断言；[Fast:445–448](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L445-L448>) 覆盖两协议。pi-ai 默认行为与部分既有 fixture 不同，属于下面新增的桥接问题，不否认这些验收要求已经补上。
+5. **R3-S1/S2 — applied**：[spec:89–92](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L89-L92>) 已用有效 credentials mock 变化而非热改启动环境；[design:95–96](</openspec/changes/add-dsh-magpie-plugin/design.md#L95-L96>) 明确启动快照、文件变化以服务观察发布为起点、事件入口同步失效且不等待 async listener；[Risks:178](</openspec/changes/add-dsh-magpie-plugin/design.md#L178>) 重定向诊断已统一，不声称状态码。
 
 ### 作者另行修改：pi-ai 复用
 
@@ -174,7 +174,7 @@ CHANGES_APPLIED: yes
 
 #### R3-RC-M1（新增 Moderate）— pi-ai 默认会擅自给未选 effort 的 Responses 写 none，system 的精确编码也不符合契约
 
-- **具体反例与证据**：Responses reasoning 模型未选 effort 时，openai-responses:248–263 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L248-L263`) 默认写 `reasoning:{effort:"none"}`（除非显式配置 `thinkingLevelMap.off:null`），与 [spec:157](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L157>) 的“未选不写”相反；Magpie parseResponses:321–324 (`/tmp/magpie-src/internal/gateway/responses.go#L321-L324`) 会因此设置 `ThinkOff=true`，不是无害的额外字段。另一个可直接断言的差异：pi-ai Responses 不填 `instructions`，而在 shared:123–137 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L123-L137`) 把 system 编为 input 内的 developer/system；Chat reasoning 模型在 896、917–919 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L896-L919`) 默认用 developer。故 D2:70 和 spec:197–198 的精确 fixture 不会由默认 SDK 配置自动满足。后者网关可解析，并不夸大为 system 丢失；阻断严重度来自前者实际关闭推理。
+- **具体反例与证据**：Responses reasoning 模型未选 effort 时，openai-responses:248–263 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L248-L263`) 默认写 `reasoning:{effort:"none"}`（除非显式配置 `thinkingLevelMap.off:null`），与 [spec:157](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L157>) 的“未选不写”相反；Magpie parseResponses:321–324 (`/tmp/magpie-src/internal/gateway/responses.go#L321-L324`) 会因此设置 `ThinkOff=true`，不是无害的额外字段。另一个可直接断言的差异：pi-ai Responses 不填 `instructions`，而在 shared:123–137 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L123-L137`) 把 system 编为 input 内的 developer/system；Chat reasoning 模型在 896、917–919 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L896-L919`) 默认用 developer。故 D2:70 和 spec:197–198 的精确 fixture 不会由默认 SDK 配置自动满足。后者网关可解析，并不夸大为 system 丢失；阻断严重度来自前者实际关闭推理。
 - **最小修改**：在 D2 明确桥接层的 payload/compat 归一化职责：保留 spec 的 Responses `instructions`（从初始 system 提取且不重复），Chat 配 `supportsDeveloperRole:false` 以满足 system fixture；未选 effort 时禁止 SDK 默认注入 none（例如配置 off:null 或 onPayload 删除自动 reasoning），显式选 none 时仍原样发送。新增双协议“未选 effort”wire fixture，断言不存在 `reasoning.effort`/`reasoning_effort`，并保留显式 none fixture。也可以采用合法且语义等价的 system 编码，但必须同时修改 design/spec 的精确契约，不能声称默认已满足。无需放弃 pi-ai 或手写协议。
 
 ### Re-check conclusion
@@ -206,22 +206,22 @@ CHANGES_APPLIED: yes
 ```text
 97baafe417cfbd8072a919de9a37a35b1a413524eb33422c0704377652af65cc  openspec/changes/add-dsh-magpie-plugin/proposal.md
 a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/changes/add-dsh-magpie-plugin/design.md
-7fc0581d561b60e2174c6f768d261574286894df3e9784053f90015aa7232f4d  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+7fc0581d561b60e2174c6f768d261574286894df3e9784053f90015aa7232f4d  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 ```
 
 ### R3-M1 — applied
 
-- **修订与机械断言**：[design:77](</openspec/changes/add-dsh-magpie-plugin/design.md#L77>) 与 [spec:162](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L162>) 已同步要求由权威总输入和输出推导 total，不直接透传网关 `total_tokens`；总输入小于缓存读写之和、或缺少总输入时省略。正常 1000/600/50/20 的精确 usage 为 `{inputTokens:350, cacheReadTokens:600, cacheWriteTokens:50, outputTokens:20, totalTokens:1020}`，两协议均有断言；无缓存详情为 `{inputTokens:1000, outputTokens:20, totalTokens:1020}`，100 输入/600 缓存读/20 输出且网关 total=120 的异常明确钳 input 为0并断言 total 键不存在（[spec:193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L193-L204>)）。缺总输入的省略规则本身也可直接作为键缺失断言，不再有「一律禁止 total」的冲突。
+- **修订与机械断言**：[design:77](</openspec/changes/add-dsh-magpie-plugin/design.md#L77>) 与 [spec:162](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L162>) 已同步要求由权威总输入和输出推导 total，不直接透传网关 `total_tokens`；总输入小于缓存读写之和、或缺少总输入时省略。正常 1000/600/50/20 的精确 usage 为 `{inputTokens:350, cacheReadTokens:600, cacheWriteTokens:50, outputTokens:20, totalTokens:1020}`，两协议均有断言；无缓存详情为 `{inputTokens:1000, outputTokens:20, totalTokens:1020}`，100 输入/600 缓存读/20 输出且网关 total=120 的异常明确钳 input 为0并断言 total 键不存在（[spec:193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L193-L204>)）。缺总输入的省略规则本身也可直接作为键缺失断言，不再有「一律禁止 total」的冲突。
 - **契约证据**：DSH TokenUsage:153–173 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L153-L173`)要求 input/cacheRead/cacheWrite 不重叠；total 为全调用的精确 aggregate prompt+output，可保留 provider total 或从权威计数导出，不可得/不一致时省略。当前正常分项之和为350+600+50+20=1020，异常不虚构精确总量，符合该契约。
 - **桥接实现边界（非新增阻断项）**：不能只对 pi-ai 已归一化的分项求和。pi-ai Responses usage:439–450 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L439-L450`)会钳负 input、将缺失计数置0并保留网关 total；Chat usage:1160–1184 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L1160-L1184`)会钳 input 后重算 total，因此会丢失部分原始可得性/一致性信息。设计已明确插件自己的 `mapUsage` 负责权威计数规则，后续实现须保留这些原始事实以满足上述 fixture；本轮不把该尚待实现的职责误认成 pi-ai 已自动完成。
 
 ### R3-RC-M1 — applied
 
-- **未选 effort / 显式 none**：[design:69–75](</openspec/changes/add-dsh-magpie-plugin/design.md#L69-L75>)明确每个 reasoning 模型配置 `thinkingLevelMap.off:null`，各网关档位同名映射；未选时不传 `reasoningEffort`，显式 `none` 则传字符串 `"none"`。[spec:157、193–209](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L157-L209>)同时保留两协议显式 none 的 wire 断言，并新增未选时 Responses 整个 `reasoning` 键和 Chat `reasoning_effort` 键均不存在的断言，足以区分「未选」与「关闭推理」。
+- **未选 effort / 显式 none**：[design:69–75](</openspec/changes/add-dsh-magpie-plugin/design.md#L69-L75>)明确每个 reasoning 模型配置 `thinkingLevelMap.off:null`，各网关档位同名映射；未选时不传 `reasoningEffort`，显式 `none` 则传字符串 `"none"`。[spec:157、193–209](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L157-L209>)同时保留两协议显式 none 的 wire 断言，并新增未选时 Responses 整个 `reasoning` 键和 Chat `reasoning_effort` 键均不存在的断言，足以区分「未选」与「关闭推理」。
 - **源码核实**：Responses 248–263 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L248-L263`)在未传 effort/summary 时只在 `off !== null` 才注入默认 reasoning，所以 `off:null` 会跳过；显式 `"none"` 是 truthy，进入249–257分支并经同名映射写出 `reasoning.effort:"none"`，不受 off 抑制。Chat 的普通 OpenAI 兼容分支 712–720 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L712-L720`)在未选时仅向 wire 写字符串 off 值，null 不写；显式 none 进入712–714分支并原样写出。这一结论适用于本设计选用的普通 OpenAI 网关模块/compat，不是对任意厂商 thinkingFormat 的泛化；也不得额外设置 `reasoningSummary` 或采样覆盖而破坏未选场景。参考 connect 的 thinkingLevelMapFor:42–47 (`/home/prgrmr/.dsh/profiles/web/node_modules/dsh-magpie-connect/lib/index.js#L42-L47`)确实以 `{off:null}` 起始，并在 toPiModel:1021–1057 (`/home/prgrmr/.dsh/profiles/web/node_modules/dsh-magpie-connect/lib/index.js#L1021-L1057`)挂到 Responses 及 reasoning Chat 模型；它佐证 off 的做法，不替代本设计的逐档同名映射或 system 归一化。
-- **Responses system / onPayload**：shared:123–137 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L123-L137`)确实把初始 system 文本编码为 input 中的 developer/system 消息，而非 instructions；修订没有再声称默认满足。Responses:111–122 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L111-L122`)确实存在并 await 调用 `options.onPayload(params, model)`，时机为 buildParams 之后、`client.responses.create` 之前，且支持原地改写或返回替换 body。因此把初始消息文本移到 `instructions` 并从 input 删除可行；只移动开头一条，不删除后续 system 更新。[design:71、74](</openspec/changes/add-dsh-magpie-plugin/design.md#L71-L74>)与 [spec:156、197](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L156-L197>)已要求精确位置且不得重复。
-- **Chat system**：`supportsDeveloperRole:false` 经 getCompat:1307–1314 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L1307-L1314`)的 nullish 合并保留 false，再由 896、917–919 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L896-L919`)选择并写出 `role:"system"`，不会被 reasoning 模型的 developer 默认覆盖。[design:72](</openspec/changes/add-dsh-magpie-plugin/design.md#L72>)与 [spec:156、198](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L156-L198>)已写明该配置和精确首消息断言。
+- **Responses system / onPayload**：shared:123–137 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L123-L137`)确实把初始 system 文本编码为 input 中的 developer/system 消息，而非 instructions；修订没有再声称默认满足。Responses:111–122 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L111-L122`)确实存在并 await 调用 `options.onPayload(params, model)`，时机为 buildParams 之后、`client.responses.create` 之前，且支持原地改写或返回替换 body。因此把初始消息文本移到 `instructions` 并从 input 删除可行；只移动开头一条，不删除后续 system 更新。[design:71、74](</openspec/changes/add-dsh-magpie-plugin/design.md#L71-L74>)与 [spec:156、197](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L156-L197>)已要求精确位置且不得重复。
+- **Chat system**：`supportsDeveloperRole:false` 经 getCompat:1307–1314 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L1307-L1314`)的 nullish 合并保留 false，再由 896、917–919 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L896-L919`)选择并写出 `role:"system"`，不会被 reasoning 模型的 developer 默认覆盖。[design:72](</openspec/changes/add-dsh-magpie-plugin/design.md#L72>)与 [spec:156、198](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L156-L198>)已写明该配置和精确首消息断言。
 
 ### Re-check 2 conclusion
 
@@ -250,7 +250,7 @@ a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/chang
 ```text
 97baafe417cfbd8072a919de9a37a35b1a413524eb33422c0704377652af65cc  openspec/changes/add-dsh-magpie-plugin/proposal.md
 53f747548c7e11020b00b396d586fce18af9dba38653e60c8546be0a440ceac2  openspec/changes/add-dsh-magpie-plugin/design.md
-8947ec7b36b6cf82850a808367d73b13069784182df5b751e4b42d05ee319173  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+8947ec7b36b6cf82850a808367d73b13069784182df5b751e4b42d05ee319173  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 ```
 
@@ -258,18 +258,18 @@ a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/chang
 
 - **解析证据**：Chat parseChat:99–129 (`/tmp/magpie-src/internal/gateway/chat.go#L99-L129`) 对 `system`/`developer` 使用同一个分支，提取相同文本后写入 `Request.System`。Responses parseResponses:317、341–368 (`/tmp/magpie-src/internal/gateway/responses.go#L317-L368`) 先把 `instructions` 作为 System，开头的 `system`/`developer` 又进入同一个追加分支。因此对于本次约束的**开头一条 system 文本**，三种 Responses 编码与两种 Chat 角色均能保留同样的系统内容。Responses 已有回复之后的 system/developer 会原位包装为 system-reminder，但两角色仍同分支；本结论不把开头约束扩大为任意位置均提升到顶层 System。
 - **下游核对**：翻译路径的 buildChat:268–272 (`/tmp/magpie-src/internal/gateway/chat.go#L268-L272`) 与 buildResponses:1241–1242 (`/tmp/magpie-src/internal/gateway/responses.go#L1241-L1242`) 只读取 System，已没有原始角色可区分。同协议透传不一定经过上述 IR，但 Chat 会在 gateway:4371–4372、6573–6602 (`/tmp/magpie-src/internal/gateway/gateway.go#L6573-L6602`) 将 developer 转 system，已有 回归测试:574–582 (`/tmp/magpie-src/internal/gateway/gateway_test.go#L574-L582`)。检索 `developer` 后追踪的 Responses provider 分支也属兼容归一化，而非降低权限：Codex 444–445 (`/tmp/magpie-src/internal/provider/codex_request.go#L444-L445`) 与 ChatGPT sign-in 612–613 (`/tmp/magpie-src/internal/provider/chatgpt_api.go#L612-L613`) 把 system 转 developer；Zed 73–78 (`/tmp/magpie-src/internal/provider/zed_body.go#L73-L78`) 反向转换。Codex 还会把客户 `instructions` 放成开头 developer（286–303 (`/tmp/magpie-src/internal/provider/codex_request.go#L286-L303`)）。没有发现这些路径因开头角色为 developer 而丢弃文本或当作 user 的分支。故“都并入 System”严格说适用于翻译解析，不是所有请求的执行路径，但不影响本次角色放宽的可接受性。
-- **fixture 仍可机械断言**：[spec:156、193–199](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L193-L199>) 给出了有限合法位置、角色集合和精确文本 S，可以逐项检查；Chat 明确没有 user 携带 S，Responses 也受 requirement 的禁止改写成 user 约束。pi-ai Responses:123–137 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L123-L137`)、Chat:896–919 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L896-L919`) 的默认编码落在此集合内，不需要额外的 system 迁移钩子或 supportsDeveloperRole 覆盖。
+- **fixture 仍可机械断言**：[spec:156、193–199](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L193-L199>) 给出了有限合法位置、角色集合和精确文本 S，可以逐项检查；Chat 明确没有 user 携带 S，Responses 也受 requirement 的禁止改写成 user 约束。pi-ai Responses:123–137 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L123-L137`)、Chat:896–919 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L896-L919`) 的默认编码落在此集合内，不需要额外的 system 迁移钩子或 supportsDeveloperRole 覆盖。
 
 ### 2. totalTokens 透传 — not acceptable（新增 Moderate：R3-RC3-M1）
 
 - **正常 fixture 与官方做法核实**：官方 mapUsage:1371–1377 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js#L1371-L1377`) 确实原样传 pi-ai total。Magpie 自己构造响应时，Usage.prompt:426–430 (`/tmp/magpie-src/internal/gateway/ir.go#L426-L430`) 等于未缓存输入+缓存读+缓存写，responses:1368–1372 (`/tmp/magpie-src/internal/gateway/responses.go#L1368-L1372`) 与 chat:978–982 (`/tmp/magpie-src/internal/gateway/chat.go#L978-L982`) 都据此生成完整输入与 total。对 1000/600/50/20/1020 fixture，pi-ai Chat:1160–1184 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L1160-L1184`) 得 input=350、total=350+20+600+50=1020；Responses:439–450 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L439-L450`) 得 input=350、total=1020。该正常 fixture 满足 DSH TokenUsage:153–173 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L153-L173`) 的非重叠输入和精确 aggregate total 契约。
 - **恒一致的前提不成立，有可触发的 Magpie 输出反例**：同协议上游可走 relay 判定:3795–3797、执行:3863–3865 (`/tmp/magpie-src/internal/gateway/gateway.go#L3795-L3797`) 的 `passthrough`，不会调用 `Usage.responses()`/`chat()` 重建对外 usage。4831–4832 (`/tmp/magpie-src/internal/gateway/gateway.go#L4831-L4832`) 的 sniffer 只为内部 Usage 计数；4911–4944 (`/tmp/magpie-src/internal/gateway/gateway.go#L4911-L4944`) 将上游 SSE 经有限过滤后写给客户端，并不统一生成 total。最小的现成反例就是 Magpie piReply:32–35、TestPiResponsesRelayed:67–75 (`/tmp/magpie-src/internal/gateway/pi_responses_test.go#L32-L75`)：Responses-native provider 返回 `response.completed`，其 usage 为 `{input_tokens:9, output_tokens:2}`，**没有 total_tokens**；该请求从 `/v1/responses` 进入并原协议返回。对此事件，idTidy:85–95 (`/tmp/magpie-src/internal/gateway/itemids.go#L85-L95`) 和 phaseTidy:258–260 (`/tmp/magpie-src/internal/gateway/phase.go#L258-L260`) 在没有待修 output 时直接返回原事件，不会补总量。这是已有源码 fixture 的可达路径，不依赖另换“非 Magpie 网关”、恶意输入或生产猜测。
 - **错误结果**：pi-ai Responses 对缺失 total 执行 `response.usage.total_tokens || 0`，官方式 mapUsage 随即输出 `{inputTokens:9, outputTokens:2, totalTokens:0}`。精确总量明明应为11，却声明为0；即使选择不推导，也必须省略 total，不能伪造精确零。相同透传路径也不能保证上游给出的 total 与缓存分项一致，故只把原一致性要求移入“Magpie 恒一致”的风险说明不能覆盖它。官方 adapter 的既有写法不是该不变量的证明。
-- **最小修法**：不撤销 pi-ai 复用或 system 简化，只恢复 Re-check 2 的 total 规则与其双协议验收：保留原始总输入/输出及缓存计数的可得性，完整输入不小于缓存读写且计数一致时，从权威完整输入+输出得 total；缺失或不一致时省略，不把 pi-ai 的默认0或钳零后的分项之和当作权威总量。新增上述 Responses `{input_tokens:9,output_tokens:2}` 无 total fixture，断言 `totalTokens:11`（依据已给出的权威 aggregate 计数）；恢复缓存超过总输入时 total 键不存在的断言；修正 [design D2:76、Risks:176](</openspec/changes/add-dsh-magpie-plugin/design.md#L174-L178>) 与 [spec:162、201–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L201-L204>) 的“Magpie 恒一致”前提。无需改上游网关或新增通用计费层。
+- **最小修法**：不撤销 pi-ai 复用或 system 简化，只恢复 Re-check 2 的 total 规则与其双协议验收：保留原始总输入/输出及缓存计数的可得性，完整输入不小于缓存读写且计数一致时，从权威完整输入+输出得 total；缺失或不一致时省略，不把 pi-ai 的默认0或钳零后的分项之和当作权威总量。新增上述 Responses `{input_tokens:9,output_tokens:2}` 无 total fixture，断言 `totalTokens:11`（依据已给出的权威 aggregate 计数）；恢复缓存超过总输入时 total 键不存在的断言；修正 [design D2:76、Risks:176](</openspec/changes/add-dsh-magpie-plugin/design.md#L174-L178>) 与 [spec:162、201–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L201-L204>) 的“Magpie 恒一致”前提。无需改上游网关或新增通用计费层。
 
 ### 3. thinkingLevelMap.off:null 与未选 effort 场景 — acceptable
 
-[design:69–70](</openspec/changes/add-dsh-magpie-plugin/design.md#L69-L70>) 保留每个 reasoning 模型 `off:null`、逐档同名映射与显式 none 原样发送；[spec:157、206–209](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L206-L209>) 仍要求未选时整个 Responses `reasoning` 键及 Chat `reasoning_effort` 键不存在。pi-ai Responses:248–263 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L248-L263`) 的默认注入被 `off !== null` 阻止，显式 none 则走独立的 truthy effort 分支；Chat:712–720 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L712-L720`) 只有字符串 off 才在未选时写字段，null 不写。此次简化没有改变该契约或这两条源码路径；本结论限定于所选普通 OpenAI 网关模块，不假设额外 reasoningSummary/sampling 覆盖。
+[design:69–70](</openspec/changes/add-dsh-magpie-plugin/design.md#L69-L70>) 保留每个 reasoning 模型 `off:null`、逐档同名映射与显式 none 原样发送；[spec:157、206–209](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L206-L209>) 仍要求未选时整个 Responses `reasoning` 键及 Chat `reasoning_effort` 键不存在。pi-ai Responses:248–263 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js#L248-L263`) 的默认注入被 `off !== null` 阻止，显式 none 则走独立的 truthy effort 分支；Chat:712–720 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L712-L720`) 只有字符串 off 才在未选时写字段，null 不写。此次简化没有改变该契约或这两条源码路径；本结论限定于所选普通 OpenAI 网关模块，不假设额外 reasoningSummary/sampling 覆盖。
 
 ### Re-check 3 conclusion
 
@@ -301,7 +301,7 @@ a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/chang
 ```text
 97baafe417cfbd8072a919de9a37a35b1a413524eb33422c0704377652af65cc  openspec/changes/add-dsh-magpie-plugin/proposal.md
 0fc3f2463f8fd44f20d48cdc0db29e5006c12db41d44e45b5fc7b2edfe0a92a9  openspec/changes/add-dsh-magpie-plugin/design.md
-3f7f2b03a73c5db441043ace398a0798f298770f6c51c98190c54e10164d1278  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+3f7f2b03a73c5db441043ace398a0798f298770f6c51c98190c54e10164d1278  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 ```
 
@@ -316,11 +316,11 @@ a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/chang
 | (b) 9/2，无 total | `(9,0,0,2)` | `totalTokens:11` | 是 |
 | (c) 100、读600、输出20，wire total=120 | `(0,600,0,20)` | 省略 total | 是 |
 
-(b) 原场景指定 Responses；若把等价计数放进 Chat 的 `prompt_tokens`/`completion_tokens`，也得到11。Chat 自己在(c)会算出620，Responses 会保留120；插件两者都不采用，故不会泄漏这些不一致 total。缓存为零时不输出 cache 字段，满足 [spec:193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L193-L204>) 的精确对象与键缺失断言。上述判断来自源码逐项代数核算，未运行 SDK 流测试。
+(b) 原场景指定 Responses；若把等价计数放进 Chat 的 `prompt_tokens`/`completion_tokens`，也得到11。Chat 自己在(c)会算出620，Responses 会保留120；插件两者都不采用，故不会泄漏这些不一致 total。缓存为零时不输出 cache 字段，满足 [spec:193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L193-L204>) 的精确对象与键缺失断言。上述判断来自源码逐项代数核算，未运行 SDK 流测试。
 
 #### R3-RC4-M1 — 缺原始完整输入的可得性仍被丢失（Moderate）
 
-- **证据/具体反例**：[spec:162](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L162>) 明确要求完整输入缺失时省略 total，但 D2 声称无需额外钩子、仅凭归一化分项即可实现。对 Responses `{output_tokens:20}`、或 Chat `{completion_tokens:20}`（均无完整输入和缓存详情），上述源码会把缺输入变成0，产生 `(0,0,0,20)`。D2 的例外仅覆盖“input=0且缓存>0”，因此仍输出 `totalTokens:20`。原始输入不可得却声明精确 total，违反 spec 以及 DSH TokenUsage:164–168 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L164-L168`) 的 unavailable 必须省略要求。这属于正在复核的 total 缺失分支，不是重开其它 usage 议题。
+- **证据/具体反例**：[spec:162](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L162>) 明确要求完整输入缺失时省略 total，但 D2 声称无需额外钩子、仅凭归一化分项即可实现。对 Responses `{output_tokens:20}`、或 Chat `{completion_tokens:20}`（均无完整输入和缓存详情），上述源码会把缺输入变成0，产生 `(0,0,0,20)`。D2 的例外仅覆盖“input=0且缓存>0”，因此仍输出 `totalTokens:20`。原始输入不可得却声明精确 total，违反 spec 以及 DSH TokenUsage:164–168 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts#L164-L168`) 的 unavailable 必须省略要求。这属于正在复核的 total 缺失分支，不是重开其它 usage 议题。
 - **最小修法**：保留 pi-ai；仅补充取得原始完整输入是否存在的事实，无法证明存在时不输出 total。不能从归一化0猜测原始字段存在。design 删除“无需额外钩子即可满足全部原始计数规则”的承诺，明确由桥接保留该可得性；补双协议缺完整输入、只有输出20时 total 键不存在的 fixture。若进一步要区分下面的合法全缓存与异常计数，再一并保留原始完整输入数值即可，不需要通用计费层或修改网关。
 
 **全缓存误省略 — Suggestion，不另列 Moderate**：完整输入650、读600、写50、输出20，和异常完整输入100、读600、写50、输出20，在 pi-ai 归一化后都会是 `(0,600,50,20)`。D2 的保守规则会把合法前者的 `totalTokens:670` 一并省略；“被钳到0”不能仅凭结果为0判断，因为减法恰好为0也会进入相同结果。它与 spec“完整输入不小于缓存读写之和时应给 total”的等号分支不完全一致，但没有伪造总数，非重叠分项仍然正确，total 又是可选字段，故仅为 Suggestion。最低成本是明确 spec 的保守省略边界；若按上项保存原始完整输入，直接区分等于与小于并补650/600/50/20→670场景，则同时消除此保守信息损失。
@@ -331,13 +331,13 @@ a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/chang
 
 ### 3. ponytail 刷新闸门 — 不变量局部 acceptable；任意目标复用 not acceptable
 
-**仍成立的约束**：[spec:385–391](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L385-L391>) 保留单卡完整 `(provider,user)` 匹配、互斥 union 与非法输入400；“占用时等同一个 Promise、不另请求”保持同代最多一个网关刷新，也不会为同一个并发请求重复访问厂商。校验仍须在复用前做，闸门不是跳过校验的捷径。GET 跟随刷新、当前代与提交序号同时检查、400/失败不提交且不释放他人 gate 的文字都仍在。拥有该次刷新的操作在结算后释放自己的 gate，与失败不得释放别人的 gate 不矛盾。没有要求加回409或增加跨页推送。
+**仍成立的约束**：[spec:385–391](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L385-L391>) 保留单卡完整 `(provider,user)` 匹配、互斥 union 与非法输入400；“占用时等同一个 Promise、不另请求”保持同代最多一个网关刷新，也不会为同一个并发请求重复访问厂商。校验仍须在复用前做，闸门不是跳过校验的捷径。GET 跟随刷新、当前代与提交序号同时检查、400/失败不提交且不释放他人 gate 的文字都仍在。拥有该次刷新的操作在结算后释放自己的 gate，与失败不得释放别人的 gate 不矛盾。没有要求加回409或增加跨页推送。
 
-**场景可机械断言且达到最低门槛**：现有 [并发复用:413–416](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L413-L416>) 用延迟全量刷新、请求数恰为1、两调用方状态200和T2即可断言；全量包含所请求单卡，因此这个方向语义 acceptable。实施 fixture 应先放入一张完整匹配的codex卡片，避免单卡本身校验失败。[失败后释放:428–431](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L428-L431>) 可先断言502后仍T0，再在完成之后触发新请求并断言新网关调用和T2；结合 [失败保留与502原因:438–441](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L438-L441>)，本 requirement 仍有至少1 happy及1 failure/edge。GET先发/刷新后发和刷新先发/GET后发两个场景也仍在（[spec:418–426](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L418-L426>)）。
+**场景可机械断言且达到最低门槛**：现有 [并发复用:413–416](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L413-L416>) 用延迟全量刷新、请求数恰为1、两调用方状态200和T2即可断言；全量包含所请求单卡，因此这个方向语义 acceptable。实施 fixture 应先放入一张完整匹配的codex卡片，避免单卡本身校验失败。[失败后释放:428–431](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L428-L431>) 可先断言502后仍T0，再在完成之后触发新请求并断言新网关调用和T2；结合 [失败保留与502原因:438–441](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L438-L441>)，本 requirement 仍有至少1 happy及1 failure/edge。GET先发/刷新后发和刷新先发/GET后发两个场景也仍在（[spec:418–426](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L418-L426>)）。
 
 #### R3-RC4-M2 — 单卡刷新吞掉范围更大的或不同目标的刷新（Moderate）
 
-- **证据/具体反例**：[design D8:134](</openspec/changes/add-dsh-magpie-plugin/design.md#L134>) 明确“不论目标是哪张卡片”复用，D10 cards 行也概括为复用进行中结果；[spec:387](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L387>) 没有范围限制。先让codex单卡A的刷新进行中，再从另一页面点击“刷新全部”：只会发A的有参数请求，第二页却按一次成功全量刷新结束，其余卡片从未被请求刷新。即使网关返回整个缓存集合，也不等于其它卡片已重新读取。A进行中时刷新另一张B同样会吞掉B的用户意图。这违反 [spec:381–383](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L381-L383>) 对两种刷新目标的定义，不能用节流提示替代正确目标的网关调用。当前全量→单卡场景只覆盖安全方向，没有覆盖逆向或不同卡。
+- **证据/具体反例**：[design D8:134](</openspec/changes/add-dsh-magpie-plugin/design.md#L134>) 明确“不论目标是哪张卡片”复用，D10 cards 行也概括为复用进行中结果；[spec:387](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L387>) 没有范围限制。先让codex单卡A的刷新进行中，再从另一页面点击“刷新全部”：只会发A的有参数请求，第二页却按一次成功全量刷新结束，其余卡片从未被请求刷新。即使网关返回整个缓存集合，也不等于其它卡片已重新读取。A进行中时刷新另一张B同样会吞掉B的用户意图。这违反 [spec:381–383](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L381-L383>) 对两种刷新目标的定义，不能用节流提示替代正确目标的网关调用。当前全量→单卡场景只覆盖安全方向，没有覆盖逆向或不同卡。
 - **最小修法**：只在进行中请求覆盖新请求目标时复用（全量→全量/单卡，同一完整身份的单卡→该单卡）。其它情况等待当前 gate 结算，再重新检查当前代、目标合法性和 gate，按新目标串行发一次刷新；不要刚等待结束就无条件并发发请求。同步 D8、D10 与 spec 的规则，并新增“单卡→全部”最终发1次无参数全量请求、“单卡A→单卡B”最终发B请求的场景，断言最大并发始终为1。无需恢复409或建设持久队列。
 - **随修法补的最小 failure/edge**：当前502后重试已满足最低数量门槛，不单列测试缺口为第三个Moderate；但目标等待分支需要明确前一次失败也会结算并释放自身gate、等待者收到失败或继续按目标请求的既定政策，并补“gate占用时非法union/目标仍返回400且不释放原gate”的机械断言。换代发生在等待期间则仍按已有代际规则丢弃旧结果，新请求不得沿用旧代gate或目标。保留 GET跟随、400/失败不推进提交水位规则。
 
@@ -363,13 +363,13 @@ a1517bae85471ecb54043d6958a3dd4b8d397fa5049413ea115f70ed1a9bb73e  openspec/chang
 ```text
 97baafe417cfbd8072a919de9a37a35b1a413524eb33422c0704377652af65cc  openspec/changes/add-dsh-magpie-plugin/proposal.md
 cc237b093ce7cadf7b57a27a1b2cef2799c1374eb9942ecf4c7a6c6396ca3998  openspec/changes/add-dsh-magpie-plugin/design.md
-9a72b198fd420869107978b9eb7e128b4d8a8ed437a9c20333d00a3840f02651  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+9a72b198fd420869107978b9eb7e128b4d8a8ed437a9c20333d00a3840f02651  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 ```
 
 ### 1. R3-RC4-M1 — applied
 
-[spec:162、193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L162-L204>) 与 [design D2:76](</openspec/changes/add-dsh-magpie-plugin/design.md#L76>) 已把 total 的输出条件收紧为归一化未缓存输入严格大于 0；为 0 时一律省略。这里不能把 `input=0` 理解为必然发生过钳零，但修订已明确接受合法全缓存也省略的代价。
+[spec:162、193–204](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L162-L204>) 与 [design D2:76](</openspec/changes/add-dsh-magpie-plugin/design.md#L76>) 已把 total 的输出条件收紧为归一化未缓存输入严格大于 0；为 0 时一律省略。这里不能把 `input=0` 理解为必然发生过钳零，但修订已明确接受合法全缓存也省略的代价。
 
 源码核算：令完整输入为 P、缓存读写为 R/W、输出为 O。在本次 token 计数的非负有效数值域内，pi-ai Chat:1160–1185 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js#L1160-L1185`) 与 Responses:439–452 (`packages/dsh-pet/compat/subagent/.launcher/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js#L439-L452`) 均令缺失 P 为 0，再计算 `input=max(0,P-R-W)`。因此缺失 P 必有 `input=0`；P 小于或等于 R+W 也必有 `input=0`。反之 `input>0` 推出 P 存在且 P>R+W，此时四项之和严格等于 P+O，不依赖网关或 pi-ai 的 total。**不存在“完整输入缺失或小于缓存和，却仍有正 input 并据此生成错误 total”的反例。** Chat 还支持其它位置的缓存读取计数，但只要计数非负，上述蕴含同样成立。
 
@@ -387,7 +387,7 @@ cc237b093ce7cadf7b57a27a1b2cef2799c1374eb9942ecf4c7a6c6396ca3998  openspec/chang
 
 ### 2. R3-RC4-M2 — not applied（目标覆盖修复已落实；等待分支与序号仍冲突）
 
-**已落实部分**：[spec:385–393](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L385-L393>)、[design D8:132–136](</openspec/changes/add-dsh-magpie-plugin/design.md#L132-L136>) 与 [D10:152](</openspec/changes/add-dsh-magpie-plugin/design.md#L152>) 不再无条件复用：全部覆盖全部/单卡；同一完整身份的单卡覆盖自己；单卡 A 不覆盖全部或单卡 B。目标先校验、非法400不影响 gate；非覆盖等待前次成功或失败后重查当前代和闸门，换代丢弃、不沿用旧代发请求，均已写明。[新增场景:432–435](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L432-L435>) 可断言 A 结束后才发无参数全量请求、全量调用方得到该次结果、最大并发为1。
+**已落实部分**：[spec:385–393](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L385-L393>)、[design D8:132–136](</openspec/changes/add-dsh-magpie-plugin/design.md#L132-L136>) 与 [D10:152](</openspec/changes/add-dsh-magpie-plugin/design.md#L152>) 不再无条件复用：全部覆盖全部/单卡；同一完整身份的单卡覆盖自己；单卡 A 不覆盖全部或单卡 B。目标先校验、非法400不影响 gate；非覆盖等待前次成功或失败后重查当前代和闸门，换代丢弃、不沿用旧代发请求，均已写明。[新增场景:432–435](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L432-L435>) 可断言 A 结束后才发无参数全量请求、全量调用方得到该次结果、最大并发为1。
 
 - **A→B 路径已有规则覆盖**：spec:389 显式包含“另一张卡片”，D8 也明列该分支。规则可直接导出“只等待A，不复用A，之后发送B的完整provider/user目标”的断言；不因缺少一条同构具名场景另列 finding。
 - **多个等待者同时释放不允许各自直接发请求**：spec:387 的每代最大并发1，与 spec:389/D8 的“重新检查闸门”共同约束重新进入同一个闸门处理规则。首个等待者取得 gate 后，其余必须对新的 gate 再判断覆盖/继续等待，而非只检查一次就全部放行。“串行发出”的要求已经明确，不需要持久队列，也不再以缺少“排队”一词列遗漏。实现验收可用多个等待者证实这一不变量。
@@ -395,7 +395,7 @@ cc237b093ce7cadf7b57a27a1b2cef2799c1374eb9942ecf4c7a6c6396ca3998  openspec/chang
 
 #### R3-RC5-M1 — 排队刷新沿用较小序号，会被后到、但跟随前次刷新的 GET 压过（Moderate）
 
-**依据**：[design D4:93](</openspec/changes/add-dsh-magpie-plugin/design.md#L93>) 明确每次卡片读取/刷新各是一个操作；[D8:136](</openspec/changes/add-dsh-magpie-plugin/design.md#L136>) 和 [spec:393](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L393>) 仍要求在该操作开始时分配单调序号、只有更大序号才能提交。spec:389 现在允许操作先开始，却等待别的刷新结束后才实际发送。没有规定等待后重分配序号，也没有规定跟随者沿用被跟随请求的提交身份。
+**依据**：[design D4:93](</openspec/changes/add-dsh-magpie-plugin/design.md#L93>) 明确每次卡片读取/刷新各是一个操作；[D8:136](</openspec/changes/add-dsh-magpie-plugin/design.md#L136>) 和 [spec:393](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L393>) 仍要求在该操作开始时分配单调序号、只有更大序号才能提交。spec:389 现在允许操作先开始，却等待别的刷新结束后才实际发送。没有规定等待后重分配序号，也没有规定跟随者沿用被跟随请求的提交身份。
 
 **同代、全部成功且最大并发始终为1的具体反例**：
 
@@ -432,13 +432,13 @@ cc237b093ce7cadf7b57a27a1b2cef2799c1374eb9942ecf4c7a6c6396ca3998  openspec/chang
 ```text
 97baafe417cfbd8072a919de9a37a35b1a413524eb33422c0704377652af65cc  openspec/changes/add-dsh-magpie-plugin/proposal.md
 84629b8a3ab17441d47fc3b11040e0c44831d9ccfdd89f71c56f9af234f13ae8  openspec/changes/add-dsh-magpie-plugin/design.md
-5017f2f12651123cceae74a00197819dc03be10ecf1abd513a8e8f5861b362db  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+5017f2f12651123cceae74a00197819dc03be10ecf1abd513a8e8f5861b362db  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 0379775028c50c306a52130dde1e1fb6eaf1ee8995d7f1abcdfb6a88ca9f99f7  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 ```
 
 ### R3-RC5-M1 — applied
 
-**规则证据**：[spec:387–395](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L387-L395>) 与 [design D8:134–136](</openspec/changes/add-dsh-magpie-plugin/design.md#L134-L136>) 已把序号从客户端操作入口移到实际网关请求发送点：刷新取得闸门并确认当前代后才分配；复用刷新和跟随刷新的 GET 沿用拥有者序号，不另分配、不独立抬高提交水位。提交仍须同时通过当前代与严格大于已提交水位两道检查。
+**规则证据**：[spec:387–395](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L387-L395>) 与 [design D8:134–136](</openspec/changes/add-dsh-magpie-plugin/design.md#L134-L136>) 已把序号从客户端操作入口移到实际网关请求发送点：刷新取得闸门并确认当前代后才分配；复用刷新和跟随刷新的 GET 沿用拥有者序号，不另分配、不独立抬高提交水位。提交仍须同时通过当前代与严格大于已提交水位两道检查。
 
 **原反例逐步重放**（同代、两次刷新均成功，设开始时已提交水位为0）：
 
@@ -451,16 +451,16 @@ cc237b093ce7cadf7b57a27a1b2cef2799c1374eb9942ecf4c7a6c6396ca3998  openspec/chang
 | B 重查当前代和闸门后发出 | B 此刻才获序号2；A 已结算，在途刷新仍最多1 |
 | B 返回 T_B | 2大于1，提交 T_B；即使 G 的响应处理更晚，序号1也不能覆盖 T_B |
 
-因此不再存在“B入口序号小于后到G，B实际刷新成功却被G压过”的执行顺序。[新增场景:437–440](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L437-L440>) 固定了 A在途→B等待→G跟随A→A返回→B发送并返回，明确断言 G得到T_A、额外网关GET为0、最终卡片为T_B、网关刷新请求恰为A/B两次以及最大刷新并发1。B的精确请求目标可由[单卡完整身份规则:382–385](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L382-L385>)和[非覆盖分支:389](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L389>)直接导出，不需要新增产品规则。
+因此不再存在“B入口序号小于后到G，B实际刷新成功却被G压过”的执行顺序。[新增场景:437–440](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L437-L440>) 固定了 A在途→B等待→G跟随A→A返回→B发送并返回，明确断言 G得到T_A、额外网关GET为0、最终卡片为T_B、网关刷新请求恰为A/B两次以及最大刷新并发1。B的精确请求目标可由[单卡完整身份规则:382–385](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L382-L385>)和[非覆盖分支:389](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L389>)直接导出，不需要新增产品规则。
 
 ### 与已接受规则的交互
 
-- **GET先发、刷新后发**：[原场景:422–425](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L422-L425>) 仍成立。实际GET获序号1，后发刷新获序号2；刷新先提交T2后，晚到GET的序号1被丢弃。把分配点移到实际发送没有颠倒这两次真正出站请求的次序。
-- **刷新先发、GET后发**：[原场景:427–430](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L427-L430>) 仍要求GET跟随刷新、零额外GET、得到T2；沿用刷新序号消除了由跟随者制造更大旧结果水位的可能。
-- **没有刷新时的同代GET共享**：[spec:393](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L393>) 的“序号属于真正发往网关的那次请求”是适用于所有卡片请求的总规则，并非仅限随后列举的刷新复用者。因此共享GET也只有owner的出站请求能分配序号，共享者沿用同一结果身份。具体地：GET owner R发出获1→刷新F发出获2→F提交→R及其共享者晚返回，均只能带1而不能覆盖F。若共享者在F进行中才到达，则又受GET跟随F规则约束。未发现规则未覆盖且能产生更大旧水位的反例，不另列finding。
-- **失败和非法请求**：[spec:385–395](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L385-L395>) 保留先校验再处理闸门、400不出站、不更新卡片/水位且不释放他人gate；只有2xx结果可提交。A失败时不提交，等待B仍可在A结算后按自己的目标发出并提交。实际发送时预留过请求号不等于推进已提交水位；无需失败回退序号。已有[失败后释放场景:442–445](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L442-L445>)未被改写。
-- **换代**：[spec:48–51](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L48-L51>) 与[等待规则:389](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L389>)共同保证旧代A/G结果不能提交、等待中的旧代B不出站；[design:105](</openspec/changes/add-dsh-magpie-plugin/design.md#L105>)的提交前代际检查未撤销。新代的序号不能代替旧代身份检查，当前修订没有作此替换。
-- **目标覆盖复用与多等待者**：[spec:387–389](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md#L387-L389>)、[design D8:134](</openspec/changes/add-dsh-magpie-plugin/design.md#L134>)和[D10:152](</openspec/changes/add-dsh-magpie-plugin/design.md#L152>)仍只允许全量覆盖任意目标或同一完整身份单卡复用；不覆盖则重查闸门后串行发送。多个等待者即使以不同于到达顺序的次序取得闸门，序号也按实际发送顺序递增；复用者不另领号，因此不会重现本轮反例，也不破坏最大刷新并发1。
+- **GET先发、刷新后发**：[原场景:422–425](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L422-L425>) 仍成立。实际GET获序号1，后发刷新获序号2；刷新先提交T2后，晚到GET的序号1被丢弃。把分配点移到实际发送没有颠倒这两次真正出站请求的次序。
+- **刷新先发、GET后发**：[原场景:427–430](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L427-L430>) 仍要求GET跟随刷新、零额外GET、得到T2；沿用刷新序号消除了由跟随者制造更大旧结果水位的可能。
+- **没有刷新时的同代GET共享**：[spec:393](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L393>) 的“序号属于真正发往网关的那次请求”是适用于所有卡片请求的总规则，并非仅限随后列举的刷新复用者。因此共享GET也只有owner的出站请求能分配序号，共享者沿用同一结果身份。具体地：GET owner R发出获1→刷新F发出获2→F提交→R及其共享者晚返回，均只能带1而不能覆盖F。若共享者在F进行中才到达，则又受GET跟随F规则约束。未发现规则未覆盖且能产生更大旧水位的反例，不另列finding。
+- **失败和非法请求**：[spec:385–395](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L385-L395>) 保留先校验再处理闸门、400不出站、不更新卡片/水位且不释放他人gate；只有2xx结果可提交。A失败时不提交，等待B仍可在A结算后按自己的目标发出并提交。实际发送时预留过请求号不等于推进已提交水位；无需失败回退序号。已有[失败后释放场景:442–445](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L442-L445>)未被改写。
+- **换代**：[spec:48–51](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L48-L51>) 与[等待规则:389](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L389>)共同保证旧代A/G结果不能提交、等待中的旧代B不出站；[design:105](</openspec/changes/add-dsh-magpie-plugin/design.md#L105>)的提交前代际检查未撤销。新代的序号不能代替旧代身份检查，当前修订没有作此替换。
+- **目标覆盖复用与多等待者**：[spec:387–389](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L387-L389>)、[design D8:134](</openspec/changes/add-dsh-magpie-plugin/design.md#L134>)和[D10:152](</openspec/changes/add-dsh-magpie-plugin/design.md#L152>)仍只允许全量覆盖任意目标或同一完整身份单卡复用；不覆盖则重查闸门后串行发送。多个等待者即使以不同于到达顺序的次序取得闸门，序号也按实际发送顺序递增；复用者不另领号，因此不会重现本轮反例，也不破坏最大刷新并发1。
 
 D2 total概括现已与后文一致采用“未缓存输入大于0时求和，否则省略”（[design:76](</openspec/changes/add-dsh-magpie-plugin/design.md#L76>)）；仅确认上轮文字Suggestion已统一，不重开已接受的usage政策。
 
@@ -473,7 +473,7 @@ D2 total概括现已与后文一致采用“未缓存输入大于0时求和，�
 
 ## AMD-1 — sidebar delta rebase onto current semantics (pending)
 
-实施时发现当前 sidebar 主规范与实现已采用模型厂商优先和独立中转品牌；旧 delta 整段复制会回滚这些行为。按 design D1 的“只补新 route 回归，不改源码”边界，将本 delta rebase 到当前主规范的完整 requirement，仅新增 dsh-magpie 别名及 dsh-magpie2 负例。原有场景保留，新近加入主规范的四个场景补入 test-plan，等待具名回归核验，不预判 green。暂停 sidebar 实施，CHANGES_APPLIED 改回 no；不改变 dsh-magpie host/UI 行为。
+实施时发现当前 sidebar 主规范与实现已采用模型厂商优先和独立中转品牌；旧 delta 整段复制会回滚这些行为。按 design D1 的“只补新 route 回归，不改源码”边界，将本 delta rebase 到当前主规范的完整 requirement，仅新增 dsh-magpie-connector 别名及 dsh-magpie2 负例。原有场景保留，新近加入主规范的四个场景补入 test-plan，等待具名回归核验，不预判 green。暂停 sidebar 实施，CHANGES_APPLIED 改回 no；不改变 dsh-magpie-connector host/UI 行为。
 
 ## AMD-1 targeted re-check
 
@@ -493,15 +493,15 @@ e92bac1ad11a3f5511adf83b3f42f37e166565c0d113c23e38ff4227129ea224  openspec/chang
 
 ### 规范与源码对照 — acceptable
 
-- delta:4 完整保留当前主规范:72 的模型厂商优先（先读斜杠后的模型名，未知才回退上游段）、独立中转平台识别、仅网关 route 启用该解析、未知中性 fallback 及本地资产约束；只增加 `dsh-magpie` 别名。当前该 requirement 的16个场景全部保留；网关场景增加新别名而没有删除旧 route；末尾只新增 `dsh-magpie2` 相似名负例，没有回滚当前语义。
-- design D1:56 与源码:50–63 一致：`dsh-magpie` 规范化为 `magpie`，`dsh-magpie2` 为 `magpie2`，后者不命中精确名/`magpie-` 前缀。源码:140–155 分别计算模型厂商与中转平台，:179–187 再按重复身份去重渲染，符合主规范；不需要改源码。
+- delta:4 完整保留当前主规范:72 的模型厂商优先（先读斜杠后的模型名，未知才回退上游段）、独立中转平台识别、仅网关 route 启用该解析、未知中性 fallback 及本地资产约束；只增加 `dsh-magpie-connector` 别名。当前该 requirement 的16个场景全部保留；网关场景增加新别名而没有删除旧 route；末尾只新增 `dsh-magpie2` 相似名负例，没有回滚当前语义。
+- design D1:56 与源码:50–63 一致：`dsh-magpie-connector` 规范化为 `magpie`，`dsh-magpie2` 为 `magpie2`，后者不命中精确名/`magpie-` 前缀。源码:140–155 分别计算模型厂商与中转平台，:179–187 再按重复身份去重渲染，符合主规范；不需要改源码。
 - test-plan:73–89 已列出 delta 全部17个场景，包括新近加入主规范的四个场景。现有 logos.test.ts:173–195、203–228 对旧 route 已有对应的厂商优先、GLM优先、独立中转以及非品牌无中转断言；但尚没有新 route 的对应具名回归，此阶段不可声称已执行通过。
 
 ### AMD-1-M1 — 四个新增回归未落实到 tasks 14，Coverage Notes 与表格冲突（Moderate）
 
 - **位置**：test-plan:86–89、101；tasks:137–138；logos.test.ts:173–195、203–228。
-- **具体遗漏**：表格已把「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」列为待核验 red；但 Coverage Notes 仍限定“只新增”新 route 正向和相似名负向两条，tasks 14 也只安排这两条、green 场景改标题和上游未知模型 fallback。现有四类断言只使用 `dsh-magpie-connect`，任务既没有要求给四条 red 场景补具名测试，也没有要求将相应断言扩展到 `dsh-magpie`。因此完全照 tasks 14 实施，可以结束该组却仍遗漏 AMD-1 明确要求的四条回归；只测主图别名不等于锁住新 route 的模型/中转维度。
-- **最小修法**：仅同步 test-plan 的 Coverage Notes 和 tasks 14，明确为四场景建立 `spec Scenario` 具名回归，并将相关 badgeBrands/渲染断言参数化到 `dsh-magpie` 与 `dsh-magpie-connect`：DeepSeek/GLM 模型角、OpenCode 独立中转角，以及 auto/group/custom 无中转角（同时保留原来的上游未知模型 fallback）。允许复用现有测试，不要求新增实现、资产、host/UI 功能或重开渲染决策。新断言通过后再按实际结果更新表格，不预判 green。
+- **具体遗漏**：表格已把「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」列为待核验 red；但 Coverage Notes 仍限定“只新增”新 route 正向和相似名负向两条，tasks 14 也只安排这两条、green 场景改标题和上游未知模型 fallback。现有四类断言只使用 `dsh-magpie-connect`，任务既没有要求给四条 red 场景补具名测试，也没有要求将相应断言扩展到 `dsh-magpie-connector`。因此完全照 tasks 14 实施，可以结束该组却仍遗漏 AMD-1 明确要求的四条回归；只测主图别名不等于锁住新 route 的模型/中转维度。
+- **最小修法**：仅同步 test-plan 的 Coverage Notes 和 tasks 14，明确为四场景建立 `spec Scenario` 具名回归，并将相关 badgeBrands/渲染断言参数化到 `dsh-magpie-connector` 与 `dsh-magpie-connect`：DeepSeek/GLM 模型角、OpenCode 独立中转角，以及 auto/group/custom 无中转角（同时保留原来的上游未知模型 fallback）。允许复用现有测试，不要求新增实现、资产、host/UI 功能或重开渲染决策。新断言通过后再按实际结果更新表格，不预判 green。
 
 ### AMD-1 conclusion
 
@@ -527,7 +527,7 @@ e77caeba0966d11da86e647e29e59154b35c7a7db15d6045d0b930dd40ad844c  openspec/chang
 
 ### AMD-1-M1 — applied / closed
 
-- **四场景均进入执行计划**：test-plan:86–89 的四条 red 行仍保留独立 `spec Scenario` 测试名；Coverage Notes:101 与 tasks:138（14.2）现在同时明确列出「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」，要求分别提供具名回归，并对 `dsh-magpie` 与 `dsh-magpie-connect` 两 route 参数化断言。不再存在照 tasks 实施却漏掉四条 red 的计划缺口。
+- **四场景均进入执行计划**：test-plan:86–89 的四条 red 行仍保留独立 `spec Scenario` 测试名；Coverage Notes:101 与 tasks:138（14.2）现在同时明确列出「网关小图标取模型厂商而不是上游平台」「模型名优先于上游段」「网关中转层单独识别」「上游段不是品牌时没有中转层」，要求分别提供具名回归，并对 `dsh-magpie-connector` 与 `dsh-magpie-connect` 两 route 参数化断言。不再存在照 tasks 实施却漏掉四条 red 的计划缺口。
 - **断言语义可从规范机械导出**：当前主规范:122–136 与 delta:54–68 一致保留模型名优先（DeepSeek/Anthropic/OpenAI、GLM）、独立 OpenCode 中转品牌，以及 auto/group/custom 无中转品牌。参数化场景没有放宽这些 THEN，也没有把模型角与中转角合并。原有未知模型回退上游段仍由 delta:46–48、test-plan:84 和 tasks:138 显式保留。
 - **边界与状态一致**：design D1:53–56 和 tasks:137–138 均维持只补规范/回归、不改运行时源码；14.1 保留新 route 正例、相似名负例及不符预期即停止报告的要求。Coverage Notes:101 明示 green 只是基线、最终须重跑；四条目标行仍为 red，tasks 14 仍未勾选，没有预判测试成功。主规范、delta、design 及 sidebar 源码/测试散列与上次 AMD-1 报告一致，变化落在本次要求修订的两份计划中。
 
@@ -541,7 +541,7 @@ e77caeba0966d11da86e647e29e59154b35c7a7db15d6045d0b930dd40ad844c  openspec/chang
 
 **Status: PENDING INDEPENDENT RECHECK.** 用户已明确确认将这两项加入当前 change，无需再次征求产品确认。原规划（Re-check 6）与 AMD-1-M1 的批准结论和既有 `VERDICT` / `CHANGES_APPLIED` 原行均保留为对应历史范围的证据；它们不批准本次 AMD2 delta，也不证明实现/GUI通过。本节由实现者追加，不是独立评审结论。
 
-待独立复核范围：proposal 的 AMD2 两项、design D1/non-goal 与 D13/D14、dsh-magpie spec 新增两条 requirement/五个场景、tasks 17、test-plan AMD2 ledger。selector 需按 owned_by 展示 Magpie (Claude)/(GPT) 与具体型号，真实单 route/model ID 不变，统一搜索及可见性/effort 保留；无官方逐模型展示接缝则先停并报告最小 host patch，不伪造多个 provider 或 DOM 路由 hack。settings 图标按本仓 Pet/Memex 模式仅标记自身行，CSS currentColor，observer/样式卸载，不影响旧 connect，保留 notices。
+待独立复核范围：proposal 的 AMD2 两项、design D1/non-goal 与 D13/D14、dsh-magpie-connector spec 新增两条 requirement/五个场景、tasks 17、test-plan AMD2 ledger。selector 需按 owned_by 展示 Magpie (Claude)/(GPT) 与具体型号，真实单 route/model ID 不变，统一搜索及可见性/effort 保留；无官方逐模型展示接缝则先停并报告最小 host patch，不伪造多个 provider 或 DOM 路由 hack。settings 图标按本仓 Pet/Memex 模式仅标记自身行，CSS currentColor，observer/样式卸载，不影响旧 connect，保留 notices。
 
 本次仅 AMD2 增量待 recheck；不得将旧批准扩大为 AMD2 已通过，不改变旧报告文字、VERDICT，也不将整个 change 标 PASS。独立 recheck 由 lead 安排，本执行会话不下派。
 
@@ -550,7 +550,7 @@ e77caeba0966d11da86e647e29e59154b35c7a7db15d6045d0b930dd40ad844c  openspec/chang
 
 **Status: PENDING INDEPENDENT RECHECK (expanded scope).** 本轮用户明确批准“纳入本轮，继续完成”：原 AMD2 菜单组/图标以外，纳入必要的 Pet 现有 compat 唯一 owner 受管宿主 patch，以及 AUTO 双 Magpie transport 兼容和 actual/next effort 纯显示。上节“缺接缝先停/等新授权”仅为旧时间点记录，现已获授权，不是最终 block；仍禁止伪 provider、额外 runtime owner、手改 generated dirs、显示写回全局 defaults、扩大 allowlist 或停用 connect/shim。
 
-待独立复核闭集扩大为：proposal；design D13/D14事实纠正及D15；dsh-magpie AMD2两requirement；新增 specs/auto-model-routing/spec.md 四requirement/九scenario；tasks17/18与16.1的baseline纠正；test-plan增量ledger；implementation-log/verify interim。D14按实物纠正：connect同为marker/currentColor CSS mask/observer/dispose，Pet/Memex旧实现不保证唯一，新图标唯一匹配及foreign marker排除是增强。旧审查历史及唯一状态行保持不变；既有yes仅属原规划/AMD-1，不是本轮独立认可。此处无新独立VERDICT或CHANGES_APPLIED，且不能以strict valid、作者GREEN或主wire调查替代recheck。
+待独立复核闭集扩大为：proposal；design D13/D14事实纠正及D15；dsh-magpie-connector AMD2两requirement；新增 specs/auto-model-routing/spec.md 四requirement/九scenario；tasks17/18与16.1的baseline纠正；test-plan增量ledger；implementation-log/verify interim。D14按实物纠正：connect同为marker/currentColor CSS mask/observer/dispose，Pet/Memex旧实现不保证唯一，新图标唯一匹配及foreign marker排除是增强。旧审查历史及唯一状态行保持不变；既有yes仅属原规划/AMD-1，不是本轮独立认可。此处无新独立VERDICT或CHANGES_APPLIED，且不能以strict valid、作者GREEN或主wire调查替代recheck。
 
 ## AMD2 final focused independent source/planning recheck — 2026-10-25
 
@@ -573,7 +573,7 @@ e77caeba0966d11da86e647e29e59154b35c7a7db15d6045d0b930dd40ad844c  openspec/chang
 ```text
 3666d0a0760c8784098eefb6a1415723c1350a0bd5a6a0d8f2a19cd9b246466a  openspec/changes/add-dsh-magpie-plugin/proposal.md
 5e88dbc4371f309e9e5e0772ba16766b124306fdac1c05c34a01ad186767222e  openspec/changes/add-dsh-magpie-plugin/design.md
-b2deb7881c6021f04d0d68453d3d24611b4b8bd1a8cc6d2a5cac06326b882a3e  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie/spec.md
+b2deb7881c6021f04d0d68453d3d24611b4b8bd1a8cc6d2a5cac06326b882a3e  openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md
 52925e21b168f0621ac30a6f61644cb9cd96303a899c114a5351d3757c92d4b2  openspec/changes/add-dsh-magpie-plugin/specs/sidebar-session-provider-icon/spec.md
 347b4894a8397df22bfae88b0c425c09678b24e624675c09b37d4e7fbc9a5707  openspec/changes/add-dsh-magpie-plugin/specs/auto-model-routing/spec.md
 0a9980ef42f621ba1977c3541196c1cb13bbcfab0eb146104b352f2c17f8ae19  packages/dsh-pet/compat/subagent/model-display.patch
@@ -588,12 +588,12 @@ b2deb7881c6021f04d0d68453d3d24611b4b8bd1a8cc6d2a5cac06326b882a3e  openspec/chang
 
 ### Connected source and planning conclusions
 
-- **raw ownership 与设置 fallback 分离。** [catalog:11–23](<../../../packages/dsh-magpie/src/host/catalog.ts#L11-L23>) 仅从原始非空 string owned_by 建 displayGroup；claude/codex 映射 Claude/GPT，缺失为 Other；literal other 与其它 namespace owner 不冲突。没有按误导性型号名猜归属。`CatalogModel.provider` 仍按原 `ownedBy ?? id-prefix` 回退供设置/visibility 使用，name/id 不改。[adapter:65–88](<../../../packages/dsh-magpie/src/host/adapter.ts#L65-L88>) 在 list/resolve/prepare 保留 clone 和 default-effort 行为；plugin 投影测试只证明插件边界，不当成 Host E2E。
+- **raw ownership 与设置 fallback 分离。** [catalog:11–23](<../../../packages/dsh-magpie-connector/src/host/catalog.ts#L11-L23>) 仅从原始非空 string owned_by 建 displayGroup；claude/codex 映射 Claude/GPT，缺失为 Other；literal other 与其它 namespace owner 不冲突。没有按误导性型号名猜归属。`CatalogModel.provider` 仍按原 `ownedBy ?? id-prefix` 回退供设置/visibility 使用，name/id 不改。[adapter:65–88](<../../../packages/dsh-magpie-connector/src/host/adapter.ts#L65-L88>) 在 list/resolve/prepare 保留 clone 和 default-effort 行为；plugin 投影测试只证明插件边界，不当成 Host E2E。
 - **Host identity、detach 与搜索。** [patch](<../../../packages/dsh-pet/compat/subagent/model-display.patch>) normalize 接受 omission、拒绝畸形/空白 id/label，复制且仅留 id/label；真实 resolve 与 prepared dispatch 共用 normalize，Host catalog 再 detach。展示 buckets 用 `[realProvider,displayGroupId]` JSON tuple 做 key；真实 provider/model 不变，保留原 provider 顺序/同桶模型顺序和 account 本地化。composer 的渲染与 visibleModels flatten 共用 filteredGroups；click/arrow/current/pending/effort 保持真实身份。`/model` actions 仍用原 catalog lookup、不把展示 key 当 provider；searchText 只是组标签/name/id 的别名，不改可见名称。普通无元数据模型保持原分组行为。
 - **actual/next 只显示，不写回。** ModelDirectory 只透出已有 lastUsed，current 继续取 next/default。trigger/root effort caption 仅在同 provider/model 且有 reasoning、实际与 effective-next effort 不同时显示；不同模型、无 actual、相同 effort 安全降级。effort checked/submission 继续按 next；没有改 projection、request identity 或额外调用 selectModel。既有默认 effort 路径仍保留。真实 AgentLoop/header/projection 测试与 React/display 是分层证据，不是网络 GUI 验收。
 - **AUTO 不退化。** [policy-v2](<../../../packages/auto-model-routing/src/policy-v2.ts>) 精确白名单只有 claude/codex/新旧两 transport；不 alias、不剥完整 model id。自动 capability family 仍仅 claude/codex；未知 family 要 explicit model，并需 explicit effort 或可验证 default。实时目录、supported effort、cap（不自动 max）、全局 allowlist 均按 exact provider/model 检查。[policy-host:123–160](<../../../packages/auto-model-routing/src/policy-host.ts#L123-L160>) 另保留父 captured allowlist 与 post-await MANUAL 检查；主 request 仅返回 `{...config,reasoningEffort}`，不换 provider/model、无 selectModel。已绑定 child 在父 MANUAL/legacy 后恢复原 route，仍做 live validation，损坏持久化 fail closed；新预览拒绝规则不误伤恢复。四源码差异仅扩大精确 transport 接受集，未改 legacy 本地算法。
-- **D14 connect 事实已纠正。** 亲读 installed connect client:168–236 (`/home/prgrmr/.dsh/profiles/web/node_modules/dsh-magpie-connect/lib/client.js#L168-L236`)：确为 marker + currentColor CSS mask + observer/dispose，**不是 SVG DOM replacement**。本插件 [icon:13–41](<../../../packages/dsh-magpie/src/client/settings-nav-icon.ts#L13-L41>) 独立 marker、限定 selector/CSS、重复 label fail-soft、foreign connect marker 排除、无 DOM no-op、卸载清理；没有属性观察自触发。唯一性/foreign-owner 排除是本插件增强，不误称 Pet/Memex 原有保证；设计已这样写。只读 [notices:33–63](<../../../packages/dsh-magpie/THIRD-PARTY-NOTICES#L33-L63>) 具有来源/MIT，旧 connect 行不由本插件改写。未声称消除旧 connect 自身同名匹配的全部行为。
-- **旧 AMD-1/current 语义不回滚。** sidebar delta 保留模型厂商优先、独立中转品牌及非品牌无中转层；源码 normalize 已让 dsh-magpie 命中，而 dsh-magpie2 不命中。双 transport 的具名 regression 保留，运行时代码无需更改。
+- **D14 connect 事实已纠正。** 亲读 installed connect client:168–236 (`/home/prgrmr/.dsh/profiles/web/node_modules/dsh-magpie-connect/lib/client.js#L168-L236`)：确为 marker + currentColor CSS mask + observer/dispose，**不是 SVG DOM replacement**。本插件 [icon:13–41](<../../../packages/dsh-magpie-connector/src/client/settings-nav-icon.ts#L13-L41>) 独立 marker、限定 selector/CSS、重复 label fail-soft、foreign connect marker 排除、无 DOM no-op、卸载清理；没有属性观察自触发。唯一性/foreign-owner 排除是本插件增强，不误称 Pet/Memex 原有保证；设计已这样写。只读 [notices:33–63](<../../../packages/dsh-magpie-connector/THIRD-PARTY-NOTICES#L33-L63>) 具有来源/MIT，旧 connect 行不由本插件改写。未声称消除旧 connect 自身同名匹配的全部行为。
+- **旧 AMD-1/current 语义不回滚。** sidebar delta 保留模型厂商优先、独立中转品牌及非品牌无中转层；源码 normalize 已让 dsh-magpie-connector 命中，而 dsh-magpie2 不命中。双 transport 的具名 regression 保留，运行时代码无需更改。
 
 ### Evidence tiers — what this reviewer actually ran/read
 

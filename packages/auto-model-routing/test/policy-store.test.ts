@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PolicyStore, type ChildDecision } from '../src/policy-store.js'
-it.each(['claude','dsh-magpie-connect','dsh-magpie'] as const)('restores %s identity-only records and fails closed on corruption or unknown fields', (provider) => {
+it.each(['claude','dsh-magpie-connect','dsh-magpie-connector'] as const)('restores %s identity-only records and fails closed on corruption or unknown fields', (provider) => {
   const dir = mkdtempSync(join(tmpdir(),'policy-store-')), store = new PolicyStore(dir)
   const record: ChildDecision = { version: 1, childId: '../../child', parentId: 'parent', rootId: 'root', policyVersion: 'v', mappingVersion: 'm', status: 'recommended', path: 'ordinary', explicit: { provider }, route: { provider, model: provider === 'claude' ? 'claude-haiku-5-5' : 'claude/claude-haiku-5-5', reasoningEffort: 'medium' } }
   store.set(record)

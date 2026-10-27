@@ -51,10 +51,10 @@
 
 ## Decisions
 
-### D1 单 route `dsh-magpie`，展示分组与路由身份分离（AMD2）
+### D1 单 route `dsh-magpie-connector`，展示分组与路由身份分离（AMD2）
 只注册一个 route，模型 id 保持网关原样。
 - **备选**：每个 `owned_by` 一个 route。**否决理由**：Magpie 的 provider 集合是动态的，route 会跟着变化，生命周期和孤儿会话都更复杂；AMD2 用户确认的菜单分组只是展示，不能改变真实 route。
-- sidebar-icon 的 `normalizeIdentity` 会先去掉 `dsh-`，所以 `dsh-magpie` 已经能命中现有的 `magpie` 规则。本 change 只给它补 spec 和回归测试，不改源码。
+- sidebar-icon 的 `normalizeIdentity` 会先去掉 `dsh-`，所以 `dsh-magpie-connector` 已经能命中现有的 `magpie` 规则。本 change 只给它补 spec 和回归测试，不改源码。
 
 ### D2 线协议：复用 pi-ai，按 `native_endpoints` 选择 Responses 或 Chat
 - **协议选择**：`native_endpoints` 含 `/v1/responses` 时走 Responses，其余情况（包括为空）走 Chat Completions。Magpie 保证 Chat 可以翻译到任意上游。
@@ -112,12 +112,12 @@
 - **触发时机**：插件启动且已配置时、换代时、用户点「刷新模型列表」时。不做后台定时轮询，因为目录很少变化，用户需要时可以手动获取。
 - **超时**：每次同步 15s。失败时保留当前代的目录，并记录 `lastSyncError` 与错误分类。
 - **同代只有一个进行中的同步**：同代内重复触发时，复用 `gen.syncPromise`，不另发请求（第 2 轮评审 M4）。这样不存在同代的两次同步互相覆盖，也就不需要同步序号。
-- **发布**：目录、可见性、默认 effort 任一项生效变化后，调用注册句柄的 `replace(['dsh-magpie'])`，触发 `llm/adapters-updated`。官方选择器据此失效并重读目录，subscriptions 也是这样做的。
+- **发布**：目录、可见性、默认 effort 任一项生效变化后，调用注册句柄的 `replace(['dsh-magpie-connector'])`，触发 `llm/adapters-updated`。官方选择器据此失效并重读目录，subscriptions 也是这样做的。
 - **不再单独提供「测试连接」**：保存地址或 key 会触发同步，同步结果（成功及模型数，或失败分类）就显示在设置页（ponytail 第 2 条）。
 
 ### D6 偏好存储
 - key 存在 credentials 中，引用 `MAGPIE_API_KEY`。
-- 设置文件 `$DSH_HOME/plugins/dsh-magpie/settings.json`，原子写入，权限 0600，内容为：
+- 设置文件 `$DSH_HOME/plugins/dsh-magpie-connector/settings.json`，原子写入，权限 0600，内容为：
   - `baseUrl`；
   - `visibleModels`：按 provider 保存，键不存在表示跟随网关模型列表；
   - `defaultEfforts`：模型 id 到 effort 的映射。
@@ -145,7 +145,7 @@
 `Set<sessionId>`，选标准时删除该条，不持久化（评审 S2）。会话 id 只校验为非空、长度不超过 256 的字符串。是否注入 `service_tier` 在 `stream` 时判断：会话在集合中，且 `prepareCall` 捕获的模型能力含 `priority`。注入方式：Responses 通过 pi-ai 的 `serviceTier` 选项（pi-ai 会写 `service_tier`）；Chat 通过 pi-ai 的 `onPayload` 钩子在请求体中加入 `service_tier: "priority"`，Magpie 的 Chat 会转发它（`chat.go:84、466`）。
 
 ### D10 设置路由按资源合并
-在 `/api/dsh-magpie/` 下注册 3 个路径（ponytail 第 7 条）：
+在 `/api/dsh-magpie-connector/` 下注册 3 个路径（ponytail 第 7 条）：
 
 | 路径 | GET | POST |
 |---|---|---|
@@ -159,7 +159,7 @@
 dispose 时释放 route 注册、设置路由、credentials 事件订阅和私有 Agent，并中止所有进行中的请求，包括生成。不删除 credentials 和设置文件。
 
 ### D12 包结构与可发布形态（解决 M6）
-`packages/dsh-magpie/` 的布局参照 auto-model-routing：
+`packages/dsh-magpie-connector/` 的布局参照 auto-model-routing：
 - `src/host`：adapter、wire（responses、chat）、catalog、generation、cards、settings、speed、transport；
 - `src/client`：设置页、速度栏；
 - `test/`。
@@ -174,15 +174,15 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 
 ### D13 AMD2 选择器展示分组（本轮已授权受管宿主扩展，待独立 recheck）
 - 目标是在具体型号上方显示 `Magpie (Claude)`、`Magpie (GPT)`；组键只取网关 `owned_by`，其中 `claude` 展示 Claude、`codex` 展示 GPT，其它非空 owned_by 原文展示。缺失时显示中性 `Magpie (Other)`，不靠型号名猜测；不改变既有设置页缺 owned_by 的兼容分组或偏好键。
-- 展示分组必须是官方选择器的逐模型元数据或官方受管扩展，不是额外 LLM provider。所有选项的真实选择仍为 `{provider:'dsh-magpie', model:<原id>}`；统一搜索同时覆盖展示组标签与型号/id，可见性求交集、effort 与目录 replace 失效保持原契约。
+- 展示分组必须是官方选择器的逐模型元数据或官方受管扩展，不是额外 LLM provider。所有选项的真实选择仍为 `{provider:'dsh-magpie-connector', model:<原id>}`；统一搜索同时覆盖展示组标签与型号/id，可见性求交集、effort 与目录 replace 失效保持原契约。
 - 已核验原 rc.2 ModelSelect 从 `group.id` 构造 `selection.provider`，没有独立展示组字段，不能用伪 group/provider id 分组。此前暂停待授权只属历史；本轮用户已明确批准扩展，由 Pet 现有 compat 唯一 owner 维护 pinned-source patch、README/provenance、hash/build 与测试，不另造 runtime owner，不手改 `.source`、`.build`、`.launcher*` 等 generated dirs。链路为 adapter 可选 resolved-model `displayGroup {id,label}` → LLM 校验并 detach → host catalog 再 detach → client directory → 原 ModelSelect 展示 buckets；click/keyboard/current/pending/effort 与 `/model` actions 始终取原 provider/model。统一搜索覆盖组 label、型号 name/id；没有 displayGroup 的普通模型沿用原展示。
 - Plugin catalog owner 只在 raw owned_by 上映射 displayGroup，claude→Claude、codex→GPT、缺失→Other；不修改既有 CatalogModel.provider fallback、设置分组和偏好键。插件投影测试与宿主真实链测试分别提供证据，不能互相冒充完成。
 - 测试必须覆盖 owned_by 与误导性型号名不一致、缺 owned_by、跨组搜索、隐藏模型、选择后的真实路由身份和 effort。不能用本包自制 selector 替身冒充官方端到端通过。
 
 ### D14 AMD2 设置导航鸟形图标（待独立 recheck）
 - `settings.section` 当前没有官方 icon 字段。实物 connect 0.4.1 `lib/client.js:168–236` 也是 marker + `currentColor` CSS mask + MutationObserver/dispose，不是 SVG DOM replacement；Pet 用 emoji 伪元素，Memex 用 mask，均按 label 循环匹配且不检查唯一性。本插件复用这种受限生命周期方式，并增强唯一匹配/foreign-marker 排除；不把增强误称为 Pet/Memex 已有保证。
-- 仅在 `[role="dialog"] nav button` 中精确匹配本插件当前 label `Magpie`，添加私有 `data-dsh-magpie-settings-nav` marker；若重复匹配无法唯一证明自身行，则不标记。旧 connect 的中文 label `Magpie 网关` 不匹配；英文也为 `Magpie` 时两个行同名，无法唯一定位则不标记任何行。两种情况下均不改旧 connect 的 SVG/属性。
-- 即使只有一个英文 `Magpie` 行，若已带 connect 的 `data-dsh-magpie-nav-icon`，也不认领；无 document/body/head 时 no-op。当前源码已包含这些保护，不在本轮规划中覆盖或重复实现。
+- 仅在 `[role="dialog"] nav button` 中精确匹配本插件当前 label `Magpie`，添加私有 `data-dsh-magpie-connector-settings-nav` marker；若重复匹配无法唯一证明自身行，则不标记。旧 connect 的中文 label `Magpie 网关` 不匹配；英文也为 `Magpie` 时两个行同名，无法唯一定位则不标记任何行。两种情况下均不改旧 connect 的 SVG/属性。
+- 即使只有一个英文 `Magpie` 行，若已带 connect 的 `data-dsh-magpie-connector-nav-icon`，也不认领；无 document/body/head 时 no-op。当前源码已包含这些保护，不在本轮规划中覆盖或重复实现。
 - CSS 仅作用于该 marker：隐藏自身行 fallback SVG，用本地鸟形 SVG mask 和 `background-color:currentColor` 显示 16px 图标，不依赖外网资源、不写颜色常量、不改变 label/click/焦点行为。SVG 来源和 MIT notice 追加至本包 THIRD-PARTY-NOTICES，既有 notices 不变。
 - apply 安装一次样式与 observer，支持设置对话框晚挂载/重建；dispose 断开 observer、移除所有自身 marker 和样式。找不到自身行、缺 document/body 时静默不修改页面。不观察自身写入的 attributes，以免自触发循环。
 
@@ -217,10 +217,10 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 
 ## Migration Plan
 
-1. 实现后在 `dsh.yaml` 增加 `dsh-magpie`（local，`enabled: true`），运行 `dsh build`，再运行一次确认没有变化，然后重启 DSH。
+1. 实现后在 `dsh.yaml` 增加 `dsh-magpie-connector`（local，`enabled: true`），运行 `dsh build`，再运行一次确认没有变化，然后重启 DSH。
 2. 在设置页填地址和 key，选择要显示的模型、设置默认 effort，与 connect 并行试用：日常对话、工具调用、取消、Codex 快速档。
-3. 稳定后，先把常用的旧会话手动切换到 `dsh-magpie` route（旧会话保存的是 `dsh-magpie-connect`，不会自动迁移），再把 `dsh-magpie-connect`、`magpie-display-name-shim` 设为 `enabled: false`，运行 `dsh build` 并重启。这一步需要用户确认。之后打开其余历史会话时，可能需要手动重选模型。README 的迁移段要写明这一点（第 2 轮评审 S2）。
-4. 回滚：把 `dsh-magpie` 设为 `enabled: false`，运行 `dsh build` 并重启；connect 一直保留可用。credentials 和设置文件都保留。
+3. 稳定后，先把常用的旧会话手动切换到 `dsh-magpie-connector` route（旧会话保存的是 `dsh-magpie-connect`，不会自动迁移），再把 `dsh-magpie-connect`、`magpie-display-name-shim` 设为 `enabled: false`，运行 `dsh build` 并重启。这一步需要用户确认。之后打开其余历史会话时，可能需要手动重选模型。README 的迁移段要写明这一点（第 2 轮评审 S2）。
+4. 回滚：把 `dsh-magpie-connector` 设为 `enabled: false`，运行 `dsh build` 并重启；connect 一直保留可用。credentials 和设置文件都保留。
 
 ## Open Questions
 

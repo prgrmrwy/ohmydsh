@@ -7,11 +7,11 @@
 - Initial OS guard probe: **2026-10-26 14:00:56.032781–14:00:56.062391 UTC** (10:00:56 America/New_York), `bwrap` exit **0**.
 - Official credential-only preflight: **14:05:45.660–14:05:45.737 UTC**, isolated Node exit **0**, stdout/stderr **0 bytes**, no network.
 - Bounded live attempt: **14:09:30.289–14:09:40.348 UTC** (10:09:30–10:09:40 America/New_York), isolated Node exit **0**, stdout/stderr **0 bytes**. Shell/orchestrator commands also exited **0**.
-- Complete sanitized staged evidence: `/tmp/dsh-magpie-readonly-proof-sanitized.json`, verified mode **0600**. Private probe scripts and public sentinel evidence: `/tmp/dsh-magpie-readonly-proof-qb_mp5_7` (created 0700). These are local ephemeral artifacts, not repository links. No raw response/account/user documents or secret bytes were saved.
+- Complete sanitized staged evidence: `/tmp/dsh-magpie-connector-readonly-proof-sanitized.json`, verified mode **0600**. Private probe scripts and public sentinel evidence: `/tmp/dsh-magpie-connector-readonly-proof-qb_mp5_7` (created 0700). These are local ephemeral artifacts, not repository links. No raw response/account/user documents or secret bytes were saved.
 
 ## Readonly safety proof before initialization
 
-Read the [repository instructions](<../../../AGENTS.md>), [manifest](<../../../dsh.yaml#L389-L414>), [active task16.2](<tasks.md#L170-L187>), [generation contract](<specs/dsh-magpie/spec.md#L148-L199>), [design D2/D3](<design.md#L59-L91>), and [optional-tools investigation](<optional-tools-investigation.md>). There is still no current main `dsh-magpie` spec; this change's delta is the relevant contract. The authorization for this attempt narrows the older task16.2 budget to one Responses generation; it does not close the original Chat or GUI gates.
+Read the [repository instructions](<../../../AGENTS.md>), [manifest](<../../../dsh.yaml#L389-L414>), [active task16.2](<tasks.md#L170-L187>), [generation contract](<specs/dsh-magpie-connector/spec.md#L148-L199>), [design D2/D3](<design.md#L59-L91>), and [optional-tools investigation](<optional-tools-investigation.md>). There is still no current main `dsh-magpie-connector` spec; this change's delta is the relevant contract. The authorization for this attempt narrows the older task16.2 budget to one Responses generation; it does not close the original Chat or GUI gates.
 
 The official `@deepseek-ai/dsh-credentials-local` source was resolved through the **current formal d1 runtime graph**, fingerprint `d1fbbf15c1c1d9e0b4ca80de6ffcb0450d5c0a25af9f1eda4b51ec16645ab279-372ff018-8cf6-4e66-942c-3ffe06b95ced`, not the unavailable historical `/tmp` source. Its `lib/index.js:441–447,647–688` confirms initialization can migrate a flat document under a sibling writer lock **before** the `watch:false` check; the official atomic-write implementation creates `<filename>.lock` and uses sibling temporary/rename targets. Merely disabling watching is not a readonly guarantee.
 
@@ -27,7 +27,7 @@ Actual credentials were inspected by the agent only with `stat`/`realpath` metad
 
 ## Network and catalog evidence
 
-Existing configuration was read via the real `SettingsStore` constructor, without `save`. Its configured base URL was validated by the official normalizer (no userinfo/query/fragment); neither the URL nor unrelated configuration was dumped. All requests used the [real GatewayTransport](<../../../packages/dsh-magpie/src/host/transport.ts#L4-L34>): its own direct undici Agent, path/origin checks, attribution headers, and `redirect:'error'`, not an environmental/global proxy. A test-only wrapper additionally limited this run to the following routes/counts and blocked any second request.
+Existing configuration was read via the real `SettingsStore` constructor, without `save`. Its configured base URL was validated by the official normalizer (no userinfo/query/fragment); neither the URL nor unrelated configuration was dumped. All requests used the [real GatewayTransport](<../../../packages/dsh-magpie-connector/src/host/transport.ts#L4-L34>): its own direct undici Agent, path/origin checks, attribution headers, and `redirect:'error'`, not an environmental/global proxy. A test-only wrapper additionally limited this run to the following routes/counts and blocked any second request.
 
 | Authorized operation | Actual count | HTTP status | Retained evidence |
 |---|---:|---:|---|
@@ -49,7 +49,7 @@ Selected **`codex/gpt-6.1-sol`**, effort **`low`**, output maximum **512**. No C
 
 ## Responses single-variable candidate
 
-Used the **real `MagpieRuntime` + `MagpieAdapter` + pi-ai + OpenAI SDK**, resolved from the current graph's installed `dsh-magpie` entry. No generated module or source was edited. The test-only wrapper at the final `GatewayTransport.request` boundary parsed SDK-produced JSON and changed **only** the ordinary function tool's `strict` field to explicit **false**. This is the wire function object (`tools[0].strict` in Responses), not a top-level field. The original production adapter remains unchanged.
+Used the **real `MagpieRuntime` + `MagpieAdapter` + pi-ai + OpenAI SDK**, resolved from the current graph's installed `dsh-magpie-connector` entry. No generated module or source was edited. The test-only wrapper at the final `GatewayTransport.request` boundary parsed SDK-produced JSON and changed **only** the ordinary function tool's `strict` field to explicit **false**. This is the wire function object (`tools[0].strict` in Responses), not a top-level field. The original production adapter remains unchanged.
 
 Public synthetic tool: `bash_probe`, with `parameters.type:'object'`, `required:['command']`, `command` string, optional `sandbox_permissions` string enum `['workspace-write','danger-full-access']`, and optional `justification` string. Tool description and the synthetic user prompt requested exactly one call with public arguments `{command:'printf OK'}`, no optional fields and no other content.
 

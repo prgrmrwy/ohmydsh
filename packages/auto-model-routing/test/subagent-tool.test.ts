@@ -36,7 +36,7 @@ it('policy-v2 preview is recommended not applied and respects explicit dimension
  expect(await def.execute({task:'synthetic',provider:'claude',path:'fork'},exec())).toMatchObject({status:'unsupported'})
  expect(server.bodies).toHaveLength(1)
 })
-it.each(['dsh-magpie-connect','dsh-magpie'] as const)('%s preview uses exact provider/model and legacy rejects before Jev',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s preview uses exact provider/model and legacy rejects before Jev',async(provider)=>{
  const model={provider:provider,model:'codex/gpt-6-luna',name:'Luna',reasoningEfforts:['low','medium','high','xhigh']}
  let policy:'legacy'|'policy-v2'='policy-v2'
  const {def,server}=await tool(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'baseline'}}}),undefined,undefined,{readSettings:()=>({...DEFAULT_SETTINGS,policy}),catalog:async()=>({models:[model],childAllowlist:{status:'enabled',allowedModels:[model]}})})
@@ -120,7 +120,7 @@ it('manual_root_skips_jev', async () => {
 })
 
 // Spec regression: the existing MANUAL early return takes precedence over legacy rejection.
-it.each(['dsh-magpie-connect', 'dsh-magpie'] as const)('%s MANUAL root with explicit legacy skips routing without writes', async provider => {
+it.each(['dsh-magpie-connect', 'dsh-magpie-connector'] as const)('%s MANUAL root with explicit legacy skips routing without writes', async provider => {
  const readSettings = vi.fn(() => ({ ...DEFAULT_SETTINGS, policy: 'legacy' as const }))
  const catalog = vi.fn((): RoutingCatalog => ({ models: [], childAllowlist: { status: 'enabled', allowedModels: [] } }))
  const { def, server, state, disk, judged } = await tool(tier('complex'), { S1: 'MANUAL' }, undefined, { readSettings, catalog })

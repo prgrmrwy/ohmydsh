@@ -1,6 +1,6 @@
 ## 1. Credential and identity lifecycle
 
-- [x] 1.1 Read existing dsh-magpie mainline spec, integration pitfalls and full affected callers; record exact scope and baseline, verifying no overlap with active mainline writers.
+- [x] 1.1 Read existing dsh-magpie-connector mainline spec, integration pitfalls and full affected callers; record exact scope and baseline, verifying no overlap with active mainline writers.
 - [x] 1.2 Add optional official Access credential references and complete captured identity; verify partial-pair/HTTPS/rotation/prepared-operation tests and LAN regression tests.
 - [x] 1.3 Extend all active/prepared secret redaction and credential invalidation; verify reflected JSON/text errors and settings responses contain no raw values.
 

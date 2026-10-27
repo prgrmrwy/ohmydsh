@@ -208,7 +208,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
-- [dsh-magpie](packages/dsh-magpie/README.md) — Self-hosted Magpie provider with grouped usage cards, model visibility, default effort and per-session fast mode.
+- [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — Self-hosted Magpie provider with grouped usage cards, model visibility, default effort and per-session fast mode.
 - [magpie-display-name-shim](packages/magpie-display-name-shim/README.md) — Shows Magpie gateway display names in the model picker instead of route ids, until the upstream fix ships.
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
@@ -228,7 +228,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
-- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts the `dsh-magpie` provider route from the host egress gate by exact provider id.
+- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts the `dsh-magpie-connector` provider route from the host egress gate by exact provider id.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
 - [ponytail-skills](patches/ponytail-skills.yml) — Composition patch that mounts a dedicated skill provider for the ponytail package only.
 

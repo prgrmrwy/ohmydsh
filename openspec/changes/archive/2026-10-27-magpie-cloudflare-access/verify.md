@@ -2,7 +2,7 @@
 
 ## Scope and baseline
 
-Started from clean shared main containing AMD3. Only dsh-magpie host/client identity paths and tests modified, plus this independent change; no AUTO/Pet compat, manifest/lock, production settings or Host restart. Mainline scope recorded in collaboration item access-followup-scope (seq12); read-only review requested seq13.
+Started from clean shared main containing AMD3. Only dsh-magpie-connector host/client identity paths and tests modified, plus this independent change; no AUTO/Pet compat, manifest/lock, production settings or Host restart. Mainline scope recorded in collaboration item access-followup-scope (seq12); read-only review requested seq13.
 
 ## Executed evidence
 

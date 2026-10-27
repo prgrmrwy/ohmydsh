@@ -208,7 +208,7 @@ tests/                   仓库级测试
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — 把当前会话的链接与产出文件汇总到侧栏面板。
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — 主机出口位于受限地区时，在输入框禁用 Claude 系列模型。
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — 为订阅 provider 剥离 sandbox 升级字段并清理孤立的工具调用。
-- [dsh-magpie](packages/dsh-magpie/README.md) — 自托管 Magpie provider，提供分组用量卡片、模型可见性、默认 effort 和会话级快速档。
+- [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — 自托管 Magpie provider，提供分组用量卡片、模型可见性、默认 effort 和会话级快速档。
 - [magpie-display-name-shim](packages/magpie-display-name-shim/README.md) — 让模型选择器显示 Magpie 网关的显示名而非 route id，上游修复发版前的过渡。
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
@@ -228,7 +228,7 @@ tests/                   仓库级测试
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
 - [dsh-collab-config](patches/dsh-collab-config.yml) — dsh-collab 配置补丁：邀请即授权，并声明 `pet-locus` 托管 channel，供 Pet Locus 以代理成员接入。
-- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 让 `dsh-magpie` route 不受本机出口门禁约束。
+- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 让 `dsh-magpie-connector` route 不受本机出口门禁约束。
 - [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — 配置补丁：把官方 gateway 的 WebSocket 心跳放宽到 5 秒，使大体量历史在短暂网络抖动时不被断开。
 

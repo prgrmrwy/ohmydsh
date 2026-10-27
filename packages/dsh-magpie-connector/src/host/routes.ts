@@ -1,0 +1,70 @@
+import type { MagpieRuntime } from './runtime.js'
+import { normalizeBaseUrl } from './settings.js'
+import { isVisible, validateVisibility } from './visibility.js'
+import { updateDefaultEffort } from './default-effort.js'
+import { CardsController } from './cards.js'
+import { SpeedController } from './speed.js'
+export class SettingsController {
+  private pending: Promise<void> = Promise.resolve()
+  constructor(readonly runtime:MagpieRuntime) {}
+  async handle(body?:unknown):Promise<Response> {
+    if (body === undefined) return this.execute()
+    const result = this.pending.then(() => this.execute(body))
+    this.pending = result.then(() => {}, () => {})
+    return result
+  }
+  private async execute(body?:unknown):Promise<Response> {
+    const runtime=this.runtime
+    if(body!==undefined) {
+      try {
+        if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['baseUrl','key','accessClientId','accessClientSecret','resync','visibleModels','defaultEffort'].includes(k))) throw new Error('Invalid settings')
+        const input=body as Record<string,unknown>
+        // Validate the entire union before credentials, disk writes or synchronization.
+        if('baseUrl' in input) normalizeBaseUrl(input.baseUrl)
+        if('key' in input && input.key!==null && (typeof input.key!=='string' || !input.key || input.key.length>512 || /\s/.test(input.key))) throw new Error('Invalid API key')
+        if('resync' in input && input.resync!==true) throw new Error('Invalid resync')
+        const visibleModels='visibleModels' in input ? validateVisibility(input.visibleModels) : undefined
+        const defaultEfforts='defaultEffort' in input ? updateDefaultEffort(runtime.store.value.defaultEfforts,input.defaultEffort,runtime.current.catalog) : undefined
+        const connection=Object.fromEntries(Object.entries(input).filter(([k])=>['baseUrl','key','accessClientId','accessClientSecret','resync'].includes(k)))
+        if(Object.keys(connection).length) {const result=await runtime.settings(connection);if(!result.ok)return result}
+        if(visibleModels!==undefined || defaultEfforts!==undefined) {
+          runtime.store.save({...runtime.store.value,...(visibleModels===undefined?{}:{visibleModels}),...(defaultEfforts===undefined?{}:{defaultEfforts})})
+          runtime.publish()
+        }
+      } catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
+    }
+    const response=await runtime.settings()
+    const view=await response.json() as Record<string,unknown>
+    view.groups=[...new Set(runtime.current.catalog.map(m=>m.provider))].map(provider=>({provider,models:runtime.current.catalog.filter(m=>m.provider===provider).map(m=>({id:m.info.id,name:m.info.name,efforts:m.efforts,visible:isVisible(m,runtime.store.value.visibleModels)}))}))
+    return Response.json(runtime.redactJson(view))
+  }
+}
+export interface FetchRegistration {
+ path:string;methods:('GET'|'POST')[];requestBody:'buffered';fetch:(request:Request)=>Promise<Response>
+}
+export interface FetchRegistry {register(route:FetchRegistration):()=>void}
+/** Register on the injected connection.fetch; caller owns the returned disposer. */
+export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=new SpeedController(),cards=new CardsController(runtime)) {
+ const settings=new SettingsController(runtime)
+ const handlers={
+  settings:async(request:Request,body:unknown)=>settings.handle(request.method==='POST'?body:undefined),
+  cards:async(request:Request,body:unknown)=>request.method==='POST'?cards.refresh(body):cards.get(),
+  speed:async(request:Request,body:unknown)=>{
+   const session=request.method==='GET'?new URL(request.url).searchParams.get('session'):(body as {session?:unknown}|null)?.session
+   if(request.method==='POST') {
+    if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['session','tier'].includes(k))) throw new Error('Invalid speed request')
+    speed.set(session,(body as {tier?:unknown}).tier)
+   }
+   return Response.json(speed.get(session,runtime.current.catalog))
+  },
+ }
+ const disposers:(()=>void)[]=[]
+ try {
+  for(const resource of ['settings','cards','speed'] as const) disposers.push(fetch.register({path:`/api/dsh-magpie-connector/${resource}`,methods:['GET','POST'],requestBody:'buffered',fetch:async request=>{
+   try {const body=request.method==='POST'?await request.json():undefined;return await handlers[resource](request,body)}
+   catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
+  }}))
+ } catch(error) {for(const dispose of disposers.reverse())dispose();throw error}
+ let disposed=false
+ return {settings,cards,speed,dispose:()=>{if(disposed)return;disposed=true;for(const dispose of disposers.reverse())dispose()}}
+}
