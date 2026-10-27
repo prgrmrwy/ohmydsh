@@ -9,7 +9,8 @@ it('report_skill_is_on_demand_only', () => {
  const [, front = '', body = ''] = text.split(/^---$/m)
  for (const part of [front, body]) { expect(part).toContain('仅当用户明确要求'); expect(part).toMatch(/不得主动执行[^。\n]*定时任务/) }
  const files = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')).files as string[]
- expect(files).toEqual(expect.arrayContaining(['lib', 'skills', 'scripts/label-report.mjs']))
+ expect(files).toEqual(expect.arrayContaining(['lib', 'skills']))
+ expect(files).not.toContain('scripts/label-report.mjs')
 })
 const sources = () => {
  const root=resolve(import.meta.dirname,'../src')
@@ -53,7 +54,7 @@ it('skill_contains_eight_rules',()=>{
 it('client_sources_stay_browser_safe',()=>{
  // The client bundle runs in the browser: it may reach only browser-safe modules (no node: built-ins via jev.ts).
  for(const [file,text] of sources().filter(([file])=>file.startsWith('client/')||file==='hints.ts')) {
-  expect(text,file).not.toMatch(/from '(\.\.\/)?(\.\/)?(jev|context|index|router|state|judgements)\.js'/)
+  expect(text,file).not.toMatch(/from '(\.\.\/)?(\.\/)?(jev|context|index|state)\.js'/)
   expect(text,file).not.toMatch(/node:/)
  }
 })

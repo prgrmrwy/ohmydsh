@@ -1,10 +1,11 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
-import type { Effort, Tier } from './effort.js'
+import type { Effort } from './effort.js'
 import type { JevCategory } from './jev.js'
 import { z } from 'zod'
-// Legacy files also carried `restore`/`anchor`; they are ignored (non-strict) and dropped on the next write.
+// Older files also carried `restore`/`anchor` (ignored, non-strict, dropped on the next write) and
+// `previous` (a retired tier name: still accepted and kept as is, never written anew).
 const stateSchema = z.object({
   mode: z.enum(['AUTO', 'MANUAL']),
   previous: z.enum(['simple', 'standard', 'complex', 'escalated']).optional(),
@@ -13,7 +14,7 @@ const stateSchema = z.object({
 export type Mode = 'AUTO' | 'MANUAL'
 export interface Selection { provider: string; model: string; reasoningEffort?: Effort }
 export interface Disabled { category: JevCategory; at: number }
-export interface SessionState { mode: Mode; previous?: Tier; disabled?: Disabled }
+export interface SessionState { mode: Mode; previous?: 'simple' | 'standard' | 'complex' | 'escalated'; disabled?: Disabled }
 export interface StateStore { get(id: string): SessionState | undefined; set(id: string, value: SessionState): void }
 
 export class FileStateStore implements StateStore {
@@ -57,12 +58,6 @@ export class RoutingState {
   disable(id: string, category: JevCategory, at = Date.now()): SessionState {
     const state = this.read(id)
     return this.save(id, { mode: 'MANUAL', ...(state.previous ? { previous: state.previous } : {}), disabled: { category, at } })
-  }
-
-  /** Keep the latest user-turn tier (name only) so a restart still sends it to Jev as context. */
-  remember(id: string, tier: Tier): void {
-    const state = this.read(id)
-    if (state.previous !== tier) this.save(id, { ...state, previous: tier })
   }
 
   private save(id: string, state: SessionState): SessionState {

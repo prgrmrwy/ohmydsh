@@ -4,10 +4,12 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import type { JevClient, Depth, PolicyMeasure } from './jev.js'
-import { policyVersion, CATEGORY_HINTS } from './jev.js'
+import { CATEGORY_HINTS } from './jev.js'
 import { choosePolicyRoute, policyEffort, modelFamily, validatePolicyRoute } from './routing.js'
 import { registry as builtin, type Registry } from './strategies/index.js'
+// Section 4 removes these record-format markers entirely.
 const mappingVersion = 'capability-slots-2-magpie'
+const policyVersion = 'policy-v2-d774ffe6'
 import { PolicyStore, type ChildDecision } from './policy-store.js'
 import type { RoutingState } from './state.js'
 import type { AutomaticEffort, RoutingCatalog, Settings } from './settings-contract.js'
@@ -28,7 +30,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   }
   const epochs = new Map<string, number>()
   const epoch = (id: string) => epochs.get(id) ?? 0
-  const enabled = (rootId: string) => deps.settings().policy === 'policy-v2' && deps.state.read(rootId).mode === 'AUTO'
+  const enabled = (rootId: string) => deps.state.read(rootId).mode === 'AUTO'
   const pending = new Map<string, ChildDecision>()
   const main = new WeakMap<Agent, { turn: number; depth: Depth; active: boolean; epoch: number }>()
   ctx.effect(() => () => { pending.clear(); delegation.disable() })

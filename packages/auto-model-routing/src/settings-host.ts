@@ -5,7 +5,6 @@ import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { DEFAULT_SETTINGS, SettingsStore, SettingsValidationError } from './settings.js'
 import type { RoutingCatalog } from './settings-contract.js'
 import { registry as builtin, type Registry } from './strategies/index.js'
-import rubric from './rubric.json' with { type: 'json' }
 
 import { JevClient } from './jev.js'
 import { DECISION_SERVICES, type DecisionProvider } from './decision-service.js'
@@ -48,8 +47,8 @@ export function settingsHost(ctx: Context, store: SettingsStore, registry: Regis
   }
   const read = async () => {
     const current = await catalog()
-    const result = store.read(current)
-    return { settings: result.settings, defaults: DEFAULT_SETTINGS, configStatus: result.status, issues: result.issues, key: await keyStatus(), ...current, criteria: rubric.tier.criteria }
+    const result = store.read()
+    return { settings: result.settings, defaults: DEFAULT_SETTINGS, configStatus: result.status, issues: result.issues, deprecated: result.deprecated, key: await keyStatus(), ...current }
   }
   const endpoint = async (operation: 'settings' | 'saveSettings' | 'setKey' | 'testDecision', body: unknown): Promise<Response> => {
     if (operation === 'settings') return Response.json(await read())
@@ -59,7 +58,7 @@ export function settingsHost(ctx: Context, store: SettingsStore, registry: Regis
       return Response.json(result)
     }
     if (operation === 'saveSettings') {
-      try { store.save(body, await catalog()); return Response.json(await read()) }
+      try { store.save(body); return Response.json(await read()) }
       catch (error) {
         if (error instanceof SettingsValidationError) return Response.json({ error: error.message, issues: error.issues }, { status: 400 })
         return Response.json({ error: '无法保存自动模型路由设置' }, { status: 500 })

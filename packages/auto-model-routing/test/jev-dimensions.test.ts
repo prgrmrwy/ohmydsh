@@ -1,17 +1,16 @@
 import { afterEach, expect, it } from 'vitest'
-import { JevClient, TIER_QUESTIONS } from '../src/jev.js'
+import { JevClient } from '../src/jev.js'
 import { fakeJev, json } from './fake-jev.js'
-import questions from '../src/policy-v2-rubric.json' with { type: 'json' }
+import questions from '../src/rubric.json' with { type: 'json' }
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.() })
-it('asks independent dimensions in one call and keeps legacy questions untouched', async () => {
+it('asks independent dimensions in one call', async () => {
   const server = await fakeJev(json(200, { answers: { capability: { type: 'choice', choice: 'bounded' }, depth: { type: 'choice', choice: 'baseline' } } }))
   close = server.close
   const client = new JevClient({ get: () => ({ value: 'test' }) }, server.base)
   expect(await client.judgePolicy('synthetic task', new AbortController().signal, 'child')).toMatchObject({ kind: 'ok', capability: 'bounded', depth: 'baseline' })
   expect(server.bodies).toHaveLength(1)
   expect(server.bodies[0]).toMatchObject({ questions })
-  expect(TIER_QUESTIONS).toHaveProperty('tier')
   server.set(json(200, { answers: { depth: { choice: 'higher' } } }))
   expect(await client.judgePolicy('main', new AbortController().signal, 'main')).toMatchObject({ kind: 'ok', depth: 'higher' })
   expect((server.bodies[1] as { questions: unknown }).questions).not.toHaveProperty('capability')

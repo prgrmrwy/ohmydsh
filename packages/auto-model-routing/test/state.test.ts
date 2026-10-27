@@ -36,7 +36,7 @@ it('disk_state_rejects_malformed_shape',()=>{
  writeFileSync(file,JSON.stringify({mode:'SOMETIMES'}))
  expect(()=>store.get('S')).toThrow()
 })
-it('repeated_mode_is_noop', () => {
+it('spec Scenario "重复同模式设置无副作用"', () => {
   const { state, writes } = fixture()
   state.setMode('S', 'MANUAL')
   expect(writes()).toBe(0)
@@ -59,30 +59,22 @@ it('disable_persists_and_auto_clears',()=>{
  state.setMode('S','AUTO')
  expect(state.read('S').disabled).toBeUndefined()
 })
-it('legacy_state_file_is_readable',()=>{
+it('spec Scenario "旧状态文件可读"',()=>{
  const directory=mkdtempSync(join(tmpdir(),'router-legacy-'))
  const store=new FileStateStore(directory)
  store.set('S',{mode:'AUTO'})
  const file=join(directory,readdirSync(directory)[0]!)
- writeFileSync(file,JSON.stringify({mode:'MANUAL',restore:true,anchor:{provider:'claude',model:'claude-opus-5-5',reasoningEffort:'medium',provenance:'user-selected'},disabled:{category:'timeout',at:7}}))
- expect(store.get('S')).toEqual({mode:'MANUAL',disabled:{category:'timeout',at:7}})
+ writeFileSync(file,JSON.stringify({mode:'AUTO',previous:'complex',restore:true,anchor:{provider:'claude',model:'claude-opus-5-5',reasoningEffort:'medium',provenance:'user-selected'},disabled:{category:'timeout',at:7}}))
  const state=new RoutingState(store)
- state.setMode('S','AUTO')
- expect(JSON.parse(readFileSync(file,'utf8'))).toEqual({mode:'AUTO'})
- writeFileSync(file,JSON.stringify({mode:'MANUAL',disabled:{category:'whatever',at:1}}))
- expect(()=>store.get('S')).toThrow()
-})
-it('previous_tier_persists_and_survives_mode_changes',()=>{
- const directory=mkdtempSync(join(tmpdir(),'router-previous-'))
- const state=new RoutingState(new FileStateStore(directory))
- state.setMode('S','AUTO')
- state.remember('S','complex')
+ expect(state.read('S')).toEqual({mode:'AUTO',previous:'complex',disabled:{category:'timeout',at:7}})
+ // Mode changes and disable keep `previous` as read; nothing writes a new value; restore/anchor are dropped.
  state.setMode('S','MANUAL'); state.setMode('S','AUTO')
+ expect(JSON.parse(readFileSync(file,'utf8'))).toEqual({mode:'AUTO',previous:'complex'})
  state.disable('S','timeout',1)
- expect(new RoutingState(new FileStateStore(directory)).read('S')).toEqual({mode:'MANUAL',previous:'complex',disabled:{category:'timeout',at:1}})
- state.setMode('S','AUTO')
- expect(state.read('S')).toEqual({mode:'AUTO',previous:'complex'})
- const file=join(directory,readdirSync(directory)[0]!)
- writeFileSync(file,JSON.stringify({mode:'AUTO',previous:'huge'}))
- expect(()=>new FileStateStore(directory).get('S')).toThrow()
+ expect(JSON.parse(readFileSync(file,'utf8'))).toEqual({mode:'MANUAL',previous:'complex',disabled:{category:'timeout',at:1}})
+ expect('remember' in state).toBe(false)
+ for (const bad of [{mode:'auto'},{mode:'MANUAL',disabled:{category:'whatever',at:1}},{mode:'AUTO',previous:'huge'}]) {
+  writeFileSync(file,JSON.stringify(bad))
+  expect(()=>store.get('S'),JSON.stringify(bad)).toThrow()
+ }
 })

@@ -41,8 +41,7 @@
     "CHANGELOG.md",
     "skills",
     "docs",
-    "screenshots.json",
-    "scripts/label-report.mjs"
+    "screenshots.json"
   ],
   "dsh": {
     "bundle": {

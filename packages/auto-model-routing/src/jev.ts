@@ -1,28 +1,18 @@
-import { createHash } from 'node:crypto'
 import { resolveDecisionService, type DecisionConfig } from './decision-service.js'
 export interface PolicyMeasure { ms: number; decisionProvider: string; decisionModel: string; confidence?: number; probabilities?: Record<string, number>; capabilityConfidence?: number; capabilityProbabilities?: Record<string, number> }
 const probability = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
 const distribution = (value: Record<string, unknown> | undefined) => Object.fromEntries(Object.entries(value ?? {}).filter(([,v]) => probability(v))) as Record<string, number>
-import { tiers, type Tier } from './effort.js'
-import rubric from './rubric.json' with { type: 'json' }
-import policyQuestions from './policy-v2-rubric.json' with { type: 'json' }
+import policyQuestions from './rubric.json' with { type: 'json' }
 export type Depth = 'lower' | 'baseline' | 'higher'
 export type Capability = 'bounded' | 'analytical' | 'frontier'
 export type PolicyResult = ({ kind: 'ok'; depth: Depth; capability?: Capability | 'insufficient_context' } & PolicyMeasure) | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
-export const policyVersion = `policy-v2-${createHash('sha256').update(JSON.stringify(policyQuestions)).digest('hex').slice(0, 8)}`
 import type { JevCategory } from './hints.js'
 export { CATEGORY_HINTS, type JevCategory } from './hints.js'
-export type Distribution = Partial<Record<Tier, number>>
-export type JevResult = { kind: 'ok'; tier: Tier; confidence?: number; probabilities?: Distribution; ms: number } | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
 export interface CredentialSource { get(name: string): { value: string } | undefined | Promise<{ value: string } | undefined> }
 
 const MAX_BODY = 64 * 1024
-/** Shared by the main session and `route_subagent`; only `state` differs (design D4). Single source: rubric.json. */
-export const TIER_QUESTIONS = rubric
-/** Content hash of the rubric, stored with each judgement so labels can be compared per rubric. */
-export const rubricVersion = createHash('sha256').update(JSON.stringify(TIER_QUESTIONS)).digest('hex').slice(0, 8)
-/** One tier up (`escalated` stays): the only tier arithmetic in code; it never reads message text. */
-export function tierAbove(tier: Tier): Tier { return tiers[Math.min(tiers.indexOf(tier) + 1, tiers.length - 1)]! }
+/** The only rule file: main and child questions are taken from it verbatim. */
+export const QUESTIONS = policyQuestions
 
 function byStatus(status: number): JevCategory {
   if (status === 402) return 'insufficient-credits'
@@ -39,22 +29,7 @@ export class JevClient {
     this.url = `${base}/api/alpha/decisions`
   }
 
-  /** One request, no retry. Never throws; never returns the body or the key. */
-  /** `state` is assembled and redacted by the caller (`buildState`). */
-  async judge(state: string, signal: AbortSignal): Promise<JevResult> {
-    const result = await this.decide(state, signal, TIER_QUESTIONS)
-    if (result.kind !== 'ok') return result
-    const answer = result.answers?.tier
-    const choice = answer?.choice
-    if (!tiers.includes(choice as Tier)) return { kind: 'failed', category: 'invalid-response' }
-    const unit = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1
-    const probabilities: Distribution = {}
-    for (const t of tiers) { const v = answer?.probabilities?.[t]; if (unit(v)) probabilities[t] = v }
-    return { kind: 'ok', tier: choice as Tier, ms: result.ms,
-      ...(unit(answer?.confidence) ? { confidence: answer.confidence } : {}),
-      ...(Object.keys(probabilities).length ? { probabilities } : {}) }
-  }
-
+  /** One request, no retry. Never throws; never returns the body or the key. `state` comes from `buildState`. */
   async judgePolicy(state: string, signal: AbortSignal, scope: 'main' | 'child', dimensions: 'both' | 'capability' | 'depth' = 'both'): Promise<PolicyResult> {
     const questions = scope === 'main' || dimensions === 'depth' ? { depth: policyQuestions.depth }
       : dimensions === 'capability' ? { capability: policyQuestions.capability } : policyQuestions

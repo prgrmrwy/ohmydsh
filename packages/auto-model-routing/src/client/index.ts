@@ -20,7 +20,6 @@ import { installRoutingNavIcon } from './nav-icon.js'
 interface AutoSupport { supported: boolean; provider?: string; model?: string }
 interface View {
   mode: 'AUTO' | 'MANUAL'
-  policy?: string
   depth?: string
   effort?: string
   reason?: string
@@ -175,9 +174,9 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
         view?.decision && h('div', { key: 'latest', className: 'amr-latest' },
           h('p', null, h('strong', null, '最近决策')),
           ...toastText(view.decision).map((line, index) => h('p', { key: index, className: index ? 'amr-muted' : undefined }, line))),
-        h('p', { key: 'policy', className: 'amr-muted' }, view?.policy === 'policy-v2' ? `AUTO · ${view.depth ?? '尚无判断'}；主模型不变，推理投入按请求应用；子任务自动选配。` : 'AUTO 的决定会同步到右侧模型选择；要手动指定 effort，请先切到 MANUAL。'),
+        h('p', { key: 'depth', className: 'amr-muted' }, `AUTO · ${view?.depth ?? '尚无判断'}；主模型不变，推理投入按请求应用；子任务自动选配。`),
         off && h('p', { key: 'disabled', role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
-        h('p', { key: 'data', className: 'amr-muted' }, 'AUTO 会把脱敏任务文本发送给设置中所选的决策服务判档。'),
+        h('p', { key: 'data', className: 'amr-muted' }, 'AUTO 会把脱敏任务文本发送给设置中所选的决策服务判断。'),
         error && h('p', { key: 'error', role: 'alert', className: 'amr-error' }, error),
       ]
   return h('span', { ref: (el: HTMLSpanElement | null) => { rootRef.current = el; remember() }, className: 'amr-root', onMouseEnter: on('enter'), onMouseLeave: on('leave'), onFocus: on('focus'), onBlur: on('blur') },
@@ -186,7 +185,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       type: 'button', className: 'amr-trigger', disabled: busy || !view, onClick: () => { if (locked) return; void toggle() },
       'data-disabled': off ? 'true' : undefined, 'data-locked': locked ? 'true' : undefined,
       'aria-disabled': locked ? 'true' : undefined, style: { border: 'none' },
-      title: locked ? `AUTO 仅支持 ${FAMILIES} 系列模型；悬停查看说明` : off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
+      title: locked ? `AUTO 仅支持 ${FAMILIES} 系列模型；悬停查看说明` : off ? `Jev 判断已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
       'aria-label': locked ? `推理强度模式：${view?.mode ?? 'MANUAL'}（AUTO 不支持当前模型，不可切换）` : `推理强度模式：${view?.mode ?? '加载中'}，点击切换`,
     }, h('span', null, locked ? (view?.mode ?? 'MANUAL') : off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'), locked ? h(IconInfoOutlineRegular, { size: 14, className: 'amr-icon amr-info' }) : h(SwapIcon)),
     toast && !open && (typeof document === 'undefined'
@@ -223,7 +222,7 @@ export function apply(ctx: Context): void {
     inject: () => ({ rpc: ctx.connection.rpc as unknown as Rpc, ui: settingsUi }),
   }, RoutingSettings))
   ctx.effect(() => typeof document === 'undefined' ? () => {} : installRoutingNavIcon(document), 'auto-model-routing: settings navigation icon')
-  // Reply-bar tier button, after the official feedback (order 10); rendered only on judged turns.
+  // Reply-bar allocation feedback, after the official feedback (order 10); rendered only on bound replies.
   ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
     name: 'conversation.chat.assistant-actions', id: 'auto-model-routing-label', order: 20,
     inject: (sessionId) => ({ sessionId, rpc: ctx.connection.rpc as unknown as Rpc, ui: labelUi }),

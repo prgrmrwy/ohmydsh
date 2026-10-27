@@ -4,7 +4,7 @@ import { createElement as h, act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { RoutingSettings } from '../src/client/settings-section.js'
 import { ui, view } from './gui-fixture.js'
-import questions from '../src/policy-v2-rubric.json' with { type: 'json' }
+import questions from '../src/rubric.json' with { type: 'json' }
 import { registry } from '../src/strategies/index.js'
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root, host: HTMLElement
@@ -12,21 +12,14 @@ beforeEach(() => { host = document.createElement('div'); document.body.append(ho
 afterEach(() => { act(() => root.unmount()); host.remove() })
 const click = async (text: string) => { const button = Array.from(document.querySelectorAll(document.querySelector('[role=menu]') ? '[role=menu] button' : 'button')).find(b => b.textContent === text) as HTMLButtonElement | undefined; expect(button).toBeDefined(); await act(async () => button!.click()) }
 const clickLabel = async (label: string) => { await act(async () => (host.querySelector(`[aria-label="${label}"]`) as HTMLButtonElement).click()) }
-it('four rows, source criteria, retained family drafts and sparse patch; never selects a session model', async () => {
+it('ordinary settings save a sparse patch and never select a session model', async () => {
   const calls: { endpoint: string; payload: any }[] = []
   const rpc = { call: async (_: string, endpoint: string, payload: any) => { calls.push({ endpoint, payload }); return { ok: true, value: view() } } }
   await act(async () => root.render(h(RoutingSettings, { rpc, ui })))
-  expect(host.querySelectorAll('[data-tier]')).toHaveLength(4)
-  expect(Array.from(host.querySelectorAll('[data-tooltip]')).map(el => el.getAttribute('data-tooltip'))).toEqual(Object.values(view().criteria))
-  expect(host.querySelector('[aria-label="主会话模型"]')).toBeNull()
-  expect(host.querySelector('[aria-label="simple 主会话推理等级"]')?.textContent).toContain('默认（随模型）')
-  await clickLabel('simple 主会话推理等级'); await click('medium')
-  await click('GPT')
-  expect(host.querySelector('[aria-label="simple 主会话推理等级"]')?.textContent).toContain('默认（随模型）')
-  await click('Claude')
-  expect(host.querySelector('[aria-label="simple 主会话推理等级"]')?.textContent).toContain('medium')
-  await click('保存')
-  expect(calls.find(c => c.endpoint.endsWith('saveSettings'))?.payload).toEqual({ mainEfforts: { claude: { simple: 'medium' } } })
+  expect(host.querySelectorAll('[data-tier]')).toHaveLength(0)
+  expect(host.querySelector('[role=tablist]')).toBeNull()
+  await click('AUTO'); await click('保存')
+  expect(calls.find(c => c.endpoint.endsWith('saveSettings'))?.payload).toEqual({ defaultMode: 'AUTO' })
   expect(calls.every(c => /^auto-model-routing\.(settings|saveSettings|setKey)$/.test(c.endpoint))).toBe(true)
 })
 it('connection button shows pending and local success or failure feedback',async()=>{
@@ -62,18 +55,20 @@ it('preset model menu selects version while custom service keeps model input',as
  await clickLabel('决策服务');await click('自定义 System One')
  expect(host.querySelector('input[aria-label="决策模型"]')).not.toBeNull()
 })
-it('AUTO requires no policy version control and hides inactive old mappings', async () => {
-  const data={...view(),settings:{...view().settings,policy:'policy-v2' as const}}
-  const rpc={call:async()=>({ok:true,value:data})}
-  await act(async()=>root.render(h(RoutingSettings,{rpc,ui})))
-  expect(host.querySelector('[aria-label="路由策略"]')).toBeNull()
-  expect(host.textContent).not.toContain('policy-v2')
-  expect(host.textContent).toContain('AUTO 已使用新策略')
+it('spec Scenario "旧映射配置不影响路由并在保存时移除" (settings page notice)', async () => {
+  const withDeprecated={...view(),deprecated:['childRoutes','mainEfforts','policy']}
+  await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async()=>({ok:true,value:withDeprecated})},ui})))
+  expect(host.querySelector('[role=status][data-deprecated]')?.textContent).toMatch(/不再生效/)
+  expect(host.textContent).toMatch(/下次保存.*移除/)
   expect(host.querySelectorAll('[data-tier]')).toHaveLength(0)
+  expect(host.querySelector('[role=tablist]')).toBeNull()
+  act(()=>root.unmount()); root=createRoot(host)
+  await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async()=>({ok:true,value:{...view(),deprecated:[]}})},ui})))
+  expect(host.querySelector('[data-deprecated]')).toBeNull()
 })
-it('strategy entry exposes executable criteria and model slots without saving settings',async()=>{
+it('spec Scenario "策略说明来自规则文件与注册表"',async()=>{
   const calls:string[]=[]
-  const data={...view(),settings:{...view().settings,policy:'policy-v2' as const}}
+  const data=view()
   await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async(_,endpoint)=>{calls.push(endpoint);return {ok:true,value:data}}},ui})))
   const details=host.querySelector('details')!
   expect(details.open).toBe(false)
@@ -82,27 +77,15 @@ it('strategy entry exposes executable criteria and model slots without saving se
     expect(details.textContent).toContain(q.instructions)
     for(const text of Object.values(q.criteria))expect(details.textContent).toContain(text)
   }
-  for(const s of registry.strategies)for(const model of Object.values(s.childModels))expect(details.textContent).toContain(model)
+  for(const s of registry.strategies){expect(details.textContent).toContain(s.label);for(const model of Object.values(s.childModels))expect(details.textContent).toContain(model)}
+  expect(host.querySelectorAll('[data-tier]')).toHaveLength(0)
+  expect(host.querySelector('[role=tablist]')).toBeNull()
   details.open=true;details.dispatchEvent(new Event('toggle'))
   expect(details.open).toBe(true)
   expect(calls).toEqual(['auto-model-routing.settings'])
   expect((Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='保存') as HTMLButtonElement).disabled).toBe(true)
 })
-it('family menu intersects every current model and cap without using child allowlist', async () => {
-  const data = view(); data.models[1]!.reasoningEfforts = ['medium', 'high']
-  const rpc = { call: async () => ({ ok: true, value: data }) }
-  await act(async () => root.render(h(RoutingSettings, { rpc, ui })))
-  await clickLabel('simple 主会话推理等级')
-  expect(Array.from(document.querySelectorAll('[role=menuitemradio]')).map(el => el.textContent)).toEqual(['medium', 'high'])
-  await click('medium'); await click('GPT')
-  await clickLabel('simple 主会话推理等级')
-  expect(Array.from(document.querySelectorAll('[role=menuitemradio]')).map(el => el.textContent)).toEqual(['low', 'medium'])
-  await click('low')
-  await clickLabel('simple 子会话推荐'); await click('推理等级')
-  expect(Array.from(document.querySelectorAll('[role=menuitemradio]')).map(el => el.textContent)).toEqual(['low', 'medium', 'high', 'xhigh'])
-  await click('medium')
-})
-it('key success/config failure clears only secret and reports partial save without losing drafts', async () => {
+it('spec Scenario "独立保存结果与不泄漏"', async () => {
   const rpc = { call: async (_: string, endpoint: string) => endpoint.endsWith('saveSettings') ? { ok: false, error: { message: 'invalid' } } : { ok: true, value: view() } }
   await act(async () => root.render(h(RoutingSettings, { rpc, ui })))
   const input = host.querySelector('input[type=password]') as HTMLInputElement
@@ -120,7 +103,6 @@ it('unavailable child service and readonly environment key still allow unrelated
   await act(async () => root.render(h(RoutingSettings, { rpc, ui })))
   expect((host.querySelector('input[type=password]') as HTMLInputElement).disabled).toBe(true)
   expect(host.textContent).toContain('重启')
-  expect((host.querySelector('[aria-label="simple 子会话推荐"]') as HTMLButtonElement).disabled).toBe(true)
   await click('AUTO'); await click('保存')
   expect(calls).toContain('auto-model-routing.saveSettings')
 })

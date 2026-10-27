@@ -221,14 +221,11 @@ it('binds concurrent tool-created identities, records actual requests, and resto
   expect(h.calls.at(-1)?.model).toBe(h.store.get(child.id)?.route?.model)
   expect(h.jev.bodies).toHaveLength(1)
 })
-it('keeps legacy and manual creation free from policy decisions', async () => {
+it('keeps MANUAL creation free from routing decisions', async () => {
   const h = await harness(); h.modes.set(h.parent.id,{ mode: 'MANUAL' })
   await h.invoke()
   expect(h.jev.bodies).toHaveLength(0)
   expect(h.store.get(h.handles[1]!.agent.id)).toBeUndefined()
-  h.configure('legacy'); h.modes.set(h.parent.id,{ mode: 'AUTO' })
-  await h.invoke()
-  expect(h.jev.bodies).toHaveLength(0)
 })
 it('child judgment excludes injected non-user instructions before truncation', async () => {
   const h = await harness()

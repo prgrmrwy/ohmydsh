@@ -45,9 +45,8 @@ it('keeps first decision facts separate from immutable bindings and feedback',()
 it('persists message-bound feedback with modification cancellation and validation',async()=>{
  const file=join(mkdtempSync(join(tmpdir(),'feedback-')),'feedback.jsonl');const book=new FeedbackBook(file)
  book.bind({sessionId:'s',messageId:'m',decisionId:1,depth:'baseline',model:'sol',effort:'medium'})
- const legacy={lookup:()=>undefined,label:()=>{throw Error('legacy must not write')}}
  const resolve=async()=>({id:'s'})
- const call=(feedback:unknown,messageId='m')=>labelEndpoint({sessionId:'s',messageId,feedback},resolve,legacy,book)
+ const call=(feedback:unknown,messageId='m')=>labelEndpoint({sessionId:'s',messageId,feedback},resolve,book)
  expect((await call('too-high')).status).toBe(200)
  expect(new FeedbackBook(file).lookup('s','m')?.feedback).toBe('too-high')
  await call('appropriate');expect(book.lookup('s','m')?.feedback).toBe('appropriate')

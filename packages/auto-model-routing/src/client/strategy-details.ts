@@ -1,5 +1,5 @@
 import { createElement as h } from 'react'
-import questions from '../policy-v2-rubric.json' with { type: 'json' }
+import questions from '../rubric.json' with { type: 'json' }
 import { registry } from '../strategies/index.js'
 
 /** Read-only: criteria and slots are imported from the executable policy, never copied. */

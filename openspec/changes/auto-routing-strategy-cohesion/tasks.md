@@ -24,15 +24,15 @@
   - build the `route_subagent` `provider`/`family` enums from the registry.
 
   Make 2.1 pass.
-- [ ] 2.3 Write a failing test "家族知识只有一个来源" in `content.test.ts`. Remove the remaining family literals from source until it passes (including the locked-state copy in `client/index.ts` and `client/strategy-details.ts`).
-- [ ] 2.4 Refactor. Keep the full suite green.
+- [x] 2.3 Write a failing test "家族知识只有一个来源" in `content.test.ts`. Remove the remaining family literals from source until it passes (including the locked-state copy in `client/index.ts` and `client/strategy-details.ts`).
+- [x] 2.4 Refactor. Keep the full suite green.
 
 ## 3. Remove the legacy chain
 
-- [ ] 3.1 Write failing tests: "旧判档账本不再增长且标注参数被拒" (`host.integration.test.ts`); "提交旧映射字段被拒", "旧映射配置不影响路由并在保存时移除" (`settings.test.ts`, plus the settings-page message in `settings-section.dom.test.ts`).
-- [ ] 3.2 Delete the files and branches listed in design D4: `router.ts`, the four-tier `rubric.json`, `judgements.ts`, `client/route-picker.ts`, the mapping logic in `settings*.ts`, the mapping tabs in the settings page, the four-tier menu in `label.ts`, the legacy hooks and Router in `index.ts` and `endpoints.ts`, the legacy branch in `subagent-tool.ts`, `scripts/label-report.mjs` (and its `files` entry), and `eval/run.mjs` / `cases.json` / `baseline.json`. Rename `policy-v2-rubric.json` to `rubric.json` (keep the bytes identical). Add `deprecated` to settings reads. Make 3.1 pass.
-- [ ] 3.3 Delete the corresponding legacy tests (see test-plan Coverage Notes). Remove `previous` from `context.ts`'s `buildState` and make the first line a fixed string. Have `state.ts` read `previous` but never write it.
-- [ ] 3.4 Refactor. Keep the full suite green.
+- [x] 3.1 Write failing tests: "旧判档账本不再增长且标注参数被拒" (`host.integration.test.ts`); "提交旧映射字段被拒", "旧映射配置不影响路由并在保存时移除" (`settings.test.ts`, plus the settings-page message in `settings-section.dom.test.ts`).
+- [x] 3.2 Delete the files and branches listed in design D4: `router.ts`, the four-tier `rubric.json`, `judgements.ts`, `client/route-picker.ts`, the mapping logic in `settings*.ts`, the mapping tabs in the settings page, the four-tier menu in `label.ts`, the legacy hooks and Router in `index.ts` and `endpoints.ts`, the legacy branch in `subagent-tool.ts`, `scripts/label-report.mjs` (and its `files` entry), and `eval/run.mjs` / `cases.json` / `baseline.json`. Rename `policy-v2-rubric.json` to `rubric.json` (keep the bytes identical). Add `deprecated` to settings reads. Make 3.1 pass.
+- [x] 3.3 Delete the corresponding legacy tests (see test-plan Coverage Notes). Remove `previous` from `context.ts`'s `buildState` and make the first line a fixed string. Have `state.ts` read `previous` but never write it.
+- [x] 3.4 Refactor. Keep the full suite green.
 
 ## 4. Remove version concepts and make old data read-only compatible
 

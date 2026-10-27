@@ -7,7 +7,7 @@ import { RoutingChip } from '../src/client/index.js'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const on = { decisionToast: true }
-const decision = (id: number) => ({ id, source: 'main', tier: 'complex', effort: 'xhigh', confidence: 0.9, probabilities: { complex: 0.9, standard: 0.1 }, ms: 500 })
+const decision = (id: number) => ({ id, source: 'main', tier: 'higher', depth: 'higher', effort: 'xhigh', status: 'applied', confidence: 0.9, probabilities: { baseline: 0.1, higher: 0.9 }, ms: 500, provider: 'claude', model: 'claude-opus-5-5', decisionProvider: 'openrouter', decisionModel: 'typesafe/jev-1.13' })
 let root: Root, host: HTMLElement
 beforeEach(() => { vi.useFakeTimers(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers() })
@@ -23,16 +23,16 @@ const toast = () => document.body.querySelector('.amr-toast')?.textContent ?? nu
 const poll = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(3000) }) }
 const mount = async (sessionId: string, rpc: unknown) => { await act(async () => { root.render(createElement(RoutingChip, { sessionId, rpc: rpc as never })) }) }
 
-it('first poll only primes; a new id shows once and expires after 3 seconds', async () => {
+it('spec Scenario "提示只显示一次且 3 秒消失"', async () => {
  const rpc = rpcFor({ S: [{ ...on, mode: 'AUTO', decision: decision(3) }, { ...on, mode: 'AUTO', decision: decision(3) }, { ...on, mode: 'AUTO', decision: decision(4) }] })
  await mount('S', rpc)
  expect(toast()).toBeNull()            // id 3 existed before mounting
  await poll(); expect(toast()).toBeNull() // same id again
- await poll(); expect(toast()).toContain('主会话判断 · complex → xhigh')
- expect(toast()).toContain('standard 10% / complex 90%')
+ await poll(); expect(toast()).toContain('主会话 · 已应用')
+ expect(toast()).toContain('投入分布：baseline 10% / higher 90%')
  expect(toast()).not.toContain('置信')
  await act(async () => { await vi.advanceTimersByTimeAsync(2900) })
- expect(toast()).toContain('主会话判断')
+ expect(toast()).toContain('主会话 · 已应用')
  await act(async () => { await vi.advanceTimersByTimeAsync(100) })
  expect(toast()).toBeNull()
  await poll(); expect(toast()).toBeNull() // id 4 never re-shows
@@ -50,7 +50,7 @@ it('toast still disappears when the decision vanishes before it expires', async 
  const queue = [{ mode: 'AUTO' }, { ...on, mode: 'AUTO', decision: decision(5) }]
  const rpc = { call: async (_c: string, endpoint: string) => ({ ok: true, value: endpoint.endsWith('setMode') ? { mode: 'MANUAL' } : (queue.length > 1 ? queue.shift() : queue[0]) }) }
  await mount('S', rpc)
- await poll(); expect(toast()).toContain('主会话判断')
+ await poll(); expect(toast()).toContain('主会话 · 已应用')
  // Toggling within the second returns a view without `decision` (e.g. switch off); the hint must still go away.
  await act(async () => { host.querySelector('button')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
  await act(async () => { await vi.advanceTimersByTimeAsync(3100) })
@@ -66,7 +66,7 @@ it('toast is visible while the composer hides the chip', async () => {
  await act(async () => { root.render(createElement(RoutingChip, { sessionId: 'S', rpc: rpc as never })) })
  await poll()
  const el = document.body.querySelector('.amr-toast')
- expect(el?.textContent).toContain('主会话判断')
+ expect(el?.textContent).toContain('主会话 · 已应用')
  expect(hidden.contains(el)).toBe(false)
 })
 
@@ -84,7 +84,7 @@ it('toast is horizontally centred on the chip', async () => {
  } finally { spy.mockRestore() }
 })
 
-it('new policy tooltip keeps separate confidence and application state when toast is off',async()=>{
+it('tooltip keeps separate confidence and application state when toast is off',async()=>{
  const d={...decision(30),depth:'baseline',capability:'bounded',capabilityConfidence:.72,status:'applied',decisionProvider:'typesafe',decisionModel:'jev-1.13.0'}
  await act(async()=>root.render(createElement(RoutingChip,{sessionId:'S',rpc:rpcFor({S:[{mode:'AUTO',decision:d,decisionToast:false}]}) as never,initiallyOpen:true})))
  expect(toast()).toBeNull()

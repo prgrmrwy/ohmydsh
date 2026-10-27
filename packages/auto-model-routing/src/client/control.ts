@@ -10,9 +10,8 @@ export type PanelEvent = 'enter' | 'focus' | 'leave' | 'blur'
 export const panelOpenAfter = (event: PanelEvent): boolean => event === 'enter' || event === 'focus'
 
 /** Latest Jev decision as returned by the state endpoint when the hint switch is on. */
-export interface Decision { id: number; source: 'main' | 'subagent'; tier: string; effort: string; model?: string; confidence?: number; probabilities?: Record<string, number>; ms: number; depth?: string; capability?: string; capabilityConfidence?: number; capabilityProbabilities?: Record<string, number>; decisionProvider?: string; decisionModel?: string; provider?: string; status?: string }
+export interface Decision { id: number; source: 'main' | 'subagent'; tier?: string; effort: string; model?: string; confidence?: number; probabilities?: Record<string, number>; ms: number; depth: string; capability?: string; capabilityConfidence?: number; capabilityProbabilities?: Record<string, number>; decisionProvider?: string; decisionModel?: string; provider?: string; status?: string }
 export interface Toast { id: number; lines: string[] }
-const TIER_ORDER = ['simple', 'standard', 'complex', 'escalated']
 const pct = (v: number) => `${Math.round(v * 100)}%`
 export const TOAST_MS = 3000
 
@@ -23,7 +22,7 @@ const spreadText = (order: string[], values?: Record<string, number>) => {
 
 /** Shared by the persistent hover panel and transient decision hint. */
 export function toastText(d: Decision): string[] {
-  if (d.depth) return [
+  return [
     `${d.source === 'main' ? '主会话' : '子任务'} · ${d.status === 'applied' ? '已应用' : d.status === 'failed' ? '未应用' : d.status === 'unsupported' ? '不支持调整' : '已判断/待应用'}`,
     ...(d.capability ? [`能力 ${d.capability} · 判定确定度 ${d.capabilityConfidence === undefined ? '未提供' : pct(d.capabilityConfidence)}`] : []),
     ...(d.capability ? [`能力分布：${spreadText(['bounded', 'analytical', 'frontier', 'insufficient_context'], d.capabilityProbabilities)}`] : []),
@@ -33,14 +32,6 @@ export function toastText(d: Decision): string[] {
     `${d.decisionProvider ?? '未知服务'} / ${d.decisionModel ?? '未知模型'} · ${(d.ms / 1000).toFixed(2)}s`,
     '确定度 = (最高概率 − 1/n) ÷ (1 − 1/n)，n 为候选数；不是任务成功率',
   ]
-  const head = [
-    d.source === 'main' ? '主会话判断' : '子会话判断',
-    `${d.tier} → ${d.model ? `${d.model} · ` : ''}${d.effort}`,
-    `${(d.ms / 1000).toFixed(2)}s`,
-  ].join(' · ')
-  const spread = TIER_ORDER.filter(t => d.probabilities?.[t] !== undefined && Math.round(d.probabilities[t]! * 100) > 0)
-    .map(t => `${t} ${pct(d.probabilities![t]!)}`).join(' / ')
-  return spread ? [head, spread] : [head]
 }
 
 /** A hint is shown only for a decision id not seen before (it is hidden TOAST_MS later by the chip). */
