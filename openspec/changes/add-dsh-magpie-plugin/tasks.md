@@ -207,4 +207,4 @@ AMD3 local snapshot：119/124 complete（旧115/119历史保留；新增19.1–1
 - [x] 20.3 client：删除用量栏目与「刷新全部」，连接面板空状态与「获取模型与用量」，单卡提示归入分组，三档用量条，高级连接接入方式；改写 cards-render/access-ui 测试。
 - [x] 20.4 双语 README：重试/超时、用量刷新与颜色、连接方式（含 Tailscale 属直连、Cloudflare 524 提醒、欢迎 issue/PR）。
 - [x] 20.5 本包 test（34 files / 248 tests）、typecheck、build 通过；本地 worktree 需 `--fsModuleCachePath` 指向可写目录。
-- [ ] 20.6 部署后 GUI 验收：设置页布局、Cloudflare Access 切换、真实长推理请求不再 90s 超时、断网/5xx 时 DSH 显示重试。
+- [x] 20.6 部署后 GUI 验收（2026-10-27 用户确认通过）：设置页布局、Cloudflare Access 切换、真实长推理请求不再 90s 超时、断网/5xx 时 DSH 显示重试。
