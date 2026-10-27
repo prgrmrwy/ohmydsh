@@ -4,7 +4,12 @@
 
 [English](README.md) · 简体中文
 
-![侧边栏效果：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）](docs/screenshot.png)
+<p align="center">
+  <img src="docs/overview.png" alt="真实侧边栏：每个会话行显示所选 provider 与 model 的 logo" height="300">
+  <img src="docs/screenshot.png" alt="显示规则：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）" height="300">
+</p>
+
+*左：隔离 DSH 实例中的真实侧边栏（演示会话）；右：单一与复合角标的显示规则。*
 
 <!-- problem -->
 DeepSeek Harness（DSH）的侧边栏里每个会话行看起来都一样，不打开会话就分不清它用的是哪个 provider 和 model。这个插件在每个会话标题前显示 provider + model 图标，取值于输入框当前选中的模型，切换后立刻更新。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`），在 provider logo 的右下角叠一个缩小的 model logo。

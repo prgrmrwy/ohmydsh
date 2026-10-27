@@ -4,7 +4,12 @@
 
 English · [简体中文](README.zh.md)
 
-![Sidebar rendering: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)](docs/screenshot.png)
+<p align="center">
+  <img src="docs/overview.png" alt="Real sidebar: each session row shows the logo of its selected provider and model" height="300">
+  <img src="docs/screenshot.png" alt="Rendering rules: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)" height="300">
+</p>
+
+*Left: the real sidebar in an isolated DSH instance with demo sessions. Right: rendering rules for single and composite badges.*
 
 <!-- problem -->
 In the DeepSeek Harness (DSH) sidebar every session row looks alike, so you cannot tell which provider and model a conversation uses without opening it. This plugin shows a provider + model icon in front of each session title, read from the model currently selected in the composer, and updates it the moment you switch. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
