@@ -57,3 +57,19 @@ it('client_sources_stay_browser_safe',()=>{
   expect(text,file).not.toMatch(/node:/)
  }
 })
+it('spec Scenario "家族知识只有一个来源"', () => {
+ const offenders: string[] = []
+ for (const [file, text] of sources()) {
+  if (file.startsWith('strategies/') || file.startsWith('strategies\\')) continue
+  const checks: [string, RegExp][] = [
+   ['model id', /claude-haiku-5-5|claude-sonnet-5-5|claude-opus-5-5|claude-fable-5-1|gpt-6-luna|gpt-6\.1-sol|gpt-6-astra/],
+   ['family union', /'claude'\s*\|\s*'codex'|'codex'\s*\|\s*'claude'/],
+   ['provider literal check', /\.(?:id|provider)\s*===\s*'(?:claude|codex)'|===\s*'(?:claude|codex)'/],
+   ['family id list', /\[\s*'claude'\s*,\s*'codex'\s*\]|\{\s*id:\s*'(?:claude|codex)'/],
+   ['family label copy', /Claude\s*\/\s*GPT/],
+   ['family prefix match', /\^\(\?:?claude\|gpt\)-|\(claude\|gpt\)-|startsWith\('(?:claude|gpt)-'\)|\/\^claude-|\/\^gpt-/],
+  ]
+  for (const [kind, pattern] of checks) if (pattern.test(text)) offenders.push(`${file}: ${kind}`)
+ }
+ expect(offenders).toEqual([])
+})

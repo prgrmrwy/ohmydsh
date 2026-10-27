@@ -12,6 +12,9 @@ import { IconInfoOutlineRegular, IconGaugeOutlineRegular, Menu, Tooltip } from '
 import { LabelButton, type LabelUi } from './label.js'
 import * as settingsUi from '@deepseek-ai/dsh-client-ui-primitives'
 import { RoutingSettings } from './settings-section.js'
+import { registry } from '../strategies/index.js'
+/** Supported families as the user sees them. */
+const FAMILIES = registry.labels().join(' / ')
 import { installRoutingNavIcon } from './nav-icon.js'
 
 interface AutoSupport { supported: boolean; provider?: string; model?: string }
@@ -161,9 +164,9 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
     ? [
         h('p', { key: 'locked-title' }, h('strong', null, 'AUTO 不支持当前模型')),
         h('p', { key: 'locked-model' }, `${lockedModel} 不在自动路由支持范围，已切换为 MANUAL。`),
-        h('p', { key: 'locked-note' }, '目前仅支持 Claude / GPT 系列模型；其他模型策略欢迎提交 issue 或 PR：'),
+        h('p', { key: 'locked-note' }, `目前仅支持 ${FAMILIES} 系列模型；其他模型策略欢迎提交 issue 或 PR：`),
         h('p', { key: 'locked-link' }, h('a', { href: REPO_URL, target: '_blank', rel: 'noopener noreferrer' }, REPO_URL)),
-        h('p', { key: 'locked-hint', className: 'amr-muted' }, '切回 Claude / GPT 系列模型后，可重新点击启用 AUTO。'),
+        h('p', { key: 'locked-hint', className: 'amr-muted' }, `切回 ${FAMILIES} 系列模型后，可重新点击启用 AUTO。`),
         error && h('p', { key: 'error', role: 'alert', className: 'amr-error' }, error),
       ]
     : [
@@ -183,7 +186,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       type: 'button', className: 'amr-trigger', disabled: busy || !view, onClick: () => { if (locked) return; void toggle() },
       'data-disabled': off ? 'true' : undefined, 'data-locked': locked ? 'true' : undefined,
       'aria-disabled': locked ? 'true' : undefined, style: { border: 'none' },
-      title: locked ? 'AUTO 仅支持 Claude / GPT 系列模型；悬停查看说明' : off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
+      title: locked ? `AUTO 仅支持 ${FAMILIES} 系列模型；悬停查看说明` : off ? `Jev 判档已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
       'aria-label': locked ? `推理强度模式：${view?.mode ?? 'MANUAL'}（AUTO 不支持当前模型，不可切换）` : `推理强度模式：${view?.mode ?? '加载中'}，点击切换`,
     }, h('span', null, locked ? (view?.mode ?? 'MANUAL') : off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'), locked ? h(IconInfoOutlineRegular, { size: 14, className: 'amr-icon amr-info' }) : h(SwapIcon)),
     toast && !open && (typeof document === 'undefined'

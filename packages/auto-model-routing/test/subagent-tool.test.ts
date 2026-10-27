@@ -193,3 +193,24 @@ it('explicit_model_manual_skips_jev', async () => {
  expect(def.output!.render({} as never, result as never)[0]).toMatchObject({ text: expect.stringContaining('只传用户或 lead 指定的值') })
  expect(server.bodies).toHaveLength(0)
 })
+it('spec Scenario "未给出家族且 provider 有多个家族时不猜测"', async () => {
+ const model={provider:'dsh-magpie-connector',model:'claude/claude-haiku-5-5',name:'Haiku',reasoningEfforts:['low','medium','high','xhigh']}
+ const {def,state,server}=await tool(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'baseline'}}}),undefined,undefined,{readSettings:()=>CURRENT_DEFAULTS,catalog:async()=>({models:[model],childAllowlist:{status:'enabled',allowedModels:[model]}})})
+ const before=state.read('S1')
+ const error=await def.execute({task:'synthetic',provider:'dsh-magpie-connector'},exec()).then(()=>undefined,e=>e as Error)
+ expect(error?.message).toMatch(/unsupported/);expect(error?.message).toMatch(/显式指定模型/)
+ expect(state.read('S1')).toEqual(before)
+ expect(server.bodies.length).toBeLessThanOrEqual(1)
+})
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "未注册家族的 Magpie 模型需显式模型与可验证 effort" (%s)', async provider => {
+ const m={provider,model:'opencode-go/kimi-k3',name:'Kimi',reasoningEfforts:['low','high'],defaultEffort:'high'}
+ let catalog:RoutingCatalog={models:[m],childAllowlist:{status:'enabled',allowedModels:[m]}}
+ const {def,server}=await tool(json(200,{answers:{depth:{choice:'baseline'}}}),undefined,undefined,{readSettings:()=>CURRENT_DEFAULTS,catalog:async()=>catalog})
+ expect(await def.execute({task:'t',provider,model:m.model},exec())).toMatchObject({model:m.model,reasoning_effort:'high'})
+ const {defaultEffort:_,...noDefault}=m
+ catalog={models:[noDefault],childAllowlist:{status:'enabled',allowedModels:[noDefault]}}
+ await expect(def.execute({task:'t',provider,model:m.model},exec())).rejects.toThrow()
+ expect(await def.execute({task:'t',provider,model:m.model,reasoning_effort:'low'},exec())).toMatchObject({model:m.model,reasoning_effort:'low'})
+ await expect(def.execute({task:'t',provider,model:'../kimi-k3',reasoning_effort:'low'},exec())).rejects.toThrow()
+ expect(server.bodies).toHaveLength(2)
+})

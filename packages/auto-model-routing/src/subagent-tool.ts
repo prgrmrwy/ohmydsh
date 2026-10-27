@@ -8,9 +8,7 @@ import { buildState } from './context.js'
 import type { Judgement } from './router.js'
 import type { RoutingState } from './state.js'
 import { choosePolicyRoute, modelFamily } from './routing.js'
-import { registry } from './strategies/index.js'
-const POLICY_PROVIDERS = registry.providers()
-const magpieProvider = (p: string) => registry.hasProvider(p) && p !== 'claude' && p !== 'codex'
+import { registry as builtin, type Registry } from './strategies/index.js'
 type PolicyProvider = string
 import { policyVersion } from './jev.js'
 
@@ -22,6 +20,7 @@ export interface ToolDeps {
   readSettings?: () => Settings
   catalog?: () => RoutingCatalog | Promise<RoutingCatalog>
   judged?: (sessionId: string, value: Omit<Judgement, 'id'>) => void
+  registry?: Registry
 }
 
 /** The ordinary session a caller belongs to; undefined when any link is no longer live (treated as MANUAL). */
@@ -39,16 +38,18 @@ const MANUAL_TEXT = '主会话为 MANUAL：不判档，按官方默认委派；�
 
 /** Sub-agent decision tool: same Jev judgment as the main session, only while the root session is AUTO. Writes no state. */
 export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
+  const registry = deps.registry ?? builtin
+  const magpieProvider = (p: string) => registry.hasProvider(p) && registry.familyOfChild(p, '') === undefined
   return defineTool({
     name: 'route_subagent',
     description: 'When policy-v2 is selected, this tool is an optional preview only: use the official fresh creation tool directly for exact-child automatic routing, do not turn preview output into explicit user constraints; fork is unsupported. Under the legacy policy: Call before every sub-agent delegation, whatever the task size. Picks provider/model/reasoning_effort with the Jev decision model; pass provider, model and reasoning_effort explicitly to the sub-agent tool, or the sub-agent inherits this session\'s effort. Sends the task text (redacted, up to 8000 characters) to OpenRouter/TypeSafe only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. If the user or lead already chose the sub-agent model, pass it as model: only reasoning_effort is routed and the model is kept. On error: pause delegation and ask the user; never guess a tier.',
     timeoutMs: 5000,
     parameters: {
       task: { type: 'string', required: true, description: 'The task the sub-agent will do.' },
-      provider: { type: 'string', required: true, enum: [...POLICY_PROVIDERS], description: 'Exact transport provider. Magpie is available only under policy-v2.' },
+      provider: { type: 'string', required: true, enum: registry.providers(), description: 'Exact transport provider. Magpie is available only under policy-v2.' },
       model: { type: 'string', description: 'Sub-agent model already chosen by the user or lead; when given, only reasoning_effort is routed.' },
       reasoning_effort: { type: 'string', description: 'Explicit effort constraint for policy-v2; preserved and validated, never silently replaced.' },
-      family: { type: 'string', enum: ['claude','codex'], description: 'Magpie automatic capability family; required when no model is explicitly supplied.' },
+      family: { type: 'string', enum: registry.ids(), description: 'Magpie automatic capability family; required when no model is explicitly supplied.' },
       path: { type: 'string', enum: ['ordinary','fork','teammate'], description: 'policy-v2 creation path; fork remains unsupported until real history compatibility is verified.' },
     },
     output: {
@@ -87,7 +88,7 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
           : await jev.judgePolicy(buildState({ text: args.task }), exec.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
         if (result.kind !== 'ok') throw new Error('policy-v2 Jev 判断失败或取消；暂停委派并询问用户')
         if (result.capability === 'insufficient_context') return { routed: false, status: 'needs-context', policyVersion, reason: '请补充任务目标与范围' }
-        const route = choosePolicyRoute(args.provider as PolicyProvider, result.capability ?? 'bounded', result.depth, await deps.catalog!(), deps.readSettings!().effortCap, explicit, args.family ?? (args.model ? modelFamily(args.provider, args.model) : undefined))
+        const route = choosePolicyRoute(args.provider as PolicyProvider, result.capability ?? 'bounded', result.depth, await deps.catalog!(), deps.readSettings!().effortCap, explicit, args.family ?? (args.model ? modelFamily(args.provider, args.model, registry) : undefined), registry)
         return { status: 'recommended', policyVersion, ...(result.capability ? { capability: result.capability } : {}), depth: result.depth, provider: route.provider, model: route.model, reasoning_effort: route.reasoningEffort }
       }
       if (magpieProvider(args.provider)) throw new Error('Magpie 路由需显式选择 policy-v2；原策略不变')

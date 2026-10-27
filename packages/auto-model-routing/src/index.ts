@@ -21,18 +21,20 @@ import { buildState, previousTurn } from './context.js'
 import { policyHost } from './policy-host.js'
 import { PolicyStore } from './policy-store.js'
 import { currentMainSelection, mainSupported } from './support.js'
+import { createRegistry, registry as builtin, type FamilyStrategy } from './strategies/index.js'
 
 export const name = 'dsh-auto-model-routing'
 export const inject = ['llm', 'agents', 'tools']
 const knownEfforts = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
 /** Test seams only; production uses the defaults. */
-export interface Config { home?: string; jevBase?: string; jevTimeoutMs?: number }
+export interface Config { home?: string; jevBase?: string; jevTimeoutMs?: number; strategies?: readonly FamilyStrategy[] }
 
 export function apply(ctx: Context, config: Config = {}): void {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
+  const registry = config.strategies ? createRegistry(config.strategies) : builtin
   const settings = new SettingsStore(resolve(home, 'plugins/dsh-auto-model-routing/config.json'))
-  const hostSettings = settingsHost(ctx, settings)
+  const hostSettings = settingsHost(ctx, settings, registry)
   const jev = new JevClient({ get: hostSettings.credential }, config.jevBase, config.jevTimeoutMs ?? (() => settings.read().settings.jevTimeoutMs), config.jevBase ? undefined : () => settings.read().settings.decisionService)
   const stateFiles = new FileStateStore(resolve(home, 'state/auto-model-routing/sessions'))
   const state = new RoutingState(stateFiles)
@@ -47,15 +49,15 @@ export function apply(ctx: Context, config: Config = {}): void {
   const feedback = new FeedbackBook(resolve(home, 'state/auto-model-routing/allocation-feedback.jsonl'))
   // Official writer is available only while the session controller is mounted.
   let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
-  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2')), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(true) })
+  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, 'state/auto-model-routing/policy-v2'), registry), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(), registry })
   const toastOn = (): boolean => settings.read().settings.decisionToast
-  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, judged: (sessionId, value) => router.judged(sessionId, value) })))
+  ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, judged: (sessionId, value) => router.judged(sessionId, value), registry })))
   ctx.on('agent/created', ({ agent, source }) => {
     // Factory resume announces `resume`; a nonzero initial seed also excludes restored/forked histories.
     if (source !== 'startup' || agent.session.header.origin === 'subagent' || agent.session.firstLiveSeq !== 0 || agent.session.header.isSeeded || agent.session.snapshotEvents().some(event => event.type === 'session/end-seed') || stateFiles.get(agent.id)) return
     if (settings.read().settings.defaultMode !== 'AUTO') return
-    // A new session whose default main model is outside AUTO's Claude/GPT scope starts in MANUAL.
-    if (!mainSupported(currentMainSelection(ctx, agent))) return
+    // A new session whose default main model is outside AUTO's registered families starts in MANUAL.
+    if (!mainSupported(currentMainSelection(ctx, agent), registry)) return
     state.setMode(agent.id, 'AUTO')
     return undefined
   })
@@ -164,8 +166,8 @@ export function apply(ctx: Context, config: Config = {}): void {
             const sessionId = (payload as { sessionId: string }).sessionId
             const agent = await resolveSessionAgent(sessionId).catch(() => undefined)
             const selection = agent ? currentMainSelection(ctx, agent) : undefined
-            const supported = mainSupported(selection)
-            // Leaving AUTO is persisted: a pick outside the Claude/GPT scope must not keep judging turns.
+            const supported = mainSupported(selection, registry)
+            // Leaving AUTO is persisted: a pick outside the registered families must not keep judging turns.
             if (!supported && state.read(sessionId).mode === 'AUTO') { state.setMode(sessionId, 'MANUAL'); policy.invalidate(sessionId) }
             const value = await response.json()
             const main = policy.mainStatus(sessionId)

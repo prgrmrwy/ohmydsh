@@ -4,8 +4,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { DEFAULT_SETTINGS, SettingsStore, SettingsValidationError } from './settings.js'
 import type { RoutingCatalog } from './settings-contract.js'
-import { registry } from './strategies/index.js'
-const magpieProvider = (id: string) => registry.hasProvider(id) && id !== 'claude' && id !== 'codex'
+import { registry as builtin, type Registry } from './strategies/index.js'
 import rubric from './rubric.json' with { type: 'json' }
 
 import { JevClient } from './jev.js'
@@ -14,11 +13,11 @@ const keyRef = (provider: DecisionProvider = 'openrouter') => credentialRef(DECI
 interface AllowlistService { current(): { enabled: boolean; allowedModels: { provider: string; model: string }[] } }
 
 /** Only the fixed credential reference and public catalog metadata cross this adapter. */
-export function settingsHost(ctx: Context, store: SettingsStore) {
+export function settingsHost(ctx: Context, store: SettingsStore, registry: Registry = builtin) {
   const environment = launchEnvironmentOf(ctx)
   const credentials = () => ctx.get('credentials')
-  const catalog = async (includeMagpie = store.read().settings.policy === 'policy-v2'): Promise<RoutingCatalog> => {
-    const models = (await Promise.all(ctx.llm.listProviders().filter(p => p.id === 'claude' || p.id === 'codex' || (includeMagpie && magpieProvider(p.id))).map(async provider => {
+  const catalog = async (): Promise<RoutingCatalog> => {
+    const models = (await Promise.all(ctx.llm.listProviders().filter(p => registry.hasProvider(p.id)).map(async provider => {
       try {
         return await Promise.all((await ctx.llm.listModels(provider.id)).map(async model => {
           try {
@@ -33,7 +32,7 @@ export function settingsHost(ctx: Context, store: SettingsStore) {
     try {
       if (service) {
         const current = service.current()
-        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => r.provider === 'claude' || r.provider === 'codex' || (includeMagpie && magpieProvider(r.provider))) } }
+        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => registry.hasProvider(r.provider)) } }
       }
     } catch { /* An unavailable policy must never broaden the allowed routes. */ }
     return { models, childAllowlist: { status: 'unavailable', allowedModels: [] } }

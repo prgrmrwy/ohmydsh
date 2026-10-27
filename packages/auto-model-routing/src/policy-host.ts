@@ -6,8 +6,7 @@ import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import type { JevClient, Depth, PolicyMeasure } from './jev.js'
 import { policyVersion, CATEGORY_HINTS } from './jev.js'
 import { choosePolicyRoute, policyEffort, modelFamily, validatePolicyRoute } from './routing.js'
-import { registry } from './strategies/index.js'
-const policyProvider = (p: string) => registry.hasProvider(p)
+import { registry as builtin, type Registry } from './strategies/index.js'
 const mappingVersion = 'capability-slots-2-magpie'
 import { PolicyStore, type ChildDecision } from './policy-store.js'
 import type { RoutingState } from './state.js'
@@ -17,7 +16,8 @@ import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
 import { autoSupportedModel, currentMainSelection, mainSupported } from './support.js'
 
-export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
+export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog>; registry?: Registry }) {
+  const registry = deps.registry ?? builtin
   const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: string }>()
   const rootOf = (agent: Agent): Agent | undefined => {
     let current: Agent | undefined = agent
@@ -38,7 +38,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   const decidedAt = new Map<number, number>()
   const applied = new Map<string, NonNullable<ChildDecision['decision']>>()
   const latest = new Map<string, NonNullable<ChildDecision['decision']>>()
-  /** Fall back to MANUAL when the main model left AUTO's Claude/GPT scope. */
+  /** Fall back to MANUAL when the main model left AUTO's registered families. */
   const lockUnsupportedMain = (agent: Agent) => {
     deps.state.setMode(agent.id, 'MANUAL')
     mainStatus.delete(agent.id)
@@ -53,9 +53,9 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     const path = exec.name === 'subagent_fork' || (exec.name === 'spawn_teammate' && args.context === 'fork') ? 'fork' : exec.name === 'spawn_teammate' ? 'teammate' : 'ordinary'
     if (path === 'fork') throw new Error('policy-v2 unsupported：fork 的真实历史兼容尚未验证；请暂停，改用 fresh 或由用户选择关闭试验策略后继承。')
     const provider = args.provider ?? exec.agent.session.requestHeader()?.config.provider ?? exec.agent.options.provider
-    if (typeof provider !== 'string' || !policyProvider(provider)) throw new Error('policy-v2 unsupported：无法验证 provider；暂停委派并询问用户')
+    if (typeof provider !== 'string' || !registry.hasProvider(provider)) throw new Error('policy-v2 unsupported：无法验证 provider；暂停委派并询问用户')
     const parentModel = exec.agent.session.requestHeader()?.config.model ?? exec.agent.options.model
-    const family = modelFamily(provider, typeof args.model === 'string' ? args.model : parentModel ?? '')
+    const family = modelFamily(provider, typeof args.model === 'string' ? args.model : parentModel ?? '', registry)
     const explicit: ChildDecision['explicit'] = { provider,
       ...(typeof args.model === 'string' ? { model: args.model } : {}),
       ...(typeof args.reasoning_effort === 'string' ? { reasoningEffort: args.reasoning_effort } : {}) }
@@ -85,8 +85,8 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const input = userInput(decision.messages)
       const old = main.get(agent)
       if (!input.userTurn) { if (old) main.set(agent, { ...old, turn: payload.turn }); return decision }
-      // The main model left AUTO's Claude/GPT scope: judge nothing, rewrite nothing.
-      if (!mainSupported(currentMainSelection(ctx, agent))) { lockUnsupportedMain(agent); return decision }
+      // The main model left AUTO's registered families: judge nothing, rewrite nothing.
+      if (!mainSupported(currentMainSelection(ctx, agent), registry)) { lockUnsupportedMain(agent); return decision }
       applied.delete(agent.id)
       mainStatus.delete(agent.id)
       const startedEpoch = epoch(agent.id)
@@ -133,7 +133,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
         capability = result.capability ?? 'bounded'; depth = result.depth
       }
       try {
-        const route = choosePolicyRoute(explicit.provider, capability, depth, await deps.catalog(), deps.settings().effortCap, explicit, record.family)
+        const route = choosePolicyRoute(explicit.provider, capability, depth, await deps.catalog(), deps.settings().effortCap, explicit, record.family, registry)
         const parent = ctx.agents.get(SessionId(record.parentId))
         const events: readonly { type: string; data: unknown }[] = parent?.session.snapshotEvents() ?? []
         const captured = events.find(event => event.type === 'subagent/model-selection-policy')
@@ -155,7 +155,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const runtime = main.get(agent)
       if (!runtime?.active || runtime.turn !== payload.turn || runtime.epoch !== epoch(agent.id) || !enabled(agent.id)) return config
       // Authoritative gate: the request's actual model decides, whatever the picker showed earlier.
-      if (!autoSupportedModel(config.model)) { lockUnsupportedMain(agent); return config }
+      if (!autoSupportedModel(config.model, registry)) { lockUnsupportedMain(agent); return config }
       const unsupported = (effort = '模型不支持调整') => {
         const old = mainStatus.get(agent.id)
         mainStatus.set(agent.id, { ...old, policyVersion, depth: runtime.depth, reason: 'no-effort-support', ...(old?.decision ? { decision: { ...old.decision, status: 'unsupported', model: config.model, provider: config.provider, effort } } : {}) })
@@ -166,7 +166,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       if (!efforts.length) { unsupported(); return config }
       let reasoningEffort: AutomaticEffort
       try {
-        reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined)
+        reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined, registry)
       } catch (error) {
         // A supported model whose directory cannot produce an automatic effort must not fail the turn.
         ctx.logger.warn(`auto-model-routing: could not map the main reasoning effort: ${String(error)}`)
@@ -187,7 +187,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     if (record.status === 'failed') throw new Error('policy-v2 实际应用失败；暂停子请求并询问用户')
     if (record.parentId !== agent.session.header.parentSession) throw new Error('policy-v2 决策身份不匹配')
     // Existing routed instances keep their initial route even when AUTO stops making new decisions.
-    validatePolicyRoute(await deps.catalog(), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap)
+    validatePolicyRoute(await deps.catalog(), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap, registry)
     return { ...config, ...record.route } as typeof config
   }, { prepend: true })
   const confirmMainRequest = (session: Session, requestSeq: number, turn?: number) => {

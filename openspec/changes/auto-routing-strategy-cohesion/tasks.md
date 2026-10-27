@@ -15,8 +15,8 @@
 
 ## 2. Registry-driven Host boundaries (provider sets, persistence, injection)
 
-- [ ] 2.1 Write failing tests: "未给出家族且 provider 有多个家族时不猜测", "未注册家族的 Magpie 模型需显式模型与可验证 effort" (`subagent-tool.test.ts`); "新增家族只需新增策略", "记录中的家族已不在注册表" (`policy-host.integration.test.ts`, injecting a synthetic `deepseek` through `apply(ctx, { strategies })`).
-- [ ] 2.2 Implement:
+- [x] 2.1 Write failing tests: "未给出家族且 provider 有多个家族时不猜测", "未注册家族的 Magpie 模型需显式模型与可验证 effort" (`subagent-tool.test.ts`); "新增家族只需新增策略", "记录中的家族已不在注册表" (`policy-host.integration.test.ts`, injecting a synthetic `deepseek` through `apply(ctx, { strategies })`).
+- [x] 2.2 Implement:
   - add an optional `strategies` field to `Config` in `index.ts`;
   - in `policy-host.ts`, take the provider check, family inference and `delegation` type from the registry;
   - `PolicyStore` takes the registry at construction and builds its provider/family enums from it;

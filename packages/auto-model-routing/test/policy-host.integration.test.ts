@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url'
 import * as Plugin from '../src/index.js'
 import { fakeJev, json } from './fake-jev.js'
 import { PolicyStore } from '../src/policy-store.js'
+import { BUILTIN_STRATEGIES, createRegistry, type FamilyStrategy } from '../src/strategies/index.js'
 // Test the installed SDK's real fold, not a local reimplementation of picker semantics.
 const controllerEntry = pathToFileURL(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-api-session-controller'))
 const { installModelSelectionProjection } = await import(new URL('./types/model-selection-projection.js', controllerEntry).href)
@@ -23,10 +24,10 @@ const { SessionCommandController } = await import(new URL('./types/commands.js',
 const { ApiSessionAgentController } = await import(new URL('./types/agent.js', controllerEntry).href)
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.(); close = undefined })
-async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' = 'claude', selectFails: boolean | 'missing' = false, main: { provider?: string; model?: string; efforts?: string[]; defaultEffort?: string } = {}) {
-  const provider = magpie || family
+async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' | 'deepseek' = 'claude', selectFails: boolean | 'missing' = false, main: { provider?: string; model?: string; efforts?: string[]; defaultEffort?: string } = {}, strategies?: readonly FamilyStrategy[]) {
+  const provider = magpie || (family === 'deepseek' ? 'opencode-go' : family)
   const modelId = (id: string) => magpie ? `${family}/${id}` : id
-  const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : ['gpt-6.1-sol','gpt-6-luna']
+  const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : family === 'deepseek' ? ['deepseek-v5'] : ['gpt-6.1-sol','gpt-6-luna']
   const mainProvider = main.provider ?? provider
   const mainModel = main.model ?? modelId(modelIds[0]!)
   /** Only an explicit override changes metadata; plain harness use keeps the original fixtures. */
@@ -95,7 +96,8 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
       if (agent) owner.consumeSelection(agent, config.provider, config.model, config.reasoningEffort)
     }
   })
-  let plugin = await ctx.plugin(Plugin, { home, jevBase: jev.base })
+  let pluginConfig: Plugin.Config = { home, jevBase: jev.base, ...(strategies ? { strategies } : {}) }
+  let plugin = await ctx.plugin(Plugin, pluginConfig)
   // The Host routes need both the connection and the session controller; the "missing controller" case mounts neither.
   if (selectFails !== 'missing') await expect.poll(() => routes.size).toBe(9)
   const parent = await ctx.agents.create({ sessionId: SessionId('parent'), agentOptions: picked }); handles.push(parent)
@@ -111,14 +113,15 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
     return { childId: child.agent.id }
   } }))
   const invoke = (args = {}) => ctx.tools.execute({ name: 'subagent', arguments: args, agent: parent.agent, callId: `call-${++n}` as never, signal: new AbortController().signal })
-  const store = new PolicyStore(join(home, 'state/auto-model-routing/policy-v2'))
+  const store = new PolicyStore(join(home, 'state/auto-model-routing/policy-v2'), strategies ? createRegistry(strategies) : undefined)
   // Set the mode through the same persisted store used by production (no controller dependency).
   const { FileStateStore } = await import('../src/state.js')
   const modes = new FileStateStore(join(home, 'state/auto-model-routing/sessions'))
   modes.set(parent.agent.id, { mode: 'AUTO' })
   close = async () => { for (const h of handles.reverse()) await h.dispose(); await plugin.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
   return { ctx, parent: parent.agent, handles, calls, invoke, callEndpoint, pickMain, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
-    restart: async () => { await plugin.dispose(); plugin = await ctx.plugin(Plugin,{ home, jevBase: jev.base }) } }
+    tools: () => ctx.tools,
+    restart: async (next?: readonly FamilyStrategy[]) => { await plugin.dispose(); if (next) pluginConfig = { home, jevBase: jev.base, strategies: next }; plugin = await ctx.plugin(Plugin, pluginConfig) } }
 }
 it('child decision persists separate confidences and actual application without task text',async()=>{
  const h=await harness('dsh-magpie-connect')
@@ -357,4 +360,38 @@ it('state reports autoSupport and refuses AUTO for an unsupported main model', a
   expect(supported).toMatchObject({ autoSupport: { supported: true, provider: 'claude', model: 'claude-opus-5-5' } })
   expect(supported.mode).toBe('MANUAL')
   expect(await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'AUTO' })).toMatchObject({ mode: 'AUTO', autoSupport: { supported: true } })
+})
+
+const deepseek: FamilyStrategy = { id: 'deepseek', label: 'DeepSeek', modelPrefixes: ['deepseek-'], transports: { 'opencode-go': '' }, effortStarts: { 'deepseek-v5': 'medium' }, childModels: { bounded: 'deepseek-v5', analytical: 'deepseek-v5', frontier: 'deepseek-v5' } }
+it('spec Scenario "新增家族只需新增策略"', async () => {
+ const strategies = [...BUILTIN_STRATEGIES, deepseek]
+ expect(() => createRegistry(strategies)).not.toThrow()
+ const h = await harness(false, false, 'deepseek', false, {}, strategies)
+ expect((await h.callEndpoint('state', { sessionId: h.parent.id })).autoSupport).toMatchObject({ supported: true })
+ h.jev.set(json(200, { answers: { depth: { choice: 'higher' } } }))
+ await h.run(h.parent, 'main task')
+ expect(h.calls.at(-1)).toMatchObject({ provider: 'opencode-go', model: 'deepseek-v5', reasoningEffort: 'high' })
+ h.jev.set(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }))
+ expect((await h.invoke()).isError).not.toBe(true)
+ const child = h.handles.at(-1)!.agent
+ expect(h.store.get(child.id)).toMatchObject({ status: 'applied', family: 'deepseek', route: { provider: 'opencode-go', model: 'deepseek-v5', reasoningEffort: 'medium' } })
+ const judged = h.jev.bodies.length
+ await h.restart()
+ await h.run(child, 'later message')
+ expect(h.calls.at(-1)).toMatchObject({ provider: 'opencode-go', model: 'deepseek-v5', reasoningEffort: 'medium' })
+ expect(h.jev.bodies).toHaveLength(judged)
+ const tool = h.tools().get('route_subagent') as unknown as { parameters: { properties: { provider: { enum: string[] }; family: { enum: string[] } } } }
+ expect(tool.parameters.properties.provider.enum).toContain('opencode-go')
+ expect(tool.parameters.properties.family.enum).toContain('deepseek')
+})
+it('spec Scenario "记录中的家族已不在注册表"', async () => {
+ const h = await harness(false, false, 'deepseek', false, {}, [...BUILTIN_STRATEGIES, deepseek])
+ h.jev.set(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }))
+ expect((await h.invoke()).isError).not.toBe(true)
+ const child = h.handles.at(-1)!.agent
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ await h.restart(BUILTIN_STRATEGIES)
+ await h.run(child, 'later message')
+ expect(h.calls).toHaveLength(requests)
+ expect(h.jev.bodies).toHaveLength(judged)
 })
