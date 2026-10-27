@@ -121,7 +121,7 @@ it('puts bindings without a snapshot in the unknown group', () => {
  expect(group(r, 'policy-v2-d774ffe6/map-1')!.decisions).toBe(1)
 })
 
-it('reports field presence, uses present calls as the mean denominator, and null for absent fields', () => {
+it('spec Scenario "缺失字段与部分出现"', () => {
  const h = makeHome()
  const usage = [{ inputTokens: 10, cacheWriteTokens: 4 }, { inputTokens: 20, cacheWriteTokens: 8 }, { inputTokens: 30, cacheWriteTokens: 0 }, { inputTokens: 40 }]
  writeSession(h, 'S1', [turn(1), user(1), ...usage.map((u, i) => call(`a-${i}`, 1, 1, u))])
@@ -132,7 +132,7 @@ it('reports field presence, uses present calls as the mean denominator, and null
  expect(t.reasoningTokens).toEqual({ sum: null, mean: null, present: 0, calls: 4 })
 })
 
-it('counts user turns without any linked call, including turns without a request header', () => {
+it('spec Scenario "无请求头的缺口回合可见"', () => {
  const h = makeHome()
  const events = []
  for (let n = 1; n <= 17; n++) events.push(...userTurn(n, `t${n}`, 2))
@@ -143,7 +143,7 @@ it('counts user turns without any linked call, including turns without a request
  expect(r.coverage).toMatchObject({ userTurns: 17, turnsWithoutRecord: 7 })
 })
 
-it('counts sessions currently in AUTO with no record in either ledger', () => {
+it('spec Scenario "无记录的 AUTO 会话"', () => {
  const h = makeHome()
  writeSession(h, 'S1', userTurn(1, 'a', 1)); bindAll(h, 'S1', 'a', 1, 1)
  judge(h, 'L1', 1)
@@ -152,7 +152,7 @@ it('counts sessions currently in AUTO with no record in either ledger', () => {
  expect(buildReport(h).coverage.autoSessionsWithoutRecord).toBe(2)
 })
 
-it('does not treat legacy AUTO turns as the before-AUTO reference', () => {
+it('spec Scenario "旧版 AUTO 回合不算作参照"', () => {
  const h = makeHome()
  const events = [header('gpt-6.1-sol', 'high', 0)]
  for (let n = 1; n <= 58; n++) events.push(...userTurn(n, `t${n}`, 1))
@@ -162,7 +162,7 @@ it('does not treat legacy AUTO turns as the before-AUTO reference', () => {
  expect(buildReport(h).referenceBeforeAuto).toEqual([])
 })
 
-it('reference lists only call counts and effort distribution', () => {
+it('spec Scenario "参照只含 effort 分布"', () => {
  const h = makeHome()
  const events = [header('gpt-6.1-sol', 'high', 0)]
  for (let n = 1; n <= 5; n++) events.push(...userTurn(n, `t${n}`, 2))
@@ -256,4 +256,22 @@ it('spec Scenario "不带版本字段的绑定确定同一分界"', () => {
  const historical = reference({})
  expect(historical).toEqual([{ model: 'gpt-6.1-sol', calls: 10, sessions: 1, effort: { high: 10 }, autoEffort: { medium: 2 } }])
  expect(reference({ version: null, strategy: 'codex' })).toEqual(historical)
+})
+it('spec Scenario "只计已绑定消息"', () => {
+ const h = makeHome()
+ writeSession(h, 'S1', userTurn(1, 'a', 31))
+ bindAll(h, 'S1', 'a', 12, 1)
+ const g = group(buildReport(h), 'policy-v2-aaaa/map-1')!
+ expect(g.decisions).toBe(1)
+ expect(g.calls).toBe(12)
+ expect(g.tokens.inputTokens).toMatchObject({ sum: 120, calls: 12 })
+})
+it('spec Scenario "同一决策跨多个请求"', () => {
+ const h = makeHome()
+ writeSession(h, 'S1', userTurn(1, 'b', 17))
+ for (let i = 0; i < 6; i++) bind(h, { session: 'S1', message: `b-${i}`, decision: 2, requestSeq: 274 })
+ for (let i = 6; i < 17; i++) bind(h, { session: 'S1', message: `b-${i}`, decision: 2, requestSeq: 512 })
+ const g = group(buildReport(h), 'policy-v2-aaaa/map-1')!
+ expect(g.decisions).toBe(1)
+ expect(g.calls).toBe(17)
 })

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- **Breaking — one AUTO strategy.** The opt-in legacy four-tier chain is removed: the tier router and its rubric, the per-family `mainEfforts` / `childRoutes` mappings and their settings tabs, the reply-bar tier menu and `label` parameter, `judgements.jsonl` writes, `scripts/label-report.mjs` and the `eval/run.mjs` baseline. Default AUTO behavior (main effort, child capability routing, exact-child binding, Magpie transports, caps, allowlists, fork refusal) is unchanged.
+- **Breaking — no strategy versions.** The `policy` setting and the `policyVersion` / `mappingVersion` / `rubricVersion` markers are gone, as is the `version` field on child records and feedback events and the usage report's `schema`. New feedback snapshots record the strategy family (`strategy`). The rule file is now `rubric.json` (same bytes).
+- **Family strategies.** Everything about the Claude and GPT families (supported main models, transport prefixes, effort starting points, capability slots, accepted providers) lives in `src/strategies/`; a new family is one strategy file plus registration. The registry rejects conflicting strategies at load.
+- **Old data stays readable.** Retired `policy`, `mainEfforts` and `childRoutes` keys are ignored, listed as `deprecated` and removed on the next settings save; submitting them is rejected. Child records written by 0.4.x restore without a version check (only the three known historical keys are tolerated, then dropped). Old feedback rows and events stay readable; the usage report keeps them in their original historical group. `judgements.jsonl` is kept read-only for the report.
+- **Rollback.** Pin the published 0.4.2 package: in `dsh.yaml`, set this entry to `source: remote`, `spec: dsh-auto-model-routing@0.4.2`, `version: 0.4.2`, run `dsh build` and restart the Host. Data boundary: child records rewritten by 0.5.0 and feedback rows written by 0.5.0 are not readable by 0.4.2 (fail closed; recreate those child sessions), and settings saved under 0.5.0 no longer contain the retired mapping keys. Back up `state/auto-model-routing/` and the plugin `config.json` before upgrading if you may roll back.
+- The package build now clears `lib/` before compiling, so deleted or renamed modules never ship from a stale output directory.
+
 ## 0.4.2
 
 - AUTO now handles Claude and GPT model families only: selecting any other main model switches the session to MANUAL instead of failing the turn in the effort mapper.

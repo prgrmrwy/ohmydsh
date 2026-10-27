@@ -10,7 +10,7 @@ let root: Root, host: HTMLElement
 beforeEach(() => { vi.useFakeTimers(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.useRealTimers() })
 
-it('a locked chip never sends setMode when clicked', async () => {
+it('spec Scenario "芯片锁定态与悬停提示"', async () => {
   const calls: string[] = []
   const view = { mode: 'MANUAL', autoSupport: { supported: false, provider: 'opencode-go', model: 'deepseek-v4.1-flash' } }
   const rpc = { call: async (_channel: string, endpoint: string) => { calls.push(endpoint); return { ok: true, value: view } } }

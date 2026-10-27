@@ -139,7 +139,7 @@ it('child decision persists separate confidences and actual application without 
  expect(JSON.stringify(record)).not.toContain('mechanical transformation')
  await h.restart();expect(h.store.get(child.id)?.decision?.capabilityConfidence).toBe(.71)
 })
-it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s children retain exact transport routes across mode changes and plugin reload',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "新旧 Magpie 子实例保持精确身份并恢复" (%s)',async(provider)=>{
  const h=await harness(provider)
  expect((await h.invoke()).isError).not.toBe(true)
  const child=h.handles[1]!.agent
@@ -156,7 +156,7 @@ it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s main keeps t
  expect(h.calls.at(-1)).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
  expect(h.parent.session.requestHeader()?.config).toMatchObject({provider,model:'claude/claude-opus-5-5',reasoningEffort:'high'})
 })
-it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('%s AUTO synchronizes the same request, official selection and global defaults',async(provider)=>{
+it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "同次主请求同步官方 effort 与 defaults" (%s)',async(provider)=>{
  const h=await harness(provider,true)
  h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}))
  await h.run(h.parent,'Main task with an explicit medium pick')
@@ -176,7 +176,7 @@ it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('%s AUTO s
  expect(h.calls.at(-1)).toMatchObject(route)
  expect(h.selections).toHaveLength(1)
 })
-it.each([true,'missing'] as const)('selection sync failure %s keeps the official effort and logs the failure',async(selectFails)=>{
+it.each([true,'missing'] as const)('spec Scenario "同步失败不丢本次请求" (%s)',async(selectFails)=>{
  const h=await harness(false,true,'claude',selectFails)
  h.jev.set(json(200,{answers:{depth:{choice:'higher'}}}))
  await h.run(h.parent,'Keep one consistent effort if synchronization cannot complete')
@@ -188,7 +188,7 @@ it.each([true,'missing'] as const)('selection sync failure %s keeps the official
  expect(h.warnings).toHaveBeenCalledWith(expect.stringContaining('could not sync the model selection'))
  expect(h.modes.get(h.parent.id)?.mode).toBe('AUTO')
 })
-it('same effort and MANUAL do not sync',async()=>{
+it('spec Scenario "手动与子请求不污染默认"',async()=>{
  const h=await harness(false,true)
  await h.run(h.parent,'Baseline uses the existing medium choice')
  h.modes.set(h.parent.id,{mode:'MANUAL'})
@@ -196,7 +196,7 @@ it('same effort and MANUAL do not sync',async()=>{
  expect(h.calls.map(c=>c.reasoningEffort)).toEqual(['medium','medium'])
  expect(h.selections).toEqual([]);expect(h.defaults).toEqual([])
 })
-it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('%s GPT main and child use supported efforts on the same transport',async(provider)=>{
+it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "Magpie 自动子路由" (%s)',async(provider)=>{
  const h=await harness(provider,true,'codex')
  h.jev.set(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'higher'}}}))
  await h.run(h.parent,'GPT main task')
@@ -233,7 +233,7 @@ it('keeps MANUAL creation free from routing decisions', async () => {
   expect(h.jev.bodies).toHaveLength(0)
   expect(h.store.get(h.handles[1]!.agent.id)).toBeUndefined()
 })
-it('child judgment excludes injected non-user instructions before truncation', async () => {
+it('spec Scenario "子会话不走主会话判断"', async () => {
   const h = await harness()
   h.ctx.on('agent/pre-step',async(payload,next)=>{
     const decision=await next()
@@ -252,7 +252,7 @@ it('main uses depth only without changing model', async () => {
   expect(h.calls.at(-1)).toMatchObject({ model: 'claude-opus-5-5', reasoningEffort: 'high' })
   expect((h.jev.bodies[0] as { questions: unknown }).questions).not.toHaveProperty('capability')
 })
-it('main request rechecks MANUAL after asynchronous model resolution', async () => {
+it('spec Scenario "异步解析期间切 MANUAL 不覆盖主请求"', async () => {
   const h=await harness()
   const resolve=h.ctx.llm.resolveModelInfo.bind(h.ctx.llm)
   h.ctx.llm.resolveModelInfo=async(...args)=>{const info=await resolve(...args);h.modes.set(h.parent.id,{mode:'MANUAL'});return info}
@@ -316,7 +316,7 @@ it('unsupported fork is denied before its tool body runs', async () => {
   const result = await h.ctx.tools.execute({ name: 'subagent_fork', arguments: {}, agent: h.parent, callId: 'fork' as never, signal: new AbortController().signal })
   expect(result.isError).toBe(true); expect(ran).toBe(false); expect(h.jev.bodies).toHaveLength(0)
 })
-it('unsupported main model drops AUTO to MANUAL without failing the turn', async () => {
+it('spec Scenario "不支持模型的请求不再导致整轮失败"', async () => {
   const h = await harness(false, false, 'claude', false, { provider: 'opencode-go', model: 'deepseek-v4.1-flash', efforts: ['low','high','max'], defaultEffort: 'max' })
   h.modes.set(h.parent.id, { mode: 'MANUAL' })
   await h.run(h.parent, 'manual baseline on an unsupported main model')
@@ -333,7 +333,7 @@ it('unsupported main model drops AUTO to MANUAL without failing the turn', async
   const ends = h.parent.session.snapshotEvents().filter(event => event.type === 'turn/end')
   expect((ends.at(-1)!.data as { reason: { kind: string } }).reason.kind).toBe('completed')
 })
-it('supported main model without a usable automatic effort keeps the official request', async () => {
+it('spec Scenario "支持范围内映射不可得不阻断请求"', async () => {
   const h = await harness(false, false, 'claude', false, { efforts: ['max'], defaultEffort: 'max' })
   h.jev.set(json(200,{ answers: { depth: { choice: 'higher' } } }))
   h.modes.set(h.parent.id, { mode: 'MANUAL' })
@@ -350,7 +350,7 @@ it('supported main model without a usable automatic effort keeps the official re
   const ends = h.parent.session.snapshotEvents().filter(event => event.type === 'turn/end')
   expect((ends.at(-1)!.data as { reason: { kind: string } }).reason.kind).toBe('completed')
 })
-it('state reports autoSupport and refuses AUTO for an unsupported main model', async () => {
+it('spec Scenario "切回受支持模型后恢复可切换"', async () => {
   const h = await harness()
   h.pickMain('opencode-go', 'deepseek-v4.1-flash')
   expect(await h.callEndpoint('state', { sessionId: h.parent.id })).toMatchObject({
@@ -488,4 +488,35 @@ it('spec Scenario "绑定标记存在但记录缺失或损坏"', async () => {
  await h.run(missing, 'restore'); await h.run(mismatched, 'restore')
  expect(h.calls).toHaveLength(requests)
  expect(h.jev.bodies).toHaveLength(judged)
+})
+it('spec Scenario "主决策在请求前后的状态"', async () => {
+ const h = await harness(false, false, 'claude', false, { efforts: ['max'], defaultEffort: 'max' })
+ h.jev.set(json(200, { answers: { depth: { choice: 'higher' } } }))
+ const states: unknown[] = []
+ // Prepended: this listener runs outermost, so it reads the state after the plugin's pre-step judged.
+ h.ctx.on('agent/pre-step', async (payload, next) => { const decision = await next(); if (payload.agent === h.parent && payload.step === 1) states.push(await h.callEndpoint('state', { sessionId: h.parent.id })); return decision }, { prepend: true })
+ await h.run(h.parent, 'only max is available')
+ expect(states[0]).toMatchObject({ decision: { source: 'main', tier: 'higher', depth: 'higher', effort: '待应用', status: 'recommended' } })
+ expect(await h.callEndpoint('state', { sessionId: h.parent.id })).toMatchObject({ reason: 'no-effort-support', decision: { status: 'unsupported' } })
+})
+it('spec Scenario "完全显式的子任务决策可见"', async () => {
+ const h = await harness()
+ expect((await h.invoke({ model: 'claude-sonnet-5-5', reasoning_effort: 'low' })).isError).not.toBe(true)
+ expect(h.jev.bodies).toHaveLength(0)
+ expect((await h.callEndpoint('state', { sessionId: h.parent.id })).decision).toMatchObject({ source: 'subagent', decisionProvider: 'explicit', decisionModel: '未调用', ms: 0, status: 'applied' })
+})
+it('spec Scenario "切换到不支持的主模型自动锁定"', async () => {
+ const h = await harness(false, false, 'claude', false, { provider: 'opencode-go', model: 'deepseek-v4.1-flash', efforts: ['low', 'high', 'max'], defaultEffort: 'max' })
+ h.modes.set(h.parent.id, { mode: 'MANUAL' })
+ await h.run(h.parent, 'manual baseline')
+ const official = h.calls.at(-1)!
+ h.modes.set(h.parent.id, { mode: 'AUTO' })
+ expect(await h.callEndpoint('state', { sessionId: h.parent.id })).toMatchObject({ mode: 'MANUAL', autoSupport: { supported: false, provider: 'opencode-go', model: 'deepseek-v4.1-flash' } })
+ expect(h.modes.get(h.parent.id)?.mode).toBe('MANUAL')
+ h.modes.set(h.parent.id, { mode: 'AUTO' })
+ await h.run(h.parent, 'next turn')
+ expect(h.jev.bodies).toHaveLength(0)
+ expect(h.modes.get(h.parent.id)?.mode).toBe('MANUAL')
+ const attempt = h.calls.at(-1)!
+ expect({ provider: attempt.provider, model: attempt.model, reasoningEffort: attempt.reasoningEffort }).toEqual({ provider: official.provider, model: official.model, reasoningEffort: official.reasoningEffort })
 })

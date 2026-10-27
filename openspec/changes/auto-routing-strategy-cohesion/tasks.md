@@ -58,7 +58,7 @@
 
 ## 5. Behavior requirements whose scenarios changed (rewritten or new scenarios)
 
-- [ ] 5.1 Write failing tests for the following (new or changed) scenarios:
+- [x] 5.1 Write failing tests for the following (new or changed) scenarios:
   - "AUTO 只改 effort", "新会话按默认模式创建", "旧状态文件可读" (`host.integration.test.ts` / `state.test.ts`);
   - "AUTO 结果同步到官方选择", "AUTO 判档覆盖待生效手选" (`selection.integration.test.ts`, switched to the default-chain harness);
   - "非用户回合沿用上一 depth", "子会话不走主会话判断", "请求内容受限", "源码不含本地分类与其它出站";
@@ -68,14 +68,14 @@
   - "label 响应以绑定是否存在区分" (`label-button.dom.test.ts`);
   - "AUTO 下返回推荐且保留显式维度", "MANUAL 与不可用路由" (`subagent-tool.test.ts`);
   - "skill 只含当前用法" (`content.test.ts`).
-- [ ] 5.2 Implement whatever is still missing so that 5.1 passes. Rewrite `skills/subagent-model-routing/SKILL.md` to cover the ten rules in the spec. Remove `policy-v2` / `legacy` / version wording from `skills/auto-model-routing-report/SKILL.md`.
-- [ ] 5.3 Refactor. Keep the full suite green.
+- [x] 5.2 Implement whatever is still missing so that 5.1 passes. Rewrite `skills/subagent-model-routing/SKILL.md` to cover the ten rules in the spec. Remove `policy-v2` / `legacy` / version wording from `skills/auto-model-routing-report/SKILL.md`.
+- [x] 5.3 Refactor. Keep the full suite green.
 
 ## 6. Carried-forward regression tests (behavior unchanged)
 
-- [ ] 6.1 For every row in test-plan marked "carried forward; regression", rename the existing test title to `spec Scenario "…"`, or move it onto the default-chain harness. Remove only `policy` config writes and version-field assertions. Expected values stay the same. Confirm each test was red under its old name or old harness (its name was not in the ledger) and is green after migration.
-- [ ] 6.2 Change the manifest version in `tests/auto-model-routing-sync.test.mjs` to 0.5.0. Confirm that "旧部署迁移无重复来源" and "插件禁用撤销 skill 与工具" pass, and that `tests/agent-instructions-dispatch.test.mjs` passes unmodified.
-- [ ] 6.3 Flip every row in test-plan from 🔴 to 🟢. Mechanically check that each row's test name appears exactly once in the test files and passes.
+- [x] 6.1 For every row in test-plan marked "carried forward; regression", rename the existing test title to `spec Scenario "…"`, or move it onto the default-chain harness. Remove only `policy` config writes and version-field assertions. Expected values stay the same. Confirm each test was red under its old name or old harness (its name was not in the ledger) and is green after migration.
+- [x] 6.2 Change the manifest version in `tests/auto-model-routing-sync.test.mjs` to 0.5.0. Confirm that "旧部署迁移无重复来源" and "插件禁用撤销 skill 与工具" pass, and that `tests/agent-instructions-dispatch.test.mjs` passes unmodified.
+- [x] 6.3 Flip every row in test-plan from 🔴 to 🟢. Mechanically check that each row's test name appears exactly once in the test files and passes.
 
 ## 7. Docs, scripts, release metadata
 

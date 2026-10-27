@@ -12,8 +12,8 @@ import Agents, { installModelSelection, type ModelSelectionRef } from '@deepseek
 import Sessions from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
-import Tools from '@deepseek-ai/dsh-tools'
-import Llm, { LlmAdapter, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
+import Llm, { LlmAdapter, ToolCallId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Loop from '@deepseek-ai/dsh-agent-loop'
 import * as plugin from '../src/index.js'
 import { fakeJev, type Reply } from './fake-jev.js'
@@ -22,7 +22,7 @@ export const SECRET = 'sk-or-test-SECRET'
 export let cleanup: (() => Promise<void>) | undefined
 export async function closeHarness() { await cleanup?.(); cleanup = undefined }
 
-export async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: []; config?: Record<string, unknown> } = {}) {
+export async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: []; config?: Record<string, unknown>; model?: string; toolCalls?: () => number } = {}) {
  const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
  mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true }); writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), JSON.stringify(options.config ?? (options.defaultAuto ? { defaultMode: 'AUTO' } : {})))
@@ -36,6 +36,14 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
   async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, reasoning: { efforts: ['low', 'medium', 'high', 'xhigh', 'max'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
   async *stream(request: GenerateOptions): AsyncIterable<StreamChunk> {
    calls.push(request)
+   // A request may ask for tool calls first, so one turn issues several requests.
+   if ((options.toolCalls?.() ?? 0) > 0) {
+    const id = ToolCallId(`call-${calls.length}`)
+    yield { type: 'block-start', index: 0, blockType: 'tool-call' }
+    yield { type: 'block-end', index: 0, block: { type: 'tool-call', id, name: 'noop', arguments: '{}' } }
+    yield { type: 'finish', reason: { kind: 'tool-calls' } }
+    return
+   }
    const text = options.answer?.()
    if (text) {
     yield { type: 'block-start', index: 0, blockType: 'text' }
@@ -57,6 +65,7 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
  for (const p of [Projections, Sessions, Agents, Prompt, Tools, Llm]) forks.push(await ctx.plugin(p))
  forks.push(await ctx.plugin(Loop, { agents: [] }))
  ctx.llm.registerAdapter(['test','claude','codex'], new Adapter())
+ ctx.tools.register(defineTool({ name: 'noop', description: 'Test tool used to make a turn issue several requests', parameters: {}, output: { schema: { type: 'object', additionalProperties: false, properties: {} }, render: () => [{ type: 'text', text: 'ok' }] }, execute: async () => ({}) }))
  ctx.provide('subagentModelSelection' as never, { current: () => ({ enabled: true, allowedModels: [
   { provider: 'claude', model: 'claude-haiku-5-5' }, { provider: 'claude', model: 'claude-sonnet-5-5' }, { provider: 'claude', model: 'claude-opus-5-5' },
   { provider: 'codex', model: 'gpt-6-luna' }, { provider: 'codex', model: 'gpt-6.1-sol' },
@@ -68,10 +77,10 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
  await expect.poll(() => routes.size).toBe(9)
- const selection: ModelSelectionRef = { current: { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
+ const selection: ModelSelectionRef = { current: { provider: 'test', model: options.model ?? 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
  const handle = await ctx.agents.create({
   ...(options.seed ? { seed: options.seed } : {}),
-  sessionId: SessionId(`host-${Math.random()}`), agentOptions: { provider: 'test', model: 'claude-opus-5-5' },
+  sessionId: SessionId(`host-${Math.random()}`), agentOptions: { provider: 'test', model: options.model ?? 'claude-opus-5-5' },
   setup(c) {
    installModelSelection(c, selection)
    if (options.reject) c.on('agent/pre-step', async (_p, next) => options.reject!() ? { kind: 'reject' } : next())

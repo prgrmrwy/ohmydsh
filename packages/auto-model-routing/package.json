@@ -1,6 +1,6 @@
 {
   "name": "dsh-auto-model-routing",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "DeepSeek Harness plugin: independent Jev capability and effort decisions, enforced fresh-child routes, decision visibility and allocation feedback",
   "license": "MIT",
   "author": "prgrmrwy",

@@ -33,7 +33,7 @@ it('runtime_relative_imports_resolve_inside_the_standalone_package', () => {
   for (const value of Object.values(dependencies ?? {})) expect(value).not.toMatch(/^(?:workspace:|file:|link:)/)
  }
 })
-it('no_local_classifier_or_other_egress', () => {
+it('spec Scenario "源码不含本地分类与其它出站"', () => {
  for(const [file,text] of sources()) {
   expect(text,file).not.toMatch(/export function (classify|resolveLevel)\b/)
   expect(text,file).not.toMatch(/node:https?|node:child_process/)

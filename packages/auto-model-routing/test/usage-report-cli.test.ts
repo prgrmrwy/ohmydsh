@@ -1,6 +1,6 @@
 import { beforeAll, expect, it } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -19,10 +19,11 @@ function snapshot(dir: string): Record<string, string> {
  return out
 }
 
-it('runs read-only under the permission model and leaks neither text, paths nor ids', () => {
+it('spec Scenario "损坏数据中的正文与路径不泄漏"', () => {
  const h = makeHome()
  writeSession(h, 'session-secret-1', [...userTurn(1, 'a', 2), user(2, 'user', 'SECRET-TEXT')], { cwd: '/tmp/secret-ws' })
  bindAll(h, 'session-secret-1', 'a', 2, 1)
+ appendFileSync(join(h, 'state/auto-model-routing/allocation-feedback.jsonl'), '{"sessionId":"SECRET-TEXT\n')
  writeSession(h, 'session-secret-2', userTurn(1, 'b', 3), { cwd: '/tmp/secret-ws', corruptFrame: 2 })
  bindAll(h, 'session-secret-2', 'b', 3, 2)
  const before = snapshot(h)
@@ -30,6 +31,7 @@ it('runs read-only under the permission model and leaks neither text, paths nor 
  expect(run.status, run.stderr).toBe(0)
  const out = JSON.parse(run.stdout)
  expect(out.failures['decode-failed']).toBe(1)
+ expect(out.failures['parse-failed']).toBe(1)
  for (const text of [run.stdout, run.stderr]) for (const secret of ['SECRET-TEXT', 'secret-ws', 'session-secret']) expect(text).not.toContain(secret)
  expect(snapshot(h)).toEqual(before)
 })

@@ -36,7 +36,7 @@ it('provider keys are explicit and cannot mutate another service credential',asy
  expect((await host.endpoint('setKey',{provider:'invalid',value:'synthetic-key'})).status).toBe(400)
  expect(writes).toHaveLength(1)
 })
-it('readonly_credentials_refuse_both_write_operations_without_leaking',async()=>{
+it('spec Scenario "key 的只读来源与迁移"',async()=>{
  let writes=0
  const host=fixture({describe:async()=>({configured:true,source:'env',writable:false}),set:async()=>{writes++},unset:async()=>{writes++}})
  for(const value of ['new-secret',null]){

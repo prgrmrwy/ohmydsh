@@ -91,9 +91,20 @@ it('tooltip keeps separate confidence and application state when toast is off',a
  const panel=host.querySelector('.amr-panel')?.textContent
  expect(panel).toContain('能力 bounded · 判定确定度 72%');expect(panel).toContain('投入 baseline · 判定确定度 90%');expect(panel).toContain('已应用');expect(panel).toContain('typesafe / jev-1.13.0')
 })
-it('no hint when the switch is off, even for a new decision', async () => {
+it('spec Scenario "开关关闭或判断失败不提示"', async () => {
  const rpc = rpcFor({ S: [{ mode: 'AUTO' }, { mode: 'AUTO', decision: decision(12) }] })
  await mount('S', rpc)
  await poll()
  expect(toast()).toBeNull()
+})
+it('spec Scenario "子任务判断提示"', async () => {
+ const child = { id: 9, source: 'subagent', tier: 'analytical', depth: 'baseline', capability: 'analytical', capabilityConfidence: 0.8, effort: 'medium', status: 'applied', ms: 300, provider: 'claude', model: 'claude-sonnet-5-5', decisionProvider: 'openrouter', decisionModel: 'typesafe/jev-1.13' }
+ const rpc = rpcFor({ S1: [{ ...on, mode: 'AUTO' }, { ...on, mode: 'AUTO', decision: child }] })
+ await mount('S1', rpc)
+ await poll()
+ const text = toast()!
+ const lines = Array.from(document.body.querySelector('.amr-toast')!.querySelectorAll('div')).map(el => el.textContent)
+ expect(lines[0]!.startsWith('子任务 · ')).toBe(true)
+ expect(text).toContain('子任务 · ')
+ expect(text).toContain('能力 analytical · 判定确定度 80%')
 })
