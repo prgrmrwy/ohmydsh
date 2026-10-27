@@ -5,7 +5,10 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import type { JevClient, Depth, PolicyMeasure } from './jev.js'
 import { policyVersion, CATEGORY_HINTS } from './jev.js'
-import { choosePolicyRoute, mappingVersion, policyEffort, modelFamily, policyProvider, validatePolicyRoute } from './policy-v2.js'
+import { choosePolicyRoute, policyEffort, modelFamily, validatePolicyRoute } from './routing.js'
+import { registry } from './strategies/index.js'
+const policyProvider = (p: string) => registry.hasProvider(p)
+const mappingVersion = 'capability-slots-2-magpie'
 import { PolicyStore, type ChildDecision } from './policy-store.js'
 import type { RoutingState } from './state.js'
 import type { AutomaticEffort, RoutingCatalog, Settings } from './settings-contract.js'
@@ -15,7 +18,7 @@ import { isRecord } from './settings-validation.js'
 import { autoSupportedModel, currentMainSelection, mainSupported } from './support.js'
 
 export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
-  const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: 'claude' | 'codex' }>()
+  const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: string }>()
   const rootOf = (agent: Agent): Agent | undefined => {
     let current: Agent | undefined = agent
     for (let i = 0; current && i < 32; i++) {

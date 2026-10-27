@@ -7,7 +7,11 @@ import { CATEGORY_HINTS, type JevClient } from './jev.js'
 import { buildState } from './context.js'
 import type { Judgement } from './router.js'
 import type { RoutingState } from './state.js'
-import { choosePolicyRoute, magpieProvider, modelFamily, POLICY_PROVIDERS, type PolicyProvider } from './policy-v2.js'
+import { choosePolicyRoute, modelFamily } from './routing.js'
+import { registry } from './strategies/index.js'
+const POLICY_PROVIDERS = registry.providers()
+const magpieProvider = (p: string) => registry.hasProvider(p) && p !== 'claude' && p !== 'codex'
+type PolicyProvider = string
 import { policyVersion } from './jev.js'
 
 interface SessionLike { id: string; session: { header: { origin?: string; parentSession?: string } } }

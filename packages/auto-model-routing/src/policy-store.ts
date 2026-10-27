@@ -2,14 +2,15 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { POLICY_PROVIDERS } from './policy-v2.js'
+import { registry } from './strategies/index.js'
+const POLICY_PROVIDERS = registry.providers() as [string, ...string[]]
 const route = z.object({ provider: z.enum(POLICY_PROVIDERS), model: z.string().min(1).max(128), reasoningEffort: z.enum(['low','medium','high','xhigh']) }).strict()
 const schema = z.object({
   version: z.literal(1), childId: z.string(), parentId: z.string(), rootId: z.string(),
   policyVersion: z.string(), mappingVersion: z.string(),
   status: z.enum(['recommended','applied','unsupported','needs-context','failed']),
   path: z.enum(['ordinary','teammate','fork']),
-  family: z.enum(['claude','codex']).optional(),
+  family: z.enum(registry.ids() as [string, ...string[]]).optional(),
   explicit: z.object({ provider: z.enum(POLICY_PROVIDERS), model: z.string().optional(), reasoningEffort: z.string().optional() }).strict(),
   decision: z.object({ id: z.number(), source: z.enum(['main','subagent']), tier: z.string(), depth: z.string(), capability: z.string().optional(), effort: z.string(), model: z.string().optional(), provider: z.string().optional(), status: z.string(), ms: z.number(), decisionProvider: z.string(), decisionModel: z.string(), confidence: z.number().min(0).max(1).optional(), capabilityConfidence: z.number().min(0).max(1).optional(), probabilities: z.record(z.string(),z.number().min(0).max(1)).optional(), capabilityProbabilities: z.record(z.string(),z.number().min(0).max(1)).optional() }).strict().optional(),
   route: route.optional(), actual: route.optional(), reason: z.string().max(240).optional(),

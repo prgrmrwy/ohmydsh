@@ -7,11 +7,11 @@
 
 ## 1. Registry and built-in strategies (家族策略注册表, 内置家族策略)
 
-- [ ] 1.1 Write failing tests in `strategies.test.ts`: "内置注册表可构造且允许跨 provider 共用前缀", "冲突的注册表拒绝构造" (7 cases), "effort 起点按模型名查找且保持原结果", "effort 边界保持原结果" (expected values come only from the oracle fixture). Confirm they fail because `src/strategies/` does not exist yet.
-- [ ] 1.2 Implement `src/strategies/index.ts` (`FamilyStrategy`, `createRegistry`, default `registry`, the query functions from design D2, the construction checks from D3) and `claude.ts` / `codex.ts`, so that 1.1 passes.
-- [ ] 1.3 Rename `policy-v2.test.ts` to `routing.test.ts`. Write failing tests "内置子路由与原行为一致" and "支持范围判定只依据注册表".
-- [ ] 1.4 Rename `policy-v2.ts` to `routing.ts`. Switch `choosePolicyRoute` / `policyEffort` / `modelFamily` / `validatePolicyRoute` and `support.ts` to the registry. Delete `STARTING_POINTS`, `targetEffort`, `CHILD_MODELS` and the known-model regex. Make 1.3 pass.
-- [ ] 1.5 Refactor. Keep the full package suite green, except for tests that sections 3–5 will delete or migrate (list them explicitly in `implementation-log.md`).
+- [x] 1.1 Write failing tests in `strategies.test.ts`: "内置注册表可构造且允许跨 provider 共用前缀", "冲突的注册表拒绝构造" (7 cases), "effort 起点按模型名查找且保持原结果", "effort 边界保持原结果" (expected values come only from the oracle fixture). Confirm they fail because `src/strategies/` does not exist yet.
+- [x] 1.2 Implement `src/strategies/index.ts` (`FamilyStrategy`, `createRegistry`, default `registry`, the query functions from design D2, the construction checks from D3) and `claude.ts` / `codex.ts`, so that 1.1 passes.
+- [x] 1.3 Rename `policy-v2.test.ts` to `routing.test.ts`. Write failing tests "内置子路由与原行为一致" and "支持范围判定只依据注册表".
+- [x] 1.4 Rename `policy-v2.ts` to `routing.ts`. Switch `choosePolicyRoute` / `policyEffort` / `modelFamily` / `validatePolicyRoute` and `support.ts` to the registry. Delete `STARTING_POINTS`, `targetEffort`, `CHILD_MODELS` and the known-model regex. Make 1.3 pass.
+- [x] 1.5 Refactor. Keep the full package suite green, except for tests that sections 3–5 will delete or migrate (list them explicitly in `implementation-log.md`).
 
 ## 2. Registry-driven Host boundaries (provider sets, persistence, injection)
 

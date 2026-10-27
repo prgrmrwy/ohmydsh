@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { RoutingSettings } from '../src/client/settings-section.js'
 import { ui, view } from './gui-fixture.js'
 import questions from '../src/policy-v2-rubric.json' with { type: 'json' }
-import { POLICY_MODELS } from '../src/policy-v2.js'
+import { registry } from '../src/strategies/index.js'
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root, host: HTMLElement
 beforeEach(() => { host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -82,7 +82,7 @@ it('strategy entry exposes executable criteria and model slots without saving se
     expect(details.textContent).toContain(q.instructions)
     for(const text of Object.values(q.criteria))expect(details.textContent).toContain(text)
   }
-  for(const slots of Object.values(POLICY_MODELS))for(const model of Object.values(slots))expect(details.textContent).toContain(model)
+  for(const s of registry.strategies)for(const model of Object.values(s.childModels))expect(details.textContent).toContain(model)
   details.open=true;details.dispatchEvent(new Event('toggle'))
   expect(details.open).toBe(true)
   expect(calls).toEqual(['auto-model-routing.settings'])

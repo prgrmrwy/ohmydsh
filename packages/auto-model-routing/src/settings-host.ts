@@ -4,7 +4,8 @@ import type {} from '@deepseek-ai/dsh-llm'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { DEFAULT_SETTINGS, SettingsStore, SettingsValidationError } from './settings.js'
 import type { RoutingCatalog } from './settings-contract.js'
-import { magpieProvider } from './policy-v2.js'
+import { registry } from './strategies/index.js'
+const magpieProvider = (id: string) => registry.hasProvider(id) && id !== 'claude' && id !== 'codex'
 import rubric from './rubric.json' with { type: 'json' }
 
 import { JevClient } from './jev.js'

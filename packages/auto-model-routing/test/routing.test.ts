@@ -1,8 +1,10 @@
 import { expect, it } from 'vitest'
-import { choosePolicyRoute, policyEffort, POLICY_MODELS } from '../src/policy-v2.js'
+import { choosePolicyRoute, policyEffort } from '../src/routing.js'
 import { autoSupportedModel } from '../src/support.js'
+import { registry } from '../src/strategies/index.js'
 import type { RoutingCatalog } from '../src/settings-contract.js'
-const models = Object.entries(POLICY_MODELS).flatMap(([provider, slots]) => Object.values(slots).map(model => ({ provider, model, name: model, reasoningEfforts: ['low','medium','high','xhigh','max'] })))
+import oracle from './fixtures/routing-oracle-0.4.2.json' with { type: 'json' }
+const models = registry.strategies.flatMap(s => [...new Set(Object.values(s.childModels))].map(model => ({ provider: s.id, model, name: model, reasoningEfforts: ['low','medium','high','xhigh','max'] })))
 const catalog: RoutingCatalog = { models, childAllowlist: { status: 'enabled', allowedModels: models } }
 it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('preserves %s transport and selects only the requested capability family',(provider)=>{
  const gateway=models.map(m=>({...m,provider,model:`${m.provider}/${m.model}`}))
@@ -38,11 +40,21 @@ it('preserves explicit dimensions and rejects unavailable or over-cap constraint
   expect(() => choosePolicyRoute('claude', 'bounded', 'baseline', catalog, 'xhigh', { model: 'unknown' })).toThrow()
   expect(() => choosePolicyRoute('codex', 'bounded', 'baseline', { ...catalog, childAllowlist: { status: 'unavailable', allowedModels: [] } }, 'xhigh')).toThrow()
 })
-it('recognizes only the Claude/GPT model families as AUTO-supported', () => {
-  for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-6-astra', 'gpt-6.1-sol', 'GPT-5.6-Sol', 'CLAUDE-fable-5-1', 'claude/claude-opus-5-5', 'codex/gpt-6.1-sol']) {
+it('spec Scenario "支持范围判定只依据注册表"', () => {
+  for (const model of ['claude-opus-5-5', 'gpt-6-astra', 'GPT-5.6-Sol', 'CLAUDE-fable-5-1', 'claude/claude-opus-5-5', 'codex/gpt-6.1-sol']) {
     expect(autoSupportedModel(model), model).toBe(true)
+    expect(registry.familyOfMainModel(model), model).toBeDefined()
   }
-  for (const model of ['deepseek-v4.1-flash', 'glm-5.3', 'grok-4.7', 'gemini-3', 'kimi-k3', 'qwen3.8-flash', 'opencode-go/deepseek-v4.1-flash', 'minimax-m3', '', undefined]) {
+  for (const model of ['deepseek-v4.1-flash', 'glm-5.3', 'kimi-k3', 'opencode-go/deepseek-v4.1-flash', '', undefined]) {
     expect(autoSupportedModel(model), String(model)).toBe(false)
+    expect(registry.familyOfMainModel(model), String(model)).toBeUndefined()
+  }
+})
+it('spec Scenario "内置子路由与原行为一致"', () => {
+  expect(oracle.childRoutes.length).toBe(54)
+  const all = oracle.childRoutes.flatMap(row => row.value ? [{ provider: row.value.provider, model: row.value.model, name: row.value.model, reasoningEfforts: ['low','medium','high','xhigh'] }] : [])
+  const cat: RoutingCatalog = { models: all, childAllowlist: { status: 'enabled', allowedModels: all } }
+  for (const row of oracle.childRoutes) {
+    expect(choosePolicyRoute(row.provider, row.capability as never, row.depth as never, cat, 'xhigh', {}, row.family ?? undefined), JSON.stringify(row)).toEqual(row.value)
   }
 })

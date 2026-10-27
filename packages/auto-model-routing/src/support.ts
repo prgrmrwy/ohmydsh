@@ -1,26 +1,23 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { registry as builtin, type Registry } from './strategies/index.js'
 
 /** One main-session model selection as the AUTO support gate needs it. */
 export interface MainSelection { provider: string; model: string }
 
 /**
- * AUTO only manages the Claude / GPT model families.
- *
- * The transport prefix (`claude/...`, `codex/...` on Magpie) is not part of the
- * family name, so it is stripped before matching. Every other family — DeepSeek,
- * GLM, Grok, Gemini, Kimi, Qwen, ... — is explicitly out of scope and locks the
- * session to MANUAL instead of being guessed at.
+ * AUTO only manages models whose family has a registered strategy. The transport
+ * prefix (e.g. a gateway's `<family>/`) is not part of the family name, so only the
+ * part after the last `/` is matched. Other families lock the session to MANUAL
+ * instead of being guessed at.
  */
-export function autoSupportedModel(model: string | undefined): boolean {
-  if (typeof model !== 'string' || model.length === 0) return false
-  const bare = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model
-  return /^(?:claude|gpt)-/i.test(bare)
+export function autoSupportedModel(model: string | undefined, registry: Registry = builtin): boolean {
+  return registry.familyOfMainModel(model) !== undefined
 }
 
 /** An unknown selection must never lock a session: only a proven mismatch does. */
-export function mainSupported(selection: MainSelection | undefined): boolean {
-  return selection === undefined || autoSupportedModel(selection.model)
+export function mainSupported(selection: MainSelection | undefined, registry: Registry = builtin): boolean {
+  return selection === undefined || autoSupportedModel(selection.model, registry)
 }
 
 interface ModelSelectionProjection { pending?: { provider?: unknown; model?: unknown } | null }
