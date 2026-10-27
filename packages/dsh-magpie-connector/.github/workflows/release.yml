@@ -1,0 +1,40 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@^11.15.0
+      - name: Check tag and package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "${GITHUB_REF_NAME#v}" = "$(node -p "require('./package.json').version")"
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Verify
+        run: npm run typecheck && npm test
+      - name: Publish
+        run: |
+          # A manually bootstrapped version already exists when its first tag is created.
+          version="$(node -p "require('./package.json').version")"
+          published="$(mktemp)"
+          npm view dsh-magpie-connector versions --json > "$published"
+          if node --input-type=module -e 'import fs from "node:fs"; const v=JSON.parse(fs.readFileSync(process.argv[2])); process.exit([v].flat().includes(process.argv[1]) ? 0 : 1)' "$version" "$published"; then
+            echo "Version $version is already published; nothing to publish."
+          else
+            npm publish --access public
+          fi

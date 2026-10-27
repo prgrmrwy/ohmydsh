@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-magpie-connector Architecture",
+    "locale": "en",
+    "output": "connector.en.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "link_mode": "local-only",
+      "revision": "8f3799b077cb9eb84a642d8d2157b5c59009d571"
+    }
+  },
+  "components": [
+    {
+      "id": "gui",
+      "type": "frontend",
+      "label": "DSH Web GUI",
+      "sublabel": "model picker · settings · speed control",
+      "pos": [
+        40,
+        320
+      ],
+      "size": [
+        170,
+        74
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/client/index.ts",
+          "line": 24,
+          "end_line": 37,
+          "label": "client slots"
+        }
+      ]
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "dsh-magpie-connector",
+      "sublabel": "LLM adapter + settings/usage API",
+      "pos": [
+        440,
+        320
+      ],
+      "size": [
+        190,
+        74
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/index.ts",
+          "line": 18,
+          "end_line": 32,
+          "label": "host apply"
+        }
+      ]
+    },
+    {
+      "id": "credentials",
+      "type": "security",
+      "label": "DSH credentials",
+      "sublabel": "MAGPIE_API_KEY · Access tokens",
+      "pos": [
+        180,
+        150
+      ],
+      "size": [
+        170,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/runtime.ts",
+          "line": 6,
+          "end_line": 8,
+          "label": "credential refs"
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "type": "database",
+      "label": "settings.json",
+      "sublabel": "address · visibility · default effort",
+      "pos": [
+        470,
+        500
+      ],
+      "size": [
+        170,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/settings.ts",
+          "line": 1,
+          "end_line": 20,
+          "label": "settings store"
+        }
+      ]
+    },
+    {
+      "id": "cloudflare",
+      "type": "security",
+      "label": "Cloudflare Access",
+      "sublabel": "optional · service tokens",
+      "pos": [
+        800,
+        140
+      ],
+      "size": [
+        160,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/transport.ts",
+          "line": 24,
+          "end_line": 30,
+          "label": "Access headers"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "external",
+      "label": "Magpie gateway",
+      "sublabel": "self-hosted · OpenAI-compatible /v1",
+      "pos": [
+        800,
+        320
+      ],
+      "size": [
+        170,
+        74
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/transport.ts",
+          "line": 16,
+          "end_line": 24,
+          "label": "endpoint allowlist"
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "Upstream providers",
+      "sublabel": "Claude · GPT · DeepSeek",
+      "pos": [
+        1150,
+        320
+      ],
+      "size": [
+        160,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/catalog.ts",
+          "line": 8,
+          "end_line": 15,
+          "label": "owned_by groups"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Local DSH Host",
+      "wraps": [
+        "host",
+        "credentials",
+        "settings"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Magpie trust boundary",
+      "wraps": [
+        "gateway",
+        "providers"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "gui-host",
+      "from": "gui",
+      "to": "host",
+      "label": "same-origin /api/dsh-magpie-connector/*",
+      "variant": "emphasis"
+    },
+    {
+      "id": "host-credentials",
+      "from": "host",
+      "to": "credentials",
+      "label": "resolve key / tokens",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "id": "host-settings",
+      "from": "host",
+      "to": "settings",
+      "label": "read/write preferences",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "host-gateway",
+      "from": "host",
+      "to": "gateway",
+      "label": "direct · 5 endpoints",
+      "variant": "emphasis",
+      "labelDy": -8
+    },
+    {
+      "id": "host-cloudflare",
+      "from": "host",
+      "to": "cloudflare",
+      "label": "CF-Access headers",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "cloudflare-gateway",
+      "from": "cloudflare",
+      "to": "gateway",
+      "label": "Tunnel",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "gateway-providers",
+      "from": "gateway",
+      "to": "providers",
+      "label": "accounts · routing"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Consumer surface",
+      "items": [
+        "Model picker groups by upstream provider: Magpie (Claude), Magpie (GPT), ... while the route stays dsh-magpie-connector",
+        "Settings groups models and read-only usage cards by upstream provider; each card refreshes on demand",
+        "Models advertising the priority tier offer a standard/fast switch next to the composer"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Connection methods",
+      "items": [
+        "Direct: LAN and Tailscale subnet routing use the same gateway address",
+        "Cloudflare Access: each request carries CF-Access-Client-Id/Secret; HTTPS only"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Boundaries and data",
+      "items": [
+        "The key lives in DSH credentials and is never returned by the settings API",
+        "A private undici dispatcher talks only to the configured gateway and rejects redirects",
+        "No Magpie GUI management API; changing the connection does not abort running generations"
+      ]
+    }
+  ]
+}

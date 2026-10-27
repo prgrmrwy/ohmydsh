@@ -6,6 +6,21 @@
 
 ## Requirements
 
+### Requirement: 插件身份与命名
+插件的 package/npm 名、Cordis 插件 id、LLM route id 与设置目录 SHALL 统一为 `dsh-magpie-connector`。插件 SHALL NOT 同时注册旧 route `dsh-magpie`。凭据引用 SHALL 保持 `MAGPIE_API_KEY`、`MAGPIE_ACCESS_CLIENT_ID`、`MAGPIE_ACCESS_CLIENT_SECRET` 不变，使既有 key 继续可用。
+
+改名后的首次启动，若新设置文件不存在且旧路径 `$DSH_HOME/plugins/dsh-magpie/settings.json` 存在，插件 SHALL 只读加载旧文件一次；SHALL NOT 改写或删除旧文件。之后保存设置只写新路径。依赖真实 route id 的其它能力（AUTO 策略、出口守卫豁免列表、侧边栏品牌识别）SHALL 使用新 route id。
+
+#### Scenario: 只注册新 route 并沿用凭据
+- **GIVEN** 旧插件曾以 `dsh-magpie` 注册 route，`MAGPIE_API_KEY` 已配置
+- **WHEN** 改名后的插件启动
+- **THEN** DSH 的 provider 列表中只有 `dsh-magpie-connector`；使用该 route 生成时仍解析同一 `MAGPIE_API_KEY`，不要求重新输入
+
+#### Scenario: 旧偏好只读迁移
+- **GIVEN** 旧设置文件含地址与默认 effort，新设置文件不存在
+- **WHEN** 插件启动
+- **THEN** 运行时读取到旧地址与默认 effort；旧文件字节不变；用户保存一次新设置后，新路径出现设置文件，旧文件仍不被删除
+
 ### Requirement: 网关连接与凭据
 插件 SHALL 用一个网关地址和一个 gateway API key 连接 Magpie。
 

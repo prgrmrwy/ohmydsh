@@ -208,7 +208,7 @@ tests/                   仓库级测试
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — 把当前会话的链接与产出文件汇总到侧栏面板。
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — 主机出口位于受限地区时，在输入框禁用 Claude 系列模型。
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — 为订阅 provider 剥离 sandbox 升级字段并清理孤立的工具调用。
-- [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — 自托管 Magpie provider，提供分组用量卡片、模型可见性、默认 effort 和会话级快速档。
+- [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — 把自托管 Magpie 网关接入为单个 provider route，模型与用量按上游 provider 分组，支持模型可见性、默认 effort、会话级快速档和可选 Cloudflare Access。
 - [magpie-display-name-shim](packages/magpie-display-name-shim/README.md) — 让模型选择器显示 Magpie 网关的显示名而非 route id，上游修复发版前的过渡。
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。

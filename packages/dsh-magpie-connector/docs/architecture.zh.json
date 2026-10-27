@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-magpie-connector 架构",
+    "locale": "zh-CN",
+    "output": "connector.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "link_mode": "local-only",
+      "revision": "8f3799b077cb9eb84a642d8d2157b5c59009d571"
+    }
+  },
+  "components": [
+    {
+      "id": "gui",
+      "type": "frontend",
+      "label": "DSH Web GUI",
+      "sublabel": "模型选择器 · 设置页 · 速度开关",
+      "pos": [
+        40,
+        320
+      ],
+      "size": [
+        170,
+        74
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/client/index.ts",
+          "line": 24,
+          "end_line": 37,
+          "label": "client slots"
+        }
+      ]
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "dsh-magpie-connector",
+      "sublabel": "LLM adapter + 设置/用量 API",
+      "pos": [
+        440,
+        320
+      ],
+      "size": [
+        190,
+        74
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/index.ts",
+          "line": 18,
+          "end_line": 32,
+          "label": "host apply"
+        }
+      ]
+    },
+    {
+      "id": "credentials",
+      "type": "security",
+      "label": "DSH credentials",
+      "sublabel": "MAGPIE_API_KEY · Access 令牌",
+      "pos": [
+        180,
+        150
+      ],
+      "size": [
+        170,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/runtime.ts",
+          "line": 6,
+          "end_line": 8,
+          "label": "credential refs"
+        }
+      ]
+    },
+    {
+      "id": "settings",
+      "type": "database",
+      "label": "settings.json",
+      "sublabel": "地址 · 可见性 · 默认 effort",
+      "pos": [
+        470,
+        500
+      ],
+      "size": [
+        170,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/settings.ts",
+          "line": 1,
+          "end_line": 20,
+          "label": "settings store"
+        }
+      ]
+    },
+    {
+      "id": "cloudflare",
+      "type": "security",
+      "label": "Cloudflare Access",
+      "sublabel": "可选 · 服务令牌",
+      "pos": [
+        800,
+        140
+      ],
+      "size": [
+        160,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/transport.ts",
+          "line": 24,
+          "end_line": 30,
+          "label": "Access headers"
+        }
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "external",
+      "label": "Magpie 网关",
+      "sublabel": "自托管 · OpenAI 兼容 /v1",
+      "pos": [
+        800,
+        320
+      ],
+      "size": [
+        170,
+        74
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/transport.ts",
+          "line": 16,
+          "end_line": 24,
+          "label": "endpoint allowlist"
+        }
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "上游 provider",
+      "sublabel": "Claude · GPT · DeepSeek",
+      "pos": [
+        1150,
+        320
+      ],
+      "size": [
+        160,
+        66
+      ],
+      "sources": [
+        {
+          "path": "packages/dsh-magpie-connector/src/host/catalog.ts",
+          "line": 8,
+          "end_line": 15,
+          "label": "owned_by groups"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "本机 DSH Host",
+      "wraps": [
+        "host",
+        "credentials",
+        "settings"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Magpie 侧信任边界",
+      "wraps": [
+        "gateway",
+        "providers"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "gui-host",
+      "from": "gui",
+      "to": "host",
+      "label": "同源 /api/dsh-magpie-connector/*",
+      "variant": "emphasis"
+    },
+    {
+      "id": "host-credentials",
+      "from": "host",
+      "to": "credentials",
+      "label": "解析 key / 令牌",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "id": "host-settings",
+      "from": "host",
+      "to": "settings",
+      "label": "读写偏好",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "host-gateway",
+      "from": "host",
+      "to": "gateway",
+      "label": "直连 · 5 个白名单端点",
+      "variant": "emphasis",
+      "labelDy": -8
+    },
+    {
+      "id": "host-cloudflare",
+      "from": "host",
+      "to": "cloudflare",
+      "label": "CF-Access 头",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "cloudflare-gateway",
+      "from": "cloudflare",
+      "to": "gateway",
+      "label": "Tunnel",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "gateway-providers",
+      "from": "gateway",
+      "to": "providers",
+      "label": "账号 · 路由 · 出站代理"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "消费面",
+      "items": [
+        "模型选择器按 Magpie (Claude) / Magpie (GPT) 等分组，route 始终是 dsh-magpie-connector",
+        "设置页按上游 provider 分组展示模型与只读用量卡片，支持刷新单卡",
+        "支持 priority 档位的模型在输入框旁提供标准 / 快速切换"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "接入方式",
+      "items": [
+        "直连：局域网、Tailscale 子网路由使用同一网关地址",
+        "Cloudflare Access：每个请求附加 CF-Access-Client-Id/Secret，仅 HTTPS"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "边界与数据",
+      "items": [
+        "key 存 DSH credentials，设置接口不回显",
+        "私有 undici dispatcher 只直连网关，拒绝重定向",
+        "不调用 Magpie GUI 管理接口，切换连接不中止在途生成"
+      ]
+    }
+  ]
+}

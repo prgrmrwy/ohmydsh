@@ -1,100 +1,112 @@
-# dsh-magpie
+# dsh-magpie-connector
 
 English · [简体中文](README.zh.md)
 
-A DeepSeek Harness plugin for a self-hosted Magpie gateway. One `dsh-magpie` provider route serves the models discovered at your gateway. Settings group models and read-only usage cards by upstream provider.
+![Magpie connector: model picker grouped by upstream provider, search, model switch and the per-session standard/fast control](docs/model-picker.gif)
+
+*Interaction recording from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
+
+[Repository](https://github.com/prgrmrwy/dsh-magpie-connector) · [Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
 
 <!-- problem -->
-Magpie manages upstream accounts, login, routing and provider-side proxies. This plugin adds DSH-side model visibility, default reasoning effort, cached usage cards with manual refresh, and a per-session standard/fast switch for models advertising the `priority` service tier. The API key uses DSH credentials rather than a separate plaintext plugin file.
+**Connect a self-hosted Magpie gateway to DeepSeek Harness as one provider route: models grouped by their upstream provider, read-only usage cards, and a per-session fast mode.** Magpie keeps managing logins, accounts, routing and provider egress; this plugin adds the DSH side.
 
-## Requirements
+### What you get
 
-- DeepSeek Harness `0.2.0-rc.2`.
-- A reachable Magpie gateway and an enabled gateway key.
-- For remote access, Magpie must allow the client network: enable LAN sharing or bind `MAGPIE_ADDR` to a non-loopback address. Binding only to loopback is not remote access.
-- For usage cards, an unrestricted key works directly. A restricted held key needs Quotas permission and sees only cards in its permitted scope.
+| Capability | What it does |
+|---|---|
+| **Gateway direct connection** (basic) | One gateway URL and one key. The model catalog comes from the gateway's `GET /models`; Responses-capable models use Responses, everything else uses Chat Completions. Text, tool round trips, images, usage, cancellation and DSH-managed retries go through. |
+| **Grouped by upstream provider** (signature) | The model picker shows `Magpie (Claude)`, `Magpie (GPT)` and `Magpie (<other owner>)` headings while the real route stays one `dsh-magpie-connector`. Settings and usage cards use the same grouping, and a provider that only appears in usage is never dropped. |
+| **Cloudflare Access remote connection** | For a gateway behind Cloudflare Tunnel + Access, save the service token's Client ID and Secret. Every gateway request then also carries `CF-Access-Client-Id` / `CF-Access-Client-Secret`; HTTPS only. |
+| **Read-only usage cards** | Each upstream account shows plan, expiry, window readings and Codex reset credits when the gateway provides them. Cards are read once when settings open and only re-read when you press **Refresh** on that card; bars turn orange above 70% and red at 90%. |
+| **Model visibility and default effort** | Per provider, leave visibility untouched to follow the gateway catalog, or save an explicit allowlist so new models stay hidden. Per model, save a default reasoning effort; DSH applies it on the next request. |
+| **Per-session fast mode** | Models advertising the `priority` service tier get a standard/fast switch next to the composer. The choice is per session and in host memory only; it adds `service_tier: "priority"` to requests. |
 
-## Installation and configuration
+### Install
 
-In ohmydsh, enable the local `dsh-magpie` entry in the manifest, build, then restart DSH when ready. This package has not yet been published to npm; do not assume an `npm install dsh-magpie` release exists.
+```sh
+dsh plugin --profile web add dsh-magpie-connector
+```
 
-Open **Settings → Magpie**. Enter the gateway API URL including `/v1`, for example `http://192.168.1.20:3425/v1`, and the gateway key. Never put the key in a URL or the manifest. Saving connection details synchronizes the model catalog. Use **刷新模型列表** to synchronize again; there is no catalog polling.
+Restart DSH and refresh the Web page. Inside [ohmydsh](https://github.com/prgrmrwy/ohmydsh) you can instead enable the local `dsh-magpie-connector` manifest entry and rebuild. Tested with DSH `0.2.0-rc.2`, Web UI, Node.js `>=22.19`.
 
-The key is stored through DSH's credentials service as `MAGPIE_API_KEY`. If supplied by the launch environment, it is read-only in settings. Changing an environment variable outside the running process requires a restart. Address and preferences are stored separately at `$DSH_HOME/plugins/dsh-magpie/settings.json` (default `$HOME/.dsh/plugins/dsh-magpie/settings.json`); the key is not included in that file or returned by the settings API.
+The model picker headings need the managed five-package Host extension that ohmydsh's Pet compatibility layer builds for the reviewed `0.2.0-rc.2` pin. Stock rc.2 still uses the route and generation normally, with a flat provider list.
 
-### Models and reasoning
+### Configure
 
-- With no visibility selection for a provider, discovery controls the list and new models appear automatically.
-- An explicit selection is a strict allowlist. An empty selection hides all models; new models stay hidden.
-- Default effort is a DSH preference. A saved effort that disappears from discovery is retained but does not apply until the gateway offers it again.
-- Responses-capable models use Responses; others use Chat Completions. Both use pi-ai for the wire protocol.
-- Nonempty `stop` sequences fail before network access with `MAGPIE_STOP_UNSUPPORTED`: Magpie cannot preserve them across all upstream translations.
-- Failures are retried by DSH's built-in `llm-retry` with the same policy as dsh-plugin-subscriptions: up to 10 retries, exponential backoff from 1s capped at 60s, ±20% jitter, honouring `Retry-After` on 429. The plugin never replays a request itself; it classifies failures into canonical codes. `TIMEOUT`, `TRANSPORT` (dropped connection), `SERVER` (5xx), `RATE_LIMIT` (429) and `EMPTY_RESPONSE` are retried; 401/403, exhausted quota, context overflow and other 4xx are not.
-- The stream watchdog only asks whether the gateway is still sending data: headers, SSE events and heartbeats all count. Only 300 seconds of total silence ends the request with `TIMEOUT` (message contains `MAGPIE_STREAM_TIMEOUT`), so long reasoning survives as long as the gateway keeps the stream alive.
-- Fast mode is per session and in memory. Restarting the host restores standard mode. Priority service can consume more upstream quota.
+Open **Settings → Magpie**.
 
-### Model menu groups and effort
+1. Enter the gateway API URL **including `/v1`**, for example `http://192.168.1.20:3425/v1`.
+2. Enter the gateway key. It is stored through DSH credentials as `MAGPIE_API_KEY`; a key supplied by the launch environment is read-only here. Address, visibility and default efforts live at `$DSH_HOME/plugins/dsh-magpie-connector/settings.json` — the key is never written there or returned by the settings API.
+3. Save. Saving the connection synchronizes the catalog; **Refresh model list** synchronizes again, and there is no catalog polling.
 
-In ohmydsh, these menu features require the Pet managed Host extension at the reviewed DSH `0.2.0-rc.2` pin. It rebuilds five packages together: `@deepseek-ai/dsh-llm`, `@deepseek-ai/dsh-api-session-controller`, `@deepseek-ai/dsh-api-remotes`, `@deepseek-ai/dsh-client-ui-model-selection`, and `@deepseek-ai/dsh-client-ui-commands`. Stock rc.2 can still use the plugin's route and generation, but keeps a flat provider list.
+**Advanced connection** (expanded by default) chooses how the gateway is reached:
 
-With that extension, the model picker and `/model` use gateway `owned_by` for headings: `Magpie (Claude)`, `Magpie (GPT)` for `codex`, other nonempty owners verbatim, and `Magpie (Other)` when absent. Search covers heading, model name and full id. Display metadata does not change the real `dsh-magpie` route, model ids, names, visibility keys or default effort.
+- **Direct** (default) — the gateway URL is reachable as-is. LAN and Tailscale both count: after joining the tailnet use `http://<host>.<tailnet>.ts.net:3425/v1` or the subnet-routed address; nothing else is configured in the plugin.
+- **Cloudflare Access** — for Cloudflare Tunnel + Access when the client cannot run a VPN. Enter the Access service token pair; every request carries both headers plus the bearer key. Saving after switching back to Direct clears the saved Access credentials. Cloudflare Free/Pro returns 524 when the origin sends nothing for 100 seconds.
 
-The picker uses the official single effort value. Default AUTO synchronizes a changed main effort through official `selectModel` on the same provider/model and allows its global-default save; MANUAL remains unchanged and bound children do not write that selection. The Host display extension only handles grouping/search metadata, not a second effort caption. Local source tests do not establish deployment or live GUI acceptance.
+Need another method — custom headers, mTLS, another zero-trust gateway? **Issues and pull requests are welcome**; describe your deployment and the gateway version.
 
-### Usage cards and refresh
+### Where things happen
 
-Opening settings reads Magpie's cached cards, not the provider's live quota endpoint. Each card has its own **刷新**, which asks Magpie to reread that one account; there is no page-wide bulk refresh. Magpie may return the old reading during its throttle window; this is not proof of a fresh read. Cards with `asOf` are old readings.
+| Where | What you do |
+|---|---|
+| **Model picker** | Search across group headings, model names and full ids. Headings come from the gateway's `owned_by`; the route behind every item is still `dsh-magpie-connector`, so model ids, visibility keys and default effort do not change. |
+| **Model menu groups** | A model with a non-empty `owned_by` appears under `Magpie (<owner>)`; `claude` and `codex` are shown as Claude and GPT. Missing ownership falls back to `Magpie (Other)` instead of guessing from the model name. |
+| **Composer speed control** | Shows only for the current model when the gateway advertises the `priority` tier. Hover the model menu to see effort; the official picker shows one effort value. |
+| **Settings → Magpie** | Connection, advanced connection mode, per-provider model sections with visibility checkboxes and default effort selects, plus the usage cards for that provider. |
+| **Usage card refresh** | Each card has its own **Refresh**, which asks Magpie to re-read that one account. A cold gateway may return no cards at all; the connection panel then offers **Fetch models and usage**, which first re-synchronizes the catalog and then asks Magpie to read every account once. A restricted held key cannot initialize an empty cache — ask the Magpie administrator to read usage first. |
 
-Usage bars are coloured by the share used: blue at 70% or below, orange above 70% and below 90%, red at 90% or above.
+![Magpie settings: connection, Cloudflare Access mode, provider groups with visibility and default effort, usage cards](docs/settings.gif)
 
-A cold gateway may return no cards. The connection panel then offers **获取模型与用量**, which refreshes the model list and asks Magpie to read all usage. That initializes cards with an unrestricted key. A restricted held key cannot initialize an empty cache: ask the Magpie administrator to read usage in Magpie first, or use an unrestricted key. Do not grant additional access just to hide an empty state.
+*Same isolated host and mock gateway as the picker recording; the settings panel shows synthetic accounts.*
 
-Codex reset-credit counts and expiry are display-only. This plugin never calls Magpie GUI account-management or reset endpoints.
+### Behavior worth knowing
 
-## Connection methods
+- **Failed requests are retried by DSH, not replayed by the plugin.** The adapter declares the same `llm-retry` policy as `dsh-plugin-subscriptions` (10 attempts, exponential backoff from 1s to 60s, ±20% jitter, honoring `Retry-After`). `TIMEOUT`, `TRANSPORT`, `SERVER`, `RATE_LIMIT` and `EMPTY_RESPONSE` are retryable; 401/403, exhausted quota, context overflow and other 4xx are not.
+- **Only silence ends a stream.** Headers, SSE events and heartbeats all count as liveness; 300 seconds without any data ends the request with `TIMEOUT` (message contains `MAGPIE_STREAM_TIMEOUT`). Long reasoning survives as long as the gateway keeps the stream alive.
+- **Connection changes do not abort work.** A new address or key immediately hides the old catalog and cards, but generations already prepared or running finish with their captured address and key. User cancellation and plugin disposal still stop them.
+- **The transport is deliberately narrow.** Host requests go through a private `undici` dispatcher straight to the configured gateway, never through a global proxy dispatcher. Redirects are rejected; only `GET /models`, `POST /responses`, `POST /chat/completions`, `GET /magpie/quotas/cards` and `POST /magpie/quotas/refresh` are allowed; Magpie GUI `/api/*` management endpoints are never called. Provider egress proxies belong in Magpie.
+- **Not supported:** `stop` sequences fail before any network access (`MAGPIE_STOP_UNSUPPORTED`) because Magpie cannot preserve them across every upstream translation. Usage cards and Codex reset credits are display-only; the plugin never calls account-management or reset endpoints.
+- **Secrets stay out of responses and logs.** Gateway-reflected text is redacted with the current key before it can reach the settings API or logs. Files are written `0600`; the settings API reports only `configured` / `writable`.
 
-By default you only need the gateway URL and key. **高级连接** (advanced connection, expanded by default) selects how the gateway is reached:
+### Architecture
 
-- **直连 / Direct** (default): the gateway URL is directly reachable. LAN and Tailscale both fall here — once the client machine joins the tailnet, use `http://<host>.<tailnet>.ts.net:3425/v1` or the subnet-routed address; there is nothing else to configure in the plugin.
-- **Cloudflare Access**: for a gateway behind Cloudflare Tunnel + Access when the client cannot run a VPN. Enter the Access service token's Client ID and Client Secret; every gateway request then carries `CF-Access-Client-Id`/`CF-Access-Client-Secret` alongside the bearer key. HTTPS only. Both values live in DSH credentials; switching back to Direct and saving clears them. Note that Cloudflare Free/Pro plans return 524 when the origin sends no response within 100 seconds.
+![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
 
-Need another method (custom headers, mTLS, another zero-trust gateway)? Issues and pull requests are welcome — describe your deployment.
+Entry: [index.ts](src/index.ts). Adapter and request/stream mapping: [adapter.ts](src/host/adapter.ts). Routes: [routes.ts](src/host/routes.ts). Transport allowlist: [transport.ts](src/host/transport.ts). Settings page: [SettingsPage.ts](src/client/SettingsPage.ts). The diagram source, with credential-free repository evidence: [architecture.en.json](docs/architecture.en.json).
 
-## Security and networking
+### Migrating from the old plugin id
 
-Host requests go directly to the configured gateway through a private undici dispatcher. They do not inherit a global proxy dispatcher. Redirects are rejected; methods and API paths are allowlisted. Provider egress proxies belong in Magpie, not this plugin. LAN and Tailscale subnet routing can use the same address when the subnet route is reachable.
+The plugin was previously named `dsh-magpie`. The route, settings directory and plugin id are now `dsh-magpie-connector`:
 
-Connection identity changes hide old catalog and card state. Prepared or running generations deliberately finish using their captured old address and key; a connection edit does not cancel them. User cancellation and plugin disposal still stop generation. Treat the configured gateway as trusted: it receives prompts, attachments and the gateway key.
+- `MAGPIE_API_KEY` and the optional Access credentials keep their names, so the key keeps working.
+- On first start the plugin reads `$DSH_HOME/plugins/dsh-magpie/settings.json` once if the new file does not exist. The old file is neither rewritten nor deleted.
+- Sessions that saved the old `dsh-magpie` route need a manual model re-selection; the old route is no longer registered.
+- AUTO and the egress-guard exemption list use the new route id.
 
-## Migration from dsh-magpie-connect
-
-1. Keep the old plugin and display-name shim enabled while testing the new route.
-2. Configure Magpie here; keys and preferences are not copied from the old plugin automatically.
-3. Manually select `dsh-magpie` in existing sessions. Old sessions keep their saved `dsh-magpie-connect` route until changed.
-4. After successful conversation, tools, cancellation and fast-mode checks, disable the old plugin and shim in the manifest, build and restart. Do not delete their entries or data as part of the trial.
-
-The current default AUTO policy supports both exact transports, `dsh-magpie` and `dsh-magpie-connect`, retaining full model ids, live capability/effort caps and the parent's captured allowlist. They are not aliases. For a root AUTO session using explicit legacy, either Magpie preview is rejected before Jev; MANUAL still returns `routed: false` without judging or state writes. Previously bound children keep their saved transport. Network-guard changes remain separate. See [AUTO routing](<../auto-model-routing/README.md#auto-automatic-resource-selection-default>).
-
-## Development
+### Development
 
 ```sh
 npm install
-npm test --workspace=dsh-magpie
-npm run typecheck --workspace=dsh-magpie
-npm run build --workspace=dsh-magpie
+npm test --workspace=dsh-magpie-connector
+npm run typecheck --workspace=dsh-magpie-connector
+npm run build --workspace=dsh-magpie-connector
 ```
 
-Tests use local mock gateways and real pi-ai; no real key is required. Build output is not committed. Both `prepare` and `prepack` build the package.
+Tests use local mock gateways and the real wire library; no real key is required. Build output is not committed. Both `prepare` and `prepack` build the package.
 
 ## Removal
-
 <!-- section: removal -->
-Set the manifest entry to `enabled: false`, build and restart DSH. Disposal releases registrations, timers and connections; it does not remove credentials or settings.
 
-If you want to erase data, separately remove the `MAGPIE_API_KEY` credential using DSH credentials management, and remove the plugin settings file after locating it from the installed plugin's configured data directory. Do not remove that credential if another integration still uses it. Old connect data is separate and is not deleted by this plugin.
+```sh
+dsh plugin --profile web remove dsh-magpie-connector
+```
 
-To roll back, disable this plugin and re-enable the old connect route if needed. Historical sessions may need a manual model selection.
+Restart DSH and refresh the page. Disposal releases registrations, timers and connections; it does not remove credentials or settings. To erase data, delete the `MAGPIE_API_KEY` credential through DSH credentials management and remove the plugin settings file after locating it from the installed plugin's data directory. Do not remove the credential if another integration still uses it.
+
+Inside [ohmydsh](https://github.com/prgrmrwy/ohmydsh), set the manifest entry to `enabled: false` and rebuild instead.
 
 ## License
 
-MIT. pi-ai and undici are separate MIT-licensed dependencies. See their distribution notices for their upstream licenses.
+MIT. `@earendil-works/pi-ai` and `undici` are separate MIT-licensed dependencies; the bird artwork follows the notice in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

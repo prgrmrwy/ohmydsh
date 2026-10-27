@@ -4,10 +4,25 @@
   "description": "DeepSeek Harness plugin: connect a self-hosted Magpie gateway as one LLM provider with models grouped by upstream provider, read-only usage cards, model visibility, default effort and per-session fast mode",
   "license": "MIT",
   "author": "prgrmrwy",
-  "repository": { "type": "git", "url": "git+https://github.com/prgrmrwy/dsh-magpie-connector.git", "directory": "packages/dsh-magpie-connector" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/dsh-magpie-connector.git",
+    "directory": "packages/dsh-magpie-connector"
+  },
   "homepage": "https://github.com/prgrmrwy/dsh-magpie-connector#readme",
-  "bugs": { "url": "https://github.com/prgrmrwy/dsh-magpie-connector/issues" },
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "magpie", "llm-gateway", "llm-provider", "cloudflare-access", "provider-grouping"],
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/dsh-magpie-connector/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "magpie",
+    "llm-gateway",
+    "llm-provider",
+    "cloudflare-access",
+    "provider-grouping"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -27,7 +42,8 @@
     "LICENSE",
     "THIRD-PARTY-NOTICES",
     "docs",
-    "screenshots.json"
+    "screenshots.json",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public"

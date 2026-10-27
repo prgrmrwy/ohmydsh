@@ -208,7 +208,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
-- [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — Self-hosted Magpie provider with grouped usage cards, model visibility, default effort and per-session fast mode.
+- [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — Connects a self-hosted Magpie gateway as one provider route, with models and usage grouped by upstream provider, model visibility, default effort, per-session fast mode and optional Cloudflare Access.
 - [magpie-display-name-shim](packages/magpie-display-name-shim/README.md) — Shows Magpie gateway display names in the model picker instead of route ids, until the upstream fix ships.
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
