@@ -4,13 +4,15 @@
 
 主会话在 AUTO 下经 Jev（OpenRouter）判断推理投入，主模型不变；子任务独立判断模型能力与投入并由宿主应用精确路由。2026-10-25 用户授权将该新策略设为默认，不再要求选择版本；MANUAL 与现有会话模式不变。显式 `policy: legacy` 仅供回滚，保留旧配置。
 
+`## Requirements` 中前七条（自「默认新策略与显式回滚」至「选择器恢复官方单值 effort」）是当前默认 AUTO 契约。其后的历史 Requirements 与场景中的四档、共享 questions、选择器同步及映射配置仅约束显式 `policy: legacy` 回滚路径；不作为新默认 AUTO 的验收预期。新策略使用前七条当前契约，旧格式读取、凭据保护和会话模式存储继续共用。
+
 ## 决策服务与反馈
 
 决策服务 SHALL 默认保留 OpenRouter，可切 TypeSafe 官方、Concentrate 或兼容 System One 自定义完整端点及明确模型。各服务 SHALL 使用独立固定凭据引用，不跨服务自动回退。自定义端点 SHALL 限 HTTPS 或回环 HTTP，无 URL 凭据、query、hash，拒绝重定向。切换服务草稿 SHALL 清空 key 草稿，保存后才管理新服务凭据。测试连接 SHALL 仅在用户点击时发送固定公开样例，不含会话文本。
 
 新策略 SHALL 保留并展示主/子独立维度置信度、耗时、决策服务模型与推荐/实际应用状态。只有实际请求匹配才标已应用。缺失置信度 SHALL 显示未提供，不编造总分或等同任务成功率；toast 开关 SHALL 只控制临时提示，不隐藏 tooltip。子决策 SHALL 随精确身份持久恢复；主状态运行期保留，重启后下一回合重建。
 
-## 当前默认 AUTO 契约
+## Requirements
 
 ### Requirement: 默认新策略与显式回滚
 缺省 policy SHALL 为内部 `policy-v2`，已有未含 policy 字段配置 SHALL 直接使用新策略且不改写配置文件或会话模式。设置 SHALL 不展示版本选择；旧四档映射 SHALL 仅在显式 legacy 回滚时展示和使用，不删除历史配置。
@@ -20,7 +22,7 @@
 - **THEN** 新策略生效；用户无需额外开启，MANUAL 会话保持不判档
 
 ### Requirement: 新策略决策与执行
-主会话 SHALL 仅判断 depth=lower/baseline/higher 并在模型支持序列按推荐起点最多移动一档，不修改 provider/model、不调用会保存全局默认值的 selectModel。子任务 SHALL 独立判断 capability=bounded/analytical/frontier 或 insufficient_context，保留显式模型/effort，完全显式时不调用 Jev。正式 ordinary/fresh teammate 创建 SHALL 按精确 child ID 绑定、持久化、实际请求匹配后标 applied；恢复不重判。fork SHALL 报 unsupported，不悄悄改 fresh；Agent 保留编排和验收权，不实现自主重试升级。
+主会话 SHALL 仅判断 depth=lower/baseline/higher 并在模型支持序列按推荐起点最多移动一档，不修改 provider/model；选定 effort 与官方合成值不同时，按「AUTO 主 effort 同步官方选择」经官方 selectModel 同步。子任务 SHALL 独立判断 capability=bounded/analytical/frontier 或 insufficient_context，保留显式模型/effort，完全显式时不调用 Jev。正式 ordinary/fresh teammate 创建 SHALL 按精确 child ID 绑定、持久化、实际请求匹配后标 applied；恢复不重判。fork SHALL 报 unsupported，不悄悄改 fresh；Agent 保留编排和验收权，不实现自主重试升级。
 
 #### Scenario: Magpie 自动子路由
 - **WHEN** Magpie GPT 主会话为 AUTO 且创建 bounded 子任务
@@ -29,15 +31,71 @@
 ### Requirement: 手动隔离与失败可见
 MANUAL SHALL 不触发新判断或主请求覆盖；此前绑定的子实例 SHALL 恢复既定路由。输入 SHALL 仅使用官方 user 来源并脱敏限长。主判断失败 SHALL 可见停用 AUTO，子失败 SHALL 停止派发而非继承/换模。Magpie transport SHALL 保留完整ID；未知能力家族需显式模型，未知推荐effort不猜。OpenRouter只用于Jev。性能与成本缺少证据 SHALL 标未知。
 
-#### Scenario: 新策略不改官方全局模型
+#### Scenario: 新策略不改主 provider/model
 - **WHEN** AUTO 调整主 effort
-- **THEN** 请求按支持范围生效，主 provider/model 保持，selectModel 调用数为零
+- **THEN** 请求按支持范围生效，主 provider/model 保持；effort 变化时只以同 provider/model 经官方 selectModel 同步
 
-## legacy 回滚契约作用域
+### Requirement: 新默认策略的双 Magpie 精确 transport 兼容
+当前默认 `policy-v2` SHALL 在目录、策略路由、预览工具与持久化恢复中接受 `dsh-magpie` 和 `dsh-magpie-connect`，保持各自精确 provider 与网关完整 model ID，不把两者互为 alias，也不转到本地 claude/codex。自动推荐 SHALL 仅使用已定义的 claude/codex 能力家族；其它家族仍须显式模型及可验证 effort。该增量 SHALL NOT 改变显式 legacy 回滚的既有语义：仅当所属根会话为 AUTO 且显式选择 legacy 时，两个 Magpie transport 的新预览均在请求 Jev 前拒绝；所属根会话为 MANUAL 时仍返回 `{routed: false, reason: "manual"}`，不判档、不外发、不写状态；此前已绑定实例继续按既定精确身份恢复。
 
-下列历史 Requirements 与场景中的四档、共享 questions、选择器同步及映射配置仅约束显式 `policy: legacy` 回滚路径；不作为新默认 AUTO 的验收预期。新策略使用上述当前契约，旧格式读取、凭据保护和会话模式存储继续共用。
+#### Scenario: 新旧 Magpie 子实例保持精确身份并恢复
+- **GIVEN** 当前默认策略下的 AUTO 主会话，transport 分别为新旧 Magpie，目录和允许列表包含同 transport 的目标模型
+- **WHEN** 创建 bounded 子实例，再重载插件、切父 MANUAL/legacy 并恢复该已绑定实例
+- **THEN** 初始持久绑定及后续实际请求仍为原 transport 和完整 model ID；恢复不重判、不迁移到另一个 Magpie 或本地入口
 
-## Requirements
+#### Scenario: legacy 对新旧 Magpie 预览都发前拒绝
+- **GIVEN** 所属根会话为 AUTO，显式 legacy 回滚及任一 Magpie transport
+- **WHEN** 调用 route_subagent 预览
+- **THEN** 报 policy-v2 限定错误，Jev 请求数不增加；不改变已有 legacy 本地路由语义
+
+### Requirement: Magpie 兼容不扩大权限与能力范围
+新旧 Magpie 的候选 SHALL 同时满足精确 provider/model 的实时目录能力、自动 effort cap、当前官方允许列表及存在时的父会话 captured allowlist。兼容分类 SHALL NOT 将另一 transport 的许可视为本 transport 许可，不添加或放宽任何 allowlist 项，不静默突破能力或 effort cap。持久记录损坏 SHALL 继续 fail closed。
+
+#### Scenario: GPT 主子保持同 transport 及支持的 effort
+- **GIVEN** AUTO Magpie GPT 主模型与同 transport 的 bounded GPT 子模型均在目录/允许列表内且支持目标 effort
+- **WHEN** 主请求和 fresh 子请求应用新默认策略
+- **THEN** 主 provider/model 不变并应用支持的 effort；子使用同 transport 的 codex/gpt-6-luna，持久恢复后保持身份和 effort
+
+#### Scenario: 更新全局目录不能扩大父 captured allowlist
+- **GIVEN** 任一 Magpie 父会话 captured allowlist 不含当前目标，即使较新全局目录和列表已含该目标
+- **WHEN** 创建需要该目标的子实例
+- **THEN** 拒绝该路由且无越权实际子请求；另一 Magpie transport 的许可与不支持/超过 cap 的 effort 也不能放行
+
+### Requirement: AUTO 主 effort 同步官方选择
+默认 policy-v2 主请求 SHALL 保持官方合成 provider/model，按既有 depth 算法、实时支持与 effort cap 选 effort；与官方合成 effort 不同时 SHALL 等待官方 sessionController.selectModel，以同 sessionId/provider/model 和选定 reasoningEffort 更新选择，允许官方保存全局 defaults。相同 effort SHALL 不重复同步。官方同步失败或 writer 尚不可用 SHALL 记录可诊断告警，保留官方原请求 effort 以避免再次产生显示差异，不将目标 effort 标为 applied、不静默吞错、不换模型；MANUAL、无 effort 支持及已绑定 child 请求 SHALL 不因此写官方选择。此授权废止 AMD2 禁止 selectModel/global-default 的限定，判档、child 精确绑定与 legacy 不变。
+
+#### Scenario: 同次主请求同步官方 effort 与 defaults
+- **GIVEN** 默认 AUTO 主模型 pending medium，模型支持 high，Jev depth 为 higher
+- **WHEN** 真实主请求执行（包含新旧 Magpie 与普通 route）
+- **THEN** adapter/header、官方选择与默认保存均为同 provider/model 的 high；同步完成后才发出该请求，不产生递归请求，后续相同 effort 不重复写
+
+#### Scenario: 同步失败不丢本次请求
+- **GIVEN** 官方当前选择 medium、AUTO 目标 high，但官方 selectModel 拒绝或 writer 不可用
+- **WHEN** 主请求执行
+- **THEN** 记录同步告警，实际请求保留原 provider/model/medium，使选择与请求一致；不停用 AUTO、不伪造目标 high 已同步或 applied
+
+#### Scenario: 手动与子请求不污染默认
+- **GIVEN** MANUAL 主会话、同 effort AUTO 主请求，或此前精确绑定的 child
+- **WHEN** 对应请求执行或恢复
+- **THEN** MANUAL 请求原样通过，child 保持既定路由；均无额外 selectModel/defaults 保存
+
+#### Scenario: 异步解析期间切 MANUAL 不覆盖主请求
+- **GIVEN** AUTO 主请求正在异步解析模型能力
+- **WHEN** 会话切为 MANUAL 后解析完成
+- **THEN** 输出保持官方合成请求，不写官方选择或全局 defaults
+
+### Requirement: 选择器恢复官方单值 effort
+受管宿主 SHALL 删除仅服务 actual/next 双值展示的 ModelDirectory.lastUsed 接缝、caption helper 与 locale；trigger、root effort 行和 menu SHALL 依官方 current 展示单一 effort，不出现“最近实际/下次”或 Last used/Next 双值文案。展示分组、统一搜索、真实 provider/model 的 click/keyboard/effort 提交、core modelSelection 投影及 metadata 校验/detach SHALL 保留；不得维护两套 value helper 或手改 generated dirs。
+
+#### Scenario: 单值 effort 与选择一致
+- **GIVEN** 官方 current 为同模型 high（或手选 medium/low）
+- **WHEN** 渲染 trigger、root effort 行和 effort menu
+- **THEN** 只展示官方 current 的一个 effort，menu 勾选相同值；主动选择仍按原 provider/model 与选定 effort 提交，无展示写入
+
+#### Scenario: 分组搜索与精确选择保留
+- **GIVEN** Claude/GPT 展示组与普通 provider 共存
+- **WHEN** 搜索组标签、型号或完整 id，并使用 click 或 keyboard 接受
+- **THEN** 保持既有可见顺序、唯一高亮与真实 provider/model/effort 提交，展示组 key 不充当 provider
 
 ### Requirement: 模式与改写规则
 系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，按会话持久化。新建普通会话的初始模式 SHALL 取设置项「新会话默认模式」（`MANUAL` | `AUTO`，缺省 `MANUAL`）：仅当普通会话以全新方式创建（不是恢复、清空、压缩或子会话）时，系统 SHALL 按创建时刻的设置值写入该会话的模式；此后修改设置 MUST NOT 改变已有会话的模式。没有状态记录的已有会话（例如设置生效前创建的会话）SHALL 视为 `MANUAL`。默认模式为 `AUTO` 时新会话的行为与用户手动切到 `AUTO` 相同（含 Jev 失败即停用）。

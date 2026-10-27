@@ -46,7 +46,7 @@
 
 精确 pin 为 `639ed015397290b3745d163aafe02ffee4aa3f84`，patch SHA-256 为 `7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f`，五包版本为 `0.2.0-rc.2-model-display.1`。stock rc.2 仍可正常用 Magpie 插件 route/生成，但列表保持 flat。metadata 不改真实 provider/model id 或名字。选择器保留官方单一 effort 文案；AUTO 经官方 `selectModel` 同步同路由主 effort，允许其保存全局 defaults。本展示 patch 不写选择、不覆盖 core 投影、不改变 MANUAL 请求。
 
-**正面证据**：reviewed stock rc.2 发布产物 `@deepseek-ai/dsh-llm/lib/types/types.d.ts:304–315` 的 `LlmModelInfo` 无展示 metadata；`@deepseek-ai/dsh-client-ui-model-selection/lib/client.js:537–557、980–1022` 直接用 `group.id` 作选择/current/pending 真实身份，公开 `ModelSelectInjected` 仅提供 directory/load/select，不提供子组 renderer。伪 provider 不能安全表达纯展示归属。授权接缝与证据边界见[change design D13–D15](<../../../../openspec/changes/add-dsh-magpie-plugin/design.md#d13-amd2-选择器展示分组本轮已授权受管宿主扩展待独立-recheck>)。
+**正面证据**：reviewed stock rc.2 发布产物 `@deepseek-ai/dsh-llm/lib/types/types.d.ts:304–315` 的 `LlmModelInfo` 无展示 metadata；`@deepseek-ai/dsh-client-ui-model-selection/lib/client.js:537–557、980–1022` 直接用 `group.id` 作选择/current/pending 真实身份，公开 `ModelSelectInjected` 仅提供 directory/load/select，不提供子组 renderer。伪 provider 不能安全表达纯展示归属。授权接缝与证据边界见[change design D13–D15](<../../../../openspec/changes/archive/2026-10-27-add-dsh-magpie-plugin/design.md#d13-amd2-选择器展示分组本轮已授权受管宿主扩展待独立-recheck>)。
 
 **退役条件**：reviewed 官方 release 须同时支持 resolve/prepare 校验 detach、Host catalog、controller 与 aggregate Remote codec 保留字段、两种 selector 入口一致分组搜索且 actions 保持真实 route。逐项行为与实际加载图通过后，才一并退役本 patch、五包 override/template/pins/测试；不要连带移除其它 Pet seam。本处没有完整 seam 的上游报告或已发布版本记录。本地隔离 build 不等于已部署或 live GUI 验收。
 
