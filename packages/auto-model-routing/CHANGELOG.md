@@ -2,6 +2,7 @@
 
 ## 0.4.2
 
+- AUTO now handles Claude and GPT model families only: selecting any other main model switches the session to MANUAL instead of failing the turn in the effort mapper.
 - Support the renamed `dsh-magpie-connector` Magpie route as an exact policy transport (replacing `dsh-magpie`); `dsh-magpie-connect` remains supported.
 - Fix the missing feedback entry on turns whose request configuration did not change: the main decision is marked applied from the effective request header instead of waiting for a new one.
 - Record two implicit feedback facts as separate ledger events keyed by session and decision: reply exposure and a later switch to MANUAL. No message text is stored; routing is unchanged.

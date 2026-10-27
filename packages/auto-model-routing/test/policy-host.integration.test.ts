@@ -23,10 +23,15 @@ const { SessionCommandController } = await import(new URL('./types/commands.js',
 const { ApiSessionAgentController } = await import(new URL('./types/agent.js', controllerEntry).href)
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.(); close = undefined })
-async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' = 'claude', selectFails: boolean | 'missing' = false) {
+async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' = 'claude', selectFails: boolean | 'missing' = false, main: { provider?: string; model?: string; efforts?: string[]; defaultEffort?: string } = {}) {
   const provider = magpie || family
   const modelId = (id: string) => magpie ? `${family}/${id}` : id
   const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : ['gpt-6.1-sol','gpt-6-luna']
+  const mainProvider = main.provider ?? provider
+  const mainModel = main.model ?? modelId(modelIds[0]!)
+  /** Only an explicit override changes metadata; plain harness use keeps the original fixtures. */
+  const overridden = main.provider !== undefined || main.efforts !== undefined || main.defaultEffort !== undefined
+  const overrideEfforts = () => main.efforts ?? ['low','medium','high','xhigh']
   const home = mkdtempSync(join(tmpdir(), 'policy-host-'))
   const config = join(home, 'plugins/dsh-auto-model-routing/config.json')
   mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true })
@@ -36,18 +41,30 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
   const ctx = new Context(), forks: { dispose(): unknown }[] = [], handles: Awaited<ReturnType<typeof ctx.agents.create>>[] = []
   const calls: GenerateOptions[] = [], timeline: string[] = []
   class Adapter extends LlmAdapter {
-    async listModels(provider: string) { return modelIds.map(id => ({ provider, id: modelId(id), name: id })) }
-    async resolveModel(provider: string, id: string) { return { provider, id, name: id, reasoning: { efforts: ['low','medium','high','xhigh'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
+    private described(provider: string) { return overridden && provider === mainProvider }
+    async listModels(provider: string) { return (this.described(provider) ? [mainModel] : modelIds.map(modelId)).map(id => ({ provider, id, name: id })) }
+    async resolveModel(provider: string, id: string) {
+      const override = this.described(provider)
+      const efforts = override ? overrideEfforts() : ['low','medium','high','xhigh']
+      return { provider, id, name: id, reasoning: {
+        efforts: efforts.map(effort => ({ id: ReasoningEffortId(effort), name: effort })),
+        ...(override && main.defaultEffort ? { defaultEffort: ReasoningEffortId(main.defaultEffort) } : {}),
+      } }
+    }
     async *stream(r: GenerateOptions): AsyncIterable<StreamChunk> { calls.push(r); timeline.push('adapter'); yield { type: 'finish', reason: { kind: 'stop' } } }
   }
   for (const p of [Projections,Sessions,Agents,Prompt,Tools,Llm]) forks.push(await ctx.plugin(p))
   installModelSelectionProjection(ctx)
   forks.push(await ctx.plugin(Loop,{ agents: [] }))
-  ctx.llm.registerAdapter([provider], new Adapter())
+  for (const transport of new Set([provider, mainProvider])) ctx.llm.registerAdapter([transport], new Adapter())
   ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: 'synthetic-key' } }]) as never)
   ctx.provide('subagentModelSelection' as never, { current: () => ({ enabled: true, allowedModels: modelIds.map(model => ({ provider, model: modelId(model) })) }) } as never)
   const selections: unknown[] = [], defaults: unknown[] = []
-  const picked = { provider, model: modelId(modelIds[0]!), reasoningEffort: ReasoningEffortId('medium') }
+  // A metadata override describes a model whose effort set may not contain the fixture default.
+  const keepEffort = main.provider === undefined && main.efforts === undefined && main.defaultEffort === undefined
+  const picked = main.provider
+    ? { provider: mainProvider, model: mainModel }
+    : { provider, model: modelId(modelIds[0]!), ...(keepEffort ? { reasoningEffort: ReasoningEffortId('medium') } : {}) }
   ctx.provide('agentDefaultModel' as never, {
     currentSelection: () => defaults.at(-1) ?? picked,
     saveSelection: async (selection: unknown) => { defaults.push(selection); timeline.push('defaults') },
@@ -59,13 +76,18 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
   })
   const commands = new SessionCommandController(ctx, owner, home)
   const warnings = vi.spyOn(ctx.logger, 'warn')
-  if (selectFails !== 'missing') ctx.provide('sessionController', { selectModel: async (request: unknown) => {
-    selections.push(request)
-    if (selectFails) throw new Error('synthetic selection rejection')
-    const result = await commands.selectModel(request)
-    timeline.push('selected')
-    return result
-  } } as never)
+  if (selectFails !== 'missing') ctx.provide('sessionController', {
+    resolveAgent: async (id: string) => { const agent = ctx.agents.get(SessionId(id)); return agent ? { agent } : { error: new Error('unknown session') } },
+    selectModel: async (request: unknown) => {
+      selections.push(request)
+      if (selectFails) throw new Error('synthetic selection rejection')
+      const result = await commands.selectModel(request)
+      timeline.push('selected')
+      return result
+    },
+  } as never)
+  const routes = new Map<string, { fetch: (request: Request) => Promise<Response> }>()
+  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (request: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
   ctx.on('session/event', (session, event) => {
     if (event.type === 'request/header') {
       const config = session.requestHeader()!.config
@@ -74,9 +96,13 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
     }
   })
   let plugin = await ctx.plugin(Plugin, { home, jevBase: jev.base })
+  // The Host routes need both the connection and the session controller; the "missing controller" case mounts neither.
+  if (selectFails !== 'missing') await expect.poll(() => routes.size).toBe(9)
   const parent = await ctx.agents.create({ sessionId: SessionId('parent'), agentOptions: picked }); handles.push(parent)
   if (pendingPick) owner.selectForNextRequest(parent.agent, picked)
   else owner.selectionFor(parent.agent)
+  const pickMain = (nextProvider: string, nextModel: string) => owner.selectForNextRequest(parent.agent, { provider: nextProvider, model: nextModel })
+  const callEndpoint = async (operation: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${operation}`)!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }))).json()
   const run = async (agent: typeof parent.agent, text: string) => { agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })); await agent.whenIdle() }
   let n = 0
   ctx.tools.register(defineTool({ name: 'subagent', description: 'Test official tool-dispatch boundary; not a real provider test', output: { schema: { type: 'object', additionalProperties: false, properties: { childId: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: value.childId ?? '' }] }, parameters: { model: { type: 'string' }, reasoning_effort: { type: 'string' } }, execute: async (args, exec) => {
@@ -91,7 +117,7 @@ async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connec
   const modes = new FileStateStore(join(home, 'state/auto-model-routing/sessions'))
   modes.set(parent.agent.id, { mode: 'AUTO' })
   close = async () => { for (const h of handles.reverse()) await h.dispose(); await plugin.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
-  return { ctx, parent: parent.agent, handles, calls, invoke, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
+  return { ctx, parent: parent.agent, handles, calls, invoke, callEndpoint, pickMain, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
     restart: async () => { await plugin.dispose(); plugin = await ctx.plugin(Plugin,{ home, jevBase: jev.base }) } }
 }
 it('child decision persists separate confidences and actual application without task text',async()=>{
@@ -283,4 +309,52 @@ it('unsupported fork is denied before its tool body runs', async () => {
   h.ctx.tools.register(defineTool({ name: 'subagent_fork', description: 'offline fork boundary', parameters: {}, output: { schema: { type: 'object', additionalProperties: false, properties: {} }, render: () => [] }, execute: async () => { ran = true; return {} } }))
   const result = await h.ctx.tools.execute({ name: 'subagent_fork', arguments: {}, agent: h.parent, callId: 'fork' as never, signal: new AbortController().signal })
   expect(result.isError).toBe(true); expect(ran).toBe(false); expect(h.jev.bodies).toHaveLength(0)
+})
+it('unsupported main model drops AUTO to MANUAL without failing the turn', async () => {
+  const h = await harness(false, false, 'claude', false, { provider: 'opencode-go', model: 'deepseek-v4.1-flash', efforts: ['low','high','max'], defaultEffort: 'max' })
+  h.modes.set(h.parent.id, { mode: 'MANUAL' })
+  await h.run(h.parent, 'manual baseline on an unsupported main model')
+  const baseline = h.calls.at(-1)!
+  h.modes.set(h.parent.id, { mode: 'AUTO' })
+  await h.run(h.parent, 'AUTO must not touch an unsupported main model')
+  const attempt = h.calls.at(-1)!
+  expect({ provider: attempt.provider, model: attempt.model, reasoningEffort: attempt.reasoningEffort })
+    .toEqual({ provider: baseline.provider, model: baseline.model, reasoningEffort: baseline.reasoningEffort })
+  expect(attempt.provider).toBe('opencode-go')
+  expect(attempt.model).toBe('deepseek-v4.1-flash')
+  expect(h.jev.bodies).toHaveLength(0)
+  expect(h.modes.get(h.parent.id)?.mode).toBe('MANUAL')
+  const ends = h.parent.session.snapshotEvents().filter(event => event.type === 'turn/end')
+  expect((ends.at(-1)!.data as { reason: { kind: string } }).reason.kind).toBe('completed')
+})
+it('supported main model without a usable automatic effort keeps the official request', async () => {
+  const h = await harness(false, false, 'claude', false, { efforts: ['max'], defaultEffort: 'max' })
+  h.jev.set(json(200,{ answers: { depth: { choice: 'higher' } } }))
+  h.modes.set(h.parent.id, { mode: 'MANUAL' })
+  await h.run(h.parent, 'manual baseline with only max available')
+  const baseline = h.calls.at(-1)!
+  h.modes.set(h.parent.id, { mode: 'AUTO' })
+  await h.run(h.parent, 'AUTO cannot map this supported model')
+  const attempt = h.calls.at(-1)!
+  expect({ provider: attempt.provider, model: attempt.model, reasoningEffort: attempt.reasoningEffort })
+    .toEqual({ provider: baseline.provider, model: baseline.model, reasoningEffort: baseline.reasoningEffort })
+  expect(h.selections).toHaveLength(0)
+  expect(h.modes.get(h.parent.id)).toMatchObject({ mode: 'AUTO' })
+  expect(h.modes.get(h.parent.id)?.disabled).toBeUndefined()
+  const ends = h.parent.session.snapshotEvents().filter(event => event.type === 'turn/end')
+  expect((ends.at(-1)!.data as { reason: { kind: string } }).reason.kind).toBe('completed')
+})
+it('state reports autoSupport and refuses AUTO for an unsupported main model', async () => {
+  const h = await harness()
+  h.pickMain('opencode-go', 'deepseek-v4.1-flash')
+  expect(await h.callEndpoint('state', { sessionId: h.parent.id })).toMatchObject({
+    mode: 'MANUAL',
+    autoSupport: { supported: false, provider: 'opencode-go', model: 'deepseek-v4.1-flash' },
+  })
+  expect(await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'AUTO' })).toMatchObject({ mode: 'MANUAL', autoSupport: { supported: false } })
+  h.pickMain('claude', 'claude-opus-5-5')
+  const supported = await h.callEndpoint('state', { sessionId: h.parent.id })
+  expect(supported).toMatchObject({ autoSupport: { supported: true, provider: 'claude', model: 'claude-opus-5-5' } })
+  expect(supported.mode).toBe('MANUAL')
+  expect(await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'AUTO' })).toMatchObject({ mode: 'AUTO', autoSupport: { supported: true } })
 })

@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
 import { choosePolicyRoute, policyEffort, POLICY_MODELS } from '../src/policy-v2.js'
+import { autoSupportedModel } from '../src/support.js'
 import type { RoutingCatalog } from '../src/settings-contract.js'
 const models = Object.entries(POLICY_MODELS).flatMap(([provider, slots]) => Object.values(slots).map(model => ({ provider, model, name: model, reasoningEfforts: ['low','medium','high','xhigh','max'] })))
 const catalog: RoutingCatalog = { models, childAllowlist: { status: 'enabled', allowedModels: models } }
@@ -36,4 +37,12 @@ it('preserves explicit dimensions and rejects unavailable or over-cap constraint
   expect(() => choosePolicyRoute('claude', 'bounded', 'baseline', catalog, 'medium', { reasoningEffort: 'high' })).toThrow()
   expect(() => choosePolicyRoute('claude', 'bounded', 'baseline', catalog, 'xhigh', { model: 'unknown' })).toThrow()
   expect(() => choosePolicyRoute('codex', 'bounded', 'baseline', { ...catalog, childAllowlist: { status: 'unavailable', allowedModels: [] } }, 'xhigh')).toThrow()
+})
+it('recognizes only the Claude/GPT model families as AUTO-supported', () => {
+  for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'gpt-6-astra', 'gpt-6.1-sol', 'GPT-5.6-Sol', 'CLAUDE-fable-5-1', 'claude/claude-opus-5-5', 'codex/gpt-6.1-sol']) {
+    expect(autoSupportedModel(model), model).toBe(true)
+  }
+  for (const model of ['deepseek-v4.1-flash', 'glm-5.3', 'grok-4.7', 'gemini-3', 'kimi-k3', 'qwen3.8-flash', 'opencode-go/deepseek-v4.1-flash', 'minimax-m3', '', undefined]) {
+    expect(autoSupportedModel(model), String(model)).toBe(false)
+  }
 })

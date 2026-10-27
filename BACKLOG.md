@@ -144,6 +144,16 @@
 
 ## 想法
 
+### [B050] Worktree 隔离预览的 bootstrap 步骤未脚本化，AGENTS 指引与真实流程不符
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 2026-10-27 做 `auto-unsupported-model-lock` 的隔离预览验收时，按 `AGENTS.md`「在 worktree 内依次执行 dsh build → ws prepare-preview → dsh」无法走通：(1) worktree 的 `bin/dsh` 在 lean 依赖模式下被 `dependenciesHealthy` 拒绝，无法 `dsh build`；(2) 绕过后 `sync.mjs` 首次构建隔离 home 会因缺少 profile `.npmrc` 的 `@byted` 等 scope registry、`pnpm-workspace.yaml` 的 `allowBuilds` 决策而在 npm scope preflight / ignored-builds 处失败；(3) 本地 plugin 的 `lib/` 是 gitignored 构建产物，干净 worktree 未构建时会被以缺 `lib` 形态拷进隔离 profile，预览里出现一批 `failed to import`，只有重新在 worktree 构建并在隔离 profile `pnpm install` 后才恢复。
+- **要点**:
+  - 把「隔离 build」封装进 `ws prepare-preview`（或单独脚本）：用 operation 的 `WS_DSH_HOME` 跑 `scripts/sync.mjs`，预置 `.npmrc`/`allowBuilds` 种子，构建需要的本地 package，再执行现有 hook。
+  - 修复前后 `prepare-preview` 的 `outputTail` 只体现 hook 结果，无法区分「hook 通过但预览 home 根本没构建」；建议把它纳入状态字段或在 hook 前做明确前置检查。
+  - 现状可用 workaround：`node scripts/launcher/environment.mjs` 读 worktree `.env.local` → 以 `DSH_HOME=<operation home>` 跑 `node scripts/sync.mjs`，手动补 `.npmrc`/`allowBuilds` 与本地 `lib`。
+- **更新**: 2026-10-27 隔离预览验收时记录；本次未改脚本，验收靠手工补齐。
+
 ### [B048] 记忆设置页的便利动作（打开库目录、卡片明细）
 - **状态**: 想法
 - **优先级**: P2

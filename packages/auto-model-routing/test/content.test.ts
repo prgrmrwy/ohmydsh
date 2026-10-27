@@ -39,7 +39,8 @@ it('no_local_classifier_or_other_egress', () => {
   for(const url of text.match(/https?:\/\/[^\s'"`]+/g) ?? []) {
     // SVG namespace identifiers do not initiate network requests.
     if (url === 'http://www.w3.org/2000/svg') continue
-    expect(['openrouter.ai','api.typesafe.ai','api.concentrate.ai','example.com']).toContain(new URL(url).host)
+    // github.com is a static help link the user opens in a new tab; the code never fetches it.
+    expect(['openrouter.ai','api.typesafe.ai','api.concentrate.ai','example.com','github.com']).toContain(new URL(url).host)
    }
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
