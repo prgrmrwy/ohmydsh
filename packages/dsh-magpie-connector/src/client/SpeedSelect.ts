@@ -12,7 +12,25 @@ import { settingsCss } from './styles.js'
 export const ROUTE = 'dsh-magpie-connector'
 export type Tier = 'standard' | 'fast'
 export interface SpeedState { visible: boolean; tier: Tier }
-export interface ModelDirectories { directoryFor(sessionId: string): { load(): Promise<{ current: { provider: string; model: string } | null }> } }
+type Selection = { provider: string; model: string } | null
+export interface ModelDirectories { directoryFor(sessionId: string): { load(): Promise<{ current: Selection }>; store?: { getSnapshot(): { current?: Selection } | undefined; subscribe(listener: () => void): () => void } } }
+
+/**
+ * Calls `onChange` when the session's selected provider/model changes. Other store
+ * updates (including the ones our own `load()` causes) are ignored, so a reload
+ * never re-triggers itself. No-op when the store is unavailable.
+ */
+export function createModelWatcher(models: () => ModelDirectories | undefined, sessionId: string): (onChange: () => void) => () => void {
+  return onChange => {
+    try {
+      const store = models()?.directoryFor(sessionId).store
+      if (!store) return () => {}
+      const key = () => { const c = store.getSnapshot()?.current; return c ? `${c.provider}\n${c.model}` : '' }
+      let last = key()
+      return store.subscribe(() => { const next = key(); if (next !== last) { last = next; onChange() } })
+    } catch { return () => {} }
+  }
+}
 
 export function createSpeedLoader(api: Api, models: () => ModelDirectories | undefined, sessionId: string): () => Promise<SpeedState> {
   return async () => {
@@ -37,7 +55,7 @@ const TIERS: { id: Tier; name: string; description: string }[] = [
   { id: 'fast', name: '快速', description: '请求带 priority 服务档，更快但消耗更多用量' },
 ]
 
-export function SpeedSelect({ loadSpeed, setSpeed }: { loadSpeed?: () => Promise<SpeedState>; setSpeed?: (tier: Tier) => Promise<boolean> }) {
+export function SpeedSelect({ loadSpeed, setSpeed, watchModel }: { loadSpeed?: () => Promise<SpeedState>; setSpeed?: (tier: Tier) => Promise<boolean>; watchModel?: (onChange: () => void) => () => void }) {
   const [state, setState] = useState<SpeedState | null>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -61,23 +79,30 @@ export function SpeedSelect({ loadSpeed, setSpeed }: { loadSpeed?: () => Promise
       if (!next.visible) setOpen(false)
     } catch { /* A failed read keeps the last known state. */ }
   }
-  // The host pushes nothing on a model switch, so keep a slow single-flight poll.
+  // Re-read immediately on a model switch when the selection store is observable;
+  // the slow single-flight poll stays as a fallback. A change during a read re-runs it.
   useEffect(() => {
     const current = requests.current
     current.active = true
     let inflight = false
+    let pending = false
     const poll = () => {
-      if (inflight) return
+      if (inflight) { pending = true; return }
       inflight = true
-      void reload().finally(() => { inflight = false })
+      void reload().finally(() => {
+        inflight = false
+        if (pending) { pending = false; poll() }
+      })
     }
     poll()
     const timer = setInterval(poll, POLL_MS)
+    const unwatch = watchModel?.(poll) ?? (() => {})
     return () => {
       current.active = false
       current.read++
       current.mutation++
       clearInterval(timer)
+      unwatch()
     }
   }, [])
   useEffect(() => {

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement as h } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { SpeedSelect, createSpeedLoader, createSpeedSetter, type ModelDirectories, type Tier } from '../src/client/SpeedSelect.js'
+import { SpeedSelect, createModelWatcher, createSpeedLoader, createSpeedSetter, type ModelDirectories, type Tier } from '../src/client/SpeedSelect.js'
 import { deferred, fakeApi, flush, ok } from './client-support/fake-api.js'
 import type { ApiResponse } from '../src/client/api.js'
 
@@ -54,6 +54,37 @@ describe('Codex 速度切换（输入框控件）', () => {
     await poll()
     expect(control()?.textContent).toContain('速度 · 快速')
     expect(fake.calls.filter(c => c.method === 'GET')).toHaveLength(3)
+  })
+
+  it('模型选择变化时立即刷新，不等 3 秒轮询', async () => {
+    vi.useFakeTimers()
+    const { state, props } = setup(supported)
+    let notify = () => {}
+    const unsubscribe = vi.fn()
+    const watchModel = (onChange: () => void) => { notify = onChange; return unsubscribe }
+    await mount({ ...props, watchModel })
+    expect(control()?.textContent).toContain('速度 · 快速')
+    state.current = { provider: 'dsh-magpie-connector', model: 'claude/claude-sonnet-5-5' }
+    await act(async () => notify())
+    await flush()
+    expect(control()).toBeNull()
+    act(() => root.unmount())
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    root = createRoot(host)
+  })
+
+  it('createModelWatcher 只在所选 provider/model 变化时通知，缺失 store 时静默', () => {
+    let snapshot: { current: { provider: string; model: string } | null } = { current: supported }
+    let emit = () => {}
+    const store = { getSnapshot: () => snapshot, subscribe: (l: () => void) => { emit = l; return () => {} } }
+    const listener = vi.fn()
+    createModelWatcher(() => ({ directoryFor: () => ({ load: async () => ({ current: null }), store }) }), 'S')(listener)
+    emit()
+    expect(listener).not.toHaveBeenCalled()
+    snapshot = { current: unsupported }
+    emit(); emit()
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(() => createModelWatcher(() => undefined, 'S')(listener)()).not.toThrow()
   })
 
   it('另一 route 上的同名模型不显示速度控件', async () => {

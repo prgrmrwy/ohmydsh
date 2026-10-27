@@ -53,7 +53,7 @@ Need another method — custom headers, mTLS, another zero-trust gateway? **Issu
 |---|---|
 | **Model picker** | Search across group headings, model names and full ids. Headings come from the gateway's `owned_by`; the route behind every item is still `dsh-magpie-connector`, so model ids, visibility keys and default effort do not change. |
 | **Model menu groups** | A model with a non-empty `owned_by` appears under `Magpie (<owner>)`; `claude` and `codex` are shown as Claude and GPT. Missing ownership falls back to `Magpie (Other)` instead of guessing from the model name. |
-| **Composer speed control** | Shows only for the current model when the gateway advertises the `priority` tier. Hover the model menu to see effort; the official picker shows one effort value. |
+| **Composer speed control** | Shows only for the current model when the gateway advertises the `priority` tier (on current Magpie: the Codex/GPT models), and updates as soon as the selection changes. Hover the model menu to see effort; the official picker shows one effort value. |
 | **Settings → Magpie** | Connection, advanced connection mode, per-provider model sections with visibility checkboxes and default effort selects, plus the usage cards for that provider. |
 | **Usage card refresh** | Each card has its own **Refresh**, which asks Magpie to re-read that one account. A cold gateway may return no cards at all; the connection panel then offers **Fetch models and usage**, which first re-synchronizes the catalog and then asks Magpie to read every account once. A restricted held key cannot initialize an empty cache — ask the Magpie administrator to read usage first. |
 

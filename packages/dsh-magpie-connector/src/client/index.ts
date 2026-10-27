@@ -1,5 +1,5 @@
 import { MagpieSettings } from './SettingsPage.js'
-import { SpeedSelect, createSpeedLoader, createSpeedSetter, type ModelDirectories } from './SpeedSelect.js'
+import { SpeedSelect, createModelWatcher, createSpeedLoader, createSpeedSetter, type ModelDirectories } from './SpeedSelect.js'
 import { createFetchApi, type Api } from './api.js'
 import { registerMagpieSettingsNavIcon } from './settings-nav-icon.js'
 
@@ -32,6 +32,6 @@ export function apply(ctx: ClientContext, api: Api = createFetchApi()): void {
   const models = () => ctx.get('modelDirectories') as ModelDirectories | undefined
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
     name: 'conversation.input.right', id: 'dsh-magpie-connector-speed', order: 1,
-    inject: (sessionId: string) => ({ loadSpeed: createSpeedLoader(api, models, sessionId), setSpeed: createSpeedSetter(api, sessionId) }),
+    inject: (sessionId: string) => ({ loadSpeed: createSpeedLoader(api, models, sessionId), setSpeed: createSpeedSetter(api, sessionId), watchModel: createModelWatcher(models, sessionId) }),
   }, SpeedSelect))
 }

@@ -53,7 +53,7 @@ dsh plugin --profile web add dsh-magpie-connector
 |---|---|
 | **模型选择器** | 统一搜索覆盖分组标题、型号名和完整 id。标题来自网关的 `owned_by`；每项背后的 route 仍然是 `dsh-magpie-connector`，model id、可见性键和默认 effort 都不变。 |
 | **模型菜单分组** | `owned_by` 非空的模型显示在 `Magpie (<owner>)` 下，`claude`、`codex` 分别显示为 Claude 和 GPT。缺失归属时显示 `Magpie (Other)`，不按模型名猜测。 |
-| **输入框速度控件** | 仅当前模型被网关声明为 `priority` 档时显示。悬停模型菜单可看 effort；官方选择器只显示一个 effort 值。 |
+| **输入框速度控件** | 仅当前模型被网关声明为 `priority` 档时显示（当前 Magpie 上即 Codex/GPT 模型），切换模型后立即更新。悬停模型菜单可看 effort；官方选择器只显示一个 effort 值。 |
 | **设置 → Magpie** | 连接、接入方式、按 provider 分组的模型区（可见性复选框与默认 effort 选择器），以及该 provider 的用量卡片。 |
 | **用量卡片刷新** | 每张卡片有独立的「刷新」，请求 Magpie 重新读取这一个账号。网关冷启动可能没有任何卡片；此时连接面板提供「获取模型与用量」，先同步模型目录，再请 Magpie 读取全部账号一次。受限 held key 无法初始化空缓存，需要管理员先在 Magpie 中读取一次。 |
 
