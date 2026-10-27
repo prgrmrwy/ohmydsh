@@ -2,9 +2,12 @@
 
 English · [简体中文](README.zh.md)
 
-![Magpie connector: model picker grouped by upstream provider, search, model switch and the per-session standard/fast control](docs/model-picker.gif)
+<p align="center">
+  <img src="docs/model-picker.gif" alt="Model picker grouped by upstream provider, with the GPT-only standard/fast control" width="49%">
+  <img src="docs/settings.gif" alt="Settings: connection, Cloudflare Access, provider groups and usage cards" width="49%">
+</p>
 
-*Interaction recording from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
+*Left: model picker. Right: Settings → Magpie. Recorded from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
 
 [Repository](https://github.com/prgrmrwy/dsh-magpie-connector) · [Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
 
@@ -56,10 +59,6 @@ Need another method — custom headers, mTLS, another zero-trust gateway? **Issu
 | **Composer speed control** | Shows only for the current model when the gateway advertises the `priority` tier (on current Magpie: the Codex/GPT models), and updates as soon as the selection changes. Hover the model menu to see effort; the official picker shows one effort value. |
 | **Settings → Magpie** | Connection, advanced connection mode, per-provider model sections with visibility checkboxes and default effort selects, plus the usage cards for that provider. |
 | **Usage card refresh** | Each card has its own **Refresh**, which asks Magpie to re-read that one account. A cold gateway may return no cards at all; the connection panel then offers **Fetch models and usage**, which first re-synchronizes the catalog and then asks Magpie to read every account once. A restricted held key cannot initialize an empty cache — ask the Magpie administrator to read usage first. |
-
-![Magpie settings: connection, Cloudflare Access mode, provider groups with visibility and default effort, usage cards](docs/settings.gif)
-
-*Same isolated host and mock gateway as the picker recording; the settings panel shows synthetic accounts.*
 
 ### Behavior worth knowing
 

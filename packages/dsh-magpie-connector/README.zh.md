@@ -2,9 +2,12 @@
 
 [English](README.md) · 简体中文
 
-![Magpie connector：模型选择器按上游 provider 分组，支持搜索、切换模型和会话级标准/快速切换](docs/model-picker.gif)
+<p align="center">
+  <img src="docs/model-picker.gif" alt="模型选择器：按上游 provider 分组，仅 GPT 显示标准/快速" width="49%">
+  <img src="docs/settings.gif" alt="设置页：连接、Cloudflare Access、分组配置与用量卡片" width="49%">
+</p>
 
-*录屏来自隔离的 DSH 宿主与本地 mock Magpie 网关；模型和账号均为演示数据。*
+*左：模型选择器；右：设置 → Magpie。录屏来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
 
 [插件仓库](https://github.com/prgrmrwy/dsh-magpie-connector) · [版本发布](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
 
@@ -56,10 +59,6 @@ dsh plugin --profile web add dsh-magpie-connector
 | **输入框速度控件** | 仅当前模型被网关声明为 `priority` 档时显示（当前 Magpie 上即 Codex/GPT 模型），切换模型后立即更新。悬停模型菜单可看 effort；官方选择器只显示一个 effort 值。 |
 | **设置 → Magpie** | 连接、接入方式、按 provider 分组的模型区（可见性复选框与默认 effort 选择器），以及该 provider 的用量卡片。 |
 | **用量卡片刷新** | 每张卡片有独立的「刷新」，请求 Magpie 重新读取这一个账号。网关冷启动可能没有任何卡片；此时连接面板提供「获取模型与用量」，先同步模型目录，再请 Magpie 读取全部账号一次。受限 held key 无法初始化空缓存，需要管理员先在 Magpie 中读取一次。 |
-
-![Magpie 设置页：连接、Cloudflare Access 接入方式、带可见性与默认 effort 的 provider 分组、用量卡片](docs/settings.gif)
-
-*与选择器录屏使用同一个隔离宿主和 mock 网关；设置面板中的账号为演示数据。*
 
 ### 需要知道的行为
 
