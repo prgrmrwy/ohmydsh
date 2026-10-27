@@ -419,3 +419,13 @@ customizations:
     enabled: false
     brief: Magpie 网关 provider(家庭 CT105 统一网关的模型进选择器,与直连并存)
     note: '第三方 https://github.com/bitxeno/dsh-magpie-connect(MIT,商店收录),engines dsh 0.2.0-rc.1+。原生 dsh-llm adapter,route id dsh-magpie-connect,模型 id 形如 claude/claude-opus-5-5。2026-10-23 审 0.4.1:无 child_process;出站仅到配置的 baseUrl;key 明文存 ~/.dsh-magpie-connect/(0644),GET /api/magpie-settings 回显 key,依赖 connection 回环 fence(勿加 trustedHosts)。key 只在设置页填,不进 manifest。@google/genai、protobufjs 安装脚本在 profile allowBuilds 设 false(同官方 Desktop)。已知:network-guard 按 claude 前缀拦截,MVP 不改。移除:enabled:false → dsh build → 重启,手删数据目录。 pin sha512-W80hpVOdRQVpLVjlnYxshgQ1o3PakE8nnaJ+9Q73bS/+iGkyNI8S3NYbU38s0h6u33hWWv9VnZDeDdP+U8MBHw=='
+
+  - id: dsh-mobile
+    type: package
+    source: remote
+    spec: dsh-mobile@0.6.18
+    version: 0.6.18
+    integrity: sha512-rpbKuW7BnCwdeh3FEYpMD1JZRitO/bneM/cgBUVdz7/Xvyjltv6hFx4XVfD9N8hcgjjEXqz9S+uqoz26TndEJA==
+    enabled: true
+    brief: 手机访问同一 DSH 会话(Android App/浏览器,局域网与可选远程网关)
+    note: '第三方 https://github.com/saya-ch/dsh-mobile(Apache-2.0)。2026-10-27 核对 npm 0.6.18 来源、peer/client inject、上游 README 与 bundle:Host 配对 HTTPS 网关+移动 UI+提问卡片修复,默认 initiallyEnabled:false,不开放原 3080。README 记录 DSH 0.2.0-rc.2 回归,不等于本机真机验收。信任面:配对手机可完整控制 DSH;证书/设备/定制保存在 $DSH_HOME/mobile-access;可选隧道组件按需确认下载,远程须可靠 HTTPS,非 Relay E2EE 方案;/mobile 扩展以本机权限运行。问题记录:旧 WebView 语法与自定义 CSS 可能不兼容,第三方 WS 须精确路径放行。升级复核:peer/inject、网关鉴权及实际手机跨网;不自动运行 setup/启用通道。移除:enabled:false → dsh build → 用户重启,配对与证书保留。'

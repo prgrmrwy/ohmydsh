@@ -177,6 +177,8 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context, without running tools or writing back to the main conversation. Temporarily installed from a fork release of upstream MichengAI/dsh-btw PR #16.
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — Brings the models of a Magpie AI gateway into the model picker, alongside the direct providers.
 
+- [dsh-mobile](https://github.com/saya-ch/dsh-mobile) — Accesses the same DSH sessions from an Android app or phone browser, with paired LAN access and optional remote gateways.
+
 ### Official optional
 
 - [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — Official scheduled-automation page, schedule tools and time context.
