@@ -56,6 +56,7 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 ### 主模型不换，子任务独立选配
 
 - **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；通过官方 `selectModel` 同步选定 effort，同时保存全局默认值。
+- **仅支持 Claude / GPT 系列**：AUTO 只管理模型名（去掉 transport 前缀后）以 `claude-` 或 `gpt-` 开头的主模型。切换到其他主模型（DeepSeek、GLM、Grok、Gemini、Kimi、Qwen 等）会自动落为 MANUAL 并锁定芯片：芯片显示描边 info 图标，悬停整个按钮说明支持范围并提供仓库的 issue/PR 链接。切回 Claude / GPT 系列后芯片恢复可点击且保持 MANUAL，不会自动重新启用 AUTO。
 - **fresh 子任务**：能力需求为 `bounded / analytical / frontier`，推理投入独立判断。Claude 能力槽为 Haiku / Sonnet / Opus 5.5；GPT 为 Luna / Sol / Sol。实际路由必须同时满足当前目录、支持的 effort 和官方子智能体允许列表。Magpie 保留真实 provider 与家族前缀完整模型 ID，不回退到本地入口。
 - **尊重显式选择**：只指定模型或投入时，仅判断另一维；两者都指定则不请求 Jev，只校验路由。缺少任务目标或范围时停止委派，不猜。
 - **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在子任务首次请求前绑定精确身份。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束。fork 和未绑定创建路径暂不支持，不静默替换。

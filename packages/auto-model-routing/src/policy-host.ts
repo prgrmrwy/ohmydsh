@@ -8,10 +8,11 @@ import { policyVersion, CATEGORY_HINTS } from './jev.js'
 import { choosePolicyRoute, mappingVersion, policyEffort, modelFamily, policyProvider, validatePolicyRoute } from './policy-v2.js'
 import { PolicyStore, type ChildDecision } from './policy-store.js'
 import type { RoutingState } from './state.js'
-import type { RoutingCatalog, Settings } from './settings-contract.js'
+import type { AutomaticEffort, RoutingCatalog, Settings } from './settings-contract.js'
 import { userInput } from './input.js'
 import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
+import { autoSupportedModel, currentMainSelection, mainSupported } from './support.js'
 
 export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
   const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: 'claude' | 'codex' }>()
@@ -34,6 +35,13 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   const decidedAt = new Map<number, number>()
   const applied = new Map<string, NonNullable<ChildDecision['decision']>>()
   const latest = new Map<string, NonNullable<ChildDecision['decision']>>()
+  /** Fall back to MANUAL when the main model left AUTO's Claude/GPT scope. */
+  const lockUnsupportedMain = (agent: Agent) => {
+    deps.state.setMode(agent.id, 'MANUAL')
+    mainStatus.delete(agent.id)
+    latest.delete(agent.id)
+    applied.delete(agent.id)
+  }
   ctx.on('tools/execute', async (exec, next) => {
     if (!['subagent','subagent_fork','spawn_teammate'].includes(exec.name) || !exec.agent) return next()
     const root = rootOf(exec.agent)
@@ -74,6 +82,8 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const input = userInput(decision.messages)
       const old = main.get(agent)
       if (!input.userTurn) { if (old) main.set(agent, { ...old, turn: payload.turn }); return decision }
+      // The main model left AUTO's Claude/GPT scope: judge nothing, rewrite nothing.
+      if (!mainSupported(currentMainSelection(ctx, agent))) { lockUnsupportedMain(agent); return decision }
       applied.delete(agent.id)
       mainStatus.delete(agent.id)
       const startedEpoch = epoch(agent.id)
@@ -141,11 +151,25 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     if (agent.session.header.origin !== 'subagent') {
       const runtime = main.get(agent)
       if (!runtime?.active || runtime.turn !== payload.turn || runtime.epoch !== epoch(agent.id) || !enabled(agent.id)) return config
+      // Authoritative gate: the request's actual model decides, whatever the picker showed earlier.
+      if (!autoSupportedModel(config.model)) { lockUnsupportedMain(agent); return config }
+      const unsupported = (effort = '模型不支持调整') => {
+        const old = mainStatus.get(agent.id)
+        mainStatus.set(agent.id, { ...old, policyVersion, depth: runtime.depth, reason: 'no-effort-support', ...(old?.decision ? { decision: { ...old.decision, status: 'unsupported', model: config.model, provider: config.provider, effort } } : {}) })
+      }
       const info = await ctx.llm.resolveModelInfo(config.provider, config.model, payload.signal)
       if (!enabled(agent.id) || runtime.epoch !== epoch(agent.id) || payload.signal.aborted) return config
       const efforts = (info.reasoning?.efforts ?? []).map(e => String(e.id))
-      if (!efforts.length) { const old = mainStatus.get(agent.id); mainStatus.set(agent.id, { ...old, policyVersion, depth: runtime.depth, reason: 'no-effort-support', ...(old?.decision ? { decision: { ...old.decision, status: 'unsupported', model: config.model, provider: config.provider, effort: '模型不支持调整' } } : {}) }); return config }
-      const reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined)
+      if (!efforts.length) { unsupported(); return config }
+      let reasoningEffort: AutomaticEffort
+      try {
+        reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined)
+      } catch (error) {
+        // A supported model whose directory cannot produce an automatic effort must not fail the turn.
+        ctx.logger.warn(`auto-model-routing: could not map the main reasoning effort: ${String(error)}`)
+        unsupported()
+        return config
+      }
       mainStatus.set(agent.id, { ...mainStatus.get(agent.id), policyVersion, depth: runtime.depth, effort: reasoningEffort, reason: 'jev', ...(mainStatus.get(agent.id)?.decision ? { decision: { ...mainStatus.get(agent.id)!.decision!, effort: reasoningEffort, model: config.model, provider: config.provider } } : {}) })
       if (reasoningEffort !== config.reasoningEffort) {
         try { await deps.selectModel({ sessionId: agent.id, provider: config.provider, model: config.model, reasoningEffort }) }

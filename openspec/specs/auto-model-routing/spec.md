@@ -12,6 +12,12 @@
 
 ## 当前默认 AUTO 契约
 
+新默认策略的 Requirements 位于下方 `## Requirements` 首部；legacy 回滚契约见下一节。
+
+## legacy 回滚契约作用域
+
+下列历史 Requirements 与场景中的四档、共享 questions、选择器同步及映射配置仅约束显式 `policy: legacy` 回滚路径；不作为新默认 AUTO 的验收预期。新策略使用上述当前契约，旧格式读取、凭据保护和会话模式存储继续共用。
+## Requirements
 ### Requirement: 默认新策略与显式回滚
 缺省 policy SHALL 为内部 `policy-v2`，已有未含 policy 字段配置 SHALL 直接使用新策略且不改写配置文件或会话模式。设置 SHALL 不展示版本选择；旧四档映射 SHALL 仅在显式 legacy 回滚时展示和使用，不删除历史配置。
 
@@ -32,12 +38,6 @@ MANUAL SHALL 不触发新判断或主请求覆盖；此前绑定的子实例 SHA
 #### Scenario: 新策略不改官方全局模型
 - **WHEN** AUTO 调整主 effort
 - **THEN** 请求按支持范围生效，主 provider/model 保持，selectModel 调用数为零
-
-## legacy 回滚契约作用域
-
-下列历史 Requirements 与场景中的四档、共享 questions、选择器同步及映射配置仅约束显式 `policy: legacy` 回滚路径；不作为新默认 AUTO 的验收预期。新策略使用上述当前契约，旧格式读取、凭据保护和会话模式存储继续共用。
-
-## Requirements
 
 ### Requirement: 模式与改写规则
 系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，按会话持久化。新建普通会话的初始模式 SHALL 取设置项「新会话默认模式」（`MANUAL` | `AUTO`，缺省 `MANUAL`）：仅当普通会话以全新方式创建（不是恢复、清空、压缩或子会话）时，系统 SHALL 按创建时刻的设置值写入该会话的模式；此后修改设置 MUST NOT 改变已有会话的模式。没有状态记录的已有会话（例如设置生效前创建的会话）SHALL 视为 `MANUAL`。默认模式为 `AUTO` 时新会话的行为与用户手动切到 `AUTO` 相同（含 Jev 失败即停用）。
@@ -355,7 +355,8 @@ Jev 调用失败时，系统 SHALL 把该会话转为 `MANUAL`（与用户切 MA
 - **THEN** 文本包含 `route_subagent`、`reasoning_effort`、`[model·effort]`、独立体系规则、非 claude/codex provider 时询问、“暂停委派并询问用户”、复用“新建”规则、“只指定模型”时传 `model` 的规则、“子会话 Jev 选模未启用”及 `routed: false` 时按官方默认委派，且不含档位表模型名
 
 ### Requirement: 状态可见且不改写其它控件
-系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`，以及该会话最近一次 Jev 决策（与决策提示同一格式的两行：谁判断、档位 → （模型）effort、耗时；非 0% 档位分布），无决策时不显示该段；面板 MUST NOT 渲染决定历史（Host 仍在内存保留最近 20 条并经状态接口返回，供排查，重启后清空、不落盘）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。
+
+系统 SHALL 在 composer 的 `conversation.input.right` 列表以负的 `order` 注册 `AUTO / MANUAL` 芯片（GPT 速度芯片为 `order: 0`）。芯片 SHALL 是单个按钮：可见文本为模式名，其后跟一个切换图标；无边框、无底色，hover 时显示官方交互底色；点击即切换模式。状态面板 SHALL 在鼠标悬停或键盘聚焦芯片时显示、离开芯片与面板时收起，内容为插件本回合实际输出的 effort 与 `reason`，以及该会话最近一次 Jev 决策（与决策提示同一格式的两行：谁判断、档位 → （模型）effort、耗时；非 0% 档位分布），无决策时不显示该段；面板 MUST NOT 渲染决定历史（Host 仍在内存保留最近 20 条并经状态接口返回，供排查，重启后清空、不落盘）；面板 MUST NOT 声称官方选择器总能反映 AUTO 结果（存在待生效手选时二者不同）。`reason` 取值为闭集 `jev | continued | no-effort-support | jev-failed`（`continued` 为非用户回合沿用上一级别）。会话存在 `disabled` 时，芯片**可见文本** SHALL 为 `MANUAL · Jev 停用` 并以警示色显示，title SHALL 给出该失败类别的人类可读提示；面板 SHALL 显示类别、提示、发生时间及“点击 AUTO 重试”。芯片 MUST NOT 调用官方模型选择接口或速度芯片的设置接口。当状态接口返回 `autoSupport.supported = false` 时，芯片 SHALL 改用「AUTO 主模型支持范围与不可用锁定」定义的锁定态渲染（以 info 图标替代切换图标、点击不切换、面板改为支持范围说明与反馈链接），该锁定态不改变本要求中 `disabled`（Jev 停用）的“点击 AUTO 重试”语义。
 
 #### Scenario: 芯片注册在速度芯片左侧
 - **GIVEN** client bundle 已加载
@@ -670,3 +671,33 @@ client SHALL 向官方 `conversation.chat.assistant-actions` 插槽注册一个�
 #### Scenario: 外部步骤未满足前置条件
 - **WHEN** npm 认证、商店年龄/准入校验、审核或索引探测尚未完成
 - **THEN** 发布记录分别标明待办条件、已发布版本、PR/申请地址与可见性；不得把创建仓库、发出 PR 或 registry 暂存状态当作已上架，也不得用重复发版绕过等待
+
+### Requirement: AUTO 主模型支持范围与不可用锁定
+
+AUTO SHALL 只处理 Claude / GPT 系列主模型：主模型 id 去掉 transport 前缀后（Magpie 的 `claude/...`、`codex/...` 取其最后一个 `/` 之后的部分）以 `claude-` 或 `gpt-` 开头（大小写不敏感）即视为支持；其余模型 SHALL 视为不支持。当前主模型不在支持范围时，系统 MUST NOT 发起 Jev 判断、MUST NOT 改写该请求，并 SHALL 把会话模式持久化为 `MANUAL`；状态接口 SHALL 返回当前选择与 `autoSupport = { supported: false, provider, model }`。模式按主模型切换实时推导：切回受支持模型后 `autoSupport.supported` SHALL 为 `true` 且芯片恢复可点击，模式保持 `MANUAL`，MUST NOT 自动恢复 `AUTO`。主模型在支持范围内但自动 effort 映射不可得（目录没有可用 `low|medium|high|xhigh`、推荐起点不可验证、或自动 effort 上限排除全部候选）时，主请求 SHALL 保持官方合成配置、`reason` 为 `no-effort-support`，MUST NOT 阻断请求、停用 AUTO 或记为 Jev 失败。子任务路由仍 SHALL 在无法给出可用 effort 时返回可见设置错误并要求暂停委派；`policy: legacy` 回滚路径 MUST NOT 套用本要求。
+
+#### Scenario: 切换到不支持的主模型自动锁定
+- **GIVEN** 会话为 `AUTO`，主模型为 `opencode-go/deepseek-v4.1-flash`（不以 `claude-`/`gpt-` 开头）
+- **WHEN** 用户切换模型后读取状态或发出下一回合请求
+- **THEN** 模式持久化为 `MANUAL`；状态含 `autoSupport = { supported: false, provider: 'opencode-go', model: 'deepseek-v4.1-flash' }`；该回合 Jev 请求次数为 0，模型请求的 provider/model/effort 与官方合成配置深度相等
+
+#### Scenario: 不支持模型的请求不再导致整轮失败
+- **GIVEN** 会话此前在 AUTO 下正常完成过回合，用户随后把主模型切换为不支持范围
+- **WHEN** 用户发出下一回合请求
+- **THEN** 回合正常结束（`turn/end` 不为 error）；请求照常发出且未被改写；会话保持 `MANUAL`，不产生 `disabled` 记录
+
+#### Scenario: 芯片锁定态与悬停提示
+- **GIVEN** 状态接口返回 `mode: 'MANUAL'` 与 `autoSupport = { supported: false, provider: 'opencode-go', model: 'deepseek-v4.1-flash' }`
+- **WHEN** 渲染芯片并悬停或聚焦整个按钮
+- **THEN** 芯片可见文本为 `MANUAL`，其后是描边 info 图标（不是切换箭头），按钮带 `aria-disabled` 标记且点击不发出 `setMode` 请求；面板说明 AUTO 目前仅支持 Claude / GPT 系列模型，并给出 `https://github.com/prgrmrwy/dsh-auto-model-routing` 的 issue/PR 链接；锁定时不使用 Jev 停用的红色警示样式
+
+#### Scenario: 切回受支持模型后恢复可切换
+- **GIVEN** 会话因主模型不支持而处于 `MANUAL` 锁定态
+- **WHEN** 主模型切回 `claude` / `gpt` 系列
+- **THEN** 状态返回 `autoSupport.supported = true`；芯片恢复普通 `MANUAL` 显示与切换图标且可点击；用户点击后才进入 `AUTO`，系统 MUST NOT 自动恢复
+
+#### Scenario: 支持范围内映射不可得不阻断请求
+- **GIVEN** 会话为 `AUTO`，主模型属于 Claude / GPT 系列，但官方目录只提供 `max`（或自动 effort 上限排除了全部可用候选）
+- **WHEN** 本回合首个请求经过路由器
+- **THEN** 请求配置与官方合成配置深度相等，`reason` 为 `no-effort-support`；请求成功发出，AUTO 未被停用，未记为 Jev 失败
+

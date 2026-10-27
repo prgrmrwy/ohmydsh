@@ -20,6 +20,7 @@ import { routeSubagentTool } from './subagent-tool.js'
 import { buildState, previousTurn } from './context.js'
 import { policyHost } from './policy-host.js'
 import { PolicyStore } from './policy-store.js'
+import { currentMainSelection, mainSupported } from './support.js'
 
 export const name = 'dsh-auto-model-routing'
 export const inject = ['llm', 'agents', 'tools']
@@ -52,7 +53,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.on('agent/created', ({ agent, source }) => {
     // Factory resume announces `resume`; a nonzero initial seed also excludes restored/forked histories.
     if (source !== 'startup' || agent.session.header.origin === 'subagent' || agent.session.firstLiveSeq !== 0 || agent.session.header.isSeeded || agent.session.snapshotEvents().some(event => event.type === 'session/end-seed') || stateFiles.get(agent.id)) return
-    if (settings.read().settings.defaultMode === 'AUTO') state.setMode(agent.id, 'AUTO')
+    if (settings.read().settings.defaultMode !== 'AUTO') return
+    // A new session whose default main model is outside AUTO's Claude/GPT scope starts in MANUAL.
+    if (!mainSupported(currentMainSelection(ctx, agent))) return
+    state.setMode(agent.id, 'AUTO')
     return undefined
   })
   // Agent is the WeakMap identity; origin stays on the immutable session header.
@@ -129,6 +133,10 @@ export function apply(ctx: Context, config: Config = {}): void {
             const result = await child.sessionController.resolveAgent(id as never)
             return 'agent' in result ? ref(result.agent) : undefined
           }
+          const resolveSessionAgent = async (id: string) => {
+            const result = await child.sessionController.resolveAgent(id as never)
+            return 'agent' in result ? result.agent : undefined
+          }
           const payload = enveloped ? wire.payload : body
           let manualDecision: { sessionId: string; decisionId: number } | undefined
           if (operation === 'setMode' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
@@ -153,10 +161,16 @@ export function apply(ctx: Context, config: Config = {}): void {
             catch { ctx.logger.warn('auto-model-routing: could not record MANUAL switch') }
           }
           if ((operation === 'state' || operation === 'setMode') && response.ok && settings.read().settings.policy === 'policy-v2') {
+            const sessionId = (payload as { sessionId: string }).sessionId
+            const agent = await resolveSessionAgent(sessionId).catch(() => undefined)
+            const selection = agent ? currentMainSelection(ctx, agent) : undefined
+            const supported = mainSupported(selection)
+            // Leaving AUTO is persisted: a pick outside the Claude/GPT scope must not keep judging turns.
+            if (!supported && state.read(sessionId).mode === 'AUTO') { state.setMode(sessionId, 'MANUAL'); policy.invalidate(sessionId) }
             const value = await response.json()
-            const main = policy.mainStatus((payload as { sessionId: string }).sessionId)
+            const main = policy.mainStatus(sessionId)
             const { decision: _legacyDecision, effort: _legacyEffort, reason: _legacyReason, history: _legacyHistory, ...base } = value
-            const result = { ...base, history: [], policy: 'policy-v2', ...main }
+            const result = { ...base, mode: state.read(sessionId).mode, history: [], policy: 'policy-v2', ...main, autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } }
             return Response.json(enveloped ? { type: 'server-response', rpcId: wire.rpcId, result: { ok: true, value: result } } : result)
           }
           if (!enveloped) return response
