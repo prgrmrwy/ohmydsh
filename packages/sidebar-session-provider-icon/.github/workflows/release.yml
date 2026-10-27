@@ -61,4 +61,11 @@ jobs:
         run: npm test
 
       - name: Publish
-        run: npm publish
+        run: |
+          # A tag may be backfilled for a version that is already on npm.
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-sidebar-session-provider-icon@$version" version >/dev/null 2>&1; then
+            echo "Version $version is already published; nothing to publish."
+          else
+            npm publish
+          fi

@@ -1,0 +1,77 @@
+name: Mirror release
+
+# Self-developed plugins published as standalone repositories are mirrored from
+# this monorepo with `git subtree split`. On every push to main that touches one
+# of them, push its split history to the mirror's main (fast-forward only) and,
+# when the mirror has no `v<package version>` tag yet, create it. The tag starts
+# the mirror's own release.yml, which tests and publishes to npm through
+# trusted publishing and skips versions that are already on npm.
+#
+# Each mirror has its own write deploy key; the private half is the secret named
+# in the matrix. A rejected (non fast-forward) push fails loudly instead of
+# forcing: the mirror then holds commits that are not in this repository.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/auto-model-routing/**'
+      - 'packages/dsh-magpie-connector/**'
+      - 'packages/sidebar-session-provider-icon/**'
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    name: Mirror ${{ matrix.repo }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: auto-model-routing
+            repo: dsh-auto-model-routing
+            secret: MIRROR_KEY_AUTO_MODEL_ROUTING
+          - dir: dsh-magpie-connector
+            repo: dsh-magpie-connector
+            secret: MIRROR_KEY_MAGPIE_CONNECTOR
+          - dir: sidebar-session-provider-icon
+            repo: dsh-sidebar-session-provider-icon
+            secret: MIRROR_KEY_SIDEBAR_PROVIDER_ICON
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure deploy key
+        env:
+          KEY: ${{ secrets[matrix.secret] }}
+        run: |
+          test -n "$KEY" || { echo "::error::secret ${{ matrix.secret }} is not set"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/mirror && chmod 600 ~/.ssh/mirror
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/mirror -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+
+      - name: Push subtree and tag new version
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          remote="git@github.com:prgrmrwy/${{ matrix.repo }}.git"
+          split="$(git subtree split --prefix=packages/${{ matrix.dir }} HEAD)"
+          echo "split commit: $split"
+          git push "$remote" "$split:refs/heads/main"
+          version="$(git show "$split:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          if git ls-remote --exit-code --tags "$remote" "refs/tags/v$version" >/dev/null; then
+            echo "v$version already tagged on the mirror; nothing to release."
+          else
+            git tag -a "v$version" "$split" -m "v$version"
+            git push "$remote" "refs/tags/v$version"
+            echo "Tagged v$version; the mirror's release workflow publishes it."
+          fi
