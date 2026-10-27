@@ -35,7 +35,7 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
   return defineTool({
     name: 'route_subagent',
     description: 'Optional preview of the AUTO sub-agent route: returns a recommendation only, never an applied route. Automatic routing happens when the official fresh creation tool creates the exact child, before its first request; use that tool directly and do not turn this recommendation into an explicit user constraint. Fork is unsupported. Sends the task text (redacted, up to 8000 characters) to the decision service chosen in settings only while the main session is AUTO; otherwise returns routed=false: delegate with the official defaults. If the user or lead already chose the model or effort, pass it: only the missing dimension is judged. On error: pause delegation and ask the user; never guess or switch models.',
-    timeoutMs: 5000,
+    timeoutMs: 10000,
     parameters: {
       task: { type: 'string', required: true, description: 'The task the sub-agent will do.' },
       provider: { type: 'string', required: true, enum: registry.providers(), description: 'Exact transport provider of the sub-agent.' },

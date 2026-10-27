@@ -53,7 +53,7 @@ export function settingsHost(ctx: Context, store: SettingsStore, registry: Regis
   const endpoint = async (operation: 'settings' | 'saveSettings' | 'setKey' | 'testDecision', body: unknown): Promise<Response> => {
     if (operation === 'settings') return Response.json(await read())
     if (operation === 'testDecision') {
-      const client = new JevClient({ get: async name => credentials() ? credentials()!.resolve(credentialRef(name)) : environment.get(name) }, undefined, 4500, () => store.read().settings.decisionService)
+      const client = new JevClient({ get: async name => credentials() ? credentials()!.resolve(credentialRef(name)) : environment.get(name) }, undefined, 8000, () => store.read().settings.decisionService)
       const result = await client.judgePolicy('Public connection test: sort the numbers [3,1,2] in ascending order.', new AbortController().signal, 'child')
       return Response.json(result)
     }

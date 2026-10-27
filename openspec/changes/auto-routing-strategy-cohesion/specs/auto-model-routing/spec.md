@@ -172,7 +172,7 @@ AUTO SHALL 在目录、子任务路由、预览工具与持久化恢复中接受
 - **THEN** 发往 Jev 的子任务 `state` 只含“整理日志”，不含注入指令文本；父会话本回合的决定与 Jev 请求次数不变
 
 ### Requirement: Jev 判断请求与脱敏
-系统 SHALL 在 AUTO 主会话用户回合 step 1 与已绑定子任务首次请求前，各以一次 Jev 决策请求得出判断：请求发往设置中所选决策服务的端点与模型（见 auto-decision-services-feedback），凭据按该服务的固定引用在每次调用时经官方 credentials 服务解析（credentials 服务不存在时经官方 launch environment 读取），未解析到值时为 `missing-credential`；单次期限取设置项「Jev 期限」（整数毫秒，范围 1000–4500，缺省 3000，每次请求时读取），`redirect: 'error'`，MUST NOT 重试。请求 body 为 `{model, state, questions}`；`questions` SHALL 取自包内唯一规则文件 `src/rubric.json`：主会话只含 `depth`，子任务按显式维度含 `capability`、`depth` 或两者。Jev 返回后 SHALL 重新读取会话模式，等待期间模式已变或回合决定已被废止时丢弃结果（不写决定、不写 `disabled`）。系统 MUST NOT 包含本地规则、关键词或通用对话模型的判断路径。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为所选决策服务的端点主机。
+系统 SHALL 在 AUTO 主会话用户回合 step 1 与已绑定子任务首次请求前，各以一次 Jev 决策请求得出判断：请求发往设置中所选决策服务的端点与模型（见 auto-decision-services-feedback），凭据按该服务的固定引用在每次调用时经官方 credentials 服务解析（credentials 服务不存在时经官方 launch environment 读取），未解析到值时为 `missing-credential`；单次期限取设置项「Jev 期限」（整数毫秒，范围 1000–8000，缺省 5000，每次请求时读取），`redirect: 'error'`，MUST NOT 重试。请求 body 为 `{model, state, questions}`；`questions` SHALL 取自包内唯一规则文件 `src/rubric.json`：主会话只含 `depth`，子任务按显式维度含 `capability`、`depth` 或两者。Jev 返回后 SHALL 重新读取会话模式，等待期间模式已变或回合决定已被废止时丢弃结果（不写决定、不写 `disabled`）。系统 MUST NOT 包含本地规则、关键词或通用对话模型的判断路径。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为所选决策服务的端点主机。
 
 主会话请求的 `state` SHALL 依次包含：
 1. 固定首行 `Previous user-turn tier: none`。
@@ -318,7 +318,7 @@ AUTO SHALL 在目录、子任务路由、预览工具与持久化恢复中接受
 - `decisionToast`：布尔，缺省 true；
 - `defaultMode`：MANUAL | AUTO，缺省 MANUAL；
 - `effortCap`：low | medium | high | xhigh，缺省 xhigh；
-- `jevTimeoutMs`：1000–4500 整数，缺省 3000。
+- `jevTimeoutMs`：1000–8000 整数，缺省 5000。
 写入 SHALL 整体校验、保留未修改字段，只持久化文件中已有或本次提交的字段，拒绝未知字段（含 `policy`、`mainEfforts`、`childRoutes`）、形似凭据的字段名与非法值；失败 SHALL 返回字段级错误且配置文件字节不变。文件缺失/不可解析时 SHALL 使用缺省设置并报告配置状态；可独立解析的非法普通字段按缺省值处理。旧映射字段按「旧配置与旧记录只读兼容」处理。下一次请求或工具调用采用新配置，无需重启。
 
 读取响应 SHALL 包含设置、默认值、配置问题、`deprecated` 列表、API key 状态 `{configured, source?, writable, available}`、当前模型目录与子会话允许列表状态；MUST NOT 包含 key 值。

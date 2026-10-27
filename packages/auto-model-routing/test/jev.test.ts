@@ -165,3 +165,8 @@ it('caller_cancel_is_cancelled_not_timeout', async () => {
  const result: PolicyResult = await pending
  expect(result).toEqual({ kind: 'cancelled' })
 })
+it('settings deadline outside 1000..8000 falls back to 5000 ms', async () => {
+ const { server } = await setup((_req, res) => { setTimeout(() => res.end(JSON.stringify({ answers: { depth: { choice: 'lower' } } })), 4600) })
+ expect(await judge(new JevClient(env('k'), server.base, () => 6000), 'x', new AbortController().signal)).toMatchObject({ kind: 'ok', depth: 'lower' })
+ expect(await judge(new JevClient(env('k'), server.base, () => 99999), 'x', new AbortController().signal)).toMatchObject({ kind: 'ok', depth: 'lower' })
+}, 15000)

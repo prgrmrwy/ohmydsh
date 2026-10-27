@@ -26,4 +26,4 @@ export interface SettingsRead {
   /** Retired keys present in the file, alphabetical. */
   deprecated: string[]
 }
-export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 3000 })
+export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 5000 })

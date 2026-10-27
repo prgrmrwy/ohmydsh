@@ -24,7 +24,7 @@ it('spec Scenario "保存普通设置"',()=>{
  // The next read (what the next request or new session uses) reflects the saved values without a restart.
  expect(store.read().settings).toMatchObject({defaultMode:'AUTO',jevTimeoutMs:2500,decisionToast:false})
 })
-it.each([{jevTimeoutMs:6000},{jevTimeoutMs:1000.5},{effortCap:'max'},{defaultMode:'auto'},{foo:1},{apiKey:'do-not-copy'},{mainEfforts:{}}])('spec Scenario "非法设置整体拒绝": %j',patch=>{
+it.each([{jevTimeoutMs:9000},{jevTimeoutMs:999},{jevTimeoutMs:1000.5},{effortCap:'max'},{defaultMode:'auto'},{foo:1},{apiKey:'do-not-copy'},{mainEfforts:{}}])('spec Scenario "非法设置整体拒绝": %j',patch=>{
  const {path,store}=fixture(); writeFileSync(path,'{"decisionToast":false}')
  expect(()=>store.save(patch)).toThrow(SettingsValidationError)
  expect(readFileSync(path,'utf8')).toBe('{"decisionToast":false}')
@@ -52,4 +52,13 @@ it('spec Scenario "旧映射配置不影响路由并在保存时移除"', async 
   expect(JSON.parse(readFileSync(join(h.home, 'plugins/dsh-auto-model-routing/config.json'), 'utf8'))).toEqual({ decisionToast: false })
   expect((await h.invoke('settings', {})).deprecated).toEqual([])
  } finally { await closeHarness() }
+})
+it('Jev deadline defaults to 5000 ms and accepts up to 8000 ms',()=>{
+ const {path,store}=fixture()
+ expect(DEFAULT_SETTINGS.jevTimeoutMs).toBe(5000)
+ expect(store.read().settings.jevTimeoutMs).toBe(5000)
+ store.save({jevTimeoutMs:8000})
+ expect(JSON.parse(readFileSync(path,'utf8'))).toEqual({jevTimeoutMs:8000})
+ writeFileSync(path,JSON.stringify({jevTimeoutMs:8001}))
+ expect(store.read().settings.jevTimeoutMs).toBe(5000)
 })

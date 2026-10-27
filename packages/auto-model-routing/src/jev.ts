@@ -25,7 +25,7 @@ function byStatus(status: number): JevCategory {
 
 export class JevClient {
   readonly url: string
-  constructor(private readonly env: CredentialSource, base = 'https://openrouter.ai', private readonly timeoutMs: number | (() => number) = 3000, private readonly service?: () => DecisionConfig | undefined) {
+  constructor(private readonly env: CredentialSource, base = 'https://openrouter.ai', private readonly timeoutMs: number | (() => number) = 5000, private readonly service?: () => DecisionConfig | undefined) {
     this.url = `${base}/api/alpha/decisions`
   }
 
@@ -50,7 +50,7 @@ export class JevClient {
     if (signal.aborted) return { kind: 'cancelled' }
     const configuredTimeout = typeof this.timeoutMs === 'function' ? this.timeoutMs() : this.timeoutMs
     // Settings callbacks use the public range; numeric constructor overrides remain available to tests.
-    const timeout = typeof this.timeoutMs === 'function' && (!Number.isInteger(configuredTimeout) || configuredTimeout < 1000 || configuredTimeout > 4500) ? 3000 : configuredTimeout
+    const timeout = typeof this.timeoutMs === 'function' && (!Number.isInteger(configuredTimeout) || configuredTimeout < 1000 || configuredTimeout > 8000) ? 5000 : configuredTimeout
     const deadline = AbortSignal.timeout(timeout)
     const started = performance.now()
     try {
