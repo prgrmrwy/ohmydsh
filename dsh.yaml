@@ -73,14 +73,6 @@ customizations:
   #            回退到 enabled;用于默认关闭、仅在有权限的机器上用 env 打开的
   #            定制(如内部专属包),与顶层 web / DSH_ 环境变量同一套真值/假值语义
   # 第三方(remote):只存 pin + 覆盖 + 记录,不 vendor 源码
-  - id: cost-meter
-    type: package
-    source: remote
-    spec: dsh-cost-meter@1.8.4
-    version: 1.8.4
-    enabled: true
-    brief: 会话费用统计
-    note: '第三方 https://github.com/Han-1413141/dsh-cost-meter(MIT,以 npm 元数据核对),纯 web client 插件。信任面:密钥(OpenCode Go/Coding Plan Key、火山 AK/SK、自定义余额占位符)只存 DSH 凭据库,设置页 write-only;余额/额度端点仅在用户启用对应 Provider 时出站,API Key 只发官方域名;customBalance.allowedHosts 未配置时放行并告警一次。升级复核:1.8.4 刻意不含 1.8.5 起的全局 fetch observer(与 OpenCode header 共存);核对 peer、出站域名并先做宿主冒烟。回滚:改回上一 pin(git 历史)→ dsh build;回到 1.7.x 须同时回退 DSH 到 0.1.5;验收失败则 enabled:false。 pin 校验 sha512-xtcidwjxRTchiKFTOci8z8UyNTxvabBzvWpRKCbVkOlqcl39fneEqyBPFrdVTEyioc88L45fZ8agoE509KTCAA=='
   - id: archify-dsh
     type: package
     source: remote
