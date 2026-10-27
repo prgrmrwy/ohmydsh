@@ -86,8 +86,8 @@
 
 ## 8. Deployment and acceptance
 
-- [ ] 8.1 Back up `$DSH_HOME/state/auto-model-routing/` and `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` to a timestamped directory (design D7).
-- [ ] 8.2 Build an isolated preview inside the worktree (`dsh build` → `ws prepare-preview` → `dsh`). In the preview GUI, confirm: the settings page has no mapping tabs and shows the "旧映射不再生效" message; the AUTO chip and its panel; the reply-bar allocation feedback; an unsupported model locking to MANUAL. Record what was actually observed.
+- [x] 8.1 Back up `$DSH_HOME/state/auto-model-routing/` and `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` to a timestamped directory (design D7).
+- [x] 8.2 Build an isolated preview inside the worktree (`dsh build` → `ws prepare-preview` → `dsh`). In the preview GUI, confirm: the settings page has no mapping tabs and shows the "旧映射不再生效" message; the AUTO chip and its panel; the reply-bar allocation feedback; an unsupported model locking to MANUAL. Record what was actually observed.
 - [ ] 8.3 Once the user approves, merge and run `dsh build` twice from the main checkout (the second run must produce no changes). The user decides when to restart the Host.
 
 ## 9. Verification and archive
