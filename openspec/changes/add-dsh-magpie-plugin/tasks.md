@@ -197,3 +197,14 @@
 - [ ] 19.5 parent 独立复核 AMD3 源码/规划及正式图 freshness、GUI验收：parent 源码/构建复核已 APPROVE；最终正式图验证、production sync×2（第二次no changes）完成；只剩用户重启后的GUI验收，不能将该整项或full change标PASS。
 
 AMD3 local snapshot：119/124 complete（旧115/119历史保留；新增19.1–19.4完成，19.5独立复核/正式图/GUI仍pending），不是0pending或全目标PASS。
+
+## 20. AMD4 — 用户 2026-10-27 授权的体验与重试修订
+
+用户要求：删除整体刷新用量栏目；用量条 ≤70 蓝、71–89 橙、≥90 红；参照 dsh-plugin-subscriptions 做失败重试（超时对齐其“任何数据续期、300s 空闲”）；连接默认只要地址与 key，「高级连接」默认展开、接入方式仅「直连 / Cloudflare Access」，README 欢迎 issue/PR。无卡片时在连接面板给「获取模型与用量」。
+
+- [x] 20.1 修订 spec（生成超时、失败分类与重试新 requirement、用量卡片/手动刷新、连接接入方式）与 design D2 超时条款。
+- [x] 20.2 adapter：`providerRetryPolicy`、标准错误码分类、300s 任意数据看门狗、删除建连 429/5xx 内部重发、空回复 `EMPTY_RESPONSE`；改写 timeout/retry/generate 测试。
+- [x] 20.3 client：删除用量栏目与「刷新全部」，连接面板空状态与「获取模型与用量」，单卡提示归入分组，三档用量条，高级连接接入方式；改写 cards-render/access-ui 测试。
+- [x] 20.4 双语 README：重试/超时、用量刷新与颜色、连接方式（含 Tailscale 属直连、Cloudflare 524 提醒、欢迎 issue/PR）。
+- [x] 20.5 本包 test（34 files / 248 tests）、typecheck、build 通过；本地 worktree 需 `--fsModuleCachePath` 指向可写目录。
+- [ ] 20.6 部署后 GUI 验收：设置页布局、Cloudflare Access 切换、真实长推理请求不再 90s 超时、断网/5xx 时 DSH 显示重试。

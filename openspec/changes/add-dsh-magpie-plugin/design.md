@@ -76,7 +76,7 @@
   - 输出上限：Chat 用 `max_completion_tokens`，Responses 用 `max_output_tokens`。
   - usage：`inputTokens = max(总输入 - cacheRead - cacheWrite, 0)`，没有缓存详情时缓存按 0 计，这部分由 pi-ai 完成。`totalTokens` 由插件自己的 `mapUsage` 推导：未缓存输入大于 0 时取四项之和，否则省略（见下）。不采用官方 dsh-llm-pi-ai 直接透传的做法，原因是 Magpie 透传同协议上游时，`total_tokens` 可能缺失（`gateway.go:3795–3797、4911–4944`；见 `pi_responses_test.go:32–35`），此时 pi-ai 会给出 0（`openai-responses-shared.js:450`）。实现：pi-ai 归一化后，`input + cacheRead + cacheWrite` 就是原始完整输入，因此 `input > 0` 时 `totalTokens = input + cacheRead + cacheWrite + output`；`input === 0` 时省略。这一条就能覆盖缺少完整输入（pi-ai 记为 0）和计数不一致（pi-ai 钳到 0）两种情况，不需要额外钩子。代价是恰好全部命中缓存的合法请求也会省略 total。total 是可选字段，各分项仍然正确，按评审 Re-check 4 的意见只算 Suggestion，可以接受。（Chat 和 Responses 都不采用 pi-ai 的 total。）缓存字段只在大于 0 时输出。
   - 流中出现错误事件即判为 error，之后再收到 `[DONE]` 或完成事件也不改判。
-- **超时与重试**：首实际内容预算 90s，从调用 pi-ai 前启动；只在收到非空 `text_delta`、`thinking_delta` 或 `toolcall_delta`（`delta.length > 0`）时切换或重置 60s 空闲预算。HTTP headers、pi `start`、空 block start/end、空 delta、SSE comments 与 Responses created/in_progress 都不缩短或延长当前预算；工具 start 只有 name/id、尚无参数 delta 时仍属首内容预算。block end 本身不重置预算；无 delta 而以最终 block + done 直接完成仍正常结束，不等待超时。这里澄清原“首事件”歧义，不增加 90/60 数值、不新增配置或看门狗。看门狗仍包在 pi-ai 事件流外层。插件只在建连阶段（还没收到任何事件时）对 429 和 5xx 做有限重试；已经开始的流因超时不自动重放，轮次级重试由 DSH 负责。
+- **超时与重试**（AMD4 取代原 90s/60s 内容预算与建连 429/5xx 有限重试）：对齐 dsh-plugin-subscriptions。一个 300s 空闲看门狗从调用 pi-ai 前启动；包装后的 fetch 在收到响应头和响应体每个 chunk 时重新计时，所以 SSE 事件、comments/心跳都算存活。原设计只认非空 delta，长时间推理（高 effort、网关只发 in_progress/心跳）会在 90s 被误判超时，而错误码 `MAGPIE_STREAM_TIMEOUT`/`MAGPIE_GENERATION_FAILED` 又不在 dsh-llm 默认可重试集合内，所以 DSH 的 `llm-retry` 一次也不会重试——这正是其它机器上频繁看到这两个错误的原因。现在插件声明 `providerRetryPolicy`（10 次、1s→60s、±20%），把失败映射到 `TIMEOUT`/`TRANSPORT`/`SERVER`/`RATE_LIMIT`/`EMPTY_RESPONSE` 等标准码并带 `status`/`providerRetryAfterMs`；插件自身不再重发任何请求，避免与轮次级重试相乘。消息仍保留 `MAGPIE_STREAM_TIMEOUT` 字样便于排查。
 
 ### D3 统一传输层：私有直连 dispatcher，拒绝重定向，所有 hop 都校验
 插件内只有一个 `gatewayFetch(gen, method, path, init)`：
@@ -109,7 +109,7 @@
 - **不落盘**：目录只放内存。**备选**：持久化 `catalog.json`。**否决理由**：唯一收益是 DSH 重启时网关又恰好不可达，选择器里仍有列表，但这时生成本来也会失败；持久化还要按身份隔离并保证原子写，复杂度与收益不成比例（ponytail 第 10 条、评审 C1，第 2 轮已接受）。
 
 ### D5 目录同步时机与发布（解决 M2）
-- **触发时机**：插件启动且已配置时、换代时、用户点「重新获取目录」时。不做后台定时轮询，因为目录很少变化，用户需要时可以手动获取。
+- **触发时机**：插件启动且已配置时、换代时、用户点「刷新模型列表」时。不做后台定时轮询，因为目录很少变化，用户需要时可以手动获取。
 - **超时**：每次同步 15s。失败时保留当前代的目录，并记录 `lastSyncError` 与错误分类。
 - **同代只有一个进行中的同步**：同代内重复触发时，复用 `gen.syncPromise`，不另发请求（第 2 轮评审 M4）。这样不存在同代的两次同步互相覆盖，也就不需要同步序号。
 - **发布**：目录、可见性、默认 effort 任一项生效变化后，调用注册句柄的 `replace(['dsh-magpie'])`，触发 `llm/adapters-updated`。官方选择器据此失效并重读目录，subscriptions 也是这样做的。
@@ -119,7 +119,7 @@
 - key 存在 credentials 中，引用 `MAGPIE_API_KEY`。
 - 设置文件 `$DSH_HOME/plugins/dsh-magpie/settings.json`，原子写入，权限 0600，内容为：
   - `baseUrl`；
-  - `visibleModels`：按 provider 保存，键不存在表示跟随网关目录；
+  - `visibleModels`：按 provider 保存，键不存在表示跟随网关模型列表；
   - `defaultEfforts`：模型 id 到 effort 的映射。
 - 不迁移 connect 的设置，因为白名单语义不同。用户需要重新填地址、重新选择模型。
 - 可见性只校验形状，不与当前目录比对（ponytail 第 8 条）：网关目录抖动时，不应让一次正常的保存失败。
@@ -205,7 +205,7 @@ README 中英两份，含 `<!-- problem -->` 段和 `## Removal` 段。包内提
 - **[pi-ai 升级改变 wire 行为]** → pin 主版本，spec 中的 wire 场景作为回归测试。
 - **[Magpie 接口字段漂移，没有版本承诺]** → 宽松解析：缺字段时省略，未知字段忽略，畸形条目丢弃。用 fixture 测试锁定当前形态，升级 Magpie 后跑一次真实只读冒烟。
 - **[卡片 403]** → 卡片区单独显示错误，模型和生成不受影响。
-- **[DSH 重启时网关不可达，选择器为空]** → 这是有意的取舍（D4）。生成本来也会失败；网关恢复后，用户手动「重新获取目录」即可，或者等下次启动。
+- **[DSH 重启时网关不可达，选择器为空]** → 这是有意的取舍（D4）。生成本来也会失败；网关恢复后，用户手动「刷新模型列表」即可，或者等下次启动。
 - **[经 Chat 使用 Claude 时，部分能力被网关翻译掉]** → 与 connect 现状相同，不是回退。
 - **[拒绝重定向，若 Magpie 前面挂了会重定向的反向代理就会失败]** → 地址直接填 Magpie 的 `/v1`。错误信息为「网关返回了被禁止的重定向」，与 D3 一致，不声称具体状态码。
 - **[刷新全部在多账号时放大厂商读取]** → 只由用户点击触发；host 闸门保证同一时刻只有一个刷新；Magpie 对同一请求元组有 30s 限流。

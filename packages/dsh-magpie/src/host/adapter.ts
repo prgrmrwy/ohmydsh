@@ -1,4 +1,4 @@
-import { LlmAdapter, type GenerateOptions, type PreparedAdapterCall, type StreamChunk, type TokenUsage, type ContentBlock, type AssistantMessage as HarnessAssistantMessage, type ReplayEnvelope } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter, resolveRetryPolicy, isContextWindowExceededError, isQuotaExceededError, CONTEXT_WINDOW_EXCEEDED_CODE, QUOTA_EXCEEDED_CODE, EMPTY_RESPONSE_CODE, type GenerateOptions, type LlmFailure, type PreparedAdapterCall, type StreamChunk, type TokenUsage, type ContentBlock, type AssistantMessage as HarnessAssistantMessage, type ReplayEnvelope } from '@deepseek-ai/dsh-llm'
 import { createHash } from 'node:crypto'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { createProvider, type Model, type Message, type Usage, type AssistantMessage, type Tool, type ToolCall } from '@earendil-works/pi-ai'
@@ -57,12 +57,49 @@ function restoreAssistant(message:HarnessAssistantMessage,model:Model<string>):A
       return{...block,...(typeof meta.thoughtSignature==='string'?{thoughtSignature:meta.thoughtSignature}:{}),...(typeof meta.namespace==='string'?{namespace:meta.namespace}:{})}
     })}
 }
+/** Any byte from the gateway (headers, SSE events, heartbeats) proves liveness; only silence this long times out. */
+export const STREAM_IDLE_TIMEOUT_MS = 300_000
+/**
+ * Same shape as dsh-plugin-subscriptions: Magpie fronts subscription upstreams
+ * that shed load in bursts, so ten retries from 1s doubling to 60s with 20%
+ * jitter. DSH's llm-retry plugin executes it for the canonical retryable codes.
+ */
+export const RETRY_POLICY = resolveRetryPolicy({ mode: 'normal', maxRetries: 10, backoff: { initialDelayMs: 1000, maxDelayMs: 60_000, jitterRatio: 0.2 } }, 'dsh-magpie retryPolicy')
+type HttpFailure = { status: number; retryAfterMs?: number }
+function retryAfterMs(response: Response): number | undefined {
+  const raw = response.headers.get('retry-after')?.trim()
+  if (!raw) return undefined
+  const seconds = Number(raw)
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(raw) - Date.now()
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined
+}
+/** Map a gateway failure onto the provider-neutral codes DSH's retry policy routes on. */
+export function classifyFailure(message: string, http?: HttpFailure): LlmFailure {
+  const status = http?.status
+  const extra = { ...(status !== undefined ? { status } : {}), ...(http?.retryAfterMs !== undefined ? { providerRetryAfterMs: http.retryAfterMs } : {}) }
+  let code: string
+  if (status === 401 || status === 403) code = 'AUTH'
+  else if (status === 429) code = 'RATE_LIMIT'
+  else if (isContextWindowExceededError(message)) code = CONTEXT_WINDOW_EXCEEDED_CODE
+  else if (isQuotaExceededError(message)) code = QUOTA_EXCEEDED_CODE
+  else if (status === 408 || status === 504) code = 'TIMEOUT'
+  else if (status !== undefined && status >= 500) code = 'SERVER'
+  else if (status !== undefined) code = `HTTP_${status}`
+  else if (message === 'MAGPIE_STREAM_TRUNCATED') code = 'TRANSPORT'
+  else if (message.startsWith('MAGPIE_')) code = message
+  else if (/\b5\d\d\b|server_error|overloaded|internal server error/i.test(message)) code = 'SERVER'
+  else if (/\btimed?\s*out\b|timeout/i.test(message)) code = 'TIMEOUT'
+  else if (/\b(?:network|connection|socket|fetch)\b|\bECONN[A-Z]+\b|other side closed|terminated|premature close|stream ended (?:before|without)/i.test(message)) code = 'TRANSPORT'
+  else code = 'MAGPIE_GENERATION_FAILED'
+  return { code, message, ...extra }
+}
 export function mapUsage(u: Usage): TokenUsage {
   return {inputTokens:u.input,outputTokens:u.output,...(u.cacheRead>0?{cacheReadTokens:u.cacheRead}:{}),...(u.cacheWrite>0?{cacheWriteTokens:u.cacheWrite}:{}),...(u.input>0?{totalTokens:u.input+u.cacheRead+u.cacheWrite+u.output}:{})}
 }
 export class MagpieAdapter extends LlmAdapter {
   constructor(readonly runtime: MagpieRuntime, readonly attachments?: Pick<AttachmentStore, 'readImage' | 'imageHostPath'>, readonly isFast = (_session: string) => false) { super() }
   override providerInfo() { return {id:'dsh-magpie',name:'Magpie'} }
+  override providerRetryPolicy() { return RETRY_POLICY }
   override async listModels() { const op=await this.runtime.beginOperation(); try {return structuredClone(visibleCatalog(op.gen.catalog,this.runtime.store.value.visibleModels).map(m=>withDefaultEffort(m,this.runtime.store.value.defaultEfforts)))} finally {op.release()} }
   override async resolveModel(_provider:string,id:string) {
     const op=await this.runtime.beginOperation()
@@ -88,7 +125,7 @@ export class MagpieAdapter extends LlmAdapter {
       return this.dispatch(op,entry,capturedOptions,()=>{untrack();signal?.removeEventListener('abort',untrack)})
     }}
   }
-  private async *failure(message:string):AsyncIterable<StreamChunk>{yield{type:'finish',reason:{kind:'error',failure:{code:message,message}}}}
+  private async *failure(message:string):AsyncIterable<StreamChunk>{yield{type:'finish',reason:{kind:'error',failure:classifyFailure(message)}}}
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     try {const prepared=await this.prepareCall(options.provider,options.model);yield* prepared.stream(options)}
     catch(error){yield* this.failure(this.runtime.redact(error instanceof Error?error.message:String(error)))}
@@ -120,8 +157,9 @@ export class MagpieAdapter extends LlmAdapter {
     const releaseKey=this.runtime.retainIdentity(op)
     const controller=new AbortController()
     const signal=AbortSignal.any([controller.signal,this.runtime.transport.signal.signal,...(options.signal?[options.signal]:[])])
-    let timer:ReturnType<typeof setTimeout>|undefined,timedOut=false
-    const arm=(ms:number)=>{clearTimeout(timer);timer=setTimeout(()=>{timedOut=true;controller.abort()},ms)}
+    let timer:ReturnType<typeof setTimeout>|undefined,timedOut=false,http:HttpFailure|undefined
+    const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>{timedOut=true;controller.abort()},STREAM_IDLE_TIMEOUT_MS)}
+    const timeout=():LlmFailure=>({code:'TIMEOUT',message:`MAGPIE_STREAM_TIMEOUT: no data from the gateway for ${STREAM_IDLE_TIMEOUT_MS/1000}s`})
     try{
       if(!op.key||!op.gen.baseUrl)throw new Error('MAGPIE_NOT_CONFIGURED')
       if(options.stop?.length)throw new Error('MAGPIE_STOP_UNSUPPORTED')
@@ -130,23 +168,23 @@ export class MagpieAdapter extends LlmAdapter {
         compat:{supportsFinishReason:true,thinkingFormat:'openai',maxTokensField:'max_completion_tokens',...(api==='openai-responses'?{supportsStrictMode:true}:{})} as never}
       const context=await this.context(options,model)
       const fast=!!options.sessionId&&this.isFast(options.sessionId)&&entry.serviceTiers.includes('priority')
-      arm(90000)
+      arm()
       const gatewayFetch=this.runtime.transport.fetchFor(op)
-      const fetchWithRetry:typeof fetch=async(input,init)=>{
-        for(let attempt=0;;attempt++){
-          const response=await gatewayFetch(input,init)
-          if(attempt>=2||!(response.status===429||response.status>=500))return response
-          await response.body?.cancel()
-          signal.throwIfAborted()
-        }
+      // One attempt per call: DSH's llm-retry owns retries (see RETRY_POLICY), so nothing is replayed here.
+      const watchedFetch:typeof fetch=async(input,init)=>{
+        const response=await gatewayFetch(input,init)
+        arm()
+        if(!response.ok){http={status:response.status,...(retryAfterMs(response)!==undefined?{retryAfterMs:retryAfterMs(response)!}:{})};return response}
+        if(!response.body)return response
+        const body=response.body.pipeThrough(new TransformStream<Uint8Array,Uint8Array>({transform(chunk,out){arm();out.enqueue(chunk)}}))
+        return new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers})
       }
-      const events=provider.stream(model,context,{apiKey:op.key,fetch:fetchWithRetry,signal,maxRetries:0,
+      const events=provider.stream(model,context,{apiKey:op.key,fetch:watchedFetch,signal,maxRetries:0,
         ...(options.maxTokens!==undefined?{maxTokens:options.maxTokens}:{}),...(options.temperature!==undefined?{temperature:options.temperature}:{}),
         ...(options.reasoningEffort?{reasoningEffort:options.reasoningEffort}:{}),...(fast?{serviceTier:'priority',onPayload:(payload:unknown)=>{(payload as Record<string,unknown>).service_tier='priority'}}:{}),
       } as never)
       const args=new Map<number,string>()
       for await(const event of events){
-        if((event.type==='text_delta'||event.type==='thinking_delta'||event.type==='toolcall_delta')&&event.delta.length>0)arm(60000)
         if(event.type==='text_start'||event.type==='thinking_start'||event.type==='toolcall_start')yield{type:'block-start',index:event.contentIndex,blockType:event.type==='text_start'?'text':event.type==='thinking_start'?'reasoning':'tool-call'}
         else if(event.type==='text_delta')yield{type:'text-delta',index:event.contentIndex,text:event.delta}
         else if(event.type==='thinking_delta')yield{type:'reasoning-delta',index:event.contentIndex,text:event.delta}
@@ -159,15 +197,22 @@ export class MagpieAdapter extends LlmAdapter {
         else if(event.type==='toolcall_end')yield{type:'block-end',index:event.contentIndex,block:{type:'tool-call',id:event.toolCall.id as never,name:event.toolCall.name,arguments:args.get(event.contentIndex)??JSON.stringify(event.toolCall.arguments)}}
         else if(event.type==='done'){
           yield{type:'usage',usage:mapUsage(event.message.usage)}
+          // A clean stop with nothing in it would silently end the turn; report it so DSH can retry.
+          if(event.reason==='stop'&&event.message.content.length===0){yield{type:'finish',reason:{kind:'error',failure:{code:EMPTY_RESPONSE_CODE,message:'MAGPIE_EMPTY_RESPONSE'}}};return}
           yield{type:'finish',reason:{kind:event.reason==='length'?'max-tokens':event.reason==='toolUse'?'tool-calls':'stop'},replayState:replayState(event.message,entry.info.id,args)};return
         }else if(event.type==='error'){
           yield{type:'usage',usage:mapUsage(event.error.usage)}
-          const message=timedOut?'MAGPIE_STREAM_TIMEOUT':this.runtime.redact(event.error.errorMessage??'MAGPIE_GENERATION_FAILED')
-          yield{type:'finish',reason:{kind:timedOut?'error':signal.aborted?'aborted':'error',failure:{code:timedOut?'MAGPIE_STREAM_TIMEOUT':'MAGPIE_GENERATION_FAILED',message}}};return
+          const message=this.runtime.redact(event.error.errorMessage??'MAGPIE_GENERATION_FAILED')
+          if(signal.aborted&&!timedOut){yield{type:'finish',reason:{kind:'aborted',failure:{code:'ABORTED',message}}};return}
+          yield{type:'finish',reason:{kind:'error',failure:timedOut?timeout():classifyFailure(message,http)}};return
         }
       }
       throw new Error('MAGPIE_STREAM_TRUNCATED')
-    }catch(error){const message=this.runtime.redact(error instanceof Error?error.message:String(error));yield{type:'finish',reason:{kind:signal.aborted&&!timedOut?'aborted':'error',failure:{code:message.startsWith('MAGPIE_')?message:'MAGPIE_GENERATION_FAILED',message}}}}
+    }catch(error){
+      const message=this.runtime.redact(error instanceof Error?error.message:String(error))
+      if(signal.aborted&&!timedOut){yield{type:'finish',reason:{kind:'aborted',failure:{code:'ABORTED',message}}};return}
+      yield{type:'finish',reason:{kind:'error',failure:timedOut?timeout():classifyFailure(message,http)}}
+    }
     finally{clearTimeout(timer);controller.abort();releaseKey();untrack();op.release()}
   }
 }

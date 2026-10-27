@@ -18,7 +18,7 @@ Magpie manages upstream accounts, login, routing and provider-side proxies. This
 
 In ohmydsh, enable the local `dsh-magpie` entry in the manifest, build, then restart DSH when ready. This package has not yet been published to npm; do not assume an `npm install dsh-magpie` release exists.
 
-Open **Settings → Magpie**. Enter the gateway API URL including `/v1`, for example `http://192.168.1.20:3425/v1`, and the gateway key. Never put the key in a URL or the manifest. Saving connection details synchronizes the model catalog. Use **重新获取目录** to synchronize again; there is no catalog polling.
+Open **Settings → Magpie**. Enter the gateway API URL including `/v1`, for example `http://192.168.1.20:3425/v1`, and the gateway key. Never put the key in a URL or the manifest. Saving connection details synchronizes the model catalog. Use **刷新模型列表** to synchronize again; there is no catalog polling.
 
 The key is stored through DSH's credentials service as `MAGPIE_API_KEY`. If supplied by the launch environment, it is read-only in settings. Changing an environment variable outside the running process requires a restart. Address and preferences are stored separately at `$DSH_HOME/plugins/dsh-magpie/settings.json` (default `$HOME/.dsh/plugins/dsh-magpie/settings.json`); the key is not included in that file or returned by the settings API.
 
@@ -29,6 +29,8 @@ The key is stored through DSH's credentials service as `MAGPIE_API_KEY`. If supp
 - Default effort is a DSH preference. A saved effort that disappears from discovery is retained but does not apply until the gateway offers it again.
 - Responses-capable models use Responses; others use Chat Completions. Both use pi-ai for the wire protocol.
 - Nonempty `stop` sequences fail before network access with `MAGPIE_STOP_UNSUPPORTED`: Magpie cannot preserve them across all upstream translations.
+- Failures are retried by DSH's built-in `llm-retry` with the same policy as dsh-plugin-subscriptions: up to 10 retries, exponential backoff from 1s capped at 60s, ±20% jitter, honouring `Retry-After` on 429. The plugin never replays a request itself; it classifies failures into canonical codes. `TIMEOUT`, `TRANSPORT` (dropped connection), `SERVER` (5xx), `RATE_LIMIT` (429) and `EMPTY_RESPONSE` are retried; 401/403, exhausted quota, context overflow and other 4xx are not.
+- The stream watchdog only asks whether the gateway is still sending data: headers, SSE events and heartbeats all count. Only 300 seconds of total silence ends the request with `TIMEOUT` (message contains `MAGPIE_STREAM_TIMEOUT`), so long reasoning survives as long as the gateway keeps the stream alive.
 - Fast mode is per session and in memory. Restarting the host restores standard mode. Priority service can consume more upstream quota.
 
 ### Model menu groups and effort
@@ -41,11 +43,22 @@ The picker uses the official single effort value. Default AUTO synchronizes a ch
 
 ### Usage cards and refresh
 
-Opening settings reads Magpie's cached cards, not the provider's live quota endpoint. Only **刷新** or **刷新全部** asks Magpie to read provider usage again. Magpie may return the old reading during its throttle window; this is not proof of a fresh read. Cards with `asOf` are old readings.
+Opening settings reads Magpie's cached cards, not the provider's live quota endpoint. Each card has its own **刷新**, which asks Magpie to reread that one account; there is no page-wide bulk refresh. Magpie may return the old reading during its throttle window; this is not proof of a fresh read. Cards with `asOf` are old readings.
 
-A cold gateway may return no cards. **刷新全部** can initialize cards with an unrestricted key. A restricted held key cannot initialize an empty cache: ask the Magpie administrator to read usage in Magpie first, or use an unrestricted key. Do not grant additional access just to hide an empty state.
+Usage bars are coloured by the share used: blue at 70% or below, orange above 70% and below 90%, red at 90% or above.
+
+A cold gateway may return no cards. The connection panel then offers **获取模型与用量**, which refreshes the model list and asks Magpie to read all usage. That initializes cards with an unrestricted key. A restricted held key cannot initialize an empty cache: ask the Magpie administrator to read usage in Magpie first, or use an unrestricted key. Do not grant additional access just to hide an empty state.
 
 Codex reset-credit counts and expiry are display-only. This plugin never calls Magpie GUI account-management or reset endpoints.
+
+## Connection methods
+
+By default you only need the gateway URL and key. **高级连接** (advanced connection, expanded by default) selects how the gateway is reached:
+
+- **直连 / Direct** (default): the gateway URL is directly reachable. LAN and Tailscale both fall here — once the client machine joins the tailnet, use `http://<host>.<tailnet>.ts.net:3425/v1` or the subnet-routed address; there is nothing else to configure in the plugin.
+- **Cloudflare Access**: for a gateway behind Cloudflare Tunnel + Access when the client cannot run a VPN. Enter the Access service token's Client ID and Client Secret; every gateway request then carries `CF-Access-Client-Id`/`CF-Access-Client-Secret` alongside the bearer key. HTTPS only. Both values live in DSH credentials; switching back to Direct and saving clears them. Note that Cloudflare Free/Pro plans return 524 when the origin sends no response within 100 seconds.
+
+Need another method (custom headers, mTLS, another zero-trust gateway)? Issues and pull requests are welcome — describe your deployment.
 
 ## Security and networking
 

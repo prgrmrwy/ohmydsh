@@ -11,6 +11,9 @@ const fact = (field: string, label: string, value: ReactNode) => h('span', { 'da
 const scalar = (value: unknown) => typeof value === 'boolean' ? (value ? '是' : '否') : String(value)
 const present = (value: unknown) => value !== undefined && value !== null && value !== ''
 
+/** Bar colour: ≤70% normal (blue), above 70 and below 90 warn (orange), 90% and above high (red). */
+export const usageLevel = (used: number) => used >= 90 ? 'high' : used > 70 ? 'warn' : 'normal'
+
 function WindowRow({ window }: { window: CardWindow }) {
   const reading = windowReading(window)
   const showReset = reading !== undefined && window.unlimited !== true && !present(window.display) && present(window.resetsAt)
@@ -23,7 +26,7 @@ function WindowRow({ window }: { window: CardWindow }) {
         reading !== undefined ? h('span', { 'data-reading': '' }, reading) : null),
       showReset ? h('span', null, '重置于 ', time(window.resetsAt!)) : null),
     used !== undefined ? h('div', { className: 'dmg-track', 'aria-hidden': true },
-      h('div', { className: 'dmg-fill', 'data-level': used >= 90 ? 'high' : undefined, style: { width: `${used}%` } })) : null)
+      h('div', { className: 'dmg-fill', 'data-level': usageLevel(used), style: { width: `${used}%` } })) : null)
 }
 
 export function UsageCard({ card, busy, onRefresh }: { card: Card; busy: boolean; onRefresh: () => void }) {

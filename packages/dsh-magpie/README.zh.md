@@ -18,7 +18,7 @@ Magpie 管登录、账号、路由和厂商侧代理。本插件补齐 DSH 侧�
 
 在 ohmydsh manifest 中启用 local `dsh-magpie` 条目，build 后按需重启。当前尚未发布 npm 包，不要把包名视为已可安装的正式发行版。
 
-打开 **设置 → Magpie**，填写带 `/v1` 的网关 API 地址，例如 `http://192.168.1.20:3425/v1`，以及 gateway key。不要将 key 放进 URL 或 manifest。保存连接会同步目录，之后可手动点「重新获取目录」；不定时轮询目录。
+打开 **设置 → Magpie**，填写带 `/v1` 的网关 API 地址，例如 `http://192.168.1.20:3425/v1`，以及 gateway key。不要将 key 放进 URL 或 manifest。保存连接会同步目录，之后可手动点「刷新模型列表」；不定时轮询目录。
 
 key 通过 DSH credentials 以 `MAGPIE_API_KEY` 保存。若来自启动环境，设置页只读；外部修改环境变量需重启进程才能生效。地址与偏好单独保存在 `$DSH_HOME/plugins/dsh-magpie/settings.json`（默认 `$HOME/.dsh/plugins/dsh-magpie/settings.json`）中，该文件和设置响应均不含 key。
 
@@ -29,6 +29,8 @@ key 通过 DSH credentials 以 `MAGPIE_API_KEY` 保存。若来自启动环境�
 - 默认 effort 是 DSH 侧偏好。已保存档位若暂时不在目录中，保留记录但不生效，恢复后再次生效。
 - 支持 Responses 的模型走 Responses，其余走 Chat Completions；线协议由 pi-ai 处理。
 - 非空 `stop` 序列会在请求发出前报 `MAGPIE_STOP_UNSUPPORTED`，因为 Magpie 无法保证所有协议转换保留 stop。
+- 失败交给 DSH 自带的 `llm-retry` 重试，策略与 dsh-plugin-subscriptions 相同：最多 10 次，1 秒起指数退避、上限 60 秒、±20% 抖动；429 带 `Retry-After` 时按它等待。插件本身不重放请求，只把失败归入标准错误码：超时 `TIMEOUT`、连接中断 `TRANSPORT`、5xx `SERVER`、429 `RATE_LIMIT`、空回复 `EMPTY_RESPONSE` 会重试；401/403、额度用尽、上下文超限、其它 4xx 不重试。
+- 流式超时只看网关是否还在回数据：响应头、SSE 事件和心跳都算，连续 300 秒没有任何数据才以 `TIMEOUT`（消息含 `MAGPIE_STREAM_TIMEOUT`）结束。长时间推理只要网关在发心跳就不会被截断。
 - 快速档按会话保存在内存，host 重启回到标准。priority 服务档可能消耗更多上游额度。
 
 ### 模型菜单分组与 effort
@@ -41,11 +43,22 @@ key 通过 DSH credentials 以 `MAGPIE_API_KEY` 保存。若来自启动环境�
 
 ### 用量与手动刷新
 
-打开页面只读取 Magpie 已缓存的卡片，不主动向厂商读取。只有「刷新」和「刷新全部」会请求 Magpie 重新读取厂商用量。Magpie 在节流期内可能返回旧读数；成功响应不代表真的重新读过。带 `asOf` 的卡片属于旧读数。
+打开页面只读取 Magpie 已缓存的卡片，不主动向厂商读取。每张卡片有自己的「刷新」，只请求 Magpie 重新读取这一个账号；没有整页的批量刷新。Magpie 在节流期内可能返回旧读数；成功响应不代表真的重新读过。带 `asOf` 的卡片属于旧读数。
 
-网关冷启动可能没有卡片。不受限 key 可点「刷新全部」初始化；受限 held key 无法从空缓存首次读取，需要管理员先在 Magpie 内读取一次，或使用不受限 key。不要为了掩盖空状态盲目扩大权限。
+用量条按已用比例着色：70% 及以下蓝色，70% 以上、90% 以下橙色，90% 及以上红色。
+
+网关冷启动可能没有卡片。此时连接面板会出现「获取模型与用量」：先刷新模型列表，再请求 Magpie 读取全部用量。不受限 key 可以这样初始化；受限 held key 无法从空缓存首次读取，需要管理员先在 Magpie 内读取一次，或使用不受限 key。不要为了掩盖空状态盲目扩大权限。
 
 Codex 的重置次数和过期时间只读展示。本插件不调用 Magpie GUI 的账号管理或重置端点。
+
+## 连接方式
+
+默认只需填网关地址和 key。设置页的「高级连接」（默认展开）可以选择接入方式：
+
+- **直连**（默认）：网关地址可以直接访问。局域网、Tailscale 都属于这种：客户端机器加入 tailnet 后，地址填 `http://<主机>.<tailnet>.ts.net:3425/v1` 或子网路由地址即可，插件里没有额外要填的。
+- **Cloudflare Access**：网关放在 Cloudflare Tunnel + Access 之后、客户端又不方便装 VPN 时使用。填写 Access 服务令牌的 Client ID 和 Client Secret，插件会给每个网关请求带上 `CF-Access-Client-Id`/`CF-Access-Client-Secret`，同时保留 bearer key；仅支持 HTTPS。两项通过 DSH credentials 保存；切回「直连」并保存会清除它们。注意 Cloudflare 免费/Pro 套餐在源站 100 秒内没有返回响应时会报 524。
+
+还需要别的接入方式（自定义请求头、mTLS、其它零信任网关等）？欢迎提 issue 或 PR，说明你的部署方式。
 
 ## 安全与网络
 
