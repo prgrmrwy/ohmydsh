@@ -38,6 +38,19 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - **WHEN** DSH 列举 `dsh-magpie` 的模型，并以该 route 发起一次生成
 - **THEN** 模型列表为空；生成以 `kind: error` 结束，消息包含 `MAGPIE_NOT_CONFIGURED`；网关 mock 收到的请求数为 0
 
+### Requirement: 连接接入方式（AMD4）
+设置页 SHALL 默认只要求网关地址和 key，并提供默认展开的「高级连接」，其中「接入方式」只有「直连」（默认）和「Cloudflare Access」两项。接入方式 SHALL NOT 单独持久化：已保存 Access 凭据时显示为 Cloudflare Access，否则为直连。选择 Cloudflare Access 时才显示 Client ID/Secret 两项输入；从已保存凭据切回直连并保存，SHALL 在同一次设置写入中清除两项 Access 凭据。任一 Access 凭据来自启动环境时，接入方式 SHALL 为只读。
+
+#### Scenario: 默认直连，选择 Cloudflare Access 后才出现令牌输入（AMD4）
+- **GIVEN** 未保存 Access 凭据
+- **WHEN** 打开设置页，再把接入方式切到 Cloudflare Access 并填写两项后保存
+- **THEN** 打开时「高级连接」已展开、接入方式为「直连」、只有 key 一个密码输入；切换后出现两项输入；保存请求体只含 `accessClientId` 与 `accessClientSecret`
+
+#### Scenario: 切回直连并保存即清除 Access 凭据（AMD4）
+- **GIVEN** 两项 Access 凭据均已保存且可写
+- **WHEN** 把接入方式切到「直连」并保存
+- **THEN** 页面提示保存后将清除凭据；保存请求体为 `{accessClientId: null, accessClientSecret: null}`
+
 ### Requirement: 连接身份与代际隔离
 插件 SHALL 把「规范化后的网关地址 + 当前 key」作为连接身份，并为每个身份维护一个代际。
 
@@ -92,7 +105,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - **THEN** 插件在发出该卡片请求之前完成换代；卡片请求带 K2，结果提交到新代
 
 ### Requirement: 目录同步与发布
-插件 SHALL 在以下时机从网关 `GET /models` 同步目录：插件启动且已配置时、连接身份变化时、用户在设置页点「重新获取目录」时。插件 SHALL NOT 做定时后台目录轮询。每次同步 SHALL 有超时（15 秒），超时视为 `unreachable` 失败。同一代内同一时刻 SHALL 最多只有一个目录同步在进行：进行中又被触发时，复用进行中的那一次，不另发请求。
+插件 SHALL 在以下时机从网关 `GET /models` 同步目录：插件启动且已配置时、连接身份变化时、用户在设置页点「刷新模型列表」时。插件 SHALL NOT 做定时后台目录轮询。每次同步 SHALL 有超时（15 秒），超时视为 `unreachable` 失败。同一代内同一时刻 SHALL 最多只有一个目录同步在进行：进行中又被触发时，复用进行中的那一次，不另发请求。
 
 同步失败时，设置响应 SHALL 给出 `lastSyncError` 和错误分类：`unauthorized`（401）、`forbidden`（403）、`http`（其它非 2xx，附状态码）、`unreachable`（网络错误或超时）。同时 SHALL 保留当前代已有的目录，SHALL NOT 用空目录替换。
 
@@ -105,22 +118,22 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 
 #### Scenario: 同步失败保留当前代目录
 - **GIVEN** 当前代已有 13 个模型，网关随后返回 503
-- **WHEN** 用户点「重新获取目录」
+- **WHEN** 用户点「刷新模型列表」
 - **THEN** 仍列举到那 13 个模型；设置响应 `lastSyncError` 非空、分类为 `http`，`lastSyncAt` 保持上次成功时间
 
 #### Scenario: 同代重复触发只发一次请求
 - **GIVEN** 一次目录同步已发出、尚未返回
-- **WHEN** 两个设置页先后点击「重新获取目录」
+- **WHEN** 两个设置页先后点击「刷新模型列表」
 - **THEN** 网关 mock 只收到 1 次 `GET /v1/models`；三个调用方得到同一个结果
 
 #### Scenario: 同步超时
 - **GIVEN** 网关 mock 对 `/models` 不响应，测试使用虚拟时钟
-- **WHEN** 用户点「重新获取目录」，然后时钟前进 15 秒
+- **WHEN** 用户点「刷新模型列表」，然后时钟前进 15 秒
 - **THEN** 同步结束，错误分类为 `unreachable`；当前代已有的目录保持不变
 
 #### Scenario: key 无效的分类
 - **GIVEN** 网关 mock 对 `/models` 返回 401
-- **WHEN** 用户点「重新获取目录」
+- **WHEN** 用户点「刷新模型列表」
 - **THEN** 设置响应中错误分类为 `unauthorized`
 
 ### Requirement: 模型目录字段映射
@@ -166,7 +179,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - 流在终止事件之前中断 → `error`，不得当作 `stop`；
 - 流中出现错误事件 → `error`，即使之后还收到 `[DONE]` 或完成事件。错误事件包括 Chat 的 SSE `error` 对象、Responses 的 `error` 事件，以及 Responses 的 `response.failed`（不论是否带 error 对象）。
 
-**取消与超时**：SHALL 响应 `options.signal` 并以 `aborted` 结束。从调用 pi-ai 前启动的首实际内容预算为 90 秒；只有非空 pi `text_delta`、`thinking_delta` 或 `toolcall_delta`（`delta.length > 0`）SHALL 切换或重置 60 秒空闲预算。HTTP headers、pi `start`、block start/end、空 delta、SSE comments 与 Responses created/in_progress SHALL NOT 缩短或延长当前预算；toolcall_start 仅带 name/id、没有非空参数 delta 时仍保留首实际内容预算。block end 不重置预算；无 delta 但最终 block 后直接 done 的正常完成 SHALL 立即结束，不等看门狗。超时时 SHALL 关闭连接并以 `error` 和 `MAGPIE_STREAM_TIMEOUT` 结束。已经开始的流因超时 SHALL NOT 被插件自动重放，已经输出过内容的请求同样 SHALL NOT 自动重放；轮次级重试归 DSH 负责。
+**取消与超时**：SHALL 响应 `options.signal` 并以 `aborted` 结束；超时见「流式空闲超时（AMD4）」。
 
 #### Scenario: 两种协议的文本生成与 effort
 - **GIVEN** Responses 模型 `codex/gpt-6.1-sol`（`native_endpoints` 含 `/v1/responses`）和 Chat 模型 `deepseek/deepseek-flash`；两个网关 mock 都返回文本 `hi`、usage、完成
@@ -230,26 +243,6 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - **WHEN** 各发起一次生成
 - **THEN** 两次的流都以 `finish` 原因 `error` 结束
 
-#### Scenario: 首事件与空闲超时
-- **GIVEN** 测试使用虚拟时钟；mock A 接受连接后不发实际内容，mock B 发出一段非空文本 delta 后停止发送
-- **WHEN** 分别对 A 和 B 发起生成；对 A 从调用 pi-ai 前前进 90 秒，对 B 从最后非空 delta 前进 60 秒
-- **THEN** 两次都以 `error` 和 `MAGPIE_STREAM_TIMEOUT` 结束，连接被关闭，各自 mock 只收到 1 次请求；headers、start、created/in_progress 或 comments 不重置 A 的 90 秒预算
-
-#### Scenario: 空 block start 不提前耗尽首内容预算
-- **GIVEN** mock 在 t=0 发出空 reasoning、message 或 function_call item start；工具 item 可含 name/id 但无参数
-- **WHEN** 对三种类型分别发起生成，在 t=65 秒发送对应非空 delta、最终 block 与完成事件
-- **THEN** 三次在 t=60 秒均未结束，在 t=65 秒正常结束（文本/推理为 stop，工具为 tool-calls），每次仅 1 个 POST；同样的空 start 若始终没有实际内容或完成，SHALL 在 t=90 秒而非 t=60 秒超时关闭
-
-#### Scenario: 首内容前的空 delta 不续期
-- **GIVEN** mock 在 t=0 发出空 block start，t=55 秒发出空 delta，之后不发实际内容或完成
-- **WHEN** 时钟推进至 t=89.999 秒，再推进 1 毫秒
-- **THEN** 前者仍未结束，后者以 MAGPIE_STREAM_TIMEOUT 关闭，仅 1 个 POST；空 delta 不把期限推到 t=115 秒
-
-#### Scenario: 已有内容后的空结构与空 delta 不续期
-- **GIVEN** mock 在 t=55 秒发出最后一个非空 text/thinking/toolcall delta，当前期限为 t=115 秒
-- **WHEN** 在 t=110 秒仅发空 block end/start、空 delta 或 comments，之后时钟推进至 t=115 秒
-- **THEN** 仍在 t=115 秒以 MAGPIE_STREAM_TIMEOUT 关闭，仅 1 个 POST；空事件不能无限续命
-
 #### Scenario: 截断不当成功
 - **GIVEN** 网关 mock 输出部分文本后关闭连接，没有发终止事件
 - **WHEN** 发起一次生成
@@ -269,6 +262,42 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 - **GIVEN** 模型 `deepseek/deepseek-v4-pro` 不声明图片输入
 - **WHEN** 发起包含图片的生成
 - **THEN** 以 `kind: error` 结束，网关 mock 收到的请求数为 0
+
+### Requirement: 流式空闲超时（AMD4）
+对齐 dsh-plugin-subscriptions：生成只有一个 300 秒空闲看门狗，从调用 pi-ai 前启动。网关返回的任何数据（响应头、任意 SSE 事件、SSE comments/心跳）都 SHALL 重新计时。连续 300 秒没有任何数据时 SHALL 关闭连接并以 `error` 结束，failure code 为 `TIMEOUT`，消息包含 `MAGPIE_STREAM_TIMEOUT`。最终 block 后直接 done 的正常完成 SHALL 立即结束。插件 SHALL NOT 自行重发或重放请求，重试见「失败分类交给 DSH 重试（AMD4）」。
+
+#### Scenario: 空闲超时（AMD4）
+- **GIVEN** 测试使用虚拟时钟；mock A 接受连接后不发任何数据，mock B 发出一段非空文本 delta 后停止发送
+- **WHEN** 对 A 从调用 pi-ai 前前进 300 秒，对 B 从最后一次收到数据前进 300 秒
+- **THEN** 两次在 299.999 秒时均未结束，到 300 秒以 `error` 结束，failure code 为 `TIMEOUT`、消息含 `MAGPIE_STREAM_TIMEOUT`，连接被关闭，各自 mock 只收到 1 次请求
+
+#### Scenario: 任何网关数据都续期（AMD4）
+- **GIVEN** mock 在 t=200/400/600 秒分别发 `response.created`/`response.in_progress`，在 t=800 秒发 SSE comment，之后不再发送；另一 mock 在 t=250 秒才返回响应头
+- **WHEN** 推进虚拟时钟
+- **THEN** 前者在 t=1100 秒才以 `TIMEOUT` 关闭；后者在 t=550 秒才以 `TIMEOUT` 关闭；两者都只有 1 个 POST
+
+#### Scenario: 空 block start 后长时间推理仍能完成（AMD4）
+- **GIVEN** mock 在 t=0 发出空 reasoning、message 或 function_call item start
+- **WHEN** 在 t=280 秒发送对应非空 delta、最终 block 与完成事件
+- **THEN** 三次都正常结束（文本/推理为 stop，工具为 tool-calls），每次仅 1 个 POST
+
+### Requirement: 失败分类交给 DSH 重试（AMD4）
+适配器 SHALL 通过 `providerRetryPolicy` 声明与 dsh-plugin-subscriptions 相同的策略（normal、10 次、1s 起指数退避、上限 60s、±20% 抖动，可重试码为 dsh-llm 默认集合），并把生成失败归入 dsh-llm 标准 code：401/403 为 `AUTH`；429 为 `RATE_LIMIT`，有 `Retry-After` 时带 `providerRetryAfterMs`；上下文超限、额度用尽按 dsh-llm 判定；408/504 为 `TIMEOUT`；其它 5xx 为 `SERVER`；其它 4xx 为 `HTTP_<status>`；连接中断与流截断为 `TRANSPORT`；请求前可判定的插件错误保留原 code；无法识别的为 `MAGPIE_GENERATION_FAILED`。有 HTTP 响应时 SHALL 带 `status`。无内容的正常完成 SHALL 为 `EMPTY_RESPONSE`。用户取消为 `aborted`/`ABORTED`。消息先经脱敏。
+
+#### Scenario: HTTP 失败只发一次并按状态分类
+- **GIVEN** 网关 mock 对 `/v1/responses` 分别返回 429（`Retry-After: 7`）、503、504、401、400
+- **WHEN** 各发起一次生成
+- **THEN** 每次 mock 只收到 1 个请求；failure 依次为 `RATE_LIMIT`（`status: 429`、`providerRetryAfterMs: 7000`）、`SERVER`、`TIMEOUT`、`AUTH`、`HTTP_400`，且都带 `status`
+
+#### Scenario: 连接中断可重试，未知失败不可重试
+- **GIVEN** 流开始后 mock 的 body 以 `terminated` 出错；另一 mock 以无法识别的消息出错
+- **WHEN** 各发起一次生成
+- **THEN** 前者 failure code 为 `TRANSPORT`，后者为 `MAGPIE_GENERATION_FAILED`；均只有 1 个请求
+
+#### Scenario: 空回复
+- **GIVEN** mock 只发出 `response.completed`，没有任何输出项
+- **WHEN** 发起一次生成
+- **THEN** 以 `error` 结束，failure code 为 `EMPTY_RESPONSE`
 
 ### Requirement: 只读与传输边界
 插件对 Magpie 的每个网络 hop SHALL 只落在已配置地址的同一 origin 上，并且只使用以下方法和路径（相对 API 根）：
@@ -301,7 +330,7 @@ key SHALL 通过 DSH credentials 服务按固定引用 `MAGPIE_API_KEY` 存取�
 设置页 SHALL 按网关模型的 `owned_by` 分组；没有 `owned_by` 的模型，取 id 中第一个 `/` 之前的部分作为分组。
 
 每个 provider 的可见性语义：
-- 没有保存过选择：跟随网关目录，全部可见；
+- 没有保存过选择：跟随网关模型列表，全部可见；
 - 保存过选择（包括空列表）：只显示列表中的模型，之后新上架的模型默认隐藏。
 
 选择器 SHALL 只提供「网关目录 ∩ 可见集」中的模型。可见性是 DSH 侧本地偏好，SHALL NOT 回写网关。保存时只校验形状（provider → 字符串数组），不与当前目录比对。形状非法时 SHALL 以 400 拒绝。
@@ -358,7 +387,7 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 
 插件设置页只在打开时读取一次卡片；用户手动刷新后，用刷新响应更新显示。插件 SHALL NOT 定时请求卡片或刷新端点。卡片中的字符串一律作为文本渲染。
 
-网关返回空集合时，卡片区 SHALL 显示空状态，文案为「Magpie 未返回可见用量」，并提供「刷新全部」入口。「刷新全部」之后仍然为空时，SHALL 追加提示：受限的 gateway key 无法让 Magpie 首次读取用量，需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。插件 SHALL NOT 承诺「刷新全部」一定能产生卡片，也 SHALL NOT 建议扩大网关权限或共享范围。
+网关返回空集合或读取失败时，连接面板 SHALL 显示空状态「Magpie 未返回可见用量」（失败时为失败原因）和「获取模型与用量」入口（见「用量入口与颜色（AMD4）」）。全量刷新之后仍然为空时，SHALL 追加提示：受限的 gateway key 无法让 Magpie 首次读取用量，需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。插件 SHALL NOT 承诺「获取模型与用量」一定能产生卡片，也 SHALL NOT 建议扩大网关权限或共享范围。
 
 #### Scenario: 渲染卡片字段
 - **GIVEN** 卡片端点返回两张卡片：
@@ -385,17 +414,35 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 #### Scenario: 冷启动空集合
 - **GIVEN** 卡片端点返回 `200 {data: []}`
 - **WHEN** 渲染设置页
-- **THEN** 卡片区显示「Magpie 未返回可见用量」和「刷新全部」按钮；插件没有自动发出任何刷新请求
+- **THEN** 连接面板显示「Magpie 未返回可见用量」和「获取模型与用量」按钮；插件没有自动发出任何刷新请求
 
 #### Scenario: 卡片字符串按字面渲染
 - **GIVEN** 卡片 `name` 为 `<img src=x onerror=alert(1)>`，`error` 为 `<script>x</script>`
 - **WHEN** 渲染设置页
 - **THEN** 两个字符串按字面出现在渲染文本中，DOM 中没有 `img` 或 `script` 元素，也没有内联事件属性
 
+### Requirement: 用量入口与颜色（AMD4）
+设置页 SHALL NOT 提供独立的「用量」栏目或常驻「刷新全部」；刷新只在每张卡片上进行，单卡刷新的提示与失败原因显示在该卡片所在分组。没有卡片时，用量状态显示在连接面板，并在空或失败时提供「获取模型与用量」：先重新同步目录，成功后发一次全量刷新（`{all: true}`），同步失败则不刷新并显示原因。窗口用量条 SHALL 按 `used` 着色：≤70 蓝色（business），大于 70 且小于 90 橙色（warn），≥90 红色（error）。
+
+#### Scenario: 用量条三档颜色（AMD4）
+- **GIVEN** 卡片窗口 `used` 分别为 0、70、70.5、71、89.9、90、100
+- **WHEN** 渲染设置页
+- **THEN** 用量条档位依次为 normal、normal、warn、warn、warn、high、high
+
+#### Scenario: 有卡片时没有整体刷新（AMD4）
+- **GIVEN** 卡片端点返回一张 codex 卡片
+- **WHEN** 渲染设置页
+- **THEN** 页面没有「刷新全部」或「获取模型与用量」按钮，也没有用量状态栏；只有该卡片自己的「刷新」
+
+#### Scenario: 目录同步失败时不发全量刷新
+- **GIVEN** 卡片为空，设置写入（目录同步）返回 502
+- **WHEN** 用户点击「获取模型与用量」
+- **THEN** 不发出全量刷新，连接面板显示失败原因
+
 ### Requirement: 手动刷新用量
 设置页 SHALL 提供两种刷新，都只由用户点击触发：
 - 单张卡片的「刷新」：发送 `POST /magpie/quotas/refresh?provider=<provider>&user=<user>`；卡片没有 `user` 时省略该参数。provider SHALL 取自当前显示的这张卡片；
-- 卡片区的「刷新全部」：发送不带参数的 `POST /magpie/quotas/refresh`。
+- 全量刷新：发送不带参数的 `POST /magpie/quotas/refresh`，界面上只经「获取模型与用量」触发（AMD4）。
 
 host SHALL 只接受以下两种互斥的请求形状：`{all: true}`，或 `{provider, user?}`。单卡请求的 `(provider, user)` SHALL 与当前代最近一次读到的某张卡片完全一致，包括卡片有 `user` 时必须提供相同的 user；否则返回 400，不向网关发请求。两种形状混用或 provider 为空，同样返回 400。
 
@@ -414,10 +461,10 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **WHEN** 用户点击它的刷新
 - **THEN** 网关 mock 恰好收到 1 个 `POST /v1/magpie/quotas/refresh?provider=codex&user=u%40example.com`；卡片读取时间更新为响应中的值；刷新进行中按钮为禁用态
 
-#### Scenario: 冷启动时刷新全部
+#### Scenario: 冷启动时获取模型与用量
 - **GIVEN** 卡片区为空状态，网关 mock 对不带参数的刷新返回 2 张卡片
-- **WHEN** 用户点击「刷新全部」
-- **THEN** mock 收到 1 个不带 query 的 `POST /v1/magpie/quotas/refresh`，之后显示 2 张卡片
+- **WHEN** 用户点击「获取模型与用量」
+- **THEN** 先发出一次目录重新同步，成功后 mock 收到 1 个不带 query 的 `POST /v1/magpie/quotas/refresh`，之后显示 2 张卡片，「获取模型与用量」按钮消失
 
 #### Scenario: 节流期内返回旧读数
 - **GIVEN** 卡片读取时间为 T，网关 mock 对刷新返回 200，读取时间仍为 T
@@ -430,7 +477,7 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **THEN** 每次响应状态都为 400，网关 mock 收到的刷新请求数为 0
 
 #### Scenario: 并发刷新复用进行中的那一次
-- **GIVEN** 客户端 1 发起的「刷新全部」尚未返回
+- **GIVEN** 客户端 1 发起的全量刷新尚未返回
 - **WHEN** 客户端 2 对 codex 卡片发起单卡刷新，之后客户端 1 的刷新返回读取时间 T2
 - **THEN** 网关 mock 总共只收到 1 个刷新请求；两个客户端都得到状态 200、读取时间为 T2 的卡片结果
 
@@ -444,10 +491,10 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **WHEN** 另一页面此时读取卡片（G），之后 F 返回
 - **THEN** G 不发出 `GET /v1/magpie/quotas/cards`，等 F 结束后得到读取时间 T2；最终显示的读取时间为 T2
 
-#### Scenario: 单卡刷新进行中时点刷新全部
+#### Scenario: 单卡刷新进行中时发起全量刷新
 - **GIVEN** 当前卡片有 `{provider: "codex", user: "u@example.com"}`；对它的单卡刷新 A 已发出、尚未返回
-- **WHEN** 另一个客户端点「刷新全部」，之后 A 返回
-- **THEN** A 返回之后，网关 mock 才收到 1 个不带 query 的 `POST /v1/magpie/quotas/refresh`；任何时刻同时进行的刷新请求都不超过 1 个；「刷新全部」的调用方拿到的是这次全量刷新的结果
+- **WHEN** 另一个客户端发起全量刷新，之后 A 返回
+- **THEN** A 返回之后，网关 mock 才收到 1 个不带 query 的 `POST /v1/magpie/quotas/refresh`；任何时刻同时进行的刷新请求都不超过 1 个；全量刷新的调用方拿到的是这次全量刷新的结果
 
 #### Scenario: 等待中的刷新不被跟随者压过
 - **GIVEN** 当前卡片有 A、B 两张；单卡刷新 A 已发出、尚未返回，A 的响应 T_A 中 B 仍是旧值
@@ -459,9 +506,9 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **WHEN** F 结束后，用户再次刷新，mock 这次返回 T2
 - **THEN** F 失败后卡片仍为 T0；第二次刷新正常发出并得到 T2
 
-#### Scenario: 受限 key 冷启动刷新全部仍为空
+#### Scenario: 受限 key 冷启动获取用量仍为空
 - **GIVEN** 卡片端点返回 `200 {data: []}`，网关 mock 对不带参数的刷新也返回 `200 {data: []}`
-- **WHEN** 用户点击「刷新全部」
+- **WHEN** 用户点击「获取模型与用量」
 - **THEN** 卡片区仍为空状态，并追加显示需要 Magpie 管理员先读取一次的提示；提示中没有「打开共享」或「增加权限」字样
 
 #### Scenario: 刷新失败保留原卡片

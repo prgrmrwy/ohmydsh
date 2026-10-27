@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
-import { GUARD_CHANNEL, GUARD_SET_CONFIG_ENDPOINT, GUARD_STATUS_ENDPOINT, type GuardStatus } from '../contract.js'
+import { GUARD_CHANNEL, GUARD_CONFIG_CHANGED, GUARD_SET_CONFIG_ENDPOINT, GUARD_STATUS_ENDPOINT, type GuardStatus } from '../contract.js'
 import type { GuardKey } from './locales.js'
 
 /** The injected service face for the section slot (spread flat by the renderer). */
@@ -46,6 +46,7 @@ export function GuardSettingsSection(props: GuardSettingsProps): JSX.Element | n
   const [status, setStatus] = useState<GuardStatus | null>(null)
   const [blockedText, setBlockedText] = useState('')
   const [endpointsText, setEndpointsText] = useState('')
+  const [exemptText, setExemptText] = useState('')
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const busy = useRef(false)
 
@@ -54,6 +55,7 @@ export function GuardSettingsSection(props: GuardSettingsProps): JSX.Element | n
     void fetchStatus(rpc).then((next) => {
       setStatus(next)
       if (next !== null) {
+        setExemptText(next.config.exemptProviders.join(', '))
         setBlockedText(next.config.blockedCountries.join(', '))
         setEndpointsText(next.config.geoEndpoints.join(', '))
       }
@@ -68,15 +70,17 @@ export function GuardSettingsSection(props: GuardSettingsProps): JSX.Element | n
   if (rpc === undefined || t === undefined) return null
 
   const save = (): void => {
-    if (busy.current) return
+    if (busy.current || status === null) return
     busy.current = true
     setNotice(null)
     const blockedCountries = blockedText.split(',').map((s) => s.trim().toUpperCase()).filter((s) => s !== '')
     const geoEndpoints = endpointsText.split(',').map((s) => s.trim()).filter((s) => s !== '')
-    void rpc.call(GUARD_CHANNEL, GUARD_SET_CONFIG_ENDPOINT, { blockedCountries, geoEndpoints })
+    const exemptProviders = exemptText.split(',').map(s => s.trim()).filter(Boolean)
+    void rpc.call(GUARD_CHANNEL, GUARD_SET_CONFIG_ENDPOINT, { ...status.config, blockedCountries, geoEndpoints, exemptProviders })
       .then((result) => {
         const ok = (result as { ok?: boolean })?.ok === true
         if (ok) {
+          window.dispatchEvent(new Event(GUARD_CONFIG_CHANGED))
           setNotice({ kind: 'ok', text: t('saved') })
           refresh()
         } else {
@@ -105,6 +109,10 @@ export function GuardSettingsSection(props: GuardSettingsProps): JSX.Element | n
 
       <h3 className="dshg-group-title">{t('configTitle')}</h3>
       <label className="dshg-field">
+        {t('exemptProvidersLabel')}
+        <input className="dshg-input" value={exemptText} onChange={(event) => setExemptText(event.target.value)} />
+      </label>
+      <label className="dshg-field">
         {t('blockedLabel')}
         <input className="dshg-input" value={blockedText} onChange={(event) => setBlockedText(event.target.value)} />
       </label>
@@ -112,7 +120,7 @@ export function GuardSettingsSection(props: GuardSettingsProps): JSX.Element | n
         {t('endpointsLabel')}
         <input className="dshg-input" value={endpointsText} onChange={(event) => setEndpointsText(event.target.value)} />
       </label>
-      <button type="button" className={`dshg-action${busy.current ? ' dshg-busy' : ''}`} onClick={save}>{t('save')}</button>
+      <button type="button" className={`dshg-action${busy.current ? ' dshg-busy' : ''}`} disabled={status === null} onClick={save}>{t('save')}</button>
       {notice !== null && (
         <p className={`dshg-notice dshg-notice-${notice.kind}`} role="status">
           {notice.text}

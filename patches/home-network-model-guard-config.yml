@@ -1,0 +1,6 @@
+# Explicit deployment default; the host's config.json can override with [].
+- id: dsh-home-network-model-guard
+  name: dsh-home-network-model-guard
+  config:
+    exemptProviders:
+      - dsh-magpie

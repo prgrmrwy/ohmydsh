@@ -16,6 +16,11 @@
 export const GUARD_CHANNEL = '/dsh-home-network-model-guard'
 /** The read-only endpoint answering with one {@link GuardCheckResult}. */
 export const GUARD_CHECK_ENDPOINT = 'check'
+/** Effective policy, available without a Geo lookup. */
+export const GUARD_POLICY_ENDPOINT = 'policy'
+/** Local notification after settings are saved. */
+export const GUARD_CONFIG_CHANGED = 'dsh-home-network-model-guard:config-changed'
+export interface GuardPolicy { exemptProviders: readonly string[] }
 /** The read-only endpoint answering with one {@link GuardStatus}. */
 export const GUARD_STATUS_ENDPOINT = 'status'
 /** The write endpoint applying a validated configuration. */
@@ -71,6 +76,7 @@ export interface GuardStatus {
   source?: 'primary' | 'fallback'
   /** Current effective configuration (never contains secrets). */
   config: {
+    exemptProviders: readonly string[]
     blockedCountries: readonly string[]
     geoEndpoints: readonly [string, string]
     timeoutMs: number

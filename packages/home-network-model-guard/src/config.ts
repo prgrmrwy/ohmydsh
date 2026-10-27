@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { chmod, mkdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isProviderList } from './rules.js'
 
 /** Default blocklist: mainland-China egress is blocked until configured otherwise. */
 export const DEFAULT_BLOCKED_COUNTRIES: readonly string[] = ['CN']
@@ -32,6 +33,8 @@ const FORBIDDEN_FIELD_RE = /(password|secret|token|credential|private.?key|api.?
  * The parsed, validated guard configuration.
  */
 export interface GuardConfig {
+  /** Exact provider routes exempt from this host's egress policy. */
+  readonly exemptProviders: readonly string[]
   /** ISO 3166-1 alpha-2 codes whose egress blocks Claude (default `CN`). */
   readonly blockedCountries: readonly string[]
   /** [primary, fallback] HTTPS Geo endpoints. */
@@ -54,6 +57,7 @@ export interface GuardConfig {
 
 /** Ship-safe defaults; overridden by the host config file when valid. */
 export const DEFAULT_CONFIG: GuardConfig = Object.freeze({
+  exemptProviders: Object.freeze([]),
   blockedCountries: DEFAULT_BLOCKED_COUNTRIES,
   geoEndpoints: DEFAULT_GEO_ENDPOINTS,
   timeoutMs: 5_000,
@@ -94,7 +98,7 @@ function isPositiveNumber(value: unknown): value is number {
  * @param raw - parsed JSON value.
  * @returns the validated config, or an error message.
  */
-export function validateGuardConfig(raw: unknown): { ok: true; config: GuardConfig } | { ok: false; error: string } {
+export function validateGuardConfig(raw: unknown, defaults: readonly string[] = []): { ok: true; config: GuardConfig } | { ok: false; error: string } {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return { ok: false, error: 'config must be a JSON object' }
   }
@@ -102,6 +106,10 @@ export function validateGuardConfig(raw: unknown): { ok: true; config: GuardConf
     if (FORBIDDEN_FIELD_RE.test(key)) return { ok: false, error: `rejected field "${key}": credentials are not allowed` }
   }
   const record = raw as Record<string, unknown>
+
+  const providers = record.exemptProviders === undefined ? defaults : record.exemptProviders
+  if (!isProviderList(providers)) return { ok: false, error: 'exemptProviders must be a list of exact provider route IDs (max 64)' }
+  const exemptProviders = [...new Set(providers)]
 
   let blockedCountries: readonly string[] = DEFAULT_BLOCKED_COUNTRIES
   if (record.blockedCountries !== undefined) {
@@ -142,7 +150,7 @@ export function validateGuardConfig(raw: unknown): { ok: true; config: GuardConf
   }
   if (backoffMaxMs < backoffBaseMs) return { ok: false, error: 'backoffMaxMs must be >= backoffBaseMs' }
 
-  return { ok: true, config: { blockedCountries, geoEndpoints, timeoutMs, ttlMs, backoffBaseMs, backoffMaxMs } }
+  return { ok: true, config: { exemptProviders, blockedCountries, geoEndpoints, timeoutMs, ttlMs, backoffBaseMs, backoffMaxMs } }
 }
 
 /**
@@ -153,11 +161,11 @@ export function validateGuardConfig(raw: unknown): { ok: true; config: GuardConf
  * @param path - host config file path.
  * @returns validated config; never throws.
  */
-export function loadGuardConfig(path: string): GuardConfig {
+export function loadGuardConfig(path: string, defaults: readonly string[] = []): GuardConfig {
   try {
-    if (!existsSync(path)) return DEFAULT_CONFIG
+    if (!existsSync(path)) return validateGuardConfig({}, defaults).ok ? { ...DEFAULT_CONFIG, exemptProviders: [...new Set(defaults)] } : DEFAULT_CONFIG
     const raw: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    const result = validateGuardConfig(raw)
+    const result = validateGuardConfig(raw, defaults)
     return result.ok ? result.config : DEFAULT_CONFIG
   } catch {
     return DEFAULT_CONFIG

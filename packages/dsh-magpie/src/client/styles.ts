@@ -22,6 +22,9 @@ export const settingsCss = `
 .dmg-button:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}
 .dmg-error{color:var(--dsw-alias-state-error-primary);font-size:12px;overflow-wrap:anywhere;white-space:pre-wrap}
 .dmg-ok{color:var(--dsw-alias-label-secondary);font-size:12px}
+.dmg-usage{display:flex;flex-direction:column;gap:6px}
+.dmg-advanced>summary{cursor:pointer;color:var(--dsw-alias-label-secondary);font-size:12px}
+.dmg-advanced-body{display:flex;flex-direction:column;gap:10px;margin-top:10px;padding-left:10px;border-left:.5px solid var(--dsw-alias-border-l2)}
 .dmg-cards{display:flex;flex-direction:column;gap:8px}
 .dmg-card{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:.5px solid var(--dsw-alias-border-l2);border-radius:12px}
 .dmg-card-title{display:flex;align-items:center;gap:8px;min-width:0}
@@ -34,6 +37,7 @@ export const settingsCss = `
 .dmg-window-line time{color:var(--dsw-alias-label-tertiary)}
 .dmg-track{height:6px;border-radius:3px;overflow:hidden;background:var(--dsw-alias-border-l2)}
 .dmg-fill{height:100%;background:var(--dsw-alias-state-business-primary)}
+.dmg-fill[data-level=warn]{background:var(--dsw-alias-state-warn-primary)}
 .dmg-fill[data-level=high]{background:var(--dsw-alias-state-error-primary)}
 .dmg-models{display:flex;flex-direction:column}
 .dmg-model{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:.5px solid var(--dsw-alias-border-l2)}

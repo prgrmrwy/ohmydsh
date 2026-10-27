@@ -9,7 +9,7 @@ import { credentialsMock } from './support/credentials.js'
 import { createGateway, deferred, json } from './support/gateway.js'
 import { models, responseText } from './support/wire.js'
 
-// Contract regressions: only nonempty content deltas renew the 90s/60s watchdog.
+// Contract: any data from the gateway re-arms one 300s idle watchdog; DSH llm-retry owns retries.
 // Synthetic wire fixtures exercise real pi-ai, not live SOL latency or private history.
 type Mark = { at: number; layer: string; type: string; length?: number }
 const cleanup: (() => Promise<unknown>)[] = []
@@ -97,57 +97,56 @@ async function fixture(headersDelay = 0) {
     },
     comment() { mark('raw', 'comment'); body.enqueue(new TextEncoder().encode(': fixture heartbeat\n\n')) },
     end() { body.close() },
-    fail() { mark('transport', 'producer-error'); body.error(new Error('synthetic producer failure')) },
+    fail(message: string) { mark('transport', 'producer-error'); body.error(new Error(message)) },
   }
 }
+const IDLE = 300_000
 function timeout(f: Awaited<ReturnType<typeof fixture>>, at: number) {
-  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'error', failure: { code: 'MAGPIE_STREAM_TIMEOUT' } } })
+  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'error', failure: { code: 'TIMEOUT', message: expect.stringContaining('MAGPIE_STREAM_TIMEOUT') } } })
   expect(f.trace.find(m => m.type === 'abort')?.at).toBe(at)
   expect(f.signal()?.aborted).toBe(true)
   expect(f.calls()).toBe(1)
 }
-
-test('50s headers/pi start latency remains inside the original 90s budget, not a fresh budget', async () => {
-  const f = await fixture(50_000)
-  expect(f.trace).toContainEqual({ at: 50_000, layer: 'transport', type: 'headers-200' })
-  expect(f.trace).toContainEqual({ at: 50_000, layer: 'pi', type: 'start' })
-  await f.advance(39_999)
+async function expiresAt(f: Awaited<ReturnType<typeof fixture>>, at: number) {
+  await f.advance(at - Date.now() - 1)
   expect(finish(f.chunks)).toBeUndefined()
   await f.advance(1)
-  expect(finish(f.chunks)).toBeDefined()
   await f.run
-  timeout(f, 90_000)
+  timeout(f, at)
+}
+
+test('silence from the start times out at the 300s idle budget', async () => {
+  const f = await fixture()
+  await expiresAt(f, IDLE)
 })
 
-test('headers/start, created/in_progress and comments do not renew the 90s first-content budget', async () => {
+test('slow headers re-arm the idle budget when they arrive', async () => {
+  const f = await fixture(250_000)
+  expect(f.trace).toContainEqual({ at: 250_000, layer: 'transport', type: 'headers-200' })
+  await expiresAt(f, 250_000 + IDLE)
+})
+
+test('any gateway data (created/in_progress/comments) keeps a long reasoning request alive', async () => {
   const f = await fixture()
-  expect(f.trace.filter(m => m.layer === 'pi').map(m => m.type)).toEqual(['start'])
-  for (const time of [20_000, 40_000, 80_000]) {
+  for (const time of [200_000, 400_000, 600_000]) {
     await f.advance(time - Date.now())
-    f.raw({ type: time === 20_000 ? 'response.created' : 'response.in_progress', response: { id: 'r_fixture', status: 'in_progress' } })
-    f.comment()
+    f.raw({ type: time === 200_000 ? 'response.created' : 'response.in_progress', response: { id: 'r_fixture', status: 'in_progress' } })
     await f.settle()
   }
-  expect(f.trace.filter(m => m.layer === 'pi').map(m => m.type)).toEqual(['start'])
-  await f.advance(9_999)
+  await f.advance(800_000 - Date.now())
+  f.comment()
+  await f.settle()
   expect(finish(f.chunks)).toBeUndefined()
-  await f.advance(1)
-  expect(finish(f.chunks)).toBeDefined()
-  await f.run
-  timeout(f, 90_000)
+  await expiresAt(f, 800_000 + IDLE)
 })
 
 for (const type of ['reasoning', 'message', 'function_call'] as const) {
-  test(`empty ${type} item start preserves first content at 65s and successful completion`, async () => {
+  test(`empty ${type} item start, content after 280s still completes`, async () => {
     const f = await fixture()
     f.raw(added(type))
     await f.settle()
-    const start = type === 'reasoning' ? 'thinking_start' : type === 'message' ? 'text_start' : 'toolcall_start'
-    expect(f.trace.filter(m => m.layer === 'pi').map(m => m.type)).toEqual(['start', start])
-    expect(f.chunks).toEqual([{ type: 'block-start', index: 0, blockType: type === 'reasoning' ? 'reasoning' : type === 'message' ? 'text' : 'tool-call' }])
-    await f.advance(60_000)
+    await f.advance(280_000)
     expect(finish(f.chunks)).toBeUndefined()
-    await f.advance(5_000)
     const value = type === 'function_call' ? '{}' : 'x'
     f.raw(delta(type, value))
     f.raw(done(type, value))
@@ -155,25 +154,10 @@ for (const type of ['reasoning', 'message', 'function_call'] as const) {
     f.end()
     await f.run
     expect(finish(f.chunks)).toMatchObject({ reason: { kind: type === 'function_call' ? 'tool-calls' : 'stop' } })
-    expect(f.trace.find(m => m.type.endsWith('_delta'))).toMatchObject({ at: 65_000, length: value.length })
     expect(f.calls()).toBe(1)
   })
 
-  test(`empty ${type} start without content times out at 90s, not 60s`, async () => {
-    const f = await fixture()
-    f.raw(added(type))
-    await f.settle()
-    await f.advance(60_000)
-    expect(finish(f.chunks)).toBeUndefined()
-    await f.advance(29_999)
-    expect(finish(f.chunks)).toBeUndefined()
-    await f.advance(1)
-    expect(finish(f.chunks)).toBeDefined()
-    await f.run
-    timeout(f, 90_000)
-  })
-
-  test(`${type} final block followed directly by done needs no delta or renewed timer`, async () => {
+  test(`${type} final block followed directly by done needs no delta`, async () => {
     const f = await fixture()
     await f.advance(65_000)
     f.raw(done(type, type === 'function_call' ? '{}' : 'final content'))
@@ -181,92 +165,28 @@ for (const type of ['reasoning', 'message', 'function_call'] as const) {
     f.end()
     await f.run
     expect(f.trace.some(m => m.layer === 'pi' && m.type.endsWith('_delta'))).toBe(false)
-    expect(f.chunks).toContainEqual(expect.objectContaining({ type: 'block-end', block: expect.objectContaining(
-      type === 'function_call' ? { type: 'tool-call', arguments: '{}' } : { text: 'final content' },
-    ) }))
     expect(finish(f.chunks)).toMatchObject({ reason: { kind: type === 'function_call' ? 'tool-calls' : 'stop' } })
     expect(f.calls()).toBe(1)
   })
-
-  test(`${type} content delta renews idle budget; later empty end/start/delta/comments do not`, async () => {
-    const f = await fixture()
-    f.raw(added(type))
-    await f.settle()
-    await f.advance(55_000)
-    f.raw(delta(type, type === 'function_call' ? '{' : 'x'))
-    await f.settle()
-    await f.advance(55_000)
-    f.raw(done(type, ''))
-    f.raw(added(type))
-    f.raw(delta(type, ''))
-    f.comment()
-    await f.settle()
-    const emptyDelta = type === 'reasoning' ? 'thinking_delta' : type === 'message' ? 'text_delta' : 'toolcall_delta'
-    expect(f.trace).toContainEqual({ at: 110_000, layer: 'pi', type: emptyDelta, length: 0 })
-    await f.advance(4_999)
-    expect(finish(f.chunks)).toBeUndefined()
-    await f.advance(1)
-    expect(finish(f.chunks)).toBeDefined()
-    await f.run
-    timeout(f, 115_000)
-  })
 }
 
-test('without an empty early item the same synthetic 65s first text succeeds within 90s', async () => {
-  const f = await fixture()
-  await f.advance(65_000)
-  for (const event of responseText()) f.raw(event)
-  f.end()
-  await f.run
-  expect(f.chunks.some(c => c.type === 'text-delta')).toBe(true)
-  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'stop' } })
-  expect(f.calls()).toBe(1)
-  expect(f.trace.find(m => m.type === 'text_delta')?.at).toBe(65_000)
-})
-
-test('a late empty item cannot extend the initial absolute deadline beyond 90s', async () => {
-  const f = await fixture()
-  await f.advance(80_000)
-  f.raw(added('reasoning'))
-  await f.settle()
-  await f.advance(9_999)
-  expect(finish(f.chunks)).toBeUndefined()
-  await f.advance(1)
-  expect(finish(f.chunks)).toBeDefined()
-  await f.run
-  timeout(f, 90_000)
-})
-
-for (const type of ['reasoning', 'message', 'function_call'] as const) {
-  test(`empty ${type} delta at 55s does not renew the first-content deadline`, async () => {
-    const f = await fixture()
-    f.raw(added(type))
-    await f.settle()
-    await f.advance(55_000)
-    f.raw(delta(type, ''))
-    await f.settle()
-    const piType = type === 'reasoning' ? 'thinking_delta' : type === 'message' ? 'text_delta' : 'toolcall_delta'
-    expect(f.trace).toContainEqual({ at: 55_000, layer: 'pi', type: piType, length: 0 })
-    await f.advance(34_999)
-    expect(finish(f.chunks)).toBeUndefined()
-    await f.advance(1)
-    expect(finish(f.chunks)).toBeDefined()
-    await f.run
-    timeout(f, 90_000)
-  })
-}
-
-test('post-start producer failure is delivered as pi error, not timeout and not replayed', async () => {
+test('a dropped connection after start is a retryable TRANSPORT failure, never replayed here', async () => {
   const f = await fixture()
   await f.advance(12_000)
-  f.fail()
+  f.fail('terminated')
   await f.run
-  expect(f.trace.filter(m => m.layer === 'pi').map(m => m.type)).toEqual(['start', 'error'])
-  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'error', failure: { code: 'MAGPIE_GENERATION_FAILED' } } })
+  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'error', failure: { code: 'TRANSPORT' } } })
   expect(f.calls()).toBe(1)
 })
 
-test('outer iterator throw after watchdog expiry exposes catch-path classification gap (injected seam)', async () => {
+test('an unrecognised producer failure stays non-retryable', async () => {
+  const f = await fixture()
+  f.fail('synthetic producer failure')
+  await f.run
+  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'error', failure: { code: 'MAGPIE_GENERATION_FAILED' } } })
+})
+
+test('an iterator throw after watchdog expiry is still reported as TIMEOUT', async () => {
   const originalIterator = EventStream.prototype[Symbol.asyncIterator]
   const release = deferred()
   vi.spyOn(EventStream.prototype, Symbol.asyncIterator).mockImplementation(async function* (this: EventStream<unknown, unknown>) {
@@ -279,16 +199,14 @@ test('outer iterator throw after watchdog expiry exposes catch-path classificati
     }
   })
   const f = await fixture()
-  await f.advance(90_000)
+  await f.advance(IDLE)
   await f.aborted.promise
   release.resolve()
   await f.run
-  expect(f.trace.find(m => m.type === 'abort')?.at).toBe(90_000)
-  expect(finish(f.chunks)).toMatchObject({ reason: { kind: 'error', failure: { code: 'MAGPIE_GENERATION_FAILED', message: 'synthetic iterator throw after abort' } } })
-  expect(f.calls()).toBe(1)
+  timeout(f, IDLE)
 })
 
-for (const success of [true, false]) test(`loopback real HTTP: empty start ${success ? 'allows 65s text + stop' : 'times out at 90s'} with one POST and socket close`, async () => {
+for (const success of [true, false]) test(`loopback real HTTP: empty start ${success ? 'allows 65s text + stop' : 'times out 300s after the last heartbeat'} with one POST and socket close`, async () => {
   const g = await createGateway()
   cleanup.push(g.close)
   g.handlers.set('GET /v1/models', json(models))
@@ -327,14 +245,14 @@ for (const success of [true, false]) test(`loopback real HTTP: empty start ${suc
     for (const event of responseText()) response.write(`data: ${JSON.stringify(event)}\n\n`)
     response.end()
   } else {
-    await vi.advanceTimersByTimeAsync(29_999)
+    await vi.advanceTimersByTimeAsync(294_999)
     expect(finish(chunks)).toBeUndefined()
     await vi.advanceTimersByTimeAsync(1)
   }
   await run
   await socketClosed.promise
-  expect(Date.now()).toBe(success ? 65_000 : 90_000)
-  expect(finish(chunks)).toMatchObject({ reason: success ? { kind: 'stop' } : { kind: 'error', failure: { code: 'MAGPIE_STREAM_TIMEOUT' } } })
+  expect(Date.now()).toBe(success ? 65_000 : 355_000)
+  expect(finish(chunks)).toMatchObject({ reason: success ? { kind: 'stop' } : { kind: 'error', failure: { code: 'TIMEOUT' } } })
   if (success) expect(chunks).toContainEqual(expect.objectContaining({ type: 'text-delta', text: 'hi' }))
   expect(g.requests.map(r => [r.method, r.path])).toEqual([['POST', '/v1/responses']])
 })

@@ -26,6 +26,13 @@ const noFabrication = () => {
   for (const bad of ['Invalid Date', 'undefined', 'null', 'NaN']) expect(host.textContent).not.toContain(bad)
 }
 
+describe('用量条颜色', () => {
+  it.each([[70, 'normal'], [70.5, 'warn'], [71, 'warn'], [89, 'warn'], [89.9, 'warn'], [90, 'high'], [100, 'high'], [0, 'normal']] as const)('used %s%% → %s', async (used, level) => {
+    await render(() => cardsOk([{ provider: 'codex', windows: [{ name: '5h', used }] }]))
+    expect(group('codex')!.querySelector('.dmg-fill')?.getAttribute('data-level')).toBe(level)
+  })
+})
+
 describe('只读用量卡片', () => {
   it('spec Scenario "渲染卡片字段"', async () => {
     await render(() => cardsOk([
@@ -95,7 +102,8 @@ describe('只读用量卡片', () => {
     const fake = await render(() => cardsOk([]))
     expect(usage()?.getAttribute('data-usage-state')).toBe('empty')
     expect(text(usage())).toContain('Magpie 未返回可见用量')
-    expect(buttonByText(host, '刷新全部')).toBeDefined()
+    expect(buttonByText(usage()!, '获取模型与用量')).toBeDefined()
+    expect(host.querySelector('[aria-label="连接"] [data-usage-state]')).toBe(usage())
     await flush()
     expect(fake.calls.filter(c => c.path === 'cards').map(c => c.method)).toEqual(['GET'])
   })
@@ -127,7 +135,7 @@ describe('手动刷新用量（UI 侧）', () => {
     await act(async () => buttonByText(group('codex')!, '刷新')!.click())
     expect(fake.calls.filter(c => c.method === 'POST')).toEqual([{ method: 'POST', path: 'cards', body: { provider: 'codex', user: 'u@example.com' } }])
     expect(buttonByText(group('codex')!, '刷新')?.disabled).toBe(true)
-    expect(buttonByText(host, '刷新全部')?.disabled).toBe(true)
+    expect(usage()).toBeNull()
     await act(async () => pending.resolve(cardsOk([{ ...card, readAt: '2026-10-25T11:00:00Z' }])))
     await flush()
     expect(group('codex')!.querySelector('[data-field="readAt"] time')?.getAttribute('datetime')).toBe('2026-10-25T11:00:00Z')
@@ -135,13 +143,30 @@ describe('手动刷新用量（UI 侧）', () => {
     expect(host.textContent).not.toContain('未重新读取')
   })
 
-  it('UI 侧：冷启动时刷新全部', async () => {
-    const fake = await render(() => cardsOk([]), { 'POST cards': () => cardsOk([{ provider: 'codex', user: 'a' }, { provider: 'claude', user: 'b' }]) })
-    await act(async () => buttonByText(host, '刷新全部')!.click())
+  it('UI 侧：冷启动时获取模型与用量（先同步目录再全量刷新）', async () => {
+    const fake = await render(() => cardsOk([]), { 'POST settings': () => ok(settingsView()), 'POST cards': () => cardsOk([{ provider: 'codex', user: 'a' }, { provider: 'claude', user: 'b' }]) })
+    await act(async () => buttonByText(host, '获取模型与用量')!.click())
     await flush()
-    expect(fake.calls.filter(c => c.method === 'POST')).toEqual([{ method: 'POST', path: 'cards', body: { all: true } }])
+    expect(fake.calls.filter(c => c.method === 'POST')).toEqual([{ method: 'POST', path: 'settings', body: { resync: true } }, { method: 'POST', path: 'cards', body: { all: true } }])
     expect(host.querySelectorAll('[data-card]')).toHaveLength(2)
-    expect(usage()?.getAttribute('data-usage-state')).toBe('ok')
+    expect(usage()).toBeNull()
+    expect(buttonByText(host, '获取模型与用量')).toBeUndefined()
+  })
+
+  it('有卡片时没有整体刷新栏目，只有每张卡片自己的刷新', async () => {
+    await render(() => cardsOk([card]))
+    expect(usage()).toBeNull()
+    expect(buttonByText(host, '刷新全部')).toBeUndefined()
+    expect(buttonByText(host, '获取模型与用量')).toBeUndefined()
+    expect(Array.from(host.querySelectorAll('button')).filter(b => b.textContent === '刷新')).toHaveLength(1)
+  })
+
+  it('目录同步失败时不发全量刷新并给出原因', async () => {
+    const fake = await render(() => cardsOk([]), { 'POST settings': () => ({ status: 502, body: { error: 'SYNC_DOWN' } }) })
+    await act(async () => buttonByText(host, '获取模型与用量')!.click())
+    await flush()
+    expect(fake.calls.filter(c => c.path === 'cards' && c.method === 'POST')).toHaveLength(0)
+    expect(text(host.querySelector('[data-usage-alert]'))).toContain('SYNC_DOWN')
   })
 
   it('UI 侧：节流期内返回旧读数', async () => {
@@ -153,9 +178,9 @@ describe('手动刷新用量（UI 侧）', () => {
   })
 
   it('UI 侧：受限 key 冷启动刷新全部仍为空', async () => {
-    await render(() => cardsOk([]), { 'POST cards': () => cardsOk([]) })
+    await render(() => cardsOk([]), { 'POST settings': () => ok(settingsView()), 'POST cards': () => cardsOk([]) })
     expect(text(usage())).not.toContain('管理员')
-    await act(async () => buttonByText(host, '刷新全部')!.click())
+    await act(async () => buttonByText(host, '获取模型与用量')!.click())
     await flush()
     expect(usage()?.getAttribute('data-usage-state')).toBe('empty')
     expect(text(usage())).toContain('Magpie 未返回可见用量')
@@ -169,7 +194,7 @@ describe('手动刷新用量（UI 侧）', () => {
     await act(async () => buttonByText(group('codex')!, '刷新')!.click())
     await flush()
     expect(text(group('codex')!.querySelector('[data-card]'))).toBe(before)
-    expect(text(host.querySelector('[data-usage-alert]'))).toContain('502')
+    expect(text(group('codex')!.querySelector('[data-usage-alert]'))).toContain('502')
   })
 })
 
@@ -192,7 +217,7 @@ describe('连接身份与设置写入竞态（延迟请求 DOM 回归）', () =>
       'POST settings': () => save.promise,
       'POST cards': () => cardsOk([oldCard]),
     })
-    await act(async () => buttonByText(host, '刷新全部')!.click())
+    await act(async () => buttonByText(group('codex')!, '刷新')!.click())
     expect(host.textContent).toContain('未重新读取')
     await saveAddress()
     expect(host.querySelectorAll('[data-card]')).toHaveLength(0)
@@ -215,29 +240,28 @@ describe('连接身份与设置写入竞态（延迟请求 DOM 回归）', () =>
       'POST settings': () => save.promise,
       'POST cards': () => ++refreshes === 1 ? oldRefresh.promise : newRefresh.promise,
     })
-    await act(async () => buttonByText(host, '刷新全部')!.click())
+    await act(async () => buttonByText(group('codex')!, '刷新')!.click())
     await saveAddress()
     expect(host.textContent).not.toContain('OLD_IDENTITY')
     await act(async () => save.resolve(ok(settingsView({ baseUrl: 'http://new-gateway.test/v1' }))))
     expect(reads).toBe(2)
     expect(host.textContent).toContain('NEW_IDENTITY')
-    await act(async () => buttonByText(host, '刷新全部')!.click())
+    await act(async () => buttonByText(group('codex')!, '刷新')!.click())
     expect(fake.calls.filter(c => c.method === 'POST' && c.path === 'cards')).toHaveLength(2)
     await act(async () => oldRefresh.resolve(outcome === 'success' ? cardsOk([oldCard]) : { status: 502, body: { error: 'OLD_REFRESH_ERROR' } }))
     expect(host.textContent).not.toContain('OLD_IDENTITY')
     expect(host.textContent).not.toContain('OLD_REFRESH_ERROR')
     expect(host.textContent).not.toContain('未重新读取')
-    expect(buttonByText(host, '刷新全部')?.disabled).toBe(true)
-    expect(text(usage())).toContain('正在请求 Magpie 重新读取')
+    expect(buttonByText(group('codex')!, '刷新')?.disabled).toBe(true)
     await act(async () => newRefresh.resolve(cardsOk([{ ...newCard, readAt: '2026-10-25T12:00:00Z' }])))
-    expect(buttonByText(host, '刷新全部')?.disabled).toBe(false)
+    expect(buttonByText(group('codex')!, '刷新')?.disabled).toBe(false)
   })
 
   it('保存与旧刷新点击发生在同一 tick，不得把旧身份刷新归入新 epoch', async () => {
     const save = deferred<ApiResponse>()
     const fake = await render(() => cardsOk([oldCard]), { 'POST settings': () => save.promise, 'POST cards': () => cardsOk([oldCard]) })
     await act(async () => inputValue(connection().querySelector('input')!, 'http://new-gateway.test/v1'))
-    const staleRefreshButton = buttonByText(host, '刷新全部')!
+    const staleRefreshButton = buttonByText(group('codex')!, '刷新')!
     await act(async () => { buttonByText(connection(), '保存')!.click(); staleRefreshButton.click() })
     expect(fake.calls.filter(c => c.path === 'cards' && c.method === 'POST')).toHaveLength(0)
     expect(host.textContent).not.toContain('OLD_IDENTITY')
@@ -273,14 +297,14 @@ describe('连接身份与设置写入竞态（延迟请求 DOM 回归）', () =>
     await act(async () => initialRead.resolve(cardsOk([oldCard])))
     expect(usage()?.getAttribute('data-usage-state')).toBe('unconfigured')
     expect(host.querySelectorAll('[data-card]')).toHaveLength(0)
-    expect(buttonByText(host, '刷新全部')).toBeUndefined()
+    expect(buttonByText(host, '获取模型与用量')).toBeUndefined()
   })
 
   it('连接保存失败也不泄露旧卡片，旧请求不能补回且不自动读卡或 refresh', async () => {
     const save = deferred<ApiResponse>()
     const oldRefresh = deferred<ApiResponse>()
     const fake = await render(() => cardsOk([oldCard]), { 'POST settings': () => save.promise, 'POST cards': () => oldRefresh.promise })
-    await act(async () => buttonByText(host, '刷新全部')!.click())
+    await act(async () => buttonByText(group('codex')!, '刷新')!.click())
     await saveAddress()
     await act(async () => save.resolve({ status: 503, body: { error: 'SAVE_FAILED' } }))
     await act(async () => oldRefresh.resolve(cardsOk([oldCard])))
@@ -344,8 +368,8 @@ describe('连接身份与设置写入竞态（延迟请求 DOM 回归）', () =>
         const select = group('codex')!.querySelector('select')!
         select.value = 'high'
         select.dispatchEvent(new Event('change', { bubbles: true }))
-      } else if (action === 'follow') buttonByText(group('codex')!, '跟随网关目录')!.click()
-      else buttonByText(connection(), '重新获取目录')!.click()
+      } else if (action === 'follow') buttonByText(group('codex')!, '跟随网关模型列表')!.click()
+      else buttonByText(connection(), '刷新模型列表')!.click()
     })
     const controls = host.querySelectorAll('[aria-label="连接"] input, [aria-label="连接"] button, [data-model] input, [data-model] select, [data-provider] .dmg-head button')
     expect(Array.from(controls).every(el => (el as HTMLInputElement).disabled)).toBe(true)
@@ -353,14 +377,14 @@ describe('连接身份与设置写入竞态（延迟请求 DOM 回归）', () =>
       : action === 'follow' ? { visibleModels: { claude: [] } } : { resync: true })
     await act(async () => pending.resolve(ok(view)))
     expect((group('claude')!.querySelector('select') as HTMLSelectElement).disabled).toBe(false)
-    expect(buttonByText(group('claude')!, '跟随网关目录')?.disabled).toBe(false)
+    expect(buttonByText(group('claude')!, '跟随网关模型列表')?.disabled).toBe(false)
     expect(fake.calls.filter(c => c.path === 'cards').map(c => c.method)).toEqual(['GET'])
   })
 
   it('换 api 后晚到的 settings 响应不能回写当前页面', async () => {
     const stale = deferred<ApiResponse>()
     await render(() => cardsOk([]), { 'POST settings': () => stale.promise })
-    await act(async () => buttonByText(connection(), '重新获取目录')!.click())
+    await act(async () => buttonByText(connection(), '刷新模型列表')!.click())
     const next = fakeApi({
       'GET settings': () => ok(settingsView({ baseUrl: 'http://current.test/v1', groups: [{ provider: 'current', models: [] }] })),
       'GET cards': () => cardsOk([]),

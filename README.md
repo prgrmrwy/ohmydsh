@@ -177,6 +177,8 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context, without running tools or writing back to the main conversation. Temporarily installed from a fork release of upstream MichengAI/dsh-btw PR #16.
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — Brings the models of a Magpie AI gateway into the model picker, alongside the direct providers.
 
+- [dsh-mobile](https://github.com/saya-ch/dsh-mobile) — Accesses the same DSH sessions from an Android app or phone browser, with paired LAN access and optional remote gateways.
+
 ### Official optional
 
 - [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — Official scheduled-automation page, schedule tools and time context.
@@ -226,6 +228,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
+- [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts the `dsh-magpie` provider route from the host egress gate by exact provider id.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.
 - [ponytail-skills](patches/ponytail-skills.yml) — Composition patch that mounts a dedicated skill provider for the ponytail package only.
 

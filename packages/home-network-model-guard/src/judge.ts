@@ -8,7 +8,7 @@
  * @module dsh-home-network-model-guard/judge
  */
 import type { NetworkVerdict } from './contract.js'
-import { isClaudeFamily } from './rules.js'
+import { requiresEgressGuard } from './rules.js'
 
 /** The model-selection facts the guard may act on. */
 export interface SelectionFacts {
@@ -18,6 +18,7 @@ export interface SelectionFacts {
 
 /** Everything the guard needs to decide for one session. */
 export interface JudgeInput {
+  readonly exemptProviders?: readonly string[]
   /**
    * Host egress classification. `'blocked'` and `'unknown'` both fail closed
    * for Claude; only `'allowed'` permits it.
@@ -52,7 +53,7 @@ export type GuardAction = 'block' | 'yield-official' | 'none'
 export function judge(input: JudgeInput): GuardAction {
   if (input.routable === false) return 'yield-official'
   if (input.selection === null) return 'none'
-  if (!isClaudeFamily(input.selection.provider, input.selection.model)) return 'none'
+  if (!requiresEgressGuard(input.selection.provider, input.selection.model, input.exemptProviders)) return 'none'
   if (input.network === 'allowed') return 'none'
   return 'block'
 }

@@ -172,7 +172,7 @@
 - [x] 16.1 原85/158仅属baseline；本次重核99行，group3/display3有实际分层证据并更新localgreen，独立plugin29files179 tests/typecheck/build、AUTO31files222、sidebar68、Host-source25/原339/continuation161通过。99 localgreen不等于最终独立review/live GUI/最终部署图通过。
 - [ ] 16.2 只读冒烟：用测试脚本（不经过 DSH 宿主）以当前 key 对 CT105 依次执行目录同步、一次短文本生成（Chat 和 Responses 各一次，不带 stop）和一次读卡片。记录 HTTP 状态和关键字段，不记录 key、账号或对话内容；不点刷新，以免访问厂商。
 - [ ] 16.3 strict validate 已在本轮通过且 interim `verify.md` 已更新，但新增 group/display/recheck/live gates 未闭合；待证据齐全后重跑 `OPENSPEC_TELEMETRY=0 openspec validate add-dsh-magpie-plugin --strict` 并按 anvil verify 作最终验收，不能把 interim FAIL 当完成。
-- [ ] 16.4 询问用户是否重启 DSH，并在 GUI 中验收：设置页卡片与分组、可见性、默认 effort、速度栏，以及一次真实工具回合。之后是否把 dsh-magpie-connect 和 magpie-display-name-shim 设为 `enabled: false` 由用户决定，本 change 不自动执行。
+- [x] 16.4 （2026-10-27 用户 GUI 验收通过后勾选）询问用户是否重启 DSH，并在 GUI 中验收：设置页卡片与分组、可见性、默认 effort、速度栏，以及一次真实工具回合。之后是否把 dsh-magpie-connect 和 magpie-display-name-shim 设为 `enabled: false` 由用户决定，本 change 不自动执行。
 
 ## 2026-10-25 收尾边界（UTC；证据见 verify/implementation-log）
 
@@ -194,6 +194,21 @@
 - [x] 19.2 先跑真实 AgentLoop/controller 主请求与官方选择/defaults同 effort、失败告警、无额外 child/MANUAL 写入的 RED；选择器单值 RED，保留分组/search/真实identity回归。
 - [x] 19.3 最小接通 policy-v2 主请求官方同路由 effort 同步；删 actual/next 独有 patch/tests/helper，更新 pin/verifier及双方双语README，不增加配置、不改adapter/传输。
 - [x] 19.4 实跑 focused/full AUTO、typecheck/build、隔离 pinned Host-source dedicated suite、patch apply check、governance/whitespace/strict；记录source SHA和实际RED/GREEN及未验收边界，不启动fullgraph/restart/sync/deploy。
-- [ ] 19.5 parent 独立复核 AMD3 源码/规划及正式图 freshness、GUI验收：parent 源码/构建复核已 APPROVE；最终正式图验证、production sync×2（第二次no changes）完成；只剩用户重启后的GUI验收，不能将该整项或full change标PASS。
+- [x] 19.5 （2026-10-27 用户 GUI 验收通过后勾选）parent 独立复核 AMD3 源码/规划及正式图 freshness、GUI验收：parent 源码/构建复核已 APPROVE；最终正式图验证、production sync×2（第二次no changes）完成；只剩用户重启后的GUI验收，不能将该整项或full change标PASS。
 
 AMD3 local snapshot：119/124 complete（旧115/119历史保留；新增19.1–19.4完成，19.5独立复核/正式图/GUI仍pending），不是0pending或全目标PASS。
+
+## 20. AMD4 — 用户 2026-10-27 授权的体验与重试修订
+
+用户要求：删除整体刷新用量栏目；用量条 ≤70 蓝、71–89 橙、≥90 红；参照 dsh-plugin-subscriptions 做失败重试（超时对齐其“任何数据续期、300s 空闲”）；连接默认只要地址与 key，「高级连接」默认展开、接入方式仅「直连 / Cloudflare Access」，README 欢迎 issue/PR。无卡片时在连接面板给「获取模型与用量」。
+
+- [x] 20.1 修订 spec（生成超时、失败分类与重试新 requirement、用量卡片/手动刷新、连接接入方式）与 design D2 超时条款。
+- [x] 20.2 adapter：`providerRetryPolicy`、标准错误码分类、300s 任意数据看门狗、删除建连 429/5xx 内部重发、空回复 `EMPTY_RESPONSE`；改写 timeout/retry/generate 测试。
+- [x] 20.3 client：删除用量栏目与「刷新全部」，连接面板空状态与「获取模型与用量」，单卡提示归入分组，三档用量条，高级连接接入方式；改写 cards-render/access-ui 测试。
+- [x] 20.4 双语 README：重试/超时、用量刷新与颜色、连接方式（含 Tailscale 属直连、Cloudflare 524 提醒、欢迎 issue/PR）。
+- [x] 20.5 本包 test（34 files / 248 tests）、typecheck、build 通过；本地 worktree 需 `--fsModuleCachePath` 指向可写目录。
+- [x] 20.6 部署后 GUI 验收（2026-10-27 用户确认通过）：设置页布局、Cloudflare Access 切换、真实长推理请求不再 90s 超时、断网/5xx 时 DSH 显示重试。
+
+## 2026-10-27 归档说明
+
+经用户确认带未完成项归档：2.5（历史缺先红证据，无法补）、16.2（CT105 直连只读冒烟未执行）、16.3（最终 anvil verify 未单独收尾）保持未勾选。16.4、19.5 以用户 2026-10-27 GUI 验收为准勾选。归档时 delta 合入主 specs：新建 dsh-magpie；sidebar-session-provider-icon 替换「使用下载落盘的真实品牌资产」；auto-model-routing 先把当前默认 AUTO 三条 requirement 移入 `## Requirements`，并按 AMD3 改写“不调用 selectModel”条款与场景，再加入四条新增 requirement。

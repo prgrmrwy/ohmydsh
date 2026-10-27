@@ -35,6 +35,7 @@ export interface ReasonBlock {
 export interface SessionGuardDeps {
   /** Latest host network verdict (`'unknown'` while unavailable → fail open). */
   network(): NetworkVerdict
+  exemptProviders?(): readonly string[]
   /**
    * One facts snapshot for a session; `undefined` when the session is not
    * (yet) materialized — the caller retries on the next signal.
@@ -145,7 +146,7 @@ export class ComposerGuardController {
   private actionOf(sessionId: string): ReturnType<typeof judge> {
     const facts = this.deps.read(sessionId)
     if (facts === undefined) return 'none'
-    return judge({ network: this.deps.network(), routable: facts.routable, selection: facts.selection })
+    return judge({ network: this.deps.network(), exemptProviders: this.deps.exemptProviders?.() ?? [], routable: facts.routable, selection: facts.selection })
   }
 
   private stateOf(sessionId: string): SessionState {
