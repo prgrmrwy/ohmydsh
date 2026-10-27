@@ -1,13 +1,12 @@
 {
   "name": "dsh-magpie-connector",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DeepSeek Harness plugin: connect a self-hosted Magpie gateway as one LLM provider with models grouped by upstream provider, read-only usage cards, model visibility, default effort and per-session fast mode",
   "license": "MIT",
   "author": "prgrmrwy",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/prgrmrwy/dsh-magpie-connector.git",
-    "directory": "packages/dsh-magpie-connector"
+    "url": "git+https://github.com/prgrmrwy/dsh-magpie-connector.git"
   },
   "homepage": "https://github.com/prgrmrwy/dsh-magpie-connector#readme",
   "bugs": {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Fix README images on npm: `repository` no longer declares a monorepo `directory`, so relative image links resolve against the standalone repository root.
+
 ## 0.1.0
 
 - First release.
