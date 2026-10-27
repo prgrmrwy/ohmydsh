@@ -17,5 +17,5 @@
 
 ## 4. 验证与发布准备
 
-- [ ] 4.1 运行包测试/typecheck/build、根仓库文档治理与 facade 测试，并记录实际结果。
-- [ ] 4.2 发布准备：npm 元数据与 `npm pack` 校验；建独立 GitHub 镜像仓库（subtree），npm 发布需用户完成登录后执行。
+- [x] 4.1 运行包测试/typecheck/build、根仓库文档治理与 facade 测试，并记录实际结果。
+- [x] 4.2 发布准备：`npm pack --dry-run` 通过；已建独立 GitHub 镜像仓库 prgrmrwy/dsh-magpie-connector 并推 subtree（含 topics）。npm 发布因本机未登录返回 ENEEDAUTH，需用户 `npm login` 后执行或由仓库 release workflow（tag 触发、trusted publishing）发布。
