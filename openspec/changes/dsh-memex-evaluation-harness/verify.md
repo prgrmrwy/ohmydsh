@@ -42,7 +42,24 @@
 - 行为红绿证据包括目录配置/生产run入口、首次目录、取消、R数值、报告时序、旧轮次升级4失败→全绿及续跑缺API 18失败→全绿。测试夹具导入/形状错误单独修复，不作TDD业务红灯。
 - 真实六条件测试曾复现 `idle/stat` 后文件 ENOENT；正式 `sessions.flush` checkpoint 后通过。真实跨RPC续跑曾因 Cordis traceable proxy 身份变化被拒；用公开 `symbols.original` 核对服务身份并保留可信能力引用，不放宽 Agent exact identity。
 
-### Remaining Acceptance — Not Executed
+### 2026-10-29 部署阻断修复与复验
+
+- 用户于10月28日22:34重新构建并重启；实际Host PID18587、启动22:34:48。模块、judge preset、evalSelftest配置和skill已齐全。
+- 部署实测发现两个离线阶段漏掉的问题：安装bin是符号链接，CLI main guard直接比较argv路径导致静默退出；pnpm file部署将fixture与源码共享inode，严格nlink检查拒绝。前者改为realpath比较；后者通过package的ohmydsh.independentFiles声明fixtures/eval，由受管sync在完整路径/树/字节预检后原子替换部署硬链接。源文件不写，未知条目/符号链接/字节差异拒绝；保留原fixture检查不变。
+- 首次4个独立资源行为测试均红（无操作stub），实现后全绿；加入真实sync硬链接安装回归，首次复制、第二次mtime不变。macOS测试夹具改为物理tmp路径，未放宽生产symlink检查。
+- 两次实际 `dsh build`：首次报告5个独立资源与Memex更新成功；第二次明确 `no changes — deployment already matches manifest`。源码与部署五文件均nlink=1；部署版fixedPlanPreview返回6条件。没有再次重启、没有改Host内存逻辑。
+- `node --test tests/memex-cli-entry.test.mjs` 新鲜编译到独立临时目录，direct与安装式symlink入口help均有相同输出，未认证/未创建轮次。
+- Memex全包首次及独立重跑均只有旧升级反例循环超过5秒；13个评分场景拆成it.each，断言及超时上限未放宽。最终 `npm test && npm run typecheck`：118文件/787测试全绿。
+- 仓库 `npm test && npm run check:artifacts && git diff --check`：646总计/644pass/0fail/2既有skip；其后新增独立CLI测试1pass（不将其虚报为已包含在全量计数）。OpenSpec strict通过。
+- 真实Host只读拒绝探测：未认证401、外来Origin403、外来Host且无认证401。后者不能独立证明authenticated authority拒绝；EVAL032仍未完整通过。
+- 已有用户真实自检授权且限定GPT；当前工具无交互TTY，必须由用户在终端隐藏粘贴官方启动URL。没有从日志、浏览器或配置提取认证凭据，尚无live轮次/模型调用/默认值变更。启动建议被测和裁判均codex/gpt-6.1-sol，实际Host路线仍需运行时验证；后代路线为事后核验，不能承诺事前限制所有自发后代。
+- 本批整批本地复核：检查CLI两个入口、package声明、sync安装成功/已是最新两条接线、独立副本helper完整预检/身份复核/原子替换及全部新测试；无未处理代码阻断。不创建不存在的SSF执行receipt。
+- 用户随后实际运行round-803bde31-fb81-467b-8899-e305080eab38，在首题prompt前停止：projection记录标题被截断、pending codex/gpt-6.1-sol实际effort为high；titleInput为空/tokenUsage为0。旧轮次unhealthy与请求现场保留，不重发、不篡改冻结route。物理JSONL为多帧，单帧解压只看到header，未将其冒称完整日志。
+- 将生产离线runtime标题上限从宽松300改为72字节，先复现readback mismatch；修复固定标题为item加session尾段，保持非题面/user-pinned，全部身份仍由私有账本绑定。effort比较保持严格，后续需显式传入codex/gpt-6.1-sol@high；先前建议未带effort不完整。真实runtime夹具补齐listModels/resolveModel一致的high默认元数据，冻结被测和裁判均high，六条件闭环通过。
+- 提交前最终 `npm test && npm run typecheck`（Memex）再次118文件/787测试通过；标题修复尚未部署进当前Host内存，没有重启或重跑live轮次。
+- 用户要求先本地提交再拉远端main；本批纳入本地修复提交，随后使用rebase同步，不推送、不归档；先前完整门槛FAIL继续保留。受管安装仍有既有peer/deprecation和非受管bundle告警，构建退出0，不声称已消除这些环境问题。
+
+### 初次离线交付时的 Remaining Acceptance（历史记录；部署状态以上述复验为准）
 
 1. 未运行 `dsh build` 或 sync 至日常部署；需用户授权后两次受管build，第二次明确no-op。
 2. 未重启日常 Host/未起替代服务器/未操作3080。是否重启由用户决定。

@@ -127,8 +127,7 @@ it('validates frozen protocols even before raw responses exist and rejects damag
   writeFileSync(join(damaged.root, damaged.plan.id, 'input.json'), '{}\n')
   expect(() => buildOfflineReport(damaged.root, damaged.plan.id)).toThrow(/hash mismatch/)
 })
-it('rejects hash-valid frozen protocols with unbound route, criteria, evidence, schema or write sources', async () => {
-  for (const change of [
+it.each([
     (p: any) => { p[0].provider = 'foreign' },
     (p: any) => { p[0].effort = 'other' },
     (p: any) => { p[0].path = '/free' },
@@ -142,7 +141,7 @@ it('rejects hash-valid frozen protocols with unbound route, criteria, evidence, 
     (p: any) => { p[0].prompt = JSON.stringify({ ...JSON.parse(p[0].prompt), evidence: [{ id: 'root:answer', text: 'different evidence' }] }) },
     (p: any) => { const prompt = JSON.parse(p[0].prompt); prompt.writeback.sources = ['foreign:write']; p[0].prompt = JSON.stringify(prompt) },
     (p: any) => { const prompt = JSON.parse(p[0].prompt); delete prompt.writeback; p[0].prompt = JSON.stringify(prompt) },
-  ]) {
+])('rejects hash-valid unbound frozen protocol case %#', async change => {
     const f = await scored(true), protocols = structuredClone(readFrozenInput(join(f.directory, 'judge-protocols'))) as any
     change(protocols)
     const other = root(); freezeInput(join(other, f.plan.id), readFrozenInput(join(f.root, f.plan.id)))
@@ -153,5 +152,4 @@ it('rejects hash-valid frozen protocols with unbound route, criteria, evidence, 
     // Copy the actual frozen raw responses, not summarized outcomes.
     for (const index of [0, 1]) copyFileSync(join(f.directory, 'judge-protocols', `${index}-raw.json`), join(directory, 'judge-protocols', `${index}-raw.json`))
     expect(() => loadOfflineOutcomes(other, f.plan.id)).toThrow(/Frozen judge protocol mismatch/)
-  }
 })

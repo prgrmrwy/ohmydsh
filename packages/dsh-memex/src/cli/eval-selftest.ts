@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { createInterface } from 'node:readline/promises'
 import { authenticatedEvalClient } from '../eval/host-client.js'
@@ -129,7 +129,7 @@ async function launchCredential(signal: AbortSignal): Promise<string> {
     if (signal.aborted) interrupted()
   })
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   let client: Awaited<ReturnType<typeof authenticatedEvalClient>> | undefined
   const abort = new AbortController()
   const interrupt = () => abort.abort()

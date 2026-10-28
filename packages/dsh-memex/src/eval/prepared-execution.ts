@@ -11,6 +11,6 @@ export async function executePreparedItem(round: FixedRound, itemId: string, ses
   const reserved = ledger.read().find(entry => entry.kind === 'reserved' && entry.id === sessionId)
   if (!item || !reserved || reserved.round !== round.id || reserved.question !== item.question || reserved.condition !== item.condition || attempt.condition !== item.condition) throw new Error('Execution reservation does not match frozen item')
   verifyAttemptRoute(resolver, attempt)
-  await executeFixedItem(port, { sessionId, title: `Memex selftest ${round.id}/${item.id}/${sessionId}`, route: round.tested, prompt: item.prompt,
+  await executeFixedItem(port, { sessionId, title: `Memex selftest ${item.id}/${sessionId.slice(-12)}`, route: round.tested, prompt: item.prompt,
     ...(item.followUp === undefined ? {} : { followUp: item.followUp }) })
 }

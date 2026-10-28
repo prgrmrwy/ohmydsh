@@ -94,7 +94,7 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
       resolve: () => { throw new Error('File uploads outside offline fixture') },
       retirePrompt() {},
     } as never)
-    await install(titles, { fallbackMaxWords: 8, fallbackMaxBytes: 80, maxTitleBytes: 300 })
+    await install(titles, { fallbackMaxWords: 8, fallbackMaxBytes: 64, maxTitleBytes: 72 })
     const titleFiber = ctx.plugin(titleProvider, { provider: 'offline', model: 'title', targetWords: 4, targetCjkCharacters: 8, maxInputBytes: 4000, maxOutputTokens: 100, timeoutMs: 1000 })
     await titleFiber
     await install(controller, { nativeOpen: false })
@@ -113,8 +113,8 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     const rootAgentsForBudget: any[] = []
     const answer = 'Current config.json: retryLimit is 4; leaseSeconds is 45; 20 seconds is below 45 seconds; the previous 15-second statement is stale.'
     class LocalFixedModel extends llm.LlmAdapter {
-      async listModels(provider: string) { return ['tested', 'judge', 'title'].map(id => ({ provider, id, name: id })) }
-      async resolveModel(provider: string, model: string) { return { provider, id: model, name: model } }
+      async listModels(provider: string) { return ['tested', 'judge', 'title'].map(id => ({ provider, id, name: id, ...(id === 'title' ? {} : { reasoning: { efforts: [{ id: 'high', name: 'High' }], defaultEffort: 'high' } }) })) }
+      async resolveModel(provider: string, model: string) { return (await this.listModels(provider)).find(value => value.id === model)! }
       async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
         calls.push(options)
         expect(options.provider).toBe('offline')
@@ -176,7 +176,7 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     ] } })
     const dispatch = createHostEvalDispatch(ctx, root, { home, scopes, generation: 'offline-host-1', timeoutMs: 5000 })
     const signal = new AbortController().signal
-    const plan = await dispatch('eval/registerRound', { version: 'selftest-v1', tested: { provider: 'offline', model: 'tested' }, judge: { provider: 'offline', model: 'judge' }, maxJudgeCalls: 12 }, signal) as FixedRound
+    const plan = await dispatch('eval/registerRound', { version: 'selftest-v1', tested: { provider: 'offline', model: 'tested', effort: 'high' }, judge: { provider: 'offline', model: 'judge', effort: 'high' }, maxJudgeCalls: 12 }, signal) as FixedRound
     expect(plan.items).toHaveLength(6)
     const result = await dispatch('eval/runRound', { round: plan.id, requestId: 'complete-offline-round' }, signal)
     expect((result as { evidenceComplete: boolean }).evidenceComplete).toBe(true)
@@ -284,7 +284,7 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     // same-Host resume must keep the completed pair result and old attempt, and
     // create one new ordinary session instead of replaying any judge submission.
     await dispatch('eval/confirmDefaultReview', { round: plan.id, confirmation: 'I REVIEWED THE DEFAULT MODEL' }, signal)
-    const resumePlan = await dispatch('eval/registerRound', { version: 'selftest-v1', tested: { provider: 'offline', model: 'tested' }, judge: { provider: 'offline', model: 'judge' }, maxJudgeCalls: 12 }, signal) as FixedRound
+    const resumePlan = await dispatch('eval/registerRound', { version: 'selftest-v1', tested: { provider: 'offline', model: 'tested', effort: 'high' }, judge: { provider: 'offline', model: 'judge', effort: 'high' }, maxJudgeCalls: 12 }, signal) as FixedRound
     const realFlush = ctx.sessions.flush.bind(ctx.sessions)
     let checkpoints = 0
     const checkpoint = vi.spyOn(ctx.sessions, 'flush').mockImplementation(async session => {

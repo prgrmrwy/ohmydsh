@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile, stat, realpath } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import os from 'node:os'
@@ -20,8 +20,8 @@ const SYNC_SCRIPT = path.join(REPO, 'scripts', 'sync.mjs')
  *   - `.sync-corrupt`                 -> add succeeds but writes a tampered
  *                                       lib/index.js (re-verify mismatch)
  */
-async function fixture({ build = true } = {}) {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh-refresh-'))
+async function fixture({ build = true, independent = false } = {}) {
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'ohmydsh-refresh-'))
   const repo = path.join(root, 'repo')
   const dshHome = path.join(root, 'dsh-home')
   const profile = path.join(dshHome, 'profiles', 'web')
@@ -39,6 +39,7 @@ async function fixture({ build = true } = {}) {
   await writeFile(path.join(repo, 'scripts', 'lib', 'env-local.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'env-local.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'profile-lock.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'profile-lock.mjs')))
   await writeFile(path.join(repo, 'scripts', 'lib', 'legacy-settings.mjs'), await readFile(path.join(REPO, 'scripts', 'lib', 'legacy-settings.mjs')))
+  if (independent) await writeFile(path.join(repo, 'scripts/lib/independent-package-files.mjs'), await readFile(path.join(REPO, 'scripts/lib/independent-package-files.mjs')))
   await symlink(path.join(REPO, 'node_modules'), path.join(repo, 'node_modules'), 'dir')
   await writeFile(path.join(repo, 'package.json'), JSON.stringify({
     name: 'fixture-root', private: true, type: 'module', workspaces: ['packages/*'],
@@ -48,6 +49,7 @@ async function fixture({ build = true } = {}) {
     version: '1.0.0',
     type: 'module',
     files: ['lib', 'cordis.patch.yml'],
+    ...(independent ? { ohmydsh: { independentFiles: ['lib'] } } : {}),
     scripts: build ? { build: 'node build.mjs' } : {},
     dsh: { bundle: { patch: './cordis.patch.yml' } },
   }))
@@ -96,7 +98,7 @@ if [[ "$action" == add && "$value" == file:* ]]; then
   (cd "$src" && find . -type f ! -name '.sync-fail' ! -name '.sync-corrupt' | while read -r f; do
     if [[ ! -e "$profile/node_modules/$name/$f" ]]; then
       mkdir -p "$profile/node_modules/$name/$(dirname "$f")"
-      cp "$f" "$profile/node_modules/$name/$f"
+      ${independent ? 'ln' : 'cp'} "$f" "$profile/node_modules/$name/$f"
     fi
   done)
   if [[ -e "$src/.sync-corrupt" ]]; then
@@ -129,6 +131,23 @@ function setValue(source, text) {
 }
 
 const deployedIndex = (profile) => path.join(profile, 'node_modules', 'dsh-local-demo', 'lib', 'index.js')
+
+test('declared independent files survive hardlink install and second sync is a no-op', async () => {
+  const fx = await fixture({ build: false, independent: true })
+  const first = fx.run()
+  assert.equal(first.status, 0, first.stderr + first.stdout)
+  assert.match(first.stdout, /materialize independent resources/)
+  const deployed = deployedIndex(fx.profile)
+  const source = path.join(fx.source, 'lib/index.js')
+  assert.equal((await stat(source)).nlink, 1)
+  assert.equal((await stat(deployed)).nlink, 1)
+  assert.notEqual((await stat(source)).ino, (await stat(deployed)).ino)
+  const after = await stat(deployed)
+  const second = fx.run()
+  assert.equal(second.status, 0, second.stderr + second.stdout)
+  assert.doesNotMatch(second.stdout, /materialize independent resources/)
+  assert.equal((await stat(deployed)).mtimeMs, after.mtimeMs)
+})
 
 test('content drift with stale deployed subtree forces atomic refresh (pnpm merge semantics)', async () => {
   const fx = await fixture()

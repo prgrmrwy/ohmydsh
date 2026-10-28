@@ -1625,6 +1625,14 @@ async function syncPackages(manifest, items, names) {
         fail(`${name} installed but is missing ${missingAfterInstall.join(', ')}; its source does not satisfy its own manifest`)
       }
     }
+    if (installed && item.source === 'local') {
+      const resources = readJson(path.join(localDir, 'package.json'))?.ohmydsh?.independentFiles
+      if (resources !== undefined) {
+        const { materializeIndependentPackageFiles } = await import('./lib/independent-package-files.mjs')
+        const copied = await materializeIndependentPackageFiles(localDir, path.join(PROFILE_DIR, 'node_modules', ...name.split('/')), resources)
+        if (copied.length) change(`materialize independent resources for ${name}: ${copied.length} files`)
+      }
+    }
     if (installed && localHash !== undefined && buildInputHash !== undefined) {
       nextLocalHashes[name] = localHash
       nextBuildInputs[name] = buildInputHash

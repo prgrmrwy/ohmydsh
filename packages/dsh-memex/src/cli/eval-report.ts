@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 export interface EvalReportOutput { out(text: string): void; error(text: string): void }
 import { resolve } from 'node:path'
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { buildOfflineReport } from '../eval/offline-report.js'
 const usage = '离线固定虚构自检报告：--root <私有自检目录> --round <round-uuid>。只读，不连接 Host、不启动模型；不支持自由 suite。'
@@ -20,6 +21,6 @@ export function runEvalReportCli(args: readonly string[], output: EvalReportOutp
     return report.exitCode
   } catch (error) { output.error(`无法生成离线自检报告：${error instanceof Error ? error.message : String(error)}\n`); return 2 }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   process.exitCode = runEvalReportCli(process.argv.slice(2), { out: text => process.stdout.write(text), error: text => process.stderr.write(text) })
 }

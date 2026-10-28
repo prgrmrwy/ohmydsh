@@ -39,7 +39,7 @@ it('rechecks MANUAL and model before a natural follow-up after the initial turn'
 })
 
 it('refuses incorrect title pin, mode or model readback before sending a question', async () => {
-  for (const mismatch of [{ userPinned: false }, { mode: 'AUTO' }, { route: { provider: 'p', model: 'wrong' } }]) {
+  for (const mismatch of [{ userPinned: false }, { mode: 'AUTO' }, { route: { provider: 'p', model: 'wrong' } }, { route: { ...input.route, effort: 'high' } }]) {
     const h = harness()
     const inspect = h.port.inspect
     h.port.inspect = async id => ({ ...await inspect(id), ...mismatch })
