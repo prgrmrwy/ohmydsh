@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -38,3 +38,27 @@ jobs:
           else
             npm publish --access public
           fi
+      - name: Create GitHub Release with the published npm artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          # Download the registry artifact so GitHub and npm distribute identical bytes.
+          assets="$(mktemp -d)"
+          npm pack "$name@$version" --ignore-scripts --pack-destination "$assets" --silent
+          node --input-type=module - "$version" "$assets/notes.md" <<'NODE'
+          import fs from 'node:fs'
+          const [version, output] = process.argv.slice(2)
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8')
+          const section = changelog.split(`## ${version}\n`)[1]?.split('\n## ')[0]?.trim()
+          if (!section) throw new Error(`No changelog entry for ${version}`)
+          fs.writeFileSync(output, section + '\n')
+          NODE
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$version" --notes-file "$assets/notes.md"
+          fi
+          gh release upload "$tag" "$assets/$name-$version.tgz" \
+            --repo "$GITHUB_REPOSITORY" --clobber
