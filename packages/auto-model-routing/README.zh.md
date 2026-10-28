@@ -2,9 +2,12 @@
 
 [English](README.md) · 简体中文
 
-![AUTO 交互：切换 AUTO/MANUAL 并查看决策](docs/auto-routing.gif)
+<p align="center">
+  <img src="docs/auto-routing.gif" alt="AUTO：切换模式、应用推理投入并查看决策分布" width="49%">
+  <img src="docs/settings.gif" alt="设置：决策服务、连接测试、默认值与策略说明" width="49%">
+</p>
 
-*此交互录屏来自早期四档界面（隔离 mock 宿主）；当前策略按下文独立判断能力与投入。*
+*左：AUTO 交互与已应用的决策；右：当前设置页与策略说明。录制来自隔离 DSH 宿主，使用本地模拟 Jev/模型响应与合成任务。*
 
 [插件仓库](https://github.com/prgrmrwy/dsh-auto-model-routing) · [版本发布](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
 
@@ -100,14 +103,6 @@ AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方
 
 入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、transport、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[真实 Magpie 验收](docs/magpie-live-acceptance.md)。
 
-<details>
-<summary>早期四档界面演示（已于 0.5.0 删除）</summary>
-
-下列隔离宿主录屏使用模拟 Jev/模型响应，展示的界面已不存在。
-
-![早期四档路由设置](docs/settings.gif)
-
-</details>
 ## 开发验证
 
 ```sh

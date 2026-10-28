@@ -2,9 +2,12 @@
 
 English · [简体中文](README.zh.md)
 
-![AUTO interaction: toggle AUTO/MANUAL and inspect the decision](docs/auto-routing.gif)
+<p align="center">
+  <img src="docs/auto-routing.gif" alt="AUTO: switch modes, apply effort and inspect the decision distribution" width="49%">
+  <img src="docs/settings.gif" alt="Settings: decision service, connection test, defaults and strategy details" width="49%">
+</p>
 
-*Interaction recording from the earlier four-tier UI (isolated mock Host); current decisions use independent capability and depth as described below.*
+*Left: AUTO interaction and applied decision. Right: current settings and strategy details. Recorded from an isolated DSH host with local mock Jev/model responses and synthetic tasks.*
 
 [Repository](https://github.com/prgrmrwy/dsh-auto-model-routing) · [Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
 
@@ -99,14 +102,6 @@ Main failures disable AUTO; child failures stop dispatch. Explicit model/effort 
 
 Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, transports, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
 
-<details>
-<summary>Earlier four-tier UI demos (removed in 0.5.0)</summary>
-
-These isolated-host recordings use mock Jev/model responses and show a UI that no longer exists.
-
-![Earlier four-tier routing settings](docs/settings.gif)
-
-</details>
 ## Development
 
 ```sh

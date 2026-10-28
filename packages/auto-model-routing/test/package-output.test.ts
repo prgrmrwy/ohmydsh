@@ -22,7 +22,9 @@ it('spec Scenario "源码与文案不含版本"', () => {
   if (!modules) throw new Error('cannot locate installed dependencies (typescript) for the package build')
   symlinkSync(modules, join(work, 'node_modules'), 'dir')
   execFileSync('npm', ['run', 'build'], { cwd: work, stdio: 'pipe', env: { ...process.env, npm_config_offline: 'true' } })
-  const [packed] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: work, encoding: 'utf8', env: { ...process.env, npm_config_offline: 'true' } })) as [{ files: { path: string }[] }]
+  const output = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: work, encoding: 'utf8', env: { ...process.env, npm_config_offline: 'true' } })) as { files: { path: string }[] }[] | Record<string, { files: { path: string }[] }>
+  const [packed] = Array.isArray(output) ? output : Object.values(output)
+  if (!packed) throw new Error('npm pack returned no package metadata')
   const paths = packed.files.map(f => f.path)
   for (const gone of ['lib/router.js', 'lib/judgements.js', 'lib/policy-v2.js', 'lib/policy-v2-rubric.json']) expect(paths, gone).not.toContain(gone)
   for (const kept of ['lib/index.js', 'lib/client.js', 'lib/usage-report.js', 'skills/subagent-model-routing/SKILL.md', 'skills/auto-model-routing-report/SKILL.md']) expect(paths, kept).toContain(kept)

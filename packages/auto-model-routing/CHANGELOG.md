@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Replace both retired four-tier GIFs with high-resolution recordings of the current AUTO interaction, applied decision distribution and settings/strategy UI, using isolated mock services and synthetic tasks.
+- Show both demos side by side at the top of the English and Chinese READMEs; remove the obsolete demo disclaimer and folded settings recording. No runtime behavior changes.
+
 ## 0.5.0
 
 - **Breaking — one AUTO strategy.** The opt-in legacy four-tier chain is removed: the tier router and its rubric, the per-family `mainEfforts` / `childRoutes` mappings and their settings tabs, the reply-bar tier menu and `label` parameter, `judgements.jsonl` writes, `scripts/label-report.mjs` and the `eval/run.mjs` baseline. Default AUTO behavior (main effort, child capability routing, exact-child binding, Magpie transports, caps, allowlists, fork refusal) is unchanged.
