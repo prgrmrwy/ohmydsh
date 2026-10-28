@@ -36,7 +36,7 @@
 ### Change Delivery
 
 - Commit range：`fb0e22ff..HEAD`（本地 main，未推送）；用户同意提交。
-- 未纳入提交：用户既有未提交改动 `BACKLOG.md`、`packages/dsh-memex/docs/evaluation-methodology.md` 保持原样。
+- 追加提交：`b14b4999` 记录评估范围边界与 B051（`BACKLOG.md`、`packages/dsh-memex/docs/evaluation-methodology.md`），用户确认提交。工作区干净。
 
 ## Overall Decision
 
