@@ -3,12 +3,12 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-attachment'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
-import { MagpieRuntime, KEY_REF, ACCESS_CLIENT_ID_REF, ACCESS_CLIENT_SECRET_REF } from './host/runtime.js'
+import { MagpieRuntime } from './host/runtime.js'
 import { MagpieAdapter } from './host/adapter.js'
 import { SettingsStore } from './host/settings.js'
 import { registerRoutes } from './host/routes.js'
 import { SpeedController } from './host/speed.js'
-export { MagpieRuntime, KEY_REF, ACCESS_CLIENT_ID_REF, ACCESS_CLIENT_SECRET_REF } from './host/runtime.js'
+export { MagpieRuntime, lineCredentialRefs, lineIdOfCredentialRef } from './host/runtime.js'
 export { MagpieAdapter, mapUsage } from './host/adapter.js'
 export { SettingsStore } from './host/settings.js'
 export { GatewayTransport } from './host/transport.js'
@@ -22,7 +22,7 @@ export function apply(ctx: Context, config: Config = {}) {
   const speed = new SpeedController()
   const adapter = new MagpieAdapter(runtime, ctx.get('attachments'), session => speed.get(session).tier === 'fast')
   registration = ctx.llm.registerAdapter(['dsh-magpie-connector'], adapter)
-  ctx.on('credentials/reference-updated', ref => { if (ref === KEY_REF || ref === ACCESS_CLIENT_ID_REF || ref === ACCESS_CLIENT_SECRET_REF) runtime.invalidateCredential() })
+  ctx.on('credentials/reference-updated', ref => runtime.invalidateCredential(ref))
   ctx.inject(['connection'], child => {
     child.effect(() => registerRoutes(child.connection.fetch, runtime, speed).dispose)
   })

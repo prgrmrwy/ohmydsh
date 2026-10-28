@@ -61,7 +61,7 @@
       "id": "credentials",
       "type": "security",
       "label": "DSH credentials",
-      "sublabel": "MAGPIE_API_KEY · Access tokens",
+      "sublabel": "per-line key · Access (bound to stable id)",
       "pos": [
         180,
         150
@@ -259,14 +259,14 @@
       "title": "Connection methods",
       "items": [
         "Direct: LAN and Tailscale subnet routing use the same gateway address",
-        "Cloudflare Access: each request carries CF-Access-Client-Id/Secret; HTTPS only"
+        "Automatic line selection: ≤600ms TCP probe (10s positive / 15s negative cache); Access headers only on the HTTPS line that enables them"
       ]
     },
     {
       "dot": "rose",
       "title": "Boundaries and data",
       "items": [
-        "The key lives in DSH credentials and is never returned by the settings API",
+        "Each line's key/Access values live in DSH credentials and are never returned by the settings API",
         "A private undici dispatcher talks only to the configured gateway and rejects redirects",
         "No Magpie GUI management API; changing the connection does not abort running generations"
       ]

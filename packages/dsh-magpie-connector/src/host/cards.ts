@@ -40,7 +40,7 @@ export class CardsController {
   private async send(op:Operation,state:State,target?:Target):Promise<Result> {
     const {gen,key}=op
     if (!this.runtime.isCurrent(gen)) return this.stale()
-    if (!gen.baseUrl || !key) return {status:200,body:{status:'unconfigured',cards:[]}}
+    if (!op.baseUrl || !key) return {status:200,body:{status:'unconfigured',cards:[]}}
     const seq=++state.seq
     let path=target ? '/magpie/quotas/refresh' : '/magpie/quotas/cards'
     if (target && !('all' in target)) path+=`?provider=${encodeURIComponent(target.provider)}${target.user===undefined?'':`&user=${encodeURIComponent(target.user)}`}`

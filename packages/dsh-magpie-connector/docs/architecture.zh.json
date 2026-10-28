@@ -61,7 +61,7 @@
       "id": "credentials",
       "type": "security",
       "label": "DSH credentials",
-      "sublabel": "MAGPIE_API_KEY · Access 令牌",
+      "sublabel": "按线路 key · Access（稳定 id 绑定）",
       "pos": [
         180,
         150
@@ -83,7 +83,7 @@
       "id": "settings",
       "type": "database",
       "label": "settings.json",
-      "sublabel": "地址 · 可见性 · 默认 effort",
+      "sublabel": "线路列表 · 可见性 · 默认 effort",
       "pos": [
         470,
         500
@@ -258,15 +258,15 @@
       "dot": "emerald",
       "title": "接入方式",
       "items": [
-        "直连：局域网、Tailscale 子网路由使用同一网关地址",
-        "Cloudflare Access：每个请求附加 CF-Access-Client-Id/Secret，仅 HTTPS"
+        "多线路：首次安装为空、通常 1 条，可加备用线路，序号即优先级",
+        "自动选线：≤600ms TCP 探测（正 10s/负 15s 缓存），Access 仅随启用它的 HTTPS 线路发送"
       ]
     },
     {
       "dot": "rose",
       "title": "边界与数据",
       "items": [
-        "key 存 DSH credentials，设置接口不回显",
+        "每线路 key/Access 存 DSH credentials，设置接口不回显",
         "私有 undici dispatcher 只直连网关，拒绝重定向",
         "不调用 Magpie GUI 管理接口，切换连接不中止在途生成"
       ]

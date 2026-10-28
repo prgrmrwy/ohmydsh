@@ -4,6 +4,7 @@ import { CardsController } from '../src/host/cards.js'
 import { SettingsStore } from '../src/host/settings.js'
 import { credentialsMock } from './support/credentials.js'
 import { createGateway, json } from './support/gateway.js'
+import { line } from './support/line.js'
 
 for (const endpoint of ['catalog', 'cards'] as const) {
   for (const format of ['json', 'text'] as const) {
@@ -13,7 +14,7 @@ for (const endpoint of ['catalog', 'cards'] as const) {
         const oldKey = 'old-"quoted\\key'
         const gateway = await createGateway()
         const credentials = credentialsMock(retainOldKey ? oldKey : key)
-        const store = new SettingsStore(); store.value.baseUrl = gateway.baseUrl
+        const store = new SettingsStore(); store.value.lines = [line(gateway.baseUrl)]
         const runtime = new MagpieRuntime(credentials.service, store)
         let oldOperation: Awaited<ReturnType<typeof runtime.beginOperation>> | undefined
         gateway.handlers.set('GET /v1/models', json({ data: [{ id: 'example' }] }))

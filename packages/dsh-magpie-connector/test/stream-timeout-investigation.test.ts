@@ -8,6 +8,7 @@ import { SettingsStore } from '../src/host/settings.js'
 import { credentialsMock } from './support/credentials.js'
 import { createGateway, deferred, json } from './support/gateway.js'
 import { models, responseText } from './support/wire.js'
+import { line } from './support/line.js'
 
 // Contract: any data from the gateway re-arms one 300s idle watchdog; DSH llm-retry owns retries.
 // Synthetic wire fixtures exercise real pi-ai, not live SOL latency or private history.
@@ -44,7 +45,7 @@ const finish = (chunks: StreamChunk[]) => chunks.findLast(c => c.type === 'finis
 
 async function fixture(headersDelay = 0) {
   const store = new SettingsStore()
-  store.value.baseUrl = 'http://127.0.0.1:1/v1'
+  store.value.lines = [line('http://127.0.0.1:1/v1')]
   const runtime = new MagpieRuntime(credentialsMock('synthetic-key').service, store)
   cleanup.push(() => runtime.dispose())
   vi.spyOn(runtime.transport, 'request').mockResolvedValue(Response.json(models))
@@ -211,7 +212,7 @@ for (const success of [true, false]) test(`loopback real HTTP: empty start ${suc
   cleanup.push(g.close)
   g.handlers.set('GET /v1/models', json(models))
   const store = new SettingsStore()
-  store.value.baseUrl = g.baseUrl
+  store.value.lines = [line(g.baseUrl)]
   const runtime = new MagpieRuntime(credentialsMock('synthetic-key').service, store)
   cleanup.push(() => runtime.dispose())
   await runtime.start()

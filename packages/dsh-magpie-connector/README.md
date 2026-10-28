@@ -4,10 +4,9 @@ English · [简体中文](README.zh.md)
 
 <p align="center">
   <img src="docs/model-picker.gif" alt="Model picker grouped by upstream provider, with the GPT-only standard/fast control" width="49%">
-  <img src="docs/settings.gif" alt="Settings: connection, Cloudflare Access, provider groups and usage cards" width="49%">
 </p>
 
-*Left: model picker. Right: Settings → Magpie. Recorded from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
+*Model picker recorded from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic. A fresh settings screenshot is pending re-recording.*
 
 [Repository](https://github.com/prgrmrwy/dsh-magpie-connector) · [Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
 
@@ -18,9 +17,10 @@ English · [简体中文](README.zh.md)
 
 | Capability | What it does |
 |---|---|
-| **Gateway direct connection** (basic) | One gateway URL and one key. The model catalog comes from the gateway's `GET /models`; Responses-capable models use Responses, everything else uses Chat Completions. Text, tool round trips, images, usage, cancellation and DSH-managed retries go through. |
+| **Gateway lines** (basic) | Each line has its own URL and gateway key. The model catalog comes from the gateway's `GET /models`; Responses-capable models use Responses, everything else uses Chat Completions. Text, tool round trips, images, usage, cancellation and DSH-managed retries go through. |
+| **Automatic multi-line failover** (signature) | Empty on first install; normally one line; add backup lines and let the order decide priority. Before every gateway operation the plugin picks the first reachable complete line with a ≤600ms TCP probe (10s positive / 15s negative in-memory cache, no background polling), so home uses the LAN while outside falls back to the public endpoint. Switching lines carries the catalog over (no flash), clears usage cards and re-syncs the new line; single-line users keep 0.1.x behavior. |
 | **Grouped by upstream provider** (signature) | The model picker shows `Magpie (Claude)`, `Magpie (GPT)` and `Magpie (<other owner>)` headings while the real route stays one `dsh-magpie-connector`. Settings and usage cards use the same grouping, and a provider that only appears in usage is never dropped. |
-| **Cloudflare Access remote connection** | For a gateway behind Cloudflare Tunnel + Access, save the service token's Client ID and Secret. Every gateway request then also carries `CF-Access-Client-Id` / `CF-Access-Client-Secret`; HTTPS only. |
+| **Per-line Cloudflare Access** | Each line independently chooses Direct or Cloudflare Access. Access-enabled line requests carry the service token pair plus the bearer key; the token is never sent to a plain-HTTP line. |
 | **Read-only usage cards** | Each upstream account shows plan, expiry, window readings and Codex reset credits when the gateway provides them. Cards are read once when settings open and only re-read when you press **Refresh** on that card; bars turn orange above 70% and red at 90%. |
 | **Model visibility and default effort** | Per provider, leave visibility untouched to follow the gateway catalog, or save an explicit allowlist so new models stay hidden. Per model, save a default reasoning effort; DSH applies it on the next request. |
 | **Per-session fast mode** | Models advertising the `priority` service tier get a standard/fast switch next to the composer. The choice is per session and in host memory only; it adds `service_tier: "priority"` to requests. |
@@ -39,14 +39,12 @@ The model picker headings need the managed five-package Host extension that ohmy
 
 Open **Settings → Magpie**.
 
-1. Enter the gateway API URL **including `/v1`**, for example `http://192.168.1.20:3425/v1`.
-2. Enter the gateway key. It is stored through DSH credentials as `MAGPIE_API_KEY`; a key supplied by the launch environment is read-only here. Address, visibility and default efforts live at `$DSH_HOME/plugins/dsh-magpie-connector/settings.json` — the key is never written there or returned by the settings API.
-3. Save. Saving the connection synchronizes the catalog; **Refresh model list** synchronizes again, and there is no catalog polling.
+1. In **line 1**, enter the gateway API URL **including `/v1`**, for example `http://192.168.1.20:3425/v1`, and that line's gateway key. The line list, addresses, visibility and default efforts live at `$DSH_HOME/plugins/dsh-magpie-connector/settings.json` — keys and Access values are never written there or returned by the settings API.
+2. For multiple ingresses press **Add backup line**; each line has its own address and key. Use the move-up/move-down buttons to change priority (number 1 wins). Saving keeps only the active line expanded; the 4×4 green marker after its number shows the current line, and the info icon explains priority and automatic fallback.
+3. Inside each line's **Advanced connection** choose Direct or Cloudflare Access. LAN and Tailscale are Direct; Cloudflare Access requires an HTTPS line and switching back to Direct clears that line's two Access credentials on save. Cloudflare Free/Pro returns 524 when the origin sends nothing for 100 seconds.
+4. Saving synchronizes the catalog; **Refresh model list** synchronizes again, and there is no catalog polling.
 
-**Advanced connection** (expanded by default) chooses how the gateway is reached:
-
-- **Direct** (default) — the gateway URL is reachable as-is. LAN and Tailscale both count: after joining the tailnet use `http://<host>.<tailnet>.ts.net:3425/v1` or the subnet-routed address; nothing else is configured in the plugin.
-- **Cloudflare Access** — for Cloudflare Tunnel + Access when the client cannot run a VPN. Enter the Access service token pair; every request carries both headers plus the bearer key. Saving after switching back to Direct clears the saved Access credentials. Cloudflare Free/Pro returns 524 when the origin sends nothing for 100 seconds.
+> **0.2.0 BREAKING upgrade**: settings are now a single `lines[]` format. A legacy single-address `settings.json` (top-level `baseUrl`) and the legacy fixed credential refs (`MAGPIE_API_KEY` / `MAGPIE_ACCESS_*`) are **not read or migrated**; re-add your lines and enter each line's key/Access in Settings. Model visibility and default efforts are preserved; old credential records can be deleted manually in DSH credentials. Back up `settings.json` and the old refs first if you want to keep a rollback path.
 
 Need another method — custom headers, mTLS, another zero-trust gateway? **Issues and pull requests are welcome**; describe your deployment and the gateway version.
 
@@ -94,7 +92,7 @@ Tests use local mock gateways and the real wire library; no real key is required
 dsh plugin --profile web remove dsh-magpie-connector
 ```
 
-Restart DSH and refresh the page. Disposal releases registrations, timers and connections; it does not remove credentials or settings. To erase data, delete the `MAGPIE_API_KEY` credential through DSH credentials management and remove the plugin settings file after locating it from the installed plugin's data directory. Do not remove the credential if another integration still uses it.
+Restart DSH and refresh the page. Disposal releases registrations, timers and connections; it does not remove credentials or settings. To erase data, delete each line's `MAGPIE_LINE_<ID>_*` refs (plus any pre-0.2.0 `MAGPIE_API_KEY` / `MAGPIE_ACCESS_*` leftovers) through DSH credentials management and remove the plugin settings file after locating it from the installed plugin's data directory. Do not remove a credential if another integration still uses it.
 
 Inside [ohmydsh](https://github.com/prgrmrwy/ohmydsh), set the manifest entry to `enabled: false` and rebuild instead.
 

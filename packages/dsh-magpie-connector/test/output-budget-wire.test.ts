@@ -6,6 +6,7 @@ import { SettingsStore } from '../src/host/settings.js'
 import { createGateway, json, sse } from './support/gateway.js'
 import { credentialsMock } from './support/credentials.js'
 import { chatText, responseText } from './support/wire.js'
+import { line } from './support/line.js'
 
 // Record the model pi-ai receives; everything else runs the real implementation.
 const seenModels = vi.hoisted(() => [] as { id: string; maxTokens: number }[])
@@ -28,7 +29,7 @@ const catalog = { data: [
 ] }
 const protocols = [{ model: 'codex/gpt-6.1-sol', path: '/responses', text: responseText, field: 'max_output_tokens' }, { model: 'deepseek/deepseek-flash', path: '/chat/completions', text: chatText, field: 'max_completion_tokens' }]
 async function setup() {
-  const g = await createGateway(); const c = credentialsMock('mk-test-123'); const store = new SettingsStore(); store.value.baseUrl = g.baseUrl
+  const g = await createGateway(); const c = credentialsMock('mk-test-123'); const store = new SettingsStore(); store.value.lines = [line(g.baseUrl)]
   const r = new MagpieRuntime(c.service, store); g.handlers.set('GET /v1/models', json(catalog)); await r.start(); g.requests.length = 0
   cleanup.push(g.close, () => r.dispose())
   g.handlers.set('POST /v1/responses', sse(responseText())); g.handlers.set('POST /v1/chat/completions', sse(chatText()))

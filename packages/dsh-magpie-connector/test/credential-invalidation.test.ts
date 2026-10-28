@@ -3,6 +3,7 @@ import { MagpieRuntime } from '../src/host/runtime.js'
 import { SettingsStore } from '../src/host/settings.js'
 import { credentialsMock } from './support/credentials.js'
 import { createGateway, deferred, json } from './support/gateway.js'
+import { LINE_ID, line } from './support/line.js'
 
 test('own credential event invalidates old state before the credential write promise settles', async () => {
   const gateway = await createGateway()
@@ -11,13 +12,13 @@ test('own credential event invalidates old state before the credential write pro
   const committed = deferred(), release = deferred()
   const originalSet = credentials.service.set
   credentials.service.set = async (...args) => { await originalSet(...args); committed.resolve(); await release.promise }
-  const store = new SettingsStore(); store.value.baseUrl = gateway.baseUrl
+  const store = new SettingsStore(); store.value.lines = [line(gateway.baseUrl)]
   const runtime = new MagpieRuntime(credentials.service, store)
   credentials.onChange(() => runtime.invalidateCredential())
   await runtime.start()
   const previous = runtime.current
   previous.magpieCards = { cards: [{ provider: 'old' }] }
-  const write = runtime.settings({ key: 'new-key' })
+  const write = runtime.settings({ lines: [{ id: LINE_ID, baseUrl: gateway.baseUrl, accessMode: 'direct', key: 'new-key' }] })
   try {
     await committed.promise
     expect(runtime.current).not.toBe(previous)

@@ -4,11 +4,12 @@ import { SettingsStore } from '../src/host/settings.js'
 import { SettingsController } from '../src/host/routes.js'
 import { credentialsMock } from './support/credentials.js'
 import { createGateway, deferred, json } from './support/gateway.js'
+import { line } from './support/line.js'
 
 test('combined resync and effort updates do not overwrite a concurrent effort for another model', async () => {
   const gateway = await createGateway()
   const store = new SettingsStore()
-  store.value.baseUrl = gateway.baseUrl
+  store.value.lines = [line(gateway.baseUrl)]
   const models = { data: [{ id: 'a', reasoning_levels: ['high'] }, { id: 'b', reasoning_levels: ['high'] }] }
   gateway.handlers.set('GET /v1/models', json(models))
   const runtime = new MagpieRuntime(credentialsMock('test-key').service, store)

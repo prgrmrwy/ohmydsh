@@ -15,8 +15,16 @@ export interface CardsView { status: CardsStatus; error?: string; cards: Card[] 
 export interface ModelRow { id: string; name?: string; efforts?: string[]; visible?: boolean }
 export interface ModelGroup { provider: string; models: ModelRow[] }
 export type SyncErrorKind = 'unauthorized' | 'forbidden' | 'http' | 'unreachable'
+export interface LineView {
+  id?: string; baseUrl?: string; accessMode?: 'direct' | 'cloudflare'; complete?: boolean
+  key?: { configured?: boolean; writable?: boolean }
+  access?: { clientId?: { configured?: boolean; writable?: boolean }; clientSecret?: { configured?: boolean; writable?: boolean } }
+  refs?: { key?: string; accessClientId?: string; accessClientSecret?: string }
+}
 export interface SettingsView {
-  baseUrl?: string | null; key?: { configured?: boolean; writable?: boolean }
+  lines?: LineView[]; activeLineId?: string | null
+  pending?: { lineId?: string; field?: string }[]
+  retainedCredentials?: { lineId?: string; field?: string }[]
   access?: { clientId?: { configured?: boolean; writable?: boolean }; clientSecret?: { configured?: boolean; writable?: boolean } }
   lastSyncAt?: string; lastSyncError?: string; lastSyncErrorKind?: SyncErrorKind
   groups?: ModelGroup[]; visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>

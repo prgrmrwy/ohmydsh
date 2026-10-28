@@ -493,8 +493,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="535" y="371" class="t-muted" font-size="9" text-anchor="middle">LLM adapter + 设置/用量 API</text>
         </g>
 
-        <g id="node-credentials" data-node-id="credentials" data-node-label="DSH credentials" tabindex="0" role="button" aria-label="聚焦DSH credentials，MAGPIE_API_KEY · Access 令牌, 本机 DSH Host" aria-pressed="false" data-node-kind="security" data-node-sublabel="MAGPIE_API_KEY · Access 令牌" data-node-context="本机 DSH Host">
-          <title>DSH credentials · MAGPIE_API_KEY · Access 令牌 · 本机 DSH Host</title>
+        <g id="node-credentials" data-node-id="credentials" data-node-label="DSH credentials" tabindex="0" role="button" aria-label="聚焦DSH credentials，按线路 key · Access, 本机 DSH Host" aria-pressed="false" data-node-kind="security" data-node-sublabel="按线路 key · Access" data-node-context="本机 DSH Host">
+          <title>DSH credentials · 按线路 key · Access · 本机 DSH Host</title>
           <rect x="180" y="150" width="170" height="66" rx="6" class="c-mask"/>
           <rect x="180" y="150" width="170" height="66" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(186 156) scale(0.6875)">
@@ -502,11 +502,11 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="265" y="181" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DSH credentials</text>
-        <text x="265" y="197" class="t-muted" font-size="9" text-anchor="middle">MAGPIE_API_KEY · Access 令牌</text>
+        <text x="265" y="197" class="t-muted" font-size="9" text-anchor="middle">按线路 key · Access</text>
         </g>
 
-        <g id="node-settings" data-node-id="settings" data-node-label="settings.json" tabindex="0" role="button" aria-label="聚焦settings.json，地址 · 可见性 · 默认 effort, 本机 DSH Host" aria-pressed="false" data-node-kind="database" data-node-sublabel="地址 · 可见性 · 默认 effort" data-node-context="本机 DSH Host">
-          <title>settings.json · 地址 · 可见性 · 默认 effort · 本机 DSH Host</title>
+        <g id="node-settings" data-node-id="settings" data-node-label="settings.json" tabindex="0" role="button" aria-label="聚焦settings.json，线路列表 · 可见性 · 默认 effort, 本机 DSH Host" aria-pressed="false" data-node-kind="database" data-node-sublabel="线路列表 · 可见性 · 默认 effort" data-node-context="本机 DSH Host">
+          <title>settings.json · 线路列表 · 可见性 · 默认 effort · 本机 DSH Host</title>
           <rect x="470" y="500" width="170" height="66" rx="6" class="c-mask"/>
           <rect x="470" y="500" width="170" height="66" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(476 506) scale(0.6875)">
@@ -514,7 +514,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="555" y="531" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">settings.json</text>
-        <text x="555" y="547" class="t-muted" font-size="9" text-anchor="middle">地址 · 可见性 · 默认 effort</text>
+        <text x="555" y="547" class="t-muted" font-size="9" text-anchor="middle">线路列表 · 可见性 · 默认 effort</text>
         </g>
 
         <g id="node-cloudflare" data-node-id="cloudflare" data-node-label="Cloudflare Access" tabindex="0" role="button" aria-label="聚焦Cloudflare Access，可选 · 服务令牌, 架构组件" aria-pressed="false" data-node-kind="security" data-node-sublabel="可选 · 服务令牌" data-node-context="架构组件">

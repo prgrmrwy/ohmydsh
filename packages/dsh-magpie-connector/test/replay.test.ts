@@ -7,6 +7,7 @@ import { SettingsStore } from '../src/host/settings.js'
 import { createGateway, json, sse } from './support/gateway.js'
 import { credentialsMock } from './support/credentials.js'
 import { models, chatText, responseText, chatTool, responseTool } from './support/wire.js'
+import { line } from './support/line.js'
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
@@ -17,7 +18,7 @@ const protocols = [
 async function setup() {
   const gateway = await createGateway()
   const store = new SettingsStore()
-  store.value.baseUrl = gateway.baseUrl
+  store.value.lines = [line(gateway.baseUrl)]
   const runtime = new MagpieRuntime(credentialsMock('mock-replay-key').service, store)
   gateway.handlers.set('GET /v1/models', json(models))
   await runtime.start()

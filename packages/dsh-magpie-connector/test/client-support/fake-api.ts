@@ -25,8 +25,13 @@ export function deferred<T>() {
 export const ok = (body: unknown): ApiResponse => ({ status: 200, body })
 
 export const settingsView = (overrides: Record<string, unknown> = {}) => ({
-  baseUrl: 'http://gateway.test/v1',
-  key: { configured: true, writable: true },
+  lines: [{
+    id: 'a1b2c3d4', baseUrl: 'http://gateway.test/v1', accessMode: 'direct', complete: true,
+    key: { configured: true, writable: true },
+    access: { clientId: { configured: false, writable: true }, clientSecret: { configured: false, writable: true } },
+    refs: { key: 'MAGPIE_LINE_A1B2C3D4_API_KEY', accessClientId: 'MAGPIE_LINE_A1B2C3D4_ACCESS_CLIENT_ID', accessClientSecret: 'MAGPIE_LINE_A1B2C3D4_ACCESS_CLIENT_SECRET' },
+  }],
+  activeLineId: 'a1b2c3d4',
   lastSyncAt: '2026-10-25T10:00:00Z',
   groups: [
     { provider: 'claude', models: [{ id: 'claude/claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['low', 'high'], visible: true }] },

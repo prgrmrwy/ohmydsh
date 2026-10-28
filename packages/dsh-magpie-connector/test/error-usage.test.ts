@@ -5,10 +5,11 @@ import { SettingsStore } from '../src/host/settings.js'
 import { credentialsMock } from './support/credentials.js'
 import { createGateway, json, sse } from './support/gateway.js'
 import { models, responseText, chatText } from './support/wire.js'
+import { line } from './support/line.js'
 
 for (const responses of [true, false]) test(`${responses ? 'Responses' : 'Chat'} content filter preserves known usage before error finish`, async () => {
   const gateway = await createGateway()
-  const store = new SettingsStore(); store.value.baseUrl = gateway.baseUrl
+  const store = new SettingsStore(); store.value.lines = [line(gateway.baseUrl)]
   const runtime = new MagpieRuntime(credentialsMock('test-key').service, store)
   gateway.handlers.set('GET /v1/models', json(models))
   const events = responses ? responseText('hi', undefined, 'incomplete') : chatText('hi', undefined, 'content_filter')

@@ -74,7 +74,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     settingsLock.current = true; setSavingSettings(true)
     const version = ++settingsVersion.current
     const body = typeof change === 'function' ? change(settingsRef.current) : change
-    const identityWrite = ['baseUrl', 'key', 'accessClientId', 'accessClientSecret'].some(field => Object.hasOwn(body, field))
+    const identityWrite = ['lines', 'baseUrl', 'key', 'accessClientId', 'accessClientSecret'].some(field => Object.hasOwn(body, field))
     const epoch = identityWrite ? clearUsage() : cardsEpoch.current
     try {
       const result = await postSettings(api, body)
@@ -190,74 +190,133 @@ async function postSettings(api: Api, body: Record<string, unknown>): Promise<Se
 
 type AccessMode = 'direct' | 'cloudflare'
 const ACCESS_MODES: { id: AccessMode; label: string }[] = [{ id: 'direct', label: '直连' }, { id: 'cloudflare', label: 'Cloudflare Access' }]
+const INFO_TEXT = '线路按序号优先尝试，连不上自动试下一条；绿色方块表示当前线路；多条线路应指向同一个 Magpie 网关。'
+const hostnameOf = (baseUrl: string) => { try { return new URL(baseUrl).hostname || baseUrl } catch { return baseUrl || '未配置' } }
+
+interface LineDraft {
+  draftId: string; id?: string; baseUrl: string; accessMode: AccessMode; savedAccess: boolean
+  keyConfigured: boolean; keyWritable: boolean; apiKey: string
+  accessConfigured: boolean; accessWritable: boolean; accessClientId: string; accessClientSecret: string
+}
+
+function lineDrafts(settings: SettingsView): LineDraft[] {
+  const configured = (access: { clientId?: { configured?: boolean }; clientSecret?: { configured?: boolean } } | undefined) => access?.clientId?.configured === true || access?.clientSecret?.configured === true
+  const source = (settings.lines ?? []).map(line => ({ id: line.id, baseUrl: line.baseUrl ?? '', accessMode: (line.accessMode ?? 'direct') as AccessMode, key: line.key, access: line.access }))
+  return source.map((line, index) => ({
+    draftId: line.id ?? `new-${index}`, ...(line.id ? { id: line.id } : {}), baseUrl: line.baseUrl, accessMode: line.accessMode,
+    savedAccess: line.accessMode === 'cloudflare', keyConfigured: line.key?.configured === true, keyWritable: line.key?.writable !== false, apiKey: '',
+    accessConfigured: configured(line.access), accessWritable: line.access?.clientId?.writable !== false && line.access?.clientSecret?.writable !== false,
+    accessClientId: '', accessClientSecret: '',
+  }))
+}
+const lineSignature = (draft: LineDraft) => JSON.stringify([draft.id ?? null, draft.baseUrl.trim(), draft.accessMode])
 
 function Connection({ settings, saving, mutateSettings, usage }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; usage: ReactNode }) {
-  const [baseUrl, setBaseUrl] = useState(settings.baseUrl ?? '')
-  const [key, setKey] = useState('')
-  const [accessClientId, setAccessClientId] = useState('')
-  const [accessClientSecret, setAccessClientSecret] = useState('')
+  const baseline = lineDrafts(settings)
+  const [drafts, setDrafts] = useState<LineDraft[]>(baseline)
+  const [expanded, setExpanded] = useState<string | null>(settings.activeLineId ?? baseline[0]?.draftId ?? null)
   const [message, setMessage] = useState<{ text: string; failed: boolean }>()
-  const writable = settings.key?.writable !== false
-  const configured = settings.key?.configured === true
-  const savedUrl = settings.baseUrl ?? ''
-  const access = settings.access
-  const accessSaved = access?.clientId?.configured === true || access?.clientSecret?.configured === true
-  const accessLocked = access?.clientId?.writable === false || access?.clientSecret?.writable === false
-  // The mode is not stored: it follows whether Access credentials exist, so switching to 直连 and saving clears them.
-  const [mode, setMode] = useState<AccessMode>(accessSaved ? 'cloudflare' : 'direct')
-  useEffect(() => { setMode(accessSaved ? 'cloudflare' : 'direct') }, [accessSaved])
-  const clearsAccess = mode === 'direct' && accessSaved
+  useEffect(() => { const next = lineDrafts(settings); setDrafts(next); setExpanded(settings.activeLineId ?? next[0]?.draftId ?? null) }, [settings])
+  // Legacy hosts have no line list: keep line 1 marked active. A v2 host that
+  // reports a null/absent active line (nothing complete) must show no marker.
+  const activeId = settings.activeLineId ?? null
+  const update = (draftId: string, patch: Partial<LineDraft>) => setDrafts(current => current.map(draft => draft.draftId === draftId ? { ...draft, ...patch } : draft))
+  const move = (index: number, delta: number) => setDrafts(current => {
+    const target = index + delta; if (target < 0 || target >= current.length) return current
+    const next = [...current]; const swap = next[index]!; next[index] = next[target]!; next[target] = swap; return next
+  })
+  const remove = (draftId: string) => setDrafts(current => current.length <= 1 ? current : current.filter(draft => draft.draftId !== draftId))
+  const add = () => setDrafts(current => {
+    const draft: LineDraft = { draftId: `new-${current.length}-${Date.now()}`, baseUrl: '', accessMode: 'direct', savedAccess: false, keyConfigured: false, keyWritable: true, apiKey: '', accessConfigured: false, accessWritable: true, accessClientId: '', accessClientSecret: '' }
+    setExpanded(draft.draftId); return [...current, draft]
+  })
+  const dirty = drafts.length !== baseline.length || drafts.some((draft, index) => {
+    const before = baseline[index]
+    return !before || lineSignature(draft) !== lineSignature(before) || !!draft.apiKey
+      || (draft.accessMode === 'cloudflare' && (!!draft.accessClientId || !!draft.accessClientSecret))
+      || (draft.accessMode === 'direct' && draft.savedAccess)
+  })
   const post = async (body: Record<string, unknown>, done: string) => {
     setMessage(undefined)
     const result = await mutateSettings(body)
     if (!result) return
-    if (result.view) { setKey(''); setAccessClientId(''); setAccessClientSecret(''); setMessage({ text: done, failed: false }) }
+    if (result.view) setMessage({ text: done, failed: false })
     else setMessage({ text: result.error!, failed: true })
   }
   const save = () => {
-    const body: Record<string, unknown> = {}
-    if (baseUrl.trim() !== savedUrl) body.baseUrl = baseUrl.trim()
-    if (key) body.key = key
-    if (clearsAccess) { body.accessClientId = null; body.accessClientSecret = null }
-    if (mode === 'cloudflare' && accessClientId) body.accessClientId = accessClientId
-    if (mode === 'cloudflare' && accessClientSecret) body.accessClientSecret = accessClientSecret
-    void post(body, clearsAccess ? '已保存，已清除 Access 凭据' : '已保存')
+    const lines = drafts.map(draft => ({
+      ...(draft.id ? { id: draft.id } : {}),
+      baseUrl: draft.baseUrl.trim(), accessMode: draft.accessMode,
+      ...(draft.apiKey ? { key: draft.apiKey } : {}),
+      ...(draft.accessMode === 'cloudflare'
+        ? { ...(draft.accessClientId ? { accessClientId: draft.accessClientId } : {}), ...(draft.accessClientSecret ? { accessClientSecret: draft.accessClientSecret } : {}) }
+        : (draft.savedAccess ? { accessClientId: null, accessClientSecret: null } : {})),
+    }))
+    void post({ lines }, '已保存')
   }
-  const dirty = !!key || baseUrl.trim() !== savedUrl || clearsAccess || (mode === 'cloudflare' && (!!accessClientId || !!accessClientSecret))
   return h('section', { className: 'dmg-panel', 'aria-label': '连接' },
-    h('h3', null, '连接'),
-    h('label', { className: 'dmg-field' }, h('span', null, '网关地址（含 /v1）'),
-      h('input', { className: 'dmg-input', value: baseUrl, disabled: saving, placeholder: 'http://127.0.0.1:3425/v1', onChange: (e: { target: { value: string } }) => setBaseUrl(e.target.value) })),
-    h('label', { className: 'dmg-field' }, h('span', null, `Gateway API key · ${configured ? '已配置' : '未配置'}${writable ? '' : '（来自启动环境，只读）'}`),
-      h('input', {
-        className: 'dmg-input', type: 'password', autoComplete: 'off', value: key, disabled: saving || !writable,
-        placeholder: configured ? '留空则保持不变' : '必填', onChange: (e: { target: { value: string } }) => setKey(e.target.value),
-      })),
-    h('details', { className: 'dmg-advanced', open: true, 'data-advanced': '' },
-      h('summary', null, '高级连接'),
-      h('div', { className: 'dmg-advanced-body' },
-        h('label', { className: 'dmg-field' }, h('span', null, `接入方式${accessLocked ? '（Access 凭据来自启动环境，只读）' : ''}`),
-          h('select', { className: 'dmg-select', 'aria-label': '接入方式', value: mode, disabled: saving || accessLocked,
-            onChange: (e: { target: { value: string } }) => setMode(e.target.value as AccessMode) },
-          ...ACCESS_MODES.map(m => h('option', { key: m.id, value: m.id }, m.label)))),
-        mode === 'direct'
-          ? h('p', { className: 'dmg-hint' }, clearsAccess ? '保存后将清除已保存的 Cloudflare Access 凭据。' : '网关地址可直接访问时选择（局域网、Tailscale 等组网后的地址）。')
-          : h('p', { className: 'dmg-hint' }, '网关在 Cloudflare Access 之后时选择：填写服务令牌的两项，仅支持 HTTPS。留空保持不变。'),
-        ...(mode === 'cloudflare' ? ([
-          ['Access Client ID', access?.clientId, accessClientId, setAccessClientId],
-          ['Access Client Secret', access?.clientSecret, accessClientSecret, setAccessClientSecret],
-        ] as const).map(([label, status, value, setValue]) => h('label', { key: label, className: 'dmg-field' },
-          h('span', null, `${label} · ${status?.configured ? '已配置' : '未配置'}${status?.writable === false ? '（来自启动环境，只读）' : ''}`),
-          h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value,
-            disabled: saving || status?.writable === false, placeholder: status?.configured ? '留空则保持不变' : '必填',
-            onChange: (e: { target: { value: string } }) => setValue(e.target.value) }))) : []))),
+    h('div', { className: 'dmg-head' },
+      h('h3', null, '连接'),
+      h('span', { className: 'dmg-info', role: 'img', 'aria-label': '线路优先级说明', title: INFO_TEXT }, 'ⓘ')),
+    drafts.length === 0 ? h('p', { className: 'dmg-hint' }, '还没有线路。点击「添加线路」填写网关地址与 key。') : null,
+    h('div', { className: 'dmg-lines' },
+      ...drafts.map((draft, index) => h(LineCard, {
+        key: draft.draftId, draft, index, total: drafts.length, saving,
+        active: !!draft.id && draft.id === activeId,
+        expanded: expanded === draft.draftId,
+        onToggle: () => setExpanded(current => current === draft.draftId ? null : draft.draftId),
+        onChange: (patch: Partial<LineDraft>) => update(draft.draftId, patch),
+        onMove: (delta: number) => move(index, delta),
+        onRemove: () => remove(draft.draftId),
+      }))),
+    h('div', { className: 'dmg-row' },
+      h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: add }, drafts.length ? '添加备用线路' : '添加线路')),
     h('div', { className: 'dmg-row' },
       h('button', { type: 'button', className: 'dmg-button', disabled: saving || !dirty, onClick: save }, saving ? '保存中…' : '保存'),
-      configured && writable ? h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ key: null }, '已清除 key') } }, '清除 key') : null,
       h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ resync: true }, '已刷新模型列表') } }, '刷新模型列表')),
     h(SyncStatus, { settings }),
     message ? h('p', { className: message.failed ? 'dmg-error' : 'dmg-ok', role: message.failed ? 'alert' : 'status' }, message.text) : null,
     usage)
+}
+
+function LineCard({ draft, index, total, saving, active, expanded, onToggle, onChange, onMove, onRemove }: {
+  draft: LineDraft; index: number; total: number; saving: boolean; active: boolean; expanded: boolean
+  onToggle: () => void; onChange: (patch: Partial<LineDraft>) => void; onMove: (delta: number) => void; onRemove: () => void
+}) {
+  return h('div', { className: 'dmg-line', 'data-line-id': draft.id, 'data-expanded': expanded ? 'true' : 'false' },
+    h('div', { className: 'dmg-line-head' },
+      h('span', { className: 'dmg-line-index' }, `线路 ${index + 1}`),
+      active ? h('span', { className: 'dmg-active', role: 'img', 'aria-label': '当前线路', title: '当前线路', 'data-active-line': draft.id }) : null,
+      h('span', { className: 'dmg-line-title' }, `${hostnameOf(draft.baseUrl)}${draft.id ? '' : '（未保存）'}`),
+      h('div', { className: 'dmg-line-actions' },
+        h('button', { type: 'button', className: 'dmg-button', disabled: saving || index === 0, onClick: () => onMove(-1) }, '上移'),
+        h('button', { type: 'button', className: 'dmg-button', disabled: saving || index === total - 1, onClick: () => onMove(1) }, '下移'),
+        h('button', { type: 'button', className: 'dmg-button', disabled: saving || total <= 1, onClick: onRemove }, '删除'),
+        h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: onToggle }, expanded ? '收起' : '展开'))),
+    expanded ? h('div', { className: 'dmg-line-body' },
+      h('label', { className: 'dmg-field' }, h('span', null, '网关地址（含 /v1）'),
+        h('input', { className: 'dmg-input', value: draft.baseUrl, disabled: saving, placeholder: 'http://127.0.0.1:3425/v1', onChange: (e: { target: { value: string } }) => onChange({ baseUrl: e.target.value }) })),
+      h('label', { className: 'dmg-field' }, h('span', null, `Gateway API key · ${draft.keyConfigured ? '已配置' : '未配置'}${draft.keyWritable ? '' : '（来自启动环境，只读）'}`),
+        h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value: draft.apiKey, disabled: saving || !draft.keyWritable,
+          placeholder: draft.keyConfigured ? '留空则保持不变' : '必填', onChange: (e: { target: { value: string } }) => onChange({ apiKey: e.target.value }) })),
+      h('details', { className: 'dmg-advanced', open: true, 'data-advanced': '' },
+        h('summary', null, '高级连接'),
+        h('div', { className: 'dmg-advanced-body' },
+          h('label', { className: 'dmg-field' }, h('span', null, `接入方式${draft.accessWritable ? '' : '（Access 凭据来自启动环境，只读）'}`),
+            h('select', { className: 'dmg-select', 'aria-label': '接入方式', value: draft.accessMode, disabled: saving || !draft.accessWritable,
+              onChange: (e: { target: { value: string } }) => onChange({ accessMode: e.target.value as AccessMode }) },
+            ...ACCESS_MODES.map(mode => h('option', { key: mode.id, value: mode.id }, mode.label)))),
+          draft.accessMode === 'direct'
+            ? h('p', { className: 'dmg-hint' }, draft.savedAccess ? '保存后将清除已保存的 Cloudflare Access 凭据。' : '网关地址可直接访问时选择（局域网、Tailscale 等组网后的地址）。')
+            : h('p', { className: 'dmg-hint' }, '网关在 Cloudflare Access 之后时选择：填写服务令牌的两项，仅支持 HTTPS。留空保持不变。'),
+          ...(draft.accessMode === 'cloudflare' ? ([
+            ['Access Client ID', draft.accessClientId, 'accessClientId'],
+            ['Access Client Secret', draft.accessClientSecret, 'accessClientSecret'],
+          ] as const).map(([label, value, field]) => h('label', { key: label, className: 'dmg-field' },
+            h('span', null, `${label} · ${(field === 'accessClientId' ? draft.accessConfigured : draft.accessConfigured) ? '已配置' : '未配置'}${draft.accessWritable ? '' : '（来自启动环境，只读）'}`),
+            h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value,
+              disabled: saving || !draft.accessWritable, placeholder: '留空则保持不变',
+              onChange: (e: { target: { value: string } }) => onChange({ [field]: e.target.value } as Partial<LineDraft>) }))) : [])))) : null)
 }
 
 function SyncStatus({ settings }: { settings: SettingsView }) {

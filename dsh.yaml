@@ -394,10 +394,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.1.2
+    version: 0.2.0
     enabled: true
     brief: 接入自托管 Magpie 网关；按上游 provider 分组，含用量卡片、默认输出预算与 Cloudflare Access
-    note: '自研 MIT,change add-dsh-magpie-plugin + magpie-connector-rename + magpie-default-output-budget。单 route dsh-magpie-connector,pi-ai 处理 Responses/Chat;设置页按网关 owned_by 分组展示模型与只读用量卡片,支持默认 effort、会话快速档与 Cloudflare Access。0.1.2 起 max_output_tokens 仅作 pi-ai 能力上限,DSH 默认预算改为 min(最大输出,窗口/4,窗口/2−65536) 预留压缩空间;DSH 升级复核 compaction-basic 默认 headroom/threshold/retain(见 catalog.ts 注释)。信任面:读取 credentials MAGPIE_API_KEY,设置接口不回显 key,私有 undici 只直连白名单 API 且拒绝重定向。移除:enabled:false → dsh build → 重启。'
+    note: '自研 MIT,change add-dsh-magpie-plugin + magpie-connector-rename + magpie-default-output-budget。单 route dsh-magpie-connector,pi-ai 处理 Responses/Chat;设置页按网关 owned_by 分组展示模型与只读用量卡片,支持默认 effort、会话快速档与 Cloudflare Access。0.2.0 起为 BREAKING:设置单一 lines[] 格式(首次安装为空、通常 1 条、上限 5、序号即优先级、host 生成 8 位随机 hex 线路 id、每线路 MAGPIE_LINE_<ID>_* 凭据),旧 baseUrl/旧固定引用不读取不迁移不删除,需重配;自动 TCP 探测选线并在切换时继承目录、清卡片、重同步,生成不换线不重放。0.1.2 起 max_output_tokens 仅作 pi-ai 能力上限,DSH 默认预算改为 min(最大输出,窗口/4,窗口/2−65536) 预留压缩空间;DSH 升级复核 compaction-basic 默认 headroom/threshold/retain(见 catalog.ts 注释)。信任面:按线路读取 credentials MAGPIE_LINE_<ID>_*（旧 MAGPIE_API_KEY/ACCESS 固定引用不读取）,设置接口不回显凭据,探测只建 TCP 不带凭据,私有 undici 只直连白名单 API 且拒绝重定向。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   - id: magpie-display-name-shim

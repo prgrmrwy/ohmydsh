@@ -8,6 +8,7 @@ import { MagpieRuntime } from '../src/host/runtime.js'
 import { SettingsStore } from '../src/host/settings.js'
 import { credentialsMock } from './support/credentials.js'
 import { models, responseText, chatText, responseTool, chatTool } from './support/wire.js'
+import { line } from './support/line.js'
 
 const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => {
@@ -54,7 +55,7 @@ async function assemble(adapter: MagpieAdapter, input: GenerateOptions) {
 }
 async function setup(p: typeof protocols[number]) {
   const store = new SettingsStore()
-  store.value.baseUrl = 'https://gateway.invalid/v1'
+  store.value.lines = [line('https://gateway.invalid/v1')]
   const runtime = new MagpieRuntime(credentialsMock('fixture-key').service, store)
   cleanup.push(() => runtime.dispose())
   const bodies: WireBody[] = []
@@ -62,7 +63,7 @@ async function setup(p: typeof protocols[number]) {
   // Keep the real SDK serialization and GatewayTransport.fetchFor Request boundary;
   // only its final request port is fake, so no network or real credentials are used.
   vi.spyOn(runtime.transport, 'request').mockImplementation(async (_identity, method, path, init) => {
-    const url = new URL(path, store.value.baseUrl)
+    const url = new URL(path, store.value.lines[0]?.baseUrl)
     if (method === 'GET' && path === '/models') return Response.json(models)
     expect(method).toBe('POST')
     expect(url.pathname).toBe(p.path)

@@ -42,7 +42,7 @@ test('host registers three resources, projects preferences and emits real priori
     return route!.fetch(new Request(`http://localhost/api/dsh-magpie-connector/${resource}${body === undefined && resource === 'speed' ? '?session=S' : ''}`, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }))
   }
   try {
-    expect((await call('settings', { baseUrl: gateway.baseUrl, key: 'test-key' })).status).toBe(200)
+    expect((await call('settings', { lines: [{ baseUrl: gateway.baseUrl, accessMode: 'direct', key: 'test-key' }] })).status).toBe(200)
     expect((await call('cards')).status).toBe(200)
     expect((await call('settings', { visibleModels: { codex: ['codex/responses'] }, defaultEffort: { model: 'codex/responses', effort: 'high' } })).status).toBe(200)
     expect((await adapter.listModels()).map(m => m.id)).toEqual(['codex/responses'])

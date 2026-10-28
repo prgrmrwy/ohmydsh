@@ -44,6 +44,15 @@ export const settingsCss = `
 .dmg-model label{display:flex;align-items:center;gap:6px;min-width:0;flex:1}
 .dmg-model label>span{overflow-wrap:anywhere}
 .dmg-model code{font-size:11px;color:var(--dsw-alias-label-tertiary)}
+.dmg-info{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:.5px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-tertiary);font-size:11px;cursor:default}
+.dmg-lines{display:flex;flex-direction:column;gap:8px}
+.dmg-line{border:.5px solid var(--dsw-alias-border-l2);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:8px;background:var(--dsw-alias-bg-layer-1)}
+.dmg-line-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dmg-line-index{font-weight:500}
+.dmg-line-title{color:var(--dsw-alias-label-tertiary);font-size:12px;overflow-wrap:anywhere;min-width:0;flex:1}
+.dmg-active{width:4px;height:4px;flex:none;background:var(--dmg-active,#22c55e)}
+.dmg-line-actions{display:flex;gap:6px;margin-left:auto}
+.dmg-line-body{display:flex;flex-direction:column;gap:10px;padding-left:10px;border-left:.5px solid var(--dsw-alias-border-l2)}
 .dmg-speed{position:relative;display:inline-flex}
 .dmg-speed-trigger{border:.5px solid var(--dsw-alias-border-l3);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;padding:2px 8px;cursor:pointer;white-space:nowrap}
 .dmg-speed-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}

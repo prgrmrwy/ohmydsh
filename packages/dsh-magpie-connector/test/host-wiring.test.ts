@@ -21,7 +21,7 @@ test('actual host wiring registers one route and authenticated settings fetch; p
  const {runtime,adapter}=apply(ctx as unknown as Context,{home})
  try{
   const route=routes.find(r=>r.path==='/api/dsh-magpie-connector/settings')!;expect(route).toBeDefined()
-  const response=await route.fetch(new Request('http://localhost/api/dsh-magpie-connector/settings',{method:'POST',body:JSON.stringify({baseUrl:g.baseUrl,key:'mk-test-123'})}))
+  const response=await route.fetch(new Request('http://localhost/api/dsh-magpie-connector/settings',{method:'POST',body:JSON.stringify({lines:[{baseUrl:g.baseUrl,accessMode:'direct',key:'mk-test-123'}]})}))
   expect(response.status).toBe(200);expect(await response.text()).not.toContain('mk-test-123')
   expect(registered).toBe(1);expect(replaced).toBeGreaterThan(0);expect(await adapter.listModels()).toHaveLength(1)
   const file=join(home,'plugins/dsh-magpie-connector/settings.json');expect(readFileSync(file,'utf8')).not.toContain('mk-test-123');expect(statSync(file).mode&0o777).toBe(0o600)

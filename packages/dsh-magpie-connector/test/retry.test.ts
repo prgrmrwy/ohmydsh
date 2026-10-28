@@ -5,6 +5,7 @@ import { SettingsStore } from '../src/host/settings.js'
 import { createGateway, json, sse } from './support/gateway.js'
 import { models, responseText } from './support/wire.js'
 import { credentialsMock } from './support/credentials.js'
+import { line } from './support/line.js'
 
 test('retry policy matches dsh-plugin-subscriptions: 10 retries, 1s doubling to 60s, 20% jitter, canonical codes', () => {
   expect(RETRY_POLICY).toMatchObject({ mode: 'normal', maxRetries: 10, initialDelayMs: 1000, maxDelayMs: 60_000, jitterRatio: 0.2 })
@@ -19,7 +20,7 @@ test.each([
   ['401', 401, {}, { code: 'AUTH', status: 401 }],
   ['400', 400, {}, { code: 'HTTP_400', status: 400 }],
 ] as const)('HTTP %s is sent once and classified for DSH llm-retry', async (_name, status, headers, failure) => {
-  const g = await createGateway(); const store = new SettingsStore(); store.value.baseUrl = g.baseUrl
+  const g = await createGateway(); const store = new SettingsStore(); store.value.lines = [line(g.baseUrl)]
   const r = new MagpieRuntime(credentialsMock('placeholder').service, store); g.handlers.set('GET /v1/models', json(models)); await r.start()
   try {
     let attempts = 0
@@ -31,7 +32,7 @@ test.each([
 })
 
 test('a completed response with no content is EMPTY_RESPONSE, not a silent stop', async () => {
-  const g = await createGateway(); const store = new SettingsStore(); store.value.baseUrl = g.baseUrl
+  const g = await createGateway(); const store = new SettingsStore(); store.value.lines = [line(g.baseUrl)]
   const r = new MagpieRuntime(credentialsMock('placeholder').service, store); g.handlers.set('GET /v1/models', json(models)); await r.start()
   try {
     g.handlers.set('POST /v1/responses', sse(responseText().filter(e => (e as { type: string }).type === 'response.completed')))

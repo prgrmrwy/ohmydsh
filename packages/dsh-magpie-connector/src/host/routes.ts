@@ -1,5 +1,4 @@
 import type { MagpieRuntime } from './runtime.js'
-import { normalizeBaseUrl } from './settings.js'
 import { isVisible, validateVisibility } from './visibility.js'
 import { updateDefaultEffort } from './default-effort.js'
 import { CardsController } from './cards.js'
@@ -17,18 +16,18 @@ export class SettingsController {
     const runtime=this.runtime
     if(body!==undefined) {
       try {
-        if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['baseUrl','key','accessClientId','accessClientSecret','resync','visibleModels','defaultEffort'].includes(k))) throw new Error('Invalid settings')
+        if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['lines','resync','visibleModels','defaultEffort'].includes(k))) throw new Error('Invalid settings')
         const input=body as Record<string,unknown>
         // Validate the entire union before credentials, disk writes or synchronization.
-        if('baseUrl' in input) normalizeBaseUrl(input.baseUrl)
+        if('lines' in input) { if(!Array.isArray(input.lines)) throw new Error('Invalid lines'); if(input.lines.length<1||input.lines.length>5) throw new Error('Invalid lines') }
         if('key' in input && input.key!==null && (typeof input.key!=='string' || !input.key || input.key.length>512 || /\s/.test(input.key))) throw new Error('Invalid API key')
         if('resync' in input && input.resync!==true) throw new Error('Invalid resync')
         const visibleModels='visibleModels' in input ? validateVisibility(input.visibleModels) : undefined
         const defaultEfforts='defaultEffort' in input ? updateDefaultEffort(runtime.store.value.defaultEfforts,input.defaultEffort,runtime.current.catalog) : undefined
-        const connection=Object.fromEntries(Object.entries(input).filter(([k])=>['baseUrl','key','accessClientId','accessClientSecret','resync'].includes(k)))
+        const connection=Object.fromEntries(Object.entries(input).filter(([k])=>['lines','resync'].includes(k)))
         if(Object.keys(connection).length) {const result=await runtime.settings(connection);if(!result.ok)return result}
         if(visibleModels!==undefined || defaultEfforts!==undefined) {
-          runtime.store.save({...runtime.store.value,...(visibleModels===undefined?{}:{visibleModels}),...(defaultEfforts===undefined?{}:{defaultEfforts})})
+          runtime.savePreferences({ ...(visibleModels===undefined?{}:{visibleModels}), ...(defaultEfforts===undefined?{}:{defaultEfforts}) })
           runtime.publish()
         }
       } catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}

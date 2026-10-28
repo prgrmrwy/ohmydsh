@@ -493,8 +493,8 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="535" y="371" class="t-muted" font-size="9" text-anchor="middle">LLM adapter + settings/usage API</text>
         </g>
 
-        <g id="node-credentials" data-node-id="credentials" data-node-label="DSH credentials" tabindex="0" role="button" aria-label="Focus DSH credentials, MAGPIE_API_KEY · Access tokens, Local DSH Host" aria-pressed="false" data-node-kind="security" data-node-sublabel="MAGPIE_API_KEY · Access tokens" data-node-context="Local DSH Host">
-          <title>DSH credentials · MAGPIE_API_KEY · Access tokens · Local DSH Host</title>
+        <g id="node-credentials" data-node-id="credentials" data-node-label="DSH credentials" tabindex="0" role="button" aria-label="Focus DSH credentials, per-line key · Access, Local DSH Host" aria-pressed="false" data-node-kind="security" data-node-sublabel="per-line key · Access" data-node-context="Local DSH Host">
+          <title>DSH credentials · per-line key · Access · Local DSH Host</title>
           <rect x="180" y="150" width="170" height="66" rx="6" class="c-mask"/>
           <rect x="180" y="150" width="170" height="66" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(186 156) scale(0.6875)">
@@ -502,7 +502,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" x="265" y="181" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DSH credentials</text>
-        <text x="265" y="197" class="t-muted" font-size="9" text-anchor="middle">MAGPIE_API_KEY · Access tokens</text>
+        <text x="265" y="197" class="t-muted" font-size="9" text-anchor="middle">per-line key · Access</text>
         </g>
 
         <g id="node-settings" data-node-id="settings" data-node-label="settings.json" tabindex="0" role="button" aria-label="Focus settings.json, address · visibility · default effort, Local DSH Host" aria-pressed="false" data-node-kind="database" data-node-sublabel="address · visibility · default effort" data-node-context="Local DSH Host">

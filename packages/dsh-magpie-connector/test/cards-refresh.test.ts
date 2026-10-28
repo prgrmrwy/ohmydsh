@@ -7,7 +7,7 @@ const deferred=()=>{let resolve!:(r:Response)=>void;const promise=new Promise<Re
 async function setup(initial:unknown[]=[card()]) {
  const gen={id:1,baseUrl:'http://mock/v1',catalog:[],bgAbort:new AbortController()}
  const request=vi.fn(async(_connection:unknown,_method:string,_path:string,_init?:unknown)=>reply(initial)); const release=vi.fn()
- const runtime={formatErrorBody:MagpieRuntime.prototype.formatErrorBody,current:gen,beginOperation:async()=>({gen:runtime.current,key:'secret',release}),isCurrent:(g:unknown)=>g===runtime.current,redact:(s:string)=>s.replaceAll('secret','[redacted]').replaceAll('active-key','[redacted]'),transport:{request}}
+ const runtime={formatErrorBody:MagpieRuntime.prototype.formatErrorBody,current:gen,beginOperation:async()=>({gen:runtime.current,baseUrl:runtime.current.baseUrl,key:'secret',release}),isCurrent:(g:unknown)=>g===runtime.current,redact:(s:string)=>s.replaceAll('secret','[redacted]').replaceAll('active-key','[redacted]'),transport:{request}}
  const c=new CardsController(runtime as unknown as MagpieRuntime);await c.get();request.mockClear()
  return {c,request,runtime,gen}
 }

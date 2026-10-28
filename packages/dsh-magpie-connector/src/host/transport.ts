@@ -1,15 +1,33 @@
 import { Agent, fetch as directFetch } from 'undici'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
-export interface ConnectionIdentity { baseUrl: string; key: string; accessClientId?: string; accessClientSecret?: string }
+import type { AccessMode } from './settings.js'
+
+export interface ConnectionIdentity {
+  baseUrl: string
+  key: string
+  accessClientId?: string
+  accessClientSecret?: string
+  /** Line the request was captured for; used for probe-cache invalidation. */
+  lineId?: string
+  /** `direct` lines never carry Access headers, whatever is stored for them. */
+  accessMode?: AccessMode
+}
+
+/** Errors proving the request never left this host (DNS/build failures). */
+const CONNECTION_PHASE_CODES = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'])
+
 export function validateIdentity(identity: ConnectionIdentity) {
   const { accessClientId: id = '', accessClientSecret: secret = '' } = identity
   if (!!id !== !!secret) throw new Error('MAGPIE_ACCESS_PAIR_REQUIRED')
   if ([id, secret].some(value => value && (value.length > 512 || /[^\x21-\x7e]/.test(value)))) throw new Error('MAGPIE_ACCESS_INVALID')
+  if (identity.accessMode === 'cloudflare' && !(id && secret)) throw new Error('MAGPIE_ACCESS_PAIR_REQUIRED')
   if (id && identity.baseUrl && new URL(identity.baseUrl).protocol !== 'https:') throw new Error('MAGPIE_ACCESS_HTTPS_REQUIRED')
 }
 const allowed = new Set(['GET /models', 'POST /responses', 'POST /chat/completions', 'GET /magpie/quotas/cards', 'POST /magpie/quotas/refresh'])
 export class GatewayTransport {
   readonly signal = new AbortController()
+  /** Called when a request fails before the connection was established. */
+  onConnectionFailure?: (lineId: string) => void
   private readonly agent = new Agent()
   async request(identity: ConnectionIdentity, method: string, path: string, init: RequestInit = {}): Promise<Response> {
     validateIdentity(identity)
@@ -23,7 +41,7 @@ export class GatewayTransport {
     headers.set('authorization', `Bearer ${identity.key}`)
     headers.delete('CF-Access-Client-Id')
     headers.delete('CF-Access-Client-Secret')
-    if (identity.accessClientId && identity.accessClientSecret) {
+    if (identity.accessMode !== 'direct' && identity.accessClientId && identity.accessClientSecret) {
       headers.set('CF-Access-Client-Id', identity.accessClientId)
       headers.set('CF-Access-Client-Secret', identity.accessClientSecret)
     }
@@ -33,6 +51,12 @@ export class GatewayTransport {
       } as Parameters<typeof directFetch>[1]) as unknown as Response
     } catch (error) {
       if (String((error as { cause?: unknown })?.cause).includes('redirect')) throw new Error('网关返回了被禁止的重定向')
+      const cause = (error as { cause?: { code?: string; name?: string } }).cause
+      const connectionPhase = !!cause && (CONNECTION_PHASE_CODES.has(cause.code ?? '') || cause.name === 'ConnectTimeoutError')
+      if (connectionPhase) {
+        Object.assign(error as object, { connectionPhase: true })
+        if (identity.lineId) this.onConnectionFailure?.(identity.lineId)
+      }
       throw error
     }
   }

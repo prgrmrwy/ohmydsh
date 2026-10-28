@@ -1,8 +1,32 @@
-# dsh-magpie-connector host integration API
+## 0.2.0 single-schema line settings API (current)
 
-**Latest assembly checkpoint (12:04 America/New_York):** host-features has composed `registerRoutes`/`SettingsController`, cards and speed; adapter visibility/default-effort projection is integrated. The full shared package passes **20 test files / 124 tests**, typecheck and build. Older “outstanding assembly” notes below describe the pre-handoff API boundary and are superseded by this checkpoint. `runtime.settings` remains the core-only handler; use the composed settings route for preference updates. No shared task completion is implied.
+BREAKING: the host settings surface keeps only the `lines[]` schema. Legacy top-level `baseUrl`, `nextLineId`, notices and fixed `MAGPIE_API_KEY` / `MAGPIE_ACCESS_*` refs no longer exist; the 0.1.x notes below are historical.
 
-This is the task-1 → host-features handoff. UI sources are owned separately. Core files are `src/host/{runtime,adapter,catalog,settings,transport}.ts` and `src/index.ts`.
+```ts
+// GET projection (SettingsController)
+{ lines: [{ id, baseUrl, accessMode, complete,
+            key: { configured, writable },
+            access: { clientId: { configured, writable }, clientSecret: { configured, writable } },
+            refs: { key, accessClientId, accessClientSecret } }],
+  activeLineId, pending, retainedCredentials,
+  lastSyncAt?, lastSyncError?, lastSyncErrorKind?, groups, visibleModels, defaultEfforts }
+
+// POST (SettingsController passes the connection subset to runtime.settings)
+{ lines: [{ id?, baseUrl: string, accessMode: 'direct' | 'cloudflare',
+            key?: string | null, accessClientId?: string | null, accessClientSecret?: string | null }],
+  resync?: true }
+// `resync: true` alone is valid (force one catalog sync). A line with zero lines in the
+// committed list is only reachable through load/first install; POST requires 1–5 lines.
+```
+
+- A line is complete when it has an address, a resolvable key and (for `cloudflare`) an HTTPS address plus both Access values. Only complete lines take part in automatic selection.
+- Line ids are host-generated 8-hex-character random ids (unique among existing and pending lines), stored in settings, stable across reorder/delete/restart and never derived from the address or key. Creation must omit `id`; existing ids must reference a current line and may not repeat (400 zero-write otherwise).
+- Every line uses `MAGPIE_LINE_<ID>_API_KEY` / `..._ACCESS_CLIENT_ID` / `..._ACCESS_CLIENT_SECRET` (uppercase id). Sorting/deleting never rebinds references; deleting a line clears writable refs and reports environment-owned values through `retainedCredentials`.
+- Credential fields are tri-state: omitted = keep, `null` = clear (writable refs only), string = write. Whole-table saves/reorders must omit credentials they do not want to change.
+- Loading validates the persisted lines and pending entries strictly: invalid format, duplicate ids/addresses, >5 lines or malformed pending make the whole connection read as empty (unconfigured) without touching the file or resolving credentials.
+- Subscribe to `credentials/reference-updated` for **any** ref and map it with `lineIdOfCredentialRef(ref)`: a change on the active line invalidates the generation, a change on a non-active line does not.
+- Credential writes are not transactional. Attempted `(lineId, field)` pairs are persisted as `pending` before any secret write; on successful whole-table commit, pending entries for lines absent from the commit are cleaned automatically (unset writable refs, keep env-owned ones in `retainedCredentials`). Deletes/access-mode changes commit only after every writable credential was cleared.
+- `Operation` captures `lineId`, `accessMode`, `baseUrl` and the credentials; use `op` (not `gen.baseUrl`) for requests. `Generation` still owns catalog/cards; a line switch replaces the generation but carries the catalog, so `isCurrent(gen)` remains the commit guard.
 
 ## Runtime and connection identity
 
@@ -13,22 +37,22 @@ await runtime.syncCatalog()
 const op = await runtime.beginOperation()
 try {
   const response = await runtime.transport.request(
-    { baseUrl: op.gen.baseUrl, key: op.key }, 'GET', '/magpie/quotas/cards',
+    { baseUrl: op.baseUrl, key: op.key }, 'GET', '/magpie/quotas/cards',
     { signal: op.gen.bgAbort.signal },
   )
   // Read/project/redact first; commit only if runtime.isCurrent(op.gen).
 } finally { op.release() }
 ```
 
-- `credentials` is `Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>`. Fixed exported `KEY_REF` is `credentialRef('MAGPIE_API_KEY')`. No credential files or process-environment fallback are read.
-- `SettingsStore(path?)` loads/saves `{baseUrl, visibleModels, defaultEfforts}`. With no path it is an in-memory test store. `save(value)` atomically replaces a 0600 settings file. Never put key material in this object.
+- `credentials` is `Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>`. Line references are derived with `lineCredentialRefs(lineId)`; `lineIdOfCredentialRef(ref)` maps a ref back to its line id. Legacy fixed refs are not read. No credential files or process-environment fallback are read.
+- `SettingsStore(path?)` loads/saves the single-schema `{lines, visibleModels, defaultEfforts, credentialUpdatePending?}` (see above). With no path it is an in-memory test store. `save(value)` atomically replaces a 0600 settings file. Never put key material in this object.
 - `beginOperation(): Promise<Operation>` resolves credentials once, changes generation before dispatch if necessary, starts new-identity catalog sync, and retains that key for redaction until `release()`.
 - `Operation = { gen, key, release }`. Release is idempotent. Keep the operation alive through response/error projection, not merely through request dispatch.
 - `Generation` exposes `id`, `baseUrl`, `keyFingerprint`, `catalog`, `bgAbort`, `syncPromise?`, `lastSyncAt?`, `lastSyncError?`, `lastSyncErrorKind?`. The string-indexed extension slot lets features attach generation-local state, e.g. `gen.magpieCards`. Do not put feature state on a global singleton.
 - `runtime.isCurrent(gen)` must guard every result commit. Dispose also makes it false. A stale request must not put old cards into the new generation.
-- `runtime.invalidateCredential()` synchronously drops visible old state and aborts background operations before asynchronously resolving/syncing. Subscribe to `credentials/reference-updated` only for `KEY_REF`. Own key writes suppress that listener until the combined settings mutation commits.
+- `runtime.invalidateCredential(ref?)` maps a `credentials/reference-updated` ref to its line id (`lineIdOfCredentialRef`) and rotates only when that line is active; without a ref it rotates the current generation. It synchronously drops visible old state and aborts background operations before asynchronously resolving/syncing. Own credential writes suppress that listener until the combined settings mutation commits.
 - `runtime.redact(text)` replaces current and active-operation keys literally with `[redacted]`. All gateway strings going into HTTP responses or logs must use this method. Catalog metadata is redacted before it is cached.
-- `runtime.settings(body?)` currently handles the **core** partial update union `{baseUrl?, key?:string|null, resync?:true}` and GET projection, returning a `Response`. It rejects unknown keys. The feature integration must validate the full combined settings request **before any core mutation**, then coordinate visibility/default-effort storage; do not POST preferences directly to this core-only handler.
+- `runtime.settings(body?)` handles the single-schema settings update `{lines?, resync?}` (plus GET projection) and returns a `Response`; the generic SettingsController adds preference fields (`visibleModels`, `defaultEffort`) around it. Credential fields use the tri-state (omit/null/write) contract above; unknown keys are rejected with 400 and nothing is written.
 - `publish()` must call the adapter registration handle's `replace(['dsh-magpie-connector'])`; no payload-free imitation event is needed. Same-generation sync is single-flight and times out after 15 seconds. Last successful catalog/time survive same-generation failure; identity changes never retain old data.
 
 ## Catalog and adapter

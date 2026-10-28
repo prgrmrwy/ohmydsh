@@ -2,7 +2,8 @@ import { expect, test } from 'vitest'
 import { createGateway, deferred, json, sse } from './support/gateway.js'
 import { GatewayTransport } from '../src/host/transport.js'
 import { credentialsMock } from './support/credentials.js'
-import { KEY_REF } from '../src/host/runtime.js'
+import { lineCredentialRefs } from '../src/host/runtime.js'
+const KEY_REF = lineCredentialRefs('a1b2c3d4').key
 test('gateway records method path query body and maximum concurrency, and supports delayed SSE', async () => {
   const g = await createGateway(), t = new GatewayTransport()
   try {

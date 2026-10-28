@@ -4,10 +4,9 @@
 
 <p align="center">
   <img src="docs/model-picker.gif" alt="模型选择器：按上游 provider 分组，仅 GPT 显示标准/快速" width="49%">
-  <img src="docs/settings.gif" alt="设置页：连接、Cloudflare Access、分组配置与用量卡片" width="49%">
 </p>
 
-*左：模型选择器；右：设置 → Magpie。录屏来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
+*模型选择器录屏来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据；设置页的线路列表截图待重录。*
 
 [插件仓库](https://github.com/prgrmrwy/dsh-magpie-connector) · [版本发布](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
 
@@ -18,9 +17,10 @@
 
 | 能力 | 具体行为 |
 |---|---|
-| **Magpie 网关直连**（基础） | 只需网关地址和 key。模型目录来自网关 `GET /models`；支持 Responses 的模型走 Responses，其余走 Chat Completions。文本、工具往返、图片、usage、取消以及 DSH 统一重试都能正常工作。 |
+| **Magpie 网关接入**（基础） | 每条线路只需地址和该线路的 key。模型目录来自网关 `GET /models`；支持 Responses 的模型走 Responses，其余走 Chat Completions。文本、工具往返、图片、usage、取消以及 DSH 统一重试都能正常工作。 |
+| **多线路自动切换**（特色） | 通常一条线路（首次安装为空，最多 5 条），可添加备用线路并按序号自动选择：每次操作前对候选地址做 ≤600ms 的 TCP 可达探测（正缓存 10s / 负缓存 15s，不后台轮询），在家走局域网、在外自动落到公网。切换线路时模型目录继承不闪断、用量卡片清空并按新线路重读；单线路（通常一条）行为与旧版一致。 |
 | **按上游 provider 分组**（特色） | 模型选择器显示 `Magpie (Claude)`、`Magpie (GPT)`、`Magpie (<其它归属>)` 等标题，真实 route 始终只有一个 `dsh-magpie-connector`。设置页和用量卡片使用同一套分组，只出现在用量里的 provider 也不会被丢弃。 |
-| **Cloudflare Access 远程连接** | 网关在 Cloudflare Tunnel + Access 之后、客户端不方便装 VPN 时，保存服务令牌的 Client ID 和 Secret。此后每个网关请求都会带上 `CF-Access-Client-Id` / `CF-Access-Client-Secret`，同时保留 bearer key；仅支持 HTTPS。 |
+| **按线路的 Cloudflare Access** | 每条线路可单独选择「直连」或「Cloudflare Access」。启用后该线路的请求带上服务令牌两项并保留 bearer key；服务令牌永远不会发往明文 HTTP 线路。 |
 | **只读用量卡片** | 每个上游账号展示计划、到期时间、各窗口读数和 Codex 重置次数（网关提供时）。打开设置页只读一次，之后只有点单张卡片的「刷新」才会重新读取；用量条超过 70% 变橙、达到 90% 变红。 |
 | **模型可见性与默认 effort** | 每个 provider 不设置可见性时跟随网关目录；保存过选择后只显示勾选项，新上架模型默认隐藏。每个模型可保存一个默认推理 effort，DSH 在下一次请求应用。 |
 | **会话级快速档** | 网关声明 `priority` 服务档的模型，输入框旁会出现标准/快速切换。选择按会话保存在 host 内存，快速档会给请求带上 `service_tier: "priority"`。 |
@@ -39,14 +39,12 @@ dsh plugin --profile web add dsh-magpie-connector
 
 打开 **设置 → Magpie**。
 
-1. 填写**包含 `/v1`** 的网关 API 地址，例如 `http://192.168.1.20:3425/v1`。
-2. 填写 gateway key。它通过 DSH credentials 以 `MAGPIE_API_KEY` 保存；来自启动环境的 key 在这里只读。地址、可见性与默认 effort 保存在 `$DSH_HOME/plugins/dsh-magpie-connector/settings.json` —— key 不会写入该文件，也不会被设置接口返回。
-3. 保存。保存连接会同步模型目录；「刷新模型列表」可再次同步，插件不会定时轮询目录。
+1. 在**线路 1** 里填写**包含 `/v1`** 的网关 API 地址，例如 `http://192.168.1.20:3425/v1`，以及这条线路的 gateway key。地址、线路列表、可见性与默认 effort 保存在 `$DSH_HOME/plugins/dsh-magpie-connector/settings.json` —— key/Access 不会写入该文件，也不会被设置接口返回。
+2. 需要多条线路时点「添加备用线路」，每条线路填写自己的地址与 key；用「上移/下移」调整优先级（序号 1 优先）。保存后打开设置页默认只展开当前生效线路，序号后的 4×4 绿色方块表示当前线路；点击 info 图标可查看优先级与自动回退说明。
+3. 每条线路的**高级连接**里选择「直连」或「Cloudflare Access」。局域网与 Tailscale 都属于直连；Cloudflare Access 需要 HTTPS 线路，从 Access 切回直连并保存会清除该线路的两项 Access 凭据。Cloudflare 免费/Pro 套餐在源站 100 秒内没有响应时会返回 524。
+4. 保存会同步模型目录；「刷新模型列表」可再次同步，插件不会定时轮询目录。
 
-**高级连接**（默认展开）决定如何到达网关：
-
-- **直连**（默认）—— 网关地址可直接访问。局域网和 Tailscale 都属于这种：客户端加入 tailnet 后填 `http://<主机>.<tailnet>.ts.net:3425/v1` 或子网路由地址即可，插件里没有额外配置。
-- **Cloudflare Access** —— 网关在 Cloudflare Tunnel + Access 之后、客户端不方便装 VPN 时使用。填写服务令牌两项；每个请求同时携带两项头和 bearer key。从 Cloudflare Access 切回直连并保存会清除已保存的 Access 凭据。Cloudflare 免费/Pro 套餐在源站 100 秒内没有响应时会返回 524。
+> **0.2.0 BREAKING 升级**：设置格式改为单一 `lines[]`，旧版单地址 `settings.json`（只有 `baseUrl`）与旧固定凭据引用（`MAGPIE_API_KEY` / `MAGPIE_ACCESS_*`）**不会被读取或迁移**，升级后需在设置页重新添加线路并填写每线路 key/Access。模型可见性与默认 effort 会保留；旧凭据记录可由你在 DSH credentials 中手动删除。升级前若要保留回滚能力，请备份 `settings.json` 与旧凭据引用。
 
 还需要别的接入方式（自定义请求头、mTLS、其它零信任网关）？**欢迎提 issue 或 PR**，说明你的部署方式和网关版本。
 
@@ -65,6 +63,8 @@ dsh plugin --profile web add dsh-magpie-connector
 - **失败交给 DSH 重试，插件不重放请求。** 适配器声明与 `dsh-plugin-subscriptions` 相同的 `llm-retry` 策略（最多 10 次，1 秒起指数退避至 60 秒，±20% 抖动，429 时遵守 `Retry-After`）。`TIMEOUT`、`TRANSPORT`、`SERVER`、`RATE_LIMIT`、`EMPTY_RESPONSE` 会重试；401/403、额度用尽、上下文超限与其它 4xx 不重试。
 - **默认输出预算为上下文压缩预留空间。** 网关的 `max_output_tokens` 是模型能力上限，不直接作为每次请求的默认预算。交给 DSH 的默认预算是 `min(能力上限, max(1, 窗口/4, 窗口/2 − 65536))`，给 DSH 的上下文压缩留出空间；显式设置的 `maxTokens` 不受影响。上下文窗口小于 104,026 token 的模型仍按同一公式计算，但不保证通过 DSH 的压缩检查。
 - **只有持续静默才会结束流。** 响应头、SSE 事件和心跳都算有数据；连续 300 秒没有任何数据才以 `TIMEOUT` 结束（消息含 `MAGPIE_STREAM_TIMEOUT`）。只要网关还在发心跳，长时间推理不会被截断。
+- **自动选线不会重放请求。** 每次操作开始前按序号做 TCP 可达探测并选线路；连接阶段失败只使该线路缓存失效、本次操作失败，下一次操作重新选择。生成请求从不被插件换线或重放，其它失败交给 DSH 重试策略。
+- **切换线路与编辑线路语义不同。** 自动切换保留模型目录（不闪断）、清空用量卡片并以新线路重同步；编辑生效线路的地址/key/接入方式才会按换代清空目录；编辑非生效线路不影响当前目录。
 - **更改连接不会中止正在进行的生成。** 新地址或新 key 会立即隐藏旧目录与旧卡片，但已 prepare 或正在运行的生成会用捕获到的旧地址与 key 跑完。用户取消与插件卸载仍会中止它们。
 - **传输边界刻意收窄。** host 请求经私有 `undici` dispatcher 直连配置的网关，不经过全局代理 dispatcher；拒绝重定向；只允许 `GET /models`、`POST /responses`、`POST /chat/completions`、`GET /magpie/quotas/cards`、`POST /magpie/quotas/refresh`；从不调用 Magpie GUI 的 `/api/*` 管理接口。厂商出站代理在 Magpie 侧配置。
 - **不支持：** 非空 `stop` 序列会在发请求前失败（`MAGPIE_STOP_UNSUPPORTED`），因为 Magpie 无法在所有上游协议转换中保留 stop。用量卡片与 Codex 重置次数只读展示，插件不会调用账号管理或重置端点。
@@ -94,7 +94,7 @@ npm run build --workspace=dsh-magpie-connector
 dsh plugin --profile web remove dsh-magpie-connector
 ```
 
-重启 DSH 并刷新页面。dispose 只释放注册、计时器与连接，不删除凭据和设置。需要彻底清理时，通过 DSH credentials 管理删除 `MAGPIE_API_KEY`，并在确认安装版本的数据目录后删除插件设置文件。如果其它集成仍在使用该凭据，不要删除。
+重启 DSH 并刷新页面。dispose 只释放注册、计时器与连接，不删除凭据和设置。需要彻底清理时，通过 DSH credentials 管理删除各线路的 `MAGPIE_LINE_<ID>_*` 凭据（以及升级前遗留的 `MAGPIE_API_KEY` / `MAGPIE_ACCESS_*`），并在确认安装版本的数据目录后删除插件设置文件。如果其它集成仍在使用某个凭据，不要删除。
 
 在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 中则把 manifest 条目设为 `enabled: false` 后重新构建。
 
