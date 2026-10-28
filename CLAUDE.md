@@ -31,8 +31,8 @@
 
 **把自研插件发布成独立仓库、上架 DSH 插件商店（awesome-dsh-plugin）或优化可搜索性前，
 先读 [`docs/architecture/dsh-plugin-publishing.md`](docs/architecture/dsh-plugin-publishing.md)。** 那里是通用流程：
-六步清单（本地准备 → 镜像仓库 → 仓库元数据 → 商店 PR → npm → 其它索引）与三个必踩的坑
-（`prepare` 与 `prepack` 缺一不可、subtree 只推已提交内容、提 PR 前先本地预校验）；照做不需要任何历史上下文。
+当前 SOP（包准备 → 独立镜像 → 主仓自动同步/tag → npm OIDC + GitHub Release 同版安装包 → 分发验收 → 商店 PR），
+以 AUTO 全链路为参考；npm 与 GitHub Release 都是默认必配项。日常只在主仓升版并推 main，商店固定 tarball 更新与本机部署另行处理。
 
 ## 关键目录
 
