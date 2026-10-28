@@ -153,6 +153,21 @@
   - 修复前后 `prepare-preview` 的 `outputTail` 只体现 hook 结果，无法区分「hook 通过但预览 home 根本没构建」；建议把它纳入状态字段或在 hook 前做明确前置检查。
   - 现状可用 workaround：`node scripts/launcher/environment.mjs` 读 worktree `.env.local` → 以 `DSH_HOME=<operation home>` 跑 `node scripts/sync.mjs`，手动补 `.npmrc`/`allowBuilds` 与本地 `lib`。
 - **更新**: 2026-10-27 隔离预览验收时记录；本次未改脚本，验收靠手工补齐。
+
+
+### [B051] Memex 构造检测：测量重复运行稳定性
+- **状态**: 想法
+- **优先级**: P2
+- **背景 / 动机**: 同一道检测题用同一个被测 Agent 跑两次，结果可能因为模型随机性而不同。不测稳定性，就分不清某题由失败转为通过，是优化起了作用还是随机波动，也不知道每题跑一次够不够。change `dsh-memex-evaluation-harness` 首版不做这项，作为后续待办。
+- **要点**:
+  - 对一部分题各跑 2–3 次，统计结果落在漏斗同一层的比例。
+  - 稳定，则正式运行每题跑一次；不稳定，则每题多跑几次，或先改进题目。
+  - 可作为第四项可用门槛，与可判定率、裁判一致率、区分度并列。
+  - 在本项完成前，单次运行中单题的变化不能作为改善证据，只能以按主题的区间判断。
+- **依据**: `packages/dsh-memex/docs/evaluation-methodology.md`；change `dsh-memex-evaluation-harness` 的 proposal。
+- **更新**: 2026-10-27 从检测方案的范围讨论中拆出，用户确认留作待办；同时登记在 change `dsh-memex-evaluation-harness` 的 proposal“后续工作”一节，两处互相引用。
+
+
 ### [B052] Memex 召回时机收紧：答案已在手时不做例行背景召回
 - **状态**: 想法
 - **优先级**: P1
@@ -165,6 +180,7 @@
   - 开放问题：要不要规定只在遇到具体事实缺口时才召回，而不在任务开头例行召回？
 - **依据**: 评估报告 `~/.dsh-memex-eval/effectiveness-all-libraries-20261027/REPORT.md` 与可视化 `visual-summary.png`（本机私有证据，不入库）。
 - **更新**: 2026-10-27 由全库评估结论提出，用户确认记为可做。 编号原为 B050，2026-10-28 与远端新增的 B050 冲突，合并时改为 B052。
+
 
 ### [B048] 记忆设置页的便利动作（打开库目录、卡片明细）
 - **状态**: 想法
