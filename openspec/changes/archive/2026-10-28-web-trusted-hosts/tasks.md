@@ -8,4 +8,4 @@
 
 - [x] 2.1 `npm test` 全绿
 - [x] 2.2 `dsh build` 连续两次，第二次无变化
-- [ ] 2.3 下次 `dsh restart` 后确认进程 argv 含 `.env.local` 声明的 `--trusted-host`
+- [x] 2.3 `dsh restart` 后确认进程 argv 含 `.env.local` 声明的 `--trusted-host`(2026-10-28)
