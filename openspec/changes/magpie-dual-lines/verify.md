@@ -7,7 +7,7 @@
 ### TDD Integrity
 - [x] Every test-plan.md entry exists as a real test — **82 / 82** scenario 行均有具名测试；本轮单一版本重设计后重新生成 test-plan（20 requirements），并逐个先红后绿。
 - [x] Every test-plan.md row flipped to 🟢 green — **82 / 82**，无 🔴 red 残留。
-- [x] Full suite passes — `51 test files / 305 tests` 全绿（含需 `lib/` 构建产物的 `metadata.test.ts`）。
+- [x] Full suite passes — `51 test files / 306 tests` 全绿（含需 `lib/` 构建产物的 `metadata.test.ts`；合入后补 1 个 ESM `require` 源码卫生回归测试）。
 - [x] Zero skipped/pending/commented-out tests — 汇总无 skipped；`grep -c '\.skip('` 为 0。
 - [x] No test weakened or deleted without a REMOVED requirement —
   - 删除/合并的测试均对应**本 BREAKING change 移除的行为**：旧「设置迁移」4 个场景与 id 复用场景已从 spec 删除；`generation.test.ts`/`connection.test.ts` 与 canonical `line-generation`/`line-connection` 重复，合并到 canonical 文件；`cards-render.test.tsx` 中「清除 key / 平铺 baseUrl 设置」竞态 suite 针对已删除的旧连接表单与 legacy 平铺 API，整段移除（新的行卡片 UI 由 line-active-ui/line-silent-ui/access-ui 覆盖）；`access-auth`/`access-restart` 夹具从 legacy 固定引用迁移到 `lineCredentialRefs(lineId)` 后保留全部断言。
@@ -15,7 +15,7 @@
 
 ### Evidence
 - Final full-suite command: `vitest run --root packages/dsh-magpie-connector --fsModuleCachePath /tmp/vitest-cache-magpie`
-- Result summary: **Test Files 51 passed (51) · Tests 305 passed (305) · 0 failed · 0 skipped**
+- Result summary: **Test Files 51 passed (51) · Tests 306 passed (306) · 0 failed · 0 skipped**
 - Typecheck: `tsc -p tsconfig.json --noEmit` → OK；`tsc -p tsconfig.test.json --noEmit` → OK
 - Build: `tsc -p tsconfig.json && tsdown` → 成功；连续第二次 build 产物 sha256 无差异（幂等）
 - Package: `npm pack --dry-run` → `dsh-magpie-connector-0.2.0.tgz`，61 files / 503.2 kB packed（含新 README/CHANGELOG/internal-api/architecture；旧 `docs/settings.gif` 已删除不再发布）

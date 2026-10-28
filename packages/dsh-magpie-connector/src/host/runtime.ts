@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { credentialRef, type CredentialProvider, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import {
   MAX_LINES, SettingsStore, isAccessMode, normalizeBaseUrl, validateLoadedLines, validatePendingCredentials,
@@ -60,7 +60,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => !!value &
 const emptyGeneration = (): Generation => ({ id: 0, lineId: '', baseUrl: '', accessMode: 'direct', keyFingerprint: '', catalog: [], bgAbort: new AbortController() })
 const randomHexId = (existing: readonly string[]): string => {
   const taken = new Set(existing.map(id => id.toLowerCase()))
-  for (;;) { const id = require('node:crypto').randomBytes(4).toString('hex') as string; if (!taken.has(id)) return id }
+  for (;;) { const id = randomBytes(4).toString('hex'); if (!taken.has(id)) return id }
 }
 const CONNECTION_FIELDS: CredentialField[] = ['key', 'accessClientId', 'accessClientSecret']
 

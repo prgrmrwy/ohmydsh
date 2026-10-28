@@ -23,3 +23,17 @@ test('credentials mock can change an effective value with or without an event', 
   c.change('K2');expect(events).toBe(0);expect((await c.service.resolve(KEY_REF))?.value).toBe('K2')
   c.change('K3',true);expect(events).toBe(1);await c.service.unset(KEY_REF);expect(await c.service.resolve(KEY_REF)).toBeUndefined()
 })
+
+test('plugin source does not rely on CJS require (host runs ESM)', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const root = fileURLToPath(new URL('../src', import.meta.url))
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return walk(path)
+    return entry.name.endsWith('.ts') ? [path] : []
+  })
+  const offenders = walk(root).filter(file => /\brequire\s*\(/.test(readFileSync(file, 'utf8')))
+  expect(offenders).toEqual([])
+})
