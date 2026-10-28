@@ -790,6 +790,16 @@
 - **待查方向**: sync 在安装前扫描 profile 锁文件，发现 tarball 条目缺 `integrity` 时，给出一条首因提示（例如建议移走锁文件后重跑）；或者预检阶段报告全局 pnpm 的大版本，供人工判断。还要确认 pnpm 12 在锁文件重新生成后能否与 DSH 0.2.0-rc.2 正常配合。
 - **更新**: 2026-10-28 记录（pvedev 初始化时发现；当时用降级 pnpm、连续 build 的办法恢复，allowBuilds 部分另立 change `sync-pnpm-allow-builds`）。
 
+### [D014] 经 Cloudflare 访问 Magpie 时，长会话的生成请求被 524 边缘超时掐断
+- **状态**: 已定位，待修复
+- **优先级**: P1（长会话是主要使用方式；一旦触发，整轮不可用）
+- **现象**: 公网经 Cloudflare 访问家庭 Magpie 网关时，上下文约 40 万 token 的长会话请求稳定失败，报 `524 status code (no body)`。三次失败耗时 127.2s / 128.1s / 129.7s，正好卡在 Cloudflare 的 125 秒 Proxy Read Timeout 上；同期新会话正常。Claude 与 OpenCode Go 模型都会出现。失败后还会按 `Retry-After: 120` 继续重试，表现为连续十几分钟反复 524。
+- **根因（摘要）**: 524 由 Cloudflare 边缘发出，不是 Magpie 报错：边缘只在**源站返回响应头**前计时 125 秒，而 Magpie 要等上游响应头才写自己的响应头，于是这 125 秒实际覆盖了上游完整首字时间；长 prompt 的 prefill 必然超过它。计时在源站送出第一个字节时停止，因此「让源站立刻回答并心跳」可以绕开，而不必缩短响应时间。
+- **约束**: 只能经 Cloudflare 访问（家庭网络无公网入口）；不能靠缩小上下文窗口规避（长会话是常态）；Cloudflare 仅 Enterprise 可把 125 秒调大；OpenAI 兼容协议也不支持改轮询。
+- **详细排查与候选方案**: [cloudflare-524-long-requests.md](packages/dsh-magpie-connector/docs/cloudflare-524-long-requests.md)（含证据、机制、社区同类方案对比与推荐做法）
+- **未决**: 长请求体积约 1.5–2MB，是否叠加了 Cloudflare 的 30 秒 Proxy Write Timeout，需要量一次上行速率与请求体大小。
+- **更新**: 2026-10-28 记录并定位（读会话日志复现三次 125 秒级失败；查 Cloudflare 官方限制与 local-cli-bridge 同类先例）。修复不在本仓，倾向落在 home-substore 的 Cloudflare 入口侧。
+
 ---
 
 ## 待立项
