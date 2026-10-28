@@ -13,6 +13,7 @@ import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { buildReport, parseRecords, renderReport, type StoredRecord } from '../telemetry/report.js'
+import { evalFilter } from '../eval/filter.js'
 import { telemetryDir } from '../telemetry/sink.js'
 
 const USAGE = 'Usage: dsh-memex-recall-report [--days <n>] [--lib <library path>] [--scope <scope name>]'
@@ -92,8 +93,12 @@ export function main(argv: readonly string[], io: CliIo): number {
     .map(f => f.slice(0, -3))
     .sort()
 
+  let evalRegistry = ''
+  try { evalRegistry = readFileSync(join(dir, 'eval-registry.ndjson'), 'utf8') }
+  catch { io.err('Warning: eval registry unavailable; using eval-scope fallback only.\n') }
+  if (evalFilter(evalRegistry).warning) io.err('Warning: corrupt eval registry rows; valid identities and scope fallback retained.\n')
   const report = buildReport({
-    records,
+    records, evalRegistry,
     corruptLines: corrupt,
     scope: parsed.scope ?? basename(parsed.lib),
     cards,

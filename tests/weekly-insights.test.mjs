@@ -8,6 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, appen
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import zlib from 'node:zlib'
+import { createHash } from 'node:crypto'
 
 const SCRIPT = new URL('../skills/weekly-insights/scripts/insights.mjs', import.meta.url).pathname
 const hasZstd = spawnSync('zstd', ['--version']).status === 0 && typeof zlib.zstdCompressSync === 'function'
@@ -55,6 +56,21 @@ function fixture() {
   ])
   return { home, rootLog, recent }
 }
+
+test('eval registry and cwd roots are excluded recursively before folding or cache', { skip: !hasZstd && 'zstd unavailable' }, () => {
+  const { home, recent } = fixture()
+  const state = join(home, 'plugins', 'dsh-memex'); mkdirSync(state, { recursive: true })
+  const hash = createHash('sha256').update('dsh-memex:session:eval-root').digest('hex').slice(0, 16)
+  writeFileSync(join(state, 'eval-registry.ndjson'), JSON.stringify({ round: 'round-test', role: 'created', sessionHash: hash }) + '\n')
+  writeLog(home, 'eval', 'eval-root', [{ type: 'session', id: 'eval-root', cwd: '/w/ordinary', delegationDepth: 0 }, ...turn(0, recent, 'selftest')])
+  writeLog(home, 'eval', 'eval-child', [{ type: 'session', id: 'eval-child', cwd: '/w/ordinary', parentSession: 'eval-root', delegationDepth: 1 }, ...turn(0, recent, 'child')])
+  writeLog(home, 'eval', 'cwd-root', [{ type: 'session', id: 'cwd-root', cwd: '/home/u/.dsh-memex-eval-runs/mem/eval-12345678-1234-1234-1234-123456789abc/repo', delegationDepth: 0 }, ...turn(0, recent, 'selftest')])
+  const r = run(home, ['collect', '--days', '7'])
+  assert.equal(r.status, 0, r.err)
+  assert.equal(r.out.roots, 2)
+  const meta = JSON.parse(readFileSync(join(r.out.runDir, 'meta.json'), 'utf8'))
+  assert.ok(meta.sessions.every(s => !['eval-root', 'eval-child', 'cwd-root'].includes(s.sessionId)))
+})
 
 test('collect streams multi-frame logs, filters window/seed, folds subagents, honours --project', { skip: !hasZstd && 'zstd unavailable' }, () => {
   const { home } = fixture()

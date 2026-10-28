@@ -78,15 +78,17 @@ test('collab-kernel build copies convention markdown including empty-source case
 
 test('workspace CLI build permission step is Node-only and preserves POSIX executable bits',async t=>{
   const root=await fixture(t)
-  for(const [name,entry]of [['worktree-session','lib/cli.js'],['dsh-memex','lib/cli/recall-report.js']]){
+  for(const [name,entries]of [['worktree-session',['lib/cli.js']],['dsh-memex',['lib/cli/recall-report.js','lib/cli/eval-report.js']]]){
     const script=(await pkg(name)).scripts['build:host']
     assert.ok(script.startsWith('tsc -p tsconfig.json && '))
     const program=nodeInline(script.slice('tsc -p tsconfig.json && '.length))
-    const file=path.join(root,entry)
-    await mkdir(path.dirname(file),{recursive:true})
-    await writeFile(file,'#!/usr/bin/env node\n')
+    for(const entry of entries){
+      const file=path.join(root,entry)
+      await mkdir(path.dirname(file),{recursive:true})
+      await writeFile(file,'#!/usr/bin/env node\n')
+    }
     const result=spawnSync(process.execPath,['-e',program],{cwd:root,encoding:'utf8',shell:false})
     assert.equal(result.status,0,result.stderr)
-    if(process.platform!=='win32')assert.equal((await stat(file)).mode&0o111,0o111)
+    for(const entry of entries)if(process.platform!=='win32')assert.equal((await stat(path.join(root,entry))).mode&0o111,0o111)
   }
 })

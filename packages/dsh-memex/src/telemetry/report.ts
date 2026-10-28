@@ -1,3 +1,4 @@
+import { evalFilter } from '../eval/filter.js'
 import type { HitRecord, RecallRecord } from './record.js'
 
 /**
@@ -12,6 +13,7 @@ export type StoredRecord = Omit<Partial<RecallRecord>, 'hits'> & {
 }
 
 export interface ReportInput {
+  readonly evalRegistry?: string
   readonly records: readonly StoredRecord[]
   /** Lines that failed to parse; carried through so the report can say so. */
   readonly corruptLines: number
@@ -37,6 +39,8 @@ export interface Report {
   readonly unanchoredOnly: number
   readonly distinctCards: number
   readonly corruptLines: number
+  /** Recall records left out because they belong to registered or eval-scoped test traffic. */
+  readonly excludedEval: number
   /** Hits written before per-hit scope: counted as reached, owned by nobody. */
   readonly unattributedHits: number
   readonly han: { readonly total: number; readonly empty: number }
@@ -56,7 +60,10 @@ const DAY_MS = 86_400_000
  */
 export function buildReport(input: ReportInput): Report {
   const cutoff = input.now.getTime() - input.days * DAY_MS
+  const filter = evalFilter(input.evalRegistry ?? '')
+  let excludedEval = 0
   const records = input.records.filter(r => {
+    if (filter.exclude({ ...(r.session ? { sessionHash: r.session } : {}), ...(r.scope ? { scope: r.scope } : {}) })) { excludedEval += 1; return false }
     const at = typeof r.at === 'string' ? Date.parse(r.at) : Number.NaN
     return Number.isFinite(at) && at >= cutoff
   })
@@ -100,6 +107,7 @@ export function buildReport(input: ReportInput): Report {
     unanchoredOnly,
     distinctCards: counts.size,
     corruptLines: input.corruptLines,
+    excludedEval,
     unattributedHits,
     han: { total: han.length, empty: han.filter(r => r.hitCount === 0).length },
     scope: input.scope,
@@ -143,6 +151,7 @@ export function renderReport(report: Report, libPath: string): string {
   )
   out.push(`  distinct cards seen  ${report.distinctCards}`)
   if (report.corruptLines > 0) out.push(`  skipped bad lines    ${report.corruptLines}`)
+  if (report.excludedEval > 0) out.push(`  excluded eval recalls ${report.excludedEval}   <- registered selftest traffic or eval- scope, left out of every count above`)
   if (report.unattributedHits > 0) {
     out.push(
       `  hits without a scope ${report.unattributedHits}   <- written before per-hit scope; counted, but not attributed to a library`,

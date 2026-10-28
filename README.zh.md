@@ -217,6 +217,7 @@ tests/                   仓库级测试
 - [ws](skills/ws/SKILL.md) — 查看、提升并清理 Worktree Session 绑定。
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — 仅观察的路由提示：判断工作是否应走正式工作流。
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — 统计记忆召回情况，并列出从未被召回的卡片。
+- [memex-eval](skills/memex-eval/SKILL.md) — 运行或读取 memex 固定虚构自检；只检查评估链路，不是有效性评估。
 - [weekly-insights](skills/weekly-insights/SKILL.md) — 类似 Claude Code `/insights` 的本地会话复盘：流式读取会话日志，逐会话打标签并缓存，生成带改进建议的 HTML 报告。
 - [publish-dsh-plugin](skills/publish-dsh-plugin/SKILL.md) — 内聚自研插件发布 SOP：README、自动镜像、npm 与 GitHub Release、商店验收。
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — 把远端插件加入 manifest、build，并在重启前询问。
@@ -224,6 +225,7 @@ tests/                   仓库级测试
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
 - [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — 委派前调用 route_subagent 并显式传入模型与 effort；失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
+- [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
 - [dsh-collab-config](patches/dsh-collab-config.yml) — dsh-collab 配置补丁：邀请即授权，并声明 `pet-locus` 托管 channel，供 Pet Locus 以代理成员接入。
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 逐个列出 Magpie 各归属 route（`dsh-magpie-connector-<owner>`），使其不受本机出口门禁约束。

@@ -47,12 +47,17 @@ done
 root="$HOME/.dsh-memex"
 found=0
 status=0
+skipped=0
 for lib in "$root"/*/; do
   [[ -d "${lib}cards" ]] || continue
+  case "$(basename "$lib")" in eval-*) skipped=$((skipped + 1)); continue ;; esac
   found=1
   printf '\n===== %s =====\n' "$(basename "$lib")"
   "${cmd[@]}" "$@" --lib "${lib%/}" || status=$?
 done
+if [[ $skipped -gt 0 ]]; then
+  printf 'memex-recall-report: skipped %d eval libraries (selftest test traffic; pass --lib to inspect one)\n' "$skipped" >&2
+fi
 if [[ $found -eq 0 ]]; then
   printf 'memex-recall-report: no libraries with a cards/ directory under %s\n' "$root" >&2
   exit 1

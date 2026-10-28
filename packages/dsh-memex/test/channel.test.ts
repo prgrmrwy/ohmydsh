@@ -17,7 +17,7 @@ import { registerMemexChannel, type MemexChannelOptions } from '../src/host/chan
 import { createScopeResolver } from '../src/scope/resolver.js'
 import type { KernelResult, KernelRunOptions } from '../src/run/types.js'
 
-type Handler = (endpoint: string, params?: unknown) => Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>
+type Handler = (endpoint: string, params?: unknown, signal?: AbortSignal) => Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>
 
 interface Harness {
   readonly namespaceDir: string
@@ -28,6 +28,7 @@ interface Harness {
 }
 
 function harness(options: {
+  evalDispatch?: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>
   failHomes?: readonly string[]
   scopes?: MemexChannelOptions['scopes']
   workspaces?: ReadonlyArray<{ id: string; title: string; path: string }> | 'unavailable' | 'throws'
@@ -86,6 +87,7 @@ function harness(options: {
   }
   registerMemexChannel(ctx as never, {
     scopes,
+    ...(options.evalDispatch ? { evalDispatch: options.evalDispatch } : {}),
     config: () => ({ autoDerive: true, scopes: [{ name: 'acme', pathPrefixes: ['/work/acme'], publish: 'internal' }], bindings: [] }),
     runner,
     installedVersion: () => '0.4.1',
@@ -95,7 +97,7 @@ function harness(options: {
 
   const call = async (endpoint: string, params?: unknown) => {
     if (handler === undefined) throw new Error('channel was not registered')
-    return await handler(endpoint, params)
+    return await handler(endpoint, params, new AbortController().signal)
   }
   return {
     namespaceDir,
@@ -107,6 +109,16 @@ function harness(options: {
 }
 
 describe('memex settings channel', () => {
+  it('dispatches eval only through the existing authenticated handler and forwards carrier cancellation', async () => {
+    let count = 0
+    const h = harness({ evalDispatch: async (endpoint, payload, signal) => {
+      expect(endpoint).toBe('eval/status'); expect(payload).toEqual({ round: 'r' }); expect(signal).toBeInstanceOf(AbortSignal)
+      count++; return { state: 'ready' }
+    } })
+    expect(await h.call('eval/status', { round: 'r' })).toEqual({ ok: true, value: { state: 'ready' } })
+    expect(count).toBe(1)
+    expect((await harness().call('eval/status', { round: 'r' })).ok).toBe(false)
+  })
   it('reports every library with its source, declaration state and sampled sync', async () => {
     const h = harness()
     mkdirSync(join(h.namespaceDir, 'acme', 'cards'), { recursive: true })

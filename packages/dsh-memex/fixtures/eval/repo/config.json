@@ -1,0 +1,5 @@
+{
+  "project": "fictional-lantern",
+  "retryLimit": 4,
+  "leaseSeconds": 45
+}

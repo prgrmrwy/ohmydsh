@@ -169,6 +169,31 @@ function projectMatches(cwd, project) {
   return basename(cwd) === project || cwd.split('/').includes(project)
 }
 
+export function filterEvalSessions(scanned, registry) {
+  const hashes = new Set()
+  let warning = false
+  for (const line of registry.split('\n').filter(line => line.trim())) {
+    try {
+      const row = JSON.parse(line)
+      if (!row || typeof row.round !== 'string' || !['reserved', 'created', 'child'].includes(row.role) || !/^[a-f0-9]{16}$/.test(row.sessionHash)) throw new Error('invalid eval registry')
+      hashes.add(row.sessionHash)
+    } catch { warning = true }
+  }
+  const excluded = new Set()
+  for (const s of scanned) {
+    if (!s.header) continue
+    const hash = createHash('sha256').update(`dsh-memex:session:${s.header.id}`).digest('hex').slice(0, 16)
+    if (hashes.has(hash) || /(?:^|\/)\.dsh-memex-eval-runs\/(?:mem|nomem)\/eval-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/repo\/?$/.test(s.header.cwd ?? '')) excluded.add(s.header.id)
+  }
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const s of scanned) if (s.header && excluded.has(s.header.parentSession) && !excluded.has(s.header.id)) { excluded.add(s.header.id); changed = true }
+  }
+  const sessions = scanned.filter(s => !s.header || !excluded.has(s.header.id))
+  return { sessions, warning, excluded: scanned.length - sessions.length }
+}
+
 export async function collect(opts) {
   const days = Number(opts.days ?? 7)
   if (!Number.isFinite(days) || days <= 0) throw new Error('--days must be a positive number')
@@ -178,7 +203,7 @@ export async function collect(opts) {
   const sessionsDir = join(DSH_HOME, 'sessions')
   if (spawnSync('zstd', ['--version']).status !== 0) throw new Error('zstd CLI not found; install it (e.g. brew install zstd)')
   const files = listLogs(sessionsDir, sinceMs)
-  const scanned = []
+  let scanned = []
   const queue = [...files]
   await Promise.all(Array.from({ length: 6 }, async () => {
     while (queue.length) {
@@ -186,6 +211,13 @@ export async function collect(opts) {
       try { scanned.push(await scanLog(x, sinceMs)) } catch (err) { scanned.push({ file: x.f, error: String(err.message ?? err) }) }
     }
   }))
+  let registry = ''
+  try { registry = readFileSync(join(DSH_HOME, 'plugins', 'dsh-memex', 'eval-registry.ndjson'), 'utf8') }
+  catch { console.error('Warning: eval registry unavailable; using exact eval cwd fallback.') }
+  const filtered = filterEvalSessions(scanned, registry)
+  if (filtered.warning) console.error('Warning: malformed eval registry rows; retaining valid rows and cwd fallback.')
+  if (filtered.excluded > 0) console.error(`Excluded ${filtered.excluded} eval selftest sessions (registered roots, eval cwd and their descendants).`)
+  scanned = filtered.sessions
   const byId = new Map(scanned.filter((s) => s.header).map((s) => [s.header.id, s]))
   const rootOf = (s) => {
     let cur = s

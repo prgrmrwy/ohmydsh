@@ -1,0 +1,5 @@
+# A standing minimal Agent-plane composition. All Host capabilities remain global;
+# the eval bridge must mask inherited tools and enforce the final request gate.
+- name: '@deepseek-ai/dsh-agent-tool-presentation'
+  config:
+    mode: native

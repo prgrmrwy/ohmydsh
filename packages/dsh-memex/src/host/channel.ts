@@ -61,6 +61,7 @@ const MAX_COUNT_DEPTH = 4
 export type ChannelScopeService = Pick<ScopeService, 'resolve' | 'list' | 'resolveByName' | 'bindingFor' | 'accessFor'>
 
 export interface MemexChannelOptions {
+  readonly evalDispatch?: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<unknown>
   readonly scopes: ChannelScopeService
   /** Latest validated settings section; read per call so live edits show up. */
   readonly config: () => ScopeConfig
@@ -349,8 +350,12 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
     if (connection === undefined) return
     child.effect(() => connection.rpc.handle(
       MEMEX_CHANNEL,
-      async (endpoint: string, params?: unknown): Promise<RpcOk | RpcFail> => {
+      async (endpoint: string, params: unknown, signal: AbortSignal): Promise<RpcOk | RpcFail> => {
         try {
+          if (endpoint.startsWith('eval/') && options.evalDispatch) {
+            if (!(signal instanceof AbortSignal)) return fail('eval requires a carrier cancellation signal')
+            return { ok: true, value: await options.evalDispatch(endpoint, params, signal) }
+          }
           if (endpoint === MEMEX_STORES_ENDPOINT) return { ok: true, value: await buildStores() }
           if (endpoint === MEMEX_RESOLVE_ENDPOINT) return { ok: true, value: resolvePath(params) }
           if (endpoint === MEMEX_WORKSPACES_ENDPOINT) return { ok: true, value: listWorkspaces() }

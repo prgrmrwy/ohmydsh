@@ -217,6 +217,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [ws](skills/ws/SKILL.md) — Inspects, promotes and cleans Worktree Session bindings.
 - [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Observation-only routing hint on whether work should use a formal workflow.
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — Reports memory recall statistics and which cards are never recalled.
+- [memex-eval](skills/memex-eval/SKILL.md) — Runs or reads the fixed fictional memex selftest; a pipeline check, not an effectiveness evaluation.
 - [weekly-insights](skills/weekly-insights/SKILL.md) — Local session retrospective like Claude Code `/insights`: streams session logs, tags each session and caches the result, writes an HTML report with improvement prompts.
 - [publish-dsh-plugin](skills/publish-dsh-plugin/SKILL.md) — Owns the self-developed plugin publishing SOP: README, automatic mirrors, npm and GitHub Releases, and marketplace verification.
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
@@ -224,6 +225,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
 - [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
+- [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts each Magpie owner route (`dsh-magpie-connector-<owner>`) from the host egress gate, listed one by one by exact provider id.

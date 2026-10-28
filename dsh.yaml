@@ -205,6 +205,18 @@ customizations:
     enabled: true
     brief: memex 召回报告 skill(只读:空结果率/死卡/高频卡与建议)
     note: '自研 skill,change memex-recall-report-cli(2026-09-24 归档)。命令随 dsh-memex 包的 bin 分发,本 skill 只提供触发词、定位脚本与解读纪律。只读:读本机召回遥测与卡片文件名,不写文件、不联网、不改卡片。升级复核:dsh-memex 遥测格式或 bin 变化时回归 report.sh。移除:enabled:false → dsh build。'
+  # 自研:dsh-memex 固定虚构自检的裁判 preset 与说明 skill(change dsh-memex-evaluation-harness)
+  - id: memex-eval-judge
+    type: preset
+    version: 0.1.0
+    enabled: true
+    brief: memex 自检裁判专用最小 preset(仅 native 呈现,无编码工具)
+    note: '自研 preset,change dsh-memex-evaluation-harness。只含 dsh-agent-tool-presentation native 一项,不加载 bash/read/skill/subagent/AGENTS;裁判父由 Host 桥按此 id 挂载,另有首请求门禁与执行守卫兜底。仅供固定虚构自检使用,日常会话不选用。升级复核:官方 preset 组合或 subagent 继承语义变化时回归 eval-judge-runtime 测试。移除:enabled:false → dsh build。'
+  - id: memex-eval
+    type: skill
+    enabled: true
+    brief: memex 固定虚构自检 skill(运行需用户同意;读报告只读)
+    note: '自研 skill,change dsh-memex-evaluation-harness。固定三题×有/无记忆六条件,不接受自定义 suite;工具自检,不能用于有效性评估。运行会调用真实模型、可能改全局默认模型(不自动恢复),须先取得用户同意;读报告命令 dsh-memex-eval-report 只读。升级复核:dsh-memex 自检报告或 bin 变化时同步 SKILL.md。移除:enabled:false → dsh build。'
   # 自研 skill:会话洞察(对标 Claude /insights),替代 dsh-session-insights(其 64 MiB 单次上限读不了本机会话量)
   - id: weekly-insights
     type: skill

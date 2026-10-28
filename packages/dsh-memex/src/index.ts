@@ -11,6 +11,7 @@ import { registerMemexTools } from './tools/index.js'
 import { registerMemexLifecycle } from './lifecycle/index.js'
 import { registerMemexSkills } from './lifecycle/skills.js'
 import { registerMemexChannel } from './host/channel.js'
+import { createHostEvalDispatch } from './eval/host-plugin.js'
 import { createBrowseRegistry } from './run/browse-registry.js'
 import { parseOrgProfile, type OrgProfileInput } from './org.js'
 import { Config, guardConfigCandidates, parseConfig, readScopeConfig, validateMemexSettings } from './scope/settings.js'
@@ -73,6 +74,7 @@ export function apply(ctx: Context, config: Config = parseConfig({})): void {
       },
       browse,
       config: runtime.config,
+      evalDispatch: createHostEvalDispatch(child, undefined, { scopes: { resolve: scopes.resolve } }),
       // The workspace registry is an optional peer: its absence is reported, not
       // thrown, so the page degrades to the configuration-only shape.
       onWarn: (message: string) => { child.logger('dsh-memex').warn(message) },

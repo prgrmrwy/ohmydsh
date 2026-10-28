@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileS
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { sessionIdentityHash } from '../src/eval/filter.js'
 import { main } from '../src/cli/recall-report.js'
-import { buildReport, parseRecords, type StoredRecord } from '../src/telemetry/report.js'
+import { buildReport, parseRecords, renderReport, type StoredRecord } from '../src/telemetry/report.js'
 
 const NOW = new Date('2026-09-24T12:00:00Z')
 const query = { tokens: 2, han: true, segmented: true, semantic: false }
@@ -17,6 +18,14 @@ function report(records: StoredRecord[], cards: string[], scope = 'personal') {
 }
 
 describe('buildReport', () => {
+  it('excludes registered eval telemetry hashes without rehashing and legacy eval scopes', () => {
+    const result = buildReport({ records: [
+      { ...rec([]), session: sessionIdentityHash('eval') },
+      { ...rec([]), scope: 'eval-123-repo' },
+      { ...rec([]), session: sessionIdentityHash('daily') },
+    ], evalRegistry: JSON.stringify({ round: 'round-test', role: 'created', sessionHash: sessionIdentityHash('eval') }), corruptLines: 0, scope: 'personal', cards: [], days: 14, now: NOW })
+    expect(result.recalls).toBe(1)
+  })
   it('counts empty recalls and recalls whose hits are all unanchored', () => {
     const r = report(
       [
@@ -42,6 +51,16 @@ describe('buildReport', () => {
     expect(r.recalls).toBe(1)
   })
 
+  it('EVAL-053: 跨库命中不被误归属', () => {
+    const r = report([rec([{ slug: 'retry-limit', scope: 'other-lib', anchored: true }])], ['retry-limit'])
+    expect(r.neverRecalled).toEqual(['retry-limit'])
+  })
+  it('EVAL-054: 旧记录被计入但不归属', () => {
+    const r = report([rec([{ slug: 'legacy-card', anchored: true } as never])], ['legacy-card', 'untouched'])
+    expect(r.neverRecalled).toEqual(['untouched'])
+    expect(r.unattributedHits).toBe(1)
+    expect(renderReport(r, '/lib')).toContain('hits without a scope 1')
+  })
   it('reports a card as never recalled when only its namesake in another library was returned', () => {
     // The old script matched on slug alone, so this card looked alive.
     const r = report([rec([{ slug: 'shared-name', scope: 'other-lib', anchored: true }])], ['shared-name', 'x'])
@@ -129,6 +148,18 @@ describe('dsh-memex-recall-report', () => {
     expect(out).not.toContain('    alive')
   })
 
+  it('reads the registry in the real CLI path and keeps files unchanged', () => {
+    const { home, dir, lib } = fixture()
+    const lines = [rec([]), { ...rec([]), session: sessionIdentityHash('registered-eval') }]
+    writeFileSync(join(dir, 'recall-2026-09.ndjson'), lines.map(row => JSON.stringify(row)).join('\n') + '\n')
+    writeFileSync(join(dir, 'eval-registry.ndjson'), JSON.stringify({ round: 'round-test', role: 'created', sessionHash: sessionIdentityHash('registered-eval') }) + '\n')
+    const before = snapshot(home)
+    const result = run(['--lib', lib], { DSH_HOME: home })
+    expect(result.out).toContain('recalls              1')
+    expect(result.err).toBe('')
+    expect(snapshot(home)).toEqual(before)
+  })
+
   it('derives the scope from the library directory name by default', () => {
     const { home, lib } = fixture()
     const { out } = run(['--lib', lib], { DSH_HOME: home })
@@ -142,6 +173,47 @@ describe('dsh-memex-recall-report', () => {
     run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: home })
     expect(snapshot(home)).toEqual(before.t)
     expect(snapshot(lib)).toEqual(before.l)
+  })
+
+  it('EVAL-051: 部署后可在本机运行', () => {
+    const { home, lib } = fixture()
+    const other = mkdtempSync(join(tmpdir(), 'dsh-memex-report-other-'))
+    expect(run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: home }).out).toContain('recalls              2')
+    expect(run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: other }).out).toContain(`No telemetry yet at ${join(other, 'plugins', 'dsh-memex')}`)
+  })
+
+  it('EVAL-052: 运行不改变任何文件', () => {
+    const { home, dir, lib } = fixture()
+    writeFileSync(join(dir, 'eval-registry.ndjson'), JSON.stringify({ round: 'round-test', role: 'created', sessionHash: sessionIdentityHash('x') }) + '\n')
+    const before = { telemetry: snapshot(dir), registry: readFileSync(join(dir, 'eval-registry.ndjson'), 'utf8'), library: snapshot(lib) }
+    expect(run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: home }).code).toBe(0)
+    expect(snapshot(dir)).toEqual(before.telemetry)
+    expect(readFileSync(join(dir, 'eval-registry.ndjson'), 'utf8')).toBe(before.registry)
+    expect(snapshot(lib)).toEqual(before.library)
+  })
+
+  it('EVAL-055: 默认排除已登记的测试会话', () => {
+    const { home, dir, lib } = fixture()
+    const rows = [
+      ...Array.from({ length: 50 }, () => ({ ...rec([]), session: sessionIdentityHash('daily') })),
+      ...Array.from({ length: 30 }, () => ({ ...rec([]), session: sessionIdentityHash('registered-eval') })),
+    ]
+    writeFileSync(join(dir, 'recall-2026-09.ndjson'), rows.map(row => JSON.stringify(row)).join('\n') + '\n')
+    writeFileSync(join(dir, 'eval-registry.ndjson'), JSON.stringify({ round: 'round-test', role: 'created', sessionHash: sessionIdentityHash('registered-eval') }) + '\n')
+    const { code, out } = run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: home })
+    expect(code).toBe(0)
+    expect(out).toContain('recalls              50')
+    expect(out).toContain('excluded eval recalls 30')
+  })
+
+  it('EVAL-056: 登记缺失时按 scope 名排除', () => {
+    const { home, dir, lib } = fixture()
+    const rows = [...Array.from({ length: 5 }, () => ({ ...rec([]), scope: 'eval-nexus' })), rec([])]
+    writeFileSync(join(dir, 'recall-2026-09.ndjson'), rows.map(row => JSON.stringify(row)).join('\n') + '\n')
+    const { code, out } = run(['--lib', lib, '--scope', 'personal'], { DSH_HOME: home })
+    expect(code).toBe(0)
+    expect(out).toContain('recalls              1')
+    expect(out).toContain('excluded eval recalls 5')
   })
 
   it('does not create the telemetry directory when it is absent', () => {
