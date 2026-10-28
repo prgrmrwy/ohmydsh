@@ -782,6 +782,14 @@
 - **待查方向**: 在 `agent/request` waterfall 里拿到最终 config 时就判定应用（那里已经有 `reasoningEffort` 和 provider/model），不再等 `request/header`；或者在没有新请求头时，用 `session.requestHeader()` 的当前值确认。修复前先补一个“相邻两回合同 effort，第二回合仍有绑定”的集成测试，并确认会话日志里没有请求头是宿主“配置未变则不重写”的行为。
 - **更新**: 2026-10-26 记录（讨论 AUTO 隐式反馈时发现）。同日核实宿主侧根因：`dsh-agent-loop` 的 `buildRequest` 只在首个请求、配置变化或新请求序列时写 `request/header`；已在正式宿主 harness 里写出复现测试（第二个同 depth 回合 `label` 返回 `{}`），修复并入上述 change。
 
+### [D013] sync 不检查 profile 锁文件和 pnpm 版本，旧锁文件遇上更严格的 pnpm 时，每个插件都会安装失败
+- **状态**: 待排查
+- **优先级**: P2
+- **现象**: pvedev 的全局 pnpm 升到 12.15.0 后，`dsh build` 的每个插件安装都报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`（一次运行 27 次）。原因是 profile `pnpm-lock.yaml`（10-14 由旧版 pnpm 生成）中 URL tarball 依赖 `dsh-cockpit-bridge` 缺少 `integrity` 字段。降到 11.24.0 后，前几次安装照样报这个错，直到某次安装重写了锁文件、补上 `integrity` 才恢复。pnpm 每次安装前都会先校验整份锁文件，所以一个坏条目会被放大成全部失败。
+- **约束**: `openspec/specs/repo-layout/spec.md` 的"仓库初始化按最低版本准则校验 Node/npm 工具链"不允许在 `engines` 之外锁定包管理器的精确版本，所以最多只能提示，不能强制。
+- **待查方向**: sync 在安装前扫描 profile 锁文件，发现 tarball 条目缺 `integrity` 时，给出一条首因提示（例如建议移走锁文件后重跑）；或者预检阶段报告全局 pnpm 的大版本，供人工判断。还要确认 pnpm 12 在锁文件重新生成后能否与 DSH 0.2.0-rc.2 正常配合。
+- **更新**: 2026-10-28 记录（pvedev 初始化时发现；当时用降级 pnpm、连续 build 的办法恢复，allowBuilds 部分另立 change `sync-pnpm-allow-builds`）。
+
 ---
 
 ## 待立项

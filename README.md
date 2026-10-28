@@ -168,7 +168,6 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 
 ### Third-party packages
 
-- [cost-meter](https://github.com/Han-1413141/dsh-cost-meter) — Shows per-session cost statistics in the web client.
 - [archify-dsh](https://github.com/tt-a1i/archify) — Generates interactive architecture, sequence and data-flow diagrams from a conversation.
 - [llm-subscriptions](https://github.com/V1ki/dsh-plugin-subscriptions) — Adds subscription-based providers (Codex, Claude, Grok, Copilot) switchable from the input box.
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — Switches the conversation width between five tiers.

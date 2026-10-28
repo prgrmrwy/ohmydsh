@@ -168,7 +168,6 @@ tests/                   仓库级测试
 
 ### 第三方 package
 
-- [cost-meter](https://github.com/Han-1413141/dsh-cost-meter) — 在 Web 客户端显示每个会话的费用统计。
 - [archify-dsh](https://github.com/tt-a1i/archify) — 在对话中生成可交互的架构图、时序图与数据流图。
 - [llm-subscriptions](https://github.com/V1ki/dsh-plugin-subscriptions) — 增加订阅制 provider（Codex、Claude、Grok、Copilot），可在输入框切换。
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — 在五档之间切换对话区宽度。
