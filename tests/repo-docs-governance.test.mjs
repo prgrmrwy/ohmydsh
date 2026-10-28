@@ -405,7 +405,9 @@ function linksWithinHead(file, text, target) {
 /** README pairing problems: missing zh twin, missing mutual link, wrong language ratio. */
 function readmePairViolations(files, readFile) {
   const problems = []
-  const readmes = files.filter((file) => /(^|\/)README\.md$/.test(file) && !file.startsWith('openspec/') && !file.includes('node_modules/'))
+  // packages/*/fixtures/** README files are hash-pinned test data (e.g. the dsh-memex selftest
+  // repository), not documentation: editing or pairing them would change the frozen fixture.
+  const readmes = files.filter((file) => /(^|\/)README\.md$/.test(file) && !file.startsWith('openspec/') && !file.includes('node_modules/') && !/^packages\/[^/]+\/fixtures\//.test(file))
   for (const en of readmes) {
     const dir = path.posix.dirname(en)
     const zh = dir === '.' ? 'README.zh.md' : `${dir}/README.zh.md`
@@ -438,6 +440,12 @@ test('README without zh pair is reported', () => {
   const problems = readmePairViolations(files, (file) => texts[file] ?? '')
   assert.equal(problems.length, 1)
   assert.match(problems[0], /packages\/new-plugin: missing tracked README\.zh\.md/)
+})
+
+test('hash-pinned fixture data READMEs are exempt, but a package README still needs its zh pair', () => {
+  const files = ['packages/p/fixtures/eval/repo/README.md', 'packages/p/README.md']
+  const problems = readmePairViolations(files, () => '')
+  assert.deepEqual(problems, ['packages/p: missing tracked README.zh.md next to packages/p/README.md'])
 })
 
 test('a pair that does not link each other within 15 lines is reported', () => {

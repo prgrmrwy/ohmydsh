@@ -58,11 +58,11 @@
 
 ## 9. 文档、受管配置和发布接线
 
-> 9.3 未勾：仓库级“每个 markdown 链接指向已跟踪路径”检查要求新增的 skills/memex-eval 与 presets/memex-eval-judge 已被 git 跟踪；用户未要求提交，故未 git add。已用 intent-to-add 临时验证该失败仅因未跟踪（随即撤销）。提交后复跑即可勾选。selftest CLI 尚无 bin 与真实 Host 传输（属 3.2 managed runner 接线）。
+> 9.3 已于用户同意提交后复跑仓库检查并勾选。selftest CLI 仍无可执行 bin 与真实 Host 传输：Host 只接受浏览器 launch token 换取的签名 cookie，CLI 如何合法取得会话凭证须在部署验收时与用户确认，不绕过 Connection 认证。
 
 - [x] 9.1 写失败测试 EVAL-049–050 及打包/配置检查：长期原则未删且去向如实、CLI 可执行与固定数据随包、judge preset/目录声明及 skill 的 managed wiring。
 - [x] 9.2 接入 bin、fixture 发布资源、所需精确兼容依赖、judge preset 和 memex-eval skill；仅修改 manifest 真相源，保留未迁移方法论，补自检用途/风险/手动恢复说明。
-- [ ] 9.3 重构；运行类型、构建、打包资源检查、方法论与 managed-assets 回归。不得在此任务顺带部署或重启日常 GUI。
+- [x] 9.3 重构；运行类型、构建、打包资源检查、方法论与 managed-assets 回归。不得在此任务顺带部署或重启日常 GUI。
 
 ## 10. 验证与交付（需单独 live/部署授权）
 
