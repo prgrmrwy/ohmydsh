@@ -16,4 +16,9 @@ test('malformed optional numeric metadata is omitted and repeated efforts do not
   expect(model?.info.context).toBeUndefined()
   expect(model?.info.defaultMaxTokens).toBeUndefined()
 })
+test('spec Scenario "非法容量值视为缺失"', () => {
+  const result = mapCatalog({ data: [0, -1, 2.5, '1000', 9007199254740992].map((v, i) => ({ id: `m${i}`, context_window: v, max_output_tokens: v })) })
+  expect(result.map(m => m.info.id)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4'])
+  for (const m of result) { expect(m.info).not.toHaveProperty('context'); expect(m.info).not.toHaveProperty('defaultMaxTokens') }
+})
 test('spec Scenario "畸形条目被丢弃"', () => expect(mapCatalog({ data: [{ name: 'bad' }, { id: 'a' }, { id: 'b' }] })).toHaveLength(2))

@@ -388,10 +388,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.1.1
+    version: 0.1.2
     enabled: true
-    brief: 接入自托管 Magpie 网关；按上游 provider 分组，含用量卡片与 Cloudflare Access
-    note: '自研 MIT,change add-dsh-magpie-plugin + magpie-connector-rename。单 route dsh-magpie-connector(原 dsh-magpie),pi-ai 处理 Responses/Chat;设置页按网关 owned_by 分组展示模型与只读用量卡片,支持默认 effort、会话快速档与 Cloudflare Access。信任面:读取 DSH credentials MAGPIE_API_KEY;地址与偏好单独存盘,设置接口不回显 key;私有 undici dispatcher 只直连配置 baseUrl 的白名单 API,拒绝重定向,不调用 Magpie GUI 管理接口。旧会话保存的 dsh-magpie route 需手动重选模型;AUTO 与出口守卫已同步新 route ID;凭据引用不变。npm 名 dsh-magpie-connector。移除:enabled:false → dsh build → 重启;凭据与设置保留。'
+    brief: 接入自托管 Magpie 网关；按上游 provider 分组，含用量卡片、默认输出预算与 Cloudflare Access
+    note: '自研 MIT,change add-dsh-magpie-plugin + magpie-connector-rename + magpie-default-output-budget。单 route dsh-magpie-connector,pi-ai 处理 Responses/Chat;设置页按网关 owned_by 分组展示模型与只读用量卡片,支持默认 effort、会话快速档与 Cloudflare Access。0.1.2 起 max_output_tokens 仅作 pi-ai 能力上限,DSH 默认预算改为 min(最大输出,窗口/4,窗口/2−65536) 预留压缩空间;DSH 升级复核 compaction-basic 默认 headroom/threshold/retain(见 catalog.ts 注释)。信任面:读取 credentials MAGPIE_API_KEY,设置接口不回显 key,私有 undici 只直连白名单 API 且拒绝重定向。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   - id: magpie-display-name-shim

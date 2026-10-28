@@ -164,7 +164,7 @@ export class MagpieAdapter extends LlmAdapter {
       if(!op.key||!op.gen.baseUrl)throw new Error('MAGPIE_NOT_CONFIGURED')
       if(options.stop?.length)throw new Error('MAGPIE_STOP_UNSUPPORTED')
       const api=entry.nativeEndpoints.includes('/v1/responses')?'openai-responses':'openai-completions'
-      const model:Model<'openai-completions'|'openai-responses'>={id:entry.info.id,name:entry.info.name,provider:'dsh-magpie-connector',api,baseUrl:op.gen.baseUrl,reasoning:entry.efforts.length>0,thinkingLevelMap:{off:null,...Object.fromEntries(entry.efforts.map(e=>[e,e]))},input:entry.info.inputModalities?.includes('image')?['text','image']:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:entry.info.context?.contextWindow??128000,maxTokens:entry.info.defaultMaxTokens??16384,
+      const model:Model<'openai-completions'|'openai-responses'>={id:entry.info.id,name:entry.info.name,provider:'dsh-magpie-connector',api,baseUrl:op.gen.baseUrl,reasoning:entry.efforts.length>0,thinkingLevelMap:{off:null,...Object.fromEntries(entry.efforts.map(e=>[e,e]))},input:entry.info.inputModalities?.includes('image')?['text','image']:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:entry.info.context?.contextWindow??128000,maxTokens:entry.outputLimit??16384,
         compat:{supportsFinishReason:true,thinkingFormat:'openai',maxTokensField:'max_completion_tokens',...(api==='openai-responses'?{supportsStrictMode:true}:{})} as never}
       const context=await this.context(options,model)
       const fast=!!options.sessionId&&this.isFast(options.sessionId)&&entry.serviceTiers.includes('priority')

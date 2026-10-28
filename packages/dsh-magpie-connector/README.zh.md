@@ -63,6 +63,7 @@ dsh plugin --profile web add dsh-magpie-connector
 ### 需要知道的行为
 
 - **失败交给 DSH 重试，插件不重放请求。** 适配器声明与 `dsh-plugin-subscriptions` 相同的 `llm-retry` 策略（最多 10 次，1 秒起指数退避至 60 秒，±20% 抖动，429 时遵守 `Retry-After`）。`TIMEOUT`、`TRANSPORT`、`SERVER`、`RATE_LIMIT`、`EMPTY_RESPONSE` 会重试；401/403、额度用尽、上下文超限与其它 4xx 不重试。
+- **默认输出预算为上下文压缩预留空间。** 网关的 `max_output_tokens` 是模型能力上限，不直接作为每次请求的默认预算。交给 DSH 的默认预算是 `min(能力上限, max(1, 窗口/4, 窗口/2 − 65536))`，给 DSH 的上下文压缩留出空间；显式设置的 `maxTokens` 不受影响。上下文窗口小于 104,026 token 的模型仍按同一公式计算，但不保证通过 DSH 的压缩检查。
 - **只有持续静默才会结束流。** 响应头、SSE 事件和心跳都算有数据；连续 300 秒没有任何数据才以 `TIMEOUT` 结束（消息含 `MAGPIE_STREAM_TIMEOUT`）。只要网关还在发心跳，长时间推理不会被截断。
 - **更改连接不会中止正在进行的生成。** 新地址或新 key 会立即隐藏旧目录与旧卡片，但已 prepare 或正在运行的生成会用捕获到的旧地址与 key 跑完。用户取消与插件卸载仍会中止它们。
 - **传输边界刻意收窄。** host 请求经私有 `undici` dispatcher 直连配置的网关，不经过全局代理 dispatcher；拒绝重定向；只允许 `GET /models`、`POST /responses`、`POST /chat/completions`、`GET /magpie/quotas/cards`、`POST /magpie/quotas/refresh`；从不调用 Magpie GUI 的 `/api/*` 管理接口。厂商出站代理在 Magpie 侧配置。
