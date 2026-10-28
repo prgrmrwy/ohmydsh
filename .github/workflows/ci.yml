@@ -60,7 +60,7 @@ jobs:
           Copy-Item "$env:SystemRoot\System32\cmd.exe" $tools
           Copy-Item "$env:SystemRoot\System32\where.exe" $tools
           $nodeDir = Split-Path (Get-Command node.exe).Source
-          $gitDir = Split-Path (Get-Command git.exe).Source
+          $gitDir = Join-Path $env:ProgramFiles 'Git\cmd'
           $env:PATH = "$tools;$nodeDir;$gitDir;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
           if (Get-Command bash,sh -ErrorAction SilentlyContinue) { throw 'Bash leaked into native lane' }
           node scripts/test.mjs
