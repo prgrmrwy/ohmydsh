@@ -1,8 +1,9 @@
 ## Verification Results
 
 ### Task Completion
-- [x] 除 6.6 外全部任务标记 `[x]`（20/21）
-- Remaining open tasks: **6.6** —— 需要在用户重启 DSH Host 后，对运行中的 0.1.2 再查一次 `/models` 并确认三个受影响模型的 `defaultMaxTokens`。重启是用户决定的操作，本轮未执行；其代码层面的等价校验已在「Non-executable checks run」中完成，见下文。
+- [x] 全部 21 个任务标记 `[x]`（21/21）
+- Remaining open tasks: none
+- 6.6 完成记录（2026-10-28 19:09 后）：用户重启 Host 后确认进程 PID 2497219 于 19:09:23 启动（晚于 16:31 的部署产物），UI `/` 返回 401（服务在线、需鉴权）。用**部署产物** `~/.dsh/profiles/web/node_modules/dsh-magpie-connector/lib/host/catalog.js` 对真实 `GET /models` 做只读映射：`codex/gpt-6-astra`、`codex/gpt-6-luna` 的 `defaultMaxTokens` 均为 70464，`opencode-go/minimax-m3.1-flash` 为 434464，全部符合预期。
 
 ### TDD Integrity
 - [x] Every test-plan.md entry exists as a real test（13 行全部有具名 vitest 用例）
@@ -37,12 +38,13 @@
 ### Change Delivery
 
 - Commit range：`48cf1302..b69a56c1`（`48cf1302` 提交 D014 排查文档；`b69a56c1` 提交本 change 的实现、测试、文档、manifest 与全部 openspec 产物）
-- 补充提交：本 verify.md 的交付状态记录随下一次 `chore(openspec)` 提交落库。
+- 补充提交：`529bbd53` 记录交付 commit；6.6 完成后的 verify/tasks 更新随 `chore(openspec)` 提交落库。
 - 提交人：prgrmrwy。发起提交的是用户指令（「先提交吧」），不是为满足本产物而自行提交。
 
 ## Overall Decision
 
 DECISION: PASS_WITH_WARNINGS
 
-- ✅ 实现、测试、文档、manifest、build 幂等与在线只读校验均符合规范。
-- ⚠️ 两项待办：① 6.6 需用户重启 Host 后用运行中的 0.1.2 复验（当前 Host 仍是 0.1.1）；② 仓库级 `npm test` 有 1 个与本次无关的环境性失败（本机缺 `zstd` 二进制），建议装 `zstd` 或跳过该用例的机器级依赖。
+- ✅ 21/21 任务完成；实现、测试、文档、manifest、build 幂等、重启后部署产物在线只读校验（70464 / 70464 / 434464）均符合规范。
+- ⚠️ 唯一遗留：仓库级 `npm test` 有 1 个与本次无关的环境性失败——`tests/jev-readiness.test.mjs` 的 fixture 依赖 `zstd` CLI，本机未安装。建议装 `zstd` 或让该用例在缺依赖时 skip；不影响本 change 的验收。
+

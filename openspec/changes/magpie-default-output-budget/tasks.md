@@ -35,4 +35,4 @@
 - [x] 6.3 包内 `npm run typecheck`、`npm test`、`npm run build`；仓库 `npm test`、`npm run check:artifacts`
 - [x] 6.4 `openspec validate magpie-default-output-budget --strict`
 - [x] 6.5 `dsh build`，连续第二次无变化；询问用户是否重启 DSH（不自行重启）
-- [ ] 6.6 重启后只读查询 `/models`，确认三个受影响模型的 `defaultMaxTokens` 为 70464 / 70464 / 434464；真实生成冒烟按 design Open Questions 另行征得同意
+- [x] 6.6 重启后只读查询 `/models`，确认三个受影响模型的 `defaultMaxTokens` 为 70464 / 70464 / 434464；真实生成冒烟按 design Open Questions 另行征得同意
