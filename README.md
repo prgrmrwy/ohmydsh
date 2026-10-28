@@ -226,6 +226,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
+- [memex-eval-config](patches/memex-eval-config.yml) — Adds fixed selftest workspace closures without replacing user scope or workspace settings.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
 - [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts each Magpie owner route (`dsh-magpie-connector-<owner>`) from the host egress gate, listed one by one by exact provider id.

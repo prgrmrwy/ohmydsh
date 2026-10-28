@@ -194,6 +194,7 @@ export const Config = Schema.object({
   // not volatile — changing them remounts the plugin, and the form never shows them.
   internalHosts: Schema.array(Schema.string()),
   internalDomains: Schema.array(Schema.string()),
+  evalSelftest: Schema.boolean().default(false),
   autoDerive: fields.autoDerive.volatile(),
   scopes: fields.scopes.volatile(),
   bindings: fields.bindings.volatile(),
@@ -204,6 +205,7 @@ interface Ref<T> { get(): T }
 export interface Config {
   readonly internalHosts?: readonly string[]
   readonly internalDomains?: readonly string[]
+  readonly evalSelftest?: boolean
   readonly autoDerive: Ref<boolean>
   readonly scopes: Ref<ScopeConfig['scopes']>
   readonly bindings: Ref<ScopeConfig['bindings']>

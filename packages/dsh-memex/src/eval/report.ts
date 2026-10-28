@@ -3,10 +3,11 @@ import { summarizePlan, type ItemJudgements, type Counts } from './plan-scoring.
 import type { ExecutionAudit } from './audit.js'
 import type { EvidenceSelection } from './selection.js'
 import type { BoundaryHit } from './boundary.js'
-export interface ReportDiagnostics { contaminated?: Record<string, readonly BoundaryHit[]>; selections?: Record<string, EvidenceSelection['coverage']>; defaultModelNotice?: string; executions?: Record<string, ExecutionAudit>; judges?: { calls: number; inputTokens: number; outputTokens: number } }
+import type { FrozenProgramEvidence } from './program-evidence.js'
+export interface ReportDiagnostics { programs?: Record<string, FrozenProgramEvidence>; contaminated?: Record<string, readonly BoundaryHit[]>; selections?: Record<string, EvidenceSelection['coverage']>; defaultModelNotice?: string; executions?: Record<string, ExecutionAudit>; judges?: { calls: number; inputTokens: number; outputTokens: number } }
 export function renderSelftestReport(plan: FixedRound, judged: Record<string, ItemJudgements>, diagnostics?: ReportDiagnostics): { markdown: string; exitCode: number } {
   const ids = new Set(plan.items.map(item => item.id))
-  for (const id of [...Object.keys(diagnostics?.executions ?? {}), ...Object.keys(diagnostics?.selections ?? {}), ...Object.keys(diagnostics?.contaminated ?? {})]) if (!ids.has(id)) throw new Error('Diagnostic item outside frozen plan')
+  for (const id of [...Object.keys(diagnostics?.programs ?? {}), ...Object.keys(diagnostics?.executions ?? {}), ...Object.keys(diagnostics?.selections ?? {}), ...Object.keys(diagnostics?.contaminated ?? {})]) if (!ids.has(id)) throw new Error('Diagnostic item outside frozen plan')
   const polluted = new Set(Object.entries(diagnostics?.contaminated ?? {}).filter(([, hits]) => hits.length).map(([id]) => id))
   // contaminated items never enter judgement: their semantic results are dropped and stay unknown
   const outcomes = Object.fromEntries(Object.entries(judged).filter(([id]) => !polluted.has(id)))
@@ -20,11 +21,11 @@ export function renderSelftestReport(plan: FixedRound, judged: Record<string, It
   const rawCosts = diagnostics ? [
     '## 原始成本（递归后代，seed 去重）', '',
     '非 valid 行的数值仅为已观测小计，不是完整成本；缺失或溢出的用量不能当零。', '',
-    '| 条件 | 审计 | 会话数 | 输入合计 | 未缓存输入 | cache read | cache write | 输出 |',
-    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| 条件 | 审计 | 会话数 | 输入合计 | 未缓存输入 | cache read | cache write | 输出 | 工具调用 |',
+    '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
     ...plan.items.map(item => {
       const audit = diagnostics.executions?.[item.id], c = audit?.tokenCategories
-      return `| ${item.id} | ${audit?.status ?? 'unknown'} | ${audit?.sessions.length ?? 'unknown'} | ${audit?.inputTokens ?? 'unknown'} | ${c?.uncachedInput ?? 'unknown'} | ${c?.cacheRead ?? 'unknown'} | ${c?.cacheWrite ?? 'unknown'} | ${audit?.outputTokens ?? 'unknown'} |`
+      return `| ${item.id} | ${audit?.status ?? 'unknown'} | ${audit?.sessions.length ?? 'unknown'} | ${audit?.inputTokens ?? 'unknown'} | ${c?.uncachedInput ?? 'unknown'} | ${c?.cacheRead ?? 'unknown'} | ${c?.cacheWrite ?? 'unknown'} | ${audit?.outputTokens ?? 'unknown'} | ${audit?.toolCalls ?? 'unknown'} |`
     }), '',
     '## 自发后代（预算外，软监测上限而非硬屏障）', '',
     '计划预算只覆盖固定会话与裁判请求；被测会话自发创建的后代数量与成本无法预先限定，此处只做事后统计。', '',
@@ -45,7 +46,7 @@ export function renderSelftestReport(plan: FixedRound, judged: Record<string, It
   const lines = [
     '# Memex 固定虚构自检', '', `Round: ${plan.id} (${plan.version})`, '',
     '仅检查链路；裁判未校准，不代表 Memex 效果。不计算收益、区间或显著性。引文匹配只校验出处，不证明语义。', '',
-    '测试根会话已归档并静止，未销毁；会话历史保留，日常会话不受影响。', '',
+    '清退要求：测试根会话应归档并静止而非销毁，保留历史且不影响日常会话；本离线报告未核验资源释放证明，不能据此断言已清退。', '',
     '宿主可达限制：被测普通会话不是安全沙箱，可读宿主上的真实文件或题目答案；越界访问与请求路线只做事后审计，发现即判为污染并停止，已发出的请求无法追回。', '',
     '| 范围 | 分母 | pass | fail | unknown |', '| --- | ---: | ---: | ---: | ---: |',
     count('全部计划端到端', result.endpoint), count('独立写回', result.writeback), count('Know 条件漏斗', result.knowFunnel), count('Act 条件漏斗', result.actionFunnel), '',
@@ -64,6 +65,15 @@ export function renderSelftestReport(plan: FixedRound, judged: Record<string, It
     }), '',
     incomplete ? '状态：未完成（unknown/缺证不得当作通过）。' : '状态：语义判据已收齐；fail 是观察结果，不是链路缺证。', '',
     ...contamination,
+    ...(diagnostics?.programs ? [
+      '## 程序观察与写回时序', '',
+      '仅核验固定字面事实到达、成功工具结果与目标身份；链接不展开，失败调用不算写入。内容语义由独立裁判项判定。写入分类逐会话依事件时间，不跨会话猜因果；未知输入的写意图及无 diff 的新增/更新类型记 unknown，不得当主动或已核验最终磁盘状态。', '',
+      '| 条件 | 记忆结果片段 | 成功写入 | 失败调用 | 会话写回分类 |', '| --- | ---: | ---: | ---: | --- |',
+      ...plan.items.map(item => {
+        const p = diagnostics.programs?.[item.id]
+        return `| ${item.id} | ${p?.retrieval.length ?? 'unknown'} | ${p?.writes.filter(w => w.success).length ?? 'unknown'} | ${p?.writes.filter(w => !w.success).length ?? 'unknown'} | ${p?.sessions.map(s => s.writeback.class).join(', ') || 'unknown'} |`
+      }), '',
+    ] : []),
     ...rawCosts,
     '## 覆盖范围', '', '选段范围仅可见 assistant 答案事件，不代表完整日志覆盖；冻结或裁判返回不等于独立核验的实际实收，更不代表人工复核。', '',
     '| 条件 | 可选事件 | 已选 | 遗漏 | 裁判实收 | 人工复核覆盖 |', '| --- | ---: | ---: | ---: | --- | --- |',

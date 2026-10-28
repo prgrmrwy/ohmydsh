@@ -109,11 +109,13 @@ it('EVAL-058: 归档测试根但不销毁日常对象', async () => {
   expect(f.port.current()).toBe(f.root)
 })
 
-it('EVAL-058 (report): the selftest report describes test roots as archived and quiesced, never disposed', async () => {
+it('EVAL-058 (report): the report describes the required retirement policy without asserting unproven release', async () => {
   const { renderSelftestReport } = await import('../src/eval/report.js')
   const plan = { id: 'round-x', version: 'selftest-v1', items: [{ id: 'know-mem', question: 'know', kind: 'Know', condition: 'mem', writebackApplicable: false }] } as never
   const markdown = renderSelftestReport(plan, {}).markdown
-  expect(markdown).toContain('测试根会话已归档并静止，未销毁')
+  expect(markdown).toContain('测试根会话应归档并静止而非销毁')
+  expect(markdown).toContain('未核验资源释放证明')
+  expect(markdown).not.toContain('测试根会话已归档并静止')
   expect(markdown).not.toMatch(/已(销毁|dispose)|disposed/)
 })
 

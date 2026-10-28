@@ -1,0 +1,5 @@
+# Only adds fixed-directory closures; never overwrites runtime-owned workspace declarations.
+- id: dsh-memex
+  name: dsh-memex
+  config:
+    evalSelftest: true

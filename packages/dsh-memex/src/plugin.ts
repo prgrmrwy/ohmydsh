@@ -4,6 +4,9 @@ import { readScopeConfig, type Config } from './scope/settings.js'
 import { ScopeRuntime } from './scope/runtime.js'
 import type { ScopeConfig } from './scope/types.js'
 import { EMPTY_ORG_PROFILE, type OrgProfile } from './org.js'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { normalizePath } from './scope/resolver.js'
 
 export interface MemexRuntime {
   readonly scopes: ScopeRuntime
@@ -28,10 +31,22 @@ export interface MemexRuntime {
  * Tool/lifecycle registration is performed by the caller in the same fiber.
  */
 export function createMemexRuntime(ctx: Context, config: Config, org: OrgProfile = EMPTY_ORG_PROFILE): MemexRuntime {
-  let current = readScopeConfig(config)
+  const effective = (): ScopeConfig => {
+    const value = readScopeConfig(config)
+    if (!config.evalSelftest) return value
+    const root = join(homedir(), '.dsh-memex-eval-runs')
+    const workspaces = [...(value.workspaces ?? [])]
+    for (const declaration of [{ path: root, fallback: false as const }, { path: join(root, 'nomem'), memory: false as const, fallback: false as const }, { path: join(root, 'judge'), memory: false as const, fallback: false as const }]) {
+      const index = workspaces.findIndex(entry => normalizePath(entry.path) === declaration.path)
+      if (index < 0) workspaces.push(declaration)
+      else workspaces[index] = { ...workspaces[index]!, ...declaration }
+    }
+    return { ...value, workspaces }
+  }
+  let current = effective()
   const scopes = new ScopeRuntime(current, { org })
   ctx.on('loader/volatile-update', () => {
-    current = readScopeConfig(config)
+    current = effective()
     scopes.replace(current)
   })
   return { scopes, config: () => current }

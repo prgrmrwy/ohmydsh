@@ -10,6 +10,7 @@ export interface HostItemInput {
   root: string; round: string; item: string; session: string; attempt: EvalAttempt; ledger: EvalLedger; scopes: ScopeService;
   controller: SessionController; routing(operation: 'state' | 'setMode', payload: unknown): Promise<unknown>;
   tracking: RetirementTracking; backend: EvidenceBackend; judge: EvalBridgeOptions['judge'];
+  lifecycle?(stage: 'execute' | 'retired' | 'collect' | 'score'): void;
 }
 import { join, sep } from 'node:path'
 
@@ -26,6 +27,8 @@ import { executePreparedItem } from './prepared-execution.js'
 import { createHostRetirer } from './host-retirer.js'
 import { createHostEvidenceReader } from './host-reader.js'
 import { collectItemEvidence } from './collection.js'
+import { installTestedBudget, testedLimits } from './tested-budget.js'
+import { freezeInput } from './freeze.js'
 
 /** Internal assembly only: no free-form plan, prompt, path or schema is accepted over RPC. */
 export async function runHostItem(ctx: Context, input: HostItemInput, signal: AbortSignal): Promise<unknown> {
@@ -35,12 +38,14 @@ export async function runHostItem(ctx: Context, input: HostItemInput, signal: Ab
   const healthy = () => { if (!input.tracking.healthy()) throw new Error('Host item tracking unhealthy; preserve scene') }
   healthy()
   const directory = join(input.root, round.id, item.id)
-  const port = controllerExecutionPort(input.controller, input.routing, input.attempt.cwd, signal, directory)
+  freezeInput(join(directory, 'tested-limits'), testedLimits)
+  const budget = installTestedBudget(ctx, input.ledger, input.session, signal)
+  const port = controllerExecutionPort(input.controller, input.routing, input.attempt.cwd, budget.signal, directory)
   const retire = createHostRetirer(ctx, input.ledger, input.tracking)
-  return runFixedItem(item, {
-    execute: () => executePreparedItem(round, item.id, input.session, input.attempt, input.ledger, input.scopes, port),
-    retire: () => retire(input.session),
-    collect: async () => { healthy(); await collectItemEvidence(directory, input.ledger, input.session, round.tested, createHostEvidenceReader(ctx, input.ledger, input.backend), { home: attemptHome(input.attempt.cwd), own: { cwd: input.attempt.cwd, home: input.attempt.home } }); healthy() },
-    score: () => { healthy(); return input.judge(round, item, signal) },
-  }, signal)
+  try { return await runFixedItem(item, {
+    execute: () => { input.lifecycle?.('execute'); return executePreparedItem(round, item.id, input.session, input.attempt, input.ledger, input.scopes, port) },
+    retire: async () => { await retire(input.session); healthy(); input.lifecycle?.('retired') },
+    collect: async () => { healthy(); input.lifecycle?.('collect'); await collectItemEvidence(directory, input.ledger, input.session, round.tested, createHostEvidenceReader(ctx, input.ledger, input.backend), { home: attemptHome(input.attempt.cwd), own: { cwd: input.attempt.cwd, home: input.attempt.home } }, [item.prompt, ...(item.followUp ? [item.followUp] : [])]); healthy() },
+    score: () => { healthy(); input.lifecycle?.('score'); return input.judge(round, item, signal) },
+  }, budget.signal) } finally { budget.dispose() }
 }

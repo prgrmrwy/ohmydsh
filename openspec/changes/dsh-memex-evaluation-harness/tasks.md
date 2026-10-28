@@ -1,6 +1,6 @@
 ## 执行边界
 
-第三轮 APPROVE_WITH_CHANGES，RC1/RC2 已经独立复核，CHANGES_APPLIED: yes。本文件是实施准备，不是实施授权。所有任务尚未开始，需用户另行明确启动 apply。
+第四轮 APPROVE_WITH_CHANGES，Required Changes 已复核，CHANGES_APPLIED: yes。用户已授权 apply，2026-10-28 再次确认继续集成审查与离线补线；未授权部署、重启日常 Host 或真实模型运行。任务状态以本文件为准，不能以单项测试通过代替生产调用链接通。
 
 依赖顺序如下。各组测试名与编号以 test-plan.md 为准。每个场景先写测试并确认因缺少目标行为而红（非导入/语法失败），再实现，再重构；已有原行为回归不得伪造失败。每个具名测试通过后及时将 test-plan 的对应行改绿。
 
@@ -58,11 +58,27 @@
 
 ## 9. 文档、受管配置和发布接线
 
-> 9.3 已于用户同意提交后复跑仓库检查并勾选。selftest CLI 仍无可执行 bin 与真实 Host 传输：Host 只接受浏览器 launch token 换取的签名 cookie，CLI 如何合法取得会话凭证须在部署验收时与用户确认，不绕过 Connection 认证。
+> 9.3 已复跑仓库检查。2026-10-28 自主补线已加入 selftest executable bin 与标准 fetch 认证传输：只接受用户在终端隐藏输入官方 loopback launch URL，经原有 303/cookie 交换；不扫描日志或读取浏览器凭据。live 可用性仍待授权验证。
 
 - [x] 9.1 写失败测试 EVAL-049–050 及打包/配置检查：长期原则未删且去向如实、CLI 可执行与固定数据随包、judge preset/目录声明及 skill 的 managed wiring。
 - [x] 9.2 接入 bin、fixture 发布资源、所需精确兼容依赖、judge preset 和 memex-eval skill；仅修改 manifest 真相源，保留未迁移方法论，补自检用途/风险/手动恢复说明。
 - [x] 9.3 重构；运行类型、构建、打包资源检查、方法论与 managed-assets 回归。不得在此任务顺带部署或重启日常 GUI。
+
+## 2026-10-28 集成复核历史：发现时重新打开的实施项（后续修复见下节）
+
+- **5.2**：`runManagedRound` 只有测试调用，Host 插件只暴露 register/judge/status/cancel；普通被测六条件没有生产入口。独立 controller/title/release 测试不等于完整执行链完成。
+- **6.2**：`semanticOutcome` 总是输出 `R: []`、`W: []`；`classifyWriteback` 没有生产调用者，完整工具结果虽已冻结但未成为 R/W 判据。须按已有规范接线，不能伪造通过。
+- **7.2 / 9.2**：`runSelftestCli` 仍要求注入 `call/runItem`，无 executable selftest bin 或认证传输；仅 report bin 随包。既有 9.1 打包测试只覆盖 report，不代表 selftest 可运行。
+- 目录级 workspace 声明未在 manifest 中落地，运行前必须核实如何由已有配置机制交付；不能把 scope resolver 单测当作 Host 生效配置证明。
+- 本次先修复采集产物 → 离线报告字段不兼容、污染记录未读取和无证据清退声明。六条件证据/评分/报告串联测试不包含真实 SessionController、Connection 或 LLM，不能关闭以上项目。
+
+## 2026-10-28 自主补线结果
+
+- **5.2 已完成离线实施**：认证桥 `eval/runRound` 装配真实 controller、Host routing 服务、tracking、persistence、judge；真实兼容依赖测试证明六顶层/八回合/十二裁判、固定标题、归档静止与 exact-owned jobs 连续释放。采集前走正式 `sessions.flush` checkpoint，不能用 idle/stat 冒充落盘。
+- **6.2 已接线**：冻结 R/W 工具产物，正文事实到达/成功写入/目标检查，成功写内容增加独立语义子结果但不增加十二次预算。真实 Memex tools/lifecycle + mock kernel 契约测试通过；未知用户/子会话自然语言干预保守 unknown，不能猜主动或跨会话意图。报告明确未核验释放证明，旧冻结协议兼容读取。
+- **9.2 已完成离线接线**：bin/lockfile、合法隐藏认证、只读状态/人工默认值确认、受管 evalSelftest 配置和 skill；不自建监听、不读凭据库、不写默认模型。
+- **7.2 已完成离线实施**：CLI 新轮次/状态/人工确认/显式续跑，稳定请求幂等；每条件冻结 128 请求/120 秒软限并取消。续跑仅当前 dispatcher 连续持有原 tracking/judge/root 能力、全量旧根/作业/后代释放重新证明、普通失败未评分且 prompt 提交均有 accepted 时允许；旧 attempt 移入 history，新 cwd/session 唯一，完成项不重判。跨 Host/未知提交/failed 或 unknown 裁判/活资源拒绝。真实 runtime 注入第二条件 checkpoint 故障后续跑，保留首项评分、七个唯一普通根、仍恰十二裁判通过。旧 unhealthy/未知请求记录保留，不伪造历史成功。
+- 本轮所有真实模型/日常 Host/部署验收仍未执行，未获授权，不归档。
 
 ## 10. 验证与交付（需单独 live/部署授权）
 

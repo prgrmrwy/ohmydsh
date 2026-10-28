@@ -23,7 +23,7 @@ it('EVAL-012 (report level): the report is regenerated from the frozen copy with
 })
 
 it('refuses hash-valid malformed cost audits rather than interpolating unsafe or inconsistent fields', () => {
-  for (const patch of [{ inputTokens: -1 }, { status: 'invented' }, { sessions: ['root', 'root'] }, { tokenCategories: { uncachedInput: 1, cacheRead: 1, cacheWrite: 1 } }, { extra: true }]) {
+  for (const patch of [{ inputTokens: -1 }, { status: 'invented' }, { sessions: ['root', 'root'] }, { tokenCategories: { uncachedInput: 1, cacheRead: 1, cacheWrite: 1 } }, { toolCalls: -1 }, { toolCalls: 0.5 }, { observedRoutes: {} }, { observedRoutes: [{ session: 'daily', provider: 'p', model: 'm', requests: 1 }] }, { observedRoutes: [{ session: 'root', provider: 'p', model: 'm', requests: 0 }] }, { observedRoutes: [{ session: 'root', provider: 'p', model: 'm', requests: 1, unexpected: true }] }, { extra: true }]) {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'eval-offline-bad-audit-'))
     const plan = registerFixedRound(root, { version: 'selftest-v1', tested: { provider: 'mock', model: 'test' }, judge: { provider: 'mock', model: 'judge' }, maxJudgeCalls: 12 })
     const directory = join(root, plan.id, 'know-mem'); mkdirSync(directory)
@@ -31,6 +31,16 @@ it('refuses hash-valid malformed cost audits rather than interpolating unsafe or
     expect(() => buildOfflineReport(root, plan.id)).toThrow(/audit/)
   }
 })
+it('refuses hash-valid malformed boundary diagnostics rather than rendering arbitrary data', () => {
+  for (const hits of [{}, [null], [{ seq: -1, tool: 'read', path: '/fictional', kind: 'real-library' }], [{ seq: 1, tool: 'read', path: '/fictional', kind: 'invented' }], [{ seq: 1, tool: 'read', path: '/fictional', kind: 'real-library', extra: true }]]) {
+    const root = mkdtempSync(join(realpathSync(tmpdir()), 'eval-offline-bad-boundary-'))
+    const plan = registerFixedRound(root, { version: 'selftest-v1', tested: { provider: 'mock', model: 'test' }, judge: { provider: 'mock', model: 'judge' }, maxJudgeCalls: 12 })
+    const directory = join(root, plan.id, 'know-mem'); mkdirSync(directory)
+    freezeInput(join(directory, 'boundary-hits'), hits)
+    expect(() => buildOfflineReport(root, plan.id)).toThrow(/boundary/)
+  }
+})
+
 it('rejects structurally valid audits containing foreign sessions or missing registered descendants', () => {
   for (const foreign of [true, false]) {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'eval-offline-lineage-'))

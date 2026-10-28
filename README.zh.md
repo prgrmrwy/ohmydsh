@@ -226,6 +226,7 @@ tests/                   仓库级测试
 - [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — 委派前调用 route_subagent 并显式传入模型与 effort；失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
+- [memex-eval-config](patches/memex-eval-config.yml) — 添加固定自检目录的关闭声明，保留用户 scope 与工作区设置。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
 - [dsh-collab-config](patches/dsh-collab-config.yml) — dsh-collab 配置补丁：邀请即授权，并声明 `pet-locus` 托管 channel，供 Pet Locus 以代理成员接入。
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 逐个列出 Magpie 各归属 route（`dsh-magpie-connector-<owner>`），使其不受本机出口门禁约束。

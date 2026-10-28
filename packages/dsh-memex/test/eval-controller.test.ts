@@ -7,7 +7,7 @@ import { executeFixedItem } from '../src/eval/executor.js'
 
 it('uses ordinary controller create, pinned title, MANUAL endpoint, and exact selected route', async () => {
   const calls: unknown[] = []
-  const agent = { id: 'reserved', options: { provider: 'mock', model: 'fixed', reasoningEffort: 'high' }, session: { header: { cwd: '/fixture/repo', agentPreset: 'standard' }, snapshotEvents: () => [{ type: 'session/title', data: { title: 'Pinned', source: { kind: 'user' } } }] }, whenIdle: async () => { calls.push('idle') } }
+  const agent = { id: 'reserved', options: { provider: 'mock', model: 'fixed', reasoningEffort: 'high' }, session: { header: { cwd: '/fixture/repo', agentPreset: 'standard' }, snapshotEvents: () => [{ type: 'session/title', data: { title: 'Pinned', source: { kind: 'user' } } }, { type: 'model/selection', data: { provider: 'mock', model: 'fixed', reasoningEffort: 'high' } }] }, whenIdle: async () => { calls.push('idle') } }
   const controller = {
     create: async (request: unknown) => { calls.push(request); return { sessionId: 'reserved' } },
     rename: async (request: unknown) => { calls.push(request) }, selectModel: async (request: unknown) => { calls.push(request) },
@@ -22,6 +22,19 @@ it('uses ordinary controller create, pinned title, MANUAL endpoint, and exact se
   expect(calls[0]).toEqual({ sessionId: 'reserved', cwd: '/fixture/repo', agentPreset: 'standard' })
   expect(calls).toContainEqual({ sessionId: 'reserved', provider: 'mock', model: 'fixed', reasoningEffort: 'high' })
   expect(calls.at(-1)).toBe('idle')
+})
+
+it('reads durable model/selection instead of immutable creation-time options before either turn', async () => {
+  const selected = { provider: 'new-provider', model: 'new-model', reasoningEffort: 'high' }
+  const agent = { id: 'reserved', options: { provider: 'daily', model: 'daily-model' }, session: {
+    header: { cwd: '/repo', agentPreset: 'standard' }, snapshotEvents: () => [
+      { type: 'session/title', data: { title: 'Pinned', source: { kind: 'user' } } },
+      { type: 'model/selection', data: selected },
+    ],
+  } }
+  const controller = { resolveAgent: async () => ({ agent }) }
+  const port = controllerExecutionPort(controller as never, async () => ({ mode: 'MANUAL' }), '/repo', new AbortController().signal)
+  expect((await port.inspect('reserved')).route).toEqual({ provider: 'new-provider', model: 'new-model', effort: 'high' })
 })
 
 it('EVAL-018 (controller level): a title that is not user-pinned on readback blocks the question with no controller prompt', async () => {
@@ -56,6 +69,25 @@ it('binds a stable turn identity to text rather than silently treating changed t
   await expect(port.prompt('reserved', 'changed', 'initial')).rejects.toThrow(/mismatch/)
   await port.prompt('reserved', 'original', 'follow-up')
   expect(sent).toBe(2)
+})
+
+it('cancels the exact running tested Agent on carrier abort before waiting for idle and rejects completion', async () => {
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), 'eval-abort-prompt-'))
+  let started!: () => void, idle!: () => void
+  const running = new Promise<void>(resolve => { started = resolve })
+  const stopped = new Promise<void>(resolve => { idle = resolve })
+  let cancelled = 0
+  const agent = { cancel: () => { cancelled++; idle() }, whenIdle: () => { started(); return stopped } }
+  const controller = { prompt: async () => {}, resolveAgent: async () => ({ agent }) }
+  const abort = new AbortController()
+  const port = controllerExecutionPort(controller as never, async () => ({}), '/repo', abort.signal, directory)
+  const work = port.prompt('reserved', 'fictional').catch(error => error)
+  await running
+  abort.abort()
+  // Avoid leaving a pending test if cancellation is missing.
+  await Promise.resolve()
+  expect(cancelled).toBe(1)
+  expect(await work).toMatchObject({ message: expect.stringMatching(/abort/) })
 })
 
 it('refuses prompt delivery without a durable receipt directory', async () => {

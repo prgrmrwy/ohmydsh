@@ -1,6 +1,8 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 const f = vi.hoisted(() => ({ calls: [] as string[], releaseFailure: false, healthy: true, failAt: '', item: { id: 'know-mem' } }))
 vi.mock('../src/eval/round.js', () => ({ loadFixedRound: () => ({ id: 'round-fixed', items: [f.item] }) }))
+vi.mock('../src/eval/freeze.js', () => ({ freezeInput: () => {} }))
+vi.mock('../src/eval/tested-budget.js', () => ({ testedLimits: { maxRequestsPerCondition: 128, maxDurationMsPerCondition: 120000 }, installTestedBudget: (_ctx: unknown, _ledger: unknown, _root: unknown, signal: AbortSignal) => ({ signal, dispose() {} }) }))
 vi.mock('../src/eval/controller.js', () => ({ controllerExecutionPort: () => ({}) }))
 vi.mock('../src/eval/prepared-execution.js', () => ({ executePreparedItem: async () => { f.calls.push('execute') } }))
 vi.mock('../src/eval/host-retirer.js', () => ({ createHostRetirer: () => async () => { f.calls.push('retire'); if (f.failAt === 'retire') f.healthy = false; if (f.releaseFailure) throw new Error('release unproven') } }))

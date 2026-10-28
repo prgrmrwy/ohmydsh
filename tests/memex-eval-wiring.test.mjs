@@ -33,6 +33,15 @@ test('the memex-eval skill is managed, read-only by default and points only at f
   assert.ok(!/--suite/.test(body.replace(/不接受[^\n]*--suite[^\n]*/g, '')), 'skill must not suggest custom suites')
 })
 
+test('selftest directory closures are managed without replacing user workspace declarations', () => {
+  const patch = entry('memex-eval-config')
+  assert.equal(patch?.type, 'patch')
+  assert.equal(patch?.enabled, true)
+  assert.equal(patch?.mergeConfig, true)
+  const rows = yaml.load(readFileSync(path.join(REPO, 'patches/memex-eval-config.yml'), 'utf8'))
+  assert.deepEqual(rows, [{ id: 'dsh-memex', name: 'dsh-memex', config: { evalSelftest: true } }])
+})
+
 test('the package ships the report executable and fixed fixtures that the skill relies on', () => {
   const pkg = JSON.parse(readFileSync(path.join(REPO, 'packages/dsh-memex/package.json'), 'utf8'))
   assert.equal(pkg.bin['dsh-memex-eval-report'], './lib/cli/eval-report.js')

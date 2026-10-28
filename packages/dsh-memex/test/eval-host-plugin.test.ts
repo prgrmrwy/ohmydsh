@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 const f = vi.hoisted(() => ({ calls: [] as string[], judgeFails: false }))
+vi.mock('../src/eval/managed-round.js', () => ({ createManagedRoundExecution: () => ({ run: async (input: any, signal: AbortSignal) => {
+  f.calls.push('managed-round'); expect(input.controller).toBeDefined(); expect(input.routing).toBeTypeOf('function'); expect(input.backend.root).toBe('/stored'); expect(input.scopes).toBeDefined(); expect(signal.aborted).toBe(false); return { completed: true }
+}, resume: async () => { f.calls.push('resume-round'); return {} } }) }))
+vi.mock('../src/eval/offline-report.js', () => ({ buildOfflineReport: () => ({ exitCode: 0 }) }))
 vi.mock('../src/eval/runtime-tracking.js', () => ({ startHostEvalTracking: () => { f.calls.push('track'); return { owners: new Set(), healthy: () => true, settleJobs: async () => { f.calls.push('settle') } } } }))
 vi.mock('../src/eval/registered-judge.js', () => ({ createRegisteredRoundJudge: async () => {
   f.calls.push('parent')
@@ -13,11 +17,28 @@ import { createHostEvalDispatch } from '../src/eval/host-plugin.js'
 const registration = { version: 'selftest-v1', tested: { provider: 'mock', model: 'tested' }, judge: { provider: 'mock', model: 'judge' }, maxJudgeCalls: 12 }
 function host(services: Record<string, unknown>) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "eval-host-plugin-"))
-  const ctx = { get: (name: string) => services[name] }
+  const ctx = { get: (name: string) => services[name], effect: () => {} }
   const scopes = services.memexScopes as never
-  return { root, dispatch: createHostEvalDispatch(ctx as never, root, { scopes, judgeCwd: "/judge", timeoutMs: 1000, generation: "host-test" }) }
+  return { root, dispatch: createHostEvalDispatch(ctx as never, root, { scopes, home: root, judgeCwd: join(root, 'judge'), timeoutMs: 1000, generation: "host-test" }) }
 }
 const full = { agentDefaultModel: { currentSelection: () => ({ provider: 'mock', model: 'default' }) }, memexScopes: { resolve: () => ({}) } }
+
+it('assembles the production fixed runner exclusively from trusted Host services', async () => {
+  f.calls.length = 0
+  const { dispatch } = host({ ...full, sessionController: {}, autoModelRouting: { call: async () => ({ mode: 'MANUAL' }) }, sessionPersistence: { name: 'session-persistence-jsonl', config: { root: '/stored', compression: 'none' } }, agents: {}, jobs: {}, subagents: {}, workspaceRegistry: {}, agentPresets: {} })
+  const signal = new AbortController().signal
+  const round = await dispatch('eval/registerRound', registration, signal) as { id: string }
+  expect(await dispatch('eval/runRound', { round: round.id, requestId: 'production' }, signal)).toEqual({ outcomes: { completed: true }, evidenceComplete: true })
+  expect(f.calls).toEqual(['managed-round'])
+})
+
+it('missing execution services fail before subscribing or creating a judge parent', async () => {
+  f.calls.length = 0
+  const { dispatch } = host(full), signal = new AbortController().signal
+  const round = await dispatch('eval/registerRound', registration, signal) as { id: string }
+  await expect(dispatch('eval/runRound', { round: round.id, requestId: 'missing' }, signal)).rejects.toThrow(/service unavailable/)
+  expect(f.calls).toEqual([])
+})
 
 it('creates tracking before the judge parent once per round, then scores through the managed judge', async () => {
   f.calls.length = 0; f.judgeFails = false

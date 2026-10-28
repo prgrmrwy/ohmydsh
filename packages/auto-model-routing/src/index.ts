@@ -63,6 +63,40 @@ export function apply(ctx: Context, config: Config = {}): void {
   })
 
   ctx.inject(['connection', 'sessionController'], child => {
+    const modeRequest = async (operation: 'state' | 'setMode', payload: unknown): Promise<Response> => {
+      const resolveAgent = async (id: string) => {
+        const result = await child.sessionController.resolveAgent(id as never)
+        return 'agent' in result ? ref(result.agent) : undefined
+      }
+      let manualDecision: { sessionId: string; decisionId: number } | undefined
+      if (operation === 'setMode' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
+        const id = (payload as { sessionId: string }).sessionId, mode = (payload as { mode?: unknown }).mode
+        if ((mode === 'AUTO' || mode === 'MANUAL') && state.read(id).mode !== mode && await resolveAgent(id)) {
+          const decisionId = policy.appliedDecision(id)
+          if (mode === 'MANUAL' && decisionId !== undefined) manualDecision = { sessionId: id, decisionId }
+          policy.invalidate(id)
+        }
+      }
+      const response = await endpoint(operation, payload, resolveAgent, state)
+      if (!response.ok) return response
+      if (manualDecision) {
+        try { feedback.fact(manualDecision.sessionId, manualDecision.decisionId, 'manual-switch') }
+        catch { ctx.logger.warn('auto-model-routing: could not record MANUAL switch') }
+      }
+      const sessionId = (payload as { sessionId: string }).sessionId
+      const resolved = await child.sessionController.resolveAgent(sessionId as never).catch(() => undefined)
+      const selection = resolved && 'agent' in resolved ? currentMainSelection(ctx, resolved.agent) : undefined
+      const supported = mainSupported(selection, registry)
+      if (!supported && state.read(sessionId).mode === 'AUTO') { state.setMode(sessionId, 'MANUAL'); policy.invalidate(sessionId) }
+      const { previous: _previous, ...persisted } = await response.json()
+      return Response.json({ ...persisted, mode: state.read(sessionId).mode, ...policy.mainStatus(sessionId), ...(toastOn() ? { decisionToast: true } : {}), autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } })
+    }
+    child.provide('autoModelRouting' as never, { call: async (operation: 'state' | 'setMode', payload: unknown) => {
+      if (operation !== 'state' && operation !== 'setMode') throw new Error('Unsupported routing operation')
+      const response = await modeRequest(operation, payload)
+      if (!response.ok) throw new Error('Routing mode request rejected')
+      return response.json()
+    } } as never)
     for (const operation of ['state', 'setMode', 'label', 'observe', 'settings', 'saveSettings', 'setKey', 'testDecision', 'childRouting'] as const) {
       child.effect(() => child.connection.fetch.register({
         path: `/api/auto-model-routing.${operation}`,
@@ -77,21 +111,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             const result = await child.sessionController.resolveAgent(id as never)
             return 'agent' in result ? ref(result.agent) : undefined
           }
-          const resolveSessionAgent = async (id: string) => {
-            const result = await child.sessionController.resolveAgent(id as never)
-            return 'agent' in result ? result.agent : undefined
-          }
           const payload = enveloped ? wire.payload : body
-          let manualDecision: { sessionId: string; decisionId: number } | undefined
-          if (operation === 'setMode' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
-            const id = (payload as { sessionId: string }).sessionId
-            const mode = (payload as { mode?: unknown }).mode
-            if ((mode === 'AUTO' || mode === 'MANUAL') && state.read(id).mode !== mode && await resolveAgent(id)) {
-              const decisionId = policy.appliedDecision(id)
-              if (mode === 'MANUAL' && decisionId !== undefined) manualDecision = { sessionId: id, decisionId }
-              policy.invalidate(id)
-            }
-          }
           const response = operation === 'childRouting'
             ? (typeof (payload as { sessionId?: unknown })?.sessionId === 'string'
               ? Response.json(policy.status((payload as { sessionId: string }).sessionId) ?? { status: 'unsupported', reason: '没有已绑定的子任务决策' })
@@ -99,24 +119,7 @@ export function apply(ctx: Context, config: Config = {}): void {
             : operation === 'settings' || operation === 'saveSettings' || operation === 'setKey' || operation === 'testDecision'
             ? await hostSettings.endpoint(operation, payload)
             : operation === 'observe' ? await observeEndpoint(payload, resolveAgent, feedback, () => ctx.logger.warn('auto-model-routing: could not record exposure'))
-            : operation === 'label' ? await labelEndpoint(payload, resolveAgent, feedback) : await endpoint(operation, payload, resolveAgent, state)
-          if (manualDecision && response.ok) {
-            try { feedback.fact(manualDecision.sessionId, manualDecision.decisionId, 'manual-switch') }
-            catch { ctx.logger.warn('auto-model-routing: could not record MANUAL switch') }
-          }
-          if ((operation === 'state' || operation === 'setMode') && response.ok) {
-            const sessionId = (payload as { sessionId: string }).sessionId
-            const agent = await resolveSessionAgent(sessionId).catch(() => undefined)
-            const selection = agent ? currentMainSelection(ctx, agent) : undefined
-            const supported = mainSupported(selection, registry)
-            // Leaving AUTO is persisted: a pick outside the registered families must not keep judging turns.
-            if (!supported && state.read(sessionId).mode === 'AUTO') { state.setMode(sessionId, 'MANUAL'); policy.invalidate(sessionId) }
-            const value = await response.json()
-            const main = policy.mainStatus(sessionId)
-            const { previous: _previous, ...persisted } = value
-            const result = { ...persisted, mode: state.read(sessionId).mode, ...main, ...(toastOn() ? { decisionToast: true } : {}), autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } }
-            return Response.json(enveloped ? { type: 'server-response', rpcId: wire.rpcId, result: { ok: true, value: result } } : result)
-          }
+            : operation === 'label' ? await labelEndpoint(payload, resolveAgent, feedback) : await modeRequest(operation, payload)
           if (!enveloped) return response
           const value = await response.json()
           return Response.json({ type: 'server-response', rpcId: wire.rpcId, result: response.ok ? { ok: true, value } : { ok: false, error: { code: 'invalid-request', message: value.error, details: { issues: value.issues ?? [] } } } })

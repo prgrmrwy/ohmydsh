@@ -362,6 +362,13 @@ customizations:
     brief: dsh-collab 邀请即授权，并为 Pet Locus 声明托管 channel pet-locus
     note: '整行覆盖 dsh-collab 的 config（admission invite；managedChannels [pet-locus]），数据目录用插件默认值。原私有 overlay 的 Pet 主会话排除名单（denySessionIds）已于 2026-10-25 移除：它是协作层与 Pet 互不相干时期的隔离补丁，与 Locus 主会话作为空间成员的新模型冲突（change pet-locus-collab-integration）。回滚：enabled:false → dsh build → dsh restart，台账保留。'
 
+  - id: memex-eval-config
+    type: patch
+    enabled: true
+    mergeConfig: true
+    brief: 固定虚构自检目录关闭 personal fallback，nomem 与 judge 关闭记忆
+    note: '自研配置，change dsh-memex-evaluation-harness。只设置 dsh-memex.evalSelftest:true：插件把固定运行根的目录关闭声明并入实际 resolver，保留用户 workspaces/scopes/bindings，不认领固定 scope、不创建库或会话；Host 仍逐条件核验唯一派生路由。仅配置不运行模型。升级复核目录派生与 volatile 配置回归；移除 enabled:false → dsh build → 用户决定重启。'
+
   # 纯配置调优：经官方 gateway 配置放宽大历史传输时的心跳容忍。
   - id: websocket-heartbeat
     type: patch

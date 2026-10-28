@@ -78,7 +78,7 @@ test('collab-kernel build copies convention markdown including empty-source case
 
 test('workspace CLI build permission step is Node-only and preserves POSIX executable bits',async t=>{
   const root=await fixture(t)
-  for(const [name,entries]of [['worktree-session',['lib/cli.js']],['dsh-memex',['lib/cli/recall-report.js','lib/cli/eval-report.js']]]){
+  for(const [name,entries]of [['worktree-session',['lib/cli.js']],['dsh-memex',['lib/cli/recall-report.js','lib/cli/eval-report.js','lib/cli/eval-selftest.js']]]){
     const script=(await pkg(name)).scripts['build:host']
     assert.ok(script.startsWith('tsc -p tsconfig.json && '))
     const program=nodeInline(script.slice('tsc -p tsconfig.json && '.length))

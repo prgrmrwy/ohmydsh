@@ -12,8 +12,7 @@ function io(answer: string) {
   const port: SelftestIo = {
     out: text => { out += text }, error: text => { out += text },
     confirm: async text => { notice = text; calls.push('confirm'); return answer },
-    call: async (endpoint, payload) => { calls.push(endpoint); return registerFixedRound(root, payload) },
-    runItem: async (_round, item) => { items.push(item) },
+    call: async (endpoint, payload) => { calls.push(endpoint); if (endpoint === 'eval/pendingDefaultReviews') return []; if (endpoint === 'eval/registerRound') return registerFixedRound(root, payload); if (endpoint === 'eval/runRound') { items.push('whole-round'); return { evidenceComplete: true } } return { defaultModelNotice: 'Please review default' } },
   }
   return { port, calls, items, output: () => out, notice: () => notice }
 }
@@ -22,8 +21,8 @@ const routes = ['--tested', 'mock/tested', '--judge', 'mock/judge']
 it('EVAL-001: 用户确认后运行六个条件', async () => {
   const h = io('RUN FIXED SELFTEST')
   expect(await runSelftestCli(routes, h.port)).toBe(0)
-  expect(h.calls).toEqual(['confirm', 'eval/registerRound'])
-  expect(h.items).toEqual(['know-mem', 'know-nomem', 'stale-mem', 'stale-nomem', 'writeback-mem', 'writeback-nomem'])
+  expect(h.calls).toEqual(['confirm', 'eval/pendingDefaultReviews', 'eval/registerRound', 'eval/runRound', 'eval/status'])
+  expect(h.items).toEqual(['whole-round'])
   expect(h.output()).toContain('固定虚构自检')
   expect(h.output()).toContain('宿主可达限制')
 })
@@ -53,9 +52,10 @@ it('EVAL-002: 自定义输入被拒绝', async () => {
 
 it('stops at the first uncertain condition and never reports success', async () => {
   const h = io('RUN FIXED SELFTEST')
-  h.port.runItem = async (_round, item) => { h.items.push(item); if (item === 'stale-mem') throw new Error('release unproven') }
+  const call = h.port.call
+  h.port.call = async (endpoint, payload) => { if (endpoint === 'eval/runRound') throw new Error('release unproven'); return call(endpoint, payload) }
   expect(await runSelftestCli(routes, h.port)).toBe(1)
-  expect(h.items).toEqual(['know-mem', 'know-nomem', 'stale-mem'])
+  expect(h.items).toEqual([])
   expect(h.output()).toContain('保留现场')
 })
 

@@ -1,6 +1,11 @@
 import { checkQuotes, type EvidenceText } from './quotes.js'
 import type { Verdict } from './scoring.js'
 export interface CheckedJudgement { verdict: Verdict; provenance: 'checked' | 'invalid' | 'not-required'; reason: string }
+export function readItemJudgement(value: unknown, answers: readonly EvidenceText[]): CheckedJudgement {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return readJudgement(value, answers)
+  const { writeback: _writeback, ...answer } = value as Record<string, unknown>
+  return readJudgement(answer, answers)
+}
 export function readJudgement(value: unknown, evidence: readonly EvidenceText[]): CheckedJudgement {
   const invalid = (): CheckedJudgement => ({ verdict: 'unknown', provenance: 'invalid', reason: 'Invalid judgement shape or quote provenance; inspect raw response' })
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()

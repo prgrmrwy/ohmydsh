@@ -1,6 +1,6 @@
 ## Test Plan
 
-评审门禁：第三轮 APPROVE_WITH_CHANGES，Required Changes 已独立复核，CHANGES_APPLIED: yes。以下为规划，尚未运行测试。
+评审门禁：第四轮 APPROVE_WITH_CHANGES，Required Changes 已独立复核，CHANGES_APPLIED: yes。表格绿色表示对应具名测试通过，不等于 live 验收完成；2026-10-28 生产补线与真实兼容依赖离线闭环已完成，范围与限制以 tasks.md / verify.md 为准。
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |---|---|---|---|---|
@@ -79,3 +79,5 @@
 - 方法论检查只验证文档原则保留与映射标记，不声称机械检查能证明语义等价。
 - 人工 live 六条件自检需后续明确授权；记录实际会话、模型、工具面、日志与默认值告警。此计划通过不代表 live 验收通过。
 - 任何测试暴露 spec/API 不可行：暂停对应实现，修订方案并重新评审，不弱化安全断言。
+- 2026-10-28 新增 eval-pipeline.test.ts：真实 register/ledger/collection/scoreFrozenItem/offlineReport 六条件串联，固定事件及协议响应（无模型）；验证生产采集字段可读、12 次固定评分、R无召回/W无写入为观测no而非缺证（4 pass/2 fail）、污染落盘可见、无清退证据不宣称已释放。此测试不替代 runtime、认证或完整 runner 接线验收。
+- 2026-10-28 追加真实闭环：eval-production-runtime.test.ts（真实compat controller/loop/preset/jobs/workspace/zstd，固定mock adapter）、eval-memex-tools-runtime.test.ts（19真实工具/lifecycle producer contract）、eval-frozen-upgrade.test.ts（7冻结升级/篡改）、eval-managed-resume.test.ts（26同Host续跑及拒绝边界）、eval-tested-budget.test.ts/真实runtime无限工具循环、eval-default-review-entry.test.ts（all-unknown非零/状态/人工确认/续跑CLI）、eval-resume-bridge.test.ts/ eval-run-bridge.test.ts。补充测试只加强已有义务，不替代EVAL-032或live证据。

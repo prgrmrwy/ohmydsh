@@ -10,7 +10,7 @@ vi.mock('../src/eval/registered-judge.js', () => ({ createRegisteredRoundJudge: 
 vi.mock('../src/eval/host-round.js', () => ({ runHostRound: async () => { f.calls.push('run-round'); if (f.fail) throw new Error('release unproven'); return { fixed: 'result' } } }))
 import { runManagedRound } from '../src/eval/managed-round.js'
 const input = { root: '/rounds', round: 'round', generation: 'host', judgeCwd: '/judge', timeoutMs: 1000, registryFile: '/registry' } as any
-beforeEach(() => { f.settlementFails = false; input.root = mkdtempSync(join(realpathSync(tmpdir()), 'eval-managed-')); mkdirSync(join(input.root, input.round)) })
+beforeEach(() => { f.settlementFails = false; input.root = mkdtempSync(join(realpathSync(tmpdir()), 'eval-managed-')); input.registryFile = join(input.root, 'state', 'registry'); input.judgeCwd = join(input.root, 'judge'); mkdirSync(join(input.root, input.round)) })
 it('persists Host generation and refuses replay before subscribing, including across a new Host', async () => {
   f.fail = false
   await runManagedRound({} as never, input, new AbortController().signal)

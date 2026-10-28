@@ -715,3 +715,26 @@
 - 用户选择：提交（是）、部署（暂不）、真实模型（暂不）。只暂存本change文件提交为110f8647；用户既有改动BACKLOG.md与evaluation-methodology.md未纳入。
 - 提交后仓库检查暴露两项并修正（17c7b39f）：review.md仓库根路径链接改相对路径、指向git忽略构建产物的链接改为路径文字（去链接后正文diff为空）；README中英配对检查豁免packages/*/fixtures/**哈希固定数据（附反例测试）。仓库638/636通过/0失败/2既有跳过；包103files/687tests。9.3勾选，任务27/33。
 - 自检CLI的bin与真实Host传输未接：Host只认浏览器launch token换取的签名cookie，CLI取凭证方式须与用户在部署验收时确定，不绕过Connection认证。
+
+## 2026-10-28 用户确认继续：集成复核与第一批修复
+
+- 纠正此前“离线已完成只等授权”的结论：`runManagedRound` 无生产调用者；selftest 只有注入式核心，无 executable/真实传输；`semanticOutcome` 的 R/W 恒为空，写回分类无生产调用者；目录级 workspace 声明未受管交付。重新打开 5.2、6.2、7.2、9.2，当前 23/33，不修改已批准设计，也不假造 live 证据。
+- 增加六条件 register→ledger→collectItemEvidence→scoreFrozenItem→buildOfflineReport 串联测试；事件和裁判协议响应为固定虚构数据，不调用远端模型。最初夹具漏建 item 目录导致 ENOENT，修好夹具后才确认有效行为红灯：真实采集器输出 observedRoutes/toolCalls，离线 checkedAudit 白名单拒绝，两个测试均报 Invalid frozen execution audit。
+- 修复 reader 接受并严格校验 observedRoutes/toolCalls（精确字段、已登记 session、非空路线、正整数请求数、去重；拒未知字段）；第一条六条件测试转绿，第二条继续因报告未显示污染行而红。
+- 读取并校验已冻结 boundary-hits 后传入 renderSelftestReport，污染项 unknown/非零且不进入评分；新增损坏字段反例，第二条转绿。报告再加“无清退证据不宣称已归档”断言先红，移除无条件完成声明，改为清退政策与未核验披露；既有 EVAL-058 runtime 断言不变，报告补充测试不再奖励无证据完成措辞。
+- 结果：包 npm test && npm run typecheck && npm run build:host，104 files / 690 passed、0 failed/skip；仓库 npm test，639 tests / 637 passed / 0 failed / 2 既有 skips；check:artifacts、OpenSpec strict、git diff --check 通过。
+- 没有部署、同步到日常 profile、重启 Host、调用真实模型或提交。下一批仍应接完整生产运行入口及 R/W 程序证据；当前串联测试仅覆盖采集/评分/报告，不是 SessionController/Connection/真实 runtime 闭环。
+
+## 2026-10-28 用户要求自主推进至可验收：生产补线与真实离线闭环
+
+- 新增 `eval/runRound` 固定入口，Host自己组装 controller/routing/registered tracking/persistence/judge，参数仍仅冻结round/requestId，不接受路径/题面/schema。AUTO从原HTTP handler提取同一modeRequest为Host窄服务，不建第二状态。真实selectModel只写model/selection，不能读immutable agent.options，已修回读并核验request/header。
+- executable selftest CLI与lockfile/bin权限、标准fetch认证：仅终端隐藏输入官方loopback launch URL，manual 303同origin根cookie交换，cookie内存保存；不查日志/浏览器库/argv/env凭据，不另开服务器。失败/断连不重发未知请求，status/pendingDefaultReviews/人工confirmDefaultReview无模型写能力。全部unknown/缺证经Host checked报告聚合返回非零。
+- `evalSelftest:true` 受管mergeConfig patch增加固定运行根fallback:false、nomem/judge memory:false声明，保留原workspaces/scopes/bindings。首次运行先安全建私有目录，祖先symlink拒绝。不会仅因配置创建会话或卡库。
+- 冻结实际程序证据：paired Memex成功结果、当前库scope/home、正文/搜索summary、写参数/成功位/目标身份；只见调用或失败不算写回，链接不展开。写内容另有独立semantic verdict/quotes，但嵌套在原两次判据中，保持12裁判预算。数字40/450/4.5不再匹配4/45。时序只用本Session实际输入/提醒，固定natural输入以外的未知意图保守unknown，不把child显式写要求误报主动；未来输入不追溯。
+- 真实compat离线测试曾第一条件采集ENOENT，定位正式JSONL是lazy writer，idle/stat都不等于durability；正式sessions.flush后再物理读取，多帧zstd闭环通过。package依赖图有两个LLM私有WeakSet实例时边界不兼容；测试明确forward当前.launcher真实图，不伪造loop标记。
+- 独立只读审查发现真实admission abort竞态（controller仅入口检查signal）、普通无限工具循环无软预算、pending无确认出口、unknown exit0、历史manifest/prose强比当前、R数字边界、child写意图误类。逐项核实修复。取消后请求闸门与admission返回后二次cancel真实deferred admission adapter0；每条件冻结128请求/120秒软监测，根及已登记递归后代超限取消，披露不是硬成本屏障。被撤回的“无finally就是父泄漏”未采纳，真实结构所有权与保留不确定现场合同不变。
+- frozen report与execution校验分离：执行仍当前manifest严格；报告按支持的selftest-v1冻结manifest/resources/plan/protocol自洽和route/schema/evidence绑定读旧副本，不因升级当前prose重判。7个升级与篡改测试先4行为红后全绿。哈希不是历史签名，不宣称防宿主完整重造。
+- 补齐显式同Host安全续跑：factory内存保留连续tracking/judge与exact roots，重新完整退休全部旧根/作业/后代，未知提交/评分已开始/释放未证/跨Host/卸载均拒。普通pre-score故障旧item安全移history，新唯一cwd/session，完成结果不重复。首次跨RPC真实验证因Cordis traceable proxy严格引用变动拒绝，改用官方symbols.original核对服务身份并复用原可信引用；Agent对象仍exact检查。真实第二条件checkpoint失败→显式resume→7唯一根/仍12裁判通过。旧unhealthy/request历史保留，不伪造原请求成功。
+- 新增真实Memex tools/lifecycle+mock kernel生产契约19例；正常兼容runtime闭环6顶层/8回合/12裁判、owned jobs释放/unowned保留、自检title0/日常1、archive后不再模型、只读报告、重放无副作用均通过。fixture standard省略全量AGENTS/skills；routing算法另测；无真实模型效果主张。
+- 最终package全量118files/775tests、typecheck/build:host/npm pack dry-run通过；AUTO30files/240tests、typecheck通过；仓库640total/638pass/0fail/2既有skip及artifacts/strict/diff通过。新增续跑子会话仍在补边界时可增加计数，交付verify按最终新鲜输出更新。
+- 当前27/33。剩余真实Connection EVAL032、部署两次幂等、用户决定重启、授权真模型和最终归档核验均未执行。全部改动未提交/推送；没有部署/重启日常3080/真实模型自检。

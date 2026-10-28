@@ -8,7 +8,7 @@ import { readFrozenInput, freezeInput } from './freeze.js'
 import { allocateAttempt, materializeAttempt } from './routing.js'
 import { selftestManifest } from './selftest-manifest.js'
 
-function ensureDirectory(path: string): void {
+export function ensureDirectory(path: string): void {
   const absolute = resolve(path), parent = dirname(absolute)
   if (parent !== absolute) ensureDirectory(parent)
   try { mkdirSync(absolute, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
