@@ -708,3 +708,10 @@
 - 插件index把活的scope代理（同工具用的resolver）传入，判父路线核验用Host实际解析，不重建配置。
 - 新增eval-host-plugin.test.ts：先因原fail-closed实现得行为红；首版cancel在失败轮次仍dispose父→红，补unhealthy守门后绿。wiring中对未登记round的judgeItem仍拒（冻结计划加载失败），断言成立原因未变。
 - 完整103files/687tests、typecheck、build:host绿。勾选3.2，任务26/33。3.1/3.3仍需真实Host验证EVAL-032。未部署/重启/真实模型；目标active。
+
+## 自动继续第108轮（核验与交付）
+
+- 生成verify.md（anvil）：DECISION: FAIL——离线部分完成，剩余需真实Host/部署/live授权。评审未陈旧（proposal/design/specs修改时间均早于review）。
+- 用户选择：提交（是）、部署（暂不）、真实模型（暂不）。只暂存本change文件提交为110f8647；用户既有改动BACKLOG.md与evaluation-methodology.md未纳入。
+- 提交后仓库检查暴露两项并修正（17c7b39f）：review.md仓库根路径链接改相对路径、指向git忽略构建产物的链接改为路径文字（去链接后正文diff为空）；README中英配对检查豁免packages/*/fixtures/**哈希固定数据（附反例测试）。仓库638/636通过/0失败/2既有跳过；包103files/687tests。9.3勾选，任务27/33。
+- 自检CLI的bin与真实Host传输未接：Host只认浏览器launch token换取的签名cookie，CLI取凭证方式须与用户在部署验收时确定，不绕过Connection认证。
