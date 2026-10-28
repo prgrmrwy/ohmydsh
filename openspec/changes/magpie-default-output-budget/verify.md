@@ -36,15 +36,9 @@
 
 ### Change Delivery
 
-- Commit range：无（未提交）
-- Delivery state：**工作区就绪，等待人工复核与提交**。改动文件：
-  - `packages/dsh-magpie-connector/src/host/catalog.ts`（预算公式与 `outputLimit`）、`src/host/adapter.ts`（SDK 上限改用能力值）
-  - `packages/dsh-magpie-connector/test/output-budget.test.ts`、`test/output-budget-wire.test.ts`、`test/catalog-mapping.test.ts`
-  - `packages/dsh-magpie-connector/{package.json,CHANGELOG.md,README.md,README.zh.md}`
-  - `dsh.yaml`（版本 0.1.2 与 note）
-  - 另：`BACKLOG.md` 与 `packages/dsh-magpie-connector/docs/cloudflare-524-long-requests.md`（D014 的排查记录，已 `git add`，与本次 change 同批提交即可）
-  - `openspec/changes/magpie-default-output-budget/` 尚未纳入版本控制（等提交时一并加入）
-- 提交由用户在复核后执行；本轮未擅自 commit。
+- Commit range：`48cf1302..b69a56c1`（`48cf1302` 提交 D014 排查文档；`b69a56c1` 提交本 change 的实现、测试、文档、manifest 与全部 openspec 产物）
+- 补充提交：本 verify.md 的交付状态记录随下一次 `chore(openspec)` 提交落库。
+- 提交人：prgrmrwy。发起提交的是用户指令（「先提交吧」），不是为满足本产物而自行提交。
 
 ## Overall Decision
 
