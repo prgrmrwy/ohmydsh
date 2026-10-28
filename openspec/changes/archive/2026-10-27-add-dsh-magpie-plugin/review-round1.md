@@ -82,7 +82,7 @@ efd37d6b08153ed96254fe13412fdc08c2811a347edc4c475bd1db7675b5ca6f  openspec/chang
 
 - **位置**：[design D10](</openspec/changes/add-dsh-magpie-plugin/design.md#L88-L94>)与[可独立启用与移除 requirement](</openspec/changes/add-dsh-magpie-plugin/specs/dsh-magpie-connector/spec.md#L256-L272>)。
 - **问题**：D10 定义“可发布形态”只列 prepack；若照此实现，npm tarball 可用，但商店/GitHub 源码安装可能没有 lib，插件无法加载。README 场景又把“治理测试通过”当作 Removal 的证明，但当前治理还有 docTier、首屏 problem 标记及 A/B 截图规则，不能只补 Removal 和 tier 表。
-- **证据**：[发布文档:358–361](</docs/architecture/dsh-plugin-publishing.md#L358-L361>)明确 prepare/prepack 两个都必需；[治理测试:493–518、548–567](</tests/repo-docs-governance.test.mjs#L493-L518>)有额外要求。
+- **证据**：[发布文档:358–361](<https://github.com/prgrmrwy/ohmydsh/blob/85b822b392d49335a693ad08ca7bddedd0956aad/docs/architecture/dsh-plugin-publishing.md#L358-L361>)明确 prepare/prepack 两个都必需；[治理测试:493–518、548–567](</tests/repo-docs-governance.test.mjs#L493-L518>)有额外要求。
 - **建议修法**：在可发布形态中明确 prepare+prepack、dsh.bundle/client/export 与 files 中实际产物；选择 docTier 并满足相应 README 规则。增加 package 元数据的机械检查（含缺 prepare 的负例），而不是本轮提前联网发包/上架。与真正发布的范围隔离可以继续保留。
 
 #### M7 — 卡片白名单丢掉 unlimited/display，会把真实无限额度显示成 0%

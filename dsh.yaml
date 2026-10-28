@@ -217,6 +217,12 @@ customizations:
     enabled: true
     brief: 添加远端 DSH 插件的标准流程(写 manifest → build → 询问重启)
     note: '自研流程 skill:核实 npm 来源与源码仓库后,在 dsh.yaml 追加精确 pin(禁止 ^/~)的 remote 条目,dsh build,再询问是否重启;不擅自重启,build 失败即停。信任面:会用 npm view 访问 npm registry;第三方插件按第三方代码对待。升级复核:manifest 字段约定(含 brief/note 形态)变化时同步 SKILL.md。移除:enabled:false → dsh build。'
+  # 自研 skill:自研插件发布与商店上架,规则与执行入口内聚在 SKILL.md
+  - id: publish-dsh-plugin
+    type: skill
+    enabled: true
+    brief: 自研插件发布上架 SOP(README → 自动镜像/tag → npm + Release → 商店验收)
+    note: '自研纯文本 skill,原 docs/architecture 发布 SOP 迁入单一 SKILL.md。支持首次发布上架、日常发版与只读状态核对;默认 npm OIDC 与 GitHub Release 同版附件均必配,README 按操作/设置并排、图注、Archify、介绍排序。不新增脚本或依赖;按用户范围调用 git/gh/npm 与现有 Actions,会访问 GitHub/npm/商店并可能公开代码和发布资料,不授予额外权限、不擅自重启 Host。升级复核:镜像/发布 workflow 和商店上游规则。移除:enabled:false → dsh build。'
   # 自研 skill:移除插件的标准流程
   - id: remove-dsh-plugin
     type: skill

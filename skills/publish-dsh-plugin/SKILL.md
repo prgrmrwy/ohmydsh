@@ -1,4 +1,19 @@
-# 自研插件发布与商店上架 SOP
+---
+name: publish-dsh-plugin
+description: 在 ohmydsh 维护的自研 DSH 插件发布与商店上架：整理 README、配置自动镜像/tag、npm OIDC 与 GitHub Release、验证分发并提交商店条目；也用于日常发版或只读检查发布状态。
+whenToUse: 用户要求发布/上架自研 DSH 插件、完善其发布资料或流程、发布新版本，或核对镜像/tag/npm/Release/商店状态时使用；安装或移除第三方插件使用 add-dsh-plugin/remove-dsh-plugin。
+---
+
+# 自研插件发布与商店上架（publish-dsh-plugin）
+
+本文件同时是执行指引与完整 SOP，是发布规则的唯一维护入口；不要另建一份平行 SOP、发布脚本或状态机。
+
+## 执行原则
+
+- 先明确目标插件与本次范围，检查已有状态，从缺失环节继续；只读检查请求不执行发布操作，日常发版不重复建仓或提首次上架 PR。
+- ohmydsh 仓库以当前工作目录或用户明确给出的 checkout 为准，不硬编码本机路径。skill 可能部署在用户目录：以下文件路径均相对 ohmydsh 仓库根；参考链接指向公开源码，不能把 skill 安装目录当成仓库根。
+- 有本地 checkout 时以其最新源码、规范和 workflow 为准。先做已授权的准备与验证，再执行该请求范围内的推送、发布和商店提交；需要用户完成网页认证时说明具体阻塞，不反复索取已有授权。
+- 执行结束逐项报告镜像、tag、npm、GitHub Release/附件、商店 PR 的实际状态与链接；未执行或失败的步骤直接说明。不得仅凭 Action 成功声称已完成全部上架。
 
 适用于在 ohmydsh `packages/<目录>` 持续开发、以独立 GitHub 仓库分发的自研 DSH 插件。**ohmydsh 是源码真相源，独立仓库是发布镜像；默认必须同时配置 npm 自动发布和 GitHub Release 自动发布。** 只有 tag、只有 npm 或只有 Release，均不算发布链路配置完成。
 
@@ -18,11 +33,11 @@
 
 | 环节 | 真相源 |
 | --- | --- |
-| 主仓同步与自动打 tag | [mirror-release.yml](../../.github/workflows/mirror-release.yml) |
-| npm + GitHub Release 全流程模板 | [AUTO release.yml](../../packages/auto-model-routing/.github/workflows/release.yml) |
-| 包元数据与构建入口 | [AUTO package.json](../../packages/auto-model-routing/package.json) |
-| 双语首屏与并排演示 | [AUTO README](../../packages/auto-model-routing/README.md) |
-| 本仓文档规则 | [文档治理测试](../../tests/repo-docs-governance.test.mjs) |
+| 主仓同步与自动打 tag | [mirror-release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/.github/workflows/mirror-release.yml) |
+| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/.github/workflows/release.yml) |
+| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/package.json) |
+| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/README.md) |
+| 本仓文档规则 | [文档治理测试](https://github.com/prgrmrwy/ohmydsh/blob/main/tests/repo-docs-governance.test.mjs) |
 
 复制 AUTO workflow 时必须替换包名等专属内容，不把 AUTO 的名称、描述或测试假定原样带入新插件。
 
@@ -79,7 +94,7 @@ GitHub Actions 只执行仓库根目录的 workflow。包内 `.github/workflows/
 
 ### ohmydsh：同步与打 tag
 
-在根 [mirror-release.yml](../../.github/workflows/mirror-release.yml) 中：
+在根 [mirror-release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/.github/workflows/mirror-release.yml) 中：
 
 - 增加包目录的 push paths 条件和 matrix 项，填写 dir、repo、secret。
 - 每个镜像使用独立的 write deploy key；公钥登记到目标镜像，私钥保存为 ohmydsh Actions secret。不得提交私钥或复用宽权限 npm token。

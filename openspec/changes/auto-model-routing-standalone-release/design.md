@@ -2,7 +2,7 @@
 
 动机见 proposal.md。当前包是 0.2.0/private，无 prepare/prepack；根 skills 的独立 manifest 行经 sync 复制到 DSH_HOME。现有 `tests/auto-model-routing-sync.test.mjs` 只证明两份文件被部署，不能证明 Host 真正收录 skill。现行规范的“skill 文本包含八项规则”还引用根 skills 路径。
 
-依据：`docs/architecture/dsh-plugin-publishing.md` §9/§11，sidebar-session-provider-icon 的发布 workflow、archify 的 filesystem bundle 范式，以及 `docs/architecture/dsh-plugin-integration-pitfalls.md`。涉及全局 Host provider 会进入 Pet scope 的已知限制，本 change 不修复宿主 scope 机制，也不添加强制派发拦截。
+依据：`skills/publish-dsh-plugin/SKILL.md`（发布 SOP 已内聚为 skill，原文档已迁移），sidebar-session-provider-icon 的发布 workflow、archify 的 filesystem bundle 范式，以及 `docs/architecture/dsh-plugin-integration-pitfalls.md`。涉及全局 Host provider 会进入 Pet scope 的已知限制，本 change 不修复宿主 scope 机制，也不添加强制派发拦截。
 
 ## Goals / Non-Goals
 

@@ -30,7 +30,7 @@
 日志无异常，但实际没有生效的集成方式——已经重复踩过，不要再靠现场排查重新发现。
 
 **把自研插件发布成独立仓库、上架 DSH 插件商店（awesome-dsh-plugin）或优化可搜索性前，
-先读 [`docs/architecture/dsh-plugin-publishing.md`](docs/architecture/dsh-plugin-publishing.md)。** 那里是通用流程：
+使用 [`publish-dsh-plugin`](skills/publish-dsh-plugin/SKILL.md) skill。** 发布 SOP 与执行指引都内聚在该 skill，不另维护平行文档：
 当前 SOP（包准备 → 独立镜像 → 主仓自动同步/tag → npm OIDC + GitHub Release 同版安装包 → 分发验收 → 商店 PR），
 以 AUTO 全链路为参考；npm 与 GitHub Release 都是默认必配项。日常只在主仓升版并推 main，商店固定 tarball 更新与本机部署另行处理。
 
@@ -41,7 +41,7 @@
 - `openspec/changes/`：进行中的 OpenSpec change；包含 proposal、design、delta specs 和 tasks。
 - `openspec/changes/archive/`：已完成 change 的历史设计与验收记录。
 - `docs/adr/`：已接受的长期架构决策。
-- `docs/architecture/`：当前系统结构与机制说明（[私有 overlay](docs/architecture/private-overlay.md)、[环境级 Agent 指令](docs/architecture/agent-instructions.md)、[DSH 插件集成陷阱](docs/architecture/dsh-plugin-integration-pitfalls.md)、[自研插件发布与收录](docs/architecture/dsh-plugin-publishing.md)）；时间点性的调研与验收记录归入所属 OpenSpec change 或 package 的 `docs/`，缺陷归入 `BACKLOG.md`。
+- `docs/architecture/`：当前系统结构与机制说明（[私有 overlay](docs/architecture/private-overlay.md)、[环境级 Agent 指令](docs/architecture/agent-instructions.md)、[DSH 插件集成陷阱](docs/architecture/dsh-plugin-integration-pitfalls.md)）；时间点性的调研与验收记录归入所属 OpenSpec change 或 package 的 `docs/`，缺陷归入 `BACKLOG.md`。
 - `packages/`：本仓库自研的 DSH package/bundle 源码。
 - `patches/`：纯 composition patch 或远端插件的个人覆盖。
 - `skills/`：同步到 `~/.dsh/skills/` 的自定义 skill。
