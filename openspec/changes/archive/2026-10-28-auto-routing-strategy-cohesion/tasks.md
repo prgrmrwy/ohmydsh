@@ -88,10 +88,10 @@
 
 - [x] 8.1 Back up `$DSH_HOME/state/auto-model-routing/` and `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` to a timestamped directory (design D7).
 - [x] 8.2 Build an isolated preview inside the worktree (`dsh build` → `ws prepare-preview` → `dsh`). In the preview GUI, confirm: the settings page has no mapping tabs and shows the "旧映射不再生效" message; the AUTO chip and its panel; the reply-bar allocation feedback; an unsupported model locking to MANUAL. Record what was actually observed.
-- [ ] 8.3 Once the user approves, merge and run `dsh build` twice from the main checkout (the second run must produce no changes). The user decides when to restart the Host.
+- [x] 8.3 Once the user approves, merge and run `dsh build` twice from the main checkout (the second run must produce no changes). The user decides when to restart the Host.
 
 ## 9. Verification and archive
 
 - [x] 9.1 Generate `verify.md` according to the Anvil verify instructions: every test-plan row is green, the whole suite introduces no new skips, and the review is not stale. Report the strict validation exit code as it actually is.
-- [ ] 9.2 After the delta specs are merged, rewrite the Purpose in `openspec/specs/auto-model-routing/spec.md`, together with lines 5–7 (remove the legacy rollback and the "前七条" explanation) and the Purpose in `openspec/specs/auto-routing-usage-report/spec.md`. Scan the merged main specs and confirm they impose no remaining obligations around legacy or version selection.
-- [ ] 9.3 Archive only with the user's authorization.
+- [x] 9.2 After the delta specs are merged, rewrite the Purpose in `openspec/specs/auto-model-routing/spec.md`, together with lines 5–7 (remove the legacy rollback and the "前七条" explanation) and the Purpose in `openspec/specs/auto-routing-usage-report/spec.md`. Scan the merged main specs and confirm they impose no remaining obligations around legacy or version selection.
+- [x] 9.3 Archive only with the user's authorization.
