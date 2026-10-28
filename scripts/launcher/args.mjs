@@ -29,6 +29,24 @@ export function parseArgs(argv) {
   return flags
 }
 
+// bare host[:port]:主机名/IPv4,或带方括号的 IPv6;官方 connection 加载时仍会再严格校验规范形式。
+const AUTHORITY = /^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/
+
+/**
+ * 本机私有 `DSH_TRUSTED_HOSTS`(通常写在 gitignored 的 .env.local,逗号或空白分隔)
+ * → 官方 `--trusted-host` 参数。域名属于部署事实,不进公开 manifest。
+ * 写错时抛错而不是忽略:静默丢弃会让入口 403,静默放宽则扩大 Host fence;
+ * 调用方须在停止现有 Host 之前调用,避免官方启动时才报错导致起不来。
+ */
+export function trustedHostArgs(env) {
+  const raw = env?.DSH_TRUSTED_HOSTS
+  if (raw === undefined || raw.trim() === '') return []
+  const hosts = raw.split(/[\s,]+/).filter(Boolean)
+  const invalid = hosts.find(host => !AUTHORITY.test(host))
+  if (invalid !== undefined) throw new Error(`DSH_TRUSTED_HOSTS entry ${JSON.stringify(invalid)} is not a bare host[:port] authority`)
+  return hosts.flatMap(host => ['--trusted-host', host])
+}
+
 export const HELP = `ohmydsh — customization repository launcher
 
 Usage: dsh [web] [options]

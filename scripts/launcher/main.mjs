@@ -3,7 +3,7 @@ import path from 'node:path'
 import net from 'node:net'
 import { spawn } from '../lib/child-process.mjs'
 import yaml from 'js-yaml'
-import { parseArgs, isOfficialInvocation, HELP } from './args.mjs'
+import { parseArgs, isOfficialInvocation, trustedHostArgs, HELP } from './args.mjs'
 import { loadEnvironment } from './environment.mjs'
 import { run as defaultRun } from './runner.mjs'
 import { autoUpdate, appendEvent, ensurePrerequisites } from './maintenance.mjs'
@@ -110,6 +110,8 @@ export async function runLauncher(argv, options = {}) {
   }
   if (flags.buildOnly) return 0
   let doc = getManifest()
+  // restart 停机前先校验,写错的 DSH_TRUSTED_HOSTS 不能让健康 Host 被停掉后起不来。
+  const hostTrustArgs = trustedHostArgs(env)
   let prepared
   const prepare = async () => {
     doc = getManifest()
@@ -134,7 +136,7 @@ export async function runLauncher(argv, options = {}) {
     flags.port = port
     uiOptions.port = port
     if (preview && (await probe(port, { env })).state !== 'empty') continue
-    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', '--port', String(flags.port), '--no-open', ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
+    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', '--port', String(flags.port), '--no-open', ...hostTrustArgs, ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
     fs.mkdirSync(home, { recursive: true })
     const fd = flags.foreground ? undefined : fs.openSync(path.join(home, 'dsh.log'), 'a')
     let child

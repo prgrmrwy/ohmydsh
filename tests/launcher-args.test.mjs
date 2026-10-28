@@ -14,6 +14,16 @@ test('Node args retain local command flags and priority inputs', async () => {
   assert.equal(isOfficialInvocation(['plugin-update','--dry-run']), false)
   assert.equal(isOfficialInvocation(['stop','--profile','web']), true)
 })
+test('DSH_TRUSTED_HOSTS maps to official --trusted-host args and rejects malformed values', async () => {
+  const { trustedHostArgs } = await implementation()
+  assert.deepEqual(trustedHostArgs({}), [])
+  assert.deepEqual(trustedHostArgs({ DSH_TRUSTED_HOSTS: '  ' }), [])
+  assert.deepEqual(trustedHostArgs({ DSH_TRUSTED_HOSTS: 'dsh.example.com,h:8443' }), ['--trusted-host', 'dsh.example.com', '--trusted-host', 'h:8443'])
+  assert.deepEqual(trustedHostArgs({ DSH_TRUSTED_HOSTS: 'a.example.com  [::1]:9000' }), ['--trusted-host', 'a.example.com', '--trusted-host', '[::1]:9000'])
+  for (const value of ['https://dsh.example.com', 'dsh.example.com/path', 'user@dsh.example.com', 'dsh.example.com:', '-bad.example.com']) {
+    assert.throws(() => trustedHostArgs({ DSH_TRUSTED_HOSTS: value }), /DSH_TRUSTED_HOSTS/)
+  }
+})
 test('Node invalid arguments reject synchronously before effects', async () => {
   const { parseArgs } = await implementation()
   for (const argv of [['--unknown'],['--check'],['--port'],['--host'],['--trusted-host'],['--port=0'],['--port=65536'],['--port=nan'],['--port=1.1'],['--port=']]) assert.throws(() => parseArgs(argv), /参数|port|value|--check|host/)
