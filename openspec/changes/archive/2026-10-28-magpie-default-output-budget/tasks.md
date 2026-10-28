@@ -6,15 +6,15 @@
 
 ## 2. 默认请求输出预算
 
-- [ ] 2.1 Write failing test: `test/output-budget.test.ts` 的「大输出模型为压缩保留空间」「小窗口按四分之一窗口预留」「网关侧手动设置的输出上限同样收紧」（断言失败原因应是 `defaultMaxTokens` 仍等于 O）
-- [ ] 2.2 Implement: `src/host/catalog.ts` 按公式计算 `defaultMaxTokens`，65536 写成具名常量并注明来源（compaction-basic 默认 `headroomTokens`、Magpie `dshHeadroom`）与 DSH 升级复核点；pass 2.1
-- [ ] 2.3 确认 1.3 的「SDK 模型上限为最大输出能力」此时**因 `model.maxTokens` 变为 184464 而失败**（预期的红）
-- [ ] 2.4 Refactor; full suite stays green（除 2.3 预期失败项）
+- [x] 2.1 Write failing test: `test/output-budget.test.ts` 的「大输出模型为压缩保留空间」「小窗口按四分之一窗口预留」「网关侧手动设置的输出上限同样收紧」（断言失败原因应是 `defaultMaxTokens` 仍等于 O）
+- [x] 2.2 Implement: `src/host/catalog.ts` 按公式计算 `defaultMaxTokens`，65536 写成具名常量并注明来源（compaction-basic 默认 `headroomTokens`、Magpie `dshHeadroom`）与 DSH 升级复核点；pass 2.1
+- [x] 2.3 确认 1.3 的「SDK 模型上限为最大输出能力」此时**因 `model.maxTokens` 变为 184464 而失败**（预期的红）
+- [x] 2.4 Refactor; full suite stays green（除 2.3 预期失败项）
 
 ## 3. 能力分离
 
-- [ ] 3.1 Implement: `CatalogModel` 新增 `outputLimit`，`src/host/adapter.ts` 交给 pi-ai 的 `model.maxTokens` 改为 `entry.outputLimit ?? 16384`；`prepareCall` 的未知模型回退条目同步；pass 2.3
-- [ ] 3.2 Refactor; full suite stays green
+- [x] 3.1 Implement: `CatalogModel` 新增 `outputLimit`，`src/host/adapter.ts` 交给 pi-ai 的 `model.maxTokens` 改为 `entry.outputLimit ?? 16384`；`prepareCall` 的未知模型回退条目同步；pass 2.3
+- [x] 3.2 Refactor; full suite stays green
 
 ## 4. 宿主压缩检查不变量
 
