@@ -151,7 +151,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 设置面板底部 DSH 主机系统时钟(24h + 时区 + hostname)
-    note: '自研,B019,spec settings-system-clock。Host 经 Connection RPC /dsh-system-clock 暴露只读的主机时间/时区/hostname,Web 在设置面板底部渲染 24h 时钟,不可达时显式降级而不回退浏览器时间;无外部网络、不写入。⚠ 回环边界由 connection 层统一施加(非回环 Host 403、未认证 401);本部署未配置 trustedHosts,不得顺手添加,否则该通道随之放宽。升级复核:DSH 升级后回归 connection 的 Host fence。移除:enabled:false → dsh build → 重启。'
+    note: '自研,B019,spec settings-system-clock。Host 经 Connection RPC /dsh-system-clock 暴露只读的主机时间/时区/hostname,Web 在设置面板底部渲染 24h 时钟,不可达时显式降级而不回退浏览器时间;无外部网络、不写入。⚠ 回环边界由 connection 层统一施加(非回环 Host 403、未认证 401);公开 manifest 不配置 trustedHosts;本机若在 .env.local 设 DSH_TRUSTED_HOSTS,该通道随之可经对应域名访问,前面必须另有认证层,不得顺手添加。升级复核:DSH 升级后回归 connection 的 Host fence。移除:enabled:false → dsh build → 重启。'
   # 自研(local):受限地区 × Claude 发送拦截(Web blocks + Host 出口国家码判定,双备份 Geo,未知 fail-closed)
   - id: home-network-model-guard
     type: package
@@ -159,7 +159,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
-    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 dsh-magpie-connector,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道仅回环可达(未配置 trustedHosts,不得添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
+    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 dsh-magpie-connector,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道默认仅回环可达;本机 .env.local 的 DSH_TRUSTED_HOSTS 会把它一并放宽到所列域名(前面必须另有认证层,不得顺手添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
   - id: auto-model-routing
     type: package
     source: local
