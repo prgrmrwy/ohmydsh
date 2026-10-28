@@ -119,11 +119,15 @@ function windowsQuery(port) {
   return `[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false);$OutputEncoding=[Console]::OutputEncoding;$ErrorActionPreference='Stop';try { $listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -eq ${Number(port)} });$records=@();foreach($id in @($listeners.OwningProcess | Sort-Object -Unique)){ $p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$id) -ErrorAction Stop;if(-not $p -or -not $p.CreationDate -or -not $p.CommandLine -or -not $p.ExecutablePath){throw 'Process identity unavailable'};$records+=@{pid=[int]$p.ProcessId;parentPid=[int]$p.ParentProcessId;created=$p.CreationDate.ToUniversalTime().ToString('o');commandLine=$p.CommandLine;executable=$p.ExecutablePath}};ConvertTo-Json -Compress -Depth 5 -InputObject @{state='ok';processes=@($records)}} catch {ConvertTo-Json -Compress -InputObject @{state='probe-error';error='Windows listener/CIM query unavailable'};exit 1}`
 }
 
-export async function probePort(port, { platform = process.platform, env = process.env, deadline = Date.now() + 5_000, run = runPlatformCommand, connect = portReachable } = {}) {
+// Cold Windows PowerShell + NetTCPIP/CIM load takes ~4-6s on a fresh host;
+// a successful probe returns well under 1s, so this only bounds the failure path.
+export const PROBE_TIMEOUT_MS = 15_000
+
+export async function probePort(port, { platform = process.platform, env = process.env, deadline = Date.now() + PROBE_TIMEOUT_MS, run = runPlatformCommand, connect = portReachable } = {}) {
   const error = message => ({ state: 'probe-error', processes: [], error: message })
   if (!validPort(port)) return error('Port must be an integer in 1..65535')
   if (Date.now() >= deadline) return error('Ownership probe deadline expired')
-  const options = { env, timeoutMs: Math.min(5_000, Math.max(1, deadline - Date.now())) }
+  const options = { env, timeoutMs: Math.min(PROBE_TIMEOUT_MS, Math.max(1, deadline - Date.now())) }
   try {
     let records
     if (platform === 'win32') {
@@ -140,7 +144,7 @@ export async function probePort(port, { platform = process.platform, env = proce
       else {
         const ids = [...new Set(result.stdout.trim().split(/\s+/).map(Number))]
         if (!ids.length || ids.some(pid => !positivePid(pid))) return error('lsof returned invalid listener PIDs')
-        records = await Promise.all(ids.map(pid => posixRecord(pid, platform, run, { env, timeoutMs: Math.min(5_000, Math.max(1, deadline - Date.now())) })))
+        records = await Promise.all(ids.map(pid => posixRecord(pid, platform, run, { env, timeoutMs: Math.min(PROBE_TIMEOUT_MS, Math.max(1, deadline - Date.now())) })))
       }
     }
     const reachable = records.length ? true : await connect(Number(port), { timeoutMs: Math.min(300, Math.max(1, deadline - Date.now())) })
@@ -161,7 +165,7 @@ export async function probePort(port, { platform = process.platform, env = proce
 export async function stopServer(port, options = {}) {
   const { platform = process.platform, env = process.env, run = runPlatformCommand, connect = portReachable, signal = (pid, kind) => process.kill(pid, kind), warn = message => console.warn(message) } = options
   const deadline = Math.min(options.deadline ?? Infinity, Date.now() + 20_000)
-  const probe = options.probe ?? (() => probePort(port, { platform, env, run, connect, deadline: Math.min(deadline, Date.now() + 5_000) }))
+  const probe = options.probe ?? (() => probePort(port, { platform, env, run, connect, deadline: Math.min(deadline, Date.now() + PROBE_TIMEOUT_MS) }))
   const fail = (state, error) => ({ ok: false, state, error })
   if (!validPort(port)) return fail('probe-error', 'Invalid port')
   let initial = await probe()

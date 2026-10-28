@@ -4,7 +4,7 @@ import { buildState, previousTurn, redact } from '../src/context.js'
 const user = (text: string, kind = 'user') => ({ role: 'user', source: { kind }, content: [{ type: 'text', text }] })
 const assistant = (text: string) => ({ role: 'assistant', content: [{ type: 'text', text }] })
 
-it('redact_covers_shapes_before_truncation', () => {
+it('spec Scenario "脱敏覆盖常见形态且不误伤正文"', () => {
   const key = `sk-${'A1b2C3d4E5'.repeat(4)}`.slice(0, 40)
   const head = [
     '{"API_KEY": "abc123"}',
@@ -32,7 +32,7 @@ it('redact_covers_shapes_before_truncation', () => {
   expect(redact('at 10.1.2.3:8080 ok')).toBe('at <ip> ok')
 })
 
-it('previous_turn_truncated_and_redacted', () => {
+it('spec Scenario "上一轮上下文截断、取末段并脱敏"', () => {
   const longUser = '问'.repeat(900)
   const reply = `${'答'.repeat(3000 - 40)} token=abc123def456 at 10.1.2.3:8080`
   const messages = [
@@ -47,9 +47,9 @@ it('previous_turn_truncated_and_redacted', () => {
   ]
   const previous = previousTurn(messages)
   expect(previous).toEqual({ user: longUser, assistant: reply })
-  const state = buildState({ previous: 'standard', prevUser: previous.user, prevAssistant: previous.assistant, text: '继续' })
+  const state = buildState({ prevUser: previous.user, prevAssistant: previous.assistant, text: '继续' })
   const lines = state.split('\n')
-  expect(lines[0]).toBe('Previous user-turn tier: standard (one tier above: complex)')
+  expect(lines[0]).toBe('Previous user-turn tier: none')
   expect(state).toContain(`Previous user message (truncated):\n${'问'.repeat(500)}\n`)
   expect(state).not.toContain('问'.repeat(501))
   const redactedReply = redact(reply)
@@ -66,8 +66,8 @@ it('first_turn_state_has_no_context', () => {
   expect(previousTurn([user('Host 指令', 'agent-instructions')])).toEqual({})
   expect(buildState({ text: '看下这个报错' })).toBe('Previous user-turn tier: none\nUser message:\n看下这个报错')
   // Only one side present: the explanation line stays, the missing section is omitted.
-  const onlyUser = buildState({ previous: 'escalated', prevUser: '修一下登录', text: '继续' })
-  expect(onlyUser.split('\n')[0]).toBe('Previous user-turn tier: escalated (one tier above: escalated)')
+  const onlyUser = buildState({ prevUser: '修一下登录', text: '继续' })
+  expect(onlyUser.split('\n')[0]).toBe('Previous user-turn tier: none')
   expect(onlyUser).toContain('Previous user message (truncated):\n修一下登录')
   expect(onlyUser).not.toContain('Previous assistant reply')
 })

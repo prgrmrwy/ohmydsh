@@ -32,7 +32,7 @@ it('observes only after three continuous foreground seconds and cleans up',async
  vi.stubGlobal('IntersectionObserver',class {constructor(cb:(entries:unknown[])=>void){intersect=cb}observe(){}disconnect=disconnect})
  vi.spyOn(document,'hasFocus').mockReturnValue(true)
  vi.spyOn(document,'visibilityState','get').mockReturnValue('visible')
- const {rpc,calls}=rpcFrom(()=>({ok:true,value:{policy:'policy-v2',depth:'baseline'}}))
+ const {rpc,calls}=rpcFrom(()=>({ok:true,value:{depth:'baseline',effort:'medium',model:'sol'}}))
  try{
   await mount('m',rpc)
   intersect([{isIntersecting:true,intersectionRatio:1}]);await vi.advanceTimersByTimeAsync(1000)
@@ -50,7 +50,7 @@ it('resets the exposure timer on hidden pages and focus loss',async()=>{
  vi.stubGlobal('IntersectionObserver',class {constructor(cb:(entries:unknown[])=>void){intersect=cb}observe(){}disconnect=disconnect})
  vi.spyOn(document,'hasFocus').mockImplementation(()=>focused)
  vi.spyOn(document,'visibilityState','get').mockImplementation(()=>state)
- const {rpc,calls}=rpcFrom(()=>({ok:true,value:{policy:'policy-v2',depth:'baseline'}}))
+ const {rpc,calls}=rpcFrom(()=>({ok:true,value:{depth:'baseline',effort:'medium',model:'sol'}}))
  try{
   await mount('m',rpc);intersect([{isIntersecting:true,intersectionRatio:1}])
   await vi.advanceTimersByTimeAsync(2000);state='hidden';document.dispatchEvent(new Event('visibilitychange'))
@@ -63,7 +63,7 @@ it('resets the exposure timer on hidden pages and focus loss',async()=>{
   await act(async()=>{root.render(null)});expect(disconnect).toHaveBeenCalled()
  }finally{vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals()}
 })
-it('unbound and legacy replies do not register an exposure observer',async()=>{
+it('unbound replies do not register an exposure observer',async()=>{
  const observer=vi.fn();vi.stubGlobal('IntersectionObserver',observer)
  try{
   await mount('unbound',rpcFrom(()=>({ok:true,value:{}})).rpc)
@@ -71,56 +71,32 @@ it('unbound and legacy replies do not register an exposure observer',async()=>{
   expect(observer).not.toHaveBeenCalled()
  }finally{vi.unstubAllGlobals()}
 })
-it('allocation menu supports feedback change cancel and visible failure',async()=>{
+it('spec Scenario "修改撤销"',async()=>{
  let feedback:string|null|undefined;let fail=false
- const {rpc}=rpcFrom(p=>{if(Object.hasOwn(p,'feedback')){if(fail)return {ok:false};feedback=p.feedback}return {ok:true,value:{policy:'policy-v2',depth:'baseline',effort:'medium',model:'sol',feedback}}})
+ const {rpc}=rpcFrom(p=>{if(Object.hasOwn(p,'feedback')){if(fail)return {ok:false};feedback=p.feedback}return {ok:true,value:{depth:'baseline',effort:'medium',model:'sol',feedback}}})
  await mount('new',rpc)
  const choose=async(text:string)=>{await act(async()=>{(host.querySelector('button[aria-label]') as HTMLButtonElement).click()});await act(async()=>{(Array.from(host.querySelectorAll('[role=menuitem]')).find(e=>e.textContent===text) as HTMLButtonElement).click()})}
  await choose('投入偏高');expect(tooltip()).toContain('你反馈：投入偏高')
  await choose('撤销反馈');expect(tooltip()).not.toContain('你反馈')
  fail=true;await choose('分配合适');expect(host.querySelector('[role=alert]')?.textContent).toBe('反馈未保存，请重试');expect(tooltip()).not.toContain('你反馈')
 })
-it('button_only_when_judged', async () => {
-  const { rpc, calls } = rpcFrom(p => ({ ok: true, value: p.messageId === 'm2' ? { tier: 'complex', effort: 'high' } : {} }))
-  await mount('m3', rpc)
-  expect(host.innerHTML).toBe('')
-  await mount('m2', rpc)
-  expect(host.querySelector('button[aria-label]')).not.toBeNull()
-  expect(host.querySelector('[data-icon=gauge]')).not.toBeNull()
-  // One query per message.
-  await act(async () => { root.render(h(LabelButton, { sessionId: 'S1', messageId: 'm2', rpc: rpc as never, ui })) })
-  expect(calls.map(c => c.payload.messageId)).toEqual(['m3', 'm2'])
-  expect(calls.every(c => c.endpoint === 'auto-model-routing.label' && c.payload.label === undefined)).toBe(true)
-})
-
-it('tooltip_and_menu_content', async () => {
-  const { rpc } = rpcFrom(p => ({ ok: true, value: p.messageId === 'm4' ? { tier: 'simple' } : { tier: 'complex', effort: 'high', label: 'standard' } }))
-  await mount('m4', rpc)
-  expect(tooltip()).toBe('AUTO 判档：简单')
-  await mount('m2', rpc)
-  expect(tooltip()).toBe('AUTO 判档：复杂 → high · 你标注：标准')
-  expect(host.querySelector('[data-side]')?.getAttribute('data-side')).toBe('bottom')
-  await act(async () => { (host.querySelector('button[aria-label]') as HTMLButtonElement).click() })
-  expect(host.querySelector('[data-menu]')?.getAttribute('data-menu')).toBe('open')
-  expect(host.textContent).toContain('这轮应该用哪档？')
-  const items = Array.from(host.querySelectorAll('[role=menuitem]')).map(item => `${item.textContent}${item.getAttribute('data-checked') ? ' ✓' : ''}`)
-  expect(items).toEqual(['简单', '标准 ✓', '复杂 · Jev', '升级'])
-})
-
-it('selection_calls_label_only', async () => {
-  for (const ok of [true, false]) {
-    const { rpc, calls } = rpcFrom(p => p.label
-      ? (ok ? { ok: true, value: { tier: 'complex', effort: 'high', label: p.label } } : { ok: false, value: undefined })
-      : { ok: true, value: { tier: 'complex', effort: 'high' } })
-    await mount(`m-${ok}`, rpc)
-    await act(async () => { (host.querySelector('button[aria-label]') as HTMLButtonElement).click() })
-    const standard = Array.from(host.querySelectorAll('[role=menuitem]')).find(item => item.textContent?.startsWith('标准')) as HTMLButtonElement
-    await act(async () => { standard.click() })
-    const labelled = calls.filter(c => c.payload.label !== undefined)
-    expect(labelled).toEqual([{ endpoint: 'auto-model-routing.label', payload: { sessionId: 'S1', messageId: `m-${ok}`, label: 'standard' } }])
-    expect(calls.every(c => c.endpoint === 'auto-model-routing.label')).toBe(true)
-    expect(host.querySelector('[data-menu]')?.getAttribute('data-menu')).toBe('closed')
-    if (ok) expect(tooltip()).toContain('你标注：标准')
-    else expect(tooltip()).not.toContain('你标注')
-  }
+it('spec Scenario "label 响应以绑定是否存在区分"', async () => {
+  vi.useFakeTimers(); let intersect!: (entries: unknown[]) => void
+  const created = vi.fn()
+  vi.stubGlobal('IntersectionObserver', class { constructor(cb: (entries: unknown[]) => void) { created(); intersect = cb } observe() {} disconnect() {} })
+  vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+  const m1 = { sessionId: 'S1', messageId: 'm1', decisionId: 5, depth: 'higher', model: 'claude-opus-5-5', effort: 'high' }
+  const { rpc, calls } = rpcFrom(p => ({ ok: true, value: p.messageId === 'm1' ? m1 : {} }))
+  try {
+    await mount('m2', rpc)
+    expect(host.innerHTML).toBe('')
+    expect(created).not.toHaveBeenCalled()
+    await mount('m1', rpc)
+    expect(tooltip()).toMatch(/^AUTO 分配：higher → high · claude-opus-5-5/)
+    expect(host.querySelector('[data-icon=gauge]')).not.toBeNull()
+    intersect([{ isIntersecting: true, intersectionRatio: 1 }]); await vi.advanceTimersByTimeAsync(3000)
+    expect(calls.filter(c => c.endpoint.endsWith('.observe')).map(c => c.payload.messageId)).toEqual(['m1'])
+    expect(calls.every(c => c.payload.label === undefined)).toBe(true)
+  } finally { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals() }
 })

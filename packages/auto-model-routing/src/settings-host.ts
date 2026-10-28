@@ -4,8 +4,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { DEFAULT_SETTINGS, SettingsStore, SettingsValidationError } from './settings.js'
 import type { RoutingCatalog } from './settings-contract.js'
-import { magpieProvider } from './policy-v2.js'
-import rubric from './rubric.json' with { type: 'json' }
+import { registry as builtin, type Registry } from './strategies/index.js'
 
 import { JevClient } from './jev.js'
 import { DECISION_SERVICES, type DecisionProvider } from './decision-service.js'
@@ -13,11 +12,11 @@ const keyRef = (provider: DecisionProvider = 'openrouter') => credentialRef(DECI
 interface AllowlistService { current(): { enabled: boolean; allowedModels: { provider: string; model: string }[] } }
 
 /** Only the fixed credential reference and public catalog metadata cross this adapter. */
-export function settingsHost(ctx: Context, store: SettingsStore) {
+export function settingsHost(ctx: Context, store: SettingsStore, registry: Registry = builtin) {
   const environment = launchEnvironmentOf(ctx)
   const credentials = () => ctx.get('credentials')
-  const catalog = async (includeMagpie = store.read().settings.policy === 'policy-v2'): Promise<RoutingCatalog> => {
-    const models = (await Promise.all(ctx.llm.listProviders().filter(p => p.id === 'claude' || p.id === 'codex' || (includeMagpie && magpieProvider(p.id))).map(async provider => {
+  const catalog = async (): Promise<RoutingCatalog> => {
+    const models = (await Promise.all(ctx.llm.listProviders().filter(p => registry.hasProvider(p.id)).map(async provider => {
       try {
         return await Promise.all((await ctx.llm.listModels(provider.id)).map(async model => {
           try {
@@ -32,7 +31,7 @@ export function settingsHost(ctx: Context, store: SettingsStore) {
     try {
       if (service) {
         const current = service.current()
-        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => r.provider === 'claude' || r.provider === 'codex' || (includeMagpie && magpieProvider(r.provider))) } }
+        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => registry.hasProvider(r.provider)) } }
       }
     } catch { /* An unavailable policy must never broaden the allowed routes. */ }
     return { models, childAllowlist: { status: 'unavailable', allowedModels: [] } }
@@ -48,18 +47,18 @@ export function settingsHost(ctx: Context, store: SettingsStore) {
   }
   const read = async () => {
     const current = await catalog()
-    const result = store.read(current)
-    return { settings: result.settings, defaults: DEFAULT_SETTINGS, configStatus: result.status, issues: result.issues, key: await keyStatus(), ...current, criteria: rubric.tier.criteria }
+    const result = store.read()
+    return { settings: result.settings, defaults: DEFAULT_SETTINGS, configStatus: result.status, issues: result.issues, deprecated: result.deprecated, key: await keyStatus(), ...current }
   }
   const endpoint = async (operation: 'settings' | 'saveSettings' | 'setKey' | 'testDecision', body: unknown): Promise<Response> => {
     if (operation === 'settings') return Response.json(await read())
     if (operation === 'testDecision') {
-      const client = new JevClient({ get: async name => credentials() ? credentials()!.resolve(credentialRef(name)) : environment.get(name) }, undefined, 4500, () => store.read().settings.decisionService)
+      const client = new JevClient({ get: async name => credentials() ? credentials()!.resolve(credentialRef(name)) : environment.get(name) }, undefined, 8000, () => store.read().settings.decisionService)
       const result = await client.judgePolicy('Public connection test: sort the numbers [3,1,2] in ascending order.', new AbortController().signal, 'child')
       return Response.json(result)
     }
     if (operation === 'saveSettings') {
-      try { store.save(body, await catalog()); return Response.json(await read()) }
+      try { store.save(body); return Response.json(await read()) }
       catch (error) {
         if (error instanceof SettingsValidationError) return Response.json({ error: error.message, issues: error.issues }, { status: 400 })
         return Response.json({ error: '无法保存自动模型路由设置' }, { status: 500 })

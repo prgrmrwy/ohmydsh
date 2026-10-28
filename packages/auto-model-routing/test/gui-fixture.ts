@@ -1,6 +1,5 @@
 import { createElement as h, forwardRef, type ReactNode } from 'react'
 import type { SettingsUi } from '../src/client/settings-ui.js'
-import rubric from '../src/rubric.json' with { type: 'json' }
 
 const wrap = ({ children, ...props }: { children?: ReactNode }) => h('div', props, children)
 export const ui = {
@@ -32,8 +31,7 @@ export const models = [
 ]
 export const catalog = { models, childAllowlist: { status: 'enabled' as const, allowedModels: models.filter(m => !m.model.includes('fable')).map(({ provider, model }) => ({ provider, model })) } }
 export const view = () => ({
-  settings: { policy: 'legacy' as 'legacy' | 'policy-v2', decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 3000 },
-  defaults: { decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 3000 },
-  configStatus: 'ok', issues: [], key: { configured: true, writable: true, available: true, source: 'store' }, ...catalog,
-  criteria: rubric.tier.criteria,
+  settings: { decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 5000 },
+  defaults: { decisionToast: true, defaultMode: 'MANUAL' as const, effortCap: 'xhigh' as const, jevTimeoutMs: 5000 },
+  configStatus: 'ok', issues: [], deprecated: [] as string[], key: { configured: true, writable: true, available: true, source: 'store' }, ...catalog,
 })

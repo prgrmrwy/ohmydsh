@@ -15,7 +15,7 @@ for (const name of names) {
  assert.equal(pkg.version,name === 'cordis' ? '4.0.4' : '0.2.0-rc.2')
 }
 const [{Context},Agents,Loop,Sessions,Projections,Prompt,Tools,Llm,Subagents,Spawn,Teams,SubTool,TeamTools,Persistence,Query,Environment] = await Promise.all(names.map(load))
-const home = await mkdtemp(join(tmpdir(),'policy-v2-official-'))
+const home = await mkdtemp(join(tmpdir(),'host-probe-children-'))
 await mkdir(join(home,'plugins/dsh-auto-model-routing'),{recursive:true})
 await writeFile(join(home,'plugins/dsh-auto-model-routing/config.json'),JSON.stringify({ defaultMode:'AUTO' }))
 const jevBodies = []

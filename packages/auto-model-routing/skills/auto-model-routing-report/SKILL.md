@@ -9,7 +9,8 @@ description: 仅当用户明确要求评估 AUTO 效果、观察 AUTO 期间的 
 
 ## 它能回答什么
 
-- AUTO 期间做了哪些决策，按策略版本、模型和推理深度（depth）分组，以及这些决策实际消耗了多少 token。
+- AUTO 期间做了哪些决策，按策略家族（`group`）、模型和推理深度（depth）分组，以及这些决策实际消耗了多少 token。
+  - `group` 为策略家族 id（如 `claude`、`codex`）。0.5.0 之前写入的记录保留原有分组标识，`historical: true`；没有快照的记录归入 `unknown`。历史组与家族组不要合并比较。
 - 数据覆盖情况：哪些回合没有记录，以及有多少会话处于 AUTO 但完全没有记录。
 - 对照首个 AUTO 记录之前的回合，effort 起点发生了什么变化。
 
@@ -34,7 +35,7 @@ description: 仅当用户明确要求评估 AUTO 效果、观察 AUTO 期间的 
    - `conclusion: insufficient-sample` → “样本不足，尚不能判断”。门槛是 ≥20 个决策，且来自 ≥3 个会话。
    - `caveats` 中的每一项都要用一句话说明：
      - `observational-not-controlled`：观察数据，不是受控对照；判断因果需要专门对照实验。
-     - `scope-main-session-assistant-calls-only`：不含子会话、压缩摘要、标题生成、Jev 判档和失败重试的用量，因此不能推出“节省”。
+     - `scope-main-session-assistant-calls-only`：不含子会话、压缩摘要、标题生成、Jev 判断和失败重试的用量，因此不能推出“节省”。
      - `only-applied-decisions-recorded`：只记录实际生效的决策，已统计部分可能偏向某类回合；`coverage.turnsWithoutRecord` 显示缺口大小。
      - `token-semantics-differ-by-provider`：不同 provider 的 token 口径可能不同，不要跨模型比较。
      - `reference-before-auto-effort-only-confounded`：`referenceBeforeAuto` 只用于看 effort 起点的变化；它受会话阶段、任务类型、模型切换等因素混杂，不能当作对照组。
@@ -52,4 +53,4 @@ description: 仅当用户明确要求评估 AUTO 效果、观察 AUTO 期间的 
 ## 前提
 
 - 报告每次都从原始记录和会话日志重新计算，不保存快照。用户删除旧会话后，对应历史无法再统计。
-- 旧版策略（legacy）的判档一致率请用同一插件目录下的 `scripts/label-report.mjs`。
+- 早期四档判档账本 `judgements.jsonl` 只用来定位每个会话首个 AUTO 记录，本报告不统计其中的标注。

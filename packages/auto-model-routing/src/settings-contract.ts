@@ -1,24 +1,15 @@
-import type { Tier } from './effort.js'
-
 export const AUTO_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const
 export type AutomaticEffort = typeof AUTO_EFFORTS[number]
-export type RoutingProvider = 'claude' | 'codex'
-export const PROVIDERS = [{ id: 'claude', label: 'Claude' }, { id: 'codex', label: 'GPT' }] as const
-export interface ChildRoute { model: string; reasoningEffort: AutomaticEffort }
 export interface Settings {
-  policy?: 'legacy' | 'policy-v2'
   decisionService?: import('./decision-service.js').DecisionConfig
   decisionToast: boolean
   defaultMode: 'MANUAL' | 'AUTO'
   effortCap: AutomaticEffort
   jevTimeoutMs: number
-  mainEfforts?: Partial<Record<RoutingProvider, Partial<Record<Tier, AutomaticEffort>>>>
-  childRoutes?: Partial<Record<RoutingProvider, Partial<Record<Tier, ChildRoute>>>>
 }
-export type SettingsPatch = Partial<Pick<Settings, 'decisionService' | 'policy' | 'decisionToast' | 'defaultMode' | 'effortCap' | 'jevTimeoutMs'>> & {
-  mainEfforts?: Partial<Record<RoutingProvider, Partial<Record<Tier, AutomaticEffort | null>> | null>>
-  childRoutes?: Partial<Record<RoutingProvider, Partial<Record<Tier, ChildRoute | null>>>>
-}
+export type SettingsPatch = Partial<Settings>
+/** Retired mapping keys: read and reported, never applied, dropped on the next save. */
+export const DEPRECATED_KEYS = ['childRoutes', 'mainEfforts', 'policy'] as const
 export interface SettingsIssue { path: string; code: string; message: string }
 export interface RoutingModel { provider: string; model: string; name: string; reasoningEfforts: readonly string[]; defaultEffort?: string }
 export interface RoutingCatalog {
@@ -29,9 +20,10 @@ export interface RoutingCatalog {
   }
 }
 export interface SettingsRead {
-  /** Invalid explicit cells are retained for diagnosis; validate before using an override. */
   settings: Settings
   issues: SettingsIssue[]
   status: 'missing' | 'ok' | 'invalid'
+  /** Retired keys present in the file, alphabetical. */
+  deprecated: string[]
 }
-export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ policy: 'policy-v2', decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 3000 })
+export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 5000 })

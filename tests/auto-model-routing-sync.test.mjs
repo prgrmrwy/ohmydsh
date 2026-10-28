@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cp, symlink, readFile, access } from 'node:fs/promises'
+import { cp, symlink, readFile, readdir, access } from 'node:fs/promises'
 import path from 'node:path'
 import { overlayFixture, REPO } from './helpers/overlay-fixture.mjs'
 
@@ -9,11 +9,11 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.4.2
+    version: 0.5.0
     enabled: ${enabled}
 ${legacy ? '  - id: subagent-model-routing\n    type: skill\n    enabled: true\n' : ''}`
 
-test('routing bundle migrates managed skill, preserves data and second isolated sync is noop', async () => {
+async function migrated() {
   const fx = await overlayFixture({ externalRoot: false, manifest: manifest(true) })
   const target = path.join(fx.repo, 'packages/auto-model-routing')
   await cp(path.join(REPO, 'packages/auto-model-routing'), target, { recursive: true, filter: source => !source.split(path.sep).includes('node_modules') })
@@ -44,12 +44,26 @@ test('routing bundle migrates managed skill, preserves data and second isolated 
   const bundle = await readFile(path.join(deployed, 'cordis.patch.yml'), 'utf8')
   assert.match(bundle, /providerName: auto-model-routing-plugin/)
   assert.match(bundle, /includeDefaultRoots: false/)
+  return { fx, deployed, state, privateSkill }
+}
+
+test('spec Scenario "旧部署迁移无重复来源"', async () => {
+  const { fx, deployed, state } = await migrated()
+  const skills = await readdir(path.join(deployed, 'skills'))
+  assert.deepEqual(skills.filter(name => name === 'subagent-model-routing'), ['subagent-model-routing'])
   const second = fx.sync()
   assert.equal(second.status, 0, second.stderr)
   assert.match(second.stdout, /no changes/)
+  assert.equal(await readFile(state, 'utf8'), '{"mode":"MANUAL"}')
+})
+
+test('spec Scenario "插件禁用撤销 skill 与工具"', async () => {
+  const { fx, deployed, state, privateSkill } = await migrated()
   await fx.putPublic('dsh.yaml', manifest(false, false))
   const disabled = fx.sync()
   assert.equal(disabled.status, 0, disabled.stderr)
+  await assert.rejects(access(path.join(deployed, 'package.json')), { code: 'ENOENT' })
+  await assert.rejects(access(path.join(fx.dshHome, 'skills/subagent-model-routing/SKILL.md')), { code: 'ENOENT' })
   assert.equal(await readFile(state, 'utf8'), '{"mode":"MANUAL"}')
   assert.equal(await readFile(privateSkill, 'utf8'), 'untouched')
 })

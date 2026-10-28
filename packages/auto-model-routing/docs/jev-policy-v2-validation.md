@@ -1,5 +1,7 @@
 # Jev policy-v2 验证（2026-10-24）
 
+> 历史记录：命名、路径与行为以记录时的 0.4.x 版本为准；0.5.0 起只有一套 AUTO 策略，规则文件为 `src/rubric.json`，家族策略见 `src/strategies/`。
+
 ## 结论
 
 官方接口和真实 `typesafe/jev-1.13` 均支持一次请求中独立返回 capability 与 depth。10 次合成任务请求全部返回合法的双 Choice；预先定义的 development / holdout 各 5 例均符合预期，不调整 rubric、不重试。**这只证明接口与小样本分类，不证明实际子模型质量、成本收益或默认推广条件。**
@@ -26,7 +28,7 @@
 | hold-constraints | holdout | frontier | higher |
 | hold-unknown | holdout | insufficient_context | baseline |
 
-[测试输入及独立预期](../eval/policy-v2-cases.json)、[问题定义](../src/policy-v2-rubric.json)、[有预算保护的实测脚本](../eval/policy-v2-live.mjs)。depth 从同一任务证据独立判断相对适配模型的推荐投入，不引用另一个尚未返回的 capability 答案。两者都指定时不判；只指定一个维度时仅询问另一个。
+[测试输入及独立预期](../eval/cases.json)、[问题定义](../src/rubric.json)、[有预算保护的实测脚本](../eval/live.mjs)（当时文件名分别带 `policy-v2-` 前缀）。depth 从同一任务证据独立判断相对适配模型的推荐投入，不引用另一个尚未返回的 capability 答案。两者都指定时不判；只指定一个维度时仅询问另一个。
 
 实测脚本先保留每次费用预算再请求，失败也计一次；预留每次 65536 input tokens 远高于合成输入。未知 usage.cost 停止，不记零。尚有 10 次授权余量，不默认消耗，也不因生成一个新结果文件就获得新预算。跨多次运行的全局预算需由执行者核对，脚本不是账户级额度控制。
 

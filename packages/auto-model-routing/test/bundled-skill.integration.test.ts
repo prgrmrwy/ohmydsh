@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
 
-it('bundle provider loads one real registry skill and disposes it', async () => {
+it('spec Scenario "干净安装获得唯一 skill"', async () => {
   const ctx = new Context()
   const registry = await ctx.plugin(Registry)
   const patch = readFileSync(resolve(import.meta.dirname, '../cordis.patch.yml'), 'utf8')

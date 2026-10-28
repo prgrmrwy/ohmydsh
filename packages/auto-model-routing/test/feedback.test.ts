@@ -27,7 +27,7 @@ it('keeps immutable snapshot and separate timestamped feedback events with old r
  book.bind({...old,messageId:'new',decisionId:2,snapshot})
  book.set('s','new','too-high');book.set('s','new',null)
  const records=readFileSync(file,'utf8').trim().split('\n').map(line=>JSON.parse(line))
- expect(records.at(-1)).toMatchObject({type:'feedback',version:2,feedback:null,decisionId:2,at:expect.any(Number)})
+ expect(records.at(-1)).toMatchObject({type:'feedback',feedback:null,decisionId:2,at:expect.any(Number)})
  expect(records.at(-1)).not.toHaveProperty('snapshot')
  expect(new FeedbackBook(file).lookup('s','new')).toMatchObject({snapshot,feedback:null,boundAt:expect.any(Number),feedbackAt:expect.any(Number)})
 })
@@ -45,13 +45,49 @@ it('keeps first decision facts separate from immutable bindings and feedback',()
 it('persists message-bound feedback with modification cancellation and validation',async()=>{
  const file=join(mkdtempSync(join(tmpdir(),'feedback-')),'feedback.jsonl');const book=new FeedbackBook(file)
  book.bind({sessionId:'s',messageId:'m',decisionId:1,depth:'baseline',model:'sol',effort:'medium'})
- const legacy={lookup:()=>undefined,label:()=>{throw Error('legacy must not write')}}
  const resolve=async()=>({id:'s'})
- const call=(feedback:unknown,messageId='m')=>labelEndpoint({sessionId:'s',messageId,feedback},resolve,legacy,book)
+ const call=(feedback:unknown,messageId='m')=>labelEndpoint({sessionId:'s',messageId,feedback},resolve,book)
  expect((await call('too-high')).status).toBe(200)
  expect(new FeedbackBook(file).lookup('s','m')?.feedback).toBe('too-high')
  await call('appropriate');expect(book.lookup('s','m')?.feedback).toBe('appropriate')
  await call(null);expect(new FeedbackBook(file).lookup('s','m')?.feedback).toBeNull()
  expect((await call('invalid')).status).toBe(400);expect((await call('appropriate','other')).status).toBe(404)
  expect(book.lookup('other','m')).toBeUndefined()
+})
+it('spec Scenario "新旧记录并存"',()=>{
+ const file=join(mkdtempSync(join(tmpdir(),'feedback-mixed-')),'data.jsonl')
+ const oldSnapshot={decidedAt:1,appliedAt:2,policyVersion:'policy-v2-d774ffe6',mappingVersion:'capability-slots-2-magpie',decisionProvider:'openrouter',decisionModel:'jev',ms:20,provider:'claude',requestSeq:8}
+ writeFileSync(file,JSON.stringify({sessionId:'s',messageId:'old',decisionId:1,depth:'baseline',model:'claude-opus-5-5',effort:'medium',snapshot:oldSnapshot,boundAt:3})+'\n'+JSON.stringify({type:'feedback',version:2,sessionId:'s',messageId:'old',decisionId:1,at:4,feedback:'appropriate'})+'\n')
+ const book=new FeedbackBook(file)
+ const snapshot={decidedAt:5,appliedAt:6,strategy:'codex',decisionProvider:'openrouter',decisionModel:'jev',ms:20,provider:'codex',requestSeq:9}
+ book.bind({sessionId:'s',messageId:'new',decisionId:2,depth:'higher',model:'gpt-6.1-sol',effort:'high',snapshot})
+ const reread=new FeedbackBook(file)
+ expect(reread.lookup('s','old')).toMatchObject({snapshot:oldSnapshot,feedback:'appropriate'})
+ expect(reread.lookup('s','old')!.snapshot).not.toHaveProperty('strategy')
+ expect(reread.lookup('s','new')!.snapshot).toEqual(snapshot)
+ book.set('s','new','too-high')
+ const rows=readFileSync(file,'utf8').trim().split('\n').map(l=>JSON.parse(l))
+ expect(rows.at(-2).snapshot).not.toHaveProperty('policyVersion');expect(rows.at(-2).snapshot).not.toHaveProperty('mappingVersion')
+ expect(rows.at(-1)).toMatchObject({type:'feedback',feedback:'too-high'});expect(rows.at(-1)).not.toHaveProperty('version')
+ expect(new FeedbackBook(file).lookup('s','new')).toMatchObject({snapshot,feedback:'too-high'})
+})
+it('spec Scenario "新旧事件格式混读"',()=>{
+ const file=join(mkdtempSync(join(tmpdir(),'feedback-events-')),'data.jsonl')
+ const bind=(m:string,d:number)=>JSON.stringify({sessionId:'s',messageId:m,decisionId:d,depth:'baseline',model:'sol',effort:'medium'})
+ const lines=[bind('a',1),bind('b',2),bind('c',3),
+  JSON.stringify({type:'feedback',version:2,sessionId:'s',messageId:'a',decisionId:1,at:10,feedback:'too-low'}),
+  JSON.stringify({type:'fact',version:1,sessionId:'s',decisionId:1,fact:'exposed',at:11}),
+  JSON.stringify({type:'feedback',sessionId:'s',messageId:'b',decisionId:2,at:12,feedback:'appropriate'}),
+  JSON.stringify({type:'fact',sessionId:'s',decisionId:2,fact:'manual-switch',at:13}),
+  JSON.stringify({type:'feedback',sessionId:'s',messageId:'c',decisionId:3,at:14,feedback:'unknown',extra:1})]
+ writeFileSync(file,lines.join('\n')+'\n')
+ const book=new FeedbackBook(file)
+ expect(book.lookup('s','a')).toMatchObject({feedback:'too-low',feedbackAt:10})
+ expect(book.lookup('s','b')).toMatchObject({feedback:'appropriate',feedbackAt:12})
+ expect(book.lookup('s','c')).not.toHaveProperty('feedback')
+ expect(book.facts('s',1)).toEqual({exposed:11})
+ expect(book.facts('s',2)).toEqual({'manual-switch':13})
+ // A retired version value other than the original one is not accepted.
+ writeFileSync(file,[bind('a',1),JSON.stringify({type:'feedback',version:3,sessionId:'s',messageId:'a',decisionId:1,at:10,feedback:'too-low'})].join('\n')+'\n')
+ expect(new FeedbackBook(file).lookup('s','a')).not.toHaveProperty('feedback')
 })

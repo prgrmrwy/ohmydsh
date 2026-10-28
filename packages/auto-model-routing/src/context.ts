@@ -1,7 +1,4 @@
-import type { Tier } from './effort.js'
-import { tierAbove } from './jev.js'
-
-/** Shape-based, best effort (design D4): applied to the whole text before any truncation. */
+/** Shape-based, best effort: applied to the whole text before any truncation. */
 const RULES: readonly [RegExp, string][] = [
   [/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '<redacted>'],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer <redacted>'],
@@ -28,9 +25,9 @@ export function previousTurn(messages: readonly HistoryMessage[]): { user?: stri
 
 const EXPLAIN = 'Earlier conversation is shown so you can tell what the new message asks for. Rate the work the assistant must do next in response to the new message, not the earlier work.'
 
-/** The Jev `state` for a main-session turn (spec "Jev 判断档位"); every section is redacted, then cut. */
-export function buildState(input: { previous?: Tier | undefined; prevUser?: string | undefined; prevAssistant?: string | undefined; text: string }): string {
-  const lines = [input.previous ? `Previous user-turn tier: ${input.previous} (one tier above: ${tierAbove(input.previous)})` : 'Previous user-turn tier: none']
+/** The Jev `state`; every section is redacted, then cut. The fixed first line keeps the request bytes stable. */
+export function buildState(input: { prevUser?: string | undefined; prevAssistant?: string | undefined; text: string }): string {
+  const lines = ['Previous user-turn tier: none']
   const context = input.prevUser !== undefined || input.prevAssistant !== undefined
   if (context) lines.push(EXPLAIN)
   if (input.prevUser !== undefined) lines.push('Previous user message (truncated):', redact(input.prevUser).slice(0, 500))

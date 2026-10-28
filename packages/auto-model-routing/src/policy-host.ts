@@ -4,8 +4,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import type { JevClient, Depth, PolicyMeasure } from './jev.js'
-import { policyVersion, CATEGORY_HINTS } from './jev.js'
-import { choosePolicyRoute, mappingVersion, policyEffort, modelFamily, policyProvider, validatePolicyRoute } from './policy-v2.js'
+import { CATEGORY_HINTS } from './jev.js'
+import { choosePolicyRoute, policyEffort, modelFamily, validatePolicyRoute } from './routing.js'
+import { registry as builtin, type Registry } from './strategies/index.js'
 import { PolicyStore, type ChildDecision } from './policy-store.js'
 import type { RoutingState } from './state.js'
 import type { AutomaticEffort, RoutingCatalog, Settings } from './settings-contract.js'
@@ -14,8 +15,10 @@ import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
 import { autoSupportedModel, currentMainSelection, mainSupported } from './support.js'
 
-export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog> }) {
-  const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: 'claude' | 'codex' }>()
+export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog>; registry?: Registry }) {
+  const registry = deps.registry ?? builtin
+  const familyOf = (model: string) => registry.familyOfMainModel(model)?.id
+  const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: string }>()
   const rootOf = (agent: Agent): Agent | undefined => {
     let current: Agent | undefined = agent
     for (let i = 0; current && i < 32; i++) {
@@ -25,17 +28,17 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   }
   const epochs = new Map<string, number>()
   const epoch = (id: string) => epochs.get(id) ?? 0
-  const enabled = (rootId: string) => deps.settings().policy === 'policy-v2' && deps.state.read(rootId).mode === 'AUTO'
+  const enabled = (rootId: string) => deps.state.read(rootId).mode === 'AUTO'
   const pending = new Map<string, ChildDecision>()
   const main = new WeakMap<Agent, { turn: number; depth: Depth; active: boolean; epoch: number }>()
   ctx.effect(() => () => { pending.clear(); delegation.disable() })
-  const mainStatus = new Map<string, { policyVersion: string; depth: Depth; effort?: string; reason: string; decision?: NonNullable<ChildDecision['decision']> }>()
+  const mainStatus = new Map<string, { depth: Depth; effort?: string; reason: string; decision?: NonNullable<ChildDecision['decision']> }>()
   let decisionId = Date.now()
   const requestMetadata = new Map<string, { requestSeq: number; appliedAt: number; requestTurn?: number }>()
   const decidedAt = new Map<number, number>()
   const applied = new Map<string, NonNullable<ChildDecision['decision']>>()
   const latest = new Map<string, NonNullable<ChildDecision['decision']>>()
-  /** Fall back to MANUAL when the main model left AUTO's Claude/GPT scope. */
+  /** Fall back to MANUAL when the main model left AUTO's registered families. */
   const lockUnsupportedMain = (agent: Agent) => {
     deps.state.setMode(agent.id, 'MANUAL')
     mainStatus.delete(agent.id)
@@ -48,11 +51,11 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     if (!root || !enabled(root.id)) return next()
     const args = isRecord(exec.arguments) ? exec.arguments : {}
     const path = exec.name === 'subagent_fork' || (exec.name === 'spawn_teammate' && args.context === 'fork') ? 'fork' : exec.name === 'spawn_teammate' ? 'teammate' : 'ordinary'
-    if (path === 'fork') throw new Error('policy-v2 unsupported：fork 的真实历史兼容尚未验证；请暂停，改用 fresh 或由用户选择关闭试验策略后继承。')
+    if (path === 'fork') throw new Error('unsupported：fork 的真实历史兼容尚未验证；请暂停，改用 fresh 创建，或由用户切到 MANUAL 后继承。')
     const provider = args.provider ?? exec.agent.session.requestHeader()?.config.provider ?? exec.agent.options.provider
-    if (typeof provider !== 'string' || !policyProvider(provider)) throw new Error('policy-v2 unsupported：无法验证 provider；暂停委派并询问用户')
+    if (typeof provider !== 'string' || !registry.hasProvider(provider)) throw new Error('unsupported：无法验证 provider；暂停委派并询问用户')
     const parentModel = exec.agent.session.requestHeader()?.config.model ?? exec.agent.options.model
-    const family = modelFamily(provider, typeof args.model === 'string' ? args.model : parentModel ?? '')
+    const family = modelFamily(provider, typeof args.model === 'string' ? args.model : parentModel ?? '', registry)
     const explicit: ChildDecision['explicit'] = { provider,
       ...(typeof args.model === 'string' ? { model: args.model } : {}),
       ...(typeof args.reasoning_effort === 'string' ? { reasoningEffort: args.reasoning_effort } : {}) }
@@ -63,14 +66,14 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     const binding = delegation.getStore()
     if (!binding || binding.parentId !== agent.session.header.parentSession) return
     // Creation is precisely inside this official tool's async lifetime, never matched by prompt.
-    const record: ChildDecision = { version: 1, childId: agent.id, ...binding, policyVersion, mappingVersion, status: 'recommended' }
+    const record: ChildDecision = { childId: agent.id, ...binding, status: 'recommended' }
     deps.store.set(record)
     deps.store.bind(agent.id)
     pending.set(agent.id, record)
     return undefined
   })
   const requireBindingRecord = (agent: Agent, record: ChildDecision | undefined) => {
-    if (deps.store.wasBound(agent.id) && !record) throw new Error('policy-v2 已绑定子会话的决策记录缺失；停止请求，不恢复继承配置')
+    if (deps.store.wasBound(agent.id) && !record) throw new Error('已绑定子会话的决策记录缺失，无法恢复；停止请求，不恢复继承配置')
   }
   ctx.on('agent/disposed', ({ agent }) => { pending.delete(agent.id); mainStatus.delete(agent.id); return undefined })
   ctx.on('agent/pre-step', async (payload, next) => {
@@ -82,8 +85,8 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const input = userInput(decision.messages)
       const old = main.get(agent)
       if (!input.userTurn) { if (old) main.set(agent, { ...old, turn: payload.turn }); return decision }
-      // The main model left AUTO's Claude/GPT scope: judge nothing, rewrite nothing.
-      if (!mainSupported(currentMainSelection(ctx, agent))) { lockUnsupportedMain(agent); return decision }
+      // The main model left AUTO's registered families: judge nothing, rewrite nothing.
+      if (!mainSupported(currentMainSelection(ctx, agent), registry)) { lockUnsupportedMain(agent); return decision }
       applied.delete(agent.id)
       mainStatus.delete(agent.id)
       const startedEpoch = epoch(agent.id)
@@ -95,7 +98,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       main.set(agent, { turn: payload.turn, depth: result.depth, active: true, epoch: startedEpoch })
       const { kind: _kind, ...measurement } = result
       latest.delete(agent.id)
-      mainStatus.set(agent.id, { policyVersion, depth: result.depth, reason: 'jev', decision: { ...measurement, id: ++decisionId, source: 'main', tier: result.depth, effort: '待应用', status: 'recommended' } })
+      mainStatus.set(agent.id, { depth: result.depth, reason: 'jev', decision: { ...measurement, id: ++decisionId, source: 'main', tier: result.depth, effort: '待应用', status: 'recommended' } })
       decidedAt.set(decisionId, Date.now())
       if (decidedAt.size > 200) decidedAt.delete(decidedAt.keys().next().value!)
       if (mainStatus.size > 200) mainStatus.delete(mainStatus.keys().next().value!)
@@ -105,16 +108,15 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     requireBindingRecord(agent, record)
     if (!record) {
       const root = rootOf(agent)
-      if (root && enabled(root.id)) throw new Error('policy-v2 unsupported：创建没有官方工具身份绑定；该子请求未路由。请暂停并选择受支持创建路径或关闭试验后继承。')
+      if (root && enabled(root.id)) throw new Error('unsupported：创建没有官方工具身份绑定；该子请求未路由。请暂停并改用受支持的创建路径，或由用户切到 MANUAL 后继承。')
       return decision
     }
-    if (record.parentId !== agent.session.header.parentSession) throw new Error('policy-v2 子会话身份不匹配')
-    if (!record.route && !enabled(record.rootId)) { pending.delete(agent.id); throw new Error('policy-v2 创建期间策略或模式已改变；请重新创建，不静默继承') }
+    if (record.parentId !== agent.session.header.parentSession) throw new Error('子会话身份不匹配')
+    if (!record.route && !enabled(record.rootId)) { pending.delete(agent.id); throw new Error('创建期间模式已改变；请重新创建，不静默继承') }
     if (!record.route && enabled(record.rootId)) {
-      if (!pending.has(agent.id)) throw new Error('policy-v2 初始决策未完成且已恢复；不能用后续消息重新选模，请发起新资源决策')
-      if (record.status !== 'recommended') throw new Error(`policy-v2 ${record.status}：${record.reason ?? '初始决策未完成'}；暂停并询问用户`)
+      if (!pending.has(agent.id)) throw new Error('初始决策未完成且已恢复；不能用后续消息重新选模，请重新创建子任务')
+      if (record.status !== 'recommended') throw new Error(`${record.status}：${record.reason ?? '初始决策未完成'}；暂停并询问用户`)
       const saveFailure = (status: ChildDecision['status'], reason: string) => { record = { ...record!, status, reason }; deps.store.set(record); pending.delete(agent.id) }
-      if (record.policyVersion !== policyVersion || record.mappingVersion !== mappingVersion) throw new Error('policy-v2 未完成决策版本不可恢复')
       const explicit = record.explicit
       let measure: PolicyMeasure | undefined
       let capability: 'bounded' | 'analytical' | 'frontier' = 'bounded', depth: Depth = 'baseline'
@@ -122,27 +124,27 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
         // This is the exact child's entering message, not a parent-history/prompt similarity match.
         const text = userInput(decision.messages).text
         const result = await deps.jev.judgePolicy(buildState({ text }), payload.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
-        if (!enabled(record.rootId)) { saveFailure('failed', '创建期间模式已变化'); throw new Error('policy-v2 创建期间模式已变化；请重新创建') }
-        if (result.kind === 'cancelled') { saveFailure('failed', '初始判断已取消'); throw new Error('policy-v2 已取消') }
-        if (result.kind === 'failed') { saveFailure('failed', result.category); throw new Error(`policy-v2 Jev 失败：${CATEGORY_HINTS[result.category]}；暂停委派并询问用户`) }
-        if (result.capability === 'insufficient_context') { saveFailure('needs-context', '任务目标或范围不足'); throw new Error('policy-v2 needs-context：请补充任务目标与范围') }
+        if (!enabled(record.rootId)) { saveFailure('failed', '创建期间模式已变化'); throw new Error('创建期间模式已变化；请重新创建') }
+        if (result.kind === 'cancelled') { saveFailure('failed', '初始判断已取消'); throw new Error('子任务判断已取消') }
+        if (result.kind === 'failed') { saveFailure('failed', result.category); throw new Error(`Jev 失败：${CATEGORY_HINTS[result.category]}；暂停委派并询问用户`) }
+        if (result.capability === 'insufficient_context') { saveFailure('needs-context', '任务目标或范围不足'); throw new Error('needs-context：请补充任务目标与范围') }
         measure = result
         capability = result.capability ?? 'bounded'; depth = result.depth
       }
       try {
-        const route = choosePolicyRoute(explicit.provider, capability, depth, await deps.catalog(), deps.settings().effortCap, explicit, record.family)
+        const route = choosePolicyRoute(explicit.provider, capability, depth, await deps.catalog(), deps.settings().effortCap, explicit, record.family, registry)
         const parent = ctx.agents.get(SessionId(record.parentId))
         const events: readonly { type: string; data: unknown }[] = parent?.session.snapshotEvents() ?? []
         const captured = events.find(event => event.type === 'subagent/model-selection-policy')
         if (captured) {
           const allowed = (captured.data as { allowedModels?: { provider: string; model: string }[] }).allowedModels
-          if (!Array.isArray(allowed) || !allowed.some(item => item.provider === route.provider && item.model === route.model)) throw new Error('policy-v2 路由不在父会话创建时的官方允许列表中；请新建会话')
+          if (!Array.isArray(allowed) || !allowed.some(item => item.provider === route.provider && item.model === route.model)) throw new Error('路由不在父会话创建时的官方允许列表中；请新建会话')
         }
-        if (!enabled(record.rootId) || payload.signal.aborted) throw new Error('policy-v2 创建已取消或模式已变化')
+        if (!enabled(record.rootId) || payload.signal.aborted) throw new Error('创建已取消或模式已变化')
         record = { ...record, route, status: 'recommended', decision: { id: ++decisionId, source: 'subagent', tier: capability, depth, capability, effort: route.reasoningEffort, model: route.model, provider: route.provider, status: 'recommended', ms: measure?.ms ?? 0, decisionProvider: measure?.decisionProvider ?? 'explicit', decisionModel: measure?.decisionModel ?? '未调用', ...(measure?.confidence !== undefined ? { confidence: measure.confidence } : {}), ...(measure?.capabilityConfidence !== undefined ? { capabilityConfidence: measure.capabilityConfidence } : {}), ...(measure?.probabilities ? { probabilities: measure.probabilities } : {}), ...(measure?.capabilityProbabilities ? { capabilityProbabilities: measure.capabilityProbabilities } : {}) } }; deps.store.set(record); pending.delete(agent.id)
       } catch (error) { saveFailure('failed', '配置不可用'); throw error }
     }
-    if (!record.route && enabled(record.rootId)) throw new Error('policy-v2 决策未完成；暂停子请求')
+    if (!record.route && enabled(record.rootId)) throw new Error('决策未完成；暂停子请求')
     return decision
   })
   ctx.on('agent/request', async (payload, next) => {
@@ -152,10 +154,10 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const runtime = main.get(agent)
       if (!runtime?.active || runtime.turn !== payload.turn || runtime.epoch !== epoch(agent.id) || !enabled(agent.id)) return config
       // Authoritative gate: the request's actual model decides, whatever the picker showed earlier.
-      if (!autoSupportedModel(config.model)) { lockUnsupportedMain(agent); return config }
+      if (!autoSupportedModel(config.model, registry)) { lockUnsupportedMain(agent); return config }
       const unsupported = (effort = '模型不支持调整') => {
         const old = mainStatus.get(agent.id)
-        mainStatus.set(agent.id, { ...old, policyVersion, depth: runtime.depth, reason: 'no-effort-support', ...(old?.decision ? { decision: { ...old.decision, status: 'unsupported', model: config.model, provider: config.provider, effort } } : {}) })
+        mainStatus.set(agent.id, { ...old, depth: runtime.depth, reason: 'no-effort-support', ...(old?.decision ? { decision: { ...old.decision, status: 'unsupported', model: config.model, provider: config.provider, effort } } : {}) })
       }
       const info = await ctx.llm.resolveModelInfo(config.provider, config.model, payload.signal)
       if (!enabled(agent.id) || runtime.epoch !== epoch(agent.id) || payload.signal.aborted) return config
@@ -163,14 +165,14 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       if (!efforts.length) { unsupported(); return config }
       let reasoningEffort: AutomaticEffort
       try {
-        reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined)
+        reasoningEffort = policyEffort(config.model, runtime.depth, efforts, deps.settings().effortCap, info.reasoning?.defaultEffort ? String(info.reasoning.defaultEffort) : undefined, registry)
       } catch (error) {
         // A supported model whose directory cannot produce an automatic effort must not fail the turn.
         ctx.logger.warn(`auto-model-routing: could not map the main reasoning effort: ${String(error)}`)
         unsupported()
         return config
       }
-      mainStatus.set(agent.id, { ...mainStatus.get(agent.id), policyVersion, depth: runtime.depth, effort: reasoningEffort, reason: 'jev', ...(mainStatus.get(agent.id)?.decision ? { decision: { ...mainStatus.get(agent.id)!.decision!, effort: reasoningEffort, model: config.model, provider: config.provider } } : {}) })
+      mainStatus.set(agent.id, { ...mainStatus.get(agent.id), depth: runtime.depth, effort: reasoningEffort, reason: 'jev', ...(mainStatus.get(agent.id)?.decision ? { decision: { ...mainStatus.get(agent.id)!.decision!, effort: reasoningEffort, model: config.model, provider: config.provider } } : {}) })
       if (reasoningEffort !== config.reasoningEffort) {
         try { await deps.selectModel({ sessionId: agent.id, provider: config.provider, model: config.model, reasoningEffort }) }
         catch (error) { ctx.logger.warn(`auto-model-routing: could not sync the model selection: ${String(error)}`); return config }
@@ -179,12 +181,12 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     }
     const record = deps.store.get(agent.id)
     requireBindingRecord(agent, record)
-    if (record && !record.route) throw new Error('policy-v2 初始路由未完成；不静默继承')
+    if (record && !record.route) throw new Error('初始路由未完成；不静默继承')
     if (!record?.route) return config
-    if (record.status === 'failed') throw new Error('policy-v2 实际应用失败；暂停子请求并询问用户')
-    if (record.parentId !== agent.session.header.parentSession) throw new Error('policy-v2 决策身份不匹配')
+    if (record.status === 'failed') throw new Error('实际应用失败；暂停子请求并询问用户')
+    if (record.parentId !== agent.session.header.parentSession) throw new Error('决策身份不匹配')
     // Existing routed instances keep their initial route even when AUTO stops making new decisions.
-    validatePolicyRoute(await deps.catalog(), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap)
+    validatePolicyRoute(await deps.catalog(), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap, registry)
     return { ...config, ...record.route } as typeof config
   }, { prepend: true })
   const confirmMainRequest = (session: Session, requestSeq: number, turn?: number) => {
@@ -210,7 +212,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       if (d?.status === 'applied' && enabled(session.id) && data.message?.id && d.model) {
         try { deps.feedback.bind({ sessionId: session.id, messageId: data.message.id, decisionId: d.id, depth: d.depth, model: d.model, effort: d.effort,
           ...(requestMetadata.has(session.id) && d.provider && decidedAt.has(d.id) ? { snapshot: {
-            ...requestMetadata.get(session.id)!, decidedAt: decidedAt.get(d.id)!, policyVersion, mappingVersion,
+            ...requestMetadata.get(session.id)!, decidedAt: decidedAt.get(d.id)!, ...(familyOf(d.model) ? { strategy: familyOf(d.model)! } : {}),
             decisionProvider: d.decisionProvider, decisionModel: d.decisionModel, ms: d.ms, provider: d.provider,
             ...(d.confidence !== undefined ? { confidence: d.confidence } : {}), ...(d.probabilities ? { probabilities: d.probabilities } : {}),
           } } : {}),
@@ -232,7 +234,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     const matches = actual.provider === record.route.provider && actual.model === record.route.model && actual.reasoningEffort === record.route.reasoningEffort
     if (record.decision) latest.set(record.rootId, { ...record.decision, status: matches ? 'applied' : 'failed' })
     deps.store.set({ ...record, ...(record.decision ? { decision: { ...record.decision, status: matches ? 'applied' : 'failed' } } : {}), status: matches ? 'applied' : 'failed', ...(matches ? { actual: record.route } : { reason: '实际请求配置不匹配' }) })
-    if (!matches) throw new Error('policy-v2 实际请求配置不匹配')
+    if (!matches) throw new Error('实际请求配置不匹配')
   })
   return {
     appliedDecision: (id: string) => enabled(id) ? applied.get(id)?.id : undefined,

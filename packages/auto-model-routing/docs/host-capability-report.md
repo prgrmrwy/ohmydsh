@@ -1,5 +1,7 @@
 # AUTO 宿主能力核验（官方 0.2.0-rc.2）
 
+> 历史记录：命名、路径与行为以记录时的 0.4.x 版本为准；0.5.0 起只有一套 AUTO 策略，规则文件为 `src/rubric.json`，家族策略见 `src/strategies/`。
+
 ## 结论
 
 **官方入口足以让插件在普通子会话、fork、teammate 的首次模型请求前读取精确子身份和本轮任务，并改写实际 provider/model/effort；不需要改宿主或 compat。** 这证明的是宿主接入能力，不是现有 AUTO 已支持这些路径。

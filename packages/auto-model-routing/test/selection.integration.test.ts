@@ -14,7 +14,7 @@ import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environ
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import * as plugin from '../src/index.js'
-import { fakeJev, tier } from './fake-jev.js'
+import { fakeJev, json } from './fake-jev.js'
 
 const stops: (() => Promise<void>)[] = []
 afterEach(async () => { while (stops.length) await stops.pop()!() })
@@ -23,7 +23,7 @@ afterEach(async () => { while (stops.length) await stops.pop()!() })
 // with no pending pick it falls back to the last persisted request header.
 async function harness() {
  const ctx = new Context()
- const jev = await fakeJev(tier('complex'))
+ const jev = await fakeJev(json(200, { answers: { depth: { choice: 'higher' } } }))
  ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: 'sk-or-test' } }]) as never)
  for (const p of [Projections, Sessions, Agents, Prompt, Tools, Llm]) await ctx.plugin(p)
  await ctx.plugin(Loop, { agents: [] })
@@ -41,13 +41,15 @@ async function harness() {
  ctx.provide('sessionController', {
   resolveAgent: async () => ({ agent: current }),
   selectModel: async (request: { provider: string; model: string; reasoningEffort?: string }) => {
+   selections.push(request)
    picked = { provider: request.provider, model: request.model, ...(request.reasoningEffort ? { reasoningEffort: ReasoningEffortId(request.reasoningEffort) } : {}) }
    return { selected: picked }
   },
  } as never)
  const home = mkdtempSync(`${tmpdir()}/router-sel-`)
  mkdirSync(`${home}/plugins/dsh-auto-model-routing`,{recursive:true})
- writeFileSync(`${home}/plugins/dsh-auto-model-routing/config.json`,JSON.stringify({policy:'legacy'}))
+ writeFileSync(`${home}/plugins/dsh-auto-model-routing/config.json`,'{}')
+ const selections: unknown[] = []
  const fork = await ctx.plugin(plugin, { home, jevBase: jev.base })
  let agentRef: { session: { requestHeader(): { config: { provider: string; model: string; reasoningEffort?: string } } | undefined } } | undefined
  const selection: ModelSelectionRef = {
@@ -66,10 +68,18 @@ async function harness() {
  stops.push(async () => { await handle.dispose(); await fork.dispose(); await jev.close() })
  const call = async (op: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${op}`)!.fetch(new Request('http://x/api', { method: 'POST', body: JSON.stringify(body) }))).json()
  const run = async (text: string) => { agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent.whenIdle() }
- return { calls, run, jev, setMode: (mode: 'AUTO' | 'MANUAL') => call('setMode', { sessionId: agent.id, mode }), consumePick: () => { picked = undefined }, pick: (effort: string) => { picked = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId(effort) } } }
+ return { calls, run, jev, selections, sessionId: agent.id, setMode: (mode: 'AUTO' | 'MANUAL') => call('setMode', { sessionId: agent.id, mode }), consumePick: () => { picked = undefined }, pick: (effort: string) => { picked = { provider: 'test', model: 'claude-opus-5-5', reasoningEffort: ReasoningEffortId(effort) } } }
 }
 
-it('manual_keeps_last_auto_effort', async () => {
+it('spec Scenario "AUTO 结果同步到官方选择"', async () => {
+ const h = await harness()
+ await h.setMode('AUTO')
+ await h.run('排查多个模块')
+ await h.run('继续排查')
+ expect(h.calls.slice(-2).map(c => c.reasoningEffort)).toEqual(['high', 'high'])
+ expect(h.selections).toEqual([{ sessionId: h.sessionId, provider: 'test', model: 'claude-opus-5-5', reasoningEffort: 'high' }])
+})
+it('spec Scenario "切回 MANUAL 不复原"', async () => {
  const h = await harness()
  await h.run('普通问题')
  h.consumePick() // the pick was used by the first request, as the controller's consume() does
@@ -79,22 +89,19 @@ it('manual_keeps_last_auto_effort', async () => {
  await h.setMode('MANUAL')
  await h.run('继续')
  await h.run('再继续')
- // No restore: the official selection keeps using the last request header (high) and the router passes it through.
+ // No restore: the official selection keeps high and MANUAL passes it through.
  expect(h.calls.slice(-2).map(c => c.reasoningEffort)).toEqual(['high', 'high'])
  expect(h.jev.bodies).toHaveLength(1)
 })
-
-it('auto_overrides_pending_pick', async () => {
+it('spec Scenario "AUTO 判档覆盖待生效手选"', async () => {
  const h = await harness()
- await h.run('普通问题')
- h.consumePick()
  await h.setMode('AUTO')
  await h.run('排查多个模块')
- // A pick made during AUTO is replaced by the next AUTO decision (it is synced to the official selection).
- h.pick('low')
+ // A pick made during AUTO is replaced by the next AUTO decision (synced to the official selection).
+ h.pick('medium')
  await h.run('排查多个模块')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
- await new Promise(r => setTimeout(r, 0))
+ expect(h.selections.at(-1)).toMatchObject({ reasoningEffort: 'high' })
  await h.setMode('MANUAL')
  await h.run('继续')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('high')

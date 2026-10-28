@@ -1,5 +1,7 @@
 # policy-v2 开发与验收记录
 
+> 历史记录：命名、路径与行为以记录时的 0.4.x 版本为准；0.5.0 起只有一套 AUTO 策略，规则文件为 `src/rubric.json`，家族策略见 `src/strategies/`。
+
 ## 状态
 
 2026-10-25 用户在最小真实 Magpie 验收后追加授权：AUTO 默认升级，不再要求版本开关。默认配置为内部 policy-v2；显式 legacy 仅供回滚。旧四档配置保留但不参与新策略，MANUAL 不变。已构建部署、通过分离控制进程重启现有3080服务，并在实际GUI验证无版本选择、显示 AUTO 已使用新策略。真实质量/返工/成本对照仍未完成，不宣称性能收益。
@@ -7,7 +9,7 @@
 ## 实现入口
 
 - [Jev 契约](../src/jev.ts)：复用认证、deadline、body 上限、错误分类；原 tier 问题不变。新主请求只问 depth；子请求一次问 capability/depth，显式约束只问未指定维度。
-- [独立映射](../src/policy-v2.ts)：版本化能力槽，effort 推荐起点按受支持序列最多移动一档，受 cap 限制，不自动使用 max。映射是初始基线，Codex analytical/frontier 都是 Sol，未虚构第三模型。
+- [独立映射](../src/routing.ts)（当时为 `src/policy-v2.ts`）：版本化能力槽，effort 推荐起点按受支持序列最多移动一档，受 cap 限制，不自动使用 max。映射是初始基线，Codex analytical/frontier 都是 Sol，未虚构第三模型。
 - [宿主接入](../src/policy-host.ts)：官方 `tools/execute` → AsyncLocalStorage → `agent/created` 绑定精确 child ID 和 parent/root；不依赖 prompt 相似度。`agent/pre-step` 获取首次任务并决策，`agent/request` 应用；`request/header` 记录匹配证据。
 - [持久化](../src/policy-store.ts)：每 child 哈希路径、严格 schema、owner-only 原子替换，只有身份/版本/约束/路由/状态，不含任务原文。缺失、损坏、未完成恢复不默默继承；未完成决策不能用后续消息重新分类。
 - [工具](../src/subagent-tool.ts)：policy-v2 下 optional preview，仅 recommended；普通创建工具负责精确应用，不把预览冒充 applied。
@@ -18,7 +20,7 @@
 
 | 路径/行为 | 证据 | 结果/边界 |
 |---|---|---|
-| 官方 ordinary fresh continuable 工具与 provider | [整链脚本](../scripts/policy-v2-host-probe.mjs)加载官方 0.2.0-rc.2、真实生产插件，fake Jev/adapter | 实际请求 model/effort 匹配；全宿主关闭重建后恢复，不重判 |
+| 官方 ordinary fresh continuable 工具与 provider | [整链脚本](../scripts/host-probe-children.mjs)（当时为 `policy-v2-host-probe.mjs`）加载官方 0.2.0-rc.2、真实生产插件，fake Jev/adapter | 实际请求 model/effort 匹配；全宿主关闭重建后恢复，不重判 |
 | 官方 fresh teammate 工具与服务 | 同上 | 创建、后续消息和全宿主恢复通过，不重选 |
 | 并发创建与显式模型/effort | [宿主测试](../test/policy-host.integration.test.ts)官方 Tools/Agents，测试创建工具 | 并发精确身份隔离；两者指定零判断；普通/teammate 官方 provider 的并发压力未测 |
 | fork / teammate fork | tools wrapper 可提前拒绝 | unsupported，真实历史兼容未验证，不擅自转 fresh |
@@ -41,7 +43,7 @@
 重跑整链：先 package build；在原临时官方 prefix 的基础上，精确安装 `@deepseek-ai/dsh-tool-subagent@0.2.0-rc.2`、`@deepseek-ai/dsh-experimental-tool-agent-team@0.2.0-rc.2`、`@deepseek-ai/dsh-launch-environment@0.2.0-rc.2`（`--save-exact --ignore-scripts`），然后：
 
 ```sh
-node packages/auto-model-routing/scripts/policy-v2-host-probe.mjs "$PROBE_HOME"
+node packages/auto-model-routing/scripts/host-probe-children.mjs "$PROBE_HOME"
 ```
 
 官方 standing tool 的 `modelSelectionSettings:true` 要求 preset-scoped context；隔离脚本没有伪造该 composition，使用 standing fixed-schema 工具 + 合成 allowlist。因此显式选择与父快照另用 host tests 验证，真实 preset/GUI 组合不记为通过。

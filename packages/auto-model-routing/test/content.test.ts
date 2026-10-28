@@ -9,7 +9,8 @@ it('report_skill_is_on_demand_only', () => {
  const [, front = '', body = ''] = text.split(/^---$/m)
  for (const part of [front, body]) { expect(part).toContain('仅当用户明确要求'); expect(part).toMatch(/不得主动执行[^。\n]*定时任务/) }
  const files = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')).files as string[]
- expect(files).toEqual(expect.arrayContaining(['lib', 'skills', 'scripts/label-report.mjs']))
+ expect(files).toEqual(expect.arrayContaining(['lib', 'skills']))
+ expect(files).not.toContain('scripts/label-report.mjs')
 })
 const sources = () => {
  const root=resolve(import.meta.dirname,'../src')
@@ -32,7 +33,7 @@ it('runtime_relative_imports_resolve_inside_the_standalone_package', () => {
   for (const value of Object.values(dependencies ?? {})) expect(value).not.toMatch(/^(?:workspace:|file:|link:)/)
  }
 })
-it('no_local_classifier_or_other_egress', () => {
+it('spec Scenario "源码不含本地分类与其它出站"', () => {
  for(const [file,text] of sources()) {
   expect(text,file).not.toMatch(/export function (classify|resolveLevel)\b/)
   expect(text,file).not.toMatch(/node:https?|node:child_process/)
@@ -45,15 +46,50 @@ it('no_local_classifier_or_other_egress', () => {
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')
 })
-it('skill_contains_eight_rules',()=>{
+it('spec Scenario "skill 只含当前用法"',()=>{
  const text=skill()
- for(const rule of ['route_subagent','reasoning_effort','[model·effort]','独立','claude/codex','暂停委派并询问用户','新建','子会话 Jev 选模未启用','routed: false','按官方默认委派','只指定模型']) expect(text,rule).toContain(rule)
- expect(text).not.toMatch(/claude-haiku-5-5|claude-fable-5-1|gpt-6-luna|gpt-6-astra|claude-opus-5-5|gpt-6\.1-sol|claude-sonnet-5-5/)
+ for(const rule of ['route_subagent','fresh','recommended','routed: false','[model·effort]','fork','childRouting','暂停委派并询问用户','子会话 Jev 选模未启用','新建']) expect(text,rule).toContain(rule)
+ for(const word of ['simple','escalated','legacy','原策略','旧策略','回滚']) expect(text,word).not.toContain(word)
+ expect(text).not.toMatch(/\b(?:claude|gpt)-[A-Za-z0-9.]/)
 })
 it('client_sources_stay_browser_safe',()=>{
  // The client bundle runs in the browser: it may reach only browser-safe modules (no node: built-ins via jev.ts).
  for(const [file,text] of sources().filter(([file])=>file.startsWith('client/')||file==='hints.ts')) {
-  expect(text,file).not.toMatch(/from '(\.\.\/)?(\.\/)?(jev|context|index|router|state|judgements)\.js'/)
+  expect(text,file).not.toMatch(/from '(\.\.\/)?(\.\/)?(jev|context|index|state)\.js'/)
   expect(text,file).not.toMatch(/node:/)
  }
+})
+it('spec Scenario "家族知识只有一个来源"', () => {
+ const offenders: string[] = []
+ for (const [file, text] of sources()) {
+  if (file.startsWith('strategies/') || file.startsWith('strategies\\')) continue
+  const checks: [string, RegExp][] = [
+   ['model id', /claude-haiku-5-5|claude-sonnet-5-5|claude-opus-5-5|claude-fable-5-1|gpt-6-luna|gpt-6\.1-sol|gpt-6-astra/],
+   ['family union', /'claude'\s*\|\s*'codex'|'codex'\s*\|\s*'claude'/],
+   ['provider literal check', /\.(?:id|provider)\s*===\s*'(?:claude|codex)'|===\s*'(?:claude|codex)'/],
+   ['family id list', /\[\s*'claude'\s*,\s*'codex'\s*\]|\{\s*id:\s*'(?:claude|codex)'/],
+   ['family label copy', /Claude\s*\/\s*GPT/],
+   ['family prefix match', /\^\(\?:?claude\|gpt\)-|\(claude\|gpt\)-|startsWith\('(?:claude|gpt)-'\)|\/\^claude-|\/\^gpt-/],
+  ]
+  for (const [kind, pattern] of checks) if (pattern.test(text)) offenders.push(`${file}: ${kind}`)
+ }
+ expect(offenders).toEqual([])
+})
+it('in-package Markdown relative links resolve', () => {
+ const root = resolve(import.meta.dirname, '..')
+ const docs = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter(f => f.endsWith('.md') && !f.includes('node_modules') && !f.startsWith('lib'))
+ const broken: string[] = []
+ for (const file of docs) {
+  const text = readFileSync(resolve(root, file), 'utf8')
+  for (const match of text.matchAll(/\]\(<?([^)>\s]+)>?\)/g)) {
+   const target = match[1]!
+   if (/^(?:[a-z]+:|#)/i.test(target)) continue
+   const path = decodeURI(target.split('#')[0]!)
+   const absolute = resolve(root, dirname(file), path)
+   // Links that leave the package (e.g. a sibling package in the monorepo) are not checked here.
+   if (relative(root, absolute).startsWith('..')) continue
+   if (!existsSync(absolute)) broken.push(`${file}: ${target}`)
+  }
+ }
+ expect(broken).toEqual([])
 })

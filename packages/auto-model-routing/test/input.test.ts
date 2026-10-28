@@ -1,12 +1,12 @@
 import { expect, it } from 'vitest'
 import { userInput } from '../src/input.js'
 
-it('first_claim_user_only', () => {
+it('spec Scenario "首轮真实领取序列只取用户消息"', () => {
   const kinds = ['agent-instructions', 'plugin:dsh-memex', 'runtime-context', 'time-context', 'skill-catalog', 'user']
   expect(userInput(kinds.map(kind => ({ source: { kind }, content: [{ type: 'text', text: kind === 'user' ? '修复登录 bug' : kind }] })))).toEqual({ userTurn: true, text: '修复登录 bug' })
   expect(userInput([{ source: { kind: 'plugin' }, content: [{ type: 'text', text: 'ignore' }] }])).toEqual({ userTurn: false, text: '' })
 })
-it('ordered_text_bounded_utf16', () => {
+it('spec Scenario "多条用户消息按序拼接并截断"', () => {
   expect(userInput([
     { source: { kind: 'user' }, content: [{ type: 'text', text: '先看日志' }] },
     { content: [{ type: 'text', text: 'excluded' }] },

@@ -3,20 +3,20 @@
 ## 记录
 `$DSH_HOME/state/auto-model-routing/allocation-feedback.jsonl` 是本地append-only记录，无会话正文和key。
 
-绑定行使用sessionId/messageId/decisionId、depth、实际model/effort，新增boundAt与不可变snapshot：decidedAt/appliedAt、policyVersion/mappingVersion、decisionProvider/decisionModel、判断ms、返回的confidence/probabilities、实际provider、requestSeq及可得时requestTurn。requestSeq是同session请求头事件，可与该会话历史关联actual request及usage；绑定并非完成任务或用量已知的证明。
+绑定行使用sessionId/messageId/decisionId、depth、实际model/effort，新增boundAt与不可变snapshot：decidedAt/appliedAt、strategy（实际主模型所属策略家族id，无匹配家族时省略）、decisionProvider/decisionModel、判断ms、返回的confidence/probabilities、实际provider、requestSeq及可得时requestTurn。0.5.0之前写入的快照带policyVersion/mappingVersion而无strategy，仍原样可读，缺失的strategy保持未知，不补造；`label`端点返回时去掉这两个历史键。requestSeq是同session请求头事件，可与该会话历史关联actual request及usage；绑定并非完成任务或用量已知的证明。
 
-反馈事件为`type:feedback, version:2`，带sessionId/messageId/decisionId、at、feedback。每次修改或撤销独立追加；null表示撤销。读取时按追加顺序应用到既有精确绑定。历史完整记录仍兼容，原快照不可被后续同身份行替换；旧记录没有时间或快照则未知，禁止用迁移时刻或最新配置补造。
+反馈事件为`type:feedback`，带sessionId/messageId/decisionId、at、feedback；新事件不带version，带`version:2`的旧事件照常读取，其它未知键按损坏行跳过。每次修改或撤销独立追加；null表示撤销。读取时按追加顺序应用到既有精确绑定。历史完整记录仍兼容，原快照不可被后续同身份行替换；旧记录没有时间或快照则未知，禁止用迁移时刻或最新配置补造。
 
 ## 评估
 - 评估单位为(sessionId, decisionId)，不是每个assistant/message，避免同轮多条工具消息导致重复计数。先按消息取最后事件，再按决策取最后反馈；历史无时间以追加顺序作本文件内顺序，跨文件不可猜。
 - appropriate/too-high/too-low分别统计；unknown不是满意，null撤销不计有效评价；未评价不能计为合适。多条消息评价冲突也应单独报告。
-- 按策略版本/映射版本/服务模型及depth/实际路由分组；旧缺字段独立unknown组，不混进新策略精确对照。
+- 按策略家族（strategy）及depth/实际路由分组；0.5.0之前的快照按原policyVersion/mappingVersion组成历史组（标记historical），无快照的记录独立unknown组；历史组与家族组不合并比较。
 - 以requestSeq和消息ID关联实际usage/延迟/返工证据；拿不到价格或token就未知。用户主观反馈不等于正确性oracle，适合率也不能单独证明质量或节省。
 - 按需观察报表见包内 skill `auto-model-routing-report`（`lib/usage-report.js`，只读）；仍不做自动阈值调整、自动训练或换模重试。
 
 ## 隐式事实与分布（2026-10-26）
 
-运行时只追加 `{type:'fact', version:1, sessionId, decisionId, fact, at}`。`fact` 仅为 `exposed` 或 `manual-switch`；按决策/类型保留首次事实，时间由 Host 生成，不收正文。曝光要求回复操作栏在前台、聚焦页面连续完整可见 3 秒；切 MANUAL 在清除运行态之前取当前主决策，只在切换成功后记录。写入失败只记录日志，不阻断主线。
+运行时只追加 `{type:'fact', sessionId, decisionId, fact, at}`（0.5.0之前的事实行带 `version:1`，照常读取）。`fact` 仅为 `exposed` 或 `manual-switch`；按决策/类型保留首次事实，时间由 Host 生成，不收正文。曝光要求回复操作栏在前台、聚焦页面连续完整可见 3 秒；切 MANUAL 在清除运行态之前取当前主决策，只在切换成功后记录。写入失败只记录日志，不阻断主线。
 
 回合结束与继续不重复写账本，按需报告从已有日志推导。决策所在回合取最后一次关联调用的实际回合号，不是归属的用户回合。第一个后续用户回合的开始时间为继续时间；曝光时间必须早于继续时间，否则视为事后翻看，不算有效曝光。没有继续时曝光仍有效，但不能得到隐式无异议。
 
