@@ -19,7 +19,7 @@
 |---|---|
 | **Magpie 网关接入**（基础） | 每条线路只需地址和该线路的 key。模型目录来自网关 `GET /models`；支持 Responses 的模型走 Responses，其余走 Chat Completions。文本、工具往返、图片、usage、取消以及 DSH 统一重试都能正常工作。 |
 | **多线路自动切换**（特色） | 通常一条线路（首次安装为空，最多 5 条），可添加备用线路并按序号自动选择：每次操作前对候选地址做 ≤600ms 的 TCP 可达探测（正缓存 10s / 负缓存 15s，不后台轮询），在家走局域网、在外自动落到公网。切换线路时模型目录继承不闪断、用量卡片清空并按新线路重读；单线路（通常一条）行为与旧版一致。 |
-| **按上游 provider 分组**（特色） | 模型选择器显示 `Magpie (Claude)`、`Magpie (GPT)`、`Magpie (<其它归属>)` 等标题，真实 route 始终只有一个 `dsh-magpie-connector`。设置页和用量卡片使用同一套分组，只出现在用量里的 provider 也不会被丢弃。 |
+| **按上游 provider 分组**（特色） | 原版 DSH 即可使用，无需 Host 扩展：插件按网关 `owned_by` 为每个归属注册一个真实 provider route（`dsh-magpie-connector-claude`、`-codex`、`-opencode-go` 等；缺失或不合法归入 `-other`），官方模型选择器因此显示 `Magpie (Claude)`、`Magpie (Codex)`、`Magpie (Opencode-go)`、`Magpie (Other)` 分组。设置页和用量卡片使用同一套分组，只出现在用量里的 provider 也不会被丢弃。 |
 | **按线路的 Cloudflare Access** | 每条线路可单独选择「直连」或「Cloudflare Access」。启用后该线路的请求带上服务令牌两项并保留 bearer key；服务令牌永远不会发往明文 HTTP 线路。 |
 | **只读用量卡片** | 每个上游账号展示计划、到期时间、各窗口读数和 Codex 重置次数（网关提供时）。打开设置页只读一次，之后只有点单张卡片的「刷新」才会重新读取；用量条超过 70% 变橙、达到 90% 变红。 |
 | **模型可见性与默认 effort** | 每个 provider 不设置可见性时跟随网关目录；保存过选择后只显示勾选项，新上架模型默认隐藏。每个模型可保存一个默认推理 effort，DSH 在下一次请求应用。 |
@@ -33,7 +33,7 @@ dsh plugin --profile web add dsh-magpie-connector
 
 重启 DSH 并刷新页面。在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 中也可以直接启用 local `dsh-magpie-connector` manifest 条目后重新构建。已验证 DSH `0.2.0-rc.2`、Web UI、Node.js `>=22.19`。
 
-模型选择器的分组标题依赖 ohmydsh 的 Pet 兼容层为 reviewed `0.2.0-rc.2` pin 构建的受管五包 Host 扩展。stock rc.2 仍可正常使用 route 与生成，但 provider 内列表保持 flat。
+> **0.3.0 BREAKING 升级**：旧的单一 route `dsh-magpie-connector` 已退役。保存在它上面的会话与默认模型不再可用，请在 `Magpie (…)` 分组中重选模型。其它依赖精确 route id 的配置（例如子任务路由、出口豁免列表）需改成新的 `dsh-magpie-connector-<owner>`。
 
 ### 配置
 
@@ -52,8 +52,8 @@ dsh plugin --profile web add dsh-magpie-connector
 
 | 位置 | 做什么 |
 |---|---|
-| **模型选择器** | 统一搜索覆盖分组标题、型号名和完整 id。标题来自网关的 `owned_by`；每项背后的 route 仍然是 `dsh-magpie-connector`，model id、可见性键和默认 effort 都不变。 |
-| **模型菜单分组** | `owned_by` 非空的模型显示在 `Magpie (<owner>)` 下，`claude`、`codex` 分别显示为 Claude 和 GPT。缺失归属时显示 `Magpie (Other)`，不按模型名猜测。 |
+| **模型选择器** | 统一搜索覆盖分组标题、型号名和完整 id。每个分组是一个真实 route `dsh-magpie-connector-<owner>`；model id 保持网关完整 id，可见性键和默认 effort 不变。 |
+| **模型菜单分组** | `owned_by`（转小写，1–48 个 `a-z0-9._-` 字符）决定 route 和标题 `Magpie (<Owner>)`（首字母大写）。缺失或不合法时归入 `Magpie (Other)`，不按模型名猜测。见过的归属记在 `settings.json` 的 `knownOwners`（最多 32 个），重启后 route 立即存在，首次目录同步完成后模型才出现。归属下架后其 route 保留（空组自动隐藏）。手动清空 `knownOwners` 会让保存在被移除 route 上的选择失效。启动时若 route 注册失败（例如被别的插件占用），设置页会显示错误，排除后需重启 DSH。 |
 | **输入框速度控件** | 仅当前模型被网关声明为 `priority` 档时显示（当前 Magpie 上即 Codex/GPT 模型），切换模型后立即更新。悬停模型菜单可看 effort；官方选择器只显示一个 effort 值。 |
 | **设置 → Magpie** | 连接、接入方式、按 provider 分组的模型区（可见性复选框与默认 effort 选择器），以及该 provider 的用量卡片。 |
 | **用量卡片刷新** | 每张卡片有独立的「刷新」，请求 Magpie 重新读取这一个账号。网关冷启动可能没有任何卡片；此时连接面板提供「获取模型与用量」，先同步模型目录，再请 Magpie 读取全部账号一次。受限 held key 无法初始化空缓存，需要管理员先在 Magpie 中读取一次。 |

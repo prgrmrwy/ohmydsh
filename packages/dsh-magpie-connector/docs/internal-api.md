@@ -53,7 +53,7 @@ try {
 - `runtime.invalidateCredential(ref?)` maps a `credentials/reference-updated` ref to its line id (`lineIdOfCredentialRef`) and rotates only when that line is active; without a ref it rotates the current generation. It synchronously drops visible old state and aborts background operations before asynchronously resolving/syncing. Own credential writes suppress that listener until the combined settings mutation commits.
 - `runtime.redact(text)` replaces current and active-operation keys literally with `[redacted]`. All gateway strings going into HTTP responses or logs must use this method. Catalog metadata is redacted before it is cached.
 - `runtime.settings(body?)` handles the single-schema settings update `{lines?, resync?}` (plus GET projection) and returns a `Response`; the generic SettingsController adds preference fields (`visibleModels`, `defaultEffort`) around it. Credential fields use the tri-state (omit/null/write) contract above; unknown keys are rejected with 400 and nothing is written.
-- `publish()` must call the adapter registration handle's `replace(['dsh-magpie-connector'])`; no payload-free imitation event is needed. Same-generation sync is single-flight and times out after 15 seconds. Last successful catalog/time survive same-generation failure; identity changes never retain old data.
+- `publish(routes?)` goes through the route registrar: the first non-empty set calls `registerAdapter`, later sets call `replace` (also when only the catalog changed, so open pickers get `llm/adapters-updated`); the result drives owner rollback and `routeRegistrationError`. Same-generation sync is single-flight and times out after 15 seconds. Last successful catalog/time survive same-generation failure; identity changes never retain old data.
 
 ## Catalog and adapter
 
@@ -62,7 +62,8 @@ try {
 ```ts
 interface CatalogModel {
   info: LlmResolvedModelInfo
-  provider: string // owned_by, else first id segment
+  provider: string // visibility key: owned_by, else first id segment
+  owner: string // route key (ownerKey), route = dsh-magpie-connector-<owner>
   efforts: string[]
   nativeEndpoints: string[]
   serviceTiers: string[] // tier ids, e.g. priority
@@ -97,7 +98,7 @@ Every request validates same origin and exact API-root-relative path, forces aut
 
 ## Host wiring
 
-`apply(ctx,{home?})` currently registers one `dsh-magpie-connector` adapter, credentials event, `/api/dsh-magpie-connector/settings` through injected `connection.fetch`, starts initial sync, and installs an async effect disposer. It returns `{runtime,adapter}` for focused harness tests. The feature assembly adds cards/speed resources and their controller lifecycle here; do not add another adapter registration or another settings route.
+`apply(ctx,{home?})` registers one adapter on the owner routes derived from `knownOwners` (via `createRouteRegistrar`, see `src/host/registrar.ts`), credentials event, `/api/dsh-magpie-connector/settings` through injected `connection.fetch`, starts initial sync, and installs an async effect disposer. It returns `{runtime,adapter,routes}` for focused harness tests. The feature assembly adds cards/speed resources and their controller lifecycle here; do not add another adapter registration or another settings route.
 
 ## Evidence and remaining assembly
 

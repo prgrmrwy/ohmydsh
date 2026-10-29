@@ -221,9 +221,9 @@
 
 ## 11. 收尾、文档与发布
 
-- [ ] 11.1 删除 `test/display-group.test.ts` 与 `displayGroup` 相关类型；改写其余写死旧 route 的既有测试；全量测试绿
-- [ ] 11.2 `packages/dsh-magpie-connector`：运行 build、typecheck、test；仓库 `npm test`、`npm run check:artifacts`、`openspec validate magpie-owner-routes --strict`
-- [ ] 11.3 `package.json` 0.3.0；CHANGELOG（BREAKING：多 route、旧 route 退役、旧会话/默认模型需重选、AUTO/出口守卫需另行适配）；README / README.zh 去掉「需要 Host 扩展」限制并说明 knownOwners 与重启恢复
-- [ ] 11.4 `dsh.yaml` 本插件条目 brief/note 与版本更新
+- [x] 11.1 删除 `test/display-group.test.ts` 与 `displayGroup` 相关类型；改写其余写死旧 route 的既有测试；全量测试绿
+- [x] 11.2 `packages/dsh-magpie-connector`：运行 build、typecheck、test；仓库 `npm test`、`npm run check:artifacts`、`openspec validate magpie-owner-routes --strict`
+- [x] 11.3 `package.json` 0.3.0；CHANGELOG（BREAKING：多 route、旧 route 退役、旧会话/默认模型需重选、AUTO/出口守卫需另行适配）；README / README.zh 去掉「需要 Host 扩展」限制并说明 knownOwners 与重启恢复
+- [x] 11.4 `dsh.yaml` 本插件条目 brief/note 与版本更新
 - [ ] 11.5 与用户确认 AUTO / 出口守卫适配的上线顺序后再 `dsh build`（两次，第二次无变更），请用户重启并在 GUI 确认 `Magpie (Claude|Codex|Opencode-go|Deepseek)` 分组
 - [ ] 11.6 按 `publish-dsh-plugin` skill 发版 0.3.0，更新商店 PR #10211 条目描述并回复维护者

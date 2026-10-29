@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+**BREAKING:** the single provider route `dsh-magpie-connector` is retired and not aliased. Sessions, the default model and any external configuration saved with that route id no longer resolve; reselect the model after upgrading, and update anything that lists the exact route id (subagent routing, egress allowlists).
+
+- **Grouping on stock DSH.** One real route per gateway `owned_by`: `dsh-magpie-connector-<owner>` (lower-cased, 1–48 chars of `a-z0-9._-`; anything else goes to `-other`). The official picker shows `Magpie (<Owner>)` groups without any Host extension; the `displayGroup` metadata is gone.
+- **Route identity.** Every model result carries the requested route as `provider`; lookups are by model id, so capabilities are identical on any plugin route.
+- **Replay across routes.** Native reasoning replay uses a fixed transport identity, so encrypted reasoning survives tool turns, restarts and switching between plugin routes; foreign or tampered history degrades to plain history.
+- **Remembered owners.** `settings.json` `knownOwners` (max 32, first-seen order) registers routes at start-up before the first sync. Invalid values are reset as a whole (`knownOwnersReset`), over-limit owners are reported (`ownerLimitReached`, `rejectedOwners`), and owners that disappear keep their empty route.
+- **Failure handling.** A failed first registration (route owned by another plugin, or a host listener `INVARIANT`) is reported as `routeRegistrationError` in Settings and requires a DSH restart; replace conflicts roll back the new owner and still publish catalog changes. Settings writes go through one synchronous writer, so owner discovery never deadlocks with settings requests or overwrites concurrent line saves.
+- **Speed control** shows on any plugin route.
+
 ## 0.2.0
 
 **BREAKING:** the settings format changes from a single top-level `baseUrl` to an ordered `lines[]` list, and credentials move to per-line derived refs. Existing `settings.json` files with only `baseUrl` and the legacy fixed refs (`MAGPIE_API_KEY`, `MAGPIE_ACCESS_CLIENT_ID`, `MAGPIE_ACCESS_CLIENT_SECRET`) are **not read, migrated or deleted**; reconfigure the connection in Settings after upgrading. `visibleModels` / `defaultEfforts` are preserved. Back up `settings.json` and the old credential refs before upgrading if you need a rollback path.
