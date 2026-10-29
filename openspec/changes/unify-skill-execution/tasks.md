@@ -14,5 +14,5 @@
 - [x] 3.1 在Linux本机、corp-mac-vm和Windows PC使用同一公开源码、独立目录/profile/prefix/端口验证初始化、link和helper合同；保留失败记录。
 - [x] 3.2 以独立ASCII/Unicode对照定位Windows Node24.12同步删除失败；验证官方校验和的临时24.20运行时，更新推荐版本与逐行启动文档。
 - [x] 3.3 修复真实Windows冷启动缓存清理的Git长路径失败；先保留Native RED，再以调用级配置回绿并纳入Windows合同通道，不修改全局Git配置。
-- [ ] 3.4 同一修复提交在三端完成完整build×2/no-change、doctor/dump、认证页面、真实Host启动/重启PID变化/停止释放端口；复核并交付轻量结果，单列终端关闭/桌面UI限制。
+- [x] 3.4 同一修复提交在三端完成完整build×2/no-change、doctor/dump、认证页面、真实Host启动/重启PID变化/停止释放端口；复核并交付轻量结果，单列终端关闭/桌面UI限制。
 - [x] 3.5 将model-display合同的glob路径转为正斜杠；原生Windows的真实Vitest收集由超时变为预期4文件，完整执行24/24通过，不跳过或削弱断言。

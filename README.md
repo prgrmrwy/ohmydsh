@@ -33,7 +33,7 @@ Two kinds of readers, two entry points:
 ## Quick start
 <!-- section: quick-start -->
 
-Initialization requires Node.js 22+ and npm 10+; `.nvmrc` is the recommended Node version, not an exact-version gate. The launcher uses one Node implementation on Windows, macOS and Linux, without requiring Git Bash on Windows. **Full configuration support is still pending the complete native-platform build and terminal-close gates**; passing launcher tests is not a full-repository Windows support claim. Pick one of three paths.
+Initialization requires Node.js 22+ and npm 10+; `.nvmrc` is the recommended Node version, not an exact-version gate. The launcher uses one Node implementation on Windows, macOS and Linux, without requiring Git Bash on Windows. **Isolated builds and Host command workflows have passed on all three platforms; real terminal-close and desktop UI acceptance remain outstanding.** See the [three-platform acceptance record](openspec/changes/unify-skill-execution/checking/summary.md); this does not certify every third-party plugin on Windows. Pick one of three paths.
 
 For native Windows paths containing non-ASCII characters, use the tested Node.js 24.20.0 release (the current `.nvmrc` recommendation). On 24.12.0, synchronous deletion can silently fail and cause `EPERM` when pnpm replaces plugin directories. This acceptance run uses pnpm 11.7.0; if the first build reports unresolved dependency build-script decisions, explicitly allow or deny each dependency before rerunning `dsh build`.
 
@@ -48,7 +48,7 @@ dsh build                  # materialize the configuration
 dsh                        # start DSH
 ```
 
-The same separate-line commands work in cmd and PowerShell on Windows. `npm link` creates `dsh.cmd` and `dsh.ps1` in the npm global prefix; put that prefix on PATH. If PowerShell execution policy blocks the generated script, invoke `dsh.cmd` rather than weakening machine-wide policy. On POSIX, the global bin directory is `<prefix>/bin`. Check `npm prefix -g` and `where.exe dsh` / `command -v dsh` when another official `dsh` is already installed; do not use `--force` to overwrite an unrelated command. `npm unlink --global ohmydsh` unregisters this link. POSIX legacy install/bootstrap wrappers remain thin compatibility entries.
+The same separate-line commands work in cmd and PowerShell on Windows. `npm link` creates `dsh.cmd` and `dsh.ps1` in the npm global prefix; put that prefix on PATH. If PowerShell execution policy blocks `.ps1` shims, use `npm.cmd link`, `dsh.cmd build` and `dsh.cmd` rather than weakening machine-wide policy. On POSIX, the global bin directory is `<prefix>/bin`. Check `npm prefix -g` and `where.exe dsh` / `command -v dsh` when another official `dsh` is already installed; do not use `--force` to overwrite an unrelated command. `npm unlink --global ohmydsh` unregisters this link. POSIX legacy install/bootstrap wrappers remain thin compatibility entries.
 
 POSIX start/stop/restart require `lsof` and `ps` (for example, install `lsof` using your OS package manager); missing ownership tools fail before launching or killing a Host. Windows uses the built-in PowerShell TCP/CIM query and forcefully stops only a revalidated owned tree; graceful flush is not guaranteed. An explicit `DSH_BIN` is a single executable path: Windows accepts JS entrypoints or native `.exe`, not `.cmd`/`.bat`/`.ps1` shims or a command string. Use the real JS CLI, not its npm shim.
 
