@@ -18,6 +18,7 @@ import { PolicyStore } from './policy-store.js'
 import { currentMainSelection, mainSupported } from './support.js'
 import { createRegistry, registry as builtin, type FamilyStrategy } from './strategies/index.js'
 
+const SCOPE_NOTE = '按官方工具 ALS 上下文、同父与 startup 绑定；不能区分同窗口插件旁支，旁支可能一并受管。'
 export const name = 'dsh-auto-model-routing'
 /** Child decision records. The historical directory name is kept on purpose: records are not migrated. */
 export const CHILD_DECISIONS_DIR = 'state/auto-model-routing/policy-v2'
@@ -30,14 +31,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
   const registry = config.strategies ? createRegistry(config.strategies) : builtin
   const settings = new SettingsStore(resolve(home, 'plugins/dsh-auto-model-routing/config.json'))
-  const hostSettings = settingsHost(ctx, settings, registry)
+  const hostSettings = settingsHost(ctx, settings)
   const jev = new JevClient({ get: hostSettings.credential }, config.jevBase, config.jevTimeoutMs ?? (() => settings.read().settings.jevTimeoutMs), config.jevBase ? undefined : () => settings.read().settings.decisionService)
   const stateFiles = new FileStateStore(resolve(home, 'state/auto-model-routing/sessions'))
   const state = new RoutingState(stateFiles)
   const feedback = new FeedbackBook(resolve(home, 'state/auto-model-routing/allocation-feedback.jsonl'))
   // Official writer is available only while the session controller is mounted.
   let selectModel: ((request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => Promise<unknown>) | undefined
-  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, CHILD_DECISIONS_DIR), registry), settings: () => settings.read().settings, catalog: () => hostSettings.catalog(), registry })
+  const policy = policyHost(ctx, { feedback, jev, state, selectModel: async request => { if (!selectModel) throw new Error('session controller is unavailable'); await selectModel(request) }, store: new PolicyStore(resolve(home, CHILD_DECISIONS_DIR), registry), settings: () => settings.read().settings, catalog: provider => hostSettings.catalog(provider), registry })
   const toastOn = (): boolean => settings.read().settings.decisionToast
   ctx.effect(() => ctx.tools.register(routeSubagentTool(jev, { agents: ctx.agents as never, state, readSettings: () => settings.read().settings, catalog: hostSettings.catalog, registry })))
   ctx.on('agent/created', ({ agent, source }) => {
@@ -68,6 +69,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         const result = await child.sessionController.resolveAgent(id as never)
         return 'agent' in result ? ref(result.agent) : undefined
       }
+      // Child sessions have no AUTO chip: answer before any support check, lock or decoration.
+      if (operation === 'state' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
+        const target = await resolveAgent((payload as { sessionId: string }).sessionId)
+        if (target?.origin === 'subagent') return Response.json({ applicable: false })
+      }
       let manualDecision: { sessionId: string; decisionId: number } | undefined
       if (operation === 'setMode' && typeof (payload as { sessionId?: unknown })?.sessionId === 'string') {
         const id = (payload as { sessionId: string }).sessionId, mode = (payload as { mode?: unknown }).mode
@@ -89,7 +95,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const supported = mainSupported(selection, registry)
       if (!supported && state.read(sessionId).mode === 'AUTO') { state.setMode(sessionId, 'MANUAL'); policy.invalidate(sessionId) }
       const { previous: _previous, ...persisted } = await response.json()
-      return Response.json({ ...persisted, mode: state.read(sessionId).mode, ...policy.mainStatus(sessionId), ...(toastOn() ? { decisionToast: true } : {}), autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } })
+      return Response.json({ ...persisted, mode: state.read(sessionId).mode, ...policy.mainStatus(sessionId), ...(policy.childNotice(sessionId) ? { childNotice: policy.childNotice(sessionId) } : {}), ...(toastOn() ? { decisionToast: true } : {}), autoSupport: { supported, ...(selection ? { provider: selection.provider, model: selection.model } : {}) } })
     }
     child.provide('autoModelRouting' as never, { call: async (operation: 'state' | 'setMode', payload: unknown) => {
       if (operation !== 'state' && operation !== 'setMode') throw new Error('Unsupported routing operation')
@@ -114,7 +120,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           const payload = enveloped ? wire.payload : body
           const response = operation === 'childRouting'
             ? (typeof (payload as { sessionId?: unknown })?.sessionId === 'string'
-              ? Response.json(policy.status((payload as { sessionId: string }).sessionId) ?? { status: 'unsupported', reason: '没有已绑定的子任务决策' })
+              ? Response.json((record => record ? { ...record, scopeNote: SCOPE_NOTE } : { status: 'unsupported', reason: '没有已绑定的子任务决策' })(policy.status((payload as { sessionId: string }).sessionId)))
               : Response.json({ error: 'invalid request' }, { status: 400 }))
             : operation === 'settings' || operation === 'saveSettings' || operation === 'setKey' || operation === 'testDecision'
             ? await hostSettings.endpoint(operation, payload)

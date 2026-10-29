@@ -5,7 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import type { JevClient, Depth, PolicyMeasure } from './jev.js'
 import { CATEGORY_HINTS } from './jev.js'
-import { choosePolicyRoute, policyEffort, modelFamily, validatePolicyRoute } from './routing.js'
+import { chooseChildRoute, policyEffort, validatePolicyRoute } from './routing.js'
 import { registry as builtin, type Registry } from './strategies/index.js'
 import { PolicyStore, type ChildDecision } from './policy-store.js'
 import type { RoutingState } from './state.js'
@@ -15,10 +15,10 @@ import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
 import { autoSupportedModel, currentMainSelection, mainSupported } from './support.js'
 
-export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: () => Promise<RoutingCatalog>; registry?: Registry }) {
+export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: (provider?: string) => Promise<RoutingCatalog>; registry?: Registry }) {
   const registry = deps.registry ?? builtin
   const familyOf = (model: string) => registry.familyOfMainModel(model)?.id
-  const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: ChildDecision['explicit']; family?: string }>()
+  const delegation = new AsyncLocalStorage<{ parentId: string; rootId: string; path: ChildDecision['path']; explicit: { provider?: string; model?: string; reasoningEffort?: string } }>()
   const rootOf = (agent: Agent): Agent | undefined => {
     let current: Agent | undefined = agent
     for (let i = 0; current && i < 32; i++) {
@@ -45,31 +45,59 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     latest.delete(agent.id)
     applied.delete(agent.id)
   }
+  const childEpochs = new Map<string, number>()
+  const notices = new Map<string, { id: number; childId: string; reason: string; at: number }>()
+  let noticeId = 0
+  /** Visible fallback: the child request runs with DSH defaults, the root learns why. */
+  const fallback = (record: ChildDecision, reason: string): ChildDecision => {
+    const next: ChildDecision = { childId: record.childId, parentId: record.parentId, rootId: record.rootId, path: record.path, explicit: record.explicit,
+      ...(record.family ? { family: record.family } : {}), ...(record.parentSelection ? { parentSelection: record.parentSelection } : {}), status: 'unsupported', reason }
+    deps.store.set(next)
+    pending.delete(record.childId)
+    childEpochs.delete(record.childId)
+    notices.set(record.rootId, { id: ++noticeId, childId: record.childId, reason, at: Date.now() })
+    ctx.logger.warn(`auto-model-routing: child ${record.childId} not routed (${reason}); running with DSH defaults`)
+    return next
+  }
+  const capturedAllowlist = (parentId: string) => {
+    const events: readonly { type: string; data: unknown }[] = ctx.agents.get(SessionId(parentId))?.session.snapshotEvents() ?? []
+    const captured = events.find(event => event.type === 'subagent/model-selection-policy')
+    if (!captured) return undefined
+    const allowed = (captured.data as { allowedModels?: unknown }).allowedModels
+    return Array.isArray(allowed) ? allowed as { provider: string; model: string }[] : []
+  }
   ctx.on('tools/execute', async (exec, next) => {
-    if (!['subagent','subagent_fork','spawn_teammate'].includes(exec.name) || !exec.agent) return next()
+    if (!['subagent','spawn_teammate'].includes(exec.name) || !exec.agent) return next()
+    const args = isRecord(exec.arguments) ? exec.arguments : {}
+    // Fork copies the parent: AUTO does not manage it and opens no binding window.
+    if (exec.name === 'spawn_teammate' && args.context === 'fork') return next()
     const root = rootOf(exec.agent)
     if (!root || !enabled(root.id)) return next()
-    const args = isRecord(exec.arguments) ? exec.arguments : {}
-    const path = exec.name === 'subagent_fork' || (exec.name === 'spawn_teammate' && args.context === 'fork') ? 'fork' : exec.name === 'spawn_teammate' ? 'teammate' : 'ordinary'
-    if (path === 'fork') throw new Error('unsupported：fork 的真实历史兼容尚未验证；请暂停，改用 fresh 创建，或由用户切到 MANUAL 后继承。')
-    const provider = args.provider ?? exec.agent.session.requestHeader()?.config.provider ?? exec.agent.options.provider
-    if (typeof provider !== 'string' || !registry.hasProvider(provider)) throw new Error('unsupported：无法验证 provider；暂停委派并询问用户')
-    const parentModel = exec.agent.session.requestHeader()?.config.model ?? exec.agent.options.model
-    const family = modelFamily(provider, typeof args.model === 'string' ? args.model : parentModel ?? '', registry)
-    const explicit: ChildDecision['explicit'] = { provider,
+    const explicit = { ...(typeof args.provider === 'string' && args.provider ? { provider: args.provider } : {}),
       ...(typeof args.model === 'string' ? { model: args.model } : {}),
       ...(typeof args.reasoning_effort === 'string' ? { reasoningEffort: args.reasoning_effort } : {}) }
-    return delegation.run({ parentId: exec.agent.id, rootId: root.id, path, explicit, ...(family ? { family } : {}) }, next)
+    return delegation.run({ parentId: exec.agent.id, rootId: root.id, path: exec.name === 'spawn_teammate' ? 'teammate' : 'ordinary', explicit }, next)
   })
-  ctx.on('agent/created', ({ agent }) => {
-    if (agent.session.header.origin !== 'subagent') return
+  ctx.on('agent/created', ({ agent, source }) => {
+    if (agent.session.header.origin !== 'subagent' || source !== 'startup') return
     const binding = delegation.getStore()
-    if (!binding || binding.parentId !== agent.session.header.parentSession) return
-    // Creation is precisely inside this official tool's async lifetime, never matched by prompt.
-    const record: ChildDecision = { childId: agent.id, ...binding, status: 'recommended' }
-    deps.store.set(record)
-    deps.store.bind(agent.id)
+    // shortcut: same-window plugin children under this parent are indistinguishable (accepted 2026-10-28), until DSH exposes tool-call→child identity.
+    if (!binding || binding.parentId !== agent.session.header.parentSession || !enabled(binding.rootId) || deps.store.wasBound(agent.id)) return
+    const parent = ctx.agents.get(SessionId(binding.parentId))
+    if (!parent) return
+    const config = parent.session.requestHeader()?.config
+    const provider = config?.provider ?? parent.options.provider
+    const model = config?.model ?? parent.options.model
+    const effort = config?.reasoningEffort ?? parent.options.reasoningEffort
+    const routeProvider = binding.explicit.provider ?? provider
+    if (typeof provider !== 'string' || !provider || typeof routeProvider !== 'string' || !routeProvider) return
+    const family = registry.familyOfMainModel(binding.explicit.model ?? (typeof model === 'string' ? model : undefined))?.id
+    const record: ChildDecision = { childId: agent.id, parentId: binding.parentId, rootId: binding.rootId, path: binding.path, status: 'recommended',
+      explicit: { ...binding.explicit, provider: routeProvider }, ...(family ? { family } : {}),
+      parentSelection: { provider, ...(typeof model === 'string' ? { model } : {}), ...(typeof effort === 'string' ? { reasoningEffort: effort } : {}) } }
+    deps.store.create(record)
     pending.set(agent.id, record)
+    childEpochs.set(agent.id, epoch(binding.rootId))
     return undefined
   })
   const requireBindingRecord = (agent: Agent, record: ChildDecision | undefined) => {
@@ -106,45 +134,36 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     }
     let record = pending.get(agent.id) ?? deps.store.get(agent.id)
     requireBindingRecord(agent, record)
-    if (!record) {
-      const root = rootOf(agent)
-      if (root && enabled(root.id)) throw new Error('unsupported：创建没有官方工具身份绑定；该子请求未路由。请暂停并改用受支持的创建路径，或由用户切到 MANUAL 后继承。')
-      return decision
-    }
+    // Unbound children (plugin-created, MANUAL-created, fork) pass through untouched.
+    if (!record) return decision
     if (record.parentId !== agent.session.header.parentSession) throw new Error('子会话身份不匹配')
-    if (!record.route && !enabled(record.rootId)) { pending.delete(agent.id); throw new Error('创建期间模式已改变；请重新创建，不静默继承') }
-    if (!record.route && enabled(record.rootId)) {
-      if (!pending.has(agent.id)) throw new Error('初始决策未完成且已恢复；不能用后续消息重新选模，请重新创建子任务')
-      if (record.status !== 'recommended') throw new Error(`${record.status}：${record.reason ?? '初始决策未完成'}；暂停并询问用户`)
-      const saveFailure = (status: ChildDecision['status'], reason: string) => { record = { ...record!, status, reason }; deps.store.set(record); pending.delete(agent.id) }
-      const explicit = record.explicit
-      let measure: PolicyMeasure | undefined
-      let capability: 'bounded' | 'analytical' | 'frontier' = 'bounded', depth: Depth = 'baseline'
-      if (!explicit.model || !explicit.reasoningEffort) {
-        // This is the exact child's entering message, not a parent-history/prompt similarity match.
-        const text = userInput(decision.messages).text
-        const result = await deps.jev.judgePolicy(buildState({ text }), payload.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
-        if (!enabled(record.rootId)) { saveFailure('failed', '创建期间模式已变化'); throw new Error('创建期间模式已变化；请重新创建') }
-        if (result.kind === 'cancelled') { saveFailure('failed', '初始判断已取消'); throw new Error('子任务判断已取消') }
-        if (result.kind === 'failed') { saveFailure('failed', result.category); throw new Error(`Jev 失败：${CATEGORY_HINTS[result.category]}；暂停委派并询问用户`) }
-        if (result.capability === 'insufficient_context') { saveFailure('needs-context', '任务目标或范围不足'); throw new Error('needs-context：请补充任务目标与范围') }
-        measure = result
-        capability = result.capability ?? 'bounded'; depth = result.depth
-      }
-      try {
-        const route = choosePolicyRoute(explicit.provider, capability, depth, await deps.catalog(), deps.settings().effortCap, explicit, record.family, registry)
-        const parent = ctx.agents.get(SessionId(record.parentId))
-        const events: readonly { type: string; data: unknown }[] = parent?.session.snapshotEvents() ?? []
-        const captured = events.find(event => event.type === 'subagent/model-selection-policy')
-        if (captured) {
-          const allowed = (captured.data as { allowedModels?: { provider: string; model: string }[] }).allowedModels
-          if (!Array.isArray(allowed) || !allowed.some(item => item.provider === route.provider && item.model === route.model)) throw new Error('路由不在父会话创建时的官方允许列表中；请新建会话')
-        }
-        if (!enabled(record.rootId) || payload.signal.aborted) throw new Error('创建已取消或模式已变化')
-        record = { ...record, route, status: 'recommended', decision: { id: ++decisionId, source: 'subagent', tier: capability, depth, capability, effort: route.reasoningEffort, model: route.model, provider: route.provider, status: 'recommended', ms: measure?.ms ?? 0, decisionProvider: measure?.decisionProvider ?? 'explicit', decisionModel: measure?.decisionModel ?? '未调用', ...(measure?.confidence !== undefined ? { confidence: measure.confidence } : {}), ...(measure?.capabilityConfidence !== undefined ? { capabilityConfidence: measure.capabilityConfidence } : {}), ...(measure?.probabilities ? { probabilities: measure.probabilities } : {}), ...(measure?.capabilityProbabilities ? { capabilityProbabilities: measure.capabilityProbabilities } : {}) } }; deps.store.set(record); pending.delete(agent.id)
-      } catch (error) { saveFailure('failed', '配置不可用'); throw error }
+    if (record.route || record.status !== 'recommended') return decision
+    if (!pending.has(agent.id)) { fallback(record, 'interrupted'); return decision }
+    const startedEpoch = childEpochs.get(agent.id) ?? epoch(record.rootId)
+    const current = () => enabled(record!.rootId) && epoch(record!.rootId) === startedEpoch
+    if (!current()) { fallback(record, 'mode-changed'); return decision }
+    const explicit = record.explicit
+    let measure: PolicyMeasure | undefined
+    let capability: 'bounded' | 'analytical' | 'frontier' = 'bounded', depth: Depth = 'baseline'
+    if (!explicit.model || !explicit.reasoningEffort) {
+      // This is the exact child's entering message, not a parent-history/prompt similarity match.
+      const text = userInput(decision.messages).text
+      const result = await deps.jev.judgePolicy(buildState({ text }), payload.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
+      if (!current()) { fallback(record, 'mode-changed'); return decision }
+      if (result.kind === 'cancelled') { fallback(record, 'jev-cancelled'); return decision }
+      if (result.kind === 'failed') { fallback(record, `jev-${result.category}`); return decision }
+      if (result.capability === 'insufficient_context') { fallback(record, 'needs-context'); return decision }
+      measure = result
+      capability = result.capability ?? 'bounded'; depth = result.depth
     }
-    if (!record.route && enabled(record.rootId)) throw new Error('决策未完成；暂停子请求')
+    const catalog = await deps.catalog(explicit.provider)
+    if (!current()) { fallback(record, 'mode-changed'); return decision }
+    const parent = record.parentSelection ?? { provider: explicit.provider }
+    const chosen = chooseChildRoute({ provider: explicit.provider, parent, explicit, capability, depth, catalog, cap: deps.settings().effortCap, captured: capturedAllowlist(record.parentId) }, registry)
+    if ('fallback' in chosen) { fallback(record, chosen.fallback); return decision }
+    const route = chosen.route
+    record = { ...record, route, status: 'recommended', decision: { id: ++decisionId, source: 'subagent', tier: capability, depth, capability, effort: route.reasoningEffort, model: route.model, provider: route.provider, status: 'recommended', ms: measure?.ms ?? 0, decisionProvider: measure?.decisionProvider ?? 'explicit', decisionModel: measure?.decisionModel ?? '未调用', ...(measure?.confidence !== undefined ? { confidence: measure.confidence } : {}), ...(measure?.capabilityConfidence !== undefined ? { capabilityConfidence: measure.capabilityConfidence } : {}), ...(measure?.probabilities ? { probabilities: measure.probabilities } : {}), ...(measure?.capabilityProbabilities ? { capabilityProbabilities: measure.capabilityProbabilities } : {}) } }
+    deps.store.set(record); pending.delete(agent.id); childEpochs.delete(agent.id)
     return decision
   })
   ctx.on('agent/request', async (payload, next) => {
@@ -181,12 +200,11 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     }
     const record = deps.store.get(agent.id)
     requireBindingRecord(agent, record)
-    if (record && !record.route) throw new Error('初始路由未完成；不静默继承')
     if (!record?.route) return config
     if (record.status === 'failed') throw new Error('实际应用失败；暂停子请求并询问用户')
     if (record.parentId !== agent.session.header.parentSession) throw new Error('决策身份不匹配')
-    // Existing routed instances keep their initial route even when AUTO stops making new decisions.
-    validatePolicyRoute(await deps.catalog(), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap, registry)
+    // Existing routed instances keep their initial route; live gates are re-checked on every request.
+    validatePolicyRoute(await deps.catalog(record.route.provider), record.route.provider, record.route.model, record.route.reasoningEffort, deps.settings().effortCap, capturedAllowlist(record.parentId))
     return { ...config, ...record.route } as typeof config
   }, { prepend: true })
   const confirmMainRequest = (session: Session, requestSeq: number, turn?: number) => {
@@ -239,6 +257,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   return {
     appliedDecision: (id: string) => enabled(id) ? applied.get(id)?.id : undefined,
     invalidate: (id: string) => { epochs.set(id, epoch(id) + 1); mainStatus.delete(id); latest.delete(id); applied.delete(id) },
+    childNotice: (rootId: string) => notices.get(rootId),
     status: (id: string) => deps.store.get(id), mainStatus: (id: string) => enabled(id) ? { ...mainStatus.get(id), ...(latest.get(id) ? { decision: latest.get(id) } : {}) } : undefined,
   }
 }

@@ -7,9 +7,8 @@ export interface FamilyStrategy {
   readonly label: string
   /** Main-model support: matched case-insensitively against the id after its last `/`. */
   readonly modelPrefixes: readonly string[]
-  /** Transport provider → model-id prefix for this family's child models on that transport. */
-  readonly transports: Readonly<Record<string, string>>
   /** Exact bare model id → recommended starting effort. */
   readonly effortStarts: Readonly<Record<string, StartEffort>>
+  /** Bare child model names; the provider's live catalog supplies the full id. */
   readonly childModels: Readonly<Record<Capability, string>>
 }

@@ -9,8 +9,9 @@ const env = { get: (name: string) => name === 'OPENROUTER_API_KEY' ? { value: 's
 let close: (() => Promise<void>) | undefined
 afterEach(async () => { await close?.(); close = undefined })
 
-interface FakeAgent { id: string; session: { header: { origin?: 'subagent'; parentSession?: string } } }
-const session = (id: string, parent?: string): FakeAgent => ({ id, session: { header: parent ? { origin: 'subagent', parentSession: parent } : {} } })
+interface FakeAgent { id: string; session: { header: { origin?: 'subagent'; parentSession?: string } }; options: { provider: string; model: string; reasoningEffort?: string } }
+const opus = { provider: 'claude', model: 'claude-opus-5-5', reasoningEffort: 'medium' }
+const session = (id: string, parent?: string, options: FakeAgent['options'] = opus): FakeAgent => ({ id, session: { header: parent ? { origin: 'subagent', parentSession: parent } : {} }, options })
 const haiku = { provider: 'claude', model: 'claude-haiku-5-5', name: 'Haiku', reasoningEfforts: ['low', 'medium', 'high', 'xhigh'] }
 const haikuCatalog: RoutingCatalog = { models: [haiku], childAllowlist: { status: 'enabled', allowedModels: [haiku] } }
 const both = (capability = 'bounded', depth = 'baseline') => json(200, { answers: { capability: { choice: capability }, depth: { choice: depth } } })
@@ -41,14 +42,17 @@ it('spec Scenario "MANUAL 与不可用路由"', async () => {
  expect(server.bodies).toHaveLength(0)
  // The caller's chosen model must survive MANUAL: the hint may not tell the agent to drop it.
  expect(def.output!.render({} as never, result as never)[0]).toMatchObject({ text: expect.stringContaining('只传用户或 lead 指定的值') })
- const error = await def.execute({ task: 'x', provider: 'codex' }, exec(live[1])).then(() => undefined, (e: Error) => e)
- expect(error?.message).toMatch(/暂停委派并询问用户/)
+ const s2 = session('S2', undefined, { provider: 'codex', model: 'gpt-6.1-sol', reasoningEffort: 'max' })
+ const fallback = await def.execute({ task: 'x', provider: 'codex' }, exec(s2))
+ expect(fallback).toEqual({ routed: false, status: 'fallback', reason: 'no-usable-route' })
+ expect(fallback).not.toHaveProperty('model')
  expect(state.read('S1')).toEqual({ mode: 'MANUAL' }); expect(state.read('S2')).toEqual({ mode: 'AUTO' })
 })
 it.each(['dsh-magpie-connect', 'dsh-magpie-connector'] as const)('%s preview uses the exact provider and family model', async provider => {
  const model = { provider, model: 'codex/gpt-6-luna', name: 'Luna', reasoningEfforts: ['low', 'medium', 'high', 'xhigh'] }
- const { def } = await tool(both(), undefined, undefined, { catalog: () => ({ models: [model], childAllowlist: { status: 'enabled', allowedModels: [model] } }) })
- expect(await def.execute({ task: 'synthetic', provider, family: 'codex' }, exec())).toMatchObject({ provider, model: 'codex/gpt-6-luna', reasoning_effort: 'high', status: 'recommended' })
+ const caller = session('S1', undefined, { provider, model: 'codex/gpt-6.1-sol', reasoningEffort: 'medium' })
+ const { def } = await tool(both(), undefined, [caller], { catalog: () => ({ models: [model], childAllowlist: { status: 'enabled', allowedModels: [model] } }) })
+ expect(await def.execute({ task: 'synthetic', provider }, exec(caller))).toMatchObject({ provider, model: 'codex/gpt-6-luna', reasoning_effort: 'high', status: 'recommended' })
 })
 it.each(['dsh-magpie-connect', 'dsh-magpie-connector'] as const)('%s MANUAL root skips routing without reads or writes', async provider => {
  const readSettings = vi.fn(() => CURRENT_DEFAULTS)
@@ -72,7 +76,7 @@ it('nested_child_follows_root_mode', async () => {
 it('tool_failure_reports_without_state_change', async () => {
  const { def, disk } = await tool(json(402, {}))
  const before = structuredClone(disk.get('S1'))
- await expect(def.execute({ task: 'x', provider: 'claude' }, exec())).rejects.toThrow(/暂停委派并询问用户/)
+ expect(await def.execute({ task: 'x', provider: 'claude' }, exec())).toEqual({ routed: false, status: 'fallback', reason: 'jev-insufficient-credits' })
  expect(disk.get('S1')).toEqual(before)
  await close?.(); close = undefined
  const controller = new AbortController(); controller.abort()
@@ -88,7 +92,7 @@ it('explicit model judges only depth and never substitutes', async () => {
  expect(await def.execute({ task: 'x', provider: 'codex', model: 'gpt-6-astra' }, exec())).toMatchObject({ model: 'gpt-6-astra', reasoning_effort: 'medium' })
  expect((server.bodies[0] as { questions: object }).questions).not.toHaveProperty('capability')
  catalog = { ...catalog, childAllowlist: { status: 'enabled', allowedModels: [] } }
- await expect(def.execute({ task: 'x', provider: 'codex', model: 'gpt-6-astra' }, exec())).rejects.toThrow(/暂停委派并询问用户/)
+ expect(await def.execute({ task: 'x', provider: 'codex', model: 'gpt-6-astra' }, exec())).toEqual({ routed: false, status: 'fallback', reason: 'explicit-unavailable' })
  expect(state.read('S1')).toEqual({ mode: 'AUTO' })
 })
 it('description and output carry no version or policy names', async () => {
@@ -99,14 +103,22 @@ it('description and output carry no version or policy names', async () => {
  expect(def.description).toMatch(/fresh creation tool/)
  expect(def.description).toMatch(/decision service/)
 })
-it('spec Scenario "未给出家族且 provider 有多个家族时不猜测"', async () => {
- const model={provider:'dsh-magpie-connector',model:'claude/claude-haiku-5-5',name:'Haiku',reasoningEfforts:['low','medium','high','xhigh']}
- const {def,state,server}=await tool(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'baseline'}}}),undefined,undefined,{catalog:async()=>({models:[model],childAllowlist:{status:'enabled',allowedModels:[model]}})})
- const before=state.read('S1')
- const error=await def.execute({task:'synthetic',provider:'dsh-magpie-connector'},exec()).then(()=>undefined,e=>e as Error)
- expect(error?.message).toMatch(/unsupported/);expect(error?.message).toMatch(/显式指定模型/)
- expect(state.read('S1')).toEqual(before)
- expect(server.bodies.length).toBeLessThanOrEqual(1)
+it('spec Scenario "预览失败与取消的区分"', async () => {
+ const { def, disk, server } = await tool(json(200, { answers: { capability: { choice: 'insufficient_context' }, depth: { choice: 'baseline' } } }))
+ const before = structuredClone([...disk])
+ expect(await def.execute({ task: 'x', provider: 'claude' }, exec())).toMatchObject({ routed: false, status: 'needs-context' })
+ server.set(json(402, {}))
+ expect(await def.execute({ task: 'x', provider: 'claude' }, exec())).toEqual({ routed: false, status: 'fallback', reason: 'jev-insufficient-credits' })
+ const controller = new AbortController(); controller.abort()
+ await expect(def.execute({ task: 'x', provider: 'claude' }, exec(session('S1'), controller.signal))).rejects.toThrow(/已取消/)
+ expect([...disk]).toEqual(before)
+})
+it('spec Scenario "未登记的 provider 不被枚举拒绝"', async () => {
+ const sol = { provider: 'traex', model: 'GPT-5.6-Sol', name: 'Sol', reasoningEfforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' }
+ const caller = session('S1', undefined, { provider: 'traex', model: 'GPT-5.6-Sol', reasoningEffort: 'medium' })
+ const { def } = await tool(both('bounded', 'higher'), undefined, [caller], { catalog: () => ({ models: [sol], childAllowlist: { status: 'enabled', allowedModels: [sol] } }) })
+ expect(JSON.stringify(def.parameters)).not.toContain('dsh-magpie-connect')
+ expect(await def.execute({ task: 'x', provider: 'traex' }, exec(caller))).toMatchObject({ status: 'recommended', provider: 'traex', model: 'GPT-5.6-Sol', reasoning_effort: 'high' })
 })
 it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "未注册家族的 Magpie 模型需显式模型与可验证 effort" (%s)', async provider => {
  const m={provider,model:'opencode-go/kimi-k3',name:'Kimi',reasoningEfforts:['low','high'],defaultEffort:'high'}
@@ -115,8 +127,8 @@ it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "
  expect(await def.execute({task:'t',provider,model:m.model},exec())).toMatchObject({model:m.model,reasoning_effort:'high'})
  const {defaultEffort:_,...noDefault}=m
  catalog={models:[noDefault],childAllowlist:{status:'enabled',allowedModels:[noDefault]}}
- await expect(def.execute({task:'t',provider,model:m.model},exec())).rejects.toThrow()
+ expect(await def.execute({task:'t',provider,model:m.model},exec())).toMatchObject({routed:false,status:'fallback'})
  expect(await def.execute({task:'t',provider,model:m.model,reasoning_effort:'low'},exec())).toMatchObject({model:m.model,reasoning_effort:'low'})
- await expect(def.execute({task:'t',provider,model:'../kimi-k3',reasoning_effort:'low'},exec())).rejects.toThrow()
+ expect(await def.execute({task:'t',provider,model:'../kimi-k3',reasoning_effort:'low'},exec())).toMatchObject({routed:false,status:'fallback'})
  expect(server.bodies).toHaveLength(2)
 })

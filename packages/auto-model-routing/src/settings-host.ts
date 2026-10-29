@@ -4,7 +4,6 @@ import type {} from '@deepseek-ai/dsh-llm'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { DEFAULT_SETTINGS, SettingsStore, SettingsValidationError } from './settings.js'
 import type { RoutingCatalog } from './settings-contract.js'
-import { registry as builtin, type Registry } from './strategies/index.js'
 
 import { JevClient } from './jev.js'
 import { DECISION_SERVICES, type DecisionProvider } from './decision-service.js'
@@ -12,11 +11,25 @@ const keyRef = (provider: DecisionProvider = 'openrouter') => credentialRef(DECI
 interface AllowlistService { current(): { enabled: boolean; allowedModels: { provider: string; model: string }[] } }
 
 /** Only the fixed credential reference and public catalog metadata cross this adapter. */
-export function settingsHost(ctx: Context, store: SettingsStore, registry: Registry = builtin) {
+export function settingsHost(ctx: Context, store: SettingsStore) {
   const environment = launchEnvironmentOf(ctx)
   const credentials = () => ctx.get('credentials')
-  const catalog = async (): Promise<RoutingCatalog> => {
-    const models = (await Promise.all(ctx.llm.listProviders().filter(p => registry.hasProvider(p.id)).map(async provider => {
+  const allowlist = (): RoutingCatalog['childAllowlist'] => {
+    // The optional provider is owned by dsh-tool-subagent, not this package.
+    const service = ctx.get('subagentModelSelection' as never) as AllowlistService | undefined
+    try {
+      if (service) {
+        const current = service.current()
+        return { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels }
+      }
+    } catch { /* An unavailable policy must never broaden the allowed routes. */ }
+    return { status: 'unavailable', allowedModels: [] }
+  }
+  /** One provider when routing; otherwise only the providers the allowlist names (never every host provider). */
+  const catalog = async (only?: string): Promise<RoutingCatalog> => {
+    const childAllowlist = allowlist()
+    const wanted = new Set(only ? [only] : childAllowlist.allowedModels.map(r => r.provider))
+    const models = (await Promise.all(ctx.llm.listProviders().filter(p => wanted.has(p.id)).map(async provider => {
       try {
         return await Promise.all((await ctx.llm.listModels(provider.id)).map(async model => {
           try {
@@ -26,15 +39,7 @@ export function settingsHost(ctx: Context, store: SettingsStore, registry: Regis
         })).then(entries => entries.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined))
       } catch { return [] }
     }))).flat()
-    // The optional provider is owned by dsh-tool-subagent, not this package.
-    const service = ctx.get('subagentModelSelection' as never) as AllowlistService | undefined
-    try {
-      if (service) {
-        const current = service.current()
-        return { models, childAllowlist: { status: current.enabled ? 'enabled' : 'disabled', allowedModels: current.allowedModels.filter(r => registry.hasProvider(r.provider)) } }
-      }
-    } catch { /* An unavailable policy must never broaden the allowed routes. */ }
-    return { models, childAllowlist: { status: 'unavailable', allowedModels: [] } }
+    return { models, childAllowlist }
   }
   const keyStatus = async (provider: DecisionProvider = store.read().settings.decisionService?.provider ?? 'openrouter') => {
     const ref = keyRef(provider)

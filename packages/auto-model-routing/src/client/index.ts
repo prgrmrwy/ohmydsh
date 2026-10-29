@@ -18,7 +18,7 @@ const FAMILIES = registry.labels().join(' / ')
 import { installRoutingNavIcon } from './nav-icon.js'
 
 interface AutoSupport { supported: boolean; provider?: string; model?: string }
-interface View {
+interface View { childNotice?: { id: number; childId: string; reason: string; at: number };
   mode: 'AUTO' | 'MANUAL'
   depth?: string
   effort?: string
@@ -67,11 +67,13 @@ function SwapIcon() {
     h('path', { d: 'M13 10.5H3.5M6 8l-2.5 2.5L6 13' }))
 }
 
+const noticeText = (notice: { reason: string }) => `最近子任务未路由：${notice.reason}（按 DSH 默认运行）`
 export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false, initialToast, subscribeSelection }: Props & { initialView?: View; initiallyOpen?: boolean; initialToast?: Toast }) {
   const [view, setView] = useState<View | undefined>(initialView)
   const [open, setOpen] = useState(initiallyOpen)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [notApplicable, setNotApplicable] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [toast, setToast] = useState<Toast | undefined>(initialToast)
   // The composer hides the right-side controls while the agent runs (when Jev decides), so the hint is
@@ -99,6 +101,18 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
     remember()
     setToast(next)
   }, [view, sessionId])
+  const seenNotice = useRef<number | undefined>(undefined)
+  const noticePrimed = useRef(false)
+  useEffect(() => {
+    if (!view || viewSession.current !== sessionId) return
+    const notice = view.childNotice
+    if (!noticePrimed.current) { noticePrimed.current = true; seenNotice.current = notice?.id; return }
+    if (!notice || notice.id === seenNotice.current) return
+    seenNotice.current = notice.id
+    if (!view.decisionToast) return
+    remember()
+    setToast({ id: -notice.id, lines: [noticeText(notice)] })
+  }, [view, sessionId])
   // Hiding depends only on the toast shown, so later state changes cannot cancel it.
   useEffect(() => {
     if (!toast) return
@@ -124,13 +138,21 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   useEffect(() => {
     let active = true
     primed.current = false
+    noticePrimed.current = false
     seen.current = undefined
     viewSession.current = undefined
     setToast(undefined)
-    const refresh = () => { void callRouting(rpc, sessionId).then(value => { if (active) { viewSession.current = sessionId; setView(value as View); setError(''); ensureSubscription() } }, reason => { if (active) setError(String(reason)) }) }
+    let poll: ReturnType<typeof setInterval> | undefined
+    const refresh = () => { void callRouting(rpc, sessionId).then(value => {
+      if (!active) return
+      // Child sessions have no AUTO chip; their origin never changes, so stop polling for good.
+      if ((value as { applicable?: unknown })?.applicable === false) { setNotApplicable(true); clearInterval(poll); subscription.current?.stop(); subscription.current = undefined; return }
+      viewSession.current = sessionId; setView(value as View); setError(''); ensureSubscription()
+    }, reason => { if (active) setError(String(reason)) }) }
     refreshRef.current = refresh
+    setNotApplicable(false)
     refresh()
-    const poll = setInterval(refresh, 3000)
+    poll = setInterval(refresh, 3000)
     return () => {
       active = false
       clearInterval(poll)
@@ -177,8 +199,10 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
         h('p', { key: 'depth', className: 'amr-muted' }, `AUTO · ${view?.depth ?? '尚无判断'}；主模型不变，推理投入按请求应用；子任务自动选配。`),
         off && h('p', { key: 'disabled', role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
         h('p', { key: 'data', className: 'amr-muted' }, 'AUTO 会把脱敏任务文本发送给设置中所选的决策服务判断。'),
+        view?.childNotice && h('p', { key: 'notice', role: 'status', className: 'amr-muted' }, noticeText(view.childNotice)),
         error && h('p', { key: 'error', role: 'alert', className: 'amr-error' }, error),
       ]
+  if (notApplicable) return null
   return h('span', { ref: (el: HTMLSpanElement | null) => { rootRef.current = el; remember() }, className: 'amr-root', onMouseEnter: on('enter'), onMouseLeave: on('leave'), onFocus: on('focus'), onBlur: on('blur') },
     h('style', null, CSS),
     h('button', {

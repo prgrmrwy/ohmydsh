@@ -1,20 +1,20 @@
 import type { Capability, Depth } from './jev.js'
 import { AUTO_EFFORTS, type AutomaticEffort, type RoutingCatalog } from './settings-contract.js'
-import { MODEL_ID_PATTERN } from './settings-validation.js'
 import { registry as builtin, type Registry } from './strategies/index.js'
 
-/** Family of a child model on an exact transport; undefined when no registered strategy owns it. */
-export function modelFamily(provider: string, model: string, registry: Registry = builtin): string | undefined {
-  return registry.familyOfChild(provider, model)?.id
-}
-/** A transport whose model ids carry a family prefix (`<family>/<model>`), e.g. a gateway. */
-function prefixedTransport(provider: string, registry: Registry): boolean {
-  return registry.strategies.some(s => (s.transports[provider] ?? '') !== '')
-}
-export function validatePolicyRoute(catalog: RoutingCatalog, provider: string, model: string, effort: string, cap: AutomaticEffort, registry: Registry = builtin): void {
+type Allowed = readonly { provider: string; model: string }[]
+const listed = (list: Allowed, provider: string, model: string) => list.some(m => m.provider === provider && m.model === model)
+
+/** Whether a route is usable now: live catalog, enabled official allowlist, captured allowlist (if any) and the effort cap. */
+export function routeUsable(catalog: RoutingCatalog, provider: string, model: string, effort: string, cap: AutomaticEffort, captured?: Allowed): boolean {
   const entry = catalog.models.find(m => m.provider === provider && m.model === model)
-  const validId = prefixedTransport(provider, registry) ? /^[A-Za-z0-9._:-]+(?:\/[A-Za-z0-9._:-]+)+$/.test(model) && model.length <= 128 : MODEL_ID_PATTERN.test(model)
-  if (!registry.hasProvider(provider) || !validId || !entry || !AUTO_EFFORTS.includes(effort as AutomaticEffort) || AUTO_EFFORTS.indexOf(effort as AutomaticEffort) > AUTO_EFFORTS.indexOf(cap) || !entry.reasoningEfforts.includes(effort) || catalog.childAllowlist.status !== 'enabled' || !catalog.childAllowlist.allowedModels.some(m => m.provider === provider && m.model === model)) throw new Error('子任务路由不在当前目录/允许列表或 effort 上限内；暂停委派并询问用户')
+  return !!entry && model.length <= 128 && AUTO_EFFORTS.includes(effort as AutomaticEffort) && AUTO_EFFORTS.indexOf(effort as AutomaticEffort) <= AUTO_EFFORTS.indexOf(cap)
+    && entry.reasoningEfforts.includes(effort) && catalog.childAllowlist.status === 'enabled' && listed(catalog.childAllowlist.allowedModels, provider, model)
+    && (!captured || listed(captured, provider, model))
+}
+/** Bound routes are re-checked on every request; any gate failure rejects that request. */
+export function validatePolicyRoute(catalog: RoutingCatalog, provider: string, model: string, effort: string, cap: AutomaticEffort, captured?: Allowed): void {
+  if (!routeUsable(catalog, provider, model, effort, cap, captured)) throw new Error('子任务路由不在当前目录/允许列表或 effort 上限内；拒绝本次请求')
 }
 
 export function policyEffort(model: string, depth: Depth, supported: readonly string[], cap: AutomaticEffort, defaultEffort?: string, registry: Registry = builtin): AutomaticEffort {
@@ -31,19 +31,36 @@ export function policyEffort(model: string, depth: Depth, supported: readonly st
   return AUTO_EFFORTS.indexOf(chosen) > AUTO_EFFORTS.indexOf(cap) ? allowed.at(-1)! : chosen
 }
 export interface PolicyRoute { provider: string; model: string; reasoningEffort: AutomaticEffort }
+export type RouteFallback = 'no-usable-route' | 'explicit-unavailable'
+export interface ChildRouteInput {
+  provider: string
+  parent: { model?: string | undefined; reasoningEffort?: string | undefined }
+  explicit: { model?: string | undefined; reasoningEffort?: string | undefined }
+  capability: Capability
+  depth: Depth
+  catalog: RoutingCatalog
+  cap: AutomaticEffort
+  captured?: Allowed | undefined
+}
 /**
- * Child route: explicit dimensions are kept; otherwise the family's capability slot on this transport.
- * A transport owned by a single family (empty prefix) implies that family; others need `family`.
+ * Fallback chain: capability slot → keep model with depth effort → parent effort (automatic effort only) → no rewrite.
+ * Provider never changes; explicit dimensions are never replaced.
  */
-export function choosePolicyRoute(provider: string, capability: Capability, depth: Depth, catalog: RoutingCatalog, cap: AutomaticEffort, explicit: { model?: string | undefined; reasoningEffort?: string | undefined } = {}, family?: string, registry: Registry = builtin): PolicyRoute {
-  if (!registry.hasProvider(provider)) throw new Error('unsupported：provider 不在已注册家族中；暂停委派并询问用户')
-  const implied = registry.familyOfChild(provider, '')?.id
-  const selectedFamily = implied ?? family
-  const slot = selectedFamily ? registry.childModel(selectedFamily, provider, capability) : undefined
-  if (!explicit.model && !slot) throw new Error('unsupported：没有已定义的模型能力家族；请显式指定模型')
-  const model = explicit.model ?? slot!
-  const entry = catalog.models.find(m => m.provider === provider && m.model === model)
-  const reasoningEffort = explicit.reasoningEffort ?? policyEffort(model, depth, entry?.reasoningEfforts ?? [], cap, entry?.defaultEffort, registry)
-  validatePolicyRoute(catalog, provider, model, reasoningEffort, cap, registry)
-  return { provider, model, reasoningEffort: reasoningEffort as AutomaticEffort }
+export function chooseChildRoute(input: ChildRouteInput, registry: Registry = builtin): { route: PolicyRoute } | { fallback: RouteFallback } {
+  const { provider, parent, explicit, depth, catalog, cap, captured } = input
+  const entry = (model: string) => catalog.models.find(m => m.provider === provider && m.model === model)
+  const depthEffort = (model: string) => { try { const e = entry(model); return e ? policyEffort(model, depth, e.reasoningEfforts, cap, e.defaultEffort, registry) : undefined } catch { return undefined } }
+  const take = (model: string | undefined, effort: string | undefined) => model && effort && routeUsable(catalog, provider, model, effort, cap, captured) ? { route: { provider, model, reasoningEffort: effort as AutomaticEffort } } : undefined
+  const family = parent.model ? registry.familyOfMainModel(parent.model)?.id : undefined
+  if (!explicit.model && family && parent.model) {
+    const slot = registry.resolveSlot(family, input.capability, parent.model, catalog.models.filter(m => m.provider === provider).map(m => m.model))
+    const hit = slot && take(slot, explicit.reasoningEffort ?? depthEffort(slot))
+    if (hit) return hit
+  }
+  const model = explicit.model ?? parent.model
+  const kept = model && take(model, explicit.reasoningEffort ?? depthEffort(model))
+  if (kept) return kept
+  const inherited = !explicit.reasoningEffort && take(model, parent.reasoningEffort)
+  if (inherited) return inherited
+  return { fallback: explicit.model || explicit.reasoningEffort ? 'explicit-unavailable' : 'no-usable-route' }
 }

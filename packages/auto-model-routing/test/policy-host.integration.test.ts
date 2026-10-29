@@ -227,11 +227,18 @@ it('binds concurrent tool-created identities, records actual requests, and resto
   expect(h.calls.at(-1)?.model).toBe(h.store.get(child.id)?.route?.model)
   expect(h.jev.bodies).toHaveLength(1)
 })
-it('keeps MANUAL creation free from routing decisions', async () => {
+it('spec Scenario "MANUAL 时创建的子会话在切到 AUTO 后仍放行"', async () => {
   const h = await harness(); h.modes.set(h.parent.id,{ mode: 'MANUAL' })
   await h.invoke()
+  const child = h.handles[1]!.agent
   expect(h.jev.bodies).toHaveLength(0)
-  expect(h.store.get(h.handles[1]!.agent.id)).toBeUndefined()
+  expect(h.store.get(child.id)).toBeUndefined()
+  h.modes.set(h.parent.id,{ mode: 'AUTO' })
+  const requests = h.calls.length
+  await h.run(child, 'Later work after switching the root to AUTO')
+  expect(h.calls).toHaveLength(requests + 1)
+  expect(h.calls.at(-1)).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' })
+  expect(h.jev.bodies).toHaveLength(0); expect(h.store.get(child.id)).toBeUndefined(); expect(h.store.wasBound(child.id)).toBe(false)
 })
 it('spec Scenario "子会话不走主会话判断"', async () => {
   const h = await harness()
@@ -245,11 +252,11 @@ it('spec Scenario "子会话不走主会话判断"', async () => {
   expect(body.state).toContain('Apply the exact supplied mechanical transformation')
   expect(body.state).not.toContain('PRIVATE_RUNTIME_CONTEXT')
 })
-it('main uses depth only without changing model', async () => {
+it('spec Scenario "AUTO 不改主 provider/model"', async () => {
   const h = await harness()
   h.jev.set(json(200,{ answers: { depth: { choice: 'higher' } } }))
   await h.run(h.parent,'Reason carefully about the constraint conflict')
-  expect(h.calls.at(-1)).toMatchObject({ model: 'claude-opus-5-5', reasoningEffort: 'high' })
+  expect(h.calls.at(-1)).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5', reasoningEffort: 'high' })
   expect((h.jev.bodies[0] as { questions: unknown }).questions).not.toHaveProperty('capability')
 })
 it('spec Scenario "异步解析期间切 MANUAL 不覆盖主请求"', async () => {
@@ -274,32 +281,35 @@ it('missing routed-child record fails closed in MANUAL and legacy, without rejud
   expect(h.calls).toHaveLength(before)
   expect(h.jev.bodies).toHaveLength(1)
 })
-it('missing context stops the child request without changing root AUTO', async () => {
+it('missing context falls back to DSH defaults without changing root AUTO', async () => {
   const h = await harness()
   h.jev.set(json(200,{ answers: { capability: { choice: 'insufficient_context' }, depth: { choice: 'baseline' } } }))
   await h.invoke()
   const child = h.handles[1]!.agent
-  expect(h.calls.filter(c => c.sessionId === child.id)).toHaveLength(0)
-  expect(h.store.get(child.id)?.status).toBe('needs-context')
+  expect(h.calls.filter(c => c.sessionId === child.id)).toHaveLength(1)
+  expect(h.store.get(child.id)).toMatchObject({ status: 'unsupported', reason: 'needs-context' })
+  expect(h.store.get(child.id)?.route).toBeUndefined()
   expect(h.modes.get(h.parent.id)?.mode).toBe('AUTO')
 })
-it('Jev failure stops child execution and preserves the failure across later messages', async () => {
+it('spec Scenario "子任务 Jev 失败不改写"', async () => {
   const h = await harness(); h.jev.set(json(402,{}))
   await h.invoke()
   const child = h.handles[1]!.agent
-  expect(h.store.get(child.id)?.status).toBe('failed')
-  expect(h.calls.filter(c => c.sessionId === child.id)).toHaveLength(0)
+  expect(h.store.get(child.id)).toMatchObject({ status: 'unsupported', reason: 'jev-insufficient-credits' })
+  expect(h.calls.filter(c => c.sessionId === child.id)).toHaveLength(1)
+  expect(h.modes.get(h.parent.id)?.mode).toBe('AUTO'); expect(h.modes.get(h.parent.id)?.disabled).toBeUndefined()
   h.jev.set(json(200,{ answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }))
   await h.run(child,'Try again without a new resource decision')
   expect(h.jev.bodies).toHaveLength(1)
 })
-it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('does not broaden the %s parent captured allowlist with a newer global catalog', async (magpie) => {
+it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "更新全局目录不能扩大父 captured allowlist" (%s)', async (magpie) => {
   const h = await harness(magpie)
   ;(h.parent.session.append as unknown as (type:string,data:unknown)=>unknown)('subagent/model-selection-policy',{ allowedModels: [{provider:magpie||'claude',model:magpie?'claude/claude-opus-5-5':'claude-opus-5-5'}] })
   await h.invoke()
   const child = h.handles[1]!.agent
-  expect(h.calls.filter(c=>c.sessionId===child.id)).toHaveLength(0)
-  expect(h.store.get(child.id)?.status).toBe('failed')
+  // The slot outside the captured allowlist is never selected.
+  expect(h.calls.filter(c=>c.sessionId===child.id).some(c=>/haiku/.test(c.model))).toBe(false)
+  expect(h.store.get(child.id)?.route?.model ?? '').not.toMatch(/haiku/)
 })
 it('actual request mismatch is recorded as failed rather than applied', async () => {
   const h = await harness()
@@ -310,11 +320,11 @@ it('actual request mismatch is recorded as failed rather than applied', async ()
   await h.invoke()
   expect(h.store.get(h.handles[1]!.agent.id)?.status).toBe('failed')
 })
-it('unsupported fork is denied before its tool body runs', async () => {
+it('spec Scenario "fork 子会话与父会话一致"', async () => {
   const h = await harness(); let ran = false
   h.ctx.tools.register(defineTool({ name: 'subagent_fork', description: 'offline fork boundary', parameters: {}, output: { schema: { type: 'object', additionalProperties: false, properties: {} }, render: () => [] }, execute: async () => { ran = true; return {} } }))
   const result = await h.ctx.tools.execute({ name: 'subagent_fork', arguments: {}, agent: h.parent, callId: 'fork' as never, signal: new AbortController().signal })
-  expect(result.isError).toBe(true); expect(ran).toBe(false); expect(h.jev.bodies).toHaveLength(0)
+  expect(result.isError).not.toBe(true); expect(ran).toBe(true); expect(h.jev.bodies).toHaveLength(0)
 })
 it('spec Scenario "不支持模型的请求不再导致整轮失败"', async () => {
   const h = await harness(false, false, 'claude', false, { provider: 'opencode-go', model: 'deepseek-v4.1-flash', efforts: ['low','high','max'], defaultEffort: 'max' })
@@ -365,7 +375,7 @@ it('spec Scenario "切回受支持模型后恢复可切换"', async () => {
   expect(await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'AUTO' })).toMatchObject({ mode: 'AUTO', autoSupport: { supported: true } })
 })
 
-const deepseek: FamilyStrategy = { id: 'deepseek', label: 'DeepSeek', modelPrefixes: ['deepseek-'], transports: { 'opencode-go': '' }, effortStarts: { 'deepseek-v5': 'medium' }, childModels: { bounded: 'deepseek-v5', analytical: 'deepseek-v5', frontier: 'deepseek-v5' } }
+const deepseek: FamilyStrategy = { id: 'deepseek', label: 'DeepSeek', modelPrefixes: ['deepseek-'], effortStarts: { 'deepseek-v5': 'medium' }, childModels: { bounded: 'deepseek-v5', analytical: 'deepseek-v5', frontier: 'deepseek-v5' } }
 it('spec Scenario "新增家族只需新增策略"', async () => {
  const strategies = [...BUILTIN_STRATEGIES, deepseek]
  expect(() => createRegistry(strategies)).not.toThrow()
@@ -383,9 +393,8 @@ it('spec Scenario "新增家族只需新增策略"', async () => {
  await h.run(child, 'later message')
  expect(h.calls.at(-1)).toMatchObject({ provider: 'opencode-go', model: 'deepseek-v5', reasoningEffort: 'medium' })
  expect(h.jev.bodies).toHaveLength(judged)
- const tool = h.tools().get('route_subagent') as unknown as { parameters: { properties: { provider: { enum: string[] }; family: { enum: string[] } } } }
- expect(tool.parameters.properties.provider.enum).toContain('opencode-go')
- expect(tool.parameters.properties.family.enum).toContain('deepseek')
+ // No provider registry: the preview tool takes any provider and has no family parameter.
+ expect(JSON.stringify((h.tools().get('route_subagent') as unknown as { parameters: unknown }).parameters)).not.toContain('family')
 })
 it('spec Scenario "记录中的家族已不在注册表"', async () => {
  const h = await harness(false, false, 'deepseek', false, {}, [...BUILTIN_STRATEGIES, deepseek])
@@ -519,4 +528,264 @@ it('spec Scenario "切换到不支持的主模型自动锁定"', async () => {
  expect(h.modes.get(h.parent.id)?.mode).toBe('MANUAL')
  const attempt = h.calls.at(-1)!
  expect({ provider: attempt.provider, model: attempt.model, reasoningEffort: attempt.reasoningEffort }).toEqual({ provider: official.provider, model: official.model, reasoningEffort: official.reasoningEffort })
+})
+it('spec Scenario "插件直接创建的子会话原样放行"', async () => {
+ const h = await harness()
+ const judged = h.jev.bodies.length
+ // Pet locus style: created by Host code, outside any official tool window.
+ const child = await h.ctx.agents.create({ sessionId: SessionId('plugin-child'), parentAgent: h.parent, meta: { origin: 'subagent', parentSession: h.parent.id }, agentOptions: { provider: 'claude', model: 'claude-opus-5-5' } }); h.handles.push(child)
+ await h.run(child.agent, 'Locus first turn')
+ expect(h.calls.filter(c => c.sessionId === child.agent.id)).toHaveLength(1)
+ expect(h.calls.at(-1)).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' })
+ expect(h.jev.bodies).toHaveLength(judged)
+ expect(h.store.get(child.agent.id)).toBeUndefined(); expect(h.store.wasBound(child.agent.id)).toBe(false)
+ expect(await h.callEndpoint('childRouting', { sessionId: child.agent.id })).toMatchObject({ status: 'unsupported' })
+})
+it('spec Scenario "父模型不在允许列表时不改写" (traex parent)', async () => {
+ const h = await harness(false, false, 'codex', false, { provider: 'traex', model: 'GPT-5.6-Sol', efforts: ['low','medium','high','xhigh'], defaultEffort: 'medium' })
+ h.jev.set(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'higher' } } }))
+ const result = await h.invoke()
+ expect(result.isError).not.toBe(true)
+ const child = h.handles.at(-1)!.agent
+ expect(h.store.get(child.id)).toMatchObject({ status: 'unsupported', reason: 'no-usable-route', explicit: { provider: 'traex' }, family: 'codex', parentSelection: { provider: 'traex', model: 'GPT-5.6-Sol' } })
+ const state = await h.callEndpoint('state', { sessionId: h.parent.id })
+ expect(state.childNotice).toMatchObject({ childId: child.id, reason: 'no-usable-route' })
+ expect(h.warnings.mock.calls.some(([m]) => String(m).includes(child.id))).toBe(true)
+})
+it('spec Scenario "子会话状态返回不适用" and scopeNote', async () => {
+ const h = await harness()
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ expect(await h.callEndpoint('state', { sessionId: child.id })).toEqual({ applicable: false })
+ expect((await h.callEndpoint('childRouting', { sessionId: child.id })).scopeNote).toBe('按官方工具 ALS 上下文、同父与 startup 绑定；不能区分同窗口插件旁支，旁支可能一并受管。')
+})
+
+type H = Awaited<ReturnType<typeof harness>>
+/** A second official creation path (fresh spawn_teammate) whose child anchors to the executing agent. */
+function spawner(h: H) {
+ let k = 0
+ const ctrl: { before?: () => unknown; options?: { provider: string; model: string } } = {}
+ h.ctx.tools.register(defineTool({ name: 'spawn_teammate', description: 'Test fresh teammate boundary', parameters: { provider: { type: 'string' }, prompt: { type: 'string' } }, output: { schema: { type: 'object', additionalProperties: false, properties: { childId: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: value.childId ?? '' }] }, execute: async (args, exec) => {
+  await ctrl.before?.()
+  const from = exec.agent!
+  const child = await h.ctx.agents.create({ sessionId: SessionId(`mate-${++k}`), parentAgent: from, meta: { origin: 'subagent', parentSession: from.id }, agentOptions: ctrl.options ?? { provider: from.options.provider!, model: from.options.model! } }); h.handles.push(child)
+  await h.run(child.agent, args.prompt ?? 'Apply the exact supplied mechanical transformation')
+  return { childId: child.agent.id }
+ } }))
+ const spawn = (from: H['parent'] = h.parent, args: Record<string, string> = {}) => h.ctx.tools.execute({ name: 'spawn_teammate', arguments: args, agent: from, callId: `mate-call-${++k}` as never, signal: new AbortController().signal })
+ return { ctrl, spawn }
+}
+const pluginChild = async (h: H, id: string) => {
+ const child = await h.ctx.agents.create({ sessionId: SessionId(id), parentAgent: h.parent, meta: { origin: 'subagent', parentSession: h.parent.id }, agentOptions: { provider: 'claude', model: 'claude-opus-5-5' } }); h.handles.push(child)
+ await h.run(child.agent, 'Plugin-owned work')
+ return child.agent
+}
+const SCOPE_NOTE = '按官方工具 ALS 上下文、同父与 startup 绑定；不能区分同窗口插件旁支，旁支可能一并受管。'
+it('spec Scenario "官方工具创建的子会话受管"', async () => {
+ const h = await harness()
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ expect(h.store.wasBound(child.id)).toBe(true)
+ expect(h.store.get(child.id)).toMatchObject({ status: 'applied', route: { provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' } })
+ expect(h.calls.filter(c => c.sessionId === child.id).at(-1)).toMatchObject({ provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' })
+})
+it('spec Scenario "孙会话以直接父会话为锚"', async () => {
+ const h = await harness(); const { spawn } = spawner(h)
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ expect((await spawn(child)).isError).not.toBe(true)
+ const grandchild = h.handles.at(-1)!.agent
+ expect(h.store.get(grandchild.id)).toMatchObject({ parentId: child.id, rootId: h.parent.id, route: { provider: 'claude' } })
+})
+it('spec Scenario "创建期间根会话离开 AUTO 则不受管"', async () => {
+ const h = await harness(); const { ctrl, spawn } = spawner(h)
+ ctrl.before = () => h.modes.set(h.parent.id, { mode: 'MANUAL' })
+ expect((await spawn()).isError).not.toBe(true)
+ const child = h.handles.at(-1)!.agent
+ expect(h.store.get(child.id)).toBeUndefined(); expect(h.store.wasBound(child.id)).toBe(false)
+ expect(h.calls.filter(c => c.sessionId === child.id).at(-1)).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' })
+ expect(h.jev.bodies).toHaveLength(0)
+})
+it('spec Scenario "恢复通知不重写已有绑定"', async () => {
+ const h = await harness(); const { ctrl, spawn } = spawner(h)
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ const bytes = readFileSync(childFile(h.home, child.id), 'utf8')
+ const seen: string[] = []
+ h.ctx.on('agent/created', ({ source }) => { seen.push(source); return undefined })
+ // A resume notification for an existing child arrives inside another official tool window.
+ ctrl.before = () => (h.ctx.emit as unknown as (name: string, payload: unknown) => void)('agent/created', { agent: child, source: 'resume' })
+ await spawn()
+ expect(seen).toContain('resume')
+ expect(readFileSync(childFile(h.home, child.id), 'utf8')).toBe(bytes)
+ await h.run(child, 'Next message')
+ expect(h.calls.filter(c => c.sessionId === child.id).at(-1)).toMatchObject({ model: 'claude-haiku-5-5', reasoningEffort: 'medium' })
+})
+it('spec Scenario "工具窗口外创建的插件子会话不被接管"', async () => {
+ const h = await harness()
+ await h.invoke()
+ const judged = h.jev.bodies.length
+ const late = await pluginChild(h, 'late-plugin-child')
+ expect(h.store.get(late.id)).toBeUndefined(); expect(h.store.wasBound(late.id)).toBe(false)
+ expect(h.jev.bodies).toHaveLength(judged)
+ expect(h.calls.filter(c => c.sessionId === late.id).at(-1)).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' })
+})
+it('spec Scenario "同窗口同父插件旁支一并受管且如实说明"', async () => {
+ // Fixture limit: the offline harness has no subagents service, so the sibling uses agents.create inside the window.
+ const h = await harness(); const { ctrl, spawn } = spawner(h)
+ let sibling: H['parent'] | undefined
+ ctrl.before = async () => { sibling = await pluginChild(h, 'window-sibling') }
+ await spawn()
+ expect(h.store.wasBound(sibling!.id)).toBe(true)
+ expect(h.store.get(sibling!.id)?.status).toBe('applied')
+ expect((await h.callEndpoint('childRouting', { sessionId: sibling!.id })).scopeNote).toBe(SCOPE_NOTE)
+})
+it('spec Scenario "provider 与父配置在绑定边界同步采样"', async () => {
+ const h = await harness(); const { ctrl, spawn } = spawner(h)
+ h.pickMain('claude', 'claude-sonnet-5-5')
+ await h.run(h.parent, 'Switch the main model before delegating')
+ await h.invoke()
+ const inherited = h.store.get(h.handles.at(-1)!.agent.id)!
+ expect(inherited.parentSelection).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5' })
+ expect(inherited.explicit.provider).toBe('claude')
+ ctrl.options = { provider: 'claude', model: 'claude-opus-5-5' }
+ await spawn(h.parent, { provider: 'X' })
+ const explicit = h.store.get(h.handles.at(-1)!.agent.id)!
+ expect(explicit.parentSelection).toMatchObject({ provider: 'claude', model: 'claude-sonnet-5-5' })
+ expect(explicit.explicit.provider).toBe('X')
+})
+it('spec Scenario "受管子会话完整性问题仍拒绝"', async () => {
+ const h = await harness()
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ const record = JSON.parse(readFileSync(childFile(h.home, child.id), 'utf8'))
+ writeFileSync(childFile(h.home, child.id), JSON.stringify({ ...record, parentId: 'other' }))
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ await h.run(child, 'Restore with a mismatched parent')
+ expect(h.calls).toHaveLength(requests); expect(h.jev.bodies).toHaveLength(judged)
+})
+it('spec Scenario "不改写的记录在重启后不重判"', async () => {
+ const h = await harness()
+ await h.restart()
+ const children = await Promise.all([
+  legacyChild(h, 'u-1', legacyRecord('u-1', h.parent.id, { status: 'unsupported', reason: 'no-usable-route', route: undefined, actual: undefined })),
+  legacyChild(h, 'n-1', legacyRecord('n-1', h.parent.id, { status: 'needs-context', reason: '请补充', route: undefined, actual: undefined })),
+  legacyChild(h, 'f-1', legacyRecord('f-1', h.parent.id, { status: 'failed', reason: 'Jev 失败', route: undefined, actual: undefined })),
+ ])
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ for (const child of children) await h.run(child, 'restore')
+ expect(h.calls).toHaveLength(requests + 3); expect(h.jev.bodies).toHaveLength(judged)
+ expect(h.calls.slice(-3).every(c => c.model === 'claude-opus-5-5')).toBe(true)
+})
+it('spec Scenario "冷恢复时初始决策中断"', async () => {
+ const h = await harness()
+ await h.restart()
+ const child = await legacyChild(h, 'r-1', legacyRecord('r-1', h.parent.id, { status: 'recommended', route: undefined, actual: undefined }))
+ const judged = h.jev.bodies.length, requests = h.calls.length
+ await h.run(child, 'restore')
+ expect(h.calls).toHaveLength(requests + 1); expect(h.jev.bodies).toHaveLength(judged)
+ expect(h.store.get(child.id)).toMatchObject({ status: 'unsupported', reason: 'interrupted' })
+})
+it('spec Scenario "已有 route 实时门禁失败仍拒绝"', async () => {
+ const h = await harness()
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ const bytes = readFileSync(childFile(h.home, child.id), 'utf8')
+ const listModels = h.ctx.llm.listModels.bind(h.ctx.llm)
+ const gates: [string, () => unknown, () => unknown][] = [
+  ['cap lowered', () => h.configure({ effortCap: 'low' }), () => h.configure()],
+  ['catalog unavailable', () => { h.ctx.llm.listModels = async () => { throw new Error('offline') } }, () => { h.ctx.llm.listModels = listModels }],
+ ]
+ for (const [name, apply, undo] of gates) for (const restart of [false, true]) {
+  apply(); if (restart) await h.restart()
+  const judged = h.jev.bodies.length, requests = h.calls.length
+  await h.run(child, `next request (${name})`)
+  expect(h.calls, name).toHaveLength(requests); expect(h.jev.bodies, name).toHaveLength(judged)
+  expect(readFileSync(childFile(h.home, child.id), 'utf8'), name).toBe(bytes)
+  undo()
+ }
+})
+it.each([[false, 200], [false, 402], [true, 200], [true, 402]] as const)('spec Scenario "子判断期间模式往返使旧结果失效" (roundtrip=%s, Jev %s)', async (roundtrip, status) => {
+ const h = await harness()
+ h.jev.set((_req, res) => { void (async () => {
+  await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'MANUAL' })
+  if (roundtrip) await h.callEndpoint('setMode', { sessionId: h.parent.id, mode: 'AUTO' })
+  res.writeHead(status, { 'content-type': 'application/json' })
+  res.end(JSON.stringify(status === 200 ? { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } } : {}))
+ })() })
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ const record = h.store.get(child.id)!
+ expect(record).toMatchObject({ status: 'unsupported', reason: 'mode-changed' }); expect(record.route).toBeUndefined()
+ expect(h.calls.filter(c => c.sessionId === child.id).at(-1)?.model).toBe('claude-opus-5-5')
+ expect(h.modes.get(h.parent.id)?.disabled).toBeUndefined()
+ expect(h.jev.bodies).toHaveLength(1)
+ if (roundtrip) {
+  const state = await h.callEndpoint('state', { sessionId: h.parent.id })
+  expect(state.childNotice?.reason).toBe('mode-changed'); expect(state.decision).toBeUndefined()
+ }
+})
+it('spec Scenario "未路由告警可见且只提示一次"', async () => {
+ const h = await harness(); h.jev.set(json(402, {}))
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ const first = await h.callEndpoint('state', { sessionId: h.parent.id }), second = await h.callEndpoint('state', { sessionId: h.parent.id })
+ expect(first.childNotice).toMatchObject({ childId: child.id, reason: 'jev-insufficient-credits' })
+ expect(second.childNotice.id).toBe(first.childNotice.id)
+ expect(first.decisionToast).toBe(true)
+ expect(h.warnings.mock.calls.filter(([m]) => String(m).includes(child.id))).toHaveLength(1)
+})
+it('spec Scenario "告警不泄漏任务文本且开关关闭不弹出"', async () => {
+ const h = await harness(); const { spawn } = spawner(h)
+ h.configure({ decisionToast: false }); h.jev.set(json(402, {}))
+ await spawn(h.parent, { prompt: 'SECRET_TASK_TEXT do the private thing' })
+ const state = await h.callEndpoint('state', { sessionId: h.parent.id })
+ expect(state.childNotice?.reason).toBe('jev-insufficient-credits')
+ expect(state.decisionToast).toBeUndefined()
+ expect(JSON.stringify(state)).not.toContain('SECRET_TASK_TEXT')
+ expect(JSON.stringify(h.warnings.mock.calls)).not.toContain('SECRET_TASK_TEXT')
+})
+it('spec Scenario "带旧 AUTO 状态的子会话不被改写"', async () => {
+ const h = await harness()
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ h.modes.set(child.id, { mode: 'AUTO' })
+ const before = JSON.stringify(h.modes.get(child.id))
+ expect(await h.callEndpoint('state', { sessionId: child.id })).toEqual({ applicable: false })
+ expect(await h.callEndpoint('state', { type: 'client-request', rpcId: 'r1', method: 'auto-model-routing.state', payload: { sessionId: child.id } })).toEqual({ type: 'server-response', rpcId: 'r1', result: { ok: true, value: { applicable: false } } })
+ expect(JSON.stringify(h.modes.get(child.id))).toBe(before)
+})
+it('spec Scenario "子失败不换模且可见"', async () => {
+ const h = await harness(); h.jev.set(json(402, {}))
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ expect(h.calls.filter(c => c.sessionId === child.id).every(c => c.model === 'claude-opus-5-5')).toBe(true)
+ expect(await h.callEndpoint('childRouting', { sessionId: child.id })).toMatchObject({ status: 'unsupported', reason: 'jev-insufficient-credits', scopeNote: SCOPE_NOTE })
+})
+it('spec Scenario "GPT 主子保持同 transport 及支持的 effort"', async () => {
+ const h = await harness('dsh-magpie-connect', false, 'codex')
+ await h.invoke()
+ const child = h.handles[1]!.agent
+ expect(h.store.get(child.id)?.route).toMatchObject({ provider: 'dsh-magpie-connect', model: 'codex/gpt-6-luna' })
+ await h.restart()
+ await h.run(child, 'Restore GPT child')
+ expect(h.calls.at(-1)).toMatchObject({ provider: 'dsh-magpie-connect', model: 'codex/gpt-6-luna', reasoningEffort: h.store.get(child.id)!.route!.reasoningEffort })
+})
+it('spec Scenario "子任务判断失败不停用根会话"', async () => {
+ const h = await harness(); h.jev.set(json(429, {}))
+ await h.invoke()
+ expect(h.store.get(h.handles[1]!.agent.id)?.status).toBe('unsupported')
+ expect(h.modes.get(h.parent.id)).toMatchObject({ mode: 'AUTO' }); expect(h.modes.get(h.parent.id)?.disabled).toBeUndefined()
+ h.jev.set(json(200, { answers: { depth: { choice: 'baseline' } } }))
+ const judged = h.jev.bodies.length
+ await h.run(h.parent, 'The root still judges its own next turn')
+ expect(h.jev.bodies.length).toBe(judged + 1)
+})
+it('spec Scenario "未登记 provider 的 GPT 主会话可以派子任务"', async () => {
+ const h = await harness(false, false, 'codex', false, { provider: 'traex', model: 'GPT-5.6-Sol', efforts: ['low','medium','high','xhigh'], defaultEffort: 'medium' })
+ const { spawn } = spawner(h)
+ expect((await spawn()).isError).not.toBe(true)
+ const child = h.handles.at(-1)!.agent
+ expect(h.store.get(child.id)).toMatchObject({ explicit: { provider: 'traex' }, family: 'codex' })
+ expect(h.calls.filter(c => c.sessionId === child.id).at(-1)).toMatchObject({ provider: 'traex', model: 'GPT-5.6-Sol' })
 })
