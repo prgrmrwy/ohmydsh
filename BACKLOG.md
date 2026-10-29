@@ -181,7 +181,7 @@
 - **依据**: 评估报告 `~/.dsh-memex-eval/effectiveness-all-libraries-20261027/REPORT.md` 与可视化 `visual-summary.png`（本机私有证据，不入库）。
 - **更新**: 2026-10-27 由全库评估结论提出，用户确认记为可做。 编号原为 B050，2026-10-28 与远端新增的 B050 冲突，合并时改为 B052。
 ### [B053] `jev-workflow-routing` 有一条 2493 字符的 requirement，strict 校验长期红
-- **状态**: 想法
+- **状态**: 已完成（2026-10-30）
 - **优先级**: P2
 - **背景 / 动机**: `openspec validate jev-workflow-routing --type spec --strict` 因 `requirements[3]`（"Routing evidence is bounded, private, and auditable"）描述长达 2493 字符而判 fail（`openspec validate --all --strict` 因此把它计入 45 个失败项之一）。该长度在 change `make-jev-router-advisory` 归档前就已存在（`git show HEAD:openspec/specs/jev-workflow-routing/spec.md` 同为 2493），不是那次同步引入的；归档时按「不为过校验而改既有语义」的原则保留原样。
 - **要点**:
@@ -189,6 +189,7 @@
   - 拆分属纯结构整理，不改行为；但 recorder 的测试大量断言该 requirement 的措辞，拆分时需同步 `tests/jev-workflow-router*.test.mjs` 里的正则。
   - 不要在无关 change 里顺手改，会与归档历史对不上。
 - **更新**: 2026-10-29 change `make-jev-router-advisory` 归档时发现并记录；本次未改该 requirement。
+- **完成**: 2026-10-30 已拆为 5 条各自 ≤500 字符的 requirement（记录结构 / `jevCalls` 契约 / 确定性推导 / 隐私 / 禁用与报告），原 12 个 scenario 正文逐字保留、仅重新归属，另新增 1 个 scenario 承载原本落在 requirement 文本里的锚定正则与归一化规则（避免拆短后丢失规范性细节）。`openspec validate jev-workflow-routing --type spec --strict` 现为 valid。实务修正：测试并不读 spec 文件，所以「需同步 `tests/jev-workflow-router*.test.mjs` 正则」不成立，改动未触及任何测试。
 
 ### [B048] 记忆设置页的便利动作（打开库目录、卡片明细）
 - **状态**: 想法
