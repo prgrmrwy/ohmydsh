@@ -33,3 +33,10 @@
 - 私有修复（本机用户在inner会话批准）：私有main 0c3678208511adf3e5d1fe6fb122ee431224106e，44 tests/0 skip/0 fail。同链接只读重拉：title==expected 0/24（修复前24/24）、path不含预期原文、带图项4/24（修复前24/24）、去重后下载1张、无暂存残留；片段门禁exit0。公开扫描35文件0命中。
 - 公开侧复核修复后合成e2e：隔离部署view.py health200，path仅树层级，catalog无绝对路径；真实1×1 PNG证据在浏览器解码naturalWidth=1，Escape关闭。
 - 真实报告外发未执行；生产部署/重启/软链切换未执行。
+
+## 生产切换（2026-10-29）
+
+- 主干3ea3031d由用户在主checkout构建两次（第二次无变更，用户确认）并重启；~/.dsh/skills/case-verify与主干源码逐文件一致，新会话技能列表出现case-verify。
+- 用户在.env.local配置CASE_VERIFY_ADAPTERS指向私有adapter目录；adapters.py list发现bits-oracle(oracle-source)与feishu-report(report-sink)，0排除。
+- 经lstat/readlink确认旧软链指向原zy-hub源后unlink；技能列表中verifying-acceptance随之消失。zy-hub源目录保留未动。
+- 生产环境真实/case-verify完整流程与真实报告外发按用户决定暂缓，不属于本次归档已验证范围。

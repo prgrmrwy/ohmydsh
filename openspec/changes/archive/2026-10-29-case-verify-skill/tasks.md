@@ -434,6 +434,6 @@
 - [x] 71.2 登记 dsh.yaml brief/note（来源、可信 adapter 执行面、Python 运行边界、升级复核、移除及回退），更新 skills README 双语索引。
 - [x] 71.3 对 Coverage Notes 额外回归按先红后绿补齐；最小 fixture 为 2 oracle、3 checkpoint（含 derived）、5 观察和运行时生成的假截图，不带真实数据。
 - [x] 71.4 运行 Python/Node 测试、npm test、npm run check:artifacts、strict 校验；记录真实命令和计数。
-- [ ] 71.5 私有仓单独实现 oracle-source/report-sink adapter 和关键词扫描，配置 CASE_VERIFY_ADAPTERS；实际内部链接阶段 1 验证需用户参与，不擅自跨仓写入。
-- [ ] 71.6 用户批准合入后，在主 checkout 部署两次确认幂等；用户决定重启。只在 lstat/readlink 证明旧软链及新入口可用时 unlink，否则保留并报告。
+- [x] 71.5 私有仓单独实现 oracle-source/report-sink adapter 和关键词扫描，配置 CASE_VERIFY_ADAPTERS；实际内部链接阶段 1 验证需用户参与，不擅自跨仓写入。
+- [x] 71.6 用户批准合入后，在主 checkout 部署两次确认幂等；用户决定重启。只在 lstat/readlink 证明旧软链及新入口可用时 unlink，否则保留并报告。
 - [x] 71.7 实施后生成 verify.md，核对全场景绿色、review 未过期、无真实数据入库；规划阶段不得写 PASS。
