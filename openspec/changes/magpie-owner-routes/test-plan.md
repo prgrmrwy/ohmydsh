@@ -6,15 +6,15 @@
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
-| specs/dsh-magpie-connector/spec.md → 插件身份与命名 | 只注册归属 route | packages/dsh-magpie-connector/test/owner-identity.test.ts | test_owner_identity_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 插件身份与命名 | 旧 route 选择不再可用 | packages/dsh-magpie-connector/test/owner-identity.test.ts | test_owner_identity_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 插件身份与命名 | 凭据引用由稳定 id 绑定 | packages/dsh-magpie-connector/test/owner-identity.test.ts | test_owner_identity_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 快速模式请求带 priority（两种协议） | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 归属 route 上显示速度控件 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 标准模式与其它会话不带字段 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 不支持的模型不显示且不带字段 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_04 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | host 重启后回到标准 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_05 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 非法 tier 被拒绝 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_06 | 🔴 red |
+| specs/dsh-magpie-connector/spec.md → 插件身份与命名 | 只注册归属 route | packages/dsh-magpie-connector/test/owner-identity.test.ts | test_owner_identity_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 插件身份与命名 | 旧 route 选择不再可用 | packages/dsh-magpie-connector/test/owner-identity.test.ts | test_owner_identity_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 插件身份与命名 | 凭据引用由稳定 id 绑定 | packages/dsh-magpie-connector/test/owner-identity.test.ts | test_owner_identity_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 快速模式请求带 priority（两种协议） | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 归属 route 上显示速度控件 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 标准模式与其它会话不带字段 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 不支持的模型不显示且不带字段 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | host 重启后回到标准 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_05 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 非法 tier 被拒绝 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_06 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 保存 key 后不回显 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_01 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 网关反射的 key 被脱敏 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_02 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 环境提供的 key 拒绝修改 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_03 | 🔴 red |
@@ -46,15 +46,15 @@
 | specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | 尚未注册任何 route 时 dispose | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_04 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 旧格式升级（BREAKING） | 升级后旧配置被忽略且不删除 | packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts | test_owner_legacy_upgrade_01 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 旧格式升级（BREAKING） | 旧格式升级后配置线路即恢复 | packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts | test_owner_legacy_upgrade_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 按 owned_by 分组且不按名字猜测 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 不可信或大小写不同的 owned_by | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 返回的 provider 等于被请求的 route | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 可见性与 effort 在归属 route 上保持 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_04 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | other 组内保留各自的可见性键 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_05 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 原版宿主即可看到分组 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_06 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 归属 route 上续聊保留推理元数据 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 跨本插件 route 续聊仍视为同模型 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 篡改或外来回放退化为普通历史 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_03 | 🔴 red |
+| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 按 owned_by 分组且不按名字猜测 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 不可信或大小写不同的 owned_by | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 返回的 provider 等于被请求的 route | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 可见性与 effort 在归属 route 上保持 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | other 组内保留各自的可见性键 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_05 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 原版宿主即可看到分组 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_06 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 归属 route 上续聊保留推理元数据 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 跨本插件 route 续聊仍视为同模型 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 篡改或外来回放退化为普通历史 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_03 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 重启后 route 身份在同步前即存在 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_01 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次安装在同步前不注册 route | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_02 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次配置经设置请求同步出归属后注册 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_03 | 🔴 red |

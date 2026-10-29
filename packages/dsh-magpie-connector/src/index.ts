@@ -8,25 +8,35 @@ import { MagpieAdapter } from './host/adapter.js'
 import { SettingsStore } from './host/settings.js'
 import { registerRoutes } from './host/routes.js'
 import { SpeedController } from './host/speed.js'
+import { createDisposer } from './host/dispose.js'
+import { createRouteRegistrar, type RouteRegistrar } from './host/registrar.js'
+import { routeOf } from './host/catalog.js'
 export { MagpieRuntime, lineCredentialRefs, lineIdOfCredentialRef } from './host/runtime.js'
 export { MagpieAdapter, mapUsage } from './host/adapter.js'
 export { SettingsStore } from './host/settings.js'
 export { GatewayTransport } from './host/transport.js'
+export { createRouteRegistrar, type RouteRegistrar, type PublishResult } from './host/registrar.js'
+export { TRANSPORT_ID, ownerKey, ownerLabel, routeOf, isMagpieRoute } from './host/catalog.js'
 export const name = 'dsh-magpie-connector'
 export const inject = ['llm', 'credentials']
 export interface Config { home?: string }
 export function apply(ctx: Context, config: Config = {}) {
   const home = config.home ?? process.env.DSH_HOME ?? resolve(homedir(), '.dsh')
-  let registration: ReturnType<typeof ctx.llm.registerAdapter> | undefined
-  const runtime = new MagpieRuntime(ctx.credentials, new SettingsStore(resolve(home, 'plugins/dsh-magpie-connector/settings.json')), () => registration?.replace(['dsh-magpie-connector']))
+  // Declared first, assigned below: the runtime's publish callback and the adapter reference each other.
+  let adapter!: MagpieAdapter
+  let registrar!: RouteRegistrar
+  // Until owner persistence lands the route set is the held routes plus the owners of the current catalog.
+  const derived = () => [...new Set([...registrar.current(), ...runtime.current.catalog.map(m => routeOf(m.owner))])]
+  const runtime = new MagpieRuntime(ctx.credentials, new SettingsStore(resolve(home, 'plugins/dsh-magpie-connector/settings.json')), routes => { registrar.publish(routes ?? derived()) })
   const speed = new SpeedController()
-  const adapter = new MagpieAdapter(runtime, ctx.get('attachments'), session => speed.get(session).tier === 'fast')
-  registration = ctx.llm.registerAdapter(['dsh-magpie-connector'], adapter)
+  adapter = new MagpieAdapter(runtime, ctx.get('attachments'), session => speed.get(session).tier === 'fast')
+  registrar = createRouteRegistrar(ctx.llm, adapter)
   ctx.on('credentials/reference-updated', ref => runtime.invalidateCredential(ref))
   ctx.inject(['connection'], child => {
     child.effect(() => registerRoutes(child.connection.fetch, runtime, speed).dispose)
   })
-  ctx.effect(() => async () => { registration?.(); registration = undefined; await runtime.dispose() })
+  const dispose = createDisposer(runtime, [() => registrar.dispose()])
+  ctx.effect(() => dispose)
   void runtime.start().catch(() => {})
-  return { runtime, adapter }
+  return { runtime, adapter, routes: registrar }
 }

@@ -34,7 +34,7 @@ test('test_active_line_02 spec Scenario "无完整线路时 active 为空"', asy
   expect(view.activeLineId).toBeNull()
   expect(view.lines[0]?.complete).toBe(false)
   const adapter = new MagpieAdapter(runtime)
-  expect(await adapter.listModels()).toEqual([])
+  expect(await adapter.listModels('dsh-magpie-connector-other')).toEqual([])
   const chunks = []
   for await (const chunk of adapter.stream({ provider: 'dsh-magpie-connector', model: 'a', messages: [] })) chunks.push(chunk)
   expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { message: expect.stringContaining('MAGPIE_NOT_CONFIGURED') } } })

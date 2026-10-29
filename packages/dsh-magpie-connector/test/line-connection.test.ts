@@ -83,7 +83,7 @@ test('test_line_connection_05 spec Scenario "未配置时不提供模型且不�
   const runtime = new MagpieRuntime(credentials.service, store)
   cleanup.push(() => runtime.dispose())
   const adapter = new MagpieAdapter(runtime)
-  expect(await adapter.listModels()).toEqual([])
+  expect(await adapter.listModels('dsh-magpie-connector-other')).toEqual([])
   const chunks = []
   for await (const chunk of adapter.stream({ provider: 'dsh-magpie-connector', model: 'a', messages: [] })) chunks.push(chunk)
   expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { message: expect.stringContaining('MAGPIE_NOT_CONFIGURED') } } })

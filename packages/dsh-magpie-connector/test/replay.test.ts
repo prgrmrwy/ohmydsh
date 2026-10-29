@@ -26,7 +26,7 @@ async function setup() {
   cleanup.push(gateway.close, () => runtime.dispose())
   return { gateway, adapter: new MagpieAdapter(runtime) }
 }
-const options = (model: string, messages: GenerateOptions['messages'] = [{ role: 'user', content: [{ type: 'text', text: 'U' }] }]): GenerateOptions => ({ provider: 'dsh-magpie-connector', model, messages })
+const options = (model: string, messages: GenerateOptions['messages'] = [{ role: 'user', content: [{ type: 'text', text: 'U' }] }]): GenerateOptions => ({ provider: 'dsh-magpie-connector-codex', model, messages })
 async function assemble(stream: AsyncIterable<StreamChunk>) {
   const assembler = new BlockAssembler()
   const chunks: StreamChunk[] = []
@@ -34,7 +34,7 @@ async function assemble(stream: AsyncIterable<StreamChunk>) {
   return { assembler, chunks }
 }
 function assistant(model: string, content: readonly ContentBlock[], replayState: unknown) {
-  return createAssistantMessage({ content, source: { provider: 'dsh-magpie-connector', model, replayState } })
+  return createAssistantMessage({ content, source: { provider: 'dsh-magpie-connector-codex', model, replayState } })
 }
 const continueInput = { role: 'user', content: [{ type: 'text', text: 'continue' }] } as const
 const incomplete = { type: 'response.incomplete', response: { id: 'r1', status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output: [] } }
@@ -117,7 +117,7 @@ test('Responses encrypted reasoning and text signatures survive an actual assemb
   expect(JSON.stringify(replay)).not.toContain('"path"')
   expect(chunks.at(-2)?.type).toBe('usage')
   gateway.handlers.set(`POST ${p.path}`, sse(responseText('done')))
-  const history = assembler.message({ provider: 'dsh-magpie-connector', model: p.model, replayState: replay })
+  const history = assembler.message({ provider: 'dsh-magpie-connector-codex', model: p.model, replayState: replay })
   await assemble(adapter.stream(options(p.model, [history, createToolResultMessage({ callId: tool.id, content: [{ type: 'text', text: 'ok' }], isError: false })])))
   const body = gateway.requests[1]!.body as { input: unknown[] }
   expect(body.input).toContainEqual(reasoningItem)
@@ -186,7 +186,7 @@ for (const change of ['edit', 'remove'] as const) test(`changed reasoning (${cha
 test('legacy response.pi is never a source of content or hidden calls', async () => {
   const { gateway, adapter } = await setup()
   const p = protocols[0]!
-  const legacy = { response: { pi: { role: 'assistant', api: 'openai-responses', provider: 'dsh-magpie-connector', model: p.model, content: [{ type: 'text', text: 'LEGACY-REMOVED-TEXT' }, { type: 'toolCall', id: 'old|fc_old', name: 'read_file', arguments: { path: 'removed' } }], stopReason: 'toolUse', timestamp: 0 } } }
+  const legacy = { response: { pi: { role: 'assistant', api: 'openai-responses', provider: 'dsh-magpie-connector-codex', model: p.model, content: [{ type: 'text', text: 'LEGACY-REMOVED-TEXT' }, { type: 'toolCall', id: 'old|fc_old', name: 'read_file', arguments: { path: 'removed' } }], stopReason: 'toolUse', timestamp: 0 } } }
   gateway.handlers.set(`POST ${p.path}`, sse(responseText('done')))
   await assemble(adapter.stream(options(p.model, [assistant(p.model, [{ type: 'text', text: 'CURRENT-TEXT' }], legacy), continueInput])))
   const wire = JSON.stringify(gateway.requests[0]!.body)

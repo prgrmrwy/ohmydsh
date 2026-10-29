@@ -29,8 +29,8 @@ const control = () => host.querySelector('[data-magpie-speed]')
 const trigger = () => control()!.querySelector('button[aria-haspopup]') as HTMLButtonElement
 const option = (tier: Tier) => control()!.querySelector(`[role=menuitemradio][data-tier=${tier}]`) as HTMLButtonElement
 const label = (tier: Tier) => `速度 · ${tier === 'fast' ? '快速' : '标准'}`
-const supported = { provider: 'dsh-magpie-connector', model: 'codex/gpt-6.1-sol' }
-const unsupported = { provider: 'dsh-magpie-connector', model: 'deepseek/deepseek-flash' }
+const supported = { provider: 'dsh-magpie-connector-codex', model: 'codex/gpt-6.1-sol' }
+const unsupported = { provider: 'dsh-magpie-connector-codex', model: 'deepseek/deepseek-flash' }
 async function mount(props: Parameters<typeof SpeedSelect>[0]) {
   await act(async () => root.render(h(SpeedSelect, props)))
   await flush()
@@ -64,7 +64,7 @@ describe('Codex 速度切换（输入框控件）', () => {
     const watchModel = (onChange: () => void) => { notify = onChange; return unsubscribe }
     await mount({ ...props, watchModel })
     expect(control()?.textContent).toContain('速度 · 快速')
-    state.current = { provider: 'dsh-magpie-connector', model: 'claude/claude-sonnet-5-5' }
+    state.current = { provider: 'dsh-magpie-connector-codex', model: 'claude/claude-sonnet-5-5' }
     await act(async () => notify())
     await flush()
     expect(control()).toBeNull()
@@ -95,7 +95,7 @@ describe('Codex 速度切换（输入框控件）', () => {
   })
 
   it('选择标准时 POST {session, tier: "standard"}，标签随之更新', async () => {
-    const { fake, props } = setup({ provider: 'dsh-magpie-connector', model: 'codex/gpt-6.1-sol' })
+    const { fake, props } = setup({ provider: 'dsh-magpie-connector-codex', model: 'codex/gpt-6.1-sol' })
     await act(async () => root.render(h(SpeedSelect, props)))
     await flush()
     await act(async () => (control()!.querySelector('button[aria-haspopup]') as HTMLButtonElement).click())

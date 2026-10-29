@@ -123,7 +123,7 @@ for (const p of protocols) {
     const tools = structuredClone([readTool, bashTool, goalTool])
     const original = structuredClone(tools)
     const messages = [
-      first.message({ provider: 'dsh-magpie-connector', model: p.model, replayState: first.replayState }),
+      first.message({ provider: 'dsh-magpie-connector-codex', model: p.model, replayState: first.replayState }),
       createToolResultMessage({ callId: call.id, content: [{ type: 'text', text: 'ok' }], isError: false }),
     ]
     expect((await assemble(adapter, options(p.model, { tools, messages }))).finish.kind).toBe('stop')

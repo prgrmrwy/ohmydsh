@@ -1,52 +1,52 @@
 ## 0. 基础设施
 
-- [ ] 0.1 新增 `test/support/host.ts` 真实宿主夹具（真实 Cordis + LlmRuntime、外来 adapter、INVARIANT 监听器注入）与可失败的 SettingsStore writer
+- [x] 0.1 新增 `test/support/host.ts` 真实宿主夹具（真实 Cordis + LlmRuntime、外来 adapter、INVARIANT 监听器注入）与可失败的 SettingsStore writer
 - [ ] 0.2 `SettingsStore`/runtime：新增同步 `writeSettings(patch)`（以写入时刻 store 已知字段为基底），`cleanSettings`/`savePreferences`/pending 标记改走它；跑全量测试保持绿
 
 ## 1. 按网关归属注册 route
 
-- [ ] 1.1 Write failing test `test_owner_routes_01` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「按 owned_by 分组且不按名字猜测」(assert it fails for the right reason)
-- [ ] 1.2 Implement「按 owned_by 分组且不按名字猜测」per design; run `test_owner_routes_01` to pass
-- [ ] 1.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 1.4 Write failing test `test_owner_routes_02` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「不可信或大小写不同的 owned_by」(assert it fails for the right reason)
-- [ ] 1.5 Implement「不可信或大小写不同的 owned_by」per design; run `test_owner_routes_02` to pass
-- [ ] 1.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 1.7 Write failing test `test_owner_routes_03` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「返回的 provider 等于被请求的 route」(assert it fails for the right reason)
-- [ ] 1.8 Implement「返回的 provider 等于被请求的 route」per design; run `test_owner_routes_03` to pass
-- [ ] 1.9 Refactor; rerun this group's tests, full suite stays green
-- [ ] 1.10 Write failing test `test_owner_routes_04` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「可见性与 effort 在归属 route 上保持」(assert it fails for the right reason)
-- [ ] 1.11 Implement「可见性与 effort 在归属 route 上保持」per design; run `test_owner_routes_04` to pass
-- [ ] 1.12 Refactor; rerun this group's tests, full suite stays green
-- [ ] 1.13 Write failing test `test_owner_routes_05` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「other 组内保留各自的可见性键」(assert it fails for the right reason)
-- [ ] 1.14 Implement「other 组内保留各自的可见性键」per design; run `test_owner_routes_05` to pass
-- [ ] 1.15 Refactor; rerun this group's tests, full suite stays green
-- [ ] 1.16 Write failing test `test_owner_routes_06` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「原版宿主即可看到分组」(assert it fails for the right reason)
-- [ ] 1.17 Implement「原版宿主即可看到分组」per design; run `test_owner_routes_06` to pass
-- [ ] 1.18 Refactor; rerun this group's tests, full suite stays green
+- [x] 1.1 Write failing test `test_owner_routes_01` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「按 owned_by 分组且不按名字猜测」(assert it fails for the right reason)
+- [x] 1.2 Implement「按 owned_by 分组且不按名字猜测」per design; run `test_owner_routes_01` to pass
+- [x] 1.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 1.4 Write failing test `test_owner_routes_02` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「不可信或大小写不同的 owned_by」(assert it fails for the right reason)
+- [x] 1.5 Implement「不可信或大小写不同的 owned_by」per design; run `test_owner_routes_02` to pass
+- [x] 1.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 1.7 Write failing test `test_owner_routes_03` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「返回的 provider 等于被请求的 route」(assert it fails for the right reason)
+- [x] 1.8 Implement「返回的 provider 等于被请求的 route」per design; run `test_owner_routes_03` to pass
+- [x] 1.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 1.10 Write failing test `test_owner_routes_04` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「可见性与 effort 在归属 route 上保持」(assert it fails for the right reason)
+- [x] 1.11 Implement「可见性与 effort 在归属 route 上保持」per design; run `test_owner_routes_04` to pass
+- [x] 1.12 Refactor; rerun this group's tests, full suite stays green
+- [x] 1.13 Write failing test `test_owner_routes_05` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「other 组内保留各自的可见性键」(assert it fails for the right reason)
+- [x] 1.14 Implement「other 组内保留各自的可见性键」per design; run `test_owner_routes_05` to pass
+- [x] 1.15 Refactor; rerun this group's tests, full suite stays green
+- [x] 1.16 Write failing test `test_owner_routes_06` in `packages/dsh-magpie-connector/test/owner-routes.test.ts` for「原版宿主即可看到分组」(assert it fails for the right reason)
+- [x] 1.17 Implement「原版宿主即可看到分组」per design; run `test_owner_routes_06` to pass
+- [x] 1.18 Refactor; rerun this group's tests, full suite stays green
 
 ## 2. 插件身份与命名
 
-- [ ] 2.1 Write failing test `test_owner_identity_01` in `packages/dsh-magpie-connector/test/owner-identity.test.ts` for「只注册归属 route」(assert it fails for the right reason)
-- [ ] 2.2 Implement「只注册归属 route」per design; run `test_owner_identity_01` to pass
-- [ ] 2.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 2.4 Write failing test `test_owner_identity_02` in `packages/dsh-magpie-connector/test/owner-identity.test.ts` for「旧 route 选择不再可用」(assert it fails for the right reason)
-- [ ] 2.5 Implement「旧 route 选择不再可用」per design; run `test_owner_identity_02` to pass
-- [ ] 2.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 2.7 Write failing test `test_owner_identity_03` in `packages/dsh-magpie-connector/test/owner-identity.test.ts` for「凭据引用由稳定 id 绑定」(assert it fails for the right reason)
-- [ ] 2.8 Implement「凭据引用由稳定 id 绑定」per design; run `test_owner_identity_03` to pass
-- [ ] 2.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 2.1 Write failing test `test_owner_identity_01` in `packages/dsh-magpie-connector/test/owner-identity.test.ts` for「只注册归属 route」(assert it fails for the right reason)
+- [x] 2.2 Implement「只注册归属 route」per design; run `test_owner_identity_01` to pass
+- [x] 2.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 2.4 Write failing test `test_owner_identity_02` in `packages/dsh-magpie-connector/test/owner-identity.test.ts` for「旧 route 选择不再可用」(assert it fails for the right reason)
+- [x] 2.5 Implement「旧 route 选择不再可用」per design; run `test_owner_identity_02` to pass
+- [x] 2.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 2.7 Write failing test `test_owner_identity_03` in `packages/dsh-magpie-connector/test/owner-identity.test.ts` for「凭据引用由稳定 id 绑定」(assert it fails for the right reason)
+- [x] 2.8 Implement「凭据引用由稳定 id 绑定」per design; run `test_owner_identity_03` to pass
+- [x] 2.9 Refactor; rerun this group's tests, full suite stays green
 
 ## 3. 原生回放身份跨 route 稳定
 
-- [ ] 3.1 Write failing test `test_owner_replay_01` in `packages/dsh-magpie-connector/test/owner-replay.test.ts` for「归属 route 上续聊保留推理元数据」(assert it fails for the right reason)
-- [ ] 3.2 Implement「归属 route 上续聊保留推理元数据」per design; run `test_owner_replay_01` to pass
-- [ ] 3.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 3.4 Write failing test `test_owner_replay_02` in `packages/dsh-magpie-connector/test/owner-replay.test.ts` for「跨本插件 route 续聊仍视为同模型」(assert it fails for the right reason)
-- [ ] 3.5 Implement「跨本插件 route 续聊仍视为同模型」per design; run `test_owner_replay_02` to pass
-- [ ] 3.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 3.7 Write failing test `test_owner_replay_03` in `packages/dsh-magpie-connector/test/owner-replay.test.ts` for「篡改或外来回放退化为普通历史」(assert it fails for the right reason)
-- [ ] 3.8 Implement「篡改或外来回放退化为普通历史」per design; run `test_owner_replay_03` to pass
-- [ ] 3.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 3.1 Write failing test `test_owner_replay_01` in `packages/dsh-magpie-connector/test/owner-replay.test.ts` for「归属 route 上续聊保留推理元数据」(assert it fails for the right reason)
+- [x] 3.2 Implement「归属 route 上续聊保留推理元数据」per design; run `test_owner_replay_01` to pass
+- [x] 3.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 3.4 Write failing test `test_owner_replay_02` in `packages/dsh-magpie-connector/test/owner-replay.test.ts` for「跨本插件 route 续聊仍视为同模型」(assert it fails for the right reason)
+- [x] 3.5 Implement「跨本插件 route 续聊仍视为同模型」per design; run `test_owner_replay_02` to pass
+- [x] 3.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 3.7 Write failing test `test_owner_replay_03` in `packages/dsh-magpie-connector/test/owner-replay.test.ts` for「篡改或外来回放退化为普通历史」(assert it fails for the right reason)
+- [x] 3.8 Implement「篡改或外来回放退化为普通历史」per design; run `test_owner_replay_03` to pass
+- [x] 3.9 Refactor; rerun this group's tests, full suite stays green
 
 ## 4. 归属 route 持久
 
@@ -200,24 +200,24 @@
 
 ## 10. Codex 速度切换
 
-- [ ] 10.1 Write failing test `test_owner_speed_01` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「快速模式请求带 priority（两种协议）」(assert it fails for the right reason)
-- [ ] 10.2 Implement「快速模式请求带 priority（两种协议）」per design; run `test_owner_speed_01` to pass
-- [ ] 10.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 10.4 Write failing test `test_owner_speed_02` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「归属 route 上显示速度控件」(assert it fails for the right reason)
-- [ ] 10.5 Implement「归属 route 上显示速度控件」per design; run `test_owner_speed_02` to pass
-- [ ] 10.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 10.7 Write failing test `test_owner_speed_03` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「标准模式与其它会话不带字段」(assert it fails for the right reason)
-- [ ] 10.8 Implement「标准模式与其它会话不带字段」per design; run `test_owner_speed_03` to pass
-- [ ] 10.9 Refactor; rerun this group's tests, full suite stays green
-- [ ] 10.10 Write failing test `test_owner_speed_04` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「不支持的模型不显示且不带字段」(assert it fails for the right reason)
-- [ ] 10.11 Implement「不支持的模型不显示且不带字段」per design; run `test_owner_speed_04` to pass
-- [ ] 10.12 Refactor; rerun this group's tests, full suite stays green
-- [ ] 10.13 Write failing test `test_owner_speed_05` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「host 重启后回到标准」(assert it fails for the right reason)
-- [ ] 10.14 Implement「host 重启后回到标准」per design; run `test_owner_speed_05` to pass
-- [ ] 10.15 Refactor; rerun this group's tests, full suite stays green
-- [ ] 10.16 Write failing test `test_owner_speed_06` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「非法 tier 被拒绝」(assert it fails for the right reason)
-- [ ] 10.17 Implement「非法 tier 被拒绝」per design; run `test_owner_speed_06` to pass
-- [ ] 10.18 Refactor; rerun this group's tests, full suite stays green
+- [x] 10.1 Write failing test `test_owner_speed_01` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「快速模式请求带 priority（两种协议）」(assert it fails for the right reason)
+- [x] 10.2 Implement「快速模式请求带 priority（两种协议）」per design; run `test_owner_speed_01` to pass
+- [x] 10.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 10.4 Write failing test `test_owner_speed_02` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「归属 route 上显示速度控件」(assert it fails for the right reason)
+- [x] 10.5 Implement「归属 route 上显示速度控件」per design; run `test_owner_speed_02` to pass
+- [x] 10.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 10.7 Write failing test `test_owner_speed_03` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「标准模式与其它会话不带字段」(assert it fails for the right reason)
+- [x] 10.8 Implement「标准模式与其它会话不带字段」per design; run `test_owner_speed_03` to pass
+- [x] 10.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 10.10 Write failing test `test_owner_speed_04` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「不支持的模型不显示且不带字段」(assert it fails for the right reason)
+- [x] 10.11 Implement「不支持的模型不显示且不带字段」per design; run `test_owner_speed_04` to pass
+- [x] 10.12 Refactor; rerun this group's tests, full suite stays green
+- [x] 10.13 Write failing test `test_owner_speed_05` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「host 重启后回到标准」(assert it fails for the right reason)
+- [x] 10.14 Implement「host 重启后回到标准」per design; run `test_owner_speed_05` to pass
+- [x] 10.15 Refactor; rerun this group's tests, full suite stays green
+- [x] 10.16 Write failing test `test_owner_speed_06` in `packages/dsh-magpie-connector/test/owner-speed.test.tsx` for「非法 tier 被拒绝」(assert it fails for the right reason)
+- [x] 10.17 Implement「非法 tier 被拒绝」per design; run `test_owner_speed_06` to pass
+- [x] 10.18 Refactor; rerun this group's tests, full suite stays green
 
 ## 11. 收尾、文档与发布
 

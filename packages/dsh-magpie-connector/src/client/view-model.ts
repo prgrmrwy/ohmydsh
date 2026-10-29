@@ -14,7 +14,7 @@ export interface CardsView { status: CardsStatus; error?: string; cards: Card[] 
 
 export interface ModelRow { id: string; name?: string; efforts?: string[]; visible?: boolean }
 export interface ModelGroup { provider: string; models: ModelRow[] }
-export type SyncErrorKind = 'unauthorized' | 'forbidden' | 'http' | 'unreachable'
+export type SyncErrorKind = 'unauthorized' | 'forbidden' | 'http' | 'unreachable' | 'settings' | 'registration'
 export interface LineView {
   id?: string; baseUrl?: string; accessMode?: 'direct' | 'cloudflare'; complete?: boolean
   key?: { configured?: boolean; writable?: boolean }
@@ -28,6 +28,12 @@ export interface SettingsView {
   access?: { clientId?: { configured?: boolean; writable?: boolean }; clientSecret?: { configured?: boolean; writable?: boolean } }
   lastSyncAt?: string; lastSyncError?: string; lastSyncErrorKind?: SyncErrorKind
   groups?: ModelGroup[]; visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>
+  /** Initial route registration failed (design D6): the host must be restarted to recover. */
+  routeRegistrationError?: { code: string; route?: string }
+  /** knownOwners was invalid at load and reset to empty (spec 归属 route 持久). */
+  knownOwnersReset?: boolean
+  /** The owner cap (32) rejected new owners; `rejectedOwners` lists them. */
+  ownerLimitReached?: boolean; rejectedOwners?: string[]
 }
 
 const str = (value: unknown): value is string => typeof value === 'string' && value !== ''

@@ -14,7 +14,7 @@ import { cardKey, formatTime, parseCards, providerOrder, readTime, sameTarget, t
 export const EMPTY_TEXT = 'Magpie 未返回可见用量'
 export const RESTRICTED_HINT = '受限的 gateway key 无法让 Magpie 首次读取用量：需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。'
 export const NOT_REREAD = 'Magpie 未重新读取（可能处于节流间隔内）'
-const SYNC_KIND: Record<SyncErrorKind, string> = { unauthorized: 'key 无效（401）', forbidden: '无权访问（403）', http: '网关错误', unreachable: '无法连接网关' }
+const SYNC_KIND: Record<SyncErrorKind, string> = { unauthorized: 'key 无效（401）', forbidden: '无权访问（403）', http: '网关错误', unreachable: '无法连接网关', settings: '设置保存失败', registration: '路由注册失败' }
 
 type Target = { all: true } | { provider: string; user?: string }
 type Notice = 'not-reread' | 'restricted'
@@ -321,10 +321,17 @@ function LineCard({ draft, index, total, saving, active, expanded, onToggle, onC
 
 function SyncStatus({ settings }: { settings: SettingsView }) {
   const count = (settings.groups ?? []).reduce((n, g) => n + g.models.length, 0)
+  const rejected = settings.rejectedOwners ?? []
+  const registration = settings.routeRegistrationError
   return h('div', { className: 'dmg-meta', 'data-sync': '' },
     settings.lastSyncAt ? h('p', null, `共 ${count} 个模型 · 更新于 `, h('time', { dateTime: settings.lastSyncAt }, formatTime(settings.lastSyncAt))) : null,
     settings.lastSyncError ? h('p', { className: 'dmg-error' },
-      `同步失败${settings.lastSyncErrorKind ? `（${SYNC_KIND[settings.lastSyncErrorKind] ?? settings.lastSyncErrorKind}）` : ''}：${settings.lastSyncError}`) : null)
+      `同步失败${settings.lastSyncErrorKind ? `（${SYNC_KIND[settings.lastSyncErrorKind] ?? settings.lastSyncErrorKind}）` : ''}：${settings.lastSyncError}`) : null,
+    registration ? h('p', { className: 'dmg-error', role: 'alert' },
+      `Magpie 路由注册失败（${registration.code}${registration.route ? `，${registration.route}` : ''}）：需重启 Host 后才能恢复。`) : null,
+    settings.knownOwnersReset ? h('p', { className: 'dmg-hint' }, '归属列表已重置：已保存的归属无效，下次同步会重新建立。') : null,
+    settings.ownerLimitReached ? h('p', { className: 'dmg-hint' },
+      `归属数量已达上限（32 个），以下归属未能加入：${rejected.join('、')}`) : null)
 }
 
 interface GroupProps {

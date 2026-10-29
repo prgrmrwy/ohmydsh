@@ -12,7 +12,7 @@ afterEach(async()=>{for(const f of cleanup.splice(0).reverse())await f()})
 async function collect(a:MagpieAdapter){const chunks:StreamChunk[]=[];for await(const c of a.stream({provider:'dsh-magpie-connector',model:'codex/gpt-6.1-sol',messages:[]}))chunks.push(c);return chunks}
 test('unconfigured real adapter finishes with MAGPIE_NOT_CONFIGURED and zero network requests',async()=>{
  const g=await createGateway();const store=new SettingsStore();store.value.lines = [line(g.baseUrl)];const r=new MagpieRuntime(credentialsMock().service,store);cleanup.push(g.close,()=>r.dispose());await r.start()
- const a=new MagpieAdapter(r);expect(await a.listModels()).toEqual([]);expect((await collect(a)).at(-1)).toMatchObject({reason:{kind:'error',failure:{message:'MAGPIE_NOT_CONFIGURED'}}});expect(g.requests).toHaveLength(0)
+ const a=new MagpieAdapter(r);expect(await a.listModels('dsh-magpie-connector-other')).toEqual([]);expect((await collect(a)).at(-1)).toMatchObject({reason:{kind:'error',failure:{message:'MAGPIE_NOT_CONFIGURED'}}});expect(g.requests).toHaveLength(0)
 })
 test('real pi-ai fetch rejects same-origin and cross-origin redirects and redacts reflected HTTP errors',async()=>{
  const g=await createGateway(),other=await createGateway();const store=new SettingsStore();store.value.lines = [line(g.baseUrl)];const r=new MagpieRuntime(credentialsMock('mk-test-123').service,store);cleanup.push(g.close,other.close,()=>r.dispose());g.handlers.set('GET /v1/models',json(models));await r.start();const a=new MagpieAdapter(r)

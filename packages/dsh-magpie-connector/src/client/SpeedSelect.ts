@@ -7,9 +7,11 @@ import { settingsCss } from './styles.js'
  * models whose gateway catalog advertises the `priority` service tier. The
  * choice lives in host memory per session (design D9); this component only
  * views it. It renders nothing unless the session's current model is a
- * `dsh-magpie-connector` model listed in `fastModels`.
+ * owner-route (`dsh-magpie-connector-<owner>`) model listed in `fastModels`.
  */
-export const ROUTE = 'dsh-magpie-connector'
+/** Owner-route id shape (D4/D8); must match the host's `isMagpieRoute` in catalog.ts. Client does not import host code. */
+const MAGPIE_ROUTE = /^dsh-magpie-connector-[a-z0-9][a-z0-9._-]{0,47}$/
+export function isMagpieRoute(provider: string): boolean { return MAGPIE_ROUTE.test(provider) }
 export type Tier = 'standard' | 'fast'
 export interface SpeedState { visible: boolean; tier: Tier }
 type Selection = { provider: string; model: string } | null
@@ -41,7 +43,7 @@ export function createSpeedLoader(api: Api, models: () => ModelDirectories | und
     const body = response.body as { tier?: unknown; fastModels?: unknown }
     const fastModels = Array.isArray(body.fastModels) ? body.fastModels.filter((m): m is string => typeof m === 'string') : []
     const tier: Tier = body.tier === 'fast' ? 'fast' : 'standard'
-    return { visible: current !== null && current.provider === ROUTE && fastModels.includes(current.model), tier }
+    return { visible: current !== null && isMagpieRoute(current.provider) && fastModels.includes(current.model), tier }
   }
 }
 

@@ -6,10 +6,10 @@ import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript'
 import * as chat from '@earendil-works/pi-ai/api/openai-completions'
 import * as responses from '@earendil-works/pi-ai/api/openai-responses'
 import type { MagpieRuntime, Operation } from './runtime.js'
-import type { CatalogModel } from './catalog.js'
+import { TRANSPORT_ID, isMagpieRoute, ownerLabel, ownerOfRoute, type CatalogModel } from './catalog.js'
 import { visibleCatalog } from './visibility.js'
 import { withDefaultEffort } from './default-effort.js'
-const provider = createProvider({ id:'dsh-magpie-connector',auth:{apiKey:{name:'Gateway key',resolve:async()=>undefined}},models:[],api:{'openai-completions':chat,'openai-responses':responses} })
+const provider = createProvider({ id:TRANSPORT_ID,auth:{apiKey:{name:'Gateway key',resolve:async()=>undefined}},models:[],api:{'openai-completions':chat,'openai-responses':responses} })
 const emptyUsage = (): Usage => ({input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}})
 const record = (value:unknown):Record<string,unknown>|undefined => typeof value==='object'&&value!==null&&!Array.isArray(value)?value as Record<string,unknown>:undefined
 const blockHash = (block:ContentBlock):string => createHash('sha256').update(JSON.stringify(block.type==='text'||block.type==='reasoning'?[block.type,block.text]:block.type==='tool-call'?[block.type,block.id,block.name,block.arguments]:[block.type])).digest('hex')
@@ -35,10 +35,12 @@ function restoreAssistant(message:HarnessAssistantMessage,model:Model<string>):A
     if(block.type==='tool-call')return[{type:'toolCall',id:block.id,name:block.name,arguments:parseArguments(block.arguments)}]
     return[]
   })
-  // Same-route tool ids already belong to DSH content, even when no replay was stored.
-  const fallback:AssistantMessage={role:'assistant',api:message.source.provider===model.provider&&message.source.model===model.id?model.api:'dsh-foreign',provider:message.source.provider,model:message.source.model,content:content.map(block=>block.type==='thinking'?{type:'text',text:block.thinking}:block),usage:emptyUsage(),stopReason:content.some(block=>block.type==='toolCall')?'toolUse':'stop',timestamp:0}
+  // Native replay identity is the fixed transport id, shared by every owner route; only our own routes may claim it.
+  const ours=isMagpieRoute(message.source.provider)
+  // Same-model tool ids already belong to DSH content, even when no replay was stored.
+  const fallback:AssistantMessage={role:'assistant',api:ours&&message.source.model===model.id?model.api:'dsh-foreign',provider:ours?TRANSPORT_ID:message.source.provider,model:message.source.model,content:content.map(block=>block.type==='thinking'?{type:'text',text:block.thinking}:block),usage:emptyUsage(),stopReason:content.some(block=>block.type==='toolCall')?'toolUse':'stop',timestamp:0}
   const envelope=record(message.source.replayState),response=record(envelope?.response),blocks=envelope?.blocks
-  if(response?.kind!=='dsh-magpie-connector-pi'||response.version!==1||typeof response.api!=='string'||!response.api||response.provider!==message.source.provider||response.model!==message.source.model||!['stop','length','toolUse'].includes(String(response.stopReason))||!Array.isArray(blocks)||blocks.length!==message.content.length)return fallback
+  if(!ours||response?.kind!=='dsh-magpie-connector-pi'||response.version!==1||typeof response.api!=='string'||!response.api||response.provider!==TRANSPORT_ID||response.model!==message.source.model||!['stop','length','toolUse'].includes(String(response.stopReason))||!Array.isArray(blocks)||blocks.length!==message.content.length)return fallback
   for(const key of ['responseId','responseModel','providerThinkingLevel'])if(response[key]!==undefined&&typeof response[key]!=='string')return fallback
   const metadata=blocks.map(record)
   for(const [index,block]of message.content.entries()){
@@ -98,20 +100,28 @@ export function mapUsage(u: Usage): TokenUsage {
 }
 export class MagpieAdapter extends LlmAdapter {
   constructor(readonly runtime: MagpieRuntime, readonly attachments?: Pick<AttachmentStore, 'readImage' | 'imageHostPath'>, readonly isFast = (_session: string) => false) { super() }
-  override providerInfo() { return {id:'dsh-magpie-connector',name:'Magpie'} }
+  override providerInfo(route: string) { return {id:route,name:ownerLabel(ownerOfRoute(route))} }
   override providerRetryPolicy() { return RETRY_POLICY }
-  override async listModels() { const op=await this.runtime.beginOperation(); try {return structuredClone(visibleCatalog(op.gen.catalog,this.runtime.store.value.visibleModels).map(m=>withDefaultEffort(m,this.runtime.store.value.defaultEfforts)))} finally {op.release()} }
-  override async resolveModel(_provider:string,id:string) {
+  /** Look the model up by id in the whole catalog (route-independent); the returned provider is the requested route. */
+  private entryFor(op:Operation,route:string,id:string):CatalogModel {
+    const entry=structuredClone(op.gen.catalog.find(m=>m.info.id===id)??{info:{provider:route,id,name:id,inputModalities:['text']},provider:id.split('/')[0]!,owner:ownerOfRoute(route),efforts:[],nativeEndpoints:[],serviceTiers:[]}) as CatalogModel
+    entry.info={...withDefaultEffort(entry,this.runtime.store.value.defaultEfforts),provider:route}
+    return entry
+  }
+  override async listModels(route:string) {
     const op=await this.runtime.beginOperation()
     try {
-      const entry=op.gen.catalog.find(m=>m.info.id===id)
-      return structuredClone(entry?withDefaultEffort(entry,this.runtime.store.value.defaultEfforts):{provider:'dsh-magpie-connector',id,name:id})
+      const owner=ownerOfRoute(route)
+      return visibleCatalog(op.gen.catalog.filter(m=>m.owner===owner),this.runtime.store.value.visibleModels).map(m=>({...structuredClone(withDefaultEffort(m,this.runtime.store.value.defaultEfforts)),provider:route}))
     } finally {op.release()}
   }
-  override async prepareCall(_provider: string, id: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+  override async resolveModel(route:string,id:string) {
     const op=await this.runtime.beginOperation()
-    const entry=structuredClone(op.gen.catalog.find(m=>m.info.id===id)??{info:{provider:'dsh-magpie-connector',id,name:id,inputModalities:['text']},provider:id.split('/')[0]!,efforts:[],nativeEndpoints:[],serviceTiers:[]}) as CatalogModel
-    entry.info=withDefaultEffort(entry,this.runtime.store.value.defaultEfforts)
+    try {return this.entryFor(op,route,id).info} finally {op.release()}
+  }
+  override async prepareCall(route: string, id: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    const op=await this.runtime.beginOperation()
+    const entry=this.entryFor(op,route,id)
     // Prepared objects may be abandoned by SDK validation; retain only while dispatched.
     op.release()
     const untrack=this.runtime.trackPrepared(op)
@@ -164,7 +174,7 @@ export class MagpieAdapter extends LlmAdapter {
       if(!op.key||!op.baseUrl)throw new Error('MAGPIE_NOT_CONFIGURED')
       if(options.stop?.length)throw new Error('MAGPIE_STOP_UNSUPPORTED')
       const api=entry.nativeEndpoints.includes('/v1/responses')?'openai-responses':'openai-completions'
-      const model:Model<'openai-completions'|'openai-responses'>={id:entry.info.id,name:entry.info.name,provider:'dsh-magpie-connector',api,baseUrl:op.baseUrl,reasoning:entry.efforts.length>0,thinkingLevelMap:{off:null,...Object.fromEntries(entry.efforts.map(e=>[e,e]))},input:entry.info.inputModalities?.includes('image')?['text','image']:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:entry.info.context?.contextWindow??128000,maxTokens:entry.outputLimit??16384,
+      const model:Model<'openai-completions'|'openai-responses'>={id:entry.info.id,name:entry.info.name,provider:TRANSPORT_ID,api,baseUrl:op.baseUrl,reasoning:entry.efforts.length>0,thinkingLevelMap:{off:null,...Object.fromEntries(entry.efforts.map(e=>[e,e]))},input:entry.info.inputModalities?.includes('image')?['text','image']:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:entry.info.context?.contextWindow??128000,maxTokens:entry.outputLimit??16384,
         compat:{supportsFinishReason:true,thinkingFormat:'openai',maxTokensField:'max_completion_tokens',...(api==='openai-responses'?{supportsStrictMode:true}:{})} as never}
       const context=await this.context(options,model)
       const fast=!!options.sessionId&&this.isFast(options.sessionId)&&entry.serviceTiers.includes('priority')

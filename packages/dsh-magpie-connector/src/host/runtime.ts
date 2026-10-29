@@ -85,7 +85,7 @@ export class MagpieRuntime {
   private saving = false
   private readonly newId: (existing: readonly string[]) => string
   selectedLineId: string | null = null
-  constructor(readonly credentials: Credentials, readonly store = new SettingsStore(), readonly publish = () => {}, options: RuntimeOptions = {}) {
+  constructor(readonly credentials: Credentials, readonly store = new SettingsStore(), readonly publish: (routes?: string[]) => void = () => {}, options: RuntimeOptions = {}) {
     this.selector = new LineSelector(options)
     this.transport.onConnectionFailure = lineId => this.selector.invalidate(lineId)
     this.newId = options.newId ?? randomHexId

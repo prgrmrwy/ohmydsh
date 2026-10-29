@@ -79,3 +79,21 @@ export async function mountRealHost(options: RealHostOptions = {}) {
     disposeForeign: () => { for (const f of foreign) f() },
   }
 }
+
+/** Poll until `check` is truthy (real timers); throws with `label` on timeout. */
+export async function until<T>(check: () => T | Promise<T>, label = 'condition', timeoutMs = 3000): Promise<NonNullable<T>> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const value = await check()
+    if (value) return value as NonNullable<T>
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`)
+    await new Promise(resolve => setTimeout(resolve, 5))
+  }
+}
+
+/** Drain an async iterable into an array (ES2024 `Array.fromAsync` is not in the TS lib target). */
+export async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = []
+  for await (const item of iterable) out.push(item)
+  return out
+}

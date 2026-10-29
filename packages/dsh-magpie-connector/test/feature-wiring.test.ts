@@ -45,9 +45,9 @@ test('host registers three resources, projects preferences and emits real priori
     expect((await call('settings', { lines: [{ baseUrl: gateway.baseUrl, accessMode: 'direct', key: 'test-key' }] })).status).toBe(200)
     expect((await call('cards')).status).toBe(200)
     expect((await call('settings', { visibleModels: { codex: ['codex/responses'] }, defaultEffort: { model: 'codex/responses', effort: 'high' } })).status).toBe(200)
-    expect((await adapter.listModels()).map(m => m.id)).toEqual(['codex/responses'])
-    expect((await adapter.resolveModel('dsh-magpie-connector', 'codex/responses')).reasoning?.defaultEffort).toBe('high')
-    expect((await adapter.prepareCall('dsh-magpie-connector', 'codex/responses')).model.reasoning?.defaultEffort).toBe('high')
+    expect((await adapter.listModels('dsh-magpie-connector-codex')).map(m => m.id)).toEqual(['codex/responses'])
+    expect((await adapter.resolveModel('dsh-magpie-connector-codex', 'codex/responses')).reasoning?.defaultEffort).toBe('high')
+    expect((await adapter.prepareCall('dsh-magpie-connector-codex', 'codex/responses')).model.reasoning?.defaultEffort).toBe('high')
     expect((await call('settings', { visibleModels: {} })).status).toBe(200)
     expect((await call('speed', { session: 'S', tier: 'fast' })).status).toBe(200)
     for (const model of ['codex/responses', 'codex/chat']) {
