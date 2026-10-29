@@ -206,7 +206,6 @@ tests/                   仓库级测试
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — 主机出口位于受限地区时，在输入框禁用 Claude 系列模型。
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — 为订阅 provider 剥离 sandbox 升级字段并清理孤立的工具调用。
 - [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — 把自托管 Magpie 网关按上游归属接入为多个真实 provider route（原版 DSH 即显示 `Magpie (Claude)`、`Magpie (Codex)` 等分组），支持多线路自动选线（在家 LAN、在外公网/Cloudflare Access；按线路 key/Access），用量卡片按上游 provider 分组，支持可见性、默认 effort 与会话级快速档。
-- [magpie-display-name-shim](packages/magpie-display-name-shim/README.md) — 让模型选择器显示 Magpie 网关的显示名而非 route id，上游修复发版前的过渡。
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
 - [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
@@ -216,7 +215,7 @@ tests/                   仓库级测试
 
 - [case-verify](skills/case-verify/SKILL.md) — 从独立 oracle 构造浏览器验收 trail，记录只追加、精确关联的证据；可信可执行 adapter 可接入外部用例和报告输出。
 - [ws](skills/ws/SKILL.md) — 查看、提升并清理 Worktree Session 绑定。
-- [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — 仅观察的路由提示：判断工作是否应走正式工作流。
+- [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — 流程选路 advisory：到达「直接改还是开 change」决策点时给一行可无视的建议，不阻断、不自动执行。
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — 统计记忆召回情况，并列出从未被召回的卡片。
 - [memex-eval](skills/memex-eval/SKILL.md) — 运行或读取 memex 固定虚构自检；只检查评估链路，不是有效性评估。
 - [weekly-insights](skills/weekly-insights/SKILL.md) — 类似 Claude Code `/insights` 的本地会话复盘：流式读取会话日志，逐会话打标签并缓存，生成带改进建议的 HTML 报告。

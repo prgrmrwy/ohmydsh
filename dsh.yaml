@@ -274,13 +274,13 @@ customizations:
   - id: llm-subscriptions
     type: package
     source: remote
-    spec: dsh-plugin-subscriptions@0.9.10
-    version: 0.9.10
-    integrity: sha512-QiFoVFtCL9CawI5p8lKM2lfH2Lr95nMp6xyjBaEUpZxSae9MehGSaogX7G41rf965vVjVn0EQqJ0nPoFP1LA8Q==
-    # provenance: upstream npm release, gitHead a5b01068b7f0c0cdb6f38bafe700c345fdfee4ba.
+    spec: dsh-plugin-subscriptions@0.9.12
+    version: 0.9.12
+    integrity: sha512-OHW6LsNjmfQ7gFZ734Lbz9iVtrPeWAaQz2sAzSezNDgyNGpEBzvLufGhzwffh1VgWz2TW8AMJ/JpgBec5Lscrg==
+    # provenance: upstream npm release, gitHead b8023110864494acefc6f5963c2a197d85dda20c.
     enabled: true
     brief: codex/claude/grok/copilot 订阅制 provider(Claude 复用本机登录态,输入框可切换)
-    note: '第三方 https://github.com/V1ki/dsh-plugin-subscriptions(MIT),spec llm-subscriptions。订阅制 provider:codex/claude/grok/copilot 经 OAuth 登录后出现在模型选择器。信任面:凭据在 $DSH_HOME/plugins/subscriptions/auth.json(0600);Claude 可导入本机 Claude Code 凭据(macOS keychain 经 /usr/bin/security,或 ~/.claude/.credentials.json)并写回;Codex 目录另查 registry.npmjs.org(无凭据,可用 codexClientVersion 关闭);订阅自动化有 ToS/封号风险;0.9.9 起含 chatgpt.com reset-credits 鉴权与 prepareReset/consumeReset 路由(0.9.10 复核未变)。升级复核:出站域名集与 child_process 面未变;shim 依赖 LLM provider route id,非 /api/subscriptions-auth.* 路由。回滚:spec/version/integrity 改回上一 pin(git 历史)→ dsh build → 重启。'
+    note: '第三方 https://github.com/V1ki/dsh-plugin-subscriptions(MIT),spec llm-subscriptions。订阅制 provider:codex/claude/grok/copilot OAuth 后进选择器。凭据在 $DSH_HOME/plugins/subscriptions/auth.json(0600);Claude 可导入本机 Claude Code 凭据并写回;Codex 另查 registry.npmjs.org;订阅自动化有 ToS/封号风险。0.9.12 逐文件 diff:仅加 visibleModels 可见性过滤与 client usage-window-filter,出站域名/child_process/凭据/路由 id 均未变;未修 issue #7 的 sandbox 升级字段。回滚:改回上一 pin → dsh build → 重启。'
   # 自研(local):D001/issue #7 + Codex Responses 孤立 function_call 部署侧缓解
   - id: subscriptions-sandbox-shim
     type: package
@@ -292,11 +292,11 @@ customizations:
   - id: width-tiers
     type: package
     source: remote
-    spec: dsh-width-tiers@1.0.9
-    version: 1.0.9
+    spec: dsh-width-tiers@2.0.1
+    version: 2.0.1
     enabled: true
     brief: 对话区宽度五档切换(748px 至全宽)
-    note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区五档宽度切换,以 localStorage 记忆;无网络请求、无 Host 文件/命令/模型能力,卸载时清理 DOM/监听/定时器/样式;不触碰右侧面板,全宽档经官方 layout 服务收起侧边栏。1.0.7 起 medium 档 960→1120px(用户可见),档位文案复制了应用侧公式 clamp(680,列×0.64,920),公式漂移只影响文案;1.0.9 仅 client/README 变化,bundle patch 未变(2.0.0 改挂 shell.overlay,暂缓)。升级复核:自 1.0.4 起接线由包自带 bundle patch 承载,绝不可再并存手写 wiring patch(对无 id 的 insert DSH 不去重,会出现两条同 id loader 行);验收为启动清单中 dsh-width-tiers 恰好出现一次;DSH 升级需回归 layout/locale 服务。回滚:改回上一 pin → dsh build → 重启。 pin 校验 sha512-zP3PXsiR84ePtzCOuh/XQ8Fn61YSQlAgiMRm1DxDco2Ym0nHbtcfZGsepthf2wi1NYFhK1m4cqb12xkKjQqadA=='
+    note: '第三方 https://github.com/aaronlei/dsh-width-tiers(MIT)。Web 对话区宽度分档,localStorage 记忆,无网络/Host 能力。2.0.1 起选择器为 shell.overlay 内 React 组件,新增 client 依赖 @deepseek-ai/dsh-client-ui-slots(与 dshVersion 同版本),最低 DSH Web 0.2.x。2.0.0 修复**拦截全部 DSH 快捷键**:隐藏菜单保留 role="menu",而 DSH 把任意 [role=menu] 当打开模态,致双 Esc、设置等快捷键失效;现仅打开时暴露。复核:bundle patch 与 1.0.9 一致,禁并存手写 wiring patch(无 id 的 insert 不去重会出两条 loader 行);验收为启动清单恰好一条且隐藏时快捷键可用。回滚:改回 1.0.9 与其 integrity。 pin 校验 sha512-7zb5IRhNJqjNr37qts83zX86lAFicDok9UB0TMPi4tlf/6aE9AyeBNEcuJsNY48WwPvEkXKXpPLYLb06GVCTug=='
   # 自研(local):会话资源面板 — better-sidebar 右侧工作台 tab(当前会话链接分类)
   - id: sidebar-session-resources
     type: package
@@ -424,14 +424,6 @@ customizations:
     note: '自研 MIT,change add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多个真实 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners 持久≤32),原版选择器即显示 Magpie (<Owner>) 分组,不依赖 model-display.patch;旧单 route 退役无别名,旧会话需重选;AUTO strategies 与 guard exemptProviders 仍写旧 route,须另行适配(均 fail closed)。0.2.0 起设置为 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读按线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒绝重定向。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
-  - id: magpie-display-name-shim
-    type: package
-    source: local
-    version: 0.1.0
-    enabled: false
-    brief: Magpie 模型在选择器里显示网关显示名(Claude Haiku 5.5)而非 route id
-    note: '自研过渡 shim:dsh-magpie-connect 0.4.1 的 listModels/resolveModel 报 name: id,选择器显示 claude/claude-haiku-5-5。本插件在 llm/adapters-updated 时包装 dsh-magpie-connect route 的 adapter,把 name 换成它自己目录缓存 ~/.dsh-magpie-connect/magpie-models.json 里的网关 display_name;id 不变(路由/会话历史不受影响),无网络请求,读缓存失败保持原名。上游修复 https://github.com/bitxeno/dsh-magpie-connect/pull/1。退役:test/real-adapter.test.mjs 断言已 pin 版本仍为 name: id,升级后该断言失败即说明上游已修,enabled:false → dsh build → 重启。'
-
   # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。
   - id: home-network-model-guard-config
     type: patch

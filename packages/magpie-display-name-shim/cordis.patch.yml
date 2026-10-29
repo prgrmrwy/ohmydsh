@@ -1,7 +1,0 @@
-# Bundle self-activation patch: when this package is installed into a profile
-# via `dsh plugin --profile web add file:<repo>/packages/magpie-display-name-shim`
-# (the ohmydsh sync path), this patch mounts the plugin's node half.
-# Host-only plugin: no `dsh.client` declaration, so there is no client bundle.
-- insert:
-    - id: magpie-display-name-shim
-      name: dsh-magpie-display-name-shim

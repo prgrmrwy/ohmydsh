@@ -206,7 +206,6 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
 - [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — Connects a self-hosted Magpie gateway with one real provider route per upstream owner (`Magpie (Claude)`, `Magpie (Codex)`, … on stock DSH), multiple auto-selected connection lines (LAN at home, Cloudflare Access/public outside; per-line keys/Access), usage cards grouped by upstream provider, visibility, default effort and per-session fast mode.
-- [magpie-display-name-shim](packages/magpie-display-name-shim/README.md) — Shows Magpie gateway display names in the model picker instead of route ids, until the upstream fix ships.
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
 - [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
@@ -216,7 +215,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 
 - [case-verify](skills/case-verify/SKILL.md) — Plans independent-oracle browser acceptance trails and records append-only, precisely linked evidence; optional trusted executable adapters supply external cases and report sinks.
 - [ws](skills/ws/SKILL.md) — Inspects, promotes and cleans Worktree Session bindings.
-- [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Observation-only routing hint on whether work should use a formal workflow.
+- [jev-workflow-router](skills/jev-workflow-router/SKILL.md) — Advisory routing: one ignorable suggestion line when work may need a formal workflow; never blocking, never acts on its own.
 - [memex-recall-report](skills/memex-recall-report/SKILL.md) — Reports memory recall statistics and which cards are never recalled.
 - [memex-eval](skills/memex-eval/SKILL.md) — Runs or reads the fixed fictional memex selftest; a pipeline check, not an effectiveness evaluation.
 - [weekly-insights](skills/weekly-insights/SKILL.md) — Local session retrospective like Claude Code `/insights`: streams session logs, tags each session and caches the result, writes an HTML report with improvement prompts.

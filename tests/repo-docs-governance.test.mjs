@@ -608,7 +608,6 @@ test('package tiers match the design (D6)', () => {
     'dsh-openspec': 'A',
     'dsh-pet': 'A',
     'home-network-model-guard': 'B',
-    'magpie-display-name-shim': 'C',
     'sidebar-session-resources': 'B',
     'session-title-copy': 'B',
     'sidebar-session-provider-icon': 'B',
