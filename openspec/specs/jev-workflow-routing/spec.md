@@ -32,17 +32,6 @@
 - **WHEN** Jev 推荐较轻流程但现有安全、权限、Worktree Session、验证或合入规则要求更严格行为
 - **THEN** 现有规则保持有效，Jev 推荐不得降级或绕过它们
 
-### Requirement: Phase one is observation-only shadow routing
-首期路由 SHALL 运行在 shadow mode。系统 MUST 保持当前对话、OpenSpec 提醒、change 创建和执行行为不变；Jev 结果只能形成评估记录，不得自动展示为用户必须响应的中断，不得创建 change、选择 schema、调用 spec-superflow 或触发实现。
-
-#### Scenario: High-confidence shadow recommendation
-- **WHEN** Jev 对某次决策给出高置信度推荐
-- **THEN** 系统记录该推荐与概率证据，但当前 Agent 仍按既有行为决定和推进流程
-
-#### Scenario: Shadow recommendation disagrees with actual route
-- **WHEN** Jev 推荐与用户或现有 Agent 最终采用的流程不同
-- **THEN** 系统保留二者作为后续评估样本，但不得在本次任务中自动纠正或重放流程
-
 ### Requirement: Routing failures fail open to existing behavior and closed to new automation
 缺失凭据、网络故障、超时、取消、限流、无效响应、未知候选、显式逃逸、低置信度或低胜者差距 SHALL 被视为未作出自动决定。系统 SHALL 在不阻塞普通对话的前提下维持接入前的标准行为，并 MUST NOT 把故障或不确定性解释为允许跳过 change。
 
@@ -52,21 +41,21 @@
 
 #### Scenario: Jev declines or is uncertain
 - **WHEN** 返回 escape hatch、无效结构、低于阈值的置信度或不足的第一第二候选差值
-- **THEN** 结果标记为需要人工/既有 Agent 判断，且不得静默选择 direct 或任何社区工作流
+- **THEN** 系统不输出候选建议、标记为需要人工/既有 Agent 判断，且不得静默选择 direct 或任何社区工作流
 
 ### Requirement: Routing evidence is bounded, private, and auditable
-每条 shadow 记录 SHALL 使用稳定且可迁移的版本结构，至少包含有界的样本 provenance、候选集合及版本、推荐候选、概率、置信度/差值、决策状态、调用时间、完整 shadow 判断的 measured/unavailable 延迟状态、最终实际流程（若已知）、覆盖来源，以及实际处理该次调用的 Jev 服务方 `jevProvider`。provenance 只允许 `real-vibe`、`synthetic-fixture`、`unknown`。`jevProvider` 只允许 `typesafe`、`openrouter`、`unknown`。Agent SHALL 把每次 Jev 调用的有界投影以 `jevCalls`（至多 2 项）交给 recorder：成功调用为 `{outcome: "success", provider, semantic}`，其中 `provider` 取自结果 JSON 的 `provider` 字段，`semantic` 在结果无法完整解析、被截断、缺失或不符合 classify/decide 必需结构，或 classify 任一 `results[].status` / decide `recommendation.status` 为 `invalid_response` 时为 `invalid-response`；仅结果完整可解析且通过必需结构校验时为 `ok`；失败调用为 `{outcome: "error", message}`，`message` 截断到 512 字符。recorder SHALL 确定性计算，不读取 manifest、不猜测：
+每条路由记录 SHALL 使用稳定且可迁移的版本结构，至少包含有界的样本 provenance、候选集合及版本、推荐候选、概率、置信度/差值、决策状态、调用时间、完整判断的 measured/unavailable 延迟状态、最终实际流程（若已知）、覆盖来源，以及实际处理该次调用的 Jev 服务方 `jevProvider`。provenance 只允许 `real-vibe`、`synthetic-fixture`、`unknown`。`jevProvider` 只允许 `typesafe`、`openrouter`、`unknown`。Agent SHALL 把每次 Jev 调用的有界投影以 `jevCalls`（至多 2 项）交给 recorder：成功调用为 `{outcome: "success", provider, semantic}`，其中 `provider` 取自结果 JSON 的 `provider` 字段，`semantic` 在结果无法完整解析、被截断、缺失或不符合 classify/decide 必需结构，或 classify 任一 `results[].status` / decide `recommendation.status` 为 `invalid_response` 时为 `invalid-response`；仅结果完整可解析且通过必需结构校验时为 `ok`；失败调用为 `{outcome: "error", message}`，`message` 截断到 512 字符。recorder SHALL 确定性计算，不读取 manifest、不猜测：
 - **服务方**：成功调用取 `provider`（闭集外为 `unknown`）；失败调用只按锚定在开头的上游格式识别——`^OpenRouter decisions API ` 为 `openrouter`，`^TypeSafe API ` 为 `typesafe`，`^Jev provider (typesafe|openrouter):` 为对应值，否则为 `unknown`。两次调用中可识别的值一致或只有一个时取该值，冲突时为 `unknown`。
 - **HTTP 状态**：只从锚定格式提取——`^OpenRouter decisions API (\d{3})\b`、`^TypeSafe API HTTP (\d{3})\b`、`^Jev provider \w+: .*\(HTTP (\d{3})\)$`；不在任意文本中搜索数字。
 - **错误类别**：有失败调用时按首个失败调用归一化：状态 451 为 `region-blocked`，401/403 为 `unauthorized`，429 为 `rate-limited`，5xx 为 `provider-5xx`，其它状态为 `unknown`；无状态时，`^Jev request exceeded the \d+ms deadline` 或含 `timed out` / `timeout`（不区分大小写）为 `timeout`，含 `fetch failed`、`socket`、`ECONN`、`ENOTFOUND` 或 `network` 为 `network`，其余为 `unknown`。没有失败调用时，任一成功调用 `semantic` 为 `invalid-response` 则为 `malformed-response`；否则保留输入的 `errorCategory`（经闭集归一化；输入缺失时按现有规则为 `unknown`，因此 Agent 在调用全部成功时 SHALL 显式传 `errorCategory: none`），使 `missing-credential`、`cancelled`、`malformed-response` 等由 Agent 观察到的失败不会被改写为 `none`。`jevCalls` 缺失或形状不合法时视为未提供，`jevProvider` 为 `unknown`，`errorCategory` 取输入值。
 `jevCalls` 与错误文本只用于上述计算，MUST NOT 持久化或出现在 recorder 的 stdout/stderr 中；stdin 不是合法 JSON 时，recorder SHALL 只输出固定诊断 `invalid JSON input` 并以非 0 退出，不回显输入片段。SKILL SHALL 要求 Agent 用文件写入工具把输入 JSON 写入临时文件，再以 `node recorder.mjs record < <file>` 传入，不得把工具输出文本拼入 shell 命令、heredoc 或命令参数。错误类别为闭集：`none`、`missing-credential`、`unauthorized`、`rate-limited`、`region-blocked`（服务方以 HTTP 451 拒绝出口地区）、`provider-5xx`、`network`、`timeout`、`cancelled`、`malformed-response`、`unknown`。系统 MUST NOT 记录、推断或按语言分类请求；provenance、latency 与 jevProvider 元数据 MUST NOT 被发送给 Jev。记录 MUST NOT 包含 API Key、凭据、完整会话历史、未裁剪附件、provider 原始错误体、不必要的源代码正文或自由文本摘要，并 SHALL 提供禁用与清理路径。报告 SHALL 提供按 `jevProvider` 拆分的 `real-vibe` 记录聚合（含 `unknown` 组，与其它 breakdowns 口径一致），并标明该拆分只覆盖可归属的记录、不是完整的服务可靠性；Phase 2 门槛计算不变。
 
-#### Scenario: A shadow sample is recorded
+#### Scenario: A routing sample is recorded
 - **WHEN** 普通 Agent 在真实流程选择点调用 Jev 并获得可解析结果
 - **THEN** 系统保存 `real-vibe` provenance、measured/unavailable latency 与 `jevProvider`，以及足以比较推荐与实际流程的有限证据，且不保存密钥、完整对话或语言分类
 
 #### Scenario: A synthetic fixture is recorded
-- **WHEN** 测试或明确的离线 fixture 产生 shadow 记录
+- **WHEN** 测试或明确的离线 fixture 产生路由记录
 - **THEN** 记录使用 `synthetic-fixture` provenance，报告不得把它计入真实 vibe 样本覆盖
 
 #### Scenario: Legacy record lacks new dimensions
@@ -116,21 +105,69 @@
 - **WHEN** 用户关闭该定制或执行安全清理
 - **THEN** 新的 Jev 调用停止，既有标准 OpenSpec 与普通对话仍可用，并可按明确规则清理 shadow 记录
 
-### Requirement: Promotion beyond shadow mode requires measured evidence and explicit approval
-系统 MUST NOT 仅凭若干成功调用自动进入 advisory 或自动路由。升级 SHALL 依赖预先定义且可复核的真实本地样本量、路线与高代价类别覆盖、加权误路由成本、失败率和延迟/成本报告，并需用户显式批准。语言分类和中英文配额 MUST NOT 成为采集字段或准入门槛。报告 MUST 对每个强制门槛产生机器可判定的 pass、fail 或 unavailable 状态；任何 unknown/unavailable 必须阻止准入，而不是被当作零值或通过。任何自动化阶段都 MUST 保留用户覆盖与标准 OpenSpec 回退。
+### Requirement: Advisory routing emits at most one non-blocking suggestion
+到达工作流决策点时，系统 SHALL 至多给出一条中文非阻断建议，包含推荐候选、置信度与「可无视」说明；MUST NOT 以提问、选项卡片或要求用户确认的形式出现，MUST NOT 阻塞或延后后续步骤。用户已显式指定流程、或任务已属于一个既有 change 时，系统 SHALL 不给出建议且不发起任何 Jev 调用。
 
-#### Scenario: Every gate is measurable
-- **WHEN** 新 schema 的真实 shadow records 包含足够的可靠标签、provenance 和 measured latency
-- **THEN** 报告按真实样本计算所有预登记数据集与质量门槛，并为每个门槛输出可判定结果
+#### Scenario: 高置信度建议只出现一行
+- **WHEN** 用户请求到达「直接处理还是开 change」的决策点，且 Jev 返回 confidence 0.77、margin 0.70 推荐 `formal-workflow`
+- **THEN** 输出中出现一行中文建议，包含推荐候选与置信度，并明确说明可以无视；该行之后同一回合照常继续原有工作，不追加追问
 
-#### Scenario: Required evidence is unavailable
-- **WHEN** 任一强制门槛缺少真实样本 provenance、latency、价格接受或其它所需证据
-- **THEN** 报告将该门槛标记为 unavailable 或 fail，整体保持 `not-established`
+#### Scenario: 用户显式指定流程时不调用 Jev
+- **WHEN** 用户明确说「用 Anvil 做这个」或「直接改就行」
+- **THEN** 系统沿用该选择，`mcp__jev__jev_classify` 与 `mcp__jev__jev_decide` 的调用次数为 0，输出中不含任何建议行
 
-#### Scenario: Shadow data is insufficient
-- **WHEN** 样本量、关键类别覆盖或错误成本证据未达到准入条件
-- **THEN** 系统保持 shadow mode，不启用用户可见建议或自动选路
+#### Scenario: 已有 change 沿用既定控制平面
+- **WHEN** 当前任务已属于一个已创建的 OpenSpec 或 spec-superflow change
+- **THEN** 系统的 Jev 调用次数为 0，不输出建议行，也不改变该 change 的 schema
 
-#### Scenario: Promotion is approved
-- **WHEN** 评估报告达到全部预先定义门槛且用户显式批准下一阶段
-- **THEN** 后续 change 可启用 advisory mode，并继续保留人工覆盖、故障回退和可关闭语义
+#### Scenario: 建议不产生副作用
+- **WHEN** Jev 给出高置信度推荐
+- **THEN** 不创建 change、不选择或切换 schema、不调用 `ssf`、不修改任何文件、不授权任何工具，记录文件是唯一被写入的本地产物
+
+### Requirement: Advisory uncertainty and failures stay silent and never reroute
+低置信度、胜者差距不足、escape hatch、无效响应、超时、取消、限流或缺失凭据时，系统 SHALL 不输出候选建议，继续沿既有确定性规则推进；MUST NOT 把失败或不确定性解释为选择 `direct` 或跳过 change 的许可，也 MUST NOT 因 Jev 不可用而阻塞普通对话。
+
+#### Scenario: Jev 不可用时静默继续
+- **WHEN** Jev MCP 未提供工具、凭据缺失或调用超时
+- **THEN** 输出中不出现建议行，当前任务按既有规则继续，记录该次调用失败类别与 `jevProvider: unknown`
+
+#### Scenario: 低置信度不出建议
+- **WHEN** classify 返回 confidence 0.45、margin 0.37
+- **THEN** 不输出候选建议，任务按确定性规则继续，该次判断以 `needs-review` 状态记录
+
+### Requirement: Advisory latency comes from session event timestamps
+每次 advisory 判断的延迟 SHALL 由会话事件日志中对应 Jev 工具调用的 `tool/call` 与 `tool/result` 时间戳之差得出，并以一次判断内各次调用之和作为完整序列延迟；MUST NOT 以 agent 自身两次模型步骤之间的墙钟差充当 Jev 延迟，也 MUST NOT 对超出任何存储上限的值静默截断。
+
+#### Scenario: 两次调用相加
+- **WHEN** 一次判断依次调用 classify 与 decide，日志时间戳得出 1801ms 与 1700ms
+- **THEN** 记录的序列延迟为 3501ms，且 `availability` 为 `measured`
+
+#### Scenario: 日志不可解码
+- **WHEN** 会话日志缺失、损坏或无法完整解码
+- **THEN** 记录的延迟为 `{availability: "unavailable", milliseconds: null}` 并给出可操作原因，不写入猜测值
+
+#### Scenario: 超长样本不被静默压平
+- **WHEN** 实测序列延迟为 80057ms
+- **THEN** 存储值与报告保留 80057ms，不出现 60000ms 这类无标识截断
+
+### Requirement: Reports expose continuous health instead of an unreachable admission gate
+报告 SHALL 提供调用失败率、建议与实际路径不一致率、以及真实样本延迟 p50/p95 三项持续指标；MUST NOT 再以 100 条带标签样本、≥10 个工作日、每条路线 ≥15 条或每类高危 ≥10 条的覆盖门槛阻塞 advisory。零样本时报告 SHALL 明确标注样本不足，但 advisory 照常工作。
+
+#### Scenario: 零样本下 advisory 仍可用
+- **WHEN** 记录文件不存在或为空
+- **THEN** 报告的三项指标显示为样本不足，advisory 行为不受影响
+
+#### Scenario: 指标可计算
+- **WHEN** 存在 10 条 `real-vibe` 记录，其中 1 条调用失败、2 条建议与实际路径不同
+- **THEN** 报告给出失败率 0.1、不一致率 0.2 与基于 9 条实测样本的 p50/p95
+
+### Requirement: Anything beyond one-off advice needs a separate approved change
+超出「一次性非阻断建议」的任何自动化 SHALL 仍需单独 OpenSpec change 与用户显式批准，包括自动创建 change、自动选择或切换 schema、自动调用 `ssf`、改写既有 change 的控制平面、或依据高置信度触发实施；此类行为 MUST NOT 由本能力累积的指标、置信度或默认配置自动开启。
+
+#### Scenario: 高置信度不授予执行权
+- **WHEN** Jev 建议 `anvil` 且 confidence 为 0.95
+- **THEN** 系统仍只输出一行建议，实际流程由用户或既有确定性规则决定
+
+#### Scenario: 无批准不启用自动化
+- **WHEN** 未存在单独批准的自动化 change
+- **THEN** 任何自动建 change、切 schema、调用 `ssf` 的路径都不可达

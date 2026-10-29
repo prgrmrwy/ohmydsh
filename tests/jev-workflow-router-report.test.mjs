@@ -60,19 +60,24 @@ test('report emits aggregate confusion, cost, reliability, latency and coverage 
   assert.equal(report.recommendations.confusionMatrix.counts.anvil['spec-superflow'], 1)
   assert.equal(report.cost.weightedTotal, 28); assert.equal(report.cost.weightedPerLabelled, 5.6); assert.equal(report.cost.highCostMisses, 2)
   assert.equal(report.cost.needsReviewCost, 0); assert.equal(report.quality.needsReviewRate, 1 / 6); assert.equal(report.quality.providerFailureRate, 1 / 6)
-  assert.deepEqual(report.quality.latencyMs, { method: 'complete-shadow-sequence-monotonic-nearest-rank', measuredCount: 6, unavailableCount: 0, p50: 30, p95: 60 })
+  assert.deepEqual(report.quality.latencyMs, { method: 'session-event-timestamps-nearest-rank', measuredCount: 6, unavailableCount: 0, p50: 30, p95: 60 })
   assert.deepEqual(report.quality.usage.totals, { input: 42, output: 48, total: 90 })
   assert.equal(report.quality.estimatedExternalCost, null)
   assert.equal('languageProxy' in report.dataset, false)
   assert.equal(JSON.stringify(report).includes('language'), false)
   assert.deepEqual(report.dataset.provenance, { 'real-vibe': 6, 'synthetic-fixture': 0, unknown: 0 })
-  assert.equal(report.coverage.phase2Admission, 'not-established')
-  assert.equal(report.coverage.gates.explicitUserApproval.status, 'unavailable')
-  assert.notEqual(report.coverage.gates.labelledObservations.status, 'unavailable')
-  assert.ok(report.coverage.warnings.some(w => w.code === 'weighted-cost-above-threshold'))
-  assert.ok(!report.coverage.warnings.some(w => w.code === 'needs-review-rate-above-threshold'))
-  assert.ok(report.coverage.warnings.some(w => w.code === 'provider-failure-rate-above-threshold'))
-  assert.ok(report.coverage.warnings.some(w => w.code === 'high-cost-misses-present'))
+  // Advisory is approved: no admission gate may appear in the report.
+  assert.equal('coverage' in report, false)
+  assert.equal(JSON.stringify(report).includes('not-established'), false)
+  // Mismatch rate replaces the old weighted-cost gate. Of the 5 labelled
+  // records, the needs-review one is not comparable advice, so 4 comparable
+  // records all advised a different route than the one actually taken.
+  assert.equal(report.quality.mismatchComparable, 4)
+  assert.equal(report.quality.mismatchCount, 4)
+  assert.equal(report.quality.mismatchRate, 1)
+  assert.ok(report.health.warnings.some(w => w.code === 'mismatch-rate-above-threshold'))
+  assert.ok(report.health.warnings.some(w => w.code === 'provider-failure-rate-above-threshold'))
+  assert.ok(!report.health.warnings.some(w => w.code === 'insufficient-real-vibe-samples'))
   const text = JSON.stringify(report)
   assert.doesNotMatch(text, /SECRET|private\.example|user@example|private\/path|observationId|recordedAt/)
 })
@@ -87,9 +92,8 @@ test('synthetic fixtures never contribute to real-vibe admission metrics', async
   assert.equal(report.cost.weightedTotal, 0)
   assert.equal(report.cost.highCostMisses, 0)
   assert.equal(report.quality.needsReviewRate, null)
-  assert.equal(report.coverage.gates.labelledObservations.status, 'fail')
-  assert.equal(report.coverage.gates.needsReviewRate.status, 'unavailable')
-  assert.ok(report.coverage.warnings.some(w => w.code === 'real-vibe-coverage-unavailable'))
+  assert.equal(report.quality.mismatchRate, null)
+  assert.ok(report.health.warnings.some(w => w.code === 'insufficient-real-vibe-samples'))
 })
 
 test('quality warnings include needs-review threshold breaches', async t => {
@@ -97,7 +101,8 @@ test('quality warnings include needs-review threshold breaches', async t => {
   await add(home, { actual: 'standard-openspec', recommended: 'standard-openspec', status: 'needs-review', latencyMs: 1, usage: {} })
   const report = run(home, ['report'])
   assert.equal(report.quality.needsReviewRate, 1)
-  assert.ok(report.coverage.warnings.some(w => w.code === 'needs-review-rate-above-threshold'))
+  // Needs-review rate is reported for visibility but is no longer a gate.
+  assert.ok(!report.health.warnings.some(w => w.code === 'needs-review-rate-above-threshold'))
 })
 
 test('every pre-registered misroute cost row is reachable with deterministic precedence', async t => {
@@ -128,17 +133,16 @@ test('explicit unavailable latency remains unavailable rather than claiming 0ms'
   const home = await mkdtemp(join(tmpdir(), 'jev-report-no-latency-')); t.after(() => rm(home, { recursive: true, force: true }))
   await add(home, { actual: 'standard-openspec', recommended: 'standard-openspec', latencyMs: null, usage: {} })
   const report = run(home, ['report'])
-  assert.deepEqual(report.quality.latencyMs, { method: 'complete-shadow-sequence-monotonic-nearest-rank', measuredCount: 0, unavailableCount: 1, p50: null, p95: null })
-  assert.ok(report.coverage.warnings.some(w => w.code === 'latency-coverage-unavailable'))
+  assert.deepEqual(report.quality.latencyMs, { method: 'session-event-timestamps-nearest-rank', measuredCount: 0, unavailableCount: 1, p50: null, p95: null })
+  assert.ok(report.health.warnings.some(w => w.code === 'latency-coverage-unavailable'))
 })
 
 test('empty and corrupt record sets produce a valid conservative report', async t => {
   const home = await mkdtemp(join(tmpdir(), 'jev-report-empty-')); t.after(() => rm(home, { recursive: true, force: true }))
   let report = run(home, ['report'])
   assert.equal(report.dataset.total, 0); assert.equal(report.cost.weightedPerLabelled, null); assert.equal(report.quality.latencyMs.p50, null)
-  assert.equal(report.coverage.gates.externalCostAccepted.status, 'unavailable')
-  assert.equal(report.coverage.gates.privacyAndIntegrationEvidence.status, 'unavailable')
-  assert.equal(report.coverage.gates.explicitUserApproval.status, 'unavailable')
+  assert.equal(report.health.latencyTruncatedSamples, 0)
+  assert.ok(report.health.warnings.some(w => w.code === 'insufficient-real-vibe-samples'))
   const file = join(home, 'state', 'jev-workflow-router', 'records.v1.jsonl')
   await mkdir(join(home, 'state', 'jev-workflow-router'), { recursive: true })
   await writeFile(file, '{bad json}\n')
@@ -158,5 +162,5 @@ test('report breaks down real-vibe records by jevProvider including unknown', as
   assert.equal(report.breakdowns.jevProvider.openrouter.total, 1)
   assert.equal(report.breakdowns.jevProvider.unknown.providerFailures, 1)
   assert.equal(report.breakdowns.jevProviderScope, 'attributed-records-only')
-  assert.equal(report.coverage.gates.providerFailureRate.actual, 0.75)
+  assert.equal(report.quality.providerFailureRate, 0.75)
 })

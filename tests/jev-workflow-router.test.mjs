@@ -122,20 +122,29 @@ function sample(index = 0) {
   }
 }
 
-test('skill is an observation-only closed two-step shadow router', async () => {
+test('skill is an advisory closed two-step router with zero calls when already decided', async () => {
   const source = await readFile(skill, 'utf8')
   assert.match(source, /independently reach(?:ed|ing) the workflow decision point/iu)
   assert.match(source, /mcp__jev__jev_classify/u)
   assert.match(source, /mcp__jev__jev_decide/u)
-  assert.match(source, /observation-only/iu)
-  assert.match(source, /never show a recommendation as a question or a user-visible interruption/iu)
+  // Advisory, not shadow: one line, never a question or a blocker.
+  assert.match(source, /advisory only/iu)
+  assert.match(source, /never a question, an options card, or a request for confirmation/iu)
+  assert.match(source, /never delays or blocks/iu)
+  assert.match(source, /can be ignored/iu)
+  // Zero calls once the answer is settled by an explicit choice or existing change.
+  assert.match(source, /Make no Jev call at all, and emit no advice line/iu)
+  assert.match(source, /explicitly chosen a route/iu)
+  assert.match(source, /already belongs to an existing OpenSpec or spec-superflow change/iu)
   assert.match(source, /Do not collect, infer, persist, report, or gate on request language/iu)
-  assert.match(source, /local start time in milliseconds/iu)
-  assert.match(source, /node -e "console\.log\(Date\.now\(\)\)"/u)
-  assert.match(source, /difference is negative/iu)
-  assert.match(source, /"sampleProvenance":"real-vibe"/u)
-  assert.match(source, /"availability":"measured","milliseconds":N/u)
-  assert.match(source, /Never reuse the legacy `latencyMs` field/iu)
+  // Latency must come from session event timestamps, not agent self-timing.
+  assert.match(source, /Latency comes from the session log, not from you/iu)
+  assert.match(source, /measures your own model round-trips/iu)
+  assert.match(source, /observedWindow/u)
+  assert.match(source, /node recorder\.mjs latency OBSERVATION_ID/u)
+  // Anything beyond advice still needs its own change.
+  assert.match(source, /needs a separate approved change/iu)
+  assert.match(source, /"sampleProvenance": "real-vibe"/u)
   assert.match(source, /`real-vibe`[\s\S]*`synthetic-fixture`[\s\S]*`unknown`/iu)
   assert.match(source, /active managed Worktree Session[\s\S]*remove `spec-superflow`[\s\S]*`ssf isolate`[\s\S]*`ssf finish`/iu)
   assert.match(source, /instructions or warnings alone do not qualify/iu)
@@ -144,13 +153,18 @@ test('skill is an observation-only closed two-step shadow router', async () => {
   }
   for (const forbidden of ['full prompt', 'source fragments', 'diff', 'attachment', 'provider errors']) {
     assert.match(source, new RegExp(forbidden, 'iu'))
-  }  assert.match(source, /`jevCalls`/u)
+  }
+  assert.match(source, /`jevCalls`/u)
   assert.match(source, /`region-blocked`/u)
   assert.match(source, /"errorCategory":"none"/u)
   assert.match(source, /node recorder\.mjs record < /u)
+  assert.match(source, /Never reuse the legacy `latencyMs` field/iu)
   assert.match(source, /never (?:interpolate|paste|splice)[^.]*(?:shell|heredoc|argument)/iu)
   assert.match(source, /delete the (?:temporary|staging) file/iu)
   assert.match(source, /current user/iu)
+  // The Phase-1 shadow framing must be gone: it forbade any user-visible output.
+  assert.doesNotMatch(source, /observation-only|Phase 1 shadow/iu)
+  assert.doesNotMatch(source, /Never show a recommendation/iu)
 })
 
 test('record persists only normalized bounded fields and never attacker observation ids', async t => {
@@ -185,7 +199,7 @@ test('record persists only normalized bounded fields and never attacker observat
   ])
   assert.equal(record.schemaVersion, 2)
   assert.equal(record.sampleProvenance, 'synthetic-fixture')
-  assert.deepEqual(record.metrics.latency, { availability: 'measured', milliseconds: 17 })
+  assert.deepEqual(record.metrics.latency, { availability: 'measured', milliseconds: 17, truncated: false })
   assert.equal(record.actualRoute, 'unknown')
   assert.equal(record.overrideSource, 'unknown')
 })
@@ -258,7 +272,7 @@ test('legacy v1 records remain readable without invented provenance or latency',
   await writeFile(recordsPath(home), `${JSON.stringify(proven)}\n`, 'utf8')
   assert.equal((await run(home, ['label', id, 'anvil', 'agent'])).code, 0)
   const [kept] = await storedRecords(home)
-  assert.deepEqual(kept.metrics.latency, { availability: 'measured', milliseconds: 42 })
+  assert.deepEqual(kept.metrics.latency, { availability: 'measured', milliseconds: 42, truncated: false })
   assert.equal(kept.jevProvider, 'unknown')
 })
 

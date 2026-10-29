@@ -13,6 +13,12 @@ import {
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
+import {
+  SESSION_LOG_REASONS,
+  findSessionLog,
+  parseSessionEvents,
+  readSessionLogFile,
+} from './session-log.mjs'
 
 const SCHEMA_VERSION = 2
 const LEGACY_SCHEMA_VERSION = 1
@@ -26,13 +32,12 @@ const MAX_INPUT_BYTES = 65_536
 const LOCK_WAIT_MS = 2_000
 const LOCK_STALE_MS = 30_000
 const REPORT_VERSION = 2
-const PHASE_2_THRESHOLDS = {
-  labelled: 100,
-  distinctWorkingDays: 10,
-  routeLabels: 15,
-  highCostCategoryLabels: 10,
-  weightedCostPerLabelled: 0.75,
-  needsReviewRate: 0.35,
+// Advisory mode is approved; these are ongoing health thresholds, not admission
+// gates. The former sample-count/workday/route-coverage admission gates are gone
+// because their only sample source was this router itself, which made them
+// unreachable by construction.
+const HEALTH_THRESHOLDS = {
+  mismatchRate: 0.35,
   providerFailureRate: 0.05,
   p50LatencyMs: 1_500,
   p95LatencyMs: 5_000,
@@ -197,6 +202,43 @@ function normalizeRequirementChecks(input) {
   return Object.fromEntries(REQUIREMENT_KEYS.map(key => [key, bool(source[key])]))
 }
 
+/**
+ * The window that scopes which Jev tool calls belong to one observation.
+ *
+ * Both bounds are epoch milliseconds taken from the session event log itself, so
+ * the recorder can select exactly the `tool/call`/`tool/result` pairs of this
+ * judgement instead of guessing from wall-clock proximity. An unusable window
+ * yields null and the record simply carries no window.
+ */
+function normalizeObservedWindow(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const from = source.from
+  const to = source.to
+  if (
+    typeof from !== 'number' || !Number.isFinite(from) || from < 0
+    || typeof to !== 'number' || !Number.isFinite(to) || to < 0
+    || to < from
+  ) return null
+  return { from: Math.trunc(from), to: Math.trunc(to) }
+}
+
+// Long-running sequences are legitimate: a shadow/advisory call can span a slow
+// provider retry or a stalled network. The previous ceiling silently rewrote
+// anything above 60 000 ms to exactly 60 000 ms, which makes long-tail audits
+// read a fabricated value. Keep the measured number and mark the overflow
+// explicitly instead, so a reader can tell "measured 80 057 ms" from
+// "clamped, real value unknown".
+const LATENCY_STORAGE_CEILING = 3_600_000
+
+const LATENCY_REASONS = [
+  'no-session-id',
+  'sessions-root-missing',
+  'session-file-missing',
+  'decode-failed',
+  'no-matching-calls',
+  'result-missing',
+]
+
 function normalizeLatency(input) {
   const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
   const availability = enumValue(source.availability, LATENCY_AVAILABILITY, 'unavailable')
@@ -205,8 +247,25 @@ function normalizeLatency(input) {
     || typeof source.milliseconds !== 'number'
     || !Number.isFinite(source.milliseconds)
     || source.milliseconds < 0
-  ) return { availability: 'unavailable', milliseconds: null }
-  return { availability: 'measured', milliseconds: finiteInteger(source.milliseconds, 0, 0, 60_000) }
+  ) {
+    // An absent reason must stay absent: `enumValue` would default it to
+    // 'unknown', which would look like a real (if unknown) diagnosis.
+    const reason = typeof source.reason === 'string' && LATENCY_REASONS.includes(source.reason)
+      ? source.reason
+      : undefined
+    return reason === undefined
+      ? { availability: 'unavailable', milliseconds: null }
+      : { availability: 'unavailable', milliseconds: null, reason }
+  }
+  const milliseconds = Math.trunc(source.milliseconds)
+  if (milliseconds > LATENCY_STORAGE_CEILING) {
+    return { availability: 'measured', milliseconds: LATENCY_STORAGE_CEILING, truncated: true }
+  }
+  // A stored sample that was clamped when written now sits exactly at the
+  // ceiling and is in range, so re-deriving the flag from the value would erase
+  // the fact on every read. Preserve the explicit marker instead; fresh input
+  // simply omits it.
+  return { availability: 'measured', milliseconds, truncated: source.truncated === true }
 }
 
 const MAX_JEV_CALLS = 2
@@ -373,6 +432,11 @@ function normalizeRecord(input) {
         total: finiteInteger(usage.total, 0, 0, 20_000_000),
       },
     },
+    // Bounds for the `latency` subcommand: which Jev tool calls belong to this
+    // observation. Absent means the record did not ask for event-log timing.
+    ...(normalizeObservedWindow(source.observedWindow) === null
+      ? {}
+      : { observedWindow: normalizeObservedWindow(source.observedWindow) }),
     errorCategory,
     jevProvider: attribution.jevProvider,
     actualRoute: 'unknown',
@@ -399,7 +463,7 @@ function normalizeStoredRecord(value) {
     normalized.metrics.latency = typeof value.metrics?.latencyMs === 'number'
       && Number.isFinite(value.metrics.latencyMs)
       && value.metrics.latencyMs > 0
-      ? { availability: 'measured', milliseconds: finiteInteger(value.metrics.latencyMs, 0, 0, 60_000) }
+      ? normalizeLatency({ availability: 'measured', milliseconds: value.metrics.latencyMs })
       : { availability: 'unavailable', milliseconds: null }
   }
   normalized.observationId = value.observationId
@@ -556,6 +620,93 @@ function increment(object, key) {
   object[key] = (object[key] ?? 0) + 1
 }
 
+/**
+ * Pair Jev tool calls with their results inside a window and sum the elapsed ms.
+ *
+ * Timestamps come from the session event log, which records `tool/call` and
+ * `tool/result` with millisecond precision. That is the transport actually
+ * observed; asking the agent to diff two of its own model steps instead measures
+ * reasoning latency, which is roughly an order of magnitude larger.
+ */
+function sumCallDurations(events, window) {
+  const calls = new Map()
+  for (const event of events) {
+    if (event?.type !== 'tool/call') continue
+    const name = event.data?.name
+    const callId = event.data?.callId
+    const time = event.time
+    if (typeof name !== 'string' || !name.startsWith('mcp__jev__')) continue
+    if (typeof callId !== 'string' || typeof time !== 'number') continue
+    if (window !== undefined && (time < window.from || time > window.to)) continue
+    calls.set(callId, { time })
+  }
+  if (calls.size === 0) return { milliseconds: 0, paired: 0, unpaired: 0 }
+
+  let total = 0
+  let paired = 0
+  let unpaired = 0
+  const settled = new Set()
+  for (const event of events) {
+    if (event?.type !== 'tool/result') continue
+    const callId = event.data?.toolCallId ?? event.data?.message?.toolCallId
+    if (typeof callId !== 'string' || !calls.has(callId) || settled.has(callId)) continue
+    const time = event.time
+    const call = calls.get(callId)
+    if (typeof time !== 'number' || time < call.time) continue
+    settled.add(callId)
+    total += time - call.time
+    paired += 1
+  }
+  for (const callId of calls.keys()) if (!settled.has(callId)) unpaired += 1
+  return { milliseconds: total, paired, unpaired }
+}
+
+async function latencyCommand(observationId) {
+  if (disabled()) return { disabled: true, measured: false }
+  if (!/^[a-f0-9-]{8,64}$/u.test(observationId ?? '')) throw new Error('invalid observation id')
+
+  const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+  const sessionId = process.env.DSH_SESSION_ID || ''
+  const located = findSessionLog({ dshHome, sessionId })
+  if (located.file === undefined) {
+    return { disabled: false, measured: false, observationId, reason: located.reason ?? SESSION_LOG_REASONS.FILE_MISSING }
+  }
+  const decoded = readSessionLogFile(located.file)
+  if (!decoded.ok) {
+    return { disabled: false, measured: false, observationId, reason: decoded.reason }
+  }
+  const events = parseSessionEvents(decoded.text)
+
+  let outcome
+  await withLock(async ({ recordsFile }) => {
+    const records = await readRecords(recordsFile)
+    const target = [...records].reverse().find(record => record.observationId === observationId)
+    if (!target) {
+      outcome = { disabled: false, measured: false, observationId, reason: 'record-not-found' }
+      return
+    }
+    const window = target.observedWindow
+    const measured = sumCallDurations(events, window)
+    if (measured.paired === 0) {
+      target.metrics.latency = normalizeLatency({ availability: 'unavailable', reason: 'no-matching-calls' })
+      await atomicWrite(recordsFile, encodeRecords(trimRecords(records, limits())))
+      outcome = { disabled: false, measured: false, observationId, reason: 'no-matching-calls' }
+      return
+    }
+    target.metrics.latency = normalizeLatency({ availability: 'measured', milliseconds: measured.milliseconds })
+    await atomicWrite(recordsFile, encodeRecords(trimRecords(records, limits())))
+    outcome = {
+      disabled: false,
+      measured: true,
+      observationId,
+      milliseconds: target.metrics.latency.milliseconds,
+      calls: measured.paired,
+      unpaired: measured.unpaired,
+    }
+  })
+  return outcome
+}
+
 async function summaryCommand() {
   const records = await readRecords(paths().recordsFile)
   const summary = {
@@ -703,72 +854,40 @@ function thresholdGate(actual, required, predicate) {
   return gate(predicate(actual, required) ? 'pass' : 'fail', actual, required)
 }
 
-function coverageWarnings({
+// Ongoing health warnings replace the former admission gates. They fire on real
+// measurements only and never block advisory, which is already approved.
+function healthWarnings({
   realVibeRecords,
-  labelled,
-  distinctWorkingDays,
-  routeLabels,
-  highCostCategories,
-  weightedPerLabelled,
-  highCostMisses,
-  needsReviewRate,
+  mismatchRate,
   providerFailureRate,
   latencyP50,
   latencyP95,
+  truncatedLatencyCount,
 }) {
   const warnings = []
   if (realVibeRecords === 0) warnings.push({
-    code: 'real-vibe-coverage-unavailable',
+    code: 'insufficient-real-vibe-samples',
     metric: 'sampleProvenance',
     actual: 0,
-    required: 'reliably-labelled-real-vibe-records',
+    required: 'any-real-vibe-record',
   })
-  if (labelled < PHASE_2_THRESHOLDS.labelled) warnings.push({
-    code: 'labelled-observations-below-threshold',
-    metric: 'labelled',
-    actual: labelled,
-    required: PHASE_2_THRESHOLDS.labelled,
+  if (mismatchRate !== null && mismatchRate > HEALTH_THRESHOLDS.mismatchRate) warnings.push({
+    code: 'mismatch-rate-above-threshold', metric: 'mismatchRate', actual: mismatchRate, required: HEALTH_THRESHOLDS.mismatchRate,
   })
-  if (distinctWorkingDays < PHASE_2_THRESHOLDS.distinctWorkingDays) warnings.push({
-    code: 'working-days-below-threshold',
-    metric: 'distinctWorkingDays',
-    actual: distinctWorkingDays,
-    required: PHASE_2_THRESHOLDS.distinctWorkingDays,
-  })
-  for (const route of ROUTES) {
-    if (routeLabels[route] < PHASE_2_THRESHOLDS.routeLabels) warnings.push({
-      code: 'actual-route-coverage-below-threshold',
-      metric: route,
-      actual: routeLabels[route],
-      required: PHASE_2_THRESHOLDS.routeLabels,
-    })
-  }
-  for (const [category, count] of Object.entries(highCostCategories)) {
-    if (count < PHASE_2_THRESHOLDS.highCostCategoryLabels) warnings.push({
-      code: 'high-cost-category-coverage-below-threshold',
-      metric: category,
-      actual: count,
-      required: PHASE_2_THRESHOLDS.highCostCategoryLabels,
-    })
-  }
-  if (highCostMisses > 0) warnings.push({ code: 'high-cost-misses-present', metric: 'highCostMisses', actual: highCostMisses, required: 0 })
-  if (weightedPerLabelled !== null && weightedPerLabelled > PHASE_2_THRESHOLDS.weightedCostPerLabelled) warnings.push({
-    code: 'weighted-cost-above-threshold', metric: 'weightedCostPerLabelled', actual: weightedPerLabelled, required: PHASE_2_THRESHOLDS.weightedCostPerLabelled,
-  })
-  if (needsReviewRate !== null && needsReviewRate > PHASE_2_THRESHOLDS.needsReviewRate) warnings.push({
-    code: 'needs-review-rate-above-threshold', metric: 'needsReviewRate', actual: needsReviewRate, required: PHASE_2_THRESHOLDS.needsReviewRate,
-  })
-  if (providerFailureRate !== null && providerFailureRate > PHASE_2_THRESHOLDS.providerFailureRate) warnings.push({
-    code: 'provider-failure-rate-above-threshold', metric: 'providerFailureRate', actual: providerFailureRate, required: PHASE_2_THRESHOLDS.providerFailureRate,
+  if (providerFailureRate !== null && providerFailureRate > HEALTH_THRESHOLDS.providerFailureRate) warnings.push({
+    code: 'provider-failure-rate-above-threshold', metric: 'providerFailureRate', actual: providerFailureRate, required: HEALTH_THRESHOLDS.providerFailureRate,
   })
   if (latencyP50 === null || latencyP95 === null) warnings.push({
-    code: 'latency-coverage-unavailable', metric: 'latencyMs', actual: null, required: { p50: PHASE_2_THRESHOLDS.p50LatencyMs, p95: PHASE_2_THRESHOLDS.p95LatencyMs },
+    code: 'latency-coverage-unavailable', metric: 'latencyMs', actual: null, required: { p50: HEALTH_THRESHOLDS.p50LatencyMs, p95: HEALTH_THRESHOLDS.p95LatencyMs },
   })
-  if (latencyP50 !== null && latencyP50 > PHASE_2_THRESHOLDS.p50LatencyMs) warnings.push({
-    code: 'p50-latency-above-threshold', metric: 'p50LatencyMs', actual: latencyP50, required: PHASE_2_THRESHOLDS.p50LatencyMs,
+  if (latencyP50 !== null && latencyP50 > HEALTH_THRESHOLDS.p50LatencyMs) warnings.push({
+    code: 'p50-latency-above-threshold', metric: 'p50LatencyMs', actual: latencyP50, required: HEALTH_THRESHOLDS.p50LatencyMs,
   })
-  if (latencyP95 !== null && latencyP95 > PHASE_2_THRESHOLDS.p95LatencyMs) warnings.push({
-    code: 'p95-latency-above-threshold', metric: 'p95LatencyMs', actual: latencyP95, required: PHASE_2_THRESHOLDS.p95LatencyMs,
+  if (latencyP95 !== null && latencyP95 > HEALTH_THRESHOLDS.p95LatencyMs) warnings.push({
+    code: 'p95-latency-above-threshold', metric: 'p95LatencyMs', actual: latencyP95, required: HEALTH_THRESHOLDS.p95LatencyMs,
+  })
+  if (truncatedLatencyCount > 0) warnings.push({
+    code: 'latency-samples-truncated', metric: 'latencyMs', actual: truncatedLatencyCount, required: 0,
   })
   return warnings
 }
@@ -817,44 +936,41 @@ async function reportCommand() {
     }
   }
 
+  // Mismatch rate: among real-vibe records whose actual route is known and whose
+  // recommendation was actionable, how often did the advice differ from what was
+  // actually done. This is the honest successor to the old weighted-cost gate.
+  let mismatchComparable = 0
+  let mismatchCount = 0
+  let truncatedLatencyCount = 0
+  for (const record of realVibeRecords) {
+    if (record.actualRoute === 'unknown') continue
+    if (!isAutoCandidate(record)) continue
+    mismatchComparable += 1
+    if (record.recommendation.workflow !== record.actualRoute) mismatchCount += 1
+  }
+  for (const record of realVibeRecords) {
+    if (record.metrics.latency.truncated === true) truncatedLatencyCount += 1
+  }
+
   const highCostCategories = labelledHighCostCategories(realVibeRecords)
   const weightedPerLabelled = realVibe.labelled === 0 ? null : realVibe.weightedCost / realVibe.labelled
   const needsReviewRate = realVibeRecords.length === 0 ? null : realVibe.needsReview / realVibeRecords.length
   const providerFailureRate = realVibeRecords.length === 0 ? null : realVibe.providerFailures / realVibeRecords.length
+  const mismatchRate = mismatchComparable === 0 ? null : mismatchCount / mismatchComparable
   const latencyP50 = nearestRank(latencies, 0.5)
   const latencyP95 = nearestRank(latencies, 0.95)
-  const warnings = coverageWarnings({
+  const warnings = healthWarnings({
     realVibeRecords: realVibeRecords.length,
-    labelled: realVibe.labelled,
-    distinctWorkingDays: workingDays.size,
-    routeLabels,
-    highCostCategories,
-    weightedPerLabelled,
-    highCostMisses: realVibe.highCostMisses,
-    needsReviewRate,
+    mismatchRate,
     providerFailureRate,
     latencyP50,
     latencyP95,
+    truncatedLatencyCount,
   })
   const meanUsage = Object.fromEntries(Object.entries(usageTotals).map(([key, value]) => [
     key,
     records.length === 0 ? null : value / records.length,
   ]))
-  const gateStatuses = {
-    labelledObservations: thresholdGate(realVibe.labelled, PHASE_2_THRESHOLDS.labelled, (a, r) => a >= r),
-    distinctWorkingDays: thresholdGate(workingDays.size, PHASE_2_THRESHOLDS.distinctWorkingDays, (a, r) => a >= r),
-    actualRouteCoverage: Object.fromEntries(ROUTES.map(route => [route, thresholdGate(routeLabels[route], PHASE_2_THRESHOLDS.routeLabels, (a, r) => a >= r)])),
-    highCostCategoryCoverage: Object.fromEntries(Object.entries(highCostCategories).map(([category, count]) => [category, thresholdGate(count, PHASE_2_THRESHOLDS.highCostCategoryLabels, (a, r) => a >= r)])),
-    highCostMisses: thresholdGate(realVibe.highCostMisses, 0, a => a === 0),
-    weightedCostPerLabelled: thresholdGate(weightedPerLabelled, PHASE_2_THRESHOLDS.weightedCostPerLabelled, (a, r) => a <= r),
-    needsReviewRate: thresholdGate(needsReviewRate, PHASE_2_THRESHOLDS.needsReviewRate, (a, r) => a <= r),
-    providerFailureRate: thresholdGate(providerFailureRate, PHASE_2_THRESHOLDS.providerFailureRate, (a, r) => a <= r),
-    p50LatencyMs: thresholdGate(latencyP50, PHASE_2_THRESHOLDS.p50LatencyMs, (a, r) => a <= r),
-    p95LatencyMs: thresholdGate(latencyP95, PHASE_2_THRESHOLDS.p95LatencyMs, (a, r) => a <= r),
-    externalCostAccepted: gate('unavailable', null, 'user-accepted-estimated-mean-external-cost'),
-    privacyAndIntegrationEvidence: gate('unavailable', null, 'separate-acceptance-evidence'),
-    explicitUserApproval: gate('unavailable', null, 'separate-phase-2-change-approval'),
-  }
 
   return {
     reportVersion: REPORT_VERSION,
@@ -907,8 +1023,13 @@ async function reportCommand() {
       needsReviewRate,
       providerFailureRate,
       providerFailures: realVibe.providerFailures,
+      mismatchRate,
+      mismatchCount,
+      mismatchComparable,
       latencyMs: {
-        method: 'complete-shadow-sequence-monotonic-nearest-rank',
+        // Event-timestamp timing: each Jev tool call's tool/call -> tool/result
+        // gap from the session log, summed over the sequence.
+        method: 'session-event-timestamps-nearest-rank',
         measuredCount: latencies.length,
         unavailableCount: realVibeRecords.length - latencies.length,
         p50: latencyP50,
@@ -931,11 +1052,14 @@ async function reportCommand() {
       // Failed calls often cannot be attributed; the unknown group keeps them visible.
       jevProviderScope: 'attributed-records-only',
     },
-    coverage: {
-      phase2Admission: 'not-established',
-      thresholds: PHASE_2_THRESHOLDS,
-      gates: gateStatuses,
+    health: {
+      // Ongoing observation of an approved advisory router. There is deliberately
+      // no admission gate here: anything beyond giving advice needs a separate
+      // approved change, and sample-count gates could never be reached because
+      // this router is the only source of its own samples.
+      thresholds: HEALTH_THRESHOLDS,
       warnings,
+      latencyTruncatedSamples: truncatedLatencyCount,
     },
   }
 }
@@ -952,7 +1076,7 @@ async function clearCommand() {
 }
 
 function usage() {
-  return 'usage: recorder.mjs record | label OBSERVATION_ID ACTUAL_ROUTE SOURCE | summary | report | clear'
+  return 'usage: recorder.mjs record | label OBSERVATION_ID ACTUAL_ROUTE SOURCE | latency OBSERVATION_ID | summary | report | clear'
 }
 
 async function main() {
@@ -966,6 +1090,10 @@ async function main() {
     case 'label':
       if (args.length !== 3) throw new Error(usage())
       result = await labelCommand(...args)
+      break
+    case 'latency':
+      if (args.length !== 1) throw new Error(usage())
+      result = await latencyCommand(...args)
       break
     case 'summary':
       if (args.length !== 0) throw new Error(usage())

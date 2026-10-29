@@ -1,22 +1,32 @@
 ---
 name: jev-workflow-router
-description: Observation-only Phase-1 shadow routing for the already-reached decision whether work should stay direct or use a formal workflow. Auto-apply only after the agent has independently reached that workflow decision point; never use it to detect intent, replace ordinary reasoning, or interrupt the user.
-whenToUse: The agent has independently determined, using the conversation and existing project rules, that it must now decide whether to continue directly or enter a formal planning/change workflow. Do not apply for ordinary explanation, research, or implementation steps that have not reached that decision.
+description: Advisory routing at the point where work might stay direct or enter a formal workflow. Use it after independently reaching that decision to get one non-blocking suggestion line with a confidence value; never use it to detect intent, and never let it block, question the user, or decide anything on its own.
+whenToUse: You have independently determined, using the conversation and existing project rules, that you must now decide whether to continue directly or enter a formal planning/change workflow, and no explicit user choice or existing change already settles it. Do not apply for ordinary explanation, research, or implementation steps that have not reached that decision.
 ---
 
-# Jev workflow router — Phase 1 shadow only
+# Jev workflow router — advisory only
 
-This skill observes a decision that the agent already had to make. It never makes that decision authoritative and never adds a new decision point.
+This skill informs a decision you already had to make. It never makes that decision, and it never turns into a question the user must answer.
 
-## Non-negotiable Phase-1 boundary
+## Non-negotiable boundary
 
-- Keep the actual control flow exactly as it would have been without this skill.
-- Never create a change, select or change a schema, invoke `ssf`, start apply/implementation, mutate files, authorize tools, reduce a safety gate, merge, archive, clean, or otherwise act because of a Jev result.
-- Never show a recommendation as a question or a user-visible interruption. Do not wait for Jev. If a bounded call fails or is unavailable, continue existing behavior.
-- Never use this skill before independently reaching the workflow decision point. It is not an intent detector and must not turn explanation, research, or casual conversation into a formal workflow.
-- The closed candidate set is exactly `direct`, `standard-openspec`, `anvil`, and `spec-superflow`. Do not invent, fork, combine, rename, or silently modify candidates.
-- Phase 1 is observation-only regardless of confidence. Promotion requires a separate change and explicit user approval.
-- Do not collect, infer, persist, report, or gate on request language. There are no Chinese/English quotas.
+- The advice is one line in your own reply. It is never a question, an options card, or a request for confirmation, and it never delays or blocks the work that follows.
+- Never because of a Jev result: create a change, select or change a schema, invoke `ssf`, start apply/implementation, mutate files, authorize tools, reduce a safety gate, merge, archive, or clean.
+- Never wait for Jev. If the call fails, times out, or returns something unusable, say nothing about routing and continue with existing behavior.
+- Never apply this skill before independently reaching the workflow decision point. It is not an intent detector and must not turn explanation, research, or casual conversation into a formal workflow.
+- The candidate set is exactly `direct`, `standard-openspec`, `anvil`, and `spec-superflow`. Do not invent, fork, combine, rename, or silently modify candidates.
+- Anything beyond giving advice (auto-creating a change, switching a schema, invoking `ssf`, acting on high confidence) needs a separate approved change.
+- Do not collect, infer, persist, report, or gate on request language.
+
+## Skip first: zero calls when the answer is already decided
+
+Make no Jev call at all, and emit no advice line, when any of these holds:
+
+1. The user has explicitly chosen a route ("just fix it", "use Anvil", "open a change for this").
+2. The task already belongs to an existing OpenSpec or spec-superflow change.
+3. The request is not implementation work at all (explanation, research, review of unrelated material).
+
+These are the common cases. The router exists for the genuinely open decision, not for every turn.
 
 ## Versioned candidate catalog
 
@@ -29,20 +39,20 @@ Catalog version: `1`. These descriptions, rather than names alone, are the crite
 | `anvil` | Use the pinned, unmodified Anvil OpenSpec schema for work whose safety, migration, persistence, concurrency, or independent verification needs justify its stronger ledger and gates. |
 | `spec-superflow` | Use pinned, unmodified spec-superflow for scoped work that benefits from one scope confirmation, planned implementation/recovery, and final review, without requiring Anvil's full assurance gates. |
 
-A candidate that is not installed, supported, and healthy is not eligible. `standard-openspec` remains the formal fallback. When a managed DSH Worktree Session binding is active, treat `spec-superflow` as unavailable as an executable candidate unless a separately verified external firewall mechanically prevents both `ssf isolate` and `ssf finish`; remove it from the eligible set and retain `standard-openspec`. A warning or prompt instruction is not such a firewall, and the unmodified upstream planned workflow must not be claimed safe merely by warning against those mandatory paths.
+A candidate that is not installed, supported, and healthy is not eligible. `standard-openspec` remains the formal fallback. When a managed DSH Worktree Session binding is active, treat `spec-superflow` as unavailable as an executable candidate unless a separately verified external firewall mechanically prevents both `ssf isolate` and `ssf finish`; remove it from the eligible set and retain `standard-openspec`. A warning or prompt instruction is not such a firewall.
 
 ## Deterministic rules run first
 
-Determine the actual route from existing instructions and reasoning before interpreting any shadow result. These rules override Jev:
+Determine the actual route from existing instructions and reasoning before interpreting any Jev result. These rules override Jev:
 
 1. An explicit user choice of one of the four routes controls.
 2. An existing change keeps its recorded control plane/schema; never re-route it.
 3. A non-implementation request is not forced into a change.
-4. Remove unavailable or unhealthy community candidates from the eligible shadow set. In an active managed Worktree Session, remove `spec-superflow` unless a verified external firewall mechanically blocks both `ssf isolate` and `ssf finish`; instructions or warnings alone do not qualify.
+4. Remove unavailable or unhealthy community candidates from the eligible set. In an active managed Worktree Session, remove `spec-superflow` unless a verified external firewall mechanically blocks both `ssf isolate` and `ssf finish`; instructions or warnings alone do not qualify.
 5. Existing security, permission, dependency, Worktree Session, verification, merge, archive, and cleanup rules are minimum gates. A lighter recommendation cannot weaken them.
 6. Conflicts, ambiguity, or missing authoritative context preserve existing behavior. They are never permission to choose `direct`.
 
-The actual route is whatever the agent/user/existing change eventually selects under those rules, not the Jev recommendation.
+The actual route is whatever you, the user, or an existing change eventually selects under those rules, not the Jev recommendation.
 
 ## Privacy-bounded feature projection
 
@@ -59,22 +69,14 @@ Construct features locally and only from these fields:
 
 Use `unknown`/conservative values when evidence is absent. Never include or derive a prose summary. Never send or record the full prompt, conversation, source, source fragments, diff, paths, URLs, emails, identifiers, attachment names/metadata/content, credentials, token-like strings, provider errors, or arbitrary user text.
 
-## Two bounded shadow calls
+## Bounded calls
 
-Before the first call, capture a local start time in milliseconds; after classify plus the conditional decide has settled (success, error, timeout, or cancellation), capture the end time and record the difference as the complete shadow-sequence duration. The two Jev calls are separate tool invocations, so a per-process monotonic clock cannot span them; use this portable command for both readings (it works on macOS, Linux and Windows, unlike `date +%s%3N`, which macOS `date` does not support):
+If `DSH_JEV_WORKFLOW_ROUTER_DISABLED` is `1`, `true`, `yes`, or `on` (case-insensitive), make no Jev calls, write no records, and emit no advice.
 
-```sh
-node -e "console.log(Date.now())"
-```
+Otherwise, after the skip rules above and the deterministic rules are known:
 
-Record `{ "availability": "measured", "milliseconds": END - START }`. Use `{ "availability": "unavailable", "milliseconds": null }` only when either reading is missing or the difference is negative (clock adjusted) — never guess a value. Timing and provenance are local recorder metadata and MUST NOT be sent to Jev.
-
-If `DSH_JEV_WORKFLOW_ROUTER_DISABLED` is `1`, `true`, `yes`, or `on` (case-insensitive), make no Jev calls and write no records.
-
-Otherwise, after deterministic rules are known, make these observation-only calls with only the bounded feature projection:
-
-1. Call `mcp__jev__jev_classify` to classify `direct` versus `formal-workflow`. Include only the enum/numeric/boolean features above, the two fixed class descriptions, the fixed `manual-review` escape, and a bounded timeout. Do not include prose evidence. Preserve the complete closed-key classification distribution: `direct`, `formal-workflow`, `manual-review`.
-2. Only when the first shadow result recommends `formal-workflow`, call `mcp__jev__jev_decide` over the eligible subset of `standard-openspec`, `anvil`, and `spec-superflow`, using catalog-version-1 descriptions and the same bounded features. Preserve confidence, winner margin, requirement-check booleans, and the complete closed-key workflow distribution: all three workflow keys plus the fixed escape keys `ask_user`, `investigate`, and `none`. Ineligible workflow keys remain bounded fields with probability zero; never discard an escape probability.
+1. Call `mcp__jev__jev_classify` to classify `direct` versus `formal-workflow`. Include only the enum/numeric/boolean features above, the two fixed class descriptions, the fixed `manual-review` escape, and a bounded timeout. Do not include prose evidence.
+2. Only when the first result recommends `formal-workflow`, call `mcp__jev__jev_decide` over the eligible subset of `standard-openspec`, `anvil`, and `spec-superflow`, using catalog-version-1 descriptions and the same bounded features.
 
 Do not retry ambiguous failures. The error category closed set is `none`, `missing-credential`, `unauthorized`, `rate-limited`, `region-blocked`, `provider-5xx`, `network`, `timeout`, `cancelled`, `malformed-response`, and `unknown`. Never put raw error messages/bodies in command arguments, records, or user output.
 
@@ -89,26 +91,76 @@ When every call succeeded, set `"errorCategory":"none"` explicitly; when you obs
 
 This is the only place raw error text may appear, and only on the recorder's stdin. Never interpolate, paste, or splice tool output into a shell command, heredoc, or command argument.
 
-## Conservative post-call policy
+## What to say, and when to say nothing
 
-The shadow status is `needs-review` if any of these holds: escape was selected; response structure is invalid; the choice is unknown/ineligible; any required probability/confidence is missing or non-finite; confidence is below the MCP's conservative default; winner margin is below the MCP's conservative default; a requirement check fails; or any call errors. Do not reinterpret `needs-review` as `direct` or as any executable route.
+Show advice only when the classify/decide result is unambiguous: the recommendation is a closed candidate, confidence and winner margin are at or above the MCP's conservative defaults, no escape hatch was selected, and no requirement check failed.
 
-A result may be labelled `auto-candidate` only for offline evaluation when all checks pass. Even then it has zero authority and causes no action or user interruption.
+One line, in Chinese, in your normal reply. For example:
+
+```
+（Jev 路由建议：standard-openspec，置信度 0.91；可无视，按你的判断走。）
+```
+
+Rules for that line:
+
+- One line, no bullet list, no table, no follow-up question.
+- Include the candidate and the confidence. Say explicitly that it can be ignored.
+- Never present it as a requirement, a gate, or a blocker.
+- When any check fails, when an escape hatch is chosen, when a call errors, or when confidence/margin is below the conservative default: say nothing about routing and simply continue. Uncertainty is not permission to pick `direct`.
 
 ## Local recorder
 
-Use the zero-dependency Node >=22 recorder next to this file. Pass JSON only on stdin; never put observations in command arguments. Write the record JSON with the file-writing tool to a temporary file readable only by the current user (for example under the system temp directory with mode 0600), run `node recorder.mjs record < <that file>`, and delete the temporary file afterwards whether the command succeeded or failed. The bounded record object must contain `"sampleProvenance":"real-vibe"` for an ordinary Agent call and `"metrics":{"latency":{"availability":"measured","milliseconds":N},"usage":{...}}` when the local monotonic measurement succeeded. Never reuse the legacy `latencyMs` field.
+Use the zero-dependency Node >=22 recorder next to this file. Pass JSON only on stdin; never put observations in command arguments. Write the record JSON with the file-writing tool to a temporary file readable only by the current user (under the system temp directory with mode 0600), run `node recorder.mjs record < <that file>`, and delete the temporary file afterwards whether the command succeeded or failed.
+
+Every record must include one bounded local provenance value: `real-vibe` for an ordinary decision point, `synthetic-fixture` for an explicit test/offline fixture, or `unknown` when neither is provable. Synthetic and unknown records never count toward health metrics derived from real use.
+
+The shaped minimum, with the window described below:
+
+```json
+{
+  "sampleProvenance": "real-vibe",
+  "observedWindow": { "from": 1793246299793, "to": 1793246310000 },
+  "features": { "intent": "feature", "scope": "multi-module", "behaviorChange": true,
+                "persistence": false, "concurrency": false, "existingChange": false,
+                "safetyGateConflict": false, "externalSystems": 1,
+                "safetyRisk": "low", "migrationRisk": "reversible", "explicitRoute": "unknown" },
+  "eligibleCandidates": ["direct", "standard-openspec", "anvil", "spec-superflow"],
+  "recommendation": { "changeNecessity": "formal-workflow", "workflow": "standard-openspec",
+                      "classificationProbabilities": { "direct": 0, "formal-workflow": 0.85, "manual-review": 0.15 },
+                      "workflowProbabilities": { "standard-openspec": 0.91, "anvil": 0.05, "spec-superflow": 0.02,
+                                                 "ask_user": 0.01, "investigate": 0.005, "none": 0.005 },
+                      "confidence": 0.85, "margin": 0.7, "escape": false, "status": "auto-candidate",
+                      "requirementChecks": { "eligibleChoice": true, "completeProbabilities": true,
+                                             "confidenceMet": true, "marginMet": true, "safetyCompatible": true } },
+  "jevCalls": [{ "outcome": "success", "provider": "openrouter", "semantic": "ok" }],
+  "errorCategory": "none",
+  "metrics": { "usage": { "input": 513, "output": 43, "total": 556 } }
+}
+```
+
+Never send a `metrics.latency` value you measured yourself; omit it and let `recorder.mjs latency` fill it from the log. Never reuse the legacy `latencyMs` field.
 
 ```sh
 node recorder.mjs record < "$RECORD_JSON_FILE"
+node recorder.mjs latency OBSERVATION_ID
 node recorder.mjs label OBSERVATION_ID ACTUAL_ROUTE SOURCE
 node recorder.mjs summary
 node recorder.mjs report
 node recorder.mjs clear
 ```
 
-Every record must include one bounded local provenance value: `real-vibe` for an ordinary Agent decision point, `synthetic-fixture` for an explicit test/offline fixture, or `unknown` when neither is provable. Provenance is not a Jev feature. Synthetic and unknown records may validate implementation but never contribute to real-vibe Phase 2 admission metrics.
+### Latency comes from the session log, not from you
 
-`label` is retrospective only. Allowed sources are `user-explicit`, `agent`, and `existing-change`. Label only when the actual route is known from one of those sources. Otherwise leave it `unknown`; never infer or guess it from the recommendation.
+Do not time the calls yourself. Differencing two `Date.now()` readings taken around separate tool calls measures your own model round-trips (observed: ~32 s) rather than the Jev request (observed: ~1.7 s), so it is off by roughly an order of magnitude.
 
-Records default to `$DSH_HOME/state/jev-workflow-router/records.v1.jsonl` (falling back to `~/.dsh` only when `DSH_HOME` is unset), remain bounded and local, and are not conversation context. New writes use schema v2; legacy schema-v1 records remain readable with unknown provenance and measured latency only when their old positive latency value proves it. Reading never backfills historical facts; a later label/retention write serializes the conservative projection as v2. `summary` emits aggregate counts only. `report` emits only a versioned aggregate confusion/cost/provenance/coverage/latency/usage report and contains no language field or quota. External cost remains explicitly unavailable until separately accepted. `clear` explicitly removes recorded samples.
+Instead, record the window that scopes this judgement and let the recorder read the timestamps the session log already holds:
+
+1. Before the first Jev call, run `node -e "console.log(Date.now())"` once to capture `from`.
+2. After the sequence settles (success, error, timeout, or cancellation), capture `to` the same way.
+3. Include `"observedWindow":{"from":FROM,"to":TO}` in the record.
+
+Then run `node recorder.mjs latency OBSERVATION_ID`. It pairs each `mcp__jev__*` `tool/call` with its `tool/result` in that window, sums the gaps, and writes the result. If the log is missing, undecodable, or has no matching calls, it stores `availability: "unavailable"` with a specific reason instead of guessing — that is a normal outcome, not an error to work around.
+
+`label` is retrospective only. Allowed sources are `user-explicit`, `agent`, and `existing-change`. Label only when the actual route is known from one of those sources. Otherwise leave it `unknown`; never infer it from the recommendation.
+
+Records default to `$DSH_HOME/state/jev-workflow-router/records.v1.jsonl` (falling back to `~/.dsh` only when `DSH_HOME` is unset), remain bounded and local, and are not conversation context. `summary` emits aggregate counts only. `report` emits confusion, cost, reliability, mismatch rate, and event-timestamp latency for ongoing health; it has no admission gate, because advisory is already approved and any further automation needs its own change. `clear` removes recorded samples.

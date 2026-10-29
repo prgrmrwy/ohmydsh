@@ -196,12 +196,12 @@ customizations:
     enabled: true
     brief: Worktree Session 的 ws 操作 skill(status/promote/clean)
     note: '自研 skill,配合 worktree-session 包,spec source-workspace-worktree-session。只对已证明归属的操作生效:调用会话的有效 Worktree Session 绑定、主 checkout 上的仓库级 clean,或解析出有效 operation 元数据的显式绝对路径;命名(.worktrees、ws/*、lean 等词)不构成归属证明,不绕过拒绝改用通用 git。升级复核:ws 工具参数或 binding 语义变化时同步 SKILL.md。移除:enabled:false → dsh build。'
-  # Phase 1 Jev 流程路由:只做 shadow observation,不创建 change/切 schema/调用 ssf。
+  # Phase 2 Jev 流程选路 advisory:一行非阻断建议,不创建 change/切 schema/调用 ssf。
   - id: jev-workflow-router
     type: skill
     enabled: true
-    brief: Jev 流程分流 shadow 评估(无自动副作用)
-    note: '自研,spec jev-workflow-routing。仅在 Agent 已独立到达流程选择点后调用 pinned Jev MCP(见 thirdPartyResources jev;现经 OpenRouter 转发,其数据保留条款未单独复核,只发有界特征;凭据 OPENROUTER_API_KEY 由仓库 .env.local 注入 Host 环境,与官方凭据库中 auto-model-routing 用的同名 key 各存一份,不入仓库);候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;只做 shadow observation,无自动副作用;用户显式选择、existing change、安全门禁与 Worktree Session 始终优先;低置信度/失败均 needs-review,记录仅含本地有界特征与服务方 jevProvider(recorder 从调用投影确定性归因,错误原文不落盘)。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
+    brief: Jev 流程选路 advisory(一行建议,无自动副作用)
+    note: '自研,spec jev-workflow-routing。Phase 2 advisory(2026-10-29 用户批准,change make-jev-router-advisory):到达「直接改还是开 change」决策点时调用 pinned Jev MCP(见 thirdPartyResources jev;经 OpenRouter 转发,数据保留条款未单独复核,只发有界特征;凭据由 .env.local 注入 Host)给出**一行中文非阻断建议**,可无视;用户显式指定流程、任务已属既有 change、或非实施请求时零调用零输出;候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;永不建 change、切 schema、调 ssf、开实施、放宽安全或合入门禁、归档清理,超出「给一行建议」的自动化须另开 change 并获批。延迟由 recorder 的 latency 子命令从会话事件日志 tool/call→tool/result 时间戳回填,不用 Agent 自我计时;会话日志用 Node 内置 zstd 逐帧解码(不依赖外部 zstd CLI)。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
   # 自研 skill:「统计一下召回」→ 跑 dsh-memex-recall-report 并按口径解读
   # 命令本身随 dsh-memex 包的 bin 分发(openspec 2026-09-24-memex-recall-report-cli);
   # 这里只提供触发词、定位命令的包装脚本与解读纪律。只读,不改卡片。

@@ -16,6 +16,12 @@
 - prepare-preview 按白名单复制运行配置快照（含订阅 refresh token），不复制 Session/history；codex 在预览中刷新后可能需要在日常 GUI 重新登录。memex 仍共享真实记忆库。
 - 验收通过后再提交并获准合入；生产部署必须从主 checkout 执行 `dsh build`，连续第二次应无变更，最后由用户决定并执行日常 Host 重启。不要把生产部署指向临时 worktree。
 
+## 工作流选路
+
+- 到「这件事直接改，还是要开 OpenSpec change、开哪种」这个决策点时，若用户没有明确指定、当前任务也不属于已有 change，先用 `jev-workflow-router` skill 取一次建议：它只做一次 classify（必要时再一次 decide），然后在你自己的回复里给一行中文建议，例如「（Jev 路由建议：standard-openspec，置信度 0.91；可无视，按你的判断走。）」。
+- 这行建议永不阻断、永不追问、永不作为门禁；低置信度、escape、调用失败都直接不说。用户已指定流程或任务已有 change 时零调用、零输出。
+- 建议不改变任何实际流程：不因它建 change、切 schema、调 `ssf`、开实施或放宽任何安全/合入/Worktree 门禁。超出「给一行建议」的自动化必须另开 change 并经用户批准。
+
 ## 子会话派发
 
 是否派发由你决定：

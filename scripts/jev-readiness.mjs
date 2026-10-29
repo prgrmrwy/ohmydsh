@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
 import { homedir } from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+// Session logs are decoded through the skill's own module because sync copies
+// each skill directory wholesale into $DSH_HOME; a deployed recorder cannot
+// import from scripts/. One shared decoder keeps this probe and the recorder
+// reading logs identically.
+import {
+  SESSION_LOG_REASONS,
+  findSessionLog,
+  parseSessionEvents,
+  readSessionLogFile,
+} from '../skills/jev-workflow-router/session-log.mjs'
 
 const repo = process.env.DSH_REPO_ROOT ? path.resolve(process.env.DSH_REPO_ROOT) : path.resolve(new URL('..', import.meta.url).pathname)
 const dshHome = process.env.DSH_HOME || path.join(homedir(), '.dsh')
@@ -22,31 +31,27 @@ function declaredVariables(file) {
   return [...new Set(names)].sort()
 }
 
-function findSessionFile() {
-  if (!sessionId) return undefined
-  const root = path.join(dshHome, 'sessions')
-  if (!existsSync(root)) return undefined
-  // Prefer the current v4 log; fall back to v3 for sessions written before the format bump.
-  for (const name of ['session.v4.jsonl.zstd', 'session.v3.jsonl.zstd']) {
-    for (const workspace of readdirSync(root)) {
-      const file = path.join(root, workspace, sessionId, name)
-      if (existsSync(file) && statSync(file).isFile()) return file
-    }
+/**
+ * Inspect the current session's event log.
+ *
+ * Failure carries a specific, actionable reason instead of one opaque boolean.
+ * A missing `zstd` binary is no longer a way to fail: decoding uses Node's
+ * built-in zstd and walks every frame, so a multi-frame log can never be
+ * mistaken for a short or empty one.
+ */
+function inspectSession() {
+  const located = findSessionLog({ dshHome, sessionId })
+  if (located.file === undefined) {
+    return { available: false, reason: located.reason ?? SESSION_LOG_REASONS.FILE_MISSING }
   }
-  return undefined
-}
-
-function inspectSession(file) {
-  if (!file) return { available: false }
-  const decoder = spawnSync('zstd', ['-dc', file], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  if (decoder.status !== 0) return { available: false, decodeFailed: true }
+  const decoded = readSessionLogFile(located.file)
+  if (!decoded.ok) {
+    return { available: false, reason: decoded.reason, file: located.name }
+  }
   let requestHeaders = 0
   let lastToolNames = []
   let latestCatalog = ''
-  for (const line of decoder.stdout.split('\n')) {
-    if (!line) continue
-    let event
-    try { event = JSON.parse(line) } catch { continue }
+  for (const event of parseSessionEvents(decoded.text)) {
     if (event.type === 'request/header') {
       requestHeaders += 1
       lastToolNames = (event.data?.header?.tools ?? []).map(tool => typeof tool === 'string' ? tool : tool?.name).filter(Boolean)
@@ -56,8 +61,13 @@ function inspectSession(file) {
       latestCatalog = Array.isArray(content) ? content.map(item => item.text ?? '').join('') : String(content ?? '')
     }
   }
+  if (requestHeaders === 0) {
+    return { available: false, reason: SESSION_LOG_REASONS.NO_REQUEST_HEADER, file: located.name, frames: decoded.frames }
+  }
   return {
     available: true,
+    file: located.name,
+    frames: decoded.frames,
     requestHeaders,
     toolCount: lastToolNames.length,
     jevTools: lastToolNames.filter(name => name.startsWith('mcp__jev__')).sort(),
@@ -72,7 +82,14 @@ function inspectSession(file) {
  * this probe asserting a stale literal.
  */
 function expectedVersions() {
-  const manifest = yaml.load(readFileSync(path.join(repo, 'dsh.yaml'), 'utf8')) ?? {}
+  let manifest
+  try {
+    manifest = yaml.load(readFileSync(path.join(repo, 'dsh.yaml'), 'utf8')) ?? {}
+  } catch {
+    // A missing or unreadable manifest degrades to "unknown expectation" rather
+    // than crashing the probe: the session half is still useful on its own.
+    manifest = {}
+  }
   const resources = new Map((manifest.thirdPartyResources ?? []).map(resource => [resource.id, resource]))
   const jev = resources.get('jev')
   const superflow = resources.get('spec-superflow')
@@ -92,7 +109,7 @@ const patch = path.join(dshHome, 'profiles', profile, 'cordis.patch.yml')
 const packageJson = existsSync(profilePackage) ? JSON.parse(readFileSync(profilePackage, 'utf8')) : {}
 const dependencies = packageJson.dependencies ?? {}
 const patchText = existsSync(patch) ? readFileSync(patch, 'utf8') : ''
-const session = inspectSession(findSessionFile())
+const session = inspectSession()
 
 const report = {
   reportVersion: 1,
