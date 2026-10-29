@@ -32,3 +32,7 @@ These are previously reported, distinct runs, not one combined suite and not fre
 Earlier macOS CLI-stop/lifecycle tests could invoke same-port Chrome AppleScript even with `--no-open` and an isolated HOME. A successful cleanup diagnostic did not establish that tabs existed or closed; actual desktop effects remain unknown. Later Host cleanup used process-layer stop only and is not full CLI/UI acceptance. Do not repeat operational drivers without a new scoped authorization and current identity checks.
 
 Historical detailed reports can be inspected at the Git revision above when exact source snapshots, receipt sequence or review findings matter; this summary is deliberately not an equivalent detailed evidence artifact.
+
+## Owner-authorized closure (2026-10-25; replayed 2026-10-30)
+
+The preceding strict FAIL / NOT READY TO ARCHIVE is historical. Owner subsequently reported npm link, normal use and cockpit integration successful, explicitly accepted the58unfinished tasks and known validation limits, and authorized spec synchronization and archive. Disposition: DELIVERED_AND_ARCHIVED_WITH_WARNINGS, not all-gates PASS. User feedback does not establish unreported macOS UI subcases or a fresh platform matrix. Historical111/169 task status and strict FAIL remain intact. Current specs were synchronized; no worktree cleanup or production restart authorized.

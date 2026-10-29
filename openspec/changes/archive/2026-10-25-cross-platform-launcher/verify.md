@@ -1,6 +1,6 @@
 ## Owner closure disposition (2026-10-25)
 
-DELIVERED_AND_ARCHIVED_WITH_WARNINGS — owner explicitly accepted the58remaining tasks and disclosed validation limitations, authorized current-spec synchronization and archive. Owner reports npm link, actual usage and cockpit integration work normally. This is user manual acceptance, not an agent-run macOS PWA/Chrome-cleanup matrix. See checking/owner-closure.md and checking/main-integration-status.md. Historical strict-gate DECISION: FAIL below is preserved, not relabeled PASS. No worktree cleanup or production restart authorized.
+DELIVERED_AND_ARCHIVED_WITH_WARNINGS — owner explicitly accepted the58remaining tasks and disclosed validation limitations, authorized current-spec synchronization and archive. Owner reports npm link, actual usage and cockpit integration work normally. This is user manual acceptance, not an agent-run macOS PWA/Chrome-cleanup matrix. See checking/summary.md for retained evidence and the owner closure disposition. Historical strict-gate DECISION: FAIL below is preserved, not relabeled PASS. No worktree cleanup or production restart authorized.
 
 ## Verification Results
 
