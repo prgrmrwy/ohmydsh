@@ -206,6 +206,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 | npm 成功，Release 缺失 | 补好 workflow，镜像同步后 dispatch 同版本；跳过 npm，创建 Release 与附件，无需为了补发布页而升版 |
 | 同版本 tag 与 main 不同 | 重跑前检查差异。不得借补 Release 改写已发布版本的源码或移动其 tag；附件仍下载 npm 既有产物，说明应与发布内容一致 |
 | npm 报 EOTP/ENEEDAUTH | 核对包 owner、Trusted Publisher 仓库/文件名/权限/绑定确认；确需用户网页授权时说明真实阻塞 |
+| Release 步骤 `npm pack` 404（刚发布） | registry 元数据已有新版但 tarball 端点尚未传播（实测约 3 分钟）。workflow 已对 `npm pack` 重试 20×30s；旧 workflow 失败时等可下载后 dispatch 同版本补 Release，无需升版 |
 | npm 图挂了 | 检查 repository.directory、镜像相对路径与资源访问。修正 README/元数据后需新 npm 版本才能更新包页 |
 | 本机 pack 测试报 JSON 不可迭代 | 核验 npm 版本与实际输出；npm 11 常见数组、npm 12 可返回包名索引对象，两种都应兼容 |
 | 商店仍装旧版 | 检查条目是否固定 tarball、PR 是否合并及采集刷新，不能只看 npm latest |
@@ -214,12 +215,12 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 ## 11. 当前落地状态与后续基线
 
-截至 2026-10-28，本仓自动镜像已覆盖 AUTO、Magpie、Sidebar；按本 SOP 的默认完成标准：
+截至 2026-10-29（Magpie 行于 0.3.0 发版时更新），本仓自动镜像已覆盖 AUTO、Magpie、Sidebar；按本 SOP 的默认完成标准：
 
 | 插件 | 自动镜像/tag | npm OIDC | GitHub Release + npm 同版附件 | 状态 |
 | --- | --- | --- | --- | --- |
 | AUTO | 已配置 | 已配置 | 已配置，0.5.1 已验 | 完整参考实现 |
-| Magpie | 已配置 | 已配置 | workflow 尚未配置 | 待补 Release 环节 |
+| Magpie | 已配置 | 已配置 | 已配置，0.3.0 已验（附件与 npm 字节一致） | 全链路已通 |
 | Sidebar | 已配置 | 已配置 | workflow 尚未配置 | 待补 Release 环节 |
 
 这是本次核对时的状态，不是把后三者差异当作永久例外。后续新插件默认完成全链路；维护现有插件时以实际 workflow 与线上结果更新此表。
