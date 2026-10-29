@@ -30,7 +30,7 @@ export interface RealHostOptions {
  */
 export async function mountRealHost(options: RealHostOptions = {}) {
   const ctx = new Context()
-  ctx.plugin(LlmRuntime as never)
+  ;(ctx as unknown as { plugin(p: unknown): unknown }).plugin(LlmRuntime)
   await new Promise(resolve => setTimeout(resolve, 0))
   const llm = (ctx as unknown as { llm: HostLlm }).llm
   const invariant = { on: false }
@@ -43,6 +43,8 @@ export async function mountRealHost(options: RealHostOptions = {}) {
   if (options.foreignRoutes?.length) {
     class Foreign extends LlmAdapter {
       override providerInfo(provider: string) { return { id: provider, name: `Foreign ${provider}` } }
+      // eslint-disable-next-line require-yield
+      override async *stream(): AsyncIterable<never> { throw new Error('foreign adapter stream not used') }
     }
     foreign.push(llm.registerAdapter(options.foreignRoutes, new Foreign()) as unknown as () => void)
   }
