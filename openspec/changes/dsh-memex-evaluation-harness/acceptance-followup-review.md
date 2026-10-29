@@ -1,5 +1,13 @@
 # Acceptance follow-up source review — 2026-10-29
 
+## 2026-10-30 follow-up
+
+The user deployed and restarted the Host; the installed retirement module matches the source build hash, and its mtime precedes the current listener's start time. Earlier undeployed statements below describe the previous review time.
+
+Added a real Connection + Memex channel + actual eval dispatcher composition regression using ephemeral in-memory credentials, official 303/cookie exchange, and captured HTTP route callbacks. Valid-cookie cross-Origin, opaque Origin, cross-site and untrusted Host requests fail before dispatch/default reads; authority changes invalidate the cookie. A same-origin control reaches the actual read-only default-model endpoint, preserves the default and creates no round directory; fiber disposal withdraws the route. No real Host cookie, server listener, session or model call is used. The actual 3080 unauthenticated rejection probe also passes. This completes tasks 3.1/3.3 as implementation regression obligations, without claiming authenticated live-Host black-box coverage.
+
+Fresh whole-package verification: 124 files / 807 tests, typecheck, repository wiring/insights 7 tests, strict OpenSpec, artifacts and whitespace checks all pass. PASS for this test-only addition. Full change remains not ready for archive: no new real-model round with the deployed retirement observations exists, and historical results are never backfilled.
+
 ## Scope
 
 Uncommitted follow-up to the successful GPT round: existing-Host Connection rejection test, post-retirement observations, associated regression tests and verification ledger. This is a local source review, not an Anvil planning re-approval or a whole-change archive approval.

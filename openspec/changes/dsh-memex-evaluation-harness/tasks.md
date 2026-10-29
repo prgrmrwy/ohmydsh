@@ -20,11 +20,11 @@
 
 ## 3. Host 桥与默认值只读披露
 
-> 3.1/3.3 未勾：要求验证“鉴权/Origin/未认证拒绝”（EVAL-032），该拒绝由 DSH Connection 层施加，只能在运行中的 Host 上验证，需部署授权。memex 侧不变量（无自建监听、桥只挂在 Connection rpc handler）已离线测试。
+> 2026-10-30：现有3080 Host实测401/403；新增真实Connection认证实现＋Memex channel＋实际eval dispatcher组合回归，临时内存凭据经官方303交换得到有效cookie，验证跨源/opaque Origin/cross-site/伪造Host被拒且dispatcher零调用，同源只读默认值成功且不改默认值、不创建轮次目录；fiber dispose后路由撤销。结合EVAL-019–020、030–034全绿，3.1/3.3关闭。组合回归不冒称日常Host有效cookie黑盒，也不承诺socket本机来源证明。
 
-- [ ] 3.1 写失败测试 EVAL-019–020、030–034：未知字段/任意模型证据路径、鉴权/Origin、父会话已用、超时断连、dispose 失败、硬中断下次告警及无恢复写操作。
+- [x] 3.1 写失败测试 EVAL-019–020、030–034：未知字段/任意模型证据路径、鉴权/Origin、父会话已用、超时断连、dispose 失败、硬中断下次告警及无恢复写操作。
 - [x] 3.2 实现固定轮次注册/状态/评分/取消与 readDefaultModel 的窄接口；参数从受信冻结计划取得，沿用 Connection 防线；Host 拥有 AbortController 和 run 清退，禁止任意默认值写回。
-- [ ] 3.3 重构；运行桥与默认值测试，验证 Host authority/跨源/未认证拒绝和日常会话无副作用，不把 Connection 认证说成 socket 本机来源证明。
+- [x] 3.3 重构；运行桥与默认值测试，验证 Host authority/跨源/未认证拒绝和日常会话无副作用，不把 Connection 认证说成 socket 本机来源证明。
 
 ## 4. 裁判真实组合与首次请求门禁
 

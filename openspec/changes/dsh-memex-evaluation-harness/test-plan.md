@@ -35,7 +35,7 @@
 | specs/dsh-memex-evaluation/spec.md → 受限裁判组合和首次请求前门禁 | 日常会话不受裁判门禁影响 | packages/dsh-memex/test/eval-judge-runtime.test.ts | EVAL-029: 日常会话不受裁判门禁影响 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 冻结项成功评分并清退 | packages/dsh-memex/test/eval-judge-runtime.test.ts | EVAL-030: 冻结项成功评分并清退 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 伪造路线或任意证据被拒绝 | packages/dsh-memex/test/eval-host.test.ts | EVAL-031: 伪造路线或任意证据被拒绝 | 🟢 green |
-| specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 未鉴权或跨源请求被拒绝 | packages/dsh-memex/test/eval-connection-live.test.ts | EVAL-032: 未鉴权或跨源请求被拒绝 | 🟢 green |
+| specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 未鉴权或跨源请求被拒绝 | packages/dsh-memex/test/eval-connection-live.test.ts, packages/dsh-memex/test/eval-connection-runtime.test.ts | EVAL-032: 未鉴权或跨源请求被拒绝 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 父会话已收到 prompt 被拒绝 | packages/dsh-memex/test/eval-judge-parent.test.ts, packages/dsh-memex/test/eval-judge-runtime.test.ts | EVAL-033: 父会话已收到 prompt 被拒绝 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 裁判超时或客户端断开 | packages/dsh-memex/test/eval-host.test.ts | EVAL-034: 裁判超时或客户端断开 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → 全文证据、实际阅读覆盖与引文核对 | 成功结果保留全文 | packages/dsh-memex/test/eval-evidence.test.ts | EVAL-035: 成功结果保留全文 | 🟢 green |

@@ -1,5 +1,15 @@
 ## Verification Results
 
+### 最新结论：2026-10-30 部署重启后续验收
+
+用户已完成部署/重启。只读核对3080监听PID9122，进程启动时间2026-10-30 00:04:05 Asia/Shanghai；dsh history最新启动记录2026-10-29T16:04:08.097Z。本地与正式profile中的lib/eval/host-retirement.js SHA256相同：0da7a87e90d3748656d9905755a8e39cffe6af15c491e7a9e46a496ba4a9ee35，mtime均为2026-10-29T16:03:28.657Z，早于本次启动，包含retirement观察写入。未把当前部署目录同哈希扩大为所有模块均已独立验证。
+
+新增eval-connection-runtime.test.ts：从正式compat graph载入真实Connection插件，临时内存credential provider，官方authorizeIndex执行303/cookie交换，注册实际Memex通道及createHostEvalDispatch。无认证401；持有效cookie的跨源、opaque Origin、cross-site及不可信Host403；换可信localhost authority时原cookie401。拒绝项dispatcher/default read均零次；同源控制经过真实RPC/桥读取默认值成功、rpcId回显正确，默认值未变、轮次目录未创建；dispose fiber撤销路由。仅socket/webServer和credential持久介质以隔离测试替代，无真实凭据/模型/会话/监听器。现有3080无凭据黑盒也再次通过。3.1/3.3按各自实现及回归义务关闭，不声称已经拿日常cookie完成跨源黑盒。
+
+最终验证：MEMEX_TEST_LIVE_CONNECTION=1 npm test --workspace dsh-memex：124files807tests通过；typecheck通过；仓库eval wiring/weekly-insights共7tests通过；严格OpenSpec/artifacts/diff通过。只新增测试和验收记录，无运行时代码变化，不要求用户再次部署重启。
+
+正式profile的三个CLI bin链接均已物化，当前shell PATH不包含profile node_modules/.bin，补到本次命令环境后官方dsh-memex-eval-report只读生成原成功轮次，exit0，5pass1fail0语义unknown，默认值确认仍有记录。此PATH调整仅作用于命令，不写用户配置。私有selftest树仍只有两个历史durable result，没有新增retirement记录；用户完成的是部署/重启，不把这解释成新六条件模型轮次已完成。10.3及整个change归档仍未关闭；不恢复旧轮次、不补写历史、不自动启动新模型。未push/重启/归档。
+
 ### 2026-10-29 22:40 验证任务闭合
 
 仓库级node --test tests/memex-eval-wiring.test.mjs tests/weekly-insights.test.mjs：7tests通过，覆盖managed preset/skill/目录关闭/bin-fixture接线、eval身份递归过滤与cache前排除、多帧/seed解析及facet缓存。结合本批61场景映射检查、含EVAL032的全包123files806tests、typecheck/build/strict OpenSpec/artifacts/diff，10.1现已满足，标记完成。
