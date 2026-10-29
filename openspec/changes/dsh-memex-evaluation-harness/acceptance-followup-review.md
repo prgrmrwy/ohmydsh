@@ -1,6 +1,16 @@
 # Acceptance follow-up source review — 2026-10-29
 
-## 2026-10-30 follow-up
+## 2026-10-30 Goal closeout review
+
+A fresh read-only reviewer checked the approved proposal/design/specs/test-plan against the implementation and runtime tests. No approved requirement mandates a new live global title-call recorder, persistent daily-session snapshot, or separate judge-disposal receipt format. Earlier gaps below are historical; treating these extra formats as blockers was an acceptance expansion, now withdrawn without changing any specification or guard.
+
+The new real-model round f2704e21 has complete semantic criteria (report exit0, 5 pass / 1 observed behavior fail / 0 semantic unknown), twelve physically audited fresh judge requests, six hash-checked retirement observations, six continuous owned-job settlements, nineteen registered/filter-excluded identities, and user default-model confirmation. The Lead checked the private artifacts; the reviewer checked the code and recorded evidence, not the private raw logs again.
+
+The actual owner chain awaits one-shot disposal, then parent disposal and final jobs proof before Host writes a successful durable result. Existing real-runtime tests verify parent/children leave the registry before fixture teardown, while retained roots remain archived/idle with empty inboxes. Default title provider plus local mock verifies eval title0/daily title1, exactly as the approved scenario specifies. This batch strengthens a pre-existing daily Agent/inbox/options control and adds deferred-disposer/final-settlement regression checks. No runtime behavior is changed and no new model round or deployment is needed for these test-only additions. Final command results and task closure are recorded at the top of verify.md. A second fresh read-only review found no blocking issue; it identified a microtask window in the new one-shot pending assertion. The Lead added an event-loop turn before asserting and checked an in-memory missing-await mutation: the original passes and the mutation is detected. The reviewed whole Memex suite then passed 124 files / 816 tests with typecheck; repository whole-suite passed 701 of 704 tests, zero failures, three skips.
+
+No claim is made that the offline report automatically verifies every physical receipt, that persistent observations recreate live capabilities, that mock responses are live model calls, or that the tool selftest measures Memex effectiveness. Archive/spec-sync/push remain separate unexecuted operations.
+
+## Historical 2026-10-30 follow-up
 
 The user deployed and restarted the Host; the installed retirement module matches the source build hash, and its mtime precedes the current listener's start time. Earlier undeployed statements below describe the previous review time.
 

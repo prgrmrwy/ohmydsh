@@ -1,5 +1,44 @@
 ## Verification Results
 
+### 当前收尾结论：2026-10-30 Goal 自动验收
+
+本节为唯一当前结论；下方所有旧 FAIL、未部署/未授权及任务数均是对应时间点的历史，不覆盖本节。用户授权持续自动测试与修复；沿用已批准固定自检范围，不增加业务评估或安全沙箱承诺。
+
+独立只读复核（fresh子审查）确认：规范没有要求额外新增“实机全局标题计数器”“日常会话持久快照”“裁判清退receipt格式”。此前把这些新格式当归档阻塞属于验收扩张，本次明确撤回该额外门槛，不改spec、不降低行为或证据要求。按原spec的实机证据、真实runtime＋本地mock及所有权等待链分层验收：
+
+| 验收项 | 实际证据 | 结论与边界 |
+| --- | --- | --- |
+| 部署及真实模型 | 修复模块部署hash/Host启动先后核验；round-f2704e21六条件codex/gpt-6.1-sol@high，六成本valid，report exit0；5pass/1行为fail/0语义unknown | 新版真实六条件已跑通，nomem未写回不是需刷绿的缺证；不推断Memex效果 |
+| 裁判实收与工具面 | 十二个fresh child物理日志逐个verifyJudgeRequest，冻结route/schema/messages，唯一structured_output与raw一致；真实runtime首请求门禁/危险工具拒绝 | 实机实收＋事前门禁实现回归分别给证据，不把事后header替代live owner门禁 |
+| 根/作业/裁判清退 | 六根hash冻结观察与attempt一一对应；六owned job同generation连续可信结算；生产runtime在context teardown前断言十二child及父从registry消失；runBoundedJudge finally await run.dispose → round await judge.dispose → 最终settle → Host写durable result | 按合法owner完成等待链，非cancel accepted/空list/turn-end放行；根仍归档保留，不从receipt重建resume能力；不声称新增独立OS进程普查 |
+| 标题零辅助请求 | spec109–116指定真实默认provider＋mock；title runtime为六条件0/日常1；生产runtime同样计数0/1；实机六根user-pinned事件均早于首题 | 满足原验收方式，不声称实机外发全局计数已独立采集 |
+| 日常非干扰 | 加强生产runtime：运行前建立日常exact Agent及pending input，整轮后对象/inbox两队列/options/archive保持；unowned job仍running，之后日常自动标题正常；真实WorkspaceRegistry拒绝归档非登记身份 | 隔离真实runtime行为证明，非日常会话全状态独立实机快照；已披露selectModel默认值副作用不属于零影响承诺 |
+| 流量排除及默认值 | 实机19身份登记与生产recall/insights过滤核对，非eval控制保留；三消费端夹具回归；用户恢复默认值，default-confirmed存在 | 不改默认值，不从确认标记推断当前全局值，不读取日常业务内容来做验证 |
+
+补充延迟Promise回归：one-shot结果ready而dispose pending时不得publish成功；父dispose pending不得进行末次settle或返回，异步拒绝阻止成功；末次settle拒绝同样阻止成功。独立最终复核发现one-shot新增pending断言需多让一个事件循环机会才可可靠检测漏await，已加setImmediate；纯Node内存变异检查确认原实现pending断言通过、仅移除await run.dispose()的变异必被该断言拒绝，无生产文件修改。此为已有await契约强化，无运行时代码修改，不伪造新功能red-green记录。新增预置日常控制为已有非干扰契约强化。仓库全量首次4项失败均为skill-execution临时路径/var与/private/var基准不同；统一夹具到realpath(tmpdir)，原参数/退出码/cwd断言全部保留，定向8tests通过。
+
+隔离方式：官方ws status确认当前非空会话无绑定，官方maintenance CLI无start入口；没有合成绑定或用git worktree绕过。使用已有测试的独立temp home/cwd/sqlite/persistence和本地adapter，网络fail-fast；未启动新监听器、未碰日常3080、未再次真实模型自检。该限制不是产品缺陷，也不冒称已创建WS。
+
+最终验证：MEMEX_TEST_LIVE_CONNECTION=1 npm test --workspace dsh-memex：124文件/816测试全通过；npm run typecheck --workspace dsh-memex通过；npm run build --workspace dsh-memex通过（其后仅测试及文档变更）；node --test tests/memex-eval-wiring.test.mjs tests/weekly-insights.test.mjs：7通过；仓库npm test：704总计/701通过/0失败/3跳过，exit0，跳过项不称通过；strict OpenSpec、artifacts及diff检查通过。两轮独立只读审查分开核对原验收边界及最终补充测试，结论见acceptance-followup-review.md。
+
+归档、spec同步、git push及日常重启均未执行。本轮目标为实施/验收闭合，不把业务评估、校准、统计与B051纳入完成声明。此次只补测试和验收文档，不需要再次部署或真实模型自检。
+
+### 2026-10-30 01:28 修复部署后的真实轮次复核
+
+用户已重新部署及重启；此前核验两个修复模块本地/安装版哈希一致，部署01:12:22、Host PID66084启动01:12:31。按durable result的mtime确认本次是round-f2704e21-43b5-4094-bf42-97290016378c（01:23:34完成），不依赖glob返回排序。正式dsh-memex-eval-report只读运行exit0：端点5pass/1fail/0unknown，Know2pass、Act4pass，独立写回1pass/1fail；无记忆未写回是行为fail，不要求重跑刷绿。
+
+六条件请求路线均codex/gpt-6.1-sol@high、成本valid、自发后代0。使用readFrozenInput验证六份retirement记录的哈希，各与对应attempt的session一一匹配，均包含version1及七个完整观察；十二份冻结裁判协议均使用partitioned-v1且顶层没有:write来源。该项补齐新版本清退观察实机证据，但观察不授予当前live/resume能力，不能扩展为裁判实收/独立成本或日常会话零影响证明。
+
+本轮默认值运行前codex/gpt-6-astra@medium，结束时codex/gpt-6.1-sol@high；用户已手动恢复，后续确认default-confirmed标记存在，不声称由离线标记证明当前全局默认值。未启动额外模型运行，不更改旧轮次结果。
+
+后续只读物理日志审计：按ledger顺序绑定六条件各两名裁判，共12个唯一fresh child，均parentSession匹配、isSeeded=false、inheritedEventCount=0、preset=memex-eval-judge。逐个解码完整多帧session.v4.jsonl.zstd，唯一request/header经verifyJudgeRequest核对实际route/effort/maxTokens/messages/tools/schema；唯一tool/call为structured_output，arguments与对应冻结raw逐对象相等，唯一turn/end为completed。12项全通过，裁判usage实收小计未缓存输入7772、cacheRead0、输出3031。此为独立补核，不修改原报告保守unknown字段，不等同人工语义复核或校准。
+
+六普通根的user-pinned固定标题事件均早于首request/header，未见首回合前assistant请求；该日志观察不扩展为宿主外所有辅助provider调用的独立计数证明。jobs.ndjson六个精确owner作业在同一Host generation均registered→settled(completed)→removed。公共registry核对本轮19个唯一身份（6根+1裁判父+12child）哈希全部登记；把实际身份送入生产evalFilter与insights.filterEvalSessions，两者均排除19项，非eval控制项保留。未运行insights报告或触发模型。
+
+本批收尾检查：node --test tests/memex-eval-wiring.test.mjs tests/weekly-insights.test.mjs：7tests通过；严格OpenSpec及git diff --check通过。裁判父物理日志仅权限配置与subagent/catalog事件，无模型请求；未将此扩展为对象已dispose的证明。
+
+历史判断（本次Goal复核后撤回额外证据格式门槛）：彼时10.3未勾，要求独立日常快照/实机标题全局计数/额外裁判清退receipt。原规范要求可复核行为证据而非这些特定新格式；本节数据仍保留，最终是否满足按顶部证据层次表，不从completed或根receipt替代owner等待链。
+
 ### 2026-10-30 裁判证据分区缺陷修复（未部署）
 
 用户新轮次 round-2dd18758-c020-417d-bd31-3df964f3a8b3 的 stale-mem facts 返回 yes，但第三条引文来自实际提供的成功写卡来源，答案校验仅接受 selection，因而变成 invalid/unknown。六条件成本审计 valid；不能归因上游缺 usage，也不能把默认模型提醒当失败原因。旧轮次保持 unknown，不重判、不改写。
@@ -65,7 +104,7 @@ round-d7d3c34c前四条件和八裁判已完成，第五条件在整请求约301
 - 构建门禁：continuation161、Team与tool-Team75、模型展示24+339通过；Team75覆盖普通Lead、ordinary fork、rostered teammate及工具生命周期，构建每次必跑。打包静态pin/接线2tests通过。
 - 正式launcher指针解析Team包为上述兼容版本及hash；最后一次正式图Memex runtime复验通过。受管dsh build第二次no changes，artifacts/diff通过。未重启现有Host、未创建任何teammate、未启动新模型轮次。live整体仍未通过，本批未提交。
 
-### Task Completion
+### Historical Task Completion（2026-10-28阶段）
 
 - tasks.md：27/33 已完成；剩余 3.1、3.3、10.1–10.4 涉及真实 Connection 黑盒、部署与 live 最终核验。
 - 5.2：正式 `eval/runRound` 装配普通 SessionController、同一 AUTO 状态服务、tracking、持久化及裁判。无任意路径/题面/schema RPC。
@@ -97,7 +136,7 @@ round-d7d3c34c前四条件和八裁判已完成，第五条件在整请求约301
 
 范围限制：runtime standard 是真实 native/fs/delegation 组合，不是全 shipped AGENTS/skills；AUTO state/setMode 窄fixture不验证算法（真实服务另有集成回归）；真实工具测试mock kernel不证明磁盘diff。R为固定字面必要事实检查，不泛化语义召回质量。写回新增/覆盖diff和裁判实际消费/人工覆盖未独立核验，报告保持unknown，不冒称完成。
 
-### Review & TDD Integrity
+### Historical Review & TDD Integrity（2026-10-28阶段）
 
 - 规划评审第四轮 `APPROVE_WITH_CHANGES` / `CHANGES_APPLIED: yes` 保留，本轮为已批准边界内生产连接与bug修复，没有扩展业务评估或OS安全沙箱。
 - 61个具名场景完整映射，60 green；EVAL-032 Connection真实未认证/Origin/authority黑盒仍 red，需授权部署。未把客户端fetch mock当成真实认证验收。
@@ -144,10 +183,12 @@ round-d7d3c34c前四条件和八裁判已完成，第五条件在整请求约301
 - 提交前已核对改动范围、空暂存区与 `git diff --check`，没有包含可重建产物或 raw session/history。
 - 未推送，不归档/合并/部署，不重启日常 Host，不运行真实模型自检；提交授权不扩大这些边界。
 
-## Overall Decision
+## Overall Decision（当前结论）
 
-OFFLINE_IMPLEMENTATION: READY_FOR_USER_ACCEPTANCE
+OFFLINE_IMPLEMENTATION: VERIFIED
 
-DECISION: FAIL（完整 change 门槛未满足：真实 Connection、部署/live尚未授权/未验）
+DECISION: PASS（按已批准首版固定虚构自检的实施与验收范围；非Memex效果评估）
 
-这不是代码回归失败，也不是 live 已通过；离线代码可验收，剩余是明确分开的部署与真实Host/live验收。长期方法论、业务评估、校准、统计与 B051 继续保留。
+部署/重启与真实模型轮次已实际完成；安全边界及实际实收、连续jobs/根观察、身份流量排除与默认值确认有上述实机证据；标题零辅助请求、合法owner等待清退及日常非干扰按规范指定真实runtime＋mock验收。33项实施任务在最终复核无阻断后闭合，不要求新增未被规范要求的证据格式。旧轮次unknown与行为fail保留，报告对未自动收集项目的unknown不改写为通过。
+
+归档/同步delta specs/提交推送并不由PASS自动执行。长期方法论、业务评估、校准、统计与B051继续保留。此前“未授权/未部署/live未验”的FAIL仅为历史阶段结论，已由顶部当前证据覆盖。

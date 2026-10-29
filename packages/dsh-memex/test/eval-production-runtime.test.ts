@@ -212,6 +212,12 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     } })
     expect(dispatch).toBeTypeOf('function')
     const signal = new AbortController().signal
+    // A daily session already exists while eval owns and retires its trees.
+    const daily = await ctx.sessionController.create({ sessionId: sessions.SessionId('offline-daily-control'), cwd: join(home, 'daily'), agentPreset: 'standard' })
+    const dailyAgent = ctx.agents.get(daily.sessionId)!
+    const dailyInbox = llm.createUserMessage({ content: [{ type: 'text', text: 'pending ordinary input' }], source: { kind: 'user' } })
+    dailyAgent.inject(dailyInbox)
+    const dailyBefore = { nextStep: [...dailyAgent.inbox.nextStep], nextTurn: [...dailyAgent.inbox.nextTurn], options: { ...dailyAgent.options } }
     const plan = await dispatch('eval/registerRound', { version: 'selftest-v1', tested: { provider: 'offline', model: 'tested', effort: 'high' }, judge: { provider: 'offline', model: 'judge', effort: 'high' }, maxJudgeCalls: 12 }, signal) as FixedRound
     expect(plan.items).toHaveLength(6)
     const result = await dispatch('eval/runRound', { round: plan.id, requestId: 'complete-offline-round' }, signal)
@@ -249,7 +255,12 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
       expect(ledger.releaseHistory('offline-host-1').filter(event => event.id === ownedJobs.get(agent.id)).map(event => event.type)).toEqual(['registered', 'settled'])
     }
     for (const agent of created.filter(agent => agent.session.header.parentSession || agent.id === parent[0]!.id)) expect(ctx.agents.get(agent.id)).toBeUndefined()
-    expect(ctx.agents.list()).toHaveLength(6)
+    expect(ctx.agents.list()).toHaveLength(7) // six retained eval roots plus the untouched daily control
+    expect(ctx.agents.get(daily.sessionId)).toBe(dailyAgent)
+    expect(dailyAgent.inbox.nextStep).toEqual(dailyBefore.nextStep)
+    expect(dailyAgent.inbox.nextTurn).toEqual(dailyBefore.nextTurn)
+    expect(dailyAgent.options).toEqual(dailyBefore.options)
+    expect(ctx.workspaceRegistry.archivedSessionIds).not.toContain(daily.sessionId)
     expect(ctx.jobs.get(unownedJob).status).toBe('running')
     const beforeReplay = calls.length
     expect(await dispatch('eval/runRound', { round: plan.id, requestId: 'complete-offline-round' }, signal)).toEqual(result)
@@ -282,7 +293,7 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     await rootAgents[0]!.whenIdle()
     expect(calls).toHaveLength(beforeReplay)
     rootAgents[0]!.cancel({ kind: 'user' }); await rootAgents[0]!.whenIdle()
-    const daily = await ctx.sessionController.create({ sessionId: sessions.SessionId('offline-daily-control'), cwd: join(home, 'daily'), agentPreset: 'standard' })
+    dailyAgent.cancel({ kind: 'user' }) // Clear only our control's intentionally pending input.
     await ctx.sessionController.prompt({ sessionId: daily.sessionId, requestId: 'daily-control', mode: 'queue', content: [{ type: 'text', text: 'ordinary control' }] }, signal)
     await ctx.agents.get(daily.sessionId)!.whenIdle()
     await titleFiber.dispose()
