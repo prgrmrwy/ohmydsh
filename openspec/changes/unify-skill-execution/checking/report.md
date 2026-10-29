@@ -27,4 +27,4 @@ No Critical/Important implementation finding remains in the reviewed scope. Disc
 
 ## Delivery boundary
 
-Only this batch's two helper surfaces are unified; arbitrary user shell commands and OS adapters retain their own contracts. Deployment to daily profiles requires the owner's later normal build. Existing worktree and Windows backups retained. New change remains active with the disclosed root baseline issue; no automatic zero-skip acceptance or archive is asserted.
+Only this batch's two helper surfaces are unified; arbitrary user shell commands and OS adapters retain their own contracts. Deployment to daily profiles requires the owner's later normal build. Existing worktree and Windows backups retained. New change remains active with the disclosed root baseline issue; no automatic zero-skip acceptance or archive is asserted. Controlled main fast-forward and normal push succeeded at `2916b92a`, including the prior owner-approved launcher archive and this helper batch. Production profile was not rebuilt; these are source changes awaiting the owner's normal deployment.
