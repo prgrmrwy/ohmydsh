@@ -81,7 +81,7 @@ You are installing ohmydsh, a DSH customization repository. Follow these rules i
 3. [NO-DEPLOY-EDIT] Never hand-edit anything under ~/.dsh. Change dsh.yaml or the repository sources, then run `dsh build`.
 4. [NO-SECRETS] Never write credentials into the manifest, command arguments or this chat. Secrets belong in .env.local only.
 5. [STOP-ON-FAIL-CLOSED] If sync fails closed (for example AGENTS.md drift), stop and report the exact error. Never delete files to get around it.
-6. [ASK-RESTART] Ask me before restarting DSH.
+6. [ASK-RESTART] Ask me before restarting DSH. Inside a DSH session `dsh restart` disconnects it and exit 0 only means scheduled; verify with `dsh history` after reconnecting.
 ```
 
 ### Command cheat-sheet
@@ -89,7 +89,7 @@ You are installing ohmydsh, a DSH customization repository. Follow these rules i
 ```text
 dsh build          materialize dsh.yaml into ~/.dsh without starting DSH
 dsh stop           stop the running DSH
-dsh restart        stop, wait for the port, start again
+dsh restart        stop, wait for the port, start again (in a DSH session: scheduled, then detached)
 dsh reset          undeploy customizations (the manifest is untouched)
 dsh history        list previous startups and the plugins they loaded
 dsh plugin-update  check remote plugins, confirm, edit dsh.yaml, build, commit

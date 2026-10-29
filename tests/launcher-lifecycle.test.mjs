@@ -29,7 +29,7 @@ async function fixture(t) {
   await writeFile(path.join(root,'scripts/host-prerequisites.mjs'),'process.exit(0)')
   await writeFile(path.join(root,'scripts/plugin-list.mjs'),"console.log('fixture-plugin')")
   const run=(args,extra={})=>new Promise(resolve=>{
-    const c=spawn(process.execPath,[path.join(root,'bin/dsh.mjs'),'--port',String(port),...args],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_SKIP_UPDATE:'1',DSH_SKIP_HOST_PREREQUISITES:'1',DSH_BIN:undefined,DSH_LOCAL_MANIFEST:path.join(root,'absent'),...extra},stdio:['ignore','pipe','pipe']})
+    const c=spawn(process.execPath,[path.join(root,'bin/dsh.mjs'),'--port',String(port),...args],{cwd:root,env:{...process.env,DSH_HOME:home,DSH_SKIP_UPDATE:'1',DSH_SKIP_HOST_PREREQUISITES:'1',DSH_BIN:undefined,DSH_LOCAL_MANIFEST:path.join(root,'absent'),DSH_RESTART_CONTEXT:'external',...extra},stdio:['ignore','pipe','pipe']})
     let stdout='',stderr='';c.stdout.on('data',x=>stdout+=x);c.stderr.on('data',x=>stderr+=x)
     const timer=setTimeout(()=>c.kill('SIGKILL'),12000)
     c.once('close',(status,signal)=>{clearTimeout(timer);resolve({status,signal,stdout,stderr})})

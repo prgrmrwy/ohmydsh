@@ -81,7 +81,7 @@ customizations: []
 3. [NO-DEPLOY-EDIT] 绝不手改 ~/.dsh 下的任何内容；改 dsh.yaml 或仓库源码，然后运行 `dsh build`。
 4. [NO-SECRETS] 绝不把凭据写进 manifest、命令参数或聊天；密钥只能放在 .env.local。
 5. [STOP-ON-FAIL-CLOSED] sync 因 fail-closed 报错（例如 AGENTS.md 漂移）时，停下并原样汇报错误，绝不通过删除文件来绕过。
-6. [ASK-RESTART] 重启 DSH 之前先问我。
+6. [ASK-RESTART] 重启 DSH 之前先问我。在 DSH 会话内执行 `dsh restart` 会断开该会话，返回 0 只表示已排程；重连后用 `dsh history` 验证。
 ```
 
 ### 命令速查
@@ -89,7 +89,7 @@ customizations: []
 ```text
 dsh build          把 dsh.yaml 物化进 ~/.dsh，不启动
 dsh stop           停止正在运行的 DSH
-dsh restart        停止、等端口释放、再启动
+dsh restart        停止、等端口释放、再启动（会话内：先排程，再脱离会话执行）
 dsh reset          撤销定制部署（manifest 不变）
 dsh history        查看历次启动及其加载的插件
 dsh plugin-update  检测远端插件、确认、改 dsh.yaml、build、提交

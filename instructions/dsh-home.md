@@ -14,7 +14,15 @@
 - 只有需要验收时，才在 worktree 内依次执行 `dsh build` → `ws prepare-preview` → `dsh`。若当前 Host 尚未注册新动作，可使用当前 worktree 构建后的 `dsh-ws prepare-preview <worktree绝对路径>`。
 - 隔离 build 不更新日常 GUI。预览的实际地址以 `DSH_PREVIEW` 输出为准，首选端口占用时会自动退避。不要操作日常 3080。
 - prepare-preview 按白名单复制运行配置快照（含订阅 refresh token），不复制 Session/history；codex 在预览中刷新后可能需要在日常 GUI 重新登录。memex 仍共享真实记忆库。
-- 验收通过后再提交并获准合入；生产部署必须从主 checkout 执行 `dsh build`，连续第二次应无变更，最后由用户决定并执行日常 Host 重启。不要把生产部署指向临时 worktree。
+- 验收通过后再提交并获准合入；生产部署必须从主 checkout 执行 `dsh build`，连续第二次应无变更，最后由用户决定是否重启日常 Host（见下节）。不要把生产部署指向临时 worktree。
+
+## 重启与断线
+
+- 仅当用户明确要求时，才在会话内执行 `dsh restart`；多个请求同时到来时先问用户。执行前告知用户：本次会话将断开。
+- 会话内 `dsh restart` 会先返回"已排程"，约 3 秒后再由脱离会话的进程停止并重启 Host。返回 0 只表示已排程，不得在当次回复中宣称重启成功。
+- 会话没有断开时，立即执行 `dsh history`，若最近一次重启为 `failed`，如实报告 `failedPhase` 与 `hostStopped`。重连后同样用 `dsh history` 按 receipt 验证结果。
+- Host 没有恢复时，请用户在外部终端执行 `dsh`。预览环境重连后，以 `$DSH_HOME/preview.json` 或重跑 `dsh` 时的 `DSH_PREVIEW` 输出为准确认地址。
+- `dsh stop` 同样会断开当前会话。Windows 不支持会话内重启，请用户在外部终端执行 `dsh restart`。
 
 ## 工作流选路
 

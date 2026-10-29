@@ -81,6 +81,20 @@ test('deploys generated AGENTS.md, records provenance hash, and is idempotent', 
   assert.deepEqual((await stateOf(fx.dshHome)).agentInstructions, firstState.agentInstructions)
 })
 
+test('session restart rules are materialized', async () => {
+  const fx = await fixture({ body: await readFile(path.join(REPO, 'instructions', 'dsh-home.md'), 'utf8') })
+  const result = fx.run()
+  assert.equal(result.status, 0, result.stderr)
+  const deployed = await readFile(path.join(fx.dshHome, 'AGENTS.md'), 'utf8')
+  for (const token of ['仅当用户明确要求', '本次会话将断开', '返回 0 只表示已排程', 'dsh history', 'failedPhase', '外部终端执行 `dsh`']) assert.ok(deployed.includes(token), `missing ${token}`)
+  assert.ok(!deployed.includes('最后由用户决定并执行日常 Host 重启'))
+  for (const skill of ['add-dsh-plugin', 'remove-dsh-plugin']) {
+    const text = await readFile(path.join(REPO, 'skills', skill, 'SKILL.md'), 'utf8')
+    assert.ok(!text.includes('请用户自己执行'), `${skill} keeps the old restart guidance`)
+    assert.ok(text.includes('返回 0 只表示已排程') && text.includes('dsh history'), `${skill} lacks the session restart rule`)
+  }
+})
+
 test('rejects absolute and repository-escaping instruction sources', async () => {
   for (const source of ['/tmp/AGENTS.md', '../outside.md', 'instructions/../../outside.md']) {
     const fx = await fixture({ source })

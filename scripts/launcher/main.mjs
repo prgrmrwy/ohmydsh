@@ -10,6 +10,7 @@ import { autoUpdate, appendEvent, ensurePrerequisites } from './maintenance.mjs'
 import { probePort, stopServer } from './process.mjs'
 import { isolatedHome, readPreview, writePreview, matchesPreview, stopPreview, previewPorts } from './preview.mjs'
 import { openUi, closeUi } from './ui.mjs'
+import { sessionEvidence, scheduleRestart, orchestrateRestart, restartHistory, withoutSessionMarkers } from './session-restart.mjs'
 import packageManager from '../lib/package-manager.cjs'
 
 export function canConnect(port, timeoutMs = 300) {
@@ -30,7 +31,16 @@ function manifestAt(repo) {
 }
 
 export async function runLauncher(argv, options = {}) {
-  const { repo, env: caller = process.env, log = console.log, warn = console.error, run = defaultRun, probe = probePort, stop = stopServer, platform = process.platform } = options
+  const caller = options.env ?? process.env
+  if (caller.DSH_RESTART_ORCHESTRATED === '1' && !options.orchestrated) {
+    if (!parseArgs(argv).restart) throw new Error('invalid internal restart handoff; refusing to stop the Host')
+    return orchestrateRestart(caller, overrides => launch(argv, { ...options, ...overrides }))
+  }
+  return launch(argv, options)
+}
+
+async function launch(argv, options) {
+  const { repo, env: caller = process.env, log = console.log, warn = console.error, run = defaultRun, probe = probePort, stop = stopServer, platform = process.platform, onPhase = () => {} } = options
   const official = isOfficialInvocation(argv)
   // Validate all local arguments before configuration or any side effect.
   const flags = official ? {} : parseArgs(argv)
@@ -85,11 +95,21 @@ export async function runLauncher(argv, options = {}) {
   if (flags.history) {
     const file = path.join(home, 'dsh-startup.log')
     log(fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trimEnd().split('\n').slice(-20).join('\n') : 'no startup history yet (run dsh to start one)')
+    const restarts = restartHistory(home)
+    if (restarts.length) log(restarts.join('\n'))
     return 0
   }
   if (flags.doctor) return (await runScript('host-prerequisites.mjs', flags.check ? ['--check'] : [])).status
   if (flags.reset) return (await runScript('sync.mjs', ['--reset'])).status
   if (flags.pluginUpdate) return (await runScript('plugin-update.mjs', [...(flags.dryRun ? ['--dry-run'] : []), ...(flags.yes ? ['--yes'] : [])])).status
+  if (flags.restart && !flags.buildOnly && !options.orchestrated) {
+    // Decided before any probe/update/prepare/stop: a session caller dies with the Host.
+    const evidence = options.sessionContext === 'external' ? undefined : options.sessionContext ?? sessionEvidence({ platform, env: caller })
+    if (evidence) {
+      if (flags.foreground) throw new Error('DSH 会话内不能 restart --foreground；请在外部终端执行')
+      return scheduleRestart({ argv, repo, home, caller, evidence, platform, log, warn, ...(options.restartSpawn ? { spawn: options.restartSpawn } : {}) })
+    }
+  }
   let current
   if (!flags.buildOnly) {
     current = await probe(flags.port, { env })
@@ -122,7 +142,13 @@ export async function runLauncher(argv, options = {}) {
     if (!fields.DSH_SERVER_BIN) throw new Error('Host runtime 解析未返回 bin 路径')
     return fields
   }
-  if (flags.restart) { prepared = await prepare(); await doStop(); current = { state: 'empty' } }
+  if (flags.restart) {
+    prepared = await prepare()
+    onPhase('stopping')
+    await doStop()
+    onPhase('stopped')
+    current = { state: 'empty' }
+  }
   if (current.state === 'owned') {
     announcePreview()
     await ui(doc)
@@ -141,7 +167,8 @@ export async function runLauncher(argv, options = {}) {
     const fd = flags.foreground ? undefined : fs.openSync(path.join(home, 'dsh.log'), 'a')
     let child
     try {
-      child = (options.spawn ?? spawn)(resolved.command, resolved.args, { env: hostEnv, cwd: process.cwd(), shell: false, detached: !flags.foreground, windowsHide: true, stdio: flags.foreground ? 'inherit' : ['ignore', fd, fd] })
+      onPhase('starting', { port })
+      child = (options.spawn ?? spawn)(resolved.command, resolved.args, { env: withoutSessionMarkers(hostEnv), cwd: process.cwd(), shell: false, detached: !flags.foreground, windowsHide: true, stdio: flags.foreground ? 'inherit' : ['ignore', fd, fd] })
     } finally { if (fd !== undefined) fs.closeSync(fd) }
     let childError
     const closed = new Promise(resolve => {

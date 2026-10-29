@@ -28,6 +28,6 @@ whenToUse: 用户要求安装/添加某个 DSH 插件(给出包名、npm 链接�
    - 验收通过后提交改动，经用户批准使用受控命令合入，再从主 checkout 执行生产 build。生产 sync 会把 local package 写成该 checkout 的绝对 `file:` 路径，因此绝不能把真实 home 部署指向临时 worktree。
    - 校验:`grep -c '.worktrees/' ~/.dsh/profiles/web/package.json` 应为 0;连续第二次 build 应报告 no changes。
 4. **询问重启**(必须问,不得擅自重启):问用户是否现在重启 DSH 使插件生效,给出两个选项:
-   - **立即重启**:请用户自己执行 `dsh restart`。它是完整重启(`bin/dsh` 的 `do_restart` = stop → `nc -z` 确认端口释放 → 继续走 start),比手敲 `dsh stop && dsh` 更稳:端口没释放会直接报错而不是撞 EADDRINUSE。**由用户执行**——重启会中断当前会话,agent 在会话内执行等于自断;
+   - **立即重启**:仅当用户明确选择后执行 `dsh restart`(stop → 确认端口释放 → start,比 `dsh stop && dsh` 更稳)。先告知用户本次会话将断开;会话内执行时命令先返回"已排程",约 3 秒后才真正重启,返回 0 只表示已排程,不得当次宣称成功。重连后用 `dsh history` 按 receipt 验证;Windows 不支持会话内重启,改请用户在外部终端执行;
    - **稍后手动重启**:插件已装好,下次 `dsh` 启动自动加载,什么都不用做。
 5. **收尾**:按用户选择说明即可;重启后可用 `dsh` 的输出清单或 `dsh history` 确认新插件已加载。
