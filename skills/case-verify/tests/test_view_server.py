@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from test_model_gates import ready_checking, observation, append, SCRIPTS
 sys.path.insert(0, str(SCRIPTS))
@@ -63,6 +64,15 @@ class ViewServerTests(unittest.TestCase):
         url = json.loads(body)['observations'][0]['evidence'][0]['url']
         self.assertEqual(self.request(server, url)[0], 200)
         self.assertEqual(before, self.snapshot())
+
+    def test_bind_does_not_resolve_hostname(self):
+        # Loopback readiness must not wait for a runner's reverse DNS resolver.
+        with patch('socket.getfqdn', side_effect=AssertionError('unexpected hostname lookup')):
+            server = create_server(self.root, static_dir=self.static)
+        self.addCleanup(server.server_close)
+        self.assertEqual(server.server_name, '127.0.0.1')
+        self.assertEqual(server.server_port, server.socket.getsockname()[1])
+        self.assertGreater(server.server_port, 0)
 
     def test_ready_line_flush(self):
         p = subprocess.Popen([sys.executable, '-B', str(SCRIPTS / 'view.py'), '--checking-dir', str(self.root), '--port', '0'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

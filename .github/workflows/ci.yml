@@ -28,6 +28,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # Documentation governance verifies retired notes against Git history.
+          fetch-depth: 0
 
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v7
