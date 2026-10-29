@@ -12,7 +12,7 @@
 ![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
 
 <!-- problem -->
-**把自托管的 Magpie 网关作为一个 provider route 接入 DeepSeek Harness：模型按上游 provider 分组展示，附带只读用量卡片和会话级快速档。** Magpie 继续负责登录、账号、路由和厂商出站代理，本插件补齐 DSH 侧。
+**把自托管的 Magpie 网关接入 DeepSeek Harness，每个上游归属对应一个 provider route：原版 DSH 即按上游 provider 分组展示模型，附带只读用量卡片和会话级快速档。** Magpie 继续负责登录、账号、路由和厂商出站代理，本插件补齐 DSH 侧。
 
 ### 你会得到什么
 

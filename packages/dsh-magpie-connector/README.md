@@ -12,7 +12,7 @@ English · [简体中文](README.zh.md)
 ![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
 
 <!-- problem -->
-**Connect a self-hosted Magpie gateway to DeepSeek Harness as one provider route: models grouped by their upstream provider, read-only usage cards, and a per-session fast mode.** Magpie keeps managing logins, accounts, routing and provider egress; this plugin adds the DSH side.
+**Connect a self-hosted Magpie gateway to DeepSeek Harness with one provider route per upstream owner: models grouped by upstream provider on stock DSH, read-only usage cards, and a per-session fast mode.** Magpie keeps managing logins, accounts, routing and provider egress; this plugin adds the DSH side.
 
 ### What you get
 
