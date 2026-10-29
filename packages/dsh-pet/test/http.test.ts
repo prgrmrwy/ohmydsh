@@ -82,6 +82,52 @@ describe('request trust', () => {
   it('rejects a missing host header', () => {
     expect(isTrustedRequest(request({}))).toBe(false)
   })
+
+  it('accepts a matching loopback IPv6 origin', () => {
+    expect(isTrustedRequest(request({ host: '[::1]:3080', origin: 'http://[::1]:3080' }))).toBe(true)
+  })
+})
+
+describe('hosts DSH itself trusts', () => {
+  /** Run one request through the fence wrapper and Pet's route. */
+  async function through(
+    headers: Record<string, string | undefined>,
+    verdict: 401 | 403 | undefined = undefined,
+  ) {
+    const res = response()
+    await withBrowserAuth(
+      petRoute('/dsh-pet/api/status', async () => ({ phase: 'ready' })),
+      { requestRejection: () => verdict },
+    ).handler(request(headers, '{}'), res)
+    return res
+  }
+
+  it('accepts a same-origin page on a host the DSH fence admitted', async () => {
+    const res = await through({ host: 'a.example.com', origin: 'https://a.example.com' })
+    expect(res.statusCode).toBe(200)
+    expect(res.payload).toEqual({ ok: true, data: { phase: 'ready' } })
+    expect((await through({ host: 'A.EXAMPLE.COM:8443', origin: 'https://a.example.com:8443' })).statusCode).toBe(200)
+  })
+
+  it('still rejects a cross-origin page even when the fence admitted the host', async () => {
+    for (const origin of ['https://evil.example', 'https://a.example.com:8443', 'http://localhost:3080', ':://bad']) {
+      const res = await through({ host: 'a.example.com', origin })
+      expect(res.statusCode).toBe(403)
+      expect(res.payload).toMatchObject({ ok: false, error: 'INVALID_REQUEST' })
+    }
+  })
+
+  it('stays loopback-only for a route mounted without the DSH fence', () => {
+    // No fence verdict, no trust: a forgotten wrapper cannot widen Pet.
+    expect(isTrustedRequest(request({ host: 'a.example.com', origin: 'https://a.example.com' }))).toBe(false)
+    expect(isTrustedRequest(request({ host: 'a.example.com' }))).toBe(false)
+  })
+
+  it('never reaches Pet when the fence refuses the host', async () => {
+    const res = await through({ host: 'a.example.com', origin: 'https://a.example.com' }, 403)
+    expect(res.statusCode).toBe(403)
+    expect(res.payload).toBe('forbidden')
+  })
 })
 
 describe('bounded body parsing', () => {
@@ -323,7 +369,8 @@ describe('route wrapper', () => {
     await route.handler(request({ host: 'evil.example.com' }), res)
 
     expect(res.statusCode).toBe(403)
-    expect(res.payload).toMatchObject({ error: 'INVALID_REQUEST' })
+    expect(res.payload).toMatchObject({ ok: false, error: 'INVALID_REQUEST' })
+    expect((res.payload as { message: string }).message).toContain('--trusted-host')
   })
 
   it('returns a successful payload with redaction applied', async () => {

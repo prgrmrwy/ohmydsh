@@ -56,7 +56,8 @@ async function call<T>(path: string, body: unknown = {}): Promise<T> {
   const response = await fetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    // Same-origin only: the Host additionally enforces loopback and origin.
+    // Same-origin only: the Host additionally enforces a loopback (or
+    // DSH-trusted) host and a matching origin.
     credentials: 'same-origin',
     body: JSON.stringify(body),
   })

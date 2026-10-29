@@ -8,7 +8,8 @@
  *
  * Trust model has two layers: DSH's official Connection fence proves the
  * persistent browser session before dispatch, then Pet independently requires
- * a loopback Host plus same-origin browser markers. Both fail closed.
+ * a loopback Host (or one DSH's fence admitted via `--trusted-host`) plus
+ * same-origin browser markers. Both fail closed.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -62,7 +63,10 @@ export function authorizeBrowserRequest(
   res: ServerResponse,
 ): boolean {
   const rejection = fence.requestRejection(req)
-  if (rejection === undefined) return true
+  if (rejection === undefined) {
+    fenceAdmitted.add(req)
+    return true
+  }
   res.writeHead(rejection, {
     'cache-control': 'no-store',
     'content-type': 'text/plain; charset=utf-8',
@@ -91,26 +95,45 @@ export function withBrowserAuth(
 }
 
 /**
- * Prove the request came from this machine's own DSH page.
+ * Requests DSH's Connection fence admitted in this process. Pet's own check
+ * accepts a non-loopback `Host` only for these, so a route mounted without the
+ * fence stays loopback-only instead of silently trusting any authority.
+ */
+const fenceAdmitted = new WeakSet<IncomingMessage>()
+
+/** Hostname of a lower-cased `Host` header, IPv6 unbracketed. */
+function hostnameOf(host: string): string {
+  return host.startsWith('[') ? host.slice(1, host.indexOf(']')) : (host.split(':')[0] ?? '')
+}
+
+/**
+ * Prove the request came from this machine's own DSH page, or from a
+ * same-origin page on an authority DSH's own fence already trusts
+ * (`--trusted-host`).
  *
- * Both checks must pass: a loopback `Host` and, when present, a matching
- * `Origin`. A cross-origin page therefore cannot drive Pet mutations.
+ * Both checks must pass: a loopback (or fence-admitted) `Host` and, when
+ * present, a matching `Origin`. A cross-origin page therefore cannot drive Pet
+ * mutations. Pet keeps no host list of its own: which domains are served is a
+ * single deployment decision made on DSH.
  * @param req - Incoming request.
  * @returns whether the request is trusted.
  */
 export function isTrustedRequest(req: IncomingMessage): boolean {
   const host = (req.headers.host ?? '').toLowerCase()
-  const hostname = host.startsWith('[') ? host.slice(1, host.indexOf(']')) : (host.split(':')[0] ?? '')
-  const loopback = hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1'
-  if (!loopback) return false
+  const hostname = hostnameOf(host)
+  const loopbackNames = new Set(['127.0.0.1', 'localhost', '::1'])
+  const loopback = loopbackNames.has(hostname)
+  if (!loopback && (host === '' || !fenceAdmitted.has(req))) return false
 
   const origin = req.headers.origin
   if (origin === undefined || origin === 'null') return true
   try {
-    const originHost = new URL(origin).hostname.toLowerCase()
+    const originUrl = new URL(origin)
+    // A non-loopback authority must be exactly same-origin, port included.
+    if (!loopback) return originUrl.host.toLowerCase() === host
+    const originHost = originUrl.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1')
     if (originHost === hostname) return true
-    const loopbackNames = new Set(['127.0.0.1', 'localhost', '::1'])
-    return loopbackNames.has(originHost) && loopbackNames.has(hostname)
+    return loopbackNames.has(originHost)
   } catch {
     return false
   }
@@ -309,8 +332,9 @@ export function petRoute(
       if (!isTrustedRequest(req)) {
         // Fail closed without revealing whether the route exists.
         sendJson(res, 403, {
+          ok: false,
           error: 'INVALID_REQUEST',
-          message: 'Pet management is restricted to same-origin loopback requests',
+          message: 'Pet management accepts only same-origin requests on a loopback host or a host DSH itself trusts (--trusted-host)',
         })
         return
       }

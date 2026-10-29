@@ -203,6 +203,14 @@ Pet never reads, copies or stores provider credentials. It records only the sele
 
 The management surface is made of exact paths with a strict body allowlist, restricted to same-origin loopback requests. There is deliberately **no** generic RPC bridge: no `callDshRpc`, no arbitrary prompt, no arbitrary filesystem path outside the dedicated validated import operation, and no channel destination pass-through. Unknown request fields are rejected rather than ignored, and responses are redacted before they reach the browser.
 
+### Serving Pet behind a domain
+
+Every management call passes two checks: DSH's own Connection fence (Host/Origin plus the browser-session cookie), then Pet's origin check. Pet keeps no host list of its own. It accepts a loopback host, or a host the DSH fence has just admitted for this request; either way `Origin`, when present, must match `Host` (for a non-loopback host, exactly, port included).
+
+So serving Pet through a domain needs nothing beyond what DSH itself needs: start `dsh web` with `--trusted-host <domain>` (with ohmydsh, `DSH_TRUSTED_HOSTS=<domain>` in the gitignored `.env.local`). A route mounted without the DSH fence stays loopback-only.
+
+This opens the whole management surface (Skill import, configuration, Invocations) to that domain, just as `--trusted-host` already opens every DSH session to it. Put an authentication layer you control in front of a public address; the DSH cookie still applies, but it should not be the only gate.
+
 ## Runtime state and lifecycle
 <!-- section: runtime-state -->
 

@@ -5,7 +5,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { petApi, PetApiError } from '../src/client/api.js'
+import { petRoute } from '../src/host/http.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -49,6 +51,24 @@ describe('a non-JSON response is reported as what it is', () => {
       code: 'INVALID_REQUEST',
       message: 'bad field',
     })
+  })
+
+  it('shows why the Pet origin check refused, not a missing ok marker', async () => {
+    // Feed the real route's 403 body to the client.
+    let status = 0
+    let body = ''
+    const res = {
+      writeHead(code: number) { status = code; return res },
+      end(text: string) { body = text },
+    } as unknown as ServerResponse
+    await petRoute('/dsh-pet/api/config', async () => ({}))
+      .handler({ headers: { host: 'a.example.com' }, method: 'GET' } as IncomingMessage, res)
+    respond(status, body)
+
+    const error = await petApi.config().catch((cause: unknown) => cause as PetApiError)
+    expect(status).toBe(403)
+    expect(error.message).toContain('--trusted-host')
+    expect(error.message).not.toContain('ok 标记')
   })
 
   it('returns data on success', async () => {
