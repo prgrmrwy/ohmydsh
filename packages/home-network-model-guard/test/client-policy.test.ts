@@ -13,7 +13,7 @@ const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve()
 
 function mount(call: ReturnType<typeof vi.fn>) {
   const blocks = new Map<string, any>()
-  const selection = { provider: 'dsh-magpie-connector', model: 'claude/opus' }
+  const selection = { provider: 'dsh-magpie-connector-claude', model: 'claude/opus' }
   const snapshot = { current: selection, routable: true }
   const store = { getSnapshot: () => snapshot, subscribe: () => () => {} }
   const ctx: any = {
@@ -34,7 +34,7 @@ it('unblocks Magpie after policy arrives while Geo remains pending; refresh fail
   const call = vi.fn(async (_channel, endpoint) => {
     if (endpoint === 'policy') {
       if (fail) throw new Error('offline')
-      return { ok: true, value: { exemptProviders: ['dsh-magpie-connector'] } }
+      return { ok: true, value: { exemptProviders: ['dsh-magpie-connector-claude'] } }
     }
     return new Promise(() => {}) // Geo never finishes
   })
@@ -51,7 +51,7 @@ it('unblocks Magpie after policy arrives while Geo remains pending; refresh fail
 
 it('refreshes policy periodically after a successful Geo answer and applies revocation', async () => {
   vi.useFakeTimers()
-  let providers = ['dsh-magpie-connector']
+  let providers = ['dsh-magpie-connector-claude']
   const blocks = mount(vi.fn(async (_channel, endpoint) => ({ ok: true, value: endpoint === 'policy' ? { exemptProviders: providers } : { verdict: 'blocked', degraded: false } })))
   await flush()
   expect(blocks.has('s')).toBe(false)
@@ -73,14 +73,14 @@ it('ignores stale policy responses after a forced settings refresh', async () =>
   }))
   window.dispatchEvent(new Event(GUARD_CONFIG_CHANGED))
   await flush()
-  resolveOld({ ok: true, value: { exemptProviders: ['dsh-magpie-connector'] } })
+  resolveOld({ ok: true, value: { exemptProviders: ['dsh-magpie-connector-claude'] } })
   await flush()
   expect(blocks.has('s')).toBe(true)
 })
 
 it('settings saves the list, preserves timing fields, emits refresh, and allows an empty list', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const config = { ...DEFAULT_CONFIG, exemptProviders: ['dsh-magpie-connector'], timeoutMs: 1234, ttlMs: 98765 }
+  const config = { ...DEFAULT_CONFIG, exemptProviders: ['dsh-magpie-connector-claude'], timeoutMs: 1234, ttlMs: 98765 }
   const call = vi.fn(async (_channel, endpoint, params) => {
     if (endpoint === 'set-config') return { ok: true, value: {} }
     return { ok: true, value: { verdict: 'unknown', degraded: true, config, configEpoch: '1' } }

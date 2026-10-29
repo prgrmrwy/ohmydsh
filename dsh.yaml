@@ -159,7 +159,7 @@ customizations:
     version: 0.1.0
     enabled: true
     brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
-    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 dsh-magpie-connector,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道默认仅回环可达;本机 .env.local 的 DSH_TRUSTED_HOSTS 会把它一并放宽到所列域名(前面必须另有认证层,不得顺手添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
+    note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 Magpie 各归属 route,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道默认仅回环可达;本机 .env.local 的 DSH_TRUSTED_HOSTS 会把它一并放宽到所列域名(前面必须另有认证层,不得顺手添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
   - id: auto-model-routing
     type: package
     source: local
@@ -412,5 +412,5 @@ customizations:
   - id: home-network-model-guard-config
     type: patch
     enabled: true
-    brief: 出口守卫默认豁免 dsh-magpie-connector provider
-    note: 'change guard-provider-exemptions。仅按真实 route ID 精确匹配，UI 分组无关；本机设置可用 exemptProviders:[] 撤销。删除旧 dsh-magpie-connect 接入，本机数据与旧会话保留。回滚：禁用本 patch 并确认本机配置无显式豁免，再 build+重启。'
+    brief: 出口守卫默认豁免 Magpie 各归属 route（dsh-magpie-connector-<owner>）
+    note: 'change guard-provider-exemptions + magpie-owner-routes。逐个列出 Magpie 0.3.0 的归属 route（claude/codex/opencode-go/deepseek/other），仅按真实 route ID 精确匹配，不按前缀；网关新增归属时需在此补列，否则其 Claude 模型按 fail-closed 拦截；本机设置可用 exemptProviders:[] 撤销。删除旧 dsh-magpie-connect 接入，本机数据与旧会话保留。回滚：禁用本 patch 并确认本机配置无显式豁免，再 build+重启。'

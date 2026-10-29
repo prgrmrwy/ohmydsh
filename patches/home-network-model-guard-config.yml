@@ -1,6 +1,11 @@
 # Explicit deployment default; the host's config.json can override with [].
+# Magpie registers one route per gateway owner (dsh-magpie-connector-<owner>); list each exactly — no prefix matching.
 - id: dsh-home-network-model-guard
   name: dsh-home-network-model-guard
   config:
     exemptProviders:
-      - dsh-magpie-connector
+      - dsh-magpie-connector-claude
+      - dsh-magpie-connector-codex
+      - dsh-magpie-connector-opencode-go
+      - dsh-magpie-connector-deepseek
+      - dsh-magpie-connector-other

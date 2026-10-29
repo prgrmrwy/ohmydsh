@@ -11,45 +11,47 @@ import { NetworkVerdictCache } from '../src/network.js'
 import { parse } from 'yaml'
 import { readFileSync } from 'node:fs'
 
-const magpie = { provider: 'dsh-magpie-connector', model: 'claude/claude-opus-5-5' }
+const MAGPIE_ROUTES = ['dsh-magpie-connector-claude', 'dsh-magpie-connector-codex', 'dsh-magpie-connector-opencode-go', 'dsh-magpie-connector-deepseek', 'dsh-magpie-connector-other']
+const magpie = { provider: 'dsh-magpie-connector-claude', model: 'claude/claude-opus-5-5' }
 const dirs: string[] = []
 const temporary = () => { const dir = mkdtempSync(path.join(tmpdir(), 'guard-exempt-')); dirs.push(dir); return dir }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 
 it('matches only the actual provider identity while preserving Claude classification', () => {
   expect(isClaudeFamily(magpie.provider, magpie.model)).toBe(true)
-  expect(requiresEgressGuard(magpie.provider, magpie.model, ['dsh-magpie-connector'])).toBe(false)
-  for (const provider of ['claude', 'anthropic', 'dsh-magpie-connect', 'dsh-magpie-connector-other', 'DSH-MAGPIE', 'Magpie (Claude)']) {
-    expect(requiresEgressGuard(provider, magpie.model, ['dsh-magpie-connector'])).toBe(true)
+  expect(requiresEgressGuard(magpie.provider, magpie.model, ['dsh-magpie-connector-claude'])).toBe(false)
+  // Retired single route, a new gateway owner, prefixes and UI labels never inherit the exemption.
+  for (const provider of ['claude', 'anthropic', 'dsh-magpie-connect', 'dsh-magpie-connector', 'dsh-magpie-connector-anthropic', 'dsh-magpie-connector-claude2', 'DSH-MAGPIE', 'Magpie (Claude)']) {
+    expect(requiresEgressGuard(provider, magpie.model, ['dsh-magpie-connector-claude'])).toBe(true)
   }
 })
 
 describe('config precedence and validation', () => {
   it('defaults to no exemption and deduplicates exact route IDs', () => {
     expect(validateGuardConfig({})).toMatchObject({ ok: true, config: { exemptProviders: [] } })
-    expect(validateGuardConfig({ exemptProviders: ['dsh-magpie-connector', 'dsh-magpie-connector', 'Other'] })).toMatchObject({ ok: true, config: { exemptProviders: ['dsh-magpie-connector', 'Other'] } })
-    for (const exemptProviders of [null, '*', ['*'], [''], ['Magpie (Claude)'], [5], [' dsh-magpie-connector'], ['x'.repeat(129)], Array(65).fill('a')]) {
+    expect(validateGuardConfig({ exemptProviders: ['dsh-magpie-connector-claude', 'dsh-magpie-connector-claude', 'Other'] })).toMatchObject({ ok: true, config: { exemptProviders: ['dsh-magpie-connector-claude', 'Other'] } })
+    for (const exemptProviders of [null, '*', ['*'], [''], ['Magpie (Claude)'], [5], [' dsh-magpie-connector-claude'], ['x'.repeat(129)], Array(65).fill('a')]) {
       expect(validateGuardConfig({ exemptProviders }).ok).toBe(false)
     }
   })
 
   it('inherits deployment defaults, supports explicit empty override, and fails closed on invalid files', async () => {
     const file = path.join(temporary(), 'config.json')
-    expect(loadGuardConfig(file, ['dsh-magpie-connector']).exemptProviders).toEqual(['dsh-magpie-connector'])
+    expect(loadGuardConfig(file, ['dsh-magpie-connector-claude']).exemptProviders).toEqual(['dsh-magpie-connector-claude'])
     writeFileSync(file, '{}')
-    expect(loadGuardConfig(file, ['dsh-magpie-connector']).exemptProviders).toEqual(['dsh-magpie-connector'])
+    expect(loadGuardConfig(file, ['dsh-magpie-connector-claude']).exemptProviders).toEqual(['dsh-magpie-connector-claude'])
     await writeGuardConfig(file, { exemptProviders: [], timeoutMs: 3456 })
-    expect(loadGuardConfig(file, ['dsh-magpie-connector'])).toMatchObject({ exemptProviders: [], timeoutMs: 3456 })
+    expect(loadGuardConfig(file, ['dsh-magpie-connector-claude'])).toMatchObject({ exemptProviders: [], timeoutMs: 3456 })
     writeFileSync(file, '{"exemptProviders":["*"]}')
-    expect(loadGuardConfig(file, ['dsh-magpie-connector']).exemptProviders).toEqual([])
+    expect(loadGuardConfig(file, ['dsh-magpie-connector-claude']).exemptProviders).toEqual([])
     writeFileSync(file, 'broken')
-    expect(loadGuardConfig(file, ['dsh-magpie-connector']).exemptProviders).toEqual([])
+    expect(loadGuardConfig(file, ['dsh-magpie-connector-claude']).exemptProviders).toEqual([])
   })
 })
 
 it.each(['blocked', 'unknown'] as const)('bypasses Geo only for exempt providers on %s and observes revocation live', async verdict => {
   const check = vi.fn(async () => ({ verdict, degraded: false }))
-  let providers = ['dsh-magpie-connector']
+  let providers = ['dsh-magpie-connector-claude']
   const gate = createEgressGate(check, undefined, () => providers)
   const next = vi.fn(() => (async function* () { yield { type: 'text-delta', index: 0, text: 'ok' } as const })())
   const consume = async (options: typeof magpie) => { for await (const _ of gate(options as never, next)) {} }
@@ -71,12 +73,12 @@ it.each(['blocked', 'unknown'] as const)('clears only its own composer block on 
     setBlock: (_, value) => { block = value }, reason: () => 'guard' })
   guard.evaluate('s')
   expect(block?.reason).toBe('guard')
-  providers = ['dsh-magpie-connector']; selection = magpie
+  providers = ['dsh-magpie-connector-claude']; selection = magpie
   guard.evaluate('s')
   expect(block).toBeUndefined()
   providers = []; guard.evaluate('s')
   expect(block?.reason).toBe('guard')
-  block = { reason: 'foreign' }; providers = ['dsh-magpie-connector']; guard.evaluate('s')
+  block = { reason: 'foreign' }; providers = ['dsh-magpie-connector-claude']; guard.evaluate('s')
   expect(block?.reason).toBe('foreign')
 })
 
@@ -86,8 +88,8 @@ it('serves effective Host policy without Geo, applies persisted revocation at th
   let handler: any, gate: any
   const ctx: any = { logger: () => ({ info: vi.fn() }), on: (_: string, fn: any) => { gate = fn },
     inject: (_: string[], fn: any) => fn(ctx), get: () => ({ rpc: { handle: (_: string, fn: any) => { handler = fn } } }), effect: (fn: any) => fn() }
-  apply(ctx, { exemptProviders: ['dsh-magpie-connector'] })
-  expect(await handler('policy')).toEqual({ ok: true, value: { exemptProviders: ['dsh-magpie-connector'] } })
+  apply(ctx, { exemptProviders: ['dsh-magpie-connector-claude'] })
+  expect(await handler('policy')).toEqual({ ok: true, value: { exemptProviders: ['dsh-magpie-connector-claude'] } })
   expect(check).not.toHaveBeenCalled()
   const next = vi.fn(() => (async function* () {})())
   for await (const _ of gate(magpie, next)) {}
@@ -99,10 +101,10 @@ it('serves effective Host policy without Geo, applies persisted revocation at th
   expect(loadGuardConfig(configPathOf(process.env.DSH_HOME!)).exemptProviders).toEqual([])
 })
 
-it('removes the old connect manifest entry and explicitly configures only dsh-magpie-connector', () => {
+it('removes the old connect manifest entry and explicitly lists each Magpie owner route', () => {
   const manifest = parse(readFileSync(new URL('../../../dsh.yaml', import.meta.url), 'utf8'))
   expect(manifest.customizations.some((c: any) => c.id === 'dsh-magpie-connect')).toBe(false)
   expect(manifest.customizations.find((c: any) => c.id === 'home-network-model-guard-config').enabled).toBe(true)
   const patch = parse(readFileSync(new URL('../../../patches/home-network-model-guard-config.yml', import.meta.url), 'utf8'))
-  expect(patch).toEqual([{ id: 'dsh-home-network-model-guard', name: 'dsh-home-network-model-guard', config: { exemptProviders: ['dsh-magpie-connector'] } }])
+  expect(patch).toEqual([{ id: 'dsh-home-network-model-guard', name: 'dsh-home-network-model-guard', config: { exemptProviders: MAGPIE_ROUTES } }])
 })
