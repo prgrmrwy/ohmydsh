@@ -47,7 +47,12 @@ jobs:
           tag="v$version"
           # Download the registry artifact so GitHub and npm distribute identical bytes.
           assets="$(mktemp -d)"
-          npm pack "$name@$version" --ignore-scripts --pack-destination "$assets" --silent
+          # A fresh publish can take minutes to become downloadable; retry before failing.
+          for attempt in $(seq 1 20); do
+            if npm pack "$name@$version" --ignore-scripts --pack-destination "$assets" --silent; then break; fi
+            if [ "$attempt" = 20 ]; then echo "npm tarball for $name@$version still unavailable" >&2; exit 1; fi
+            sleep 30
+          done
           node --input-type=module - "$version" "$assets/notes.md" <<'NODE'
           import fs from 'node:fs'
           const [version, output] = process.argv.slice(2)
