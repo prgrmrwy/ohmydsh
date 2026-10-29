@@ -157,8 +157,6 @@ npm 的搜索结果、包详情页、registry 是不同入口；搜索暂时不�
 url: https://github.com/<owner>/<repo>
 name: <owner>/<repo>
 category: model
-# 若条目声明固定 tarball，必须对应已发布且可下载的 Release 附件。
-tarball: https://github.com/<owner>/<repo>/releases/download/v<版本>/<包名>-<版本>.tgz
 description:
   en: 'One factual sentence describing the plugin.'
   zh: '一句描述实际能力的中文说明。'
@@ -167,7 +165,7 @@ description:
 - category 必须在上游允许列表中，不是所有插件都选 model。
 - name 与 url 身份一致，文件名按上游 slug 规则生成；字段只用上游支持的项，不自加 npm 字段。
 - description.en 单行、以句号结尾；含 YAML 特殊字符时加引号，不写尚未实现的功能或营销结论。
-- tarball 是否需要由商店当前安装机制与条目决定；本仓默认提供 Release 安装包，因此填写时直接使用同版附件。
+- **已发 npm 的插件不写 `tarball:`。** 商店（`scripts/build-site.mjs` 的 `cardCmd` 与详情页安装命令）在插件映射到 npm 时，首选不带版本的 `dsh plugin --profile web add <npm包名>`，始终是最新版；`tarball:` 只会多出一条备选命令，写成固定版本还会随发版过时。只有不发 npm 的插件才需要它，此时指向已发布的 Release 附件。
 - 用上游 `readEntries()` / `validateEntries(entries)` 先本地预校验，再提交自己的 fork 分支和 PR；不手改上游生成的 README/catalog。
 - PR 创建、CI 通过、合并、商店实际展示是四个状态，逐项核验和报告。
 
@@ -183,7 +181,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 | 发布功能、修复或更新 npm README/GIF | 升包版本，写 CHANGELOG，同步 manifest、锁文件和版本 fixture | 镜像更新 → 新 tag → 检查/构建 → npm → GitHub Release 与附件 |
 | 只改主仓 manifest 或根 workflow | 不涉及包目录的 push 可能不触发镜像 | 需要时手动运行 Mirror release；不误判为失败 |
 
-发布后按第 6 节独立核验各分发面。若商店条目有固定旧版 `tarball:`，需另提更新该 URL 的 PR；当前自动发布 workflow **不会自动改商店条目**。未固定 tarball 的条目按上游采集机制核验，不虚构更新已到达用户端。
+发布后按第 6 节独立核验各分发面。商店安装命令与详情页 README 分别跟随 npm 最新版和仓库，发版后无需改商店条目；当前自动发布 workflow 也**不会改商店条目**。未固定 tarball 的条目按上游采集机制核验，不虚构更新已到达用户端。
 
 ## 9. 每次交付的执行清单
 
@@ -194,7 +192,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 - [ ] 需发布时更新包版本、CHANGELOG、manifest、锁文件及 fixture，完成本地和独立布局验证。
 - [ ] 推 main 后两端 Actions 成功，registry 版本存在且可装，Release/tag/说明/附件一致。
 - [ ] 首次上架先本地校验条目，再提 PR；记录 CI/合并/商店展示状态。
-- [ ] 既有固定 tarball 条目跟进更新；生产部署与 Host 重启另行处理。
+- [ ] 生产部署与 Host 重启另行处理（商店条目无需随发版更新）。
 
 ## 10. 失败补救与禁止事项
 
@@ -209,7 +207,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 | Release 步骤 `npm pack` 404（刚发布） | registry 元数据已有新版但 tarball 端点尚未传播（实测约 3 分钟）。workflow 已对 `npm pack` 重试 20×30s；旧 workflow 失败时等可下载后 dispatch 同版本补 Release，无需升版 |
 | npm 图挂了 | 检查 repository.directory、镜像相对路径与资源访问。修正 README/元数据后需新 npm 版本才能更新包页 |
 | 本机 pack 测试报 JSON 不可迭代 | 核验 npm 版本与实际输出；npm 11 常见数组、npm 12 可返回包名索引对象，两种都应兼容 |
-| 商店仍装旧版 | 检查条目是否固定 tarball、PR 是否合并及采集刷新，不能只看 npm latest |
+| 商店仍装旧版 | 先看主安装命令是否为 npm（需 `repository` 指回镜像，商店才会映射 npm）及采集刷新时间；条目里的固定 `tarball:` 只影响备选命令 |
 
 禁止覆盖已发布 npm 版本、移动已发布版本 tag、上传不同重建包冒充 npm 原包，或把临时/原始会话证据放进发布包。通用 CI、发布验收与 DSH 运行兼容是不同证据，不互相替代。
 
