@@ -4,12 +4,20 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+from socketserver import TCPServer
 import sys
 from urllib.parse import unquote
 from _model import ModelError, require
 from build_catalog import build
 
 CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+
+
+class LoopbackHTTPServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer's reverse DNS lookup can stall readiness on offline runners.
+        TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 def create_server(checking_dir, port=0, static_dir=None):
@@ -83,7 +91,7 @@ def create_server(checking_dir, port=0, static_dir=None):
             else:
                 self.reply(404, b'Not found')
 
-    return ThreadingHTTPServer(('127.0.0.1', port), Handler)
+    return LoopbackHTTPServer(('127.0.0.1', port), Handler)
 
 
 def select_directory(directory=None, workspace=None):
