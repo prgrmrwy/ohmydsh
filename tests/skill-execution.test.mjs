@@ -6,7 +6,7 @@ import os from 'node:os'
 import { spawnSync } from 'node:child_process'
 const ROOT = path.resolve(import.meta.dirname, '..')
 async function fixture(t, skill) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'skill 中文 space '))
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'skill 中文 space ')))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   const dir = path.join(root, 'deployed-skill')
   await fs.cp(path.join(ROOT, 'skills', skill), dir, { recursive: true })
