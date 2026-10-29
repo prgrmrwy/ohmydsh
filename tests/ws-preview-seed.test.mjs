@@ -44,6 +44,10 @@ test('seed allowlist, credential exclusion, exact auth, idempotence and preview-
   assert.equal(await fs.readFile(path.join(f.home, 'sessions/local'), 'utf8'), 'preview session')
   await assert.rejects(fs.stat(path.join(f.home, 'sessions/source')))
   assert.equal((await fs.stat(path.join(f.home, SEED_FILES[0]))).mode & 0o777, 0o600)
+  // Without its lines the Magpie connector registers no route in the preview.
+  const magpie = 'plugins/dsh-magpie-connector/settings.json'
+  assert.equal(await fs.readFile(path.join(f.home, magpie), 'utf8'), await fs.readFile(path.join(f.source, magpie), 'utf8'))
+  assert.equal((await fs.stat(path.join(f.home, magpie))).mode & 0o777, 0o600)
   assert.equal(first.port, (await seedPreview(options)).port)
   assert.equal(await fs.readFile(path.join(f.source, SEED_FILES[0]), 'utf8'), sourceAuth)
   assert.equal(await fs.readFile(path.join(f.source, '.credentials.yaml'), 'utf8'), sourceCredentials)

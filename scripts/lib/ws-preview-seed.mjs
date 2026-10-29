@@ -8,6 +8,8 @@ export const SEED_FILES = [
   'plugins/subscriptions/auth.json', 'plugins/subscriptions/models.json',
   'plugins/subscriptions/model-defaults.json', 'plugins/subscriptions/provider-settings.json',
   'plugins/dsh-auto-model-routing/config.json',
+  // Gateway lines only; their keys travel with .credentials.yaml.
+  'plugins/dsh-magpie-connector/settings.json',
 ]
 export const PATCH_IDS = ['agent-default-model', 'llm-deepseek', 'llm-pi-ai', 'subagent-model-selection-settings', 'permission', 'dsh-memex']
 export const PATCH_ANCHOR = '- insert: [] # ohmydsh: anchor keeps rows the runtime appends below the generated region'

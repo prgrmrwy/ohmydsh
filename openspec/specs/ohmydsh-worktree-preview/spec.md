@@ -11,13 +11,18 @@ ohmydsh 的 `.ws/prepare-preview` SHALL 只写入 `WS_DSH_HOME` 与本 worktree 
 - `plugins/subscriptions/` 下的 `auth.json`（原样复制，含 refresh token）、`models.json`、`model-defaults.json`、`provider-settings.json`；
 - `profiles/web/cordis.patch.yml` 生成区之外、id 命中白名单的行：默认模型、LLM provider、子会话模型白名单、权限预设、`dsh-memex`；
 - `profiles/web/.npmrc` 的 registry 行；
-- `plugins/dsh-auto-model-routing/config.json`。
+- `plugins/dsh-auto-model-routing/config.json`；
+- `plugins/dsh-magpie-connector/settings.json`（连接线路与可见模型；其 key 已随 `.credentials.yaml` 复制）。
 
 白名单在仓库中以单一声明维护。白名单之外的内容 MUST NOT 复制，包括 `sessions/`、`storages/`、`state/` 和日志。复制 MUST 是独立文件，不得使用链接；写入文件权限 MUST 为 0600。
 
 #### Scenario: Fresh worktree reaches a usable model without setup
 - **WHEN** 用户在 worktree 中依次执行 `dsh build`、`ws prepare-preview`、`dsh`
 - **THEN** 启动的 Host SHALL 直接使用与真实 home 相同的默认模型与 provider，MUST NOT 停在要求输入 API Key 或选择模型的初始化流程
+
+#### Scenario: Magpie connector lines reach the preview
+- **WHEN** 真实 home 存在 `plugins/dsh-magpie-connector/settings.json`，执行 prepare-preview
+- **THEN** 隔离 home 中 SHALL 出现内容相同、权限 0600 的独立副本，真实 home 的文件 MUST NOT 被修改
 
 #### Scenario: Sessions and history are never copied
 - **WHEN** prepare-preview 完成
