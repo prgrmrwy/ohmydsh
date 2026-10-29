@@ -7,4 +7,4 @@
 ## 2. Integration
 
 - [x] 2.1 验证Linux完整测试、artifact、strict、diff；原生Windows无Bash执行聚焦合同并披露未跑平台。
-- [ ] 2.2 复核完整diff与归档冲突处理，提交并用受控流程合入推送；记录已知限制，不重启或清理worktree。
+- [x] 2.2 复核完整diff与归档冲突处理，提交并用受控流程合入推送；记录已知限制，不重启或清理worktree。
