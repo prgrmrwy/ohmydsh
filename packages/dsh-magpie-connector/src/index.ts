@@ -10,7 +10,6 @@ import { registerRoutes } from './host/routes.js'
 import { SpeedController } from './host/speed.js'
 import { createDisposer } from './host/dispose.js'
 import { createRouteRegistrar, type RouteRegistrar } from './host/registrar.js'
-import { routeOf } from './host/catalog.js'
 export { MagpieRuntime, lineCredentialRefs, lineIdOfCredentialRef } from './host/runtime.js'
 export { MagpieAdapter, mapUsage } from './host/adapter.js'
 export { SettingsStore } from './host/settings.js'
@@ -25,9 +24,7 @@ export function apply(ctx: Context, config: Config = {}) {
   // Declared first, assigned below: the runtime's publish callback and the adapter reference each other.
   let adapter!: MagpieAdapter
   let registrar!: RouteRegistrar
-  // Until owner persistence lands the route set is the held routes plus the owners of the current catalog.
-  const derived = () => [...new Set([...registrar.current(), ...runtime.current.catalog.map(m => routeOf(m.owner))])]
-  const runtime = new MagpieRuntime(ctx.credentials, new SettingsStore(resolve(home, 'plugins/dsh-magpie-connector/settings.json')), routes => { registrar.publish(routes ?? derived()) })
+  const runtime = new MagpieRuntime(ctx.credentials, new SettingsStore(resolve(home, 'plugins/dsh-magpie-connector/settings.json')), routes => registrar.publish(routes ?? runtime.routeSet()))
   const speed = new SpeedController()
   adapter = new MagpieAdapter(runtime, ctx.get('attachments'), session => speed.get(session).tier === 'fast')
   registrar = createRouteRegistrar(ctx.llm, adapter)

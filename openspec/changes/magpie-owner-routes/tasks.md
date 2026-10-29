@@ -1,7 +1,7 @@
 ## 0. 基础设施
 
 - [x] 0.1 新增 `test/support/host.ts` 真实宿主夹具（真实 Cordis + LlmRuntime、外来 adapter、INVARIANT 监听器注入）与可失败的 SettingsStore writer
-- [ ] 0.2 `SettingsStore`/runtime：新增同步 `writeSettings(patch)`（以写入时刻 store 已知字段为基底），`cleanSettings`/`savePreferences`/pending 标记改走它；跑全量测试保持绿
+- [x] 0.2 `SettingsStore`/runtime：新增同步 `writeSettings(patch)`（以写入时刻 store 已知字段为基底），`cleanSettings`/`savePreferences`/pending 标记改走它；跑全量测试保持绿
 
 ## 1. 按网关归属注册 route
 
@@ -50,69 +50,69 @@
 
 ## 4. 归属 route 持久
 
-- [ ] 4.1 Write failing test `test_owner_persistence_01` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「重启后 route 身份在同步前即存在」(assert it fails for the right reason)
-- [ ] 4.2 Implement「重启后 route 身份在同步前即存在」per design; run `test_owner_persistence_01` to pass
-- [ ] 4.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.4 Write failing test `test_owner_persistence_02` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「首次安装在同步前不注册 route」(assert it fails for the right reason)
-- [ ] 4.5 Implement「首次安装在同步前不注册 route」per design; run `test_owner_persistence_02` to pass
-- [ ] 4.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.7 Write failing test `test_owner_persistence_03` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「首次配置经设置请求同步出归属后注册」(assert it fails for the right reason)
-- [ ] 4.8 Implement「首次配置经设置请求同步出归属后注册」per design; run `test_owner_persistence_03` to pass
-- [ ] 4.9 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.10 Write failing test `test_owner_persistence_04` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「resync 发现新归属不自锁」(assert it fails for the right reason)
-- [ ] 4.11 Implement「resync 发现新归属不自锁」per design; run `test_owner_persistence_04` to pass
-- [ ] 4.12 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.13 Write failing test `test_owner_persistence_05` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「新归属被持久并发布」(assert it fails for the right reason)
-- [ ] 4.14 Implement「新归属被持久并发布」per design; run `test_owner_persistence_05` to pass
-- [ ] 4.15 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.16 Write failing test `test_owner_persistence_06` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「保存 knownOwners 失败时仍发布已有 route 的目录变化」(assert it fails for the right reason)
-- [ ] 4.17 Implement「保存 knownOwners 失败时仍发布已有 route 的目录变化」per design; run `test_owner_persistence_06` to pass
-- [ ] 4.18 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.19 Write failing test `test_owner_persistence_07` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「replace 冲突时撤回追加并发布目录」(assert it fails for the right reason)
-- [ ] 4.20 Implement「replace 冲突时撤回追加并发布目录」per design; run `test_owner_persistence_07` to pass
-- [ ] 4.21 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.22 Write failing test `test_owner_persistence_08` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「撤回写入失败时下次启动按启动失败处理」(assert it fails for the right reason)
-- [ ] 4.23 Implement「撤回写入失败时下次启动按启动失败处理」per design; run `test_owner_persistence_08` to pass
-- [ ] 4.24 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.25 Write failing test `test_owner_persistence_09` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「首次注册 INVARIANT 不当作成功」(assert it fails for the right reason)
-- [ ] 4.26 Implement「首次注册 INVARIANT 不当作成功」per design; run `test_owner_persistence_09` to pass
-- [ ] 4.27 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.28 Write failing test `test_owner_persistence_10` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「线路保存期间的归属追加不被覆盖」(assert it fails for the right reason)
-- [ ] 4.29 Implement「线路保存期间的归属追加不被覆盖」per design; run `test_owner_persistence_10` to pass
-- [ ] 4.30 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.31 Write failing test `test_owner_persistence_11` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「非法 knownOwners 被整体重置且不影响连接」(assert it fails for the right reason)
-- [ ] 4.32 Implement「非法 knownOwners 被整体重置且不影响连接」per design; run `test_owner_persistence_11` to pass
-- [ ] 4.33 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.34 Write failing test `test_owner_persistence_12` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「归属下架后 route 保留」(assert it fails for the right reason)
-- [ ] 4.35 Implement「归属下架后 route 保留」per design; run `test_owner_persistence_12` to pass
-- [ ] 4.36 Refactor; rerun this group's tests, full suite stays green
-- [ ] 4.37 Write failing test `test_owner_persistence_13` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「归属上限按出现顺序截断」(assert it fails for the right reason)
-- [ ] 4.38 Implement「归属上限按出现顺序截断」per design; run `test_owner_persistence_13` to pass
-- [ ] 4.39 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.1 Write failing test `test_owner_persistence_01` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「重启后 route 身份在同步前即存在」(assert it fails for the right reason)
+- [x] 4.2 Implement「重启后 route 身份在同步前即存在」per design; run `test_owner_persistence_01` to pass
+- [x] 4.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.4 Write failing test `test_owner_persistence_02` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「首次安装在同步前不注册 route」(assert it fails for the right reason)
+- [x] 4.5 Implement「首次安装在同步前不注册 route」per design; run `test_owner_persistence_02` to pass
+- [x] 4.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.7 Write failing test `test_owner_persistence_03` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「首次配置经设置请求同步出归属后注册」(assert it fails for the right reason)
+- [x] 4.8 Implement「首次配置经设置请求同步出归属后注册」per design; run `test_owner_persistence_03` to pass
+- [x] 4.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.10 Write failing test `test_owner_persistence_04` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「resync 发现新归属不自锁」(assert it fails for the right reason)
+- [x] 4.11 Implement「resync 发现新归属不自锁」per design; run `test_owner_persistence_04` to pass
+- [x] 4.12 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.13 Write failing test `test_owner_persistence_05` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「新归属被持久并发布」(assert it fails for the right reason)
+- [x] 4.14 Implement「新归属被持久并发布」per design; run `test_owner_persistence_05` to pass
+- [x] 4.15 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.16 Write failing test `test_owner_persistence_06` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「保存 knownOwners 失败时仍发布已有 route 的目录变化」(assert it fails for the right reason)
+- [x] 4.17 Implement「保存 knownOwners 失败时仍发布已有 route 的目录变化」per design; run `test_owner_persistence_06` to pass
+- [x] 4.18 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.19 Write failing test `test_owner_persistence_07` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「replace 冲突时撤回追加并发布目录」(assert it fails for the right reason)
+- [x] 4.20 Implement「replace 冲突时撤回追加并发布目录」per design; run `test_owner_persistence_07` to pass
+- [x] 4.21 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.22 Write failing test `test_owner_persistence_08` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「撤回写入失败时下次启动按启动失败处理」(assert it fails for the right reason)
+- [x] 4.23 Implement「撤回写入失败时下次启动按启动失败处理」per design; run `test_owner_persistence_08` to pass
+- [x] 4.24 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.25 Write failing test `test_owner_persistence_09` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「首次注册 INVARIANT 不当作成功」(assert it fails for the right reason)
+- [x] 4.26 Implement「首次注册 INVARIANT 不当作成功」per design; run `test_owner_persistence_09` to pass
+- [x] 4.27 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.28 Write failing test `test_owner_persistence_10` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「线路保存期间的归属追加不被覆盖」(assert it fails for the right reason)
+- [x] 4.29 Implement「线路保存期间的归属追加不被覆盖」per design; run `test_owner_persistence_10` to pass
+- [x] 4.30 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.31 Write failing test `test_owner_persistence_11` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「非法 knownOwners 被整体重置且不影响连接」(assert it fails for the right reason)
+- [x] 4.32 Implement「非法 knownOwners 被整体重置且不影响连接」per design; run `test_owner_persistence_11` to pass
+- [x] 4.33 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.34 Write failing test `test_owner_persistence_12` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「归属下架后 route 保留」(assert it fails for the right reason)
+- [x] 4.35 Implement「归属下架后 route 保留」per design; run `test_owner_persistence_12` to pass
+- [x] 4.36 Refactor; rerun this group's tests, full suite stays green
+- [x] 4.37 Write failing test `test_owner_persistence_13` in `packages/dsh-magpie-connector/test/owner-persistence.test.ts` for「归属上限按出现顺序截断」(assert it fails for the right reason)
+- [x] 4.38 Implement「归属上限按出现顺序截断」per design; run `test_owner_persistence_13` to pass
+- [x] 4.39 Refactor; rerun this group's tests, full suite stays green
 
 ## 5. 禁用不删除用户数据
 
-- [ ] 5.1 Write failing test `test_owner_dispose_01` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「dispose 不删除数据」(assert it fails for the right reason)
-- [ ] 5.2 Implement「dispose 不删除数据」per design; run `test_owner_dispose_01` to pass
-- [ ] 5.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 5.4 Write failing test `test_owner_dispose_02` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「dispose 时有进行中的请求」(assert it fails for the right reason)
-- [ ] 5.5 Implement「dispose 时有进行中的请求」per design; run `test_owner_dispose_02` to pass
-- [ ] 5.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 5.7 Write failing test `test_owner_dispose_03` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「注册句柄 dispose 抛错时其它清理仍执行」(assert it fails for the right reason)
-- [ ] 5.8 Implement「注册句柄 dispose 抛错时其它清理仍执行」per design; run `test_owner_dispose_03` to pass
-- [ ] 5.9 Refactor; rerun this group's tests, full suite stays green
-- [ ] 5.10 Write failing test `test_owner_dispose_04` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「尚未注册任何 route 时 dispose」(assert it fails for the right reason)
-- [ ] 5.11 Implement「尚未注册任何 route 时 dispose」per design; run `test_owner_dispose_04` to pass
-- [ ] 5.12 Refactor; rerun this group's tests, full suite stays green
+- [x] 5.1 Write failing test `test_owner_dispose_01` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「dispose 不删除数据」(assert it fails for the right reason)
+- [x] 5.2 Implement「dispose 不删除数据」per design; run `test_owner_dispose_01` to pass
+- [x] 5.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 5.4 Write failing test `test_owner_dispose_02` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「dispose 时有进行中的请求」(assert it fails for the right reason)
+- [x] 5.5 Implement「dispose 时有进行中的请求」per design; run `test_owner_dispose_02` to pass
+- [x] 5.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 5.7 Write failing test `test_owner_dispose_03` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「注册句柄 dispose 抛错时其它清理仍执行」(assert it fails for the right reason)
+- [x] 5.8 Implement「注册句柄 dispose 抛错时其它清理仍执行」per design; run `test_owner_dispose_03` to pass
+- [x] 5.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 5.10 Write failing test `test_owner_dispose_04` in `packages/dsh-magpie-connector/test/owner-dispose.test.ts` for「尚未注册任何 route 时 dispose」(assert it fails for the right reason)
+- [x] 5.11 Implement「尚未注册任何 route 时 dispose」per design; run `test_owner_dispose_04` to pass
+- [x] 5.12 Refactor; rerun this group's tests, full suite stays green
 
 ## 6. 旧格式升级（BREAKING）
 
-- [ ] 6.1 Write failing test `test_owner_legacy_upgrade_01` in `packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts` for「升级后旧配置被忽略且不删除」(assert it fails for the right reason)
-- [ ] 6.2 Implement「升级后旧配置被忽略且不删除」per design; run `test_owner_legacy_upgrade_01` to pass
-- [ ] 6.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 6.4 Write failing test `test_owner_legacy_upgrade_02` in `packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts` for「旧格式升级后配置线路即恢复」(assert it fails for the right reason)
-- [ ] 6.5 Implement「旧格式升级后配置线路即恢复」per design; run `test_owner_legacy_upgrade_02` to pass
-- [ ] 6.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 6.1 Write failing test `test_owner_legacy_upgrade_01` in `packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts` for「升级后旧配置被忽略且不删除」(assert it fails for the right reason)
+- [x] 6.2 Implement「升级后旧配置被忽略且不删除」per design; run `test_owner_legacy_upgrade_01` to pass
+- [x] 6.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 6.4 Write failing test `test_owner_legacy_upgrade_02` in `packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts` for「旧格式升级后配置线路即恢复」(assert it fails for the right reason)
+- [x] 6.5 Implement「旧格式升级后配置线路即恢复」per design; run `test_owner_legacy_upgrade_02` to pass
+- [x] 6.6 Refactor; rerun this group's tests, full suite stays green
 
 ## 7. 网关连接与凭据
 

@@ -40,12 +40,12 @@
 | specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 字段映射 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_01 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 畸形条目被丢弃 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_02 | 🔴 red |
 | specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 非法容量值视为缺失 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | dispose 不删除数据 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | dispose 时有进行中的请求 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | 注册句柄 dispose 抛错时其它清理仍执行 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | 尚未注册任何 route 时 dispose | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_04 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 旧格式升级（BREAKING） | 升级后旧配置被忽略且不删除 | packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts | test_owner_legacy_upgrade_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 旧格式升级（BREAKING） | 旧格式升级后配置线路即恢复 | packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts | test_owner_legacy_upgrade_02 | 🔴 red |
+| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | dispose 不删除数据 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | dispose 时有进行中的请求 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | 注册句柄 dispose 抛错时其它清理仍执行 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | 尚未注册任何 route 时 dispose | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 旧格式升级（BREAKING） | 升级后旧配置被忽略且不删除 | packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts | test_owner_legacy_upgrade_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 旧格式升级（BREAKING） | 旧格式升级后配置线路即恢复 | packages/dsh-magpie-connector/test/owner-legacy-upgrade.test.ts | test_owner_legacy_upgrade_02 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 按 owned_by 分组且不按名字猜测 | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_01 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 不可信或大小写不同的 owned_by | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_02 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 按网关归属注册 route | 返回的 provider 等于被请求的 route | packages/dsh-magpie-connector/test/owner-routes.test.ts | test_owner_routes_03 | 🟢 green |
@@ -55,19 +55,19 @@
 | specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 归属 route 上续聊保留推理元数据 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_01 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 跨本插件 route 续聊仍视为同模型 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_02 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 原生回放身份跨 route 稳定 | 篡改或外来回放退化为普通历史 | packages/dsh-magpie-connector/test/owner-replay.test.ts | test_owner_replay_03 | 🟢 green |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 重启后 route 身份在同步前即存在 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次安装在同步前不注册 route | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次配置经设置请求同步出归属后注册 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | resync 发现新归属不自锁 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_04 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 新归属被持久并发布 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_05 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 保存 knownOwners 失败时仍发布已有 route 的目录变化 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_06 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | replace 冲突时撤回追加并发布目录 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_07 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 撤回写入失败时下次启动按启动失败处理 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_08 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次注册 INVARIANT 不当作成功 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_09 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 线路保存期间的归属追加不被覆盖 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_10 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 非法 knownOwners 被整体重置且不影响连接 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_11 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 归属下架后 route 保留 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_12 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 归属上限按出现顺序截断 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_13 | 🔴 red |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 重启后 route 身份在同步前即存在 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次安装在同步前不注册 route | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次配置经设置请求同步出归属后注册 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | resync 发现新归属不自锁 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 新归属被持久并发布 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_05 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 保存 knownOwners 失败时仍发布已有 route 的目录变化 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_06 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | replace 冲突时撤回追加并发布目录 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_07 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 撤回写入失败时下次启动按启动失败处理 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_08 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次注册 INVARIANT 不当作成功 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_09 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 线路保存期间的归属追加不被覆盖 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_10 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 非法 knownOwners 被整体重置且不影响连接 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_11 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 归属下架后 route 保留 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_12 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 归属上限按出现顺序截断 | packages/dsh-magpie-connector/test/owner-persistence.test.ts | test_owner_persistence_13 | 🟢 green |
 
 ## Coverage Notes
 

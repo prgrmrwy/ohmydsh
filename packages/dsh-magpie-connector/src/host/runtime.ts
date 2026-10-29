@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { credentialRef, type CredentialProvider, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import {
-  MAX_LINES, SettingsStore, isAccessMode, normalizeBaseUrl, validateLoadedLines, validatePendingCredentials,
+  MAX_LINES, MAX_OWNERS, SettingsStore, isAccessMode, normalizeBaseUrl, validateLoadedLines, validateKnownOwners, validatePendingCredentials,
   type AccessMode, type CredentialField, type LineSettings, type PendingCredential, type Settings,
 } from './settings.js'
 import { GatewayTransport, validateIdentity, type ConnectionIdentity } from './transport.js'
 import { LineSelector, type Probe } from './selection.js'
-import { mapCatalog, type CatalogModel } from './catalog.js'
+import { mapCatalog, routeOf, type CatalogModel } from './catalog.js'
+import type { PublishResult } from './registrar.js'
 
 export type Credentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>
 
@@ -83,6 +84,12 @@ export class MagpieRuntime {
   private updating = false
   private disposed = false
   private saving = false
+  /** Validated `knownOwners`; the route set is derived from it. */
+  private owners: string[] = []
+  private knownOwnersReset = false
+  private rejectedOwners: string[] = []
+  /** Set once the initial route registration failed: no further owner admission or publishing (needs a Host restart). */
+  private registrationError: { code: string; route?: string } | undefined
   private readonly newId: (existing: readonly string[]) => string
   selectedLineId: string | null = null
   constructor(readonly credentials: Credentials, readonly store = new SettingsStore(), readonly publish: (routes?: string[]) => void = () => {}, options: RuntimeOptions = {}) {
@@ -90,6 +97,35 @@ export class MagpieRuntime {
     this.transport.onConnectionFailure = lineId => this.selector.invalidate(lineId)
     this.newId = options.newId ?? randomHexId
     this.failedFields = this.loadConfig().pending
+    try { this.owners = validateKnownOwners(this.store.value.knownOwners) } catch { this.owners = []; this.knownOwnersReset = true }
+  }
+  /** Route ids of the persisted owners: the full set the adapter should own. */
+  routeSet(): string[] { return this.owners.map(routeOf) }
+  private emit(routes?: string[]): PublishResult | undefined {
+    if (this.disposed) return undefined
+    const result = this.publish(routes) as PublishResult | undefined
+    if (result && !result.ok && result.phase === 'initial') this.registrationError ??= { code: result.code, ...(result.route ? { route: result.route } : {}) }
+    return result
+  }
+  /**
+   * The only settings write path. Synchronous (no await inside), so two writes can never interleave;
+   * the base is the in-memory known fields AT CALL TIME (never a snapshot from before an await) and
+   * unknown fields (e.g. the legacy `baseUrl`) are not written back. Throws when the disk write fails,
+   * leaving the in-memory value unchanged.
+   */
+  writeSettings(patch: { [K in keyof Settings]?: Settings[K] | undefined }): void {
+    const value = this.store.value
+    const next: Settings = {
+      lines: value.lines ?? [], visibleModels: value.visibleModels ?? {}, defaultEfforts: value.defaultEfforts ?? {},
+      ...(value.credentialUpdatePending ? { credentialUpdatePending: value.credentialUpdatePending } : {}),
+      ...(this.owners.length ? { knownOwners: this.owners } : {}),
+    }
+    for (const [key, field] of Object.entries(patch)) {
+      if (field === undefined) delete (next as unknown as Record<string, unknown>)[key]
+      else (next as unknown as Record<string, unknown>)[key] = field
+    }
+    this.store.save(next)
+    if (patch.knownOwners) this.knownOwnersReset = false
   }
   /** Strict load: any invalid persisted line/pending makes the whole connection read as empty. */
   private loadConfig(): LoadedConfig {
@@ -97,10 +133,7 @@ export class MagpieRuntime {
       return { lines: validateLoadedLines(this.store.value.lines), pending: validatePendingCredentials(this.store.value.credentialUpdatePending) }
     } catch { return { lines: [], pending: [] } }
   }
-  private cleanSettings(lines: LineSettings[], pending?: PendingCredential[]): Settings {
-    return { lines, visibleModels: this.store.value.visibleModels ?? {}, defaultEfforts: this.store.value.defaultEfforts ?? {}, ...(pending ? { credentialUpdatePending: pending } : {}) }
-  }
-  async start() { await this.syncCatalog() }
+  async start() { this.emit(this.routeSet()); await this.syncCatalog() }
   trackPrepared(op: Operation): () => void {
     const ref = new WeakRef(op)
     this.prepared.add(ref)
@@ -125,7 +158,7 @@ export class MagpieRuntime {
       catalog: carry?.catalog ? [...carry.catalog] : [], bgAbort: new AbortController(),
       ...(carry?.lastSyncAt ? { lastSyncAt: carry.lastSyncAt } : {}),
     }
-    this.publish()
+    this.emit()
   }
   private identityOf(resolved: ResolvedLine | undefined): ConnectionIdentity {
     if (!resolved) return { lineId: '', baseUrl: '', accessMode: 'direct', key: '', accessClientId: '', accessClientSecret: '' }
@@ -240,7 +273,8 @@ export class MagpieRuntime {
         }
         const catalog = mapCatalog(JSON.parse(JSON.stringify(await response.json()), (_key, value) => typeof value === 'string' ? this.redact(value) : value))
         if (!this.isCurrent(gen)) return
-        gen.catalog = catalog; gen.lastSyncAt = new Date().toISOString(); delete gen.lastSyncError; delete gen.lastSyncErrorKind; this.publish()
+        gen.catalog = catalog; gen.lastSyncAt = new Date().toISOString(); delete gen.lastSyncError; delete gen.lastSyncErrorKind
+        this.commitOwners(gen, catalog)
       } catch (error) {
         if (!this.isCurrent(gen)) return
         const status = (error as { status?: number }).status
@@ -252,6 +286,33 @@ export class MagpieRuntime {
       }
     })()
     return gen.syncPromise
+  }
+
+  /** D6 owner admission + publish for one successfully mapped catalog (synchronous: no await between the checks and the effects). */
+  private commitOwners(gen: Generation, catalog: CatalogModel[]) {
+    if (this.disposed || !this.isCurrent(gen)) return
+    const fresh = [...new Set(catalog.map(m => m.owner))].filter(owner => !this.owners.includes(owner))
+    const admit = fresh.slice(0, Math.max(0, MAX_OWNERS - this.owners.length))
+    this.rejectedOwners = fresh.slice(admit.length)
+    if (this.registrationError) return
+    const previous = this.owners
+    let added = false
+    if (admit.length) {
+      try { this.writeSettings({ knownOwners: [...previous, ...admit] }); this.owners = [...previous, ...admit]; added = true }
+      catch { gen.lastSyncErrorKind = 'settings'; gen.lastSyncError = 'MAGPIE_SETTINGS_WRITE_FAILED: could not save known owners' }
+    }
+    const result = this.emit(this.routeSet())
+    if (!result || result.ok) return
+    const rollback = () => {
+      if (!added) return
+      this.owners = previous
+      try { this.writeSettings({ knownOwners: previous.length ? previous : undefined }) } catch { /* reported below; memory stays rolled back */ }
+    }
+    rollback()
+    if (result.phase === 'initial') return
+    gen.lastSyncErrorKind = 'registration'
+    gen.lastSyncError = `MAGPIE_ROUTE_REGISTRATION_FAILED: ${result.code}${result.route ? ` ${result.route}` : ''}`
+    this.emit(this.routeSet())
   }
 
   // ---- settings surface ---------------------------------------------------
@@ -367,7 +428,7 @@ export class MagpieRuntime {
     this.saving = true
     try {
       // Marker saves keep the committed line list; a failed write must not apply the new lines.
-      if (pending.length) this.store.save(this.cleanSettings(existing, pending))
+      if (pending.length) this.writeSettings({ lines: existing, credentialUpdatePending: pending })
       for (const write of writes) {
         const ref = lineCredentialRefs(write.lineId)[write.field]
         if (write.value === null) await this.credentials.unset(ref)
@@ -381,7 +442,7 @@ export class MagpieRuntime {
         await this.credentials.unset(ref)
       }
       this.retained = retained
-      this.store.save(this.cleanSettings(nextLines))
+      this.writeSettings({ lines: nextLines, credentialUpdatePending: undefined })
       this.failedFields = []
     } catch {
       this.failedFields = pending
@@ -433,16 +494,18 @@ export class MagpieRuntime {
       lastSyncAt: gen.lastSyncAt, lastSyncError: gen.lastSyncError, lastSyncErrorKind: gen.lastSyncErrorKind,
       groups: [...new Set(gen.catalog.map(m => m.provider))].map(provider => ({ provider, models: gen.catalog.filter(m => m.provider === provider).map(m => ({ id: m.info.id, name: m.info.name, efforts: m.efforts })) })),
       visibleModels: this.store.value.visibleModels, defaultEfforts: this.store.value.defaultEfforts,
+      knownOwnersReset: this.knownOwnersReset, ownerLimitReached: this.rejectedOwners.length > 0, rejectedOwners: this.rejectedOwners,
+      ...(this.registrationError ? { routeRegistrationError: this.registrationError } : {}),
     }))
   }
   /** Preference-only writes also persist the single clean schema (drops legacy fields). */
   savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string> }) {
     const config = this.loadConfig()
-    this.store.save({
+    this.writeSettings({
       lines: config.lines,
       visibleModels: patch.visibleModels ?? this.store.value.visibleModels ?? {},
       defaultEfforts: patch.defaultEfforts ?? this.store.value.defaultEfforts ?? {},
-      ...(this.failedFields.length ? { credentialUpdatePending: this.failedFields } : {}),
+      credentialUpdatePending: this.failedFields.length ? this.failedFields : undefined,
     })
   }
   config(): LineSettings[] { return this.loadConfig().lines }

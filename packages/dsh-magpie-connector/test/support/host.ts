@@ -19,6 +19,8 @@ export interface RealHostOptions {
   foreignRoutes?: string[]
   /** Add an `llm/adapters-updated` listener that throws `{code:'INVARIANT'}` while `invariant.on` is true. */
   invariantListener?: boolean
+  /** With `invariantListener`: the listener already throws while the plugin mounts (first registration). */
+  invariantOn?: boolean
   home?: string
 }
 
@@ -33,7 +35,7 @@ export async function mountRealHost(options: RealHostOptions = {}) {
   ;(ctx as unknown as { plugin(p: unknown): unknown }).plugin(LlmRuntime)
   await new Promise(resolve => setTimeout(resolve, 0))
   const llm = (ctx as unknown as { llm: HostLlm }).llm
-  const invariant = { on: false }
+  const invariant = { on: options.invariantOn === true }
   if (options.invariantListener) {
     ctx.on('llm/adapters-updated' as never, (() => {
       if (invariant.on) throw Object.assign(new Error('test invariant listener'), { code: 'INVARIANT' })

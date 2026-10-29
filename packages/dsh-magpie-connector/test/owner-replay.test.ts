@@ -28,6 +28,8 @@ async function mount(home?: string, gw?: Awaited<ReturnType<typeof createGateway
   if (!gw) cleanup.push(g.close)
   cleanup.push(() => host.dispose())
   await until(() => host.ownRoutes().length === 2, 'routes')
+  // Persisted routes exist before the first sync; wait for the catalog so the model's native endpoint is known.
+  await until(async () => (await host.llm.listModels(CODEX)).length > 0, 'catalog synced')
   return { g, host }
 }
 async function firstTurn(host: Awaited<ReturnType<typeof mount>>['host'], provider = CODEX) {

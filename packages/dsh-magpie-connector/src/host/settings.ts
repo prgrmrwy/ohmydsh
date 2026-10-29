@@ -18,6 +18,8 @@ export interface Settings {
   visibleModels: Record<string, string[]>
   defaultEfforts: Record<string, string>
   credentialUpdatePending?: PendingCredential[]
+  /** Owner keys seen so far (first-seen order, max {@link MAX_OWNERS}); each owns one registered LLM route. */
+  knownOwners?: string[]
 }
 export class SettingsStore {
   value: Settings = { lines: [], visibleModels: {}, defaultEfforts: {} }
@@ -41,6 +43,8 @@ export function normalizeBaseUrl(value: unknown): string {
 }
 
 export const MAX_LINES = 5
+export const MAX_OWNERS = 32
+const OWNER_KEY = /^[a-z0-9][a-z0-9._-]*$/
 export const LINE_ID_PATTERN = /^[0-9a-f]{8}$/
 export const isAccessMode = (value: unknown): value is AccessMode => value === 'direct' || value === 'cloudflare'
 export const isCredentialField = (value: unknown): value is CredentialField => value === 'key' || value === 'accessClientId' || value === 'accessClientSecret'
@@ -98,4 +102,16 @@ export function randomLineId(existing: Iterable<string>): string {
     const id = randomBytes(4).toString('hex')
     if (!taken.has(id)) return id
   }
+}
+
+/**
+ * Load-time check of `knownOwners`: missing = empty; anything else invalid (not an array, bad key,
+ * duplicate, more than {@link MAX_OWNERS}) throws so the caller resets the WHOLE array (no partial repair).
+ */
+export function validateKnownOwners(value: unknown): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > MAX_OWNERS) throw new Error('Invalid knownOwners')
+  for (const key of value) if (typeof key !== 'string' || key.length < 1 || key.length > 48 || !OWNER_KEY.test(key)) throw new Error('Invalid knownOwners')
+  if (new Set(value).size !== value.length) throw new Error('Invalid knownOwners')
+  return [...value] as string[]
 }
