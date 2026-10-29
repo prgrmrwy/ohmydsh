@@ -8,15 +8,19 @@ whenToUse: 用户想了解 memex 记忆库的召回效果、死卡或检索质�
 
 ## 运行
 
-```bash
-bash ~/.dsh/skills/memex-recall-report/scripts/report.sh --days 14
+将 `<skill-root>` 替换为本 skill 实际安装目录，三平台使用同一个 Node 入口：
+
+```text
+node "<skill-root>/scripts/report.mjs" --days 14
 ```
 
-- 不带 `--lib`：对 `~/.dsh-memex/` 下每个有 `cards/` 的库各出一份报告。
+不要求 Bash。旧 `scripts/report.sh` 只作兼容转发。Windows 路径使用本机绝对路径；引号中的 `~` 不展开，请使用实际 home 路径。
+
+- 不带 `--lib`：对 home 下 `.dsh-memex/` 中每个有 `cards/` 的库各出一份报告，排除 `eval-*` 自检库并提示排除数；显式 `--lib` 或 `--lib=路径` 可查看自检库。
 - 只看一个库：`--lib ~/.dsh-memex/personal`；库名与目录名不同时加 `--scope <名>`。
 - 时间窗默认 14 天；用户说「这个月」「最近一周」时换算成 `--days`。
 
-脚本会依次查找 PATH、`$DSH_HOME/profiles/*/node_modules/.bin/`、当前仓库构建产物。都找不到说明本机还没部署 dsh-memex，
+脚本会依次查找 PATH、`$DSH_HOME/profiles/*/node_modules/dsh-memex` 的真实 JS bin、当前仓库构建产物。Windows 不执行 cmd/ps1 包装脚本；已识别的 npm 布局用当前 Node 调用对应包入口，未知布局给出诊断。都找不到说明本机还没部署 dsh-memex，
 请用户先 `dsh build`，不要自己去拼路径。
 
 命令只读：只读遥测文件和卡片文件名，不写文件、不联网。可以直接运行，不需要先问用户。

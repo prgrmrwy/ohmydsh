@@ -134,17 +134,21 @@ destructive run so the user sees which candidates are involved — but read the
 preview for what it is: it lists what would be examined, not what a real run
 would ultimately do to an unarchived candidate.
 
-The shell wrapper has no trustworthy Session-id environment, so use it only with
+The Node helper (and legacy shell forwarder) has no trustworthy Session-id environment, so use it only with
 an explicit path for unattended operator recovery and diagnostics of schema-v2
 operations (this route asks no one, so it is for operators, not for working
 around a refused authorization):
 
-```bash
-scripts/ws.sh status /absolute/worktree/path
-scripts/ws.sh promote /absolute/worktree/path
-scripts/ws.sh clean --dry-run /absolute/worktree/path
-scripts/ws.sh clean /absolute/worktree/path
+Resolve `<skill-root>` to this installed skill's directory and use the same Node entry on Windows, macOS and Linux. Pass native absolute paths on Windows. The helper discovers the installed `dsh-ws` CLI or a built checkout; it never installs one. Windows npm shims are resolved to their package JS entry, not executed through a shell.
+
+```text
+node "<skill-root>/scripts/ws.mjs" status <absolute-worktree-path>
+node "<skill-root>/scripts/ws.mjs" promote <absolute-worktree-path>
+node "<skill-root>/scripts/ws.mjs" clean --dry-run <absolute-worktree-path>
+node "<skill-root>/scripts/ws.mjs" clean <absolute-worktree-path>
 ```
+
+The old `scripts/ws.sh` path forwards only; it grants no additional authority.
 
 ## Dependency and safety rules
 
