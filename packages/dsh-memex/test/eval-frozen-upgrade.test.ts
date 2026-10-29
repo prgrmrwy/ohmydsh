@@ -3,7 +3,7 @@ import { copyFileSync, mkdtempSync, realpathSync, readdirSync, writeFileSync } f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-const upgrade = vi.hoisted(() => ({ prompts: false, packagedReads: 0 }))
+const upgrade = vi.hoisted(() => ({ prompts: false, legacy: false, packagedReads: 0 }))
 vi.mock('../src/eval/fixtures.js', async original => {
   const actual = await original<typeof import('../src/eval/fixtures.js')>()
   return { ...actual, validateFixture: (...args: Parameters<typeof actual.validateFixture>) => { upgrade.packagedReads++; return actual.validateFixture(...args) } }
@@ -11,6 +11,15 @@ vi.mock('../src/eval/fixtures.js', async original => {
 vi.mock('../src/eval/judge-protocol.js', async original => {
   const actual = await original<typeof import('../src/eval/judge-protocol.js')>()
   return { ...actual, frozenItemProtocols: (...args: Parameters<typeof actual.frozenItemProtocols>) => actual.frozenItemProtocols(...args).map(protocol => {
+    if (upgrade.legacy) {
+      const input = JSON.parse(protocol.prompt)
+      delete input.evidenceLayout
+      if (input.writeback) {
+        input.evidence.push(...input.writeback.evidence)
+        delete input.writeback.evidence
+      }
+      protocol.prompt = JSON.stringify(input)
+    }
     if (upgrade.prompts) {
       const input = JSON.parse(protocol.prompt)
       input.rubric = 'Next release wording, not the historical wording.'
@@ -28,22 +37,39 @@ import { scoreFrozenItem } from '../src/eval/score-item.js'
 import { loadOfflineOutcomes } from '../src/eval/offline-outcomes.js'
 import { buildOfflineReport } from '../src/eval/offline-report.js'
 const published = structuredClone(selftestManifest)
-afterEach(() => { upgrade.prompts = false; Object.assign(selftestManifest, structuredClone(published)) })
+afterEach(() => { upgrade.legacy = false; upgrade.prompts = false; Object.assign(selftestManifest, structuredClone(published)) })
 function root() { return mkdtempSync(join(realpathSync(tmpdir()), 'eval-frozen-upgrade-')) }
 function registered() {
   const directory = root()
   const plan = registerFixedRound(directory, { version: 'selftest-v1', tested: { provider: 'mock', model: 'tested', effort: 'low' }, judge: { provider: 'mock', model: 'judge', effort: 'high' }, maxJudgeCalls: 12 })
   return { root: directory, plan }
 }
-async function scored(writeback = false) {
+async function scored(writeback = false, incidentalWrite = false) {
   const f = registered(), item = f.plan.items[writeback ? 4 : 0]!, directory = join(f.root, f.plan.id, item.id)
   freezeInput(directory, {})
   freezeSelection(join(directory, 'selection'), [{ id: 'root:answer', text: item.requiredFacts.join('; ') }], ['root:answer'])
-  if (writeback) freezeInput(join(directory, 'program-evidence'), { retrieval: [], writes: [{ source: 'root:4', tool: 'memex_retro', at: 10, success: true, targetCorrect: true, slug: 'lease', content: item.requiredFacts.join('; ') }], sessions: [] })
+  if (writeback || incidentalWrite) freezeInput(join(directory, 'program-evidence'), { retrieval: [], writes: [{ source: 'root:4', tool: 'memex_retro', at: 10, success: true, targetCorrect: true, slug: 'lease', content: item.requiredFacts.join('; ') }], sessions: [] })
   await scoreFrozenItem(directory, item, f.plan.judge, async () => ({ verdict: 'yes', reason: 'historical result', quotes: [{ source: 'root:answer', quote: item.requiredFacts[0] }],
     ...(writeback ? { writeback: { verdict: 'yes', reason: 'historical write', quotes: [{ source: 'root:4:write', quote: item.requiredFacts[0] }] } } : {}) }))
   return { ...f, item, directory }
 }
+it.each([false, true])('partitions answer and write evidence through scoring and offline reading (writeback=%s)', async writeback => {
+  const f = await scored(writeback, true)
+  const protocols = readFrozenInput(join(f.directory, 'judge-protocols')) as { prompt: string }[]
+  for (const protocol of protocols) {
+    const input = JSON.parse(protocol.prompt)
+    expect(input.evidence.map((source: { id: string }) => source.id)).toEqual(['root:answer'])
+    if (writeback) expect(input.writeback.evidence.map((source: { id: string }) => source.id)).toEqual(['root:4:write'])
+    else expect(input.writeback).toBeUndefined()
+  }
+  expect(loadOfflineOutcomes(f.root, f.plan.id)[f.item.id]?.endpoint).not.toContain('unknown')
+})
+it('keeps legacy mixed-evidence reports readable after partitioning', async () => {
+  upgrade.legacy = true
+  const f = await scored(true)
+  upgrade.legacy = false
+  expect(loadOfflineOutcomes(f.root, f.plan.id)[f.item.id]?.endpoint).toEqual(['yes', 'yes', 'yes', 'yes', 'yes'])
+})
 function copied(f: ReturnType<typeof registered>, change: (value: any) => void) {
   const value = structuredClone(readFrozenInput(join(f.root, f.plan.id))) as any
   change(value)
@@ -139,6 +165,8 @@ it.each([
     (p: any) => { p[0].prompt = JSON.stringify({ ...JSON.parse(p[0].prompt), protocol: 'judge-v2' }) },
     (p: any) => { p[0].prompt = JSON.stringify({ ...JSON.parse(p[0].prompt), requiredFacts: ['unbound'] }) },
     (p: any) => { p[0].prompt = JSON.stringify({ ...JSON.parse(p[0].prompt), evidence: [{ id: 'root:answer', text: 'different evidence' }] }) },
+    (p: any) => { const prompt = JSON.parse(p[0].prompt); prompt.evidenceLayout = 'unknown'; p[0].prompt = JSON.stringify(prompt) },
+    (p: any) => { const prompt = JSON.parse(p[0].prompt); prompt.writeback.evidence[0].text = 'unbound'; p[0].prompt = JSON.stringify(prompt) },
     (p: any) => { const prompt = JSON.parse(p[0].prompt); prompt.writeback.sources = ['foreign:write']; p[0].prompt = JSON.stringify(prompt) },
     (p: any) => { const prompt = JSON.parse(p[0].prompt); delete prompt.writeback; p[0].prompt = JSON.stringify(prompt) },
 ])('rejects hash-valid unbound frozen protocol case %#', async change => {

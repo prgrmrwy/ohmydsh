@@ -21,7 +21,8 @@ it('uses the same fixed two calls to judge answer and independently check succes
     count++
     const input = JSON.parse(protocol.prompt)
     expect(input.writeback).toMatchObject({ applicable: true })
-    expect(input.evidence.some((e: { text: string }) => e.text.includes('Lantern leaseSeconds is 45;'))).toBe(true)
+    expect(input.evidence.map((e: { id: string }) => e.id)).toEqual(['root:answer'])
+    expect(input.writeback.evidence).toEqual([{ id: 'root:4:write', text: 'Lantern leaseSeconds is 45; previous 15-second statement is stale.' }])
     return { verdict: 'yes', reason: 'fictional answer', quotes: [{ source: 'root:answer', quote: item.requiredFacts[0] }],
       writeback: { verdict: 'yes', reason: 'fictional correct write', quotes: [{ source: 'root:4:write', quote: 'leaseSeconds is 45' }] } }
   })

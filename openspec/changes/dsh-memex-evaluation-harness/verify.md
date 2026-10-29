@@ -1,5 +1,13 @@
 ## Verification Results
 
+### 2026-10-30 裁判证据分区缺陷修复（未部署）
+
+用户新轮次 round-2dd18758-c020-417d-bd31-3df964f3a8b3 的 stale-mem facts 返回 yes，但第三条引文来自实际提供的成功写卡来源，答案校验仅接受 selection，因而变成 invalid/unknown。六条件成本审计 valid；不能归因上游缺 usage，也不能把默认模型提醒当失败原因。旧轮次保持 unknown，不重判、不改写。
+
+修复 frozenItemProtocols：顶层 evidence 仅答案；适用写回的材料放 writeback.evidence，明确两个引文范围。新增 evidenceLayout=partitioned-v1；离线读取器严格验证该分区，同时保留无标记 judge-v1 混合布局的历史读取，不扩展答案允许来源。无裁判工具、路线、模型、输出 schema 或调用次数变更。
+
+新增普通题自发写卡及写回题分区回归，修复前两项红；覆盖历史布局读取、未知布局和篡改写回证据拒绝。原写回测试依赖混合布局的断言改为独立来源绑定。最终 MEMEX_TEST_LIVE_CONNECTION=1 npm test --workspace dsh-memex：124 files / 812 tests 全通过；typecheck、strict OpenSpec、git diff --check 通过。未部署、未重启、未发模型请求；本结论是程序缺陷修复，不是新真实轮次通过或整个 change 归档。
+
 ### 最新结论：2026-10-30 部署重启后续验收
 
 用户已完成部署/重启。只读核对3080监听PID9122，进程启动时间2026-10-30 00:04:05 Asia/Shanghai；dsh history最新启动记录2026-10-29T16:04:08.097Z。本地与正式profile中的lib/eval/host-retirement.js SHA256相同：0da7a87e90d3748656d9905755a8e39cffe6af15c491e7a9e46a496ba4a9ee35，mtime均为2026-10-29T16:03:28.657Z，早于本次启动，包含retirement观察写入。未把当前部署目录同哈希扩大为所有模块均已独立验证。
