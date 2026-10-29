@@ -4,6 +4,7 @@ import { registerFixedRound, loadFixedRound, type FixedRound, type RoundItem } f
 import { DefaultModelNotice } from './default-model.js'
 import { durableWrite, readRegular } from './freeze.js'
 import { ensureDirectory } from './prepare-item.js'
+import { safeEvalFailure, checkedEvalFailure } from './failure.js'
 
 export interface EvalBridgeOptions {
   root: string; currentDefault(): unknown;
@@ -96,7 +97,13 @@ export function createEvalBridge(options: EvalBridgeOptions): { dispatch(endpoin
         return { cancelled: true }
       }
       if ((endpoint === 'eval/judgeItem' || endpoint === 'eval/runRound' || endpoint === 'eval/resumeRound') && existsSync(cancelled)) throw new Error('Round cancelled; no new judge work admitted')
-      if (endpoint === 'eval/status') return { id: round.id, unhealthy: failed(), uncertainRequests, defaultModelNotice: new DefaultModelNotice(join(options.root, round.id)).describe(options.currentDefault()) }
+      if (endpoint === 'eval/status') {
+        const failures = readdirSync(join(options.root, round.id)).sort().flatMap(name => {
+          const match = /^failure-([A-Za-z0-9-]{1,100})\.json$/.exec(name)
+          return match ? [{ requestId: match[1]!, diagnostic: checkedEvalFailure(JSON.parse(readRegular(join(options.root, round.id, name)).toString())) }] : []
+        })
+        return { id: round.id, unhealthy: failed(), uncertainRequests, failures, defaultModelNotice: new DefaultModelNotice(join(options.root, round.id)).describe(options.currentDefault()) }
+      }
       const resuming = endpoint === 'eval/resumeRound'
       if (resuming && !new DefaultModelNotice(join(options.root, round.id)).pending()) throw new Error('Resume requires pending default-model disclosure; confirmation is only valid after execution ends')
       if (failed() && !resuming) throw new Error('Round unhealthy; prior outcome uncertain; inspect resource ledger before any further scoring')
@@ -142,7 +149,10 @@ export function createEvalBridge(options: EvalBridgeOptions): { dispatch(endpoin
       active.set(key, { round: round.id, item: item.id, abort, result })
       try { return await result }
       catch (error) {
-        try { if (!existsSync(unhealthy)) durableWrite(unhealthy, 'Uncertain judge outcome; inspect private ledger. No automatic retry.\n') }
+        try {
+          if (!existsSync(unhealthy)) durableWrite(unhealthy, 'Uncertain eval outcome; inspect private ledger and failure diagnostic. No automatic retry.\n')
+          durableWrite(join(options.root, round.id, `failure-${requestId}.json`), JSON.stringify(safeEvalFailure(error)) + '\n')
+        }
         catch (persistenceError) { throw new AggregateError([error, persistenceError], 'Judge failed and failure persistence unavailable; preserve scene') }
         throw error
       }

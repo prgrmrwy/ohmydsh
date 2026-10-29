@@ -14,6 +14,13 @@ export function verifyJudgeMessages(messages: unknown, prompt: string): void {
     } else if (kind === 'runtime-context') {
       const expected = `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n${judgeDelegationText}`
       if (message.role !== 'user' || !isDeepStrictEqual(message.content, [{ type: 'text', text: expected }])) throw new Error('Invalid judge runtime context')
+    } else if (kind === 'time-context') {
+      const text = message.content?.[0]?.text
+      const source = message.source as { kind?: string; form?: string; sections?: unknown }
+      // Fresh one-shot judges have no browser RPC timezone or preceding message.
+      const clock = /^Time sampled while preparing turn 1, step 1: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\[(?:UTC|[A-Za-z][A-Za-z0-9_+.-]*(?:\/[A-Za-z0-9_+.-]+)+)\]\nBrowser time zone for this request: unavailable\. Ask the user to clarify otherwise-unqualified dates and times\.\nElapsed since the preceding model-visible message: unavailable\.$/
+      if (message.role !== 'user' || typeof text !== 'string' || !clock.test(text) || source.form !== 'snapshot'
+        || !isDeepStrictEqual(message.content, [{ type: 'text', text }]) || !isDeepStrictEqual(source.sections, [{ name: 'time-context', text }])) throw new Error('Invalid judge time context')
     } else throw new Error(`Forbidden judge message source: ${kind}`)
     if (!Array.isArray(message.content) || message.content.some(block => block.type !== 'text' || typeof block.text !== 'string')) throw new Error('Judge accepts text messages only')
   }

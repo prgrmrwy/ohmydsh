@@ -1,0 +1,21 @@
+diff --git a/packages/experimental/agent-team/src/roster.ts b/packages/experimental/agent-team/src/roster.ts
+--- a/packages/experimental/agent-team/src/roster.ts
++++ b/packages/experimental/agent-team/src/roster.ts
+@@ -103,7 +103,7 @@ export class TeamRoster {
+           // A direct child outside the durable roster is not a teammate. Ordinary
+           // host forks are independent roots; subagent descriptors distinguish
+           // provider-owned workers that must not receive a nested Team identity.
+-          if (this.subagentDescriptor(agent)) return undefined
++          if (agent.session.header.origin === 'subagent' || this.subagentDescriptor(agent)) return undefined
+           return { root: agent, id: TeamId(agent.id), role: 'lead', name: 'lead' }
+         }
+       }
+@@ -111,7 +111,7 @@ export class TeamRoster {
+       // Do not reinterpret that durable child as a new implicit root Team. A host-
+       // resumed ordinary fork has no descriptor in its own suffix and remains a
+       // valid new root whose inherited Team records stay outside its projected Team state.
+-      if (this.subagentDescriptor(agent)) return undefined
++      if (agent.session.header.origin === 'subagent' || this.subagentDescriptor(agent)) return undefined
+       return { root: agent, id: TeamId(agent.id), role: 'lead', name: 'lead' }
+     } catch {
+       // This method is used by lifecycle observers and teardown discovery. A

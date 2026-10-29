@@ -35,6 +35,10 @@ At reviewed stock rc.2, the published `@deepseek-ai/dsh-llm/lib/types/types.d.ts
 
 Retire this patch only after a reviewed official release preserves optional metadata across resolve/prepare normalization, Host catalog and generated controller/aggregate Remote codecs, supports matching presentation/search in both selector entries with true route actions. Verify every behavior and the loaded graph before removing all five overrides, template/pins and their tests together; do not retire unrelated Pet seams. No upstream report/release for this complete seam is recorded here. Local isolated build evidence is not deployment or live GUI acceptance.
 
+### Team membership creation window
+
+`team-membership.patch` replaces only `@deepseek-ai/dsh-experimental-agent-team` (`0.2.0-rc.2-team-membership.1`, SHA-256 `0f42cab5802bcc468ed05cdba5522abe9115cef858543d97c5300ef3d8f95bae`). Rostered active/provisioning teammates retain priority. Other provider-owned children with `header.origin === 'subagent'` do not become implicit Team Leads before their first-step descriptor exists, including during parent teardown. Ordinary roots and non-provider host forks retain their Lead identity. No Session format or descriptor timing changes; tools and policy remain enabled for actual Team members. Retire this patch once the reviewed official roster handles the same unpublished-descriptor window and its installed graph passes Team and one-shot isolation regressions.
+
 ## Verification
 
 `node test-packaging.cjs` checks patch pins and rejects malformed isolated-build arguments before formal launcher state is touched. The upstream scoped-tools regression test is `pnpm exec vitest run packages/core/tools/tests/scoped.spec.ts --config vitest.config.ts` from the pinned upstream checkout. The isolated launcher verifier exercises the generated dependency graph rather than trusting package metadata alone.

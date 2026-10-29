@@ -60,7 +60,10 @@ describe('dsh-memex package wiring', () => {
     const files: string[] = []
     const walk = (dir: string) => { for (const name of readdirSync(dir)) { const p = join(dir, name); statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') && files.push(p) } }
     walk(new URL('../src', import.meta.url).pathname)
-    const listeners = files.filter(file => /from 'node:(http|https|net|http2)'|createServer\(|\.listen\(|WebSocketServer/.test(readFileSync(file, 'utf8')))
+    const listeners = files.filter(file => /createServer\(|\.listen\(|WebSocketServer/.test(readFileSync(file, 'utf8')))
+    const clientTransport = readFileSync(new URL('../src/eval/http-transport.ts', import.meta.url), 'utf8')
+    expect(clientTransport).toContain("import { request as httpRequest } from 'node:http'")
+    expect(clientTransport).not.toMatch(/createServer|\.listen\(/)
     expect(listeners).toEqual([])
     const callers = files.filter(file => readFileSync(file, 'utf8').includes('createHostEvalDispatch(')).map(file => file.split('/src/')[1])
     expect(callers.sort()).toEqual(['eval/host-plugin.ts', 'index.ts'])

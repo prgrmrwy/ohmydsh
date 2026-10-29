@@ -4,7 +4,7 @@ vi.mock('../src/eval/round.js', () => ({ loadFixedRound: () => ({ id: 'round-fix
 vi.mock('../src/eval/freeze.js', () => ({ freezeInput: () => {} }))
 vi.mock('../src/eval/tested-budget.js', () => ({ testedLimits: { maxRequestsPerCondition: 128, maxDurationMsPerCondition: 120000 }, installTestedBudget: (_ctx: unknown, _ledger: unknown, _root: unknown, signal: AbortSignal) => ({ signal, dispose() {} }) }))
 vi.mock('../src/eval/controller.js', () => ({ controllerExecutionPort: () => ({}) }))
-vi.mock('../src/eval/prepared-execution.js', () => ({ executePreparedItem: async () => { f.calls.push('execute') } }))
+vi.mock('../src/eval/prepared-execution.js', () => ({ executePreparedItem: async () => { f.calls.push('execute'); if (f.failAt === 'execute') throw new Error('execution failed') } }))
 vi.mock('../src/eval/host-retirer.js', () => ({ createHostRetirer: () => async () => { f.calls.push('retire'); if (f.failAt === 'retire') f.healthy = false; if (f.releaseFailure) throw new Error('release unproven') } }))
 vi.mock('../src/eval/host-reader.js', () => ({ createHostEvidenceReader: () => { f.calls.push('reader'); return async () => ({}) } }))
 vi.mock('../src/eval/collection.js', () => ({ collectItemEvidence: async () => { f.calls.push('collect'); if (f.failAt === 'collect') f.healthy = false } }))
@@ -27,6 +27,14 @@ it('release failure blocks physical log access and judging in the assembled entr
   f.calls.length = 0; f.releaseFailure = true
   await expect(runHostItem({} as never, input, new AbortController().signal)).rejects.toThrow('release unproven')
   expect(f.calls).toEqual(['execute', 'retire'])
+})
+it('attributes execution failures after successful retirement to execute, and retains retirement failures separately', async () => {
+  f.releaseFailure = false; f.failAt = 'execute'
+  await expect(runHostItem({} as never, input, new AbortController().signal)).rejects.toMatchObject({ phase: 'execute', message: 'execution failed' })
+  f.releaseFailure = true; f.failAt = ''
+  await expect(runHostItem({} as never, input, new AbortController().signal)).rejects.toMatchObject({ phase: 'retire', message: 'release unproven' })
+  f.releaseFailure = false; f.failAt = 'collect'
+  await expect(runHostItem({} as never, input, new AbortController().signal)).rejects.toMatchObject({ phase: 'collect' })
 })
 it('unplanned item is refused before controller or resource access', async () => {
   f.calls.length = 0; f.releaseFailure = false

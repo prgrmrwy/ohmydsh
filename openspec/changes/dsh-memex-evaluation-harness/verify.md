@@ -1,6 +1,33 @@
 ## Verification Results
 
+### 最新结论：2026-10-29 19:38 实机成功轮次复核
+
+成功轮次round-d5f02abc-3f05-4e64-9d02-394e3b7377b8，durable result evidenceComplete:true，六条件及十二裁判yes/checked收齐，默认值人工确认标记已读取核验，离线report exit0。端点5pass1fail来自nomem无成功写回，是行为观察，不是链路缺证；不再为刷绿重跑。
+
+对账本十二个裁判child逐一解码物理多帧日志：每个恰1个request/header、provider codex/model gpt-6.1-sol/effort high，工具唯一structured_output、schema深相等冻结协议、系统与用户/time消息通过verifyJudgeMessages、parentSession匹配登记父、唯一structured_output调用、唯一assistant带usage、turn/end completed。独立观察的裁判未缓存输入8420、cacheRead0、输出2903。上述是本次事后补充核验，当前离线report仍显示该项unknown，未改旧产物或假装report已自动支持此核验。
+
+清退证据：六个bash均有同generation host-dd4115b9的registered→settled(completed)→removed顺序。未发现额外普通后代。没有单独持久化exact live Agent身份、末次cancel/idle/inbox/drain全量证明；成功返回依赖当时内存检查，不能从持久文件独立重建当时能力，也不能据此声称当前live registry已核验。Task10.3仍待该项与实机流量排除/标题零辅助调用的完整验收。
+
+本轮刷新验证：npm test --workspace dsh-memex（122files805tests）、npm run typecheck --workspace dsh-memex、两个compat builder测试、check:artifacts、git diff --check均exit0。未运行新模型、未重启Host、未提交/推送/归档。10.2依据已完成受管部署二次幂等标记完成；3.1/3.3真实Connection黑盒、10.1全部映射与严格规范校验、10.3剩余live核验不冒充完成，change尚不可归档。此前各节是历史时间点，不覆盖本节最新成功事实。
+
+### 2026-10-29 题3可判定性修正
+
+round-9fd9a885六条件已完成，writeback-nomem两裁判unknown/checked：旧题未明确15秒声明，nomem不可见旧卡，却要求断言该声明过期。修正questions.json仅共同输入题面，明确待核验的“当前15秒”声明，不泄露45秒正确值、不提示写卡；requiredFacts及自然follow-up不变。selftest-manifest更新为1372bytes / 88dcfa58f62b5bfab979c75fca5cbe6a1fb33a01a0f3121df4d664234f1e6a19。新回归断言nomem无需猜旧声明且无写回指令。全包122files805tests、typecheck、两次受管build（第二次no changes）、diff通过。使用新编译reader只读重建旧round保持unknown，整目录内容哈希前后均cd901d5db6e7220bbdf7d5f41acafafe87553c8985c3cd0801ced4e702e19df1。旧证据不改、不补判。Host已加载旧manifest常量，后续新注册前需用户重启Host；新GPT实机未运行，不归档。
+
 2026-10-28：已完成本轮离线生产补线与回归，**可交用户授权进行部署/Host/live 验收**；不等于全部验收通过，不归档。此前阶段发现的缺线已修复，历史 FAIL 原因与修复证据见 implementation-progress.md / tasks.md。
+
+### 2026-10-29 CLI长请求传输修复
+
+round-d7d3c34c前四条件和八裁判已完成，第五条件在整请求约301秒断连取消。CLI替换原生fetch为标准库http/https单请求传输，无redirect/retry，整轮传输deadline1小时、其它30秒、认证仍10秒，4MiB响应上限，caller abort覆盖headers/body。Host不变、不需重启；不提升模型或每条件预算。实际编译模块对临时loopback延迟headers310秒测试：elapsedMs310026、calls1、long-wait-ok、exit0。全包122files805tests及typecheck、连续两次dsh build第二次no changes、diff/artifact/OpenSpec普通校验通过。延迟/取消/断流/redirect/大body及body阶段abort真实socket回归通过。摘要Jev review因低置信升级，未当通过证据；本地逐行检查补上Response构造异常reject保护。GPT完整新轮次仍未运行、旧轮次不续跑、未重启Host。
+
+### 2026-10-29 Team 共存兼容修复（用户选择方案1）
+
+- round-3ff553b3已通过普通执行/清退/采集及裁判MANUAL检查，但首次裁判在严格系统文本门禁失败：真实Team监听在descriptor追加前把provider child误识别Lead，注入scope-local工具和team:policy。完整物理child日志确认，不据request/header落盘推断成功外发。
+- 用户明确选择保留Team修兼容。新增team-membership.patch，仅TeamRoster非roster成员判定检查header.origin；active/provisioning roster先返回，普通根/fork仍Lead。无格式变更、无全局停用、无裁判检查放宽、无旧评分重试。
+- patch固定上游639ed015与SHA256 0f42cab5802bcc468ed05cdba5522abe9115cef858543d97c5300ef3d8f95bae；build/launcher接hash pin、cache fingerprint、包0.2.0-rc.2-team-membership.1、file override及已安装版本/hash验证。未编辑生成副本。
+- RED真实Team组合首次score失败；GREEN正式新运行图真实Team共存下六条件/八回合/十二裁判通过。生产runtime默认必装真实Team，并在agent/created断言descriptor尚未出现、subagent非member、普通根为Lead。全包120files/800tests、Host/client typecheck通过。
+- 构建门禁：continuation161、Team与tool-Team75、模型展示24+339通过；Team75覆盖普通Lead、ordinary fork、rostered teammate及工具生命周期，构建每次必跑。打包静态pin/接线2tests通过。
+- 正式launcher指针解析Team包为上述兼容版本及hash；最后一次正式图Memex runtime复验通过。受管dsh build第二次no changes，artifacts/diff通过。未重启现有Host、未创建任何teammate、未启动新模型轮次。live整体仍未通过，本批未提交。
 
 ### Task Completion
 
@@ -66,6 +93,14 @@
 3. 未运行真实模型固定自检。需要先解释6条件/1裁判父/2追问/最多12裁判、普通自发后代未知、默认模型副作用及宿主非沙箱，再获明确授权。
 4. 未验真实 Connection 未认证/跨源/authority拒绝及官方URL隐藏粘贴交互；未验实际部署完整preset面、实际模型请求和资源账本清退。
 5. 之前安装时报告的传递依赖漏洞未自动升级，本 change 不包含依赖安全升级；真实模型裁判未校准，不能推出 Memex有效性。
+
+### 2026-10-29 live首题故障诊断（尚未修复原始运行故障）
+
+- round-d85e0346已完成首题GPT/high真实执行，后续停止；resume也失败。实际轨迹离线collector重放valid，原目录无采集/评分产物。Host具体清退/检查点错误未保存，不能恢复原始异常或归因于用户调整模型。详见live-failure-investigation.md。
+- 修复观测缺口：Host保存白名单化phase/code/源码位置/cause树，status验证后读取；CLI区分RPC identity错误与Host拒绝并输出固定原因代码，不回显任意服务端文字。原失败请求/unhealthy保留，不自动重发、不放宽资源或评分门禁。
+- 最终包119files/796tests、typecheck通过；受管dsh build的Host/client构建与部署通过，连续第二次no changes。安装入口/独立资源/原子刷新10tests、artifacts、diff通过。摘要级Jev评审因低正确性置信度escalate；随后独立GPT源级复核发现并消除了普通对象继承键映射缺陷，补4个回归；最终结论no blocking findings（仅离线诊断补丁，不证明live修复）。另剥离完整异常message后才解析白名单栈位置，避免正文伪造帧；诊断写入失败反例证明unhealthy优先持久化。
+- 最新OpenSpec strict检查返回1：三个既有requirement超500字符警告（身份先登记与中断保守恢复、受限裁判组合和首次请求前门禁、Eval桥绑定冻结轮次与生命周期）；本批没有改动specs，不虚报strict通过，也不未经评审改写已批准需求来消警告。
+- 尚未重启Host加载新诊断，也未启动新模型轮次。原始Host故障仍待明确阶段证据，本批不得标live通过；修复未提交。
 
 ### Git / Delivery
 

@@ -46,6 +46,7 @@ const toolsPatchSha256 = '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04
 const managedEffectsPatchSha256 = '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61'
 const modelDisplayPatchSha256 = '7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f'
 const modelDisplayTemplate = readJson(join(here, 'model-display.package.template.json'))
+const teamMembershipTemplate = readJson(join(here, 'team-membership.package.template.json'))
 const nativeToolsTemplate = readJson(join(here, 'native-tools.package.template.json'))
 const expectedNativeToolsVersion = nativeToolsTemplate.version
 const toolsTemplate = readJson(join(here, 'newtools.package.template.json'))
@@ -128,10 +129,11 @@ function verifyLauncher(directory, fingerprint) {
       || subagent.dsh_compat?.patchSha256 !== subagentPatchSha256
       || subagent.dsh_compat?.upstreamBase !== reviewedCommit
     ) return undefined
-    for (const spec of modelDisplayTemplate.packages) {
+    for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
       const manifest = requireFromLauncher.resolve(`${spec.name}/package.json`)
       const pkg = readJson(manifest)
-      if (pkg.version !== modelDisplayTemplate.version || pkg.dsh_compat?.patchSha256 !== modelDisplayPatchSha256 || pkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
+      const template = teamMembershipTemplate.packages.some(candidate => candidate.name === spec.name) ? teamMembershipTemplate : modelDisplayTemplate
+      if (pkg.version !== template.version || pkg.dsh_compat?.patchSha256 !== template.patchSha256 || pkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
       if (spec.client && !existsSync(join(dirname(manifest), 'lib/client.js'))) return undefined
     }
     run(process.execPath, [join(here, 'verify-model-display.mjs'), '--graph', directory], here)
@@ -224,6 +226,8 @@ try {
     .update(readFileSync(join(here, 'inquiry-isolation.patch')))
     .update(readFileSync(join(here, 'newinquiry-tools-guard.patch')))
     .update(readFileSync(join(here, 'native-managed-effects.patch')))
+    .update(readFileSync(join(here, 'team-membership.patch')))
+    .update(readFileSync(join(here, 'team-membership.package.template.json')))
     .update(readFileSync(join(here, 'model-display.patch')))
     .update(readFileSync(join(here, 'model-display.package.template.json')))
     .update(readFileSync(join(here, 'model-display.vitest.config.mjs')))
@@ -306,7 +310,7 @@ try {
         nativeTools.set(spec.name, localName)
       }
       const modelDisplayPackages = new Map()
-      for (const spec of modelDisplayTemplate.packages) {
+      for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
         const localName = spec.sourceDir.split('/').at(-1)
         const source = join(artifactRoot, 'agent-artifacts', 'model-display-artifacts', localName)
         const destination = join(compatPackages, localName)

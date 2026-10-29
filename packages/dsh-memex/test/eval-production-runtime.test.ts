@@ -97,6 +97,14 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     await install(titles, { fallbackMaxWords: 8, fallbackMaxBytes: 64, maxTitleBytes: 72 })
     const titleFiber = ctx.plugin(titleProvider, { provider: 'offline', model: 'title', targetWords: 4, targetCjkCharacters: 8, maxInputBytes: 4000, maxOutputTokens: 100, timeoutMs: 1000 })
     await titleFiber
+    // Match the live Host's optional Team listeners. Loading this composition
+    // creates no teammates; it exercises one-shot child tool/prompt isolation.
+    await install(await load('@deepseek-ai/dsh-experimental-agent-team'))
+    await install(await load('@deepseek-ai/dsh-experimental-tool-agent-team'))
+    // Global Host instructions must not enter a fixed judge's system prompt.
+    ctx.systemPrompt.section({ name: 'offline-host-global', order: 50, text: 'GLOBAL HOST: MCP, GUI and model identity instructions' })
+    ctx.systemPrompt.context({ name: 'offline-host-runtime', order: 50, text: 'GLOBAL HOST sandbox policy' })
+    await install(await load('@deepseek-ai/dsh-time-context'), { timeZone: 'UTC', refreshIntervalMs: 600000 })
     await install(controller, { nativeOpen: false })
     expect(ctx.sessionController).toBeInstanceOf(controller.SessionController)
     const modes = new Map<string, string>(), routingCalls: [string, any][] = []
@@ -109,7 +117,27 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
       else expect(operation).toBe('state')
       return { mode: modes.get(payload.sessionId) ?? 'AUTO' }
     } } as never)
-    ctx.on('agent/created', ({ agent }) => { created.push(agent); return undefined })
+    // Internal judge spawn is not an official routing-tool creation. An AUTO
+    // ordinary ancestor must be rejected before the child can issue a request.
+    ctx.on('agent/pre-step', ({ agent }, next) => {
+      let parent = agent.session.header.parentSession
+      if (!parent) return next()
+      let root = ctx.agents.get(parent)
+      while (root?.session.header.parentSession) root = ctx.agents.get(root.session.header.parentSession)
+      if (root && modes.get(root.id) !== 'MANUAL') throw new Error('Internal judge parent must be MANUAL before spawn')
+      return next()
+    })
+    ctx.on('agent/created', ({ agent }) => {
+      created.push(agent)
+      if (agent.session.header.origin === 'subagent') {
+        // Creation precedes the first-step descriptor: this is the regression window.
+        expect(agent.session.snapshotEvents().some(event => event.type === 'subagent/descriptor')).toBe(false)
+        expect(ctx.agentTeams.tryMembership(agent)).toBeUndefined()
+      } else if (!agent.session.header.parentSession) {
+        expect(ctx.agentTeams.tryMembership(agent)?.role).toBe('lead')
+      }
+      return undefined
+    })
     const rootAgentsForBudget: any[] = []
     const answer = 'Current config.json: retryLimit is 4; leaseSeconds is 45; 20 seconds is below 45 seconds; the previous 15-second statement is stale.'
     class LocalFixedModel extends llm.LlmAdapter {
@@ -174,7 +202,15 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     const scopes = createScopeResolver({ homeDir: home, config: { workspaces: [
       { path: runRoot, fallback: false }, { path: join(runRoot, 'nomem'), memory: false }, { path: join(runRoot, 'judge'), memory: false },
     ] } })
-    const dispatch = createHostEvalDispatch(ctx, root, { home, scopes, generation: 'offline-host-1', timeoutMs: 5000 })
+    let dispatch!: ReturnType<typeof createHostEvalDispatch>
+    // Production mounts Memex under an injected plugin fiber, not the root Context.
+    // Undeclared direct service properties throw there even while ctx.get works.
+    await ctx.plugin({ name: 'offline-memex-owner', inject: ['tools'], apply(owner: HostContext) {
+      expect(() => owner.agents).toThrow(/without inject/)
+      expect(owner.get('agents')).toBeDefined()
+      dispatch = createHostEvalDispatch(owner, root, { home, scopes, generation: 'offline-host-1', timeoutMs: 5000 })
+    } })
+    expect(dispatch).toBeTypeOf('function')
     const signal = new AbortController().signal
     const plan = await dispatch('eval/registerRound', { version: 'selftest-v1', tested: { provider: 'offline', model: 'tested', effort: 'high' }, judge: { provider: 'offline', model: 'judge', effort: 'high' }, maxJudgeCalls: 12 }, signal) as FixedRound
     expect(plan.items).toHaveLength(6)
@@ -195,7 +231,8 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     expect(calls.filter(call => call.model === 'tested')).toHaveLength(14) // eight answers plus six real file reads
     expect(calls.filter(call => call.purpose === 'session-title')).toHaveLength(0)
     expect(released.size).toBe(6)
-    expect(routingCalls.filter(([operation]) => operation === 'setMode')).toHaveLength(6)
+    expect(routingCalls.filter(([operation, payload]) => operation === 'setMode' && roots.some(root => root.id === payload.sessionId))).toHaveLength(6)
+    expect(routingCalls.filter(([operation, payload]) => operation === 'setMode' && payload.sessionId === parent[0]!.id)).toHaveLength(12)
     for (const agent of rootAgents) {
       expect(ctx.workspaceRegistry.archivedSessionIds).toContain(agent.id)
       expect(agent.status).toBe('idle')

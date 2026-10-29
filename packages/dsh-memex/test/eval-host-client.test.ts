@@ -15,6 +15,13 @@ it('exchanges an explicitly supplied official launch URL and sends cookie only t
   expect(new Headers(requests[1]!.init?.headers).get('cookie')).toBe('dsh-test=synthetic')
   expect(requests[1]!.url).not.toContain('token')
 })
+it('reports known Host rejection codes without exposing arbitrary server messages', async () => {
+  let n = 0
+  const client = await authenticatedEvalClient('http://127.0.0.1:3080/?token=secret-fixture', (async (_url, init) => ++n === 1
+    ? new Response(null, { status: 303, headers: { location: './', 'set-cookie': 'dsh-test=x' } })
+    : Response.json({ type: 'server-response', rpcId: JSON.parse(String(init?.body)).rpcId, result: { ok: false, error: { message: 'Test owner inbox not empty after retirement' } } })) as typeof fetch)
+  await expect(client.call('eval/status', {})).rejects.toThrow('root-inbox-pending')
+})
 it('rejects arbitrary hosts/paths/redirects, failed admission, and forged or failed RPC responses without leaking credential text', async () => {
   let contacted = 0
   for (const url of ['https://external.example/?token=secret-fixture', 'http://127.0.0.1:3080/private?token=secret-fixture', 'http://127.0.0.1:3080/?token=secret-fixture&extra=x']) {

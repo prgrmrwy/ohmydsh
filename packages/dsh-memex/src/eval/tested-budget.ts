@@ -11,7 +11,7 @@ export function installTestedBudget(ctx: Context, ledger: EvalLedger, root: stri
   }
   const stop = () => {
     abort.abort(new Error('Tested condition cancelled or soft budget exceeded'))
-    for (const id of owned()) ctx.agents.get(id as never)?.cancel({ kind: 'user' })
+    for (const id of owned()) ctx.get('agents')?.get(id as never)?.cancel({ kind: 'user' })
   }
   carrier.addEventListener('abort', stop, { once: true })
   if (carrier.aborted) stop()

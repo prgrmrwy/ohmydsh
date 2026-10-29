@@ -2,6 +2,10 @@
 
 [English](README.md) · 简体中文
 
+## Team 创建窗口兼容
+
+`team-membership.patch` 仅替换 `@deepseek-ai/dsh-experimental-agent-team`，版本 `0.2.0-rc.2-team-membership.1`，SHA-256 `0f42cab5802bcc468ed05cdba5522abe9115cef858543d97c5300ef3d8f95bae`。active/provisioning roster 成员优先保持 teammate；其它 `header.origin === 'subagent'` 子会话在首次 descriptor 追加前不再被视作 Lead，父退出时同样成立。普通根和非 provider 的 host fork 仍是 Lead。不改变 Session 格式或 descriptor 时序，不停用真实成员的 Team 工具。正式版本修复同一窗口且实际运行图通过 Team 与 one-shot 隔离回归后才删除本补丁。
+
 ## 这是什么
 
 当前 `dsh.yaml` 固定 DSH `0.2.0-rc.2`。Pet unified locus 需要该正式包尚未发布的

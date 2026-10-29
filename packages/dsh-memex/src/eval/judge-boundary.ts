@@ -2,7 +2,7 @@ import { requirePristineJudgeParent } from './judge-parent.js'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
-import { verifyJudgeRequest } from './judge-gate.js'
+import { verifyJudgeRequest, judgeSystemText } from './judge-gate.js'
 export interface BoundaryProtocol { provider: string; model: string; effort?: string; schema: unknown; prompt: string }
 
 export function installJudgeBoundary(ctx: Context, parent: Agent, protocol: BoundaryProtocol, budget?: { claim(): void }): { checked(): number; dispose(): void } {
@@ -16,6 +16,8 @@ export function installJudgeBoundary(ctx: Context, parent: Agent, protocol: Boun
     if (children.size > 0) throw new Error('Judge creation window already claimed')
     if (!ctx.agents.isOwnedBy(agent.id, parent)) throw new Error('Judge live owner mismatch')
     children.set(agent.id, agent)
+    agent.ctx.systemPrompt.section({ name: 'memex-eval:complete-judge', order: 0, text: judgeSystemText, interpolate: false, complete: true })
+    agent.ctx.systemPrompt.suppressRuntimeContext()
     agent.ctx.tools.guard(execution => execution.name === 'structured_output' ? undefined : 'Judge may only submit structured_output')
     return undefined
   })

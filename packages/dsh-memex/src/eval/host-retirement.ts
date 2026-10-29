@@ -13,7 +13,7 @@ export async function retireHostTestRoot(ctx: Context, root: Agent, ledger: Eval
   if (!ledger.read().some(e => e.kind === 'reserved' && e.id === root.id)) throw new Error('Refusing to retire an unregistered test root')
   await retireTestRoot({
     ...operations, root,
-    current: () => ctx.agents.get(root.id),
+    current: () => ctx.get('agents')?.get(root.id),
     cancel: agent => { agent.cancel({ kind: 'user' }) },
     whenIdle: agent => agent.whenIdle(),
     pending: agent => agent.inbox.nextTurn.length + agent.inbox.nextStep.length,

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { safeEvalFailure } from './failure.js'
+import { evalHttpFetch } from './http-transport.js'
 
 /** Explicit operator credential only; no log/cookie-store discovery or on-disk credential persistence. */
-export async function authenticatedEvalClient(launch: string, fetcher: typeof fetch = fetch): Promise<{ call(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<unknown> }> {
+export async function authenticatedEvalClient(launch: string, fetcher: typeof fetch = evalHttpFetch): Promise<{ call(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<unknown> }> {
   let url: URL
   try { url = new URL(launch) } catch { throw new Error('Invalid official Host launch URL') }
   if (!['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
@@ -27,9 +29,14 @@ export async function authenticatedEvalClient(launch: string, fetcher: typeof fe
         body: JSON.stringify({ type: 'client-request', rpcId, method: endpoint, payload }), ...(signal ? { signal } : {}) })
     } catch { throw new Error('Host eval transport interrupted; query status, never retry uncertain work automatically') }
     if (!result.ok) { await result.body?.cancel(); throw new Error(`Host eval HTTP ${result.status}; request not retried`) }
-    let wire: { type?: unknown; rpcId?: unknown; result?: { ok?: unknown; value?: unknown } }
+    let wire: { type?: unknown; rpcId?: unknown; result?: { ok?: unknown; value?: unknown; error?: { message?: unknown } } }
     try { wire = await result.json() as typeof wire } catch { throw new Error('Invalid Host eval response') }
-    if (wire?.type !== 'server-response' || wire.rpcId !== rpcId || wire.result?.ok !== true) throw new Error('Host eval RPC failed or response identity mismatch; inspect round status')
+    if (wire?.type !== 'server-response' || wire.rpcId !== rpcId) throw new Error('Host eval response identity mismatch; inspect round status')
+    if (wire.result?.ok !== true) {
+      const message = wire.result?.error?.message
+      const diagnostic = safeEvalFailure(new Error(typeof message === 'string' ? message : ''))
+      throw new Error(`Host eval rejected: ${diagnostic.code}; inspect round status/failure diagnostics; request not retried`)
+    }
     return wire.result.value
   } }
 }

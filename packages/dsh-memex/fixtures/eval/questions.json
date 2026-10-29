@@ -24,7 +24,7 @@
     "kind": "Act",
     "state": "stale",
     "conditions": ["mem", "nomem"],
-    "prompt": "请调查 Lantern 当前租约时长，以及旧说法与源码是否冲突。只诊断，不改源码。",
+    "prompt": "有人仍声称“Lantern 当前工作租约是 15 秒”。请调查当前租约时长，判断这条说法与当前配置是否冲突。只诊断，不改源码。",
     "followUp": "谢谢，请用两句话总结这次调查的操作注意事项。",
     "followUpKind": "natural",
     "requiredFacts": ["leaseSeconds is 45", "the previous 15-second statement is stale"],

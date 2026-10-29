@@ -1,0 +1,7 @@
+{
+  "packages": [
+    { "name": "@deepseek-ai/dsh-experimental-agent-team", "sourceDir": "packages/experimental/agent-team", "client": false }
+  ],
+  "version": "0.2.0-rc.2-team-membership.1",
+  "patchSha256": "0f42cab5802bcc468ed05cdba5522abe9115cef858543d97c5300ef3d8f95bae"
+}

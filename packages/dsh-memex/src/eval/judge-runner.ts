@@ -20,6 +20,13 @@ export async function runHostJudge(ctx: Context, parent: Agent, protocol: Bounda
     gate = ctx.plugin({ name: 'memex-eval-judge-request', inject: ['agents'], apply(child: Context) { boundary = installJudgeBoundary(child, parent, protocol, budget) } })
     await gate
     requirePristineJudgeParent(parent)
+    const routing = ctx.get('autoModelRouting' as never) as { call(operation: 'state' | 'setMode', payload: unknown): Promise<unknown> } | undefined
+    if (!routing) throw new Error('Judge routing service unavailable')
+    const payload = { sessionId: parent.id, mode: 'MANUAL' }
+    const acknowledged = await routing.call('setMode', payload) as { mode?: unknown } | null
+    const actual = await routing.call('state', { sessionId: parent.id }) as { mode?: unknown } | null
+    if (acknowledged?.mode !== 'MANUAL' || actual?.mode !== 'MANUAL') throw new Error('Judge parent MANUAL readback mismatch; child not spawned')
+    requirePristineJudgeParent(parent)
     return await runBoundedJudge(signal, timeoutMs, async childSignal => {
       const run = await subagents.start('spawn', {
         parent, signal: childSignal, prompt: [{ type: 'text', text: protocol.prompt }],

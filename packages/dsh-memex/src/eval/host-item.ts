@@ -29,6 +29,7 @@ import { createHostEvidenceReader } from './host-reader.js'
 import { collectItemEvidence } from './collection.js'
 import { installTestedBudget, testedLimits } from './tested-budget.js'
 import { freezeInput } from './freeze.js'
+import { EvalPhaseFailure, type EvalPhase } from './failure.js'
 
 /** Internal assembly only: no free-form plan, prompt, path or schema is accepted over RPC. */
 export async function runHostItem(ctx: Context, input: HostItemInput, signal: AbortSignal): Promise<unknown> {
@@ -42,10 +43,11 @@ export async function runHostItem(ctx: Context, input: HostItemInput, signal: Ab
   const budget = installTestedBudget(ctx, input.ledger, input.session, signal)
   const port = controllerExecutionPort(input.controller, input.routing, input.attempt.cwd, budget.signal, directory)
   const retire = createHostRetirer(ctx, input.ledger, input.tracking)
+  let phase: EvalPhase = 'execute'
   try { return await runFixedItem(item, {
-    execute: () => { input.lifecycle?.('execute'); return executePreparedItem(round, item.id, input.session, input.attempt, input.ledger, input.scopes, port) },
-    retire: async () => { await retire(input.session); healthy(); input.lifecycle?.('retired') },
-    collect: async () => { healthy(); input.lifecycle?.('collect'); await collectItemEvidence(directory, input.ledger, input.session, round.tested, createHostEvidenceReader(ctx, input.ledger, input.backend), { home: attemptHome(input.attempt.cwd), own: { cwd: input.attempt.cwd, home: input.attempt.home } }, [item.prompt, ...(item.followUp ? [item.followUp] : [])]); healthy() },
-    score: () => { healthy(); input.lifecycle?.('score'); return input.judge(round, item, signal) },
-  }, budget.signal) } finally { budget.dispose() }
+    execute: async () => { phase = 'execute'; input.lifecycle?.('execute'); try { await executePreparedItem(round, item.id, input.session, input.attempt, input.ledger, input.scopes, port) } catch (error) { throw new EvalPhaseFailure('execute', error) } },
+    retire: async () => { phase = 'retire'; await retire(input.session); healthy(); input.lifecycle?.('retired') },
+    collect: async () => { phase = 'collect'; healthy(); input.lifecycle?.('collect'); await collectItemEvidence(directory, input.ledger, input.session, round.tested, createHostEvidenceReader(ctx, input.ledger, input.backend), { home: attemptHome(input.attempt.cwd), own: { cwd: input.attempt.cwd, home: input.attempt.home } }, [item.prompt, ...(item.followUp ? [item.followUp] : [])]); healthy() },
+    score: () => { phase = 'score'; healthy(); input.lifecycle?.('score'); return input.judge(round, item, signal) },
+  }, budget.signal) } catch (error) { throw error instanceof EvalPhaseFailure ? error : new EvalPhaseFailure(phase, error) } finally { budget.dispose() }
 }
