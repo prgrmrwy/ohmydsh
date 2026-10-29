@@ -222,6 +222,11 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     const roots = identities.filter(entry => entry.kind === 'reserved' && entry.question !== 'judge')
     const parent = identities.filter(entry => entry.kind === 'reserved' && entry.question === 'judge')
     expect(roots).toHaveLength(6); expect(parent).toHaveLength(1)
+    const retirements = readdirSync(join(root, plan.id)).filter(name => name.startsWith('retirement-'))
+      .map(name => readFrozenInput(join(root, plan.id, name)) as { version: number; root: string; observed: string[] })
+    expect(retirements).toHaveLength(6)
+    expect(retirements.map(receipt => receipt.root).sort()).toEqual(roots.map(entry => entry.id).sort())
+    expect(retirements.every(receipt => receipt.version === 1 && receipt.observed.includes('inbox-empty'))).toBe(true)
     expect(identities.filter(entry => entry.kind === 'child')).toHaveLength(12)
     const rootAgents = roots.map(entry => ctx.agents.get(entry.id)!)
     expect(rootAgents.every(Boolean)).toBe(true) // archive is not dispose

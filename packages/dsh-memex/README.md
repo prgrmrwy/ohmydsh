@@ -19,6 +19,10 @@ An AI agent forgets everything when a session ends, and one shared notebook for 
 
 **Jump to:** [How it works](#how-it-works) · [Configuration](#configuration) · [Guard boundary](#guard-boundary) · [Installation and prerequisites](#installation-and-prerequisites) · [Development](#development)
 
+## Fixed selftest retirement observations
+
+Successful test-root retirement writes a private, hashed `retirement-<session>-<uuid>` observation alongside the round evidence only after archive, exact live identity, jobs, descendant and one-shot settlement, final cancellation/idle, and empty-inbox checks succeed. These observations are not resume capabilities, are not current live-state proofs, and are never backfilled for historical rounds. A persistence failure stops the round; failed retirement produces no successful observation.
+
 ## How it works
 <!-- section: how-it-works -->
 

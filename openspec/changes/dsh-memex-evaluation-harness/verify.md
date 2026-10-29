@@ -1,5 +1,23 @@
 ## Verification Results
 
+### 2026-10-29 22:40 验证任务闭合
+
+仓库级node --test tests/memex-eval-wiring.test.mjs tests/weekly-insights.test.mjs：7tests通过，覆盖managed preset/skill/目录关闭/bin-fixture接线、eval身份递归过滤与cache前排除、多帧/seed解析及facet缓存。结合本批61场景映射检查、含EVAL032的全包123files806tests、typecheck/build/strict OpenSpec/artifacts/diff，10.1现已满足，标记完成。
+
+本批代码未部署，未执行新真实模型、未push/归档。下一道真正需要用户参与的边界是部署后重启及官方认证，而不是再给旧轮次改分；如要补新清退观察实机证据，必须明确把它视为新运行，不复用历史成功或以receipt重建权限。当前可独立完成的回归与证据记录已收齐，3.1/3.3与10.3/10.4仍未整体完成，后续需继续沿各自验收义务，不将无凭据401/403外推为全已认证链路黑盒证明。
+
+### 2026-10-29 22:38 follow-up review
+
+新增acceptance-followup-review.md记录本批源码复核：窄范围PASS，不代表整个change可归档。真实Team组合生产闭环新增六条receipt通过readFrozenInput校验哈希与六个exact登记root集合；失败drain不新增成功观察。成功旧轮次公共登记包含全部19个session身份（7根/12child），26条登记行，无缺失；实际evalFilter对19身份全部排除，对无关control不排除。该检查加现有三消费端回归是流量排除证据，不宣称已在每个日常报告上观测到全部排除输出。未变更tasks勾选，因为3.1/3.3包含更广已认证黑盒/无副作用义务，10.1还包含相关仓库回归，10.3还缺新清退观察的实机证据。
+
+### 2026-10-29 22:29 剩余验收推进
+
+新增可重复、opt-in的eval-connection-live.test.ts，使用现有3080官方Connection入口，无cookie/凭据/模型创建：未认证401、跨源403、伪造Host authority403，均无redirect。命令MEMEX_TEST_LIVE_CONNECTION=1 npm test --workspace dsh-memex全包123files806tests通过（包含真实拒绝测试），typecheck通过。EVAL-032映射由红改绿；61个场景映射均有唯一ID与对应文件标记。上游固定源码Connection的api-request-trust/browser-auth/http-bridge测试3files24tests通过，仅作为契约辅助，不冒充完整真实Host已认证跨源验收。
+
+成功轮次六条件物理日志均确认source.kind=user的固定session/title在首次user题面之前；初始探针误把source对象当字符串，纠正后六项均通过，未改产品数据。request/header日志是变化事件而非每次请求计数，不能用其数量估算辅助调用。真实标题provider零辅助调用仍依赖预置标题及默认策略/离线真实provider组合，不声称已从全局外发记录独立证明。
+
+当前工具版本刷新运行openspec validate dsh-memex-evaluation-harness --strict已exit0；未修改规范来消警，先前严格校验三项超长警告不再是当前阻塞。历史成功轮次没有持久化末次exact Agent/inbox/drain快照，不能事后补写成当时证据。任何新receipt只对未来运行提供观察，不替代resume的live capability，也不回填历史。现已在retireHostTestRoot完整检查成功后freeze私有retirement-<session>-<uuid>观察，独立哈希、每次唯一避免续跑重查碰撞；失败drain不产生新成功记录。先RED确认缺文件，再GREEN确认真实Registry/末次inbox清空后写入，26项resume回归及真实Team六条件闭环通过。旧轮次仍无该记录，不回填。最终刷新含live拒绝用例的123files806tests、typecheck、package build、严格OpenSpec、artifacts和diff均通过。尚未部署此新增记录，不要求用户立即重跑；未push/重启/真实模型重跑。
+
 ### 最新结论：2026-10-29 19:38 实机成功轮次复核
 
 成功轮次round-d5f02abc-3f05-4e64-9d02-394e3b7377b8，durable result evidenceComplete:true，六条件及十二裁判yes/checked收齐，默认值人工确认标记已读取核验，离线report exit0。端点5pass1fail来自nomem无成功写回，是行为观察，不是链路缺证；不再为刷绿重跑。
