@@ -116,87 +116,87 @@
 
 ## 7. 网关连接与凭据
 
-- [ ] 7.1 Write failing test `test_owner_connection_01` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「保存 key 后不回显」(assert it fails for the right reason)
-- [ ] 7.2 Implement「保存 key 后不回显」per design; run `test_owner_connection_01` to pass
-- [ ] 7.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.4 Write failing test `test_owner_connection_02` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「网关反射的 key 被脱敏」(assert it fails for the right reason)
-- [ ] 7.5 Implement「网关反射的 key 被脱敏」per design; run `test_owner_connection_02` to pass
-- [ ] 7.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.7 Write failing test `test_owner_connection_03` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「环境提供的 key 拒绝修改」(assert it fails for the right reason)
-- [ ] 7.8 Implement「环境提供的 key 拒绝修改」per design; run `test_owner_connection_03` to pass
-- [ ] 7.9 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.10 Write failing test `test_owner_connection_04` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「非法设置输入被拒绝」(assert it fails for the right reason)
-- [ ] 7.11 Implement「非法设置输入被拒绝」per design; run `test_owner_connection_04` to pass
-- [ ] 7.12 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.13 Write failing test `test_owner_connection_05` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「未配置时不提供模型且不发请求」(assert it fails for the right reason)
-- [ ] 7.14 Implement「未配置时不提供模型且不发请求」per design; run `test_owner_connection_05` to pass
-- [ ] 7.15 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.16 Write failing test `test_owner_connection_06` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「手改或损坏的持久设置被整体拒绝」(assert it fails for the right reason)
-- [ ] 7.17 Implement「手改或损坏的持久设置被整体拒绝」per design; run `test_owner_connection_06` to pass
-- [ ] 7.18 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.19 Write failing test `test_owner_connection_07` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「请求不混用线路凭据」(assert it fails for the right reason)
-- [ ] 7.20 Implement「请求不混用线路凭据」per design; run `test_owner_connection_07` to pass
-- [ ] 7.21 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.22 Write failing test `test_owner_connection_08` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「删除线路只清可写凭据」(assert it fails for the right reason)
-- [ ] 7.23 Implement「删除线路只清可写凭据」per design; run `test_owner_connection_08` to pass
-- [ ] 7.24 Refactor; rerun this group's tests, full suite stays green
-- [ ] 7.25 Write failing test `test_owner_connection_09` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「整表重排不丢凭据」(assert it fails for the right reason)
-- [ ] 7.26 Implement「整表重排不丢凭据」per design; run `test_owner_connection_09` to pass
-- [ ] 7.27 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.1 Write failing test `test_owner_connection_01` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「保存 key 后不回显」(assert it fails for the right reason)
+- [x] 7.2 Implement「保存 key 后不回显」per design; run `test_owner_connection_01` to pass
+- [x] 7.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.4 Write failing test `test_owner_connection_02` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「网关反射的 key 被脱敏」(assert it fails for the right reason)
+- [x] 7.5 Implement「网关反射的 key 被脱敏」per design; run `test_owner_connection_02` to pass
+- [x] 7.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.7 Write failing test `test_owner_connection_03` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「环境提供的 key 拒绝修改」(assert it fails for the right reason)
+- [x] 7.8 Implement「环境提供的 key 拒绝修改」per design; run `test_owner_connection_03` to pass
+- [x] 7.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.10 Write failing test `test_owner_connection_04` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「非法设置输入被拒绝」(assert it fails for the right reason)
+- [x] 7.11 Implement「非法设置输入被拒绝」per design; run `test_owner_connection_04` to pass
+- [x] 7.12 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.13 Write failing test `test_owner_connection_05` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「未配置时不提供模型且不发请求」(assert it fails for the right reason)
+- [x] 7.14 Implement「未配置时不提供模型且不发请求」per design; run `test_owner_connection_05` to pass
+- [x] 7.15 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.16 Write failing test `test_owner_connection_06` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「手改或损坏的持久设置被整体拒绝」(assert it fails for the right reason)
+- [x] 7.17 Implement「手改或损坏的持久设置被整体拒绝」per design; run `test_owner_connection_06` to pass
+- [x] 7.18 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.19 Write failing test `test_owner_connection_07` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「请求不混用线路凭据」(assert it fails for the right reason)
+- [x] 7.20 Implement「请求不混用线路凭据」per design; run `test_owner_connection_07` to pass
+- [x] 7.21 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.22 Write failing test `test_owner_connection_08` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「删除线路只清可写凭据」(assert it fails for the right reason)
+- [x] 7.23 Implement「删除线路只清可写凭据」per design; run `test_owner_connection_08` to pass
+- [x] 7.24 Refactor; rerun this group's tests, full suite stays green
+- [x] 7.25 Write failing test `test_owner_connection_09` in `packages/dsh-magpie-connector/test/owner-connection.test.ts` for「整表重排不丢凭据」(assert it fails for the right reason)
+- [x] 7.26 Implement「整表重排不丢凭据」per design; run `test_owner_connection_09` to pass
+- [x] 7.27 Refactor; rerun this group's tests, full suite stays green
 
 ## 8. 连接身份与代际隔离
 
-- [ ] 8.1 Write failing test `test_owner_generation_01` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「换地址后不显示旧目录」(assert it fails for the right reason)
-- [ ] 8.2 Implement「换地址后不显示旧目录」per design; run `test_owner_generation_01` to pass
-- [ ] 8.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.4 Write failing test `test_owner_generation_02` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「换 key 后不显示旧卡片」(assert it fails for the right reason)
-- [ ] 8.5 Implement「换 key 后不显示旧卡片」per design; run `test_owner_generation_02` to pass
-- [ ] 8.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.7 Write failing test `test_owner_generation_03` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「旧代晚到的响应被丢弃」(assert it fails for the right reason)
-- [ ] 8.8 Implement「旧代晚到的响应被丢弃」per design; run `test_owner_generation_03` to pass
-- [ ] 8.9 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.10 Write failing test `test_owner_generation_04` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「已准备的调用按捕获值跑完」(assert it fails for the right reason)
-- [ ] 8.11 Implement「已准备的调用按捕获值跑完」per design; run `test_owner_generation_04` to pass
-- [ ] 8.12 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.13 Write failing test `test_owner_generation_05` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「进行中的生成不被换代中止」(assert it fails for the right reason)
-- [ ] 8.14 Implement「进行中的生成不被换代中止」per design; run `test_owner_generation_05` to pass
-- [ ] 8.15 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.16 Write failing test `test_owner_generation_06` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「外部改 key 触发换代」(assert it fails for the right reason)
-- [ ] 8.17 Implement「外部改 key 触发换代」per design; run `test_owner_generation_06` to pass
-- [ ] 8.18 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.19 Write failing test `test_owner_generation_07` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「未收到事件时新操作发现 key 变化」(assert it fails for the right reason)
-- [ ] 8.20 Implement「未收到事件时新操作发现 key 变化」per design; run `test_owner_generation_07` to pass
-- [ ] 8.21 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.22 Write failing test `test_owner_generation_08` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「自动切线路保留目录并清空卡片」(assert it fails for the right reason)
-- [ ] 8.23 Implement「自动切线路保留目录并清空卡片」per design; run `test_owner_generation_08` to pass
-- [ ] 8.24 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.25 Write failing test `test_owner_generation_09` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「编辑非生效线路不换目录」(assert it fails for the right reason)
-- [ ] 8.26 Implement「编辑非生效线路不换目录」per design; run `test_owner_generation_09` to pass
-- [ ] 8.27 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.28 Write failing test `test_owner_generation_10` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「删除生效线路后换线路并保留目录」(assert it fails for the right reason)
-- [ ] 8.29 Implement「删除生效线路后换线路并保留目录」per design; run `test_owner_generation_10` to pass
-- [ ] 8.30 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.31 Write failing test `test_owner_generation_11` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「非生效线路外部凭据变化不换代」(assert it fails for the right reason)
-- [ ] 8.32 Implement「非生效线路外部凭据变化不换代」per design; run `test_owner_generation_11` to pass
-- [ ] 8.33 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.34 Write failing test `test_owner_generation_12` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「随机 id 生效线路的外部凭据事件触发换代」(assert it fails for the right reason)
-- [ ] 8.35 Implement「随机 id 生效线路的外部凭据事件触发换代」per design; run `test_owner_generation_12` to pass
-- [ ] 8.36 Refactor; rerun this group's tests, full suite stays green
-- [ ] 8.37 Write failing test `test_owner_generation_13` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「切换后同步失败保留继承目录」(assert it fails for the right reason)
-- [ ] 8.38 Implement「切换后同步失败保留继承目录」per design; run `test_owner_generation_13` to pass
-- [ ] 8.39 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.1 Write failing test `test_owner_generation_01` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「换地址后不显示旧目录」(assert it fails for the right reason)
+- [x] 8.2 Implement「换地址后不显示旧目录」per design; run `test_owner_generation_01` to pass
+- [x] 8.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.4 Write failing test `test_owner_generation_02` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「换 key 后不显示旧卡片」(assert it fails for the right reason)
+- [x] 8.5 Implement「换 key 后不显示旧卡片」per design; run `test_owner_generation_02` to pass
+- [x] 8.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.7 Write failing test `test_owner_generation_03` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「旧代晚到的响应被丢弃」(assert it fails for the right reason)
+- [x] 8.8 Implement「旧代晚到的响应被丢弃」per design; run `test_owner_generation_03` to pass
+- [x] 8.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.10 Write failing test `test_owner_generation_04` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「已准备的调用按捕获值跑完」(assert it fails for the right reason)
+- [x] 8.11 Implement「已准备的调用按捕获值跑完」per design; run `test_owner_generation_04` to pass
+- [x] 8.12 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.13 Write failing test `test_owner_generation_05` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「进行中的生成不被换代中止」(assert it fails for the right reason)
+- [x] 8.14 Implement「进行中的生成不被换代中止」per design; run `test_owner_generation_05` to pass
+- [x] 8.15 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.16 Write failing test `test_owner_generation_06` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「外部改 key 触发换代」(assert it fails for the right reason)
+- [x] 8.17 Implement「外部改 key 触发换代」per design; run `test_owner_generation_06` to pass
+- [x] 8.18 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.19 Write failing test `test_owner_generation_07` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「未收到事件时新操作发现 key 变化」(assert it fails for the right reason)
+- [x] 8.20 Implement「未收到事件时新操作发现 key 变化」per design; run `test_owner_generation_07` to pass
+- [x] 8.21 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.22 Write failing test `test_owner_generation_08` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「自动切线路保留目录并清空卡片」(assert it fails for the right reason)
+- [x] 8.23 Implement「自动切线路保留目录并清空卡片」per design; run `test_owner_generation_08` to pass
+- [x] 8.24 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.25 Write failing test `test_owner_generation_09` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「编辑非生效线路不换目录」(assert it fails for the right reason)
+- [x] 8.26 Implement「编辑非生效线路不换目录」per design; run `test_owner_generation_09` to pass
+- [x] 8.27 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.28 Write failing test `test_owner_generation_10` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「删除生效线路后换线路并保留目录」(assert it fails for the right reason)
+- [x] 8.29 Implement「删除生效线路后换线路并保留目录」per design; run `test_owner_generation_10` to pass
+- [x] 8.30 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.31 Write failing test `test_owner_generation_11` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「非生效线路外部凭据变化不换代」(assert it fails for the right reason)
+- [x] 8.32 Implement「非生效线路外部凭据变化不换代」per design; run `test_owner_generation_11` to pass
+- [x] 8.33 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.34 Write failing test `test_owner_generation_12` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「随机 id 生效线路的外部凭据事件触发换代」(assert it fails for the right reason)
+- [x] 8.35 Implement「随机 id 生效线路的外部凭据事件触发换代」per design; run `test_owner_generation_12` to pass
+- [x] 8.36 Refactor; rerun this group's tests, full suite stays green
+- [x] 8.37 Write failing test `test_owner_generation_13` in `packages/dsh-magpie-connector/test/owner-generation.test.ts` for「切换后同步失败保留继承目录」(assert it fails for the right reason)
+- [x] 8.38 Implement「切换后同步失败保留继承目录」per design; run `test_owner_generation_13` to pass
+- [x] 8.39 Refactor; rerun this group's tests, full suite stays green
 
 ## 9. 模型目录字段映射
 
-- [ ] 9.1 Write failing test `test_owner_catalog_mapping_01` in `packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts` for「字段映射」(assert it fails for the right reason)
-- [ ] 9.2 Implement「字段映射」per design; run `test_owner_catalog_mapping_01` to pass
-- [ ] 9.3 Refactor; rerun this group's tests, full suite stays green
-- [ ] 9.4 Write failing test `test_owner_catalog_mapping_02` in `packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts` for「畸形条目被丢弃」(assert it fails for the right reason)
-- [ ] 9.5 Implement「畸形条目被丢弃」per design; run `test_owner_catalog_mapping_02` to pass
-- [ ] 9.6 Refactor; rerun this group's tests, full suite stays green
-- [ ] 9.7 Write failing test `test_owner_catalog_mapping_03` in `packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts` for「非法容量值视为缺失」(assert it fails for the right reason)
-- [ ] 9.8 Implement「非法容量值视为缺失」per design; run `test_owner_catalog_mapping_03` to pass
-- [ ] 9.9 Refactor; rerun this group's tests, full suite stays green
+- [x] 9.1 Write failing test `test_owner_catalog_mapping_01` in `packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts` for「字段映射」(assert it fails for the right reason)
+- [x] 9.2 Implement「字段映射」per design; run `test_owner_catalog_mapping_01` to pass
+- [x] 9.3 Refactor; rerun this group's tests, full suite stays green
+- [x] 9.4 Write failing test `test_owner_catalog_mapping_02` in `packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts` for「畸形条目被丢弃」(assert it fails for the right reason)
+- [x] 9.5 Implement「畸形条目被丢弃」per design; run `test_owner_catalog_mapping_02` to pass
+- [x] 9.6 Refactor; rerun this group's tests, full suite stays green
+- [x] 9.7 Write failing test `test_owner_catalog_mapping_03` in `packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts` for「非法容量值视为缺失」(assert it fails for the right reason)
+- [x] 9.8 Implement「非法容量值视为缺失」per design; run `test_owner_catalog_mapping_03` to pass
+- [x] 9.9 Refactor; rerun this group's tests, full suite stays green
 
 ## 10. Codex 速度切换
 

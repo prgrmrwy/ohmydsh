@@ -15,31 +15,31 @@
 | specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 不支持的模型不显示且不带字段 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_04 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → Codex 速度切换 | host 重启后回到标准 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_05 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → Codex 速度切换 | 非法 tier 被拒绝 | packages/dsh-magpie-connector/test/owner-speed.test.tsx | test_owner_speed_06 | 🟢 green |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 保存 key 后不回显 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 网关反射的 key 被脱敏 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 环境提供的 key 拒绝修改 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 非法设置输入被拒绝 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_04 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 未配置时不提供模型且不发请求 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_05 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 手改或损坏的持久设置被整体拒绝 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_06 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 请求不混用线路凭据 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_07 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 删除线路只清可写凭据 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_08 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 整表重排不丢凭据 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_09 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 换地址后不显示旧目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 换 key 后不显示旧卡片 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 旧代晚到的响应被丢弃 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_03 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 已准备的调用按捕获值跑完 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_04 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 进行中的生成不被换代中止 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_05 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 外部改 key 触发换代 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_06 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 未收到事件时新操作发现 key 变化 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_07 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 自动切线路保留目录并清空卡片 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_08 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 编辑非生效线路不换目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_09 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 删除生效线路后换线路并保留目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_10 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 非生效线路外部凭据变化不换代 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_11 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 随机 id 生效线路的外部凭据事件触发换代 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_12 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 切换后同步失败保留继承目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_13 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 字段映射 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_01 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 畸形条目被丢弃 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_02 | 🔴 red |
-| specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 非法容量值视为缺失 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_03 | 🔴 red |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 保存 key 后不回显 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 网关反射的 key 被脱敏 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 环境提供的 key 拒绝修改 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 非法设置输入被拒绝 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 未配置时不提供模型且不发请求 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_05 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 手改或损坏的持久设置被整体拒绝 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_06 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 请求不混用线路凭据 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_07 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 删除线路只清可写凭据 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_08 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 网关连接与凭据 | 整表重排不丢凭据 | packages/dsh-magpie-connector/test/owner-connection.test.ts | test_owner_connection_09 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 换地址后不显示旧目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 换 key 后不显示旧卡片 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 旧代晚到的响应被丢弃 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_03 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 已准备的调用按捕获值跑完 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 进行中的生成不被换代中止 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_05 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 外部改 key 触发换代 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_06 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 未收到事件时新操作发现 key 变化 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_07 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 自动切线路保留目录并清空卡片 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_08 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 编辑非生效线路不换目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_09 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 删除生效线路后换线路并保留目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_10 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 非生效线路外部凭据变化不换代 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_11 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 随机 id 生效线路的外部凭据事件触发换代 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_12 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 连接身份与代际隔离 | 切换后同步失败保留继承目录 | packages/dsh-magpie-connector/test/owner-generation.test.ts | test_owner_generation_13 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 字段映射 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_01 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 畸形条目被丢弃 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_02 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 模型目录字段映射 | 非法容量值视为缺失 | packages/dsh-magpie-connector/test/owner-catalog-mapping.test.ts | test_owner_catalog_mapping_03 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | dispose 不删除数据 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_01 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | dispose 时有进行中的请求 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_02 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 禁用不删除用户数据 | 注册句柄 dispose 抛错时其它清理仍执行 | packages/dsh-magpie-connector/test/owner-dispose.test.ts | test_owner_dispose_03 | 🟢 green |
