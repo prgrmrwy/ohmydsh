@@ -75,6 +75,7 @@ whenToUse: 用户要求发布/上架自研 DSH 插件、完善其发布资料或
 
 演示与资源要求：
 
+- **演示图一律用 PNG 静态截图，不用 GIF。** DSH 插件商店默认不展示 GIF（2026-10-29 实测），README 首屏与 `screenshots.json` 都只放 PNG。每张图选最能代表核心价值的一个状态：操作面停在结果已出现的时刻（如决策已应用、菜单已展开分组），设置面停在关键配置与反馈同屏的位置（如连接测试成功、分组与用量卡片），不放空态、半填表单或滚动中的中间态。用 Playwright/CDP 在 `deviceScaleFactor: 2` 下按区域无损截图；已有 GIF 录制时可无损导出其中代表帧，并在截图登记写明帧号与原录制来源。
 - 演示必须对应当前界面；完整包住菜单、输入框或设置弹窗，保持文字清晰，不以旧版 UI 冒充当前行为。
 - README 位图在包内 `docs/SCREENSHOTS.md` 登记，注明 screenshot/illustration、来源、日期、审阅与说明；遵守治理测试的单文件 400 KiB 上限。
 - `screenshots.json` 列出包内实际存在的演示图片路径，随包发布。图片、架构图与 JSON 源均纳入正确的发布 files；npm README 的相对链接需与镜像根目录一致，发布后再核对实际页面。
@@ -178,7 +179,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 | 本次意图 | 主仓操作 | 自动结果 |
 | --- | --- | --- |
 | 只更新镜像源码/README | 版本不变，提交包目录改动 | 镜像 main 更新；已有 tag 不动，npm/Release 不重发 |
-| 发布功能、修复或更新 npm README/GIF | 升包版本，写 CHANGELOG，同步 manifest、锁文件和版本 fixture | 镜像更新 → 新 tag → 检查/构建 → npm → GitHub Release 与附件 |
+| 发布功能、修复或更新 npm README/截图 | 升包版本，写 CHANGELOG，同步 manifest、锁文件和版本 fixture | 镜像更新 → 新 tag → 检查/构建 → npm → GitHub Release 与附件 |
 | 只改主仓 manifest 或根 workflow | 不涉及包目录的 push 可能不触发镜像 | 需要时手动运行 Mirror release；不误判为失败 |
 
 发布后按第 6 节独立核验各分发面。商店安装命令与详情页 README 分别跟随 npm 最新版和仓库，发版后无需改商店条目；当前自动发布 workflow 也**不会改商店条目**。未固定 tarball 的条目按上游采集机制核验，不虚构更新已到达用户端。
@@ -186,7 +187,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 ## 9. 每次交付的执行清单
 
 - [ ] 拉取最新主仓，核对源码、镜像、tag、npm 与 Release，处理他人新提交。
-- [ ] 包自包含、元数据/许可齐全；README 按“操作/设置并排 → 小字左右图注 → Archify 架构图 → 问题一句话与特点 → 常规使用文档 → ohmydsh/协议/issue/PR”排序，演示与图均对应当前实现，资源与截图登记合规。
+- [ ] 包自包含、元数据/许可齐全；README 按“操作/设置并排（PNG 代表性截图，无 GIF） → 小字左右图注 → Archify 架构图 → 问题一句话与特点 → 常规使用文档 → ohmydsh/协议/issue/PR”排序，演示与图均对应当前实现，资源与截图登记合规。
 - [ ] 主仓 mirror matrix/paths、每仓 deploy key、npm Trusted Publisher 配置齐全。
 - [ ] release workflow 同时覆盖 npm 和 GitHub Release，含版本校验、检查、重复运行与附件。
 - [ ] 需发布时更新包版本、CHANGELOG、manifest、锁文件及 fixture，完成本地和独立布局验证。
@@ -220,5 +221,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 | AUTO | 已配置 | 已配置 | 已配置，0.5.1 起已验 | 已按 §3 |
 | Magpie | 已配置 | 已配置 | 已配置，0.3.0 已验（附件与 npm 字节一致） | 已按 §3（npm 页随下一个版本更新） |
 | Sidebar | 已配置 | 已配置 | 已配置，0.1.12 起 | 已按 §3（无设置面，右侧为显示规则示意） |
+
+演示图：AUTO 0.5.3 与 Magpie 0.3.1 起由 GIF 换为代表性 PNG（取自原录制的代表帧），Sidebar 一直是 PNG；只有推 main 并核对商店详情页后，才能说商店已展示新图。
 
 更早的版本（Magpie ≤0.2.0、Sidebar ≤0.1.11）没有回补 GitHub Release；需要时按 §10「npm 成功，Release 缺失」处理。后续新插件默认完成全链路；维护现有插件时以实际 workflow 与线上结果更新此表。

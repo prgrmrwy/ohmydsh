@@ -163,7 +163,7 @@ customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.5.2
+    version: 0.5.3
     enabled: true
     brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
     note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识(Claude/GPT)集中在src/strategies注册表,新家族=新增策略文件。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义System One可选,独立credentials或只读启动环境;AUTO外发≤8000字当前任务及前轮摘要,形态脱敏尽力而为,所选服务保留条款须自行确认。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json(旧映射字段只读忽略,保存时移除);路由与无正文反馈快照:$DSH_HOME/state/auto-model-routing。反馈仅观察不自动调优。fork不支持;真实Magpie普通子任务已验,teammate仅mock覆盖。0.5.0删除四档链路与版本字段;回滚:本条改source: remote、spec: dsh-auto-model-routing@0.4.2、version: 0.4.2 → dsh build → 重启(0.5.0写过的子会话记录/反馈行0.4.2读不到)。停用:enabled:false → dsh build,撤销路由恢复。'
@@ -418,7 +418,7 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.3.0
+    version: 0.3.1
     enabled: true
     brief: 接入自托管 Magpie 网关；按上游 owned_by 注册多个 route 原生分组，含用量卡片、默认输出预算与 Cloudflare Access
     note: '自研 MIT,change add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多个真实 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners 持久≤32),原版选择器即显示 Magpie (<Owner>) 分组,不依赖 model-display.patch;旧单 route 退役无别名,旧会话需重选;AUTO strategies 与 guard exemptProviders 仍写旧 route,须另行适配(均 fail closed)。0.2.0 起设置为 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读按线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒绝重定向。移除:enabled:false → dsh build → 重启。'

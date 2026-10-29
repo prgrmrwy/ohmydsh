@@ -3,11 +3,11 @@
 English · [简体中文](README.zh.md)
 
 <p align="center">
-  <img src="docs/auto-routing.gif" alt="AUTO: switch modes, apply effort and inspect the decision distribution" width="49%">
-  <img src="docs/settings.gif" alt="Settings: decision service, connection test, defaults and strategy details" width="49%">
+  <img src="docs/auto-routing.png" alt="AUTO applied a higher effort to the main session; the panel shows the returned decision distribution" width="49%">
+  <img src="docs/settings.png" alt="Settings: decision service, compatible endpoint and a successful connection test" width="49%">
 </p>
 
-*Left: AUTO interaction and applied decision. Right: current settings and strategy details. Recorded from an isolated DSH host with local mock Jev/model responses and synthetic tasks.*
+*Left: an applied AUTO decision with its effort distribution. Right: decision service settings with a successful connection test. Captured from an isolated DSH host with local mock Jev/model responses and synthetic tasks.*
 
 ![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
 

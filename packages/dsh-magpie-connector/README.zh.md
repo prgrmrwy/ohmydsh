@@ -3,11 +3,11 @@
 [English](README.md) · 简体中文
 
 <p align="center">
-  <img src="docs/model-picker.gif" alt="模型选择器：按上游 provider 分组，仅 GPT 显示标准/快速" width="49%">
-  <img src="docs/settings.gif" alt="设置页：添加线路、Cloudflare Access 备用线路、保存、分组模型的可见性与默认 effort、用量卡片刷新" width="49%">
+  <img src="docs/model-picker.png" alt="模型选择器：按上游 provider 分组为 Magpie (Claude)、Magpie (GPT)、Magpie (deepseek)" width="49%">
+  <img src="docs/settings.png" alt="设置页：按 provider 分组的模型可见性、默认 effort 与用量卡片" width="49%">
 </p>
 
-*左：按上游 provider 分组的模型选择器，仅 GPT 显示标准/快速切换；右：设置 → Magpie，包括连接线路、Cloudflare Access 备用线路、模型可见性、默认 effort 与用量卡片。录屏来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
+*左：按上游 provider 分组的模型选择器；右：设置 → Magpie，按 provider 分组的模型可见性、默认 effort 与用量卡片。截图来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
 
 ![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
 

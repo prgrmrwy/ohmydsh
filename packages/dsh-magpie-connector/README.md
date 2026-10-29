@@ -3,11 +3,11 @@
 English · [简体中文](README.zh.md)
 
 <p align="center">
-  <img src="docs/model-picker.gif" alt="Model picker grouped by upstream provider, with the GPT-only standard/fast control" width="49%">
-  <img src="docs/settings.gif" alt="Settings: add a line, a Cloudflare Access backup line, save, provider groups with visibility and default effort, usage card refresh" width="49%">
+  <img src="docs/model-picker.png" alt="Model picker grouped by upstream provider: Magpie (Claude), Magpie (GPT), Magpie (deepseek)" width="49%">
+  <img src="docs/settings.png" alt="Settings: models grouped by provider with visibility, default effort and usage cards" width="49%">
 </p>
 
-*Left: model picker grouped by upstream provider, with the GPT-only standard/fast switch. Right: Settings → Magpie — connection lines, a Cloudflare Access backup line, model visibility, default effort and usage cards. Recorded from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
+*Left: model picker grouped by upstream provider. Right: Settings → Magpie — per-provider model visibility, default effort and usage cards. Captured from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
 
 ![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
 

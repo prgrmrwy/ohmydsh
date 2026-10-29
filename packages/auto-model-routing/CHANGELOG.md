@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3
+
+- Replace both README demo GIFs with representative PNG screenshots (an applied AUTO decision with its distribution; decision service settings with a connection test), because the DSH plugin store does not show GIFs by default. No runtime behavior changes.
+
 ## 0.5.2
 
 - README follows the standard plugin layout: demos side by side, then the architecture diagram, then the introduction; a closing section links the ohmydsh source, the MIT license and the issue tracker.

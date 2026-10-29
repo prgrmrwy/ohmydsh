@@ -3,11 +3,11 @@
 [English](README.md) · 简体中文
 
 <p align="center">
-  <img src="docs/auto-routing.gif" alt="AUTO：切换模式、应用推理投入并查看决策分布" width="49%">
-  <img src="docs/settings.gif" alt="设置：决策服务、连接测试、默认值与策略说明" width="49%">
+  <img src="docs/auto-routing.png" alt="AUTO 已为主会话应用更高推理投入，面板显示返回的决策分布" width="49%">
+  <img src="docs/settings.png" alt="设置：决策服务、兼容端点与连接测试成功" width="49%">
 </p>
 
-*左：AUTO 交互与已应用的决策；右：当前设置页与策略说明。录制来自隔离 DSH 宿主，使用本地模拟 Jev/模型响应与合成任务。*
+*左：已应用的 AUTO 决策与投入分布；右：决策服务设置与连接测试成功。截图来自隔离 DSH 宿主，使用本地模拟 Jev/模型响应与合成任务。*
 
 ![AUTO 架构：独立判断、请求校验与分配反馈](docs/architecture-v2.zh.svg)
 

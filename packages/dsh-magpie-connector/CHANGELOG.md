@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Replace both README demo GIFs with representative PNG screenshots (the model picker grouped by provider; per-provider visibility, default effort and usage cards in Settings), because the DSH plugin store does not show GIFs by default. No runtime behavior changes.
+
 ## 0.3.0
 
 **BREAKING:** the single provider route `dsh-magpie-connector` is retired and not aliased. Sessions, the default model and any external configuration saved with that route id no longer resolve; reselect the model after upgrading, and update anything that lists the exact route id (subagent routing, egress allowlists).
