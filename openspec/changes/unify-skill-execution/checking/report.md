@@ -27,4 +27,10 @@ No Critical/Important implementation finding remains in the reviewed scope. Disc
 
 ## Delivery boundary
 
-Only this batch's two helper surfaces are unified; arbitrary user shell commands and OS adapters retain their own contracts. Deployment to daily profiles requires the owner's later normal build. Existing worktree and Windows backups retained. New change remains active with the disclosed root baseline issue; no automatic zero-skip acceptance or archive is asserted. Controlled main fast-forward and normal push succeeded at `2916b92a`, including the prior owner-approved launcher archive and this helper batch. Production profile was not rebuilt; these are source changes awaiting the owner's normal deployment.
+Only this batch's two helper surfaces are unified; arbitrary user shell commands and OS adapters retain their own contracts. Deployment to daily profiles requires the owner's later normal build. Existing worktree and Windows backups retained. New change remains active; no automatic zero-skip acceptance or archive is asserted. The initial baseline issue below was repaired by a parallel main branch and is superseded by the final integrated result. Controlled main fast-forward and normal push succeeded at `2916b92a`, including the prior owner-approved launcher archive and this helper batch. Production profile was not rebuilt; these are source changes awaiting the owner's normal deployment.
+
+## Final integrated result (2026-10-30)
+
+While delivery records were merging, parallel main commit `b0ebbb28` repaired the historical notes index. Controlled merge `b34bd2b9` retained both branches; every reviewed helper, driver and new contract file is byte-identical to the tested implementation. Task worktree then fast-forwarded to that main.
+
+A fresh complete npm test on `b34bd2b9` succeeded: **704tests/699pass/0fail/5existing skips**, exit0. This supersedes the four initial baseline failures, without relabeling earlier runs. No test assertion was weakened by this helper change. Windows native8+1 focused results remain valid because those files are unchanged; no fresh macOS run or zero-skip whole-platform claim is implied.
