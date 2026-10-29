@@ -33,18 +33,22 @@ ohmydsh 把**一个人的 DSH 配置**收敛成一个可审查、可复现的仓
 ## 快速开始
 <!-- section: quick-start -->
 
-初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**完整配置仍待原生平台完整构建和终端关闭验收**；启动器测试通过不等于已承诺全仓 Windows 支持。三条路径任选其一。
+初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**三端隔离的构建与 Host 命令流程已验收，真实终端关闭和桌面 UI 仍待验证**，详见[三端验收记录](openspec/changes/unify-skill-execution/checking/summary.md)；这不等于全部第三方插件的 Windows 功能认证。三条路径任选其一。
+
+原生 Windows 含中文路径时请使用已验证的 Node.js 24.20.0（当前 `.nvmrc` 推荐版本）。24.12.0 存在同步删除静默失败的问题，可能导致 pnpm 替换插件目录时报 `EPERM`。本轮验收使用 pnpm 11.7.0；首次构建若提示依赖构建脚本策略未决，需逐项明确允许或拒绝，再重跑 `dsh build`。
 
 ### 路径一：照抄我的完整配置
 
 ```bash
-git clone https://github.com/prgrmrwy/ohmydsh.git && cd ohmydsh
+git clone https://github.com/prgrmrwy/ohmydsh.git
+cd ohmydsh
 node scripts/bootstrap.mjs # 检查最低版本，必要时执行根 lock 的 npm ci
 npm link                   # 注册仓库 bin；不代替依赖初始化
-dsh build && dsh           # 物化配置，然后启动 DSH
+dsh build                  # 物化配置
+dsh                        # 启动 DSH
 ```
 
-Windows 可在 cmd 或 PowerShell 执行（Windows PowerShell 5.1 把 `&&` 拆成两行）。`npm link` 在 npm 全局 prefix 生成 `dsh.cmd` / `dsh.ps1`，须把该 prefix 加到 PATH；若执行策略阻止 ps1，直接使用 `dsh.cmd`，不要降低全机器执行策略。POSIX 全局 bin 在 `<prefix>/bin`。用 `npm prefix -g` 与 `where.exe dsh` / `command -v dsh` 排查官方同名命令冲突，不用 `--force` 覆盖无关 bin；`npm unlink --global ohmydsh` 撤销当前 link。旧 POSIX install/bootstrap 只保留薄兼容入口。
+Windows 的 cmd 和 PowerShell 都可逐行执行上述相同命令。`npm link` 在 npm 全局 prefix 生成 `dsh.cmd` / `dsh.ps1`，须把该 prefix 加到 PATH；若执行策略阻止 ps1，使用 `npm.cmd link`、`dsh.cmd build` 和 `dsh.cmd`，不要降低全机器执行策略。POSIX 全局 bin 在 `<prefix>/bin`。用 `npm prefix -g` 与 `where.exe dsh` / `command -v dsh` 排查官方同名命令冲突，不用 `--force` 覆盖无关 bin；`npm unlink --global ohmydsh` 撤销当前 link。旧 POSIX install/bootstrap 只保留薄兼容入口。
 
 POSIX start/stop/restart 要求 `lsof`、`ps`（用系统包管理器安装 lsof），缺探测工具时在启动/停止前拒绝；Windows 使用系统 PowerShell TCP/CIM 查询，仅强制停止再次核验归属的进程树，不保证优雅刷盘。显式 `DSH_BIN` 是单个可执行路径：Windows 支持 JS 入口或原生 `.exe`，拒绝 `.cmd`/`.bat`/`.ps1` shim 与命令字符串，应指向真实 JS CLI。
 

@@ -89,6 +89,22 @@ test('the stamp survives the scrub and lives outside the git work tree contents'
   } finally { f.cleanup() }
 })
 
+test('stale ignored paths beyond MAX_PATH are scrubbed without changing Git configuration', () => {
+  const { prepareUpstreamCache } = require(MODULE)
+  const f = fixture()
+  try {
+    git(f.root, 'config', '--local', 'core.longpaths', 'false')
+    const deep = path.join(f.root, 'node_modules', 'a'.repeat(90), 'b'.repeat(90), 'c'.repeat(90), 'entry.js')
+    mkdirSync(path.dirname(deep), { recursive: true })
+    writeFileSync(deep, 'stale ignored artifact\n')
+    assert.ok(deep.length > 300)
+    assert.equal(prepareUpstreamCache({ checkout: f.root, commit: f.commit, patchSha256: 'p1', run: (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }) }).reused, false)
+    assert.equal(existsSync(deep), false)
+    assert.equal(git(f.root, 'config', '--local', '--get', 'core.longpaths'), 'false')
+    assert.equal(readFileSync(path.join(f.root, 'packages', 'kept', 'index.ts'), 'utf8'), 'export const kept = 1\n')
+  } finally { f.cleanup() }
+})
+
 test('build.mjs consults the cache stamp before building and records it only after a successful build', () => {
   const builder = readFileSync(path.resolve(import.meta.dirname, '..', 'packages', 'dsh-pet', 'compat', 'subagent', 'build.mjs'), 'utf8')
   const prepare = builder.indexOf('prepareUpstreamCache(')

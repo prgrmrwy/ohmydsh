@@ -6,7 +6,7 @@ const checkout = process.env.DSH_COMPAT_SUBAGENT_CHECKOUT
 if (!checkout) throw new Error('Set DSH_COMPAT_SUBAGENT_CHECKOUT to the isolated pinned source checkout')
 const requireSource = createRequire(resolve(checkout, 'package.json'))
 const { standardDecoratorPlugin, vitestExecArgv } = await import(pathToFileURL(resolve(checkout, 'vitest.shared.ts')).href)
-const tests = fileURLToPath(new URL('../../test/', import.meta.url))
+const tests = fileURLToPath(new URL('../../test/', import.meta.url)).replaceAll('\\', '/')
 const ts = requireSource('typescript')
 const paths = ts.readConfigFile(resolve(checkout, 'tsconfig.base.json'), ts.sys.readFile).config.compilerOptions.paths
 const aliases = Object.entries(paths).map(([name, targets]) => ({
