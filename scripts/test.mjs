@@ -9,7 +9,7 @@ export function testFiles(platform, entries) {
   if (platform !== 'win32') return entries.filter(name => name.endsWith('.test.mjs')).sort().map(name => path.join('tests', name))
   // Historical Bash oracle fixtures stay in the complete POSIX lane. Native
   // Windows never starts them or silently skips a failed platform assertion.
-  return ['child-process', 'compat-launcher-policy', 'compat-launcher-publish', 'dsh-host-runtime', 'package-manager', 'launcher-bootstrap', 'launcher-exec', 'launcher-args', 'launcher-env-local', 'launcher-environment', 'launcher-process', 'launcher-ui', 'launcher-runner', 'launcher-lifecycle', 'launcher-install', 'launcher-acceptance', 'workspace-lifecycle', 'skill-execution', 'test-driver'].map(name => path.join('tests', `${name}.test.mjs`)).concat(path.join('tests', 'platform', 'windows-launcher.test.mjs'))
+  return ['child-process', 'compat-launcher-policy', 'compat-launcher-publish', 'compat-upstream-cache', 'dsh-host-runtime', 'package-manager', 'launcher-bootstrap', 'launcher-exec', 'launcher-args', 'launcher-env-local', 'launcher-environment', 'launcher-process', 'launcher-ui', 'launcher-runner', 'launcher-lifecycle', 'launcher-install', 'launcher-acceptance', 'workspace-lifecycle', 'skill-execution', 'test-driver'].map(name => path.join('tests', `${name}.test.mjs`)).concat(path.join('tests', 'platform', 'windows-launcher.test.mjs'))
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

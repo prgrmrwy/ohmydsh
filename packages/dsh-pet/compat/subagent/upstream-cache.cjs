@@ -48,7 +48,7 @@ function prepareUpstreamCache({ checkout, commit, patchSha256, run }) {
   // must not mistake a half-prepared tree for a valid cache.
   rmSync(stampPath(checkout), { force: true })
   // -ff also removes nested git repositories; -x removes ignored files (lib/, node_modules).
-  run('git', ['clean', '-ffdxq'], checkout)
+  run('git', ['-c', 'core.longpaths=true', 'clean', '-ffdxq'], checkout)
   return { reused: false }
 }
 
