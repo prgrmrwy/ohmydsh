@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- README follows the standard plugin layout: demos side by side, then the architecture diagram, then the introduction; a closing section links the ohmydsh source, the MIT license and the issue tracker.
+- The release workflow now also creates the GitHub Release for each version and attaches the exact npm tarball. No runtime behavior changes.
+
 ## 0.5.1
 
 - Replace both retired four-tier GIFs with high-resolution recordings of the current AUTO interaction, applied decision distribution and settings/strategy UI, using isolated mock services and synthetic tasks.

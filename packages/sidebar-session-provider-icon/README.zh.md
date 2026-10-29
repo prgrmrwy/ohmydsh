@@ -11,10 +11,18 @@
 
 *左：隔离 DSH 实例中的真实侧边栏（演示会话）；右：单一与复合角标的显示规则。*
 
+![架构：输入框选择、官方 modelSelection projection 与 Host 的 provider projection 汇入 provider-map，在每个侧边栏会话行前渲染品牌徽标](docs/architecture.zh.svg)
+
 <!-- problem -->
 DeepSeek Harness（DSH）的侧边栏里每个会话行看起来都一样，不打开会话就分不清它用的是哪个 provider 和 model。这个插件在每个会话标题前显示 provider + model 图标，取值于输入框当前选中的模型，切换后立刻更新。provider 和 model 不是同一家时（例如 `opencode-go/deepseek-v4-flash`），在 provider logo 的右下角叠一个缩小的 model logo。
 
-**安装。** 需要 DeepSeek Harness `0.2.0-rc.2`、Node.js `>=22.19`。
+- **真实品牌标识，不靠生成。** logo 是固定版本、随包分发的 SVG，按实际 provider route 和 model id 选取，运行时不生成、不下载。
+- **实时跟随输入框。** 当前打开的会话立即跟随输入框的选择；其他会话行使用下一次请求的选择，冷历史回退到最近一次真实请求。
+- **识别网关的复合徽标。** 聚合 route 显示 route logo 加模型厂商角标；Magpie 等网关还能多显示一层中转平台，全部保持原来 14×14 的占位。
+
+## 安装
+
+需要 DeepSeek Harness `0.2.0-rc.2`、Node.js `>=22.19`。
 
 ```sh
 # 从 npm 安装：预构建，无需构建授权
@@ -26,7 +34,6 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 
 重启 DSH 并刷新 Web 页面。除此之外不需要任何东西：无配置项、不访问网络、除安装它的 DSH profile 外不写任何文件。
 
-在 ohmydsh 仓库里，本插件通过 `dsh.yaml` 的条目 `sidebar-session-provider-icon`（`source: local`）接入，因此在该仓库改源码只需 `dsh build` 再重启。当前行为见规范 [`openspec/specs/sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/sidebar-session-provider-icon/spec.md)；设计演进见归档的 change [`sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-08-21-sidebar-session-provider-icon) 和 [`sidebar-provider-icon-composite-model-badge`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge)。
 
 ## 行为
 
@@ -135,3 +142,17 @@ npm run build
 在 ohmydsh monorepo 里本包是 workspace 成员：在仓库根目录安装一次，后三条命令加上 `--workspace dsh-sidebar-session-provider-icon`。`dsh build` / sync 也会在安装本 local package 之前按需生成 `lib/`；刷新 Web 页面即可加载新的 client bundle。
 
 vitest 下小 SVG 会被内联成 data URL，属性引号会被改成 `'`。改写 SVG 属性的正则要同时兼容 `"` 和 `'`。
+
+## 移除
+
+```sh
+dsh plugin --profile web remove dsh-sidebar-session-provider-icon
+```
+
+重启 DSH 并刷新页面，徽标即消失。插件自身不保留任何设置或文件。
+
+## 来源、许可与参与
+
+本插件在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh)（`packages/sidebar-session-provider-icon`）中持续开发，本仓库是发布镜像，自动发布到 npm 与 GitHub Releases。当前行为见规范 [`openspec/specs/sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/sidebar-session-provider-icon/spec.md)；设计演进见归档的 change [`sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-08-21-sidebar-session-provider-icon) 和 [`sidebar-provider-icon-composite-model-badge`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge)。
+
+代码采用 [MIT](LICENSE) 许可；随包的品牌图标见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。欢迎到 [prgrmrwy/dsh-sidebar-session-provider-icon](https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon/issues) 提 issue 和 PR，尤其是缺失的品牌和识别不到的模型名。

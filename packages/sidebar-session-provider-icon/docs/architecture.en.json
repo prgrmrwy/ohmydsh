@@ -1,0 +1,304 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-sidebar-session-provider-icon Architecture",
+    "locale": "en",
+    "output": ".archify/architecture-sidebar-icon-20261029/sidebar.en.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "link_mode": "local-only",
+      "revision": "0fa7bc1599fe9b159ce29f0bf0a575d87db0824b"
+    }
+  },
+  "components": [
+    {
+      "id": "log",
+      "type": "database",
+      "label": "Session log",
+      "sublabel": "request/header events",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/provider.ts",
+          "line": 41,
+          "end_line": 55,
+          "label": "request/header only"
+        }
+      ]
+    },
+    {
+      "id": "proj",
+      "type": "backend",
+      "label": "provider projection",
+      "sublabel": "Host · last request route",
+      "pos": [
+        40,
+        220
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/index.ts",
+          "line": 18,
+          "end_line": 24,
+          "label": "register projection"
+        },
+        {
+          "path": "packages/sidebar-session-provider-icon/src/provider.ts",
+          "line": 64,
+          "end_line": 72,
+          "label": "projection unit"
+        }
+      ]
+    },
+    {
+      "id": "msel",
+      "type": "backend",
+      "label": "modelSelection projection",
+      "sublabel": "official · next selection",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/provider-map.ts",
+          "line": 13,
+          "end_line": 30,
+          "label": "durable selection"
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "type": "frontend",
+      "label": "Session list feed",
+      "sublabel": "ctx.sessions.list · projection values",
+      "pos": [
+        440,
+        220
+      ],
+      "size": [
+        220,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/index.ts",
+          "line": 150,
+          "end_line": 153,
+          "label": "list subscription"
+        }
+      ]
+    },
+    {
+      "id": "comp",
+      "type": "frontend",
+      "label": "Composer model selector",
+      "sublabel": "modelDirectories store · live",
+      "pos": [
+        840,
+        40
+      ],
+      "size": [
+        210,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/selection-binding.ts",
+          "line": 103,
+          "end_line": 126,
+          "label": "store subscription"
+        }
+      ]
+    },
+    {
+      "id": "pmap",
+      "type": "frontend",
+      "label": "provider-map.ts",
+      "sublabel": "live → next selection → last request",
+      "pos": [
+        840,
+        220
+      ],
+      "size": [
+        210,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/provider-map.ts",
+          "line": 40,
+          "end_line": 63,
+          "label": "precedence"
+        }
+      ]
+    },
+    {
+      "id": "logos",
+      "type": "frontend",
+      "label": "logos.ts",
+      "sublabel": "route logo + model corner logo",
+      "pos": [
+        1220,
+        220
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/logos.ts",
+          "line": 175,
+          "end_line": 189,
+          "label": "badge brands"
+        }
+      ]
+    },
+    {
+      "id": "rows",
+      "type": "frontend",
+      "label": "Sidebar session rows",
+      "sublabel": "badge before title · data-row-key",
+      "pos": [
+        1220,
+        400
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/row-locator.ts",
+          "line": 50,
+          "end_line": 56,
+          "label": "row identity"
+        },
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/index.ts",
+          "line": 137,
+          "end_line": 147,
+          "label": "MutationObserver"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "DSH Host",
+      "wraps": [
+        "log",
+        "proj",
+        "msel"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Web client (browser)",
+      "wraps": [
+        "list",
+        "comp",
+        "pmap",
+        "logos",
+        "rows"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "log-proj",
+      "from": "log",
+      "to": "proj",
+      "label": "fold request/header"
+    },
+    {
+      "id": "proj-list",
+      "from": "proj",
+      "to": "list",
+      "label": "provider (last request)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "msel-list",
+      "from": "msel",
+      "to": "list",
+      "label": "next selection",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "list-pmap",
+      "from": "list",
+      "to": "pmap",
+      "label": "projection values",
+      "variant": "emphasis"
+    },
+    {
+      "id": "comp-pmap",
+      "from": "comp",
+      "to": "pmap",
+      "label": "live provider/model"
+    },
+    {
+      "id": "pmap-logos",
+      "from": "pmap",
+      "to": "logos",
+      "label": "(provider, model)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "logos-rows",
+      "from": "logos",
+      "to": "rows",
+      "label": "badge · tooltip"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Selection precedence",
+      "items": [
+        "A live composer selection wins while the open session can still be verified",
+        "Otherwise the official modelSelection next selection, which also covers a picked-but-unsent model",
+        "Cold history falls back to the provider of the last real request"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Brand rendering",
+      "items": [
+        "Provider route picks the main logo; the model id picks the corner logo",
+        "Gateway routes can show three layers: gateway, transit platform, model vendor",
+        "Unknown vendors get no corner logo; the 14×14 footprint never changes"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Boundaries",
+      "items": [
+        "No configuration, no network requests, no files written",
+        "Rows are matched by the official data-row-key, so duplicate titles never swap badges"
+      ]
+    }
+  ]
+}

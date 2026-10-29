@@ -9,7 +9,7 @@
 
 *左：AUTO 交互与已应用的决策；右：当前设置页与策略说明。录制来自隔离 DSH 宿主，使用本地模拟 Jev/模型响应与合成任务。*
 
-[插件仓库](https://github.com/prgrmrwy/dsh-auto-model-routing) · [版本发布](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
+![AUTO 架构：独立判断、请求校验与分配反馈](docs/architecture-v2.zh.svg)
 
 <!-- problem -->
 **为 DSH 增加 AUTO 模式：主 Agent 自动调 effort，子 Agent 自动选 model + effort。** 不必每轮手动选择推理投入，也不必为每个子任务手动挑模型。
@@ -97,9 +97,7 @@ AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方
 ## 架构
 <!-- section: architecture -->
 
-![AUTO 架构：独立判断、请求校验与分配反馈](docs/architecture-v2.zh.svg)
-
-主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。图示为 AUTO 路径，MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
+顶部的架构图为 AUTO 路径。主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
 入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、transport、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[真实 Magpie 验收](docs/magpie-live-acceptance.md)。
 
@@ -113,9 +111,7 @@ npm run build
 
 测试使用官方 AgentLoop、假 LLM 流和 mock/回环 Jev，不产生真实模型费用。如需观察 AUTO 决策及实际 token 用量，请明确让 agent 使用 `auto-model-routing-report` skill（仅按需调用，运行只读的 `lib/usage-report.js`）；它是观察统计，不衡量节省；新数据结构与去重口径见[feedback-evaluation.md](docs/feedback-evaluation.md)。
 
-继续在主仓开发，本仓库仅作发布镜像。插件使用自身声明的依赖、包内 skill 和官方 DSH 服务即可独立构建与加载，不要求检出主仓，也不要求安装主仓环境指令。外部设计链接仅供背景阅读，不是运行输入。
-
-[当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)在源码 monorepo 中维护。包内[委派 skill](skills/subagent-model-routing/SKILL.md)提供指引，执行保障来自官方宿主钩子，而不是提示词。暂无完整任务质量或 token 节省的量化结论。
+插件使用自身声明的依赖、包内 skill 和官方 DSH 服务即可独立构建与加载，不要求检出主仓，也不要求安装主仓环境指令。外部设计链接仅供背景阅读，不是运行输入。包内[委派 skill](skills/subagent-model-routing/SKILL.md)提供指引，执行保障来自官方宿主钩子，而不是提示词。暂无完整任务质量或 token 节省的量化结论。
 
 ## 移除
 <!-- section: removal -->
@@ -125,3 +121,9 @@ dsh plugin --profile web remove dsh-auto-model-routing
 ```
 
 重启 DSH 并刷新页面。插件的 skill、工具和请求钩子撤销，配置与日志保留。关闭插件后不再执行子路由恢复，宿主使用原始创建配置。在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 中则禁用 local 条目并重新构建。
+
+## 来源、许可与参与
+
+本插件在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh)（`packages/auto-model-routing`）中持续开发，[本仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)是发布镜像，自动发布到 [npm](https://www.npmjs.com/package/dsh-auto-model-routing) 与 [GitHub Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases)。[当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)也在主仓维护。
+
+采用 [MIT](LICENSE) 许可。欢迎到 [prgrmrwy/dsh-auto-model-routing](https://github.com/prgrmrwy/dsh-auto-model-routing/issues) 提 issue 和 PR，包括支持 Claude、GPT 以外的模型家族。

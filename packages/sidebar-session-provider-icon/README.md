@@ -11,10 +11,18 @@ English · [简体中文](README.zh.md)
 
 *Left: the real sidebar in an isolated DSH instance with demo sessions. Right: rendering rules for single and composite badges.*
 
+![Architecture: the composer selection, the official modelSelection projection and a Host provider projection feed provider-map, which renders a brand badge in front of each sidebar row](docs/architecture.en.svg)
+
 <!-- problem -->
 In the DeepSeek Harness (DSH) sidebar every session row looks alike, so you cannot tell which provider and model a conversation uses without opening it. This plugin shows a provider + model icon in front of each session title, read from the model currently selected in the composer, and updates it the moment you switch. When the provider and the model come from different vendors (for example `opencode-go/deepseek-v4-flash`), the provider logo carries a small model logo in its bottom-right corner.
 
-**Install.** DeepSeek Harness `0.2.0-rc.2`, Node.js `>=22.19`.
+- **Real brand marks, nothing generated.** Logos are pinned, vendored SVGs chosen from the actual provider route and model id; nothing is generated or fetched at runtime.
+- **Follows the composer live.** The open session tracks the input-box selection immediately; other rows keep their next selection, and cold history falls back to the last real request.
+- **Gateway-aware composite.** Aggregator routes show the route logo with the model vendor in the corner, and gateways such as Magpie can add the transit platform as a third layer — all inside the original 14×14 footprint.
+
+## Install
+
+DeepSeek Harness `0.2.0-rc.2`, Node.js `>=22.19`.
 
 ```sh
 # from npm — prebuilt, no build approval
@@ -26,7 +34,6 @@ dsh plugin --profile web add prgrmrwy/dsh-sidebar-session-provider-icon
 
 Restart DSH and refresh the Web page. Nothing else is needed: no configuration, no network access, and no files written outside the DSH profile that installs it.
 
-In the ohmydsh repository this plugin is wired through the `dsh.yaml` entry `sidebar-session-provider-icon` (`source: local`), so a source change there only needs `dsh build` and a restart. Current behavior is specified in [`openspec/specs/sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/sidebar-session-provider-icon/spec.md); design history lives in the archived changes [`sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-08-21-sidebar-session-provider-icon) and [`sidebar-provider-icon-composite-model-badge`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge).
 
 ## How it behaves
 
@@ -135,3 +142,17 @@ npm run build
 In the ohmydsh monorepo this package is a workspace member: install once at the repository root and add `--workspace dsh-sidebar-session-provider-icon` to the last three commands. `dsh build` / sync also builds `lib/` on demand before installing the local package; refresh the Web page to pick up a new client bundle.
 
 Under vitest, small SVGs are inlined as data URLs with attribute quotes rewritten to `'`. Any regex that rewrites SVG attributes must accept both `"` and `'`.
+
+## Removal
+
+```sh
+dsh plugin --profile web remove dsh-sidebar-session-provider-icon
+```
+
+Restart DSH and refresh the page; the badges disappear. The plugin keeps no settings or files of its own.
+
+## Source, license and contributing
+
+This plugin is developed in [ohmydsh](https://github.com/prgrmrwy/ohmydsh) (`packages/sidebar-session-provider-icon`); this repository is its release mirror, published to npm and GitHub Releases automatically. Current behavior is specified in [`openspec/specs/sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/sidebar-session-provider-icon/spec.md); design history lives in the archived changes [`sidebar-session-provider-icon`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-08-21-sidebar-session-provider-icon) and [`sidebar-provider-icon-composite-model-badge`](https://github.com/prgrmrwy/ohmydsh/tree/main/openspec/changes/archive/2026-10-10-sidebar-provider-icon-composite-model-badge).
+
+Code is [MIT](LICENSE); vendored brand icons are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Issues and pull requests are welcome at [prgrmrwy/dsh-sidebar-session-provider-icon](https://github.com/prgrmrwy/dsh-sidebar-session-provider-icon/issues) — missing brands and unrecognized model names especially.

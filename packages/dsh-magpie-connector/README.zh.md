@@ -4,11 +4,12 @@
 
 <p align="center">
   <img src="docs/model-picker.gif" alt="模型选择器：按上游 provider 分组，仅 GPT 显示标准/快速" width="49%">
+  <img src="docs/settings.gif" alt="设置页：添加线路、Cloudflare Access 备用线路、保存、分组模型的可见性与默认 effort、用量卡片刷新" width="49%">
 </p>
 
-*模型选择器录屏来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据；设置页的线路列表截图待重录。*
+*左：按上游 provider 分组的模型选择器，仅 GPT 显示标准/快速切换；右：设置 → Magpie，包括连接线路、Cloudflare Access 备用线路、模型可见性、默认 effort 与用量卡片。录屏来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
 
-[插件仓库](https://github.com/prgrmrwy/dsh-magpie-connector) · [版本发布](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
+![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
 
 <!-- problem -->
 **把自托管的 Magpie 网关作为一个 provider route 接入 DeepSeek Harness：模型按上游 provider 分组展示，附带只读用量卡片和会话级快速档。** Magpie 继续负责登录、账号、路由和厂商出站代理，本插件补齐 DSH 侧。
@@ -70,22 +71,22 @@ dsh plugin --profile web add dsh-magpie-connector
 - **不支持：** 非空 `stop` 序列会在发请求前失败（`MAGPIE_STOP_UNSUPPORTED`），因为 Magpie 无法在所有上游协议转换中保留 stop。用量卡片与 Codex 重置次数只读展示，插件不会调用账号管理或重置端点。
 - **密钥不会进入响应或日志。** 网关反射的文本在进入设置接口或日志之前会用当前 key 脱敏。写盘文件权限 `0600`；设置接口只报告 `configured` / `writable`。
 
-### 架构
-
-![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
+### 代码导览
 
 入口：[index.ts](src/index.ts)。适配器与请求/流映射：[adapter.ts](src/host/adapter.ts)。路由：[routes.ts](src/host/routes.ts)。传输白名单：[transport.ts](src/host/transport.ts)。设置页：[SettingsPage.ts](src/client/SettingsPage.ts)。不含凭据的图源与仓库证据：[architecture.zh.json](docs/architecture.zh.json)。
 
 ### 开发
 
+在本仓库的独立检出中：
+
 ```sh
 npm install
-npm test --workspace=dsh-magpie-connector
-npm run typecheck --workspace=dsh-magpie-connector
-npm run build --workspace=dsh-magpie-connector
+npm run typecheck
+npm test
+npm run build
 ```
 
-测试使用本机 mock 网关和真实线协议库，不需要真实 key。构建产物不入库；`prepare` 与 `prepack` 都会执行 build。
+在 ohmydsh monorepo 里，在仓库根目录安装一次，后三条命令加上 `--workspace=dsh-magpie-connector`。测试使用本机 mock 网关和真实线协议库，不需要真实 key。构建产物不入库；`prepare` 与 `prepack` 都会执行 build。
 
 ## 移除
 <!-- section: removal -->
@@ -98,6 +99,8 @@ dsh plugin --profile web remove dsh-magpie-connector
 
 在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 中则把 manifest 条目设为 `enabled: false` 后重新构建。
 
-## 许可
+## 来源、许可与参与
 
-MIT。`@earendil-works/pi-ai` 与 `undici` 是分别以 MIT 许可分发的依赖；鸟形图标来源与许可见 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)。
+本插件在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh)（`packages/dsh-magpie-connector`）中持续开发，[本仓库](https://github.com/prgrmrwy/dsh-magpie-connector)是发布镜像，自动发布到 [npm](https://www.npmjs.com/package/dsh-magpie-connector) 与 [GitHub Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases)。当前行为见规范 [`openspec/specs/dsh-magpie-connector`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-magpie-connector/spec.md)。
+
+采用 [MIT](LICENSE) 许可。`@earendil-works/pi-ai` 与 `undici` 是分别以 MIT 许可分发的依赖；鸟形图标来源与许可见 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)。欢迎到 [prgrmrwy/dsh-magpie-connector](https://github.com/prgrmrwy/dsh-magpie-connector/issues) 提 issue 和 PR。

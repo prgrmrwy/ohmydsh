@@ -4,11 +4,12 @@ English · [简体中文](README.zh.md)
 
 <p align="center">
   <img src="docs/model-picker.gif" alt="Model picker grouped by upstream provider, with the GPT-only standard/fast control" width="49%">
+  <img src="docs/settings.gif" alt="Settings: add a line, a Cloudflare Access backup line, save, provider groups with visibility and default effort, usage card refresh" width="49%">
 </p>
 
-*Model picker recorded from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic. A fresh settings screenshot is pending re-recording.*
+*Left: model picker grouped by upstream provider, with the GPT-only standard/fast switch. Right: Settings → Magpie — connection lines, a Cloudflare Access backup line, model visibility, default effort and usage cards. Recorded from an isolated DSH host with a local mock Magpie gateway; models and accounts are synthetic.*
 
-[Repository](https://github.com/prgrmrwy/dsh-magpie-connector) · [Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases) · [npm](https://www.npmjs.com/package/dsh-magpie-connector)
+![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
 
 <!-- problem -->
 **Connect a self-hosted Magpie gateway to DeepSeek Harness as one provider route: models grouped by their upstream provider, read-only usage cards, and a per-session fast mode.** Magpie keeps managing logins, accounts, routing and provider egress; this plugin adds the DSH side.
@@ -68,22 +69,22 @@ Need another method — custom headers, mTLS, another zero-trust gateway? **Issu
 - **Not supported:** `stop` sequences fail before any network access (`MAGPIE_STOP_UNSUPPORTED`) because Magpie cannot preserve them across every upstream translation. Usage cards and Codex reset credits are display-only; the plugin never calls account-management or reset endpoints.
 - **Secrets stay out of responses and logs.** Gateway-reflected text is redacted with the current key before it can reach the settings API or logs. Files are written `0600`; the settings API reports only `configured` / `writable`.
 
-### Architecture
-
-![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
+### Code map
 
 Entry: [index.ts](src/index.ts). Adapter and request/stream mapping: [adapter.ts](src/host/adapter.ts). Routes: [routes.ts](src/host/routes.ts). Transport allowlist: [transport.ts](src/host/transport.ts). Settings page: [SettingsPage.ts](src/client/SettingsPage.ts). The diagram source, with credential-free repository evidence: [architecture.en.json](docs/architecture.en.json).
 
 ### Development
 
+In a standalone checkout of this repository:
+
 ```sh
 npm install
-npm test --workspace=dsh-magpie-connector
-npm run typecheck --workspace=dsh-magpie-connector
-npm run build --workspace=dsh-magpie-connector
+npm run typecheck
+npm test
+npm run build
 ```
 
-Tests use local mock gateways and the real wire library; no real key is required. Build output is not committed. Both `prepare` and `prepack` build the package.
+Inside the ohmydsh monorepo, install once at the root and add `--workspace=dsh-magpie-connector` to the last three commands. Tests use local mock gateways and the real wire library; no real key is required. Build output is not committed. Both `prepare` and `prepack` build the package.
 
 ## Removal
 <!-- section: removal -->
@@ -96,6 +97,8 @@ Restart DSH and refresh the page. Disposal releases registrations, timers and co
 
 Inside [ohmydsh](https://github.com/prgrmrwy/ohmydsh), set the manifest entry to `enabled: false` and rebuild instead.
 
-## License
+## Source, license and contributing
 
-MIT. `@earendil-works/pi-ai` and `undici` are separate MIT-licensed dependencies; the bird artwork follows the notice in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
+This plugin is developed in [ohmydsh](https://github.com/prgrmrwy/ohmydsh) (`packages/dsh-magpie-connector`); [this repository](https://github.com/prgrmrwy/dsh-magpie-connector) is its release mirror, published automatically to [npm](https://www.npmjs.com/package/dsh-magpie-connector) and [GitHub Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases). Current behavior is specified in [`openspec/specs/dsh-magpie-connector`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-magpie-connector/spec.md).
+
+[MIT](LICENSE). `@earendil-works/pi-ai` and `undici` are separate MIT-licensed dependencies; the bird artwork follows the notice in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES). Issues and pull requests are welcome at [prgrmrwy/dsh-magpie-connector](https://github.com/prgrmrwy/dsh-magpie-connector/issues).

@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write # required for OIDC trusted publishing
 
 jobs:
@@ -69,3 +69,36 @@ jobs:
           else
             npm publish
           fi
+      - name: Create GitHub Release with the published npm artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          # Download the registry artifact so GitHub and npm distribute identical bytes.
+          assets="$(mktemp -d)"
+          # A fresh publish can take minutes to become downloadable; retry before failing.
+          for attempt in $(seq 1 20); do
+            if npm pack "$name@$version" --ignore-scripts --pack-destination "$assets" --silent; then break; fi
+            if [ "$attempt" = 20 ]; then echo "npm tarball for $name@$version still unavailable" >&2; exit 1; fi
+            sleep 30
+          done
+          node --input-type=module - "$version" "$assets/notes.md" <<'NODE'
+          import fs from 'node:fs'
+          const [version, output] = process.argv.slice(2)
+          // Headings may carry a date suffix ("## 1.2.3 — 2026-01-01"); the section ends at the next "## ".
+          const lines = fs.readFileSync('CHANGELOG.md', 'utf8').split('\n')
+          const start = lines.findIndex(l => l === `## ${version}` || l.startsWith(`## ${version} `))
+          if (start < 0) throw new Error(`No changelog entry for ${version}`)
+          const end = lines.findIndex((l, i) => i > start && l.startsWith('## '))
+          const section = lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim()
+          if (!section) throw new Error(`Empty changelog entry for ${version}`)
+          fs.writeFileSync(output, section + '\n')
+          NODE
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "$version" --notes-file "$assets/notes.md"
+          fi
+          gh release upload "$tag" "$assets/$name-$version.tgz" \
+            --repo "$GITHUB_REPOSITORY" --clobber

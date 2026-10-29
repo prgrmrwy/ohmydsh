@@ -1,0 +1,304 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-sidebar-session-provider-icon 架构",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-sidebar-icon-20261029/sidebar.zh.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "link_mode": "local-only",
+      "revision": "0fa7bc1599fe9b159ce29f0bf0a575d87db0824b"
+    }
+  },
+  "components": [
+    {
+      "id": "log",
+      "type": "database",
+      "label": "会话日志",
+      "sublabel": "request/header 事件",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/provider.ts",
+          "line": 41,
+          "end_line": 55,
+          "label": "request/header only"
+        }
+      ]
+    },
+    {
+      "id": "proj",
+      "type": "backend",
+      "label": "provider projection",
+      "sublabel": "Host · 最近一次请求的 route",
+      "pos": [
+        40,
+        220
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/index.ts",
+          "line": 18,
+          "end_line": 24,
+          "label": "register projection"
+        },
+        {
+          "path": "packages/sidebar-session-provider-icon/src/provider.ts",
+          "line": 64,
+          "end_line": 72,
+          "label": "projection unit"
+        }
+      ]
+    },
+    {
+      "id": "msel",
+      "type": "backend",
+      "label": "modelSelection projection",
+      "sublabel": "官方 · 下一次请求的选择",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/provider-map.ts",
+          "line": 13,
+          "end_line": 30,
+          "label": "durable selection"
+        }
+      ]
+    },
+    {
+      "id": "list",
+      "type": "frontend",
+      "label": "会话列表 feed",
+      "sublabel": "ctx.sessions.list · projection 值",
+      "pos": [
+        440,
+        220
+      ],
+      "size": [
+        220,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/index.ts",
+          "line": 150,
+          "end_line": 153,
+          "label": "list subscription"
+        }
+      ]
+    },
+    {
+      "id": "comp",
+      "type": "frontend",
+      "label": "输入框模型选择器",
+      "sublabel": "modelDirectories store · 实时",
+      "pos": [
+        840,
+        40
+      ],
+      "size": [
+        210,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/selection-binding.ts",
+          "line": 103,
+          "end_line": 126,
+          "label": "store subscription"
+        }
+      ]
+    },
+    {
+      "id": "pmap",
+      "type": "frontend",
+      "label": "provider-map.ts",
+      "sublabel": "实时 → 已选 → 最近请求",
+      "pos": [
+        840,
+        220
+      ],
+      "size": [
+        210,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/provider-map.ts",
+          "line": 40,
+          "end_line": 63,
+          "label": "precedence"
+        }
+      ]
+    },
+    {
+      "id": "logos",
+      "type": "frontend",
+      "label": "logos.ts",
+      "sublabel": "route 主图 + model 角标",
+      "pos": [
+        1220,
+        220
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/logos.ts",
+          "line": 175,
+          "end_line": 189,
+          "label": "badge brands"
+        }
+      ]
+    },
+    {
+      "id": "rows",
+      "type": "frontend",
+      "label": "侧边栏会话行",
+      "sublabel": "标题前徽标 · data-row-key",
+      "pos": [
+        1220,
+        400
+      ],
+      "size": [
+        200,
+        70
+      ],
+      "sources": [
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/row-locator.ts",
+          "line": 50,
+          "end_line": 56,
+          "label": "row identity"
+        },
+        {
+          "path": "packages/sidebar-session-provider-icon/src/client/index.ts",
+          "line": 137,
+          "end_line": 147,
+          "label": "MutationObserver"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "DSH Host",
+      "wraps": [
+        "log",
+        "proj",
+        "msel"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Web 客户端（浏览器）",
+      "wraps": [
+        "list",
+        "comp",
+        "pmap",
+        "logos",
+        "rows"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "log-proj",
+      "from": "log",
+      "to": "proj",
+      "label": "折叠 request/header"
+    },
+    {
+      "id": "proj-list",
+      "from": "proj",
+      "to": "list",
+      "label": "provider（最近请求）",
+      "variant": "emphasis"
+    },
+    {
+      "id": "msel-list",
+      "from": "msel",
+      "to": "list",
+      "label": "下一次选择",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "list-pmap",
+      "from": "list",
+      "to": "pmap",
+      "label": "projection 值",
+      "variant": "emphasis"
+    },
+    {
+      "id": "comp-pmap",
+      "from": "comp",
+      "to": "pmap",
+      "label": "实时 provider/model"
+    },
+    {
+      "id": "pmap-logos",
+      "from": "pmap",
+      "to": "logos",
+      "label": "(provider, model)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "logos-rows",
+      "from": "logos",
+      "to": "rows",
+      "label": "徽标 · tooltip"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "选择优先级",
+      "items": [
+        "能验证当前打开会话时，输入框的实时选择优先",
+        "否则用官方 modelSelection 的 next，覆盖已选未发送的模型",
+        "冷历史会话回退到最近一次真实请求的 provider"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "品牌渲染",
+      "items": [
+        "provider route 决定主图，model id 决定角标",
+        "网关 route 最多三层：网关、中转平台、模型厂商",
+        "识别不出厂商就不画角标；始终保持 14×14 占位"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "边界",
+      "items": [
+        "无配置、不发网络请求、不写文件",
+        "按官方 data-row-key 匹配行，同名会话不会串徽标"
+      ]
+    }
+  ]
+}

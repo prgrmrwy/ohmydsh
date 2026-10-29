@@ -114,3 +114,9 @@
 - 几何依据（实测官方行 CSS）：badge 位于 x∈[28,42]，官方 StateDot 圆点在 x∈[13,19]；左下角 10px 图标放 `left:-4px` 占 x∈[24,34]，与圆点留 5px、与右下角图标留 2px，badge 占位宽度仍为 14px，行布局不变。
 - 直连 route 判定与渲染完全不变。
 - 对应 openspec change `sidebar-provider-icon-gateway-transit-tier`；回滚：`dsh.yaml` 版本改回 0.1.10 → `dsh build` → 刷新。
+
+## 0.1.12 — 2026-10-29
+
+- README 按插件标准布局重排：顶部并排展示真实侧边栏与显示规则，随后是新增的 Archify 双语架构图，再是问题说明与特点；补充移除步骤，以及指向 ohmydsh 源码、MIT 许可与 issue 的结尾。
+- npm 包补带 `README.zh.md` 与 `CHANGELOG.md`；`screenshots.json` 加入真实侧边栏截图。
+- 发布 workflow 现在会为每个版本创建 GitHub Release，并附上与 npm 完全相同的 tarball。运行行为无变化。

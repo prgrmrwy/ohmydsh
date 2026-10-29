@@ -9,7 +9,7 @@ English · [简体中文](README.zh.md)
 
 *Left: AUTO interaction and applied decision. Right: current settings and strategy details. Recorded from an isolated DSH host with local mock Jev/model responses and synthetic tasks.*
 
-[Repository](https://github.com/prgrmrwy/dsh-auto-model-routing) · [Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases) · [npm](https://www.npmjs.com/package/dsh-auto-model-routing)
+![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
 
 <!-- problem -->
 **Add AUTO mode to DSH: automatic effort for the main agent, automatic model + effort for sub-agents.** Stop adjusting reasoning investment every turn or choosing a model for every delegated task.
@@ -93,12 +93,11 @@ AUTO applies the selected effort to the current main request and awaits official
 - **Local state:** configuration is under `$DSH_HOME/plugins/dsh-auto-model-routing/`; mode, child routes and feedback are under `$DSH_HOME/state/auto-model-routing/`. Feedback stores resource metadata, IDs, the strategy family, returned distributions and timestamps—not task/reply text. Request event IDs allow later usage correlation; costs are not fabricated when unavailable. See [feedback and evaluation](docs/feedback-evaluation.md).
 - **No automatic learning.** Human allocation feedback is observational. It does not change routing or prove quality/cost benefits. Old messages without decision bindings are not backfilled; old records with missing evaluation fields remain unknown.
 - **Upgrade to 0.5.0:** there is one AUTO strategy and no version setting. Existing sessions keep their stored mode; new chats still default to MANUAL unless configured otherwise. Retired `policy` / `mainEfforts` / `childRoutes` keys in the plugin configuration are ignored, shown as no longer effective in Settings, and removed on the next save. Child decisions and feedback recorded by 0.4.x stay readable. To go back, pin the published `dsh-auto-model-routing@0.4.2` (see [CHANGELOG](CHANGELOG.md) for the data boundary).
+
 ## Architecture
 <!-- section: architecture -->
 
-![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
-
-Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. The diagram shows the AUTO paths; MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
+The diagram at the top shows the AUTO paths. Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
 Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, transports, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
 
@@ -112,9 +111,7 @@ npm run build
 
 Tests use the official AgentLoop with fake LLM streams and mock/loopback Jev responses, not paid model calls. To observe AUTO decisions and their actual token usage, ask the agent to use the `auto-model-routing-report` skill (on demand only; it runs the read-only `lib/usage-report.js`). It is observational, not a savings measurement. Evaluation schema and deduplication rules are in [feedback-evaluation.md](docs/feedback-evaluation.md).
 
-Development stays in the source monorepo; this repository is its release mirror. The package builds and loads independently using its declared dependencies, bundled skill and official DSH services; no monorepo checkout or monorepo instruction file is required. External design references are optional background, not runtime inputs.
-
-The [current specification](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md) lives in the source monorepo. The bundled [delegation skill](skills/subagent-model-routing/SKILL.md) supplies guidance; enforcement belongs to the official host hooks, not the prompt. No measured task-quality or token-savings claim is made.
+The package builds and loads independently using its declared dependencies, bundled skill and official DSH services; no monorepo checkout or monorepo instruction file is required. External design references are optional background, not runtime inputs. The bundled [delegation skill](skills/subagent-model-routing/SKILL.md) supplies guidance; enforcement belongs to the official host hooks, not the prompt. No measured task-quality or token-savings claim is made.
 
 ## Removal
 <!-- section: removal -->
@@ -124,3 +121,9 @@ dsh plugin --profile web remove dsh-auto-model-routing
 ```
 
 Restart DSH and refresh the page. The plugin's skill/tools and request hooks disappear; settings and logs remain. Without the plugin, child replay is no longer enforced and host restoration uses the original creation configuration. In [ohmydsh](https://github.com/prgrmrwy/ohmydsh), disable the local entry and rebuild instead.
+
+## Source, license and contributing
+
+This plugin is developed in [ohmydsh](https://github.com/prgrmrwy/ohmydsh) (`packages/auto-model-routing`); [this repository](https://github.com/prgrmrwy/dsh-auto-model-routing) is its release mirror, published automatically to [npm](https://www.npmjs.com/package/dsh-auto-model-routing) and [GitHub Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases). The [current specification](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md) lives there too.
+
+[MIT](LICENSE). Issues and pull requests are welcome at [prgrmrwy/dsh-auto-model-routing](https://github.com/prgrmrwy/dsh-auto-model-routing/issues) — including support for model families beyond Claude and GPT.

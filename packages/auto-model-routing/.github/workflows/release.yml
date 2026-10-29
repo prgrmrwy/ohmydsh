@@ -56,9 +56,13 @@ jobs:
           node --input-type=module - "$version" "$assets/notes.md" <<'NODE'
           import fs from 'node:fs'
           const [version, output] = process.argv.slice(2)
-          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8')
-          const section = changelog.split(`## ${version}\n`)[1]?.split('\n## ')[0]?.trim()
-          if (!section) throw new Error(`No changelog entry for ${version}`)
+          // Headings may carry a date suffix ("## 1.2.3 — 2026-01-01"); the section ends at the next "## ".
+          const lines = fs.readFileSync('CHANGELOG.md', 'utf8').split('\n')
+          const start = lines.findIndex(l => l === `## ${version}` || l.startsWith(`## ${version} `))
+          if (start < 0) throw new Error(`No changelog entry for ${version}`)
+          const end = lines.findIndex((l, i) => i > start && l.startsWith('## '))
+          const section = lines.slice(start + 1, end < 0 ? undefined : end).join('\n').trim()
+          if (!section) throw new Error(`Empty changelog entry for ${version}`)
           fs.writeFileSync(output, section + '\n')
           NODE
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
