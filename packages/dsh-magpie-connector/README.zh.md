@@ -4,10 +4,10 @@
 
 <p align="center">
   <img src="docs/model-picker.png" alt="模型选择器：按上游 provider 分组为 Magpie (Claude)、Magpie (GPT)、Magpie (deepseek)" width="49%">
-  <img src="docs/settings.png" alt="设置页：按 provider 分组的模型可见性、默认 effort 与用量卡片" width="49%">
+  <img src="docs/settings.png" alt="设置页：顶部连接线路，下方按 provider 分组的模型可见性、默认 effort 与用量卡片" width="49%">
 </p>
 
-*左：按上游 provider 分组的模型选择器；右：设置 → Magpie，按 provider 分组的模型可见性、默认 effort 与用量卡片。截图来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
+*左：按上游 provider 分组的模型选择器；右：设置 → Magpie，顶部连接线路，下方按 provider 分组的模型可见性、默认 effort 与用量卡片。截图来自隔离 DSH 宿主与本地 mock Magpie 网关，模型和账号均为演示数据。*
 
 ![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
 
