@@ -46,12 +46,15 @@ function validateProtocols(value: unknown, item: RoundItem, route: ModelRoute, a
     if (!isDeepStrictEqual(actualRoute, route) || !isDeepStrictEqual(actualSchema, schema) || typeof prompt !== 'string') return protocolMismatch()
     let parsed: unknown
     try { parsed = JSON.parse(prompt) } catch { return protocolMismatch() }
-    const input = fields(parsed, ['protocol', 'criterion', 'rubric', 'requiredFacts', 'evidence', ...(hasWrites ? ['writeback'] : [])])
+    const input = fields(parsed, ['protocol', 'criterion', 'rubric', 'requiredFacts', 'evidence', 'evidenceLayout', ...(hasWrites ? ['writeback'] : [])])
+    const partitioned = input.evidenceLayout === 'partitioned-v1'
+    if ('evidenceLayout' in input && !partitioned) return protocolMismatch()
     if (input.protocol !== 'judge-v1' || input.criterion !== item.judgements[index]
       || typeof input.rubric !== 'string' || !input.rubric.trim()
-      || !isDeepStrictEqual(input.requiredFacts, item.requiredFacts) || !isDeepStrictEqual(input.evidence, evidence)) return protocolMismatch()
+      || !isDeepStrictEqual(input.requiredFacts, item.requiredFacts) || !isDeepStrictEqual(input.evidence, partitioned ? answers.map(({ id, text }) => ({ id, text })) : evidence)) return protocolMismatch()
     if (hasWrites) {
-      const writeback = fields(input.writeback, ['applicable', 'sources', 'rubric'])
+      const writeback = fields(input.writeback, ['applicable', 'sources', 'rubric', ...(partitioned ? ['evidence'] : [])])
+      if (partitioned && !isDeepStrictEqual(writeback.evidence, writes)) return protocolMismatch()
       if (writeback.applicable !== true || !isDeepStrictEqual(writeback.sources, writes.map(source => source.id))
         || typeof writeback.rubric !== 'string' || !writeback.rubric.trim()) return protocolMismatch()
     }

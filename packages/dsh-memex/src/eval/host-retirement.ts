@@ -2,6 +2,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { EvalLedger } from './ledger.js'
 import { retireTestRoot } from './release.js'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { freezeInput } from './freeze.js'
 
 export interface HostRetirementOperations {
   archive(id: string): Promise<void>; settleJobs(): Promise<void>; drainDescendants(): Promise<void>;
@@ -17,5 +20,10 @@ export async function retireHostTestRoot(ctx: Context, root: Agent, ledger: Eval
     cancel: agent => { agent.cancel({ kind: 'user' }) },
     whenIdle: agent => agent.whenIdle(),
     pending: agent => agent.inbox.nextTurn.length + agent.inbox.nextStep.length,
+  })
+  // Observation only: this receipt never grants resume authority or replaces live checks.
+  freezeInput(join(ledger.directory, `retirement-${root.id}-${randomUUID()}`), {
+    version: 1, root: root.id,
+    observed: ['archived', 'exact-live-identity', 'jobs-settled', 'descendants-drained', 'one-shots-settled', 'final-cancel-idle', 'inbox-empty'],
   })
 }

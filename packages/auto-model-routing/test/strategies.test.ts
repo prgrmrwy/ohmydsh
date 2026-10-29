@@ -36,14 +36,18 @@ describe('spec Scenario "冲突的注册表拒绝构造"', () => {
 })
 
 const ALL = ['low', 'medium', 'high', 'xhigh', 'max']
+/** Intentional deviation from the frozen 0.4.2 oracle: Sol starts at high, one step above it. */
+const solRaised = (model: string, effort: string) =>
+  /(^|\/)gpt-6\.1-sol$/.test(model) ? ({ low: 'medium', medium: 'high', high: 'xhigh' } as Record<string, string>)[effort] ?? effort : effort
 it('spec Scenario "effort 起点按模型名查找且保持原结果"', () => {
   expect(oracle.effortStarts.length).toBe(72)
   for (const row of oracle.effortStarts) {
     const run = () => policyEffort(row.model, row.depth as never, ALL, 'xhigh', row.defaultEffort ?? undefined)
     if ('error' in row) expect(run, JSON.stringify(row)).toThrow('unsupported')
-    else expect(run(), JSON.stringify(row)).toBe(row.value)
+    else expect(run(), JSON.stringify(row)).toBe(solRaised(row.model, row.value!))
   }
-  // The registry lookup alone reproduces the old known-model table.
+  expect(registry.effortStart('codex/gpt-6.1-sol')).toBe('high')
+  // Other starting efforts and case-sensitive lookup remain unchanged.
   expect(registry.effortStart('opencode-go/gpt-6-luna')).toBe('high')
   expect(registry.effortStart('CLAUDE-OPUS-5-5')).toBeUndefined()
 })

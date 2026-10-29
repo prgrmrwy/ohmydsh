@@ -196,19 +196,27 @@ it('spec Scenario "手动与子请求不污染默认"',async()=>{
  expect(h.calls.map(c=>c.reasoningEffort)).toEqual(['medium','medium'])
  expect(h.selections).toEqual([]);expect(h.defaults).toEqual([])
 })
+it.each([
+ ['lower', 'medium'], ['baseline', 'high'], ['higher', 'xhigh'],
+] as const)('Sol main request applies %s as %s', async (depth, effort) => {
+ const h = await harness(false, false, 'codex')
+ h.jev.set(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: depth } } }))
+ await h.run(h.parent, 'GPT main task')
+ expect(h.calls.at(-1)).toMatchObject({ provider: 'codex', model: 'gpt-6.1-sol', reasoningEffort: effort })
+})
 it.each(['dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scenario "Magpie 自动子路由" (%s)',async(provider)=>{
  const h=await harness(provider,true,'codex')
  h.jev.set(json(200,{answers:{capability:{choice:'bounded'},depth:{choice:'higher'}}}))
  await h.run(h.parent,'GPT main task')
- expect(h.calls.at(-1)).toMatchObject({provider,model:'codex/gpt-6.1-sol',reasoningEffort:'high'})
+ expect(h.calls.at(-1)).toMatchObject({provider,model:'codex/gpt-6.1-sol',reasoningEffort:'xhigh'})
  expect((await h.invoke()).isError).not.toBe(true)
  const child=h.handles[1]!.agent
  expect(h.store.get(child.id)).toMatchObject({status:'applied',family:'codex',route:{provider,model:'codex/gpt-6-luna',reasoningEffort:'xhigh'}})
  await h.restart();h.modes.set(h.parent.id,{mode:'MANUAL'})
  await h.run(child,'Restore GPT child')
  expect(h.calls.at(-1)).toMatchObject({provider,model:'codex/gpt-6-luna',reasoningEffort:'xhigh'})
- expect(h.selections).toEqual([{sessionId:h.parent.id,provider,model:'codex/gpt-6.1-sol',reasoningEffort:'high'}])
- expect(h.defaults).toEqual([{provider,model:'codex/gpt-6.1-sol',reasoningEffort:'high'}])
+ expect(h.selections).toEqual([{sessionId:h.parent.id,provider,model:'codex/gpt-6.1-sol',reasoningEffort:'xhigh'}])
+ expect(h.defaults).toEqual([{provider,model:'codex/gpt-6.1-sol',reasoningEffort:'xhigh'}])
  expect(h.jev.bodies).toHaveLength(2)
 })
 it('binds concurrent tool-created identities, records actual requests, and restores plugin decisions', async () => {

@@ -807,7 +807,7 @@ provider MUST NOT 从注册表派生，也 MUST NOT 用于过滤目录、允许�
 #### Scenario: effort 起点按模型名查找且保持原结果
 - **GIVEN** 内置注册表；目录支持 `low..max`；effort 上限 `xhigh`
 - **WHEN** 分别以下列输入计算主 effort（模型、depth、目录默认 effort）
-- **THEN** `claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5`、`gpt-6.1-sol` 的 lower/baseline/higher 为 `low/medium/high`；`claude-fable-5-1`、`gpt-6-luna` 为 `medium/high/xhigh`；`gpt-6-astra` 为 `low/low/medium`；`claude/claude-opus-5-5` 与 Opus 相同；`opencode-go/gpt-6-luna`（目录默认 `low`）与 Luna 相同；`CLAUDE-OPUS-5-5`、`claude-unknown`、`gpt-7` 在目录默认 `low` 时为 `low/low/medium`，无目录默认时抛出 unsupported 错误
+- **THEN** `claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5` 的 lower/baseline/higher 为 `low/medium/high`；`claude-fable-5-1`、`gpt-6-luna`、`gpt-6.1-sol`（含 `codex/gpt-6.1-sol`）为 `medium/high/xhigh`；`gpt-6-astra` 为 `low/low/medium`；`claude/claude-opus-5-5` 与 Opus 相同；`opencode-go/gpt-6-luna`（目录默认 `low`）与 Luna 相同；`CLAUDE-OPUS-5-5`、`claude-unknown`、`gpt-7` 在目录默认 `low` 时为 `low/low/medium`，无目录默认时抛出 unsupported 错误
 
 #### Scenario: effort 边界保持原结果
 - **GIVEN** 内置注册表；除个别用例另行给出外，目录支持 `[low, medium, high, xhigh, max]`，effort 上限 `xhigh`
@@ -837,14 +837,14 @@ provider MUST NOT 从注册表派生，也 MUST NOT 用于过滤目录、允许�
 ### Requirement: 内置模型家族策略
 内置注册表 SHALL 恰含两个策略：
 - `claude`（label `Claude`）：`modelPrefixes: ["claude-"]`；`effortStarts`：`claude-opus-5-5`、`claude-sonnet-5-5`、`claude-haiku-5-5` 为 medium，`claude-fable-5-1` 为 high；`childModels`：bounded `claude-haiku-5-5`、analytical `claude-sonnet-5-5`、frontier `claude-opus-5-5`。
-- `codex`（label `GPT`）：`modelPrefixes: ["gpt-"]`；`effortStarts`：`gpt-6.1-sol` 为 medium，`gpt-6-luna` 为 high，`gpt-6-astra` 为 low；`childModels`：bounded `gpt-6-luna`、analytical `gpt-6.1-sol`、frontier `gpt-6.1-sol`。
+- `codex`（label `GPT`）：`modelPrefixes: ["gpt-"]`；`effortStarts`：`gpt-6.1-sol` 为 high（比同档 Claude 高一档，依据用户体感调整，非受控评估结论），`gpt-6-luna` 为 high，`gpt-6-astra` 为 low；`childModels`：bounded `gpt-6-luna`、analytical `gpt-6.1-sol`、frontier `gpt-6.1-sol`。
 
 子模型的实际 id 取自 provider 目录中按能力槽解析规则找到的条目。
 
 #### Scenario: 内置子路由与原行为一致
 - **GIVEN** 内置注册表；`claude`、`codex`、`dsh-magpie-connector`、`dsh-magpie-connect` 的目录与允许列表含原有全部能力槽模型（Magpie 下为 `claude/…`、`codex/…`），均支持 `low..xhigh`
 - **WHEN** 以父模型 `claude-opus-5-5`、`gpt-6.1-sol`、`claude/claude-opus-5-5`、`codex/gpt-6.1-sol` 在各自 provider 下计算 bounded/analytical/frontier × lower/baseline/higher 的子路由
-- **THEN** 结果与本变更前 `choosePolicyRoute` 的输出深度相等，例如 `codex` bounded baseline → `gpt-6-luna` / `high`，`dsh-magpie-connector` + 父 `claude/…` frontier lower → `claude/claude-opus-5-5` / `low`，`claude` bounded baseline → `claude-haiku-5-5` / `medium`
+- **THEN** 结果与本变更前 `choosePolicyRoute` 的输出深度相等，唯一例外是 `gpt-6.1-sol` 子路由的 effort 随起点整体上调一档（`low/medium/high` → `medium/high/xhigh`），例如 `codex` bounded baseline → `gpt-6-luna` / `high`，`dsh-magpie-connector` + 父 `claude/…` frontier lower → `claude/claude-opus-5-5` / `low`，`claude` bounded baseline → `claude-haiku-5-5` / `medium`
 
 #### Scenario: 能力槽只在父 provider 内解析
 - **GIVEN** 父会话 `traex` / `GPT-5.6-Sol`；`codex` 目录与允许列表含 `gpt-6-luna`，`traex` 目录不含；允许列表含 `traex` / `GPT-5.6-Sol`
@@ -854,4 +854,4 @@ provider MUST NOT 从注册表派生，也 MUST NOT 用于过滤目录、允许�
 #### Scenario: 能力槽须与父模型前缀相同
 - **GIVEN** provider `dsh-magpie-connect`；目录与允许列表只含 `opencode-go/gpt-6-luna` 与 `codex/gpt-6.1-sol`（均支持 `low..xhigh`）；父模型为 `codex/gpt-6.1-sol`
 - **WHEN** 计算 bounded/baseline 子路由
-- **THEN** 能力槽视为未找到（`opencode-go/gpt-6-luna` 前缀不同）；route 为 `dsh-magpie-connect` / `codex/gpt-6.1-sol` / `medium`
+- **THEN** 能力槽视为未找到（`opencode-go/gpt-6-luna` 前缀不同）；route 为 `dsh-magpie-connect` / `codex/gpt-6.1-sol` / `high`

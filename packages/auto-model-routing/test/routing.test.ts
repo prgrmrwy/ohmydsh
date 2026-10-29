@@ -14,6 +14,8 @@ it('moves at most one supported step and never automatically uses max', () => {
   expect(policyEffort('claude-opus-5-5', 'higher', ['low','medium','xhigh','max'], 'xhigh')).toBe('xhigh')
   expect(policyEffort('gpt-6-luna', 'higher', ['low','medium','high','xhigh','max'], 'high')).toBe('high')
   expect(policyEffort('gpt-6-astra', 'lower', ['low','medium'], 'xhigh')).toBe('low')
+  expect(policyEffort('codex/gpt-6.1-sol', 'higher', ['low','medium','high','xhigh','max'], 'high')).toBe('high')
+  expect(policyEffort('gpt-6.1-sol', 'baseline', ['low','medium','high','xhigh'], 'medium')).toBe('medium')
   expect(() => policyEffort('unknown', 'baseline', ['low','high'], 'xhigh')).toThrow()
 })
 
@@ -28,6 +30,10 @@ it('spec Scenario "支持范围判定只依据注册表"', () => {
   }
 })
 
+/** Intentional deviation from the frozen 0.4.2 oracle: Sol starts at high, one step above it. */
+const solRaised = <T extends { model: string; reasoningEffort: string }>(r: T): T =>
+  /(^|\/)gpt-6\.1-sol$/.test(r.model) ? { ...r, reasoningEffort: ({ low: 'medium', medium: 'high', high: 'xhigh' } as Record<string, string>)[r.reasoningEffort] ?? r.reasoningEffort } : r
+
 it('spec Scenario "内置子路由与原行为一致"', () => {
   expect(oracle.childRoutes.length).toBe(54)
   const all = [...new Map(oracle.childRoutes.map(row => [`${row.value.provider} ${row.value.model}`, entry(row.value.provider, row.value.model)])).values()]
@@ -38,7 +44,7 @@ it('spec Scenario "内置子路由与原行为一致"', () => {
   for (const row of oracle.childRoutes) {
     const parentModel = parentOf(row.provider, row.family)
     const models = all.some(m => m.provider === row.provider && m.model === parentModel) ? all : [...all, entry(row.provider, parentModel)]
-    expect(route({ provider: row.provider, parent: { model: parentModel }, capability: row.capability as never, depth: row.depth as never, catalog: cat(models) }), JSON.stringify(row)).toEqual({ route: row.value })
+    expect(route({ provider: row.provider, parent: { model: parentModel }, capability: row.capability as never, depth: row.depth as never, catalog: cat(models) }), JSON.stringify(row)).toEqual({ route: solRaised(row.value) })
   }
 })
 
@@ -52,7 +58,7 @@ it('spec Scenario "能力槽只在父 provider 内解析"', () => {
 it('spec Scenario "能力槽须与父模型前缀相同"', () => {
   const models = [entry('dsh-magpie-connect', 'opencode-go/gpt-6-luna'), entry('dsh-magpie-connect', 'codex/gpt-6.1-sol')]
   expect(route({ provider: 'dsh-magpie-connect', parent: { model: 'codex/gpt-6.1-sol' }, catalog: cat(models) }))
-    .toEqual({ route: { provider: 'dsh-magpie-connect', model: 'codex/gpt-6.1-sol', reasoningEffort: 'medium' } })
+    .toEqual({ route: { provider: 'dsh-magpie-connect', model: 'codex/gpt-6.1-sol', reasoningEffort: 'high' } })
 })
 
 it('explicit dimensions are kept; unusable explicit values fall back without substitution', () => {

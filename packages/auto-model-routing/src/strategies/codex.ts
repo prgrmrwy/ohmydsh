@@ -5,6 +5,6 @@ export const codex = {
   id: 'codex',
   label: 'GPT',
   modelPrefixes: ['gpt-'],
-  effortStarts: { 'gpt-6.1-sol': 'medium', 'gpt-6-luna': 'high', 'gpt-6-astra': 'low' },
+  effortStarts: { 'gpt-6.1-sol': 'high', 'gpt-6-luna': 'high', 'gpt-6-astra': 'low' },
   childModels: { bounded: 'gpt-6-luna', analytical: 'gpt-6.1-sol', frontier: 'gpt-6.1-sol' },
 } as const satisfies FamilyStrategy

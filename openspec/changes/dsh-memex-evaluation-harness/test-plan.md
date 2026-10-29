@@ -35,7 +35,7 @@
 | specs/dsh-memex-evaluation/spec.md → 受限裁判组合和首次请求前门禁 | 日常会话不受裁判门禁影响 | packages/dsh-memex/test/eval-judge-runtime.test.ts | EVAL-029: 日常会话不受裁判门禁影响 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 冻结项成功评分并清退 | packages/dsh-memex/test/eval-judge-runtime.test.ts | EVAL-030: 冻结项成功评分并清退 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 伪造路线或任意证据被拒绝 | packages/dsh-memex/test/eval-host.test.ts | EVAL-031: 伪造路线或任意证据被拒绝 | 🟢 green |
-| specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 未鉴权或跨源请求被拒绝 | packages/dsh-memex/test/eval-host.test.ts | EVAL-032: 未鉴权或跨源请求被拒绝 | 🔴 red |
+| specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 未鉴权或跨源请求被拒绝 | packages/dsh-memex/test/eval-connection-live.test.ts, packages/dsh-memex/test/eval-connection-runtime.test.ts | EVAL-032: 未鉴权或跨源请求被拒绝 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 父会话已收到 prompt 被拒绝 | packages/dsh-memex/test/eval-judge-parent.test.ts, packages/dsh-memex/test/eval-judge-runtime.test.ts | EVAL-033: 父会话已收到 prompt 被拒绝 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → Eval 桥绑定冻结轮次与生命周期 | 裁判超时或客户端断开 | packages/dsh-memex/test/eval-host.test.ts | EVAL-034: 裁判超时或客户端断开 | 🟢 green |
 | specs/dsh-memex-evaluation/spec.md → 全文证据、实际阅读覆盖与引文核对 | 成功结果保留全文 | packages/dsh-memex/test/eval-evidence.test.ts | EVAL-035: 成功结果保留全文 | 🟢 green |
@@ -80,4 +80,5 @@
 - 人工 live 六条件自检需后续明确授权；记录实际会话、模型、工具面、日志与默认值告警。此计划通过不代表 live 验收通过。
 - 任何测试暴露 spec/API 不可行：暂停对应实现，修订方案并重新评审，不弱化安全断言。
 - 2026-10-28 新增 eval-pipeline.test.ts：真实 register/ledger/collection/scoreFrozenItem/offlineReport 六条件串联，固定事件及协议响应（无模型）；验证生产采集字段可读、12 次固定评分、R无召回/W无写入为观测no而非缺证（4 pass/2 fail）、污染落盘可见、无清退证据不宣称已释放。此测试不替代 runtime、认证或完整 runner 接线验收。
+- 2026-10-30 Goal收尾：production-runtime加强整轮前已存在日常对象/inbox/options的非干扰控制；judge-lifetime/managed-round补延迟dispose、异步拒绝和末次settle失败阻止成功回归。标题/非干扰依规范指定的真实runtime+mock验收，实机证据另层列于verify；不要求新增计数器/receipt格式、不重跑刷绿。
 - 2026-10-28 追加真实闭环：eval-production-runtime.test.ts（真实compat controller/loop/preset/jobs/workspace/zstd，固定mock adapter）、eval-memex-tools-runtime.test.ts（19真实工具/lifecycle producer contract）、eval-frozen-upgrade.test.ts（7冻结升级/篡改）、eval-managed-resume.test.ts（26同Host续跑及拒绝边界）、eval-tested-budget.test.ts/真实runtime无限工具循环、eval-default-review-entry.test.ts（all-unknown非零/状态/人工确认/续跑CLI）、eval-resume-bridge.test.ts/ eval-run-bridge.test.ts。补充测试只加强已有义务，不替代EVAL-032或live证据。

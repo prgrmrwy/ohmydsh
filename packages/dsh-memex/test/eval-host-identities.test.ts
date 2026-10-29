@@ -6,7 +6,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -40,9 +40,19 @@ it('records a reserved root on the real registry publication boundary without pr
         settleOneShots: async () => {},
         healthy: tracking.healthy,
       })
+      const receipts = readdirSync(directory).filter(name => name.startsWith(`retirement-${id}-`))
+      expect(receipts).toHaveLength(1)
+      expect(JSON.parse(readFileSync(join(directory, receipts[0]!, 'input.json'), 'utf8'))).toEqual({
+        version: 1, root: id, observed: ['archived', 'exact-live-identity', 'jobs-settled', 'descendants-drained', 'one-shots-settled', 'final-cancel-idle', 'inbox-empty'],
+      })
       expect(notices).toEqual([id])
       expect(handle.agent.inbox.hasPending).toBe(false)
       expect(ctx.agents.get(handle.agent.id)).toBe(handle.agent)
+      await expect(retireHostTestRoot(ctx, handle.agent, ledger, {
+        archive: async () => {}, settleJobs: async () => {}, drainDescendants: async () => { throw new Error('drain failed') },
+        settleOneShots: async () => {}, healthy: tracking.healthy,
+      })).rejects.toThrow('drain failed')
+      expect(readdirSync(directory).filter(name => name.startsWith(`retirement-${id}-`))).toEqual(receipts)
     } finally { await handle.dispose() }
   } finally { await ctx.fiber.dispose() }
 })

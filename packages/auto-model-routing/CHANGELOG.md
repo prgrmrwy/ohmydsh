@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4
+
+- GPT Sol (`gpt-6.1-sol`) now starts at `high` instead of `medium`, one step above the matching Claude start, so its lower/baseline/higher efforts become `medium/high/xhigh` for both the main session and Sol child routes. Luna and Astra are unchanged; automatic routing still never uses `max`. This follows user-reported quality concerns, not a controlled evaluation. Existing bound child routes retain their recorded effort.
+
 ## 0.5.3
 
 - Replace both README demo GIFs with representative PNG screenshots (an applied AUTO decision with its distribution; decision service settings with a connection test), because the DSH plugin store does not show GIFs by default. No runtime behavior changes.

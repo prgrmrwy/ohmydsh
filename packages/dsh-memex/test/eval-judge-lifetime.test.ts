@@ -7,6 +7,21 @@ it('awaits disposal before returning successful output', async () => {
   expect(result).toBe('answer'); expect(calls).toEqual(['disposed'])
 })
 
+it('does not publish success while the owned disposer is still pending', async () => {
+  let release!: () => void, entered!: () => void
+  const disposing = new Promise<void>(resolve => { entered = resolve })
+  const cleanup = new Promise<void>(resolve => { release = resolve })
+  let published = false
+  const result = runBoundedJudge(new AbortController().signal, 1000, async () => ({
+    result: Promise.resolve('answer'), dispose: async () => { entered(); await cleanup },
+  })).then(value => { published = true; return value })
+  await disposing
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(published).toBe(false)
+  release()
+  expect(await result).toBe('answer')
+})
+
 it('aborts on carrier disconnect and still awaits the owned run disposer', async () => {
   const carrier = new AbortController()
   let disposed = false
