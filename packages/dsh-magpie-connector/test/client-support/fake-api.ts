@@ -42,9 +42,12 @@ export const settingsView = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
-/** Expand one saved line row: the edit body is unmounted while the row is collapsed. */
+/** Expand one saved line row if it is collapsed; the edit body is unmounted while collapsed. */
 export function expandLine(root: ParentNode, lineId: string): void {
-  const toggle = root.querySelector(`[data-line-id="${lineId}"] [data-toggle]`) as HTMLButtonElement | null
+  const row = root.querySelector(`[data-line-id="${lineId}"]`)
+  if (!row) throw new Error(`line ${lineId} is not rendered`)
+  if (row.getAttribute('data-expanded') === 'true') return
+  const toggle = row.querySelector('[data-toggle]') as HTMLButtonElement | null
   if (!toggle) throw new Error(`line ${lineId} has no toggle`)
   toggle.click()
 }

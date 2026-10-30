@@ -73,6 +73,12 @@ export const settingsCss = `
 .dmg-bars[data-level="2"] i[data-on=true],.dmg-bars[data-level="1"] i[data-on=true]{background:var(--dsw-alias-state-warn-primary)}
 .dmg-bars[data-level="0"] i[data-on=true]{background:var(--dsw-alias-label-dimmed)}
 .dmg-latency-text{white-space:nowrap;min-width:0}
+.dmg-unset{padding:0 6px;border:.5px solid var(--dsw-alias-border-l3);border-radius:8px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:18px;white-space:nowrap}
+.dmg-check{display:flex;flex-direction:column;gap:6px;padding-top:4px;border-top:.5px dashed var(--dsw-alias-border-l2)}
+.dmg-check-line{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary);overflow-wrap:anywhere}
+.dmg-check-line[data-check-kind=ok]{color:var(--dsw-alias-label-primary)}
+.dmg-check-models>summary{cursor:pointer;font-size:12px;color:var(--dsw-alias-label-secondary)}
+.dmg-check-models p{margin:4px 0 0;overflow-wrap:anywhere}
 .dmg-line-body{display:flex;flex-direction:column;gap:10px;padding:2px 4px 2px 10px;border-left:.5px solid var(--dsw-alias-border-l2)}
 .dmg-speed{position:relative;display:inline-flex}
 .dmg-speed-trigger{border:.5px solid var(--dsw-alias-border-l3);border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;padding:2px 8px;cursor:pointer;white-space:nowrap}

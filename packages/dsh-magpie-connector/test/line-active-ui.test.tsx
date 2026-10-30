@@ -163,3 +163,32 @@ test('test_line_expand_save_failure spec Scenario "保存失败时保持展开�
     expect(mounted.calls.filter(call => call.path === 'latency')).toHaveLength(before)
   } finally { cleanup(mounted) }
 })
+
+test('test_line_active_ui_03 spec Scenario "已保存但未完整的线路标记为未配置"', async () => {
+  const view = {
+    lines: [
+      { id: 'a1b2c3d4', baseUrl: 'http://lan.test:3425/v1', accessMode: 'direct', complete: true, key: { configured: true, writable: true } },
+      { id: '9f0e7d6c', baseUrl: 'https://public.test/v1', accessMode: 'direct', complete: false, key: { configured: false, writable: true } },
+    ],
+    activeLineId: 'a1b2c3d4',
+  }
+  const { host, root } = await mount(view)
+  try {
+    const active = host.querySelector('[data-line-id="a1b2c3d4"]') as HTMLElement
+    const incomplete = host.querySelector('[data-line-id="9f0e7d6c"]') as HTMLElement
+    expect(active.querySelector('[data-line-incomplete]')).toBeNull()
+    expect(active.textContent).not.toContain('未配置')
+    const marker = incomplete.querySelector('[data-line-incomplete]')!
+    expect(marker).not.toBeNull()
+    expect(marker.textContent).toBe('未配置')
+    expect(incomplete.querySelector('[data-active-line]')).toBeNull()
+    // The marker reflects the saved state only: this line is saved (no "未保存" tag), it just is
+    // not complete. A brand-new draft gets the "未保存" tag instead, never "未配置".
+    expect(incomplete.textContent).not.toContain('（未保存）')
+    const add = Array.from(host.querySelectorAll('button')).find(node => node.textContent === '添加备用线路')!
+    act(() => add.click())
+    const draft = Array.from(host.querySelectorAll('.dmg-line')).at(-1) as HTMLElement
+    expect(draft.textContent).toContain('（未保存）')
+    expect(draft.querySelector('[data-line-incomplete]')).toBeNull()
+  } finally { act(() => root.unmount()); host.remove() }
+})

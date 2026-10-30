@@ -25,15 +25,21 @@ export function credentialsMock(initial?: string, writable = true, options: Cred
   const failSet = new Set(options.failSet ?? [])
   const failUnset = new Set(options.failUnset ?? [])
   let listener = () => {}
+  let resolveCount = 0
+  let gate: (() => Promise<void>) | undefined
+  let setGate: (() => Promise<void>) | undefined
   const name = (ref: unknown) => ref as string
   const get = (ref: unknown) => values.get(name(ref))
   const service: Credentials = {
     describe: async ref => ({ configured: values.has(name(ref)), writable: writable && !readonlyRefs.has(name(ref)) }),
     resolve: async ref => {
+      resolveCount++
+      if (gate) await gate()
       const value = get(ref)
       return value === undefined ? undefined : { value, source: writable && !readonlyRefs.has(name(ref)) ? 'file' : 'env' }
     },
     set: async (ref, next) => {
+      if (setGate) await setGate()
       if (failSet.has(name(ref))) throw new Error(`set failed: ${name(ref)}`)
       writes.push(next); values.set(name(ref), next); listener()
     },
@@ -55,6 +61,11 @@ export function credentialsMock(initial?: string, writable = true, options: Cred
     /** Legacy alias: resolve the fixture line's derived key ref. */
     keyRef: lineCredentialRefs(FIXTURE_LINE_ID).key as unknown as string,
     onChange(callback: () => void) { listener = callback },
+    /** Pause every `resolve` until the gate promise settles (line-check admission tests). */
+    setResolveGate(next?: () => Promise<void>) { gate = next },
+    /** Pause every `set` (holds the runtime inside its saving window). */
+    setWriteGate(next?: () => Promise<void>) { setGate = next },
+    get resolveCount() { return resolveCount },
     setRef(ref: string, value: string, emit = false) { values.set(ref, value); if (emit) listener() },
     removeRef(ref: string, emit = false) { values.delete(ref); if (emit) listener() },
     markReadonly(ref: string) { readonlyRefs.add(ref) },
