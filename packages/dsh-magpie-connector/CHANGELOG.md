@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- **Only the checked line is re-measured.** 0.4.1 refreshed the whole latency pass after a line check, so every saved row's reading changed even though only one line was checked. `GET /api/dsh-magpie-connector/latency` now accepts `?line=<id>`: the host probes just that saved line and returns only its reading, and the settings page merges it into that row while every other row keeps its previous value. Unknown or unsaved ids measure nothing. The full pass on panel open and after a successful save is unchanged, and there is still no polling.
+
 ## 0.4.1
 
 - **Check refreshes latency.** A completed line check on a **saved** line now also re-runs the settings-page latency measurement (one `GET /api/dsh-magpie-connector/latency` pass), so the signal reading next to that line reflects the same moment as the check instead of the last panel open or save. Unsaved drafts trigger nothing (they have no latency row), the host measurement stays single-flight with its 600 ms deadline, and there is still no polling.

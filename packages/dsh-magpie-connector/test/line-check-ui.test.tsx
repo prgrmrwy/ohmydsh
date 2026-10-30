@@ -159,20 +159,32 @@ test('test_line_check_ui_05 spec Scenario "没有缓存基准时不下结论"', 
 test('test_line_check_ui_06 spec Scenario "检查线路后重新测速"', async () => {
   const host = document.createElement('div'); document.body.append(host)
   const root = createRoot(host)
-  let latencyCalls = 0
+  const latencyCalls: (string | undefined)[] = []
   const fake = fakeApi({
     'GET settings': () => ok(settingsView(twoLines)),
     'GET cards': () => ok({ status: 'ok', cards: [] }),
-    'GET latency': () => { latencyCalls++; return ok({ lines: [{ id: 'a1b2c3d4', ms: 80 }, { id: '9f0e7d6c', ms: 200 }] }) },
+    'GET latency': request => {
+      const only = (request as { query?: Record<string, string> }).query?.line
+      latencyCalls.push(only)
+      return ok({ lines: only === undefined
+        ? [{ id: 'a1b2c3d4', ms: 80 }, { id: '9f0e7d6c', ms: 200 }]
+        : [{ id: only, ms: 30 }] })
+    },
     'POST line-check': () => ok({ kind: 'ok', latencyMs: 42, modelCount: 3, models: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], testedAt: '2026-10-30T03:00:00Z' }),
   })
+  const latencyOf = (id: string) => card(host, id).querySelector('[data-latency]') as HTMLElement
   await act(async () => root.render(h(MagpieSettings, { api: fake.api }))); await flush()
   mounted.push({ root, host })
-  // Panel open measured once; a completed check on a saved line adds exactly one more pass.
-  expect(latencyCalls).toBe(1)
+  // Panel open measured everything once.
+  expect(latencyCalls).toEqual([undefined])
+  expect(latencyOf('a1b2c3d4').getAttribute('data-latency-ms')).toBe('80')
+  expect(latencyOf('9f0e7d6c').getAttribute('data-latency-ms')).toBe('200')
+
+  // A completed check on a saved line re-measures only that line; the other row keeps its reading.
   await checkLine(host, 'a1b2c3d4')
-  expect(latencyCalls).toBe(2)
-  expect(card(host, 'a1b2c3d4').querySelector('[data-latency-state="done"]')).not.toBeNull()
+  expect(latencyCalls).toEqual([undefined, 'a1b2c3d4'])
+  expect(latencyOf('a1b2c3d4').getAttribute('data-latency-ms')).toBe('30')
+  expect(latencyOf('9f0e7d6c').getAttribute('data-latency-ms')).toBe('200')
   expect(fake.calls.filter(call => call.method === 'POST' && call.path === 'settings')).toHaveLength(0)
 
   // An unsaved draft has no latency row, so checking it refreshes nothing.
@@ -184,5 +196,5 @@ test('test_line_check_ui_06 spec Scenario "检查线路后重新测速"', async 
   const run = buttonByText(draft, '检查线路')
   await act(async () => { run!.click() }); await flush()
   expect(draft.querySelector('[data-check-kind="ok"]')).not.toBeNull()
-  expect(latencyCalls).toBe(2)
+  expect(latencyCalls).toEqual([undefined, 'a1b2c3d4'])
 })

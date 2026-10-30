@@ -20,28 +20,37 @@ const measureSocket: Measure = async (host, port, timeoutMs, signal) => {
 /**
  * Read-only settings-page measurement: one TCP connect per saved line with a
  * parseable address, all in parallel, each capped by the selection deadline.
- * Measurements are single-flight (concurrent reads share one pass), never touch
- * settings, credentials or the selector cache, and are aborted on dispose.
+ * A `lineId` request measures only that saved line (the line-check refresh).
+ * Passes are single-flight per scope (a full pass also serves line requests),
+ * never touch settings, credentials or the selector cache, and are aborted on
+ * dispose.
  */
+const FULL = '*'
 export class LatencyController {
   private readonly measure: Measure
   private readonly timeoutMs: number
   private readonly controllers = new Set<AbortController>()
-  private inFlight: Promise<LatencyReading[]> | undefined
+  private readonly passes = new Set<{ scope: string; promise: Promise<LatencyReading[]> }>()
   private disposed = false
   constructor(private readonly lines: () => LineSettings[], options: LatencyControllerOptions = {}) {
     this.measure = options.measure ?? measureSocket
     this.timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS
   }
-  async read(): Promise<Response> {
+  /** `lineId` narrows the pass to one saved line (the line-check refresh); omit for the full panel pass. */
+  async read(lineId?: string): Promise<Response> {
     if (this.disposed) return Response.json({ lines: [] })
-    const readings = await this.measureOnce()
-    return Response.json({ lines: readings })
+    const scope = lineId ?? FULL
+    const readings = await this.pass(scope, lineId)
+    return Response.json({ lines: scope === FULL ? readings : readings.filter(reading => reading.id === lineId) })
   }
-  private measureOnce(): Promise<LatencyReading[]> {
-    if (this.inFlight) return this.inFlight
+  private pass(scope: string, lineId?: string): Promise<LatencyReading[]> {
+    for (const entry of this.passes) {
+      // A running full pass already measures this line; reuse it instead of probing twice.
+      if (entry.scope === scope || (scope !== FULL && entry.scope === FULL)) return entry.promise
+    }
     const targets: { id: string; host: string; port: number }[] = []
     for (const line of this.lines()) {
+      if (lineId !== undefined && line.id !== lineId) continue
       const endpoint = endpointOf(line.baseUrl)
       if (endpoint) targets.push({ id: line.id, host: endpoint.host, port: endpoint.port })
     }
@@ -52,8 +61,9 @@ export class LatencyController {
       catch { return { id: target.id, ms: null } }
       finally { this.controllers.delete(controller) }
     }))
-    this.inFlight = measuring.finally(() => { this.inFlight = undefined })
-    return this.inFlight
+    const entry = { scope, promise: measuring.finally(() => { this.passes.delete(entry) }) }
+    this.passes.add(entry)
+    return entry.promise
   }
   dispose() {
     if (this.disposed) return

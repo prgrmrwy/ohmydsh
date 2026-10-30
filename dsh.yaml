@@ -113,7 +113,7 @@ customizations:
   - id: dsh-memex
     type: package
     source: local
-    version: 0.4.1
+    version: 0.4.2
     enabled: true
     enabledEnv: DSH_MEMEX_ENABLED  # 紧急熔断：设 DSH_MEMEX_ENABLED=0 即可在下次 build 时移除
     brief: memex 持久记忆原生接入(scope 隔离/跨库检索/守门 + 「记忆」设置页)
@@ -418,10 +418,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.4.1
+    version: 0.4.2
     enabled: true
     brief: 接入自托管 Magpie 网关；按 owned_by 原生分组，含保存前线路检查、用量卡片、默认输出预算与 Access
-    note: '自研 MIT,change add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多个真实 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners 持久≤32),原版选择器即显示 Magpie (<Owner>) 分组,不依赖 model-display.patch;旧单 route 退役无别名,旧会话需重选;AUTO strategies 与 guard exemptProviders 仍写旧 route,须另行适配(均 fail closed)。0.2.0 起设置为 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读按线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒绝重定向。0.4.0:只读线路检查(单次 GET /models,5s 预算、单飞、版本号防交错,零写入/换代/选线/注册/缓存)+修复备用线路保存清卡片与未配置标记;面板打磨与每线路延迟测速;0.4.1:保存线路的检查完成后刷新延迟。移除:enabled:false → dsh build → 重启。'
+    note: '自研 MIT,change add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多个真实 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners 持久≤32),原版选择器即显示 Magpie (<Owner>) 分组,不依赖 model-display.patch;旧单 route 退役无别名,旧会话需重选;AUTO strategies 与 guard exemptProviders 仍写旧 route,须另行适配(均 fail closed)。0.2.0 起设置为 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读按线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒绝重定向。0.4.0:只读线路检查(GET /models,5s 预算、单飞、版本号防交错,零写入/换代/选线/注册)+修复备用线路保存清卡片与未配置标记;面板打磨与每线路延迟测速;0.4.1:检查后刷新延迟;0.4.2 起只重测该行。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。

@@ -1,8 +1,9 @@
-/** One measurement pass over every saved line: readings keyed by line id. */
+/** One measurement pass over every saved line: readings keyed by line id. `measuring` marks a
+ * single row being re-measured on its own (line check), so other rows keep their reading. */
 export type LatencyState =
   | { phase: 'idle' }
   | { phase: 'measuring' }
-  | { phase: 'done'; readings: ReadonlyMap<string, number | null> }
+  | { phase: 'done'; readings: ReadonlyMap<string, number | null>; measuring?: ReadonlySet<string> }
   | { phase: 'failed' }
 
 /** Per-row projection of the panel-wide state. */
@@ -42,6 +43,7 @@ export function lineLatency(state: LatencyState, line: { id?: string | undefined
   if (!measured) return { state: 'idle' }
   if (state.phase === 'failed') return { state: 'failed' }
   if (state.phase !== 'done') return { state: 'measuring' }
+  if (state.measuring?.has(line.id!)) return { state: 'measuring' }
   if (!state.readings.has(line.id!)) return { state: 'idle' }
   const ms = state.readings.get(line.id!) ?? null
   return ms === null ? { state: 'done', ms: null, level: 0 } : { state: 'done', ms, level: latencyLevel(ms) }

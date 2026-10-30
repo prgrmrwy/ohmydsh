@@ -97,17 +97,32 @@ export function MagpieSettings({ api }: { api: Api }) {
       if (epoch === cardsEpoch.current) setCards({ status: 'error', error: errorText(error), cards: [] })
     }
   }
-  /** One measurement per panel open (and after a successful line write); failures stay silent. */
-  const readLatency = async () => {
+  /** One measurement per panel open (and after a successful line write); failures stay silent.
+   * With `only`, just that saved line is re-measured and merged in — the other rows keep their
+   * reading instead of all flipping to 测速中 (the line-check refresh). */
+  const readLatency = async (only?: string) => {
     const epoch = ++latencyEpoch.current
-    setLatency({ phase: 'measuring' })
+    if (only === undefined) setLatency({ phase: 'measuring' })
+    else setLatency(current => current.phase === 'done' ? { phase: 'done', readings: current.readings, measuring: new Set([only]) } : current)
+    const settle = () => {
+      // Superseded by a newer pass: drop the stale result but never leave the row stuck on 测速中.
+      if (only === undefined) return
+      setLatency(current => current.phase === 'done' ? { phase: 'done', readings: current.readings } : current)
+    }
     try {
-      const response = await api({ method: 'GET', path: 'latency' })
-      if (epoch !== latencyEpoch.current) return
+      const response = await api({ method: 'GET', path: 'latency', ...(only === undefined ? {} : { query: { line: only } }) })
+      if (epoch !== latencyEpoch.current) { settle(); return }
       const readings = isOk(response) ? parseLatency(response.body) : undefined
-      setLatency(readings ? { phase: 'done', readings } : { phase: 'failed' })
+      if (only === undefined) { setLatency(readings ? { phase: 'done', readings } : { phase: 'failed' }); return }
+      setLatency(current => {
+        const merged = new Map(current.phase === 'done' ? current.readings : [])
+        if (readings) for (const [id, ms] of readings) merged.set(id, ms)
+        return { phase: 'done', readings: merged }
+      })
     } catch {
-      if (epoch === latencyEpoch.current) setLatency({ phase: 'failed' })
+      if (epoch !== latencyEpoch.current) { settle(); return }
+      if (only === undefined) setLatency({ phase: 'failed' })
+      else settle()
     }
   }
   const clearUsage = () => {
@@ -210,7 +225,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     h('style', null, settingsCss),
     h('p', { className: 'dmg-intro' }, '通过自托管的 Magpie 网关使用模型。用量卡片只读，打开本页时读取一次，之后只在你点击卡片上的刷新时重新读取。'),
     settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, `无法读取设置：${settingsError}`) : null,
-    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency, onRefreshLatency: () => { void readLatency() },
+    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency, onRefreshLatency: (lineId: string) => { void readLatency(lineId) },
       usage: h(UsageStatus, { cards, busy, ...(noteScope === undefined ? { notice, alert: usageAlert } : {}), onFetchAll: () => { void fetchAll() }, saving: savingSettings }) })
       : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, '正在读取设置…'),
     ...providerOrder(groups, cardList).map(provider => h(ProviderGroup, {
@@ -296,7 +311,7 @@ function lineDrafts(settings: SettingsView): LineDraft[] {
 }
 const lineSignature = (draft: LineDraft) => JSON.stringify([draft.id ?? null, draft.baseUrl.trim(), draft.accessMode])
 
-function Connection({ settings, saving, mutateSettings, api, usage, latency, onRefreshLatency }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; api: Api; usage: ReactNode; latency: LatencyState; onRefreshLatency: () => void }) {
+function Connection({ settings, saving, mutateSettings, api, usage, latency, onRefreshLatency }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; api: Api; usage: ReactNode; latency: LatencyState; onRefreshLatency: (lineId: string) => void }) {
   const baseline = lineDrafts(settings)
   const [drafts, setDrafts] = useState<LineDraft[]>(baseline)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -417,9 +432,9 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency, onR
         return
       }
       setChecks(current => ({ ...current, [draft.draftId]: { signature, activeLineId: activeId, result: snapshot } }))
-      // A completed check is a fresh network sample of this line: saved lines re-measure latency
-      // alongside it (unsaved drafts have no reading row, so they trigger nothing).
-      if (draft.id) onRefreshLatency()
+      // A completed check is a fresh network sample of this line: re-measure just that saved
+      // line (unsaved drafts have no reading row, so they trigger nothing).
+      if (draft.id) onRefreshLatency(draft.id)
     } catch (error) {
       if (epoch === checkEpoch.current) setCheckErrors(current => ({ ...current, [draft.draftId]: `检查失败：${errorText(error)}` }))
     } finally {

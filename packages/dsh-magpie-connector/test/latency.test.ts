@@ -140,3 +140,29 @@ test('test_latency_route_measures_saved_lines_only', async () => {
   expect(body.lines[0]).toMatchObject({ id: LINE_ID })
   expect(gateway.requests).toHaveLength(0)
 })
+
+test('test_latency_single_line', async () => {
+  const first = await createTcpListener(); cleanup.push(first.close)
+  const second = await createTcpListener(); cleanup.push(second.close)
+  const { runtime } = runtimeWith([
+    line(`http://127.0.0.1:${first.port}/v1`, LINE_ID),
+    line(`http://127.0.0.1:${second.port}/v1`, LINE_ID_2),
+  ])
+  const { routes } = register(runtime)
+  const route = latencyRoute(routes)
+  const measured: number[] = []
+  for (const listener of [first, second]) measured.push(listener.port)
+
+  // ?line=<id> measures only that saved line and answers with just that reading.
+  const single = await route.fetch(new Request(`http://local/api/dsh-magpie-connector/latency?line=${LINE_ID_2}`))
+  expect(single.status).toBe(200)
+  const body = await single.json() as { lines: { id: string; ms: number | null }[] }
+  expect(body.lines.map(entry => entry.id)).toEqual([LINE_ID_2])
+  expect(body.lines[0]!.ms).not.toBeNull()
+
+  // Unknown or unsaved ids measure nothing at all.
+  for (const id of ['ffffffff', 'draft-1']) {
+    const missing = await route.fetch(new Request(`http://local/api/dsh-magpie-connector/latency?line=${id}`))
+    expect(await missing.json()).toEqual({ lines: [] })
+  }
+})

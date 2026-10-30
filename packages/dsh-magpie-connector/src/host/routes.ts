@@ -58,7 +58,7 @@ export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=n
    return Response.json(speed.get(session,runtime.current.catalog))
   },
   lineCheck:async(_request:Request,body:unknown)=>runtime.lineCheck(body),
-  latency:async()=>latency.read(),
+  latency:async(request:Request)=>latency.read(new URL(request.url).searchParams.get('line') ?? undefined),
  }
  /** GET-only latency diagnostics; every other resource keeps the GET/POST surface. */
  const resources=['settings','cards','speed','latency'] as const
