@@ -214,14 +214,18 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 ## 11. 当前落地状态与后续基线
 
-截至 2026-10-29，本仓自动镜像已覆盖 AUTO、Magpie、Sidebar，三者的 release workflow 都包含 npm OIDC 与 GitHub Release（附 npm 同版 tgz）步骤：
+截至 2026-10-30，本仓自动镜像已覆盖 AUTO、Magpie、Sidebar、Session ID Copy，四者的 release workflow 都包含 npm OIDC 与 GitHub Release（附 npm 同版 tgz）步骤：
 
 | 插件 | 自动镜像/tag | npm OIDC | GitHub Release + npm 同版附件 | README 结构 |
 | --- | --- | --- | --- | --- |
 | AUTO | 已配置 | 已配置 | 已配置，0.5.1 起已验 | 已按 §3 |
 | Magpie | 已配置 | 已配置 | 已配置，0.3.0 已验（附件与 npm 字节一致） | 已按 §3（npm 页随下一个版本更新） |
 | Sidebar | 已配置 | 已配置 | 已配置，0.1.12 起 | 已按 §3（无设置面，右侧为显示规则示意） |
+| Session ID Copy (`dsh-session-id-copy`) | 已配置 | 已配置 | 已配置，0.2.0 手动首发补 Release、0.2.1 起经 OIDC 发布并已验（附件与 npm 字节一致） | 已按 §3（无设置面，单图 + Archify） |
 
-演示图：AUTO 0.5.3 与 Magpie 0.3.1 起由 GIF 换为代表性 PNG（取自原录制的代表帧），Sidebar 一直是 PNG；只有推 main 并核对商店详情页后，才能说商店已展示新图。
+演示图：AUTO 0.5.3 与 Magpie 0.3.1 起由 GIF 换为代表性 PNG（取自原录制的代表帧），Sidebar 与 Session ID Copy 一直是 PNG；只有推 main 并核对商店详情页后，才能说商店已展示新图。
+
+首次发布仍有 bootstrap 限制：npm 不允许给尚不存在的包配置 Trusted Publisher（[npm/cli#8544](https://github.com/npm/cli/issues/8544)），所以**第一个版本必须由维护者本机带 2FA 手动发布**，之后用 `npm trust github <pkg> --file release.yml --repo <owner>/<mirror> --allow-publish`（npm ≥ 11.15）绑定 OIDC。该配置必须在创建后 **2 天内完成首次成功发布**，否则失效；因此绑定后应尽快补一个版本走 OIDC 验证，或者在真正要发版时再绑定。手动首发没有 provenance，绑定后的版本才有 attestations。
+
 
 更早的版本（Magpie ≤0.2.0、Sidebar ≤0.1.11）没有回补 GitHub Release；需要时按 §10「npm 成功，Release 缺失」处理。后续新插件默认完成全链路；维护现有插件时以实际 workflow 与线上结果更新此表。
