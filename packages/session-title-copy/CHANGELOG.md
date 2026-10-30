@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 — 2026-10-30
+
+- 内容与 0.2.0 相同。npm 要求包在 registry 上已存在才能绑定 Trusted Publisher，所以 0.2.0 由维护者本机手动首发；本版用于验证 GitHub Actions 的 OIDC 自动发布，从此版本起 npm 包由 CI 带 provenance 发布，发布时不再需要人工验证码。
+
 ## 0.2.0 — 2026-10-30
 
 - 独立发布与商店上架：npm 包名改为 `dsh-session-id-copy`，独立镜像 `prgrmrwy/dsh-session-id-copy`；`dsh.yaml` 条目 id 与源码目录仍为 `session-title-copy`，运行时行为不变。

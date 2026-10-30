@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-id-copy",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness plugin: show a 6-character session id badge next to the conversation title and copy the full session id on click",
   "license": "MIT",
   "author": "prgrmrwy",
