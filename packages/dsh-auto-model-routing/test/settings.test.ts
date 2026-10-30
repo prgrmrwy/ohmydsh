@@ -53,12 +53,12 @@ it('spec Scenario "旧映射配置不影响路由并在保存时移除"', async 
   expect((await h.invoke('settings', {})).deprecated).toEqual([])
  } finally { await closeHarness() }
 })
-it('Jev deadline defaults to 5000 ms and accepts up to 8000 ms',()=>{
+it('Jev deadline defaults to 8000 ms and accepts up to 8000 ms',()=>{
  const {path,store}=fixture()
- expect(DEFAULT_SETTINGS.jevTimeoutMs).toBe(5000)
- expect(store.read().settings.jevTimeoutMs).toBe(5000)
+ expect(DEFAULT_SETTINGS.jevTimeoutMs).toBe(8000)
+ expect(store.read().settings.jevTimeoutMs).toBe(8000)
  store.save({jevTimeoutMs:8000})
  expect(JSON.parse(readFileSync(path,'utf8'))).toEqual({jevTimeoutMs:8000})
  writeFileSync(path,JSON.stringify({jevTimeoutMs:8001}))
- expect(store.read().settings.jevTimeoutMs).toBe(5000)
+ expect(store.read().settings.jevTimeoutMs).toBe(8000)
 })
