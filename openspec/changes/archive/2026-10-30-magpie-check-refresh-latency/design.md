@@ -30,7 +30,7 @@
 
 ## Migration Plan
 
-无数据/协议变化，patch 版本 0.4.1；旧 host 不受影响（不新增端点、不新增请求类型），刷新页面即生效，无需重启 Host。
+无数据/协议变化，patch 版本 0.4.1；旧 host 不受影响（不新增端点、不新增请求类型）。改动只落在 Web 客户端 bundle：`dsh build` 物化后仍需重启 DSH Host 才会加载新 bundle，仅刷新页面不够。
 
 ## Open Questions
 
