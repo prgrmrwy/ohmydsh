@@ -38,12 +38,16 @@ test('test_line_silent_ui_01 spec Scenario "切换线路静默无提示"', async
 test('test_line_silent_ui_02 spec Scenario "info 图标说明优先级"', async () => {
   const { host, root } = await mount(line('a1b2c3d4', 'a1b2c3d4'))
   try {
-    const info = host.querySelector('[aria-label="线路优先级说明"]') as HTMLElement
+    const info = host.querySelector('.dmg-info') as HTMLElement
     expect(info).not.toBeNull()
-    const title = info.getAttribute('title') ?? ''
-    expect(title).toContain('按序号')
-    expect(title).toContain('自动')
-    expect(title).toContain('绿色方块')
-    expect(title).toContain('同一个 Magpie 网关')
+    expect(info.getAttribute('tabindex')).toBe('0')
+    for (const attribute of ['title', 'aria-label']) {
+      const text = info.getAttribute(attribute) ?? ''
+      expect(text).toContain('按序号')
+      expect(text).toContain('自动')
+      expect(text).toContain('绿色方块')
+      expect(text).toContain('同一个 Magpie 网关')
+      expect(text).toContain('TCP 建连耗时（含 DNS 解析）')
+    }
   } finally { act(() => root.unmount()); host.remove() }
 })

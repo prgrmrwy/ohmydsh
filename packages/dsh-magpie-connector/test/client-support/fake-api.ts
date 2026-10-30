@@ -42,6 +42,13 @@ export const settingsView = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+/** Expand one saved line row: the edit body is unmounted while the row is collapsed. */
+export function expandLine(root: ParentNode, lineId: string): void {
+  const toggle = root.querySelector(`[data-line-id="${lineId}"] [data-toggle]`) as HTMLButtonElement | null
+  if (!toggle) throw new Error(`line ${lineId} has no toggle`)
+  toggle.click()
+}
+
 /** Let pending promises and React updates settle. */
 export async function flush(): Promise<void> {
   for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve() })

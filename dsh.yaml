@@ -418,10 +418,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.3.1
+    version: 0.4.0
     enabled: true
     brief: 接入自托管 Magpie 网关；按上游 owned_by 注册多个 route 原生分组，含用量卡片、默认输出预算与 Cloudflare Access
-    note: '自研 MIT,change add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多个真实 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners 持久≤32),原版选择器即显示 Magpie (<Owner>) 分组,不依赖 model-display.patch;旧单 route 退役无别名,旧会话需重选;AUTO strategies 与 guard exemptProviders 仍写旧 route,须另行适配(均 fail closed)。0.2.0 起设置为 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读按线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒绝重定向。移除:enabled:false → dsh build → 重启。'
+    note: '自研 MIT,changes add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes/line-panel-polish。0.3.0:按 owned_by 注册多个真实 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners≤32),原版选择器即分组;旧单 route 无别名,旧会话需重选,AUTO/guard 仍写旧 route 需另行适配(均 fail closed)。0.2.0 起 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。0.4.0:设置页线路默认收起、头部点击展开、操作改 DSH 图标;打开面板对已保存可解析线路做一次 TCP 建连测速(新 GET /latency,无 HTTP/凭据,不轮询不持久化),用量条圆角。信任面:只读按线路凭据,设置不回显,探测/测速仅 TCP,undici 只直连白名单 API 拒绝重定向。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。

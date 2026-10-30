@@ -1,9 +1,9 @@
 /**
- * The only way the web half reaches the host: the three D10 resources under
+ * The only way the web half reaches the host: the four D10 resources under
  * `/api/dsh-magpie-connector/`. Responses are bare JSON; errors are non-2xx with
  * `{error: string}`. Injected so tests replace it without touching `fetch`.
  */
-export type Resource = 'settings' | 'cards' | 'speed'
+export type Resource = 'settings' | 'cards' | 'speed' | 'latency'
 export interface ApiRequest { method: 'GET' | 'POST'; path: Resource; query?: Record<string, string>; body?: unknown }
 export interface ApiResponse { status: number; body: unknown }
 export type Api = (request: ApiRequest) => Promise<ApiResponse>

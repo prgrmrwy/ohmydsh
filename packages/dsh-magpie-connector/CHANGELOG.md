@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- **Line panel polish.** Settings now collapses every configured line by default (it no longer force-expands the active one); clicking a line header toggles it, and the add/remove/reorder actions are always-visible DSH product-icon buttons with accessible names and tooltips. A newly added line still opens for editing and stays open through its first save (including when it was moved before saving) and when a save fails.
+- **Line latency.** Opening Settings measures each saved line with a parseable address once (parallel TCP connect time, ≤600ms per line, DNS included, no HTTP and no credentials) and shows a 4-bar signal reading plus the millisecond value; timeouts show 「超时」, failed or older-host responses degrade silently to 「—」. Readings are display-only: they are not persisted, never touch automatic line selection, and are re-measured only on the next panel open or after a successful line save (no polling). New GET-only host resource `GET /api/dsh-magpie-connector/latency`.
+- Usage bar fill now has rounded ends matching the track.
+
 ## 0.3.1
 
 - Replace both README demo GIFs with representative PNG screenshots (the model picker grouped by provider; per-provider visibility, default effort and usage cards in Settings), because the DSH plugin store does not show GIFs by default. No runtime behavior changes.

@@ -9,7 +9,7 @@ import { credentialsMock } from './support/credentials.js'
 import { createGateway, json, sse } from './support/gateway.js'
 import { chatText, responseText } from './support/wire.js'
 
-test('host registers three resources, projects preferences and emits real priority wire bodies, then disposes without deleting settings', async () => {
+test('host registers four resources, projects preferences and emits real priority wire bodies, then disposes without deleting settings', async () => {
   const gateway = await createGateway()
   const models = [
     { id: 'codex/responses', owned_by: 'codex', reasoning_levels: ['none', 'high'], native_endpoints: ['/v1/responses'], service_tiers: [{ id: 'priority' }] },
@@ -44,6 +44,7 @@ test('host registers three resources, projects preferences and emits real priori
   try {
     expect((await call('settings', { lines: [{ baseUrl: gateway.baseUrl, accessMode: 'direct', key: 'test-key' }] })).status).toBe(200)
     expect((await call('cards')).status).toBe(200)
+    expect((await call('latency')).status).toBe(200)
     expect((await call('settings', { visibleModels: { codex: ['codex/responses'] }, defaultEffort: { model: 'codex/responses', effort: 'high' } })).status).toBe(200)
     expect((await adapter.listModels('dsh-magpie-connector-codex')).map(m => m.id)).toEqual(['codex/responses'])
     expect((await adapter.resolveModel('dsh-magpie-connector-codex', 'codex/responses')).reasoning?.defaultEffort).toBe('high')

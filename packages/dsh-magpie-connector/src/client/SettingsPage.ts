@@ -1,5 +1,7 @@
 import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react'
+import { IconChevronDownOutlineRegular, IconChevronUpOutlineRegular, IconTrashOutlineRegular, IconTriangleRightFillRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { errorText, failureText, isOk, type Api } from './api.js'
+import { lineLatency, parseLatency, type LatencyState, type LineLatency } from './latency.js'
 import { settingsCss } from './styles.js'
 import { UsageCard } from './UsageCard.js'
 import { cardKey, formatTime, parseCards, providerOrder, readTime, sameTarget, type Card, type CardsView, type ModelGroup, type ModelRow, type SettingsView, type SyncErrorKind } from './view-model.js'
@@ -32,10 +34,12 @@ export function MagpieSettings({ api }: { api: Api }) {
   const [noteScope, setNoteScope] = useState<NoteScope>()
   const [usageAlert, setUsageAlert] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
+  const [latency, setLatency] = useState<LatencyState>({ phase: 'idle' })
   const settingsRef = useRef<SettingsView | undefined>(undefined)
   const settingsVersion = useRef(0)
   const settingsLock = useRef(false)
   const cardsEpoch = useRef(0)
+  const latencyEpoch = useRef(0)
   const refreshLock = useRef(false)
   const cardsRef = useRef<Card[]>([])
   cardsRef.current = cards?.cards ?? []
@@ -46,6 +50,19 @@ export function MagpieSettings({ api }: { api: Api }) {
       if (epoch === cardsEpoch.current) setCards(parseCards(response.body, response.status))
     } catch (error) {
       if (epoch === cardsEpoch.current) setCards({ status: 'error', error: errorText(error), cards: [] })
+    }
+  }
+  /** One measurement per panel open (and after a successful line write); failures stay silent. */
+  const readLatency = async () => {
+    const epoch = ++latencyEpoch.current
+    setLatency({ phase: 'measuring' })
+    try {
+      const response = await api({ method: 'GET', path: 'latency' })
+      if (epoch !== latencyEpoch.current) return
+      const readings = isOk(response) ? parseLatency(response.body) : undefined
+      setLatency(readings ? { phase: 'done', readings } : { phase: 'failed' })
+    } catch {
+      if (epoch === latencyEpoch.current) setLatency({ phase: 'failed' })
     }
   }
   const clearUsage = () => {
@@ -65,7 +82,8 @@ export function MagpieSettings({ api }: { api: Api }) {
       else setSettingsError(failureText(response))
     }, error => { if (version === settingsVersion.current) setSettingsError(errorText(error)) })
     void readCards(epoch)
-    return () => { ++settingsVersion.current; ++cardsEpoch.current }
+    void readLatency()
+    return () => { ++settingsVersion.current; ++cardsEpoch.current; ++latencyEpoch.current }
   }, [api])
 
   const mutateSettings: SettingsMutation = async change => {
@@ -81,7 +99,7 @@ export function MagpieSettings({ api }: { api: Api }) {
       if (version !== settingsVersion.current) return
       if (result.view) {
         commitSettings(result.view)
-        if (identityWrite) void readCards(epoch)
+        if (identityWrite) { void readCards(epoch); void readLatency() }
       } else if (identityWrite) {
         setCards({ status: 'error', error: result.error!, cards: [] })
       }
@@ -127,7 +145,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     h('style', null, settingsCss),
     h('p', { className: 'dmg-intro' }, '通过自托管的 Magpie 网关使用模型。用量卡片只读，打开本页时读取一次，之后只在你点击卡片上的刷新时重新读取。'),
     settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, `无法读取设置：${settingsError}`) : null,
-    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings,
+    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, latency,
       usage: h(UsageStatus, { cards, busy, ...(noteScope === undefined ? { notice, alert: usageAlert } : {}), onFetchAll: () => { void fetchAll() }, saving: savingSettings }) })
       : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, '正在读取设置…'),
     ...providerOrder(groups, cardList).map(provider => h(ProviderGroup, {
@@ -190,7 +208,7 @@ async function postSettings(api: Api, body: Record<string, unknown>): Promise<Se
 
 type AccessMode = 'direct' | 'cloudflare'
 const ACCESS_MODES: { id: AccessMode; label: string }[] = [{ id: 'direct', label: '直连' }, { id: 'cloudflare', label: 'Cloudflare Access' }]
-const INFO_TEXT = '线路按序号优先尝试，连不上自动试下一条；绿色方块表示当前线路；多条线路应指向同一个 Magpie 网关。'
+const INFO_TEXT = '线路按序号优先尝试，连不上自动试下一条；绿色方块表示当前线路；多条线路应指向同一个 Magpie 网关；延迟是 TCP 建连耗时（含 DNS 解析），不是网关健康检查。'
 const hostnameOf = (baseUrl: string) => { try { return new URL(baseUrl).hostname || baseUrl } catch { return baseUrl || '未配置' } }
 
 interface LineDraft {
@@ -211,12 +229,29 @@ function lineDrafts(settings: SettingsView): LineDraft[] {
 }
 const lineSignature = (draft: LineDraft) => JSON.stringify([draft.id ?? null, draft.baseUrl.trim(), draft.accessMode])
 
-function Connection({ settings, saving, mutateSettings, usage }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; usage: ReactNode }) {
+function Connection({ settings, saving, mutateSettings, usage, latency }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; usage: ReactNode; latency: LatencyState }) {
   const baseline = lineDrafts(settings)
   const [drafts, setDrafts] = useState<LineDraft[]>(baseline)
-  const [expanded, setExpanded] = useState<string | null>(settings.activeLineId ?? baseline[0]?.draftId ?? null)
+  const [expanded, setExpanded] = useState<string | null>(null)
   const [message, setMessage] = useState<{ text: string; failed: boolean }>()
-  useEffect(() => { const next = lineDrafts(settings); setDrafts(next); setExpanded(settings.activeLineId ?? next[0]?.draftId ?? null) }, [settings])
+  // Save-time position of the pending (unsaved) draft: it keeps the row expanded
+  // across the response that replaces its synthetic id with the host-assigned id.
+  const pendingDraftId = useRef<string | null>(null)
+  const pendingIndex = useRef<number | null>(null)
+  const awaitingSave = useRef(false)
+  useEffect(() => {
+    const next = lineDrafts(settings)
+    setDrafts(next)
+    if (awaitingSave.current) {
+      awaitingSave.current = false
+      const index = pendingIndex.current
+      pendingIndex.current = null
+      setExpanded(current => current && next.some(draft => draft.draftId === current) ? current : (index !== null && next[index] ? next[index]!.draftId : null))
+      pendingDraftId.current = null
+    } else {
+      setExpanded(current => current && next.some(draft => draft.draftId === current) ? current : null)
+    }
+  }, [settings])
   // Legacy hosts have no line list: keep line 1 marked active. A v2 host that
   // reports a null/absent active line (nothing complete) must show no marker.
   const activeId = settings.activeLineId ?? null
@@ -225,9 +260,14 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
     const target = index + delta; if (target < 0 || target >= current.length) return current
     const next = [...current]; const swap = next[index]!; next[index] = next[target]!; next[target] = swap; return next
   })
-  const remove = (draftId: string) => setDrafts(current => current.length <= 1 ? current : current.filter(draft => draft.draftId !== draftId))
+  const remove = (draftId: string) => setDrafts(current => {
+    if (current.length <= 1) return current
+    if (pendingDraftId.current === draftId) pendingDraftId.current = null
+    return current.filter(draft => draft.draftId !== draftId)
+  })
   const add = () => setDrafts(current => {
     const draft: LineDraft = { draftId: `new-${current.length}-${Date.now()}`, baseUrl: '', accessMode: 'direct', savedAccess: false, keyConfigured: false, keyWritable: true, apiKey: '', accessConfigured: false, accessWritable: true, accessClientId: '', accessClientSecret: '' }
+    pendingDraftId.current = draft.draftId
     setExpanded(draft.draftId); return [...current, draft]
   })
   const dirty = drafts.length !== baseline.length || drafts.some((draft, index) => {
@@ -239,11 +279,15 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
   const post = async (body: Record<string, unknown>, done: string) => {
     setMessage(undefined)
     const result = await mutateSettings(body)
+    if (!result?.view) { awaitingSave.current = false; pendingIndex.current = null }
     if (!result) return
     if (result.view) setMessage({ text: done, failed: false })
     else setMessage({ text: result.error!, failed: true })
   }
   const save = () => {
+    const pending = drafts.findIndex(draft => draft.draftId === pendingDraftId.current && !draft.id)
+    pendingIndex.current = pending >= 0 ? pending : null
+    awaitingSave.current = true
     const lines = drafts.map(draft => ({
       ...(draft.id ? { id: draft.id } : {}),
       baseUrl: draft.baseUrl.trim(), accessMode: draft.accessMode,
@@ -257,13 +301,14 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
   return h('section', { className: 'dmg-panel', 'aria-label': '连接' },
     h('div', { className: 'dmg-head' },
       h('h3', null, '连接'),
-      h('span', { className: 'dmg-info', role: 'img', 'aria-label': '线路优先级说明', title: INFO_TEXT }, 'ⓘ')),
+      h('span', { className: 'dmg-info', role: 'img', tabIndex: 0, 'aria-label': INFO_TEXT, title: INFO_TEXT }, 'ⓘ')),
     drafts.length === 0 ? h('p', { className: 'dmg-hint' }, '还没有线路。点击「添加线路」填写网关地址与 key。') : null,
     h('div', { className: 'dmg-lines' },
       ...drafts.map((draft, index) => h(LineCard, {
         key: draft.draftId, draft, index, total: drafts.length, saving,
         active: !!draft.id && draft.id === activeId,
         expanded: expanded === draft.draftId,
+        latency: lineLatency(latency, draft),
         onToggle: () => setExpanded(current => current === draft.draftId ? null : draft.draftId),
         onChange: (patch: Partial<LineDraft>) => update(draft.draftId, patch),
         onMove: (delta: number) => move(index, delta),
@@ -279,21 +324,50 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
     usage)
 }
 
-function LineCard({ draft, index, total, saving, active, expanded, onToggle, onChange, onMove, onRemove }: {
-  draft: LineDraft; index: number; total: number; saving: boolean; active: boolean; expanded: boolean
+function iconButton(name: string, icon: ReactNode, lineLabel: string, disabled: boolean, onClick: () => void, reason?: string) {
+  const action = `${name}线路 ${lineLabel}`
+  const label = disabled && reason ? `${action}（${reason}）` : action
+  const button = h('button', { type: 'button', className: 'dmg-icon-button', 'aria-label': label, 'data-action': name, disabled, onClick },
+    h('span', { className: 'dmg-icon', 'aria-hidden': true }, icon))
+  return disabled ? button : h(Tooltip, { label: action, children: button })
+}
+
+/** Per-row latency cell: 4 signal bars plus the reading; only rows that should have a reading are non-idle. */
+function LatencySlot({ latency }: { latency: LineLatency }) {
+  const attrs: Record<string, string> = { className: 'dmg-latency', 'data-latency': '', 'data-latency-state': latency.state }
+  const level = latency.level ?? 0
+  if (latency.state === 'done') {
+    attrs['data-latency-level'] = String(level)
+    attrs['data-latency-ms'] = latency.ms === null || latency.ms === undefined ? '' : String(latency.ms)
+  }
+  const reading = latency.state === 'done' && latency.ms !== null && latency.ms !== undefined
+  const text = latency.state === 'measuring' ? '测速中…' : latency.state === 'failed' ? '—' : latency.state === 'done' ? (reading ? `${latency.ms} ms` : '超时') : ''
+  const title = latency.state === 'done' ? (reading ? `TCP 建连耗时 ${latency.ms} ms（含 DNS 解析），不是网关健康检查` : '600ms 内未完成 TCP 建连（可能很慢或不可达）') : undefined
+  return h('span', { ...attrs, ...(title ? { title } : {}) },
+    reading ? h('span', { className: 'dmg-bars', 'aria-hidden': true, 'data-level': String(level) },
+      ...[0, 1, 2, 3].map(index => h('i', { key: index, 'data-on': index < level ? 'true' : 'false' }))) : null,
+    h('span', { className: 'dmg-latency-text' }, text))
+}
+
+function LineCard({ draft, index, total, saving, active, expanded, latency, onToggle, onChange, onMove, onRemove }: {
+  draft: LineDraft; index: number; total: number; saving: boolean; active: boolean; expanded: boolean; latency: LineLatency
   onToggle: () => void; onChange: (patch: Partial<LineDraft>) => void; onMove: (delta: number) => void; onRemove: () => void
 }) {
-  return h('div', { className: 'dmg-line', 'data-line-id': draft.id, 'data-expanded': expanded ? 'true' : 'false' },
+  const lineLabel = String(index + 1)
+  const bodyId = `dmg-line-body-${draft.draftId}`
+  return h('div', { className: 'dmg-line', 'data-line-id': draft.id, 'data-draft': draft.id ? undefined : '', 'data-expanded': expanded ? 'true' : 'false' },
     h('div', { className: 'dmg-line-head' },
-      h('span', { className: 'dmg-line-index' }, `线路 ${index + 1}`),
-      active ? h('span', { className: 'dmg-active', role: 'img', 'aria-label': '当前线路', title: '当前线路', 'data-active-line': draft.id }) : null,
-      h('span', { className: 'dmg-line-title' }, `${hostnameOf(draft.baseUrl)}${draft.id ? '' : '（未保存）'}`),
+      h('button', { type: 'button', className: 'dmg-line-toggle', 'aria-expanded': expanded, ...(expanded ? { 'aria-controls': bodyId } : {}), 'data-toggle': '', onClick: onToggle },
+        h('span', { className: 'dmg-chevron', 'aria-hidden': true }, h(IconTriangleRightFillRegular, null)),
+        h('span', { className: 'dmg-line-index' }, `线路 ${lineLabel}`),
+        active ? h('span', { className: 'dmg-active', role: 'img', 'aria-label': '当前线路', title: '当前线路', 'data-active-line': draft.id }) : null,
+        h('span', { className: 'dmg-line-title' }, `${hostnameOf(draft.baseUrl)}${draft.id ? '' : '（未保存）'}`),
+        h(LatencySlot, { latency })),
       h('div', { className: 'dmg-line-actions' },
-        h('button', { type: 'button', className: 'dmg-button', disabled: saving || index === 0, onClick: () => onMove(-1) }, '上移'),
-        h('button', { type: 'button', className: 'dmg-button', disabled: saving || index === total - 1, onClick: () => onMove(1) }, '下移'),
-        h('button', { type: 'button', className: 'dmg-button', disabled: saving || total <= 1, onClick: onRemove }, '删除'),
-        h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: onToggle }, expanded ? '收起' : '展开'))),
-    expanded ? h('div', { className: 'dmg-line-body' },
+        iconButton('上移', h(IconChevronUpOutlineRegular, null), lineLabel, saving || index === 0, () => onMove(-1), '已是第一条'),
+        iconButton('下移', h(IconChevronDownOutlineRegular, null), lineLabel, saving || index === total - 1, () => onMove(1), '已是最后一条'),
+        iconButton('删除', h(IconTrashOutlineRegular, null), lineLabel, saving || total <= 1, onRemove, '仅剩一条'))),
+    expanded ? h('div', { className: 'dmg-line-body', id: bodyId },
       h('label', { className: 'dmg-field' }, h('span', null, '网关地址（含 /v1）'),
         h('input', { className: 'dmg-input', value: draft.baseUrl, disabled: saving, placeholder: 'http://127.0.0.1:3425/v1', onChange: (e: { target: { value: string } }) => onChange({ baseUrl: e.target.value }) })),
       h('label', { className: 'dmg-field' }, h('span', null, `Gateway API key · ${draft.keyConfigured ? '已配置' : '未配置'}${draft.keyWritable ? '' : '（来自启动环境，只读）'}`),

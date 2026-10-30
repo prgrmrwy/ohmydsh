@@ -3,6 +3,7 @@ import { isVisible, validateVisibility } from './visibility.js'
 import { updateDefaultEffort } from './default-effort.js'
 import { CardsController } from './cards.js'
 import { SpeedController } from './speed.js'
+import { LatencyController } from './latency.js'
 export class SettingsController {
   private pending: Promise<void> = Promise.resolve()
   constructor(readonly runtime:MagpieRuntime) {}
@@ -43,7 +44,7 @@ export interface FetchRegistration {
 }
 export interface FetchRegistry {register(route:FetchRegistration):()=>void}
 /** Register on the injected connection.fetch; caller owns the returned disposer. */
-export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=new SpeedController(),cards=new CardsController(runtime)) {
+export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=new SpeedController(),cards=new CardsController(runtime),latency=new LatencyController(()=>runtime.config())) {
  const settings=new SettingsController(runtime)
  const handlers={
   settings:async(request:Request,body:unknown)=>settings.handle(request.method==='POST'?body:undefined),
@@ -56,14 +57,18 @@ export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=n
    }
    return Response.json(speed.get(session,runtime.current.catalog))
   },
+  latency:async()=>latency.read(),
  }
+ /** GET-only latency diagnostics; every other resource keeps the GET/POST surface. */
+ const resources=['settings','cards','speed','latency'] as const
+ const methodsOf=(resource:typeof resources[number]):('GET'|'POST')[]=>resource==='latency'?['GET']:['GET','POST']
  const disposers:(()=>void)[]=[]
  try {
-  for(const resource of ['settings','cards','speed'] as const) disposers.push(fetch.register({path:`/api/dsh-magpie-connector/${resource}`,methods:['GET','POST'],requestBody:'buffered',fetch:async request=>{
+  for(const resource of resources) disposers.push(fetch.register({path:`/api/dsh-magpie-connector/${resource}`,methods:methodsOf(resource),requestBody:'buffered',fetch:async request=>{
    try {const body=request.method==='POST'?await request.json():undefined;return await handlers[resource](request,body)}
    catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
   }}))
  } catch(error) {for(const dispose of disposers.reverse())dispose();throw error}
  let disposed=false
- return {settings,cards,speed,dispose:()=>{if(disposed)return;disposed=true;for(const dispose of disposers.reverse())dispose()}}
+ return {settings,cards,speed,latency,dispose:()=>{if(disposed)return;disposed=true;latency.dispose();for(const dispose of disposers.reverse())dispose()}}
 }
