@@ -113,7 +113,7 @@ customizations:
   - id: dsh-memex
     type: package
     source: local
-    version: 0.4.2
+    version: 0.4.1
     enabled: true
     enabledEnv: DSH_MEMEX_ENABLED  # 紧急熔断：设 DSH_MEMEX_ENABLED=0 即可在下次 build 时移除
     brief: memex 持久记忆原生接入(scope 隔离/跨库检索/守门 + 「记忆」设置页)
