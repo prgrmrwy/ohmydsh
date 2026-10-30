@@ -2,7 +2,10 @@ import { createElement as h, useEffect, useRef, useState, type ReactNode } from 
 import { errorText, failureText, isOk, type Api } from './api.js'
 import { settingsCss } from './styles.js'
 import { UsageCard } from './UsageCard.js'
-import { cardKey, formatTime, parseCards, providerOrder, readTime, sameTarget, type Card, type CardsView, type ModelGroup, type ModelRow, type SettingsView, type SyncErrorKind } from './view-model.js'
+import {
+  cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, providerOrder, readTime, sameTarget,
+  type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type SettingsView, type SyncErrorKind,
+} from './view-model.js'
 
 /**
  * Magpie settings section: connection (with an advanced access mode), then
@@ -15,6 +18,14 @@ export const EMPTY_TEXT = 'Magpie 未返回可见用量'
 export const RESTRICTED_HINT = '受限的 gateway key 无法让 Magpie 首次读取用量：需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。'
 export const NOT_REREAD = 'Magpie 未重新读取（可能处于节流间隔内）'
 const SYNC_KIND: Record<SyncErrorKind, string> = { unauthorized: 'key 无效（401）', forbidden: '无权访问（403）', http: '网关错误', unreachable: '无法连接网关', settings: '设置保存失败', registration: '路由注册失败' }
+/** Human labels for the check kinds the host may report. */
+const CHECK_KIND: Record<string, string> = {
+  ok: '可达', unauthorized: 'key 无效', forbidden: '无权访问', http: '网关错误', redirect: '被重定向',
+  unreachable: '连不上', timeout: '超时', 'invalid-catalog': '目录无法解析', incomplete: '配置不完整',
+  invalid: '请求无效', busy: '已有检查在进行', pending: '宿主正在保存，稍后再试',
+}
+const CHECK_UNSUPPORTED = '当前宿主版本不支持线路检查'
+const ACCESS_FIELDS = ['accessClientId', 'accessClientSecret'] as const
 
 type Target = { all: true } | { provider: string; user?: string }
 type Notice = 'not-reread' | 'restricted'
@@ -22,6 +33,40 @@ type Notice = 'not-reread' | 'restricted'
 type NoteScope = string | undefined
 type SettingsResult = { view?: SettingsView; error?: string }
 type SettingsMutation = (body: Record<string, unknown> | ((current: SettingsView) => Record<string, unknown>)) => Promise<SettingsResult | undefined>
+/** One rendered check result, bound to the draft it was produced from and to the then-active line. */
+type CheckEntry = { signature: string; activeLineId: string | null; result: CheckSnapshot }
+type SubmittedLine = { id?: string; baseUrl?: string; accessMode?: string; key?: string; accessClientId?: string | null; accessClientSecret?: string | null }
+
+/**
+ * Does this submitted list touch the active line's identity? Only then the old usage cards must
+ * disappear before the request is even sent (the host writes credentials before awaiting its
+ * catalog sync, which can take up to 15s).
+ */
+export function touchesActiveIdentity(lines: unknown[], view: SettingsView): boolean {
+  const activeId = view.activeLineId
+  if (!activeId) return false
+  const active = (view.lines ?? []).find(line => line.id === activeId)
+  if (!active) return false
+  const submitted = lines.filter((line): line is SubmittedLine => !!line && typeof line === 'object')
+  const entry = submitted.find(line => line.id === activeId)
+  if (!entry) return true
+  if (typeof entry.baseUrl === 'string' && entry.baseUrl !== (active.baseUrl ?? '')) return true
+  if (typeof entry.accessMode === 'string' && entry.accessMode !== (active.accessMode ?? 'direct')) return true
+  if (typeof entry.key === 'string' && entry.key !== '') return true
+  return ACCESS_FIELDS.some(field => typeof entry[field] === 'string' && entry[field] !== '')
+}
+
+/** One line of the read-only snapshot: kind, model count, diff against the cache and latency. */
+export function describeCheck(snapshot: CheckSnapshot, diff: { added: string[]; removed: string[] } | undefined, lastSyncAt: string | undefined): string {
+  const parts = [CHECK_KIND[snapshot.kind] ?? snapshot.kind]
+  if (snapshot.kind === 'ok') {
+    parts.push(`${snapshot.modelCount ?? snapshot.models?.length ?? 0} 个模型`)
+    if (diff) parts.push(diff.added.length === 0 && diff.removed.length === 0 ? `与缓存目录一致${lastSyncAt ? `（缓存于 ${formatTime(lastSyncAt)}）` : ''}` : `多 ${diff.added.length} · 少 ${diff.removed.length}`)
+  }
+  if (snapshot.gatewayStatus !== undefined) parts.push(`HTTP ${snapshot.gatewayStatus}`)
+  parts.push(`${snapshot.latencyMs}ms`)
+  return parts.join(' · ')
+}
 
 export function MagpieSettings({ api }: { api: Api }) {
   const [settings, setSettings] = useState<SettingsView>()
@@ -68,22 +113,41 @@ export function MagpieSettings({ api }: { api: Api }) {
     return () => { ++settingsVersion.current; ++cardsEpoch.current }
   }, [api])
 
+  /**
+   * After an isolated failure the old cards must not come back: reread the host's truth (settings
+   * plus cards, both redacted) instead of restoring what the user saw before the write.
+   */
+  const rereadAfterFailure = async (epoch: number) => {
+    try {
+      const response = await api({ method: 'GET', path: 'settings' })
+      if (epoch !== cardsEpoch.current) return
+      if (isOk(response)) { commitSettings(response.body as SettingsView); void readCards(epoch) }
+      else setSettingsError(failureText(response))
+    } catch (error) { if (epoch === cardsEpoch.current) setSettingsError(errorText(error)) }
+  }
+
   const mutateSettings: SettingsMutation = async change => {
     // Ref acquisition is synchronous: disabled props alone cannot stop same-tick writes.
     if (settingsLock.current || !settingsRef.current) return
     settingsLock.current = true; setSavingSettings(true)
     const version = ++settingsVersion.current
     const body = typeof change === 'function' ? change(settingsRef.current) : change
-    const identityWrite = ['lines', 'baseUrl', 'key', 'accessClientId', 'accessClientSecret'].some(field => Object.hasOwn(body, field))
-    const epoch = identityWrite ? clearUsage() : cardsEpoch.current
+    const before = settingsRef.current
+    const beforeActive = before.activeLineId ?? null
+    const submitted = Array.isArray(body.lines) ? body.lines as unknown[] : undefined
+    // Submit-time isolation: only a write that can change the active identity hides the cards.
+    const isolated = submitted !== undefined && touchesActiveIdentity(submitted, before)
+    const epoch = isolated ? clearUsage() : cardsEpoch.current
     try {
       const result = await postSettings(api, body)
       if (version !== settingsVersion.current) return
+      const switched = !!result.view && (result.view.activeLineId ?? null) !== beforeActive
       if (result.view) {
         commitSettings(result.view)
-        if (identityWrite) void readCards(epoch)
-      } else if (identityWrite) {
-        setCards({ status: 'error', error: result.error!, cards: [] })
+        if (isolated) void readCards(epoch)
+        else if (switched) { clearUsage(); void readCards(cardsEpoch.current) }
+      } else if (isolated) {
+        void rereadAfterFailure(epoch)
       }
       return result
     } finally {
@@ -127,7 +191,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     h('style', null, settingsCss),
     h('p', { className: 'dmg-intro' }, '通过自托管的 Magpie 网关使用模型。用量卡片只读，打开本页时读取一次，之后只在你点击卡片上的刷新时重新读取。'),
     settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, `无法读取设置：${settingsError}`) : null,
-    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings,
+    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api,
       usage: h(UsageStatus, { cards, busy, ...(noteScope === undefined ? { notice, alert: usageAlert } : {}), onFetchAll: () => { void fetchAll() }, saving: savingSettings }) })
       : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, '正在读取设置…'),
     ...providerOrder(groups, cardList).map(provider => h(ProviderGroup, {
@@ -197,25 +261,33 @@ interface LineDraft {
   draftId: string; id?: string; baseUrl: string; accessMode: AccessMode; savedAccess: boolean
   keyConfigured: boolean; keyWritable: boolean; apiKey: string
   accessConfigured: boolean; accessWritable: boolean; accessClientId: string; accessClientSecret: string
+  /** Host-reported completeness of the saved line (never of the unsaved draft). */
+  complete: boolean
 }
 
 function lineDrafts(settings: SettingsView): LineDraft[] {
   const configured = (access: { clientId?: { configured?: boolean }; clientSecret?: { configured?: boolean } } | undefined) => access?.clientId?.configured === true || access?.clientSecret?.configured === true
-  const source = (settings.lines ?? []).map(line => ({ id: line.id, baseUrl: line.baseUrl ?? '', accessMode: (line.accessMode ?? 'direct') as AccessMode, key: line.key, access: line.access }))
+  const source = (settings.lines ?? []).map(line => ({ id: line.id, baseUrl: line.baseUrl ?? '', accessMode: (line.accessMode ?? 'direct') as AccessMode, key: line.key, access: line.access, complete: line.complete !== false }))
   return source.map((line, index) => ({
     draftId: line.id ?? `new-${index}`, ...(line.id ? { id: line.id } : {}), baseUrl: line.baseUrl, accessMode: line.accessMode,
     savedAccess: line.accessMode === 'cloudflare', keyConfigured: line.key?.configured === true, keyWritable: line.key?.writable !== false, apiKey: '',
     accessConfigured: configured(line.access), accessWritable: line.access?.clientId?.writable !== false && line.access?.clientSecret?.writable !== false,
-    accessClientId: '', accessClientSecret: '',
+    accessClientId: '', accessClientSecret: '', complete: line.complete,
   }))
 }
 const lineSignature = (draft: LineDraft) => JSON.stringify([draft.id ?? null, draft.baseUrl.trim(), draft.accessMode])
 
-function Connection({ settings, saving, mutateSettings, usage }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; usage: ReactNode }) {
+function Connection({ settings, saving, mutateSettings, api, usage }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; api: Api; usage: ReactNode }) {
   const baseline = lineDrafts(settings)
   const [drafts, setDrafts] = useState<LineDraft[]>(baseline)
   const [expanded, setExpanded] = useState<string | null>(settings.activeLineId ?? baseline[0]?.draftId ?? null)
   const [message, setMessage] = useState<{ text: string; failed: boolean }>()
+  const [checks, setChecks] = useState<Record<string, CheckEntry>>({})
+  const [checking, setChecking] = useState<string>()
+  const [checkErrors, setCheckErrors] = useState<Record<string, string>>({})
+  const [checkUnsupported, setCheckUnsupported] = useState(false)
+  const checkLock = useRef(false)
+  const checkEpoch = useRef(0)
   useEffect(() => { const next = lineDrafts(settings); setDrafts(next); setExpanded(settings.activeLineId ?? next[0]?.draftId ?? null) }, [settings])
   // Legacy hosts have no line list: keep line 1 marked active. A v2 host that
   // reports a null/absent active line (nothing complete) must show no marker.
@@ -227,7 +299,7 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
   })
   const remove = (draftId: string) => setDrafts(current => current.length <= 1 ? current : current.filter(draft => draft.draftId !== draftId))
   const add = () => setDrafts(current => {
-    const draft: LineDraft = { draftId: `new-${current.length}-${Date.now()}`, baseUrl: '', accessMode: 'direct', savedAccess: false, keyConfigured: false, keyWritable: true, apiKey: '', accessConfigured: false, accessWritable: true, accessClientId: '', accessClientSecret: '' }
+    const draft: LineDraft = { draftId: `new-${current.length}-${Date.now()}`, baseUrl: '', accessMode: 'direct', savedAccess: false, keyConfigured: false, keyWritable: true, apiKey: '', accessConfigured: false, accessWritable: true, accessClientId: '', accessClientSecret: '', complete: false }
     setExpanded(draft.draftId); return [...current, draft]
   })
   const dirty = drafts.length !== baseline.length || drafts.some((draft, index) => {
@@ -236,12 +308,17 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
       || (draft.accessMode === 'cloudflare' && (!!draft.accessClientId || !!draft.accessClientSecret))
       || (draft.accessMode === 'direct' && draft.savedAccess)
   })
-  const post = async (body: Record<string, unknown>, done: string) => {
+  const dropChecks = () => { checkEpoch.current++; checkLock.current = false; setChecking(undefined); setChecks({}); setCheckErrors({}) }
+  const post = async (body: Record<string, unknown>, done: string | ((view: SettingsView) => string)) => {
     setMessage(undefined)
     const result = await mutateSettings(body)
     if (!result) return
-    if (result.view) setMessage({ text: done, failed: false })
+    if (result.view) setMessage({ text: typeof done === 'function' ? done(result.view) : done, failed: false })
     else setMessage({ text: result.error!, failed: true })
+  }
+  const savedLabel = (view: SettingsView) => {
+    const index = (view.lines ?? []).findIndex(line => line.id === view.activeLineId)
+    return index >= 0 ? `已保存 · 当前线路 ${index + 1}` : '已保存 · 当前无生效线路'
   }
   const save = () => {
     const lines = drafts.map(draft => ({
@@ -252,41 +329,95 @@ function Connection({ settings, saving, mutateSettings, usage }: { settings: Set
         ? { ...(draft.accessClientId ? { accessClientId: draft.accessClientId } : {}), ...(draft.accessClientSecret ? { accessClientSecret: draft.accessClientSecret } : {}) }
         : (draft.savedAccess ? { accessClientId: null, accessClientSecret: null } : {})),
     }))
-    void post({ lines }, '已保存')
+    void post({ lines }, view => { dropChecks(); return savedLabel(view) })
   }
+  const runCheck = async (draft: LineDraft) => {
+    if (checkLock.current || checkUnsupported) return
+    checkLock.current = true
+    const epoch = ++checkEpoch.current
+    const signature = checkSignature(draft)
+    setChecking(draft.draftId)
+    setCheckErrors(current => { const next = { ...current }; delete next[draft.draftId]; return next })
+    try {
+      const body: Record<string, unknown> = { baseUrl: draft.baseUrl.trim(), accessMode: draft.accessMode }
+      if (draft.id) body.id = draft.id
+      if (draft.apiKey) body.key = draft.apiKey
+      if (draft.accessMode === 'cloudflare') {
+        if (draft.accessClientId) body.accessClientId = draft.accessClientId
+        if (draft.accessClientSecret) body.accessClientSecret = draft.accessClientSecret
+      }
+      const response = await api({ method: 'POST', path: 'line-check', body })
+      if (epoch !== checkEpoch.current) return
+      if (response.status === 404) { setCheckUnsupported(true); return }
+      const snapshot = parseCheck(response.body)
+      if (!snapshot) {
+        setCheckErrors(current => ({ ...current, [draft.draftId]: isOk(response) ? '检查结果无法解析' : failureText(response) }))
+        return
+      }
+      setChecks(current => ({ ...current, [draft.draftId]: { signature, activeLineId: activeId, result: snapshot } }))
+    } catch (error) {
+      if (epoch === checkEpoch.current) setCheckErrors(current => ({ ...current, [draft.draftId]: `检查失败：${errorText(error)}` }))
+    } finally {
+      if (epoch === checkEpoch.current) { checkLock.current = false; setChecking(undefined) }
+    }
+  }
+  const clearCheck = (draftId: string) => {
+    checkEpoch.current++
+    setChecks(current => { const next = { ...current }; delete next[draftId]; return next })
+    setCheckErrors(current => { const next = { ...current }; delete next[draftId]; return next })
+  }
+  const catalogIds = cacheIds(settings.groups)
   return h('section', { className: 'dmg-panel', 'aria-label': '连接' },
     h('div', { className: 'dmg-head' },
       h('h3', null, '连接'),
       h('span', { className: 'dmg-info', role: 'img', 'aria-label': '线路优先级说明', title: INFO_TEXT }, 'ⓘ')),
     drafts.length === 0 ? h('p', { className: 'dmg-hint' }, '还没有线路。点击「添加线路」填写网关地址与 key。') : null,
     h('div', { className: 'dmg-lines' },
-      ...drafts.map((draft, index) => h(LineCard, {
-        key: draft.draftId, draft, index, total: drafts.length, saving,
-        active: !!draft.id && draft.id === activeId,
-        expanded: expanded === draft.draftId,
-        onToggle: () => setExpanded(current => current === draft.draftId ? null : draft.draftId),
-        onChange: (patch: Partial<LineDraft>) => update(draft.draftId, patch),
-        onMove: (delta: number) => move(index, delta),
-        onRemove: () => remove(draft.draftId),
-      }))),
+      ...drafts.map((draft, index) => {
+        const entry = checks[draft.draftId]
+        const fresh = entry && entry.signature === checkSignature(draft) && entry.activeLineId === activeId ? entry : undefined
+        return h(LineCard, {
+          key: draft.draftId, draft, index, total: drafts.length, saving,
+          active: !!draft.id && draft.id === activeId,
+          expanded: expanded === draft.draftId,
+          checking: checking === draft.draftId, checkDisabled: checking !== undefined || checkUnsupported,
+          check: fresh?.result, checkError: checkErrors[draft.draftId],
+          diff: fresh?.result && catalogIds.length > 0 && settings.lastSyncAt ? checkDiff(fresh.result, catalogIds) : undefined,
+          lastSyncAt: settings.lastSyncAt,
+          onToggle: () => setExpanded(current => current === draft.draftId ? null : draft.draftId),
+          onChange: (patch: Partial<LineDraft>) => update(draft.draftId, patch),
+          onMove: (delta: number) => move(index, delta),
+          onRemove: () => remove(draft.draftId),
+          onCheck: () => { void runCheck(draft) },
+          onClearCheck: () => clearCheck(draft.draftId),
+        })
+      })),
     h('div', { className: 'dmg-row' },
       h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: add }, drafts.length ? '添加备用线路' : '添加线路')),
     h('div', { className: 'dmg-row' },
       h('button', { type: 'button', className: 'dmg-button', disabled: saving || !dirty, onClick: save }, saving ? '保存中…' : '保存'),
       h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ resync: true }, '已刷新模型列表') } }, '刷新模型列表')),
     h(SyncStatus, { settings }),
-    message ? h('p', { className: message.failed ? 'dmg-error' : 'dmg-ok', role: message.failed ? 'alert' : 'status' }, message.text) : null,
+    message ? h('p', { className: message.failed ? 'dmg-error' : 'dmg-ok', ...(message.failed ? { role: 'alert' } : {}) }, message.text) : null,
     usage)
 }
 
-function LineCard({ draft, index, total, saving, active, expanded, onToggle, onChange, onMove, onRemove }: {
+function LineCard({ draft, index, total, saving, active, expanded, checking, checkDisabled, check, checkError, diff, lastSyncAt, onToggle, onChange, onMove, onRemove, onCheck, onClearCheck }: {
   draft: LineDraft; index: number; total: number; saving: boolean; active: boolean; expanded: boolean
+  checking: boolean; checkDisabled: boolean; check?: CheckSnapshot | undefined; checkError?: string | undefined
+  diff?: { added: string[]; removed: string[] } | undefined; lastSyncAt?: string | undefined
   onToggle: () => void; onChange: (patch: Partial<LineDraft>) => void; onMove: (delta: number) => void; onRemove: () => void
+  onCheck: () => void; onClearCheck: () => void
 }) {
+  const diffParts = diff ? [
+    diff.added.length ? h('p', { key: 'added', className: 'dmg-hint' }, `多出：${diff.added.join('、')}`) : null,
+    diff.removed.length ? h('p', { key: 'removed', className: 'dmg-hint' }, `缺少：${diff.removed.join('、')}`) : null,
+  ].filter(Boolean) : []
   return h('div', { className: 'dmg-line', 'data-line-id': draft.id, 'data-expanded': expanded ? 'true' : 'false' },
     h('div', { className: 'dmg-line-head' },
       h('span', { className: 'dmg-line-index' }, `线路 ${index + 1}`),
       active ? h('span', { className: 'dmg-active', role: 'img', 'aria-label': '当前线路', title: '当前线路', 'data-active-line': draft.id }) : null,
+      draft.id && !draft.complete ? h('span', { className: 'dmg-unset', 'data-line-incomplete': '' }, '未配置') : null,
       h('span', { className: 'dmg-line-title' }, `${hostnameOf(draft.baseUrl)}${draft.id ? '' : '（未保存）'}`),
       h('div', { className: 'dmg-line-actions' },
         h('button', { type: 'button', className: 'dmg-button', disabled: saving || index === 0, onClick: () => onMove(-1) }, '上移'),
@@ -299,6 +430,21 @@ function LineCard({ draft, index, total, saving, active, expanded, onToggle, onC
       h('label', { className: 'dmg-field' }, h('span', null, `Gateway API key · ${draft.keyConfigured ? '已配置' : '未配置'}${draft.keyWritable ? '' : '（来自启动环境，只读）'}`),
         h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value: draft.apiKey, disabled: saving || !draft.keyWritable,
           placeholder: draft.keyConfigured ? '留空则保持不变' : '必填', onChange: (e: { target: { value: string } }) => onChange({ apiKey: e.target.value }) })),
+      h('div', { className: 'dmg-check', 'data-check': '' },
+        h('div', { className: 'dmg-row' },
+          h('button', {
+            type: 'button', className: 'dmg-button', 'data-check-run': '',
+            disabled: saving || checkDisabled || draft.baseUrl.trim() === '', onClick: onCheck,
+          }, checking ? '检查中…' : '检查线路'),
+          check ? h('button', { type: 'button', className: 'dmg-button', disabled: saving || checking, onClick: onClearCheck }, '清除') : null),
+        h('p', { className: 'dmg-hint' }, '只读快照：不改当前线路，也不写入配置。'),
+        checkError ? h('p', { className: 'dmg-error' }, checkError) : null,
+        check ? h('p', { className: 'dmg-check-line', 'data-check-kind': check.kind }, describeCheck(check, diff, lastSyncAt)) : null,
+        check?.reason ? h('p', { className: 'dmg-hint', 'data-check-reason': '' }, check.reason) : null,
+        check?.models?.length ? h('details', { className: 'dmg-check-models' },
+          h('summary', null, `模型 id（${check.models.length}）`),
+          ...diffParts,
+          h('p', { className: 'dmg-hint' }, check.models.map(model => model.id).join('、'))) : null),
       h('details', { className: 'dmg-advanced', open: true, 'data-advanced': '' },
         h('summary', null, '高级连接'),
         h('div', { className: 'dmg-advanced-body' },
@@ -313,7 +459,7 @@ function LineCard({ draft, index, total, saving, active, expanded, onToggle, onC
             ['Access Client ID', draft.accessClientId, 'accessClientId'],
             ['Access Client Secret', draft.accessClientSecret, 'accessClientSecret'],
           ] as const).map(([label, value, field]) => h('label', { key: label, className: 'dmg-field' },
-            h('span', null, `${label} · ${(field === 'accessClientId' ? draft.accessConfigured : draft.accessConfigured) ? '已配置' : '未配置'}${draft.accessWritable ? '' : '（来自启动环境，只读）'}`),
+            h('span', null, `${label} · ${draft.accessConfigured ? '已配置' : '未配置'}${draft.accessWritable ? '' : '（来自启动环境，只读）'}`),
             h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value,
               disabled: saving || !draft.accessWritable, placeholder: '留空则保持不变',
               onChange: (e: { target: { value: string } }) => onChange({ [field]: e.target.value } as Partial<LineDraft>) }))) : [])))) : null)

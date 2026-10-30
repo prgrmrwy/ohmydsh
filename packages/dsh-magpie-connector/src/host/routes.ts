@@ -56,11 +56,16 @@ export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=n
    }
    return Response.json(speed.get(session,runtime.current.catalog))
   },
+  lineCheck:async(_request:Request,body:unknown)=>runtime.lineCheck(body),
  }
  const disposers:(()=>void)[]=[]
  try {
   for(const resource of ['settings','cards','speed'] as const) disposers.push(fetch.register({path:`/api/dsh-magpie-connector/${resource}`,methods:['GET','POST'],requestBody:'buffered',fetch:async request=>{
    try {const body=request.method==='POST'?await request.json():undefined;return await handlers[resource](request,body)}
+   catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
+  }}))
+  disposers.push(fetch.register({path:'/api/dsh-magpie-connector/line-check',methods:['POST'],requestBody:'buffered',fetch:async request=>{
+   try {return await handlers.lineCheck(request,await request.json())}
    catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
   }}))
  } catch(error) {for(const dispose of disposers.reverse())dispose();throw error}

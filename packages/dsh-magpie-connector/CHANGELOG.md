@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- **Check a line before saving it.** Every line card has 「检查线路 / Check line」: it runs one real `GET /models` against the card's current draft (address, access mode, key; empty credentials fall back to that line's saved values) and renders a read-only snapshot — result kind, latency, model count and, when the host has a cached catalog with a sync time, the model ids extra to or missing from that cache. It never writes credentials or settings, never rotates the generation, never selects a line, never registers a route and never touches the probe cache, so it cannot change which line is in use; the snapshot is explicitly compared against the *cached* catalog, never called "same as the current line" (a switch keeps an inherited catalog).
+- **Bounded, classified, redacted.** The `line-check` settings API resource admits no write: with a save in progress or a credential write pending it answers `pending`/`busy` without reading saved credentials, a host-memory connection-write version proves no write landed during the credential read, the whole check shares a 5 s budget, only one check runs at a time, and draft credentials are redacted from results, reasons and logs. Failure classification has a fixed precedence (response state before body, transport-blocked redirects included).
+- **Quieter saves, honest labels.** Usage cards are cleared only when a save touches the active line's identity (line removed, address/access mode changed, credentials supplied) or the host auto-switches lines; editing or reordering spare lines keeps the cards and their read time. The save result states the resulting line (`已保存 · 当前线路 N` / no active line) with no live region, and a saved-but-incomplete line is labelled `未配置`.
+- **Wire contract.** `POST /api/dsh-magpie-connector/line-check` accepts `{id?, baseUrl, accessMode?, key?, accessClientId?, accessClientSecret?}`; shape violations are 400, every other outcome is a 200 result with `kind`. See `openspec/changes/magpie-line-probe-and-save-clarity/` for the specification.
+
 ## 0.3.1
 
 - Replace both README demo GIFs with representative PNG screenshots (the model picker grouped by provider; per-provider visibility, default effort and usage cards in Settings), because the DSH plugin store does not show GIFs by default. No runtime behavior changes.

@@ -67,7 +67,7 @@ export async function mountRealHost(options: RealHostOptions = {}) {
   const fiber = (ctx as unknown as { plugin(p: unknown): unknown }).plugin({ name: 'dsh-magpie-connector-under-test', inject, apply: (child: Context) => { result.value = apply(child, { home }) } })
   for (let i = 0; i < 50 && (!result.value || !routes.size); i++) await new Promise(resolve => setTimeout(resolve, 2))
   if (!result.value) throw new Error('plugin did not apply')
-  const call = async (resource: 'settings' | 'cards' | 'speed', body?: unknown, query = '') => {
+  const call = async (resource: 'settings' | 'cards' | 'speed' | 'line-check', body?: unknown, query = '') => {
     const route = routes.get(`/api/dsh-magpie-connector/${resource}`)
     if (!route) throw new Error(`resource ${resource} not registered`)
     return route.fetch(new Request(`http://localhost/api/dsh-magpie-connector/${resource}${query}`, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }))

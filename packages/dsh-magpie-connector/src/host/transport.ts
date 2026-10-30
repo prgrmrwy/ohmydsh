@@ -51,7 +51,9 @@ export class GatewayTransport {
         signal: AbortSignal.any([this.signal.signal, ...(init.signal ? [init.signal] : [])]),
       } as Parameters<typeof directFetch>[1]) as unknown as Response
     } catch (error) {
-      if (String((error as { cause?: unknown })?.cause).includes('redirect')) throw new Error('网关返回了被禁止的重定向')
+      // Marker only: the redirect is still refused here, but callers that classify failures
+      // (line check) need to tell it apart from transport errors without matching a translated message.
+      if (String((error as { cause?: unknown })?.cause).includes('redirect')) throw Object.assign(new Error('网关返回了被禁止的重定向'), { redirect: true })
       const cause = (error as { cause?: { code?: string; name?: string } }).cause
       const connectionPhase = !!cause && (CONNECTION_PHASE_CODES.has(cause.code ?? '') || cause.name === 'ConnectTimeoutError')
       if (connectionPhase) {
