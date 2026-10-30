@@ -4,8 +4,8 @@ import { createFetchApi, type Api } from './api.js'
 import { registerMagpieSettingsNavIcon } from './settings-nav-icon.js'
 
 /**
- * Web half of dsh-magpie-connector. Talks to the host only through the three D10
- * resources (`/api/dsh-magpie-connector/{settings,cards,speed}`), same-origin fetch as
+ * Web half of dsh-magpie-connector. Talks to the host only through the four D10
+ * resources (`/api/dsh-magpie-connector/{settings,cards,speed,latency}`), same-origin fetch as
  * dsh-magpie-connect does (the shell's connection authenticates the page).
  * Types are kept minimal on purpose: no dsh-client-* type packages needed.
  */

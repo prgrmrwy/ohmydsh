@@ -28,6 +28,20 @@ BREAKING: the host settings surface keeps only the `lines[]` schema. Legacy top-
 - Credential writes are not transactional. Attempted `(lineId, field)` pairs are persisted as `pending` before any secret write; on successful whole-table commit, pending entries for lines absent from the commit are cleaned automatically (unset writable refs, keep env-owned ones in `retainedCredentials`). Deletes/access-mode changes commit only after every writable credential was cleared.
 - `Operation` captures `lineId`, `accessMode`, `baseUrl` and the credentials; use `op` (not `gen.baseUrl`) for requests. `Generation` still owns catalog/cards; a line switch replaces the generation but carries the catalog, so `isCurrent(gen)` remains the commit guard.
 
+## 0.4.0 line latency resource (current)
+
+```ts
+// GET-only; the route is registered with methods:['GET'].
+GET /api/dsh-magpie-connector/latency → { lines: [{ id, ms: number | null }] }
+```
+
+- One entry per **saved line with a parseable address** (empty addresses are omitted, not reported as failures). Unconfigured lines still get a reading: measurement is a network property, not a completeness one.
+- `ms` is a non-negative integer TCP connect time in milliseconds, DNS lookup included, capped by the same 600ms deadline the selector uses; `null` means no connect completed in time.
+- Measurements run in parallel, single-flight (concurrent GETs share one pass), are never cached or persisted, and send no HTTP request and no credentials. They do not write settings, do not change `activeLineId`, and do not read or populate the selector's probe cache.
+- Non-GET methods are not handled by the plugin: they fall through the connection layer to `404` and never open a socket.
+- `dispose` aborts in-flight probes; a later read returns `{lines: []}` without connecting.
+- The web half renders the reading per line (`data-latency-state/level/ms`); any non-2xx (including `404` from an older host) degrades silently to 「—」 with no alert/status/aria-live content.
+
 ## Runtime and connection identity
 
 ```ts
@@ -98,7 +112,7 @@ Every request validates same origin and exact API-root-relative path, forces aut
 
 ## Host wiring
 
-`apply(ctx,{home?})` registers one adapter on the owner routes derived from `knownOwners` (via `createRouteRegistrar`, see `src/host/registrar.ts`), credentials event, `/api/dsh-magpie-connector/settings` through injected `connection.fetch`, starts initial sync, and installs an async effect disposer. It returns `{runtime,adapter,routes}` for focused harness tests. The feature assembly adds cards/speed resources and their controller lifecycle here; do not add another adapter registration or another settings route.
+`apply(ctx,{home?})` registers one adapter on the owner routes derived from `knownOwners` (via `createRouteRegistrar`, see `src/host/registrar.ts`), credentials event, `/api/dsh-magpie-connector/settings` through injected `connection.fetch`, starts initial sync, and installs an async effect disposer. It returns `{runtime,adapter,routes}` for focused harness tests. The feature assembly adds cards/speed/latency resources and their controller lifecycle here; do not add another adapter registration or another settings route.
 
 ## Evidence and remaining assembly
 
@@ -149,10 +163,10 @@ GREEN checkpoints:
 - Generation: all seven exact names exist. The two real dispatch cases `已准备的调用按捕获值跑完` and `进行中的生成不被换代中止` live in `generate.test.ts`, not the planned `generation.test.ts`; the names match verbatim, but the test-plan file location needs lead correction/acceptance. Executor did not modify OpenSpec.
 - Catalog sync: all five names match; mapping: both names match; generation: all fifteen names match; transport: all three names match.
 - `未配置时不提供模型且不发请求` was already negative-only green against the initial empty seam. A later real adapter test asserts `MAGPIE_NOT_CONFIGURED` plus empty advertised catalog and zero network, but there is **no legitimate first-red record for that full scenario**. Do not misreport the vacuous initial pass as RED. All generation negative tests initially vacuous were strengthened and confirmed RED before bridge implementation.
-- Transport `完整流程只触达白名单` directly exercises all allowed operations through the one transport and rejects forbidden paths, but the final assembled cards/speed feature workflow still requires its own end-to-end run. This test alone is not evidence that all feature endpoints were wired.
+- Transport `完整流程只触达白名单` directly exercises all allowed operations through the one transport and rejects forbidden paths, but the final assembled cards/speed/latency feature workflow still requires its own end-to-end run. This test alone is not evidence that all feature endpoints were wired.
 
 ## Interfaces and assembly boundary
 
 See `internal-api.md`. Exported core classes: `MagpieRuntime`, `MagpieAdapter`, `GatewayTransport`, `SettingsStore`; operation/capability interfaces come from their host modules. Real DSH `LlmAdapter`/registration/credentials/attachment types are used, not an alternative adapter framework.
 
-The lead/host-features owner takes final composition of preferences, adapter projection and cards/speed routes. Do not mark tasks1–7 or shared task1 complete merely from this evidence: interface assembly and final whole-suite snapshot must be accepted by lead. No dependency installation was needed or performed in this takeover; pre-existing root lockfile changes were preserved.
+The lead/host-features owner takes final composition of preferences, adapter projection and cards/speed/latency routes. Do not mark tasks1–7 or shared task1 complete merely from this evidence: interface assembly and final whole-suite snapshot must be accepted by lead. No dependency installation was needed or performed in this takeover; pre-existing root lockfile changes were preserved.

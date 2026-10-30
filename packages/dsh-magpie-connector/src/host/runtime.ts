@@ -46,7 +46,24 @@ export interface RuntimeOptions {
   now?: () => number
   /** Deterministic id seam for tests; defaults to 8 random hex chars. */
   newId?: (existing: readonly string[]) => string
+  /** Whole-check budget override (tests use a short one); defaults to {@link CHECK_TIMEOUT_MS}. */
+  checkTimeoutMs?: number
 }
+/** One check of a draft line: reachability + auth + catalog summary only. */
+export type LineCheckKind = 'ok' | 'unauthorized' | 'forbidden' | 'http' | 'redirect' | 'unreachable' | 'timeout' | 'invalid-catalog' | 'incomplete' | 'invalid' | 'busy' | 'pending'
+export interface LineCheckResult {
+  kind: LineCheckKind; gatewayStatus?: number; reason?: string; latencyMs: number
+  modelCount?: number; models?: { id: string }[]; testedAt: string
+}
+/** Whole-check budget: connect, headers, body and parsing share it. */
+export const CHECK_TIMEOUT_MS = 5_000
+/** Longest `reason` the check returns (redacted first, then truncated). */
+export const CHECK_REASON_MAX = 300
+/** Request-body keys a line check accepts; anything else is a shape error. */
+const CHECK_FIELDS = ['id', 'baseUrl', 'accessMode', 'key', 'accessClientId', 'accessClientSecret'] as const
+const CHECK_CREDENTIALS: CredentialField[] = ['key', 'accessClientId', 'accessClientSecret']
+const LINE_ID_SHAPE = /^[0-9a-f]{8}$/
+const nonEmpty = (value: string | undefined): value is string => typeof value === 'string' && value !== ''
 interface ResolvedLine {
   line: LineSettings
   key: string
@@ -64,6 +81,37 @@ const randomHexId = (existing: readonly string[]): string => {
   for (;;) { const id = randomBytes(4).toString('hex'); if (!taken.has(id)) return id }
 }
 const CONNECTION_FIELDS: CredentialField[] = ['key', 'accessClientId', 'accessClientSecret']
+/** Shape-validated line-check request: draft address/access mode plus explicit credential overrides. */
+interface CheckRequest { id?: string; baseUrl: string; accessMode: AccessMode; explicit: Partial<Record<CredentialField, string>> }
+const errorText = (error: unknown): string => error instanceof Error ? error.message : String(error)
+/**
+ * The wire contract is a draft subset, not the settings write format: `id` is absent for a brand-new
+ * line (empty string is a shape error), `baseUrl` is required, and credential fields are plain
+ * strings (never `null`) where empty means "use the saved value when an id is given".
+ */
+function normalizeCheckRequest(body: unknown): CheckRequest {
+  if (!isRecord(body)) throw new Error('Invalid line check')
+  if (Object.keys(body).some(key => !(CHECK_FIELDS as readonly string[]).includes(key))) throw new Error('Invalid line check')
+  let id: string | undefined
+  if ('id' in body) {
+    if (typeof body.id !== 'string' || !LINE_ID_SHAPE.test(body.id)) throw new Error('Invalid line check id')
+    id = body.id
+  }
+  if (typeof body.baseUrl !== 'string') throw new Error('Invalid line check baseUrl')
+  let accessMode: AccessMode = 'direct'
+  if ('accessMode' in body) {
+    if (!isAccessMode(body.accessMode)) throw new Error('Invalid line check accessMode')
+    accessMode = body.accessMode
+  }
+  const explicit: Partial<Record<CredentialField, string>> = {}
+  for (const field of CHECK_CREDENTIALS) {
+    if (!(field in body)) continue
+    const value = (body as Record<string, unknown>)[field]
+    if (typeof value !== 'string') throw new Error(`Invalid line check ${field}`)
+    explicit[field] = value
+  }
+  return { ...(id !== undefined ? { id } : {}), baseUrl: body.baseUrl, accessMode, explicit }
+}
 
 /**
  * Host half of the connector, single-schema (BREAKING) design. Owns the ordered
@@ -91,11 +139,16 @@ export class MagpieRuntime {
   /** Set once the initial route registration failed: no further owner admission or publishing (needs a Host restart). */
   private registrationError: { code: string; route?: string } | undefined
   private readonly newId: (existing: readonly string[]) => string
+  /** Bumped by every connection write (and credential event): the only read-consistency proof a check needs. */
+  private writeVersion = 0
+  private checking = false
+  readonly checkTimeoutMs: number
   selectedLineId: string | null = null
   constructor(readonly credentials: Credentials, readonly store = new SettingsStore(), readonly publish: (routes?: string[]) => void = () => {}, options: RuntimeOptions = {}) {
     this.selector = new LineSelector(options)
     this.transport.onConnectionFailure = lineId => this.selector.invalidate(lineId)
     this.newId = options.newId ?? randomHexId
+    this.checkTimeoutMs = options.checkTimeoutMs ?? CHECK_TIMEOUT_MS
     this.failedFields = this.loadConfig().pending
     try { this.owners = validateKnownOwners(this.store.value.knownOwners) } catch { this.owners = []; this.knownOwnersReset = true }
   }
@@ -185,6 +238,9 @@ export class MagpieRuntime {
   }
   invalidateCredential(ref?: unknown) {
     if (this.disposed) return
+    // Any credential event invalidates an in-flight check, including spare-line updates that
+    // are not allowed to rotate the generation below.
+    this.writeVersion++
     if (ref !== undefined) {
       const lineId = lineIdOfCredentialRef(ref)
       if (lineId === undefined) return
@@ -345,6 +401,9 @@ export class MagpieRuntime {
 
   /** Structured line-list update: the only settings write path (BREAKING schema). */
   private async updateLines(requested: unknown[]): Promise<Response> {
+    // Same synchronous segment as `saving = true` below: even a write that fails later invalidates
+    // any check whose credential read overlapped it.
+    this.writeVersion++
     if (requested.length === 0 || requested.length > MAX_LINES) throw new Error('Invalid lines')
     const config = this.loadConfig()
     const existing = config.lines
@@ -508,6 +567,98 @@ export class MagpieRuntime {
       credentialUpdatePending: this.failedFields.length ? this.failedFields : undefined,
     })
   }
+  // ---- line check (read-only diagnosis) -----------------------------------
+
+  /**
+   * Read-only draft check: one `GET /models` against the draft's own API root. It never writes
+   * credentials or settings, never rotates the generation, never selects a line, never registers a
+   * route and never touches the probe cache (see `magpie-line-selection`「线路检查端点与结果分类」).
+   * The only await between admission and the request is credential resolution, and the connection
+   * write version (bumped by every `updateLines` start and credential event) proves no write landed
+   * in that window.
+   */
+  async lineCheck(body: unknown): Promise<Response> {
+    const started = Date.now()
+    const testedAt = new Date().toISOString()
+    let request: CheckRequest
+    try { request = normalizeCheckRequest(body) } catch (error) { return Response.json({ error: this.redact(errorText(error)) }, { status: 400 }) }
+    if (this.disposed) return this.checkReply({ kind: 'pending', latencyMs: this.elapsed(started), testedAt, reason: 'disposed' })
+    if (this.saving || this.failedFields.length) return this.checkReply({ kind: 'pending', latencyMs: this.elapsed(started), testedAt })
+    const config = this.loadConfig()
+    const saved = request.id === undefined ? undefined : config.lines.find(line => line.id === request.id)
+    if (request.id !== undefined && !saved) return this.checkReply({ kind: 'invalid', reason: 'unknown line id', latencyMs: this.elapsed(started), testedAt })
+    if (this.checking) return this.checkReply({ kind: 'busy', latencyMs: this.elapsed(started), testedAt })
+    this.checking = true
+    const version = this.writeVersion
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.checkTimeoutMs)
+    let release: (() => void) | undefined
+    const done = (result: Omit<LineCheckResult, 'latencyMs' | 'testedAt'>) => this.checkReply({ ...result, latencyMs: this.elapsed(started), testedAt })
+    try {
+      if (request.baseUrl === '') return done({ kind: 'incomplete', reason: 'empty base url' })
+      let baseUrl: string
+      try { baseUrl = normalizeBaseUrl(request.baseUrl) } catch { return done({ kind: 'invalid', reason: 'invalid base url' }) }
+      const { accessMode } = request
+      if (accessMode === 'direct' && (nonEmpty(request.explicit.accessClientId) || nonEmpty(request.explicit.accessClientSecret))) {
+        return done({ kind: 'invalid', reason: 'access credentials on a direct line' })
+      }
+      for (const field of CHECK_CREDENTIALS) {
+        const value = request.explicit[field]
+        if (value !== undefined && value !== '' && (value.length > 512 || /[^\x21-\x7e]/.test(value))) return done({ kind: 'invalid', reason: `invalid ${field}` })
+      }
+      let key = request.explicit.key ?? ''
+      let clientId = request.explicit.accessClientId ?? ''
+      let clientSecret = request.explicit.accessClientSecret ?? ''
+      if (saved && (key === '' || clientId === '' || clientSecret === '')) {
+        let resolved: ResolvedLine
+        try { resolved = await this.resolveLine(saved) } catch (error) {
+          return done({ kind: 'invalid', reason: this.trimReason(errorText(error)) })
+        }
+        // The only await: any write that started (even one that later failed) bumped the version.
+        if (this.writeVersion !== version || this.disposed) return done({ kind: 'pending' })
+        if (key === '') key = resolved.key
+        if (clientId === '') clientId = resolved.accessClientId
+        if (clientSecret === '') clientSecret = resolved.accessClientSecret
+      }
+      if (!key) return done({ kind: 'incomplete', reason: 'missing key' })
+      if (accessMode === 'cloudflare') {
+        if (new URL(baseUrl).protocol !== 'https:') return done({ kind: 'incomplete', reason: 'cloudflare requires https' })
+        if (!clientId || !clientSecret) return done({ kind: 'incomplete', reason: 'missing access credentials' })
+      } else { clientId = ''; clientSecret = '' }
+      const identity: ConnectionIdentity = { baseUrl, key, accessClientId: clientId, accessClientSecret: clientSecret, accessMode }
+      try { validateIdentity(identity) } catch (error) { return done({ kind: 'invalid', reason: this.trimReason(errorText(error)) }) }
+      release = this.retainIdentity(identity)
+      const response = await this.transport.request(identity, 'GET', '/models', { signal: controller.signal })
+      const gatewayStatus = response.status
+      if (gatewayStatus >= 300) {
+        const kind: LineCheckKind = gatewayStatus < 400 ? 'redirect' : gatewayStatus === 401 ? 'unauthorized' : gatewayStatus === 403 ? 'forbidden' : 'http'
+        let reason: string
+        try { reason = this.trimReason(this.formatErrorBody(await response.text())) } catch { reason = '错误 body 未完整读取' }
+        return done({ kind, gatewayStatus, reason })
+      }
+      let text: string
+      try { text = await response.text() } catch (error) {
+        return controller.signal.aborted ? done({ kind: 'timeout' }) : done({ kind: 'unreachable', reason: this.trimReason(errorText(error)) })
+      }
+      if (controller.signal.aborted) return done({ kind: 'timeout' })
+      let catalog: CatalogModel[]
+      try { catalog = mapCatalog(JSON.parse(text)) } catch { return done({ kind: 'invalid-catalog' }) }
+      return done({ kind: 'ok', modelCount: catalog.length, models: catalog.map(model => ({ id: model.info.id })) })
+    } catch (error) {
+      if ((error as { redirect?: boolean }).redirect === true) return done({ kind: 'redirect' })
+      if (controller.signal.aborted) return done({ kind: 'timeout' })
+      return done({ kind: 'unreachable', reason: this.trimReason(errorText(error)) })
+    } finally {
+      clearTimeout(timer)
+      this.checking = false
+      release?.()
+    }
+  }
+  private elapsed(started: number) { return Math.max(0, Date.now() - started) }
+  /** Redact first, then truncate: the reverse order can leave an unmatched secret prefix. */
+  private trimReason(text: string) { const redacted = this.redact(text); return redacted.length > CHECK_REASON_MAX ? redacted.slice(0, CHECK_REASON_MAX) : redacted }
+  private checkReply(result: LineCheckResult): Response { return Response.json(this.redactJson(result)) }
+
   config(): LineSettings[] { return this.loadConfig().lines }
   async dispose() { this.disposed = true; this.current.bgAbort.abort(); this.selector.dispose(); await this.transport.dispose() }
 }

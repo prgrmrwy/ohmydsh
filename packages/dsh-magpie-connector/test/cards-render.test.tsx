@@ -26,6 +26,19 @@ const noFabrication = () => {
   for (const bad of ['Invalid Date', 'undefined', 'null', 'NaN']) expect(host.textContent).not.toContain(bad)
 }
 
+it('test_usage_bar_round_cap', async () => {
+  const { settingsCss } = await import('../src/client/styles.js')
+  const ruleOf = (selector: string) => {
+    const start = settingsCss.indexOf(`${selector}{`)
+    expect(start).toBeGreaterThanOrEqual(0)
+    return settingsCss.slice(start, settingsCss.indexOf('}', start))
+  }
+  const track = ruleOf('.dmg-track').match(/border-radius:([^;}]+)/)?.[1]
+  const fill = ruleOf('.dmg-fill').match(/border-radius:([^;}]+)/)?.[1]
+  expect(track).toBe('3px')
+  expect(fill).toBe(track)
+})
+
 describe('用量条颜色', () => {
   it.each([[70, 'normal'], [70.5, 'warn'], [71, 'warn'], [89, 'warn'], [89.9, 'warn'], [90, 'high'], [100, 'high'], [0, 'normal']] as const)('used %s%% → %s', async (used, level) => {
     await render(() => cardsOk([{ provider: 'codex', windows: [{ name: '5h', used }] }]))

@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { getGlobalDispatcher, MockAgent, setGlobalDispatcher } from 'undici'
 import type { Probe } from '../src/host/selection.js'
+import { LatencyController } from '../src/host/latency.js'
 import { MagpieRuntime, lineCredentialRefs } from '../src/host/runtime.js'
 import { SettingsStore } from '../src/host/settings.js'
 import type { LineSettings } from '../src/host/settings.js'
@@ -87,13 +88,24 @@ test('test_line_transport_05 spec Scenario "明文 http 线路不携带 Access �
 })
 
 test('test_line_transport_06 spec Scenario "探测只建 TCP 连接不发 HTTP"', async () => {
-  const reachable = await createGateway(), skipped = await createGateway(); cleanup.push(reachable.close, skipped.close)
+  const reachable = await createGateway(), skipped = await createGateway(), keyless = await createGateway(); cleanup.push(reachable.close, skipped.close, keyless.close)
   reachable.handlers.set('GET /v1/models', json({ data: [{ id: 'a' }] }))
   const probes: { host: string; port: number }[] = []
-  const { runtime } = await setup([direct(LINE_ID, reachable.baseUrl), direct(LINE_ID_2, skipped.baseUrl)], async (host, port) => { probes.push({ host, port }); return port === portOf(reachable.baseUrl) })
+  const { runtime } = await setup([
+    direct(LINE_ID, reachable.baseUrl),
+    direct(LINE_ID_2, skipped.baseUrl),
+    direct('0badf00d', keyless.baseUrl),
+  ], async (host, port) => { probes.push({ host, port }); return port === portOf(reachable.baseUrl) })
   await runtime.start()
   expect(probes.length).toBeGreaterThan(0)
   expect(probes[0]!.port).toBe(portOf(reachable.baseUrl))
+  // Settings-page measurement also connects the key-less but parseable line, over TCP only.
+  const latency = new LatencyController(() => runtime.config())
+  cleanup.push(async () => latency.dispose())
+  const measured = await (await latency.read()).json() as { lines: { id: string; ms: number | null }[] }
+  expect(measured.lines.map(entry => entry.id).sort()).toEqual([LINE_ID, LINE_ID_2, '0badf00d'].sort())
   expect(reachable.requests.map(request => request.path)).toEqual(['/v1/models'])
   expect(skipped.requests).toHaveLength(0)
+  expect(keyless.requests).toHaveLength(0)
+  expect([...probes.map(entry => entry.port), ...measured.lines.map(() => 0)].length).toBeGreaterThan(0)
 })

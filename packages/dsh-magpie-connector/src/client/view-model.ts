@@ -38,6 +38,47 @@ export interface SettingsView {
 
 const str = (value: unknown): value is string => typeof value === 'string' && value !== ''
 
+/** One read-only line check result, exactly as the host classified it. */
+export interface CheckSnapshot {
+  kind: string; gatewayStatus?: number; reason?: string; latencyMs: number
+  modelCount?: number; models?: { id: string }[]; testedAt: string
+}
+
+/** Defensive parse of the line-check response: no fabricated fields, unknown kinds dropped. */
+export function parseCheck(body: unknown): CheckSnapshot | undefined {
+  const raw = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
+  if (!str(raw.kind) || typeof raw.latencyMs !== 'number' || !Number.isFinite(raw.latencyMs)) return undefined
+  const models = Array.isArray(raw.models)
+    ? raw.models.filter((entry): entry is { id: string } => !!entry && typeof entry === 'object' && str((entry as { id?: unknown }).id)).map(entry => ({ id: entry.id }))
+    : undefined
+  return {
+    kind: raw.kind, latencyMs: Math.max(0, Math.round(raw.latencyMs)),
+    ...(typeof raw.gatewayStatus === 'number' ? { gatewayStatus: raw.gatewayStatus } : {}),
+    ...(str(raw.reason) ? { reason: raw.reason } : {}),
+    ...(typeof raw.modelCount === 'number' ? { modelCount: raw.modelCount } : {}),
+    ...(models ? { models } : {}),
+    ...(str(raw.testedAt) ? { testedAt: raw.testedAt } : {}),
+  } as CheckSnapshot
+}
+
+/** Everything that makes a snapshot stale for one card: identity plus unsaved credential edits. */
+export const checkSignature = (draft: { id?: string | undefined; baseUrl: string; accessMode: string; apiKey: string; accessClientId: string; accessClientSecret: string }) =>
+  JSON.stringify([draft.id ?? null, draft.baseUrl.trim(), draft.accessMode, draft.apiKey, draft.accessClientId, draft.accessClientSecret])
+
+/** Cached catalog ids the snapshot is compared against (never the live "current line" catalog). */
+export const cacheIds = (groups: ModelGroup[] | undefined): string[] => (groups ?? []).flatMap(group => group.models.map(model => model.id))
+
+/**
+ * Diff against the cached catalog. Comparing only complete model ids keeps both sides comparable:
+ * the cache exposes raw `provider` keys while the check result carries no ownership at all.
+ */
+export function checkDiff(snapshot: CheckSnapshot, cache: string[]): { added: string[]; removed: string[] } | undefined {
+  if (!snapshot.models) return undefined
+  const have = new Set(snapshot.models.map(model => model.id))
+  const known = new Set(cache)
+  return { added: [...have].filter(id => !known.has(id)), removed: [...known].filter(id => !have.has(id)) }
+}
+
 /** Defensive parse: unknown or malformed entries never reach the renderer. */
 export function parseCards(body: unknown, httpStatus: number): CardsView {
   const raw = (body && typeof body === 'object' ? body : {}) as { status?: unknown; error?: unknown; cards?: unknown }

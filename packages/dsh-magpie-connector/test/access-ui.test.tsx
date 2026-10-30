@@ -3,7 +3,7 @@ import { act, createElement as h } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, test } from 'vitest'
 import { MagpieSettings } from '../src/client/SettingsPage.js'
-import { buttonByText, fakeApi, flush, inputValue, ok, settingsView } from './client-support/fake-api.js'
+import { buttonByText, expandLine, fakeApi, flush, inputValue, ok, settingsView } from './client-support/fake-api.js'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const LINE_ID = 'a1b2c3d4'
 const cloudflareLine = (access = { clientId: { configured: true, writable: true }, clientSecret: { configured: true, writable: true } }) => ({
@@ -18,6 +18,7 @@ test('Access inputs are optional passwords, submit only typed values and clear a
   const fake = fakeApi({ 'GET settings': () => ok(settingsView(view)), 'GET cards': () => ok({ status: 'ok', cards: [] }), 'POST settings': () => ok(settingsView(view)) })
   try {
     await act(async () => root.render(h(MagpieSettings, { api: fake.api }))); await flush()
+    act(() => expandLine(host, LINE_ID))
     const inputs = Array.from(host.querySelectorAll('label')).filter(label => label.textContent?.startsWith('Access ')).map(label => label.querySelector('input')!)
     expect(inputs).toHaveLength(2); for (const input of inputs) { expect(input.type).toBe('password'); expect(input.value).toBe('') }
     act(() => { inputValue(inputs[0]!, 'typed-id'); inputValue(inputs[1]!, 'typed-secret') })
@@ -40,6 +41,7 @@ test('environment-owned Access fields cannot be edited or cleared', async () => 
   const fake = fakeApi({ 'GET settings': () => ok(settingsView(cloudflareLine({ clientId: { configured: true, writable: false }, clientSecret: { configured: true, writable: true } }))), 'GET cards': () => ok({ status: 'ok', cards: [] }) })
   try {
     await act(async () => root.render(h(MagpieSettings, { api: fake.api }))); await flush()
+    act(() => expandLine(host, LINE_ID))
     const label = Array.from(host.querySelectorAll('label')).find(entry => entry.textContent?.startsWith('Access Client ID'))!
     expect(label.querySelector('input')!.disabled).toBe(true)
     expect((host.querySelector('select[aria-label="接入方式"]') as HTMLSelectElement).disabled).toBe(true)
@@ -51,6 +53,7 @@ test('direct is the default mode: no Access fields until Cloudflare Access is ch
   const fake = fakeApi({ 'GET settings': () => ok(settingsView()), 'GET cards': () => ok({ status: 'ok', cards: [] }), 'POST settings': () => ok(settingsView()) })
   try {
     await act(async () => root.render(h(MagpieSettings, { api: fake.api }))); await flush()
+    act(() => expandLine(host, LINE_ID))
     const mode = host.querySelector('select[aria-label="接入方式"]') as HTMLSelectElement
     expect(mode.value).toBe('direct'); expect(Array.from(mode.options).map(option => option.textContent)).toEqual(['直连', 'Cloudflare Access'])
     expect(host.querySelectorAll('input[type=password]')).toHaveLength(1)

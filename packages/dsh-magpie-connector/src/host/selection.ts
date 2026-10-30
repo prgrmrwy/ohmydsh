@@ -25,10 +25,17 @@ export function endpointOf(url: string): Endpoint | undefined {
   } catch { return undefined }
 }
 
-/** TCP reachability only: no HTTP request, no credentials. */
-export function probePort(host: string, port: number, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+export interface SocketProbeResult {
+  reachable: boolean
+  /** TCP connect time in ms (DNS lookup included), clamped to a non-negative integer. */
+  ms: number
+}
+
+/** TCP reachability and connect timing only: no HTTP request, no credentials. */
+export function probeSocket(host: string, port: number, timeoutMs: number, signal?: AbortSignal): Promise<SocketProbeResult> {
   return new Promise(resolve => {
     let settled = false
+    const started = performance.now()
     const socket = connect({ host, port })
     const finish = (reachable: boolean) => {
       if (settled) return
@@ -36,7 +43,7 @@ export function probePort(host: string, port: number, timeoutMs: number, signal?
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
       socket.destroy()
-      resolve(reachable)
+      resolve({ reachable, ms: Math.max(0, Math.round(performance.now() - started)) })
     }
     const onAbort = () => finish(false)
     // Explicit deadline: net.connect's `timeout` option only emits an event and
@@ -47,6 +54,11 @@ export function probePort(host: string, port: number, timeoutMs: number, signal?
     socket.once('error', () => finish(false))
     socket.once('close', () => finish(false))
   })
+}
+
+/** TCP reachability only; thin wrapper kept so `Probe` and its callers stay unchanged. */
+export async function probePort(host: string, port: number, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+  return (await probeSocket(host, port, timeoutMs, signal)).reachable
 }
 
 export interface LineSelectorOptions {
