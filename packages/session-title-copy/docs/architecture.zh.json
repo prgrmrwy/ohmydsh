@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-session-id-copy 架构",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-session-id-copy-20261030-200500/session-id-copy.zh.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "link_mode": "local-only",
+      "revision": "dbdaa3c2b019e792eb29bb07468b4722f8634f2b"
+    }
+  },
+  "components": [
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "Host 入口",
+      "sublabel": "bundle 行 · 空实现",
+      "pos": [40, 300],
+      "size": [180, 66],
+      "sources": [
+        { "path": "packages/session-title-copy/src/index.ts", "line": 27, "end_line": 30, "label": "空 loader 入口" }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "frontend",
+      "label": "客户端插件",
+      "sublabel": "reconcile 循环",
+      "pos": [340, 300],
+      "size": [200, 74],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/index.ts", "line": 32, "end_line": 32, "label": "sessions + locale" },
+        { "path": "packages/session-title-copy/src/client/index.ts", "line": 56, "end_line": 118, "label": "observer、rAF、清理" }
+      ]
+    },
+    {
+      "id": "locator",
+      "type": "frontend",
+      "label": "标题定位",
+      "sublabel": "面包屑 nav 接缝",
+      "pos": [340, 130],
+      "size": [200, 66],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/title-locator.ts", "line": 72, "end_line": 72, "label": "findCrumbNav" }
+      ]
+    },
+    {
+      "id": "sessions",
+      "type": "database",
+      "label": "sessions.list",
+      "sublabel": "current · id 真相源",
+      "pos": [340, 480],
+      "size": [200, 66],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/main-session.ts", "line": 18, "end_line": 18, "label": "读取 current" }
+      ]
+    },
+    {
+      "id": "badge",
+      "type": "frontend",
+      "label": "session id 徽标",
+      "sublabel": "6 位缩略 · 完整 id tooltip",
+      "pos": [680, 300],
+      "size": [200, 74],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/wiring.ts", "line": 21, "end_line": 21, "label": "自有 marker" },
+        { "path": "packages/session-title-copy/src/client/wiring.ts", "line": 119, "end_line": 140, "label": "接线与更新" }
+      ]
+    },
+    {
+      "id": "clipboard",
+      "type": "external",
+      "label": "浏览器剪贴板",
+      "sublabel": "navigator.clipboard",
+      "pos": [1020, 300],
+      "size": [180, 68]
+    },
+    {
+      "id": "hint",
+      "type": "frontend",
+      "label": "复制提示",
+      "sublabel": "1.2 秒 · 跟随界面语言",
+      "pos": [680, 470],
+      "size": [200, 60],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/wiring.ts", "line": 183, "end_line": 183, "label": "showCopiedHint" },
+        { "path": "packages/session-title-copy/src/client/locales.ts", "line": 15, "end_line": 15, "label": "locale 命名空间" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Web 客户端 · 浏览器",
+      "wraps": ["client", "locator", "badge", "hint", "sessions"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Host 进程",
+      "wraps": ["host"]
+    }
+  ],
+  "connections": [
+    { "id": "host-serves-client", "from": "host", "to": "client", "label": "加载 bundle" },
+    { "id": "client-reads-store", "from": "sessions", "to": "client", "label": "current id", "fromSide": "top", "toSide": "bottom" },
+    { "id": "client-finds-title", "from": "client", "to": "locator", "label": "定位 nav", "fromSide": "top", "toSide": "bottom" },
+    { "id": "client-inserts-badge", "from": "client", "to": "badge", "label": "插入徽标", "variant": "emphasis" },
+    { "id": "badge-copies", "from": "badge", "to": "clipboard", "label": "点击：完整 id", "variant": "emphasis" },
+    { "id": "badge-shows-hint", "from": "badge", "to": "hint", "label": "显示提示", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "徽标",
+      "items": [
+        "显示 session- 前缀之后的 6 个字符",
+        "tooltip 携带完整 session id",
+        "自有 marker 与内联样式；官方标题保持 disabled"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态同步",
+      "items": [
+        "sessions 订阅加 MutationObserver 观察头部",
+        "经 rAF 防抖；重复插入是幂等的",
+        "没有标题区时清除残留徽标"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "信任面",
+      "items": [
+        "除空 loader 入口外没有 host 能力",
+        "不联网、不落盘、不读会话内容",
+        "DOM 漂移与剪贴板被拒时静默降级"
+      ]
+    }
+  ]
+}
