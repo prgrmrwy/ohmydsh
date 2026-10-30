@@ -239,8 +239,10 @@ describe('client 注册', () => {
   it('apply 注册设置页与 conversation.input.right 速度栏', async () => {
     const { apply } = await import('../src/client/index.js')
     const registered: { name: string; id: string; inject?: (s: string) => any }[] = []
+    const { fakeLocale } = await import('./client-support/fake-locale.js')
     const ctx = {
       slots: { inject: (_: string, run: () => unknown) => { run() }, register: (r: any) => { registered.push(r); return () => {} } },
+      locale: fakeLocale().service,
       get: () => undefined,
       effect: () => {},
     }

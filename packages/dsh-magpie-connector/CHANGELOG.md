@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-10-31
+
+- 设置页与速度选择器支持界面语言：新增 `settings.magpie` 的 zh/en 字典（`src/client/locales.ts`），通过 `ctx.locale` 注册并在 `apply()` 绑定；文案不再硬编码中文，跟随 DSH 界面语言（英文界面下为英文）。未绑定翻译器时（单测、无 locale 服务的宿主）仍回退到中文，行为不变。
+- `dsh.client.inject` 与 peer 依赖补 `@deepseek-ai/dsh-client-locale`。
+- 新增字典键集合一致性与中英切换测试（`test/client-locales.test.ts`）。
+
 ## 0.4.2
 
 - **Only the checked line is re-measured.** 0.4.1 refreshed the whole latency pass after a line check, so every saved row's reading changed even though only one line was checked. `GET /api/dsh-magpie-connector/latency` now accepts `?line=<id>`: the host probes just that saved line and returns only its reading, and the settings page merges it into that row while every other row keeps its previous value. Unknown or unsaved ids measure nothing. The full pass on panel open and after a successful save is unchanged, and there is still no polling.

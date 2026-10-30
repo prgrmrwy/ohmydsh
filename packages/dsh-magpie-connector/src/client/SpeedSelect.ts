@@ -1,6 +1,7 @@
 import { createElement as h, useEffect, useRef, useState } from 'react'
 import { isOk, type Api } from './api.js'
 import { settingsCss } from './styles.js'
+import { t, type MagpieKey } from './locales.js'
 
 /**
  * Composer speed control (`conversation.input.right`): standard / fast for
@@ -52,9 +53,10 @@ export function createSpeedSetter(api: Api, sessionId: string): (tier: Tier) => 
 }
 
 const POLL_MS = 3000
-const TIERS: { id: Tier; name: string; description: string }[] = [
-  { id: 'standard', name: '标准', description: '默认速度与用量' },
-  { id: 'fast', name: '快速', description: '请求带 priority 服务档，更快但消耗更多用量' },
+/** Tier presentation: the labels live in the locale dictionaries, not here. */
+const TIERS: { id: Tier; nameKey: MagpieKey; descriptionKey: MagpieKey }[] = [
+  { id: 'standard', nameKey: 'speedTierStandard', descriptionKey: 'speedTierStandardDescription' },
+  { id: 'fast', nameKey: 'speedTierFast', descriptionKey: 'speedTierFastDescription' },
 ]
 
 export function SpeedSelect({ loadSpeed, setSpeed, watchModel }: { loadSpeed?: () => Promise<SpeedState>; setSpeed?: (tier: Tier) => Promise<boolean>; watchModel?: (onChange: () => void) => () => void }) {
@@ -136,17 +138,17 @@ export function SpeedSelect({ loadSpeed, setSpeed, watchModel }: { loadSpeed?: (
       void reload()
     } else setFailed(true)
   }
-  const label = `速度 · ${TIERS.find(t => t.id === state.tier)!.name}`
+  const label = t('speedLabel', { tier: t(TIERS.find(tier => tier.id === state.tier)!.nameKey) })
   return h('div', {
     ref: rootRef, className: 'dmg-speed', 'data-magpie-speed': '',
     onKeyDown: (event: { key: string; preventDefault(): void }) => { if (event.key === 'Escape' && open) { event.preventDefault(); setOpen(false) } },
   },
   h('style', null, settingsCss),
-  failed ? h('span', { className: 'dmg-error', role: 'alert' }, '速度未保存，请重试') : null,
-  open ? h('div', { className: 'dmg-speed-menu', role: 'menu', 'aria-label': '速度' }, ...TIERS.map(tier => h('button', {
+  failed ? h('span', { className: 'dmg-error', role: 'alert' }, t('speedSaveFailed')) : null,
+  open ? h('div', { className: 'dmg-speed-menu', role: 'menu', 'aria-label': t('speedMenu') }, ...TIERS.map(tier => h('button', {
     key: tier.id, type: 'button', role: 'menuitemradio', className: 'dmg-speed-item', 'data-tier': tier.id,
     'aria-checked': tier.id === state.tier, disabled: busy, onClick: () => choose(tier.id),
-  }, h('span', null, tier.id === state.tier ? '✓' : ''), h('span', null, tier.name, h('small', null, tier.description))))) : null,
+  }, h('span', null, tier.id === state.tier ? '✓' : ''), h('span', null, t(tier.nameKey), h('small', null, t(tier.descriptionKey)))))) : null,
   h('button', {
     type: 'button', className: 'dmg-speed-trigger', 'aria-haspopup': 'menu', 'aria-expanded': open, title: label, disabled: busy,
     onClick: () => {

@@ -3,6 +3,7 @@
  * optional here and is simply not rendered when absent — the page never
  * fabricates placeholders or inferred values.
  */
+import { t } from './locales.js'
 export interface CardWindow { name?: string; used?: number; resetsAt?: string; unlimited?: boolean; display?: string }
 export interface Card {
   provider: string; name?: string; icon?: string; user?: string; plan?: string; until?: string; renew?: string | boolean
@@ -98,7 +99,7 @@ export function formatTime(raw: string): string {
 
 /** Window reading, by precedence unlimited > display > used%. Undefined means "show no reading". */
 export function windowReading(window: CardWindow): string | undefined {
-  if (window.unlimited === true) return '无限'
+  if (window.unlimited === true) return t('unlimited')
   if (str(window.display)) return window.display
   if (typeof window.used === 'number' && Number.isFinite(window.used)) return `${Math.round(window.used * 10) / 10}%`
   return undefined

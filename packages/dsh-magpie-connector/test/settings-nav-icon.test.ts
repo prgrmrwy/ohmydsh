@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { apply } from '../src/client/index.js'
 import { fakeApi } from './client-support/fake-api.js'
+import { fakeLocale } from './client-support/fake-locale.js'
 
 const MARKER = 'data-dsh-magpie-connector-settings-nav'
 const STYLE = 'style[data-dsh-magpie-connector-settings-nav-style]'
@@ -12,6 +13,7 @@ function mount() {
   const registered: { label?: () => string }[] = []
   apply({
     slots: { inject: (_name: string, run: () => unknown) => { run() }, register: registration => { registered.push(registration); return () => {} } },
+    locale: fakeLocale().service,
     get: () => undefined,
     effect: (run: () => () => void) => { disposers.push(run()) },
   }, fakeApi({}).api)

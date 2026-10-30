@@ -70,6 +70,7 @@ Need another method — custom headers, mTLS, another zero-trust gateway? **Issu
 - **The transport is deliberately narrow.** Host requests go through a private `undici` dispatcher straight to the configured gateway, never through a global proxy dispatcher. Redirects are rejected; only `GET /models`, `POST /responses`, `POST /chat/completions`, `GET /magpie/quotas/cards` and `POST /magpie/quotas/refresh` are allowed; Magpie GUI `/api/*` management endpoints are never called. Provider egress proxies belong in Magpie.
 - **Not supported:** `stop` sequences fail before any network access (`MAGPIE_STOP_UNSUPPORTED`) because Magpie cannot preserve them across every upstream translation. Usage cards and Codex reset credits are display-only; the plugin never calls account-management or reset endpoints.
 - **Secrets stay out of responses and logs.** Gateway-reflected text is redacted with the current key before it can reach the settings API or logs. Files are written `0600`; the settings API reports only `configured` / `writable`.
+- **The interface follows the DSH UI language.** Since 0.5.0 the settings page and the speed menu ship English and Chinese dictionaries and render in the active DSH language (`ctx.locale`); before 0.5.0 the copy was Chinese-only. A host without a locale service (or a unit test) falls back to the Chinese reference set, so stored settings and behaviour are untouched.
 
 ### Code map
 

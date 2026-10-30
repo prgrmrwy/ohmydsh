@@ -4,6 +4,7 @@ import { errorText, failureText, isOk, type Api } from './api.js'
 import { lineLatency, parseLatency, type LatencyState, type LineLatency } from './latency.js'
 import { settingsCss } from './styles.js'
 import { UsageCard } from './UsageCard.js'
+import { t, type MagpieKey } from './locales.js'
 import {
   cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, providerOrder, readTime, sameTarget,
   type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type SettingsView, type SyncErrorKind,
@@ -14,19 +15,15 @@ import {
  * per-provider groups (model visibility, DSH-side default effort, read-only
  * usage cards). Cards are read once on open or after a connection write; only
  * user refreshes reread upstream usage — each card refreshes itself, and the
- * connection panel offers "获取模型与用量" only while no card is shown.
+ * connection panel offers "Get models and usage" only while no card is shown.
  */
-export const EMPTY_TEXT = 'Magpie 未返回可见用量'
-export const RESTRICTED_HINT = '受限的 gateway key 无法让 Magpie 首次读取用量：需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。'
-export const NOT_REREAD = 'Magpie 未重新读取（可能处于节流间隔内）'
-const SYNC_KIND: Record<SyncErrorKind, string> = { unauthorized: 'key 无效（401）', forbidden: '无权访问（403）', http: '网关错误', unreachable: '无法连接网关', settings: '设置保存失败', registration: '路由注册失败' }
+const SYNC_KIND: Record<SyncErrorKind, MagpieKey> = { unauthorized: 'syncKindUnauthorized', forbidden: 'syncKindForbidden', http: 'syncKindHttp', unreachable: 'syncKindUnreachable', settings: 'syncKindSettings', registration: 'syncKindRegistration' }
 /** Human labels for the check kinds the host may report. */
-const CHECK_KIND: Record<string, string> = {
-  ok: '可达', unauthorized: 'key 无效', forbidden: '无权访问', http: '网关错误', redirect: '被重定向',
-  unreachable: '连不上', timeout: '超时', 'invalid-catalog': '目录无法解析', incomplete: '配置不完整',
-  invalid: '请求无效', busy: '已有检查在进行', pending: '宿主正在保存，稍后再试',
+const CHECK_KIND: Record<string, MagpieKey> = {
+  ok: 'checkKindOk', unauthorized: 'checkKindUnauthorized', forbidden: 'checkKindForbidden', http: 'checkKindHttp', redirect: 'checkKindRedirect',
+  unreachable: 'checkKindUnreachable', timeout: 'checkKindTimeout', 'invalid-catalog': 'checkKindInvalidCatalog', incomplete: 'checkKindIncomplete',
+  invalid: 'checkKindInvalid', busy: 'checkKindBusy', pending: 'checkKindPending',
 }
-const CHECK_UNSUPPORTED = '当前宿主版本不支持线路检查'
 const ACCESS_FIELDS = ['accessClientId', 'accessClientSecret'] as const
 
 type Target = { all: true } | { provider: string; user?: string }
@@ -60,10 +57,13 @@ export function touchesActiveIdentity(lines: unknown[], view: SettingsView): boo
 
 /** One line of the read-only snapshot: kind, model count, diff against the cache and latency. */
 export function describeCheck(snapshot: CheckSnapshot, diff: { added: string[]; removed: string[] } | undefined, lastSyncAt: string | undefined): string {
-  const parts = [CHECK_KIND[snapshot.kind] ?? snapshot.kind]
+  const kindKey = CHECK_KIND[snapshot.kind]
+  const parts = [kindKey === undefined ? snapshot.kind : t(kindKey)]
   if (snapshot.kind === 'ok') {
-    parts.push(`${snapshot.modelCount ?? snapshot.models?.length ?? 0} 个模型`)
-    if (diff) parts.push(diff.added.length === 0 && diff.removed.length === 0 ? `与缓存目录一致${lastSyncAt ? `（缓存于 ${formatTime(lastSyncAt)}）` : ''}` : `多 ${diff.added.length} · 少 ${diff.removed.length}`)
+    parts.push(t('checkModelCount', { n: snapshot.modelCount ?? snapshot.models?.length ?? 0 }))
+    if (diff) parts.push(diff.added.length === 0 && diff.removed.length === 0
+      ? (lastSyncAt ? t('checkMatchesCacheAt', { time: formatTime(lastSyncAt) }) : t('checkMatchesCache'))
+      : t('checkDiffCounts', { added: diff.added.length, removed: diff.removed.length }))
   }
   if (snapshot.gatewayStatus !== undefined) parts.push(`HTTP ${snapshot.gatewayStatus}`)
   parts.push(`${snapshot.latencyMs}ms`)
@@ -99,13 +99,13 @@ export function MagpieSettings({ api }: { api: Api }) {
   }
   /** One measurement per panel open (and after a successful line write); failures stay silent.
    * With `only`, just that saved line is re-measured and merged in — the other rows keep their
-   * reading instead of all flipping to 测速中 (the line-check refresh). */
+   * reading instead of all flipping to the measuring state (the line-check refresh). */
   const readLatency = async (only?: string) => {
     const epoch = ++latencyEpoch.current
     if (only === undefined) setLatency({ phase: 'measuring' })
     else setLatency(current => current.phase === 'done' ? { phase: 'done', readings: current.readings, measuring: new Set([only]) } : current)
     const settle = () => {
-      // Superseded by a newer pass: drop the stale result but never leave the row stuck on 测速中.
+      // Superseded by a newer pass: drop the stale result but never leave the row stuck on measuring.
       if (only === undefined) return
       setLatency(current => current.phase === 'done' ? { phase: 'done', readings: current.readings } : current)
     }
@@ -200,12 +200,12 @@ export function MagpieSettings({ api }: { api: Api }) {
       const response = await api({ method: 'POST', path: 'cards', body: target })
       if (epoch !== cardsEpoch.current) return
       // A failed refresh is not a card result: keep what was shown and say why.
-      if (!isOk(response)) { setUsageAlert(`刷新失败：${failureText(response)}`); return }
+      if (!isOk(response)) { setUsageAlert(t('refreshFailed', { reason: failureText(response) })); return }
       const next = parseCards(response.body, response.status)
       setCards(next)
       setNotice(noticeAfter(target, before, next))
     } catch (error) {
-      if (epoch === cardsEpoch.current) setUsageAlert(`刷新失败：${errorText(error)}`)
+      if (epoch === cardsEpoch.current) setUsageAlert(t('refreshFailed', { reason: errorText(error) }))
     } finally {
       if (epoch === cardsEpoch.current) { refreshLock.current = false; setRefreshing(undefined) }
     }
@@ -223,11 +223,11 @@ export function MagpieSettings({ api }: { api: Api }) {
   const groupNote = (provider: string) => noteScope === provider ? { notice, alert: usageAlert } : {}
   return h('div', { className: 'dmg-settings' },
     h('style', null, settingsCss),
-    h('p', { className: 'dmg-intro' }, '通过自托管的 Magpie 网关使用模型。用量卡片只读，打开本页时读取一次，之后只在你点击卡片上的刷新时重新读取。'),
-    settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, `无法读取设置：${settingsError}`) : null,
+    h('p', { className: 'dmg-intro' }, t('intro')),
+    settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, t('settingsReadFailed', { error: settingsError })) : null,
     settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency, onRefreshLatency: (lineId: string) => { void readLatency(lineId) },
       usage: h(UsageStatus, { cards, busy, ...(noteScope === undefined ? { notice, alert: usageAlert } : {}), onFetchAll: () => { void fetchAll() }, saving: savingSettings }) })
-      : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, '正在读取设置…'),
+      : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, t('readingSettings')),
     ...providerOrder(groups, cardList).map(provider => h(ProviderGroup, {
       key: provider, provider,
       group: groups.find(g => g.provider === provider),
@@ -257,39 +257,38 @@ function noticeAfter(target: Target, before: Card[], next: CardsView): Notice | 
  */
 function UsageStatus({ cards, busy, saving, notice, alert, onFetchAll }: { cards: CardsView | undefined; busy: boolean; saving: boolean; notice?: Notice | undefined; alert?: string; onFetchAll: () => void }) {
   const state = !cards ? 'loading' : cards.status !== 'ok' ? cards.status : cards.cards.length ? 'ok' : 'empty'
-  const message = state === 'loading' ? '正在读取用量…'
-    : state === 'forbidden' ? '当前 gateway key 无权读取用量'
-      : state === 'unconfigured' ? '填写网关地址和 key 后才能读取用量'
-        : state === 'error' ? '读取用量失败'
-          : state === 'empty' ? EMPTY_TEXT : undefined
+  const message = state === 'loading' ? t('usageReading')
+    : state === 'forbidden' ? t('usageForbidden')
+      : state === 'unconfigured' ? t('usageUnconfigured')
+        : state === 'error' ? t('usageError')
+          : state === 'empty' ? t('usageEmpty') : undefined
   const canFetch = state === 'empty' || state === 'error'
   const lines = [
     message ? h('p', { key: 'm', className: state === 'error' || state === 'forbidden' ? 'dmg-error' : 'dmg-hint', role: 'status' }, message) : null,
     cards?.error && state !== 'ok' ? h('p', { key: 'e', className: 'dmg-error' }, cards.error) : null,
-    state === 'empty' && notice === 'restricted' ? h('p', { key: 'r', className: 'dmg-hint' }, RESTRICTED_HINT) : null,
-    notice === 'not-reread' ? h('p', { key: 'n', className: 'dmg-hint', role: 'status' }, NOT_REREAD) : null,
-    busy && canFetch ? h('p', { key: 'b', className: 'dmg-hint', role: 'status' }, '正在请求 Magpie 重新读取…') : null,
+    state === 'empty' && notice === 'restricted' ? h('p', { key: 'r', className: 'dmg-hint' }, t('restrictedHint')) : null,
+    notice === 'not-reread' ? h('p', { key: 'n', className: 'dmg-hint', role: 'status' }, t('notReread')) : null,
+    busy && canFetch ? h('p', { key: 'b', className: 'dmg-hint', role: 'status' }, t('rereading')) : null,
     alert ? h('p', { key: 'a', className: 'dmg-error', role: 'alert', 'data-usage-alert': '' }, alert) : null,
   ].filter(Boolean)
   if (!lines.length && !canFetch) return null
-  return h('div', { className: 'dmg-usage', 'data-usage-state': state, 'aria-label': '用量' },
+  return h('div', { className: 'dmg-usage', 'data-usage-state': state, 'aria-label': t('usageLabel') },
     ...lines,
     canFetch ? h('div', { className: 'dmg-row' },
-      h('button', { type: 'button', className: 'dmg-button', disabled: busy || saving, onClick: onFetchAll }, '获取模型与用量')) : null)
+      h('button', { type: 'button', className: 'dmg-button', disabled: busy || saving, onClick: onFetchAll }, t('fetchModelsAndUsage'))) : null)
 }
 
 async function postSettings(api: Api, body: Record<string, unknown>): Promise<SettingsResult> {
   try {
     const response = await api({ method: 'POST', path: 'settings', body })
     if (isOk(response)) return { view: response.body as SettingsView }
-    return { error: response.status === 409 ? 'key 来自启动环境，不能在这里修改' : `未保存：${failureText(response)}` }
-  } catch (error) { return { error: `未保存：${errorText(error)}` } }
+    return { error: response.status === 409 ? t('envKeyReadonly') : t('notSaved', { reason: failureText(response) }) }
+  } catch (error) { return { error: t('notSaved', { reason: errorText(error) }) } }
 }
 
 type AccessMode = 'direct' | 'cloudflare'
-const ACCESS_MODES: { id: AccessMode; label: string }[] = [{ id: 'direct', label: '直连' }, { id: 'cloudflare', label: 'Cloudflare Access' }]
-const INFO_TEXT = '线路按序号优先尝试，连不上自动试下一条；绿色方块表示当前线路；多条线路应指向同一个 Magpie 网关；延迟是 TCP 建连耗时（含 DNS 解析），不是网关健康检查。'
-const hostnameOf = (baseUrl: string) => { try { return new URL(baseUrl).hostname || baseUrl } catch { return baseUrl || '未配置' } }
+const ACCESS_MODES: { id: AccessMode; labelKey: MagpieKey }[] = [{ id: 'direct', labelKey: 'direct' }, { id: 'cloudflare', labelKey: 'cloudflareAccess' }]
+const hostnameOf = (baseUrl: string) => { try { return new URL(baseUrl).hostname || baseUrl } catch { return baseUrl || t('hostnameUnset') } }
 
 interface LineDraft {
   draftId: string; id?: string; baseUrl: string; accessMode: AccessMode; savedAccess: boolean
@@ -389,7 +388,7 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency, onR
   }
   const savedLabel = (view: SettingsView) => {
     const index = (view.lines ?? []).findIndex(line => line.id === view.activeLineId)
-    return index >= 0 ? `已保存 · 当前线路 ${index + 1}` : '已保存 · 当前无生效线路'
+    return index >= 0 ? t('savedLine', { n: index + 1 }) : t('savedNoActive')
   }
   const save = () => {
     // A save attempt retires every snapshot: the checked draft is about to become the saved one,
@@ -428,7 +427,7 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency, onR
       if (response.status === 404) { setCheckUnsupported(true); return }
       const snapshot = parseCheck(response.body)
       if (!snapshot) {
-        setCheckErrors(current => ({ ...current, [draft.draftId]: isOk(response) ? '检查结果无法解析' : failureText(response) }))
+        setCheckErrors(current => ({ ...current, [draft.draftId]: isOk(response) ? t('checkUnparsable') : failureText(response) }))
         return
       }
       setChecks(current => ({ ...current, [draft.draftId]: { signature, activeLineId: activeId, result: snapshot } }))
@@ -436,7 +435,7 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency, onR
       // line (unsaved drafts have no reading row, so they trigger nothing).
       if (draft.id) onRefreshLatency(draft.id)
     } catch (error) {
-      if (epoch === checkEpoch.current) setCheckErrors(current => ({ ...current, [draft.draftId]: `检查失败：${errorText(error)}` }))
+      if (epoch === checkEpoch.current) setCheckErrors(current => ({ ...current, [draft.draftId]: t('checkFailed', { reason: errorText(error) }) }))
     } finally {
       if (epoch === checkEpoch.current) { checkLock.current = false; setChecking(undefined) }
     }
@@ -447,11 +446,11 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency, onR
     setCheckErrors(current => { const next = { ...current }; delete next[draftId]; return next })
   }
   const catalogIds = cacheIds(settings.groups)
-  return h('section', { className: 'dmg-panel', 'aria-label': '连接' },
+  return h('section', { className: 'dmg-panel', 'aria-label': t('connection') },
     h('div', { className: 'dmg-head' },
-      h('h3', null, '连接'),
-      h('span', { className: 'dmg-info', role: 'img', tabIndex: 0, 'aria-label': INFO_TEXT, title: INFO_TEXT }, 'ⓘ')),
-    drafts.length === 0 ? h('p', { className: 'dmg-hint' }, '还没有线路。点击「添加线路」填写网关地址与 key。') : null,
+      h('h3', null, t('connection')),
+      h('span', { className: 'dmg-info', role: 'img', tabIndex: 0, 'aria-label': t('infoText'), title: t('infoText') }, 'ⓘ')),
+    drafts.length === 0 ? h('p', { className: 'dmg-hint' }, t('noLines')) : null,
     h('div', { className: 'dmg-lines' },
       ...drafts.map((draft, index) => {
         const entry = checks[draft.draftId]
@@ -474,18 +473,18 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency, onR
         })
       })),
     h('div', { className: 'dmg-row' },
-      h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: add }, drafts.length ? '添加备用线路' : '添加线路')),
+      h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: add }, drafts.length ? t('addBackupLine') : t('addLine'))),
     h('div', { className: 'dmg-row' },
-      h('button', { type: 'button', className: 'dmg-button', disabled: saving || !dirty, onClick: save }, saving ? '保存中…' : '保存'),
-      h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ resync: true }, '已刷新模型列表') } }, '刷新模型列表')),
+      h('button', { type: 'button', className: 'dmg-button', disabled: saving || !dirty, onClick: save }, saving ? t('saving') : t('save')),
+      h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: () => { void post({ resync: true }, t('modelsRefreshed')) } }, t('refreshModels'))),
     h(SyncStatus, { settings }),
     message ? h('p', { className: message.failed ? 'dmg-error' : 'dmg-ok', ...(message.failed ? { role: 'alert' } : {}) }, message.text) : null,
     usage)
 }
 
 function iconButton(name: string, icon: ReactNode, lineLabel: string, disabled: boolean, onClick: () => void, reason?: string) {
-  const action = `${name}线路 ${lineLabel}`
-  const label = disabled && reason ? `${action}（${reason}）` : action
+  const action = t('lineAction', { action: name, line: lineLabel })
+  const label = disabled && reason ? t('lineActionReason', { action, reason }) : action
   const button = h('button', { type: 'button', className: 'dmg-icon-button', 'aria-label': label, 'data-action': name, disabled, onClick },
     h('span', { className: 'dmg-icon', 'aria-hidden': true }, icon))
   return disabled ? button : h(Tooltip, { label: action, children: button })
@@ -500,8 +499,8 @@ function LatencySlot({ latency }: { latency: LineLatency }) {
     attrs['data-latency-ms'] = latency.ms === null || latency.ms === undefined ? '' : String(latency.ms)
   }
   const reading = latency.state === 'done' && latency.ms !== null && latency.ms !== undefined
-  const text = latency.state === 'measuring' ? '测速中…' : latency.state === 'failed' ? '—' : latency.state === 'done' ? (reading ? `${latency.ms} ms` : '超时') : ''
-  const title = latency.state === 'done' ? (reading ? `TCP 建连耗时 ${latency.ms} ms（含 DNS 解析），不是网关健康检查` : '600ms 内未完成 TCP 建连（可能很慢或不可达）') : undefined
+  const text = latency.state === 'measuring' ? t('latencyMeasuring') : latency.state === 'failed' ? '—' : latency.state === 'done' ? (reading ? `${latency.ms} ms` : t('latencyTimeout')) : ''
+  const title = latency.state === 'done' ? (reading ? t('latencyTitle', { ms: latency.ms ?? 0 }) : t('latencyTitleTimeout')) : undefined
   return h('span', { ...attrs, ...(title ? { title } : {}) },
     reading ? h('span', { className: 'dmg-bars', 'aria-hidden': true, 'data-level': String(level) },
       ...[0, 1, 2, 3].map(index => h('i', { key: index, 'data-on': index < level ? 'true' : 'false' }))) : null,
@@ -516,8 +515,8 @@ function LineCard({ draft, index, total, saving, active, expanded, latency, chec
   onCheck: () => void; onClearCheck: () => void
 }) {
   const diffParts = diff ? [
-    diff.added.length ? h('p', { key: 'added', className: 'dmg-hint' }, `多出：${diff.added.join('、')}`) : null,
-    diff.removed.length ? h('p', { key: 'removed', className: 'dmg-hint' }, `缺少：${diff.removed.join('、')}`) : null,
+    diff.added.length ? h('p', { key: 'added', className: 'dmg-hint' }, t('diffAdded', { list: diff.added.join(t('listSeparator')) })) : null,
+    diff.removed.length ? h('p', { key: 'removed', className: 'dmg-hint' }, t('diffRemoved', { list: diff.removed.join(t('listSeparator')) })) : null,
   ].filter(Boolean) : []
   const lineLabel = String(index + 1)
   const bodyId = `dmg-line-body-${draft.draftId}`
@@ -525,53 +524,53 @@ function LineCard({ draft, index, total, saving, active, expanded, latency, chec
     h('div', { className: 'dmg-line-head' },
       h('button', { type: 'button', className: 'dmg-line-toggle', 'aria-expanded': expanded, ...(expanded ? { 'aria-controls': bodyId } : {}), 'data-toggle': '', onClick: onToggle },
         h('span', { className: 'dmg-chevron', 'aria-hidden': true }, h(IconTriangleRightFillRegular, null)),
-        h('span', { className: 'dmg-line-index' }, `线路 ${lineLabel}`),
-        active ? h('span', { className: 'dmg-active', role: 'img', 'aria-label': '当前线路', title: '当前线路', 'data-active-line': draft.id }) : null,
-        draft.id && !draft.complete ? h('span', { className: 'dmg-unset', 'data-line-incomplete': '' }, '未配置') : null,
-        h('span', { className: 'dmg-line-title' }, `${hostnameOf(draft.baseUrl)}${draft.id ? '' : '（未保存）'}`),
+        h('span', { className: 'dmg-line-index' }, t('lineIndex', { n: lineLabel })),
+        active ? h('span', { className: 'dmg-active', role: 'img', 'aria-label': t('currentLine'), title: t('currentLine'), 'data-active-line': draft.id }) : null,
+        draft.id && !draft.complete ? h('span', { className: 'dmg-unset', 'data-line-incomplete': '' }, t('unconfigured')) : null,
+        h('span', { className: 'dmg-line-title' }, `${hostnameOf(draft.baseUrl)}${draft.id ? '' : t('unsaved')}`),
         h(LatencySlot, { latency })),
       h('div', { className: 'dmg-line-actions' },
-        iconButton('上移', h(IconChevronUpOutlineRegular, null), lineLabel, saving || index === 0, () => onMove(-1), '已是第一条'),
-        iconButton('下移', h(IconChevronDownOutlineRegular, null), lineLabel, saving || index === total - 1, () => onMove(1), '已是最后一条'),
-        iconButton('删除', h(IconTrashOutlineRegular, null), lineLabel, saving || total <= 1, onRemove, '仅剩一条'))),
+        iconButton(t('moveUp'), h(IconChevronUpOutlineRegular, null), lineLabel, saving || index === 0, () => onMove(-1), t('firstLine')),
+        iconButton(t('moveDown'), h(IconChevronDownOutlineRegular, null), lineLabel, saving || index === total - 1, () => onMove(1), t('lastLine')),
+        iconButton(t('remove'), h(IconTrashOutlineRegular, null), lineLabel, saving || total <= 1, onRemove, t('onlyLine')))),
     expanded ? h('div', { className: 'dmg-line-body', id: bodyId },
-      h('label', { className: 'dmg-field' }, h('span', null, '网关地址（含 /v1）'),
+      h('label', { className: 'dmg-field' }, h('span', null, t('baseUrlLabel')),
         h('input', { className: 'dmg-input', value: draft.baseUrl, disabled: saving, placeholder: 'http://127.0.0.1:3425/v1', onChange: (e: { target: { value: string } }) => onChange({ baseUrl: e.target.value }) })),
-      h('label', { className: 'dmg-field' }, h('span', null, `Gateway API key · ${draft.keyConfigured ? '已配置' : '未配置'}${draft.keyWritable ? '' : '（来自启动环境，只读）'}`),
+      h('label', { className: 'dmg-field' }, h('span', null, t('apiKeyLabel', { state: `${draft.keyConfigured ? t('configured') : t('notConfigured')}${draft.keyWritable ? '' : t('readonlyFromEnv')}` })),
         h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value: draft.apiKey, disabled: saving || !draft.keyWritable,
-          placeholder: draft.keyConfigured ? '留空则保持不变' : '必填', onChange: (e: { target: { value: string } }) => onChange({ apiKey: e.target.value }) })),
+          placeholder: draft.keyConfigured ? t('keepBlank') : t('required'), onChange: (e: { target: { value: string } }) => onChange({ apiKey: e.target.value }) })),
       h('div', { className: 'dmg-check', 'data-check': '' },
         h('div', { className: 'dmg-row' },
           h('button', {
             type: 'button', className: 'dmg-button', 'data-check-run': '',
             disabled: saving || checkDisabled || draft.baseUrl.trim() === '', onClick: onCheck,
-          }, checking ? '检查中…' : '检查线路'),
-          check ? h('button', { type: 'button', className: 'dmg-button', disabled: saving || checking, onClick: onClearCheck }, '清除') : null),
-        h('p', { className: 'dmg-hint' }, '只读快照：不改当前线路，也不写入配置。'),
+          }, checking ? t('checking') : t('checkLine')),
+          check ? h('button', { type: 'button', className: 'dmg-button', disabled: saving || checking, onClick: onClearCheck }, t('clear')) : null),
+        h('p', { className: 'dmg-hint' }, t('checkReadonly')),
         checkError ? h('p', { className: 'dmg-error' }, checkError) : null,
         check ? h('p', { className: 'dmg-check-line', 'data-check-kind': check.kind }, describeCheck(check, diff, lastSyncAt)) : null,
         check?.reason ? h('p', { className: 'dmg-hint', 'data-check-reason': '' }, check.reason) : null,
         check?.models?.length ? h('details', { className: 'dmg-check-models' },
-          h('summary', null, `模型 id（${check.models.length}）`),
+          h('summary', null, t('modelIds', { n: check.models.length })),
           ...diffParts,
           h('p', { className: 'dmg-hint' }, check.models.map(model => model.id).join('、'))) : null),
       h('details', { className: 'dmg-advanced', open: true, 'data-advanced': '' },
-        h('summary', null, '高级连接'),
+        h('summary', null, t('advanced')),
         h('div', { className: 'dmg-advanced-body' },
-          h('label', { className: 'dmg-field' }, h('span', null, `接入方式${draft.accessWritable ? '' : '（Access 凭据来自启动环境，只读）'}`),
-            h('select', { className: 'dmg-select', 'aria-label': '接入方式', value: draft.accessMode, disabled: saving || !draft.accessWritable,
+          h('label', { className: 'dmg-field' }, h('span', null, `${t('accessMode')}${draft.accessWritable ? '' : t('accessReadonly')}`),
+            h('select', { className: 'dmg-select', 'aria-label': t('accessMode'), value: draft.accessMode, disabled: saving || !draft.accessWritable,
               onChange: (e: { target: { value: string } }) => onChange({ accessMode: e.target.value as AccessMode }) },
-            ...ACCESS_MODES.map(mode => h('option', { key: mode.id, value: mode.id }, mode.label)))),
+            ...ACCESS_MODES.map(mode => h('option', { key: mode.id, value: mode.id }, t(mode.labelKey))))),
           draft.accessMode === 'direct'
-            ? h('p', { className: 'dmg-hint' }, draft.savedAccess ? '保存后将清除已保存的 Cloudflare Access 凭据。' : '网关地址可直接访问时选择（局域网、Tailscale 等组网后的地址）。')
-            : h('p', { className: 'dmg-hint' }, '网关在 Cloudflare Access 之后时选择：填写服务令牌的两项，仅支持 HTTPS。留空保持不变。'),
+            ? h('p', { className: 'dmg-hint' }, draft.savedAccess ? t('directHintClears') : t('directHint'))
+            : h('p', { className: 'dmg-hint' }, t('cloudflareHint')),
           ...(draft.accessMode === 'cloudflare' ? ([
             ['Access Client ID', draft.accessClientId, 'accessClientId'],
             ['Access Client Secret', draft.accessClientSecret, 'accessClientSecret'],
           ] as const).map(([label, value, field]) => h('label', { key: label, className: 'dmg-field' },
-            h('span', null, `${label} · ${draft.accessConfigured ? '已配置' : '未配置'}${draft.accessWritable ? '' : '（来自启动环境，只读）'}`),
+            h('span', null, t('accessFieldLabel', { field: label, state: `${draft.accessConfigured ? t('configured') : t('notConfigured')}${draft.accessWritable ? '' : t('readonlyFromEnv')}` })),
             h('input', { className: 'dmg-input', type: 'password', autoComplete: 'off', value,
-              disabled: saving || !draft.accessWritable, placeholder: '留空则保持不变',
+              disabled: saving || !draft.accessWritable, placeholder: t('keepBlank'),
               onChange: (e: { target: { value: string } }) => onChange({ [field]: e.target.value } as Partial<LineDraft>) }))) : [])))) : null)
 }
 
@@ -580,14 +579,14 @@ function SyncStatus({ settings }: { settings: SettingsView }) {
   const rejected = settings.rejectedOwners ?? []
   const registration = settings.routeRegistrationError
   return h('div', { className: 'dmg-meta', 'data-sync': '' },
-    settings.lastSyncAt ? h('p', null, `共 ${count} 个模型 · 更新于 `, h('time', { dateTime: settings.lastSyncAt }, formatTime(settings.lastSyncAt))) : null,
+    settings.lastSyncAt ? h('p', null, t('modelsCount', { n: count }), h('time', { dateTime: settings.lastSyncAt }, formatTime(settings.lastSyncAt))) : null,
     settings.lastSyncError ? h('p', { className: 'dmg-error' },
-      `同步失败${settings.lastSyncErrorKind ? `（${SYNC_KIND[settings.lastSyncErrorKind] ?? settings.lastSyncErrorKind}）` : ''}：${settings.lastSyncError}`) : null,
+      t('syncFailed', { kind: settings.lastSyncErrorKind ? t('syncFailedKind', { kind: t(SYNC_KIND[settings.lastSyncErrorKind] ?? 'syncKindHttp') }) : '', error: settings.lastSyncError })) : null,
     registration ? h('p', { className: 'dmg-error', role: 'alert' },
-      `Magpie 路由注册失败（${registration.code}${registration.route ? `，${registration.route}` : ''}）：需重启 Host 后才能恢复。`) : null,
-    settings.knownOwnersReset ? h('p', { className: 'dmg-hint' }, '归属列表已重置：已保存的归属无效，下次同步会重新建立。') : null,
+      t('routeRegistrationFailed', { code: registration.code, route: registration.route ? `, ${registration.route}` : '' })) : null,
+    settings.knownOwnersReset ? h('p', { className: 'dmg-hint' }, t('ownersReset')) : null,
     settings.ownerLimitReached ? h('p', { className: 'dmg-hint' },
-      `归属数量已达上限（32 个），以下归属未能加入：${rejected.join('、')}`) : null)
+      t('ownerLimitReached', { list: rejected.join(t('listSeparator')) })) : null)
 }
 
 interface GroupProps {
@@ -626,8 +625,8 @@ function ProviderGroup({ provider, group, settings, cards, busy, saving, mutateS
   return h('section', { className: 'dmg-panel', 'data-provider': provider, 'aria-label': provider },
     h('div', { className: 'dmg-head' },
       h('h3', null, provider),
-      group && !following ? h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: follow }, '跟随网关模型列表') : null),
-    group ? h('p', { className: 'dmg-hint' }, following ? '可见性：跟随网关模型列表，新上架的模型自动出现' : '可见性：只显示勾选的模型，新上架的模型默认隐藏') : null,
+      group && !following ? h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: follow }, t('followCatalog')) : null),
+    group ? h('p', { className: 'dmg-hint' }, following ? t('visibilityFollow') : t('visibilityManual')) : null,
     models.length ? h('div', { className: 'dmg-models' }, ...models.map(model => h(ModelLine, {
       key: model.id, model, disabled: saving,
       visible: model.visible ?? (following || (saved[provider] ?? []).includes(model.id)),
@@ -636,7 +635,7 @@ function ProviderGroup({ provider, group, settings, cards, busy, saving, mutateS
       onEffort: (effort: string | null) => { void post({ defaultEffort: { model: model.id, effort } }) },
     }))) : null,
     cards.length ? h('div', { className: 'dmg-cards' }, ...cards.map(card => h(UsageCard, { key: cardKey(card), card, busy, onRefresh: () => onRefresh(card) }))) : null,
-    notice === 'not-reread' ? h('p', { className: 'dmg-hint', role: 'status' }, NOT_REREAD) : null,
+    notice === 'not-reread' ? h('p', { className: 'dmg-hint', role: 'status' }, t('notReread')) : null,
     alert ? h('p', { className: 'dmg-error', role: 'alert', 'data-usage-alert': '' }, alert) : null,
     error ? h('p', { className: 'dmg-error', role: 'alert' }, error) : null)
 }
@@ -651,14 +650,14 @@ function ModelLine({ model, visible, effort, disabled, onVisible, onEffort }: {
   const label = model.name || model.id
   return h('div', { className: 'dmg-model', 'data-model': model.id },
     h('label', null,
-      h('input', { type: 'checkbox', checked: visible, disabled, 'aria-label': `在选择器中显示 ${label}`, onChange: (e: { target: { checked: boolean } }) => onVisible(e.target.checked) }),
+      h('input', { type: 'checkbox', checked: visible, disabled, 'aria-label': t('showInPicker', { label }), onChange: (e: { target: { checked: boolean } }) => onVisible(e.target.checked) }),
       h('span', null, label),
       model.name && model.name !== model.id ? h('code', null, model.id) : null),
     efforts.length ? h('select', {
-      className: 'dmg-select', 'aria-label': `${label} 默认 effort`, disabled,
+      className: 'dmg-select', 'aria-label': t('defaultEffortAria', { label }), disabled,
       value: effort ?? '', onChange: (e: { target: { value: string } }) => onEffort(e.target.value === '' ? null : e.target.value),
     },
-    h('option', { value: '' }, '默认 effort：不设置'),
-    stale ? h('option', { value: effort, disabled: true }, `${effort}（网关当前不提供，暂不生效）`) : null,
+    h('option', { value: '' }, t('defaultEffortNone')),
+    stale ? h('option', { value: effort, disabled: true }, t('effortStale', { effort })) : null,
     ...efforts.map(id => h('option', { key: id, value: id }, id))) : null)
 }
