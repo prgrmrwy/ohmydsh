@@ -210,7 +210,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     h('style', null, settingsCss),
     h('p', { className: 'dmg-intro' }, '通过自托管的 Magpie 网关使用模型。用量卡片只读，打开本页时读取一次，之后只在你点击卡片上的刷新时重新读取。'),
     settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, `无法读取设置：${settingsError}`) : null,
-    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency,
+    settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency, onRefreshLatency: () => { void readLatency() },
       usage: h(UsageStatus, { cards, busy, ...(noteScope === undefined ? { notice, alert: usageAlert } : {}), onFetchAll: () => { void fetchAll() }, saving: savingSettings }) })
       : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, '正在读取设置…'),
     ...providerOrder(groups, cardList).map(provider => h(ProviderGroup, {
@@ -296,7 +296,7 @@ function lineDrafts(settings: SettingsView): LineDraft[] {
 }
 const lineSignature = (draft: LineDraft) => JSON.stringify([draft.id ?? null, draft.baseUrl.trim(), draft.accessMode])
 
-function Connection({ settings, saving, mutateSettings, api, usage, latency }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; api: Api; usage: ReactNode; latency: LatencyState }) {
+function Connection({ settings, saving, mutateSettings, api, usage, latency, onRefreshLatency }: { settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation; api: Api; usage: ReactNode; latency: LatencyState; onRefreshLatency: () => void }) {
   const baseline = lineDrafts(settings)
   const [drafts, setDrafts] = useState<LineDraft[]>(baseline)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -417,6 +417,9 @@ function Connection({ settings, saving, mutateSettings, api, usage, latency }: {
         return
       }
       setChecks(current => ({ ...current, [draft.draftId]: { signature, activeLineId: activeId, result: snapshot } }))
+      // A completed check is a fresh network sample of this line: saved lines re-measure latency
+      // alongside it (unsaved drafts have no reading row, so they trigger nothing).
+      if (draft.id) onRefreshLatency()
     } catch (error) {
       if (epoch === checkEpoch.current) setCheckErrors(current => ({ ...current, [draft.draftId]: `检查失败：${errorText(error)}` }))
     } finally {

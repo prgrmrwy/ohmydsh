@@ -1,6 +1,6 @@
 {
   "name": "dsh-magpie-connector",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "DeepSeek Harness plugin: connect a self-hosted Magpie gateway with one real provider route per upstream owner (grouped model picker on stock DSH), automatic multi-line failover, read-only usage cards, model visibility, default effort and per-session fast mode",
   "license": "MIT",
   "author": "prgrmrwy",

@@ -155,3 +155,34 @@ test('test_line_check_ui_05 spec Scenario "没有缓存基准时不下结论"', 
     expect(line.textContent).not.toContain('少 ')
   }
 })
+
+test('test_line_check_ui_06 spec Scenario "检查线路后重新测速"', async () => {
+  const host = document.createElement('div'); document.body.append(host)
+  const root = createRoot(host)
+  let latencyCalls = 0
+  const fake = fakeApi({
+    'GET settings': () => ok(settingsView(twoLines)),
+    'GET cards': () => ok({ status: 'ok', cards: [] }),
+    'GET latency': () => { latencyCalls++; return ok({ lines: [{ id: 'a1b2c3d4', ms: 80 }, { id: '9f0e7d6c', ms: 200 }] }) },
+    'POST line-check': () => ok({ kind: 'ok', latencyMs: 42, modelCount: 3, models: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], testedAt: '2026-10-30T03:00:00Z' }),
+  })
+  await act(async () => root.render(h(MagpieSettings, { api: fake.api }))); await flush()
+  mounted.push({ root, host })
+  // Panel open measured once; a completed check on a saved line adds exactly one more pass.
+  expect(latencyCalls).toBe(1)
+  await checkLine(host, 'a1b2c3d4')
+  expect(latencyCalls).toBe(2)
+  expect(card(host, 'a1b2c3d4').querySelector('[data-latency-state="done"]')).not.toBeNull()
+  expect(fake.calls.filter(call => call.method === 'POST' && call.path === 'settings')).toHaveLength(0)
+
+  // An unsaved draft has no latency row, so checking it refreshes nothing.
+  await act(async () => { buttonByText(host, '添加备用线路')!.click() }); await flush()
+  const draft = Array.from(host.querySelectorAll('.dmg-line')).filter(node => !node.getAttribute('data-line-id')).pop() as HTMLElement
+  act(() => inputValue(draft.querySelector('input:not([type=password])') as HTMLInputElement, 'http://draft.test:3425/v1'))
+  act(() => inputValue(draft.querySelector('input[type=password]') as HTMLInputElement, 'K1'))
+  await flush()
+  const run = buttonByText(draft, '检查线路')
+  await act(async () => { run!.click() }); await flush()
+  expect(draft.querySelector('[data-check-kind="ok"]')).not.toBeNull()
+  expect(latencyCalls).toBe(2)
+})

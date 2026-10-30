@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- **Check refreshes latency.** A completed line check on a **saved** line now also re-runs the settings-page latency measurement (one `GET /api/dsh-magpie-connector/latency` pass), so the signal reading next to that line reflects the same moment as the check instead of the last panel open or save. Unsaved drafts trigger nothing (they have no latency row), the host measurement stays single-flight with its 600 ms deadline, and there is still no polling.
+
 ## 0.4.0
 
 - **Line panel polish.** Settings now collapses every configured line by default (it no longer force-expands the active one); clicking a line header toggles it, and the add/remove/reorder actions are always-visible DSH product-icon buttons with accessible names and tooltips. A newly added line still opens for editing and stays open through its first save (including when it was moved before saving) and when a save fails.
