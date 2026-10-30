@@ -223,4 +223,11 @@ describe('showCopiedHint', () => {
     cleanup()
     expect(el.removed).toBe(true)
   })
+
+  it('uses the label passed by the caller (locale-bound hint text)', () => {
+    const { doc, created } = fakeDoc()
+    const anchor = { getBoundingClientRect: () => ({ left: 10, bottom: 20 }) } as BadgeElementLike
+    showCopiedHint(anchor, doc, '会话 ID 已复制')
+    expect(created[0]!.textContent).toBe('会话 ID 已复制')
+  })
 })

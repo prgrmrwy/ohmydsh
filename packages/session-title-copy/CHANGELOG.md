@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0 — 2026-10-30
+
+- 独立发布与商店上架：npm 包名改为 `dsh-session-id-copy`，独立镜像 `prgrmrwy/dsh-session-id-copy`；`dsh.yaml` 条目 id 与源码目录仍为 `session-title-copy`，运行时行为不变。
+- 补齐发布元数据（author / repository / homepage / bugs / keywords）、`prepare` 与 `prepack`、随包 `docs/`、`screenshots.json` 和 CHANGELOG；新增包内 `release.yml`（npm Trusted Publishing OIDC + GitHub Release 附 npm 同版 tgz）。
+- 内部标识随包名调整：cordis 插件名、client bundle id、DOM 标记改为 `dsh-session-id-copy` 前缀。
+- README 补齐独立安装/升级/移除命令、Archify 架构图、边界与来源说明。
+
 ## 0.1.2 — 2026-09-02
 
 - 修复 toast 对比度：背景色误用了不存在的 `--dsw-alias-bg-elevated`（回退到固定深色），与官方主题文字色 `--dsw-alias-label-primary` 在明亮主题下构成「深底 + 深字」。改为官方 theme-adaptive 的 `--dsw-alias-bg-overlay`（明/暗主题各自的浮层底色）+ `--dsw-alias-label-primary`，并补 `--dsw-alias-border-l2` 描边；明暗两种主题下保持可读。新增回归断言防止再次混用固定色与主题 token。

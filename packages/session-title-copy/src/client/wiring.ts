@@ -13,16 +13,20 @@
  * the official title crumb is left untouched (disabled, cursor default) and
  * the click handler lives on our own element.
  *
- * @module dsh-session-title-copy/client/wiring
+ * @module dsh-session-id-copy/client/wiring
  */
 import type { ElementLike } from './title-locator.js'
 
 /** Self-owned marker attribute set on the badge element (collision-free). */
-export const BADGE_MARKER = 'data-dsh-session-title-copy-badge'
+export const BADGE_MARKER = 'data-dsh-session-id-copy-badge'
 /** Self-owned marker attribute on the transient hint element. */
-export const HINT_MARKER = 'data-dsh-session-title-copy-hint'
-/** Hint label. */
-export const HINT_TEXT = '会话 ID 已复制'
+export const HINT_MARKER = 'data-dsh-session-id-copy-hint'
+/**
+ * Default hint label (English). The client entry passes the locale-bound string
+ * from `locales.ts`; this default keeps the hint usable on its own in tests and
+ * in any embedding without a locale service.
+ */
+export const HINT_TEXT = 'Session ID copied'
 /** How long the hint stays fully visible. */
 export const HINT_LIFETIME_MS = 1200
 /** Fade-out duration before the hint is removed. */
@@ -168,18 +172,19 @@ export interface HintDocumentLike {
 }
 
 /**
- * Show the transient "已复制" hint below the anchor, auto-removed after a
+ * Show the transient "copied" hint below the anchor, auto-removed after a
  * short lifetime. Returns a cleanup function (also removes a hint that is
  * mid-fade). Never affects layout: `position: fixed` + `pointer-events: none`.
  * @param anchor - the badge that was clicked (used for positioning).
  * @param doc - document (injectable for tests).
+ * @param text - localized hint label (defaults to the English `HINT_TEXT`).
  * @returns cleanup function.
  */
-export function showCopiedHint(anchor: BadgeElementLike, doc?: HintDocumentLike): () => void {
+export function showCopiedHint(anchor: BadgeElementLike, doc?: HintDocumentLike, text: string = HINT_TEXT): () => void {
   const documentLike = doc ?? (document as unknown as HintDocumentLike)
   const el = documentLike.createElement('div')
   el.setAttribute(HINT_MARKER, '')
-  el.textContent = HINT_TEXT
+  el.textContent = text
   el.style.cssText = [
     'position:fixed',
     'z-index:2147483000',

@@ -18,6 +18,7 @@ on:
       - 'packages/auto-model-routing/**'
       - 'packages/dsh-magpie-connector/**'
       - 'packages/sidebar-session-provider-icon/**'
+      - 'packages/session-title-copy/**'
   workflow_dispatch:
 
 concurrency:
@@ -44,6 +45,9 @@ jobs:
           - dir: sidebar-session-provider-icon
             repo: dsh-sidebar-session-provider-icon
             secret: MIRROR_KEY_SIDEBAR_PROVIDER_ICON
+          - dir: session-title-copy
+            repo: dsh-session-id-copy
+            secret: MIRROR_KEY_SESSION_ID_COPY
     steps:
       - uses: actions/checkout@v4
         with:

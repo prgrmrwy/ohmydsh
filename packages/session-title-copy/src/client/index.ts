@@ -1,5 +1,5 @@
 /**
- * Web client entry for dsh-session-title-copy.
+ * Web client entry for dsh-session-id-copy.
  *
  * Subscribes to the official sessions list store (the current-session id
  * truth source, same seam as dsh-cockpit-bridge), locates the official
@@ -16,17 +16,20 @@
  * document with a strict-failure boundary: any locator/wiring error is
  * swallowed so the official page is never disturbed.
  *
- * @module dsh-session-title-copy/client
+ * @module dsh-session-id-copy/client
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: brings the ctx.sessions Context merge (0.1.2: dsh-api-session-controller).
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+// Type-only: brings the ctx.locale Context merge (dsh-client-locale).
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { BadgeElementLike, CopyContext, CopyHooks } from './wiring.js'
 import { BADGE_MARKER, sessionSnippet, showCopiedHint, styleBadge, updateBadge, wireBadge, writeClipboard } from './wiring.js'
 import { findCrumbNav } from './title-locator.js'
 import { mainSessionId } from './main-session.js'
+import { NS, en, zh } from './locales.js'
 
-export const inject = ['sessions']
+export const inject = ['sessions', 'locale']
 
 /** Debounce a reconcile through requestAnimationFrame (coalesce bursts). */
 function scheduleReconcile(fn: () => void): () => void {
@@ -51,6 +54,9 @@ function badgeIn(zone: Element): Element | null {
 }
 
 export function apply(ctx: ClientContext): void {
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-session-id-copy: dictionaries')
+  // Read at click time so the hint follows the active UI language.
+  const t = ctx.locale.bind(NS)
   let observer: MutationObserver | null = null
   let cleanupHint: (() => void) | null = null
 
@@ -61,7 +67,7 @@ export function apply(ctx: ClientContext): void {
     writeClipboard,
     showHint: (anchor: BadgeElementLike): void => {
       cleanupHint?.()
-      cleanupHint = showCopiedHint(anchor)
+      cleanupHint = showCopiedHint(anchor, undefined, t('copied'))
     },
   }
   const reconcileNow = scheduleReconcile(() => {
@@ -115,5 +121,5 @@ export function apply(ctx: ClientContext): void {
       cleanupHint = null
       clearBadges(document)
     }
-  }, 'session-title-copy: session id badge sync')
+  }, 'dsh-session-id-copy: session id badge sync')
 }

@@ -137,13 +137,14 @@ customizations:
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
     note: '自研,spec sidebar-session-provider-icon(change:selection-freshness、magpie-route、gateway-model-brand、gateway-transit-tier)。Web client 按 store 身份观测官方 modelDirectories 即时选择:每次列表/DOM 信号重新解析,换代重订阅并重读快照,失效时改用持久投影 modelSelection.next→最近请求;行身份取官方 data-row-key(session:<id>),同名会话不串用徽标;复合 icon 最多三层:主图 provider、右下 model 厂商、左下 Magpie 中转平台(仅当上游段是可识别品牌且异于厂商;10px 裸 glyph 落 badge 左 4px 空隙,不压 StateDot);品牌 SVG 随包落盘(@lobehub/icons-static-svg@1.94.0、anomalyco/opencode、yetone/magpie,均 MIT),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,定位失败静默降级,不自发网络请求。升级复核:DSH 升级后回归 row-locator 的行 DOM 假设。移除:enabled:false → dsh build → 重启。'
   # 自研(local):会话标题旁 session id 短标识徽标(点击复制完整 id)
+  # 上架名 dsh-session-id-copy(镜像 prgrmrwy/dsh-session-id-copy);条目 id 与目录名保留 session-title-copy。
   - id: session-title-copy
     type: package
     source: local
-    version: 0.1.2
+    version: 0.2.0
     enabled: true
     brief: 标题右侧 6 位 session id 徽标(点击复制完整 id + toast;标题恢复官方)
-    note: '自研,spec session-title-copy(change session-title-id-badge)。Web client 订阅官方 sessions list(current 为 id 真相源),在标题旁插入 6 位 session id 徽标,点击复制完整 id;标题保持官方 disabled 原样。无 Host 能力、无网络请求、不读取会话内容;官方 DOM 变化或剪贴板被拒时静默降级。升级复核:官方标题区结构变化时只需改 src/client/title-locator.ts。移除:enabled:false → dsh build → 重启,无持久数据。'
+    note: '自研,spec session-title-copy(change session-title-id-badge)。0.2.0 起以 npm 包名 dsh-session-id-copy 发布(MIT,独立镜像 prgrmrwy/dsh-session-id-copy),条目 id 与目录名不变。Web client 订阅官方 sessions list(current 为 id 真相源),在标题旁插入 6 位 session id 徽标,点击复制完整 id;标题保持官方 disabled 原样。无 Host 能力、无网络请求、不读取会话内容;官方 DOM 变化或剪贴板被拒时静默降级。升级复核:官方标题区结构变化时只需改 src/client/title-locator.ts。移除:enabled:false → dsh build → 重启,无持久数据。'
   # 自研(local):B019 设置面板底部 DSH 主机系统时钟(24 小时制 + 时区)
   - id: system-clock
     type: package

@@ -28,7 +28,7 @@
  *
  * The locator only READS the DOM; wiring/mutation lives in `wiring.ts`.
  *
- * @module dsh-session-title-copy/client/title-locator
+ * @module dsh-session-id-copy/client/title-locator
  */
 
 /** Minimal node surface the locator needs (structural so it is testable without a browser DOM). */
