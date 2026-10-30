@@ -225,7 +225,11 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 演示图：AUTO 0.5.3 与 Magpie 0.3.1 起由 GIF 换为代表性 PNG（取自原录制的代表帧），Sidebar 与 Session ID Copy 一直是 PNG；只有推 main 并核对商店详情页后，才能说商店已展示新图。
 
-演示图语言（2026-10-30 起的要求）：Session ID Copy 已按要求分成两套（`docs/overview.png` 中文真实截图、`docs/overview.en.png` 英文 illustration）。AUTO、Magpie、Sidebar 目前仍是**同一张中文界面图**服务中英文 README，属于既有欠账：补英文图会让包内容变化，按 §8 应有版本号，因此随各自下一个版本一起改，不为它单独发版；在此之前不要把这三者描述为「已按 §3」。
+演示图语言（2026-10-30 起的要求）：Session ID Copy 已按要求分成两套（`docs/overview.png` 中文真实截图、`docs/overview.en.png` 英文 illustration），Sidebar 也已分成两套（中文 `overview.png`/`screenshot.png` + 英文 `overview.en.png`/`screenshot.en.png`，英文两图是 illustration，源与渲染命令随包）。
+
+**AUTO 与 Magpie 的英文图不能只靠「把 App 语言切到 English 再截一次」。** 2026-10-30 实测：在隔离实例里用 `--lang=en-US` 打开英文界面（General → Language 也是 English），Magpie 设置页仍然整页中文（「连接」「线路 1」「添加备用线路」「刷新模型列表」「默认 effort」「账号/计划/读取于」），因为这两个插件的前端文案是**硬编码中文、没有注册 `ctx.locale` 字典**（与 `system-clock` / `session-title-copy` 的做法不同）。所以顺序必须是：**先给插件 UI 本地化（新增 locale 字典 + `@deepseek-ai/dsh-client-locale` peer 依赖，随一个特性版本发出），再补英文图**。在这之前不要把这两者描述为「已按 §3」；它们的中文图仍可继续服务两个 README，但英文 README 会显示中文控件。
+
+同一次实测还确认了后续补图可复用的装置：隔离 `DSH_HOME` + 本机 loopback mock 网关（`/v1/models` 分组、`/v1/magpie/quotas/*` 用量卡）+ `MAGPIE_LINE_<8位大写ID>_API_KEY` 环境变量即可跑通完整设置页；浏览器必须用 `~/.agent-browser/browsers/chrome-156.*`（系统 `/usr/bin/chromium` 90 渲染 DSH Web 是空白页，不是代码问题）。
 
 首次发布仍有 bootstrap 限制：npm 不允许给尚不存在的包配置 Trusted Publisher（[npm/cli#8544](https://github.com/npm/cli/issues/8544)），所以**第一个版本必须由维护者本机带 2FA 手动发布**，之后用 `npm trust github <pkg> --file release.yml --repo <owner>/<mirror> --allow-publish`（npm ≥ 11.15）绑定 OIDC。该配置必须在创建后 **2 天内完成首次成功发布**，否则失效；因此绑定后应尽快补一个版本走 OIDC 验证，或者在真正要发版时再绑定。手动首发没有 provenance，绑定后的版本才有 attestations。
 
