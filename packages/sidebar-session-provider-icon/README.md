@@ -5,11 +5,11 @@
 English · [简体中文](README.zh.md)
 
 <p align="center">
-  <img src="docs/overview.png" alt="Real sidebar: each session row shows the logo of its selected provider and model" height="300">
-  <img src="docs/screenshot.png" alt="Rendering rules: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)" height="300">
+  <img src="docs/overview.en.png" alt="Sidebar: each session row shows the logo of its selected provider and model" height="300">
+  <img src="docs/screenshot.en.png" alt="Rendering rules: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)" height="300">
 </p>
 
-*Left: the real sidebar in an isolated DSH instance with demo sessions. Right: rendering rules for single and composite badges.*
+*Left: the sidebar with demo sessions. Right: rendering rules for single and composite badges. Synthetic rendering of an isolated DSH instance in English — that instance has no model credentials, so badges and rows are rendered from the plugin's own output rather than recorded from a live session.*
 
 ![Architecture: the composer selection, the official modelSelection projection and a Host provider projection feed provider-map, which renders a brand badge in front of each sidebar row](docs/architecture.en.svg)
 
