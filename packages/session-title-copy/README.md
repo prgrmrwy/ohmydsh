@@ -2,9 +2,7 @@
 
 English · [简体中文](README.zh.md)
 
-<p align="center">
-  <img src="docs/overview.en.png" alt="Conversation header with the six-character session id badge 71766c and the copied hint shown right after clicking it" width="760">
-</p>
+![Conversation header with the six-character session id badge 71766c and the copied hint shown right after clicking it](docs/overview.en.png)
 
 *The badge sits right of the conversation title, and the copied hint appears under it after a click. Synthetic rendering of an isolated DSH header in English (that instance has no model credentials, so nothing here was recorded from a live session); title and id are demo data.*
 

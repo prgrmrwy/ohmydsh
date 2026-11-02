@@ -2,12 +2,11 @@
 
 English · [简体中文](README.zh.md)
 
-<p align="center">
-  <img src="docs/auto-routing.en.png" alt="AUTO applied a higher effort to the main session; the panel shows the returned decision distribution" width="49%">
-  <img src="docs/settings.en.png" alt="Settings: decision service, compatible endpoint and a successful connection test" width="49%">
-</p>
+![AUTO applied a higher effort to the main session; the panel shows the returned decision distribution](docs/auto-routing.en.png)
 
-*Left: an applied AUTO decision with its effort distribution. Right: decision service settings with a successful connection test. Captured from an isolated DSH host (English UI) with a local mock decision service and mock model responses; endpoint, account and tasks are synthetic.*
+![Settings: decision service, compatible endpoint and a successful connection test](docs/settings.en.png)
+
+*Top: an applied AUTO decision with its effort distribution. Bottom: decision service settings with a successful connection test. Captured from an isolated DSH host (English UI) with a local mock decision service and mock model responses; endpoint, account and tasks are synthetic.*
 
 ![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
 

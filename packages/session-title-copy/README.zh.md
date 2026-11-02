@@ -2,9 +2,7 @@
 
 [English](README.md) · 简体中文
 
-<p align="center">
-  <img src="docs/overview.png" alt="对话标题旁的 6 位 session id 徽标 71766c，以及点击后出现的“会话 ID 已复制”提示" width="760">
-</p>
+![对话标题旁的 6 位 session id 徽标 71766c，以及点击后出现的“会话 ID 已复制”提示](docs/overview.png)
 
 *对话标题旁的 6 位徽标，以及点击后出现的复制提示。截图取自隔离的 DSH 实例，会话标题为合成内容。*
 

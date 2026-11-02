@@ -4,12 +4,11 @@
 
 [English](README.md) · 简体中文
 
-<p align="center">
-  <img src="docs/overview.png" alt="真实侧边栏：每个会话行显示所选 provider 与 model 的 logo" height="300">
-  <img src="docs/screenshot.png" alt="显示规则：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）" height="300">
-</p>
+![真实侧边栏：每个会话行显示所选 provider 与 model 的 logo](docs/overview.png)
 
-*左：隔离 DSH 实例中的真实侧边栏（演示会话）；右：单一与复合角标的显示规则。*
+![显示规则：同品牌显示单一 logo，聚合 provider 显示主图 + 右下角 model 小图标（浅色 / 深色主题）](docs/screenshot.png)
+
+*上：隔离 DSH 实例中的真实侧边栏（演示会话）；下：单一与复合角标的显示规则。*
 
 ![架构：输入框选择、官方 modelSelection projection 与 Host 的 provider projection 汇入 provider-map，在每个侧边栏会话行前渲染品牌徽标](docs/architecture.zh.svg)
 
