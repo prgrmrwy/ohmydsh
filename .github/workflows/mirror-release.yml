@@ -9,7 +9,12 @@ name: Mirror release
 #
 # Each mirror has its own write deploy key; the private half is the secret named
 # in the matrix. A rejected (non fast-forward) push fails loudly instead of
-# forcing: the mirror then holds commits that are not in this repository.
+# forcing: the mirror then holds commits that are not in this repository — with
+# one sanctioned exception, renaming a mirrored package directory. `git subtree
+# split` keys on the path prefix, so a rename makes the new split history
+# unrelated to the mirror's main; dispatch this workflow with force=true once to
+# rewrite it. The mirror is a generated artifact, so its main history is
+# replaceable; release tags stay where they are.
 
 on:
   push:
@@ -20,6 +25,11 @@ on:
       - 'packages/dsh-sidebar-session-provider-icon/**'
       - 'packages/dsh-session-id-copy/**'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rewrite the mirror main history (one-off, after renaming a mirrored package directory)'
+        type: boolean
+        default: false
 
 concurrency:
   group: mirror-release
@@ -70,7 +80,12 @@ jobs:
           remote="git@github.com:prgrmrwy/${{ matrix.repo }}.git"
           split="$(git subtree split --prefix=packages/${{ matrix.dir }} HEAD)"
           echo "split commit: $split"
-          git push "$remote" "$split:refs/heads/main"
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "force=true: rewriting the mirror main history (package directory rename)."
+            git push --force "$remote" "$split:refs/heads/main"
+          else
+            git push "$remote" "$split:refs/heads/main"
+          fi
           version="$(git show "$split:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
           if git ls-remote --exit-code --tags "$remote" "refs/tags/v$version" >/dev/null; then
             echo "v$version already tagged on the mirror; nothing to release."
