@@ -3,9 +3,9 @@ import type { Rpc } from './control.js'
 import { AUTO_EFFORTS, type AutomaticEffort, type RoutingCatalog, type Settings, type SettingsIssue, type SettingsPatch } from '../settings-contract.js'
 import type { SettingsUi } from './settings-ui.js'
 import { DECISION_SERVICES, resolveDecisionService, type DecisionProvider } from '../decision-service.js'
-import { CATEGORY_HINTS, type JevCategory } from '../hints.js'
+import type { JevCategory } from '../hints.js'
 import { StrategyDetails } from './strategy-details.js'
-import { t } from './locales.js'
+import { CATEGORY_HINT_KEYS, SERVICE_LABEL_KEYS, t } from './locales.js'
 
 export interface SettingsView extends RoutingCatalog {
   settings: Settings; defaults: Settings; configStatus: string; issues: SettingsIssue[]
@@ -93,7 +93,7 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
           h(ui.Menu, { open: serviceMenu, portal: true, side: 'bottom', selectedId: serviceProvider, onClose: () => setServiceMenu(false),
             items: Object.entries(DECISION_SERVICES).map(([id, service]) => ({ id, label: service.label })),
             onSelect: id => { if (!Object.hasOwn(DECISION_SERVICES, id)) return; setKey(''); setRemoveKey(false); setPatch(old => ({ ...old, decisionService: { provider: id as DecisionProvider } })); setServiceMenu(false) },
-            anchor: h('button', { type: 'button', className: 'amr-service-trigger', 'aria-label': t('decisionService'), 'aria-haspopup': 'menu', 'aria-expanded': serviceMenu, onClick: () => setServiceMenu(!serviceMenu) }, h('span', null, DECISION_SERVICES[serviceProvider].label), h(ui.IconChevronDownOutlineRegular, { size: 14 })),
+            anchor: h('button', { type: 'button', className: 'amr-service-trigger', 'aria-label': t('decisionService'), 'aria-haspopup': 'menu', 'aria-expanded': serviceMenu, onClick: () => setServiceMenu(!serviceMenu) }, h('span', null, t(SERVICE_LABEL_KEYS[serviceProvider])), h(ui.IconChevronDownOutlineRegular, { size: 14 })),
           })),
         h('p', null, changingService ? t('serviceSwitchNote') : t('credentialRef', { ref: DECISION_SERVICES[serviceProvider].credential })),
         h('div', { className: 'amr-settings-row' }, h('span', null, t('decisionModel')), serviceProvider === 'custom'
@@ -113,14 +113,14 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
               const r = await rpc.call('/api', 'auto-model-routing.testDecision', {})
               const v = r.value as { kind?: string; category?: JevCategory; ms?: number } | undefined
               const ok = r.ok && v?.kind === 'ok'
-              setTestResult({ failed: !ok, text: ok ? t('connectionOk', { ms: v.ms ?? 0 }) : t('connectionFailed', { reason: v?.category ? CATEGORY_HINTS[v.category] ?? t('serviceUnavailable') : t('connectFailedRetry') }) })
+              setTestResult({ failed: !ok, text: ok ? t('connectionOk', { ms: v.ms ?? 0 }) : t('connectionFailed', { reason: v?.category ? t(CATEGORY_HINT_KEYS[v.category]) : t('connectFailedRetry') }) })
             } catch { setTestResult({ failed: true, text: t('connectTestFailed') }) }
             finally { setTesting(false) }
           } }, testing ? t('testing') : t('testConnection')),
           h('span', { role: 'status', 'aria-live': 'polite', className: testResult?.failed ? 'amr-settings-error' : undefined }, testing ? t('testInFlight') : testResult?.text ?? (dirty ? t('saveBeforeTest') : ''))),
         h('p', null, t('testCost')),
         invalidService && h('p', { role: 'alert', className: 'amr-settings-error' }, t('invalidService')),
-        h(ui.SettingsSecretField, { id: 'amr-key', label: t('serviceKeyLabel', { service: DECISION_SERVICES[serviceProvider].label }), hint: changingService ? t('saveServiceFirst') : keyHint, text: key, disabled: changingService || saving || !view.key.available || !view.key.writable, onEdit: text => { setKey(text); setRemoveKey(false) }, configured: !changingService && view.key.configured, stateLabel: changingService ? t('stateAfterSave') : keyState }),
+        h(ui.SettingsSecretField, { id: 'amr-key', label: t('serviceKeyLabel', { service: t(SERVICE_LABEL_KEYS[serviceProvider]) }), hint: changingService ? t('saveServiceFirst') : keyHint, text: key, disabled: changingService || saving || !view.key.available || !view.key.writable, onEdit: text => { setKey(text); setRemoveKey(false) }, configured: !changingService && view.key.configured, stateLabel: changingService ? t('stateAfterSave') : keyState }),
         !changingService && view.key.available && view.key.writable && view.key.configured && h('button', { type: 'button', className: 'amr-settings-reset', onClick: () => { setRemoveKey(!removeKey); setKey('') } }, removeKey ? t('cancelRemoveKey') : t('removeKey')),
         invalidKey && h('p', { className: 'amr-settings-error' }, t('invalidKey')),
         h('div', { className: 'amr-settings-row' }, h('div', null, h('label', { htmlFor: 'amr-timeout' }, t('jevTimeout')), h('p', null, t('jevTimeoutHint'))), h('span', null, h('input', { id: 'amr-timeout', type: 'number', className: 'amr-settings-number', min: 1000, max: 8000, step: 1, value: Number.isNaN(settings.jevTimeoutMs) ? '' : settings.jevTimeoutMs, 'aria-invalid': invalidTimeout, onChange: e => setPatch(old => ({ ...old, jevTimeoutMs: e.currentTarget.value === '' ? NaN : Number(e.currentTarget.value) })) }), t('msSuffix')))),

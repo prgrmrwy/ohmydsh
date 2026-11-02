@@ -141,6 +141,19 @@ export const en = {
   panelAria: 'Automatic routing status',
   listSeparator: ', ',
   unknownProvider: 'unknown provider',
+  serviceOpenrouter: 'OpenRouter',
+  serviceTypesafe: 'TypeSafe official',
+  serviceConcentrate: 'Concentrate',
+  serviceCustom: 'Custom System One',
+  hintMissingCredential: 'No API key configured for the selected decision service',
+  hintInsufficientCredits: 'Out of credits, please top up',
+  hintUnauthorized: 'The key is invalid or lacks permission',
+  hintRateLimited: 'The request was rate limited',
+  hintRegionBlocked: 'Region blocked',
+  hintRejected: 'The request was rejected',
+  hintUnavailable: 'The Jev service is unavailable',
+  hintTimeout: 'The Jev response timed out',
+  hintInvalidResponse: 'The Jev response was invalid',
   panelUnchanged: 'not rewritten',
   panelNoJudgment: 'no judgment yet',
   modeLoading: 'loading',
@@ -275,6 +288,19 @@ export const zh: Record<AutoKey, string> = {
   panelAria: '自动路由状态',
   listSeparator: '、',
   unknownProvider: '未知 provider',
+  serviceOpenrouter: 'OpenRouter',
+  serviceTypesafe: 'TypeSafe 官方',
+  serviceConcentrate: 'Concentrate',
+  serviceCustom: '自定义 System One',
+  hintMissingCredential: '未配置所选决策服务的 API key',
+  hintInsufficientCredits: '余额不足，请充值',
+  hintUnauthorized: 'key 无效或无权限',
+  hintRateLimited: '请求被限流',
+  hintRegionBlocked: '地区受限',
+  hintRejected: '请求被拒绝',
+  hintUnavailable: 'Jev 服务不可用',
+  hintTimeout: 'Jev 响应超时',
+  hintInvalidResponse: 'Jev 响应无效',
   panelUnchanged: '未改写',
   panelNoJudgment: '尚无判断',
   modeLoading: '加载中',
@@ -316,3 +342,24 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     [NS]: AutoKey
   }
 }
+
+/** Localized labels for the built-in decision services (host-facing labels stay untouched). */
+export const SERVICE_LABEL_KEYS = {
+  openrouter: 'serviceOpenrouter',
+  typesafe: 'serviceTypesafe',
+  concentrate: 'serviceConcentrate',
+  custom: 'serviceCustom',
+} as const satisfies Record<string, AutoKey>
+
+/** Localized hint per failure category, keyed like `CATEGORY_HINTS`. */
+export const CATEGORY_HINT_KEYS = {
+  'missing-credential': 'hintMissingCredential',
+  'insufficient-credits': 'hintInsufficientCredits',
+  unauthorized: 'hintUnauthorized',
+  'rate-limited': 'hintRateLimited',
+  'region-blocked': 'hintRegionBlocked',
+  rejected: 'hintRejected',
+  unavailable: 'hintUnavailable',
+  timeout: 'hintTimeout',
+  'invalid-response': 'hintInvalidResponse',
+} as const satisfies Record<string, AutoKey>

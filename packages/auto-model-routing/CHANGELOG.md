@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 — 2026-11-02
+
+- 补齐 0.6.0 漏掉的界面文案：内置决策服务名称（OpenRouter / TypeSafe official / Concentrate / Custom System One）与失败分类提示（未配置 key、余额不足、限流等）改走 `t()`，英文界面下不再出现中文。
+- 仅客户端文案与字典键变化，无行为变更；未绑定翻译器时仍回退中文。
+
 ## 0.6.0 — 2026-11-02
 
 - 客户端界面支持中英双语：新增 `src/client/locales.ts`（`settings.autoModelRouting` 的 zh/en 字典 + 模块级翻译器），composer 的 AUTO 切换、状态面板、决策提示、回复反馈菜单与设置页文案全部改走 `t()`，随 DSH 界面语言渲染。

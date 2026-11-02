@@ -8,13 +8,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, toastText, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
-import { CATEGORY_HINTS, type JevCategory } from '../hints.js'
+import type { JevCategory } from '../hints.js'
 import { IconInfoOutlineRegular, IconGaugeOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { LabelButton, type LabelUi } from './label.js'
 import * as settingsUi from '@deepseek-ai/dsh-client-ui-primitives'
 import { RoutingSettings } from './settings-section.js'
 import { registry } from '../strategies/index.js'
-import { NS, bindLocale, en, zh, t } from './locales.js'
+import { CATEGORY_HINT_KEYS, NS, bindLocale, en, zh, t } from './locales.js'
 /** Supported families as the user sees them. */
 const FAMILIES = registry.labels().join(' / ')
 import { installRoutingNavIcon } from './nav-icon.js'
@@ -177,7 +177,7 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
     finally { setBusy(false) }
   }
   const off = view?.disabled
-  const hint = off ? CATEGORY_HINTS[off.category] ?? off.category : undefined
+  const hint = off ? t(CATEGORY_HINT_KEYS[off.category]) : undefined
   const locked = view?.autoSupport?.supported === false
   const support = view?.autoSupport
   const lockedModel = `${support?.provider ?? t('unknownProvider')} / ${support?.model ?? t('unknownModel')}`
