@@ -1,0 +1,3 @@
+chromium --headless --no-sandbox --disable-gpu --hide-scrollbars --force-device-scale-factor=2 --window-size=700,200 --screenshot=packages/session-title-copy/docs/overview.en.png file://$PWD/packages/session-title-copy/docs/overview.en.svg
+renderer: Chromium 90.0.4430.212 (Debian); fonts: DejaVu Sans, DejaVu Sans Mono (system); run from the repository root
+source: synthetic illustration, not a live capture — the badge geometry, 11px monospace snippet, 12px hint card and light-theme token colors follow src/client/wiring.ts (styleBadge / showCopiedHint); title, id and copy are synthetic

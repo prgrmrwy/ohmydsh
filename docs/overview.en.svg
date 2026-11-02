@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic illustration source for the English README (overview.en.png). Not a live capture. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="200" viewBox="0 0 700 200" role="img" aria-labelledby="t d">
+<title id="t">Session id badge and copied hint in the conversation header</title>
+<desc id="d">The conversation title with the six-character session id badge 71766c to its right, and the "Session ID copied" hint shown under the badge right after a click.</desc>
+<defs>
+<filter id="hintShadow" x="-20%" y="-40%" width="140%" height="180%">
+<feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.14"/>
+</filter>
+</defs>
+<rect width="700" height="200" fill="#ffffff"/>
+<rect y="55" width="700" height="145" fill="#f7f8fa"/>
+<line x1="0" y1="55.5" x2="700" y2="55.5" stroke="#eceef1" stroke-width="1"/>
+
+<!-- Conversation title (official element, untouched by the plugin) -->
+<text x="17" y="36" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#1f2329">Fix the flaky checkout test</text>
+
+<!-- Plugin badge: 6-character session id snippet, own element, official token colors -->
+<rect x="264" y="18" width="52" height="23" rx="6" fill="#ecedee"/>
+<text x="290" y="34" font-family="DejaVu Sans Mono, monospace" font-size="11" fill="#5f6368" text-anchor="middle">71766c</text>
+
+<!-- Official chrome after the badge: mode pill and usage pill -->
+<rect x="326" y="18" width="106" height="23" rx="11" fill="#f2f3f5" stroke="#e5e6eb" stroke-width="1"/>
+<circle cx="338" cy="29.5" r="4.5" fill="none" stroke="#86909c" stroke-width="1.3"/>
+<text x="348" y="34" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="11" fill="#4e5969">Standard mode</text>
+<rect x="442" y="18" width="92" height="23" rx="11" fill="#f2f3f5" stroke="#e5e6eb" stroke-width="1"/>
+<text x="488" y="34" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="11" fill="#4e5969" text-anchor="middle">Usage details</text>
+
+<!-- Tabs row -->
+<text x="17" y="81" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#165dff">Chat</text>
+<rect x="17" y="89" width="26" height="2" rx="1" fill="#165dff"/>
+<text x="67" y="81" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="13" fill="#4e5969">Trace</text>
+
+<!-- Copied hint: transient card under the badge, plugin-owned element -->
+<rect x="240" y="47" width="128" height="27" rx="8" fill="#ffffff" stroke="#e5e6eb" stroke-width="1" filter="url(#hintShadow)"/>
+<text x="304" y="65" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="12" fill="#1f2329" text-anchor="middle">Session ID copied</text>
+</svg>

@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-session-id-copy architecture",
+    "locale": "en",
+    "output": ".archify/architecture-session-id-copy-20261030-200500/session-id-copy.en.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:prgrmrwy/ohmydsh.git",
+      "link_mode": "local-only",
+      "revision": "dbdaa3c2b019e792eb29bb07468b4722f8634f2b"
+    }
+  },
+  "components": [
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "Host entry",
+      "sublabel": "bundle row · no-op",
+      "pos": [40, 300],
+      "size": [180, 66],
+      "sources": [
+        { "path": "packages/session-title-copy/src/index.ts", "line": 27, "end_line": 30, "label": "empty loader entry" }
+      ]
+    },
+    {
+      "id": "client",
+      "type": "frontend",
+      "label": "Client plugin",
+      "sublabel": "reconcile loop",
+      "pos": [340, 300],
+      "size": [200, 74],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/index.ts", "line": 32, "end_line": 32, "label": "sessions + locale" },
+        { "path": "packages/session-title-copy/src/client/index.ts", "line": 56, "end_line": 118, "label": "observer, rAF, cleanup" }
+      ]
+    },
+    {
+      "id": "locator",
+      "type": "frontend",
+      "label": "Title locator",
+      "sublabel": "breadcrumb nav seam",
+      "pos": [340, 130],
+      "size": [200, 66],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/title-locator.ts", "line": 72, "end_line": 72, "label": "findCrumbNav" }
+      ]
+    },
+    {
+      "id": "sessions",
+      "type": "database",
+      "label": "sessions.list",
+      "sublabel": "current · id truth source",
+      "pos": [340, 480],
+      "size": [200, 66],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/main-session.ts", "line": 18, "end_line": 18, "label": "reads current" }
+      ]
+    },
+    {
+      "id": "badge",
+      "type": "frontend",
+      "label": "Session-id badge",
+      "sublabel": "6-char snippet · full id tooltip",
+      "pos": [680, 300],
+      "size": [200, 74],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/wiring.ts", "line": 21, "end_line": 21, "label": "own marker" },
+        { "path": "packages/session-title-copy/src/client/wiring.ts", "line": 119, "end_line": 140, "label": "wire + update badge" }
+      ]
+    },
+    {
+      "id": "clipboard",
+      "type": "external",
+      "label": "Browser clipboard",
+      "sublabel": "navigator.clipboard",
+      "pos": [1020, 300],
+      "size": [180, 68]
+    },
+    {
+      "id": "hint",
+      "type": "frontend",
+      "label": "Copied hint",
+      "sublabel": "1.2 s · follows UI language",
+      "pos": [680, 470],
+      "size": [200, 60],
+      "sources": [
+        { "path": "packages/session-title-copy/src/client/wiring.ts", "line": 183, "end_line": 183, "label": "showCopiedHint" },
+        { "path": "packages/session-title-copy/src/client/locales.ts", "line": 15, "end_line": 15, "label": "locale namespace" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Web client · browser",
+      "wraps": ["client", "locator", "badge", "hint", "sessions"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Host process",
+      "wraps": ["host"]
+    }
+  ],
+  "connections": [
+    { "id": "host-serves-client", "from": "host", "to": "client", "label": "loads bundle" },
+    { "id": "client-reads-store", "from": "sessions", "to": "client", "label": "current id", "fromSide": "top", "toSide": "bottom" },
+    { "id": "client-finds-title", "from": "client", "to": "locator", "label": "locates nav", "fromSide": "top", "toSide": "bottom" },
+    { "id": "client-inserts-badge", "from": "client", "to": "badge", "label": "inserts badge", "variant": "emphasis" },
+    { "id": "badge-copies", "from": "badge", "to": "clipboard", "label": "click: full id", "variant": "emphasis" },
+    { "id": "badge-shows-hint", "from": "badge", "to": "hint", "label": "copied hint", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Badge",
+      "items": [
+        "Shows the first six characters after the session- prefix",
+        "The tooltip carries the full session id",
+        "Own marker and inline styles; the official title stays disabled"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Reconcile",
+      "items": [
+        "Sessions subscription plus a MutationObserver on the header",
+        "rAF-debounced; inserting twice is idempotent",
+        "A stale badge is removed when no title area exists"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Trust surface",
+      "items": [
+        "No host capability beyond the empty loader entry",
+        "No network, no storage, no conversation content",
+        "DOM drift and a refused clipboard degrade silently"
+      ]
+    }
+  ]
+}
