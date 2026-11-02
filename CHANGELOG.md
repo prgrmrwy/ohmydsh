@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — 2026-11-02
+
+- README 中英首屏改用 deviceScaleFactor 3 的静态 PNG（3300x1920 / 2400x2400），替换旧的低分辨率图与 GIF；同时改为 markdown 图片写法，商店详情页可直接渲染。
+- 仅文档与图片调整，无代码/行为变更。
+
 ## 0.5.0 — 2026-10-31
 
 - 设置页与速度选择器支持界面语言：新增 `settings.magpie` 的 zh/en 字典（`src/client/locales.ts`），通过 `ctx.locale` 注册并在 `apply()` 绑定；文案不再硬编码中文，跟随 DSH 界面语言（英文界面下为英文）。未绑定翻译器时（单测、无 locale 服务的宿主）仍回退到中文，行为不变。
