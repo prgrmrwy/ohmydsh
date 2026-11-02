@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 — 2026-11-02
+
+- 客户端界面支持中英双语：新增 `src/client/locales.ts`（`settings.autoModelRouting` 的 zh/en 字典 + 模块级翻译器），composer 的 AUTO 切换、状态面板、决策提示、回复反馈菜单与设置页文案全部改走 `t()`，随 DSH 界面语言渲染。
+- client 入口注册字典并绑定 `ctx.locale`；`dsh.client.inject` 与 peer 依赖补 `@deepseek-ai/dsh-client-locale`。
+- 未绑定翻译器时回退中文参考集（单测与无 locale 服务的宿主行为不变）；新增字典键集合一致性与中英切换测试。
+- 设置导航行的图标适配器按当前语言的标签匹配，不再硬编码中文。
+
 ## 0.5.4
 
 - GPT Sol (`gpt-6.1-sol`) now starts at `high` instead of `medium`, one step above the matching Claude start, so its lower/baseline/higher efforts become `medium/high/xhigh` for both the main session and Sol child routes. Luna and Astra are unchanged; automatic routing still never uses `max`. This follows user-reported quality concerns, not a controlled evaluation. Existing bound child routes retain their recorded effort.

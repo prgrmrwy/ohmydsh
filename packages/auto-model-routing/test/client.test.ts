@@ -1,3 +1,4 @@
+import { fakeLocale } from './fake-locale.js'
 import { expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -6,7 +7,7 @@ import { callRouting, chipOrder, panelOpenAfter, toastText, nextToast } from '..
 it('spec Scenario "芯片注册在速度芯片左侧"',()=>{
  expect(chipOrder).toBeLessThan(0)
  const registrations: {name:string;order:number}[] = []
- const ctx={effect:(callback:()=>unknown)=>callback(),slots:{inject:(_name:string,callback:()=>void)=>callback(),register:(options:{name:string;order:number})=>{registrations.push(options);return ()=>{}}}}
+ const ctx={effect:(callback:()=>unknown)=>callback(),locale:fakeLocale('zh').service,slots:{inject:(_name:string,callback:()=>void)=>callback(),register:(options:{name:string;order:number})=>{registrations.push(options);return ()=>{}}}}
  apply(ctx as never)
  expect(registrations).toContainEqual(expect.objectContaining({name:'conversation.input.right',order:-10}))
  expect(registrations).toContainEqual(expect.objectContaining({name:'settings.section',order:300}))

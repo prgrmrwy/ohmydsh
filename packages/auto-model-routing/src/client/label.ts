@@ -1,9 +1,12 @@
 import { createElement as h, useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import type { Rpc } from './control.js'
+import { t } from './locales.js'
 
 /** A reply bound to an applied AUTO decision; `{}` means no binding. */
 interface Allocation { depth: string; effort: string; model: string; feedback?: string | null }
-const FEEDBACK: Record<string, string> = { appropriate: '分配合适', 'too-high': '投入偏高', 'too-low': '投入不足', unknown: '无法判断' }
+const FEEDBACK_KEYS: Record<string, AutoFeedbackKey> = { appropriate: 'feedbackAppropriate', 'too-high': 'feedbackTooHigh', 'too-low': 'feedbackTooLow', unknown: 'feedbackUnknown' }
+type AutoFeedbackKey = 'feedbackAppropriate' | 'feedbackTooHigh' | 'feedbackTooLow' | 'feedbackUnknown'
+const feedbackLabel = (id: string): string => { const key = FEEDBACK_KEYS[id]; return key === undefined ? id : t(key) }
 const bound = (value: object): value is Allocation => typeof (value as { depth?: unknown }).depth === 'string'
 
 /** Official primitives, injected so the component carries no styles of its own (tests pass doubles). */
@@ -18,12 +21,14 @@ const CSS = `.amr-label-action{width:calc(28px + var(--dsh-content-font-delta,0p
 
 async function callLabel(rpc: Rpc, sessionId: string, messageId: string, feedback?: string | null): Promise<object> {
   const result = await rpc.call('/api', 'auto-model-routing.label', { sessionId, messageId, ...(feedback !== undefined ? { feedback } : {}) })
-  if (!result.ok) throw new Error(result.error?.message ?? '反馈请求失败')
+  if (!result.ok) throw new Error(result.error?.message ?? t('feedbackFailed'))
   return (result.value ?? {}) as object
 }
 
 export function tooltipText(view: Allocation): string {
-  return `AUTO 分配：${view.depth} → ${view.effort} · ${view.model}${view.feedback ? ` · 你反馈：${FEEDBACK[view.feedback]}` : ' · 评价资源分配是否合适'}`
+  return view.feedback
+    ? `${t('feedbackSummary', { depth: view.depth, effort: view.effort, model: view.model })} · ${t('feedbackYour', { label: feedbackLabel(view.feedback) })}`
+    : `${t('feedbackSummary', { depth: view.depth, effort: view.effort, model: view.model })} · ${t('feedbackAsk')}`
 }
 
 /** Reply-bar allocation feedback: shown only for replies bound to an applied AUTO decision. */
@@ -73,7 +78,7 @@ export function LabelButton({ sessionId, messageId, rpc, ui }: { sessionId: stri
   const chooseFeedback = (id: string) => {
     setOpen(false); setError('')
     // A failure leaves the shown feedback unchanged.
-    callLabel(rpc, sessionId, messageId, id === 'clear' ? null : id).then(value => { if (alive.current && bound(value)) setView(value) }, () => { if (alive.current) setError('反馈未保存，请重试') })
+    callLabel(rpc, sessionId, messageId, id === 'clear' ? null : id).then(value => { if (alive.current && bound(value)) setView(value) }, () => { if (alive.current) setError(t('feedbackNotSaved')) })
   }
   const button = h('button', { type: 'button', className: 'amr-label-action', 'aria-label': tooltipText(view), onClick: () => setOpen(value => !value) }, h(ui.Icon))
   return h('span', { ref: exposureTarget },
@@ -82,8 +87,8 @@ export function LabelButton({ sessionId, messageId, rpc, ui }: { sessionId: stri
       open, side: 'top', portal: true, onClose: () => setOpen(false),
       // The official menu draws the check on the selected row.
       ...(view.feedback ? { selectedId: view.feedback } : {}),
-      items: [{ type: 'label', id: 'title', text: '这次资源分配合适吗？' }, ...Object.entries(FEEDBACK).map(([id, label]) => ({ id, label })), ...(view.feedback ? [{ id: 'clear', label: '撤销反馈' }] : [])],
-      onSelect: id => { if (Object.hasOwn(FEEDBACK, id) || id === 'clear') chooseFeedback(id) },
+      items: [{ type: 'label', id: 'title', text: t('feedbackTitle') }, ...Object.keys(FEEDBACK_KEYS).map(id => ({ id, label: feedbackLabel(id) })), ...(view.feedback ? [{ id: 'clear', label: t('feedbackClear') }] : [])],
+      onSelect: id => { if (Object.hasOwn(FEEDBACK_KEYS, id) || id === 'clear') chooseFeedback(id) },
       anchor: h(ui.Tooltip, { label: tooltipText(view), side: 'bottom', children: button }),
     }),
     error && h('span', { role: 'alert' }, error),

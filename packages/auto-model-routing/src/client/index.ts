@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { callRouting, chipOrder, nextToast, panelOpenAfter, TOAST_MS, toastText, type Decision, type PanelEvent, type Rpc, type Toast } from './control.js'
 import { CATEGORY_HINTS, type JevCategory } from '../hints.js'
 import { IconInfoOutlineRegular, IconGaugeOutlineRegular, Menu, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -13,6 +14,7 @@ import { LabelButton, type LabelUi } from './label.js'
 import * as settingsUi from '@deepseek-ai/dsh-client-ui-primitives'
 import { RoutingSettings } from './settings-section.js'
 import { registry } from '../strategies/index.js'
+import { NS, bindLocale, en, zh, t } from './locales.js'
 /** Supported families as the user sees them. */
 const FAMILIES = registry.labels().join(' / ')
 import { installRoutingNavIcon } from './nav-icon.js'
@@ -33,7 +35,7 @@ type SelectionStore = { subscribe(listener: () => void): () => void }
 type SubscribeSelection = (sessionId: string, onChange: () => void) => () => void
 interface Props { sessionId: string; rpc: Rpc; subscribeSelection?: SubscribeSelection }
 export const name = 'dsh-auto-model-routing/client'
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'locale']
 
 const REPO_URL = 'https://github.com/prgrmrwy/dsh-auto-model-routing'
 
@@ -67,7 +69,7 @@ function SwapIcon() {
     h('path', { d: 'M13 10.5H3.5M6 8l-2.5 2.5L6 13' }))
 }
 
-const noticeText = (notice: { reason: string }) => `最近子任务未路由：${notice.reason}（按 DSH 默认运行）`
+const noticeText = (notice: { reason: string }) => t('noticeNotRouted', { reason: notice.reason })
 export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false, initialToast, subscribeSelection }: Props & { initialView?: View; initiallyOpen?: boolean; initialToast?: Toast }) {
   const [view, setView] = useState<View | undefined>(initialView)
   const [open, setOpen] = useState(initiallyOpen)
@@ -178,27 +180,27 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
   const hint = off ? CATEGORY_HINTS[off.category] ?? off.category : undefined
   const locked = view?.autoSupport?.supported === false
   const support = view?.autoSupport
-  const lockedModel = `${support?.provider ?? '未知 provider'} / ${support?.model ?? '未知模型'}`
+  const lockedModel = `${support?.provider ?? t('unknownProvider')} / ${support?.model ?? t('unknownModel')}`
   // The panel sits inside the root (padding bridges the gap), so moving onto it keeps it open.
   const place = anchor.current ?? { left: (typeof window === 'undefined' ? 0 : window.innerWidth / 2), top: (typeof window === 'undefined' ? 0 : window.innerHeight) - 96 }
   const panel = locked
     ? [
-        h('p', { key: 'locked-title' }, h('strong', null, 'AUTO 不支持当前模型')),
-        h('p', { key: 'locked-model' }, `${lockedModel} 不在自动路由支持范围，已切换为 MANUAL。`),
-        h('p', { key: 'locked-note' }, `目前仅支持 ${FAMILIES} 系列模型；其他模型策略欢迎提交 issue 或 PR：`),
+        h('p', { key: 'locked-title' }, h('strong', null, t('lockedModel'))),
+        h('p', { key: 'locked-model' }, t('lockedModelLine', { provider: support?.provider ?? t('unknownProvider'), model: support?.model ?? t('unknownModel') })),
+        h('p', { key: 'locked-note' }, t('lockedFamilies', { families: FAMILIES })),
         h('p', { key: 'locked-link' }, h('a', { href: REPO_URL, target: '_blank', rel: 'noopener noreferrer' }, REPO_URL)),
-        h('p', { key: 'locked-hint', className: 'amr-muted' }, `切回 ${FAMILIES} 系列模型后，可重新点击启用 AUTO。`),
+        h('p', { key: 'locked-hint', className: 'amr-muted' }, t('lockedHint', { families: FAMILIES })),
         error && h('p', { key: 'error', role: 'alert', className: 'amr-error' }, error),
       ]
     : [
-        h('p', { key: 'title' }, h('strong', null, view?.mode === 'AUTO' ? '自动调整推理强度' : '手动：不自动调整')),
-        h('p', { key: 'output' }, `本回合插件输出：${view?.effort ?? '未改写'} · ${view?.reason ?? '尚无决定'}`),
+        h('p', { key: 'title' }, h('strong', null, view?.mode === 'AUTO' ? t('panelAutoTitle') : t('panelManualTitle'))),
+        h('p', { key: 'output' }, t('panelOutput', { effort: view?.effort ?? t('panelUnchanged'), reason: view?.reason ?? t('notDecided') })),
         view?.decision && h('div', { key: 'latest', className: 'amr-latest' },
-          h('p', null, h('strong', null, '最近决策')),
+          h('p', null, h('strong', null, t('panelLatest'))),
           ...toastText(view.decision).map((line, index) => h('p', { key: index, className: index ? 'amr-muted' : undefined }, line))),
-        h('p', { key: 'depth', className: 'amr-muted' }, `AUTO · ${view?.depth ?? '尚无判断'}；主模型不变，推理投入按请求应用；子任务自动选配。`),
-        off && h('p', { key: 'disabled', role: 'status', className: 'amr-error' }, `Jev 停用（${off.category}）：${hint}。${new Date(off.at).toLocaleString()}。点击 AUTO 重试。`),
-        h('p', { key: 'data', className: 'amr-muted' }, 'AUTO 会把脱敏任务文本发送给设置中所选的决策服务判断。'),
+        h('p', { key: 'depth', className: 'amr-muted' }, t('panelDepth', { depth: view?.depth ?? t('panelNoJudgment') })),
+        off && h('p', { key: 'disabled', role: 'status', className: 'amr-error' }, t('panelDisabled', { category: off.category, hint: hint ?? off.category, at: new Date(off.at).toLocaleString() })),
+        h('p', { key: 'data', className: 'amr-muted' }, t('panelData')),
         view?.childNotice && h('p', { key: 'notice', role: 'status', className: 'amr-muted' }, noticeText(view.childNotice)),
         error && h('p', { key: 'error', role: 'alert', className: 'amr-error' }, error),
       ]
@@ -209,14 +211,14 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
       type: 'button', className: 'amr-trigger', disabled: busy || !view, onClick: () => { if (locked) return; void toggle() },
       'data-disabled': off ? 'true' : undefined, 'data-locked': locked ? 'true' : undefined,
       'aria-disabled': locked ? 'true' : undefined, style: { border: 'none' },
-      title: locked ? `AUTO 仅支持 ${FAMILIES} 系列模型；悬停查看说明` : off ? `Jev 判断已停用：${hint}。点击 AUTO 重试` : '点击切换自动推理强度',
-      'aria-label': locked ? `推理强度模式：${view?.mode ?? 'MANUAL'}（AUTO 不支持当前模型，不可切换）` : `推理强度模式：${view?.mode ?? '加载中'}，点击切换`,
-    }, h('span', null, locked ? (view?.mode ?? 'MANUAL') : off ? `${view?.mode} · Jev 停用` : view?.mode ?? '…'), locked ? h(IconInfoOutlineRegular, { size: 14, className: 'amr-icon amr-info' }) : h(SwapIcon)),
+      title: locked ? t('switchTitleLocked', { families: FAMILIES }) : off ? t('switchTitleDisabled', { hint: hint ?? off.category }) : t('switchTitleIdle'),
+      'aria-label': locked ? t('switchAriaLocked', { mode: view?.mode ?? 'MANUAL' }) : t('switchAria', { mode: view?.mode ?? t('modeLoading') }),
+    }, h('span', null, locked ? (view?.mode ?? 'MANUAL') : off ? t('switchJevDisabled', { mode: view?.mode ?? '' }) : view?.mode ?? '…'), locked ? h(IconInfoOutlineRegular, { size: 14, className: 'amr-icon amr-info' }) : h(SwapIcon)),
     toast && !open && (typeof document === 'undefined'
       ? h('div', { className: 'amr-toast', role: 'status', style: { pointerEvents: 'none' } }, ...toast.lines.map((line, index) => h('div', { key: index, className: index ? 'amr-muted' : undefined }, line)))
       : createPortal(h('div', { className: 'amr-toast', role: 'status', style: { pointerEvents: 'none', left: place.left, top: place.top } },
         h('style', null, CSS), ...toast.lines.map((line, index) => h('div', { key: index, className: index ? 'amr-muted' : undefined }, line))), document.body)),
-    open && h('section', { className: 'amr-panel', 'aria-label': '自动路由状态' },
+    open && h('section', { className: 'amr-panel', 'aria-label': t('panelAria') },
       h('div', { className: 'amr-card' }, ...panel),
     ),
   )
@@ -225,6 +227,8 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
 const labelUi = { Tooltip, Menu, Icon: IconGaugeOutlineRegular } as unknown as LabelUi
 
 export function apply(ctx: Context): void {
+  ctx.effect(() => { ctx.locale.register(NS, { zh, en }); return () => {} }, 'auto-model-routing: dictionaries')
+  bindLocale(ctx.locale.bind(NS) as unknown as Parameters<typeof bindLocale>[0])
   // Optional acceleration only: the official picker's per-session store triggers an immediate state read.
   // When the service is absent (or appears late) the chip's 3s poll remains the source of truth.
   const pickerSubscriber: { current: SubscribeSelection | undefined } = { current: undefined }
@@ -242,7 +246,7 @@ export function apply(ctx: Context): void {
   } catch { /* polling stays the fallback */ }
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section', id: 'auto-model-routing', order: 300,
-    label: () => '自动模型路由',
+    label: () => t('navLabel'),
     inject: () => ({ rpc: ctx.connection.rpc as unknown as Rpc, ui: settingsUi }),
   }, RoutingSettings))
   ctx.effect(() => typeof document === 'undefined' ? () => {} : installRoutingNavIcon(document), 'auto-model-routing: settings navigation icon')

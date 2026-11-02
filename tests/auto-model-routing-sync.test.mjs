@@ -1,15 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { cp, symlink, readFile, readdir, access } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { overlayFixture, REPO } from './helpers/overlay-fixture.mjs'
 
+// The fixture manifest must pin the package version that is actually checked out, otherwise sync
+// reports version drift on every run and the "no changes" idempotency assertion can never hold.
+const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(REPO, 'packages/auto-model-routing/package.json'), 'utf8')).version
 const manifest = (legacy = false, enabled = true) => `dshVersion: 0.2.0-rc.2
 customizations:
   - id: auto-model-routing
     type: package
     source: local
-    version: 0.5.4
+    version: ${PACKAGE_VERSION}
     enabled: ${enabled}
 ${legacy ? '  - id: subagent-model-routing\n    type: skill\n    enabled: true\n' : ''}`
 
