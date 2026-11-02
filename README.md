@@ -2,11 +2,11 @@
 
 English · [简体中文](README.zh.md)
 
-![Model picker grouped by upstream provider: Magpie (Claude), Magpie (Codex) and Magpie (Deepseek)](docs/model-picker.en.gif)
+![Model picker grouped by upstream provider: Magpie (Claude), Magpie (Codex) and Magpie (Deepseek)](docs/model-picker.en.png)
 
-![Settings: the connection line on top, then models grouped by provider with visibility, default effort and usage cards](docs/settings.en.gif)
+![Settings: the connection line on top, then models grouped by provider with visibility, default effort and usage cards](docs/settings.en.png)
 
-*Top: model picker grouped by upstream provider. Bottom: Settings → Magpie — the connection line, then per-provider model visibility, default effort and usage cards. Recorded from an isolated DSH host (English UI) with a local mock Magpie gateway; gateway address, models, account and readings are synthetic.*
+*Top: model picker grouped by upstream provider. Bottom: Settings → Magpie — the connection line, then per-provider model visibility, default effort and usage cards. Captured from an isolated DSH host (English UI) with a local mock Magpie gateway; gateway address, models, account and readings are synthetic.*
 
 ![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
 
