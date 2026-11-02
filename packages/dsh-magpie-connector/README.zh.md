@@ -2,11 +2,11 @@
 
 [English](README.md) · 简体中文
 
-![模型选择器：按上游 provider 分组为 Magpie (Claude)、Magpie (Codex)、Magpie (Deepseek)](docs/model-picker.gif)
+![模型选择器：按上游 provider 分组为 Magpie (Claude)、Magpie (Codex)、Magpie (Deepseek)](docs/model-picker.png)
 
-![设置页：顶部连接线路，下方按 provider 分组的模型可见性、默认 effort 与用量卡片](docs/settings.gif)
+![设置页：顶部连接线路，下方按 provider 分组的模型可见性、默认 effort 与用量卡片](docs/settings.png)
 
-*上：按上游 provider 分组的模型选择器；下：设置 → Magpie，顶部连接线路，下方按 provider 分组的模型可见性、默认 effort 与用量卡片。GIF 录自隔离 DSH 宿主与本地 mock Magpie 网关，网关地址、模型和账号均为演示数据。*
+*上：按上游 provider 分组的模型选择器；下：设置 → Magpie，顶部连接线路，下方按 provider 分组的模型可见性、默认 effort 与用量卡片。截自隔离 DSH 宿主与本地 mock Magpie 网关，网关地址、模型和账号均为演示数据。*
 
 ![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
 
