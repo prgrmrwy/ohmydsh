@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2 — 2026-11-02
+
+- 修复「key 来自启动环境」提示写死 `OPENROUTER_API_KEY` 的问题：改用当前所选决策服务的凭据名（如 `AUTO_DECISION_CUSTOM_API_KEY`），与设置页显示的「凭据引用」一致。
+- 仅提示文案，无行为变更。
+
 ## 0.6.1 — 2026-11-02
 
 - 补齐 0.6.0 漏掉的界面文案：内置决策服务名称（OpenRouter / TypeSafe official / Concentrate / Custom System One）与失败分类提示（未配置 key、余额不足、限流等）改走 `t()`，英文界面下不再出现中文。

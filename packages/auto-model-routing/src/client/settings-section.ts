@@ -80,7 +80,7 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
     setView(nextView); setMessage(results.join('；')); setSaving(false)
   }
   const keyState = !view.key.available ? t('keyUnavailable') : !view.key.writable ? t('keyFromEnv') : view.key.configured ? t('keyConfigured') : t('keyUnconfigured')
-  const keyHint = !view.key.available ? t('keyUnavailableHint') : !view.key.writable ? t('keyEnvHint') : view.key.configured ? t('keyStoredHint') : t('keyMissingHint')
+  const keyHint = !view.key.available ? t('keyUnavailableHint') : !view.key.writable ? t('keyEnvHint', { ref: DECISION_SERVICES[serviceProvider].credential }) : view.key.configured ? t('keyStoredHint') : t('keyMissingHint')
   return h('div', { className: 'amr-settings' }, h('style', null, CSS), h(ui.SettingsForm, {
     labels: { unavailable: t('settingsUnavailable'), readOnly: t('settingsReadOnly'), saveFailed: t('partialSaveFailed'), save: t('save'), saving: t('saving') },
     state: { available: true, writable: true, dirty, invalid: conflicts.length > 0 || invalidTimeout || invalidKey || invalidService, saving, failed }, onSave: () => { void save() }, onDiscard: () => {},
