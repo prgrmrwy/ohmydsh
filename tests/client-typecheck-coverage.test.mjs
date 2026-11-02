@@ -16,7 +16,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
  * the client sources and exits 0 — a typecheck that checks nothing.
  *
  * This is not hypothetical: `worktree-session` and
- * `sidebar-session-provider-icon` shipped that way, which is how a client
+ * `dsh-sidebar-session-provider-icon` shipped that way, which is how a client
  * component kept destructuring a slot prop the runtime no longer provides
  * (the DSH 0.1.2 `useSessions` regression) without any check failing.
  */

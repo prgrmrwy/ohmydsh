@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 — 2026-11-02
+
+- 仓库内包目录与 manifest 条目改名为 npm 包名 `dsh-session-id-copy`（此前目录/条目为 `session-title-copy`，与 npm 名不一致）。
+- README 首屏改为 markdown 图片并更新英文界面图，商店详情页可直接渲染。
+
 ## 0.2.1 — 2026-10-30
 
 - 内容与 0.2.0 相同。npm 要求包在 registry 上已存在才能绑定 Trusted Publisher，所以 0.2.0 由维护者本机手动首发；本版用于验证 GitHub Actions 的 OIDC 自动发布，从此版本起 npm 包由 CI 带 provenance 发布，发布时不再需要人工验证码。

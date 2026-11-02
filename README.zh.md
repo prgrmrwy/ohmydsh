@@ -203,8 +203,8 @@ tests/                   仓库级测试
 - [dsh-openspec](packages/dsh-openspec/README.md) — 把官方 OpenSpec 工作流以 skill 与命令形式暴露的受管适配器。
 - [dsh-memex](packages/dsh-memex/README.md) — 原生持久记忆，按工作区隔离作用域，并提供记忆设置页。
 - [dsh-pet](packages/dsh-pet/README.md) — 常驻的桌宠 agent，在可信快照上运行管理类 skill。
-- [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — 在侧边栏每个会话行显示当前所选模型的品牌 logo。
-- [session-title-copy](packages/session-title-copy/README.md) — 在标题旁加一个短 session id 徽标，点击复制完整 id。
+- [dsh-sidebar-session-provider-icon](packages/dsh-sidebar-session-provider-icon/README.md) — 在侧边栏每个会话行显示当前所选模型的品牌 logo。
+- [dsh-session-id-copy](packages/dsh-session-id-copy/README.md) — 在标题旁加一个短 session id 徽标，点击复制完整 id。
 - [system-clock](packages/system-clock/README.md) — 在设置底部显示 DSH 主机的时钟、时区与 hostname。
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — 把当前会话的链接与产出文件汇总到侧栏面板。
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — 主机出口位于受限地区时，在输入框禁用 Claude 系列模型。

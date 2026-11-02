@@ -17,8 +17,8 @@ on:
     paths:
       - 'packages/auto-model-routing/**'
       - 'packages/dsh-magpie-connector/**'
-      - 'packages/sidebar-session-provider-icon/**'
-      - 'packages/session-title-copy/**'
+      - 'packages/dsh-sidebar-session-provider-icon/**'
+      - 'packages/dsh-session-id-copy/**'
   workflow_dispatch:
 
 concurrency:
@@ -42,10 +42,10 @@ jobs:
           - dir: dsh-magpie-connector
             repo: dsh-magpie-connector
             secret: MIRROR_KEY_MAGPIE_CONNECTOR
-          - dir: sidebar-session-provider-icon
+          - dir: dsh-sidebar-session-provider-icon
             repo: dsh-sidebar-session-provider-icon
             secret: MIRROR_KEY_SIDEBAR_PROVIDER_ICON
-          - dir: session-title-copy
+          - dir: dsh-session-id-copy
             repo: dsh-session-id-copy
             secret: MIRROR_KEY_SESSION_ID_COPY
     steps:

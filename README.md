@@ -203,8 +203,8 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-openspec](packages/dsh-openspec/README.md) — Managed adapter exposing the official OpenSpec workflows as skills and commands.
 - [dsh-memex](packages/dsh-memex/README.md) — Native persistent memory with per-workspace scopes and a memory settings page.
 - [dsh-pet](packages/dsh-pet/README.md) — A resident desktop companion agent that runs management skills on a trusted snapshot.
-- [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
-- [session-title-copy](packages/session-title-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
+- [dsh-sidebar-session-provider-icon](packages/dsh-sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
+- [dsh-session-id-copy](packages/dsh-session-id-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
 - [system-clock](packages/system-clock/README.md) — Shows the DSH host's clock, time zone and hostname at the bottom of settings.
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
