@@ -38,7 +38,7 @@ export interface CollabWorld {
   stop(): Promise<void>
 }
 
-export async function openCollabWorld(): Promise<CollabWorld> {
+export async function openCollabWorld(config: { readonly denySessionIds?: readonly string[] } = {}): Promise<CollabWorld> {
   const parent = await realpath(tmpdir())
   const root = await mkdtemp(join(parent, 'pet-collab-'))
   const live = new Map<string, FakeAgent>()
@@ -70,7 +70,7 @@ export async function openCollabWorld(): Promise<CollabWorld> {
     fiber: {},
     logger: () => ({ info: () => {}, warn: () => {}, error: () => {}, debug: () => {} }),
   }
-  await apply(ctx, { dataDir: join(root, 'data'), managedChannels: ['pet-locus'] } as never)
+  await apply(ctx, { dataDir: join(root, 'data'), managedChannels: ['pet-locus'], ...config } as never)
   const service = services.get('dshCollab') as CollabService | undefined
   if (service === undefined) throw new Error('dshCollab was not provided')
   return {

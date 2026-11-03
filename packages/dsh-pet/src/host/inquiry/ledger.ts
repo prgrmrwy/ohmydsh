@@ -1,24 +1,4 @@
-/**
- * Pure inquiry-ledger values and state transitions. Not a store, not a
- * dispatcher and not an authorization boundary.
- *
- * An inquiry is one bounded, Host-mediated question from one circle member to
- * another. This module owns only the VALUE MODEL: what a durable inquiry row
- * looks like, which status transitions are legal, and which budget predicates a
- * chain must satisfy. Everything that touches the world lives elsewhere — the
- * persistence slice must still write atomically, dedupe against its own applied
- * event log, and reconcile dispatch evidence; the dispatcher slice decides when
- * a target is runnable and performs the inbox handoff.
- *
- * Authorization is caller-derived scope membership, proven by the Host caller
- * resolver BEFORE this module runs and re-proven again at dispatch. The scope
- * identities recorded here are provenance, not proof: a fabricated object has
- * the same shape. Computing a record commits nothing and grants nothing.
- *
- * Host-derived facts (origin, audience, createdAt, the ancestor record) are
- * inputs; this module never samples a clock, reads storage or trusts a model
- * claim beyond checking that the claim matches the Host-derived fact.
- */
+/** Read-only historical inquiry values and parser. New questions and state transitions are retired. */
 
 /** Ordered from the accepted path to terminal states new code may create. */
 export const INQUIRY_STATUSES = Object.freeze([
@@ -119,69 +99,11 @@ export interface InquiryRecord {
   readonly droppedDiagnostics: number
 }
 
-/** What the requesting model supplies. `declaredOrigin` is checked, not trusted. */
-export interface InquiryRequest {
-  readonly target: InquiryScope
-  readonly question: string
-  readonly purpose: string
-  readonly declaredOrigin: InquiryOrigin | null
-}
-
-/** Facts the Host proved before this module runs. */
-export interface InquiryContext {
-  readonly inquiryId: string
-  readonly requester: InquiryScope
-  readonly circleParentSessionId: string
-  readonly origin: InquiryOrigin
-  readonly audience: InquiryAudience
-  readonly createdAt: number
-  /** The ancestor record for an inquiry-origin inquiry, else null. */
-  readonly parent: InquiryRecord | null
-  readonly rootInquiryCount: number
-  readonly pendingCount: number
-}
-
-export type InquiryEventType =
-  | 'dispatch' | 'answer' | 'deliver-result'
-  | 'reject' | 'unavailable' | 'cancel' | 'needs-review'
-
-export interface InquiryEvent {
-  readonly type: InquiryEventType
-  /** Host-owned dedup key; redelivering it must be a no-op, never an advance. */
-  readonly eventId: string
-  readonly at: number
-  readonly reason: string | null
-}
-
-export type InquiryLedgerErrorCode =
-  | 'INVALID_INQUIRY_INPUT'
-  | 'ILLEGAL_TRANSITION'
-  | 'ORIGIN_MISMATCH'
-  | 'CHAIN_MISMATCH'
-  | 'CHAIN_DEPTH_EXCEEDED'
-  | 'TARGET_ALREADY_VISITED'
-  | 'ROOT_BUDGET_EXCEEDED'
-  | 'PENDING_BUDGET_EXCEEDED'
-
 export class InquiryLedgerError extends Error {
-  constructor(readonly code: InquiryLedgerErrorCode) {
-    // Safe diagnostics: never echo a question, an answer, a purpose, a chat id
-    // or any other member's identity back to the caller that tripped the rule.
-    super({
-      INVALID_INQUIRY_INPUT: 'Invalid inquiry input.',
-      ILLEGAL_TRANSITION: 'Inquiry event is not legal for the current inquiry state.',
-      ORIGIN_MISMATCH: 'Declared inquiry origin does not match the executing origin.',
-      CHAIN_MISMATCH: 'Inquiry does not continue the referenced inquiry chain.',
-      CHAIN_DEPTH_EXCEEDED: 'Inquiry chain depth budget is exhausted.',
-      TARGET_ALREADY_VISITED: 'Inquiry target is already on this chain.',
-      ROOT_BUDGET_EXCEEDED: 'Inquiry budget for this chain root is exhausted.',
-      PENDING_BUDGET_EXCEEDED: 'Pending inquiry budget for this session is exhausted.',
-    }[code])
-    this.name = 'InquiryLedgerError'
-  }
+  readonly code = 'INVALID_INQUIRY_INPUT'
+  constructor() { super('Invalid retained inquiry record.'); this.name = 'InquiryLedgerError' }
 }
-function fail(code: InquiryLedgerErrorCode): never { throw new InquiryLedgerError(code) }
-function invalid(): never { fail('INVALID_INQUIRY_INPUT') }
+function invalid(): never { throw new InquiryLedgerError() }
 
 // ---------------------------------------------------------------------------
 // Strict runtime input validation. Every helper reads actual runtime data
@@ -284,20 +206,6 @@ function audience(input: unknown): InquiryAudience {
   return Object.freeze({ kind: 'local-session' as const, sessionId: identifier(value.sessionId) })
 }
 
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
-
-// ---------------------------------------------------------------------------
-// Pure keys and budget predicates.
-// ---------------------------------------------------------------------------
-
-/** Exact identity including generation: a rebuilt child is a different member. */
-export function inquiryMemberKey(input: unknown): string {
-  const value = scope(input)
-  return value.kind === 'main'
-    ? `main:${value.sessionId}`
-    : `child:${value.locusId}:${value.generation}:${value.sessionId}`
-}
-
 /**
  * Circle position without generation.
  *
@@ -308,30 +216,6 @@ export function inquirySeatKey(input: unknown): string {
   const value = scope(input)
   return value.kind === 'main' ? `main:${value.sessionId}` : `child:${value.locusId}`
 }
-
-export function inquiryRootHasCapacity(existing: unknown): boolean {
-  return integer(existing) < limits.maxInquiriesPerRoot
-}
-
-export function inquirySessionHasCapacity(pending: unknown): boolean {
-  return integer(pending) < limits.maxPendingPerSession
-}
-
-export function inquiryTargetIsUnvisited(visited: unknown, target: unknown): boolean {
-  const seats = items(visited, limits.maxChainEdges + 1).map(inquirySeatKey)
-  return !seats.includes(inquirySeatKey(target))
-}
-
-export function isTerminalInquiryStatus(status: unknown): boolean {
-  // `expired` remains terminal solely as historical v12 evidence. No transition
-  // in the current machine can create it.
-  return status === 'expired' || (status !== 'queued' && status !== 'executing' && status !== 'answered'
-    && INQUIRY_STATUSES.includes(status as InquiryStatus))
-}
-
-// ---------------------------------------------------------------------------
-// Records.
-// ---------------------------------------------------------------------------
 
 const recordKeys = [
   'id', 'requester', 'target', 'circleParentSessionId', 'question', 'purpose',
@@ -406,161 +290,4 @@ export function parseInquiry(input: unknown): InquiryRecord {
     diagnostics: Object.freeze(items(value.diagnostics, limits.diagnostics).map(diagnostic)),
     droppedDiagnostics: integer(value.droppedDiagnostics),
   })
-}
-
-/** Audience may narrow to unknown, never widen past the origin it is bound to. */
-function checkAudience(value: InquiryAudience, bound: InquiryOrigin, parent: InquiryRecord | null): void {
-  if (value.kind === 'unknown') return
-  if (bound.kind === 'feishu-delivery' && value.kind !== 'feishu-chat') invalid()
-  if (bound.kind === 'local' && value.kind !== 'local-session') invalid()
-  if (bound.kind === 'inquiry' && !same(value, parent?.audience)) invalid()
-}
-
-/**
- * Calculate one immutable queued inquiry from a model request plus Host facts.
- *
- * Both arguments are validated as actual runtime input. The trace is derived
- * from the Host-supplied ancestor, never from the request: an inquiry-origin
- * inquiry cannot mint a new root to escape the accumulated budget, and a member
- * already on the chain cannot be asked again. Throws InquiryLedgerError; never
- * mutates caller-owned objects. The caller MUST still persist this record and
- * enforce the counts it passed in atomically — the counts are a snapshot, and
- * only the store decides which concurrent candidate actually takes a slot.
- */
-export function createInquiry(request: unknown, context: unknown): InquiryRecord {
-  const asked = object(request, ['target', 'question', 'purpose', 'declaredOrigin'])
-  const facts = object(context, [
-    'inquiryId', 'requester', 'circleParentSessionId', 'origin', 'audience',
-    'createdAt', 'parent', 'rootInquiryCount', 'pendingCount',
-  ])
-  const circleParentSessionId = identifier(facts.circleParentSessionId)
-  const id = identifier(facts.inquiryId)
-  const requester = scope(facts.requester, circleParentSessionId)
-  const target = scope(asked.target, circleParentSessionId)
-  const question = text(asked.question, limits.questionLength)
-  const purpose = text(asked.purpose, limits.purposeLength)
-  const createdAt = integer(facts.createdAt)
-  const boundOrigin = origin(facts.origin)
-  const boundAudience = audience(facts.audience)
-  const rootInquiryCount = integer(facts.rootInquiryCount)
-  const pendingCount = integer(facts.pendingCount)
-  const parent = facts.parent === null ? null : parseInquiry(facts.parent)
-
-  // A requester may restate its origin, but only truthfully. Feishu work cannot
-  // be relabelled as private local work to widen what an answer may contain.
-  if (asked.declaredOrigin !== null && !same(origin(asked.declaredOrigin), boundOrigin)) fail('ORIGIN_MISMATCH')
-
-  if ((boundOrigin.kind === 'inquiry') !== (parent !== null)) fail('CHAIN_MISMATCH')
-  if (parent !== null) {
-    if (boundOrigin.kind !== 'inquiry' || boundOrigin.parentInquiryId !== parent.id) fail('CHAIN_MISMATCH')
-    if (parent.circleParentSessionId !== circleParentSessionId) fail('CHAIN_MISMATCH')
-    // Only a dispatched ancestor can branch: its target may ask onward, and its
-    // requester may continue the chain once an answer came back. A queued or
-    // failed ancestor is not an edge anyone is standing on.
-    if (parent.status !== 'executing' && parent.status !== 'answered' && parent.status !== 'result-delivered') fail('CHAIN_MISMATCH')
-    const seat = inquirySeatKey(requester)
-    if (seat !== inquirySeatKey(parent.target) && seat !== inquirySeatKey(parent.requester)) fail('CHAIN_MISMATCH')
-  }
-  checkAudience(boundAudience, boundOrigin, parent)
-
-  const rootInquiryId = parent === null ? id : parent.trace.rootInquiryId
-  const depth = parent === null ? 1 : parent.trace.depth + 1
-  if (depth > limits.maxChainEdges) fail('CHAIN_DEPTH_EXCEEDED')
-
-  const inherited = parent === null ? [requester] : [...parent.trace.visited]
-  if (!inquiryTargetIsUnvisited(inherited, target)) fail('TARGET_ALREADY_VISITED')
-  const visited = Object.freeze([...inherited, target])
-
-  if (!inquiryRootHasCapacity(rootInquiryCount)) fail('ROOT_BUDGET_EXCEEDED')
-  if (!inquirySessionHasCapacity(pendingCount)) fail('PENDING_BUDGET_EXCEEDED')
-
-  return Object.freeze({
-    id, requester, target, circleParentSessionId, question, purpose,
-    origin: boundOrigin, audience: boundAudience,
-    trace: Object.freeze({ rootInquiryId, depth, visited }),
-    createdAt,
-    // Accepted only means accepted; it never means answered.
-    status: 'queued' as const, statusAt: createdAt, reason: null,
-    appliedEventIds: Object.freeze([]), diagnostics: Object.freeze([]), droppedDiagnostics: 0,
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Transitions.
-// ---------------------------------------------------------------------------
-
-/**
- * The whole machine. 'needs-review' is reachable only from a state that was
- * actually dispatched, and nothing leads out of it: a dispatched-but-unknown
- * outcome can never be converted into a success by replaying events.
- */
-const transitions: Readonly<Record<InquiryEventType, { readonly from: readonly InquiryStatus[]; readonly to: InquiryStatus }>> = Object.freeze({
-  dispatch: { from: ['queued'], to: 'executing' },
-  answer: { from: ['executing'], to: 'answered' },
-  'deliver-result': { from: ['answered'], to: 'result-delivered' },
-  reject: { from: ['queued', 'executing'], to: 'rejected' },
-  unavailable: { from: ['queued', 'executing'], to: 'unavailable' },
-  cancel: { from: ['queued', 'executing', 'answered'], to: 'cancelled' },
-  'needs-review': { from: ['executing', 'answered'], to: 'needs-review' },
-})
-/** These three are the reason-free progress events. */
-const progressEvents: readonly InquiryEventType[] = Object.freeze(['dispatch', 'answer', 'deliver-result'])
-
-function parseEvent(input: unknown): InquiryEvent {
-  const value = object(input, ['type', 'eventId', 'at', 'reason'])
-  const type = value.type as InquiryEventType
-  if (!Object.prototype.hasOwnProperty.call(transitions, type) || typeof type !== 'string') invalid()
-  const reason = value.reason === null ? null : reasonCode(value.reason)
-  // A failure must say why in a stable code; a success must not carry a reason.
-  if (progressEvents.includes(type) === (reason !== null)) invalid()
-  return Object.freeze({ type, eventId: identifier(value.eventId), at: integer(value.at), reason })
-}
-
-/**
- * Apply one Host event to an inquiry, returning a new frozen record.
- *
- * Re-applying an event that already reached the current status is a no-op that
- * returns an equal record: a redelivered dispatch, answer or failure cannot
- * double-advance the machine or overwrite the first recorded outcome. An
- * illegal transition — including any attempt to leave a terminal status or to
- * move time backwards — throws ILLEGAL_TRANSITION. Elapsed wall time is never
- * a transition condition. This module decides legality only; the store must still
- * commit the result together with its own dedup log.
- */
-export function applyInquiryEvent(record: unknown, event: unknown): InquiryRecord {
-  const current = parseInquiry(record)
-  const applied = parseEvent(event)
-  const { from, to } = transitions[applied.type]
-
-  // Idempotence first: the same outcome, however it is redelivered, changes nothing.
-  if (to === current.status) return current
-  if (current.appliedEventIds.includes(applied.eventId)) fail('ILLEGAL_TRANSITION')
-  if (!from.includes(current.status as InquiryStatus)) fail('ILLEGAL_TRANSITION')
-  if (applied.at < current.statusAt) fail('ILLEGAL_TRANSITION')
-  if (current.appliedEventIds.length >= limits.appliedEvents) invalid()
-
-  return Object.freeze({
-    ...current,
-    status: to, statusAt: applied.at, reason: applied.reason,
-    appliedEventIds: Object.freeze([...current.appliedEventIds, applied.eventId]),
-  })
-}
-
-/**
- * Retain a discarded event as an owner-visible diagnostic.
- *
- * A late or duplicate answer is evidence, not a state change: the status,
- * statusAt and reason are preserved exactly, so a terminal inquiry is never
- * revived, no continuation is triggered and no outbound message is implied.
- * Retention is bounded and the overflow is counted rather than silently lost.
- */
-export function recordInquiryDiagnostic(record: unknown, entry: unknown): InquiryRecord {
-  const current = parseInquiry(record)
-  const note = diagnostic(entry)
-  if (current.diagnostics.some(existing => existing.eventId === note.eventId)) return current
-  if (current.diagnostics.length >= limits.diagnostics) {
-    // Keep the earliest evidence; a flood cannot push the first fact out.
-    return Object.freeze({ ...current, droppedDiagnostics: current.droppedDiagnostics + 1 })
-  }
-  return Object.freeze({ ...current, diagnostics: Object.freeze([...current.diagnostics, note]) })
 }

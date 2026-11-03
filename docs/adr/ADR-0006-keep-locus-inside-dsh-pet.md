@@ -105,3 +105,9 @@
 ## 注记（2026-10-25）：消费协作内核承载台账与待办
 
 change `pet-locus-collab-integration` 让 Locus 的共享事实台账与待办改由 collab-kernel 协作空间承载（经 dsh-collab 的 `pet-locus` 接入），子会话直接使用 `collab_*` 工具，Pet 作为代理成员按 locusId 路由。这不改变本 ADR 的 Decision：Locus 未被提取，入口、代际、Delivery、受管 finish、飞书回复权、询问执行与管理面仍在 Pet 内；迁出的只是协作事实。本 ADR 所说的 `domain.transaction()` 跨表原子性对这部分事实不再适用，替代做法（Pet 先提交、再以确定 cmdId 写协作日志，按收据幂等）见该 change 的 design。
+
+## 后继说明（2026-11-03）：三层结构不改变 package 边界
+
+[ADR-0009](ADR-0009-locus-three-tier-structure.md) 记录 `locus-three-tier-structure` 的后继决定：干活主会话与 Pet 自建的 locus 主会话通过 dsh-collab 协作，每个入口的子会话直属 locus 主会话、首条业务消息到达时才创建。两位协作者都是普通会话成员；子会话不再直接获得 `collab_*`，待办由 Host 以 locus 主会话身份代写。2026-10-25 注记中的代理成员、戳与投影属于当时实现事实，本轮已退役；inquiry 也只保留只读历史，不再派发或续进。
+
+本 ADR 的「留在 dsh-pet 内」决定维持：新增 `locus_mains` 配对、入口代际、Delivery、权限核验、恢复与管理仍由 Pet 持有，协作事实仍由 collab-kernel 持有。v18 只新增配对表，旧行不改写；并未为提取插件引入通用持久化端口，也未兑现本 ADR 当时列举的所有平台命名清理。三层已有实现不等于已稳定运行：隔离/真实网络验收和常驻成本测量尚未执行，不能据此宣称已满足「落地并稳定运行」的重新评估触发条件。

@@ -1,0 +1,2 @@
+name: Locus 受限会话
+description: 白名单 preset，只含读写文件、搜索、Web 搜索、shell、Skill 目录与压缩，不含任何委派、workflow 与 agent 控制工具。

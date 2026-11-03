@@ -1,3 +1,5 @@
+# pet-locus-intent-triage Specification
+
 ## Purpose
 
 子会话按请求意图分流：信息交换当场答复，要求干活则把已查清的结论登记为待办移交所有者，避免只读权限下的改动请求无痕消失。配套一条不唤醒主会话的只读查阅路径（读写分离，缓解父会话争用），以及一本按主会话归属的共享事实台账——主会话与其 locus 之间显式登记的结构化结论，本期唯一条目类型是待办。
@@ -56,115 +58,15 @@
 - **WHEN** 后续新 Delivery 结合同一 child 历史仍无法判定意图
 - **THEN** 该新 Delivery 可按本要求独立发出至多一次澄清；限制按 Delivery 计数，系统不得在同一 Delivery 内重复追问
 
-### Requirement: caller-bound 只读父会话查阅不唤醒主会话
-
-系统 SHALL 为子会话提供一个只读工具，用于检索其 caller-bound 主会话**已落盘**的历史，以支持意图判定与问题排查。该路径 SHALL 是纯数据读取：直接读取持久日志，MUST NOT 重新进入主会话、唤醒它、向其投递消息、占用其运行槽或消耗其 turn。多个子会话 SHALL 可并发使用该工具而互不争用。
-
-工具 MUST NOT 接受任何会话、locus 或目标 selector。Host SHALL 从实际执行 caller 解析其唯一主会话；跨 locus、跨主会话、已失效关联与临时 subagent SHALL 收到统一拒绝，且 MUST NOT 泄露目标是否存在。
-
-检索结果 SHALL 被表述为对话事实，MUST NOT 构成持久授权：执行根、权限与工作约束仍只能由所有者在管理面显式确认后写入锚点。读取不到、无相关内容或宿主缺少冷读能力时 SHALL 如实报告未确认，MUST NOT 猜测，MUST NOT 降级为向主会话提问，也 MUST NOT 因此获得提问能力。
-
-#### Scenario: 主会话运行中仍可查阅
-- **WHEN** 主会话正在处理所有者的 GUI 工作，两个子会话同时检索其历史
-- **THEN** 两次检索都返回结果，主会话的运行不被打断、不排队、不新增待处理消息
-
-#### Scenario: 不接受目标参数
-- **WHEN** 子会话在调用中携带另一个会话或 locus 的标识
-- **THEN** 调用被拒绝，不按该标识检索，也不透露该目标是否存在
-
-#### Scenario: 读到的路径不等于写授权
-- **WHEN** 子会话从主会话历史中读到某条提及可写目录的对话
-- **THEN** 该事实不改变当前 locus 权限，提权仍需所有者确认锚点并通过现行派生
-
-#### Scenario: 缺少冷读能力时如实降级
-- **WHEN** 宿主未提供会话冷读能力
-- **THEN** 该工具以不可用呈现并说明原因，MUST NOT 猜测内容，也 MUST NOT 改为向主会话发问
-
-### Requirement: 共享事实台账按主会话归属并对同源只读开放
-
-系统 SHALL 维护一个按 `parentSessionId` 唯一定位的共享事实台账，承载该主会话与其 locus 之间显式登记的结论。台账 SHALL 由该主会话的 Locus 协作空间承载（collab-kernel 空间，经 dsh-collab 的 `pet-locus` 接入）：空间成员恰为主会话（普通成员，Leader）与代理成员 `pet`（`pet-locus` 托管，代表该主会话下全部 locus 子会话）。协作层 MUST NOT 感知入口、子会话与代际；子会话的身份以附加数据中的 `locusId` 戳表达，由 Pet 从执行会话派生。Pet MUST NOT 另存一份台账条目真相。台账 SHALL 是**主会话与其 locus 的共享事实**，MUST NOT 按 workspace、仓库或显式"项目"实体聚合，MUST NOT 跨主会话合并，也 MUST NOT 被表述为项目级知识库。
-
-台账 SHALL 只承诺三件事，并 MUST NOT 被解释为承诺统一的修订语义、生命周期或写入授权——那些由各类条目各自定义：
-
-1. **归属**：按 `parentSessionId` 唯一定位；空间在主会话已加载且已有 locus 时，由 Pet 以主会话的 Host 当前对象幂等建立、授权 `pet-locus` 并接纳 `pet`；主会话未加载时不为此恢复它，空间建立前子会话的协作工具与登记工具明确返回尚未就绪；最后一条条目进入终态后空间仍保留，locus 全部退役后 `pet` 成员仍在。
-2. **授权与可见范围**：主会话可读全部。当前有效 locus 子会话经协作工具读取时，SHALL 只看到主会话写的记录、自己写的记录、以及附加数据指向自己的记录；兄弟子会话写的记录在正常读取中 MUST NOT 可见（星形：需要时由主会话转述）。该隔离的目的是防止子会话误把兄弟的内容带进自己的入口，MUST NOT 被表述为防止两个有意配合的子会话借条目标识是否已占用、序号增量或错误码传递信息；子会话是同一所有者的 agent，不按对手建模。跨源、已失效关联与临时 subagent SHALL 收到统一拒绝，且 MUST NOT 泄露台账或条目是否存在。
-3. **命名空间**：条目按 `kind` 分区；本期唯一 kind 是待办；新增 kind MUST NOT 改变既有 kind 的语义、授权或生命周期。
-
-台账共享的 SHALL 只是显式登记的结构化条目。它 MUST NOT 成为共享兄弟子会话对话历史或枚举兄弟入口的旁路。
-
-#### Scenario: 兄弟子会话读不到彼此登记的结论
-- **WHEN** 同一主会话下的子会话 A 已登记一条带证据的待办，子会话 B 随后经 `collab_read` 读取空间
-- **THEN** B 读不到该条目；主会话经 `collab_read` 读到它及其来源戳
-
-#### Scenario: 跨主会话不可读
-- **WHEN** 另一主会话下的子会话尝试读取本台账
-- **THEN** 请求被统一拒绝，回执不表明该台账是否存在
-
-#### Scenario: 台账不随条目清空而消失
-- **WHEN** 台账内最后一条待办被所有者标记完成或放弃
-- **THEN** 台账记录保留，后续登记复用同一台账，不重新建立另一份
-
-#### Scenario: 新增条目类型不改既有语义
-- **WHEN** 将来引入待办之外的第二类条目
-- **THEN** 待办的授权、生命周期与字段语义不因此改变，既有条目无需改写
-
-#### Scenario: 换代后登记照旧归入同一代理
-- **WHEN** locus 从第 2 代切换到第 3 代，第 3 代 child 登记待办
-- **THEN** 条目作者为 `pet`，附加数据中的 `locusId` 与第 2 代登记的条目相同；空间成员集合不变，第 2 代 child 的协作工具调用被 `COLLAB_CALLER_UNAVAILABLE` 拒绝
-
-#### Scenario: 主会话未加载时不为建空间唤醒它
-- **WHEN** 首个 locus 挂到一个未加载的主会话，其 child 随即调用 `collab_status` 与 `pet_locus_track`
-- **THEN** 主会话不被恢复；两者都返回协作空间尚未就绪；Delivery 与回复照常
-
-### Requirement: 待办登记固定来源与回复去向且关联标识而非实例
-
-系统 SHALL 提供 caller-bound 的待办登记工具。工具 MUST NOT 接受任何 locus、chat、message、thread 或 target selector；Host SHALL 从实际执行 caller 与其唯一 current Delivery 解析全部关联事实与台账归属，任一不可证明时 fail closed。
-
-待办 SHALL 是 Locus 协作空间中由登记子会话经代理身份创建的 `request` 条目，承接方为主会话，`requiredAcks` 为空，承接方一对一指定、不引入认领；登记 MUST NOT 唤醒任何成员。以下固定事实与 `locusId` 戳 SHALL 存于条目的附加数据，创建后不可改写；证据摘要与详情以无损编码存于条目正文。登记时 SHALL 固定以下事实：`locusId`（稳定标识，用于表达问题来源）、登记时的 `generation`（历史事实，仅供审计，MUST NOT 参与寻址）、`endpoint` 即 `(chatId, threadId?)`（回复去向）、触发 `messageId`（可回跳并可按消息引用回复）与请求人。
-
-待办 SHALL 关联 locus **标识**而非 locus **实例**：代际更替、locus 重建、入口停止服务、主会话归档或群解散 MUST NOT 使待办消失、失效或被静默改写；其来源与去向仍可凭已固定的标识解析。待办归属 SHALL 跟随 `locusId` 与 `endpoint`，MUST NOT 跟随某一代 locus 的存续状态。
-
-登记 SHALL 携带子会话已查明的证据（定位、原因、建议）。证据 SHALL 是登记时刻的快照事实，MUST NOT 自动刷新，也 MUST NOT 被呈现为当前仍然成立的结论。
-
-#### Scenario: 工具不接受目标参数
-- **WHEN** 子会话在登记调用中携带 chat、message 或 locus 标识
-- **THEN** 调用被拒绝，Host 不采用模型提供的任何标识
-
-#### Scenario: 代际更替后待办仍可解析
-- **WHEN** 待办登记于 locus 第 2 代，该入口随后切换来源并产生第 3 代
-- **THEN** 待办仍然存在，其来源与去向凭已固定的 `locusId` 与 `endpoint` 解析，登记时的 `generation` 保留为历史事实
-
-#### Scenario: 入口退役不使待办消失
-- **WHEN** 待办所属 locus 已被解绑或退役
-- **THEN** 待办仍然存在且可被所有者处置，MUST NOT 被自动关闭或删除
-
-#### Scenario: 无唯一 current 时拒绝登记
-- **WHEN** 调用发生在没有唯一 current Delivery 的执行中
-- **THEN** 登记被拒绝，不创建待办，也不猜测目标
-
-#### Scenario: 登记不唤醒主会话
-- **WHEN** 子会话登记一条待办
-- **THEN** 空间新增一条承接方为主会话、作者为 `pet`、附加数据含该 locus 戳的 request，提交中不含任何唤醒，主会话不开始新轮次
-
-#### Scenario: 主会话修订条目不改变登记证据
-- **GIVEN** 子会话登记待办，证据摘要为"错误位于 A"
-- **WHEN** 主会话经协作工具把该条目的标题与正文改为"已修复"，随后所有者受理
-- **THEN** 管理面与跟进正文中的证据仍为"错误位于 A"
-
-#### Scenario: 时间在重启后保持不变
-- **GIVEN** 时钟为 1000 时登记待办，为 5000 时所有者受理
-- **WHEN** Host 重启后读取该待办
-- **THEN** 登记时间为 1000、状态变更时间为 5000；受理的重试不改变 5000
-
 ### Requirement: 待办生命周期与 Delivery 结算解耦
 
 登记待办 MUST NOT 使该 Delivery 长期保持 current。登记完成后，子会话 SHALL 经既有 `pet_locus_finish` 以 `reply` 当场结算并回执受理事实，队列按既有规则前进。
 
 待办自身 SHALL 长期存活，其状态变化 MUST NOT 产生新的飞书出站正文、表情或 Delivery。系统 MUST NOT 把待办的未完成状态表述为对应请求尚未答复，也 MUST NOT 把 Delivery 的已结算表述为该事项已完成。
 
-待办 SHALL 具备可推进的状态，至少区分待处理、已受理、已完成与已放弃；状态变化 SHALL 记录操作时间。状态与 request 进度一一对应：待处理 = `open`、已受理 = `accepted`、已完成 = `done`、已放弃 = `rejected`。状态 SHALL 只经以下路径改变：(a) 所有者经管理面处置，由 Pet 以 `pet-locus` 托管方身份代为记账，不唤醒任何成员；(b) 登记方就其自己登记的待办请求执行并投递成功后，由 Pet 代为记为已受理；(c) 主会话作为承接方自行推进（`open → accepted|rejected`、`accepted → done|rejected`）。终态通知发给作者 `pet`，Pet 按附加数据路由到登记它的 locus 并登记，MUST NOT 因此开启子会话轮次或产生飞书出站。登记方子会话 MUST NOT 自行推进状态。
+待办 SHALL 具备可推进的状态，至少区分待处理、已受理、已完成与已放弃；状态变化 SHALL 记录操作时间。状态与 request 进度一一对应：待处理 = `open`、已受理 = `accepted`、已完成 = `done`、已放弃 = `rejected`。状态 SHALL 只经以下路径改变：(a) 所有者经管理面处置，由 Pet 以 `pet-locus` manager 身份代为记账，不唤醒任何成员；(b) 干活主会话作为承接方自行推进（`open → accepted|rejected`、`accepted → done|rejected`）。终态通知按内核规则发给条目作者 locus 主会话，MUST NOT 因此开启子会话轮次或产生飞书出站。登记方子会话 MUST NOT 自行推进状态。
 
-已受理 SHALL 表示该事项已实际开工。主会话自行受理时它本人就是执行者，不需要投递；除此之外，系统产生该状态的唯一路径 SHALL 是一次成功完成投递的操作，无论其由所有者受理还是由登记方请求执行触发。系统 MUST NOT 把已受理表述为仅完成了一次标记，也 MUST NOT 向所有者或登记方提供任何只改状态而不投递的动作。
+已受理 SHALL 表示该事项已实际开工。主会话自行受理时它本人就是执行者，不需要投递；除此之外，系统产生该状态的唯一路径 SHALL 是所有者受理触发的一次成功完成的投递。系统 MUST NOT 把已受理表述为仅完成了一次标记，也 MUST NOT 向所有者提供任何只改状态而不投递的动作。
 
 系统 MUST NOT 依据一条待办处于已受理来断言其跟进任务确已送达；送达与否由该次受理操作的一次性回执表达，不由行状态反推。据此，来源不明的已受理记录 MUST NOT 破坏任何不变量。
 
@@ -183,13 +85,13 @@
 - **THEN** 系统不向原飞书入口发送任何正文或表情
 
 #### Scenario: 子会话不能推进待办状态
-- **WHEN** 子会话经 `collab_advance_request` 尝试把一条自己登记的待办标记为已受理、完成或放弃
-- **THEN** dsh-collab 在入口以 `COLLAB_ITEM_NOT_FOUND` 拒绝（承接方不是它），不调用内核，状态不变
+- **WHEN** 子会话尝试推进一条自己登记的待办
+- **THEN** 子会话没有任何可推进待办的工具，状态不变
 
 #### Scenario: 主会话做完后自行标记完成
-- **GIVEN** 一条待办经所有者受理已为已受理，主会话完成了跟进工作
-- **WHEN** 主会话经 `collab_advance_request` 推进为 `done`
-- **THEN** 待办在管理面显示为已完成；终态通知经 Pet 路由登记到登记它的 locus，该 locus 不开启轮次，系统不向飞书发送任何内容
+- **GIVEN** 一条待办经所有者受理已为已受理，干活主会话完成了跟进工作
+- **WHEN** 干活主会话经 `collab_advance_request` 推进为 `done`
+- **THEN** 待办在管理面显示为已完成；终态通知发给 locus 主会话，子会话不开启轮次，系统不向飞书发送任何内容
 
 #### Scenario: 不经受理直接了结
 - **WHEN** 所有者对一条待处理的待办直接标记已完成或已放弃
@@ -381,36 +283,6 @@
 - **WHEN** 一条待办已受理且其跟进任务仍在目标会话队列中
 - **THEN** 管理面呈现为已投递/排队中，不呈现为已完成
 
-### Requirement: 子会话可在登记后请求执行且与所有者受理共用同一链路
-
-系统 SHALL 提供 caller-bound 的工具，使登记待办的子会话可以就该待办请求执行。该工具 MUST NOT 接受任何 locus、chat、message、thread 或 target selector；Host SHALL 从实际执行 caller 与其唯一 current Delivery 解析全部关联事实，任一不可证明时 fail closed。子会话 MUST NOT 就并非由其登记的待办请求执行。
-
-该工具的语义 SHALL 是「请求执行」，MUST NOT 被定义为「转交主会话」。执行位置 SHALL 由执行目标解析决定，而非由工具契约固定；当解析规则将来产生主会话之外的结果时，该工具的语义与调用方式 SHALL 保持不变。
-
-请求执行 SHALL 与所有者受理共用同一条下游链路：同一次执行目标解析、同一正文组装规则、同一投递语义与同一组投递结局。请求执行成功后该待办 SHALL 进入已受理，系统 MUST NOT 为此引入区别于所有者受理的第五种状态。
-
-该工具 MUST NOT 使模型获得改写待办状态的一般能力：它只能就自己登记的待办、且只能在伴随一次真实投递的前提下使其进入已受理，MUST NOT 用于标记完成、标记放弃或推进任何其它待办的状态。
-
-#### Scenario: 子会话登记后请求执行
-- **WHEN** 子会话登记一条待办后就该待办请求执行
-- **THEN** 系统按执行目标解析投递该跟进任务，该待办进入已受理
-
-#### Scenario: 请求执行与受理走同一链路
-- **WHEN** 分别由子会话请求执行与由所有者受理触发同一类待办的投递
-- **THEN** 两者经同一次执行目标解析、产生同样结构的正文、并使用同一组投递结局
-
-#### Scenario: 工具不接受目标选择
-- **WHEN** 子会话在请求执行时尝试提供任何 locus、会话、群或话题目标
-- **THEN** 该请求被拒绝，系统不按模型提供的目标投递
-
-#### Scenario: 不能就他人登记的待办请求执行
-- **WHEN** 子会话就一条并非由其登记的待办请求执行
-- **THEN** 该请求被拒绝，不产生投递
-
-#### Scenario: 请求执行不赋予改写状态的一般能力
-- **WHEN** 子会话尝试经该工具把待办标记为已完成或已放弃
-- **THEN** 该请求被拒绝，状态仅可经所有者管理面推进至终态
-
 ### Requirement: 协作层不可用时台账与待办 fail closed
 
 dsh-collab 服务缺失、`pet-locus` 未能接入或接入句柄失效时，待办登记、请求执行与所有者受理 SHALL 明确返回协作层不可用，子会话的协作工具调用 SHALL 因 Pet 不认领而被拒绝；系统 MUST NOT 写入 Pet 本地替代记录，也 MUST NOT 把不可用呈现为空台账。Delivery、`pet_locus_reply`、`pet_locus_finish`、代际与入口管理 MUST NOT 因此受影响。协作层恢复后 Pet SHALL 重新接入、重建路由投影并补齐空间与 `pet` 成员。
@@ -443,67 +315,71 @@ dsh-collab 服务缺失、`pet-locus` 未能接入或接入句柄失效时，待
 - **WHEN** 所有者在管理面查看它，并经接口对它发起受理或放弃
 - **THEN** 管理面显示旧版标记与跳转、不显示动作；接口请求被拒绝，本地记录与台账都不变
 
-### Requirement: 协作层发给代理的记录按 locus 路由
+### Requirement: 协作空间由干活主会话与 locus 主会话两个普通成员组成
 
-发给成员 `pet` 的需回复消息与作者为 `pet` 的 request 终态通知，经 dsh-collab 中继 provider 交给 Pet 时，Pet SHALL 按以下顺序确定目标 locus 并登记：(1) 沿 `ref` 链向前追溯，取离本记录最近的带 `locusId` 戳的记录；(2) 正文中恰好出现一个 `locus-<16 位十六进制>` 不透明名且等于本主会话下某个入口的戳时取该入口；(3) 否则登记为无法路由并在管理面可见。Pet MUST NOT 猜测目标。本变更中路由结果只登记，MUST NOT 开启子会话轮次或产生飞书出站。
+每个干活主会话 SHALL 对应恰一个 active 的 Locus 协作空间（更换 locus 主会话后旧空间保留为历史空间，其待办仍列出并可处置），由 Pet 以 locus 主会话身份经 dsh-collab 句柄 `actAs` 建立：locus 主会话为首成员与 Leader，随后授权 Pet 的接入方 channel 为 manager、邀请干活主会话为普通成员（`memberTrust: true` 时代为加入，干活主会话因此被唤醒一次）。空间成员 SHALL 恰为这两个普通会话；MUST NOT 有代理成员，子会话 MUST NOT 是成员，也 MUST NOT 拥有任何 `collab_*` 工具。条目真相只在协作空间中，Pet MUST NOT 另存。条目可见性 SHALL 由 Pet 侧按 `ext.pet.entry`（稳定入口身份）过滤，只作用于 Pet 工具 `locus_context` 的输出；两个成员经 `collab_*` 读取时看到全部条目。
 
-#### Scenario: 回应消息沿 ref 路由到最近的戳
-- **GIVEN** locus A 的记录 Ra；主会话的条目 I `ref` Ra；主会话发给 `pet` 的消息 M1 `ref` I。locus B 的记录 Rb；主会话发给 `pet` 的消息 M2 `ref` Rb
-- **WHEN** Pet 收到 M1、M2 的投递
-- **THEN** M1 越过无戳的 I 登记为发给 A，M2 登记为发给 B；此外 B 以 `ref` 指向 Ra 发消息被 dsh-collab 以 `COLLAB_BAD_REF` 拒绝（写目标授权使同一 ref 链上不会出现两个不同 locus 的戳）
+#### Scenario: 建空间并邀请干活主会话
+- **GIVEN** Pet 为干活主会话 W 新建了 locus 主会话 M，`memberTrust: true`
+- **WHEN** 第一个入口建立完成
+- **THEN** 空间日志依次含 `space/created`（Leader 绑定 `dsh-session:M`）、`manager/allowed{pet-locus}`、`member/invited` 与 `member/joined`（绑定 `dsh-session:W`）；成员集合恰为这两个会话
 
-#### Scenario: 正文点名
-- **GIVEN** 主会话发给 `pet` 的消息无 `ref`，正文含 locus B 的不透明名
-- **WHEN** Pet 收到投递
-- **THEN** 登记为发给 B
+#### Scenario: 子会话没有协作工具
+- **WHEN** 读取任一 locus 子会话的已发布工具面
+- **THEN** 不含任何 `collab_*` 工具；子会话以伪造参数调用 `collab_read` 返回工具不存在
 
-#### Scenario: 无法路由不猜
-- **GIVEN** 主会话发给 `pet` 的消息无 `ref`、正文无不透明名
-- **WHEN** Pet 收到投递；随后任一子会话 `collab_read`
-- **THEN** 登记为无法路由，管理面可见；该消息对任何子会话不可见
+#### Scenario: 干活主会话不可邀请时不建入口
+- **GIVEN** W 在拒绝名单中
+- **WHEN** Pet 尝试为 W 建立空间
+- **THEN** 邀请返回 `COLLAB_ADDRESS_UNCLAIMED`，入口建立失败并回执所有者，不留下只有 locus 主会话的空间被当作就绪
 
-#### Scenario: 零 active child 时终态仍登记
-- **GIVEN** 待办已受理，其 locus 的最后一个 child 已退役
-- **WHEN** 主会话把该 request 推进为 `done`
-- **THEN** 协作层对 `pet` 的投递成功，Pet 登记该终态属于该 locus（历史），不开启任何轮次
+### Requirement: 待办由 Host 以 locus 主会话身份代写
 
-### Requirement: 迁移前后待办行为等价
+子会话登记待办（`pet_locus_track`）时，Host SHALL 从实际执行 caller 与其唯一 current Delivery 解析全部关联事实，并经 `actAs(locus 主会话)` 创建 `request` 条目：承接方为干活主会话，`requiredAcks` 为空，`ext.pet` 固定 `{entry, generation, endpoint, messageId, requester}`（`entry` 为稳定入口身份，`generation` 仅供审计），创建后不可改写；证据以无损编码存于正文。登记 MUST NOT 唤醒任何成员。工具 MUST NOT 接受任何 locus、chat、message、thread 或目标参数；任一事实不可证明时 fail closed。待办 SHALL 关联入口身份而非某一代实例：代际更替、入口停止服务或 locus 主会话更换都 MUST NOT 使其消失或被改写。
 
-除本变更 MODIFIED 与 ADDED 的要求明确改变的行为外，待办的对外行为 SHALL 与迁移前一致。以下现行要求本变更不修改，其全部场景 SHALL 在协作层承载下照常成立：「管理面呈现待办并提供由固定标识派生的跳转」「受理即开工并向主会话投递带上下文的跟进任务」「受理投递按队列语义接入主会话且不打断在途工作」「子会话可在登记后请求执行且与所有者受理共用同一链路」。
+#### Scenario: 代写条目的作者与附加数据
+- **WHEN** 第 2 代子会话登记一条待办
+- **THEN** 空间新增一条 actor 为 locus 主会话成员名、承接方为干活主会话、`ext.pet.entry` 为该入口稳定身份、`ext.pet.generation` 为 2 的 request，提交不含 `dispatch/intended`
 
-等价 SHALL 由同一组输入分别在迁移前存储与协作层存储上运行来判定。比较对象为：`pet_locus_track` 与 `pet_locus_request_execution` 返回给模型的内容、Host 组装的跟进正文、受理回执的结局与执行目标、管理面视图的字段与动作说明。两次运行 SHALL 使用同一时钟，比较时 SHALL 只归一化条目标识；证据文本与时间 MUST NOT 被归一化。
+#### Scenario: 工具不接受目标参数
+- **WHEN** 子会话在登记调用中携带 chat、message 或入口标识
+- **THEN** 调用被拒绝，不创建条目
 
-#### Scenario: 同一流程在新旧存储上输出一致
-- **GIVEN** 同一主会话下 child A 登记待办 T1、child B 登记 T2；所有者受理 T1（目标空闲），A 就另一待办请求执行（目标忙），所有者放弃 T2
-- **WHEN** 该流程分别在迁移前存储与协作层存储上运行
-- **THEN** 两次运行的工具返回、跟进正文、回执结局与执行目标、管理面视图在归一化条目标识后逐字节相同
+#### Scenario: 无唯一 current 时拒绝
+- **WHEN** 调用发生在没有唯一 current Delivery 的执行中
+- **THEN** 登记被拒绝，不创建条目
 
-#### Scenario: 证据边界值在新旧存储上逐字段一致
-- **GIVEN** 分别登记以下待办：摘要 300 字符；摘要含换行；详情含换行与引号、反斜杠；详情为空；摘要恰为 512 字符
-- **WHEN** 流程在新旧两种存储上各运行一次并受理其中一条
-- **THEN** 每条待办的摘要与详情在管理面视图中逐字段相同，跟进正文逐字节相同
+#### Scenario: 更换 locus 主会话后待办仍在
+- **GIVEN** 入口 E 在 locus 主会话 M1 下登记了待办 T
+- **WHEN** M1 不可用，Pet 为同一干活主会话新建 M2 并迁移入口
+- **THEN** T 仍在原空间中且可被所有者处置；E 之后的登记写入 M2 所在的新空间，管理面同时列出两处待办
 
-#### Scenario: 并发受理在新旧存储上一致
-- **GIVEN** 同一待处理待办收到两个独立受理，二者都通过待处理检查且投递都成功，之后才写入状态
-- **WHEN** 该流程在新旧两种存储上各运行一次
-- **THEN** 两次运行中都恰有一个受理成功、另一个返回"跟进任务已投递，但状态写入失败"，待办最终为已受理
+### Requirement: 所有者处置待办经 manager 代为记账
 
-#### Scenario: 失败路径在新旧存储上一致
-- **GIVEN** 待办所属主会话已归档；另一条待办已受理
-- **WHEN** 分别对二者发起受理，流程在新旧两种存储上各运行一次
-- **THEN** 两次运行都在投递前失败、失败原因分类相同、两条待办的状态都不变、不产生投递；失败文本中指引模型调用 `pet_locus_ledger_read` 的句子在协作层存储上替换为指引 `collab_read`，这是本变更唯一允许的文本差异
+所有者经管理面受理、完成或放弃待办 SHALL 由 Pet 以 manager 身份经 `disposeManagedRequest` 记账，不唤醒任何成员；受理成功的唯一路径仍是一次成功完成的跟进投递（投递目标为干活主会话）。干活主会话作为承接方 SHALL 可自行推进。终态通知按内核规则发给条目作者 locus 主会话，MUST NOT 开启任何子会话轮次或产生飞书出站。
 
-### Requirement: 待办登记后的回复如实且待办工具失败反馈可执行
+#### Scenario: 所有者直接了结
+- **WHEN** 所有者对一条待处理的待办直接标记已完成
+- **THEN** 提交 actor 为 `manager:pet-locus`、不含 `dispatch/intended`，干活主会话没有收到跟进投递
+
+#### Scenario: 干活主会话自行完成
+- **GIVEN** 待办已受理
+- **WHEN** 干活主会话经 `collab_advance_request` 推进为 `done`
+- **THEN** 管理面显示已完成；没有子会话开始新轮次，没有飞书出站
+
+#### Scenario: 所有者受理投递失败不记为已受理
+- **GIVEN** 一条待办为待处理（`open`）
+- **WHEN** 所有者受理时，向干活主会话的跟进投递失败
+- **THEN** 待办保持 `open`，不写入 `accepted`，返回投递失败原因；所有者可再次受理
+
+### Requirement: 待办登记后的回复如实且登记失败反馈可执行
 
 child 把工作登记为待办并回复请求人时，其正文 SHALL 与**该待办当前的持久状态**一致：状态仍为未开始
 或已转交时，MUST NOT 声称工作已开始、正在执行或即将完成；MUST NOT 把未经确认的目标路径、目录或
 接收者表述为事实，不确定时 SHALL 明确说明不确定并请求确认。
 
-两个 caller-bound 待办工具——**登记（track）**与
-**请求执行（request execution）**——因参数、状态或依赖不可用而无法完成时，SHALL 返回**按操作
-区分**的可执行下一步：登记失败指出缺什么前置或先做什么；（child 读台账用 dsh-collab 的 `collab_read`，Pet 不提供台账读取工具，
-其失败文案不在 Pet 控制范围）；执行请求的标识不存在/非法/不属于该 caller 时指出先读取
-台账取得合法标识。MUST NOT 只返回"不存在/失败/不可用"这类不可执行结果，也 MUST NOT 枚举或
+caller-bound 待办登记工具（track）因参数、状态或依赖不可用而无法完成时，SHALL 返回**按操作
+区分**的可执行下一步：登记失败指出缺什么前置或先做什么；child 经 `locus_context` 读取本入口待办进度，其不可用时 SHALL 与"可用但没有待办"区分；MUST NOT 只返回"不存在/失败/不可用"这类不可执行结果，也 MUST NOT 枚举或
 泄露其它 locus、其它 child 或其它待办的标识。
 
 #### Scenario: 登记后回复与待办状态一致
@@ -518,6 +394,6 @@ child 把工作登记为待办并回复请求人时，其正文 SHALL 与**该�
 - **WHEN** 登记因参数非法、缺少前置（例如没有唯一 current Delivery）或依赖不可用而失败
 - **THEN** 返回可执行的操作特定指引（说明缺什么前置或应先做什么），且不枚举或泄露其它待办、其它 locus 的标识
 
-#### Scenario: 待办标识不可解析时给出下一步
-- **WHEN** 请求执行时使用的待办标识不存在、格式非法或不属于该 caller
-- **THEN** 返回失败并指出先读取台账取得标识或使用台账返回的标识重试，且不枚举其它待办标识
+#### Scenario: 待办进度不可读与没有待办可区分
+- **WHEN** 协作空间不可用时 child 调用 `locus_context`
+- **THEN** 返回可区分的失败原因与下一步，MUST NOT 以空列表呈现为"没有待办"

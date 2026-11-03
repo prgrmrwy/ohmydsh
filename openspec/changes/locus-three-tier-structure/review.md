@@ -1,110 +1,104 @@
-# Round 5 — 三层 locus 对抗评审
+# locus-three-tier-structure — Round 7 规划评审
 
-## Review Metadata
+## Metadata
 
-- Change：`locus-three-tier-structure`；schema：anvil；轮次：5。
-- 前轮：Round 4 — `APPROVE_WITH_CHANGES`，`CHANGES_APPLIED: yes`。
-- 评审者：codex / gpt-6-astra，fresh context 独立评审；未继续委派。
-- 范围：重新检查 proposal、design、六份 delta spec、tasks、test-plan、前轮修正、探针记录，以及与四个补丁相关的调用点、构建入口、守卫和校验器；不是仅复核前轮 findings。
-- 权限：只覆盖本报告，没有修改规划或实现；没有安装依赖、运行测试/探针、构建或部署。探针结果为提交记录，并非本轮复现；未独立重建官方 rc.2 运行图。以下区分静态证据、推导出的风险与尚需执行的验收。
-- 所有者已批准四个补丁退役，本轮不重问授权；`team-membership` 保留，`model-display` 不在改动范围。
-
-## Round-4 status
-
-两项均在规划层关闭，未发现回退：
-
-1. **M1 / callback 发布与失败补偿：已应用。** [惰性创建规范](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L38-L51)明确首轮认领之前发布 child/marker/current 与初始认领关联，API 返回不是发布触发器；已 committed 后用 durable 补偿而不是 staging abort。[任务 10.1](openspec/changes/locus-three-tier-structure/tasks.md#L61)包含 API 返回前首轮身份解析及 callback 发布后拒绝两个 red 场景。[探针结论](openspec/changes/locus-three-tier-structure/probes/agent-created-probe.md#L16)也不再把沿用身份桥等同于沿用原发布时序。
-2. **M2 / 默认通知的对象：已应用。** [上下文要求](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L303-L305)和[发现传播场景](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L343-L345)明确不得自动更新的是干活主会话，官方通知 locus 主会话为例外且不等于采纳；[任务 19](openspec/changes/locus-three-tier-structure/tasks.md#L115-L117)与[测试映射](openspec/changes/locus-three-tier-structure/test-plan.md#L89)已同步。
-
-以上是规划闭合，不是实现验收。
+- 轮次：round 7；时间基准：2026-11-03T19:30:58+08:00。
+- 性质：全量规划复审，结合当前实现检查设计可落地性；**不是实现完成审计**。
+- 上轮：round 6 `APPROVE_WITH_CHANGES`，`CHANGES_APPLIED: no`，历史上未闭合。本轮独立确认其 RC1–RC3 的规划补充已经出现；不倒改上轮状态，也不把本轮确认当成测试通过。
+- 范围：proposal、design、六组 delta specs、tasks、test-plan；当前 interrupted recovery 规范；worktree 内官方 rc.2 subagent 与 Pet 创建、首 prompt 桥、队列、持久化和恢复路径。
+- 约束：仅覆盖本报告；未修改规划正文或实现，未派发、未运行 git、安装、构建、部署或测试。
+- 假设：单机 Host 管理多个入口，每入口串行 Delivery；同一入口存在异步 claim、持久写入、补偿与进程重启边界。没有引入多机共享状态要求。
 
 ## Findings
 
 ### Critical
 
-无。没有发现需要推翻三层实体、重新引入 inquiry 或否定四补丁退役目标的证据。
+无。三层结构、普通协作成员与 actAs、独立子上下文、保守迁移和官方能力替换方向均可接受。没有理由恢复已决定退役的四个补丁或重开所有者已接受的 final-guard 时间窗。
 
 ### Moderate
 
-#### M1 — 将能力标记的唯一消费者误当成最终 guard 重验的唯一受益者，退役缺少非 inquiry 等价性证明
+#### M1 — 首图降级的业务例外已正确提出，但尚缺与首发布 WAL 的交接约束和故障验收
 
-**位置与错误前提。** [设计决策 11](openspec/changes/locus-three-tier-structure/design.md#L34)以 `supportsFinalToolGuardRecheck` 仅被 inquiry readiness 消费为由，将最终 guard 补丁归为 inquiry-only；同时声称 project-read 与 lark-cli 守卫都是“同步静态判定，不依赖该重验”。前半句的标记引用搜索成立，后面的语义结论不成立。
+**是什么。** [图片例外](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L40-L45)与[设计决策 3](../../../openspec/changes/locus-three-tier-structure/design.md#L26)正确要求原 Delivery 不失败、同代换新 child、文本仅重试一次。它不是普通的“再调一次 queue”：旧 child 已创建，回调可能已发布 current/执行身份，且相应恢复日志已经存在。
 
-**连接代码后的反证：**
+**具体问题。** 当前规划只说明“补偿 child、原子更新新预留与 backlog”，没有交代原 current 的已发布执行身份、旧 first-prompt 桥及旧 WAL 如何退出，新尝试如何取得一致快照，以及降级资格/次数跨恢复如何保持。[发布实现](../../../packages/dsh-pet/src/host/locus/persistence.ts#L2462-L2509)在回调中给 current 写入 executionId，并以 `first-child:${executionId}` 写 WAL；[一般回滚](../../../packages/dsh-pet/src/host/locus/persistence.ts#L2564-L2610)保留失败 current 的旧身份、将它终结，仅重定向其它未注入 backlog。[启动恢复](../../../packages/dsh-pet/src/host/locus/persistence.ts#L3236-L3254)又会按未完成旧 WAL 补偿其对应 current。不能直接复用这条“结算原请求”的路径来实现“保留原请求”的例外。
 
-- [工具运行体补丁](packages/dsh-pet/compat/subagent/newinquiry-tools-guard.patch#L13-L30)新增的是通用 `guardReason(exec)`，位置在异步 `tools/execute` wrapper 委托之后、`bodyInvoked` 和实际工具 body 之前。它没有 inquiry 条件，也不要求 guard 自身读取 capability marker。
-- [project-read 判定](packages/dsh-pet/src/host/locus/project-read-guard.ts#L201-L220)在每次调用时执行 `realpathSync`，按当时的物理路径决定是否越过允许根/进入禁止根；[安装点](packages/dsh-pet/src/host/locus/project-read-guard.ts#L223-L244)明确同时安装 early gate 和 final monotonic guard。函数同步不等于其读取的文件系统状态不可变。
-- 因而存在需要覆盖的具体时序：early gate 看到路径仍指向允许目录 → 异步执行 wrapper 暂停 → 路径的符号链接改指向禁止目录 → wrapper 调用 `next()`。现补丁会在 body 前重新做物理路径判定；直接退回没有这段重验的运行体会丢掉这一检查机会。这里指出的是已存在检查窗口的退化，并不声称该补丁解决了所有文件系统 TOCTOU，也不声称本轮已经动态复现泄露。
-- 影响审计还不能只限 Pet：[Worktree Session 守卫](packages/worktree-session/src/host/guard.ts#L49-L54)会依据 binding 的 `cleaned` 状态拒绝，[安装逻辑](packages/worktree-session/src/host/guard.ts#L133-L151)把终态拒绝交给 monotonic guard。它是另一个应检查的非 inquiry 消费者，不能通过搜索 inquiry marker 把它排除。
+此外，[控制器降级](../../../packages/dsh-pet/src/host/channel/locus-controller.ts#L1896-L1923)第二次 queue 仍闭包捕获旧 locus/child/pending；其[exact-current 检查](../../../packages/dsh-pet/src/host/channel/locus-controller.ts#L1876-L1894)包含旧 child 身份。仅原子换 reservation/backlog 而不交接原 current 与调用方快照，会在文本尝试前被正确地判为 stale；绕过此检查则破坏精确 Delivery 授权。若先迁移 current、后处理旧 WAL，中间崩溃还会让恢复面对不匹配的旧操作，不能把它猜成可重试。
 
-**验收缺口。** [覆盖说明](openspec/changes/locus-three-tier-structure/test-plan.md#L123-L128)目前明确四补丁没有 spec 场景，靠包不再替换、marker/annotation 不存在及 compat 测试把关，同时删除对应断言。然而[现有 verifier](packages/dsh-pet/compat/subagent/verify-isolated-loop.mjs#L73-L100)已经包含与 inquiry 无关的“guard 在 async wrapper 等待期间撤销”屏障模型。把该行为校验随 inquiry 校验一起删掉，再检查 marker 不存在，只证明补丁消失，不能证明保留中的安全语义仍成立。
+**影响。** 现有单个成功场景可以由纯内存一次性重试通过，却不检验“补偿后重启”“新 prompt 已尝试、结果未知”这两类持久边界。这里不是以未完成代码为缺陷，而是计划尚未明确这次例外与已有持久协议的接缝，实施者可能保留成功用例却破坏恢复或误结算原请求。
 
-**影响与严重度。** 本 change 的默认只读/项目路径隔离仍需成立，且 tools overlay 是共享运行图，不是仅挂在 inquiry 上。错误的退役理由会让实施者删除非 inquiry 守卫的最终检查而仍通过计划中的验收。归为 Moderate：这是可局部补齐的退役设计与回归门禁缺口，不是已经实施的生产漏洞，也无需改写三层架构。
-
-**最小修复。** 修正 inquiry-only 论证；给出退役后的非 inquiry 最终边界等价方案或精确 rc.2 证据，并把屏障回归列入 spec/tasks/test-plan。四补丁仍可按所有者决定退役，不要求机械保留原补丁，也不接受仅删除测试来宣布等价。
+**最小修复。** 不增加通用重试框架或新业务实体。在设计与任务中补一段现有 WAL/事务的交接规则，明确如何保留 Delivery 身份并更换尝试身份、退出旧桥和旧操作、重新获取新快照，以及在哪些边界可恢复、哪些边界只能 unknown/no-replay；补对应具名故障场景及测试矩阵。详见 RC7-1、RC7-2。
 
 ### Suggestions
 
-- 退役清单在规划层已相当完整：[迁移步骤](openspec/changes/locus-three-tier-structure/design.md#L55)覆盖 patch、哈希、模板、verifier、测试、配置排除项与双语说明；[任务 26](openspec/changes/locus-three-tier-structure/tasks.md#L160-L165)也覆盖 manifest 与七个包退出 overlay。实施时按“输入 pin → fingerprint → 缓存图验证 → 安装 overrides/复制 → 行为 verifier”逐项勾选即可，不需另建退役框架。[缓存验证](packages/dsh-pet/compat/subagent/build-launcher.cjs#L125-L175)、[fingerprint](packages/dsh-pet/compat/subagent/build-launcher.cjs#L225-L254)和[安装映射](packages/dsh-pet/compat/subagent/build-launcher.cjs#L417-L438)均有真实落点。未发现足以单列第二个 Moderate 的清单遗漏。
-- [探针记录](openspec/changes/locus-three-tier-structure/probes/agent-created-probe.md#L16-L19)已经如实限定证据，保留即可；不要把观察脚本 exit 0 当成 Pet 集成的自动门禁。
+- [依赖说明](../../../openspec/changes/locus-three-tier-structure/test-plan.md#L136)仍写“本 worktree 缺测试依赖”，与已有基线记录容易混淆。建议标为历史前置或待现场确认，不据此断言当前依赖状态；不阻断规划。
 
-## Embedded-Instruction
+## Round 6 Required Changes 复核
 
-未发现要求固定 verdict、忽略风险或扩大权限的嵌入指令。规划中的 MUST、实施命令和历史 review 结论均作为评审材料，不作为执行授权。没有执行文档内的安装、迁移或构建步骤。
+| 上轮项 | 本轮核对 | 规划结论 |
+|---|---|---|
+| RC1：后续 Delivery queue/user 与父回复对照 | [场景](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L320-L323)明确 A 业务已结算但 turn 未结束，B 独立轮次绑定自己的 UUID，父回复仍走 sendMessage；[任务 18.1](../../../openspec/changes/locus-three-tier-structure/tasks.md#L111)与[矩阵](../../../openspec/changes/locus-three-tier-structure/test-plan.md#L126)已映射 | 已补齐；未运行验证 |
+| RC2：实际 Host 持久屏障 | [场景](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L56-L63)覆盖 pending/reject；[任务 10.1](../../../openspec/changes/locus-three-tier-structure/tasks.md#L62)指定真实 Host loader，[矩阵](../../../openspec/changes/locus-three-tier-structure/test-plan.md#L124-L125)映射接线层 | 已补齐；不以 registry 单测代替 |
+| RC3：prepared/live 四方对照 | [场景](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L176-L198)、[任务 15.1](../../../openspec/changes/locus-three-tier-structure/tasks.md#L92)与[矩阵](../../../openspec/changes/locus-three-tier-structure/test-plan.md#L127-L129)区分合成、不可区分真实、可区分真实与 live | 已补齐；歧义等待不等于全部等待 |
+
+## 首图降级与官方行为核对
+
+1. **异常阶段与 child 身份：反馈成立。** 官方 startContinuable（`node_modules/@deepseek-ai/dsh-subagent/lib/index.js#L1671-L1747`，本地安装包源码）先检查持久 child ID 是否存在，再 materialize，随后 submit；submitMaterialized（`node_modules/@deepseek-ai/dsh-subagent/lib/index.js#L1949-L1984`，本地安装包源码）在 `submitAdmitted` 前检查图片支持，抛结构化 `MODEL_DOES_NOT_SUPPORT_IMAGES`，catch 释放 activation。释放运行体不等于删除持久会话，所以失败 ID 不可复用。容量拒绝不应被顺带轮换身份。
+2. **现有首图 fallback 确实会被一般补偿破坏。** [lazy creator](../../../packages/dsh-pet/src/host/locus/lazy-child.ts#L194-L212)先 unwind，再返回 image-route-unsupported；若已发布，[publication.unpublish](../../../packages/dsh-pet/src/host/locus/first-delivery-publication.ts#L37-L40)进入一般持久回滚，终结了本应降级的 current。新增例外有充分依据，不应删除 fallback 或把该错误一概当普通失败。
+3. **安全准入：方向正确。** 必须同时有 typed image、结构化错误和可证明未接受且未认领；不能凭错误文案、单纯“没读到 claim”或超时就重发。新场景末句已明确有 accepted/claimed 证据时不重放。正文“未被接受或认领”应按“两者均未发生”实施，不得解释成任一没有发生即可。
+4. **首 prompt 桥可保留。** [registry](../../../packages/dsh-pet/src/host/locus/first-prompt.ts#L63-L100)按 child 一次性关联 UUID；[Host hook](../../../packages/dsh-pet/src/index.ts#L1047-L1050)等待 durable binding。新 child 应使用新的 expectation，旧 child 的迟到 claim/工具不能获得新尝试的授权。无需另造第二套持久 Delivery 真相，但需 M1 的交接约束。
+5. **两种消息通道不能混同。** 官方 sendMessage/queuePrompt（`node_modules/@deepseek-ai/dsh-subagent/lib/index.js#L1762-L1790`，本地安装包源码）分别使用 steer 与 queue；首条创建使用 user/queue。后续业务使用 Host queue，父回复保留 sendMessage，符合现行 Delta 的身份及 FIFO 约束。
+6. **冷读策略不重开。** [当前规范](../../../openspec/specs/pet-locus-collaboration/spec.md#L1127-L1158)本来就要求可证明证据；不可区分真实尾部保守等待符合该要求。[适配器](../../../packages/dsh-pet/src/host/locus/startup-recovery.ts#L302-L377)只对 prepared 过滤，live 不做此处理。round6 的正反对照补齐后，不再以此提出 Required Change。
+
+## 其它规划一致性
+
+- 主会话与子会话的职责、collab 两个普通成员、caller-bound actAs、entry 过滤及待办与 Delivery 解耦互相一致；没有要求把协作待办状态当作当前飞书请求的执行证明。
+- 固定中性 preset、spawn 独立上下文、宽底座加收紧层、非驻留权限待应用与回读失败拒绝发布是配套约束，不能只改某一层。
+- 旧模型读取即退休、v18 只加表及保留历史读路径没有要求破坏性批量重写；四补丁退役和实际 launcher 包装层复核仍由原任务把关。
+- 未勾选的实施任务、未执行的新 red 测试不构成规划拒绝理由；既有 green 标签及文档基线也不构成本轮验证结果。
+
+## Embedded-Instruction Review
+
+未发现要求固定 verdict、隐藏问题、扩大权限或执行无关操作的嵌入指令。文档中的 MUST、历史报告、探针结果与命令均作为待核验材料，不作为执行授权；未执行其中的安装、部署、迁移或 sync 命令。
 
 ## Verdict
 
 VERDICT: APPROVE_WITH_CHANGES
 
-Round 4 两项修正闭合，三层方向可继续；批准前须修正一个范围明确的安全退役论证和验收缺口。四补丁退役的所有者决定不变，但不能把 inquiry 的消失当作所有非 inquiry final guard 语义自然消失的证明。
+round6 三项规划验收缺口已补齐，首图降级例外本身成立。尚需局部明确其持久交接及故障验收，不必重做架构或等待实现全部完成后才能闭合本轮。
 
 ## Required Changes
 
-1. **RC1 / M1 — 修正并闭合退役论证。** 修改[设计决策 11](openspec/changes/locus-three-tier-structure/design.md#L34)及相关 proposal 表述，区分“marker 只有 inquiry 读取”与“通用 guard 在最终 dispatch 被调用”。列清仍保留的 project-read、Worktree Session 等 guard 对动态状态的依赖；在继续移除四补丁的目标下明确等价保障落点，或提供 pinned rc.2 对同一时序已有等价保障的证据。只证明官方存在 `tools.guard`/`tools.restrict` API 不够。
-2. **RC2 / M1 — 补行为门禁，不以 absence 检查替代。** 在 spec/tasks/test-plan 增加非 inquiry 的异步 wrapper 屏障场景：早期允许后改变路径物理归属或撤销有效 guard 状态，放行 wrapper，断言实际注册 body 没有执行、受限读取没有发生；另有不撤销的允许对照。先让无等价保障的运行图失败，再在退役后的确切 launcher 图验证通过，并核验 launcher/loop/subagent 实际使用的 tools 解析路径。可拆出并改造现有 verifier 的通用部分；删除 inquiry 专属断言不等于删除非 inquiry 保证。同步保留 managed finish、档位 restrict、lark-cli 误用防线的既有回归，不把最终 guard 缺口夸大成这些机制全部失效。
+1. **RC7-1 / M1 — 明确图片例外的持久交接。** 在设计决策 3 与对应实施任务补充：按精确旧 Delivery/代际/child/执行身份验证未接受、未认领证明；在补偿完成前不开放新尝试，补偿失败 fail closed；保留原 Delivery ID、deadline、FIFO，并一致迁移原 current、新 reservation 与仅未注入 backlog。明确旧 first-prompt expectation 的退出、旧 first-child WAL 的终结与新尝试身份的衔接（可用新 executionId 或等价无冲突协议，不强制新表）；不得覆盖或挪用已发出 execution/inbox/turn 证据。调用方重新取得新 child/current 快照并继续执行 exact-current fence，不绕过旧检查。明确文本降级资格/已尝试事实如何跨重启保持，任何提交结果不明仍不重放，容量拒绝保留原 reservation。无需承诺崩溃后必定自动补发，但必须写清安全恢复或保守终结的边界。
+2. **RC7-2 / M1 — 为上述交接补具名验收并同步 delta/tasks/test-plan。** 最小覆盖：①旧 child 已回调发布后图片拒绝，文本调用使用新快照，通过真实创建/仓储/控制器接缝保留同一 current，backlog 不越过且旧桥/WAL 不再授权；②补偿失败不重试，补偿/身份轮换提交附近崩溃后恢复没有半迁移、不复用旧 ID；③文本尝试已经提交或结果不明时再次恢复不产生第三次提交，已有 accepted/claim/inbox 证据不能走例外；④容量拒绝仍保留原身份。可扩写现有图片测试组，不要求每个断点新建文件或另造框架；报告的是计划补充，不要求评审中实现测试。
 
 CHANGES_APPLIED: yes
 
-本轮只更新报告，未代为修改上述规划或实现。
+本轮只覆盖本报告，未代改上述 Required Changes。当前 targeted recheck 状态见下节；原 Findings 与 Required Changes 保留为 round7 首审记录。
+
+## Round 7 targeted recheck（2026-11-03）
+
+本次只对照原 RC7-1、RC7-2 读取当前规划，不重开 round6 RC1–RC3、已接受的四 patch 退役或 final-guard 窗口；未以在途实现未完成增加 Required Changes。实际落盘的首图交接说明在[设计决策 3](../../../openspec/changes/locus-three-tier-structure/design.md#L26)，决策 4 仍为结算通知；编号差异本身不是缺陷。
+
+- **RC7-1：交接规划已基本补齐，不另增要求。** [设计决策 3](../../../openspec/changes/locus-three-tier-structure/design.md#L26)规定结构化投递前拒绝证明与 exact-current、先补偿旧 child、失败/不确定留恢复债务、旧桥/WAL 退出、新执行身份、持久文本标记及重取 current/locus/child/pending 快照；[任务 10.2](../../../openspec/changes/locus-three-tier-structure/tasks.md#L63)明确 current/reservation/backlog/WAL 原子交接顺序。[delta](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L40-L62)保留同一 Delivery/deadline/FIFO、不复用失败 child、有接受/认领或不确定证据不重放、capacity 保原身份。上述约束结合原 RC7-1 的禁止挪用执行证据要求足以指导实施，本次不因其未逐字重复原 RC 而新增阻断项。
+- **RC7-2：四个具名故障场景及映射已补，但原第①项的接缝验收范围仍未明确。** [delta 四场景](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L47-L62)分别覆盖新快照交接、补偿失败/提交附近崩溃、跨重启最多一次文本、已接受或认领不重放（含 capacity 保原身份）；[原安全降文本场景](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L42-L45)也保留。[任务 10.1](../../../openspec/changes/locus-three-tier-structure/tasks.md#L62)与[测试矩阵](../../../openspec/changes/locus-three-tier-structure/test-plan.md#L123-L127)列出了这些名称。然而当前文本未要求首图组通过**真实创建/仓储/控制器接缝**断言原 current 保留、backlog 不越过、旧桥/WAL 不再授权；任务中唯一明确真实 Host 集成的限定仅覆盖另两条持久绑定场景，不能代替本项。
+
+**唯一剩余 Required Change（原 RC7-2①，不是新要求）：** 在现有首图验收计划中明确上述真实创建/仓储/控制器接缝及断言。当前任务 10.1 将首图组归入 `locus-lazy-child.test.ts`，矩阵则指向 `locus-first-image-fallback.test.ts`；明确接缝覆盖时同时统一其归属即可，不要求新增文件、框架或在本次审查中实现/运行测试。
+
+**Recheck 结论：尚未完全闭合，保持 `VERDICT: APPROVE_WITH_CHANGES` 与 `CHANGES_APPLIED: no`。** 本结论基于本次实际读取的新文档证据一次人工核对，未调用其它模型寻求裁决。未做实现验收：未检查或修改实现，未运行测试、typecheck、构建、部署、git、安装、严格 OpenSpec 校验或故障注入；现有 red/green 标签不作为本次测试结果。
 
 ## Rebuttals
 
-### Required Changes 复核（round 5，2026-11-03）
+- **“规范已经写了原子更新和重试一次，足够了。”** 已足以规定正常业务结果；尚不足以规定旧发布 WAL、原 current 执行身份和新快照的交接。M1 指出的都是当前真实路径，不是泛化灾难假设；补一段协议及少量故障断言即可。
+- **“这是未实现代码的问题，不应阻断规划。”** 当前代码只用于证明接缝存在，不要求把它在本轮修好。Required Changes 是补规划中的恢复边界和验收 oracle，不是签署实现完成。
+- **“使用新 child ID 就解决了。”** 新 ID 解决官方 DUPLICATE_CHILD；原 current、闭包快照、首 prompt 桥和旧 WAL 仍必须一起衔接。不能用删除 exact-current 检查解决 stale。
+- **“没有 claim 就可以安全重试。”** 不采纳。已提交但尚未认领同样可能执行；结构化拒绝阶段和确证未接受才允许例外，缺证据一律 unknown/no-replay。
+- **“需要恢复 final-guard 补丁或拒绝不可区分真实中断的保守过滤。”** 不采纳。前者是所有者已接受的窗口，后者符合现行证据不足保持等待规范；两者均不属于本轮 Required Changes。
 
-- **RC1：部分应用，尚未闭合。** [design.md:34](openspec/changes/locus-three-tier-structure/design.md#L34) 已区分 marker 消费者与通用 guard 重验，[design.md:43](openspec/changes/locus-three-tier-structure/design.md#L43) 已说明 project-read 的可变 realpath、风险接受与 lark-cli 的静态命令判定；但 [proposal.md:19](openspec/changes/locus-three-tier-structure/proposal.md#L19) 仍称后三个补丁“只服务 inquiry”，design 决策 11 也保留该概括，且未交代 RC1 点名的 Worktree Session 动态 `cleaned` 守卫（[guard.ts:49–54](packages/worktree-session/src/host/guard.ts#L49-L54)、[guard.ts:144–150](packages/worktree-session/src/host/guard.ts#L144-L150)）退役后的保障或明确风险范围。因此保留 `CHANGES_APPLIED: no`，不要求恢复补丁，仅要求完成原 RC1 的论证范围。
-- **RC2 作者反驳：accepted by reviewer。** 所有者明确接受已解释的时间窗风险，因此不再要求目标运行图不提供的最终重验断言；[tasks.md:7](openspec/changes/locus-three-tier-structure/tasks.md#L7) 要求在实际退役 launcher 图核实读取路径包装层并遇到等待即停止交所有者决定，[test-plan.md:125](openspec/changes/locus-three-tier-structure/test-plan.md#L125) 如实记录这不是等价行为回归，接受仅限此风险取舍，不代表 RC1 或实施验收已完成。
-- **静态证据边界。** 搜索仓库 packages 的 `tools/execute` 注册，生产源码仅见 [policy-host.ts:69–70](packages/auto-model-routing/src/policy-host.ts#L69-L70)，非 `subagent`/`spawn_teammate` 工具立即调用 `next()`；另有测试、探针与 verifier 注册，不能把“唯一生产源码注册点”写成仓库所有文件或实际部署完整运行图均已证明。本轮未运行 launcher，tasks 1.5 仍待执行。
+## Not checked
 
-- **“所有者已批准退役，因此不应再提 guard。”** 不采纳。授权决定确定目标，不证明共享运行图的语义等价；本报告不要求重问授权或恢复 inquiry，只要求保住仍有效的不变量。
-- **“grep 只有 inquiry 引用 marker，已证明 inquiry-only。”** 不采纳。marker 是 readiness 消费面；补丁实际调用所有 scoped guards，受益者无需引用 marker。
-- **“guard 是同步函数，所以无需最终重验。”** 不采纳。project-read 同步读取的是可变的 realpath；同步函数与不可变输入是两回事。
-- **“这是 tools.restrict 丢失，所有 finish 防线都会失效。”** 不采纳。[补丁上下文](packages/dsh-pet/compat/subagent/newinquiry-tools-guard.patch#L15-L29)中的 `resolveExecution` 本来就存在，新增的是 guard 重验。managed finish 的 caller-bound/Delivery 检查与 restrict 的执行解析应分别验收，不能混同。
-- **“只要保留原补丁就能关单。”** 不作为本轮强制方案。最小要求是退役后的等价边界和真实运行图测试；选择具体实现应遵守已批准的退役目标。
-- **“规划尚未实现就是缺陷。”** 不采纳。本轮不要求在评审时完成实现；问题在于当前规划明确依赖了错误前提，而且把对应的非 inquiry 行为门禁一并排除。修正规划并设定可失败的验收即可进入实施。
+本轮仅静态阅读；未运行测试、typecheck、构建、严格 OpenSpec 校验或现场探针，没有验证真实部署图、恢复崩溃注入或实际图片模型调用。
 
-### 作者回应（round 5，2026-11-03）
+## Round 7 required changes 落实记录（主控，2026-11-03）
 
-- Required Change 1（修正 inquiry-only 论证）：已修正。design 决策 11 写明补丁会重跑全部守卫、也覆盖项目读取与出站守卫；Risks 新增一条说明退役后的时间窗、为何补丁本身也只缩短不消除、当前部署的包装层静态核实结果（只有 auto-model-routing 注册 `tools/execute`，非委派工具直接放行），以及所有者已接受该风险。
-- Required Change 2（加入"工具体不执行"的回归测试）：反驳。所有者在了解时间窗含义后决定全部退役并接受该风险；退役后官方运行时不再在工具体前重判守卫，此断言在目标图上必然不成立，写成测试等于要求保留补丁。改为 tasks 1.5 在实际 launcher 图上复核包装层，发现会等待的包装层即停下交所有者决定。请评审复核本反驳是否可接受。
-
-### 作者回应二（round 5 RC1 补充，2026-11-03）
-
-- proposal 与 design 决策 11 已删去"后三个只服务 inquiry"的概括：只有 `inquiry-isolation`、`native-managed-effects` 只服务 inquiry；`newinquiry-tools-guard` 写明为 Host 级行为、退役是所有者接受风险的决定。
-- Worktree Session `cleaned` 守卫已纳入 design Risks：退役后的窗口、清理流程对活跃会话的拒绝（maintenance.ts:165、174）、官方调用顺序（pre-execute → 同步守卫 → tools/execute 包装 → 工具体，dsh-tools lib/index.js:3225-3241）表明窗口只在 `tools/execute` 包装层；tasks 1.5 的复核范围扩展到本地文件/命令类工具。
-
-### 复核（RC1 second pass）
-
-- 已确认 [proposal:19](proposal.md#L19) 与 [design 决策 11](design.md#L34) 区分 inquiry marker 消费者与 Host 级重验；[Risks 首条](design.md#L43) 已纳入 Worktree Session 动态 `cleaned` 风险，[tasks 1.5](tasks.md#L7) 已扩展到本地文件/命令工具。已逐行核对 `guard.ts:49–54` 的终态拒绝及 `maintenance.ts:165、171–174` 的活跃路径拒绝、用户结束对应绑定时的例外；这些属于缓解与风险范围说明，不是最终重验的等价证明。
-- 本次复核尚不能签署通过：读取 worktree 内官方 `dsh-tools/lib/index.js` 时，工具因依赖解析到 managed root 外的缓存而拒绝访问；本子会话不能扩大权限，也未绕过读取限制。剩余仅为由有权限的评审者核对指定官方包 `lib/index.js:3225–3241` 的调用顺序，完成本次要求的证据验证；不是判定上述文档修正未应用。暂保留 `CHANGES_APPLIED: no`，不改 VERDICT，不重开已接受的 RC2。未运行 launcher 或测试，tasks 1.5 仍属实施验收。
-
-### 作者回应三（2026-11-03）
-
-- 官方调用顺序证据已摘录到 [probes/dsh-tools-call-order.md](probes/dsh-tools-call-order.md)（含包版本与文件 sha256），供无法读取主 checkout node_modules 的评审核对。
-- 补充：并行调度器把 prepare（守卫）与 dispatch（工具体）分开，排队等并行名额也属时间窗，已写入 design Risks，同属所有者接受的风险范围。
-
-### 复核（RC1 third pass）
-
-- **RC1：已应用（规划论证闭合）。** [proposal:19](proposal.md#L19) 与 [design 决策 11](design.md#L34) 已明确区分 inquiry 对 `supportsFinalToolGuardRecheck` 的唯一消费与补丁对 Host 全部 scoped guards 的工具体前重验；不再以 marker 引用范围证明补丁仅服务 inquiry。四补丁退役仍依据所有者已批准的风险取舍，而非声称官方提供等价最终重验。
-- **调用顺序证据已核对。** 新增[官方摘录](probes/dsh-tools-call-order.md#L3-L59)标明 `@deepseek-ai/dsh-tools@0.2.0-rc.2`、文件及 sha256 `40f47709337c3c205d4e09e647f8588f4977e66f6d52f019b3cc7ef81159d84f`：原始行 3225–3241 显示先 await `tools/pre-execute` / ask，再执行 `guardReason`；3331 显示 dispatch 经 `tools/execute` waterfall 委托工具体；2673–2678 显示并行调度使用分离的 prepare / dispatch。该摘录足以补上上轮无法读取的调用顺序证据；它不是本轮独立取得或重新计算哈希的完整官方源码，也不是并行排队的动态复现。
-- **剩余动态守卫与接受范围已明确。** [Risks 首条](design.md#L43)列出 project-read 的可变 realpath 与 Worktree Session 的可变 `cleaned`，并同时承认 `tools/execute` wrapper 等待和并行调度 prepare→dispatch 等待名额两段窗口；lark-cli 的命令字符串判定另行区分。已直接核对 [guard.ts:49–54](../../../packages/worktree-session/src/host/guard.ts#L49-L54)、[guard.ts:133–151](../../../packages/worktree-session/src/host/guard.ts#L133-L151)：物理路径检查位于 pre-execute，终态拒绝位于同步 guard；[maintenance.ts:162–174](../../../packages/worktree-session/src/host/maintenance.ts#L162-L174)保留活跃 cwd/路径拒绝，用户结束匹配 source session 仅豁免活跃绑定门禁，不豁免前述路径门禁。这些是缓解，不是消除窗口的证明；无等待 wrapper 也不能推出并行调度无窗口，Risks 中“几乎相同”不能作为所有调度情形的等价保证。
-- **范围与后续门禁。** [tasks 1.5](tasks.md#L7)仍要求在退役后的实际隔离 launcher 图复核读取、本地文件/命令工具的 wrapper，发现等待即停下交所有者决定；本次不将该待执行任务记作已验收。仅将独立 `CHANGES_APPLIED` 改为 `yes`，不改 VERDICT、不重开已接受的 RC2。未运行 launcher、测试、构建或部署；结论仅限 RC1 文档修正及所提交静态证据。
+已在 targeted recheck 后补齐唯一剩余 RC7-2①：[任务10.1](tasks.md#L62)现分别列明 lazy-child、first-image-fallback 与 Host wiring 文件归属，首图组要求组合真实创建/publication/仓储/controller 及保留失败 ID 的官方契约替身；[test-plan 的 Round7 真实接缝约束](test-plan.md)列出同 current、deadline/FIFO/backlog、旧桥/WAL退出与故障恢复断言。设计决策3另明确已发出 execution/inbox/turn 证据不得覆盖。由主控按原 Required Changes逐项核验后将顶层 CHANGES_APPLIED 更新为 yes；保留上节 no 结论为当时的历史快照，未冒称 reviewer 当时读到了本次新增文字。当前 gate 为 APPROVE_WITH_CHANGES / yes；规划落实不代表实现及现场验收已通过。

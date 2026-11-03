@@ -48,7 +48,7 @@ function controllerFor(repository: DurableLocusRepository, rendered: NormalizedL
           id: record.id, endpoint: record.endpoint, generation: record.generation,
           parentSessionId: record.parentSessionId, childSessionId: record.childSessionId as string,
           workspaceId: record.workspaceId, state: 'active' as const,
-          childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
+          childComposition: 'tier3' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
           permission: record.permission,
         }
       },
@@ -69,10 +69,9 @@ function controllerFor(repository: DurableLocusRepository, rendered: NormalizedL
     },
     child: {
       ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
-      withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: input.identity.childSessionId }) }),
       queueChild: input => ({ accepted: true as const, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
     },
-    resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+    inspectResidentPolicy: () => ({ resident: true, policy: { mode: 'read-only', workspaceRoot: '/repo' } }),
     turns: { perTurnCorrelation: true, subscribe: () => () => {} },
     // The only place a comment fact could come from on this path. Counting it
     // proves the redelivery never re-queried the platform.

@@ -6,7 +6,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PET_DOMAIN_VERSION } from '../src/host/spec.js'
 
-const SCRIPT = path.resolve('scripts/migrate-state-version.mjs')
+const SCRIPT = new URL('../scripts/migrate-state-version.mjs', import.meta.url).pathname
 
 function database(version: number): { dir: string; file: string } {
   const dir = mkdtempSync(path.join(tmpdir(), 'pet-migrate-cli-'))
@@ -30,7 +30,7 @@ function stamped(file: string): number {
 }
 
 describe('dsh-pet-migrate-state CLI', () => {
-  it.each([14, 15])('checks an additive v%s migration without writing in --dry-run mode', version => {
+  it.each([14, 15, 17])('checks an additive v%s migration without writing in --dry-run mode', version => {
     const { dir, file } = database(version)
     const before = readFileSync(file)
     const output = execFileSync(process.execPath, [SCRIPT, '--db', file, '--dry-run'], { encoding: 'utf8' })
@@ -103,7 +103,7 @@ describe('dsh-pet-migrate-state CLI', () => {
     expect(readFileSync(path.join(dir, backups[0]!))).toEqual(before)
   })
 
-  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15])('backs up v%s, restamps to the current version without changing history, and is idempotent', version => {
+  it.each([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15, 17])('backs up v%s, restamps to the current version without changing history, and is idempotent', version => {
     const { dir, file } = database(version)
     const seed = new DatabaseSync(file)
     // Include opaque malformed history and local facts: restamping is not
@@ -129,7 +129,11 @@ describe('dsh-pet-migrate-state CLI', () => {
     for (const target of [file, path.join(dir, backups[0]!)]) {
       const db = new DatabaseSync(target, { readOnly: true })
       try {
-        expect(db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()).toEqual(beforeTables)
+        const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
+        const expectedTables = target === file
+          ? [...beforeTables, { name: 'u_dsh_pet_locus_mains' }].sort((a, b) => String(a.name).localeCompare(String(b.name)))
+          : beforeTables
+        expect(tables).toEqual(expectedTables)
         expect(db.prepare('SELECT value FROM u_dsh_pet_tasks').get()).toEqual({ value: '{"id":"task-1"}' })
         for (const table of ['loci', 'chat_bindings', 'invocation_channel', 'locus_operations']) {
           expect(db.prepare(`SELECT value FROM u_dsh_pet_${table}`).get()).toEqual({ value: history })

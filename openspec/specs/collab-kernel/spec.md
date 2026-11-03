@@ -1168,7 +1168,7 @@ provider MAY 实现同步方法 `supportsMode(mode): boolean`。`sendMessage` SH
 
 业务校验：
 - 条目必须存在且 `kind` 为 `request`，否则 `COLLAB_ITEM_NOT_FOUND`（不存在）或 `COLLAB_FORBIDDEN`（非 request）；
-- 条目作者必须是由该 channel 托管的成员（`managedBy` 等于该 channel，作者已退役或被 `markGone` 仍算），否则 `COLLAB_FORBIDDEN`；
+- 条目作者必须满足其一，否则 `COLLAB_FORBIDDEN`：由该 channel 托管的成员（`managedBy` 等于该 channel，作者已退役或被 `markGone` 仍算）；或绑定为 `dsh-session` 的普通成员且宿主为该 manager 命令提供的 `authorOwned(address)` 判定返回真（宿主未提供该判定时视为假）。`authorOwned` 与命令守卫一起在提交边界重验；
 - 条目状态为 `escalated` 或 `decided` 时分别以 `COLLAB_ITEM_ESCALATED`、`COLLAB_DECIDED_LOCKED` 拒绝；
 - 允许的转换为 `open → accepted`、`open → done`、`open → rejected`、`accepted → done`、`accepted → rejected`，其余以 `COLLAB_BAD_TRANSITION` 拒绝。
 
@@ -1198,6 +1198,11 @@ provider MAY 实现同步方法 `supportsMode(mode): boolean`。`sendMessage` SH
 - **GIVEN** 空间 T 未授权 `pet-locus`
 - **WHEN** manager 对 T 调用 `disposeManagedRequest`
 - **THEN** 返回 `COLLAB_NOT_MEMBER`，与对不存在空间的 `admitMember` 同类
+
+#### Scenario: 处置接入方拥有的普通会话登记的 request
+- **GIVEN** 空间 S 已授权 `pet-locus`；普通成员 `locus`（绑定 `dsh-session:M`）创建 request `todo-2`；宿主的 `authorOwned` 只对 `M` 返回真
+- **WHEN** manager 调用 `disposeManagedRequest({itemId:'todo-2', progress:'done'})`；随后对普通成员 `work` 创建的 `todo-3` 同样调用
+- **THEN** 前者成功、actor 为 `manager:pet-locus`、不含 `dispatch/intended`；后者返回 `COLLAB_FORBIDDEN`，日志不变
 
 ### Requirement: 提交记录携带提交时间
 

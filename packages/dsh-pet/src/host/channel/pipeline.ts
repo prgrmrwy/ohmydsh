@@ -30,7 +30,7 @@ import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChatBinding } from '../spec.js'
 import type { LocusChannelControllerPort } from './locus-capability.js'
-import type { LocusAuthorizationResolver } from '../locus/admission.js'
+import { extractLocusEndpoint, type LocusAuthorizationResolver } from '../locus/admission.js'
 import type { LocusChannelEvent, LocusControllerResult } from './locus-controller.js'
 import { scopeKeyOf } from '../../wire.js'
 
@@ -181,6 +181,23 @@ export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired
 }
 
 /**
+ * The reply for an entry whose SOURCE (work) session the owner archived.
+ *
+ * Unlike a stopped entry, nothing was wrong with the entry itself: the session
+ * it serves was taken out of the owner's view. Restoring it brings the entry
+ * back by itself; `/bind` moves the entry to a session that is in use. Neither
+ * is done for them: an ordinary @ never re-points an entry at a new source.
+ */
+export function renderSourceArchivedReply(): string {
+  return '来源会话已归档，这个入口暂停服务。'
+    + '恢复该会话后本入口会自动恢复；或在本入口 @ 机器人发送 /bind 加要改用的会话 id 前缀（至少 6 位），'
+    + '把本入口绑定到新的干活主会话。新入口从只读（read）权限开始。'
+}
+
+/** How many times one entry is told its source is archived before it is left alone. */
+export const SOURCE_ARCHIVED_RECEIPT_LIMIT = 3
+
+/**
  * Consumes inbound lines and turns the admissible ones into work.
  *
  * Holds the dedup window, which is why it is an object rather than a function:
@@ -188,6 +205,33 @@ export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired
  */
 export class InboundPipeline {
   private readonly dedup = new MessageDedup()
+  /** Receipts already sent per entry about an archived source (in-process, bounded). */
+  private readonly sourceArchivedReceipts = new Map<string, number>()
+
+  /**
+   * Whether this event's entry is refused because its source session is
+   * archived, and whether it may still be told so.
+   * @returns `none` (not that case), `reply` (tell them) or `silent` (limit reached).
+   */
+  private sourceArchivedReceipt(event: LarkInboundEvent): 'none' | 'reply' | 'silent' {
+    const authorization = this.deps.locusAuthorization
+    const extracted = extractLocusEndpoint(event)
+    if (authorization === undefined || !extracted.ok) return 'none'
+    let resolved: ReturnType<LocusAuthorizationResolver>
+    try {
+      resolved = authorization(extracted.endpoint)
+    } catch {
+      return 'none'
+    }
+    if (typeof resolved === 'string' || resolved.state !== 'retired' || resolved.reason !== 'source-archived') {
+      return 'none'
+    }
+    const key = extracted.endpoint.key
+    const sent = this.sourceArchivedReceipts.get(key) ?? 0
+    if (sent >= SOURCE_ARCHIVED_RECEIPT_LIMIT) return 'silent'
+    this.sourceArchivedReceipts.set(key, sent + 1)
+    return 'reply'
+  }
 
   /**
    * @param deps - Host collaborators.
@@ -253,12 +297,17 @@ export class InboundPipeline {
           // Breaking cutover is visible rather than silently taking the old
           // endpoint under the default main. This is a bounded Host diagnostic,
           // not a business answer; failure stays fail-soft.
-          await this.deps.client.reply(
-            event.message_id,
-            renderLocusUnavailableReply(
-              outcome.reason === 'legacy-endpoint' ? 'legacy-endpoint' : 'retired-endpoint',
-            ),
-          ).catch(() => undefined)
+          const archived = outcome.reason === 'retired-endpoint' ? this.sourceArchivedReceipt(event) : 'none'
+          if (archived !== 'silent') {
+            await this.deps.client.reply(
+              event.message_id,
+              archived === 'reply'
+                ? renderSourceArchivedReply()
+                : renderLocusUnavailableReply(
+                  outcome.reason === 'legacy-endpoint' ? 'legacy-endpoint' : 'retired-endpoint',
+                ),
+            ).catch(() => undefined)
+          }
         }
         return this.report(outcome, event)
       } catch (error) {

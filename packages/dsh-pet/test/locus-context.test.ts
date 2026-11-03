@@ -85,7 +85,7 @@ describe('unified locus delivery context', () => {
       'session-child-1',
       'workspace-1',
       'effective：read',
-      'desired：write',
+      '存在待应用权限变更',
       '/repo/.worktrees/project',
       'main-session-confirmed',
       'om_request-1',
@@ -210,7 +210,8 @@ describe('unified locus delivery context', () => {
     )
 
     expect(prompt).toContain('effective：read')
-    expect(prompt).toContain('desired：未确认')
+    expect(prompt).not.toContain('desired：')
+    expect(prompt).not.toContain('待应用权限变更')
     expect(prompt).toContain('status：unknown')
     expect(prompt).toContain('execution root：未确认')
     expect(prompt).toContain('constraints：未确认')

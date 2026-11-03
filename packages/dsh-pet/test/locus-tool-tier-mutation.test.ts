@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createLocusToolTierMutation, type ToolTierMutationLocus } from '../src/host/locus/tool-tier-mutation.js'
-import type { LocusMutationFence, LocusToolTier } from '../src/host/locus/aggregate.js'
+import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusMutationFence, type LocusToolTier } from '../src/host/locus/aggregate.js'
 
 function setup(overrides: {
   initial?: Partial<ToolTierMutationLocus>
@@ -13,7 +13,7 @@ function setup(overrides: {
 } = {}) {
   let row: ToolTierMutationLocus = {
     id: 'locus-a', generation: 2, revision: 4, updatedAt: 10,
-    endpoint: { chatId: 'oc-a' }, childSessionId: 'child-a', childComposition: 'safe-v2',
+    endpoint: { chatId: 'oc-a' }, childSessionId: 'child-a', childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
     state: 'active', busy: false, toolTier: { desired: 'safe', effective: 'safe' },
     ...overrides.initial,
   }
@@ -74,12 +74,12 @@ describe('Locus tool-tier mutation', () => {
     expect(h.row()).toMatchObject({ state: 'active', revision: 6, toolTier: { desired: 'shell', effective: 'shell' } })
   })
 
-  it('persists a cold child tier for identical next-publication composition', async () => {
+  it('records a released child\'s request as pending and keeps serving the old tier', async () => {
     const h = setup({ live: false })
     const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
-    expect(result).toMatchObject({ ok: true, effective: 'shell' })
+    expect(result).toMatchObject({ ok: true, effective: 'safe', pending: true })
     expect(h.surface.setToolTier).not.toHaveBeenCalled()
-    expect(h.row()).toMatchObject({ state: 'active', toolTier: { desired: 'shell', effective: 'shell' } })
+    expect(h.row()).toMatchObject({ state: 'active', toolTier: { desired: 'shell', effective: 'safe' } })
   })
 
   it('refuses a running live child even when no Delivery is current', async () => {
@@ -92,20 +92,27 @@ describe('Locus tool-tier mutation', () => {
     expect(h.row()).toMatchObject({ state: 'active', toolTier: { effective: 'safe' } })
   })
 
-  it('refuses safe-v1 shell before entering switching', async () => {
-    const h = setup({ initial: { childComposition: 'safe-v1' } })
-    const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
-    expect(result).toEqual({ ok: false, reason: 'legacy-v1-shell' })
-    expect(h.repository.beginToolTierMutation).not.toHaveBeenCalled()
-    expect(h.row()).toMatchObject({ state: 'active', toolTier: { effective: 'safe' } })
+  it('safe-v1 入口请求 shell', async () => {
+    for (const childComposition of ['safe-v1', 'safe-v2', undefined]) {
+      const h = setup({ initial: { childComposition } })
+      const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
+      // Neither switched nor resumed: the old row is retired, not adopted.
+      expect(result).toEqual({ ok: false, reason: 'legacy-composition' })
+      expect(h.repository.beginToolTierMutation).not.toHaveBeenCalled()
+      expect(h.surface.setToolTier).not.toHaveBeenCalled()
+      expect(h.row()).toMatchObject({ state: 'active', toolTier: { desired: 'safe', effective: 'safe' } })
+    }
   })
 
-  it('returns safe on verification failure only after verified rollback', async () => {
+  it('核验失败回到 safe', async () => {
     const h = setup({ desiredAttests: false })
     const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
+    // Never reported as success, and back on a verified `safe` surface.
     expect(result).toMatchObject({ ok: false, reason: 'verification-failed' })
     expect(h.surface.setToolTier).toHaveBeenNthCalledWith(2, 'safe')
-    expect(h.row()).toMatchObject({ state: 'active', toolTier: { desired: 'shell', effective: 'safe' } })
+    // The refused request is not kept as `desired`: a differing desired is the
+    // pending marker and would re-apply on the next wake.
+    expect(h.row()).toMatchObject({ state: 'active', toolTier: { desired: 'safe', effective: 'safe' } })
   })
 
   it('aborts the durable fence when live-surface discovery throws before mutation', async () => {
@@ -138,7 +145,7 @@ describe('Locus tool-tier mutation', () => {
     expect(result).toEqual({ ok: false, reason: 'apply-failed' })
     expect(h.surface.setToolTier).toHaveBeenNthCalledWith(1, 'shell')
     expect(h.surface.setToolTier).toHaveBeenNthCalledWith(2, 'safe')
-    expect(h.row()).toMatchObject({ state: 'active', toolTier: { effective: 'safe', desired: 'shell' } })
+    expect(h.row()).toMatchObject({ state: 'active', toolTier: { effective: 'safe', desired: 'safe' } })
   })
 
   it('serializes concurrent tier changes for one locus', async () => {
@@ -181,5 +188,78 @@ describe('Locus tool-tier mutation', () => {
     moved.repository.findCurrentLocus.mockReturnValue(undefined)
     expect(await moved.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })).toEqual({ ok: false, reason: 'not-found' })
     expect(moved.repository.beginToolTierMutation).not.toHaveBeenCalled()
+  })
+})
+
+describe('Locus tool tier scenarios on a resident child', () => {
+  it('授予 shell 档', async () => {
+    const h = setup()
+    const before = { id: h.row().id, generation: h.row().generation, child: h.row().childSessionId }
+
+    const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
+
+    expect(result).toMatchObject({ ok: true, effective: 'shell' })
+    expect(result).not.toHaveProperty('pending')
+    // Same child, same generation: nothing was rebuilt.
+    expect({ id: h.row().id, generation: h.row().generation, child: h.row().childSessionId }).toEqual(before)
+    expect(h.row().toolTier).toMatchObject({ desired: 'shell', effective: 'shell', grantedBy: 'owner' })
+    expect(h.surface.visibleTools()).toEqual(expect.arrayContaining(['bash', 'skill']))
+    for (const delegation of ['subagent', 'subagent_fork', 'workflow', 'ralph', 'send_message']) {
+      expect(h.surface.visibleTools()).not.toContain(delegation)
+    }
+  })
+
+  it('撤回 shell 档', async () => {
+    const h = setup({ initial: { toolTier: { desired: 'shell', effective: 'shell' } } })
+
+    const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'safe', actor: 'owner' })
+
+    expect(result).toMatchObject({ ok: true, effective: 'safe' })
+    expect(h.surface.setToolTier).toHaveBeenCalledWith('safe')
+    expect(h.surface.visibleTools()).not.toContain('bash')
+    expect(h.row().toolTier).toMatchObject({ desired: 'safe', effective: 'safe' })
+  })
+
+  it('冷恢复保持档位', async () => {
+    const { composeLocusChild, LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES } =
+      await import('../src/host/locus/composition.js')
+    const { LOCUS_BASE_PRESET } = await import('../src/host/locus/preset.js')
+    const h = setup()
+    await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
+    const beforeRestart = [...h.surface.visibleTools()].sort()
+
+    // The runtime released the child; the next wake publishes it again from the
+    // persisted row alone.
+    const persisted = h.row()
+    let visible: readonly string[] = []
+    const result = composeLocusChild({ id: 'child-a', scope: { get: () => ({}) } }, {
+      lookup: {
+        find: () => ({
+          parentSessionId: 'main-locus',
+          childSessionId: 'child-a',
+          locusId: persisted.id,
+          generation: persisted.generation,
+          permission: 'read' as const,
+          childComposition: 'tier3' as const,
+          toolTier: { desired: persisted.toolTier!.desired, effective: persisted.toolTier!.effective },
+        }),
+      },
+      parentPreset: () => LOCUS_BASE_PRESET,
+      surface: {
+        install: () => {},
+        setToolTier: (_agent, tier) => {
+          visible = tier === 'shell'
+            ? [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES, 'pet_locus_finish']
+            : [...LOCUS_SAFE_TOOL_NAMES, 'pet_locus_finish']
+        },
+        installOutboundGuard: () => {},
+        visibleTools: () => visible,
+      },
+      policy: { apply: () => {}, resolve: () => 'read' },
+    })
+
+    expect(result).toMatchObject({ composed: true })
+    expect(result).not.toHaveProperty('pending')
+    expect([...visible].sort()).toEqual(beforeRestart)
   })
 })

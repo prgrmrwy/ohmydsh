@@ -35,6 +35,7 @@ const LOCUS: ActiveLocus = {
   childSessionId: 'session-child',
   workspaceId: 'workspace-race',
   state: 'active',
+  childComposition: 'tier3',
   permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
 }
 const REPLY_TARGET: LocusReplyTarget = {
@@ -363,7 +364,7 @@ function makeHarness(
       parentSessionId: LOCUS.parentSessionId,
       childSessionId: LOCUS.childSessionId,
     }),
-    withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
+
     queueChild: async input => {
       queueInputs.push(input)
       await options.beforeQueueFence?.(input, queueInputs.length)
@@ -374,7 +375,7 @@ function makeHarness(
   const deps: LocusControllerDeps = {
     ...baseDeps(ledger, observer),
     child,
-    resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      inspectResidentPolicy: () => ({ resident: true, policy: ({ mode: 'read-only', workspaceRoot: '/repo' }) }),
     receipts: { markAccepted, markSettled },
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.addressing === undefined ? {} : { addressing: options.addressing }),
@@ -396,6 +397,40 @@ function makeHarness(
 }
 
 describe('LocusChannelController queue/turn races', () => {
+  it('retries the same current after capacity frees without a failed receipt or a second Delivery', async () => {
+    vi.useFakeTimers()
+    try {
+      const observer = new SynchronousTurnObserver()
+      const ledger = new MemoryDeliveryLedger()
+      const failed = vi.fn()
+      let calls = 0
+      const ids: string[] = []
+      const controller = new LocusChannelController({
+        ...baseDeps(ledger, observer),
+        child: {
+          ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
+          queueChild: input => {
+            ids.push(input.deliveryId)
+            return ++calls === 1 ? { accepted: false, reason: 'child-capacity-exhausted' }
+              : { accepted: true, executionId: input.executionId, inboxMessageId: 'after-capacity' }
+          },
+        },
+        capacityRetryMs: 10,
+        now: () => 100,
+        receipts: { markAccepted: vi.fn(), markSettled: failed, sendControl: vi.fn() },
+      })
+      expect(await controller.handleAdmission(acceptedAdmission('capacity'))).toMatchObject({ kind: 'accepted' })
+      expect(ledger.listDeliveries()).toHaveLength(1)
+      expect(ledger.listDeliveries()[0]).toMatchObject({ status: 'current' })
+      expect(failed).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(11)
+      expect(ids).toEqual(['delivery-1', 'delivery-1'])
+      expect(ledger.listDeliveries()[0]).toMatchObject({ status: 'current', inboxMessageId: 'after-capacity' })
+      expect(failed).not.toHaveBeenCalled()
+      controller.dispose()
+    } finally { vi.useRealTimers() }
+  })
+
   it('durably accepts multi-bot addressing before queueing without Host intent filtering', async () => {
     const admission = acceptedAdmission('message-multi-bot')
     if (admission.kind !== 'accepted') throw new Error('fixture must be accepted')
@@ -902,10 +937,10 @@ describe('LocusChannelController live policy gate', () => {
       ...baseDeps(ledger, observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
-        withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
+
         queueChild: queued,
       },
-      resolveLivePolicy: () => live,
+      inspectResidentPolicy: () => ({ resident: true, policy: live }),
       invalidatePolicyDrift: invalidate,
       receipts: { markAccepted: marked, markSettled: vi.fn() },
     })
@@ -919,147 +954,36 @@ describe('LocusChannelController live policy gate', () => {
     expect(marked).not.toHaveBeenCalled()
   })
 
-  // A read that produced nothing comparable is NOT drift, so the recorded
-  // reason must never say `policy-drift`. It IS a fact about how this child was
-  // materialized, so the generation is retired and rebuilt once; keeping it
-  // `active` while refusing every delivery is what muted a group forever.
-  it('retires an unreadable generation once, then refuses when the rebuild is unreadable too', async () => {
-    const observer = new SynchronousTurnObserver()
-    const ledger = new MemoryDeliveryLedger()
-    const queued = vi.fn()
-    const marked = vi.fn()
-    let invalid = false
-    const invalidate = vi.fn(() => { invalid = true })
-    const ensureForDelivery = vi.fn(() => LOCUS)
+  it('keeps a non-resident child on the same generation without materializing it', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    const invalidate = vi.fn()
     const controller = new LocusChannelController({
-      ...baseDeps(ledger, observer),
-      // Mirror the repository: retiring the generation makes the READ path
-      // refuse it, which is what routes the repair through `ensureForDelivery`.
-      locus: {
-        resolveCurrent: () => {
-          if (invalid) throw new Error('This locus is invalid and must be rebuilt.')
-          return LOCUS
-        },
-        ensureForDelivery,
-      },
+      ...baseDeps(harness.ledger, harness.observer),
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
-        withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
-        queueChild: queued,
+        queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
       },
-      resolveLivePolicy: () => undefined,
+      inspectResidentPolicy: () => ({ resident: false }),
       invalidatePolicyDrift: invalidate,
-      receipts: { markAccepted: marked, markSettled: vi.fn() },
+      receipts: { markAccepted: harness.markAccepted },
     })
-
-    await expect(controller.handleAdmission(acceptedAdmission('message-unreadable'))).resolves.toEqual({
-      kind: 'refused', reason: 'policy-unreadable',
-    })
-    // Exactly one repair attempt, and it never claims drift.
-    expect(invalidate).toHaveBeenCalledOnce()
-    expect(invalidate.mock.calls[0]?.[0]).toMatchObject({
-      reason: expect.stringContaining('live policy unreadable; rebuilding this generation'),
-    })
-    expect(ensureForDelivery).toHaveBeenCalledOnce()
-    // The invariant is unchanged: nothing is served under a policy nobody could
-    // confirm, so there is still no Delivery, queue or receipt side effect.
-    expect(ledger.calls).toEqual([])
-    expect(queued).not.toHaveBeenCalled()
-    expect(marked).not.toHaveBeenCalled()
+    expect(await controller.handleAdmission(acceptedAdmission('unloaded'))).toMatchObject({ kind: 'accepted', generation: LOCUS.generation })
+    expect(invalidate).not.toHaveBeenCalled()
+    controller.dispose()
   })
 
-  // The same for a child the Host cannot reach: the exact child could not be
-  // brought up, which a fresh generation genuinely can fix, so the generation is
-  // retired rather than left `active` and permanently unservable.
-  it('retires a generation whose child cannot be reached, then refuses if the rebuild fails too', async () => {
-    const observer = new SynchronousTurnObserver()
-    const ledger = new MemoryDeliveryLedger()
-    const invalidate = vi.fn()
-    let invalid = false
-    invalidate.mockImplementation(() => { invalid = true })
-    const ensureForDelivery = vi.fn(() => LOCUS)
+  it('refuses an unreadable resident policy without rebuilding or accepting', async () => {
+    const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
+    const queue = vi.fn()
     const controller = new LocusChannelController({
-      ...baseDeps(ledger, observer),
-      locus: {
-        resolveCurrent: () => {
-          if (invalid) throw new Error('This locus is invalid and must be rebuilt.')
-          return LOCUS
-        },
-        ensureForDelivery,
-      },
-      child: {
-        ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
-        withChildSession: async () => ({ ok: false as const, reason: 'child-session-access-failed' }),
-        queueChild: vi.fn(),
-      },
-      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
-      invalidatePolicyDrift: invalidate,
-      receipts: { markAccepted: vi.fn(), markSettled: vi.fn() },
+      ...baseDeps(harness.ledger, harness.observer),
+      child: { ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }), queueChild: queue },
+      inspectResidentPolicy: () => { throw new Error('unreadable') },
     })
-
-    await expect(controller.handleAdmission(acceptedAdmission('message-unreachable'))).resolves.toEqual({
-      kind: 'refused', reason: 'policy-unreadable',
-    })
-    expect(invalidate).toHaveBeenCalledOnce()
-    expect(ensureForDelivery).toHaveBeenCalledOnce()
-  })
-
-  // The repair must actually serve the message, not merely tidy the state: the
-  // whole point of replacing "refuse and stay active" is that the message the
-  // unreadable generation could not serve is answered by the next generation.
-  it('serves the delivery on the rebuilt generation after the old child was unreachable', async () => {
-    const observer = new SynchronousTurnObserver()
-    const ledger = new MemoryDeliveryLedger()
-    const rebound: ActiveLocus = {
-      ...LOCUS,
-      id: 'locus-rebuilt',
-      generation: 4,
-      childSessionId: 'session-child-rebuilt',
-      workspaceId: 'workspace-rebuilt',
-    }
-    const invalidate = vi.fn()
-    const queueInputs: { childSessionId: string }[] = []
-    let current: ActiveLocus = LOCUS
-    let invalid = false
-    invalidate.mockImplementation(() => { invalid = true })
-    const controller = new LocusChannelController({
-      ...baseDeps(ledger, observer),
-      locus: {
-        resolveCurrent: () => {
-          if (invalid) throw new Error('This locus is invalid and must be rebuilt.')
-          return current
-        },
-        ensureForDelivery: () => {
-          current = rebound
-          invalid = false
-          return rebound
-        },
-      },
-      child: {
-        ensureChild: locus => ({
-          parentSessionId: locus.parentSessionId,
-          childSessionId: locus.childSessionId,
-        }),
-        // The stale child cannot be read; the rebuilt one can.
-        withChildSession: async input => input.identity.childSessionId === LOCUS.childSessionId
-          ? { ok: false as const, reason: 'child-session-access-failed' }
-          : { ok: true as const, value: await input.operation({ id: input.identity.childSessionId }) },
-        queueChild: async input => {
-          queueInputs.push({ childSessionId: input.child.childSessionId })
-          return { accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }
-        },
-      },
-      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
-      invalidatePolicyDrift: invalidate,
-      receipts: { markAccepted: vi.fn(), markSettled: vi.fn() },
-    })
-
-    await expect(controller.handleAdmission(acceptedAdmission('message-repaired'))).resolves.toMatchObject({
-      kind: 'accepted',
-    })
-    expect(invalidate).toHaveBeenCalledOnce()
-    // The reply work went to the REBUILT child, never back to the unreadable one.
-    expect(queueInputs).toEqual([{ childSessionId: 'session-child-rebuilt' }])
+    expect(await controller.handleAdmission(acceptedAdmission('unreadable'))).toEqual({ kind: 'refused', reason: 'policy-unreadable' })
+    expect(harness.ledger.calls).toEqual([])
+    expect(queue).not.toHaveBeenCalled()
+    controller.dispose()
   })
 
   it('rejects a write root mismatch before accept and persists the pause diagnostic', async () => {
@@ -1081,13 +1005,13 @@ describe('LocusChannelController live policy gate', () => {
       locus: { resolveCurrent: () => writeLocus, ensureForDelivery: () => writeLocus },
       child: {
         ensureChild: () => ({ parentSessionId: writeLocus.parentSessionId, childSessionId: writeLocus.childSessionId }),
-        withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: writeLocus.childSessionId }) }),
+
         queueChild: queued,
       },
       // The locus is granted `write`, which means full access: a live policy
       // that reports anything narrower is drift, and drift must stop dispatch
       // before any Delivery side effect (ADR-0005).
-      resolveLivePolicy: () => ({ mode: 'workspace-write', workspaceRoot: '/other' }),
+      inspectResidentPolicy: () => ({ resident: true, policy: ({ mode: 'workspace-write', workspaceRoot: '/other' }) }),
       invalidatePolicyDrift: ({ reason }) => { persisted.push(reason) },
       receipts: { markAccepted: marked, markSettled: vi.fn() },
     })
@@ -1403,13 +1327,13 @@ describe('LocusChannelController dispatchNext / currentFinished / scheduleCurren
       },
       child: {
         ensureChild: () => ({ parentSessionId: LOCUS.parentSessionId, childSessionId: LOCUS.childSessionId }),
-        withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: LOCUS.childSessionId }) }),
+
         queueChild: async input => {
           harness.queueInputs.push(input)
           return { accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }
         },
       },
-      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      inspectResidentPolicy: () => ({ resident: true, policy: ({ mode: 'read-only', workspaceRoot: '/repo' }) }),
       receipts: { markAccepted: harness.markAccepted, markSettled: harness.markSettled, sendControl: sent },
     })
     const acceptedAt = Date.now() - 1000
@@ -1500,7 +1424,7 @@ describe('LocusChannelController dispatchNext / currentFinished / scheduleCurren
  *
  * `normalizeActiveLocus` rebuilds the locus field by field before anything else
  * sees it, and `createLocusChildDelivery.ensureChild` refuses any locus that does
- * not present `childComposition: 'safe-v1'`. Every other fixture in this file
+ * not present `childComposition: 'tier3'`. Every other fixture in this file
  * stubs `deps.child`, and the child-delivery suite hand-writes its loci with the
  * field already present — so the two halves never met and a normalizer that
  * dropped the field rejected every live delivery as a bare `child-unavailable`.
@@ -1531,14 +1455,11 @@ describe('LocusChannelController safe-composition proof', () => {
         }
         return { ok: true as const, messageId: 'inbox-proof' }
       }),
-      withChildSession: vi.fn(async (input: { operation: (session: unknown) => unknown }) => ({
-        ok: true as const,
-        value: await input.operation({ id: LOCUS.childSessionId }),
-      })),
       dispose: vi.fn(),
     }))
     const child = createLocusChildDelivery({
       createAdapter: () => createAdapter() as never,
+      parentPreset: () => 'locus-base',
       log: code => diagnostics.push(code),
     })
     const ledger = new MemoryDeliveryLedger()
@@ -1549,16 +1470,16 @@ describe('LocusChannelController safe-composition proof', () => {
       currentToolTier: () => 'safe',
       locus: { resolveCurrent: () => record, ensureForDelivery: () => record },
       child,
-      resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+      inspectResidentPolicy: () => ({ resident: true, policy: ({ mode: 'read-only', workspaceRoot: '/repo' }) }),
       receipts: { markAccepted: vi.fn(), markSettled: vi.fn() },
       log: code => diagnostics.push(code),
     }
     return { controller: new LocusChannelController(deps), calls, createAdapter, adoptChild, ledger, diagnostics }
   }
 
-  it('carries the durable safe-v1 proof from the locus record into child adoption', async () => {
+  it('carries the durable tier3 proof from the locus record into child adoption', async () => {
     const diagnostics: string[] = []
-    const harness = deliveryHarness({ ...LOCUS, childComposition: 'safe-v1' }, diagnostics)
+    const harness = deliveryHarness({ ...LOCUS, childComposition: 'tier3' }, diagnostics)
 
     const result = await harness.controller.handleAdmission(acceptedAdmission('message-proof'))
 
@@ -1573,7 +1494,7 @@ describe('LocusChannelController safe-composition proof', () => {
 
   it('still refuses a record without the proof before any adapter is allocated', async () => {
     const diagnostics: string[] = []
-    const harness = deliveryHarness({ ...LOCUS }, diagnostics)
+    const harness = deliveryHarness({ ...LOCUS, childComposition: undefined } as never, diagnostics)
 
     const result = await harness.controller.handleAdmission(acceptedAdmission('message-unproven'))
 

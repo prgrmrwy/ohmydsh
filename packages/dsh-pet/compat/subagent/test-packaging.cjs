@@ -1,69 +1,50 @@
 'use strict'
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { readFileSync, realpathSync, mkdtempSync, rmSync } = require('node:fs')
-const { join, resolve } = require('node:path')
+const { existsSync, readFileSync, realpathSync, mkdtempSync, rmSync } = require('node:fs')
+const { join } = require('node:path')
 const { tmpdir } = require('node:os')
 const { spawnSync } = require('node:child_process')
 const here = __dirname
 
-test('pinned patches wire agent-loop and tools overrides into the launcher graph', () => {
+// Retired with the inquiry subsystem (locus-three-tier-structure, design 决策 11):
+// these overlays must not be produced, applied, or required by the launcher graph.
+const RETIRED_FILES = [
+  'settlement-notice.patch',
+  'package.template.json',
+  'inquiry-isolation.patch',
+  'newinquiry-tools-guard.patch',
+  'native-managed-effects.patch',
+  'native-tools.package.template.json',
+  'newtools.package.template.json',
+  'agent-loop.package.template.json',
+  'verify-native-managed-effects.mjs',
+  'verify-isolated-loop.mjs',
+  'test-native-managed-effects.cjs',
+  'test-native-owner-verifier.cjs',
+]
+
+test('retired overlays for agent-loop, tools and native tool owners are gone', () => {
+  for (const name of RETIRED_FILES) assert.equal(existsSync(join(here, name)), false, `${name} must be removed`)
+})
+
+test('build and launcher wire only model-display and team-membership overlays', () => {
   const build = readFileSync(join(here, 'build.mjs'), 'utf8')
   const launcher = readFileSync(join(here, 'build-launcher.cjs'), 'utf8')
-  const patch = readFileSync(join(here, 'inquiry-isolation.patch'), 'utf8')
-  const toolsPatch = readFileSync(join(here, 'newinquiry-tools-guard.patch'), 'utf8')
-  assert.match(build, /agentLoopPatchSha256: '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92'/)
-  assert.match(launcher, /agentLoopPatchSha256 = '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92'/)
-  assert.match(patch, /^diff --git a\/packages\/core\/agent-loop\/src\/agent\.ts/m)
-  assert.match(patch, /^diff --git a\/packages\/core\/agent-loop\/src\/inbox\.ts/m)
-  assert.match(patch, /^diff --git a\/packages\/core\/agent-loop\/src\/index\.ts/m)
-  assert.equal((patch.match(/^diff --git /gm) ?? []).length, 3)
-  assert.match(build, /git', \['apply', '--check', inquiryPatchFile\]/)
-  assert.match(build, /supportsIsolatedQueuedTurnClaim/)
-  assert.match(toolsPatch, /supportsFinalToolGuardRecheck/)
-  assert.match(patch, /supportsIsolatedQueuedTurnClaim = true/)
-  assert.match(patch, /probeIsolatedQueuedTurnClaim\(fixture: \{ nextStepId: string; nextTurnId: string \}\)/)
-  assert.match(patch, /claimedMessageIds: readonly string\[\]/)
-  assert.match(patch, /hasEligiblePending\(ids: ReadonlySet<MessageId>\)/)
-  assert.match(patch, /private isolatedContextIds: Set<import\('@deepseek-ai\/dsh-llm'\)\.MessageId> \| undefined/)
-  assert.match(patch, /if \(this\.isolatedContextIds !== undefined\) this\.isolatedContextIds\.add\(context\.id\)/)
-  assert.match(launcher, /@deepseek-ai\/dsh-agent-loop/)
-  assert.match(launcher, /inquiry-isolation\.patch/)
-  assert.match(build, /toolsPatchSha256: '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04654f7b13a3'/)
-  assert.match(build, /git', \['apply', '--check', toolsPatchFile\]/)
-  assert.match(toolsPatch, /^diff --git a\/packages\/core\/tools\/src\/index\.ts/m)
-  assert.equal((toolsPatch.match(/^diff --git /gm) ?? []).length, 1)
-  assert.match(launcher, /@deepseek-ai\/dsh-tools/)
-  assert.match(launcher, /newtools\.package\.template\.json/)
-  assert.match(launcher, /newinquiry-tools-guard\.patch/)
-  assert.doesNotMatch(launcher, /!loopSource\.includes\('static supportsIsolatedQueuedTurnClaim = true;'/)
-  assert.match(launcher, /run\(process\.execPath, \[behaviorVerifier, '--graph', directory\], here\)/)
-  assert.match(launcher, /subagentToolsPath = requireFromSubagent\.resolve\('@deepseek-ai\/dsh-tools\/package\.json'\)/)
-  assert.match(launcher, /createRequire\(loopPath\)[\s\S]*resolve\('@deepseek-ai\/dsh-tools\/package\.json'\)/)
-  assert.match(launcher, /realpathSync\(toolsPath\) !== realpathSync\(loopToolsPath\)/)
-  const nativePatch = readFileSync(join(here, 'native-managed-effects.patch'), 'utf8')
-  const nativeTemplate = JSON.parse(readFileSync(join(here, 'native-tools.package.template.json'), 'utf8'))
-  assert.equal(nativeTemplate.version, '0.2.0-rc.2-locus-managed-effects.1')
-  assert.equal(nativeTemplate.patchSha256, '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61')
-  assert.equal(nativeTemplate.packages.length, 4)
-  assert.deepEqual(nativeTemplate.packages.map(pkg => pkg.name), [
-    '@deepseek-ai/dsh-tool-subagent', '@deepseek-ai/dsh-tool-subagent-control',
-    '@deepseek-ai/dsh-tool-workflow', '@deepseek-ai/dsh-tool-ralph',
-  ])
-  assert.equal((nativePatch.match(/^diff --git /gm) ?? []).length, 4)
-  assert.match(build, /managedEffectsPatchSha256: '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61'/)
-  assert.match(build, /git', \['apply', '--check', managedEffectsPatchFile\]/)
-  assert.match(build, /nativeToolsRoot/)
-  assert.match(launcher, /native-managed-effects\.patch/)
-  assert.match(launcher, /native-tools\.package\.template\.json/)
-  assert.match(launcher, /verify-native-managed-effects\.mjs/)
-  assert.match(launcher, /\[nativeBehaviorVerifier, '--graph', directory\]/)
-  assert.match(launcher, /\.\.\.nativeTools\]\.map\(\(\[name, localName\]\) => \[name, `file:\$\{join\(compatPackages, localName\)\}`\]\)/)
-  assert.match(launcher, /nativeToolsTemplate\.packages\)/)
-  assert.match(launcher, /\[\.\.\.nativeTools\]\.map\(\(\[name, localName\]\) => \[name, `file:\$\{join\(compatPackages, localName\)\}`\]\)/)
-  assert.match(launcher, /finalManifest\.dependencies\[name\] = finalFileSpec/)
-  assert.match(launcher, /finalManifest\.overrides\[name\] = finalFileSpec/)
-  assert.match(launcher, /const finalFileSpec = `file:\.\/compat-packages\/\$\{localName\}`/)
+  for (const source of [build, launcher]) {
+    for (const retired of ['settlement-notice', 'inquiry-isolation', 'newinquiry-tools-guard', 'native-managed-effects', 'native-tools', 'newtools', 'agent-loop.package', 'verify-isolated-loop', 'verify-native-managed-effects']) {
+      assert.doesNotMatch(source, new RegExp(retired), `retired reference ${retired} must not remain`)
+    }
+    assert.doesNotMatch(source, /'@deepseek-ai\/dsh-agent-loop': `file:/, 'agent-loop must not be overridden')
+    assert.doesNotMatch(source, /'@deepseek-ai\/dsh-tools': `file:/, 'dsh-tools must not be overridden')
+    assert.doesNotMatch(source, /dsh\.tool\.managed-effect/, 'native owner marker must not be produced')
+  }
+  assert.match(build, /model-display\.patch/)
+  assert.match(build, /team-membership\.patch/)
+  assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-subagent': `file:/)
+  assert.match(launcher, /verify-official-runtime\.mjs/)
+  assert.match(launcher, /model-display/)
+  assert.match(launcher, /team-membership/)
 })
 
 test('both executables reject bad isolated arguments before touching formal launcher state', (t) => {
@@ -82,4 +63,10 @@ test('both executables reject bad isolated arguments before touching formal laun
   const after = (() => { try { return realpathSync(launcherPath) } catch { return null } })()
   assert.equal(after, before)
   assert.deepEqual(require('node:fs').readdirSync(scratch), [])
+})
+
+// Explicit artifact-plane gate: never falls back to a daily/formal launcher.
+test('compiled launcher uses official retired owners and retained extensions', { skip: !process.env.PET_COMPAT_TEST_GRAPH }, () => {
+  const result = spawnSync(process.execPath, [join(here, 'verify-official-runtime.mjs'), '--graph', process.env.PET_COMPAT_TEST_GRAPH], { cwd: here, encoding: 'utf8' })
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
 })

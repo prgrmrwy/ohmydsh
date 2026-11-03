@@ -273,47 +273,41 @@ describe('Pet tool schemas match the real defineTool contract', () => {
       'utf8',
     )
 
-    // Pet still does not ship one tool per arbitrary capability. Nine is the
+    // Pet still does not ship one tool per arbitrary capability. Ten is the
     // full set today: `pet_context`; the security-critical Delivery lifecycle
     // pair (finish/wait), both resolved from the caller/turn proof and
-    // deliberately accepting no target selector; the four
-    // `pet-locus-intent-triage` tools (read-only parent lookup, ledger read,
-    // `pet_locus_track`, and `pet_locus_request_execution`), each equally
-    // caller-bound with no target selector; and the caller-bound entrance read
-    // `pet_locus_chat_history`.
+    // deliberately accepting no target selector; `pet_locus_track`; the two
+    // child tools `locus_context` (read-only, no argument) and
+    // `locus_ask_parent` (one question, no target) from
+    // `locus-three-tier-structure`; the caller-bound entrance read
+    // `pet_locus_chat_history` and its document-entry counterpart
+    // `pet_locus_doc_context`; and the locus MAIN session's two tools
+    // `locus_note` and `locus_reply_child`.
     //
     // The count is the point: this asserts nobody adds a registration without
     // amending this list, so a new entry must be justified here in the same
-    // change. `pet_locus_request_execution` was added by
-    // `pet-locus-todo-accept-starts-work` (design D10) — it takes only an
-    // `itemId`, resolves where work runs Host-side, and can reach `accepted`
-    // only through a real dispatch, never `done`/`dropped`.
-    // `pet_locus_chat_history` was added by
-    // `pet-locus-feishu-read-and-delivery-fixes`: it takes a window and a
-    // Host-issued cursor, never a chat/group/user/thread selector, reads only
-    // the caller's own entrance, and is published only when the runtime
-    // actually supplies a bot read port.
-    // `pet_locus_doc_context` was added by `pet-locus-doc-comments` (D10): the
-    // document-entry counterpart of the entrance read. It takes NO argument,
-    // resolves the document and comment from the caller's locus and current
-    // Delivery, labels content untrusted, and is published only to document
-    // children (an IM child never sees it, a doc child never sees the
-    // group-history read).
+    // change. `pet_locus_parent_lookup` and `pet_locus_request_execution` are
+    // retired: the parent is now a Pet-owned locus main session, and only a
+    // person can take a todo on.
     // Count logical tool definitions at the shared helper call sites, not the
     // helper's single native registration delegation (which intentionally owns
     // every definition above).
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    // 8 since `pet_locus_ledger_read` retired (design D6); exactly that one is gone.
-    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(8)
+    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(10)
     expect(tools).not.toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).not.toContain("'pet_locus_ledger_read'")
-    expect([...code.matchAll(/ctx\.tools\.register\s*\(/g)]).toHaveLength(1)
+    // One native registration per registrar: `registerPetTools` and `registerPetLocusMainTools`.
+    expect([...code.matchAll(/ctx\.tools\.register\s*\(/g)]).toHaveLength(2)
     expect(tools).toContain('PET_CONTEXT_TOOL')
     expect(tools).toContain('PET_LOCUS_FINISH_TOOL')
     expect(tools).toContain('PET_LOCUS_WAIT_TOOL')
-    expect(tools).toContain('PET_LOCUS_PARENT_LOOKUP_TOOL')
+    expect(tools).toContain('LOCUS_CONTEXT_TOOL')
+    expect(tools).toContain('LOCUS_ASK_PARENT_TOOL')
+    expect(tools).toContain('LOCUS_NOTE_TOOL')
+    expect(tools).toContain('LOCUS_REPLY_CHILD_TOOL')
     expect(tools).toContain('PET_LOCUS_TRACK_TOOL')
-    expect(tools).toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
+    expect(tools).not.toContain('PET_LOCUS_PARENT_LOOKUP_TOOL')
+    expect(tools).not.toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
     expect(tools).toContain('PET_LOCUS_CHAT_HISTORY_TOOL')
     expect(tools).toContain('PET_LOCUS_DOC_CONTEXT_TOOL')
     expect(tools).not.toContain('pet_create_mr')

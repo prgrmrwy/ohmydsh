@@ -32,6 +32,7 @@ import {
   LOCUS_SAFE_TOOL_NAMES,
   LOCUS_SHELL_TIER_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
+import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { LOCUS_ROUTES, ROUTES } from '../src/wire.js'
 
@@ -814,6 +815,14 @@ describe('Invocation state is projected from real session events', () => {
   })
 })
 
+async function seedMainPairing(ctx: Context, main = 'main-live', workspaceId = 'ws-live') {
+  await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('locus_mains').put(main, {
+    workSessionId: `work-${main}`, locusMainSessionId: main,
+    generation: 1, status: 'active', spaceId: `space-${main}`, workspaceId,
+    createdAt: 1, updatedAt: 1,
+  })
+}
+
 describe('a locus child is composed at the real creation boundary', () => {
   const visibleToolsByContext = new WeakMap<Context, Set<string>>()
 
@@ -827,7 +836,6 @@ describe('a locus child is composed at the real creation boundary', () => {
    */
   async function hostWithLocusChild(options: {
     policy?: 'read-only' | 'workspace-write' | 'absent'
-    shellToolsInBase?: boolean
   } = {}) {
     const home = await mkdtemp(path.join(tmpdir(), 'pet-loader-'))
     const projectRoot = await mkdtemp(path.join(tmpdir(), 'pet-project-'))
@@ -840,12 +848,12 @@ describe('a locus child is composed at the real creation boundary', () => {
     const modes = new Map<string, string>()
     const visibleToolNames = new Set([
       ...LOCUS_SAFE_TOOL_NAMES,
-      ...(options.shellToolsInBase === true ? LOCUS_SHELL_TIER_TOOL_NAMES : []),
+      ...LOCUS_SHELL_TIER_TOOL_NAMES,
       ...LOCUS_CALLER_BOUND_TOOLS,
     ])
     const sessions = new Map<string, {
       id: string
-      header: { cwd: string }
+      header: { cwd: string; agentPreset?: string }
       snapshotEvents(): never[]
       seq: number
       append(type: string, data: { mode?: string }): void
@@ -855,7 +863,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       if (current !== undefined) return current
       const session = {
         id,
-        header: { cwd: projectRoot },
+        header: { cwd: projectRoot, agentPreset: LOCUS_BASE_PRESET },
         snapshotEvents: () => [],
         seq: 0,
         append(type: string, data: { mode?: string }) {
@@ -889,7 +897,6 @@ describe('a locus child is composed at the real creation boundary', () => {
       tools: {
         register: () => () => {},
         schemas: () => [...visibleToolNames].map(name => ({ name })),
-
       },
     })
     if (options.policy !== 'absent') {
@@ -931,15 +938,17 @@ describe('a locus child is composed at the real creation boundary', () => {
     while (Date.now() < deadline && routes.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
+    visibleToolsByContext.set(ctx, visibleToolNames)
     return { ctx, home, applied }
   }
 
-  /** Insert one active locus generation through the durable repository. */
-  async function seedLocus(ctx: Context, permission: 'read' | 'write', composition: 'safe-v1' | 'safe-v2' = 'safe-v1'): Promise<void> {
+  /** Insert one active three-tier generation and its work/main pairing. */
+  async function seedLocus(ctx: Context, permission: 'read' | 'write', composition: 'tier3' | 'safe-v1' | 'safe-v2' = 'tier3'): Promise<void> {
     const { LocusRepository } = await import('../src/host/locus/persistence.js')
     const domain = ctx.storage.domain.get(PET_DOMAIN_NAME)
     expect(domain).toBeDefined()
     const repository = new LocusRepository(domain as never)
+    await seedMainPairing(ctx)
     await repository.putLocus({
       id: 'locus-live',
       generation: 1,
@@ -950,7 +959,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       source: 'auto',
       state: 'active',
       childComposition: composition,
-       ...(composition === 'safe-v2' ? { toolTier: { desired: 'safe' as const, effective: 'safe' as const } } : {}),
+      toolTier: { desired: 'safe', effective: 'safe' },
       permission: { desired: permission, effective: permission, verifiedAt: 1 },
       busy: false,
       createdAt: 1,
@@ -959,50 +968,33 @@ describe('a locus child is composed at the real creation boundary', () => {
   }
 
   /** Emit the runtime's creation event exactly as DSH does. */
-  function publish(ctx: Context, sessionId: string, options: {
-    readonly onRestrict?: (restriction: { deny: readonly string[] }) => () => void
+  async function publish(ctx: Context, sessionId: string, options: {
     readonly failRestrict?: boolean
-    readonly tier?: 'safe' | 'shell'
-    readonly legacy?: boolean
-  } = {}): { registered: string[] } {
-    const visible = new Set([
-      ...LOCUS_SAFE_TOOL_NAMES,
-      ...(options.shellToolsInBase === true ? LOCUS_SHELL_TIER_TOOL_NAMES : []),
-      ...LOCUS_CALLER_BOUND_TOOLS,
-    ])
+    readonly withoutRestrict?: boolean
+    readonly withoutGuard?: boolean
+  } = {}): Promise<{ registered: string[] }> {
+    const visible = visibleToolsByContext.get(ctx)!
     const registered: string[] = []
+    const tools = {
+      register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
+      ...(options.withoutRestrict ? {} : {
+        restrict: (restriction: { deny: readonly string[] }) => {
+          if (options.failRestrict) throw new Error('injected restrict failure')
+          for (const name of restriction.deny) visible.delete(name)
+          return () => { for (const name of restriction.deny) visible.add(name) }
+        },
+      }),
+      ...(options.withoutGuard ? {} : { guard: () => () => {} }),
+    }
     const agentCtx = {
-      get: (service: string) =>
-        service === 'tools'
-          ? {
-              register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
-               restrict: (restriction: { deny: readonly string[] }) => {
-                 if (options.failRestrict === true) throw new Error('injected restrict failure')
-                 for (const name of restriction.deny) visible.delete(name)
-                 return options.onRestrict?.(restriction) ?? (() => {
-                   for (const name of restriction.deny) visible.add(name)
-                 })
-               },
-              guard: () => () => {},
-            }
-          : undefined,
+      get: (service: string) => service === 'tools' ? tools : undefined,
       inject: (_services: string[], callback: (scoped: unknown) => void) => { callback(agentCtx) },
       effect: (fn: () => unknown) => { fn(); return () => {} },
       on: () => () => {},
-      tools: {
-        register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
-               restrict: (restriction: { deny: readonly string[] }) => {
-                 if (options.failRestrict === true) throw new Error('injected restrict failure')
-                 for (const name of restriction.deny) visible.delete(name)
-                 return options.onRestrict?.(restriction) ?? (() => {
-                   for (const name of restriction.deny) visible.add(name)
-                 })
-               },
-        guard: () => () => {},
-      },
+      tools,
       skills: { registerProvider: () => () => {} },
     }
-    ctx.emit('agent/created', { agent: { id: sessionId, ctx: agentCtx } })
+    await ctx.serial('agent/created', { agent: { id: sessionId, ctx: agentCtx }, source: 'resume' })
     return { registered }
   }
 
@@ -1010,7 +1002,7 @@ describe('a locus child is composed at the real creation boundary', () => {
     const { ctx, applied } = await hostWithLocusChild()
     await seedLocus(ctx, 'read')
 
-    const { registered } = publish(ctx, 'child-live')
+    const { registered } = await publish(ctx, 'child-live')
 
     // The child got Pet's caller-bound tool on its OWN scope, and the Host
     // was asked for exactly the locus's granted permission.
@@ -1023,9 +1015,9 @@ describe('a locus child is composed at the real creation boundary', () => {
     const { ctx } = await hostWithLocusChild({ policy: 'workspace-write' })
     await seedLocus(ctx, 'read')
 
-    // A synchronous throw out of `agent/created` is what rolls the agent back,
-    // so a child never runs a turn with more file access than it was granted.
-    expect(() => publish(ctx, 'child-live')).toThrow(/read/)
+    // rc.2 awaits the serial publication boundary; rejected async listeners
+    // roll creation back before any first turn can enter a wider policy.
+    await expect(publish(ctx, 'child-live')).rejects.toThrow(/read/)
   })
 
   it('logs why a composition was refused before the veto hides it', async () => {
@@ -1040,7 +1032,7 @@ describe('a locus child is composed at the real creation boundary', () => {
       logged.push(args.map(String).join(' '))
     })
     try {
-      expect(() => publish(ctx, 'child-live')).toThrow()
+      await expect(publish(ctx, 'child-live')).rejects.toThrow()
     } finally {
       spy.mockRestore()
     }
@@ -1056,7 +1048,22 @@ describe('a locus child is composed at the real creation boundary', () => {
     const { ctx } = await hostWithLocusChild({ policy: 'absent' })
     await seedLocus(ctx, 'read')
 
-    expect(() => publish(ctx, 'child-live')).toThrow(/policy/)
+    await expect(publish(ctx, 'child-live')).rejects.toThrow(/policy/)
+  })
+
+  it.each([
+    { withoutRestrict: true }, { failRestrict: true }, { withoutGuard: true },
+  ])('vetoes publication when the scoped security surface is unavailable: %j', async options => {
+    const { ctx } = await hostWithLocusChild()
+    await seedLocus(ctx, 'read')
+    await expect(publish(ctx, 'child-live', options)).rejects.toThrow()
+  })
+
+  it.each(['safe-v1', 'safe-v2'] as const)('does not resume retired %s children', async composition => {
+    const { ctx, applied } = await hostWithLocusChild()
+    await seedLocus(ctx, 'read', composition)
+    await expect(publish(ctx, 'child-live')).rejects.toThrow(/tier3/)
+    expect(applied).toEqual([])
   })
 
   it('leaves ordinary sessions untouched', async () => {
@@ -1064,7 +1071,7 @@ describe('a locus child is composed at the real creation boundary', () => {
     await seedLocus(ctx, 'read')
 
     // Not a locus child: no veto, and no policy imposed on it.
-    expect(() => publish(ctx, 'some-other-session')).not.toThrow()
+    await expect(publish(ctx, 'some-other-session')).resolves.toEqual({ registered: [] })
     expect(applied).toEqual([])
   })
 })
@@ -1087,7 +1094,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     stubServices(ctx, routes, {
       sessions: {
         list: () => [],
-        get: (id: string) => ({ id, header: { cwd: '/repo' }, snapshotEvents: () => [], seq: 0 }),
+        get: (id: string) => ({ id, header: { cwd: '/repo', agentPreset: LOCUS_BASE_PRESET }, snapshotEvents: () => [], seq: 0 }),
       },
     })
 
@@ -1123,6 +1130,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     const { LocusRepository } = await import('../src/host/locus/persistence.js')
     const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
     const endpoint = { chatId: 'oc-live' }
+    await seedMainPairing(ctx)
     await repository.putLocus({
       id: 'locus-live',
       generation: 1,
@@ -1132,6 +1140,8 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
       workspaceId: 'ws-live',
       source: 'auto',
       state: 'active',
+      childComposition: 'tier3',
+      toolTier: { desired: 'safe', effective: 'safe' },
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: false,
       createdAt: 1,
@@ -1161,7 +1171,7 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
     // Exactly the two events DSH emits, with their real payload shapes.
     host.ctx.emit('agent/inbox/claimed' as never, {
       agent: { id: 'child-live' },
-      message: { id: 'inbox-execution-live' },
+      message: { id: 'inbox-execution-live', source: { kind: 'user' } },
       turn: 1,
     } as never)
     host.ctx.emit('session/event' as never, { id: 'child-live' } as never, {
@@ -1201,15 +1211,10 @@ describe('owner-facing locus management is served by the real routes', () => {
     const ctx = new Context()
     await ctx.plugin(Storage)
     const modes = new Map<string, string>()
-    const visibleToolNames = new Set([
-      ...LOCUS_SAFE_TOOL_NAMES,
-      ...(options.shellToolsInBase === true ? LOCUS_SHELL_TIER_TOOL_NAMES : []),
-      ...LOCUS_CALLER_BOUND_TOOLS,
-    ])
     const sessions = new Map<string, {
       id: string
       title: string
-      header: { cwd: string; parentSession?: string; origin?: string }
+      header: { cwd: string; parentSession?: string; origin?: string; agentPreset?: string }
       snapshotEvents(): never[]
       seq: number
       append(type: string, data: { mode?: string }): void
@@ -1222,7 +1227,7 @@ describe('owner-facing locus management is served by the real routes', () => {
         title: id === 'main-live' ? '研发主会话' : '项目子会话',
         header: id === 'child-live'
           ? { cwd: '/repo', parentSession: 'main-live', origin: 'subagent' }
-          : { cwd: '/repo' },
+          : { cwd: '/repo', agentPreset: LOCUS_BASE_PRESET },
         snapshotEvents: () => [],
         seq: 0,
         append(type, data) {
@@ -1261,31 +1266,18 @@ describe('owner-facing locus management is served by the real routes', () => {
         : {}),
     })
     if (options.scopeRuntime === true) {
-      // The API controller correctly refuses this subagent-owned child. Scope
-      // must therefore use the continuation owner instead.
+      // The ordinary controller refuses this child; non-resident changes must
+      // not borrow a compatibility Session or fall back to ordinary resolve.
       ctx.provide('sandboxPolicy', {
         resolve: ({ session }: { session: { id: string } }) => ({ mode: modes.get(session.id) }),
       })
       ctx.provide('subagents', {
         startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
-        createIdleContinuable: async () => ({ childId: 'child-live' }),
-        supportsSettlementNotice: true,
-        supportsIdleContinuableCreate: true,
-        supportsIndependentContinuableCreate: true,
-        supportsIndependentChildAgentPreset: true,
-        supportsLiveContinuableChildSession: true,
+        getProvider: () => ({ inheritsParentContext: false }),
         listChildren: async (_parentSessionId: string) => {
           return [{
             id: 'child-live', childSessionId: 'child-live', parentSessionId: 'main-live', kind: 'child', mode: 'continuable',
           }]
-        },
-        withLiveContinuableChildSession: async (
-          spec: { parent: unknown; childId: string },
-          operation: (session: unknown) => unknown,
-        ) => {
-          expect(spec.parent).toBe(main)
-          expect(spec.childId).toBe('child-live')
-          return operation(sessionOf('child-live'))
         },
         [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
       })
@@ -1323,6 +1315,7 @@ describe('owner-facing locus management is served by the real routes', () => {
     const { LocusRepository } = await import('../src/host/locus/persistence.js')
     const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
     const endpoint = { chatId: 'oc-live' }
+    await seedMainPairing(ctx)
     await repository.putLocus({
       id: 'locus-live',
       generation: 1,
@@ -1332,6 +1325,8 @@ describe('owner-facing locus management is served by the real routes', () => {
       workspaceId: 'ws-pet',
       source: 'auto',
       state: 'active',
+      childComposition: 'tier3',
+      toolTier: { desired: 'safe', effective: 'safe' },
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: false,
       createdAt: 1,
@@ -1516,8 +1511,7 @@ describe('startup reconciliation runs against the real runtime', () => {
     // that the persisted child cannot take another turn.
     ctx.provide('subagents', {
       startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
-      supportsIndependentContinuableCreate: true,
-      supportsIndependentChildAgentPreset: true,
+      getProvider: () => ({ inheritsParentContext: false }),
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
     })
@@ -1546,14 +1540,15 @@ describe('startup reconciliation runs against the real runtime', () => {
     await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
 
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
-    // Pet registers the domain during its async setup, so wait for it the
-    // same way the other loader tests do before reading it.
+    // Wait for full readiness, not just domain opening: earlier background
+    // initialization could otherwise leak logs into a later diagnostic case.
     const ready = Date.now() + 15_000
-    while (Date.now() < ready && ctx.storage.domain.get(PET_DOMAIN_NAME) === undefined) {
+    while (Date.now() < ready && routes.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const { LocusRepository } = await import('../src/host/locus/persistence.js')
     const seeded = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    await seedMainPairing(ctx, 'main-gone', 'ws-1')
     await seeded.putLocus({
       id: 'locus-stale',
       generation: 1,
@@ -1563,6 +1558,8 @@ describe('startup reconciliation runs against the real runtime', () => {
       workspaceId: 'ws-1',
       source: 'auto',
       state: 'active',
+      childComposition: 'tier3',
+      toolTier: { desired: 'safe', effective: 'safe' },
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: true,
       createdAt: 1,
@@ -1631,14 +1628,15 @@ describe('startup reconciliation runs against the real runtime', () => {
     await ctx.plugin(StorageDomain, { backend: 'json', routes: { [PET_DOMAIN_NAME]: PET_BACKEND_NAME } })
 
     await ctx.plugin(petPlugin, { home, version: '0.1.0' })
-    // Pet registers the domain during its async setup, so wait for it the
-    // same way the other loader tests do before reading it.
+    // Wait for full readiness, not just domain opening: earlier background
+    // initialization could otherwise leak logs into a later diagnostic case.
     const ready = Date.now() + 15_000
-    while (Date.now() < ready && ctx.storage.domain.get(PET_DOMAIN_NAME) === undefined) {
+    while (Date.now() < ready && routes.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     const { LocusRepository } = await import('../src/host/locus/persistence.js')
     const seeded = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    await seedMainPairing(ctx, 'main-1', 'ws-1')
     await seeded.putLocus({
       id: 'locus-kept',
       generation: 1,
@@ -1648,26 +1646,29 @@ describe('startup reconciliation runs against the real runtime', () => {
       workspaceId: 'ws-1',
       source: 'auto',
       state: 'active',
-      // Required for this to test the rule it names. Reconciliation invalidates
-      // a generation that lacks this durable proof BEFORE consulting any probe
-      // (probing could resolve the child and inherit the parent preset), so a
-      // seed without it is invalidated whatever the runtime can answer — and
-      // the assertion below then depends on whether the fire-and-forget pass
-      // happened to finish inside the wait, which made this case flaky.
-      childComposition: 'safe-v1',
+      // A legacy marker is deliberately skipped, not probed. Use a serviceable
+      // three-tier row so this checks missing liveness evidence, not retirement.
+      childComposition: 'tier3',
+      toolTier: { desired: 'safe', effective: 'safe' },
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: false,
       createdAt: 1,
       updatedAt: 1,
     })
 
-    // No `subagents` service at all: the probe cannot answer.
-    await ctx.plugin(petPlugin, { home: await mkdtemp(path.join(tmpdir(), 'pet-loader-')), version: '0.1.0' })
-    await new Promise(resolve => setTimeout(resolve, 200))
-
-    const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
-    // A missing seam must not invalidate every entry the user has.
-    expect(repository.getLocus('locus-kept')?.state).toBe('active')
+    // Re-run the actual reconciliation over this loader's durable domain.
+    // Loading apply twice would merely reject an already-open domain, never
+    // reach reconciliation, and falsely pass because nothing ran.
+    const { reconcileLocusChildren } = await import('../src/host/locus/reconcile.js')
+    const { probeLocusChildPorts } = await import('../src/host/locus/child.js')
+    expect(probeLocusChildPorts(ctx as never).available).toBe(false)
+    const invalidate = vi.fn()
+    const report = await reconcileLocusChildren(seeded.listLoci(), {
+      store: { invalidate, clearBusy: vi.fn() },
+    })
+    expect(report.unproven).toEqual(['locus-kept'])
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(seeded.getLocus('locus-kept')?.state).toBe('active')
   })
 })
 
@@ -1679,15 +1680,12 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
     const ctx = new Context()
     await ctx.plugin(Storage)
     stubServices(ctx, routes)
-    // A runtime exposing the child seams but NOT the ability to suppress a
-    // child's automatic parent report. The independent marker is present so
-    // the assertion below reaches the settlement-notice gate specifically.
+    // An official runtime without a Host inbox queue is unusable even when
+    // startContinuable exists; a steer/sendMessage fallback is not permitted.
     ctx.provide('subagents', {
       startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
-      supportsIndependentContinuableCreate: true,
-      supportsIndependentChildAgentPreset: true,
+      getProvider: () => ({ inheritsParentContext: false }),
       listChildren: async () => [],
-      [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
     })
     // Capture the sink Pet actually writes to. Pet reports through `console`
     // rather than `ctx.logger`, because the Host logger's output never reaches
@@ -1730,7 +1728,7 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
       // "not wired yet" from "wired and broken".
       const gate = logs.find(line => line.includes('unified Feishu channel stays unavailable'))
       expect(gate).toBeDefined()
-      expect(gate).toContain('child')
+      expect(gate).toContain('child seam unavailable (inbox-unavailable)')
     } finally {
       // Restore unconditionally: a patched `console.log` leaking out of this
       // case would silently swallow output from every later test.
@@ -2004,12 +2002,11 @@ describe('the Pet executor preset omits local-root Skill discovery', () => {
       return next === -1 ? rest : rest.slice(0, next)
     }
 
-    // Every locus child composes from this preset (`LOCUS_CHILD_PRESET`),
-    // whatever preset its main session runs. A delegation row
-    // carrying `modelSelectionSettings` installs per agent, which puts the tool
-    // in the child's OWN scope — and `LOCUS_SAFE_TOOL_FILTER` only restricts the
-    // INHERITED surface, so the child would keep `subagent` and could delegate
-    // to a descendant that retains bash and lark-cli.
+    // Ordinary Pet Task executors keep their pre-migration preset and its
+    // standing-layer delegation rows. Three-tier locus sessions instead use
+    // locus-base, whose complete delegation exclusion is tested separately.
+    // A row carrying modelSelectionSettings would register on the own plane;
+    // inherited restrictions cannot constrain such a registration.
     expect(row(await read('dsh-pet-executor'), 'tool-subagent'))
       .not.toContain('modelSelectionSettings')
     expect(row(await read('dsh-pet-executor'), 'tool-subagent-fork'))

@@ -66,8 +66,8 @@
 - [普通会话身份与投递](../src/session-provider.ts#L23-L106)
 - [kernel 模型](../../collab-kernel/src/model/index.ts)
 - [kernel 条目修改](../../collab-kernel/src/service/index.ts#L279-L291)
-- [Locus caller 校验](../../dsh-pet/src/host/collaboration/caller.ts)
-- [询问当前规范](../../../openspec/specs/pet-inquiry-runtime-channel/spec.md)
+- Locus caller 校验 `packages/dsh-pet/src/host/collaboration/caller.ts`（已随 change `locus-three-tier-structure` 删除）
+- 询问规范 `openspec/specs/pet-inquiry-runtime-channel`（已由 change `locus-three-tier-structure` 退役，见其 delta）
 
 ### 讨论中的修正
 

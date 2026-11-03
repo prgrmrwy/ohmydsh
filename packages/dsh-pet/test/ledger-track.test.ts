@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { trackFailureText, trackTodo, type TrackDeps } from '../src/host/ledger/track.js'
 import { LedgerStoreError } from '../src/host/ledger/store.js'
+import { locusIdentity } from '../src/host/collab/naming.js'
+import { endpointKeyOf } from '../src/host/locus/aggregate.js'
 import type { LocusContextRecord } from '../src/host/locus/context-repository.js'
 
 function authorized(overrides: Partial<LocusContextRecord> = {}): LocusContextRecord {
@@ -43,7 +45,8 @@ describe('trackTodo', () => {
     expect(registerTodoItem).toHaveBeenCalledWith({
       itemId: 'todo-new',
       parentSessionId: 'main-1',
-      locusId: 'locus-1',
+      // The stable ENTRY identity (hash of the endpoint key), never the generation's row id.
+      locusId: locusIdentity(endpointKeyOf({ chatId: 'oc-project' })),
       generation: 2,
       endpoint: { chatId: 'oc-project' },
       triggerMessageId: 'om_trigger',
@@ -123,19 +126,21 @@ describe('trackTodo', () => {
   })
 })
 
-describe('pet_locus_request_execution takes no target selector (design D10)', () => {
-  it('request-execution rejects any target selector argument', async () => {
+describe('pet_locus_track takes no target selector', () => {
+  it('track rejects any target selector argument', async () => {
     const { readFile } = await import('node:fs/promises')
     const nodePath = await import('node:path')
     const tools = await readFile(
       nodePath.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
       'utf8',
     )
-    const block = tools.slice(tools.indexOf('name: PET_LOCUS_REQUEST_EXECUTION_TOOL'))
+    const block = tools.slice(tools.indexOf('name: PET_LOCUS_TRACK_TOOL'))
     const params = block.slice(block.indexOf('parameters: {'), block.indexOf('output: {'))
-    // `itemId` is the ONLY accepted argument; anything resembling a target
-    // would let a model choose where work runs, which the Host must decide.
-    expect(params).toContain('itemId')
+    // `summary` and `detail` are the ONLY accepted arguments; anything
+    // resembling a target would let a model choose where the todo goes, which
+    // the Host must decide.
+    expect(params).toContain('summary')
+    expect(params).toContain('detail')
     for (const selector of ['locusId', 'chatId', 'threadId', 'sessionId', 'target', 'messageId']) {
       expect(params).not.toContain(selector)
     }

@@ -397,9 +397,9 @@ describe('names', () => {
 // ---------------------------------------------------------------------------
 
 describe('state vocabulary', () => {
-  const states: readonly PetLocusState[] = ['provisioning', 'active', 'switching', 'invalid', 'stopped', 'retired']
+  const states: readonly PetLocusState[] = ['not-created', 'provisioning', 'active', 'switching', 'invalid', 'stopped', 'retired']
 
-  it('covers all six lifecycle states', () => {
+  it('covers all seven lifecycle states', () => {
     expect(Object.keys(LOCUS_STATE_LABELS).sort()).toEqual([...states].sort())
     for (const state of states) {
       expect(locusStateLabel(state)).not.toBe('')

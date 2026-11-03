@@ -20,11 +20,15 @@ import type { FixedRound } from '../src/eval/round.js'
 vi.mock('@deepseek-ai/dsh-llm', async () => {
   const { createRequire } = await import('node:module')
   const { fileURLToPath, pathToFileURL } = await import('node:url')
-  const graph = createRequire(fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
+  const graph = createRequire(process.env.DSH_PET_TEST_RUNTIME
+    ? `${process.env.DSH_PET_TEST_RUNTIME}/package.json`
+    : fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
   return import(/* @vite-ignore */ pathToFileURL(graph.resolve('@deepseek-ai/dsh-llm')).href)
 })
 
-const graph = createRequire(fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
+const graph = createRequire(process.env.DSH_PET_TEST_RUNTIME
+    ? `${process.env.DSH_PET_TEST_RUNTIME}/package.json`
+    : fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
 const load = (name: string): Promise<any> => import(/* @vite-ignore */ pathToFileURL(graph.resolve(name)).href)
 
 it('production Host dispatch runs six real top-level conditions, eight turns and twelve owned judges completely offline', async () => {
@@ -57,8 +61,9 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
   let detachController: (() => void) | undefined
   try {
     expect(graph.resolve('@deepseek-ai/dsh-api-session-controller')).toContain('/compat-packages/session-controller/')
-    expect(graph.resolve('@deepseek-ai/dsh-agent-loop')).toContain('/compat-packages/agent-loop/')
-    expect(graph.resolve('@deepseek-ai/dsh-subagent')).toContain('/compat-packages/subagent/')
+    // agent-loop is no longer overridden (inquiry subsystem retired); it resolves to the official package.
+    expect(graph.resolve('@deepseek-ai/dsh-agent-loop')).not.toContain('/compat-packages/agent-loop/')
+    expect(graph.resolve('@deepseek-ai/dsh-subagent')).not.toContain('/compat-packages/subagent/')
     await install(llm); await install(storage); await install(sqlite, { path: ':memory:' }); await install(domain, { backend: 'sqlite' })
     await install(persistence, { root: join(dshHome, 'sessions'), compression: 'zstd' })
     await install(sessions); await install(projections); await install(prompt, { persona: '' }); await install(tools)

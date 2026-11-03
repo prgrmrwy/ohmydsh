@@ -11,13 +11,14 @@
 import { describe, expect, it } from 'vitest'
 
 describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 2.1)', () => {
-  it('PET_DOMAIN_VERSION is 17 while retaining the v15 ledger, v16 answer, and v17 inquiry rationale', async () => {
+  it('PET_DOMAIN_VERSION is 18 while retaining the v15 ledger, v16 answer, v17 inquiry and v18 locus_mains rationale', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
       new URL('../src/host/spec.ts', import.meta.url),
       'utf8',
     )
-    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 17')
+    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 18')
+    expect(specSource).toContain('Bumped to 18 for the three-tier locus structure')
     expect(specSource).toContain('Bumped to 15 for the shared-fact ledger')
     expect(specSource).toContain('Bumped to 16 for inquiry_answers')
     expect(specSource).toContain('Bumped to 17 for durable inquiry handoff intents and local work proofs')
@@ -43,9 +44,10 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
       'utf8',
     )
     const tableDecls = [...specSource.matchAll(/(\w+):\s*domainTable<string, z\.infer<typeof (\w+)>>\((\w+)\)/g)]
-    // 25 real tables after the v15 ledger tables, v16 inquiry_answers, and
-    // v17 inquiry handoff/work tables (verified by declaration count).
-    expect(tableDecls.length).toBe(25)
+    // 26 real tables after the v15 ledger tables, v16 inquiry_answers,
+    // v17 inquiry handoff/work tables, and v18 locus_mains (verified by
+    // declaration count).
+    expect(tableDecls.length).toBe(26)
     for (const [, , schemaTypeName, schemaValueName] of tableDecls) {
       // Every declaration's type-arg and value-arg name the SAME schema
       // symbol — there is no table with a mismatched schema/type pair today.
@@ -67,7 +69,7 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
       'locus_operations', 'locus_switch_notices', 'locus_permission_audit',
       'collaboration_contexts', 'collaboration_context_revisions', 'inquiries',
       'inquiry_results', 'inquiry_answers', 'inquiry_handoffs', 'inquiry_works',
-      'shared_fact_ledger', 'ledger_item',
+      'shared_fact_ledger', 'ledger_item', 'locus_mains',
     ])
   })
 

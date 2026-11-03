@@ -12,6 +12,7 @@ import {
   LocusPrepublicationError,
   LocusPrepublicationStagingRegistry,
 } from '../src/host/locus/prepublication-staging.js'
+import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 
 function identity(overrides: Partial<LocusChildComposition> = {}) {
   return {
@@ -67,6 +68,7 @@ describe('locus child pre-publication staging', () => {
     const candidate = { id: reservation.childSessionId, scope: { get: vi.fn() } }
     const result = composeLocusChild(candidate, {
       lookup,
+      parentPreset: () => LOCUS_BASE_PRESET,
       surface: {
         install: vi.fn(),
         setToolTier: (_agent, target) => {
@@ -90,7 +92,7 @@ describe('locus child pre-publication staging', () => {
     const childSessionId = 'session-durable-fail'
     const record = identity({
       childSessionId,
-      childComposition: 'safe-v2',
+      childComposition: 'tier3',
       toolTier: { desired: 'safe', effective: 'safe' },
     }) as LocusChildComposition
     const lookup = createPrepublicationCompositionLookup({
@@ -99,6 +101,7 @@ describe('locus child pre-publication staging', () => {
     })
     expect(() => composeLocusChild({ id: childSessionId, scope: { get: vi.fn() } }, {
       lookup,
+      parentPreset: () => LOCUS_BASE_PRESET,
       surface: {
         install: vi.fn(),
         setToolTier: () => { throw new Error('restrict failed on cold restore') },
@@ -109,7 +112,7 @@ describe('locus child pre-publication staging', () => {
     })).toThrow(/safe tool tier/)
   })
 
-  it('refuses fresh safe-v2 staging when the restriction seam throws', () => {
+  it('refuses fresh staging when the restriction seam throws', () => {
     const staging = registry()
     const reservation = staging.reserve(identity({ toolTier: { desired: 'safe', effective: 'safe' } }))
     const lookup = createPrepublicationCompositionLookup({ durable: durableLookup(), staging })
@@ -117,6 +120,7 @@ describe('locus child pre-publication staging', () => {
       { id: reservation.childSessionId, scope: { get: vi.fn() } },
       {
         lookup,
+        parentPreset: () => LOCUS_BASE_PRESET,
         surface: {
           install: vi.fn(),
           setToolTier: () => { throw new Error('restriction unavailable') },
@@ -141,6 +145,7 @@ describe('locus child pre-publication staging', () => {
 
     const result = composeLocusChild(agent, {
       lookup,
+      parentPreset: () => LOCUS_BASE_PRESET,
       surface: {
         install,
         setToolTier: vi.fn(),
@@ -161,7 +166,7 @@ describe('locus child pre-publication staging', () => {
         locusId: 'locus-fresh',
         generation: 1,
         permission: 'read',
-        childComposition: 'safe-v2',
+        childComposition: 'tier3',
         toolTier: { desired: 'safe', effective: 'safe' },
       },
       effectivePermission: 'read',
@@ -184,7 +189,7 @@ describe('locus child pre-publication staging', () => {
     const childSessionId = 'session-durable'
     const record = identity({
       childSessionId,
-      childComposition: 'safe-v2',
+      childComposition: 'tier3',
       toolTier: { desired: tier, effective: tier },
     }) as LocusChildComposition
     const lookup = createPrepublicationCompositionLookup({
@@ -200,6 +205,7 @@ describe('locus child pre-publication staging', () => {
     })
     const result = composeLocusChild({ id: childSessionId, scope: { get: vi.fn() } }, {
       lookup,
+      parentPreset: () => LOCUS_BASE_PRESET,
       surface: {
         install: vi.fn(),
         setToolTier,
@@ -355,5 +361,63 @@ describe('locus child pre-publication staging', () => {
     expect(staging.activeCount).toBe(0)
     expectReason(() => staging.reserve(identity()), 'registry-disposed')
     expectReason(() => staging.claim('session-same'), 'registry-disposed')
+  })
+})
+
+describe('pre-publication publication callbacks', () => {
+  const callbacks = () => ({
+    publish: vi.fn(async () => undefined),
+    unpublish: vi.fn(async () => undefined),
+  })
+
+  it('publishes and commits the reservation before the first claim', async () => {
+    const staging = registry()
+    const publication = callbacks()
+    const reservation = staging.reserve(identity(), publication)
+
+    // Not claimed yet: publishing would run before composition was proven.
+    await expect(staging.publishClaimed(reservation.childSessionId)).rejects.toMatchObject({ reason: 'claim-required' })
+    expect(staging.claim(reservation.childSessionId)).toBe(reservation.composition)
+    expect(staging.inspect(reservation.childSessionId)?.published).toBe(false)
+
+    await staging.publishClaimed(reservation.childSessionId)
+
+    expect(publication.publish).toHaveBeenCalledWith(reservation.childSessionId, reservation.composition)
+    expect(staging.inspect(reservation.childSessionId)).toBeUndefined()
+    expect(staging.activeCount).toBe(0)
+    await staging.publishClaimed(reservation.childSessionId)
+    expect(publication.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a child without a callback alone, and does not mark a failed publication as published', async () => {
+    const plain = registry()
+    const plainReservation = plain.reserve(identity())
+    plain.claim(plainReservation.childSessionId)
+    await expect(plain.publishClaimed(plainReservation.childSessionId)).resolves.toBeUndefined()
+    await expect(plain.publishClaimed('session-unknown')).resolves.toBeUndefined()
+
+    const staging = registry()
+    const reservation = staging.reserve(identity(), {
+      publish: async () => { throw new Error('store unavailable') },
+      unpublish: vi.fn(async () => undefined),
+    })
+    staging.claim(reservation.childSessionId)
+    await expect(staging.publishClaimed(reservation.childSessionId)).rejects.toThrow('store unavailable')
+    expect(staging.inspect(reservation.childSessionId)?.published).toBe(false)
+  })
+
+  it('does not confuse a committed reservation with durable compensation', async () => {
+    const staging = registry()
+    const publication = callbacks()
+    const reservation = staging.reserve(identity(), publication)
+    staging.claim(reservation.childSessionId)
+
+    await expect(staging.revertPublication(reservation.childSessionId)).resolves.toBe(false)
+    expect(publication.unpublish).not.toHaveBeenCalled()
+
+    await staging.publishClaimed(reservation.childSessionId)
+    await expect(staging.revertPublication(reservation.childSessionId)).resolves.toBe(false)
+    expect(publication.unpublish).not.toHaveBeenCalled()
+    expect(staging.inspect(reservation.childSessionId)).toBeUndefined()
   })
 })

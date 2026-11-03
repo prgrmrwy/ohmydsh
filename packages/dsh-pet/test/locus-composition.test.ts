@@ -10,6 +10,7 @@ import {
   type LocusChildComposition,
   type LocusCompositionPorts,
 } from '../src/host/locus/composition.js'
+import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 
 const CHILD = 'child-1'
 
@@ -25,6 +26,19 @@ function composition(
     locusId: 'locus-1',
     generation: 2,
     permission: 'read',
+    childComposition: 'tier3',
+    toolTier: { desired: 'safe', effective: 'safe' },
+    ...overrides,
+  }
+}
+
+/** A complete surface seam: tier layer, outbound guard and a readable safe surface. */
+function surface(overrides: Partial<NonNullable<LocusCompositionPorts['surface']>> = {}) {
+  return {
+    install: vi.fn(),
+    setToolTier: vi.fn(),
+    installOutboundGuard: vi.fn(),
+    visibleTools: vi.fn(() => SAFE_SURFACE),
     ...overrides,
   }
 }
@@ -39,7 +53,9 @@ function ports(
   const applied = new Map<string, 'read' | 'write'>()
   return {
     lookup: { find: vi.fn(() => composition()) },
-    surface: { install: vi.fn(), visibleTools: vi.fn(() => SAFE_SURFACE) },
+    parentPreset: vi.fn(() => LOCUS_BASE_PRESET),
+    writeEnabled: true,
+    surface: surface(),
     policy: {
       apply: vi.fn((sessionId: string, permission: 'read' | 'write') => {
         applied.set(sessionId, permission)
@@ -126,7 +142,7 @@ describe('unified locus child composition', () => {
   it('applies policy before installing the surface', () => {
     const order: string[] = []
     const deps = ports({
-      surface: { install: vi.fn(() => { order.push('surface') }), visibleTools: vi.fn(() => SAFE_SURFACE) },
+      surface: surface({ install: vi.fn(() => { order.push('surface') }) }),
       policy: {
         apply: vi.fn(() => { order.push('policy') }),
         resolve: vi.fn(() => 'read' as const),
@@ -140,7 +156,7 @@ describe('unified locus child composition', () => {
 
   it('reports a failing surface or policy application without publishing', () => {
     const surfaceFailure = ports({
-      surface: { install: vi.fn(() => { throw new Error('tools unavailable') }) },
+      surface: surface({ install: vi.fn(() => { throw new Error('tools unavailable') }) }),
     })
     try {
       composeLocusChild(agent(), surfaceFailure)
@@ -261,80 +277,161 @@ describe('locus composition attestation', () => {
 })
 
 describe('unified locus child publication', () => {
-  it('requires a safe-v2 restriction installer before a safe-tier child can publish', () => {
-    const deps = ports({
-      lookup: { find: vi.fn(() => composition({
-        childComposition: 'safe-v2',
-        toolTier: { desired: 'safe', effective: 'safe' },
-      })) },
-      surface: {
-        install: vi.fn(),
-        setToolTier: vi.fn(),
-        installOutboundGuard: vi.fn(),
-        visibleTools: vi.fn(() => [...SAFE_SURFACE, 'bash']),
-      },
-    })
+  it('收紧层未安装时不发布', () => {
+    // No restriction installer at all, and one that throws: both leave the
+    // child on the wide persistent base, which must never be published.
+    for (const broken of [
+      surface({ setToolTier: undefined }),
+      surface({ setToolTier: vi.fn(() => { throw new Error('tools.restrict is unavailable') }) }),
+    ]) {
+      const deps = ports({ surface: broken })
+      try {
+        composeLocusChild(agent(), deps)
+        expect.unreachable('a child without its tier layer must not be published')
+      } catch (error) {
+        expect(error).toBeInstanceOf(LocusCompositionError)
+        expect((error as LocusCompositionError).reason).toBe('surface-not-attested')
+      }
+    }
 
-    expect(() => composeLocusChild(agent(), deps)).toThrow(LocusCompositionError)
+    // The layer was "installed" but the readback still shows the wide base.
+    const stillWide = ports({ surface: surface({ visibleTools: vi.fn(() => [...SAFE_SURFACE, 'bash']) }) })
+    try {
+      composeLocusChild(agent(), stillWide)
+      expect.unreachable('a safe-tier child that still exposes bash must not be published')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('surface-not-attested')
+      expect((error as Error).message).toContain('bash')
+    }
   })
 
-  it('requires a per-agent guard for safe-v2 before any child may publish', () => {
-    const setToolTier = vi.fn((_agent, tier) => expect(tier).toBe('safe'))
-    const deps = ports({
-      lookup: { find: vi.fn(() => composition({ childComposition: 'safe-v2', toolTier: { desired: 'safe', effective: 'safe' } })) },
-      surface: { install: vi.fn(), setToolTier, visibleTools: vi.fn(() => SAFE_SURFACE) },
-    })
+  it('requires the outbound guard before any child may publish', () => {
+    const deps = ports({ surface: surface({ installOutboundGuard: undefined }) })
     expect(() => composeLocusChild(agent(), deps)).toThrow(LocusCompositionError)
-    expect(setToolTier).toHaveBeenCalledOnce()
   })
 
   it('applies the safe restriction before reading the fresh staging surface', () => {
-    const visible = [...SAFE_SURFACE]
+    const visible = [...SAFE_SURFACE, ...LOCUS_SHELL_TIER_TOOL_NAMES]
     const setToolTier = vi.fn((_agent, tier) => {
       expect(tier).toBe('safe')
-      visible.push(...LOCUS_SHELL_TIER_TOOL_NAMES)
       // A real restriction removes the shell tools from the visible surface.
       visible.splice(visible.indexOf('bash'), 1)
       visible.splice(visible.indexOf('skill'), 1)
     })
-    const deps = ports({
-      lookup: { find: vi.fn(() => composition({
-        childComposition: 'safe-v2',
-        toolTier: { desired: 'safe', effective: 'safe' },
-      })) },
-      surface: {
-        install: vi.fn(),
-        setToolTier,
-        installOutboundGuard: vi.fn(),
-        visibleTools: vi.fn(() => visible),
-      },
-    })
+    const deps = ports({ surface: surface({ setToolTier, visibleTools: vi.fn(() => visible) }) })
 
     expect(composeLocusChild(agent(), deps)).toMatchObject({ composed: true })
     expect(setToolTier).toHaveBeenCalledOnce()
   })
 
-  it('does not install the v2 restriction layer for a legacy safe-v1 child', () => {
-    const setToolTier = vi.fn()
+  it('隔离能力无法证明时不发布', () => {
+    // The locus main's preset cannot be proven: no reader, a reader that throws,
+    // and a reader that reports nothing are all "unproven", never "assumed fine".
+    const noReader = ports()
+    const unreadable = ports({ parentPreset: vi.fn(() => { throw new Error('session gone') }) })
+    const silent = ports({ parentPreset: vi.fn(() => undefined) })
+    for (const deps of [{ ...noReader, parentPreset: undefined }, unreadable, silent]) {
+      try {
+        composeLocusChild(agent(), deps)
+        expect.unreachable('an unprovable parent composition must not publish a child')
+      } catch (error) {
+        expect((error as LocusCompositionError).reason).toBe('preset-unverified')
+      }
+      // Refused BEFORE any side effect.
+      expect(deps.surface?.install).not.toHaveBeenCalled()
+      expect(deps.policy?.apply).not.toHaveBeenCalled()
+    }
+  })
+
+  it('主会话 preset 不影响子会话工具面', () => {
+    // The user's work main runs `standard`, which registers delegation into the
+    // agent's own scope. It is not the child's parent, so only the locus main's
+    // preset (`locus-base`) and the child's own readback decide the surface.
+    const workMainPreset = 'standard'
+    const presets = new Map([['main-locus', LOCUS_BASE_PRESET], ['main-work', workMainPreset]])
     const deps = ports({
-      lookup: { find: vi.fn(() => composition({ childComposition: 'safe-v1' })) },
-      surface: {
-        install: vi.fn(),
-        setToolTier,
-        installOutboundGuard: vi.fn(),
-        visibleTools: vi.fn(() => SAFE_SURFACE),
-      },
+      lookup: { find: vi.fn(() => composition({ parentSessionId: 'main-locus' })) },
+      parentPreset: vi.fn((id: string) => presets.get(id)),
     })
 
     expect(composeLocusChild(agent(), deps)).toMatchObject({ composed: true })
-    expect(setToolTier).not.toHaveBeenCalled()
+    expect(deps.parentPreset).toHaveBeenCalledWith('main-locus')
+    expect(deps.parentPreset).not.toHaveBeenCalledWith('main-work')
+    // A child that did land under a non-pinned parent is refused, whatever it exposes.
+    const wrongParent = ports({
+      lookup: { find: vi.fn(() => composition({ parentSessionId: 'main-work' })) },
+      parentPreset: vi.fn((id: string) => presets.get(id)),
+    })
+    try {
+      composeLocusChild(agent(), wrongParent)
+      expect.unreachable('a child under a non-pinned preset must not be published')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('preset-mismatch')
+    }
+  })
+
+  it('冷恢复不回落到父组合', () => {
+    // Cold resume reaches `agent/created` through the durable lookup. The tier
+    // layer is installed again from the persisted tier and verified before the
+    // child serves; a locus main that left the pinned preset refuses dispatch.
+    const persisted = composition({ toolTier: { desired: 'shell', effective: 'shell' } })
+    const setToolTier = vi.fn()
+    const resumed = ports({
+      lookup: { find: vi.fn(() => persisted) },
+      surface: surface({
+        setToolTier,
+        visibleTools: vi.fn(() => [...SAFE_SURFACE, ...LOCUS_SHELL_TIER_TOOL_NAMES]),
+      }),
+    })
+    expect(composeLocusChild(agent(), resumed)).toMatchObject({ composed: true })
+    expect(setToolTier).toHaveBeenCalledWith(expect.anything(), 'shell')
+
+    const drifted = ports({
+      lookup: { find: vi.fn(() => persisted) },
+      parentPreset: vi.fn(() => 'standard'),
+    })
+    try {
+      composeLocusChild(agent(), drifted)
+      expect.unreachable('a resumed child must not serve under a drifted parent preset')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('preset-mismatch')
+    }
+    expect(drifted.surface?.install).not.toHaveBeenCalled()
+  })
+
+  it('safe-v1 行继续服务', () => {
+    // Per the spec this row belongs to the retired model: it is NOT served, and
+    // not composed, adopted or resumed. (The scenario title predates the rule.)
+    for (const childComposition of ['safe-v1', 'safe-v2'] as const) {
+      const deps = ports({ lookup: { find: vi.fn(() => composition({ childComposition })) } })
+      try {
+        composeLocusChild(agent(), deps)
+        expect.unreachable(`a ${childComposition} row must not be served`)
+      } catch (error) {
+        expect((error as LocusCompositionError).reason).toBe('legacy-composition')
+      }
+      expect(deps.surface?.install).not.toHaveBeenCalled()
+      expect(deps.policy?.apply).not.toHaveBeenCalled()
+    }
+  })
+
+  it('升级前的 legacy child 不可恢复服务', () => {
+    const { childComposition: _marker, ...unmarked } = composition()
+    const deps = ports({ lookup: { find: vi.fn(() => unmarked) } })
+    try {
+      composeLocusChild(agent(), deps)
+      expect.unreachable('a child without a Host-attested marker must not be resumed')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('legacy-composition')
+    }
+    expect(deps.surface?.install).not.toHaveBeenCalled()
   })
 
   it('refuses to publish a child whose own plane escaped the safe filter', () => {
     // The tool filter restricts the inherited plane only, so a per-agent
     // registration like the standard preset's `subagent` survives it. The
     // installed surface is a request; this read is the effect.
-    const deps = ports({ surface: { install: vi.fn(), visibleTools: vi.fn(() => [...SAFE_SURFACE, 'subagent']) } })
+    const deps = ports({ surface: surface({ visibleTools: vi.fn(() => [...SAFE_SURFACE, 'subagent']) }) })
 
     try {
       composeLocusChild(agent(), deps)
@@ -346,7 +443,7 @@ describe('unified locus child publication', () => {
   })
 
   it('refuses to publish a child whose surface cannot be read', () => {
-    const deps = ports({ surface: { install: vi.fn(), installOutboundGuard: vi.fn() } })
+    const deps = ports({ surface: surface({ visibleTools: undefined }) })
 
     try {
       composeLocusChild(agent(), deps)
@@ -358,11 +455,7 @@ describe('unified locus child publication', () => {
 
   it('refuses to publish when reading the surface throws', () => {
     const deps = ports({
-      surface: {
-        install: vi.fn(),
-        installOutboundGuard: vi.fn(),
-        visibleTools: vi.fn(() => { throw new Error('tools service gone') }),
-      },
+      surface: surface({ visibleTools: vi.fn(() => { throw new Error('tools service gone') }) }),
     })
 
     try {
@@ -371,6 +464,22 @@ describe('unified locus child publication', () => {
     } catch (error) {
       expect((error as LocusCompositionError).reason).toBe('surface-not-attested')
     }
+  })
+
+  it('lists the child-scope tools of the three-tier model and none of the retired ones', () => {
+    expect(LOCUS_CALLER_BOUND_TOOLS).toEqual(expect.arrayContaining(['locus_context', 'locus_ask_parent']))
+    for (const retired of [
+      'pet_collaboration_context',
+      'pet_collaboration_context_update',
+      'pet_collaborators',
+      'pet_inquire',
+      'pet_inquiry_answer',
+      'pet_locus_parent_lookup',
+      'pet_locus_request_execution',
+    ]) expect(LOCUS_CALLER_BOUND_TOOLS).not.toContain(retired)
+    // A child has no collaboration tools at all.
+    expect(LOCUS_CALLER_BOUND_TOOLS.filter(name => name.startsWith('collab_'))).toEqual([])
+    expect(attestLocusComposition([...SAFE_SURFACE, 'collab_read']).leaks).toEqual(['collab_read'])
   })
 })
 

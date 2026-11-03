@@ -215,6 +215,7 @@ export function isDocEndpointView(endpoint: Pick<PetLocusEndpointView, 'chatId'>
  */
 export const LOCUS_STATE_LABELS: Record<PetLocusState, string> = {
   provisioning: '准备中',
+  'not-created': '待首条消息',
   active: '活跃',
   switching: '切换中',
   invalid: '已失效',
@@ -227,6 +228,7 @@ export type LocusTone = 'on' | 'warn' | 'off' | 'gone'
 
 const LOCUS_STATE_TONES: Record<PetLocusState, LocusTone> = {
   active: 'on',
+  'not-created': 'on',
   provisioning: 'warn',
   switching: 'warn',
   stopped: 'warn',
@@ -517,6 +519,7 @@ export interface WorkGroup {
 
 const STATE_RANK: Record<PetLocusState, number> = {
   active: 0,
+  'not-created': 1,
   provisioning: 1,
   switching: 2,
   stopped: 3,

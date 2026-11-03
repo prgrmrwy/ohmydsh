@@ -218,27 +218,17 @@
 - **更新**: 2026-09-15 实测确认入口可见但跨机器无效；根因定位到 host spawn；待提上游 PR 讨论执行面迁移。
 
 ### [B042] 父会话归档后，入口 @ 应有明确回执，而不是静默或静默复活
-- **状态**: 想法
+- **状态**: 实现完成、隔离/真实网络验收未执行；跨重启持续限额仍未闭环
 - **优先级**: P1
-- **背景 / 动机**: 所有者的预期是：在一个来源父会话**已归档**的 locus 所属群里 @ bot，Host 应识别出「这条关联的来源已经结束」，并直接在群里回一条明确消息（形如「父会话已归档，请联系所有者判断处理」），而不是让这条消息落进一份来源已经结束的工作。这不是新需求——`openspec/specs/pet-locus-collaboration/spec.md` 的场景「来源失效」已写明「WHEN 主会话归档、删除或无法恢复 THEN 关联入口有限次提示失效，不自动创建新主会话继续回答」。本条是该场景的实现落点，属**未实现**而非新增能力。
-- **现状（读源码确认，真机行为未验证）**: 入站路径**没有任何一步检查父会话是否归档**：
-  - `src/host/channel/pipeline.ts:180-198` → `locusController.handle(event)`。准入门（`src/host/locus/admission.ts`）是纯函数，只做 bot 发送者 / mention / 去重 / 水位 / allowlist 判定，只看 endpoint 与授权事实。
-  - `src/host/channel/locus-controller.ts:919+` 的 `handleAdmission`：`resolveLocus(endpoint)` 取当前代记录 → `deps.child.ensureChild(locus)` → 建 Delivery → 投给 child。全程只认 locus 记录，不解析 `parentSessionId` 的会话状态。
-  - 整条链上唯一接触父会话的是 `src/host/locus/child.ts:415` 的 `resolveLocusParent`：先 `port.get(parent)`，不在常驻则 `port.resume({ resumeSessionId })`，两者都不行才返回 `parent-unavailable`。**它没有 archived 判定，反而会主动 resume。**
-- **因此当前只可能落到两种结果，两种都错**:
-  - **resume 成功** → 子会话照常被 adopt、Delivery 被接受，**照常干活并回复**：等于悄悄把一个已归档的父会话重新拉起来继续服务，与「归档即结束」的预期、以及场景「不自动换来源继续回答」的精神都相反。
-  - **resume 失败** → `ensureChild` 抛错 → `refuse('child-unavailable')`（`src/host/channel/locus-controller.ts:1656`）→ **只写诊断日志，不回复任何内容**：用户 @ 了 bot，界面上没有任何反应，无法区分「没听见」与「坏了」。
-  - 哪一种是当前真机行为**未验证**——验证需要往真实飞书群发消息，未获授权不做。
-- **已有的近似先例（可复用形状）**: `src/host/channel/pipeline.ts:200-214` 对 `legacy-endpoint` / `retired-endpoint` 已经有一条「有界 Host 诊断回复」：仅当发送者在 allowlist 内时回一条说明并要求所有者显式重建，失败保持 fail-soft。归档回执应沿用同一形状，但必须补上它现在没有的两点：**有限次**与**可停**。
-- **要点**:
-  - **判定放在哪一层要定**：建议在 `handleAdmission` 的 `ensureChild` 之前解析一次父会话状态，比散落在 child 适配器里更可测；同时必须决定 `resolveLocusParent` 是否也加 archived 判定——否则两条路径会给出不一致的结论。
-  - **必须显式防「静默复活」**：即便最终决定「归档不影响工作」（工作跑在子会话里，父会话只在父子补问时才需要），也不能靠 `resume` 顺手把归档会话拉起来。这必须是一个写进规范的显式决定，不能是当前的默认副作用。
-  - **回执收件人是开放问题**：locus 的所有者（B035 的 owner 概念尚未完整落库）／channel allowlist 成员／建群人或群主。提到具体人需要 open_id，Host 只对已知的 allowlist 成员持有（`allowOpenIds` + `knownNames`）。
-  - **「有限次」需要机制**：spec 说「有限次提示失效后停止响应」，需要一个 per-locus（或 per-endpoint/代际）的通知计数或水位，且必须在 Host 重启后仍然成立。注意现有 legacy/retired 那条诊断回复**每次都回、没有节流**，不要照抄。
-  - **不能泄露**：群内回执 MUST NOT 出现完整 session ID、其它群 ID 或其它 locus 列表（spec:187）。「父会话已归档」这句话本身可以说，标识符不行。
-  - **与 B029 的关系**：B029 是**入口侧**不可达（bot 被移出/群解散，消息根本送不到）；本条是**来源侧**已结束（消息送得到，但没有可信的工作归属）。两条都需要「诚实状态 + 明确回执」，可共用回执形状与节流机制，但触发条件与恢复路径不同，不要合并。
-- **更新**: 2026-09-15 所有者提出预期并询问是否已实现；读源码确认入站路径无归档判定、且 `resolveLocusParent` 会主动 resume 父会话，登记为待实现。落地时补一次真机验证（在归档父会话所属群 @ 一次，确认当前是「静默」还是「复活」），再决定回执文案与收件人。
-- **更新**: 2026-11-03 核对代码：`packages/dsh-pet/src/host/locus/resolution.ts:117-150` 已按「所有者归档主会话」拦截入口（不再 resume 复活），本条「现状」一节已过期；回执文案、有限次与真机验证是否完成未核实。三层结构（`locus-three-tier-structure`）将改为「干活主会话归档 → 入口停止并提示 /bind」。
+- **背景 / 动机**: 2026-09-15 的旧两层实现只尝试 get/resume 来源父会话，没有归档判断，可能静默复活来源，失败时又只记诊断、不回执。该历史问题不再代表当前代码。三层结构区分干活主会话与 Pet 自建的 locus 主会话：前者归档是所有者的来源决定，不能被自动恢复或自动换来源。
+- **当前实现（2026-11-03 源码核对）**:
+  - [resolution](packages/dsh-pet/src/host/locus/resolution.ts) 从配对解析干活主会话归档事实，以 `source-archived` 拒绝投递；[serviceability](packages/dsh-pet/src/host/locus/serviceability.ts) 将其与 child 不可用、locus 主会话不可用和所有者停止分别处理。归档事实不伪造为入口 stopped/retired，恢复来源即可恢复服务。
+  - [pipeline](packages/dsh-pet/src/host/channel/pipeline.ts) 对授权 at 返回「来源会话已归档，这个入口暂停服务」，指明恢复来源或 `/bind` 到新的干活主会话，新入口从 read 开始；普通 at 不自动复活或换来源。回执不包含完整 session ID 或其它入口列表。
+  - 当前上限为每入口 **3 次／每次 Host 运行**（`SOURCE_ARCHIVED_RECEIPT_LIMIT`）；`sourceArchivedReceipts` 是进程内 Map，重启后重置。**不能宣称已满足历史条目提出的跨重启持续有限次要求**，也不能把该限制隐藏在“已完成”中。
+- **仍未验证**: 隔离预览与真实网络/Host/GUI/飞书验收均未执行；需验证归档后拒投且不 resume、回执与第 4 次静默、来源恢复、`/bind` 改挂，以及非授权发送者不引发建立或泄露。若继续要求跨重启持续限额，仍需持久计数/水位的实现与重启验证，不能由内存限额推断。
+- **关联**: [ADR-0009](docs/adr/ADR-0009-locus-three-tier-structure.md)、[分层归档规范](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#requirement-换绑与归档按层处理) 与 [收尾任务](openspec/changes/locus-three-tier-structure/tasks.md#27-收尾)。B029 处理入口侧不可达，本条处理来源侧归档，不合并。
+- **更新**: 2026-11-03 按三层当前实现收口，替换过期“无归档检查”的现状描述；只记录实现与精确限制，不表示已合入、部署或全部闭环。
+
 ### [B041] GUI 侧栏对自动建 main 挂载已有 workspace 存在展示时序问题
 - **状态**: 想法
 - **优先级**: P2
@@ -252,17 +242,16 @@
 - **更新**: 2026-09-15 从 `pet-locus-on-demand-tree` 真实验收中发现，转入本条独立处理。
 
 ### [B040] Locus provisioning 失败补偿只在 Host 重启时跑，运行中永久阻塞同一 endpoint
-- **状态**: 想法
+- **状态**: 实现完成、隔离/真实网络验收未执行
 - **优先级**: P1
-- **背景 / 动机**: 2026-09-15 实施 `pet-locus-on-demand-tree` 时端到端测试暴露：`createChildSession` 等外部创建失败后，`failProvisioning` 把该 provisioning 操作标记为 `phase: 'failed'`，但 `findBlockingProvisioningOperation`（`persistence.ts:3124`）判定"阻塞"只排除 `committed`/`compensated` 两种 phase——`failed` 依然阻塞。而全仓库唯一把 `phase` 从 `failed`/`needs-recovery` 转成 `compensated` 的代码路径是 `reconcileStartup`（`persistence.ts:2735`），且需要 `options.compensators`（chat/childSession/mainSession 三个回调）。生产环境确实接了这三个 compensator（`index.ts:2153` 的 `startupCompensators`），但 `reconcileStartup` 只在 Host 启动时调用一次。**结论：同一 endpoint 一旦建树失败一次，运行期间永久阻塞，必须重启 Host 才能恢复**，不是重试几次、等一会儿就能好。
-- **不是本 change 引入**：这是 provisioning 补偿机制的既有特征，同一套 `beginProvisioning`/`failProvisioning`/`findBlockingProvisioningOperation` 在旧模型下同样适用——群走 `bot-added → ensureGroup`、话题一直走 `ensureForDelivery → ensureTopic`，失败后都会命中同一个永久阻塞。`pet-locus-on-demand-tree` 只是把群的建树时机从入群挪到首个 @，触发路径变了，阻塞机制本身没变也没变严重。
-- **所有者提出的方向**：失败的 provisioning 操作应该有超时丢弃语义——`failed` 超过一定时长后不再计入 `findBlockingProvisioningOperation` 的阻塞集合，下一次 @ 到达时正常按"无 locus"重新走一遍首次创建检测与建立，不需要等 Host 重启。
-- **要点（留给后续设计，本条不预先定死）**:
-  - `petLocusOperation` schema 已有 `createdAt`/`updatedAt`（`spec.ts:923-924`），超时判据的字段现成，不需要新增持久结构。
-  - 需要先回答：超时之后是"允许直接跳过阻塞检测覆盖建新的"，还是"仍需要跑一遍资源清理（关联的 main/child 若已创建部分要不要收）"——这决定了是纯放宽阻塞判定，还是要在运行期间也接入 compensator 调用，而非只在启动时。
-  - 需要确认 `failed` 操作遗留的 `resourceRefs` 里如果已经创建了部分资源（比如 main 建成但 child 建失败），超时丢弃是否会让这些半成品资源变成孤儿——现状下 `reconcileStartup` 会清理，运行期跳过阻塞判定但不清理就可能不会。
-  - 影响面不止群/话题建树，`replaceAutomaticGroupParent`（改绑）、`createOrOpenDefaultQa`（默认 Q&A）等所有走 `beginProvisioning` 的路径都共享同一套阻塞判定，方案需要对全部 provisioning kind 一致。
-- **更新**: 2026-09-15 从 `pet-locus-on-demand-tree` 实施阶段的端到端测试中发现并确认根因；所有者提出超时丢弃方向，转入本条留待独立设计与实施。
+- **背景 / 动机**: 2026-09-15 的旧实现把建树失败记为 `failed`，却只在 startup reconcile 中补偿到 `compensated`，同一 endpoint 在 Host 运行期因此永久阻塞。群首次 @、话题、改绑和 Q&A 共用此机制，不是单个入口的重试问题。
+- **当前实现（2026-11-03 源码核对）**: [persistence](packages/dsh-pet/src/host/locus/persistence.ts) 的 `beginProvisioning` 在同 endpoint 建立前检查旧操作，`FAILED_PROVISIONING_BLOCK_MS = 10 * 60 * 1000`；`failed` 满 10 分钟时先调用 `clearStaleFailedProvisioning`，使用与启动对账相同的 `compensateOperation`。**不是超时后忽略资源、直接覆盖建新**。
+  - 根据 durable `resourceRefs` 与资源归属，依次补偿本次创建的 Q&A chat、child、locus main 与自动工作会话；不删除本来就存在的群。全部 provisioning kind 共享同一路径。
+  - 补偿成功才标 `compensated` 并解除阻塞，然后正常建立；补偿失败继续阻塞并诊断，保留原失败时间，下一次请求可立即重试补偿，不再重新等待 10 分钟。部分已完成补偿持久记录，避免重做。
+  - 未满 10 分钟仍阻塞；`needs-recovery`、正在补偿或首条创建债务不因这个 failed 超时规则被无条件放行。
+- **仍未验证**: 隔离预览故障注入及真实网络/Host/飞书验收未执行；需覆盖超时前仍阻塞、超时后资源确实回收且可新建、补偿失败继续阻塞并能后续重试，以及全部 provisioning kind 的一致性。不把源码实现或现有任务勾选当作实际资源回收成功。
+- **关联**: [ADR-0009](docs/adr/ADR-0009-locus-three-tier-structure.md)、[provisioning 超时规范](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#requirement-provisioning-失败超时后不再阻塞) 与 [任务 13](openspec/changes/locus-three-tier-structure/tasks.md)。
+- **更新**: 2026-11-03 由 `locus-three-tier-structure` 一并实现运行期补偿；本条从待设计改为实现完成、验收待做，不表示已合入、部署或全部闭环。
 
 ### [B039] 清理旧 QA 模型的死代码
 - **状态**: 想法

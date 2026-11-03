@@ -1,17 +1,4 @@
-/**
- * Pure public-context values, not a store and not an authorization boundary.
- *
- * Public facts are shared working notes inside ONE collaboration scope. They
- * grant no capability: no file access, no outbound send, no credential, no
- * sandbox or execution-root change. So writing them needs neither human
- * confirmation nor a Locus read/write level. Authorization is exclusively
- * caller-derived scope membership, proven by the Host caller resolver BEFORE
- * this module runs; a VerifiedContextAuthor value is provenance, not proof —
- * a fabricated object has the same shape. A store must still atomically
- * compare revisions, retain the revision history, and publish through the sole
- * writer. Computing a candidate here commits no CAS and establishes no access.
- * No history extraction, local-field merge, resource I/O or permission change.
- */
+/** Read-only parser for retained collaboration context rows; new consensus lives in dsh-collab. */
 
 /** Scope a revision is shared within: not workspace-wide or internet-public. */
 export const COLLABORATION_CONTEXT_SHARING_SCOPE = 'parent-and-current-and-future-locus-children' as const
@@ -81,23 +68,6 @@ export interface AuthoredCollaborationContext extends ContextBase {
 }
 
 export type CollaborationContextRecord = UnknownCollaborationContext | AuthoredCollaborationContext
-
-export interface CollaborationContextReplacement extends CollaborationContextFields {
-  readonly expectedRevision: number
-  readonly sources: readonly string[]
-}
-
-/**
- * Trusted author facts supplied by the Host after the caller resolver proved
- * current scope membership. This module cannot re-derive that membership.
- */
-export interface VerifiedContextAuthor {
-  readonly parentSessionId: string
-  readonly authoredBy: string
-  readonly authoredAt: number
-  readonly authorLocus: CollaborationContextAuthorLocus
-  readonly sharingScope: typeof scope
-}
 
 export class CollaborationContextError extends Error {
   constructor(readonly code: 'INVALID_CONTEXT_INPUT' | 'REVISION_CONFLICT' | 'REVISION_OVERFLOW' | 'PARENT_MISMATCH') {
@@ -199,48 +169,11 @@ export function parseCollaborationContext(input: unknown): CollaborationContextR
 }
 
 /** A value constructor, NOT an idempotent store ensure or an access grant. */
-export function createEmptyCollaborationContext(input: unknown): UnknownCollaborationContext {
+function createEmptyCollaborationContext(input: unknown): UnknownCollaborationContext {
   const value = object(input, ['parentSessionId'])
   return Object.freeze({
     parentSessionId: identifier(value.parentSessionId), revision: 0, status: 'unknown',
     workDescription: null, resourceReferences: null, commonConstraints: null,
     sources: Object.freeze([]), authoredBy: null, authoredAt: null, authoredByLocus: null, sharingScope: null,
-  })
-}
-
-/**
- * Calculate an immutable full replacement from Host-derived author facts.
- *
- * All three arguments are validated as actual runtime input. Null fields stay
- * unknown; empty fields withdraw prior values, without claiming history
- * erasure. Throws CollaborationContextError; never mutates or freezes
- * caller-owned objects. There is no human-confirmation flag: an in-scope agent
- * updates public facts autonomously once the Host caller resolver has proven
- * its current scope membership. The caller MUST still persist this candidate
- * atomically with its CAS and revision history; two calls against the same
- * snapshot can both calculate candidates, and only the store decides a winner.
- */
-export function updateCollaborationContext(
-  current: unknown,
-  replacement: unknown,
-  verifiedAuthor: unknown,
-): AuthoredCollaborationContext {
-  const previous = parseCollaborationContext(current)
-  const next = object(replacement, ['expectedRevision', 'workDescription', 'resourceReferences', 'commonConstraints', 'sources'])
-  const expectedRevision = integer(next.expectedRevision)
-  const content = fields(next)
-  const sources = strings(next.sources, limits.sources, limits.sourceLength, true)
-  const writer = object(verifiedAuthor, ['parentSessionId', 'authoredBy', 'authoredAt', 'authorLocus', 'sharingScope'])
-  const parentSessionId = identifier(writer.parentSessionId)
-  const authoredBy = identifier(writer.authoredBy)
-  const authoredAt = integer(writer.authoredAt)
-  const authoredByLocus = authorLocus(writer.authorLocus)
-  if (writer.sharingScope !== scope) invalid()
-  if (parentSessionId !== previous.parentSessionId) throw new CollaborationContextError('PARENT_MISMATCH')
-  if (expectedRevision !== previous.revision) throw new CollaborationContextError('REVISION_CONFLICT')
-  if (previous.revision === Number.MAX_SAFE_INTEGER) throw new CollaborationContextError('REVISION_OVERFLOW')
-  return Object.freeze({
-    parentSessionId, revision: previous.revision + 1, status: 'authored', ...content,
-    sources, authoredBy, authoredAt, authoredByLocus, sharingScope: scope,
   })
 }

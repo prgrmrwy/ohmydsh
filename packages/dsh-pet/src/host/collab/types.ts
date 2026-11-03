@@ -1,6 +1,6 @@
 /**
  * Structural view of the dsh-collab integrator surface Pet consumes
- * (`pet-locus-collab-integration` design D1–D5).
+ * (`locus-three-tier-structure` design D8).
  *
  * Pet is published as an independent plugin, so it takes NO runtime or type
  * dependency on dsh-collab or collab-kernel. These types MUST stay
@@ -24,46 +24,17 @@ export interface CollabItem {
   readonly ref?: number
   readonly ext?: CollabExt
   readonly assignee?: string
+  readonly status?: string
   readonly progress?: 'open' | 'accepted' | 'done' | 'rejected'
-}
-
-/** Kernel message, narrowed to the fields Pet reads. `id` is the commit seq as a string. */
-export interface CollabMessage {
-  readonly id: string
-  readonly actor: string
-  readonly to: string
-  readonly body: string
-  readonly needsReply: boolean
-  readonly notify?: boolean
-  readonly ref?: number
-  readonly ext?: CollabExt
-}
-
-/** A business subject dsh-collab asks `visible` about. */
-export type CollabSubject =
-  | { readonly kind: 'item'; readonly item: CollabItem }
-  | { readonly kind: 'message'; readonly message: CollabMessage }
-  | { readonly kind: 'statusText'; readonly name: string }
-
-/** A record addressable by its creation seq (item creation or message). */
-export type CollabRecordAt =
-  | { readonly kind: 'item'; readonly item: CollabItem }
-  | { readonly kind: 'message'; readonly message: CollabMessage }
-
-/** Synchronous lookup dsh-collab supplies from the same full replay (design AMD-1). */
-export interface CollabLookup {
-  recordAt(seq: number): CollabRecordAt | undefined
 }
 
 /** Kernel event, narrowed to the variants Pet folds; others pass through untyped. */
 export type CollabEvent =
   | { readonly type: 'item/created' | 'item/revised' | 'item/acked'; readonly actor: string; readonly item: CollabItem }
-  | { readonly type: 'message/sent'; readonly actor: string; readonly message: CollabMessage }
   | { readonly type: 'request/progressed'; readonly actor: string; readonly itemId: string; readonly progress: string }
   | { readonly type: 'space/created'; readonly actor: string; readonly leader: string }
   | { readonly type: 'manager/allowed' | 'manager/revoked'; readonly actor: string; readonly channel: string }
-  | { readonly type: 'member/joined' | 'member/invited'; readonly actor: string; readonly member: { readonly name: string; readonly status: string; readonly managedBy?: string; readonly binding: { readonly address: string } } }
-  | { readonly type: 'member/status'; readonly actor: string; readonly name: string; readonly status: string }
+  | { readonly type: 'member/joined' | 'member/invited'; readonly actor: string; readonly member: { readonly name: string; readonly status: string; readonly binding: { readonly channel?: string; readonly address: string } } }
   | { readonly type: 'leader/changed'; readonly actor: string; readonly leader: string }
   | { readonly type: string; readonly actor: string; readonly [key: string]: unknown }
 
@@ -74,7 +45,7 @@ export interface CollabCommitRecord {
   readonly events: readonly CollabEvent[]
 }
 
-/** Wake pointer handed to `deliver`. */
+/** Wake pointer handed to `deliver`; Pet has no managed member, so it never receives one. */
 export interface CollabPointer {
   readonly spaceId: string
   readonly toSeq: number
@@ -84,26 +55,38 @@ export interface CollabPointer {
 export type CollabPresence = 'reachable' | 'unreachable' | 'unknown'
 export interface CollabTarget { readonly name: string; readonly address: string }
 export type CollabHandleResult<T> = T | { readonly error: { readonly code: string } }
-export type CollabExec = { readonly agent?: unknown }
 
-/** What Pet registers with `dshCollab.attach('pet-locus', adapter)`. */
+/**
+ * What Pet registers with `dshCollab.attach('pet-locus', adapter)`.
+ *
+ * Pet has no managed member any more: `claim`/`holds` always answer no and
+ * `resolveCaller` never resolves a caller. The one meaningful member is
+ * `owns`, which makes the locus main sessions Pet created addressable by
+ * `actAs` and lets the manager dispose their requests.
+ */
 export interface CollabIntegratorAdapter {
   claim(address: string): boolean | Promise<boolean>
   presence(target: CollabTarget): CollabPresence | Promise<CollabPresence>
   deliver(target: CollabTarget, pointer: CollabPointer): void | Promise<void>
-  resolveCaller(agent: unknown): string | { readonly address: string; readonly stamp?: CollabExt } | undefined
+  resolveCaller(agent: unknown): undefined
   holds(address: string): boolean
-  visible?(stamp: CollabExt, subject: CollabSubject, lookup: CollabLookup): boolean
-  readonly recipients?: readonly string[]
+  owns(sessionId: string): boolean
 }
+
+/** Closed operation set `actAs` accepts (dsh-collab spec "接入方以其拥有的普通会话身份执行封闭命令"). */
+export type CollabActAsOp =
+  | { readonly op: 'createSpace'; readonly input: { readonly name: string; readonly purpose?: string } }
+  | { readonly op: 'allowManager'; readonly input: { readonly channel: string } }
+  | { readonly op: 'invite'; readonly input: { readonly name: string; readonly address: string } }
+  | { readonly op: 'createItem'; readonly input: Record<string, unknown> }
+  | { readonly op: 'sendMessage'; readonly input: Record<string, unknown> }
+  | { readonly op: 'read'; readonly input: { readonly view: 'overview' | 'since'; readonly sinceSeq?: number } }
 
 /** The handle `attach` returns; only the members Pet calls. */
 export interface CollabIntegrationHandle {
-  admit(spaceId: string, cmdId: string, input: { name: string; address: string }): Promise<CollabHandleResult<unknown>>
+  actAs(sessionId: string, spaceId: string, cmdId: string, op: CollabActAsOp): Promise<CollabHandleResult<any>>
   readManaged(spaceId: string): Promise<CollabHandleResult<CollabCommitRecord[]>>
-  command(exec: CollabExec, spaceId: string, cmdId: string, op: { op: 'createItem'; input: Record<string, unknown> }): Promise<CollabHandleResult<{ readonly seq: number; readonly itemId?: string }>>
   disposeRequest(spaceId: string, cmdId: string, input: { itemId: string; progress: 'open' | 'accepted' | 'done' | 'rejected' }): Promise<CollabHandleResult<unknown>>
-  establish(exec: CollabExec, spaceId: string, cmdId: string, input: { name: string; purpose: string }): Promise<CollabHandleResult<{ spaceId: string }>>
   dispose(): void
 }
 

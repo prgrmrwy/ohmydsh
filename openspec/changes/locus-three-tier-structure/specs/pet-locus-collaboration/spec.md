@@ -35,7 +35,31 @@ auto、Q&A 与显式绑定 SHALL 走同一建立路径，只在"干活主会话�
 
 ### Requirement: 子会话在首条消息到达时创建
 
-入口代际处于 `not-created` 时，第一条可投递的 Delivery SHALL 以官方 `startContinuable`（provider `spawn`，`parent` 为 locus 主会话，`prompt` 为该 Delivery 的投递 prompt，`toolFilter` 为不含委派的宽底座）创建子会话，并在 `agent/created` 中安装档位收紧层、设置沙箱并回读；任一步失败 SHALL 令创建失败并回滚。发布 SHALL 在 `agent/created` 回调内完成，而不是等 `startContinuable` 返回（实测其在首轮认领之后才返回）：创建前持久预留子会话身份；回调内依次认领预留、安装组合并回读、发布同一 `childId` 的 marker `tier3`、current 与首轮认领所需的关联（inbox 消息与执行身份），最后完成预留交接；这些步骤 MUST 早于首轮认领。回调内发布之后若创建流程仍被拒绝，Host SHALL 回滚已写入的持久状态（不得留下可服务的 active/current），该 Delivery 按非名额失败结算、代际回到 `not-created`；MUST NOT 以撤销已提交的预留代替补偿。创建失败 SHALL 分两类：运行体名额不足属于可重试失败，该 Delivery SHALL 保持待处理（不结算、不换代、不补偿），名额释放或下一次派发时以同一 Delivery 重试创建，且不超过其 deadline；其它失败（组合核验、provider、首轮回读等）该 Delivery SHALL 以确定性原因结算并回执，代际保持 `not-created`，下一条消息重试创建。后续 Delivery SHALL 经官方 `sendMessage` 投递。系统 MUST NOT 使用空闲创建或借出子会话 Session 的兼容能力。
+入口代际处于 `not-created` 时，第一条可投递的 Delivery SHALL 以官方 `startContinuable`（provider `spawn`，`parent` 为 locus 主会话，`prompt` 为该 Delivery 的投递 prompt，`toolFilter` 为不含委派的宽底座）创建子会话，并在 `agent/created` 中安装档位收紧层、设置沙箱并回读；任一步失败 SHALL 令创建失败并回滚。发布 SHALL 在 `agent/created` 回调内完成，而不是等 `startContinuable` 返回（实测其在首轮认领之后才返回）：创建前持久预留子会话身份；回调内依次认领预留、安装组合并回读、发布同一 `childId` 的 marker `tier3`、current、执行身份以及仅可消费一次的首条 prompt 预留关联，最后完成预留交接；这些步骤 MUST 早于首轮认领。官方首条 inbox UUID 仅在认领时或 API 返回时可知，Host SHALL 在首条业务认领时同步将 UUID 关联到该预留，并在首个 caller-bound 工具体执行前等待该 UUID 的持久绑定完成；MUST NOT 以消息正文猜测关联或再次投递首条消息。回调内发布之后若创建流程仍被拒绝，Host SHALL 回滚已写入的持久状态（不得留下可服务的 active/current），该 Delivery 按非名额失败结算、代际回到 `not-created`；MUST NOT 以撤销已提交的预留代替补偿。创建失败 SHALL 分两类：运行体名额不足属于可重试失败，该 Delivery SHALL 保持待处理（不结算、不换代、不补偿），名额释放或下一次派发时以同一 Delivery 重试创建，且不超过其 deadline；其它失败（组合核验、provider、首轮回读等）该 Delivery SHALL 以确定性原因结算并回执，代际保持 `not-created`，下一条消息重试创建。后续 Delivery SHALL 经官方 Host prompt 队列能力（`queueHostPrompt` / Host access 的 `queuePrompt`，`delivery:queue`、`source:user`）投递为独立轮次；MUST NOT 用会产生 `steer` / `agent-message` 的 `sendMessage` 代替用户 Delivery。系统 MUST NOT 使用空闲创建或借出子会话 Session 的兼容能力。
+
+首条图片消息的文本降级 SHALL 保持现有语义：仅在官方返回结构化 `MODEL_DOES_NOT_SUPPORT_IMAGES`、原 prompt 含 typed image、且 Host 可证明首条用户 prompt 未被接受或认领时，允许先补偿尚未执行的 child，再以纯文本重试同一 Delivery 一次。该已证明的投递前图片拒绝不按普通创建失败结算：原 Delivery 的身份、deadline 与 FIFO 顺序不变，已持久化的失败 child 身份 MUST NOT 再使用；新的预留 child 身份与未注入 backlog 的关联 SHALL 原子更新。无法证明未执行时 MUST NOT 重放。容量拒绝仍保留原预留身份。
+
+#### Scenario: 首条图片不支持时安全降为文本
+- **GIVEN** 首次惰性创建已持久化 child，但官方在接受用户 prompt 前返回结构化图片不支持，Host 无用户 claim 或 inbox 绑定
+- **WHEN** Host 进行一次文本降级
+- **THEN** 同一原 Delivery 在同代际以新预留 child 身份携带文本 prompt 恰执行一次，保留原 deadline 与 backlog 顺序；有已接受或已认领证据时不降级重放
+
+#### Scenario: 首图降级交接使用新快照
+- **GIVEN** 图片拒绝发生于回调内已发布 current、执行身份与旧 first-child WAL 之后，但用户 prompt 确未被接受或认领
+- **WHEN** 旧 child 补偿成功且原子轮换提交后进行文本尝试
+- **THEN** 保留原 Delivery/deadline/FIFO，退出旧 first-prompt 桥和旧 WAL；重新获取 current/locus/child 快照并用新执行身份提交，旧闭包不得绕过 exact-current
+
+#### Scenario: 首图补偿失败保留恢复债务
+- **WHEN** 首图降级的旧 child 补偿失败，或在补偿与轮换事务提交附近崩溃
+- **THEN** 未完成的状态由持久恢复债务阻止服务，按最后已提交事实恢复；不将原 Delivery 擅自成功结算，不在不确定状态提交文本或重放图片
+
+#### Scenario: 首图降级跨崩溃最多一次文本
+- **GIVEN** 文本降级标记已持久化，随后文本提交成功或其接受结果不确定时 Host 重启
+- **THEN** 根据原 Delivery 的持久标记与精确投递证据恢复，不因内存标记丢失第三次提交；同一用户请求至多一次文本尝试被接受
+
+#### Scenario: 已接受或认领的图片拒绝不重放
+- **WHEN** 有已接受、已认领证据或不能证明官方投递前拒绝时出现图片不支持错误
+- **THEN** 不进入文本降级例外，不把 absence 或错误文本当作未执行证明；名额拒绝仍走原 Delivery 与原预留 child 身份的可重试路径
 
 #### Scenario: 首条消息即首个 prompt
 - **WHEN** `not-created` 代际收到第一条 at
@@ -44,7 +68,16 @@ auto、Q&A 与显式绑定 SHALL 走同一建立路径，只在"干活主会话�
 #### Scenario: API 返回前首轮已能解析身份
 - **GIVEN** 替身在 `startContinuable` 返回之前依次触发 `agent/created`、首条 prompt 认领与首个 caller-bound 工具调用
 - **WHEN** 首个工具为 `pet_context`
-- **THEN** 工具解析到原 Delivery 与本入口；该 Delivery 只投递一次，Host 未再调用 `sendMessage`
+- **THEN** 工具解析到原 Delivery 与本入口；该 Delivery 只投递一次，Host 未再次调用 prompt 队列或 `sendMessage`
+
+#### Scenario: 首工具等待持久绑定
+- **GIVEN** 首条用户 claim 已同步绑定原 Delivery 的 inbox UUID，但对应持久写入仍处于 pending
+- **WHEN** 真实 Host 的 `tools/pre-execute` 收到该子会话 caller-bound 工具调用
+- **THEN** 工具体在持久写入成功前不执行；成功后仅执行一次且解析到原 Delivery，不二次投递
+
+#### Scenario: 首轮持久绑定失败拒绝执行
+- **GIVEN** 同上，但持久写入被拒绝
+- **THEN** 工具体不执行，不自动重投首条 prompt，不使用只有内存关联的事实授权业务出站
 
 #### Scenario: 回调内发布后创建被拒时回滚
 - **WHEN** 回调内已发布 marker 与 current，随后创建流程拒绝
@@ -166,6 +199,21 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 - **WHEN** 启动时 `sessionQuery` 未注册
 - **THEN** 不结算任何需要日志证据的 Delivery，诊断记录证据不可用
 
+#### Scenario: 不可区分中断保持等待
+- **GIVEN** prepared 观察末尾的真实 `interrupted` 事件与官方合成器对前缀生成的事件逐项相同
+- **WHEN** 启动恢复检查该 Delivery
+- **THEN** 按证据歧义保守等待，不结算为中断、不重发该 Delivery
+
+#### Scenario: 真实中断立即结算推进
+- **GIVEN** prepared 观察含可与合成尾部区分的真实 `turn/end interrupted`，其 turn 与 inbox UUID 唯一匹配 current
+- **WHEN** 启动恢复检查该 Delivery
+- **THEN** 该 Delivery 结算为 `failed/turn-interrupted`，下一条合格 backlog 可立即派发，原 prompt 不重发
+
+#### Scenario: live 中断不剔除
+- **GIVEN** live 观察末尾含与合成器产物逐项相同的真实 `turn/end interrupted`
+- **WHEN** 启动恢复检查该 Delivery
+- **THEN** 保留该 live 事件并据此结算，合成尾部过滤只用于 prepared 观察
+
 ### Requirement: 非驻留子会话的权限变更以待应用协议提交
 
 所有者变更工具档位或文件权限时，若子会话常驻且空闲，Host SHALL 经 live agent 当场应用并回读，按既有规则回执。若子会话不常驻，Host SHALL：
@@ -268,7 +316,7 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startContinuable` 创�
 
 子会话需要决策时 SHALL 直接向当前飞书入口发问，后续 at 回答 SHALL 在同一子会话继续。歧义回答 SHALL 澄清，不自动解释为授权。模型 turn 结束 MUST NOT 被显示为整个项目完成，也 MUST NOT 单独完成 current Delivery。Host 超时推进 SHALL 继续复用同一个 child session及其历史，MUST NOT 自动重建 session 或增加 locus generation。
 
-子会话的运行体驻留 SHALL NOT 被当作代际可用性的一部分。运行体 MAY 在子会话空闲且 inbox 为空时释放它（这是常态而非故障），因此宿主 MUST 以「按需冷恢复该 durable child」的方式取得其 live session 与策略，MUST NOT 因「当前不在内存中」判定该 child 不可用、作废代际或另建 child。宿主 MUST NOT 依赖借出子会话 Session 的兼容能力：需要 live agent 的操作（如就地改沙箱、回读）只在子会话常驻时经 `ctx.agents.get` 进行，否则延后到下一次 `agent/created`；投递经官方 `startContinuable`（首条）与 `sendMessage`（后续，官方负责冷恢复）。
+子会话的运行体驻留 SHALL NOT 被当作代际可用性的一部分。运行体 MAY 在子会话空闲且 inbox 为空时释放它（这是常态而非故障），因此宿主 MUST 以「按需冷恢复该 durable child」的方式取得其 live session 与策略，MUST NOT 因「当前不在内存中」判定该 child 不可用、作废代际或另建 child。宿主 MUST NOT 依赖借出子会话 Session 的兼容能力：需要 live agent 的操作（如就地改沙箱、回读）只在子会话常驻时经 `ctx.agents.get` 进行，否则延后到下一次 `agent/created`；投递经官方 `startContinuable`（首条）与官方 Host prompt 队列（后续，官方负责冷恢复）。
 
 #### Scenario: 普通资料发布
 - **WHEN** 成员发送 PRD、Figma、会议资料但未 at bot
@@ -285,6 +333,11 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startContinuable` 创�
 #### Scenario: 父回复与下一条飞书消息不会合批
 - **WHEN** current A 正在等待父会话上下文，同时飞书消息 B 已被接受
 - **THEN** B 留在 Pet backlog，父回复只继续同一 child 对 A 的处理；A 终结前 Host 不把 B 投递到 DSH inbox
+
+#### Scenario: 业务结算后下一条仍为独立轮次
+- **GIVEN** current A 已业务结算，但其运行 turn 尚未结束，消息 B 已在 backlog；父回复经 `sendMessage` 只续进 A
+- **WHEN** Host 派发 B
+- **THEN** B 经官方 Host `queuePrompt` 以 `user` 来源排入独立后续轮次，持久绑定 B 自己的 inbox UUID；不使用 `steer` 并入 A，不把父回复认作 B 的投递证据
 
 #### Scenario: 超时不重建会话
 - **WHEN** current Delivery 达到 Host deadline 而未完成

@@ -1,5 +1,14 @@
-/** Host-coordinated Locus tool-tier mutation, independent from file permission. */
-import type { LocusMutationFence, LocusToolTier, LocusToolTierName } from './aggregate.js'
+/**
+ * Host-coordinated Locus tool-tier mutation, independent from file permission.
+ *
+ * A child that is resident and idle is changed in place and read back. A child
+ * the runtime has released is not touched at all: the request is recorded as a
+ * PENDING change (`desired` differs from `effective`), the child keeps serving
+ * under its current `effective` tier, and the change is applied and verified on
+ * the child's next `agent/created` (see `composeLocusChild`). Nothing here may
+ * borrow a live Session or wake a child just to change its tools.
+ */
+import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusMutationFence, type LocusToolTier, type LocusToolTierName } from './aggregate.js'
 
 export interface ToolTierMutationLocus {
   readonly id: string
@@ -8,7 +17,7 @@ export interface ToolTierMutationLocus {
   readonly revision?: number
   readonly updatedAt?: number
   readonly childSessionId?: string
-  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  readonly childComposition?: string
   readonly toolTier?: LocusToolTier
   readonly state: 'active' | 'switching' | 'invalid' | string
   readonly busy: boolean
@@ -42,14 +51,21 @@ export interface ToolTierMutationPorts {
 }
 
 export type ToolTierMutationResult =
-  | { readonly ok: true; readonly locus: ToolTierMutationLocus; readonly effective: LocusToolTierName }
-  | { readonly ok: false; readonly reason: 'not-found' | 'busy' | 'legacy-v1-shell' | 'apply-failed' | 'verification-failed' }
+  | {
+    readonly ok: true
+    readonly locus: ToolTierMutationLocus
+    /** The tier the child serves under NOW. */
+    readonly effective: LocusToolTierName
+    /** The change was only recorded; it applies and is verified on the child's next wake. */
+    readonly pending?: true
+  }
+  | { readonly ok: false; readonly reason: 'not-found' | 'busy' | 'legacy-composition' | 'apply-failed' | 'verification-failed' }
 
 async function restoreSafeOrInvalidate(
   current: ToolTierMutationLocus,
   live: LocusLiveToolTierSurface,
   fence: LocusMutationFence,
-  requested: LocusToolTierName,
+  _requested: LocusToolTierName,
   actor: string,
   ports: ToolTierMutationPorts,
   now: () => number,
@@ -59,8 +75,10 @@ async function restoreSafeOrInvalidate(
   try { safeVerified = ports.attest(live.visibleTools(), 'safe') } catch { safeVerified = false }
   if (safeVerified) {
     try {
+      // The refused request is NOT kept as `desired`: a differing desired is the
+      // pending marker, and a failed request must never re-apply on a wake.
       await ports.repository.commitToolTierMutation(current.id, {
-        desired: requested, effective: 'safe', verifiedAt: now(), grantedBy: actor,
+        desired: 'safe', effective: 'safe', verifiedAt: now(), grantedBy: actor,
       }, now(), fence)
       return true
     } catch { /* preserve fail-closed switching state below */ }
@@ -122,8 +140,10 @@ export function createLocusToolTierMutation(ports: ToolTierMutationPorts) {
           || input.fence?.expectedRevision !== undefined && input.fence.expectedRevision !== current.revision) {
           return { ok: false, reason: 'busy' }
         }
-        if (input.tier === 'shell' && current.childComposition !== 'safe-v2') {
-          return { ok: false, reason: 'legacy-v1-shell' }
+        // Only a `tier3` row serves or switches tiers; any other marker belongs
+        // to the retired model and is neither adopted nor resumed here.
+        if (current.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+          return { ok: false, reason: 'legacy-composition' }
         }
         const fence = input.fence ?? {
           expectedGeneration: current.generation,
@@ -153,17 +173,25 @@ export function createLocusToolTierMutation(ports: ToolTierMutationPorts) {
           await ports.repository.abortToolTierMutation(current.id, now(), mutationFence).catch(() => undefined)
           return { ok: false, reason: 'apply-failed' }
         }
-        // A cold child has no mutable surface; persist the desired effective
-        // tier and let the next synchronous publication install it.
+        // A released child has no mutable surface and is not woken for this.
+        // Record the request as pending against the tier it keeps serving under;
+        // the next `agent/created` applies it, reads it back, and either adopts
+        // it or falls back to the recorded effective tier.
         if (live === undefined) {
+          const effective = current.toolTier?.effective ?? 'safe'
           try {
             const persisted = await ports.repository.commitToolTierMutation(current.id, {
               desired: input.tier,
-              effective: input.tier,
-              verifiedAt: now(),
+              effective,
+              verifiedAt: current.toolTier?.verifiedAt ?? now(),
               grantedBy: input.actor,
             }, now(), mutationFence)
-            return { ok: true, locus: persisted, effective: input.tier }
+            return {
+              ok: true,
+              locus: persisted,
+              effective,
+              ...(input.tier === effective ? {} : { pending: true as const }),
+            }
           } catch {
             const latestFence = ports.repository.findLocus(current.id)
             if (latestFence?.state === 'switching') {
@@ -210,7 +238,7 @@ export function createLocusToolTierMutation(ports: ToolTierMutationPorts) {
             const latestFence = ports.repository.findLocus(current.id)
             if (latestFence?.state === 'switching') {
               const released = await ports.repository.commitToolTierMutation(current.id, {
-                desired: input.tier, effective: 'safe', verifiedAt: now(), grantedBy: input.actor,
+                desired: 'safe', effective: 'safe', verifiedAt: now(), grantedBy: input.actor,
               }, now(), {
                 expectedGeneration: latestFence.generation,
                 ...(latestFence.updatedAt === undefined ? {} : { expectedUpdatedAt: latestFence.updatedAt }),
