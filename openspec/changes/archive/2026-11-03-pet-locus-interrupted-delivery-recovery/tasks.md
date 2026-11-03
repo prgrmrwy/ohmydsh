@@ -28,3 +28,8 @@
 - [ ] 5.2 真机：所有者重启后确认 `delivery-53` 结算为 `failed/turn-interrupted`、`delivery-54` 立即派发并回复；补跑 7.5 剩余项（未知参数拒绝、伪造游标、守卫文案、话题入口）
 - [ ] 5.3 `verify.md`：任务完成、test-plan 全绿、全量测试与真机证据
 - [ ] 5.4 spec 合并与归档（待 `pet-locus-shell-tier` 7.4 与 `pet-locus-feishu-read-and-delivery-fixes` 归档顺序确定）
+
+
+## 归档说明（2026-11-03）
+
+按所有者指示（先收尾在途 change，再立 `locus-three-tier-structure`），本 change 以当前代码为准同步 spec 后归档。上面仍未勾选的真机验收与收尾项**未完成**，没有补跑；静态核对显示 spec 与代码一致（措辞差异已改为代码事实）。本 worktree 缺 dsh-pet 的测试依赖，归档前未实际运行测试。

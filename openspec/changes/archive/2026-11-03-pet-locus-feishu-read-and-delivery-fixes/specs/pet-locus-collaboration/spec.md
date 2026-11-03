@@ -2,8 +2,8 @@
 
 ### Requirement: Locus child 具备 caller-bound 的当前入口群只读能力
 
-每个 active locus 的 child SHALL 能以 caller-bound 只读工具读取**当前入口**的历史消息，并以
-**bot 身份**读取（本 change 不引入任何其它身份路径）。
+每个 IM 入口（群或话题）的 active locus 的 child SHALL 能以 caller-bound 只读工具读取**当前入口**的历史消息，并以
+**bot 身份**读取（本 change 不引入任何其它身份路径）。文档入口 locus 不装配该工具（见 `pet-locus-doc-comments`）。
 
 读取目标 MUST 只来自调用方 child 已绑定的入口，且 MUST NOT 接受 chat/群/用户或 thread 选择参数：
 入口为**话题**时，读取范围 SHALL 为该入口**绑定的话题**及其回复（由 Host 从入口事实推导）；
@@ -11,14 +11,16 @@
 自己绑定的话题"。未知或多余参数 SHALL 使该调用被拒绝且不发生任何读取，MUST NOT 被静默忽略或
 "忽略参数后照读当前入口"。
 
-续读游标 SHALL 由 Host 签发并保持不透明：MUST NOT 直接暴露或回传第三方分页令牌。使用游标时
+续读游标 SHALL 由 Host 签名，伪造或篡改的游标不可被接受，游标 MUST NOT 被用于选择读取目标
+（游标载荷不加密，第三方分页令牌在编码后可被解码看到）。使用游标时
 SHALL 校验其由同一 child 代际、同一入口、同一方向与窗口签发；伪造、篡改、跨 child/跨代际、
-跨入口或过期游标 SHALL fail closed 并给出确定性原因。每次等待外部读取返回后 SHALL 重新核验
+跨入口或因 Host 进程重启换密钥而失效的游标（不另设时间 TTL）SHALL fail closed 并给出确定性原因。每次等待外部读取返回后 SHALL 重新核验
 调用方仍是同一 child 代际且入口未变，变更时 SHALL 丢弃该次结果。
 
 窗口 SHALL 有**固定**语义（工具级，不留给实现自由选择）：时间参数 SHALL 使用带时区偏移的
 ISO 8601；窗口 SHALL 为左闭右开 `[since, before)`；同一时间戳的消息 SHALL 按平台消息位置升序
-返回，位置缺失或相同时按消息标识字典序。单次结果 SHALL 有**可度量的**
+返回，位置缺失或相同时按消息标识字典序。窗口在 Host 对每个传输页本地过滤：无法解析时间的消息
+不排除，翻页可能经过窗口外的空页。单次结果 SHALL 有**可度量的**
 上限（总序列化字符预算、单条正文上限与单字段上限），截断处 SHALL 带可识别标记；当整页预算
 截断一个传输页时，SHALL 指明仍有更多内容并给出可继续的游标，MUST NOT 静默丢弃。
 
@@ -77,8 +79,8 @@ MUST NOT 重发。
 
 **后续每次**投递 SHALL 只携带必要请求事实（请求、回复关联、本轮回复目标）并指向 caller-bound
 `pet_context` 复核持久事实，但 MUST 声明本次投递时生效的工具档位能力（`safe`/`shell`），
-MUST NOT 让 child 只能靠猜测或主动查询才知道自己具备什么读取能力。档位事实 SHALL 取自持久记录，
-MUST NOT 由渲染层默认为 `safe`。
+MUST NOT 让 child 只能靠猜测或主动查询才知道自己具备什么读取能力。档位事实 SHALL 取自持久 locus 记录；
+记录缺省档位时视为 `safe`，渲染层 MUST NOT 忽略记录中的 `shell`。
 
 #### Scenario: 首次投递收到完整前言
 - **WHEN** 一个新建 child 收到第一条真正进入其 inbox 的 Delivery

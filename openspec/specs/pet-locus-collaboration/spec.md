@@ -783,27 +783,51 @@ claim-before-bind、expiry→promotion、Host 恢复和 next-step/next-turn batc
 
 ### Requirement: Locus 业务出站只能经受管 finish
 
-Locus child 的飞书业务正文与撤回动作 SHALL 只能由 caller-bound `pet_locus_finish` 的 Host 实现产生。child 的已发布能力集合 MUST NOT 提供可经 Skill、shell、脚本、CLI、通用 HTTP、子委派或其它执行身份直接发送或撤回飞书消息的路径；普通 assistant 文本仍不得外发。
+Locus child 的飞书业务正文与撤回动作 SHALL 以 caller-bound `pet_locus_finish` 的 Host 实现为唯一受管出口；普通 assistant 文本仍不得外发。该出口在各工具档位下的保证强度 SHALL 按档位区分，并 SHALL 如实陈述，MUST NOT 把较弱档位的保证表述为较强档位的保证。
 
-该边界 SHALL 由工具/执行 authority 隔离强制执行，MUST NOT 仅依赖 prompt、Skill 省略、命令字符串黑名单、PATH/HOME 隐藏或 read-only 文件沙箱。若当前 pinned runtime 无法证明在保留通用进程执行时隔离飞书凭据与 Lark 网络出口，发布的 Locus safe composition SHALL 移除 `bash`、`pwsh`、任意代码执行和可代为执行的子委派能力，只保留受控只读工具与 caller-bound Pet 工具。
+**`safe` 档（默认）**：child 的已发布能力集合 MUST NOT 提供可经 Skill、shell、脚本、CLI、通用 HTTP、子委派或其它执行身份直接发送或撤回飞书消息的路径。该边界 SHALL 由工具/执行 authority 隔离强制执行，MUST NOT 仅依赖 prompt、Skill 省略、命令字符串黑名单、PATH/HOME 隐藏或 read-only 文件沙箱。若当前 pinned runtime 无法证明在保留通用进程执行时隔离飞书凭据与 Lark 网络出口，`safe` 档 SHALL 不提供 `bash`、`pwsh`、`skill`、任意代码执行和可代为执行的子委派能力，只保留受控只读工具与 caller-bound Pet 工具。
 
-Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的 safe composition。该 composition 的 preset SHALL 由 Pet 在创建时显式指定并持久化，MUST NOT 从主会话当前或创建时的 preset 派生；冷恢复 SHALL mount 持久化的该 preset，MUST NOT 经父组合（`composeFrom`）重建；持久记录缺失该 preset 时 SHALL 拒绝恢复。每个成功完成 independent marker 与精确 durable toolFilter 装配的新建/重建 child，SHALL 在对应 Locus 行发布 Host 证明的 `safe-v1` composition marker；该 marker 只能在 child 创建成功返回后、active locus 发布时写入。缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；非 `safe-v1` 值亦同。Host 无法证明该 composition 已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child。任何为满足本条所需的 DSH compatibility seam SHALL 针对 manifest 中的精确 pin 做运行时探针并 fail closed。
+**`shell` 档（所有者显式授予，见「Locus 工具档位由所有者显式授予且不重建子会话」）**：child 可执行通用 shell，因而**不存在**执行 authority 层面的出站隔离。此时唯一出口 SHALL 由防误操作 guard 维持：Host SHALL 在该 child 作用域拒绝经 shell 调用 `lark-cli` 发送、回复、编辑、撤回飞书消息的命令，并在拒绝原因中指明改用 `pet_locus_finish`、finish 被拒时报告原因而非绕行。该 guard MUST NOT 在规范、管理面、飞书回执或 prompt 中被表述为安全边界；有意绕过（脚本、HTTP、复制的可执行文件）不在其保证范围内。
+
+**任何档位**：child 的已发布能力集合 MUST NOT 含子委派或可让另一执行身份代为行动的工具（包括 `subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message` 及 agent 控制工具）。该排除 SHALL 由持久组合本身保证，MUST NOT 依赖可在运行中撤除的收紧层。
+
+Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的组合。该组合的 preset SHALL 由 Pet 在创建时显式指定并持久化，MUST NOT 从主会话当前或创建时的 preset 派生；冷恢复 SHALL mount 持久化的该 preset，MUST NOT 经父组合（`composeFrom`）重建；持久记录缺失该 preset 时 SHALL 拒绝恢复。新建/重建 child SHALL 在对应 Locus 行发布 Host 证明的 composition marker：`safe-v2` 表示持久组合为「不含委派的宽底座」且每次发布时须由 Host 同步安装按档位的收紧层；`safe-v1` 表示既有的只读持久组合。marker 只能在 child 创建成功返回后、active locus 发布时写入。`safe-v1` 行 SHALL 继续按 `safe` 档服务；缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；未知 marker 值亦同。Host 无法证明所需组合（含 `safe-v2` 的按档位收紧层）已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child，MUST NOT 以宽底座发布一个未安装收紧层的 `safe` 档 child。任何为满足本条所需的 DSH compatibility seam SHALL 针对 manifest 中的精确 pin 做运行时探针并 fail closed。
 
 #### Scenario: 受管 finish 正常发送
-- **WHEN** safe child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
+- **WHEN** 任一档位的 child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
 - **THEN** Host 按 durable CAS 和固定触发消息发送一次正文并记录结果
 
 #### Scenario: shell 旁路不可达
-- **WHEN** child 尝试以 `lark-cli`、绝对路径脚本、`msg.py`、Python/Node/curl 或复制后的可执行文件直接调用飞书接口
+- **WHEN** `safe` 档 child 尝试以 `lark-cli`、绝对路径脚本、`msg.py`、Python/Node/curl 或复制后的可执行文件直接调用飞书接口
 - **THEN** 已发布执行 authority 不能产生飞书业务消息，且 Delivery 状态不因尝试而改变
 
+#### Scenario: shell 档误用 lark-cli 发送被拦截
+- **WHEN** `shell` 档 child 在 finish 被拒后执行 `lark-cli im +messages-send …` 或等价的回复/撤回/编辑命令
+- **THEN** 该工具调用在执行前被拒绝，拒绝原因指明使用 `pet_locus_finish` 并报告 finish 的拒绝原因；Delivery 状态不因尝试而改变
+
+#### Scenario: shell 档读取当前群不被拦截
+- **WHEN** `shell` 档 child 以 `lark-cli` 读取当前入口群的历史消息
+- **THEN** guard 不拒绝该调用
+
+#### Scenario: shell 档的出站保证如实表述
+- **WHEN** 所有者在管理面或飞书回执中查看 `shell` 档说明
+- **THEN** 说明写明该档不存在出站隔离、防误操作 guard 不是安全边界，MUST NOT 声称业务正文只能经 finish 产生
+
 #### Scenario: 子委派不能洗白权限
-- **WHEN** child 尝试通过 subagent、workflow、Ralph 或 agent message 让另一执行身份代发
-- **THEN** safe composition 不提供该旁路，或接收方同样无飞书出站 authority；业务正文仍只能由原 current 的 finish 产生
+- **WHEN** 任一档位的 child 尝试通过 subagent、workflow、Ralph 或 agent message 让另一执行身份代发
+- **THEN** 已发布能力集合不含这些工具；业务正文不能由另一执行身份产生
+
+#### Scenario: 收紧层未安装时不发布
+- **WHEN** `safe-v2` child 被发布（新建或冷恢复），而 Host 无法同步安装或回读核验其档位对应的收紧层
+- **THEN** 拒绝发布并给出确定性诊断，MUST NOT 以宽底座发布该 child
 
 #### Scenario: 隔离能力无法证明时不发布
-- **WHEN** runtime 既不能持久固定无进程执行的 safe composition，也不能提供隔离凭据与 Lark egress 的独立 execution world
+- **WHEN** runtime 既不能持久固定不含委派的组合，也不能提供按档位收紧的作用域限制
 - **THEN** Locus intake/child 能力保持 unavailable 并给出确定性诊断，MUST NOT 以字符串过滤或 prompt 警告宣称安全
+
+#### Scenario: safe-v1 行继续服务
+- **WHEN** 一个既有 active locus 的 child 带 `safe-v1` marker
+- **THEN** 该 locus 按 `safe` 档继续服务，行为与本变更前一致，不要求重建
 
 #### Scenario: 主会话 preset 不影响子会话工具面
 - **WHEN** 主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
@@ -814,7 +838,7 @@ Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/us
 - **THEN** runtime mount 其持久化的 preset 恢复组合，不调用父会话的组合继承；运行时不支持显式 child preset 时 locus child 能力保持 unavailable
 
 #### Scenario: 升级前的 legacy child 不可恢复服务
-- **WHEN** 一个历史 active locus 的 durable child 没有 Host attested safe-composition marker
+- **WHEN** 一个历史 active locus 的 durable child 没有 Host attested composition marker
 - **THEN** 启动恢复或派发前将该 locus 标记为不可服务并要求显式重建，MUST NOT adopt 或冷恢复该 child 后继承父 preset
 
 ### Requirement: Delivery 保留有界结构化 addressing 事实
@@ -877,3 +901,265 @@ Pet 协作代理 SHALL 按有效通知意图（notify 缺省时兼容 needsReply
 #### Scenario: 通知与回复分别处理
 - **WHEN** 主会话向 pet 发 notify:false、needsReply:true 的消息，再发 notify:true、needsReply:false 的消息
 - **THEN** 代理只登记后者并按现有规则路由，前者不被后一次指针追扫登记；不新增子会话执行
+
+### Requirement: Locus 工具档位由所有者显式授予且不重建子会话
+
+每个 locus SHALL 具有一个工具档位，取值 `safe` 或 `shell`，与文件权限档（`read`/`write`）正交。所有新建、替换与重建的 locus SHALL 默认 `safe`；新代际与显式重建 MUST NOT 继承上一代的 `shell`。
+
+`safe` 档的已发布工具面 SHALL 与本变更前的 safe composition 完全一致。`shell` 档 SHALL 在 `safe` 档之上开放通用 shell 与 Skill 加载；MUST NOT 开放任何子委派或代为行动的工具（见「Locus 业务出站只能经受管 finish」）。
+
+档位 SHALL 仅由 allowlist 经飞书控制命令（`-t/--tools safe|shell`）或管理面改变；非 allowlist 发送者的档位命令 SHALL 按既有控制命令规则拒绝。档位变更 SHALL 仅在该入口空闲（无 current Delivery 且子会话未在运行）时生效，忙时 SHALL 确定性拒绝。变更 SHALL 在同一子会话上完成，MUST NOT 重建子会话、增加代际或丢弃子会话历史。变更 SHALL 在应用后回读子会话实际可见工具面核验：与目标档位不符时 SHALL 回到 `safe` 并拒绝，MUST NOT 回执成功。变更 SHALL 记录操作者、时间、期望值与生效值。
+
+仅带 `safe-v1` marker 的 locus SHALL 拒绝 `shell` 授予，拒绝原因 SHALL 指明需显式重建一次以获得可切换的组合；该拒绝 MUST NOT 使入口失效或暂停。
+
+`shell` 档生效期间，该入口 SHALL 只接受 allowlist 成员的 at 作为工作请求；非 allowlist 成员的 at SHALL 得到确定性拒绝回执，说明该入口当前为所有者专用。已在 backlog 中、由非 allowlist 成员触发的 Delivery SHALL 在派发前以同一原因结算，MUST NOT 投递给 `shell` 档子会话。切回 `safe` 后 SHALL 恢复既有的群成员提问规则。
+
+子会话每次投递的 prompt SHALL 按当前档位说明可用能力。`shell` 档 SHALL 说明：可以 bot 身份按需读取当前入口的群消息；MUST NOT 读取无关群、私聊、全局消息或其它 workspace；业务回复仍经 `pet_locus_finish`。该说明是行为约束而非授权边界。
+
+管理面与飞书回执 SHALL 如实说明 `shell` 档的后果：子会话可在所有者本机执行命令（写入受文件权限档约束，读取与网络不受限），可使用所有者本机的飞书凭据，入口的 allowlist 成员共享该能力，且出站约束仅为防误操作。
+
+#### Scenario: 授予 shell 档
+- **WHEN** allowlist 在一个空闲的 `safe-v2` locus 发送 `-t shell`
+- **THEN** 同一子会话的可见工具面增加 shell 档工具且不含任何委派工具，核验通过后回执并记录授权；子会话 id、代际与历史不变
+
+#### Scenario: 撤回 shell 档
+- **WHEN** allowlist 在空闲的 `shell` 档 locus 发送 `-t safe`
+- **THEN** 同一子会话的可见工具面恢复为 safe composition，核验通过后回执并记录
+
+#### Scenario: 忙时拒绝
+- **WHEN** 入口存在 current Delivery 或子会话正在运行时收到档位命令
+- **THEN** 确定性拒绝并说明需等待空闲，不改变档位
+
+#### Scenario: 核验失败回到 safe
+- **WHEN** 档位应用后回读的工具面与目标不符
+- **THEN** 回到 `safe` 并拒绝，回执给出确定性原因，不回执成功
+
+#### Scenario: safe-v1 入口请求 shell
+- **WHEN** allowlist 对一个仅带 `safe-v1` marker 的 locus 请求 `shell`
+- **THEN** 拒绝并说明需显式重建一次；该入口继续按 `safe` 服务
+
+#### Scenario: shell 档拒绝普通成员
+- **WHEN** `shell` 档入口收到非 allowlist 群成员的 at
+- **THEN** 不创建 Delivery 工作，回执说明该入口当前为所有者专用
+
+#### Scenario: 切换前排队的普通成员请求
+- **WHEN** 入口在 backlog 中有非 allowlist 成员的 Delivery 时切到 `shell`
+- **THEN** 这些 Delivery 在派发前以「入口当前为所有者专用」结算，不投递给子会话
+
+#### Scenario: 冷恢复保持档位
+- **WHEN** `shell` 档 `safe-v2` 子会话被释放后冷恢复
+- **THEN** 发布时按持久档位安装收紧层，恢复后的可见工具面与恢复前一致
+
+#### Scenario: 重建不继承 shell
+- **WHEN** 一个 `shell` 档入口被显式重建或切换来源产生新代际
+- **THEN** 新代际为 `safe` 档
+
+#### Scenario: 非 allowlist 档位命令
+- **WHEN** 非 allowlist 群成员发送 `-t shell`
+- **THEN** 按控制命令规则拒绝，档位不变
+
+### Requirement: Locus child 具备 caller-bound 的当前入口群只读能力
+
+每个 IM 入口（群或话题）的 active locus 的 child SHALL 能以 caller-bound 只读工具读取**当前入口**的历史消息，并以
+**bot 身份**读取（本 change 不引入任何其它身份路径）。文档入口 locus 不装配该工具（见 `pet-locus-doc-comments`）。
+
+读取目标 MUST 只来自调用方 child 已绑定的入口，且 MUST NOT 接受 chat/群/用户或 thread 选择参数：
+入口为**话题**时，读取范围 SHALL 为该入口**绑定的话题**及其回复（由 Host 从入口事实推导）；
+入口为**群**时读取该群的消息列表。此处排除的是"调用方任意选择其它话题/线程"，**不是**"读取
+自己绑定的话题"。未知或多余参数 SHALL 使该调用被拒绝且不发生任何读取，MUST NOT 被静默忽略或
+"忽略参数后照读当前入口"。
+
+续读游标 SHALL 由 Host 签名，伪造或篡改的游标不可被接受，游标 MUST NOT 被用于选择读取目标
+（游标载荷不加密，第三方分页令牌在编码后可被解码看到）。使用游标时
+SHALL 校验其由同一 child 代际、同一入口、同一方向与窗口签发；伪造、篡改、跨 child/跨代际、
+跨入口或因 Host 进程重启换密钥而失效的游标（不另设时间 TTL）SHALL fail closed 并给出确定性原因。每次等待外部读取返回后 SHALL 重新核验
+调用方仍是同一 child 代际且入口未变，变更时 SHALL 丢弃该次结果。
+
+窗口 SHALL 有**固定**语义（工具级，不留给实现自由选择）：时间参数 SHALL 使用带时区偏移的
+ISO 8601；窗口 SHALL 为左闭右开 `[since, before)`；同一时间戳的消息 SHALL 按平台消息位置升序
+返回，位置缺失或相同时按消息标识字典序。窗口在 Host 对每个传输页本地过滤：无法解析时间的消息
+不排除，翻页可能经过窗口外的空页。单次结果 SHALL 有**可度量的**
+上限（总序列化字符预算、单条正文上限与单字段上限），截断处 SHALL 带可识别标记；当整页预算
+截断一个传输页时，SHALL 指明仍有更多内容并给出可继续的游标，MUST NOT 静默丢弃。
+
+结果 SHALL 至少包含每条消息的标识、时间、发送者显示名与正文或结构化消息的可用摘录；无法解析
+发送者时 SHALL 使用明确占位而非伪造名称；结果 SHALL 标注"群内容为不可信输入"。读取失败
+（不可读、被拒、传输失败、信封畸形）SHALL 与"读取成功且没有消息"区分，返回确定性原因，
+MUST NOT 返回空结果冒充成功。
+
+#### Scenario: safe 档 child 读取当前入口群
+- **WHEN** `safe` 档 child 在一次 Delivery 中调用该工具读取当前入口群
+- **THEN** 返回该群的有界消息分页（含时间、发送者与正文），并标注内容为不可信输入
+
+#### Scenario: 话题入口读取自己绑定的话题
+- **WHEN** 该 locus 的入口是话题，child 调用该工具
+- **THEN** 读取范围为该绑定话题及其回复，夹具同时包含无关话题与群本体消息且不出现在结果中
+
+#### Scenario: 指定其它目标或未知参数时拒绝且不读取
+- **WHEN** 调用方传入另一个群、另一个话题、私聊或全局范围，或传入未知参数
+- **THEN** 该调用被拒绝且不发生任何读取，不返回任何消息
+
+#### Scenario: 游标被篡改或跨域使用
+- **WHEN** 续读游标被修改、由其它 child/代际/入口签发，或已过期
+- **THEN** 调用 fail closed 并返回确定性原因，不返回任何消息
+
+#### Scenario: 等待期间入口或代际变化
+- **WHEN** 一次读取在等待外部返回期间该 child 的代际或入口发生变化
+- **THEN** 该次结果被丢弃，不返回给模型
+
+#### Scenario: 截断可识别且可继续
+- **WHEN** 单条正文或整页结果超过预算，或预算截断一个传输页
+- **THEN** 返回结果不超过声明的预算，截断处带有可识别标记，并给出可继续的游标而非静默丢弃
+
+#### Scenario: 窗口边界不重不漏
+- **WHEN** 两次读取使用相邻窗口或同一时间戳的多条消息
+- **THEN** 结果按声明的开闭与次序规则返回，边界处既不重复也不跳过
+
+#### Scenario: 失败与空结果可区分
+- **WHEN** 读取被拒绝、传输失败或返回畸形信封
+- **THEN** 返回确定性失败原因，MUST NOT 返回空历史
+
+### Requirement: 投递 prompt 的首投前言与逐次档位声明
+
+每个 child 的**完整前言**（入口标识、locus 与代际、主/子会话与 workspace、文件权限、工具档位及
+其能力、上下文锚点状态、按需读取说明、"不自动把结论回传主会话"的约束）SHALL 在系统能证明该
+child 尚未收到前言时发送；一旦存在**已证明送达**的投递，系统 MUST NOT 再发送完整前言。
+
+"已证明送达" SHALL 优先使用可获得的最强证据：至少包括该 child 的持久 Delivery 行上"内容已进入
+其 inbox"的绑定事实；实现 MAY 使用等价的精确对账证据（例如该 child 自身会话日志证明某条 inbox
+消息进入过 turn）来避免重复。MUST NOT 把"已接受""已渲染"或运行期计数当作送达证据。
+
+结果不可判定时（例如队列已接受但持久绑定未提交、回执丢失、进程在绑定前终止）系统 SHALL 视为
+**未收到**并在下一次真正投递时携带完整前言。该策略**允许在不可判定情形下重发一次完整前言**；
+重复发送的代价已由所有者接受（2026-10-12 决策），因此系统 MUST NOT 因该可能性而暂停投递、
+阻塞 intake 或要求所有者重建。反之，若持久绑定已提交而仅控制回执丢失，SHALL 按已送达处理，
+MUST NOT 重发。
+
+**后续每次**投递 SHALL 只携带必要请求事实（请求、回复关联、本轮回复目标）并指向 caller-bound
+`pet_context` 复核持久事实，但 MUST 声明本次投递时生效的工具档位能力（`safe`/`shell`），
+MUST NOT 让 child 只能靠猜测或主动查询才知道自己具备什么读取能力。档位事实 SHALL 取自持久 locus 记录；
+记录缺省档位时视为 `safe`，渲染层 MUST NOT 忽略记录中的 `shell`。
+
+#### Scenario: 首次投递收到完整前言
+- **WHEN** 一个新建 child 收到第一条真正进入其 inbox 的 Delivery
+- **THEN** 渲染出的是携带档位能力与锚点状态的完整前言，而不是"沿用首次投递"的续投变体
+
+#### Scenario: 渲染成功但未入队不消耗首投
+- **WHEN** 某条 Delivery 已持久化并被渲染，但在进入 child inbox 之前失败或结果不确定
+- **THEN** 下一条真正投递的 Delivery 仍携带完整前言
+
+#### Scenario: backlog 中已有其它已接受投递
+- **WHEN** 该 child 还有其它已接受但未证明入队的 Delivery
+- **THEN** 本次仍按"尚未收到前言"处理，不以这些未入队投递作为已送达证据
+
+#### Scenario: 队列已接受但持久绑定失败
+- **WHEN** 内容可能已进入 child inbox，但持久绑定未提交（进程在绑定前终止或持久化失败）
+- **THEN** 该投递不被计为已送达，下一次真正投递携带完整前言（允许重复一次），且投递不因此暂停
+
+#### Scenario: 绑定已提交但控制回执丢失
+- **WHEN** 持久绑定已提交，仅控制回执丢失
+- **THEN** 该投递计为已送达，后续投递按最小投递渲染，MUST NOT 重发完整前言
+
+#### Scenario: 第二次投递不重复前言但声明档位
+- **WHEN** 该 child 已有被证明送达的投递，本次是后续投递
+- **THEN** prompt 不重复完整前言，但仍声明当前持久档位对应的能力并携带本轮回复目标
+
+#### Scenario: 重启后按送达证据决定
+- **WHEN** Host 重启或 child 被冷恢复后收到新 Delivery
+- **THEN** 存在送达证据时不重发完整前言；无送达证据时按未收到处理并携带完整前言
+
+#### Scenario: 受既有缺陷影响的 child
+- **WHEN** 一个既有 child 的投递有送达证据，但它从未收到过完整前言
+- **THEN** 系统不自动重发完整前言，但每次投递仍声明当前档位能力；需要完整前言时由所有者显式重建该 child
+
+### Requirement: 读取守卫的拒绝可诊断且不额外放行
+
+child 的本地读取守卫 SHALL 继续只允许已确认工作区内的路径；本 change MUST NOT 新增任何工作区外
+放行。
+
+拒绝 SHALL 返回稳定的机器可读原因，并 SHALL 附带最小可执行指引：被允许的根是什么、需要额外
+路径时应由所有者如何确认。该指引只面向模型与本地诊断。
+
+Host 自动发送的飞书正文 MUST NOT 含该诊断；投递提示词 MUST NOT 指示模型把诊断内容转述进业务
+正文。受管出站 SHALL 在既有**受管变换**（例如把 `@显示名` 渲染为平台真实提醒）之外不改动模型
+提供的正文，MUST NOT 附加任何诊断、路径或允许根信息。模型自行把诊断写入正文不属于 Host 可
+保证的范围。
+
+#### Scenario: 工作区外读取被拒且原因稳定
+- **WHEN** child 尝试读取已确认工作区之外的路径
+- **THEN** 读取被拒绝并返回稳定原因码与被允许根
+
+#### Scenario: 指引可执行
+- **WHEN** 模型收到一次守卫拒绝
+- **THEN** 拒绝信息包含被允许根与申请额外路径的方式，足以决定下一步
+
+#### Scenario: Host 出站不附加诊断
+- **WHEN** 受管出站发送一条纯文本正文
+- **THEN** 发送内容与模型提供的正文一致，不附加任何守卫诊断、路径或允许根信息
+
+#### Scenario: 含提及的正文只做既有受管变换
+- **WHEN** 模型提供的正文含可唯一解析的 `@显示名`
+- **THEN** 出站仅执行既有的提及渲染，不因本 change 改变渲染结果，也不附加诊断或路径
+
+#### Scenario: prompt 不指示模型转述诊断
+- **WHEN** Host 渲染投递提示词
+- **THEN** 提示词不要求或建议模型把守卫诊断内容写入飞书正文
+
+### Requirement: 未装配的 caller-bound 能力不得以可见但必然失败的形式暴露
+
+只装配了一半的 caller-bound 能力 MUST NOT 以"工具可见、调用必然失败"的形式暴露给 child：当某项
+能力在当前 Host 尚未装配（例如协作上下文尚无可用范围）时，其工具 SHALL NOT 出现在 child 的工具面
+中；装配完成后 SHALL 可注册并对其授权 caller 正常工作；该判定 SHALL 在 cold restore 后保持一致。
+
+#### Scenario: 能力未装配时不可见
+- **WHEN** 当前 Host 没有可供该 caller 使用的协作上下文范围
+- **THEN** 该工具不出现在 child 的工具面中，child 不因调用它而得到无法解释的失败
+
+#### Scenario: 装配后可用
+- **WHEN** 该能力在当前 Host 已装配且 caller 有合法范围
+- **THEN** 工具可注册，授权 caller 调用成功
+
+#### Scenario: 冷恢复后判定一致
+- **WHEN** child 被冷恢复
+- **THEN** 工具面与该能力当前是否装配一致，不因恢复路径不同而漂移
+
+### Requirement: 启动恢复结算被中断的投递并不阻塞后续消息
+
+Host 重启可能恰好发生在某条 Delivery 已被 child 认领并开始执行 turn 之后。此时该 turn 已随进程消失，
+**永远不会有任何执行者结算这条 Delivery**；而它占据该 locus 的 current 位置，会让同入口后续所有消息
+只能停留在 backlog。系统 SHALL 在启动恢复时依据持久证据识别这种投递并立即结算，MUST NOT 让后续消息
+等待原投递的完整租约。
+
+判定 SHALL 只用**可证明**的证据：该 Delivery 已绑定 `executionId` 与 `inboxMessageId`，且 child 会话
+日志中进入过该 inbox 消息的那个 turn 已经结束（存在 `turn/end`）、其结束原因为 `interrupted`。证据
+不足或存在歧义时 SHALL fail closed，保持既有等待语义。
+
+结算 SHALL 是终态且**不重发正文**：内容既已进入 child inbox（持久绑定已提交），按既有"送达即送达"的
+策略计为已送达；结算表示"承认不会有回复"，MUST NOT 被实现为重试或重发。结算 SHALL 带上可诊断的原因。
+
+被提升（backlog → current）的 Delivery SHALL 获得不小于最小执行租约的执行窗口，且不超过其 24 小时
+硬上限，避免出现"被提升即到期"的循环。
+
+#### Scenario: 重启打断进行中的 turn
+- **WHEN** 一条 current Delivery 的绑定 turn 在 child 会话日志中被证明以 `interrupted` 结束
+- **THEN** 启动恢复以终态结算该 Delivery（非重发、非重试），并让同入口的 backlog 立即可被派发
+
+#### Scenario: 结算后不再占用 current 位置
+- **WHEN** 上述被中断的 Delivery 被结算，而同一 locus 已有 backlog 投递
+- **THEN** 该 locus 处于"有 backlog、无 current"，后续投递 SHALL 在启动排空时被提升并派发，MUST NOT 继续等待原投递的租约
+
+#### Scenario: 结算原因是可诊断的
+- **WHEN** 查看被中断结算的 Delivery 记录
+- **THEN** 其终态带有明确说明"turn 被中断、未重发正文"的原因与启动处置标记，而不是笼统的 deadline 过期
+
+#### Scenario: 证据不足时不结算
+- **WHEN** 无法证明中断（该 turn 仍处于打开状态、`turn/end` 原因不是 `interrupted`、inbox 绑定与记录不匹配、或会话日志不可读）
+- **THEN** 保持既有等待语义：不提前结算、不重派、不做任何推断
+
+#### Scenario: 被提升的投递获得最小执行租约
+- **WHEN** 一条 backlog Delivery 在其自身软租约临近或已经过去时被提升为 current
+- **THEN** 它的执行租约至少延长到"提升时刻 + 最小执行租约"，且不超过 24 小时硬上限
+
+#### Scenario: 不重发正文
+- **WHEN** 被中断结算的 Delivery 内容此前已进入 child inbox
+- **THEN** 系统 MUST NOT 把该消息正文再次投递给 child 或用户；仅结算该条 Delivery

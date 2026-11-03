@@ -43,3 +43,8 @@
 - [x] 7.2 `node scripts/sync.mjs` 两次，第二次无变化（经所有者批准部署并重启 Host：第一次 32 changes，第二次 `no changes — deployment already matches manifest`；产物含新代码已核验。清理 worktree 前须先在 main checkout 再跑一次 sync，见 `port-verification.md`）
 - [x] 7.3 实机：新建入口群即得 `safe-v2`（无需重建）→ `-t shell` 成功且回执如实声明"guard 不是安全边界" → bash 执行 `echo shell-ok` 退出码 0 → `lark-cli im +messages-send` 执行前被 guard 拒绝并原文返回 `pet_locus_finish` 指引、正文改经 finish 送达 → `-t safe` 回退且 bash/Skill 收紧。四条均有回执，见 `port-verification.md` 的 Live acceptance 表。**未复测**：授予后的重启/冷恢复持久性
 - [ ] 7.4 将 delta 合入 `openspec/specs/pet-locus-collaboration/spec.md` 后归档（需用户确认）
+
+
+## 归档说明（2026-11-03）
+
+按所有者指示（先收尾在途 change，再立 `locus-three-tier-structure`），本 change 以当前代码为准同步 spec 后归档。上面仍未勾选的真机验收与收尾项**未完成**，没有补跑；静态核对显示 spec 与代码一致（措辞差异已改为代码事实）。本 worktree 缺 dsh-pet 的测试依赖，归档前未实际运行测试。
