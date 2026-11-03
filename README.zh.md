@@ -11,7 +11,7 @@
 ![Magpie connector 架构：Web GUI 与 Host 插件、凭据与设置、Magpie 网关与上游 provider，可选经 Cloudflare Access](docs/architecture.zh.svg)
 
 <!-- problem -->
-**把自托管的 Magpie 网关接入 DeepSeek Harness，每个上游归属对应一个 provider route：原版 DSH 即按上游 provider 分组展示模型，附带只读用量卡片和会话级快速档。** Magpie 继续负责登录、账号、路由和厂商出站代理，本插件补齐 DSH 侧。
+**把自托管的 Magpie 网关接入 DeepSeek Harness，每个上游归属对应一个 provider route：原版 DSH 即按上游 provider 分组展示模型，附带用量卡片（可直接使用 Codex 重置卡）和会话级快速档。** Magpie 继续负责登录、账号、路由和厂商出站代理，本插件补齐 DSH 侧。
 
 ### 你会得到什么
 
@@ -71,7 +71,7 @@ dsh plugin --profile web add dsh-magpie-connector
 - **切换线路与编辑线路语义不同。** 自动切换保留模型目录（不闪断）、清空用量卡片并以新线路重同步；编辑生效线路的地址/key/接入方式才会按换代清空目录；编辑非生效线路不影响当前目录。
 - **更改连接不会中止正在进行的生成。** 新地址或新 key 会立即隐藏旧目录与旧卡片，但已 prepare 或正在运行的生成会用捕获到的旧地址与 key 跑完。用户取消与插件卸载仍会中止它们。
 - **传输边界刻意收窄。** host 请求经私有 `undici` dispatcher 直连配置的网关，不经过全局代理 dispatcher；拒绝重定向；只允许 `GET /models`、`POST /responses`、`POST /chat/completions`、`GET /magpie/quotas/cards`、`POST /magpie/quotas/refresh`；从不调用 Magpie GUI 的 `/api/*` 管理接口。厂商出站代理在 Magpie 侧配置。
-- **不支持：** 非空 `stop` 序列会在发请求前失败（`MAGPIE_STOP_UNSUPPORTED`），因为 Magpie 无法在所有上游协议转换中保留 stop。用量卡片与 Codex 重置次数只读展示，插件不会调用账号管理或重置端点。
+- **不支持：** 非空 `stop` 序列会在发请求前失败（`MAGPIE_STOP_UNSUPPORTED`），因为 Magpie 无法在所有上游协议转换中保留 stop。用量卡片本身只读；使用 Codex 重置卡是本插件唯一会写 Magpie 账号状态的操作——必须手动触发、两段确认、只用最早到期的那张，且从不调用账号管理端点。
 - **密钥不会进入响应或日志。** 网关反射的文本在进入设置接口或日志之前会用当前 key 脱敏。写盘文件权限 `0600`；设置接口只报告 `configured` / `writable`。
 - **界面跟随 DSH 语言。** 0.5.0 起设置页与速度菜单带中英文字典，按当前 DSH 界面语言渲染（`ctx.locale`）；0.5.0 之前文案只有中文。宿主没有 locale 服务（或单测环境）时回退到中文参考集，已保存设置与行为不受影响。
 
