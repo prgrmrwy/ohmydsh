@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 — 2026-11-03
+
+- **重置卡改成和 subscriptions 插件一样的折叠列表。** host 现在把网关 `resets.each[]`（每项只保留 `until`/`window`）与 `resets.byWindow`/`fiveHour`/`weekly` 投影给浏览器；卡片上用「用量限制重置 · 可用 N 次」做摘要行，展开后逐张列出「完整重置」/「5 小时」/「每周」和每张的「{时间} 到期」，最早到期那张附相对提示（`N 天后过期` / 不足 24 小时 `N 小时后过期` / 已过期），缺到期时间显示「到期时间不可用」。按窗口发放重置的计划（GLM Coding）摘要显示「5 小时 N 次 · 每周 M 次」。
+- 仍然只读：没有新增按钮，也不调用任何重置端点；网关不给 `each`/`byWindow` 时退回原来的「次数 + `until`」显示。
+- Codex 卡片只显示一个 `7 days` 窗口是网关数据如此：ChatGPT 的 `/wham/usage` 对当前账号只上报周窗口，插件不会补造 5 小时窗口。
+- 规范：`openspec/changes/magpie-reset-card-detail/`。
+
 ## 0.6.0 — 2026-11-03
 
 - **Sidebar usage card.** Settings → Magpie gains a 「侧边栏额度 / Sidebar usage」 switch (host setting `sidebarUsage`, default off). When on, the sidebar footer shows a dense card above Settings: one row per upstream with its weekly (`7 days`) window, reading and bar; at most five rows, the rest scroll inside the card, and a double chevron (no divider) appears when more exist. Rows keep the gateway's order, a card with an error shows 「读取失败」 instead of a reading, and the whole card has a single refresh (`{all:true}`).
