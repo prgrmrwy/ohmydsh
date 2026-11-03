@@ -2,11 +2,15 @@
 
 ### Requirement: Locus 三层实体
 
-系统 SHALL 以三层表达一段协作：用户的**干活主会话**（普通一级会话，承担工作归属）←dsh-collab→ Pet 创建的一级 **locus 主会话**（与干活主会话 1:1）→ 每个入口一个 **locus 子会话**（父为 locus 主会话）。`loci` 行的父会话字段 SHALL 指 locus 主会话；干活主会话与 locus 主会话的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSessionId, generation, status, spaceId}`），同一干活主会话任一时刻至多一个 active 的 locus 主会话。入口寻址（`chatId`/`threadId`、文档入口前缀规则）与本变更前相同。workspace SHALL 与干活主会话一致；locus 主会话 SHALL 建在干活主会话所在 workspace。locus 主会话 SHALL 由 Host 设审批 `never`、沙箱 `read-only`，并以 deny 式 `tools.restrict` 挡掉 `bash`、`write`、`edit` 与委派类工具，保留 Host 层的 `collab_*` 工具；Pet 只对自己创建的 locus 主会话向 dsh-collab 声明 `owns`。
+系统 SHALL 以三层表达一段协作：用户的**干活主会话**（普通一级会话，承担工作归属）←dsh-collab→ Pet 创建的一级 **locus 主会话**（与干活主会话 1:1）→ 每个入口一个 **locus 子会话**（父为 locus 主会话）。`loci` 行的父会话字段 SHALL 指 locus 主会话；干活主会话与 locus 主会话的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSessionId, generation, status, spaceId}`），同一干活主会话任一时刻至多一个 active 的 locus 主会话。入口寻址（`chatId`/`threadId`、文档入口前缀规则）与本变更前相同。干活主会话 SHALL 留在来源 workspace；locus 主会话及其官方子会话 SHALL 建在专用 `DSH Pet` workspace。`locus_mains.workspaceId` 记录 locus 主会话的工作区；`loci.workspaceId` 继续记录绑定的干活项目工作区，供项目读取授权与入口管理使用，不得以 Pet 运行目录替代项目根。已有位于来源工作区的 locus 主会话 SHALL 在入口空闲且下一条授权消息到来时走既有主会话替换流程，不改写旧会话 header、不搬移或删除历史。locus 主会话 SHALL 由 Host 设审批 `never`、沙箱 `read-only`，并以 deny 式 `tools.restrict` 挡掉 `bash`、`write`、`edit` 与委派类工具，保留 Host 层的 `collab_*` 工具；Pet 只对自己创建的 locus 主会话向 dsh-collab 声明 `owns`。
 
 #### Scenario: 同一干活主会话服务多个入口
 - **WHEN** 同一干活主会话分别关联开发群与一个话题
 - **THEN** 两个入口的子会话都以同一个 locus 主会话为父，`locus_mains` 中该干活主会话只有一条 active 记录
+
+#### Scenario: locus 主会话归 DSH Pet，入口仍关联干活项目
+- **WHEN** 为 nexus 等来源工作区的干活主会话建立或替换 locus 主会话
+- **THEN** 干活主会话留在来源工作区，locus 主会话运行且归属 DSH Pet，标题为 `[locus] <干活主会话名>`（无标题时用干活会话短码），入口持久工作区仍为来源项目；旧工作区中的 locus 主会话经既有空闲迁移协议替换，历史保留
 
 #### Scenario: locus 主会话工具面锁死
 - **WHEN** 读取 locus 主会话的已发布工具面与会话设置

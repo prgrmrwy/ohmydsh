@@ -24,7 +24,7 @@ Pet 自建 locus 主会话 M（普通 root，固定 locus-base）
           └─ 官方 continuable child（每入口一代，首条消息才创建）
 ```
 
-- `locus_mains` 记录 `{workSessionId, locusMainSessionId, generation, status, spaceId}`；同一干活主会话任一时刻至多一个 active locus 主会话。两者在同一 workspace，但没有 runtime 父子边。
+- `locus_mains` 记录 `{workSessionId, locusMainSessionId, generation, status, spaceId}`；同一干活主会话任一时刻至多一个 active locus 主会话。W 留在来源 workspace，M 与其官方子会话运行在专用 DSH Pet workspace，没有 W→M runtime 父子边（2026-11-04 所有者在真机验收中确认此工作区分离）。`locus_mains.workspaceId` 记录 M 的工作区，`loci.workspaceId` 记录来源项目；项目读取守卫以持久入口绑定解析项目根，继续禁止 DSH/Pet 私有目录。已有位于来源 workspace 的 M 在空闲入口的下一次授权消息时按现有换 M 流程替换，旧 header 与历史保留。
 - `loci` 内仍是父子两层：父字段指 M，child 是入口服务者。auto、Q&A、`/bind` 只在 W 的来源上不同，随后统一建立或复用 M、空间与 `not-created` 入口。绑定本身不预建 child。
 - W 保留自身的执行能力、preset 与委派能力。**W 创建的 worker delegates 不属于 Locus**：不因共用 workspace 或有祖先关系获得 Pet 入口身份、current Delivery、caller-bound 工具或协作空间成员资格；Pet 也不把它们认领为 locus main/child。Locus child 的组合不会从 W 或其 worker 派生。
 - M 不可用时为同一 W 建新 M，并把未被所有者停止/退役的入口迁为 `not-created` 新代际；历史会话和旧空间待办保留。单个 child 永久不可用只替换该入口一代；容量不足保留原 child、代际与请求。W 归档则停止服务并提示恢复来源或 `/bind`，不自动复活或换 W。

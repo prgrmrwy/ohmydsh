@@ -642,8 +642,7 @@ export class LocusRepository {
         const paired = input.main
         if (
           paired.status !== 'active' ||
-          paired.locusMainSessionId !== normalized.parentSessionId ||
-          paired.workspaceId !== normalized.workspaceId
+          paired.locusMainSessionId !== normalized.parentSessionId
         ) {
           throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Locus main does not match the published locus')
         }
@@ -3063,8 +3062,7 @@ export class LocusRepository {
         if (
           parentMain === undefined ||
           parentMain.status !== 'active' ||
-          parentMain.locusMainSessionId !== next.parentSessionId ||
-          parentMain.workspaceId !== next.workspaceId
+          parentMain.locusMainSessionId !== next.parentSessionId
         ) {
           throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Successor must be published under the active locus main')
         }

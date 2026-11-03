@@ -281,6 +281,8 @@ export interface LocusRepository {
 
 /** External DSH operations needed by the controller. */
 export interface LocusDshPort {
+  /** Pet-owned runtime workspace; the entry's workspace remains the work project. */
+  readonly locusMainWorkspaceId?: string
   /** Resolve a persisted session; undefined means unavailable, not a fallback. */
   resolveSession(sessionId: string): Promise<LocusParentSession | undefined>
   /** Resolve the currently configured default workspace. */
@@ -292,8 +294,8 @@ export interface LocusDshPort {
     chatId: string
   }): Promise<ProvisionedSession>
   /**
-   * Create the locus main session for one work session, in the work session's
-   * workspace. It mounts the neutral locus preset, is locked down (approval
+   * Create the locus main in the Pet workspace; input.workspaceId is the work
+   * project. It mounts the neutral locus preset, is locked down (approval
    * `never`, sandbox `read-only`, no shell/write/edit/delegation tools) and is
    * verified before it is returned. It is NOT a child of anything: it is an
    * ordinary top-level session that only Pet and the work session talk to.
@@ -2118,7 +2120,8 @@ export class LocusController {
       label: this.locusMainLabel(work),
     })
     resources.locusMain = created
-    assertSessionShape(created, undefined, work.workspaceId, 'locus 主会话')
+    assertSessionShape(created, undefined, this.deps.dsh.locusMainWorkspaceId, 'locus 主会话')
+    const mainWorkspaceId = requireNonEmpty(created.workspaceId, 'locusMainWorkspaceId')
     await this.recordResource(provisioningId, { locusMainSessionId: created.id })
     let space: LocusSpaceEstablishment
     try {
@@ -2143,7 +2146,7 @@ export class LocusController {
         generation: (options.retiring?.generation ?? 0) + 1,
         status: 'active',
         spaceId: space.spaceId,
-        workspaceId: work.workspaceId,
+        workspaceId: mainWorkspaceId,
         createdAt: now,
         updatedAt: now,
       },
@@ -2165,7 +2168,7 @@ export class LocusController {
       locusId: input.locusId ?? generatedId('locus', this.id),
       generation: input.generation ?? 1,
       endpoint: input.endpoint,
-      workspaceId: input.main.workspaceId,
+      workspaceId: input.work.workspaceId,
       parentSessionId: input.main.locusMainSessionId,
       ...(input.work.title !== undefined ? { parentSessionTitle: input.work.title } : {}),
       workSessionId: input.work.id,
@@ -2345,7 +2348,7 @@ export class LocusController {
     } catch {
       return false
     }
-    return isUsableLocusMainSession(session, main.locusMainSessionId)
+    return isUsableLocusMainSession(session, main.locusMainSessionId, this.deps.dsh.locusMainWorkspaceId)
   }
 
   private async flushPendingSwitchNotice(locus: LocusRecord): Promise<string> {
@@ -2386,7 +2389,7 @@ export class LocusController {
   }
 
   private locusMainLabel(work: LocusParentSession): string {
-    return `Locus 主会话 · ${work.title?.trim() || shortLocusSessionId(work.id)}`
+    return `[locus] ${work.title?.trim() || shortLocusSessionId(work.id)}`
   }
 
   private childLabel(

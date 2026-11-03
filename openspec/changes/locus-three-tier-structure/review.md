@@ -1,5 +1,16 @@
 # locus-three-tier-structure — Round 7 规划评审
 
+## 2026-11-04 工作区分离方案定向复审（主控）
+
+本次只复审所有者明确选择的工作区分离，不重开原 Round 7 的首图交接。核对官方 rc.2 `dsh-workspace`：`attachSession` 校验 header cwd 必须等于工作区物理路径；`dsh-subagent` 的 `childSessionMeta` 固定继承父 cwd，故不能用单纯重挂侧栏的办法。
+
+结论：APPROVE。W 保留原项目；M/child 运行在 DSH Pet；`locus_mains.workspaceId` 是运行工作区，`loci.workspaceId` 是来源项目。项目读取必须从持久入口解析，不使用模型参数，不把 Pet cwd 并入允许根；保留父/子/sandbox 运行根一致性、physical realpath、私有根拒绝和 symlink escape 检查。来源工作区不可证实时拒绝发布。旧 M 复用现有空闲替换流程，不改 header、不删除历史、不重放旧消息。新增测试已在旧代码上观察到预期失败；本结论是方案复审，实施和真实 GUI/飞书通过仍须另验。
+
+
+## 2026-11-04 工作区分离实现审查（主控）
+
+范围：以 `d4a2108e` 为基线的本轮全部源码、夹具、回归测试与规范 diff。结论：PASS，无阻断项。核对了创建时 Pet 工作区真实 cwd/attach、持久配对与来源项目字段分离、resolver/controller 共用归属判据、旧 M 空闲迁移不重放、真实 Host 创建和重建作用域均从持久入口解析项目根、物理路径与私有根拒绝保持，以及 `[locus] <干活主会话名>` 命名。移除的两处持久层 workspace 相等检查原本把运行归属与项目归属混为一谈；普通会话身份、active main、entry parent、provisioning/WAL/代际/CAS 校验继续保留。全量 Pet 2933 passed / 4 skipped，根仓 703 passed / 3 skipped，build/typecheck/strict/specs/artifact 通过。最终仅改标题模板后另跑创建/controller/loader/Host wiring 100 项通过。测试中的冷恢复使用新 agent scope 与官方 toolFilter 契约，不冒称执行了完整 Host 重启验收。正式 GUI/飞书的跨工作区显示与业务回执待部署后核验，27.3/27.4 不据此勾选。
+
 ## Metadata
 
 - 轮次：round 7；时间基准：2026-11-03T19:30:58+08:00。

@@ -166,6 +166,13 @@
 - [x] 26.6 `PET_DOMAIN_VERSION` 升 18、`migrate-state-version.mjs` 只加 `locus_mains` 表；迁移测试断言其它表逐字节不变
 - [x] 26.7 新增 ADR-0009（逐条回答 ADR-0007 待决事项与前置），ADR-0006、ADR-0007 加注记；BACKLOG 更新 B040、B042
 
+## 28. 真机验收修正：工作区分离（2026-11-04 所有者确认）
+
+- [x] 28.1 先写失败测试：主会话归 DSH Pet、项目工作区不变、旧 M 经既有迁移替换；Pet cwd 下仍只读来源项目且拒绝私有根和 symlink escape（旧代码 6 failed / 13 passed，失败原因均为工作区同一性假设）
+- [x] 28.2 同步三层实体与 project-read guard 规范、设计和 ADR，复审工作区分离方案（主控定向复审见 review.md；所有者明确选择 DSH Pet 归属并保留项目读取）
+- [x] 28.3 在创建、入口持久关联、Host 装配和 prompt 中分离运行工作区与项目根；验证实际 Host 路径（新增 Host 创建/重建作用域的读守卫对照通过，主会话命名按所有者要求使用 `[locus] <干活主会话名>`）
+- [x] 28.4 全量相关回归、build/typecheck 和严格规范校验，记录证据（Pet 2933 passed / 4 skipped；根仓 703 passed / 3 skipped；build/typecheck、54 specs、strict change、artifact check 通过；最终命名调整后 100 项定向回归通过，详见 workspace-separation.md）
+
 ## 27. 收尾
 
 - [x] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更

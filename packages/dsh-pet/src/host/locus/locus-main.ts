@@ -117,27 +117,20 @@ export interface LocusMainSessionFacts {
   readonly state?: 'active' | 'archived' | 'missing'
   readonly parentSessionId?: string
   readonly agentPreset?: string
+  readonly workspaceId?: string
 }
 
-/**
- * Whether a resolved session is a locus main that can still serve.
- *
- * It must resolve, not be archived or gone, be a top-level session, and still
- * run the neutral locus preset. A preset that is not provably the reviewed one
- * is a locus main that is not proven locked down, and "not proven" is not
- * usable. One definition, used by the controller (which repairs) and by the
- * resolver (which refuses to serve), so the two cannot disagree.
- * @param session - what the Host resolved for the locus main id, or undefined.
- * @param expectedId - the id that was asked for.
- */
+/** One predicate for the delivery resolver and the controller's repair path. */
 export function isUsableLocusMainSession(
   session: LocusMainSessionFacts | undefined,
   expectedId: string,
+  expectedWorkspaceId?: string,
 ): boolean {
   return session !== undefined &&
     session.id === expectedId &&
     session.state !== 'archived' &&
     session.state !== 'missing' &&
     session.parentSessionId === undefined &&
-    session.agentPreset === LOCUS_MAIN_PRESET
+    session.agentPreset === LOCUS_MAIN_PRESET &&
+    (expectedWorkspaceId === undefined || session.workspaceId === expectedWorkspaceId)
 }

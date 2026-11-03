@@ -90,6 +90,8 @@ export interface LocusAgentHandle {
 
 /** Narrow dependency face for the production adapter. */
 export interface ProductionLocusDshPortDeps {
+  /** The registered DSH Pet workspace, resolved once by the Host. */
+  readonly locusMainWorkspaceId?: string
   readonly repository: {
     getChannelConfig(): { readonly defaultWorkspaceId?: string | undefined }
   }
@@ -289,6 +291,7 @@ export function createProductionLocusDshPort(
   const foldTitle = deps.foldSessionTitle ?? foldDshSessionTitle
 
   return {
+    ...(deps.locusMainWorkspaceId === undefined ? {} : { locusMainWorkspaceId: deps.locusMainWorkspaceId }),
     async resolveSession(sessionId): Promise<LocusParentSession | undefined> {
       const requestedId = normalized(sessionId)
       if (requestedId === undefined) return undefined
@@ -461,9 +464,10 @@ export function createProductionLocusDshPort(
         )
       }
       const workSessionId = normalized(input.workSessionId)
-      const workspaceId = normalized(input.workspaceId)
-      if (workSessionId === undefined || workspaceId === undefined) {
-        throw new LocusDshCapabilityUnavailableError('Cannot create a locus main without a work session and workspace')
+      const projectWorkspaceId = normalized(input.workspaceId)
+      const workspaceId = normalized(deps.locusMainWorkspaceId)
+      if (workSessionId === undefined || projectWorkspaceId === undefined || workspaceId === undefined) {
+        throw new LocusDshCapabilityUnavailableError('Cannot create a locus main without a work session, project workspace and Pet workspace')
       }
       const workspace = deps.workspaceRegistry.get(WorkspaceId(workspaceId))
       if (

@@ -54,6 +54,7 @@ function stubServices(
     agents?: unknown
     tools?: unknown
     sessionController?: unknown
+    workspaceRegistry?: unknown
     connection?: { requestRejection(req: unknown): 401 | 403 | undefined }
   } = {},
 ): void {
@@ -64,7 +65,7 @@ function stubServices(
     },
   })
   ctx.provide('connection', overrides.connection ?? { requestRejection: () => undefined })
-  ctx.provide('workspaceRegistry', {
+  ctx.provide('workspaceRegistry', overrides.workspaceRegistry ?? {
     create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
     list: () => [],
     // The real registry resolves a workspace by id; omitting it here let a
@@ -879,6 +880,11 @@ describe('a locus child is composed at the real creation boundary', () => {
     // `sandbox/mode` event. Return stable session objects so the readback sees
     // the event it just wrote; a fresh object per get would hide the effect.
     stubServices(ctx, routes, {
+      workspaceRegistry: {
+        create: async (p: string) => ({ id: 'ws-pet', path: p, title: 'DSH Pet' }),
+        list: () => [], archivedSessionIds: [],
+        get: (id: string) => id === 'ws-live' ? { id, path: projectRoot, status: async () => 'ok' } : undefined,
+      },
       sessions: {
         list: () => [],
         get: (id: string) => sessionOf(id),

@@ -88,6 +88,46 @@ describe('Locus canonical project-read guard', () => {
     await scope.dispose()
   })
 
+  it('Pet cwd does not grant state access; the bound work project remains readable', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'locus-pet-project-'))
+    roots.push(base)
+    const project = join(base, 'project')
+    const dshHome = join(base, 'dsh-home')
+    const petCwd = join(dshHome, 'plugins', 'dsh-pet', 'workspace')
+    const outside = join(base, 'other-project')
+    await Promise.all([mkdir(project), mkdir(petCwd, { recursive: true }), mkdir(outside)])
+    await writeFile(join(project, 'ok.txt'), 'ok')
+    await writeFile(join(petCwd, 'state.txt'), 'state')
+    await writeFile(join(outside, 'secret.txt'), 'secret')
+    await symlink(join(petCwd, 'state.txt'), join(project, 'escape'))
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    let bodies = 0
+    for (const name of ['read', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies++ }))
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as typeof import('@deepseek-ai/dsh-scope')
+    const agent = { id: 'pet-child' as SessionId, session: { header: { cwd: petCwd } } } as unknown as Agent
+    const scope = createScope(ctx, agent)
+    const policy = { childCwd: petCwd, parentCwd: petCwd, workspaceRoot: petCwd, projectRoot: project, deniedRoots: [dshHome] }
+    installLocusProjectReadGuard(scope.ctx, policy)
+    const execute = (name: string, args: unknown) => ctx!.tools.execute({ agent, name, callId: `${name}-${Math.random()}` as ToolCallId, arguments: args, signal: new AbortController().signal })
+    expect((await execute('read', { file_path: join(project, 'ok.txt') })).isError).toBe(false)
+    expect((await execute('grep', { path: project, pattern: 'ok' })).isError).toBe(false)
+    for (const args of [
+      { file_path: join(petCwd, 'state.txt') },
+      { file_path: join(outside, 'secret.txt') },
+      { file_path: join(project, 'escape') },
+      { file_path: 'state.txt' },
+    ]) expect((await execute('read', args)).isError).toBe(true)
+    expect((await execute('grep', { pattern: 'state' })).isError).toBe(true)
+    expect(bodies).toBe(2)
+    // An unproven or runtime-overlapping project root still vetoes publication.
+    expect(() => installLocusProjectReadGuard(scope.ctx, { ...policy, projectRoot: dshHome })).toThrow(/overlaps/)
+    expect(() => installLocusProjectReadGuard(scope.ctx, { ...policy, projectRoot: join(base, 'missing') })).toThrow()
+    await scope.dispose()
+  })
+
   it('denial carries the allowed root and how to request more paths', async () => {
     const base = await mkdtemp(join(tmpdir(), 'locus-read-deny-'))
     roots.push(base)

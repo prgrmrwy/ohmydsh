@@ -77,6 +77,7 @@ export async function openThreeTier(options: ThreeTierOptions = {}) {
   const controller = new LocusController({
     repository: adapter,
     dsh: {
+      locusMainWorkspaceId: 'ws-pet',
       resolveSession: async id => {
         if (missing.has(id)) return undefined
         const session = sessions.get(id)
@@ -99,7 +100,7 @@ export async function openThreeTier(options: ThreeTierOptions = {}) {
         const id = `locus-main-${String(++sequence)}`
         sessions.set(id, {
           id,
-          workspaceId: input.workspaceId,
+          workspaceId: 'ws-pet',
           title: input.label,
           state: 'active',
           agentPreset: LOCUS_MAIN_PRESET,
@@ -107,7 +108,7 @@ export async function openThreeTier(options: ThreeTierOptions = {}) {
         world.createdMains.push({ id, workSessionId: input.workSessionId })
         return {
           id,
-          workspaceId: input.workspaceId,
+          workspaceId: 'ws-pet',
           title: input.label,
           rollback: async () => { world.released.push(id); sessions.delete(id) },
         }

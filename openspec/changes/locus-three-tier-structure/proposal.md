@@ -11,6 +11,7 @@ ADR-0007 规定三层只能以自身理由立项，并须先回答四个待决�
 ## What Changes
 
 - **三层结构**：干活主会话（用户的普通一级会话）←dsh-collab→ Pet 创建的一级 **locus 主会话**（与干活主会话 1:1）→ 只读 **locus 子会话**（父为 locus 主会话）。`loci` 表仍只有两层父子关系，父为 locus 主会话；干活主会话与 locus 主会话的 1:1 关系记在新表中。
+- **工作区归属（2026-11-04 所有者在验收中确认）**：干活会话留在来源项目；locus 主会话及其官方子会话运行在专用 DSH Pet。入口仍持久记录来源项目工作区，读取守卫只授权该项目，不因 Pet cwd 放开私有状态；旧主会话经既有空闲迁移协议替换，不改写历史。
 - **子会话惰性创建**：第一条入站消息到达时，用官方 `startContinuable` 携带首条 prompt 创建；此前入口处于"未创建"状态。**BREAKING**（Pet 内部）：不再使用 `createIdleContinuable`。
 - **auto / Q&A / 显式绑定合并为同一路径**：auto 时 Pet 新建干活主会话与 locus 主会话；Q&A 与 `/bind` 绑定到已有干活主会话并为其建立（或复用）locus 主会话。干活主会话归档时入口停止服务并提示 `/bind`。
 - **换绑规则**：入口不可用 → 在同一 locus 主会话下新开一代（标为未创建）；locus 主会话不可用 → 为该干活主会话新建 locus 主会话并迁移全部入口。
@@ -29,6 +30,7 @@ ADR-0007 规定三层只能以自身理由立项，并须先回答四个待决�
 ### Modified Capabilities
 - `pet-locus-collaboration`：三层实体、惰性创建、绑定/换绑/归档规则、组合与档位、启动恢复证据来源、代理成员相关条款删除。
 - `pet-locus-intent-triage`：待办改由 Host 以 locus 主会话身份代写；删除请求执行与代理路由；父会话查阅改为 `locus_context`。
+- `pet-locus-media-access`：运行 cwd 与来源项目根分离，文件读取只授权持久入口绑定的项目，Pet 私有状态继续禁止。
 - `dsh-pet`：子会话创建契约、结算通知、preset 声明、子代名额。
 - `pet-inquiry-runtime-channel`：整体 REMOVED。
 - `pet-compat-minimization`：requirement 不变；`settlement-notice.patch` 的逐项退役依据记录在 design 决策 4–6，其余三个补丁的依据在决策 11。

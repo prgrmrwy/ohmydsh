@@ -1071,10 +1071,14 @@ async function initialize(
         ) {
           throw new PetError('INTERNAL', 'Exact child project-read roots are unavailable')
         }
+        const entry = locusRepository.getLocus(composition.locusId)
+        const project = entry === undefined ? undefined : ctx.workspaceRegistry.get(entry.workspaceId as never)
+        if (project === undefined) throw new PetError('INTERNAL', 'Bound locus project workspace is unavailable')
         installLocusProjectReadGuard(scope, {
           childCwd,
           parentCwd,
           workspaceRoot,
+          projectRoot: project.path,
           deniedRoots: locusDeniedRoots(paths),
         })
         registerPetTools(agent.scope as never, {
@@ -1899,6 +1903,7 @@ async function initialize(
     try {
       const dsh = createProductionLocusDshPort({
         repository,
+        locusMainWorkspaceId: workspaceId,
         sessionController: sessionController as never,
         workspaceRegistry: ctx.workspaceRegistry as never,
         agents: {
@@ -2026,7 +2031,7 @@ async function initialize(
       ? {}
       : {
         verifyMain: async (locusMainSessionId: string) =>
-          isUsableLocusMainSession(await locusDshPort.resolveSession(locusMainSessionId), locusMainSessionId),
+          isUsableLocusMainSession(await locusDshPort.resolveSession(locusMainSessionId), locusMainSessionId, workspaceId),
       }),
     ...(locusProvisioningController === undefined
       ? {}
@@ -2955,7 +2960,9 @@ async function initialize(
         // runtime counter would reset across restarts. The Delivery being
         // rendered is excluded, so rendering never consumes the first delivery.
         const current = locusRepository.findDeliveryByMessageId(message.messageId)
-        return renderLocusDeliveryFor({
+        const project = ctx.workspaceRegistry.get(revalidated.workspaceId as never)
+        if (project === undefined || await project.status() !== 'ok') throw new Error('Bound locus project workspace is unavailable')
+        const prompt = renderLocusDeliveryFor({
           record: {
             id: revalidated.id,
             generation: revalidated.generation,
@@ -2989,6 +2996,7 @@ async function initialize(
           deliveries: locusRepository.listDeliveries(record.id),
           ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),
         })
+        return `Host 确认的绑定项目根：${JSON.stringify(project.path)}。文件读取与搜索使用该项目的绝对路径；运行 cwd 不代表项目授权，DSH/Pet 状态目录不可读取。\n\n${prompt}`
       },
       turns: locusTurnObserver,
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,

@@ -57,6 +57,8 @@ export interface LocusProjectReadGuardInput {
   readonly parentCwd: string
   /** Sandbox-policy workspace root resolved for the exact child Session. */
   readonly workspaceRoot: string
+  /** Canonicalized work-project root from the durable entry, never model input. */
+  readonly projectRoot?: string
   readonly deniedRoots: readonly string[]
 }
 
@@ -148,16 +150,15 @@ function compilePolicy(input: LocusProjectReadGuardInput): CanonicalProjectReadP
   const parentCwd = canonicalExistingDirectory(input.parentCwd)
   const workspaceRoot = canonicalExistingDirectory(input.workspaceRoot)
   const deniedRoots = canonicalDeniedRoots(input.deniedRoots)
-  // The current Locus contract creates the child at its exact parent's project
-  // cwd and resolves that same directory as the sandbox workspace root. Treat a
-  // mismatch as unavailable rather than unioning roots and accidentally making
-  // a broad parent cwd (for example `/`) an authorization grant.
+  // The child inherits its parent's runtime cwd. The work project is a separate
+  // Host-proven root; neither a broad runtime cwd nor Pet state grants access.
   if (childCwd !== parentCwd || childCwd !== workspaceRoot) {
     throw new Error('child, parent, and sandbox project roots do not agree')
   }
-  const allowedRoots = [workspaceRoot]
+  const projectRoot = canonicalExistingDirectory(input.projectRoot ?? workspaceRoot)
+  const allowedRoots = [projectRoot]
   if (deniedRoots.some(denied =>
-    physicallyContained(denied, workspaceRoot) || physicallyContained(workspaceRoot, denied))) {
+    physicallyContained(denied, projectRoot) || physicallyContained(projectRoot, denied))) {
     throw new Error('confirmed workspace overlaps or contains a denied runtime root')
   }
   return { base: childCwd, allowedRoots, deniedRoots }

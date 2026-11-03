@@ -48,6 +48,28 @@ describe('Locus 三层实体', () => {
     } finally { await world.close() }
   })
 
+  it('locus 主会话归 DSH Pet，入口仍关联干活项目', async () => {
+    const world = await openThreeTier()
+    try {
+      const entry = await world.controller.ensureGroup({ chatId: 'oc_project', parentSessionId: 'work-1' })
+      expect(world.sessions.get('work-1')?.workspaceId).toBe('ws-1')
+      expect(world.sessions.get(entry.locus.parentSessionId)).toMatchObject({ workspaceId: 'ws-pet', title: '[locus] 研发工作会话' })
+      expect(world.durable.getLocusMain(entry.locus.parentSessionId)?.workspaceId).toBe('ws-pet')
+      expect(entry.locus.workspaceId).toBe('ws-1')
+      expect(entry.group?.workspaceId).toBe('ws-1')
+      // An already-established coordinator in the source workspace is replaced
+      // through the existing migration path, rather than rewriting its history.
+      const oldMain = world.sessions.get(entry.locus.parentSessionId)!
+      world.sessions.set(oldMain.id, { ...oldMain, workspaceId: 'ws-1' })
+      const migrated = await world.controller.ensureEntry({ chatId: 'oc_project' })
+      expect(migrated.locus.parentSessionId).not.toBe(oldMain.id)
+      expect(world.sessions.get(migrated.locus.parentSessionId)?.workspaceId).toBe('ws-pet')
+      expect(world.durable.getLocusMain(oldMain.id)?.status).toBe('retired')
+      expect(migrated.locus.workspaceId).toBe('ws-1')
+      expect(world.sessions.has(oldMain.id)).toBe(true)
+    } finally { await world.close() }
+  })
+
   it('locus 主会话工具面锁死', async () => {
     const lockedTools = ['read', 'glob', 'grep', 'collab_read', 'collab_send_message', 'locus_note']
     const make = (visible: readonly string[], policy: { approval: string; sandbox: string }) => {
@@ -61,14 +83,19 @@ describe('Locus 三层实体', () => {
         attachSession: vi.fn(async () => undefined),
         detachSession: vi.fn(async () => undefined),
       }
-      const created: { meta?: { agentPreset?: string } }[] = []
+      const petWs: LocusWorkspaceEntity = {
+        ...ws, id: WorkspaceId('ws-pet'), path: '/pet/workspace',
+        attachSession: vi.fn(async () => undefined), detachSession: vi.fn(async () => undefined),
+      }
+      const created: { meta?: { agentPreset?: string; cwd?: string } }[] = []
       const mounted: string[] = []
       const deps: ProductionLocusDshPortDeps = {
         repository: { getChannelConfig: () => ({ defaultWorkspaceId: 'ws-1' }) },
+        locusMainWorkspaceId: 'ws-pet',
         sessionController: {
           inspect: vi.fn(async sessionId => ({ meta: { id: sessionId }, events: events as never })),
         },
-        workspaceRegistry: { get: () => ws, list: () => [ws], archivedSessionIds: [] },
+        workspaceRegistry: { get: id => id === petWs.id ? petWs : id === ws.id ? ws : undefined, list: () => [ws, petWs], archivedSessionIds: [] },
         agents: {
           create: vi.fn(async options => {
             created.push(options as never)
@@ -97,14 +124,17 @@ describe('Locus 三层实体', () => {
           visibleTools: () => visible,
         },
       }
-      return { port: createProductionLocusDshPort(deps), dispose, created, mounted, ws }
+      return { port: createProductionLocusDshPort(deps), dispose, created, mounted, ws: petWs, workWs: ws }
     }
 
     // The locked-down surface: no bash/write/edit/delegation, collab kept,
     // approval never, sandbox read-only.
     const good = make(lockedTools, { approval: 'never', sandbox: 'read-only' })
     const main = await good.port.createLocusMainSession({ workSessionId: 'work-1', workspaceId: 'ws-1', label: 'Locus 主会话 · 研发' })
-    expect(main).toMatchObject({ id: 'locus-main-session', workspaceId: 'ws-1' })
+    expect(main).toMatchObject({ id: 'locus-main-session', workspaceId: 'ws-pet' })
+    expect(good.created[0]?.meta?.cwd).toBe('/pet/workspace')
+    expect(good.ws.attachSession).toHaveBeenCalledWith('locus-main-session')
+    expect(good.workWs.attachSession).not.toHaveBeenCalled()
     expect(good.created[0]?.meta?.agentPreset).toBe('locus-base')
     expect(good.mounted).toEqual(['locus-base'])
     for (const denied of ['bash', 'write', 'edit', 'subagent', 'send_message']) {

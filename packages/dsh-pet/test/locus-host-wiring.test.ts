@@ -1,5 +1,5 @@
 /** Real Pet entry + Cordis/Storage/Tools: exercise Host wiring, not helper replicas. */
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -58,6 +58,7 @@ async function host() {
   }
   function addAgent(id: string, child = false) {
     const session = makeSession(id, child ? 'main' : undefined)
+    if (child) session.header.cwd = main.session.header.cwd
     sessions.set(id, session)
     const agent: any = { id, session, followup: vi.fn(), whenIdle: async () => {} }
     const scoped = createScope(agentFactoryContext, agent)
@@ -101,7 +102,7 @@ async function host() {
   ctx.provide('sandboxPolicy', {
     resolve: ({ session }: { session: ReturnType<typeof makeSession> }) => ({
       mode: [...session.snapshotEvents()].reverse().find(event => event.type === 'sandbox/mode')?.data.mode,
-      workspaceRoot: project,
+      workspaceRoot: session.header.cwd,
     }),
   })
   const queue = vi.fn(async () => 'later-inbox')
@@ -146,7 +147,7 @@ async function host() {
   })
   const controller = (capability as channelCapability.AvailableLocusChannelCapability).controller
   const execute = (agent: any, name: string) => ctx.tools.execute({ agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
-  return { ctx, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
+  return { ctx, home, project, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
 }
 
 async function seedNotCreated(h: Awaited<ReturnType<typeof host>>) {
@@ -200,6 +201,39 @@ describe('actual Host three-tier assembly', () => {
     for (const name of team) expect(await h.execute(h.main, name)).toMatchObject({ isError: true })
     expect(ran).toEqual([])
     expect(await h.execute(h.main, 'collab_status')).not.toMatchObject({ isError: true })
+  })
+
+  it('Pet 工作区子会话仍按持久绑定读取项目，拒绝 Pet 状态且冷恢复保持', async () => {
+    const h = await host()
+    const petCwd = path.join(h.home, 'plugins', 'dsh-pet', 'workspace')
+    h.main.session.header.cwd = petCwd
+    const projectFile = path.join(h.project, 'readme.txt')
+    const privateFile = path.join(petCwd, 'private.txt')
+    await writeFile(projectFile, 'project')
+    await writeFile(privateFile, 'private')
+    await seedNotCreated(h)
+    const results: boolean[] = []
+    const check = async (child: any) => {
+      expect(child.session.header.cwd).toBe(petCwd)
+      for (const file of [projectFile, privateFile]) {
+        const result = await h.ctx.tools.execute({ agent: child, name: 'read', callId: `read-${results.length}` as never, arguments: { file_path: file }, signal: new AbortController().signal })
+        results.push(result.isError)
+      }
+    }
+    h.firstTool(check)
+    await admit(h)
+    expect(h.repository.getLocus('entry')).toMatchObject({ state: 'active', workspaceId: 'ws' })
+    expect(results).toEqual([false, true])
+    expect(JSON.stringify(h.start.mock.calls[0]![0].request.prompt)).toContain(h.project)
+    // A new agent scope stands for native cold reconstruction of the same id.
+    const child = h.agents.get('child')
+    const restored = { ...child }
+    restored.ctx = createScope(h.agentFactoryContext, restored).ctx
+    restored.ctx.tools.restrict(h.start.mock.calls[0]![0].request.toolFilter)
+    h.agents.set('child', restored)
+    await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
+    await check(restored)
+    expect(results).toEqual([false, true, false, true])
   })
 
   it.each(['resolve', 'reject'] as const)('首工具等待持久绑定 / 首轮持久绑定失败拒绝执行: gates first caller-bound body on deferred durable UUID bind: %s', async outcome => {
