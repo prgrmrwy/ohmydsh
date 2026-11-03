@@ -87,7 +87,7 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
       proof: { findChild: async () => ({ parentSessionId: parent.id, childSessionId: childId }) },
     }) })
     controller = new LocusChannelController({
-      locus: { resolveCurrent: () => world.durable.getLocus(row.id), ensureForDelivery: async () => { throw new Error('already exists') } },
+      locus: { resolveCurrent: () => world.durable.getLocus(row.id), ensureForDelivery: async () => world.durable.getLocus(row.id)! },
       child: childDelivery, turns, now: () => 1005, inspectResidentPolicy: () => ({ resident: false }),
       deliveries: { accept: input => world.durable.acceptDelivery(input), getById: id => world.durable.getDelivery(id), bindQueued: input => world.durable.bindQueued(input), bindTurn: input => world.durable.bindTurn(input), settleByTurn: input => world.durable.settleByTurn(input), failBeforeDispatch: input => world.durable.failBeforeDispatch(input) },
       deliveryDispatch: { claimCurrent: input => world.durable.claimCurrentDelivery(input), scheduleCurrent: () => {} },

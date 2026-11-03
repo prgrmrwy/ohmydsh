@@ -61,7 +61,7 @@ async function fixture(options: { failText?: boolean; publish?: boolean; imageIn
     attachmentId: 'test-image' as never, mediaType: 'image/png' as const, bytes: 8, width: 1, height: 1,
   } }] }))
   const controller = new LocusChannelController({
-    locus: { resolveCurrent: () => world.durable.getLocus(original.id), ensureForDelivery: async () => { throw new Error('entry already exists') } },
+    locus: { resolveCurrent: () => world.durable.getLocus(original.id), ensureForDelivery: async () => world.durable.getLocus(original.id)! },
     child, turns, now, inspectResidentPolicy: () => ({ resident: false }),
     deliveries: {
       accept: input => world.durable.acceptDelivery(input), getById: id => world.durable.getDelivery(id),

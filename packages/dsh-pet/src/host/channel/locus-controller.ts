@@ -25,6 +25,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { sourceOf } from '../locus/doc-endpoint.js'
+import { LocusResolutionError } from '../locus/resolution.js'
 import type { DeliveryDocComment } from '../locus/delivery.js'
 import type { LocusMediaPort } from './media.js'
 import {
@@ -2165,30 +2166,24 @@ export class LocusChannelController {
     signal: AbortSignal,
   ): Promise<ActiveLocus | undefined> {
     let raw: unknown
+    let mayEnsure = needsInitialization
     try {
       raw = await this.deps.locus.resolveCurrent(endpoint)
+      // Existing entries also need the delivery-time main check. A readable
+      // active row alone does not prove its coordinator can still serve.
+      mayEnsure ||= normalizeActiveLocus(raw, endpoint) !== undefined
     } catch (error: unknown) {
-      // The READ path refuses every unavailable generation on purpose — an
-      // owner exit must not be resurrected, and a generation without the
-      // safe-v1 proof must never be served. That refusal is only fatal when
-      // this endpoint may not bootstrap at all; otherwise fall through so
-      // `ensureForDelivery` can apply the replacement policy it owns.
-      //
-      // Returning here instead is what kept a Host-invalidated endpoint
-      // unreachable even after every other layer allowed recovery: the read
-      // refused first, so the establishing path was never consulted.
-      if (!needsInitialization) {
+      // A known unavailable generation can be replaced on the SAME work
+      // session. Source archival, owner exit and unknown read failures cannot
+      // turn into permission to create a new source or default entry.
+      const replaceable = error instanceof LocusResolutionError && error.reason === 'locus-unusable'
+      if (!needsInitialization && !replaceable) {
         this.logReason('locus-read-failed', error)
         return undefined
       }
-      raw = undefined
+      mayEnsure = true
     }
-    let locus = normalizeActiveLocus(raw, endpoint)
-    if (locus !== undefined) return locus
-    if (!needsInitialization) {
-      // Admitted, but this endpoint may not auto-bootstrap: only an
-      // `uninitialized` endpoint can. Naming it prevents a mis-set
-      // authorization state from looking like a broken runtime.
+    if (!mayEnsure) {
       this.log('locus-bootstrap-skipped')
       return undefined
     }
@@ -2200,14 +2195,13 @@ export class LocusChannelController {
       })
     } catch (error: unknown) {
       this.logReason('locus-bootstrap-failed', error)
-      // Only an admitted owner reaches bootstrap; silence here left the owner
-      // with no signal at all. The controller's errors are owner-facing text.
+      // A failed readiness check or replacement must not disappear silently.
+      // The provisioning controller supplies the mechanical refusal text.
       const reason = error instanceof Error && error.message.trim() !== '' ? error.message : '原因未知'
       await this.sendControlReceipt(message.replyTarget, `入口建立失败：${reason}`, message.senderOpenId)
       return undefined
     }
-    locus = normalizeActiveLocus(raw, endpoint)
-    return locus
+    return normalizeActiveLocus(raw, endpoint)
   }
 
   private subscribeObserver(observer: LocusTurnCorrelationObserver): (() => void) | undefined {

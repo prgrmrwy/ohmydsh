@@ -173,6 +173,12 @@
 - [x] 28.3 在创建、入口持久关联、Host 装配和 prompt 中分离运行工作区与项目根；验证实际 Host 路径（新增 Host 创建/重建作用域的读守卫对照通过，主会话命名按所有者要求使用 `[locus] <干活主会话名>`）
 - [x] 28.4 全量相关回归、build/typecheck 和严格规范校验，记录证据（Pet 2933 passed / 4 skipped；根仓 703 passed / 3 skipped；build/typecheck、54 specs、strict change、artifact check 通过；最终命名调整后 100 项定向回归通过，详见 workspace-separation.md）
 
+## 29. 真机验收修正：恢复来源后的入站主会话检查
+
+- [x] 29.1 使用真实 admission resolver、resolution、controller 与持久仓储复现：两者均归档后仅恢复干活会话，旧代码拒绝；组合失效对照中旧代码仍复用不可用 M（2 failed / 22 passed）
+- [x] 29.2 修正入站衔接：已有入口派发前也检查 M；仅已知 `locus-unusable` 可进入同一来源的替换流程；未知读错误、来源仍归档和明确停止继续拒绝，保持 active M 复用（106 项定向回归通过）
+- [x] 29.3 全量 Pet build/typecheck/test、严格规范与产物检查及实现审查（2936 passed / 4 skipped；build/typecheck、strict、artifacts 通过；相对 `86e7955a` 的全部修复 diff 审查 PASS；真机项仍保留在 27.3，不提前记为通过）
+
 ## 27. 收尾
 
 - [x] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更
