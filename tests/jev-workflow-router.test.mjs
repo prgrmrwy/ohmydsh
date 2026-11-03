@@ -137,6 +137,13 @@ test('skill is an advisory closed two-step router with zero calls when already d
   assert.match(source, /explicitly chosen a route/iu)
   assert.match(source, /already belongs to an existing OpenSpec or spec-superflow change/iu)
   assert.match(source, /Do not collect, infer, persist, report, or gate on request language/iu)
+  // Display gate: an explicit local bar, not classify's 0.85 auto bar for top_probability.
+  assert.match(source, /its `confidence` is at least `0\.50`/u)
+  assert.match(source, /winner margin is at least `0\.50`/u)
+  assert.match(source, /Do not compare it to `0\.85`/u)
+  assert.match(source, /compute it from `workflowProbabilities`/u)
+  assert.match(source, /When both stages run, both results must clear both bars/u)
+  assert.doesNotMatch(source, /MCP's conservative defaults/u)
   // Latency must come from session event timestamps, not agent self-timing.
   assert.match(source, /Latency comes from the session log, not from you/iu)
   assert.match(source, /measures your own model round-trips/iu)
