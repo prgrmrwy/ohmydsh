@@ -120,6 +120,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     void loadCards(api).then(setView, () => { /* keep the last reading */ })
   }
   const collapse = (): void => { setOpen(false); setNotice('') }
+  const toggle = (): void => { if (open) collapse(); else expand() }
 
   if (enabled !== true) return null
 
@@ -129,14 +130,16 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   const latest = cards.map(cardReadTime).filter((value): value is string => typeof value === 'string').sort().at(-1)
   const status = statusText(view, error)
   const style = h('style', null, settingsCss)
-  const head = (onCollapse: boolean): ReactNode => h('div', { className: 'dmg-sidebar-head', ...(onCollapse ? {} : { onClick: expand }) },
+  const head = (): ReactNode => h('div', { className: 'dmg-sidebar-head', onClick: toggle },
     h('span', { className: 'dmg-sidebar-bird', 'aria-hidden': true }),
     h('span', { className: 'dmg-sidebar-title' }, t('sidebarTitle')),
     latest === undefined ? null : h('span', { className: 'dmg-sidebar-fresh' }, ageText(latest, now)),
     refreshButton(refresh, busy),
-    onCollapse
-      ? h('button', { type: 'button', className: 'dmg-sidebar-icon', 'aria-label': t('sidebarCollapse'), 'data-dmg-sidebar-close': '', onClick: collapse }, closeIcon())
-      : null,
+    h('button', {
+      type: 'button', className: 'dmg-sidebar-icon', 'data-dmg-sidebar-toggle': '',
+      'aria-label': open ? t('sidebarCollapse') : t('sidebarExpand'), 'aria-expanded': open,
+      title: open ? t('sidebarCollapse') : t('sidebarExpand'),
+    }, chevron(open)),
   )
 
   if (!wide) {
@@ -151,7 +154,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
       open ? createPortal(h('div', {
         ref: panelRef, className: 'dmg-sidebar-popover', role: 'dialog', 'aria-label': t('sidebarTitle'), 'data-dmg-sidebar-popover': '',
         style: { ...(pos ?? { visibility: 'hidden' as const, left: 0, top: 0 }), width: RAIL_POPOVER_WIDTH },
-      }, head(false), h('div', { className: 'dmg-sidebar-rule', 'aria-hidden': true }),
+      }, head(), h('div', { className: 'dmg-sidebar-rule', 'aria-hidden': true }),
       notice !== '' ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, notice) : null,
       detail(cards, now, status)), document.body) : null,
     )
@@ -162,7 +165,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     style,
     h('div', { className: 'dmg-sidebar-slot' },
       h('div', { className: 'dmg-sidebar-card', ...(open ? { style: { visibility: 'hidden' as const }, 'aria-hidden': true } : {}) },
-        head(false),
+        head(),
         h('div', {
           className: `dmg-sidebar-body${scrollable ? ' is-scroll' : ''}`, role: 'button', tabIndex: 0,
           ref: (node: HTMLDivElement | null): void => { bodyRef.current = node },
@@ -182,7 +185,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
         }, doubleChevron()) : null,
       ),
       open ? h('div', { className: 'dmg-sidebar-expanded', role: 'dialog', 'aria-label': t('sidebarTitle'), 'data-dmg-sidebar-expanded': '' },
-        head(true),
+        head(),
         h('div', { className: 'dmg-sidebar-rule', 'aria-hidden': true }),
         notice !== '' ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, notice) : null,
         h('div', { className: 'dmg-sidebar-detail' }, detail(cards, now, status)),
@@ -199,7 +202,12 @@ function compactRow(row: SidebarRow): ReactNode {
     h('div', { className: 'dmg-sidebar-row-line' },
       h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider),
       row.failed || row.window?.name === undefined ? null : h('span', { className: 'dmg-sidebar-window' }, row.window.name),
-      h('span', { className: 'dmg-sidebar-pct', 'data-reading': '', ...(level === undefined ? {} : { 'data-level': level }) }, reading),
+      h('span', {
+        className: 'dmg-sidebar-pct', 'data-reading': '', ...(level === undefined ? {} : { 'data-level': level }),
+        ...(row.failed || row.used !== undefined || row.display !== undefined || row.unlimited === true || row.balance === undefined
+          ? {}
+          : { 'data-balance': '', title: `${t('usageBalance')} ${row.balance}` }),
+      }, reading),
     ),
     row.failed || row.used === undefined
       ? null
@@ -276,6 +284,7 @@ const windowReading = (window: { used?: number; display?: string; unlimited?: bo
 }
 const rowReading = (row: SidebarRow): string => {
   if (row.failed) return t('usageReadingFailed')
+  if (row.used === undefined && row.display === undefined && row.unlimited !== true && row.balance !== undefined) return row.balance
   return windowReading({ ...(row.used === undefined ? {} : { used: row.used }), ...(row.display === undefined ? {} : { display: row.display }), ...(row.unlimited === true ? { unlimited: true } : {}) })
 }
 const ageText = (readAt: string, now: number): string | undefined => {
@@ -296,7 +305,9 @@ const refreshButton = (refresh: () => Promise<void>, busy: boolean): ReactNode =
 
 const refreshIcon = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
   h('path', { d: 'M13 8a5 5 0 1 1-1.6-3.7' }), h('path', { d: 'M13 2.4V5h-2.6' }))
-const closeIcon = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
-  h('path', { d: 'M4 4l8 8M12 4l-8 8' }))
+const chevron = (open: boolean): ReactNode => h('svg', {
+  viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true,
+  className: `dmg-sidebar-chevron${open ? ' is-open' : ''}`,
+}, h('path', { d: 'M4 6.5l4 4 4-4' }))
 const doubleChevron = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
   h('path', { d: 'M4 6l4 4 4-4' }), h('path', { d: 'M4 10l4 4 4-4', opacity: '.55' }))

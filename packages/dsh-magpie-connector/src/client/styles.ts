@@ -117,6 +117,8 @@ export const settingsCss = `
 .dmg-sidebar-icon:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}
 .dmg-sidebar-icon:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
 .dmg-sidebar-icon svg{width:12px;height:12px}
+.dmg-sidebar-chevron{transition:transform .15s ease}
+.dmg-sidebar-chevron.is-open{transform:rotate(180deg)}
 .dmg-sidebar-body{max-height:145px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l3) transparent;margin-top:2px}
 .dmg-sidebar-body.is-scroll{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 6px),rgba(0,0,0,.6));mask-image:linear-gradient(to bottom,#000 calc(100% - 6px),rgba(0,0,0,.6))}
 .dmg-sidebar-body::-webkit-scrollbar{width:5px}
@@ -139,8 +141,8 @@ export const settingsCss = `
 .dmg-sidebar-more svg{width:12px;height:12px}
 .dmg-sidebar-status{margin:2px 0 4px;font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}
 .dmg-sidebar-rule{border-top:.5px solid var(--dsw-alias-border-l2);margin:4px 0 6px;flex:none}
-.dmg-sidebar-expanded{position:absolute;left:0;right:0;bottom:0;z-index:6;max-height:min(72vh,600px);overflow-y:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-2);border:0;border-radius:12px;box-shadow:0 6px 24px #00000029,0 2px 6px #00000014;padding:6px 9px}
-[data-ds-dark-theme] .dmg-sidebar-expanded{box-shadow:0 8px 30px #00000066,0 2px 8px #00000040}
+.dmg-sidebar-expanded{position:absolute;left:0;right:0;bottom:0;z-index:6;max-height:min(72vh,600px);overflow-y:auto;overscroll-behavior:contain;background:var(--dsw-alias-bg-layer-2);border:0;border-radius:12px;box-shadow:0 1px 2px #0000000f,0 4px 14px #0000000d;padding:6px 9px}
+[data-ds-dark-theme] .dmg-sidebar-expanded{box-shadow:0 1px 2px #00000033,0 4px 14px #0000002e}
 .dmg-sidebar-expanded::-webkit-scrollbar{width:5px}
 .dmg-sidebar-expanded::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l3);border-radius:3px}
 .dmg-sidebar-prov+ .dmg-sidebar-prov{border-top:.5px solid var(--dsw-alias-border-l2);margin-top:6px;padding-top:6px}

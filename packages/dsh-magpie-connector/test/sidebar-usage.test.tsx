@@ -123,6 +123,13 @@ describe('常驻卡', () => {
     expect(calls()).toBe(1)
   })
 
+  it('没有额度的上游只显示余额，不显示横线', async () => {
+    await render({ cards: () => cardsOk([{ provider: 'deepseek', name: 'DeepSeek', readAt: 'T1', balance: '¥42.50' }]) })
+    const row = rowOf('deepseek')!
+    expect(row.textContent).toContain('¥42.50')
+    expect(row.textContent).not.toContain('—')
+  })
+
   it('空数据时显示状态行', async () => {
     await render({ cards: () => cardsOk([]) })
     expect(host.textContent).toContain('未返回可见用量')
@@ -142,11 +149,16 @@ describe('展开', () => {
     expect(card.getAttribute('aria-hidden')).toBe('true')
   })
 
-  it('关闭按钮收起', async () => {
+  it('title 上的开关同时负责展开与收起', async () => {
     await render()
-    await act(async () => { (host.querySelector('[data-dmg-sidebar-more]') as HTMLElement).click() })
+    const toggle = host.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => { toggle.click() })
     await flush()
-    await act(async () => { (host.querySelector('[data-dmg-sidebar-close]') as HTMLElement).click() })
+    const expanded = host.querySelector('[data-dmg-sidebar-expanded]')
+    expect(expanded).not.toBeNull()
+    expect(host.querySelector('[data-dmg-sidebar-toggle]')!.getAttribute('aria-expanded')).toBe('true')
+    await act(async () => { (expanded!.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement).click() })
     await flush()
     expect(host.querySelector('[data-dmg-sidebar-expanded]')).toBeNull()
     expect((host.querySelector('.dmg-sidebar-card') as HTMLElement).style.visibility).toBe('')
