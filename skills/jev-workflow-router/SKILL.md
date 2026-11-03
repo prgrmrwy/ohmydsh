@@ -93,12 +93,16 @@ This is the only place raw error text may appear, and only on the recorder's std
 
 ## What to say, and when to say nothing
 
-Show advice only when the classify/decide result is unambiguous: the recommendation is a closed candidate, confidence and winner margin are at or above the MCP's conservative defaults, no escape hatch was selected, and no requirement check failed.
+Show advice only when the deciding Jev result is unambiguous: the recommendation is a closed candidate, its `confidence` is at least `0.50`, and its winner margin is at least `0.50`; no escape hatch was selected, and no requirement check failed.
+
+- `confidence` is the result's `confidence` field. Do not compare it to `0.85`: that is classify's `auto_accept` bar for `top_probability`, a different quantity.
+- winner margin is the result's `margin` field. `mcp__jev__jev_decide` does not return one; compute it from `workflowProbabilities` as the highest probability minus the second-highest.
+- When both stages run, both results must clear both bars. If stage two does not, say nothing.
 
 One line, in Chinese, in your normal reply. For example:
 
 ```
-（Jev 路由建议：standard-openspec，置信度 0.91；可无视，按你的判断走。）
+（Jev 路由建议：standard-openspec，置信度 0.72；可无视，按你的判断走。）
 ```
 
 Rules for that line:
@@ -106,7 +110,7 @@ Rules for that line:
 - One line, no bullet list, no table, no follow-up question.
 - Include the candidate and the confidence. Say explicitly that it can be ignored.
 - Never present it as a requirement, a gate, or a blocker.
-- When any check fails, when an escape hatch is chosen, when a call errors, or when confidence/margin is below the conservative default: say nothing about routing and simply continue. Uncertainty is not permission to pick `direct`.
+- When any check fails, when an escape hatch is chosen, when a call errors, or when confidence/margin is below `0.50`: say nothing about routing and simply continue. Uncertainty is not permission to pick `direct`.
 
 ## Local recorder
 
@@ -126,10 +130,10 @@ The shaped minimum, with the window described below:
                 "safetyRisk": "low", "migrationRisk": "reversible", "explicitRoute": "unknown" },
   "eligibleCandidates": ["direct", "standard-openspec", "anvil", "spec-superflow"],
   "recommendation": { "changeNecessity": "formal-workflow", "workflow": "standard-openspec",
-                      "classificationProbabilities": { "direct": 0, "formal-workflow": 0.85, "manual-review": 0.15 },
-                      "workflowProbabilities": { "standard-openspec": 0.91, "anvil": 0.05, "spec-superflow": 0.02,
-                                                 "ask_user": 0.01, "investigate": 0.005, "none": 0.005 },
-                      "confidence": 0.85, "margin": 0.7, "escape": false, "status": "auto-candidate",
+                      "classificationProbabilities": { "direct": 0.13, "formal-workflow": 0.85, "manual-review": 0.02 },
+                      "workflowProbabilities": { "standard-openspec": 0.76, "anvil": 0.06, "spec-superflow": 0.04,
+                                                 "ask_user": 0.06, "investigate": 0.05, "none": 0.03 },
+                      "confidence": 0.72, "margin": 0.7, "escape": false, "status": "auto-candidate",
                       "requirementChecks": { "eligibleChoice": true, "completeProbabilities": true,
                                              "confidenceMet": true, "marginMet": true, "safetyCompatible": true } },
   "jevCalls": [{ "outcome": "success", "provider": "openrouter", "semantic": "ok" }],
@@ -137,6 +141,8 @@ The shaped minimum, with the window described below:
   "metrics": { "usage": { "input": 513, "output": 43, "total": 556 } }
 }
 ```
+
+`confidenceMet` means the deciding result's `confidence` is at least `0.50`; `marginMet` means its winner margin is at least `0.50` (computed from `workflowProbabilities` when the decide result carries no `margin`).
 
 Never send a `metrics.latency` value you measured yourself; omit it and let `recorder.mjs latency` fill it from the log. Never reuse the legacy `latencyMs` field.
 
