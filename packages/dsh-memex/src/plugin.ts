@@ -7,6 +7,7 @@ import { EMPTY_ORG_PROFILE, type OrgProfile } from './org.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { normalizePath } from './scope/resolver.js'
+import { migratePrimarySwitches } from './scope/primary-migration.js'
 
 export interface MemexRuntime {
   readonly scopes: ScopeRuntime
@@ -30,7 +31,12 @@ export interface MemexRuntime {
  * on this instance, which replaces the resolver (dropping its cwd cache).
  * Tool/lifecycle registration is performed by the caller in the same fiber.
  */
-export function createMemexRuntime(ctx: Context, config: Config, org: OrgProfile = EMPTY_ORG_PROFILE): MemexRuntime {
+export function createMemexRuntime(
+  ctx: Context,
+  config: Config,
+  org: OrgProfile = EMPTY_ORG_PROFILE,
+  options: { readonly namespaceDir?: string; readonly homeDir?: string } = {},
+): MemexRuntime {
   const effective = (): ScopeConfig => {
     const value = readScopeConfig(config)
     if (!config.evalSelftest) return value
@@ -44,9 +50,36 @@ export function createMemexRuntime(ctx: Context, config: Config, org: OrgProfile
     return { ...value, workspaces }
   }
   let current = effective()
-  const scopes = new ScopeRuntime(current, { org })
+  const scopes = new ScopeRuntime(current, { org, ...options })
   ctx.on('loader/volatile-update', () => {
-    current = effective()
+    const next = effective()
+    // Cards travel with the primary entry: an edit that switches a workspace's
+    // primary first moves the old library's cards into the new one. The loader
+    // has already committed the references here but the resolver still serves the
+    // previous routing, so a failed merge keeps the old primary in place — the
+    // next edit retries — rather than leaving that workspace's cards unreachable.
+    let migrations: ReturnType<typeof migratePrimarySwitches>
+    try {
+      migrations = migratePrimarySwitches(current, next, options)
+    } catch (error) {
+      ctx.logger('dsh-memex').warn(
+        'primary switch not applied, keeping the current routing: %s',
+        error instanceof Error ? error.message : String(error),
+      )
+      return
+    }
+    for (const migration of migrations) {
+      if (migration.report.copied.length === 0 && migration.report.skipped.length === 0) continue
+      ctx.logger('dsh-memex').info(
+        'primary switch %s: %s -> %s, copied %d card(s), kept %d target copy/copies',
+        migration.workspace,
+        migration.from,
+        migration.to,
+        migration.report.copied.length,
+        migration.report.skipped.length,
+      )
+    }
+    current = next
     scopes.replace(current)
   })
   return { scopes, config: () => current }
