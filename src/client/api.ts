@@ -3,18 +3,24 @@
  * `/api/dsh-magpie-connector/`. Responses are bare JSON; errors are non-2xx with
  * `{error: string}`. Injected so tests replace it without touching `fetch`.
  */
-export type Resource = 'settings' | 'cards' | 'speed' | 'line-check' | 'latency'
+export type Resource = 'settings' | 'cards' | 'speed' | 'line-check' | 'latency' | 'reset'
 export interface ApiRequest { method: 'GET' | 'POST'; path: Resource; query?: Record<string, string>; body?: unknown }
 export interface ApiResponse { status: number; body: unknown }
 export type Api = (request: ApiRequest) => Promise<ApiResponse>
 
 const TIMEOUT_MS = 30_000
+/**
+ * Spending a reset outlives the generic budget: the host waits up to 45s for the
+ * gateway, which itself may spend 20s and then re-read the account for 15s. The
+ * browser must not give up first — a timeout here reads as "outcome unknown".
+ */
+const RESET_TIMEOUT_MS = 60_000
 
 export function createFetchApi(base = '/api/dsh-magpie-connector/'): Api {
   return async ({ method, path, query, body }) => {
     const search = query ? `?${new URLSearchParams(query).toString()}` : ''
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const timer = setTimeout(() => controller.abort(), path === 'reset' ? RESET_TIMEOUT_MS : TIMEOUT_MS)
     try {
       const response = await fetch(`${base}${path}${search}`, {
         method,

@@ -49,3 +49,34 @@ it('spec Scenario "重置卡投影只保留固定字段"',async()=>{
  const r=await body(await c.get())
  expect((r.cards[0] as unknown as {resets:unknown}).resets).toEqual({count:2,until:'T',byWindow:true,fiveHour:1,weekly:1,each:[{until:'T1',window:'weekly'}]})
 })
+it('spec Scenario "没有 id 的旧网关"',async()=>{
+ const {c,request}=await setup()
+ request.mockResolvedValue(reply([{provider:'codex',user:'u@example.com',resets:{count:1,each:[{until:'T1'}]}}]))
+ const r=await body(await c.get())
+ const resets=(r.cards[0] as unknown as {resets:Record<string,unknown>}).resets
+ expect(resets.redeemable).toBeUndefined()
+ expect(JSON.stringify(r)).not.toContain('each":[{"until":"T1","id"')
+})
+it('codex 卡片带 id 时标记可用的重置，且 id 只留在 host',async()=>{
+ const {c,request}=await setup()
+ request.mockResolvedValue(reply([
+  {provider:'codex',user:'u@example.com',resets:{count:2,each:[{id:'r1',until:'T1'},{id:'r2',until:'T2'}]}},
+  {provider:'codex',resets:{count:1,each:[{id:'r3',until:'T3'}]}},
+  {provider:'glm',user:'g@example.com',resets:{byWindow:true,count:0,fiveHour:2,each:[{id:'r4',until:'T4'}]}},
+ ]))
+ const r=await body(await c.get())
+ const resetsOf=(index:number)=>(r.cards[index] as unknown as {resets:Record<string,unknown>}).resets
+ expect(resetsOf(0).redeemable).toBe(true)
+ // 没有 user 的卡片无法指定账号：不显示使用入口
+ expect(resetsOf(1).redeemable).toBeUndefined()
+ // 按窗口发放的计划由厂商页面使用：不显示使用入口
+ expect(resetsOf(2).redeemable).toBeUndefined()
+ for(const id of ['r1','r2','r3','r4'])expect(JSON.stringify(r)).not.toContain(id)
+})
+it('spec Scenario "所选重置卡已不在"（host 侧：强制读改写投影）',async()=>{
+ const {c,request}=await setup()
+ request.mockResolvedValue(reply([{provider:'codex',user:'u@example.com',resets:{count:1,each:[{id:'r1',until:'T1'}]}}]))
+ const fresh=await c.fresh({provider:'codex',user:'u@example.com'})
+ expect(fresh).toMatchObject({ok:true,credits:[{id:'r1',until:'T1'}]})
+ expect((await body(await c.get())).cards).toHaveLength(1)
+})
