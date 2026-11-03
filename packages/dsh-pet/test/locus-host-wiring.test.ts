@@ -74,13 +74,25 @@ async function host() {
   }
   const main = addAgent('main')
   const ordinary = addAgent('ordinary')
+  const petPath = path.join(home, 'plugins', 'dsh-pet', 'workspace')
+  main.session.header.cwd = petPath
   const workspace = {
-    id: 'ws', path: project, title: 'Project', sessionIds: ['main', 'ordinary'],
-    status: async () => 'ok', attachSession: async (id: string) => { workspace.sessionIds.push(id) }, detachSession: async () => {},
+    id: 'ws', path: project, title: 'Project', sessionIds: ['ordinary'],
+    status: async () => 'ok', attachSession: vi.fn(async (id: string) => {
+      if (sessions.get(id)?.header.cwd !== project) throw new Error('session cwd does not match project workspace')
+      workspace.sessionIds.push(id)
+    }), detachSession: async () => {},
+  }
+  const petWorkspace = {
+    id: 'ws-pet', path: petPath, title: 'DSH Pet', sessionIds: ['main'],
+    status: async () => 'ok', attachSession: vi.fn(async (id: string) => {
+      if (sessions.get(id)?.header.cwd !== petPath) throw new Error('session cwd does not match Pet workspace')
+      petWorkspace.sessionIds.push(id)
+    }), detachSession: async () => {},
   }
   ctx.provide('webServer', { register: (route: unknown) => { routes.push(route); return () => {} } })
   ctx.provide('connection', { requestRejection: () => undefined })
-  ctx.provide('workspaceRegistry', { list: () => [workspace], get: () => workspace, create: async () => workspace, archivedSessionIds: [], archiveSession: async () => {} })
+  ctx.provide('workspaceRegistry', { list: () => [workspace, petWorkspace], get: (id: string) => id === 'ws-pet' ? petWorkspace : id === 'ws' ? workspace : undefined, create: async () => petWorkspace, archivedSessionIds: [], archiveSession: async () => {} })
   ctx.provide('sessions', { list: () => [...sessions.values()], get: (id: string) => sessions.get(id), flush: async () => true })
   ctx.provide('agents', { list: () => [...agents.values()], get: (id: string) => agents.get(id), resume: async () => undefined, create: async () => { throw new Error('unexpected main creation') } })
   ctx.provide('sessionController', {
@@ -143,11 +155,11 @@ async function host() {
   expect(capability).toMatchObject({ status: 'available' })
   const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
   await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('locus_mains').put('main', {
-    workSessionId: 'ordinary', locusMainSessionId: 'main', workspaceId: 'ws', generation: 1, status: 'active', spaceId: 'space', createdAt: 1, updatedAt: 1,
+    workSessionId: 'ordinary', locusMainSessionId: 'main', workspaceId: 'ws-pet', generation: 1, status: 'active', spaceId: 'space', createdAt: 1, updatedAt: 1,
   })
   const controller = (capability as channelCapability.AvailableLocusChannelCapability).controller
   const execute = (agent: any, name: string) => ctx.tools.execute({ agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
-  return { ctx, home, project, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
+  return { ctx, home, project, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
 }
 
 async function seedNotCreated(h: Awaited<ReturnType<typeof host>>) {
@@ -223,6 +235,8 @@ describe('actual Host three-tier assembly', () => {
     h.firstTool(check)
     await admit(h)
     expect(h.repository.getLocus('entry')).toMatchObject({ state: 'active', workspaceId: 'ws' })
+    expect(h.petWorkspace.attachSession).toHaveBeenCalledWith('child')
+    expect(h.workspace.attachSession).not.toHaveBeenCalled()
     expect(results).toEqual([false, true])
     expect(JSON.stringify(h.start.mock.calls[0]![0].request.prompt)).toContain(h.project)
     // A new agent scope stands for native cold reconstruction of the same id.
@@ -233,6 +247,8 @@ describe('actual Host three-tier assembly', () => {
     h.agents.set('child', restored)
     await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
     await check(restored)
+    expect(h.petWorkspace.attachSession).toHaveBeenCalledTimes(2)
+    expect(h.workspace.attachSession).not.toHaveBeenCalled()
     expect(results).toEqual([false, true, false, true])
   })
 

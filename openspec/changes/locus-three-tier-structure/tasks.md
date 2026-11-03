@@ -179,6 +179,12 @@
 - [x] 29.2 修正入站衔接：已有入口派发前也检查 M；仅已知 `locus-unusable` 可进入同一来源的替换流程；未知读错误、来源仍归档和明确停止继续拒绝，保持 active M 复用（106 项定向回归通过）
 - [x] 29.3 全量 Pet build/typecheck/test、严格规范与产物检查及实现审查（2936 passed / 4 skipped；build/typecheck、strict、artifacts 通过；相对 `86e7955a` 的全部修复 diff 审查 PASS；真机项仍保留在 27.3，不提前记为通过）
 
+## 30. 真机验收修正：子会话工作区登记
+
+- [x] 30.1 从现场日志定位 child cwd 在 Pet、attach 仍取来源 workspaceId 的错误；双工作区 Host 夹具按 cwd 校验登记，观察 1 failed / 4 passed
+- [x] 30.2 新建 child 登记到 Pet；已存在 child 在通过组合核验的 resume 路径幂等补登记（冷恢复断言先观察 1 failed / 4 passed）；保留 child/代际/来源项目
+- [x] 30.3 最终 Pet build/typecheck、全量 2936 passed / 4 skipped；主控审查 PASS，分项现场证据和待测矩阵记录在 live-acceptance.md；27.3/27.4 保持未完成
+
 ## 27. 收尾
 
 - [x] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更
