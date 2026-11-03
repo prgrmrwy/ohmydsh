@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 — 2026-11-03
+
+- **Sidebar usage card.** Settings → Magpie gains a 「侧边栏额度 / Sidebar usage」 switch (host setting `sidebarUsage`, default off). When on, the sidebar footer shows a dense card above Settings: one row per upstream with its weekly (`7 days`) window, reading and bar; at most five rows, the rest scroll inside the card, and a double chevron (no divider) appears when more exist. Rows keep the gateway's order, a card with an error shows 「读取失败」 instead of a reading, and the whole card has a single refresh (`{all:true}`).
+- **Expands in place.** Clicking the card grows it upward in place: every upstream with every window, reset time, reset chances, balance and the redacted error. The resident card keeps its flow slot, so the session list keeps its height; the expanded layer is an overlay, not a layout change.
+- **Collapsed sidebar.** With the sidebar in rail mode only a Magpie icon remains (tooltip 「Magpie 额度」); clicking it opens the same content as a 320px anchored popover.
+- **Event-driven reads.** The card reuses `GET /api/dsh-magpie-connector/cards` with a 60s client cache and reads only on mount, manual refresh, expanding, or the page becoming visible again; no timer polling. The settings page is unchanged and keeps per-card refresh.
+- No host request/route changes; the only host addition is the persisted `sidebarUsage` flag.
+
 ## 0.5.1 — 2026-11-02
 
 - README 中英首屏改用 deviceScaleFactor 3 的静态 PNG（3300x1920 / 2400x2400），替换旧的低分辨率图与 GIF；同时改为 markdown 图片写法，商店详情页可直接渲染。
