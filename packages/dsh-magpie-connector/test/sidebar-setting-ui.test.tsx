@@ -31,3 +31,26 @@ it('设置页提供侧边栏开关，写入 sidebarUsage', async () => {
   const post = fake.calls.find(call => call.method === 'POST' && call.path === 'settings')
   expect(post?.body).toEqual({ sidebarUsage: true })
 })
+
+it('设置页提供分钟级自动刷新输入，提交后写入 sidebarRefreshMinutes', async () => {
+  const fake = fakeApi({
+    'GET settings': () => ok(settingsView({ sidebarUsage: true, sidebarRefreshMinutes: 5 })),
+    'GET cards': () => ok({ status: 'ok', cards: [] }),
+    'GET latency': () => ok({}),
+    'POST settings': () => ok(settingsView({ sidebarUsage: true, sidebarRefreshMinutes: 10 })),
+  })
+  await act(async () => root.render(h(MagpieSettings, { api: fake.api } as never)))
+  await flush()
+  const input = host.querySelector('[data-sidebar-refresh]') as HTMLInputElement
+  expect(input).not.toBeNull()
+  expect(input.value).toBe('5')
+  expect(input.getAttribute('min')).toBe('0')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '10')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('focusout', { bubbles: true }))
+  })
+  await flush()
+  const post = fake.calls.find(call => call.method === 'POST' && call.path === 'settings')
+  expect(post?.body).toEqual({ sidebarRefreshMinutes: 10 })
+})

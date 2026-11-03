@@ -43,6 +43,8 @@ export interface SettingsView {
   knownOwnersReset?: boolean
   /** Host-persisted sidebar usage card preference (absent = false). */
   sidebarUsage?: boolean
+  /** Sidebar auto-refresh interval in minutes (absent = 5, 0 = off). */
+  sidebarRefreshMinutes?: number
   /** The owner cap (32) rejected new owners; `rejectedOwners` lists them. */
   ownerLimitReached?: boolean; rejectedOwners?: string[]
 }

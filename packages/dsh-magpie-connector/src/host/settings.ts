@@ -22,6 +22,8 @@ export interface Settings {
   knownOwners?: string[]
   /** Sidebar usage card preference (host-persisted; absent means false). */
   sidebarUsage?: boolean
+  /** Sidebar card auto-refresh interval in whole minutes; 0 disables, absent = 5. */
+  sidebarRefreshMinutes?: number
 }
 export class SettingsStore {
   value: Settings = { lines: [], visibleModels: {}, defaultEfforts: {} }

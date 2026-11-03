@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2 — 2026-11-03
+
+- **Accordion instead of an overlay.** Expanding the sidebar usage card no longer covers the session list: the detail grows in flow inside the same card and the list gives up height from the bottom (the list keeps its top anchor, so rows do not jump). No divider line; the card surface and shadow carry the separation.
+- **Header-only interaction.** Only the header row toggles expand/collapse (the refresh button keeps its own action); the card body and the overflow chevron are no longer click targets — the chevron is a passive "more rows" hint.
+- **Configurable auto refresh.** New host setting `sidebarRefreshMinutes` (whole minutes, default `5`, `0` = off, range `0–1440`, non-integers/out-of-range rejected with 400) and a matching "Auto refresh" field in Settings → Magpie → Sidebar usage. The card re-reads silently on that interval, paused while the page is hidden and resumed on visibility; it never sends `POST {all:true}`. With `0` the previous event-driven behaviour (mount, manual refresh, expand, page visible) is unchanged.
+- **README screenshots.** New sidebar usage card screenshot (`usage.png` / `usage.en.png`) and refreshed Settings screenshots showing the sidebar panel with auto refresh; registered in `docs/SCREENSHOTS.md`.
+
 ## 0.6.1 — 2026-11-03
 
 - **重置卡改成和 subscriptions 插件一样的折叠列表。** host 现在把网关 `resets.each[]`（每项只保留 `until`/`window`）与 `resets.byWindow`/`fiveHour`/`weekly` 投影给浏览器；卡片上用「用量限制重置 · 可用 N 次」做摘要行，展开后逐张列出「完整重置」/「5 小时」/「每周」和每张的「{时间} 到期」，最早到期那张附相对提示（`N 天后过期` / 不足 24 小时 `N 小时后过期` / 已过期），缺到期时间显示「到期时间不可用」。按窗口发放重置的计划（GLM Coding）摘要显示「5 小时 N 次 · 每周 M 次」。
