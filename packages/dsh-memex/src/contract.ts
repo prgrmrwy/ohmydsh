@@ -37,6 +37,15 @@ export const MEMEX_REMOTE_ENDPOINT = 'remote'
  * resolves against whatever happens to listen on the user's own machine.
  */
 export const MEMEX_BROWSE_ENDPOINT = 'browse'
+/**
+ * Delete one library that no configured entry declares.
+ *
+ * The only destructive endpoint: it refuses every library the configuration
+ * knows about, and every path that is not exactly one discovered home under the
+ * namespace, so the page can offer it for leftovers without becoming a way to
+ * delete arbitrary directories.
+ */
+export const MEMEX_DELETE_ENDPOINT = 'delete'
 
 /** How a route was produced; mirrors the resolver's own vocabulary. */
 export type MemexRouteSource = 'config' | 'derived' | 'local' | 'discovered' | 'implicit'
@@ -217,6 +226,23 @@ export type MemexBrowseResult =
  * directory, which the host only does once the configuration proves the move.
  */
 export type MemexRemoteAction = 'init' | 'sync' | 'push' | 'pull' | 'auto-on' | 'auto-off' | 'retire'
+
+/** Request body of the `delete` endpoint. */
+export interface MemexDeleteRequest {
+  readonly scope: string
+}
+
+/** Outcome of a delete; transport succeeded whenever this is returned. */
+export interface MemexDeleteResult {
+  readonly status: 'ok' | 'refused'
+  /** Absolute library path that was (or would have been) removed. */
+  readonly home?: string
+  /** Cards the library held, for the confirmation the page showed. */
+  readonly cards?: number
+  /** Why nothing was removed. */
+  readonly reason?: 'declared' | 'not-discovered' | 'outside-namespace' | 'busy' | 'failed'
+  readonly message?: string
+}
 
 /** Request body of the `remote` endpoint. */
 export interface MemexRemoteRequest {
