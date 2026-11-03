@@ -762,26 +762,6 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **WHEN** 客户端为 S 设置速度 `turbo`
 - **THEN** 响应状态为 400，S 仍为标准
 
-### Requirement: 选择器按网关归属展示分组（AMD2）
-模型选择菜单 SHALL 按网关 `owned_by` 显示组标题及具体型号：`claude` 显示 `Magpie (Claude)`、`codex` 显示 `Magpie (GPT)`，其它非空归属显示 `Magpie (<owned_by>)`。缺失归属 SHALL 显示 `Magpie (Other)`，SHALL NOT 按模型名猜测归属。该展示分组 SHALL 通过官方逐模型展示扩展实现；真实 route SHALL 始终是单一 `dsh-magpie-connector`，模型 id SHALL 保持网关原值。
-
-统一搜索 SHALL 同时覆盖展示组标签与具体型号/id；可见性过滤和 effort SHALL 保持既有行为，`/model` 搜索与 actions SHALL 使用同一真实身份。缺少官方字段的 rc.2 SHALL 经本轮已授权的 Pet 现有 compat 唯一 owner 受管 patch 增加可选 resolved-model `displayGroup {id,label}`，经 LLM 校验/detach、host catalog 与原选择器展示 buckets；没有该字段的模型 SHALL 保持原展示。SHALL NOT 新建 runtime owner、手改 generated dirs、注册伪 provider 或 hack DOM 文本改变实际路由；插件 SHALL NOT 为映射展示组修改既有 CatalogModel.provider fallback 或设置偏好键。
-
-#### Scenario: owned_by 分组不随型号名猜测
-- **GIVEN** 网关模型 id 为 `custom/claude-looking`、显示名含 Claude，但 `owned_by` 为 `codex`；另有 owned_by 为 claude 的模型
-- **WHEN** 打开官方模型菜单
-- **THEN** 前者在 `Magpie (GPT)` 下，后者在 `Magpie (Claude)` 下；选中任何一项的 provider 都是 `dsh-magpie-connector`，model 为原 id
-
-#### Scenario: 分组搜索保留可见性与 effort
-- **GIVEN** Claude/GPT 组均有可见模型，另有隐藏模型，可见模型具有已保存默认 effort
-- **WHEN** 在统一菜单按组标签或型号/id 搜索并选择可见模型
-- **THEN** 能匹配对应可见型号，隐藏模型不出现，选中后真实 provider/model 与默认 effort 保持不变
-
-#### Scenario: 缺失归属不冒充分组
-- **GIVEN** 模型名含 GPT，但没有 owned_by
-- **WHEN** 打开官方模型菜单
-- **THEN** 它属于 `Magpie (Other)`，不属于按名字推测的 GPT 组；既有设置分组 fallback 与偏好键不变，普通无 displayGroup 的宿主模型仍使用原 provider 展示；畸形 displayGroup 在宿主 resolve 边界报 INVALID_MODEL_INFO，不以错误元数据改变路由
-
 ### Requirement: 设置导航自身行使用 Magpie 鸟形图标（AMD2）
 插件 SHALL 在自身 Magpie 设置导航行显示本地鸟形品牌图标，随 `currentColor` 适应主题，保留文字、点击和可访问性语义。若宿主没有官方 icon 字段，SHALL 仅对可唯一定位的自身导航行添加私有 marker 并使用限定 CSS；SHALL NOT 修改旧 connect 或其它设置行。重复同名无法唯一定位、唯一行已带 foreign connect marker、缺 document/body/head 时 SHALL 静默保留宿主行为。
 

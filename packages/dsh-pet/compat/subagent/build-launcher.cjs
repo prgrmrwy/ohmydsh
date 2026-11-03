@@ -44,8 +44,6 @@ const subagentPatchSha256 = '78490e17d1bbeacc3e1f05aa03c01343dd765628a1deb8068f9
 const agentLoopPatchSha256 = '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92'
 const toolsPatchSha256 = '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04654f7b13a3'
 const managedEffectsPatchSha256 = '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61'
-const modelDisplayPatchSha256 = '7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f'
-const modelDisplayTemplate = readJson(join(here, 'model-display.package.template.json'))
 const teamMembershipTemplate = readJson(join(here, 'team-membership.package.template.json'))
 const nativeToolsTemplate = readJson(join(here, 'native-tools.package.template.json'))
 const expectedNativeToolsVersion = nativeToolsTemplate.version
@@ -129,14 +127,12 @@ function verifyLauncher(directory, fingerprint) {
       || subagent.dsh_compat?.patchSha256 !== subagentPatchSha256
       || subagent.dsh_compat?.upstreamBase !== reviewedCommit
     ) return undefined
-    for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
+    for (const spec of teamMembershipTemplate.packages) {
       const manifest = requireFromLauncher.resolve(`${spec.name}/package.json`)
       const pkg = readJson(manifest)
-      const template = teamMembershipTemplate.packages.some(candidate => candidate.name === spec.name) ? teamMembershipTemplate : modelDisplayTemplate
-      if (pkg.version !== template.version || pkg.dsh_compat?.patchSha256 !== template.patchSha256 || pkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
+      if (pkg.version !== teamMembershipTemplate.version || pkg.dsh_compat?.patchSha256 !== teamMembershipTemplate.patchSha256 || pkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
       if (spec.client && !existsSync(join(dirname(manifest), 'lib/client.js'))) return undefined
     }
-    run(process.execPath, [join(here, 'verify-model-display.mjs'), '--graph', directory], here)
     const toolsPath = requireFromLauncher.resolve('@deepseek-ai/dsh-tools/package.json')
     const toolsPkg = readJson(toolsPath)
     if (toolsPkg.version !== expectedToolsVersion || toolsPkg.dsh_compat?.patchSha256 !== toolsPatchSha256 || toolsPkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
@@ -228,15 +224,6 @@ try {
     .update(readFileSync(join(here, 'native-managed-effects.patch')))
     .update(readFileSync(join(here, 'team-membership.patch')))
     .update(readFileSync(join(here, 'team-membership.package.template.json')))
-    .update(readFileSync(join(here, 'model-display.patch')))
-    .update(readFileSync(join(here, 'model-display.package.template.json')))
-    .update(readFileSync(join(here, 'model-display.vitest.config.mjs')))
-    .update(readFileSync(join(here, 'verify-model-display.mjs')))
-    .update(readFileSync(join(here, '../../test/model-display-host.spec.ts')))
-    .update(readFileSync(join(here, '../../test/model-display-react.spec.tsx')))
-    .update(readFileSync(join(here, '../../test/model-display-routing.spec.ts')))
-    .update(readFileSync(join(here, '../../test/model-display-popup.spec.ts')))
-    .update(readFileSync(join(here, '../../test/model-display-builder.test.cjs')))
     .update(readFileSync(join(here, 'native-tools.package.template.json')))
     .update(readFileSync(join(here, 'verify-native-managed-effects.mjs')))
     .update(readFileSync(join(here, 'test-native-managed-effects.cjs')))
@@ -309,19 +296,19 @@ try {
         cpSync(join(source, 'package.json'), join(destination, 'package.json'))
         nativeTools.set(spec.name, localName)
       }
-      const modelDisplayPackages = new Map()
-      for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
+      const hostPackageOverrides = new Map()
+      for (const spec of teamMembershipTemplate.packages) {
         const localName = spec.sourceDir.split('/').at(-1)
-        const source = join(artifactRoot, 'agent-artifacts', 'model-display-artifacts', localName)
+        const source = join(artifactRoot, 'agent-artifacts', 'team-membership-artifacts', localName)
         const destination = join(compatPackages, localName)
         cpSync(source, destination, { recursive: true })
-        modelDisplayPackages.set(spec.name, localName)
+        hostPackageOverrides.set(spec.name, localName)
       }
       const versions = upstreamVersions()
       materializeWorkspaceRanges(stagedSubagent, versions)
       materializeWorkspaceRanges(stagedLoop, versions)
       materializeWorkspaceRanges(stagedTools, versions)
-      for (const localName of [...nativeTools.values(), ...modelDisplayPackages.values()]) materializeWorkspaceRanges(join(compatPackages, localName), versions)
+      for (const localName of [...nativeTools.values(), ...hostPackageOverrides.values()]) materializeWorkspaceRanges(join(compatPackages, localName), versions)
       // The framework versions the reviewed upstream tree is itself built on.
       // Read from that tree rather than pasted, for the same reason the patch
       // hashes are derived rather than hardcoded: a constant silently rots the
@@ -343,8 +330,8 @@ try {
       const nativeToolDependencies = Object.fromEntries(
         [...nativeTools].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
       )
-      const modelDisplayDependencies = Object.fromEntries(
-        [...modelDisplayPackages].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
+      const hostPackageDependencies = Object.fromEntries(
+        [...hostPackageOverrides].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
       )
       const directToolsDependencies = Object.fromEntries(
         Object.entries(stagedToolsManifest.dependencies ?? {}).map(([pkg, range]) => {
@@ -409,7 +396,7 @@ try {
           '@deepseek-ai/dsh-brand': `^${versions.get('@deepseek-ai/dsh-brand')}`,
           ...directToolsDependencies,
           ...nativeToolDependencies,
-          ...modelDisplayDependencies,
+          ...hostPackageDependencies,
         },
         // npm currently fails to resolve relative file: overrides here. Install
         // from staging-absolute paths, then replace npm's links with real
@@ -419,7 +406,7 @@ try {
           '@deepseek-ai/dsh-agent-loop': `file:${join(compatPackages, 'agent-loop')}`,
           '@deepseek-ai/dsh-tools': `file:${join(compatPackages, 'tools')}`,
           ...Object.fromEntries([...nativeTools].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`])),
-          ...modelDisplayDependencies,
+          ...hostPackageDependencies,
           ...frameworkPins,
           undici: UNDICI_COMPAT_PIN,
         },
@@ -432,7 +419,7 @@ try {
       runNpm(['ls', '@deepseek-ai/dsh-subagent'], staging)
       const packageCopies = new Map([
         ...nativeTools,
-        ...modelDisplayPackages,
+        ...hostPackageOverrides,
         ['@deepseek-ai/dsh-subagent', 'subagent'],
         ['@deepseek-ai/dsh-agent-loop', 'agent-loop'],
         ['@deepseek-ai/dsh-tools', 'tools'],
