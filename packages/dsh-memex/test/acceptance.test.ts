@@ -180,6 +180,26 @@ describe('dsh-memex real-kernel acceptance', () => {
     expect(slugs[0]).toBe('proxy-seam')
   })
 
+  it('无相关卡片时允许返回低分候选', async () => {
+    const h = harness()
+    const home = h.resolver.ensure(h.resolver.resolveByName('current')).home
+    writeFileSync(join(home, 'cards', 'noise.md'), card('Unrelated note', '这里只讨论理配这个零散片段'))
+    const result = await h.call('memex_search', { query: '代理配置' })
+    expect(result.hits.map((hit: { slug: string }) => hit.slug)).toEqual(['noise'])
+  })
+
+  it('卡片与库不被改写', async () => {
+    const h = harness()
+    const home = h.resolver.ensure(h.resolver.resolveByName('current')).home
+    const path = join(home, 'cards', 'unchanged.md')
+    const original = card('代理配置', 'a stable card')
+    writeFileSync(path, original)
+    for (const query of ['代理配置', 'stable', '代理配置 stable']) await h.call('memex_search', { query })
+    expect(readFileSync(path, 'utf8')).toBe(original)
+    const result = await h.call('memex_read', { slug: 'unchanged' })
+    expect(result.content).toContain(original)
+  })
+
   it('gives a directory outside every repository its own library and no sync target', async () => {
     const h = harness('/workspace/loose/notes')
     const result = await h.call('memex_write', { slug: 'loose-note', content: card('Loose note', 'a note kept on this machine') })

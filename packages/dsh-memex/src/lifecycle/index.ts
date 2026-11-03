@@ -55,6 +55,8 @@ const RECALL_TEXT = [
   // is being used is fixed then, so the next session does not re-investigate it.
   // It names memex_write because memex_retro re-stamps `created` on overwrite.
   'When you check a recalled card against the current code or environment and find it wrong or outdated, fix it in the same turn: read it, rewrite it with memex_write keeping its original title and created date, correct the first paragraph to the current fact, and append a dated note saying what changed and the file:line you checked. If its conclusion no longer applies at all, say so in the card rather than deleting it. Change only the facts you actually checked in this session.',
+  // Local addition (dsh-memex-retrieval-suite; instructions/dsh-home.md): avoid query leakage into future retrieval evaluations.
+  'When writing evaluation, probe, or handoff cards, do not paste evaluation query text; cite question ids or gold set file paths instead, because lexical overlap can rank these cards ahead of the target and contaminate later retrieval evaluations.',
   'When calling memex_recall or memex_search, pass intent (gap, background, by-name, dedupe or verify) to say why you are recalling.',
   'Never include actual secrets, credentials, tokens, or exact secret file contents.',
   'Recall guardrails: follow at most 3 link hops and read at most 20 cards.',
