@@ -63,6 +63,17 @@ describe('sidebarRows', () => {
     expect(row?.unlimited).toBe(true)
     expect(row?.used).toBeUndefined()
   })
+
+  it('carries the balance of a balance-only account', () => {
+    const [row] = sidebarRows([card({ provider: 'deepseek', balance: '¥42.50' })])
+    expect(row?.window).toBeUndefined()
+    expect(row?.used).toBeUndefined()
+    expect(row?.balance).toBe('¥42.50')
+  })
+
+  it('omits empty balances', () => {
+    expect(sidebarRows([card({ balance: '' })])[0]?.balance).toBeUndefined()
+  })
 })
 
 describe('formatting', () => {

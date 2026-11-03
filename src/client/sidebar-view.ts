@@ -42,6 +42,8 @@ export interface SidebarRow {
   /** Gateway display string, rendered verbatim. */
   display?: string
   unlimited?: boolean
+  /** Balance-only accounts (no quota windows): shown instead of a dash. */
+  balance?: string
   /** The card itself failed: the row shows the failure instead of a reading. */
   failed: boolean
 }
@@ -57,6 +59,7 @@ export function sidebarRows(cards: Card[]): SidebarRow[] {
       ...(used === undefined ? {} : { used }),
       ...(typeof window?.display === 'string' && window.display !== '' ? { display: window.display } : {}),
       ...(window?.unlimited === true ? { unlimited: true } : {}),
+      ...(card.balance === undefined || card.balance === null || card.balance === '' ? {} : { balance: String(card.balance) }),
       failed: typeof card.error === 'string' && card.error !== '',
     }
   })
