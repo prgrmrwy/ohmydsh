@@ -223,6 +223,10 @@ npm run check:descriptions # fail when tool descriptions drift from the pinned k
 npm run sync:descriptions  # regenerate them after a kernel version change
 ```
 
+Tests resolve the package's declared official DSH 0.2.0-rc.2 dependencies by default; no Pet checkout, launcher build or runtime patch is required. Team is a development-only dependency: the judge tests load the real optional Team plugins, while runtime isolation uses official scoped prompt assembly, an execution guard and the final request gate. Only known Team tool schemas are hidden from the owned judge; unexpected tools still fail the gate.
+
+For an additional installed Host graph regression, set `MEMEX_TEST_HOST_PACKAGE` to an existing absolute `package.json` path and run `npx vitest run test/eval-production-runtime.test.ts test/eval-connection-runtime.test.ts`. Invalid selections fail rather than falling back. This does not replace the default official-graph suite. The live Connection test remains opt-in; mock model tests do not prove a deployed Host or real-provider run.
+
 The current behavior is specified under `openspec/specs/` (`dsh-memex-integration`, `dsh-memex-memory`, `dsh-memex-scope`, `dsh-memex-guard`, `dsh-memex-settings-ui`, `dsh-memex-card-browser`). Integration background is in [integration-notes](docs/integration-notes.md).
 
 ## License
