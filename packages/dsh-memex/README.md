@@ -129,7 +129,7 @@ Adding an entry picks from the libraries that exist (declared ones plus undeclar
 
 Each workspace also carries a **memory switch**. Off means the workspace is memory-free: no recall prompt, no write reminder, and every memex tool refuses there — the refusal happens before the library is ever materialized. It is a property of that workspace's route, so a library that also serves as another workspace's fallback target stays writable by that other workspace. The switch is read at session start, so turning it back on needs no restart. (`dsh.yaml`'s `DSH_MEMEX_ENABLED` is the other extreme: it takes the whole plugin out at build time.) Workspaces with memory off are gathered in a collapsed group at the end of the list.
 
-It also lists libraries that exist under the namespace but no entry declares (derived ones included) and can declare them, and offers a path probe that answers which library a directory resolves to **without creating anything**. Switching the primary entry is a replace: the old primary no longer serves that workspace.
+It also lists libraries that exist under the namespace but no entry declares (derived ones included) and can declare them, and offers a path probe that answers which library a directory resolves to **without creating anything**. Switching the primary entry is a replace: the old primary no longer serves that workspace. Before the replacement takes effect, the old primary library's `cards/` and `archive/` are copied into the new primary library, so the memory the workspace built up stays recallable and writable. When both libraries hold one slug the new library's copy wins and the incoming one is reported as skipped — never overwritten; the merge is idempotent and only adds. A failed merge keeps the current routing and warns instead, and the next edit retries. The migration touches only the two local library directories and never triggers a remote sync.
 
 Two claims are refused before a save: one library directory shared by two entries, and one repository pattern written verbatim under two entries. Whether two *different* patterns claim the same repository cannot be decided from the configuration, so that case is reported when a session actually resolves against it.
 
@@ -143,6 +143,14 @@ The page configures remotes, and only through the kernel CLI:
 |---|---|
 | no remote configured | configure remote (`memex sync --init <url>`) |
 | remote configured | sync now, pull, auto-sync on/off, change remote (separate, confirmed) |
+
+Configuring or changing a remote can also **move the library to a new directory** (leave the directory field empty to
+keep it). Because `.git` and `.sync.json` live inside the directory, changing the configured path alone would strand the
+remote; so the cards are copied first (a shared card keeps the target directory's copy), the repository state follows
+only when the target has none, the kernel then runs **in the new directory** (`--init` when a new remote is given,
+`sync` when it is not), the page persists the new `home`, and only then is the old directory deleted — and only when the
+host can prove it moved that directory itself and the configuration now resolves to the target, refusing roots, the home
+directory, and paths that still contain a live library. The move is idempotent and a failure keeps the old directory. The same block can also **rename** the library to match its store repository (leave the name empty to keep it; the page suggests a name from the remote URL, falling back to `<owner>-<repo>` when the plain name is taken), and a rename can be combined with the move in one step.
 
 An already-configured library is **never re-initialized or rebuilt**: the kernel detects the existing repository and updates the remote instead. Every kernel call runs with a C locale, because the kernel decides "remote already exists" by matching an English git error string — a localized `git remote add` failure would otherwise make re-running `--init` refuse.
 
