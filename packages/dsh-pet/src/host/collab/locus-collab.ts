@@ -65,6 +65,12 @@ export class LocusCollab {
   private handle: CollabIntegrationHandle | undefined
   private readonly established = new Set<string>()
   private readonly inFlight = new Map<string, Promise<EnsureSpaceOutcome>>()
+  /**
+   * Locus mains whose space Pet is establishing right now. Their pairing row is
+   * committed only after the space exists, so the durable directory cannot
+   * vouch for them yet; Pet just created them, and stops vouching once done.
+   */
+  private readonly establishing = new Set<string>()
 
   constructor(private readonly deps: LocusCollabDeps) {}
 
@@ -80,7 +86,8 @@ export class LocusCollab {
     holds: () => false,
     owns: (sessionId: string) => {
       if (typeof sessionId !== 'string' || sessionId === '') return false
-      return this.deps.directory.list().some(ref => ref.locusMainSessionId === sessionId)
+      return this.establishing.has(sessionId)
+        || this.deps.directory.list().some(ref => ref.locusMainSessionId === sessionId)
     },
   })
 
@@ -165,7 +172,11 @@ export class LocusCollab {
   ensureSpace(ref: LocusMainRef): Promise<EnsureSpaceOutcome> {
     const running = this.inFlight.get(ref.locusMainSessionId)
     if (running !== undefined) return running
-    const attempt = this.establish(ref).finally(() => this.inFlight.delete(ref.locusMainSessionId))
+    this.establishing.add(ref.locusMainSessionId)
+    const attempt = this.establish(ref).finally(() => {
+      this.inFlight.delete(ref.locusMainSessionId)
+      this.establishing.delete(ref.locusMainSessionId)
+    })
     this.inFlight.set(ref.locusMainSessionId, attempt)
     return attempt
   }

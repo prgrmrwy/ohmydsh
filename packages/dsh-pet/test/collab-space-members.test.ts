@@ -35,6 +35,17 @@ async function eventsOf(collab: LocusCollab, locusMainSessionId: string): Promis
 }
 
 describe('协作空间由干活主会话与 locus 主会话两个普通成员组成', () => {
+  it('首次建立时 locus 主会话尚未登记：establishes before the locus_mains row exists, then stops vouching', async () => {
+    world = await openCollabWorld()
+    world.session(MAIN.locusMainSessionId)
+    world.session(MAIN.workSessionId)
+    // Production order: the pairing row is committed only AFTER the space exists.
+    const { collab } = attached(world, [])
+
+    expect(await collab.ensureSpace(MAIN)).toEqual({ ok: true, spaceId: locusSpaceId(MAIN.locusMainSessionId) })
+    expect(collab.adapter.owns?.(MAIN.locusMainSessionId)).toBe(false)
+  })
+
   it('建空间并邀请干活主会话', async () => {
     world = await openCollabWorld()
     world.session(MAIN.locusMainSessionId)

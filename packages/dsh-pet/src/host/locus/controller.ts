@@ -2131,7 +2131,7 @@ export class LocusController {
         'PROVISIONING_FAILED',
         space.reason === 'work-not-invitable'
           ? '干活主会话当前不能被邀请进协作空间，未建立入口。'
-          : `协作空间建立失败（${space.reason}），未建立入口。`,
+          : `协作空间建立失败（${space.reason}${'code' in space && space.code ? `/${space.code}` : ''}），未建立入口。`,
       )
     }
     const now = this.now()
