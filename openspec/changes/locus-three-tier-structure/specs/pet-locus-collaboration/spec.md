@@ -35,11 +35,20 @@ auto、Q&A 与显式绑定 SHALL 走同一建立路径，只在"干活主会话�
 
 ### Requirement: 子会话在首条消息到达时创建
 
-入口代际处于 `not-created` 时，第一条可投递的 Delivery SHALL 以官方 `startContinuable`（provider `spawn`，`parent` 为 locus 主会话，`prompt` 为该 Delivery 的投递 prompt，`toolFilter` 为不含委派的宽底座）创建子会话，并在 `agent/created` 中安装档位收紧层、设置沙箱并回读；任一步失败 SHALL 令创建失败并回滚。创建成功后代际 SHALL 记录子会话 id 与 marker `tier3` 并转为 active。创建失败 SHALL 分两类：运行体名额不足属于可重试失败，该 Delivery SHALL 保持待处理（不结算、不换代、不补偿），名额释放或下一次派发时以同一 Delivery 重试创建，且不超过其 deadline；其它失败（组合核验、provider、首轮回读等）该 Delivery SHALL 以确定性原因结算并回执，代际保持 `not-created`，下一条消息重试创建。后续 Delivery SHALL 经官方 `sendMessage` 投递。系统 MUST NOT 使用空闲创建或借出子会话 Session 的兼容能力。
+入口代际处于 `not-created` 时，第一条可投递的 Delivery SHALL 以官方 `startContinuable`（provider `spawn`，`parent` 为 locus 主会话，`prompt` 为该 Delivery 的投递 prompt，`toolFilter` 为不含委派的宽底座）创建子会话，并在 `agent/created` 中安装档位收紧层、设置沙箱并回读；任一步失败 SHALL 令创建失败并回滚。发布 SHALL 在 `agent/created` 回调内完成，而不是等 `startContinuable` 返回（实测其在首轮认领之后才返回）：创建前持久预留子会话身份；回调内依次认领预留、安装组合并回读、发布同一 `childId` 的 marker `tier3`、current 与首轮认领所需的关联（inbox 消息与执行身份），最后完成预留交接；这些步骤 MUST 早于首轮认领。回调内发布之后若创建流程仍被拒绝，Host SHALL 回滚已写入的持久状态（不得留下可服务的 active/current），该 Delivery 按非名额失败结算、代际回到 `not-created`；MUST NOT 以撤销已提交的预留代替补偿。创建失败 SHALL 分两类：运行体名额不足属于可重试失败，该 Delivery SHALL 保持待处理（不结算、不换代、不补偿），名额释放或下一次派发时以同一 Delivery 重试创建，且不超过其 deadline；其它失败（组合核验、provider、首轮回读等）该 Delivery SHALL 以确定性原因结算并回执，代际保持 `not-created`，下一条消息重试创建。后续 Delivery SHALL 经官方 `sendMessage` 投递。系统 MUST NOT 使用空闲创建或借出子会话 Session 的兼容能力。
 
 #### Scenario: 首条消息即首个 prompt
 - **WHEN** `not-created` 代际收到第一条 at
 - **THEN** 恰调用一次 `startContinuable`，其 `prompt` 为该 Delivery 的投递 prompt；代际转为 active 并带 `tier3`
+
+#### Scenario: API 返回前首轮已能解析身份
+- **GIVEN** 替身在 `startContinuable` 返回之前依次触发 `agent/created`、首条 prompt 认领与首个 caller-bound 工具调用
+- **WHEN** 首个工具为 `pet_context`
+- **THEN** 工具解析到原 Delivery 与本入口；该 Delivery 只投递一次，Host 未再调用 `sendMessage`
+
+#### Scenario: 回调内发布后创建被拒时回滚
+- **WHEN** 回调内已发布 marker 与 current，随后创建流程拒绝
+- **THEN** 不留下 active 代际或 current；该 Delivery 以确定性原因结算，代际为 `not-created`；下一条 at 可再次创建
 
 #### Scenario: 创建失败不推进代际
 - **WHEN** `startContinuable` 因 `agent/created` 回读不符而失败
@@ -291,7 +300,7 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startContinuable` 创�
 
 父子或 agent 间的 `agent-message` SHALL 只作为子会话上下文通信，不参与 Delivery 路由选择：它 MUST NOT 建立、修改、替换或撤销 current Delivery 已由 Host 绑定的回复目标。current Delivery 存续时，原始飞书投递 turn 结束后的 `agent-message` SHALL 可唤醒同一 child 继续处理该 current；没有唯一 current 时，`agent-message` MUST NOT 自行产生飞书 finish/wait 能力。GUI/user steer、来源不明的参与者消息与第二个已投递 Delivery仍 SHALL fail closed。
 
-caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已确认局部锚点、权限与 Host 确认的 current Delivery 状态，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。未知锚点 SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传主会话；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
+caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已确认局部锚点、权限与 Host 确认的 current Delivery 状态，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。未知锚点 SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传干活主会话；官方结算通知送达 locus 主会话是明确例外，且收到通知不等于结论已被采纳为 agreed charter 或已被干活主会话知晓；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
 
 干活主会话 SHALL 被表述为工作归属，locus 主会话为可询问的上下文来源，MUST NOT 因其父节点身份宣称已统合所有协作现场的最新认知。用户显式发起的查阅与汇总不属于自动回传；系统 SHALL 区分可发现、可读取与已采纳，缺少历史读取能力或权限时如实说明。当前模型 MUST NOT 宣称已提供 project 级自动知识同步或多人分布式协同。旧 QA/chat 绑定仍遵守前置版本的退役隔离，不因本兼容规则恢复服务。
 
@@ -333,7 +342,7 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 
 #### Scenario: 子会话发现不自动成为主会话认知
 - **WHEN** QA 子会话产生新发现，而用户未发起主会话查阅或采纳，也没有关联询问
-- **THEN** 系统不自动更新主会话，不将该发现呈现为主会话已知的项目决策
+- **THEN** 系统不自动更新干活主会话，不将该发现呈现为干活主会话已知的项目决策；locus 主会话可能收到官方结算通知，但这不构成采纳
 
 #### Scenario: 用户主动查阅受实际能力约束
 - **WHEN** 用户要求查阅一个可通过索引发现、但当前无权读取或缺少宿主读取能力的子会话历史

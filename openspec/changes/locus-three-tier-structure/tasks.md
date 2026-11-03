@@ -1,7 +1,7 @@
 ## 1. 准备与运行时探针
 
 - [ ] 1.1 `ws promote` 并安装依赖，运行 dsh-pet、dsh-collab、collab-kernel 现有全部测试确认基线为绿
-- [ ] 1.2 rc.2 探针：冷恢复是否经过 `agent/created`；`startContinuable` 带首条 prompt 时预留身份 → `agent/created` → Host 发布关联 → 首个工具调用的顺序；`agent/created` 抛错时首轮业务请求未执行。结论写入 design；任一不成立即停止实施并返回设计评审
+- [x] 1.2 rc.2 探针：冷恢复经过 `agent/created`（`source:'resume'`）且监听器失败使恢复失败；首条 prompt 创建时 `agent/created` 先于首轮认领、失败则首轮不执行；`startContinuable` 在首轮认领后才返回，故关联必须在 `agent/created` 内发布。见 [probes/agent-created-probe.md](probes/agent-created-probe.md)（官方未打补丁包、纯运行时隔离、假模型）
 - [ ] 1.3 新增 `locus-base` preset（白名单、中性命名、不含委派）并在 `dsh.yaml` 声明；先写失败测试断言展开后不含委派工具
 - [ ] 1.4 编写官方 subagent / `sessionQuery` 替身与 dsh-collab `owns` 夹具
 
@@ -58,7 +58,7 @@
 
 ## 10. pet-locus-collaboration：子会话在首条消息到达时创建
 
-- [ ] 10.1 Write failing tests in `packages/dsh-pet/test/locus-lazy-child.test.ts`：「首条消息即首个 prompt」；「创建失败不推进代际」；「名额不足时保留原请求」；「provider 不能证明独立上下文」（确认因功能缺失而失败）
+- [ ] 10.1 Write failing tests in `packages/dsh-pet/test/locus-lazy-child.test.ts`：「首条消息即首个 prompt」；「创建失败不推进代际」；「名额不足时保留原请求」；「provider 不能证明独立上下文」；「API 返回前首轮已能解析身份」；「回调内发布后创建被拒时回滚」（确认因功能缺失而失败）
 - [ ] 10.2 Implement「子会话在首条消息到达时创建」使 10.1 通过（规范见 specs/pet-locus-collaboration/spec.md，做法见 design.md）
 - [ ] 10.3 Refactor；三个包全部测试与 typecheck 保持绿，test-plan 对应行翻 🟢
 
@@ -112,9 +112,9 @@
 
 ## 19. pet-locus-collaboration：上下文按实际子会话绑定并允许按需问主会话
 
-- [ ] 19.1 Write failing tests in `packages/dsh-pet/test/locus-child-context.test.ts`：「旧 fork child 不受影响」（确认因功能缺失而失败）
+- [ ] 19.1 Write failing tests in `packages/dsh-pet/test/locus-child-context.test.ts`：「旧 fork child 不受影响」；「子会话发现不自动成为主会话认知」（确认因功能缺失而失败）
 - [ ] 19.2 Implement「上下文按实际子会话绑定并允许按需问主会话」使 19.1 通过（规范见 specs/pet-locus-collaboration/spec.md，做法见 design.md）
-- [ ] 19.3 定位并保持既有场景测试不变：「长父历史不能冒充子身份」；「业务完成只经统一工具提交」；「无法证明独立能力时拒绝创建」；「历史不含最新目录」；「主会话无法回答」；「跨 turn 父回复继续 current Delivery」；「单独的 agent 消息不能获得飞书能力」；「GUI 流量仍不能消费 current」；「新话题上下文」；「子会话发现不自动成为主会话认知」；「用户主动查阅受实际能力约束」；「冷恢复保留独立历史」
+- [ ] 19.3 定位并保持既有场景测试不变：「长父历史不能冒充子身份」；「业务完成只经统一工具提交」；「无法证明独立能力时拒绝创建」；「历史不含最新目录」；「主会话无法回答」；「跨 turn 父回复继续 current Delivery」；「单独的 agent 消息不能获得飞书能力」；「GUI 流量仍不能消费 current」；「新话题上下文」；「用户主动查阅受实际能力约束」；「冷恢复保留独立历史」
 - [ ] 19.4 Refactor；三个包全部测试与 typecheck 保持绿，test-plan 对应行翻 🟢
 
 ## 20. pet-locus-collaboration：Locus 工具档位由所有者显式授予且不重建子会话
@@ -168,3 +168,7 @@
 - [ ] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更
 - [ ] 27.2 `openspec validate locus-three-tier-structure --strict`；test-plan 全部 🟢
 - [ ] 27.3 真机验收：auto 新群、`/bind`、首条消息惰性创建、名额不足重试、干活主会话归档回执、locus 主会话替换迁移、非驻留改档位；记录 locus 主会话常驻数量与内存（ADR-0007 待决事项 4），写入 verify.md
+- [ ] 27.4 补验已归档 change 中受本 change 影响、当时未完成的真机项（在新结构上验收，结果一并写入 verify.md）：
+  - `2026-11-03-pet-locus-shell-tier` 1.2：`shell` 档子会话（沙箱由本 change 在 `agent/created` 设置）内 `lark-cli --as bot im +chat-messages-list --chat-id <当前群>` 能否工作；另验授予 `shell` 后 Host 重启、子会话冷恢复档位保持（本 change 改了冷恢复组合来源）
+  - `2026-11-03-pet-locus-feishu-read-and-delivery-fixes` 7.5 剩余项：话题入口读取、未知参数拒绝、伪造游标拒绝、守卫拒绝文案（子会话改为惰性创建、父改为 locus 主会话）
+  - `2026-11-03-pet-locus-interrupted-delivery-recovery` 5.2：Host 在子会话 turn 执行中重启后，该 Delivery 结算为 `failed/turn-interrupted`、下一条立即派发并回复（本 change 把证据来源改为 `sessionQuery.observeSession` 冷读）

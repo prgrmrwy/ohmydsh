@@ -33,6 +33,8 @@
 | specs/pet-locus-collaboration/spec.md → 入口建立统一为一条路径 | 绑定到已有干活主会话复用 locus 主会话 | packages/dsh-pet/test/locus-establish.test.ts | `绑定到已有干活主会话复用 locus 主会话` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 入口建立统一为一条路径 | 建立失败不留半成品 | packages/dsh-pet/test/locus-establish.test.ts | `建立失败不留半成品` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 子会话在首条消息到达时创建 | 首条消息即首个 prompt | packages/dsh-pet/test/locus-lazy-child.test.ts | `首条消息即首个 prompt` | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 子会话在首条消息到达时创建 | API 返回前首轮已能解析身份 | packages/dsh-pet/test/locus-lazy-child.test.ts | `API 返回前首轮已能解析身份` | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → 子会话在首条消息到达时创建 | 回调内发布后创建被拒时回滚 | packages/dsh-pet/test/locus-lazy-child.test.ts | `回调内发布后创建被拒时回滚` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 子会话在首条消息到达时创建 | 创建失败不推进代际 | packages/dsh-pet/test/locus-lazy-child.test.ts | `创建失败不推进代际` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 子会话在首条消息到达时创建 | 名额不足时保留原请求 | packages/dsh-pet/test/locus-lazy-child.test.ts | `名额不足时保留原请求` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 子会话在首条消息到达时创建 | provider 不能证明独立上下文 | packages/dsh-pet/test/locus-lazy-child.test.ts | `provider 不能证明独立上下文` | 🔴 red |
@@ -84,7 +86,7 @@
 | specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 单独的 agent 消息不能获得飞书能力 | 既有测试（实施时定位） | `单独的 agent 消息不能获得飞书能力` | 🟢 existing |
 | specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | GUI 流量仍不能消费 current | 既有测试（实施时定位） | `GUI 流量仍不能消费 current` | 🟢 existing |
 | specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 新话题上下文 | 既有测试（实施时定位） | `新话题上下文` | 🟢 existing |
-| specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 子会话发现不自动成为主会话认知 | 既有测试（实施时定位） | `子会话发现不自动成为主会话认知` | 🟢 existing |
+| specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 子会话发现不自动成为主会话认知 | packages/dsh-pet/test/locus-child-context.test.ts | `子会话发现不自动成为主会话认知` | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 用户主动查阅受实际能力约束 | 既有测试（实施时定位） | `用户主动查阅受实际能力约束` | 🟢 existing |
 | specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 冷恢复保留独立历史 | 既有测试（实施时定位） | `冷恢复保留独立历史` | 🟢 existing |
 | specs/pet-locus-collaboration/spec.md → 上下文按实际子会话绑定并允许按需问主会话 | 旧 fork child 不受影响 | packages/dsh-pet/test/locus-child-context.test.ts | `旧 fork child 不受影响` | 🔴 red |
@@ -120,7 +122,7 @@
 
 ## Coverage Notes
 
-- 共 113 个场景全部映射：新增或改写 72 个（🔴），沿用未改 41 个（🟢 existing）。`pet-inquiry-runtime-channel` 为整体 REMOVED，无场景；其退役以 `npm test` 中 inquiry 测试被删除、工具面断言不含 `pet_inquire`/`pet_inquiry_answer` 覆盖（见 tasks）。
+- 共 115 个场景全部映射：新增或改写 75 个（🔴），沿用未改 40 个（🟢 existing）。`pet-inquiry-runtime-channel` 为整体 REMOVED，无场景；其退役以 `npm test` 中 inquiry 测试被删除、工具面断言不含 `pet_inquire`/`pet_inquiry_answer` 覆盖（见 tasks）。
 - 夹具：dsh-pet 现有 `test/harness.ts`（`failOnWriteNumber` 等）；新增官方 subagent 替身需能模拟 `startContinuable` 带首条 prompt、`agent/created` 回滚、名额拒绝、`sendMessage` 冷恢复；`sessionQuery.observeSession` 替身需能返回带/不带合成 `turn/end interrupted` 的事件；dsh-collab 侧用现有集成测试夹具加 adapter `owns`。
 - 运行时探针（非单测）：实施第一组任务在 rc.2 上实测"冷恢复经过 `agent/created`"与"首条 prompt 创建的顺序"（design 决策 3、6）；探针失败则停止实施、返回设计评审。
 - 依赖：本 worktree 缺 dsh-pet 测试依赖，实施前需 `ws promote` 后安装依赖。

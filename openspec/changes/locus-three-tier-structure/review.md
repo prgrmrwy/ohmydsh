@@ -1,82 +1,86 @@
+# Round 4 — 三层 locus 对抗评审
+
 ## Review Metadata
 
-- Round: 3 — full review, fresh context。
-- Prior review: round 2 — REVISE（0 Critical、2 Moderate、2 Suggestions）。
-- Reviewer: cross-model codex gpt-6-astra fresh。
-- 目标版本：DSH `0.2.0-rc.2`。
-- 权限：只读审查，仅覆盖本报告；未修改其他文件，未构建、测试、部署、迁移、重启或派发下级评审。
-- 覆盖：proposal、design、六份 delta、上轮报告；相关当前规范条款、ADR-0006/0007/0008、集成陷阱与 compat README；连接检查 dsh-collab integration → kernel disposal，以及 Pet composition 的应用、工具面回读与拒绝发布路径。未发现 tasks 文件。
-- 限制：不是全部当前规范与实现的逐行覆盖；部分长文读取被工具裁剪，结论只依赖实际可见条款。未运行独立 rc.2 生命周期/首 prompt 探针，设计中的探针要求不代表验证已通过，也不据此推断官方 API 不支持。
+- Change：`locus-three-tier-structure`；schema：anvil；轮次：4。
+- 前轮：Round 3 — `APPROVE_WITH_CHANGES`，`CHANGES_APPLIED: yes`。
+- 评审者：codex / gpt-6-astra，fresh context，跨模型独立评审；未继续委派。
+- 权限：只读评审，仅覆盖本报告；未修改设计、规范、任务或实现。
+- 方法：核对 proposal、design、六份 delta spec、tasks、test-plan、探针脚本及记录，并连接当前身份/组合发布、Delivery 观察、collab integration 与 kernel manager disposition 实现。
+- 验证限制：本轮未运行探针、测试或构建；探针运行结果来自提交的记录，不是本轮复现。尝试定位 worktree 的依赖文件时遇到依赖链接越出托管根的拒绝，未绕过；不声称已独立核验安装的官方包实现。
 
-## Round-2 Finding Status
+## Round-3 status
 
-| 原项 | 本轮状态 | 依据 |
-|---|---|---|
-| M1：冷恢复容量失败仍触发换代 | 已解决（文档契约） | [换代分类与场景](specs/pet-locus-collaboration/spec.md#L59-L76) 已明确非容量失败才换代；容量恢复保留同 child、同代际、同 Delivery。 |
-| M2：非驻留权限缺少提交与回执语义 | 核心设计已解决，存在局部条款同步遗漏 | [待应用协议](specs/pet-locus-collaboration/spec.md#L160-L181) 已选择期望/生效分离、成功回读后确认、失败清除期望；[决策 6](design.md#L29) 删除换代 fallback。无需重新选择方案；残留矛盾见本轮 M1。 |
-| S1：actAs 操作枚举遗漏 | 已解决 | [决策 8](design.md#L31) 补齐 allowManager、ackItem，并以 delta 清单为准。 |
-| S2：历史 ownership 与普通准入联合测试 | 保留为实施建议 | 归档拒绝、历史 manager 处置、提交重验均已有契约；仍建议以同一 fixture 验证，缺少联合场景不升级为架构阻塞。 |
+前轮权限协议问题已关闭，不重复提出：
+
+- [非驻留协议](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L160-L186)明确 desired/effective、失败恢复原生效值、清除期望值、原值也不能证明时拒绝发布，并增加 shell→safe 失败仍服务 shell 的场景。
+- [档位要求](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L350-L380)将空闲检查限定在接受命令时，允许已成为 current 的唤醒 Delivery 完成延迟应用；常驻失败回 safe 与非驻留失败回原值分开。
+- 这是规划闭合的确认，不是对尚未实施代码的验收。
 
 ## Findings
 
-### 🔴 Critical (blocking)
+### Critical
 
-无。本轮没有证据支持推翻已经批准的三层方向。
+无。未发现必须推翻三层结构、重开实体模型或恢复已计划退役 seam 的设计缺陷。
 
-### 🟡 Moderate
+### Moderate
 
-#### M1 — 待应用协议已选定，但相邻规范仍要求即时切换、失败降到 safe 或拒绝服务
+#### M1 — 新增的 callback 内发布决定尚未变成可验收的身份/首轮交接契约
 
-**位置：** [新增协议](specs/pet-locus-collaboration/spec.md#L160-L181)、[工具档位要求与场景](specs/pet-locus-collaboration/spec.md#L341-L387)、[风险说明](design.md#L47)。
+**证据与具体缺口。** [设计决策 3](openspec/changes/locus-three-tier-structure/design.md#L26)已经正确指出不能等 `startContinuable` 返回才发布 child/marker/current。可是[惰性创建规范与场景](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L36-L50)只检查首条 prompt、最终 active 与回读失败；“创建成功后”没有明确 callback 内的发布边界。[预留身份场景](openspec/changes/locus-three-tier-structure/specs/dsh-pet/spec.md#L25-L27)只检查使用同一预留身份；[任务 5.3](openspec/changes/locus-three-tier-structure/tasks.md#L30-L32)与[测试映射](openspec/changes/locus-three-tier-structure/test-plan.md#L20-L23)仍将其作为原样保留的 existing 测试，[任务 10.1](openspec/changes/locus-three-tier-structure/tasks.md#L59-L63)未增加这一时序的断言。
 
-**问题：** 新协议要求非驻留 child 回读期望值失败时恢复“原生效值”、清除期望并继续服务；但同文件第 347 行与第 369–371 行仍无条件要求回到 safe，授予/撤回场景也未限定为常驻即时路径。第 347 行把“无 current Delivery”作为生效条件，而新增协议明确在下一条 Delivery 唤醒时提交。设计风险段则仍承诺“下次唤醒时生效”，并规定回读失败就拒绝服务，与决策 6 的失败回退服务不一致。
+这不是说预留身份规范禁止 callback 发布：它没有这样的禁止。问题是新的关键交接规则只写在设计里，现有场景可以在“等返回再 active”的错误实现上通过。
 
-**具体反例：** C 原来为 shell，释放后所有者请求 safe，下一条 D 唤醒时目标工具面核验失败。新增条款要求恢复原 shell、清掉期望、报告撤回失败并服务 D；旧场景要求 safe；风险段要求拒绝服务。实施者/测试作者不能同时满足这三种结果。现有成功场景只覆盖 safe→shell，因而掩盖了差异。D 到达后是否因 current 已建立而禁止提交，也应由同一处规则明确，而非由实现自行解释。
+**连接代码后的风险。** [staging 的 commit/abort](packages/dsh-pet/src/host/locus/prepublication-staging.ts#L312-L349)要求 durable 发布后 commit，且 committed reservation 不能再 abort；[现有交接测试](packages/dsh-pet/test/locus-prepublication-staging.test.ts#L220-L237)只测 durable→commit，不测初始认领相对 API 返回的顺序。当前[child activation](packages/dsh-pet/src/host/locus/child.ts#L1009-L1049)则在 await 返回后才设置 active。因此“沿用 staging”可沿用身份桥，但不能暗示现有发布/失败补偿时序原封不动沿用。另一个必须连接的实际消费者是[认领观察器](packages/dsh-pet/src/index.ts#L2808-L2825)：它要求 inbox messageId、childId 与 executionId 已可关联，光写 active marker 不足以证明首轮认领可结算。
 
-**校准：** 这是选定协议之后的局部同步遗漏，不再是 round-2 M2 的“尚未选择完成语义”。以新增协议为准即可精确修改，不需重新设计，因此不判 REVISE。
+**最小修复。** 不重做架构，只补一个明确的 publication 协议和两个 red 场景：
 
-**最小修正：** 工具档位要求明确：常驻即时路径沿用失败回到 safe；非驻留路径适用新增待应用协议，命令接受时检查入口空闲，延迟提交在冷恢复首个业务工具执行前完成，不因用于唤醒的 Delivery 已建立而误拒绝。授予/撤回及失败场景注明适用路径；增加原 shell→期望 safe 的失败场景，断言原值恢复并核验、期望清除、失败回执、同 child/代际不变。恢复原值仍无法核验时，继续服从现有“无法证明组合不发布”的总则，不能无条件继续服务。设计风险段同步成“下次唤醒时应用并核验，可能失败”，删除目标回读失败即一律拒绝服务的旧结论。
+1. 创建前持久预留身份；callback 内先 claim staging、组合并回读，再发布同一 childId 的 marker/current 及首轮认领所需关联，随后完成 staging handoff。明确这些步骤早于首轮认领，API 返回不是发布触发器；不要求把 active 行提前写在组合核验之前。
+2. 替身在 `startContinuable` 返回前触发 `agent/created`、首条认领及首个 caller-bound 工具解析；断言正确绑定原 Delivery、只执行一次且不二次 sendMessage。需验证认领关联，不只检查最终 active。
+3. 在已完成 callback 内发布、但后续创建流程拒绝的边界注入失败，断言不留下可服务的 active/current 半成品，按既定失败语义结算 Delivery/恢复 `not-created`，并允许下一条重试。明确此时回滚 durable 状态，不能以 `abort(committedReservation)` 代替补偿。
 
-### 📌 Suggestions
+把新增场景同步到 tasks/test-plan；原“预留身份后创建 child”基础测试可保留，不必为了新增覆盖强行改写它。
 
-#### S1 — 保留历史 ownership 的联合回归 fixture
+#### M2 — 官方默认通知与保留下来的“不得自动回传主会话”仍有规范重叠
 
-沿用 round-2 S2：M1 归档、M2 接替后，M1 普通 actAs 被拒，但 manager 可静默处置 M1 作者的旧 request；在提交前撤销 ownership 则失败且不写日志。当前 [integration](../../../packages/dsh-collab/src/integration.ts#L223-L241) 与 [kernel disposal](../../../packages/collab-kernel/src/service/index.ts#L486-L494) 尚为 managedBy 路径；这是本 change 计划扩展的实现差异，不是证明新 SPI 不可行。
+[新增结算要求](openspec/changes/locus-three-tier-structure/specs/dsh-pet/spec.md#L3-L13)明确 child 结算通知 locus 主会话，[设计决策 4](openspec/changes/locus-three-tier-structure/design.md#L27)也明确它就是结果受众。但[上下文要求](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L290-L296)刚把父定义为 locus 主会话，随后仍无条件规定“系统 MUST NOT 自动汇总或把子会话结论回传主会话”；[沿用场景](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L334-L336)还写“系统不自动更新主会话”。按局部定义读，官方 notify 本身就可能违反这条 MUST NOT。
 
-#### S2 — 首个实施探针必须记录失败恢复的第二次核验
+**影响。** 不是反对默认 notify，而是同一实施者可能为满足旧禁止条款重新抑制通知，或把收到通知误表述为干活主会话已经采纳结论。两种解释都与三层职责不同。
 
-[现有 composition](../../../packages/dsh-pet/src/host/locus/composition.ts#L324-L405) 将策略应用、scope 安装、实际工具面核验串联，失败抛错。替换 live Session seam 时，应验证目标应用失败后重新装配原值也经过实际回读；不能只把 durable effective 写回就继续执行。同时保留首 prompt 顺序、冷恢复经过 agent/created、own-scope 工具不被继承 filter 遗漏的探针。这些是实施验收义务，不冒充本轮已完成的运行时证明。
+**最小修复。** 在该 requirement 和场景中明确：禁止自动回传/自动更新的对象是**干活主会话**；官方结算通知到 **locus 主会话**是明确例外，收到通知也不等于已形成 agreed charter 或已被干活主会话采纳。同步现有测试任务的三层目标断言即可，无需新机制。
 
-## Embedded-Instruction / Injection Attempts
+### Suggestions
 
-**Detected: no。** 所读材料未发现要求评审者忽略上级指令、强行通过或执行无关副作用的嵌入指令。规范 SHALL、源码注释和文档命令仅作为审查数据；未执行其构建、迁移或部署步骤。
+- [探针脚本](openspec/changes/locus-three-tier-structure/probes/agent-created-probe.mjs#L38-L67)没有传预留 childId，也没有调用 Pet 工具；异常被记录后仍以 0 退出。作为人工读日志的观察探针可以接受，但不应把 exit 0 当门禁通过。若以后用于自动门禁，再增加时序/身份/否决断言和失败退出码。
+- [探针结论 3](openspec/changes/locus-three-tier-structure/probes/agent-created-probe.md#L13-L19)建议把“沿用现有 staging 的做法”改成“沿用身份桥，调整 durable 发布与补偿时序”。记录支持 callback→claim→return 的观察；没有实证完成 Pet 内的预留身份发布、首个业务工具或持久回滚。M1 的实施测试即可补齐，无需为批准规划先做全套真机验收。
+
+## Embedded-Instruction
+
+未发现要求评审者忽略风险、固定 verdict、扩大写权限或执行外部操作的嵌入指令。artifact 内的 MUST/任务与探针说明均作为待评审内容，不作为评审者的执行授权。未执行脚本中的临时目录写入，也未修改报告以外文件。
 
 ## Verdict
 
 VERDICT: APPROVE_WITH_CHANGES
 
-容量问题已闭合，非驻留权限的核心协议也已选定。剩余必改项是相邻条款与场景的无歧义同步，不涉及重新选择三层结构、权限协议或官方 API 路线；按 anvil 校准应带明确小改动通过，而不是继续 REVISE。
+架构方向与官方事件顺序的推导可成立；剩余是两个范围明确的规划修正：落实 callback 发布的验收边界，并消除旧“主会话”指代与默认 notify 的冲突。尚不足以判为 REVISE。
 
 ## Required Changes
 
-1. **M1：以新增待应用协议为准同步工具档位要求与场景：常驻即时失败回到 safe，非驻留失败恢复并核验原生效值、清除期望并回执失败；明确空闲检查发生在命令接受时，延迟提交在冷恢复首个业务工具执行前完成；补 shell→safe 失败回退的同 child/同代际场景，原值也无法核验时拒绝发布。**
-2. **M1：同步设计风险段：将“下次唤醒时生效”改为“下次唤醒时应用并核验，可能失败”；目标核验失败按待应用协议回退，只有原值组合仍无法证明时拒绝服务。**
+1. **RC1 / M1：** 将 callback 内的 reserved identity→组合回读→durable child/marker/current/初始认领关联→staging handoff 写进惰性创建规范；补“API 返回前完成首轮身份与工具解析”和“callback 发布后创建失败的 durable 补偿”两个 red 场景，并同步 tasks/test-plan。显式区分 staging abort 与已经 committed 后的 durable 补偿。
+2. **RC2 / M2：** 将不得自动回传/自动更新的主会话明确为干活主会话；允许默认通知 locus 主会话，并保留“通知不等于知识已采纳”的约束；同步对应场景和测试目标。
 
 CHANGES_APPLIED: yes
 
+仅写入本轮评审报告；以上修正未代为应用。
+
 ## Rebuttals
 
-### 复核（round 3 re-check）
+### 复核（round 4 re-check）
 
-1. **Required Change 1 — applied。** 工具档位条款已区分常驻即时失败回到 safe 与非驻留待应用路径，明确命令接受时检查空闲、冷恢复首个业务工具前提交且不因唤醒 Delivery 已为 current 而拒绝（specs/pet-locus-collaboration/spec.md:356）；授予、撤回与失败场景已限定常驻路径（specs/pet-locus-collaboration/spec.md:366–380）。非驻留失败恢复并回读核验原生效值、清除待应用标记与期望值、回执失败，原值不可核验则拒绝发布（specs/pet-locus-collaboration/spec.md:165）；新增 shell→safe 失败场景覆盖原 shell 回读一致、失败回执、清除期望、同 child/同代际，以及原值核验失败不发布（specs/pet-locus-collaboration/spec.md:179–186）。
-2. **Required Change 2 — applied。** 风险段已改为“下次唤醒时应用并核验，可能失败”，目标核验失败恢复并核验原生效值继续服务，仅原值组合无法证明时拒绝发布（design.md:47）。
+仅复核本轮 Required Changes，M1、M2 均已应用；保留原 VERDICT。M1：[spec:38–51](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L38-L51)明确创建前持久预留、回调内认领→组合回读→marker/current/首轮认领关联→交接均早于首轮认领，并区分已提交后的 durable 补偿与 staging 撤销；两个新增场景已同步到 [tasks:61](openspec/changes/locus-three-tier-structure/tasks.md#L61) 与 [test-plan:36–37](openspec/changes/locus-three-tier-structure/test-plan.md#L36-L37) 的 red 测试。[design:26](openspec/changes/locus-three-tier-structure/design.md#L26) 与 [probe:16](openspec/changes/locus-three-tier-structure/probes/agent-created-probe.md#L16)也明确仅沿用身份桥、调整持久发布及补偿时序。M2：[spec:303–305](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L303-L305)及 [spec:343–345](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L343-L345)明确禁止自动更新的对象是干活主会话，官方通知 locus 主会话是例外且不等于采纳；对应场景已改列 [tasks:115–117](openspec/changes/locus-three-tier-structure/tasks.md#L115-L117) 与 [test-plan:89](openspec/changes/locus-three-tier-structure/test-plan.md#L89) 的 red 测试。本次只确认规划修正闭合，未运行测试或探针，不构成实现验收；上方“未代为应用”为原评审时点记录。
 
-本次仅复核上述两项文档修正；未复审其他发现，未验证运行时实现。VERDICT 保持不变。
-
-- 接受 round-2 M1 修复；不再把容量压力当作换代条件。
-- 接受 round-2 M2 的协议选择与删除换代 fallback；本轮只要求同步 sibling 条款，不要求重新设计提交机制。
-- 不因未运行官方探针而声称 rc.2 没有 agent/created；探针失败时返回设计评审的约束已经正确。
-- 不以三层概念强迫 loci 改为三层；映射表与现有父子模型可以共存。
-- 不重新挑战已接受的普通协作 M 信息转述风险，也不将已有实现缺少 actAs/authorOwned 误当成设计缺陷。
-- 补丁退役清单已明确保留通用异步工具 guard，不重复旧发现。
-- 本报告仅评价提案可进入实施的条件，不表示新协议已实现、运行验证通过或获准部署。
+- **“探针不含 Host，所以应整体否决。”** 不采纳。记录明确限定纯运行时/fake model；其事件顺序足以支持调整实现时序这一方向，不足之处应由 M1 的精确集成断言补齐。
+- **“预留身份必须等 start 返回后才能持久化。”** 不采纳。[当前身份规范](openspec/specs/dsh-pet/spec.md#L704-L726)要求预留值一致和发布前工具核验，并没有规定等 API 返回。应区分预留、组合核验和 active 发布。
+- **“历史 main 的 owns=true 会允许 archived 会话 actAs。”** 不采纳。[设计](openspec/changes/locus-three-tier-structure/design.md#L31)区分 owns 与 actAs 的未归档准入；历史所有权是 manager 处置历史 request 的证据，不是恢复普通成员命令权限。当前[manager 入口](packages/dsh-collab/src/integration.ts#L223-L241)与[kernel 作者判据](packages/collab-kernel/src/service/index.ts#L487-L494)确实需要所提扩展，不能把尚未实施当成提案缺陷。
+- **“非驻留撤回 shell 失败还保留 shell 必须一律降 safe。”** 不采纳。这会重新引入 Round 3 已消除的契约矛盾；当前要求恢复并证明原生效值，失败回执，不可证明则拒绝发布。
+- **“既有 staging 单测加最终 active 断言就能覆盖新时序。”** 不采纳。它们未证明首条认领发生时绑定已可见，也未覆盖 callback 内 commit 之后创建拒绝；这正是 RC1 的限定补充，不要求扩大本 change 的产品范围。
