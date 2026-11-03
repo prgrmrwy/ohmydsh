@@ -2,7 +2,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CollabError, principals, reduce, type CommitRecord, type SpaceState, type Binding, type ChannelProvider, type CollabService, type CommandContext, type CommandResult, type Member, type MemberKind, type Pointer, type Presence, type Progress, type Ext } from 'collab-kernel'
 import type { CollabHost } from './host.js'
 import type { Caller, SessionAccess } from './session-provider.js'
-import { safeError } from './tools.js'
+import { autoJoin, safeError } from './tools.js'
 import { prepareWrite, stampedRead, stampKey, type Lookup, type StampView, type Subject } from './stamp.js'
 
 /** Kernel mode format; the channel prefix is enforced per handle. */
@@ -22,6 +22,8 @@ export interface IntegratorAdapter {
   /** Address, or address plus a stamp derived from the executing session (never from the model). */
   resolveCaller(agent: Agent): string | { address: string; stamp?: Ext } | undefined
   holds(address: string): boolean
+  /** Synchronous, in-memory: does this integrator own the ordinary session? Enables `actAs` and `disposeRequest` for session-authored requests. */
+  owns?(sessionId: string): boolean
   /** Synchronous, in-memory: may a stamped caller see this subject? Enables projection and write-target checks. */
   visible?(stamp: Ext, subject: Subject, lookup: Lookup): boolean
   /** Allowed `to` values for stamped callers' messages. */
@@ -32,6 +34,13 @@ export interface IntegratorAdapter {
 export type SessionModeHandler = (sessionId: string, pointer: Pointer) => void | Promise<void>
 export type Exec = { agent?: Agent }
 export type HandleResult<T> = T | { error: { code: string; details?: Record<string, unknown> } }
+/** Closed operation set for `actAs`; `allowManager` is limited to the handle's own channel. */
+export type ActAsOp =
+  | { op: 'createSpace'; input: { name: string; purpose?: string } }
+  | { op: 'allowManager'; input: { channel: string } }
+  | { op: 'invite'; input: { name: string; address: string } }
+  | { op: MemberOp; input: any }
+  | { op: 'read'; input: { view: 'overview' | 'since'; sinceSeq?: number } }
 type MemberOp = 'createItem' | 'reviseItem' | 'ackItem' | 'sendMessage' | 'setStatus' | 'advanceRequest'
 export interface IntegrationHandle {
   admit(spaceId: string, cmdId: string, input: { name: string; address: string }): Promise<HandleResult<CommandResult>>
@@ -41,6 +50,8 @@ export interface IntegrationHandle {
   disposeRequest(spaceId: string, cmdId: string, input: { itemId: string; progress: Progress }): Promise<HandleResult<CommandResult>>
   /** Every commit record of a space that granted this channel; otherwise COLLAB_SPACE_UNAVAILABLE. */
   readManaged(spaceId: string): Promise<HandleResult<CommitRecord[]>>
+  /** Run a closed command as an ordinary session this adapter `owns`; refused with COLLAB_CALLER_UNAVAILABLE otherwise. */
+  actAs(sessionId: string, spaceId: string, cmdId: string, op: ActAsOp): Promise<HandleResult<any>>
   command(exec: Exec, spaceId: string, cmdId: string, op: { op: MemberOp; input: any }): Promise<HandleResult<CommandResult>>
   read(exec: Exec, spaceId: string, view: 'overview' | 'since', sinceSeq?: number): Promise<HandleResult<unknown>>
   /** Create (or reuse) a space as the ordinary session in `exec` and grant this handle's channel. */
@@ -63,6 +74,8 @@ const MEMBER_OPS: Readonly<Record<string, (service: CollabService, ctx: CommandC
   setStatus: (s: CollabService, c: CommandContext, i: any) => s.setStatus(c, i),
   advanceRequest: (s: CollabService, c: CommandContext, i: any) => s.advanceRequest(c, i),
 }))
+
+const ACT_AS_OPS: ReadonlySet<string> = new Set(['createSpace', 'allowManager', 'invite', 'read'])
 
 /** establish outcomes that mean "the caller is not this space's Leader". */
 const NOT_LEADER: ReadonlySet<string> = new Set(['COLLAB_FORBIDDEN', 'COLLAB_NOT_MEMBER', 'COLLAB_MEMBER_INACTIVE', 'COLLAB_SPACE_CLOSED'])
@@ -191,10 +204,54 @@ export class Integrations {
         return { error: safeError(error) }
       }
     }
+    /** Call as an owned ordinary session; owns is re-read at the kernel boundary through the guard. */
+    const asOwned = async <T>(sessionId: string, run: (host: CollabHost, caller: Caller) => Promise<T>): Promise<HandleResult<T>> => {
+      if (!this.isCurrent(owner)) return detached
+      try {
+        const owns = owner.adapter.owns
+        if (typeof owns !== 'function') throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+        const caller = await this.access!.owned(sessionId, id => owns.call(owner.adapter, id))
+        const scoped: Caller = { ...caller, guard: () => this.isCurrent(owner) && caller.guard() }
+        return await run(ready(), scoped)
+      } catch (error) {
+        if (!this.isCurrent(owner)) return detached
+        if (error instanceof CollabError && error.code === 'COLLAB_CALLER_STALE') return { error: { code: 'COLLAB_CALLER_UNAVAILABLE' } }
+        return { error: safeError(error) }
+      }
+    }
     const handle: IntegrationHandle = {
       admit: (spaceId, cmdId, input) => managed(spaceId, cmdId, input?.address, (s, c) => s.admitMember(c, { name: input.name, address: input.address })),
       rebind: (spaceId, cmdId, input) => managed(spaceId, cmdId, input?.address, (s, c) => s.rebindMember(c, { member: input.member, address: input.address })),
       retire: (spaceId, cmdId, input) => managed(spaceId, cmdId, undefined, (s, c) => s.retireMember(c, { member: input.member })),
+      actAs: async (sessionId, spaceId, cmdId, op) => {
+        if (!this.isCurrent(owner)) return detached
+        const name = op && typeof op === 'object' ? op.op : undefined
+        const input = op?.input
+        const bad = { error: { code: 'COLLAB_BAD_ARGUMENTS' } }
+        if (typeof name !== 'string' || typeof cmdId !== 'string' || !input || typeof input !== 'object' || Array.isArray(input)) return bad
+        const member = MEMBER_OPS[name]
+        if (!member && !ACT_AS_OPS.has(name)) return bad
+        if (name === 'allowManager' && input.channel !== owner.channel) return bad
+        if (name === 'read' && input.view !== 'overview' && input.view !== 'since') return bad
+        if (name === 'sendMessage' && input.mode !== undefined && (typeof input.mode !== 'string' || !input.mode.startsWith(`${owner.channel}:`))) return { error: { code: 'COLLAB_BAD_MODE' } }
+        return asOwned(sessionId, async (host, caller) => {
+          if (name === 'read') {
+            const ctx = host.context(caller, spaceId)
+            const value = await host.read<unknown>(ctx, spaceId, service => input.view === 'overview' ? service.overview(ctx) : service.readSince(ctx, input.sinceSeq ?? 0))
+            if (!caller.guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+            return JSON.parse(JSON.stringify(value))
+          }
+          const ctx = host.context(caller, spaceId, cmdId)
+          const result = await host.command(caller, spaceId, cmdId, service => {
+            if (member) return member(service, ctx, input)
+            if (name === 'createSpace') return service.createSpace(ctx, { name: input.name, address: sessionId, kind: 'agent', ...(input.purpose === undefined ? {} : { purpose: input.purpose }) })
+            if (name === 'allowManager') return service.allowManager(ctx, { channel: owner.channel })
+            return service.invite(ctx, { name: input.name, address: input.address, kind: 'agent' })
+          })
+          const plain = JSON.parse(JSON.stringify(result))
+          return name === 'invite' && this.access!.policy.memberTrust === true ? { ...plain, autoJoined: await autoJoin(host, this.access!, spaceId, input.address) } : plain
+        })
+      },
       command: async (exec, spaceId, cmdId, op) => {
         if (!this.isCurrent(owner)) return detached
         const name = op && typeof op === 'object' ? op.op : undefined
@@ -220,7 +277,11 @@ export class Integrations {
           return JSON.parse(JSON.stringify(value))
         })
       },
-      disposeRequest: (spaceId, cmdId, input) => managed(spaceId, cmdId, undefined, (s, c) => s.disposeManagedRequest(c, { itemId: input?.itemId, progress: input?.progress })),
+      disposeRequest: (spaceId, cmdId, input) => managed(spaceId, cmdId, undefined, (s, c) => {
+        const owns = owner.adapter.owns
+        const authorOwned = typeof owns === 'function' ? (address: string) => owns.call(owner.adapter, address) === true : undefined
+        return s.disposeManagedRequest(authorOwned ? { ...c, authorOwned } : c, { itemId: input?.itemId, progress: input?.progress })
+      }),
       readManaged: async spaceId => {
         if (!this.isCurrent(owner)) return detached
         const unavailable = { error: { code: 'COLLAB_SPACE_UNAVAILABLE' } }

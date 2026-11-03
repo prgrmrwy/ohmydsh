@@ -208,7 +208,7 @@ describe('接入方经句柄托管成员', () => {
   it('handle-05：句柄没有 Leader 能力', () => world(async host => {
     await start(host, MANAGED)
     const handle = service(host).attach('pet-locus', scriptedAdapter().adapter)
-    expect(Object.keys(handle).sort()).toEqual(['admit', 'command', 'dispose', 'disposeRequest', 'establish', 'read', 'readManaged', 'rebind', 'registerSessionMode', 'retire'])
+    expect(Object.keys(handle).sort()).toEqual(['actAs', 'admit', 'command', 'dispose', 'disposeRequest', 'establish', 'read', 'readManaged', 'rebind', 'registerSessionMode', 'retire'])
     for (const name of ['allowManager', 'revokeManager', 'invite', 'markGone', 'transferLeader', 'closeSpace']) expect(name in handle).toBe(false)
     expect(Object.keys(service(host)).sort()).toEqual(['attach'])
   }))

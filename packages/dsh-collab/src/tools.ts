@@ -123,7 +123,7 @@ export const AUTO_JOIN_CMD_ID = 'dsh-collab:auto-join'
  * invitee it just claimed (Host-vouched identity; never a model-chosen address
  * beyond the invite target). Failure leaves the invite as is.
  */
-async function autoJoin(host: CollabHost, access: SessionAccess, spaceId: string, address: string): Promise<boolean> {
+export async function autoJoin(host: CollabHost, access: SessionAccess, spaceId: string, address: string): Promise<boolean> {
   // A replayed invite may name a session that has since lost admission.
   if (typeof address !== 'string' || !access.admissible(address)) return false
   try {
