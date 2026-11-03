@@ -11,7 +11,7 @@
  *
  * @module dsh-memex/host/channel
  */
-import { existsSync, readdirSync, type Dirent } from 'node:fs'
+import { existsSync, readdirSync, rmSync, type Dirent } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
@@ -39,6 +39,7 @@ import {
 import type { BrowseRegistry } from '../run/browse-registry.js'
 import { mapConcurrent } from '../run/concurrency.js'
 import { installedKernelVersion, runKernel } from '../run/kernel.js'
+import { assertLibraryTarget, assertRetirable, moveLibrary, normalizeLibraryPath } from '../scope/library-move.js'
 import { parseSyncStatus } from '../run/sync-status.js'
 import { KERNEL_VERSION } from '../tools/descriptions.generated.js'
 import type { OffSource, ScopeConfig, ScopeResolution, ScopeService } from '../scope/types.js'
@@ -137,6 +138,14 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
   const runner = options.runner ?? runKernel
   const probeVersion = options.installedVersion ?? installedKernelVersion
   const namespaceDir = options.namespaceDir ?? join(process.env.HOME ?? '', '.dsh-memex')
+  /**
+   * Libraries moved in this Host's lifetime but not yet retired.
+   *
+   * A move is two steps: copy + kernel work (here), then the page persists the
+   * new home, then the old directory may be deleted. Only a directory named here
+   * — and only once the configuration points at its target — is ever deleted.
+   */
+  const pendingRetire = new Map<string, { readonly from: string; readonly to: string }>()
 
   /** Sample one library's sync state; a failure degrades that row only. */
   const sampleSync = async (resolution: ScopeResolution): Promise<MemexStoreSync> => {
@@ -328,21 +337,62 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
     }
   }
 
+  /** Turn one kernel result into the channel's answer shape. */
+  const remoteAnswer = (result: { readonly ok: boolean; readonly stdout: string; readonly stderr: string; readonly exitCode: number }, args: readonly string[]): MemexRemoteResult => {
+    const output = summarize(result.stdout)
+    if (result.ok) return { status: 'ok', ...(output !== undefined ? { output } : {}) }
+    return {
+      status: 'failed',
+      ...(output !== undefined ? { output } : {}),
+      message: summarize(result.stderr) ?? `memex ${args.join(' ')} failed (exit ${result.exitCode})`,
+    }
+  }
+
+  /**
+   * Delete a moved library's old directory, once the configuration proves the move.
+   *
+   * The page persists the new home between the move and this call, so the check
+   * here is what makes the deletion safe: the scope must now resolve to the move's
+   * target, and the directory must be one this Host itself just moved.
+   */
+  const retireLibrary = (scope: string): MemexRemoteResult => {
+    const pending = pendingRetire.get(scope)
+    if (pending === undefined) throw new Error(`no move is pending for ${scope}`)
+    // The move may have renamed the library, so the proof is that *some* scope now
+    // resolves to the target directory — not that this name still exists.
+    const homes = options.scopes.list().map(resolution => normalizeLibraryPath(resolution.home))
+    if (!homes.includes(pending.to)) {
+      throw new Error(`refusing to delete ${pending.from}: no library resolves to ${pending.to} yet`)
+    }
+    assertRetirable(pending.from, options.scopes.list().map(resolution => resolution.home))
+    rmSync(pending.from, { recursive: true, force: true })
+    pendingRetire.delete(scope)
+    return { status: 'ok', output: `retired ${pending.from}` }
+  }
+
   const runRemote = async (params: unknown): Promise<MemexRemoteResult> => {
     const request = params as MemexRemoteRequest | undefined
     if (request === undefined || typeof request.scope !== 'string') throw new Error('remote requires a scope')
-    const args = actionArgs(request)
     // resolveByName is pure: an unknown scope is answered, not materialized.
     const target = options.scopes.resolveByName(request.scope)
-    const result = await runner(args, { home: target.home, requireCards: false, timeoutMs: 120_000 })
-    if (result.ok) {
-      return { status: 'ok', ...(summarize(result.stdout) !== undefined ? { output: summarize(result.stdout)! } : {}) }
+    if (request.action === 'retire') return retireLibrary(request.scope)
+
+    const requested = request.home?.trim() ?? ''
+    if (requested === '') {
+      const args = actionArgs(request)
+      return remoteAnswer(await runner(args, { home: target.home, requireCards: false, timeoutMs: 120_000 }), args)
     }
-    return {
-      status: 'failed',
-      ...(summarize(result.stdout) !== undefined ? { output: summarize(result.stdout)! } : {}),
-      message: summarize(result.stderr) ?? `memex ${args.join(' ')} failed (exit ${result.exitCode})`,
-    }
+
+    // Move first, then let the kernel work in the new directory: a failure on
+    // either side leaves the old library in place and unregistered for retirement.
+    assertLibraryTarget(target.home, requested)
+    const report = moveLibrary(target.home, requested)
+    const args = request.action === 'init' && (request.url?.trim() ?? '') !== '' ? actionArgs(request) : ['sync']
+    const result = await runner(args, { home: report.to, requireCards: false, timeoutMs: 120_000 })
+    const answer = remoteAnswer(result, args)
+    if (answer.status !== 'ok') return answer
+    pendingRetire.set(request.scope, { from: report.from, to: report.to })
+    return { ...answer, moved: { from: report.from, to: report.to } }
   }
 
   ctx.inject(['connection'], child => {
