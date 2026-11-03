@@ -25,10 +25,12 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/cli
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   MEMEX_CHANNEL,
+  MEMEX_DELETE_ENDPOINT,
   MEMEX_REMOTE_ENDPOINT,
   MEMEX_RESOLVE_ENDPOINT,
   MEMEX_STORES_ENDPOINT,
   MEMEX_WORKSPACES_ENDPOINT,
+  type MemexDeleteResult,
   type MemexRemoteAction,
   type MemexRemoteResult,
   type MemexResolveResult,
@@ -153,6 +155,8 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   const [homeDraft, setHomeDraft] = useState('')
   /** New library name typed into the remote block; empty keeps the current one. */
   const [nameDraft, setNameDraft] = useState('')
+  /** Undeclared library awaiting a delete confirmation, by scope name. */
+  const [deleting, setDeleting] = useState<string | undefined>(undefined)
   const [copied, setCopied] = useState<string | undefined>(undefined)
   const [probePath, setProbePath] = useState('')
   const [probeResult, setProbeResult] = useState<MemexResolveResult | undefined>(undefined)
@@ -371,6 +375,39 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       setBusy(undefined)
     }
   }, [rpc, t, loadStores])
+
+  /**
+   * Delete one undeclared library after the user has seen its absolute path.
+   *
+   * The page never guesses what to remove: the Host only accepts a discovered
+   * library under the namespace that no entry declares, and the confirmation line
+   * shows exactly the directory and how many cards it holds.
+   */
+  const runDelete = useCallback(async (scopeName: string): Promise<void> => {
+    setBusy(`${scopeName}:delete`)
+    setNotice(undefined)
+    try {
+      const response = (await rpc.call(MEMEX_CHANNEL, MEMEX_DELETE_ENDPOINT, { scope: scopeName })) as
+        { ok?: boolean; value?: MemexDeleteResult; error?: { message?: string } }
+      if (response.ok !== true || response.value === undefined) {
+        setNotice({ kind: 'error', text: response.error?.message ?? t('deleteFailed') })
+        return
+      }
+      const outcome = response.value
+      if (outcome.status !== 'ok') {
+        setNotice({ kind: 'error', text: outcome.message ?? t('deleteRefused') })
+        return
+      }
+      setDeleting(undefined)
+      setNotice({ kind: 'ok', text: `${t('deleteDone')} ${outcome.home ?? ''}` })
+      await loadStores()
+      await loadWorkspaces()
+    } catch (error) {
+      setNotice({ kind: 'error', text: messageOf(error) })
+    } finally {
+      setBusy(undefined)
+    }
+  }, [rpc, t, loadStores, loadWorkspaces])
 
   /**
    * Write the scope table (and the path declarations) to the Host.
@@ -1151,8 +1188,43 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
               >
                 {t('actionDeclare')}
               </button>
+              {/* Deleting a library is the one destructive action here: the
+                  confirmation spells out the absolute directory (and its cards)
+                  so the click is on a path the user has actually seen. */}
+              {deleting === store.scope
+                ? (
+                  <button
+                    type="button"
+                    className="dshmx-act dshmx-act-inline dshmx-danger"
+                    disabled={busy !== undefined}
+                    onClick={() => void runDelete(store.scope)}
+                  >
+                    {t('actionDeleteConfirm')}
+                  </button>
+                )
+                : (
+                  <button
+                    type="button"
+                    className="dshmx-act dshmx-act-inline"
+                    disabled={busy !== undefined}
+                    onClick={() => setDeleting(store.scope)}
+                  >
+                    {t('actionDelete')}
+                  </button>
+                )}
             </div>
           ))}
+          {deleting !== undefined && (
+            <div className="dshmx-line dshmx-danger-line">
+              <span className="dshmx-note">
+                {`${t('deleteConfirm')} ${undeclared.find(store => store.scope === deleting)?.home ?? ''}`}
+                {undeclared.find(store => store.scope === deleting)?.cards !== undefined
+                  ? ` — ${String(undeclared.find(store => store.scope === deleting)?.cards)} ${t('deleteCards')}`
+                  : ''}
+              </span>
+              <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => setDeleting(undefined)}>{t('actionCancel')}</button>
+            </div>
+          )}
         </div>
       )}
 

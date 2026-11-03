@@ -89,6 +89,13 @@ export type MemexKey =
   | 'namePlaceholder'
   | 'actionUseSuggestedName'
   | 'renameHint'
+  | 'actionDelete'
+  | 'actionDeleteConfirm'
+  | 'deleteConfirm'
+  | 'deleteCards'
+  | 'deleteDone'
+  | 'deleteFailed'
+  | 'deleteRefused'
   | 'conflictHome'
   | 'conflictPattern'
   | 'conflictName'
@@ -233,6 +240,13 @@ export const en: Record<MemexKey, string> = {
   namePlaceholder: 'Library name (empty keeps the current one)',
   actionUseSuggestedName: 'Name it',
   renameHint: 'The library is renamed and keeps its current directory; use the directory field above to move the directory too.',
+  actionDelete: 'Delete',
+  actionDeleteConfirm: 'Delete for good',
+  deleteConfirm: 'Deleting this directory and every card in it:',
+  deleteCards: 'cards',
+  deleteDone: 'Library deleted:',
+  deleteFailed: 'Could not delete the library.',
+  deleteRefused: 'The Host refused to delete this library.',
   conflictHome: 'Two entries share one library path',
   conflictPattern: 'Two entries declare the same repository pattern',
   conflictName: 'Every entry needs a unique name',
@@ -378,6 +392,13 @@ export const zh: Record<MemexKey, string> = {
   namePlaceholder: '库名（留空保持当前名字）',
   actionUseSuggestedName: '按此命名',
   renameHint: '库会改名，目录保持不动；要一起搬目录，请在上面的目录输入里填新路径。',
+  actionDelete: '删除',
+  actionDeleteConfirm: '确认删除',
+  deleteConfirm: '将删除该目录及其中的全部卡片：',
+  deleteCards: '张卡片',
+  deleteDone: '已删除库：',
+  deleteFailed: '删除库失败。',
+  deleteRefused: '宿主拒绝删除这个库。',
   conflictHome: '两个条目共用了同一个库路径',
   conflictPattern: '两个条目声明了同一个仓库模式',
   conflictName: '每个条目的名称必须唯一',

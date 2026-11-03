@@ -18,11 +18,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import {
   MEMEX_BROWSE_ENDPOINT,
   MEMEX_CHANNEL,
+  MEMEX_DELETE_ENDPOINT,
   MEMEX_REMOTE_ENDPOINT,
   MEMEX_RESOLVE_ENDPOINT,
   MEMEX_STORES_ENDPOINT,
   MEMEX_WORKSPACES_ENDPOINT,
   type MemexBrowseRequest,
+  type MemexDeleteRequest,
+  type MemexDeleteResult,
   type MemexBrowseResult,
   type MemexKernelView,
   type MemexOffSource,
@@ -337,6 +340,49 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
     }
   }
 
+  /**
+   * Delete one library no configured entry declares.
+   *
+   * Deleting a directory is the only irreversible thing this channel can do, so
+   * the proof is narrow: the name must be a *discovered* library — a directory
+   * under the namespace carrying cards and no declaring entry — and its home must
+   * be exactly `<namespace>/<name>`. A library the configuration knows about, or
+   * one some workspace resolves to, is refused even when it looks unused.
+   */
+  const runDelete = (params: unknown): MemexDeleteResult => {
+    const request = params as MemexDeleteRequest | undefined
+    if (request === undefined || typeof request.scope !== 'string' || request.scope.trim() === '') {
+      throw new Error('delete requires a scope')
+    }
+    const scope = request.scope.trim()
+    const target = options.scopes.resolveByName(scope)
+    const cards = countMarkdownFiles(join(target.home, 'cards'))
+    const refuse = (reason: NonNullable<MemexDeleteResult['reason']>, message: string): MemexDeleteResult =>
+      ({ status: 'refused', home: target.home, cards, reason, message })
+    if (options.config().scopes.some(entry => entry.name === scope)) {
+      return refuse('declared', `${scope} is declared in the configuration; remove the entry instead of deleting its cards.`)
+    }
+    if (target.source !== 'discovered') {
+      return refuse('not-discovered', `${scope} is not an undeclared library under the namespace, so it cannot be deleted here.`)
+    }
+    const namespace = normalizeLibraryPath(namespaceDir)
+    const expected = join(namespace, scope)
+    if (normalizeLibraryPath(target.home) !== expected) {
+      return refuse('outside-namespace', `${target.home} is not the namespace directory for ${scope}.`)
+    }
+    const inUse = options.scopes.list().filter(resolution =>
+      resolution.scope !== scope && normalizeLibraryPath(resolution.home) === expected)
+    if (inUse.length > 0) {
+      return refuse('busy', `${inUse.map(resolution => resolution.scope).join(', ')} still resolves to ${expected}.`)
+    }
+    try {
+      rmSync(expected, { recursive: true, force: true })
+      return { status: 'ok', home: expected, cards }
+    } catch (error) {
+      return refuse('failed', error instanceof Error ? error.message : String(error))
+    }
+  }
+
   /** Turn one kernel result into the channel's answer shape. */
   const remoteAnswer = (result: { readonly ok: boolean; readonly stdout: string; readonly stderr: string; readonly exitCode: number }, args: readonly string[]): MemexRemoteResult => {
     const output = summarize(result.stdout)
@@ -410,6 +456,7 @@ export function registerMemexChannel(ctx: Context, options: MemexChannelOptions)
           if (endpoint === MEMEX_RESOLVE_ENDPOINT) return { ok: true, value: resolvePath(params) }
           if (endpoint === MEMEX_WORKSPACES_ENDPOINT) return { ok: true, value: listWorkspaces() }
           if (endpoint === MEMEX_REMOTE_ENDPOINT) return { ok: true, value: await runRemote(params) }
+          if (endpoint === MEMEX_DELETE_ENDPOINT) return { ok: true, value: runDelete(params) }
           if (endpoint === MEMEX_BROWSE_ENDPOINT) return { ok: true, value: await runBrowse(params) }
           return fail(`unknown endpoint "${endpoint}"`)
         } catch (error) {

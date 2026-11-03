@@ -4,6 +4,14 @@
 
 （无）
 
+## 0.4.7 — 2026-11-04
+
+- **「未在配置中的库」可删除**：清单每行新增「删除」，点击进入确认态，确认行显示该库的**绝对路径**与卡片数，再点「确认删除」才执行。
+- **删除范围由宿主限定**：只接受「命名空间下、有 cards、且没有任何配置条目声明」的发现型库，且 home 必须恰好是 `<命名空间>/<名字>`；已声明的库、派生路由、命名空间外的路径、仍被其它 scope 解析到的目录一律拒绝并说明原因。页面只传名字，不传路径。
+- 新增 `delete` 端点（`src/contract.ts`、`src/host/channel.ts` 的 `runDelete`）、清单确认交互（`page.tsx`/`locales.ts`/`styles.ts`）与 `test/channel-delete.test.ts`。
+- 对应 openspec change `dsh-memex-delete-undeclared-library`。
+- 回滚：`dsh.yaml` 退回 0.4.6 → `node scripts/sync.mjs` → 重启。
+
 ## 0.4.6 — 2026-11-04
 
 - **配置远端时可按远端仓库改名**：远端区块新增库名输入（留空保持当前名字），并按远端 URL 给出建议名（取仓库名，若已被其它条目占用则用 `owner-repo`）；也可一键填入。改名会钉住当前目录，卡片不受影响。
