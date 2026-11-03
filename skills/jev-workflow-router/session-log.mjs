@@ -15,11 +15,9 @@
 //     success — a 996 KiB log decoded to 218 bytes, silently. Anything that
 //     treats "decompression returned" as "whole log read" is wrong.
 //
-// So frames are located by the zstd magic number and decoded one at a time, and
-// the concatenation is the log text. A candidate boundary that does not decode
-// is treated as not-a-frame (the magic can occur inside compressed data), and
-// the output must be non-empty and larger than any single frame for multi-frame
-// input — otherwise the decode is refused rather than reported as success.
+// Scan frame headers and blocks before decoding: magic bytes can occur inside
+// payloads, and some Node versions return partial plaintext for truncated frames.
+// Reject the whole log on corruption or truncation; never skip failed segments.
 //
 // Kept inside the skill directory on purpose: sync copies each skill directory
 // wholesale into `$DSH_HOME/skills/<id>/` (`scripts/sync.mjs`), so a deployed
@@ -75,45 +73,49 @@ export function findSessionLog({ dshHome, sessionId }) {
 }
 
 /**
- * Split a multi-frame zstd buffer into decoded chunks.
- *
- * Frames are found by magic number; any candidate whose bytes fail to decode is
- * skipped rather than trusted, because the four-byte sequence can appear inside
- * compressed payload data. Returns the decoded chunks in order.
+ * Decode structurally complete standard zstd frames in file order.
+ * Reject corrupt or truncated frames, including any non-frame prefix/suffix.
  *
  * @param {Buffer} buffer
  * @returns {Buffer[]}
  */
 export function decodeZstdFrames(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) return []
-  const offsets = []
-  let index = buffer.indexOf(ZSTD_MAGIC)
-  while (index !== -1) {
-    offsets.push(index)
-    index = buffer.indexOf(ZSTD_MAGIC, index + ZSTD_MAGIC.length)
-  }
-  if (offsets.length === 0) return []
-
   const chunks = []
-  for (let position = 0; position < offsets.length; position += 1) {
-    const start = offsets[position]
-    const end = position + 1 < offsets.length ? offsets[position + 1] : buffer.length
-    try {
-      const decoded = zlib.zstdDecompressSync(buffer.subarray(start, end))
-      if (decoded.length > 0) chunks.push(decoded)
-    } catch {
-      // Not a real frame boundary; the magic occurred inside payload data.
+  let offset = 0
+  const advance = length => {
+    if (length > buffer.length - offset) throw new Error('Incomplete zstd frame')
+    offset += length
+  }
+  while (offset < buffer.length) {
+    const start = offset
+    advance(4)
+    if (!buffer.subarray(start, offset).equals(ZSTD_MAGIC)) throw new Error('Invalid zstd magic')
+    advance(1)
+    const descriptor = buffer[offset - 1]
+    if (descriptor & 0x18) throw new Error('Invalid zstd frame header')
+    const singleSegment = Boolean(descriptor & 0x20)
+    const contentSizeFlag = descriptor >>> 6
+    const dictionaryFlag = descriptor & 3
+    const dictionaryBytes = dictionaryFlag === 3 ? 4 : dictionaryFlag
+    const contentSizeBytes = contentSizeFlag === 0 ? (singleSegment ? 1 : 0) : 1 << contentSizeFlag
+    advance((singleSegment ? 0 : 1) + dictionaryBytes + contentSizeBytes)
+    for (;;) {
+      advance(3)
+      const block = buffer.readUIntLE(offset - 3, 3)
+      const type = (block >>> 1) & 3
+      if (type === 3) throw new Error('Invalid zstd block type')
+      advance(type === 1 ? 1 : block >>> 3)
+      if (block & 1) break
     }
+    if (descriptor & 4) advance(4)
+    chunks.push(zlib.zstdDecompressSync(buffer.subarray(start, offset)))
   }
   return chunks
 }
 
 /**
- * Decode a whole zstd buffer to text, tolerating multi-frame streams.
- *
- * The convenience APIs decode only the first frame. When more than one valid
- * frame exists, their result is shorter than the concatenated one and is
- * discarded; the caller never sees a silently truncated log.
+ * Decode every frame, or report decode-failed without returning a partial log.
  *
  * @param {Buffer} buffer
  * @returns {{ ok: true, text: string, frames: number } | { ok: false, reason: string }}
@@ -125,19 +127,7 @@ export function decodeZstdText(buffer) {
     }
     const chunks = decodeZstdFrames(buffer)
     if (chunks.length === 0) return { ok: false, reason: SESSION_LOG_REASONS.DECODE_FAILED }
-    const framed = Buffer.concat(chunks)
-    // Fast path: a single-frame stream needs no framing. Compare lengths so a
-    // multi-frame stream can never be reported as the (short) first frame.
-    let whole
-    try {
-      whole = zlib.zstdDecompressSync(buffer)
-    } catch {
-      whole = null
-    }
-    const text = whole !== null && whole.length >= framed.length
-      ? whole.toString('utf8')
-      : framed.toString('utf8')
-    return { ok: true, text, frames: chunks.length }
+    return { ok: true, text: Buffer.concat(chunks).toString('utf8'), frames: chunks.length }
   } catch {
     return { ok: false, reason: SESSION_LOG_REASONS.DECODE_FAILED }
   }

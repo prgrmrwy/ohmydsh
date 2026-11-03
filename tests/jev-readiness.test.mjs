@@ -98,6 +98,21 @@ test('readiness decodes every frame, not only the first', async t => {
   assert.equal(report.currentSession.routerSkill, true)
 })
 
+test('readiness refuses a corrupt middle frame instead of reporting tools from a partial log', async t => {
+  const fixture = await readinessFixture(t, { sessions: { 3: ['mcp__jev__jev_classify'] } })
+  const sessionFile = path.join(fixture.home, 'sessions', 'ws', 'session-1', 'session.v4.jsonl.zstd')
+  await writeFile(sessionFile, Buffer.concat([
+    encodeZstdFrames([JSON.stringify({ type: 'request/header', data: { header: { tools: [{ name: 'mcp__jev__jev_classify' }] } } }) + '\n']),
+    Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0xff]),
+    encodeZstdFrames(['{"type":"session"}\n']),
+  ]))
+  const { report } = runReadiness(fixture)
+  assert.equal(report.currentSession.available, false)
+  assert.equal(report.currentSession.reason, 'decode-failed')
+  assert.equal(report.currentSession.file, 'session.v4.jsonl.zstd')
+  assert.equal(Boolean(report.liveProbeReady), false)
+})
+
 test('readiness reports an actionable reason when the session cannot be read', async t => {
   // Missing session id, missing file, and corrupt log each get their own reason
   // instead of one opaque boolean, and none of them fail the probe.

@@ -143,7 +143,10 @@ Pet 用 `spawn()` 拉起 `lark-cli event consume` 订阅飞书消息。子进程
 ### 规则
 
 1. 解析会话事件前，先解出一份真实日志看结构。会话日志是多帧 zstd，
-   需逐帧解压（单次 `zstdDecompressSync` 只解第一帧，会误以为只有一行）。
+   需逐帧解压（单次 `zstdDecompressSync` 可能只解第一帧，会误以为只有一行）。
+   magic 可能出现在帧 payload 内，不能按每次出现直接切分。Jev 的共享读取器
+   `skills/jev-workflow-router/session-log.mjs` 按帧 header/block 结构定位后解压；
+   损坏、中间杂字节或未完成尾帧均返回 `decode-failed`，不跳过坏段拼成“完整日志”。
 2. 只取 `type === 'text'` 的部分；`reasoning` 与 `tool-call` 不得外发。
 3. 这类"结构推断"必须用真实样本写测试，否则测试只是把错误假设固化一遍。
 
