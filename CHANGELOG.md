@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5 — 2026-11-04
+
+- **重置卡截图与 README 小节。** 新增 `docs/reset-credits.png` / `docs/reset-credits.en.png`：codex 用量卡片展开「用量限制重置」，最早到期那张带「使用…」，到期时间右对齐、条目与标题文字对齐。中英 README 各加一节「使用一张重置卡／Spending a reset」说明入口与门槛，`screenshots.json` 与 `docs/SCREENSHOTS.md` 同步登记。
+- 两张图在隔离 DSH_HOME + 本机 loopback mock 网关上、以 DSF 3 截取 codex 卡片元素（534x219），界面文案与 0.6.4 一致。
+
 ## 0.6.4 — 2026-11-04
 
 - **文档修正（无代码变化）。** 中文 README 的「不支持」段还写着「插件不会调用账号管理或重置端点」，与 0.6.3 新增的使用重置卡能力矛盾，现已改为如实描述：用量卡片只读，使用 Codex 重置卡是唯一会写 Magpie 账号状态的操作。中英首屏也一并说清「可以从卡片使用重置卡」。

@@ -64,6 +64,12 @@ Need another method — custom headers, mTLS, another zero-trust gateway? **Issu
 | **Settings → Magpie** | Connection, advanced connection mode, per-provider model sections with visibility checkboxes and default effort selects, plus the usage cards for that provider; each line card also carries the read-only “Check line” snapshot and an “unconfigured” label, and the save result states the resulting active line. |
 | **Usage card refresh** | Each card has its own **Refresh**, which asks Magpie to re-read that one account. A cold gateway may return no cards at all; the connection panel then offers **Fetch models and usage**, which first re-synchronizes the catalog and then asks Magpie to read every account once. A restricted held key cannot initialize an empty cache — ask the Magpie administrator to read usage first. |
 
+### Spending a reset
+
+![Codex usage card with its reset credits expanded: the credit that expires first carries a "Use…" button, the others show only their expiry](docs/reset-credits.en.png)
+
+**Usage limit resets** folds out every credit the account holds. Only the credit that expires first carries **Use…**: it stays inert until the weekly window reaches 80%, and confirming spends that one after the two-step check. Expiry times are right-aligned and the rows line up with the section title.
+
 ### Behavior worth knowing
 
 - **Failed requests are retried by DSH, not replayed by the plugin.** The adapter declares the same `llm-retry` policy as `dsh-plugin-subscriptions` (10 attempts, exponential backoff from 1s to 60s, ±20% jitter, honoring `Retry-After`). `TIMEOUT`, `TRANSPORT`, `SERVER`, `RATE_LIMIT` and `EMPTY_RESPONSE` are retryable; 401/403, exhausted quota, context overflow and other 4xx are not.
