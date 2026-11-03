@@ -19,3 +19,4 @@
 
 - [x] 4.1 同步新增 integration requirements，保留其它 change 状态与原历史数据（两个 requirement 逐字核对，54 项 current specs 通过）
 - [x] 4.2 归档完成的本 change 并提交本地变更；不推送、不发布、不重启
+- [x] 4.3 从主 checkout 受管构建物化，第二次 no changes；核对部署 JS 与源构建 SHA-256 相同，不宣称当前进程已加载

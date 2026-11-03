@@ -24,4 +24,4 @@ Memex 固定自检当前依赖 Pet 提供的 Team 创建窗口修复，两个集
 - 涉及 `packages/dsh-memex/src/eval/judge-boundary.ts`、集成测试、开发依赖、README 和根 lockfile。
 - 不修改卡片、scope、冻结评分协议、历史轮次或模型默认值语义；不增加运行时 Pet/Team 依赖。
 - Pet 的通用 Team 修复仍由 Pet 自身使用方决定去留，本 change 不删除它；原 evaluation-harness change 保留独立状态。
-- 用户已于 2026-11-03 要求按正常流程正式解除依赖。本 change 范围为实现、离线验证与本地提交；不发布、不推送、不重启日常 Host。
+- 用户已于 2026-11-03 要求按正常流程正式解除依赖。本 change 范围为实现、离线验证、本地提交及按仓库流程受管构建物化；不发布、不推送、不重启日常 Host。

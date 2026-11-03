@@ -35,4 +35,6 @@
 
 本次使用本地 mock 模型和原有窄 MANUAL routing 服务夹具；未运行真实 provider、未声明覆盖 AUTO 算法或任意 Host 插件组合。原 live Connection 测试按既有条件跳过。普通 preset fixture 原有不加载用户 AGENTS/skills 的边界保持。
 
-未部署、未重启日常 Host，未升版发布或推送。日常 Host 当前仍可使用旧构建；这份结果证明本地提交的源码与测试已不再需要 Pet，不把源码完成等同部署完成。仓库全量 npm test 未在本次重跑；此前记录的两个无关失败不冒充修复。
+已从主 checkout 通过 `node bin/dsh.mjs build` 完成受管物化：首次 4 changes applied，第二次 no changes，退出码均为 0。已部署 judge-boundary.js 与源码构建产物 SHA-256 一致：`8ad653dd41cd6f89b60b089de61f06c7900d1c92c5c6194eda41f259f062f0a7`。本地证据另见 checking/deployment-summary.json。
+
+尚未重启日常 Host，未升版发布或推送。当前进程可能仍持有旧模块；不把磁盘产物已同步当运行中 Host 已加载新代码。仓库全量 npm test 未在本次重跑；此前记录的两个无关失败不冒充修复。

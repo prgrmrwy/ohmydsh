@@ -8,7 +8,7 @@ DSH pin 为 0.2.0-rc.2。Team 创建监听早于 subagent descriptor，可能在
 
 Goals：Memex 自持裁判隔离；测试默认使用官方依赖，支持显式外部 Host 图回归；严格边界与生命周期保持。
 
-Non-Goals：修复 Team roster、删除 Pet 自身补丁、改变评分协议/历史数据、移除 AUTO 的既有 MANUAL 服务契约、发版/推送/部署/重启。
+Non-Goals：修复 Team roster、删除 Pet 自身补丁、改变评分协议/历史数据、移除 AUTO 的既有 MANUAL 服务契约、发版/推送/重启。
 
 ## Decisions
 
@@ -27,7 +27,7 @@ Non-Goals：修复 Team roster、删除 Pet 自身补丁、改变评分协议/�
 
 ## Migration Plan
 
-先补测试并确认目标行为 RED，再落入局部隔离和独立依赖接线；验证全包、构建、typecheck、独立官方图和现有兼容图，完成整体评审与规范同步。本地提交不自动更新日常 Host。回滚可撤销此提交，历史轮次与库内容无需迁移。
+先补测试并确认目标行为 RED，再落入局部隔离和独立依赖接线；验证全包、构建、typecheck、独立官方图和现有兼容图，完成整体评审与规范同步。本地提交后按仓库流程从主 checkout 受管构建两次，更新部署产物并验证第二次无变更；运行中的日常 Host 等用户决定是否重启。回滚可撤销此提交再受管构建，历史轮次与库内容无需迁移。
 
 ## Open Questions
 
