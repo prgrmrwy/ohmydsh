@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const instructions = () => readFileSync(new URL('../instructions/dsh-home.md', import.meta.url), 'utf8')
-const skill = () => readFileSync(new URL('../packages/auto-model-routing/skills/subagent-model-routing/SKILL.md', import.meta.url), 'utf8')
+const skill = () => readFileSync(new URL('../packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md', import.meta.url), 'utf8')
 
 // auto-model-routing spec "环境级指令含派发规则且不含模型名": routing happens at creation; the preview is optional.
 test('dispatch_rules_present_without_model_names', () => {

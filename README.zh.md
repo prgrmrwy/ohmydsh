@@ -203,8 +203,8 @@ tests/                   仓库级测试
 - [dsh-openspec](packages/dsh-openspec/README.md) — 把官方 OpenSpec 工作流以 skill 与命令形式暴露的受管适配器。
 - [dsh-memex](packages/dsh-memex/README.md) — 原生持久记忆，按工作区隔离作用域，并提供记忆设置页。
 - [dsh-pet](packages/dsh-pet/README.md) — 常驻的桌宠 agent，在可信快照上运行管理类 skill。
-- [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — 在侧边栏每个会话行显示当前所选模型的品牌 logo。
-- [session-title-copy](packages/session-title-copy/README.md) — 在标题旁加一个短 session id 徽标，点击复制完整 id。
+- [dsh-sidebar-session-provider-icon](packages/dsh-sidebar-session-provider-icon/README.md) — 在侧边栏每个会话行显示当前所选模型的品牌 logo。
+- [dsh-session-id-copy](packages/dsh-session-id-copy/README.md) — 在标题旁加一个短 session id 徽标，点击复制完整 id。
 - [system-clock](packages/system-clock/README.md) — 在设置底部显示 DSH 主机的时钟、时区与 hostname。
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — 把当前会话的链接与产出文件汇总到侧栏面板。
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — 主机出口位于受限地区时，在输入框禁用 Claude 系列模型。
@@ -213,7 +213,7 @@ tests/                   仓库级测试
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
 - [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
-- [auto-model-routing](packages/auto-model-routing/README.md) — AUTO 下每回合请 Jev 决策模型判档，只调整推理强度；Jev 任何失败即停用 AUTO 并提示原因。[独立仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)。
+- [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — AUTO 下每回合请 Jev 决策模型判档，只调整推理强度；Jev 任何失败即停用 AUTO 并提示原因。[独立仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)。
 
 ### 自研 skill、preset 与 patch
 
@@ -227,7 +227,7 @@ tests/                   仓库级测试
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — 把远端插件加入 manifest、build，并在重启前询问。
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — 从 manifest 移除插件、build，并在重启前询问。
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
-- [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — 委派前调用 route_subagent 并显式传入模型与 effort；失败时暂停并询问用户。
+- [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — 委派前调用 route_subagent 并显式传入模型与 effort；失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
 - [memex-eval-config](patches/memex-eval-config.yml) — 添加固定自检目录的关闭声明，保留用户 scope 与工作区设置。

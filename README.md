@@ -203,8 +203,8 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-openspec](packages/dsh-openspec/README.md) — Managed adapter exposing the official OpenSpec workflows as skills and commands.
 - [dsh-memex](packages/dsh-memex/README.md) — Native persistent memory with per-workspace scopes and a memory settings page.
 - [dsh-pet](packages/dsh-pet/README.md) — A resident desktop companion agent that runs management skills on a trusted snapshot.
-- [sidebar-session-provider-icon](packages/sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
-- [session-title-copy](packages/session-title-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
+- [dsh-sidebar-session-provider-icon](packages/dsh-sidebar-session-provider-icon/README.md) — Shows the selected model's brand logo on every sidebar session row.
+- [dsh-session-id-copy](packages/dsh-session-id-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
 - [system-clock](packages/system-clock/README.md) — Shows the DSH host's clock, time zone and hostname at the bottom of settings.
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
@@ -213,7 +213,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
 - [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
-- [auto-model-routing](packages/auto-model-routing/README.md) — In AUTO, asks the Jev decision model for each turn's tier and adjusts only reasoning effort; any Jev failure turns AUTO off and says why. [Standalone repository](https://github.com/prgrmrwy/dsh-auto-model-routing).
+- [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — In AUTO, asks the Jev decision model for each turn's tier and adjusts only reasoning effort; any Jev failure turns AUTO off and says why. [Standalone repository](https://github.com/prgrmrwy/dsh-auto-model-routing).
 
 ### Self-developed skills, preset and patch
 
@@ -227,7 +227,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
-- [subagent-model-routing](packages/auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
+- [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
 - [memex-eval-config](patches/memex-eval-config.yml) — Adds fixed selftest workspace closures without replacing user scope or workspace settings.

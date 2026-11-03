@@ -34,9 +34,9 @@ whenToUse: 用户要求发布/上架自研 DSH 插件、完善其发布资料或
 | 环节 | 真相源 |
 | --- | --- |
 | 主仓同步与自动打 tag | [mirror-release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/.github/workflows/mirror-release.yml) |
-| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/.github/workflows/release.yml) |
-| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/package.json) |
-| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/README.md) |
+| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/.github/workflows/release.yml) |
+| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/package.json) |
+| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/README.md) |
 | 本仓文档规则 | [文档治理测试](https://github.com/prgrmrwy/ohmydsh/blob/main/tests/repo-docs-governance.test.mjs) |
 
 复制 AUTO workflow 时必须替换包名等专属内容，不把 AUTO 的名称、描述或测试假定原样带入新插件。
@@ -227,7 +227,9 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 演示图语言（2026-10-30 起的要求）：Session ID Copy 已按要求分成两套（`docs/overview.png` 中文真实截图、`docs/overview.en.png` 英文 illustration），Sidebar 也已分成两套（中文 `overview.png`/`screenshot.png` + 英文 `overview.en.png`/`screenshot.en.png`，英文两图是 illustration，源与渲染命令随包）。
 
-**AUTO 与 Magpie 的英文图不能只靠「把 App 语言切到 English 再截一次」。** 2026-10-30 实测：在隔离实例里用 `--lang=en-US` 打开英文界面（General → Language 也是 English），Magpie 设置页仍然整页中文（「连接」「线路 1」「添加备用线路」「刷新模型列表」「默认 effort」「账号/计划/读取于」），因为这两个插件的前端文案是**硬编码中文、没有注册 `ctx.locale` 字典**（与 `system-clock` / `session-title-copy` 的做法不同）。所以顺序必须是：**先给插件 UI 本地化（新增 locale 字典 + `@deepseek-ai/dsh-client-locale` peer 依赖，随一个特性版本发出），再补英文图**。在这之前不要把这两者描述为「已按 §3」；它们的中文图仍可继续服务两个 README，但英文 README 会显示中文控件。2026-10-31 进展：**Magpie 已在 0.5.0 完成 UI 本地化**（`src/client/locales.ts` + `ctx.locale` + 中英字典，421 项测试通过，npm 0.5.0 经 OIDC 发布并回补 GitHub Release），英文 README 的两张英文图尚未补拍；AUTO 仍未本地化。回补 Release 时注意 Magpie 的旧 workflow 只匹配 `## <version>`（不接受日期后缀），已改成与 AUTO/Sidebar 一致的前缀匹配；改 workflow 本身不会重发已发布版本，用 `gh workflow run release --ref main` 在镜像仓回补即可（版本已存在会跳过 publish，只建 Release）。
+**改名镜像包的目录会让 mirror-release 的非快进保护触发。** `git subtree split` 以路径前缀为键，把 `packages/<dir>` 改名后重新 split 出的历史与镜像 `main` 无关，主仓的 mirror-release 会按设计以 `! [rejected] ... (fetch first)` 失败，镜像停在旧 commit、也不会打新 tag。2026-11-02 处理方式：给 `.github/workflows/mirror-release.yml` 的 `workflow_dispatch` 加 `force` 输入，`gh workflow run mirror-release.yml -f force=true` 一次性 `--force` 重写两个镜像的 `main`，随后由 tag 触发镜像自己的 release 流水线正常发版；常规 push 仍严格快进。镜像是一次生成物，重写其 main 历史可接受，历史 tag 保留原位。改名还要同步：镜像矩阵路径、issue 模板、根与 `packages/README` 的清单、`tests/repo-docs-governance.test.mjs` 的 tier/illustration 名单、`tests/workspace-lifecycle.test.mjs` 的 CLEAN_PACKAGES、`package-lock.json`（删掉旧路径的 `extraneous` 条目并重装 workspace 链接）。`openspec/changes/archive/**` 里的旧名字是历史证据，不改。
+
+**AUTO 与 Magpie 的英文图不能只靠「把 App 语言切到 English 再截一次」。** 2026-10-30 实测：在隔离实例里用 `--lang=en-US` 打开英文界面（General → Language 也是 English），Magpie 设置页仍然整页中文（「连接」「线路 1」「添加备用线路」「刷新模型列表」「默认 effort」「账号/计划/读取于」），因为这两个插件的前端文案是**硬编码中文、没有注册 `ctx.locale` 字典**（与 `system-clock` / `session-title-copy` 的做法不同）。所以顺序必须是：**先给插件 UI 本地化（新增 locale 字典 + `@deepseek-ai/dsh-client-locale` peer 依赖，随一个特性版本发出），再补英文图**。在这之前不要把这两者描述为「已按 §3」；它们的中文图仍可继续服务两个 README，但英文 README 会显示中文控件。2026-11-02 状态：**两者都已完成**——Magpie 0.5.0、AUTO 0.6.2 都带 `src/client/locales.ts`（zh/en 字典 + `ctx.locale` 绑定，未绑定时回退中文）+ `@deepseek-ai/dsh-client-locale` peer 依赖，并在隔离实例里实拍了两套英文图（`docs/*.en.png`，登记在各自 `screenshots.json` 与 `SCREENSHOTS.md`），英文 README 首屏已切到 `.en` 图。Magpie 的 `model-picker.en.png` 是在英文界面里**逐级点开 Model 子菜单**后截的（顶层按钮只显示当前模型，容易误判成「route 没注册」）。AUTO 的英文面板图需要可用的判断链路：用本地 mock 提供 System One `POST /api/alpha/decisions`（`{answers:{depth,capability}}`）+ 流式 `POST /v1/chat/completions`，并把 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 的 `decisionService.provider` 设为 `custom`、`defaultMode` 设为 `AUTO`；chip 在 `view` 未加载时是 disabled，点一下不一定生效，要轮询到 aria-label 含 `AUTO` 再继续。回补 Release 时注意 Magpie 的旧 workflow 只匹配 `## <version>`（不接受日期后缀），已改成与 AUTO/Sidebar 一致的前缀匹配；改 workflow 本身不会重发已发布版本，用 `gh workflow run release --ref main` 在镜像仓回补即可（版本已存在会跳过 publish，只建 Release）。
 
 同一次实测还确认了后续补图可复用的装置：隔离 `DSH_HOME` + 本机 loopback mock 网关（`/v1/models` 分组、`/v1/magpie/quotas/*` 用量卡）+ `MAGPIE_LINE_<8位大写ID>_API_KEY` 环境变量即可跑通完整设置页；浏览器必须用 `~/.agent-browser/browsers/chrome-156.*`（系统 `/usr/bin/chromium` 90 渲染 DSH Web 是空白页，不是代码问题）。
 
