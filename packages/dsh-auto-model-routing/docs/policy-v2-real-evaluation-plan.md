@@ -4,15 +4,15 @@
 
 ## 目的与门槛
 
-下一步不是直接部署，而是在独立评审修复后验证真实子模型质量、耗时与总开销。现有 10 个 Jev 分类样例不是执行任务基准，不能把其标签命中率当任务成功率。不得消耗剩余 Jev 授权来调用其它模型；2026-10-25 用户已授权以最小必要订阅调用验收并本地部署，不再按美元预算审批；仅经 Magpie。当前真实最小验收已完成，完整对照仍未完成，见 [实测记录](magpie-live-acceptance.md)。
+下一步不是直接部署，而是在独立评审修复后验证真实子模型质量、耗时与总开销。现有 10 个 Jev 分类样例不是执行任务基准，不能把其标签命中率当任务成功率。不得消耗剩余 Jev 授权来调用其它模型；2026-10-25 用户已授权以最小必要订阅调用验收并本地部署，不再按美元预算审批；仅经当时的自托管网关。当前真实最小验收已完成，完整对照仍未完成；该次验收记录已随 0.6.6 从发布文档中移除，原文可在 git 历史中检索。
 
 ## 已确认的执行入口（2026-10-25）
 
-用户明确本机网络约束：OpenRouter 仅用于 Jev；实际子模型先只经 Magpie（含其中的 GPT/Claude 等模型）。不调用本地 Claude，不调用本机 codex/subscriptions，也不使用 OpenRouter 执行模型。
+用户明确本机网络约束：OpenRouter 仅用于 Jev；实际子模型先只经当时配置的自托管网关（含其中的 GPT/Claude 等模型）。不调用本地 Claude，不调用本机 codex/subscriptions，也不使用 OpenRouter 执行模型。
 
-本机缓存显示 Magpie DSH provider ID 为 `dsh-magpie-connect`，model ID 例如 `claude/claude-haiku-5-5`、`codex/gpt-6-luna`。缓存只证明曾发现的目录，不证明当前在线可用或实际 effort 生效。
+本机缓存显示当时网关 provider 的 model ID 形如 `claude/claude-haiku-5-5`、`codex/gpt-6-luna`。缓存只证明曾发现的目录，不证明当前在线可用或实际 effort 生效。
 
-**接入进度**：policy-v2 已接入 `dsh-magpie-connect` 精确 provider/model；Claude/GPT 前缀识别能力家族，其他模型只允许显式选用并从当前目录读取 defaultEffort（两维显式时只验证）。没有自动能力槽时停止，不猜、不回退本地入口。旧策略目录不变；已绑定 Magpie 子会话切回 legacy 后仍使用独立目录恢复。190 项测试与 fake-adapter 官方工具全宿主恢复通过，尚未执行真实 Magpie 模型调用。网关插件是已配置模型入口，不修改其源码或上游。
+**接入进度**：policy-v2 已接入当时网关的精确 provider/model；Claude/GPT 前缀识别能力家族，其他模型只允许显式选用并从当前目录读取 defaultEffort（两维显式时只验证）。没有自动能力槽时停止，不猜、不回退本地入口。旧策略目录不变；已绑定子会话切回 legacy 后仍使用独立目录恢复。190 项测试与 fake-adapter 官方工具全宿主恢复通过，尚未执行真实网关模型调用。网关插件是已配置模型入口，不修改其源码或上游。
 
 ## 最小可执行方案
 

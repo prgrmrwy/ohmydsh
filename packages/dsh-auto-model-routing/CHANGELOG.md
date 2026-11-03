@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.6 — 2026-11-04
+
+- **UI and docs decoupled from Magpie.** The settings strategy copy now describes AUTO's provider behavior instead of one gateway (`Magpie` → `AUTO` in the EN/ZH dictionaries), and the READMEs no longer contain a Magpie transport section or Magpie-specific acceptance links. Routing logic never referenced Magpie — a package test enforces that model-family knowledge lives only in `src/strategies/` and that nothing else repeats family ids or prefix matching — so this is a copy/documentation release, not a routing change.
+- **Custom model families documented.** Both READMEs gain a "Custom model families" section: the five `FamilyStrategy` fields (`id`, `label`, `modelPrefixes`, `effortStarts`, `childModels`) and their constraints, the registry validation that rejects the whole plugin on conflicts, a worked example, and the build/verify/restart steps. It also states what a new family cannot change: provider, transport, fallback, the four effort levels, the `max` prohibition and the catalog/allowlist gates.
+- **Store screenshots regenerated on the current UI.** Both READMEs' demo images (four PNGs) were re-captured on a 0.6.6 build in an isolated host against a loopback mock decision service and a neutral loopback mock model provider (`demo`), in the matching English and Chinese interfaces, so the first screen no longer shows an old gateway provider id. Sources are registered in [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
+- **Residual gateway-specific history removed.** The Magpie-only live-acceptance report and its script are gone, and the two historical hand-over documents that still described that gateway integration were rewritten with neutral wording; the detailed acceptance facts remain in git history. Third-party routing research that analyses the external Magpie project is unchanged, since it is background research rather than AUTO's own integration.
+- **Docs corrected against the implementation.** Fork and other unbound children pass through untouched (only the preview reports fork as unsupported); the interface follows the DSH UI language since 0.6.0 rather than always showing Chinese; family strategies no longer list transport knowledge; the architecture links now point at the current historical reports.
+
 ## 0.6.5 — 2026-11-03
 
 - Jev 判断等待上限默认值改为 8000 ms（原 5000 ms）；允许范围仍为 1000–8000 ms，已显式保存的值保持不变。2026-10-30 实测约 1/20 的判断服务端耗时超过 5 s，而一次超时就会让整个会话停用 AUTO。

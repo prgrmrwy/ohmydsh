@@ -6,7 +6,7 @@ English · [简体中文](README.zh.md)
 
 ![Settings: decision service, compatible endpoint and a successful connection test](docs/settings.en.png)
 
-*Top: an applied AUTO decision with its effort distribution. Bottom: decision service settings with a successful connection test. Captured from an isolated DSH host (English UI) with a local mock decision service and mock model responses; endpoint, account and tasks are synthetic.*
+*Top: an applied AUTO decision with its effort distribution. Bottom: decision service settings with a successful connection test. Captured from an isolated DSH host with a loopback mock decision service and a loopback mock model provider; endpoint, account and tasks are synthetic.*
 
 ![AUTO architecture — independent judgments, validated requests and allocation feedback](docs/architecture-v2.en.svg)
 
@@ -22,11 +22,11 @@ English · [简体中文](README.zh.md)
 | Scenario | AUTO behavior | Current boundary |
 |---|---|---|
 | Main-agent user turn | Judge effort for each new user turn; keep the main model | Not rejudged at every tool step; model must support the effort |
-| Official fresh `subagent` | Select and bind child model + effort before its first request | Real Magpie Claude/GPT ordinary child calls verified; catalog and allowlist apply |
+| Official fresh `subagent` | Select and bind child model + effort before its first request | Ordinary Claude/GPT child calls verified against a live provider; catalog and allowlist apply |
 | Official fresh `spawn_teammate` | Bind the new teammate's model + effort using the same policy | Mock-host coverage; real-provider teammate acceptance remains unverified |
 | Resume or continue a bound child | Replay its initial allocation without rejudging | Requires the plugin enabled and intact route records |
 | Explicit model / effort | Preserve the specified dimension; judge only the other | Both specified: validate without calling Jev |
-| Fork, third-party or unbound creation paths | No automatic-allocation guarantee | Fork and unbound AUTO child paths are explicitly rejected, not silently replaced |
+| Fork, third-party or unbound creation paths | No automatic-allocation guarantee | Unbound children (including fork) pass through untouched; the preview reports fork as unsupported, and AUTO never silently substitutes a route |
 
 This describes official integration paths—not acceptance of every DSH entry point, CLI/TUI interface or third-party plugin. The Web UI is the currently verified interface. MANUAL makes no new judgments. `route_subagent` is a preview, not a required step before dispatch.
 
@@ -44,7 +44,7 @@ dsh plugin --profile web add dsh-auto-model-routing
 dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 ```
 
-Restart DSH and refresh the Web page. In **Settings → Auto model routing**, choose a decision service, save its API key, and use **Test connection** with a fixed public sample. These are English descriptions of the controls; the plugin's interface labels are currently in Chinese. New chats default to **MANUAL**; click the chip to use AUTO. The companion delegation skill is included—no separate skill installation is needed.
+Restart DSH and refresh the Web page. In **Settings → Auto model routing**, choose a decision service, save its API key, and use **Test connection** with a fixed public sample. These are English descriptions of the controls; since 0.6.0 the plugin's own labels follow the DSH UI language (Chinese or English). New chats default to **MANUAL**; click the chip to use AUTO. The companion delegation skill is included—no separate skill installation is needed.
 
 ## Use
 
@@ -57,12 +57,12 @@ Restart DSH and refresh the Web page. In **Settings → Auto model routing**, ch
 
 ### Main model stays fixed; children are selected separately
 
-- **Main chat:** `lower / baseline / higher` moves at most one supported effort step below/at/above the model's verified recommended starting point. The cap defaults to `xhigh`; AUTO never selects `max`. It keeps the main provider/model and synchronizes the selected effort through official `selectModel`, which also saves global defaults.
-- **Claude/GPT families only:** AUTO manages models whose id (after any transport prefix) starts with `claude-` or `gpt-`. Selecting any other main model — DeepSeek, GLM, Grok, Gemini, Kimi, Qwen, … — switches the session to MANUAL and locks the chip: it shows an outlined info icon, and hovering the whole button explains the support scope with an issue/PR link to the repository. Switching back to a Claude/GPT model restores a clickable MANUAL chip; AUTO is never re-enabled automatically.
-- **Fresh children:** capability is `bounded / analytical / frontier`; effort is judged separately. Claude slots are Haiku / Sonnet / Opus 5.5; GPT slots are Luna / Sol / Sol. The current catalog, supported efforts and official child allowlist must all permit the route. Magpie uses its exact provider and full family-prefixed model IDs, not a fallback to local transports.
+- **Main chat:** `lower / baseline / higher` moves at most one supported effort step below/at/above the model's verified recommended starting point. The cap defaults to `xhigh`; AUTO never selects `max`. It keeps the main provider/model and synchronizes the selected effort through official `selectModel`, which also saves global defaults. If that sync fails, the turn is logged and the request keeps the official effort; MANUAL requests pass through unchanged and bound children never write the main selection.
+- **Registered families only:** AUTO manages a main model only when its family has a registered strategy; `claude-` and `gpt-` ship built in, and the id is matched after any transport prefix. Selecting any other main model — DeepSeek, GLM, Grok, Gemini, Kimi, Qwen, … — switches the session to MANUAL and locks the chip: it shows an outlined info icon, and hovering the whole button explains the support scope with an issue/PR link to the repository. Switching back to a supported model restores a clickable MANUAL chip; AUTO is never re-enabled automatically. Adding a family is a data change, not an engine change: see [custom model families](#custom-model-families).
+- **Fresh children:** capability is `bounded / analytical / frontier`; effort is judged separately. Claude slots are Haiku / Sonnet / Opus 5.5; GPT slots are Luna / Sol / Sol. The current catalog, supported efforts and official child allowlist must all permit the route. Routes keep the parent's exact provider and full model ids, including any transport prefix; there is no fallback to another provider.
 - **Explicit choices win:** specifying a model or effort leaves only the other dimension to judge. Specifying both skips Jev and validates the route. Missing task scope stops delegation rather than guessing.
-- **Official creation binds the route:** fresh `subagent` and fresh `spawn_teammate` paths bind an exact child identity before its first request. `route_subagent` is an optional preview—not proof of application and not a user constraint to copy into a subsequent call. Fork and unbound creation paths are unsupported; there is no silent substitution.
-- **Resume keeps the initial route.** Switching the root to MANUAL stops new judgments; already bound children retain their initial route. `applied` means the actual request configuration matched, **not** that the task succeeded. Real Magpie Claude/GPT ordinary calls were tested; fresh teammate routing and cold resume have mock-host coverage, not real-provider teammate acceptance.
+- **Official creation binds the route:** fresh `subagent` and fresh `spawn_teammate` paths bind an exact child identity before its first request. `route_subagent` is an optional preview—not proof of application and not a user constraint to copy into a subsequent call; a MANUAL root session makes it return `routed: false` without judging or writing state. Fork and unbound creation paths are unsupported; there is no silent substitution.
+- **Resume keeps the initial route.** Switching the root to MANUAL stops new judgments; already bound children retain their initial route. `applied` means the actual request configuration matched, **not** that the task succeeded. Ordinary Claude/GPT child calls were tested against a live provider; fresh teammate routing and cold resume have mock-host coverage, not real-provider teammate acceptance.
 
 ### Choose the decision service
 
@@ -77,11 +77,38 @@ Preset model menus expose documented versions, not live availability guarantees.
 
 **Certainty is not the selected probability.** Choice certainty is `(pmax − 1/n) / (1 − 1/n)`: with three candidates, a 70% top probability gives 55% certainty. The panel shows the service's returned certainty and full candidate distribution separately, including returned zeroes; missing values are marked unavailable. Neither number is task success rate.
 
-### Magpie transports and picker display
+### Custom model families
 
-AUTO accepts both exact transports, `dsh-magpie-connector` and `dsh-magpie-connect`. They are not aliases: full model ids, live model capabilities, supported effort/caps, the current allowlist and the parent's captured allowlist all retain their exact transport identity. Families without a registered strategy need an explicit model and a verifiable effort. With a MANUAL root session the preview returns `routed: false` without judging or state writes. Already bound children replay their saved route.
+Everything AUTO knows about a model family is data in [`src/strategies/`](src/strategies/index.ts): one file per family plus the `BUILTIN_STRATEGIES` list. Adding DeepSeek, Qwen, Gemini or an in-house family means adding a strategy file and registering it; the engine has no family knowledge of its own and provider is never part of a strategy. AUTO also has no gateway-specific code or configuration, so it works on whatever provider the session already uses.
 
-AUTO applies the selected effort to the current main request and awaits official `selectModel` on the same provider/model when the effort changes. This also updates global defaults; the official picker shows one effort value. MANUAL requests pass through unchanged and bound children never write the main selection. A selection-sync failure is logged while the current request retains its selected effort. Magpie menu grouping still requires ohmydsh's managed five-package Host extension; stock rc.2 keeps a flat list. See [Magpie setup and display requirements](<../dsh-magpie-connector/README.md#model-menu-groups-and-effort>); local tests do not establish deployment or live GUI acceptance.
+| Field | Meaning and constraints |
+|---|---|
+| `id` | Unique family id. Child records and feedback snapshots store it and the usage report groups by it, so renaming an id makes those records unreadable (fail closed). |
+| `label` | Shown in the chip's lock tooltip and in the Settings strategy panel. |
+| `modelPrefixes` | Matched case-insensitively against the main model id after its last `/`, so a gateway's `family/` prefix is not part of the family name. A main model outside every family locks the session to MANUAL. |
+| `effortStarts` | Exact bare model id (case-sensitive) → `low`, `medium`, `high` or `xhigh` recommended starting point for the `lower / baseline / higher` offset and the cap. A model without a start uses the provider directory's default effort when that effort is supported too (the panel labels it "catalog default"); otherwise automatic effort is unavailable, so the main request keeps its own configuration and child routing follows its fallback chain. |
+| `childModels` | One bare model name per capability slot, `bounded` / `analytical` / `frontier`, with no `/`. A slot resolves only inside the parent's provider, only with the parent's transport prefix, and only when exactly one live catalog entry matches. |
+
+`createRegistry` validates the whole list once, when the plugin loads, and rejects the plugin instead of running with part of a family set: a missing or duplicate `id`; prefixes of different families overlapping case-insensitively; a start other than the four values; the same start key in two families; a missing capability slot; a slot containing `/`; any key outside the five fields above.
+
+To add a family, edit the package source — an ohmydsh checkout or your own fork — copying the shape of [`claude.ts`](src/strategies/claude.ts) or [`codex.ts`](src/strategies/codex.ts) (`deepseek-v5` below is a placeholder for an id your provider catalog really exposes):
+
+```ts
+// src/strategies/deepseek.ts
+import type { FamilyStrategy } from './types.js'
+
+export const deepseek = {
+  id: 'deepseek',
+  label: 'DeepSeek',
+  modelPrefixes: ['deepseek-'],
+  effortStarts: { 'deepseek-v5': 'medium' },
+  childModels: { bounded: 'deepseek-v5', analytical: 'deepseek-v5', frontier: 'deepseek-v5' },
+} as const satisfies FamilyStrategy
+```
+
+Then add it to `BUILTIN_STRATEGIES` in [`src/strategies/index.ts`](src/strategies/index.ts), run `npm test`, `npm run typecheck` and `npm run build`, and install the rebuilt package (`dsh build` in ohmydsh, or update the npm dependency) before restarting DSH and refreshing the page. The Settings strategy panel, the lock tooltip, child routing and the usage report all read this registry, so no other file needs family knowledge; the package test fails if built-in family ids or prefix comparisons are repeated outside `src/strategies/`.
+
+A new family changes which main models AUTO manages and which slot models child tasks may pick. It does not add a provider, transport or fallback: every route keeps the parent's provider and full model id, and is still checked against the live catalog, the four effort levels, the `max` prohibition, the official child allowlist and a captured parent allowlist. Explicit model/effort arguments are preserved or validated, never replaced. Family knowledge is build-time only: there is no Settings field, plugin settings file or hot reload for strategies.
 
 ## Good to know
 
@@ -99,7 +126,7 @@ AUTO applies the selected effort to the current main request and awaits official
 
 The diagram at the top shows the AUTO paths. Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
-Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, transports, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [real Magpie acceptance](docs/magpie-live-acceptance.md).
+Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [host capability report](docs/host-capability-report.md).
 
 ## Development
 
