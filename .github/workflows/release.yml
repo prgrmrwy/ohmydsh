@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: 'npm dist-tag to publish under (default: latest)'
+        required: false
+        default: latest
 
 permissions:
   contents: write
@@ -36,7 +41,9 @@ jobs:
           if node --input-type=module -e 'import fs from "node:fs"; const v=JSON.parse(fs.readFileSync(process.argv[2])); process.exit([v].flat().includes(process.argv[1]) ? 0 : 1)' "$version" "$published"; then
             echo "Version $version is already published; nothing to publish."
           else
-            npm publish --access public
+            # Explicit --tag keeps the normal default (latest) but allows deliberately
+            # publishing a lower version as latest after a mistaken higher release.
+            npm publish --access public --tag "${{ inputs.dist_tag || 'latest' }}"
           fi
       - name: Create GitHub Release with the published npm artifact
         env:
