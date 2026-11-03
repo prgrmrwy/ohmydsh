@@ -176,7 +176,9 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 **日常只在 ohmydsh 修改、验证、提交并推 main。** 不再手工同步镜像或手工打发布 tag。
 
-**版本号默认不动，只有决定发布时才升。** 日常改代码、文档、截图、测试都保持 `package.json` 的当前版本，也不同步改 manifest 的 `version`；只有在明确要发一个包时才升版本（新增能力按 minor，纯修复/文档按 patch），并在同一批提交里写 CHANGELOG、同步 manifest 与锁文件/版本 fixture。不要把"顺手升个版本"当成日常改动的收尾。
+**版本号默认不动，只有决定发布时才升。** 日常改代码、文档、截图、测试都保持 `package.json` 的当前版本，也不同步改 manifest 的 `version`；只有在明确要发一个包时才升版本，并在同一批提交里写 CHANGELOG、同步 manifest 与锁文件/版本 fixture。不要把"顺手升个版本"当成日常改动的收尾。
+
+**默认只升最后一位（patch）：`0.6.2 → 0.6.3`。** 新增能力、行为变化和纯修复一样走 patch；第二位（minor，`0.6.3 → 0.7.0`）和第一位（major）只有在用户明确要求时才动。用户说"发布"不等于要求 minor；拿不准就按 patch 升，不要用版本号表达"功能很大"。
 
 **升版和推 main 必须成对，否则会跳号。** mirror-release 只读取推送时的当前版本并打 tag；只合并、只做本机 `dsh build` 而不推 main 的版本不会产生 tag，也永远不会补发。多次合并不推、最后一次性推送时，中间版本会被跳过（实例：0.6.0、0.6.1 只在本地合并部署，推 main 时版本已是 0.6.2，npm 表现为 0.5.1 → 0.6.2）。所以决定发布时：升版 → 提交 → 立即 push main（或手动 dispatch mirror-release），不要攒。发现跳号时先核对镜像 tag 与 npm 再判断，不要回补旧版本 tag，也不要把跳号当成发布失败；CHANGELOG 保留所有条目，最新版包含全部改动。
 
@@ -194,7 +196,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 - [ ] 包自包含、元数据/许可齐全；README 按“操作/设置并排（PNG 代表性截图，无 GIF，中英文各用本语言界面图） → 小字左右图注 → Archify 架构图 → 问题一句话与特点 → 常规使用文档 → ohmydsh/协议/issue/PR”排序，演示与图均对应当前实现，资源与截图登记合规。
 - [ ] 主仓 mirror matrix/paths、每仓 deploy key、npm Trusted Publisher 配置齐全。
 - [ ] release workflow 同时覆盖 npm 和 GitHub Release，含版本校验、检查、重复运行与附件。
-- [ ] 需发布时才更新包版本、CHANGELOG、manifest、锁文件及 fixture；升版提交后立即 push main（或 dispatch mirror-release），避免中间版本未发布造成跳号。
+- [ ] 需发布时才更新包版本、CHANGELOG、manifest、锁文件及 fixture（默认 patch；minor 仅用户明确要求）；升版提交后立即 push main（或 dispatch mirror-release），避免中间版本未发布造成跳号。
 - [ ] 推 main 后两端 Actions 成功，registry 版本存在且可装，Release/tag/说明/附件一致。
 - [ ] 首次上架先本地校验条目，再提 PR；记录 CI/合并/商店展示状态。
 - [ ] 生产部署与 Host 重启另行处理（商店条目无需随发版更新）。
