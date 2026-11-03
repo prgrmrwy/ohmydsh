@@ -108,7 +108,7 @@ test('stale ignored paths beyond MAX_PATH are scrubbed without changing Git conf
 test('build.mjs consults the cache stamp before building and records it only after a successful build', () => {
   const builder = readFileSync(path.resolve(import.meta.dirname, '..', 'packages', 'dsh-pet', 'compat', 'subagent', 'build.mjs'), 'utf8')
   const prepare = builder.indexOf('prepareUpstreamCache(')
-  const apply = builder.indexOf("run('git', ['apply', modelDisplayPatchFile], checkout)")
+  const apply = builder.indexOf("run('git', ['apply', teamMembershipPatchFile], checkout)")
   const record = builder.indexOf('recordUpstreamCache(')
   const published = builder.indexOf("writeFileSync(join(destination, 'package.json')")
   assert.ok(prepare > 0 && apply > 0 && record > 0 && published > 0, 'all markers present')

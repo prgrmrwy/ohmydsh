@@ -40,4 +40,4 @@ npm run build --workspace dsh-system-clock       # tsc (host) + tsdown (client b
 npm test --workspace dsh-system-clock            # vitest: formatter / engine / host-time / wiring, no browser
 ```
 
-The build shape matches `dsh-session-title-copy`: tsdown emits a single-file client bundle and `tsc` emits the host ESM.
+The build shape matches `dsh-session-id-copy`: tsdown emits a single-file client bundle and `tsc` emits the host ESM.

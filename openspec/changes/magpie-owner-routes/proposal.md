@@ -33,6 +33,6 @@
 
 - 代码：`packages/dsh-magpie-connector/src/{index.ts,host/catalog.ts,host/adapter.ts,host/settings.ts,host/runtime.ts,client/SpeedSelect.ts}` 、`host/routes.ts`（设置写入队列下沉）及测试；README / README.zh / CHANGELOG / package.json；`dsh.yaml` 中本插件条目的版本与说明。
 - 已检查无需改动：`sidebar-session-provider-icon` 对 `dsh-magpie-connector-*` 经 `normalizeIdentity` 后按 `magpie-` 前缀识别为 Magpie（`packages/sidebar-session-provider-icon/src/client/logos.ts:50-63`）。
-- 受影响但不在本 change 修改：`packages/auto-model-routing/src/strategies/{claude,codex}.ts` 的 `transports`、`patches/home-network-model-guard-config.yml` 的 `exemptProviders`（见上「不在本期范围」）。
+- 受影响但不在本 change 修改：`packages/dsh-auto-model-routing/src/strategies/{claude,codex}.ts` 的 `transports`、`patches/home-network-model-guard-config.yml` 的 `exemptProviders`（见上「不在本期范围」）。
 - 依赖：本 change 的 `dsh-magpie-connector` delta 建立在 `magpie-dual-lines` 之上，应在其归档后再归档本 change。
 - 用户可见：选择器从一个 `Magpie` 组变为多个 `Magpie (<Owner>)` 组；旧会话选中的 `dsh-magpie-connector` 模型不再可用（宿主报 `NO_ADAPTER`），必须重选。

@@ -22,7 +22,7 @@
 公开仓库为 `prgrmrwy/dsh-auto-model-routing`；仅推已提交的 package 子树，保持历史并核对公开作者身份和历史敏感信息。包内不得保留指向 monorepo 外部的相对链接。镜像版本 tag 必须指向子树提交，不能把 monorepo 根提交误打到镜像。拒绝 submodule 和远端消费方案，避免引入第二套部署/开发生命周期。
 
 ### D2. bundle 注册包内 filesystem provider
-skill 放在 `packages/auto-model-routing/skills/subagent-model-routing/SKILL.md`，正文保持既有语义。bundle 在 insert 下新增具稳定 id 的 `@deepseek-ai/dsh-skill-filesystem` 行，配置唯一 providerName、`includeDefaultRoots:false`、包内 bundledSkillDir。利用已导出的 package.json 从 Loader 的 baseUrl 解析包路径，不拼接 cwd；补齐官方 provider 的 peer/dev 依赖。
+skill 放在 `packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md`，正文保持既有语义。bundle 在 insert 下新增具稳定 id 的 `@deepseek-ai/dsh-skill-filesystem` 行，配置唯一 providerName、`includeDefaultRoots:false`、包内 bundledSkillDir。利用已导出的 package.json 从 Loader 的 baseUrl 解析包路径，不拼接 cwd；补齐官方 provider 的 peer/dev 依赖。
 
 删除独立 manifest skill 行及根源码副本，并更新所有当前测试/索引引用，历史归档不批量重写。先验证 sync 的既有 ownership ledger 会撤销旧副本；如不成立，实施最小受管迁移，不用无条件 rm DSH_HOME 路径。migration 测试必须从旧版本受管部署出发，不能只测干净目录。
 

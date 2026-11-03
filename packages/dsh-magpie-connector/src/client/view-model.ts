@@ -5,10 +5,18 @@
  */
 import { t } from './locales.js'
 export interface CardWindow { name?: string; used?: number; resetsAt?: string; unlimited?: boolean; display?: string }
+/** One Codex-style reset credit: when it runs out and, counted by window, which window's. */
+export interface CardReset { until?: string; window?: string }
+/**
+ * A card's reset credits as the gateway tells them: the count, the soonest
+ * expiry, per-window counts for plans that hand out one kind each, and every
+ * credit still held (`each`, soonest first).
+ */
+export interface CardResets { count?: number; until?: string; byWindow?: boolean; fiveHour?: number; weekly?: number; each?: CardReset[] }
 export interface Card {
   provider: string; name?: string; icon?: string; user?: string; plan?: string; until?: string; renew?: string | boolean
   balance?: string | number; readAt?: string; asOf?: string; error?: string
-  windows?: CardWindow[]; resets?: { count?: number; until?: string }
+  windows?: CardWindow[]; resets?: CardResets
 }
 export type CardsStatus = 'ok' | 'forbidden' | 'error' | 'unconfigured'
 export interface CardsView { status: CardsStatus; error?: string; cards: Card[] }
@@ -33,6 +41,10 @@ export interface SettingsView {
   routeRegistrationError?: { code: string; route?: string }
   /** knownOwners was invalid at load and reset to empty (spec 归属 route 持久). */
   knownOwnersReset?: boolean
+  /** Host-persisted sidebar usage card preference (absent = false). */
+  sidebarUsage?: boolean
+  /** Sidebar auto-refresh interval in minutes (absent = 5, 0 = off). */
+  sidebarRefreshMinutes?: number
   /** The owner cap (32) rejected new owners; `rejectedOwners` lists them. */
   ownerLimitReached?: boolean; rejectedOwners?: string[]
 }
@@ -95,6 +107,20 @@ export function parseCards(body: unknown, httpStatus: number): CardsView {
 export function formatTime(raw: string): string {
   const time = Date.parse(raw)
   return Number.isNaN(time) ? raw : new Date(time).toLocaleString()
+}
+
+/**
+ * How far a reset credit's expiry still is, as "in N days" / "in N hours" /
+ * "expired". Undefined when the gateway string is not an instant, so nothing
+ * is invented for it.
+ */
+export function expiryHint(raw: string, now = Date.now()): string | undefined {
+  const at = Date.parse(raw)
+  if (Number.isNaN(at)) return undefined
+  const left = at - now
+  if (left <= 0) return t('resetExpired')
+  const hours = Math.ceil(left / 3_600_000)
+  return hours < 24 ? t('resetInHours', { n: hours }) : t('resetInDays', { n: Math.ceil(left / 86_400_000) })
 }
 
 /** Window reading, by precedence unlimited > display > used%. Undefined means "show no reading". */

@@ -129,22 +129,22 @@ customizations:
         version: "0.4.1"
     note: '自研,spec dsh-memex-scope/-settings-ui/-card-browser(0.3.0 起工作区开关改为路径声明 workspaces)。依赖全局安装的内核 @touchskyer/memex@0.4.1(MIT,不改上游):由 hostPrerequisites 在 bin/dsh 启动前自愈(sync 只校验不安装),pin 须等于生成物 KERNEL_VERSION,全局安装需显式 --registry=https://registry.npmjs.org/。卡片浏览按需起内核 serve(配远端须 --local,注入 MEMEX_NO_OPEN,取 stdout 最后一个端口);跨机器注册方失败绝不回落本机地址。升级复核:内核 --init 的英文错误串(调用已注入 LC_ALL=C)与 serve 文本解析。回滚:enabled:false + sync(重启须脱离调用方进程);退到 0.2.0 前先把关闭开关写回条目级;紧急熔断 DSH_MEMEX_ENABLED=0。0.4.0 起遥测补记复用证据并另存写卡事件、注入要求卡片首段可独立使用(只读、不写库、不外发,详见 CHANGELOG);0.4.1 注入用时发现过期即修卡的提示(回滚退回 0.4.0)。'
   # 自研(local):sidebar 会话行前动态 provider logo
-  - id: sidebar-session-provider-icon
+  - id: dsh-sidebar-session-provider-icon
     type: package
     source: local
-    version: 0.1.12
+    version: 0.1.13
     enabled: true
     brief: 侧边栏会话行当前选中模型品牌 logo(选择器即时切换)
-    note: '自研,spec sidebar-session-provider-icon(change:selection-freshness、magpie-route、gateway-model-brand、gateway-transit-tier)。Web client 按 store 身份观测官方 modelDirectories 即时选择:每次列表/DOM 信号重新解析,换代重订阅并重读快照,失效时改用持久投影 modelSelection.next→最近请求;行身份取官方 data-row-key(session:<id>),同名会话不串用徽标;复合 icon 最多三层:主图 provider、右下 model 厂商、左下 Magpie 中转平台(仅当上游段是可识别品牌且异于厂商;10px 裸 glyph 落 badge 左 4px 空隙,不压 StateDot);品牌 SVG 随包落盘(@lobehub/icons-static-svg@1.94.0、anomalyco/opencode、yetone/magpie,均 MIT),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,定位失败静默降级,不自发网络请求。升级复核:DSH 升级后回归 row-locator 的行 DOM 假设。移除:enabled:false → dsh build → 重启。'
+    note: '自研,spec dsh-sidebar-session-provider-icon(chg:selection-freshness、magpie-route、gateway-model-brand、gateway-transit-tier)。Web client 按 store 身份观测官方 modelDirectories 即时选择:每次列表/DOM 信号重新解析,换代重订阅并重读快照,失效时改用持久投影 modelSelection.next→最近请求;行身份取官方 data-row-key(session:<id>),同名会话不串用徽标;复合 icon 最多三层:主图 provider、右下 model 厂商、左下 Magpie 中转平台(仅当上游段是可识别品牌且异于厂商;10px 裸 glyph 落 badge 左 4px 空隙,不压 StateDot);品牌 SVG 随包落盘(@lobehub/icons-static-svg@1.94.0、anomalyco/opencode、yetone/magpie,均 MIT),不手绘、运行时不访问 CDN;不触碰官方 StateDot/时间/菜单/拖拽,定位失败静默降级,不自发网络请求。升级复核:DSH 升级后回归 row-locator 的行 DOM 假设。移除:enabled:false → dsh build → 重启。'
   # 自研(local):会话标题旁 session id 短标识徽标(点击复制完整 id)
-  # 上架名 dsh-session-id-copy(镜像 prgrmrwy/dsh-session-id-copy);条目 id 与目录名保留 session-title-copy。
-  - id: session-title-copy
+  # 上架名 dsh-session-id-copy(镜像 prgrmrwy/dsh-session-id-copy);条目 id 与目录名与 npm 名一致。
+  - id: dsh-session-id-copy
     type: package
     source: local
-    version: 0.2.1
+    version: 0.2.2
     enabled: true
     brief: 标题右侧 6 位 session id 徽标(点击复制完整 id + toast;标题恢复官方)
-    note: '自研,spec session-title-copy(change session-title-id-badge)。0.2.0 起以 npm 包名 dsh-session-id-copy 发布(MIT,独立镜像 prgrmrwy/dsh-session-id-copy),条目 id 与目录名不变。Web client 订阅官方 sessions list(current 为 id 真相源),在标题旁插入 6 位 session id 徽标,点击复制完整 id;标题保持官方 disabled 原样。无 Host 能力、无网络请求、不读取会话内容;官方 DOM 变化或剪贴板被拒时静默降级。升级复核:官方标题区结构变化时只需改 src/client/title-locator.ts。移除:enabled:false → dsh build → 重启,无持久数据。'
+    note: '自研,spec dsh-session-id-copy(change session-title-id-badge)。0.2.0 起以 npm 包名 dsh-session-id-copy 发布(MIT,独立镜像 prgrmrwy/dsh-session-id-copy),条目 id、目录名与 npm 名一致。Web client 订阅官方 sessions list(current 为 id 真相源),在标题旁插入 6 位 session id 徽标,点击复制完整 id;标题保持官方 disabled 原样。无 Host 能力、无网络请求、不读取会话内容;官方 DOM 变化或剪贴板被拒时静默降级。升级复核:官方标题区结构变化时只需改 src/client/title-locator.ts。移除:enabled:false → dsh build → 重启,无持久数据。'
   # 自研(local):B019 设置面板底部 DSH 主机系统时钟(24 小时制 + 时区)
   - id: system-clock
     type: package
@@ -161,10 +161,11 @@ customizations:
     enabled: true
     brief: 出口位于受限地区时禁用 Claude 系列模型发送(输入框禁用 + 原因文案)
     note: '自研,spec home-network-model-guard(change trusted-egress-claude-guard)。Host 经两个互为备份的 HTTPS Geo 服务判定 DSH 主机出口国家(默认阻断 CN,本地 config.json 可改),blocked/unknown 对未豁免 provider 的 Claude 系列 fail-closed:Web 禁用输入框,Host 在 llm/stream 拒绝;非 Claude 不受影响。exemptProviders 按 route ID 精确匹配,默认由 home-network-model-guard-config 显式豁免 Magpie 各归属 route,设置页可清空撤销。信任面:仅访问两个声明的 IP 归属服务,不探测 Anthropic/Cloudflare,不落盘 IP;通道默认仅回环可达;本机 .env.local 的 DSH_TRUSTED_HOSTS 会把它一并放宽到所列域名(前面必须另有认证层,不得顺手添加)。含临时 composer min-height 补偿,运行体恢复最小高度后应删除。升级复核:blocks 共存语义与 llm/stream 门禁。移除:enabled:false → dsh build,门禁与提示全部卸载。'
-  - id: auto-model-routing
+  # 上架名 dsh-auto-model-routing(镜像 prgrmrwy/dsh-auto-model-routing);条目 id 与目录名与 npm 名一致;状态目录 state/auto-model-routing 为历史路径,不迁移。
+  - id: dsh-auto-model-routing
     type: package
     source: local
-    version: 0.6.2
+    version: 0.6.4
     enabled: true
     brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
     note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识(Claude/GPT)集中在src/strategies注册表,新家族=新增策略文件。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义System One可选,独立credentials或只读启动环境;AUTO外发≤8000字当前任务及前轮摘要,形态脱敏尽力而为,所选服务保留条款须自行确认。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json(旧映射字段只读忽略,保存时移除);路由与无正文反馈快照:$DSH_HOME/state/auto-model-routing。反馈仅观察不自动调优。fork不支持;真实Magpie普通子任务已验,teammate仅mock覆盖。0.5.0删除四档链路与版本字段;0.6.0起客户端文案走ctx.locale字典(0.6.1补服务名与分类;未绑定翻译器回退中文);回滚:source: remote+spec/version 0.4.2→dsh build→重启(0.5.0记录0.4.2读不到)。停用:enabled:false → dsh build,撤销路由恢复。'
@@ -180,7 +181,7 @@ customizations:
       kind: pet-unified-locus-v1
       supportedDshVersion: 0.2.0-rc.2
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web,状态在 $DSH_HOME/plugins/dsh-pet/sqlite;凭据留在 lark-cli,不读 provider 凭据。飞书默认关闭,allowlist 为空静默拒绝;lark-cli>=1.0.97,单条 event+subscribe,同应用其它 profile 不可并行订阅。三层 Locus 使用官方子会话/结算/冷读和固定 locus-base;四项历史补丁退役,七个 owner 使用官方包。compat 仅保留 model-display(五包)+team-membership(一包);DSH 升级必须重审。移除 tools 最终重查扩大 guard 到工具体的时间窗,所有者已接受,完整 profile 包装层须验收;见 compat/subagent/README 与 locus-three-tier-structure/design。管理面限回环或 --trusted-host 同源。移除:enabled:false→dsh build→重启。Lottie 单文件表情;下载沿用 Host 网络/代理。'
+    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web,状态在 $DSH_HOME/plugins/dsh-pet/sqlite;凭据留在 lark-cli,不读 provider 凭据。飞书默认关闭,allowlist 为空静默拒绝;lark-cli>=1.0.97,单条 event+subscribe,同应用其它 profile 不可并行订阅。三层 Locus 使用官方子会话/结算/冷读和固定 locus-base;四项历史补丁退役,七个 owner 使用官方包。compat 仅保留 team-membership(一包);DSH 升级必须重审。移除 tools 最终重查扩大 guard 到工具体的时间窗,连同完整 profile 实测的 checkpoint 落盘等待,所有者已接受;见 compat/subagent/README 与 locus-three-tier-structure/design。管理面限回环或 --trusted-host 同源。移除:enabled:false→dsh build→重启。Lottie 单文件表情;下载沿用 Host 网络/代理。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0
@@ -425,10 +426,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.5.0
+    version: 0.6.2
     enabled: true
-    brief: 接入自托管 Magpie 网关；按 owned_by 原生分组，含保存前线路检查、用量卡片、默认输出预算与 Access
-    note: '自研 MIT,change add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多 route dsh-magpie-connector-<owner>(缺失/非法归 -other,knownOwners 持久≤32),原版选择器显示 Magpie (<Owner>) 分组,不依赖 model-display.patch;旧单 route 退役无别名,旧会话需重选;AUTO strategies 与 guard exemptProviders 仍写旧 route,须另行适配(fail closed)。0.2.0 起 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读按线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒绝重定向。0.4.x:只读线路检查与每线路延迟测速,改动只重测该行。0.5.0:设置页与速度选择器走 ctx.locale 的 zh/en 字典(未绑定翻译器回退中文)。移除:enabled:false → dsh build → 重启。'
+    brief: 接入自托管 Magpie 网关；按 owned_by 原生分组，含保存前线路检查、用量卡片、侧栏额度卡与 Access
+    note: '自研 MIT,change:add-dsh-magpie-plugin/connector-rename/default-output-budget/dual-lines/owner-routes。0.3.0 BREAKING:按网关 owned_by 注册多 route dsh-magpie-connector-<owner>,原版选择器显示 Magpie (<Owner>) 分组;旧单 route 退役无别名;AUTO 与 guard 仍写旧 route 需另适配(fail closed)。0.2.0 起 lines[] 多线路自动选线、按线路 MAGPIE_LINE_<ID>_* 凭据。信任面:只读线路凭据,设置不回显,探测仅 TCP,undici 只直连白名单 API 拒重定向。0.4.x 线路检查/测速;0.5.0 zh/en 字典。0.6.0:sidebarUsage 开关(默认关)打开后侧栏常驻周窗口额度卡,点开看全部窗口,收起时 icon+320px 浮层;单一刷新、60s TTL。0.6.2:展开改流内手风琴(顶列表)、只有标题行可切换、可配 sidebarRefreshMinutes(默认5,0关)。0.6.1:重置卡可折叠列表(摘要可用N次,展开逐张到期+最早相对提示;仍只读)。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。

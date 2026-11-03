@@ -28,22 +28,20 @@ test('retired overlays for agent-loop, tools and native tool owners are gone', (
   for (const name of RETIRED_FILES) assert.equal(existsSync(join(here, name)), false, `${name} must be removed`)
 })
 
-test('build and launcher wire only model-display and team-membership overlays', () => {
+test('build and launcher wire only the team-membership overlay', () => {
   const build = readFileSync(join(here, 'build.mjs'), 'utf8')
   const launcher = readFileSync(join(here, 'build-launcher.cjs'), 'utf8')
   for (const source of [build, launcher]) {
-    for (const retired of ['settlement-notice', 'inquiry-isolation', 'newinquiry-tools-guard', 'native-managed-effects', 'native-tools', 'newtools', 'agent-loop.package', 'verify-isolated-loop', 'verify-native-managed-effects']) {
+    for (const retired of ['settlement-notice', 'inquiry-isolation', 'newinquiry-tools-guard', 'native-managed-effects', 'native-tools', 'newtools', 'agent-loop.package', 'verify-isolated-loop', 'verify-native-managed-effects', 'model-display']) {
       assert.doesNotMatch(source, new RegExp(retired), `retired reference ${retired} must not remain`)
     }
     assert.doesNotMatch(source, /'@deepseek-ai\/dsh-agent-loop': `file:/, 'agent-loop must not be overridden')
     assert.doesNotMatch(source, /'@deepseek-ai\/dsh-tools': `file:/, 'dsh-tools must not be overridden')
     assert.doesNotMatch(source, /dsh\.tool\.managed-effect/, 'native owner marker must not be produced')
   }
-  assert.match(build, /model-display\.patch/)
   assert.match(build, /team-membership\.patch/)
   assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-subagent': `file:/)
   assert.match(launcher, /verify-official-runtime\.mjs/)
-  assert.match(launcher, /model-display/)
   assert.match(launcher, /team-membership/)
 })
 

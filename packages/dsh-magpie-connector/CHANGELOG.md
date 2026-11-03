@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.2 — 2026-11-03
+
+- **Accordion instead of an overlay.** Expanding the sidebar usage card no longer covers the session list: the detail grows in flow inside the same card and the list gives up height from the bottom (the list keeps its top anchor, so rows do not jump). No divider line; the card surface and shadow carry the separation.
+- **Header-only interaction.** Only the header row toggles expand/collapse (the refresh button keeps its own action); the card body and the overflow chevron are no longer click targets — the chevron is a passive "more rows" hint.
+- **Configurable auto refresh.** New host setting `sidebarRefreshMinutes` (whole minutes, default `5`, `0` = off, range `0–1440`, non-integers/out-of-range rejected with 400) and a matching "Auto refresh" field in Settings → Magpie → Sidebar usage. The card re-reads silently on that interval, paused while the page is hidden and resumed on visibility; it never sends `POST {all:true}`. With `0` the previous event-driven behaviour (mount, manual refresh, expand, page visible) is unchanged.
+- **README screenshots.** New sidebar usage card screenshot (`usage.png` / `usage.en.png`) and refreshed Settings screenshots showing the sidebar panel with auto refresh; registered in `docs/SCREENSHOTS.md`.
+
+## 0.6.1 — 2026-11-03
+
+- **重置卡改成和 subscriptions 插件一样的折叠列表。** host 现在把网关 `resets.each[]`（每项只保留 `until`/`window`）与 `resets.byWindow`/`fiveHour`/`weekly` 投影给浏览器；卡片上用「用量限制重置 · 可用 N 次」做摘要行，展开后逐张列出「完整重置」/「5 小时」/「每周」和每张的「{时间} 到期」，最早到期那张附相对提示（`N 天后过期` / 不足 24 小时 `N 小时后过期` / 已过期），缺到期时间显示「到期时间不可用」。按窗口发放重置的计划（GLM Coding）摘要显示「5 小时 N 次 · 每周 M 次」。
+- 仍然只读：没有新增按钮，也不调用任何重置端点；网关不给 `each`/`byWindow` 时退回原来的「次数 + `until`」显示。
+- Codex 卡片只显示一个 `7 days` 窗口是网关数据如此：ChatGPT 的 `/wham/usage` 对当前账号只上报周窗口，插件不会补造 5 小时窗口。
+- 规范：`openspec/changes/magpie-reset-card-detail/`。
+
+## 0.6.0 — 2026-11-03
+
+- **Sidebar usage card.** Settings → Magpie gains a 「侧边栏额度 / Sidebar usage」 switch (host setting `sidebarUsage`, default off). When on, the sidebar footer shows a dense card above Settings: one row per upstream with its weekly (`7 days`) window, reading and bar; at most five rows, the rest scroll inside the card, and a double chevron (no divider) appears when more exist. Rows keep the gateway's order, a card with an error shows 「读取失败」 instead of a reading, and the whole card has a single refresh (`{all:true}`).
+- **Expands in place.** Clicking the card grows it upward in place: every upstream with every window, reset time, reset chances, balance and the redacted error. The resident card keeps its flow slot, so the session list keeps its height; the expanded layer is an overlay with the same shadow as the resident card, not a layout change. The title row carries one chevron that both expands and collapses.
+- **Balance-only accounts.** An upstream with no quota windows but a gateway-reported balance shows that balance (for example `¥42.50`) instead of a bare dash.
+- **Collapsed sidebar.** With the sidebar in rail mode only a Magpie icon remains (tooltip 「Magpie 额度」); clicking it opens the same content as a 320px anchored popover.
+- **Event-driven reads.** The card reuses `GET /api/dsh-magpie-connector/cards` with a 60s client cache and reads only on mount, manual refresh, expanding, or the page becoming visible again; no timer polling. The settings page is unchanged and keeps per-card refresh.
+- No host request/route changes; the only host addition is the persisted `sidebarUsage` flag.
+
+## 0.5.1 — 2026-11-02
+
+- README 中英首屏改用 deviceScaleFactor 3 的静态 PNG（3300x1920 / 2400x2400），替换旧的低分辨率图与 GIF；同时改为 markdown 图片写法，商店详情页可直接渲染。
+- 仅文档与图片调整，无代码/行为变更。
+
 ## 0.5.0 — 2026-10-31
 
 - 设置页与速度选择器支持界面语言：新增 `settings.magpie` 的 zh/en 字典（`src/client/locales.ts`），通过 `ctx.locale` 注册并在 `apply()` 绑定；文案不再硬编码中文，跟随 DSH 界面语言（英文界面下为英文）。未绑定翻译器时（单测、无 locale 服务的宿主）仍回退到中文，行为不变。

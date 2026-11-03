@@ -63,7 +63,7 @@ AUTO 主请求 SHALL 保持官方合成 provider/model，按 depth 算法、实�
 - **THEN** 输出保持官方合成请求，不写官方选择或全局 defaults
 
 ### Requirement: 选择器恢复官方单值 effort
-受管宿主 SHALL 删除仅服务 actual/next 双值展示的 ModelDirectory.lastUsed 接缝、caption helper 与 locale；trigger、root effort 行和 menu SHALL 依官方 current 展示单一 effort，不出现“最近实际/下次”或 Last used/Next 双值文案。展示分组、统一搜索、真实 provider/model 的 click/keyboard/effort 提交、core modelSelection 投影及 metadata 校验/detach SHALL 保留；不得维护两套 value helper 或手改 generated dirs。
+宿主选择器 SHALL 使用官方 `0.2.0-rc.2` 原版的 ModelDirectory 与选择器，不得重新引入仅服务 actual/next 双值展示的 `lastUsed` 接缝、caption helper 或 locale。trigger、root effort 行和 menu SHALL 按官方 current 展示单一 effort，不出现「最近实际/下次」或 Last used/Next 这类双值文案。真实 provider/model 的 click、keyboard 和 effort 提交，以及 core modelSelection 投影，SHALL 保持官方行为。系统 MUST NOT 为 AUTO 维护选择器展示 patch，也不得手改 generated 目录。
 
 #### Scenario: 单值 effort 与选择一致
 - **GIVEN** 官方 current 为同模型 high（或手选 medium/low）
@@ -71,9 +71,9 @@ AUTO 主请求 SHALL 保持官方合成 provider/model，按 depth 算法、实�
 - **THEN** 只展示官方 current 的一个 effort，menu 勾选相同值；主动选择仍按原 provider/model 与选定 effort 提交，无展示写入
 
 #### Scenario: 分组搜索与精确选择保留
-- **GIVEN** Claude/GPT 展示组与普通 provider 共存
-- **WHEN** 搜索组标签、型号或完整 id，并使用 click 或 keyboard 接受
-- **THEN** 保持既有可见顺序、唯一高亮与真实 provider/model/effort 提交，展示组 key 不充当 provider
+- **GIVEN** 多个 Magpie 归属 route 与普通 provider 同时出现在原版选择器中
+- **WHEN** 按模型名搜索（原版只按模型名匹配，不保证能按 id 或组名搜到），并用 click 或 keyboard 选中
+- **THEN** 每个 route 各自成组，提交的 provider 就是该 route 的真实 id，effort 按官方 current 提交；宿主不加载任何展示分组 metadata
 
 ### Requirement: 模式与改写规则
 系统 SHALL 为每个主会话提供 `AUTO` 与 `MANUAL` 两种模式，按会话持久化。新建普通会话的初始模式 SHALL 取设置项「新会话默认模式」（`MANUAL` | `AUTO`，缺省 `MANUAL`）：仅当普通会话以全新方式创建（不是恢复、清空、压缩或子会话）且其默认主模型受支持时，系统 SHALL 按创建时刻的设置值写入该会话的模式；此后修改设置 MUST NOT 改变已有会话的模式。没有状态记录的已有会话 SHALL 视为 `MANUAL`。默认模式为 `AUTO` 时新会话的行为与用户手动切到 `AUTO` 相同（含 Jev 失败即停用）。

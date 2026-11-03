@@ -34,9 +34,9 @@ whenToUse: 用户要求发布/上架自研 DSH 插件、完善其发布资料或
 | 环节 | 真相源 |
 | --- | --- |
 | 主仓同步与自动打 tag | [mirror-release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/.github/workflows/mirror-release.yml) |
-| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/.github/workflows/release.yml) |
-| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/package.json) |
-| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/README.md) |
+| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/.github/workflows/release.yml) |
+| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/package.json) |
+| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/README.md) |
 | 本仓文档规则 | [文档治理测试](https://github.com/prgrmrwy/ohmydsh/blob/main/tests/repo-docs-governance.test.mjs) |
 
 复制 AUTO workflow 时必须替换包名等专属内容，不把 AUTO 的名称、描述或测试假定原样带入新插件。
@@ -176,10 +176,14 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 **日常只在 ohmydsh 修改、验证、提交并推 main。** 不再手工同步镜像或手工打发布 tag。
 
+**版本号默认不动，只有决定发布时才升。** 日常改代码、文档、截图、测试都保持 `package.json` 的当前版本，也不同步改 manifest 的 `version`；只有在明确要发一个包时才升版本（新增能力按 minor，纯修复/文档按 patch），并在同一批提交里写 CHANGELOG、同步 manifest 与锁文件/版本 fixture。不要把"顺手升个版本"当成日常改动的收尾。
+
+**升版和推 main 必须成对，否则会跳号。** mirror-release 只读取推送时的当前版本并打 tag；只合并、只做本机 `dsh build` 而不推 main 的版本不会产生 tag，也永远不会补发。多次合并不推、最后一次性推送时，中间版本会被跳过（实例：0.6.0、0.6.1 只在本地合并部署，推 main 时版本已是 0.6.2，npm 表现为 0.5.1 → 0.6.2）。所以决定发布时：升版 → 提交 → 立即 push main（或手动 dispatch mirror-release），不要攒。发现跳号时先核对镜像 tag 与 npm 再判断，不要回补旧版本 tag，也不要把跳号当成发布失败；CHANGELOG 保留所有条目，最新版包含全部改动。
+
 | 本次意图 | 主仓操作 | 自动结果 |
 | --- | --- | --- |
-| 只更新镜像源码/README | 版本不变，提交包目录改动 | 镜像 main 更新；已有 tag 不动，npm/Release 不重发 |
-| 发布功能、修复或更新 npm README/截图 | 升包版本，写 CHANGELOG，同步 manifest、锁文件和版本 fixture | 镜像更新 → 新 tag → 检查/构建 → npm → GitHub Release 与附件 |
+| 只更新镜像源码/README | 版本不变（默认做法），提交并 push main | 镜像 main 更新；已有 tag 不动，npm/Release 不重发 |
+| 发布功能、修复或更新 npm README/截图 | 升包版本，写 CHANGELOG，同步 manifest、锁文件和版本 fixture，并立即 push main | 镜像更新 → 新 tag → 检查/构建 → npm → GitHub Release 与附件 |
 | 只改主仓 manifest 或根 workflow | 不涉及包目录的 push 可能不触发镜像 | 需要时手动运行 Mirror release；不误判为失败 |
 
 发布后按第 6 节独立核验各分发面。商店安装命令与详情页 README 分别跟随 npm 最新版和仓库，发版后无需改商店条目；当前自动发布 workflow 也**不会改商店条目**。未固定 tarball 的条目按上游采集机制核验，不虚构更新已到达用户端。
@@ -190,7 +194,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 - [ ] 包自包含、元数据/许可齐全；README 按“操作/设置并排（PNG 代表性截图，无 GIF，中英文各用本语言界面图） → 小字左右图注 → Archify 架构图 → 问题一句话与特点 → 常规使用文档 → ohmydsh/协议/issue/PR”排序，演示与图均对应当前实现，资源与截图登记合规。
 - [ ] 主仓 mirror matrix/paths、每仓 deploy key、npm Trusted Publisher 配置齐全。
 - [ ] release workflow 同时覆盖 npm 和 GitHub Release，含版本校验、检查、重复运行与附件。
-- [ ] 需发布时更新包版本、CHANGELOG、manifest、锁文件及 fixture，完成本地和独立布局验证。
+- [ ] 需发布时才更新包版本、CHANGELOG、manifest、锁文件及 fixture；升版提交后立即 push main（或 dispatch mirror-release），避免中间版本未发布造成跳号。
 - [ ] 推 main 后两端 Actions 成功，registry 版本存在且可装，Release/tag/说明/附件一致。
 - [ ] 首次上架先本地校验条目，再提 PR；记录 CI/合并/商店展示状态。
 - [ ] 生产部署与 Host 重启另行处理（商店条目无需随发版更新）。
@@ -219,13 +223,15 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 | 插件 | 自动镜像/tag | npm OIDC | GitHub Release + npm 同版附件 | README 结构 |
 | --- | --- | --- | --- | --- |
 | AUTO | 已配置 | 已配置 | 已配置，0.5.1 起已验 | 已按 §3 |
-| Magpie | 已配置 | 已配置 | 已配置，0.3.0 已验（附件与 npm 字节一致） | 已按 §3（npm 页随下一个版本更新） |
+| Magpie | 已配置 | 已配置 | 已配置，0.6.2 已验（tag、npm provenance、Release 附件齐全） | 已按 §3（0.6.1 起含侧栏额度卡与设置截图） |
 | Sidebar | 已配置 | 已配置 | 已配置，0.1.12 起 | 已按 §3（无设置面，右侧为显示规则示意） |
 | Session ID Copy (`dsh-session-id-copy`) | 已配置 | 已配置 | 已配置，0.2.0 手动首发补 Release、0.2.1 起经 OIDC 发布并已验（附件与 npm 字节一致） | 已按 §3（无设置面，单图 + Archify） |
 
 演示图：AUTO 0.5.3 与 Magpie 0.3.1 起由 GIF 换为代表性 PNG（取自原录制的代表帧），Sidebar 与 Session ID Copy 一直是 PNG；只有推 main 并核对商店详情页后，才能说商店已展示新图。
 
 演示图语言（2026-10-30 起的要求）：Session ID Copy 已按要求分成两套（`docs/overview.png` 中文真实截图、`docs/overview.en.png` 英文 illustration），Sidebar 也已分成两套（中文 `overview.png`/`screenshot.png` + 英文 `overview.en.png`/`screenshot.en.png`，英文两图是 illustration，源与渲染命令随包）。
+
+**改名镜像包的目录会让 mirror-release 的非快进保护触发。** `git subtree split` 以路径前缀为键，把 `packages/<dir>` 改名后重新 split 出的历史与镜像 `main` 无关，主仓的 mirror-release 会按设计以 `! [rejected] ... (fetch first)` 失败，镜像停在旧 commit、也不会打新 tag。2026-11-02 处理方式：给 `.github/workflows/mirror-release.yml` 的 `workflow_dispatch` 加 `force` 输入，`gh workflow run mirror-release.yml -f force=true` 一次性 `--force` 重写两个镜像的 `main`，随后由 tag 触发镜像自己的 release 流水线正常发版；常规 push 仍严格快进。镜像是一次生成物，重写其 main 历史可接受，历史 tag 保留原位。改名还要同步：镜像矩阵路径、issue 模板、根与 `packages/README` 的清单、`tests/repo-docs-governance.test.mjs` 的 tier/illustration 名单、`tests/workspace-lifecycle.test.mjs` 的 CLEAN_PACKAGES、`package-lock.json`（删掉旧路径的 `extraneous` 条目并重装 workspace 链接）。`openspec/changes/archive/**` 里的旧名字是历史证据，不改。
 
 **AUTO 与 Magpie 的英文图不能只靠「把 App 语言切到 English 再截一次」。** 2026-10-30 实测：在隔离实例里用 `--lang=en-US` 打开英文界面（General → Language 也是 English），Magpie 设置页仍然整页中文（「连接」「线路 1」「添加备用线路」「刷新模型列表」「默认 effort」「账号/计划/读取于」），因为这两个插件的前端文案是**硬编码中文、没有注册 `ctx.locale` 字典**（与 `system-clock` / `session-title-copy` 的做法不同）。所以顺序必须是：**先给插件 UI 本地化（新增 locale 字典 + `@deepseek-ai/dsh-client-locale` peer 依赖，随一个特性版本发出），再补英文图**。在这之前不要把这两者描述为「已按 §3」；它们的中文图仍可继续服务两个 README，但英文 README 会显示中文控件。2026-11-02 状态：**两者都已完成**——Magpie 0.5.0、AUTO 0.6.2 都带 `src/client/locales.ts`（zh/en 字典 + `ctx.locale` 绑定，未绑定时回退中文）+ `@deepseek-ai/dsh-client-locale` peer 依赖，并在隔离实例里实拍了两套英文图（`docs/*.en.png`，登记在各自 `screenshots.json` 与 `SCREENSHOTS.md`），英文 README 首屏已切到 `.en` 图。Magpie 的 `model-picker.en.png` 是在英文界面里**逐级点开 Model 子菜单**后截的（顶层按钮只显示当前模型，容易误判成「route 没注册」）。AUTO 的英文面板图需要可用的判断链路：用本地 mock 提供 System One `POST /api/alpha/decisions`（`{answers:{depth,capability}}`）+ 流式 `POST /v1/chat/completions`，并把 `$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 的 `decisionService.provider` 设为 `custom`、`defaultMode` 设为 `AUTO`；chip 在 `view` 未加载时是 disabled，点一下不一定生效，要轮询到 aria-label 含 `AUTO` 再继续。回补 Release 时注意 Magpie 的旧 workflow 只匹配 `## <version>`（不接受日期后缀），已改成与 AUTO/Sidebar 一致的前缀匹配；改 workflow 本身不会重发已发布版本，用 `gh workflow run release --ref main` 在镜像仓回补即可（版本已存在会跳过 publish，只建 Release）。
 

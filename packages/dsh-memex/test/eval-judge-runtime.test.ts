@@ -5,6 +5,12 @@ import LlmRuntime, { createUserMessage, LlmAdapter, ToolCallId, type GenerateOpt
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjection from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as Sqlite from '@deepseek-ai/dsh-storage-sqlite'
+import * as Domain from '@deepseek-ai/dsh-storage-domain'
+import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import Team from '@deepseek-ai/dsh-experimental-agent-team'
+import * as TeamTools from '@deepseek-ai/dsh-experimental-tool-agent-team'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
@@ -37,7 +43,7 @@ class MockJudge extends LlmAdapter {
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> { return { provider, id: model, name: model } }
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.calls.push(options)
-    if (!options.tools?.length) {
+    if (!options.tools?.some(tool => tool.name === 'structured_output')) {
       yield { type: 'block-start', index: 0, blockType: 'text' }
       yield { type: 'text-delta', index: 0, text: 'ordinary answer' }
       yield { type: 'block-end', index: 0, block: { type: 'text', text: 'ordinary answer' } }
@@ -53,10 +59,13 @@ class MockJudge extends LlmAdapter {
   }
 }
 
-async function runCase(injection?: 'bridge-scored' | 'contaminated-next' | 'tool' | 'agents' | 'owner' | 'daily' | 'evidence' | 'execute' | 'closed' | 'runner' | 'parent-input' | 'parent-race' | 'tokens' | 'score-item' | 'budget' | 'host-scorer', disableBoundary = false) {
+async function runCase(injection?: 'bridge-scored' | 'contaminated-next' | 'tool' | 'agents' | 'owner' | 'daily' | 'evidence' | 'execute' | 'closed' | 'runner' | 'parent-input' | 'parent-race' | 'tokens' | 'score-item' | 'budget' | 'host-scorer', disableBoundary = false, withTeam = true) {
   const ctx = new Context()
   try {
-    await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore); await ctx.plugin(SystemPrompt, { persona: '' })
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(Storage); await ctx.plugin(Sqlite, { path: ':memory:' }); await ctx.plugin(Domain, { backend: 'sqlite' })
+    await ctx.plugin(Persistence, { root: mkdtempSync(join(realpathSync(tmpdir()), 'eval-judge-runtime-')), compression: 'zstd' })
+    await ctx.plugin(SessionStore); await ctx.plugin(SystemPrompt, { persona: '' })
     await ctx.plugin(ToolRuntime); await ctx.plugin(AgentRegistry); await ctx.plugin(SessionProjection)
     await ctx.plugin(AgentLoop, { agents: [] }); await ctx.plugin(SubagentRuntime); await ctx.plugin(Spawn, { providerName: 'spawn' })
     await ctx.plugin(Loader)
@@ -66,6 +75,7 @@ async function runCase(injection?: 'bridge-scored' | 'contaminated-next' | 'tool
     ctx.loader.builtins['eval-native'] = Presentation
     await ctx.plugin(PresetRegistry, { default: 'eval-minimal' })
     await ctx.agentPresets.register({ id: 'eval-minimal', plugins: [{ name: 'cordis:eval-native', config: { mode: 'native' } }] })
+    if (withTeam) { await ctx.plugin(Team); await ctx.plugin(TeamTools) }
     const adapter = new MockJudge(); ctx.llm.registerAdapter(['mock'], adapter)
     const parent = await createJudgeParent(ctx, { id: `judge-${randomUUID()}`, cwd: '/tmp/fictional-judge', preset: 'eval-minimal' }, {
       resolve: () => ({ memory: false, fallback: false, personal: { read: false, write: false } }),
@@ -285,6 +295,7 @@ it('a queued GUI prompt contaminates a real parent before any child or model sta
 it('owned runner can reuse a pristine parent without live children or stale gates', () => runCase('runner'))
 it('closing the creation window rejects unexpected future children before their prompt', () => runCase('closed'))
 it('EVAL-024: 裁判成功提交结构化结果', () => runCase())
+it('judge succeeds without the optional Team plugins', () => runCase(undefined, false, false))
 it('EVAL-025: own subagent 导致首请求前拒绝', () => runCase('tool'))
 it('EVAL-027: 后置装配注入被最终请求门禁拒绝', () => runCase('agents'))
 it('execution guard rejects newly registered own bash before its execute body', () => runCase('execute'))

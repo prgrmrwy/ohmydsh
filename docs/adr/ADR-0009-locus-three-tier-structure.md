@@ -96,7 +96,7 @@ inquiry 五张表与必要解析/管理读路径仅为历史保留，**没有 ru
 | `native-managed-effects.patch` | inquiry 的原生 effect-owner 标记消费者与 Pet managedEffects 接缝退役，不再给四个原生工具 owner 打标。 |
 | `newinquiry-tools-guard.patch` | readiness 标记消费者随 inquiry 退役，但其 Host 级最终 guard 重判不是“官方已有”等价能力；移除该行为是所有者明确接受 TOCTOU 风险后的决定。 |
 
-launcher 不再替换 dsh-subagent、dsh-agent-loop、dsh-tools 与四个原生工具 owner，剩余扩展仅 **model-display 五包**和 **team-membership 一包**；后者与 Locus 无关。保留面、版本/provenance 和各自退役条件以 [compat README](../../packages/dsh-pet/compat/subagent/README.md) 为准，不能称为完全无 compat 的 Host。
+launcher 不再替换 dsh-subagent、dsh-agent-loop、dsh-tools 与四个原生工具 owner，剩余扩展仅 **team-membership 一包**（与 Locus 无关；model-display 已在主干另行退役）。保留面、版本/provenance 和各自退役条件以 [compat README](../../packages/dsh-pet/compat/subagent/README.md) 为准，不能称为完全无 compat 的 Host。
 
 ### 已接受的 TOCTOU 风险，未恢复最终 guard
 

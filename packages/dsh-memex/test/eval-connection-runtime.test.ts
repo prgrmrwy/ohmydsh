@@ -1,9 +1,9 @@
-import { createRequire } from 'node:module'
+import { hostTestRequire } from './host-runtime.js'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import { Readable, Writable } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CredentialRecord } from '@deepseek-ai/dsh-credentials'
@@ -14,7 +14,7 @@ import { expect, it } from 'vitest'
 import { registerMemexChannel } from '../src/host/channel.js'
 import { createHostEvalDispatch } from '../src/eval/host-plugin.js'
 
-const graph = createRequire(fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
+const graph = hostTestRequire()
 
 it('EVAL-032 composition: valid operator cookie cannot bypass Origin/authority; denied requests never reach eval', async () => {
   // Load the same released Connection graph as the managed Host; no live credentials or listener.

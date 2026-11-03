@@ -294,7 +294,7 @@ The package does not depend on ohmydsh at runtime. Install it into any DSH profi
 
 ### Supported DSH range
 
-The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-rc.2`. These are pre-stable release candidates: client slots, Host Agent services and session metadata may change between versions. Three-tier Locus uses official subagent, agent-loop, tools and native tool-owner packages; the four legacy Locus/inquiry patches are retired. The long-lived `dsh web` Host retains only the model-display five-package extension and team-membership one-package extension, rebuilt and reviewed on each DSH version change; see [compat/subagent](compat/subagent/README.md), including the explicitly accepted final-guard recheck time-window risk. Missing official runtime capabilities still disable the Lark channel with a diagnostic; the rest of Pet is unaffected.
+The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-rc.2`. These are pre-stable release candidates: client slots, Host Agent services and session metadata may change between versions. Three-tier Locus uses official subagent, agent-loop, tools and native tool-owner packages; the four legacy Locus/inquiry patches are retired. The long-lived `dsh web` Host retains only the team-membership one-package extension, rebuilt and reviewed on each DSH version change; see [compat/subagent](compat/subagent/README.md), including the explicitly accepted final-guard recheck time-window risk. Missing official runtime capabilities still disable the Lark channel with a diagnostic; the rest of Pet is unaffected.
 
 ### Capability availability
 

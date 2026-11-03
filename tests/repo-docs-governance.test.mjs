@@ -598,10 +598,10 @@ test('package READMEs satisfy their docTier presentation rules', () => {
 test('package tiers match the design (D6)', () => {
   const tiers = Object.fromEntries(trackedPackages(trackedFiles(), read).map(({ id, tier }) => [id, tier]))
   assert.deepEqual(tiers, {
-    'auto-model-routing': 'C',
     'cockpit-memex-browse-shim': 'C',
     'cockpit-worktree-open-shim': 'C',
     'collab-kernel': 'C',
+    'dsh-auto-model-routing': 'C',
     'dsh-collab': 'C',
     'dsh-magpie-connector': 'C',
     'dsh-memex': 'A',
@@ -609,8 +609,8 @@ test('package tiers match the design (D6)', () => {
     'dsh-pet': 'A',
     'home-network-model-guard': 'B',
     'sidebar-session-resources': 'B',
-    'session-title-copy': 'B',
-    'sidebar-session-provider-icon': 'B',
+    'dsh-session-id-copy': 'B',
+    'dsh-sidebar-session-provider-icon': 'B',
     'subscriptions-sandbox-shim': 'C',
     'system-clock': 'B',
     'worktree-session': 'A',
@@ -665,7 +665,7 @@ test('problem paragraph rules and C-tier removal section are enforced (fixture)'
 const REGISTRY_COLUMNS = ['file', 'kind', 'source', 'date', 'reviewer', 'verdict', 'note']
 const KINDS = ['screenshot', 'illustration']
 /** Hard-coded on purpose: widening it is a spec revision (design D6), not an execution-time edit. */
-const ILLUSTRATION_PACKAGES = ['worktree-session', 'dsh-openspec', 'sidebar-session-provider-icon', 'session-title-copy', 'sidebar-session-resources']
+const ILLUSTRATION_PACKAGES = ['worktree-session', 'dsh-openspec', 'dsh-sidebar-session-provider-icon', 'dsh-session-id-copy', 'sidebar-session-resources']
 const ILLUSTRATION_REASON_PHRASE = 'isolated instance has no model credentials'
 const PLACEHOLDER = /^[-–—]*$/
 
@@ -785,7 +785,7 @@ test('illustration allowlist, reason phrase, source file and kind values are enf
   assert.deepEqual(registryProblems({ rows: [illustration()], extraFiles: source('worktree-session') }), [])
   assert.deepEqual(registryProblems({ rows: [illustration(`no live session: ${ILLUSTRATION_REASON}.`)], extraFiles: ['packages/worktree-session/docs/overview.svg'] }), [])
   // every allowlisted package passes; a screenshot with `-` or free text note passes anywhere
-  for (const id of ['worktree-session', 'dsh-openspec', 'sidebar-session-provider-icon', 'session-title-copy', 'sidebar-session-resources']) {
+  for (const id of ['worktree-session', 'dsh-openspec', 'dsh-sidebar-session-provider-icon', 'dsh-session-id-copy', 'sidebar-session-resources']) {
     assert.deepEqual(registryProblems({ id, rows: [illustration()], extraFiles: source(id) }), [], id)
   }
   assert.deepEqual(registryProblems({ id: 'dsh-pet', rows: [screenshot()] }), [])
@@ -797,7 +797,7 @@ test('illustration allowlist, reason phrase, source file and kind values are enf
   ])
   // illustration in a package that must use screenshots
   assert.deepEqual(registryProblems({ id: 'dsh-pet', rows: [illustration()], extraFiles: source('dsh-pet') }), [
-    'packages/dsh-pet/docs/overview.png: illustration is not allowed for package dsh-pet (allowed: worktree-session, dsh-openspec, sidebar-session-provider-icon, session-title-copy, sidebar-session-resources)',
+    'packages/dsh-pet/docs/overview.png: illustration is not allowed for package dsh-pet (allowed: worktree-session, dsh-openspec, dsh-sidebar-session-provider-icon, dsh-session-id-copy, sidebar-session-resources)',
   ])
   // allowlisted package with the wrong reason
   assert.deepEqual(registryProblems({ rows: [illustration('unavailable')], extraFiles: source('worktree-session') }), [

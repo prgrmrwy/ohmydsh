@@ -40,4 +40,4 @@ npm run build --workspace dsh-system-clock       # tsc（host）+ tsdown（clien
 npm test --workspace dsh-system-clock            # vitest：formatter / engine / host-time / wiring，无浏览器
 ```
 
-构建形态与 `dsh-session-title-copy` 一致：tsdown 产出单文件 client bundle，`tsc` 产出 host 的 ESM。
+构建形态与 `dsh-session-id-copy` 一致：tsdown 产出单文件 client bundle，`tsc` 产出 host 的 ESM。

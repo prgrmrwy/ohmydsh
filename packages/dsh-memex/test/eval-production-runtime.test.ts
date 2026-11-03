@@ -1,8 +1,8 @@
-import { createRequire } from 'node:module'
+import { hostTestRequire } from './host-runtime.js'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { Context as HostContext } from '@deepseek-ai/cordis'
@@ -15,20 +15,15 @@ import { controllerExecutionPort } from '../src/eval/controller.js'
 import { createScopeResolver } from '../src/scope/resolver.js'
 import type { FixedRound } from '../src/eval/round.js'
 
-// Forward to real compat exports, not a mock implementation: the loop-request
-// WeakSet is package-private, so the production boundary must share its LLM copy.
+// Share the selected Host's real LLM copy: loop-request identity is package-private.
 vi.mock('@deepseek-ai/dsh-llm', async () => {
-  const { createRequire } = await import('node:module')
-  const { fileURLToPath, pathToFileURL } = await import('node:url')
-  const graph = createRequire(process.env.DSH_PET_TEST_RUNTIME
-    ? `${process.env.DSH_PET_TEST_RUNTIME}/package.json`
-    : fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
+  const { hostTestRequire } = await import('./host-runtime.js')
+  const { pathToFileURL } = await import('node:url')
+  const graph = hostTestRequire()
   return import(/* @vite-ignore */ pathToFileURL(graph.resolve('@deepseek-ai/dsh-llm')).href)
 })
 
-const graph = createRequire(process.env.DSH_PET_TEST_RUNTIME
-    ? `${process.env.DSH_PET_TEST_RUNTIME}/package.json`
-    : fileURLToPath(new URL('../../dsh-pet/compat/subagent/.launcher/package.json', import.meta.url)))
+const graph = hostTestRequire()
 const load = (name: string): Promise<any> => import(/* @vite-ignore */ pathToFileURL(graph.resolve(name)).href)
 
 it('production Host dispatch runs six real top-level conditions, eight turns and twelve owned judges completely offline', async () => {
@@ -60,10 +55,15 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
   let finishUnowned: (() => void) | undefined
   let detachController: (() => void) | undefined
   try {
-    expect(graph.resolve('@deepseek-ai/dsh-api-session-controller')).toContain('/compat-packages/session-controller/')
-    // agent-loop is no longer overridden (inquiry subsystem retired); it resolves to the official package.
-    expect(graph.resolve('@deepseek-ai/dsh-agent-loop')).not.toContain('/compat-packages/agent-loop/')
-    expect(graph.resolve('@deepseek-ai/dsh-subagent')).not.toContain('/compat-packages/subagent/')
+    for (const name of ['@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-experimental-agent-team']) {
+      const manifest = JSON.parse(readFileSync(graph.resolve(`${name}/package.json`), 'utf8'))
+      if (process.env.MEMEX_TEST_HOST_PACKAGE === undefined) {
+        expect(manifest.version).toBe('0.2.0-rc.2')
+        expect(manifest.dsh_compat).toBeUndefined()
+      } else {
+        expect(manifest.version).toMatch(/^0\.2\.0-rc\.2(?:-|$)/)
+      }
+    }
     await install(llm); await install(storage); await install(sqlite, { path: ':memory:' }); await install(domain, { backend: 'sqlite' })
     await install(persistence, { root: join(dshHome, 'sessions'), compression: 'zstd' })
     await install(sessions); await install(projections); await install(prompt, { persona: '' }); await install(tools)
@@ -137,7 +137,8 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
       if (agent.session.header.origin === 'subagent') {
         // Creation precedes the first-step descriptor: this is the regression window.
         expect(agent.session.snapshotEvents().some(event => event.type === 'subagent/descriptor')).toBe(false)
-        expect(ctx.agentTeams.tryMembership(agent)).toBeUndefined()
+        // Judge isolation must hold even when stock Team misclassifies this window.
+        expect(agent.ctx.tools.schemas(agent).map((tool: { name: string }) => tool.name)).toContain('structured_output')
       } else if (!agent.session.header.parentSession) {
         expect(ctx.agentTeams.tryMembership(agent)?.role).toBe('lead')
       }

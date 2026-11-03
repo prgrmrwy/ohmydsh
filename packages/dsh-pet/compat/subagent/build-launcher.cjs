@@ -40,8 +40,6 @@ const root = resolve(here, '../../../..')
 const version = '0.2.0-rc.2'
 const npmVersion = '11.19.0'
 const reviewedCommit = '639ed015397290b3745d163aafe02ffee4aa3f84'
-const modelDisplayPatchSha256 = '7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f'
-const modelDisplayTemplate = readJson(join(here, 'model-display.package.template.json'))
 const teamMembershipTemplate = readJson(join(here, 'team-membership.package.template.json'))
 function run(command, args, cwd, capture = false) {
   return runCompatCommand(command, args, cwd, { capture })
@@ -102,14 +100,12 @@ function verifyLauncher(directory, fingerprint) {
     if (!existsSync(stampFile) || !existsSync(realBin)) return undefined
     if (readFileSync(stampFile, 'utf8').trim() !== fingerprint) return undefined
     const requireFromLauncher = createRequire(join(directory, 'package.json'))
-    for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
+    for (const spec of teamMembershipTemplate.packages) {
       const manifest = requireFromLauncher.resolve(`${spec.name}/package.json`)
       const pkg = readJson(manifest)
-      const template = teamMembershipTemplate.packages.some(candidate => candidate.name === spec.name) ? teamMembershipTemplate : modelDisplayTemplate
-      if (pkg.version !== template.version || pkg.dsh_compat?.patchSha256 !== template.patchSha256 || pkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
+      if (pkg.version !== teamMembershipTemplate.version || pkg.dsh_compat?.patchSha256 !== teamMembershipTemplate.patchSha256 || pkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
       if (spec.client && !existsSync(join(dirname(manifest), 'lib/client.js'))) return undefined
     }
-    run(process.execPath, [join(here, 'verify-model-display.mjs'), '--graph', directory], here)
     run(process.execPath, [join(here, 'verify-official-runtime.mjs'), '--graph', directory], here)
     const installScripts = runNpm(['install-scripts', 'ls'], directory, true).trim()
     if (!/^No packages with unreviewed install scripts\.?$/.test(installScripts)) return undefined
@@ -141,16 +137,7 @@ try {
     .update(realpathSync(here))
     .update(readFileSync(join(here, 'team-membership.patch')))
     .update(readFileSync(join(here, 'team-membership.package.template.json')))
-    .update(readFileSync(join(here, 'model-display.patch')))
-    .update(readFileSync(join(here, 'model-display.package.template.json')))
-    .update(readFileSync(join(here, 'model-display.vitest.config.mjs')))
-    .update(readFileSync(join(here, 'verify-model-display.mjs')))
     .update(readFileSync(join(here, 'verify-official-runtime.mjs')))
-    .update(readFileSync(join(here, '../../test/model-display-host.spec.ts')))
-    .update(readFileSync(join(here, '../../test/model-display-react.spec.tsx')))
-    .update(readFileSync(join(here, '../../test/model-display-routing.spec.ts')))
-    .update(readFileSync(join(here, '../../test/model-display-popup.spec.ts')))
-    .update(readFileSync(join(here, '../../test/model-display-builder.test.cjs')))
     .update(readFileSync(join(here, 'build.mjs')))
     .update(readFileSync(join(here, 'build-launcher.cjs')))
     .update(readFileSync(join(here, 'compat-build-lock.cjs')))
@@ -186,16 +173,16 @@ try {
     try {
       const compatPackages = join(staging, 'compat-packages')
       mkdirSync(compatPackages, { recursive: true })
-      const modelDisplayPackages = new Map()
-      for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
+      const hostPackageOverrides = new Map()
+      for (const spec of teamMembershipTemplate.packages) {
         const localName = spec.sourceDir.split('/').at(-1)
-        const source = join(artifactRoot, 'agent-artifacts', 'model-display-artifacts', localName)
+        const source = join(artifactRoot, 'agent-artifacts', 'team-membership-artifacts', localName)
         const destination = join(compatPackages, localName)
         cpSync(source, destination, { recursive: true })
-        modelDisplayPackages.set(spec.name, localName)
+        hostPackageOverrides.set(spec.name, localName)
       }
       const versions = upstreamVersions()
-      for (const localName of modelDisplayPackages.values()) materializeWorkspaceRanges(join(compatPackages, localName), versions)
+      for (const localName of hostPackageOverrides.values()) materializeWorkspaceRanges(join(compatPackages, localName), versions)
       // The framework versions the reviewed upstream tree is itself built on.
       // Read from that tree rather than pasted, for the same reason the patch
       // hashes are derived rather than hardcoded: a constant silently rots the
@@ -209,8 +196,8 @@ try {
       // happened to resolve correctly only as a side effect of the storage
       // `file:` overrides being expanded first — an accident, not a constraint.
       // Stating it makes the launcher's framework version a reviewed fact.
-      const modelDisplayDependencies = Object.fromEntries(
-        [...modelDisplayPackages].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
+      const hostPackageDependencies = Object.fromEntries(
+        [...hostPackageOverrides].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
       )
       const frameworkPins = Object.fromEntries(
         ['@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-include'].map((pkg) => {
@@ -256,13 +243,13 @@ try {
         description: 'Generated isolated DSH Host runtime with reviewed Pet Locus compatibility overrides.',
         dependencies: {
           '@deepseek-ai/dsh': version,
-          ...modelDisplayDependencies,
+          ...hostPackageDependencies,
         },
         // npm currently fails to resolve relative file: overrides here. Install
         // from staging-absolute paths, then replace npm's links with real
         // package copies before publish so the final launcher is self-contained.
         overrides: {
-          ...modelDisplayDependencies,
+          ...hostPackageDependencies,
           ...frameworkPins,
           undici: UNDICI_COMPAT_PIN,
         },
@@ -273,7 +260,7 @@ try {
       // Prove npm resolved one reviewed override tree while its file links still
       // match the install metadata. The links are converted to real copies next.
       runNpm(['ls', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-tools'], staging)
-      const packageCopies = modelDisplayPackages
+      const packageCopies = hostPackageOverrides
       for (const [name, localName] of packageCopies) {
         const installed = join(staging, 'node_modules', ...name.split('/'))
         rmSync(installed, { recursive: true, force: true })

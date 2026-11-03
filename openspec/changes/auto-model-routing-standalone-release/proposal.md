@@ -21,7 +21,7 @@ auto-model-routing 目前只能按 ohmydsh 内部安装说明使用，配套 ski
 
 ## Impact
 
-- `packages/auto-model-routing/`：bundle patch、包元数据、包内 skills、发布 workflow、文档和测试。
+- `packages/dsh-auto-model-routing/`：bundle patch、包元数据、包内 skills、发布 workflow、文档和测试。
 - `skills/subagent-model-routing/`、`dsh.yaml`、双语根 README、根 lockfile、sync/内容断言测试与主规范中的路径引用。
 - 官方 `dsh-skill-filesystem` 依赖声明、scope 可见性及真实 catalog 验证；不扩大宿主权限，不注入全局强制委派指令。
 - 外部副作用：公开 GitHub 镜像、npm 0.3.0、商店 PR、dsh.so 申请。执行时复核名称、分类和准入规则；npm 认证由用户在本机安全配置，不通过聊天或仓库传递 token。

@@ -578,6 +578,7 @@ Access 请求头 SHALL 只附加到启用 Cloudflare Access 且地址为 https �
 - **THEN** 第一次没有 `reasoning.defaultEffort`；第二次为 `ultra`
 
 ### Requirement: 只读用量卡片
+
 设置页 SHALL 用 `GET /magpie/quotas/cards` 的结果，按卡片的 `provider` 归入对应分组展示。卡片的 provider 在模型目录中没有对应分组时，SHALL 单独成组显示，不得丢弃。同一 provider 下的多张卡片按 `user` 分别显示。
 
 host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，未列出的字段 SHALL NOT 跨过设置 API；所有字符串字段先按「网关连接与凭据」的规则脱敏。每张卡片 SHALL 展示网关给出的以下字段：
@@ -585,11 +586,17 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 - 读取时间（`readAt`，没有时取 `asOf`；有 `asOf` 时标明这是旧读数）；
 - `error`；
 - 每个窗口的 `name` 与读数。窗口读数规则：`unlimited` 为真时显示「无限」；否则有 `display` 时显示 `display`；否则显示 `used` 百分比，有 `resetsAt` 时附上重置时间；
-- `resets`：显示剩余次数 `count`；有 `until` 时显示过期时间，缺失时不显示过期时间。
+- `resets` 的重置卡区 SHALL 是一个折叠块（`<details>`）：摘要行显示标题「用量限制重置」和次数，展开后逐张列出持有的每张重置卡；
+- 摘要行的次数：`byWindow` 为真时按窗口显示 `fiveHour`/`weekly` 的次数（如「5 小时 2 次 · 每周 1 次」），否则在 `count` 存在时显示「可用 {count} 次」；
+- 展开后的每张重置卡：种类（该项 `window` 为 `fiveHour`/`weekly` 时显示对应窗口，否则显示「完整重置」）与到期时间；到期时间 SHALL 用 `<time dateTime>` 渲染，文案取自「{时间} 到期」；该项 `until` 缺失时 SHALL 显示「到期时间不可用」，不推断日期。
 
-网关没给的字段 SHALL 省略，不显示占位值或推断值。带 `error` 的卡片 SHALL 显示该错误，不得被隐藏。
+`resets.each` SHALL 只投影每项的 `until` 与 `window`，拒绝其它字段。`each` 为空而 `until` 存在时，SHALL 用该 `until` 作为唯一一张重置卡列出。
 
-插件设置页只在打开时读取一次卡片；用户手动刷新后，用刷新响应更新显示。插件 SHALL NOT 定时请求卡片或刷新端点。卡片中的字符串一律作为文本渲染。
+最早到期的那一张重置卡（按时间取 `each` 中最早者；没有 `each` 时取单独的 `until`）SHALL 附一个相对过期提示：未来时刻显示「N 天后过期」或不足 24 小时时「N 小时后过期」，已经过去的时刻显示「已过期」；时间字符串无法解析时不显示该提示。
+
+除重置卡的到期时间按上文明确标注「到期时间不可用」外，网关没给的字段 SHALL 省略，不显示占位值或推断值。带 `error` 的卡片 SHALL 显示该错误，不得被隐藏。
+
+插件设置页只在打开时读取一次卡片；用户手动刷新后，用刷新响应更新显示。插件 SHALL NOT 定时请求卡片或刷新端点。卡片中的字符串一律作为文本渲染。重置卡区 SHALL 只读：不提供任何使用/消费重置卡的控件，也不请求重置相关端点。
 
 网关返回空集合或读取失败时，连接面板 SHALL 显示空状态「Magpie 未返回可见用量」（失败时为失败原因）和「获取模型与用量」入口（见「用量入口与颜色（AMD4）」）。全量刷新之后仍然为空时，SHALL 追加提示：受限的 gateway key 无法让 Magpie 首次读取用量，需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。插件 SHALL NOT 承诺「获取模型与用量」一定能产生卡片，也 SHALL NOT 建议扩大网关权限或共享范围。
 
@@ -598,12 +605,32 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
   - claude：`{provider: "claude", plan: "max", windows: [{name: "7 days", used: 83, resetsAt: "2026-10-27T11:00:00+08:00"}, {name: "Chat", unlimited: true, display: "Unlimited"}]}`；
   - codex：`{provider: "codex", resets: {count: 1, until: "2026-11-06T23:30:34Z"}}`。
 - **WHEN** 渲染设置页
-- **THEN** `claude` 分组显示 `max`、`7 days 83%` 和对应的重置时间，`Chat` 窗口显示「无限」而不是 `0%`；`codex` 分组显示重置次数 `1` 和该过期时间，且没有与重置关联的按钮
+- **THEN** `claude` 分组显示 `max`、`7 days 83%` 和对应的重置时间，`Chat` 窗口显示「无限」而不是 `0%`；`codex` 分组的重置折叠块摘要显示「可用 1 次」，展开区显示该过期时间，且没有与重置关联的按钮
+
+#### Scenario: 逐张列出重置卡过期时间
+- **GIVEN** codex 卡片带 `resets: {count: 3, until: "2026-11-06T23:30:34Z", each: [{until: "2026-11-06T23:30:34Z"}, {until: "2026-11-30T20:02:48Z"}]}`
+- **WHEN** 渲染设置页
+- **THEN** 重置区是折叠块，摘要显示「用量限制重置」「可用 3 次」；展开区逐项显示两个 `<time>`（`datetime` 分别为这两项），而不是只显示最早的 `until`
+
+#### Scenario: 按窗口的次数
+- **GIVEN** 卡片带 `resets: {byWindow: true, count: 0, fiveHour: 2, weekly: 1}`
+- **WHEN** 渲染设置页
+- **THEN** 摘要显示「5 小时 2 次」与「每周 1 次」，且不显示单一的总次数 `0`
+
+#### Scenario: 相对过期提示
+- **GIVEN** 卡片带 `resets: {count: 1, until: <渲染时刻 3 天后的 ISO 时间>}`
+- **WHEN** 渲染设置页
+- **THEN** 该重置项显示该过期时间，并附「3 天后过期」
 
 #### Scenario: 缺失字段不伪造
 - **GIVEN** codex 卡片带 `resets: {count: 2}`（没有 `until`），且没有 `plan`
 - **WHEN** 渲染设置页
-- **THEN** 显示重置次数 `2`；渲染文本中不出现 `Invalid Date`、`undefined`、`null`，也没有计划行
+- **THEN** 摘要显示「可用 2 次」；渲染文本中不出现 `Invalid Date`、`undefined`、`null`，也没有计划行
+
+#### Scenario: 缺失到期时间的重置卡
+- **GIVEN** codex 卡片带 `resets: {count: 1, each: [{}]}`
+- **WHEN** 渲染设置页
+- **THEN** 展开区的该项显示「到期时间不可用」，且没有 `<time>` 元素
 
 #### Scenario: 带错误的卡片仍显示
 - **GIVEN** 卡片端点返回一张带 `error: "token expired"` 的 codex 卡片
@@ -625,9 +652,133 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 - **WHEN** 渲染设置页
 - **THEN** 两个字符串按字面出现在渲染文本中，DOM 中没有 `img` 或 `script` 元素，也没有内联事件属性
 
+#### Scenario: 重置卡投影只保留固定字段
+- **GIVEN** 网关卡片返回 `resets: {count: 2, until: "T", byWindow: true, fiveHour: 1, weekly: 1, each: [{until: "T1", window: "weekly", id: "r1", debug: "x"}], debug: "y"}`
+- **WHEN** host 读取卡片
+- **THEN** 返回给浏览器的 `resets` 只含 `count`、`until`、`byWindow`、`fiveHour`、`weekly`、`each`，`each` 的每项只含 `until` 与 `window`，响应中没有 `id` 或 `debug`
+### Requirement: 侧边栏额度开关
+
+插件设置页 SHALL 提供「在侧边栏常驻显示额度用量」开关（`role="switch"`，默认关闭），其值 SHALL 持久化在插件 host 设置的 `sidebarUsage` 布尔字段中；字段缺失时按 `false` 处理，写入非布尔值 SHALL 被拒绝（400）且设置不变。开关关闭时，客户端 SHALL NOT 渲染任何侧栏额度 UI，也 SHALL NOT 发起卡片请求。
+
+#### Scenario: 开关关闭时不渲染也不请求
+
+- **GIVEN** `sidebarUsage` 为 `false`
+- **WHEN** 侧栏渲染完成
+- **THEN** `sidebar.footer.action` 中没有额度卡片与 icon，客户端没有发出 `GET cards`
+
+#### Scenario: 开关持久化
+
+- **GIVEN** 设置页把 `sidebarUsage` 写为 `true`
+- **WHEN** 重新读取设置
+- **THEN** 返回的 `sidebarUsage` 为 `true`；写入 `"yes"` 等非布尔值返回 400 且设置不变
+
+### Requirement: 侧边栏常驻额度卡
+
+开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游一行，显示其 `7 days` 窗口读数与整宽进度条，窗口名照抄网关原文；没有周窗口时回退到读数最高的窗口，没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡 SHALL 最多显示 5 行，溢出时在卡内滚动，并在底部显示无分割线的双下箭头；该箭头 SHALL 只是溢出提示，SHALL NOT 可点击。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
+
+#### Scenario: 常驻卡只显示周窗口且最多 5 行
+
+- **GIVEN** 网关返回 6 张卡片：其中 `claude` 同时有 `5 hours` 与 `7 days` 窗口，其余各只有 `7 days`
+- **WHEN** 渲染常驻卡
+- **THEN** 每行显示对应上游的 `7 days` 读数（`claude` 不显示 `5 hours`）；可见 5 行，底部出现双下箭头；第 6 行只能通过卡内滚动看到
+
+#### Scenario: 缺少周窗口时回退到最紧窗口
+
+- **GIVEN** 某上游只有 `5 hours` 窗口（`used` 44）且没有周窗口
+- **WHEN** 渲染常驻卡
+- **THEN** 该行显示 `5 hours 44%`，不显示空读数或伪造的 `7 days`
+
+#### Scenario: 只有余额的上游不显示破折号
+
+- **GIVEN** 网关返回的 `deepseek` 卡片没有窗口、`balance` 为 `¥42.50`
+- **WHEN** 渲染常驻卡
+- **THEN** `deepseek` 行显示 `¥42.50`，没有 `—` 也没有进度条
+
+#### Scenario: 读取失败的行不伪造读数
+
+- **GIVEN** 网关返回的 `codex` 卡片带 `error: "token expired"`
+- **WHEN** 渲染常驻卡
+- **THEN** `codex` 行显示「读取失败」且没有百分比与进度条；展开卡中显示该错误文本
+
+#### Scenario: 单一刷新入口
+
+- **GIVEN** 常驻卡已渲染
+- **WHEN** 查找所有刷新控件
+- **THEN** 只有头部一个刷新按钮；点击它发出一次 `POST cards {all:true}`，每张卡片上没有独立刷新控件
+
+### Requirement: 侧边栏卡片的展开、收起与读取（流内手风琴）
+
+标题行 SHALL 提供一个带 `aria-expanded` 的展开/收起按钮，点击 SHALL 在展开与收起之间切换；标题行其余部分（刷新按钮除外）点击效果相同。常驻卡正文与双下箭头 SHALL NOT 可点击。展开时客户端 SHALL 在同一张卡内以手风琴方式显示每个上游的全部窗口、重置时间、余额、重置机会与错误：明细在流内变高、占掉侧栏列表的可用高度，SHALL NOT 以浮层覆盖列表内容；明细自身 SHALL 限高并内部滚动。侧栏收起（`wide === false`）时 SHALL 只渲染一个 Magpie icon 按钮，点击打开 320px 浮层。读取 SHALL 只由用户动作或页面事件触发并以 60 秒 TTL 缓存，SHALL NOT 使用定时器轮询；读取失败 SHALL NOT 影响目录同步、模型选择与生成。
+
+#### Scenario: 标题行的开关负责展开与收起
+
+- **GIVEN** 常驻卡已渲染
+- **WHEN** 点击标题行的展开按钮，再点击展开后标题行的同一按钮
+- **THEN** 第一次点击后出现明细且按钮 `aria-expanded` 为 `true`；第二次点击后明细消失、回到 5 行摘要，`aria-expanded` 为 `false`
+
+#### Scenario: 展开顶上去而不是盖住列表
+
+- **GIVEN** 常驻卡已渲染，侧栏列表容器高度为 H1
+- **WHEN** 点击标题行展开
+- **THEN** 卡片在流内变高，侧栏列表容器高度变为 H2 且 H2 < H1；列表内容仍完整可见、不被任何浮层覆盖；收起后回到 H1
+
+#### Scenario: 正文与双箭头不触发展开
+
+- **GIVEN** 常驻卡已渲染且存在双下箭头
+- **WHEN** 点击卡片正文或双下箭头
+- **THEN** 明细不出现；双下箭头没有 `role="button"` 或键盘交互
+
+#### Scenario: 侧栏收起只留 icon
+
+- **GIVEN** `wide` 为 `false`
+- **WHEN** 渲染 `sidebar.footer.action`
+- **THEN** 只有带 `aria-label`/tooltip「Magpie 额度」的 icon 按钮，没有常驻卡与百分比
+
+### Requirement: 侧边栏额度自动刷新
+
+插件 host 设置 SHALL 提供 `sidebarRefreshMinutes` 整数分钟：缺失时按 `5` 处理，`0` 表示关闭自动刷新，合法范围 `0–1440`，非整数或越界写入 SHALL 返回 400 且设置不变。设置页 SHALL 提供对应的分钟输入（`0` = 关闭）。开启时，侧栏额度卡 SHALL 按该间隔静默重新读取卡片（GET），SHALL NOT 发送 `POST {all:true}`；页面隐藏时到期 SHALL 不读取，恢复可见时 SHALL 补读一次；读取失败 SHALL 保留旧读数且不影响其他功能。
+
+#### Scenario: 默认五分钟
+
+- **GIVEN** 设置中没有 `sidebarRefreshMinutes`
+- **WHEN** 读取设置页
+- **THEN** 返回的 `sidebarRefreshMinutes` 为 `5`；侧栏卡片在 5 分钟后自动读取一次
+
+#### Scenario: 关闭自动刷新
+
+- **GIVEN** `sidebarRefreshMinutes` 为 `0`
+- **WHEN** 等待超过 5 分钟且用户不操作
+- **THEN** 侧栏卡片没有发出额外的 `GET cards`，行为与手动读取一致
+
+#### Scenario: 修改间隔立即生效
+
+- **GIVEN** 当前间隔为 5 分钟
+- **WHEN** 用户把输入改为 `2` 并提交
+- **THEN** 设置写入 `sidebarRefreshMinutes: 2`；侧栏下一个自动读取发生在 2 分钟后
+
+#### Scenario: 非法输入被拒绝
+
+- **GIVEN** 设置页显示自动刷新输入
+- **WHEN** 提交 `1.5`、`-1`、`1441` 或非数字
+- **THEN** host 返回 400 或界面回退到当前值，设置保持不变
+
+#### Scenario: 页面隐藏时不读取
+
+- **GIVEN** 自动刷新间隔为 1 分钟，页面处于隐藏状态
+- **WHEN** 到期
+- **THEN** 客户端不发出 `GET cards`；页面恢复可见后补读一次
+
+#### Scenario: 自动刷新不是强制刷新
+
+- **GIVEN** 自动刷新已开启
+- **WHEN** 定时读取触发
+- **THEN** 只发出 `GET cards`，没有 `POST {all:true}`
+
 ### Requirement: 用量入口与颜色（AMD4）
 
 设置页 SHALL NOT 提供独立的「用量」栏目或常驻「刷新全部」；刷新只在每张卡片上进行，单卡刷新的提示与失败原因显示在该卡片所在分组。没有卡片时，用量状态显示在连接面板，并在空或失败时提供「获取模型与用量」：先重新同步目录，成功后发一次全量刷新（`{all: true}`），同步失败则不刷新并显示原因。窗口用量条 SHALL 按 `used` 着色：≤70 蓝色（business），大于 70 且小于 90 橙色（warn），≥90 红色（error）。窗口用量条的填充段 SHALL 两端为圆角：`settingsCss` 中 `.dmg-fill` 声明的 `border-radius` SHALL 与 `.dmg-track` 相同且非零。
+
+插件 SHALL NOT 使用定时器轮询刷新端点。设置页与侧栏额度卡片的读取 SHALL 只发生在用户动作、页面事件或用户显式开启的自动刷新上：打开设置页、打开侧栏并挂载常驻卡、用户点击刷新、用户展开侧栏卡片、页面重新可见、以及 `sidebarRefreshMinutes` 大于 0 时按该间隔自动读取（客户端 60 秒 TTL 内不重复请求）。侧栏卡片的读取规则见「侧边栏额度卡片」与「侧边栏额度自动刷新」。
 
 #### Scenario: 用量条三档颜色（AMD4）
 
@@ -652,6 +803,12 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 - **GIVEN** 设置页把样式表作为字符串导出（`settingsCss`）
 - **WHEN** 解析其中 `.dmg-track` 与 `.dmg-fill` 的 `border-radius` 声明
 - **THEN** 两者都声明了相同且非零的 `border-radius`（46% 进度时末端视觉为圆弧，由预览验收确认）
+
+#### Scenario: 没有定时器轮询
+
+- **GIVEN** `sidebarRefreshMinutes` 为 0 且设置页与侧栏卡片已打开
+- **WHEN** 等待超过任何合理轮询间隔
+- **THEN** 客户端没有发出额外 `GET cards`；只有用户显式把 `sidebarRefreshMinutes` 设为正数时，卡片才按该间隔定时读取
 
 ### Requirement: 手动刷新用量
 设置页 SHALL 提供两种刷新，都只由用户点击触发：
@@ -761,26 +918,6 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **GIVEN** 会话 S 处于标准
 - **WHEN** 客户端为 S 设置速度 `turbo`
 - **THEN** 响应状态为 400，S 仍为标准
-
-### Requirement: 选择器按网关归属展示分组（AMD2）
-模型选择菜单 SHALL 按网关 `owned_by` 显示组标题及具体型号：`claude` 显示 `Magpie (Claude)`、`codex` 显示 `Magpie (GPT)`，其它非空归属显示 `Magpie (<owned_by>)`。缺失归属 SHALL 显示 `Magpie (Other)`，SHALL NOT 按模型名猜测归属。该展示分组 SHALL 通过官方逐模型展示扩展实现；真实 route SHALL 始终是单一 `dsh-magpie-connector`，模型 id SHALL 保持网关原值。
-
-统一搜索 SHALL 同时覆盖展示组标签与具体型号/id；可见性过滤和 effort SHALL 保持既有行为，`/model` 搜索与 actions SHALL 使用同一真实身份。缺少官方字段的 rc.2 SHALL 经本轮已授权的 Pet 现有 compat 唯一 owner 受管 patch 增加可选 resolved-model `displayGroup {id,label}`，经 LLM 校验/detach、host catalog 与原选择器展示 buckets；没有该字段的模型 SHALL 保持原展示。SHALL NOT 新建 runtime owner、手改 generated dirs、注册伪 provider 或 hack DOM 文本改变实际路由；插件 SHALL NOT 为映射展示组修改既有 CatalogModel.provider fallback 或设置偏好键。
-
-#### Scenario: owned_by 分组不随型号名猜测
-- **GIVEN** 网关模型 id 为 `custom/claude-looking`、显示名含 Claude，但 `owned_by` 为 `codex`；另有 owned_by 为 claude 的模型
-- **WHEN** 打开官方模型菜单
-- **THEN** 前者在 `Magpie (GPT)` 下，后者在 `Magpie (Claude)` 下；选中任何一项的 provider 都是 `dsh-magpie-connector`，model 为原 id
-
-#### Scenario: 分组搜索保留可见性与 effort
-- **GIVEN** Claude/GPT 组均有可见模型，另有隐藏模型，可见模型具有已保存默认 effort
-- **WHEN** 在统一菜单按组标签或型号/id 搜索并选择可见模型
-- **THEN** 能匹配对应可见型号，隐藏模型不出现，选中后真实 provider/model 与默认 effort 保持不变
-
-#### Scenario: 缺失归属不冒充分组
-- **GIVEN** 模型名含 GPT，但没有 owned_by
-- **WHEN** 打开官方模型菜单
-- **THEN** 它属于 `Magpie (Other)`，不属于按名字推测的 GPT 组；既有设置分组 fallback 与偏好键不变，普通无 displayGroup 的宿主模型仍使用原 provider 展示；畸形 displayGroup 在宿主 resolve 边界报 INVALID_MODEL_INFO，不以错误元数据改变路由
 
 ### Requirement: 设置导航自身行使用 Magpie 鸟形图标（AMD2）
 插件 SHALL 在自身 Magpie 设置导航行显示本地鸟形品牌图标，随 `currentColor` 适应主题，保留文字、点击和可访问性语义。若宿主没有官方 icon 字段，SHALL 仅对可唯一定位的自身导航行添加私有 marker 并使用限定 CSS；SHALL NOT 修改旧 connect 或其它设置行。重复同名无法唯一定位、唯一行已带 foreign connect marker、缺 document/body/head 时 SHALL 静默保留宿主行为。

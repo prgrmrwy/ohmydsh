@@ -13,7 +13,7 @@ const requireGraph = createRequire(join(graph, 'package.json'))
 const load = async name => import(pathToFileURL(requireGraph.resolve(name)).href)
 const officialNames = ['subagent', 'agent-loop', 'tools', 'tool-subagent', 'tool-subagent-control', 'tool-workflow', 'tool-ralph'].map(name => `@deepseek-ai/dsh-${name}`)
 const manifest = JSON.parse(readFileSync(join(graph, 'package.json'), 'utf8'))
-const retained = ['model-display', 'team-membership'].flatMap(group => JSON.parse(readFileSync(new URL(`./${group}.package.template.json`, import.meta.url), 'utf8')).packages.map(spec => spec.name)).sort()
+const retained = ['team-membership'].flatMap(group => JSON.parse(readFileSync(new URL(`./${group}.package.template.json`, import.meta.url), 'utf8')).packages.map(spec => spec.name)).sort()
 assert.deepEqual(Object.keys(manifest.overrides).filter(name => String(manifest.overrides[name]).startsWith('file:')).sort(), retained, 'only retained extension packages may be overlaid')
 const entries = new Map()
 for (const name of officialNames) {

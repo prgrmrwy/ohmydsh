@@ -2,11 +2,13 @@
 
 English · [简体中文](README.zh.md)
 
-![Model picker grouped by upstream provider: Magpie (Claude), Magpie (Codex) and Magpie (Deepseek)](docs/model-picker.en.gif)
+![Model picker grouped by upstream provider: Magpie (Claude), Magpie (Codex) and Magpie (Deepseek)](docs/model-picker.en.png)
 
-![Settings: the connection line on top, then models grouped by provider with visibility, default effort and usage cards](docs/settings.en.gif)
+![Settings: the connection line on top, then models grouped by provider with visibility, default effort and usage cards](docs/settings.en.png)
 
-*Top: model picker grouped by upstream provider. Bottom: Settings → Magpie — the connection line, then per-provider model visibility, default effort and usage cards. Recorded from an isolated DSH host (English UI) with a local mock Magpie gateway; gateway address, models, account and readings are synthetic.*
+![Sidebar usage card: one weekly row per upstream with readings and bars](docs/usage.en.png)
+
+*Top: model picker grouped by upstream provider. Middle: Settings → Magpie — the connection line, the sidebar usage panel (toggle plus auto-refresh interval in minutes) and per-provider model visibility, default effort and usage cards. Bottom: the resident sidebar usage card (click its header to expand every window). Captured from an isolated DSH host (English UI) with a local mock Magpie gateway; gateway address, models, account and readings are synthetic.*
 
 ![Magpie connector architecture: Web GUI and Host plugin, credentials and settings, Magpie gateway and upstream providers, optionally through Cloudflare Access](docs/architecture.en.svg)
 
@@ -23,7 +25,9 @@ English · [简体中文](README.zh.md)
 | **Grouped by upstream provider** (signature) | Works on stock DSH, no Host extension needed: the plugin registers one real provider route per gateway `owned_by` (`dsh-magpie-connector-claude`, `-codex`, `-opencode-go`, …; missing or invalid ownership goes to `-other`), so the official model picker shows `Magpie (Claude)`, `Magpie (Codex)`, `Magpie (Opencode-go)`, `Magpie (Other)` groups. Settings and usage cards use the same grouping, and a provider that only appears in usage is never dropped. |
 | **Line panel and latency** | Configured lines start collapsed; click a row header to edit it, and reorder/delete are always-visible DSH product-icon buttons with tooltips. Opening Settings measures every saved line with a parseable address once (parallel TCP connect time, ≤600ms per line, no HTTP, no credentials) and shows a 4-bar signal plus milliseconds; timeouts show a timeout reading and failures or older hosts degrade to a dash. Display-only: it never affects automatic line selection, is not persisted, and never polls. |
 | **Per-line Cloudflare Access** | Each line independently chooses Direct or Cloudflare Access. Access-enabled line requests carry the service token pair plus the bearer key; the token is never sent to a plain-HTTP line. |
+| **Read-only usage cards** | Each upstream account shows plan, expiry, window readings and, when the gateway provides them, its Codex reset credits: a folded `Usage limit resets · N available` line that expands to each credit with its expiry and how far off the soonest is (`expires in N days`); plans that hand out one kind per window show `2 five-hour · 1 weekly` in the summary instead. Cards are read once when settings open and only re-read when you press **Refresh** on that card; bars turn orange above 70% and red at 90%. |
 | **Read-only usage cards** | Each upstream account shows plan, expiry, window readings and Codex reset credits when the gateway provides them. Cards are read once when settings open and only re-read when you press **Refresh** on that card; bars turn orange above 70% and red at 90%. |
+| **Sidebar usage card** (0.6.0) | Settings → Magpie has a 「Sidebar usage」 switch (host setting, default off) and an auto-refresh interval (minutes, `0` = off, default 5). When on, a dense card sits above Settings: one weekly (`7 days`) row per upstream with its reading and bar, at most five rows with the rest scrolling inside and a overflow chevron when more exist, and one refresh for the whole card. Clicking the header row toggles an in-flow detail list (every window, reset time/chances, balance, error) that shrinks the session list instead of covering it; in rail mode a single Magpie icon opens the same content as a 320px popover. Reads reuse the existing usage endpoint with a 60s cache; only the configured interval polls, silently and paused while the page is hidden. |
 | **Model visibility and default effort** | Per provider, leave visibility untouched to follow the gateway catalog, or save an explicit allowlist so new models stay hidden. Per model, save a default reasoning effort; DSH applies it on the next request. |
 | **Per-session fast mode** | Models advertising the `priority` service tier get a standard/fast switch next to the composer. The choice is per session and in host memory only; it adds `service_tier: "priority"` to requests. |
 

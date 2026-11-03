@@ -38,8 +38,8 @@ test('the runtime patch is pinned to the manifest DSH version', async () => {
   assert.match(builder, /reviewed DSH source requires Node \^22\.19\.0 or >=24\.0\.0/)
 })
 
-test('both retained extension hashes match their reviewed templates and pins', async () => {
-  for (const [group, pin] of [['model-display', 'modelDisplayPatchSha256'], ['team-membership', 'teamMembershipHash']]) {
+test('the retained team-membership hash matches its reviewed template and pin', async () => {
+  for (const [group, pin] of [['team-membership', 'teamMembershipHash']]) {
     const patch = await readFile(path.join(COMPAT, `${group}.patch`))
     const template = JSON.parse(await text(`${group}.package.template.json`))
     const hash = createHash('sha256').update(patch).digest('hex')

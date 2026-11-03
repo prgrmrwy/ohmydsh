@@ -1,8 +1,8 @@
 ## Context
 
-见 [proposal](proposal.md)。现行 [规范](../../specs/auto-model-routing/spec.md) 要求主子共享 questions，并在子路由中给出固定八组输出；因此不能将新的能力/深度判断静默塞入现有四档契约。现行 [请求中间件](../../../packages/auto-model-routing/src/index.ts) 对 origin=subagent 直接返回，自动覆盖所有子请求尚不存在。
+见 [proposal](proposal.md)。现行 [规范](../../specs/auto-model-routing/spec.md) 要求主子共享 questions，并在子路由中给出固定八组输出；因此不能将新的能力/深度判断静默塞入现有四档契约。现行 [请求中间件](../../../packages/dsh-auto-model-routing/src/index.ts) 对 origin=subagent 直接返回，自动覆盖所有子请求尚不存在。
 
-当前工具 schema：普通 subagent 可传 provider/model/reasoning_effort；fork 和 spawn_teammate 未暴露这些参数。独立安装官方 0.2.0-rc.2 的[宿主探针](../../../packages/auto-model-routing/docs/host-capability-report.md)已验证普通、fork、fresh teammate 服务路径均可通过全局 pre-step/request hook 读取任务和配置实际 fake-adapter 请求，无需修改宿主。该证据不等于工具端到端或生产路由支持；fork 真实 provider 历史兼容、teammate fork 组合仍未验证，冷恢复还需插件持久化并重放初始决策。
+当前工具 schema：普通 subagent 可传 provider/model/reasoning_effort；fork 和 spawn_teammate 未暴露这些参数。独立安装官方 0.2.0-rc.2 的[宿主探针](../../../packages/dsh-auto-model-routing/docs/host-capability-report.md)已验证普通、fork、fresh teammate 服务路径均可通过全局 pre-step/request hook 读取任务和配置实际 fake-adapter 请求，无需修改宿主。该证据不等于工具端到端或生产路由支持；fork 真实 provider 历史兼容、teammate fork 组合仍未验证，冷恢复还需插件持久化并重放初始决策。
 
 ## Goals / Non-Goals
 

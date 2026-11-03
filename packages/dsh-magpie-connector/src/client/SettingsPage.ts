@@ -5,6 +5,7 @@ import { lineLatency, parseLatency, type LatencyState, type LineLatency } from '
 import { settingsCss } from './styles.js'
 import { UsageCard } from './UsageCard.js'
 import { t, type MagpieKey } from './locales.js'
+import { DEFAULT_REFRESH_MINUTES, MAX_REFRESH_MINUTES, setSidebarPreference } from './sidebar-preference.js'
 import {
   cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, providerOrder, readTime, sameTarget,
   type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type SettingsView, type SyncErrorKind,
@@ -228,6 +229,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency, onRefreshLatency: (lineId: string) => { void readLatency(lineId) },
       usage: h(UsageStatus, { cards, busy, ...(noteScope === undefined ? { notice, alert: usageAlert } : {}), onFetchAll: () => { void fetchAll() }, saving: savingSettings }) })
       : settingsError ? null : h('p', { role: 'status', className: 'dmg-hint' }, t('readingSettings')),
+    settings ? h(SidebarUsagePreference, { settings, saving: savingSettings, mutateSettings }) : null,
     ...providerOrder(groups, cardList).map(provider => h(ProviderGroup, {
       key: provider, provider,
       group: groups.find(g => g.provider === provider),
@@ -660,4 +662,65 @@ function ModelLine({ model, visible, effort, disabled, onVisible, onEffort }: {
     h('option', { value: '' }, t('defaultEffortNone')),
     stale ? h('option', { value: effort, disabled: true }, t('effortStale', { effort })) : null,
     ...efforts.map(id => h('option', { key: id, value: id }, id))) : null)
+}
+
+/**
+ * The sidebar preference: one host-persisted flag. The host is the source of
+ * truth; the module store is updated so the already-mounted sidebar card
+ * follows the toggle without a reload.
+ */
+function SidebarUsagePreference({ settings, saving, mutateSettings }: {
+  settings: SettingsView; saving: boolean; mutateSettings: SettingsMutation
+}) {
+  const [failed, setFailed] = useState('')
+  const enabled = settings.sidebarUsage === true
+  const savedMinutes = settings.sidebarRefreshMinutes ?? DEFAULT_REFRESH_MINUTES
+  const [draft, setDraft] = useState(String(savedMinutes))
+  useEffect(() => { setDraft(String(savedMinutes)) }, [savedMinutes])
+  const toggle = async () => {
+    setFailed('')
+    const next = !enabled
+    const result = await mutateSettings({ sidebarUsage: next })
+    if (result?.error) { setFailed(result.error); return }
+    setSidebarPreference({ usage: result?.view === undefined ? next : result.view.sidebarUsage === true })
+  }
+  const commitMinutes = async () => {
+    setFailed('')
+    const raw = draft.trim()
+    if (!/^\d+$/.test(raw)) { setDraft(String(savedMinutes)); return }
+    const minutes = Math.min(MAX_REFRESH_MINUTES, Number(raw))
+    if (minutes !== savedMinutes) {
+      const result = await mutateSettings({ sidebarRefreshMinutes: minutes })
+      if (result?.error) { setFailed(result.error); setDraft(String(savedMinutes)); return }
+      setSidebarPreference({ refreshMinutes: result?.view === undefined ? minutes : result.view.sidebarRefreshMinutes ?? minutes })
+    }
+    setDraft(String(minutes))
+  }
+  return h('section', { className: 'dmg-panel', 'data-sidebar-usage': '' },
+    h('h3', null, t('sidebarPanelTitle')),
+    h('p', { className: 'dmg-hint' }, t('sidebarToggleHint')),
+    h('div', { className: 'dmg-switch-row' },
+      h('span', null, t('sidebarToggle')),
+      h('button', {
+        type: 'button', className: 'dmg-switch', role: 'switch', disabled: saving,
+        'aria-checked': enabled, 'aria-label': t('sidebarToggle'), 'data-sidebar-usage-switch': '',
+        onClick: () => { void toggle() },
+      }, h('i', null)),
+    ),
+    h('div', { className: 'dmg-refresh-row' },
+      h('span', null, t('sidebarRefreshLabel')),
+      h('span', { className: 'dmg-refresh-control' },
+        h('input', {
+          type: 'number', className: 'dmg-refresh-input', min: 0, max: MAX_REFRESH_MINUTES, step: 1,
+          value: draft, disabled: saving, 'data-sidebar-refresh': '', 'aria-label': t('sidebarRefreshLabel'),
+          onChange: (event: { target: { value: string } }) => setDraft(event.target.value),
+          onBlur: () => { void commitMinutes() },
+          onKeyDown: (event: { key: string; currentTarget: { blur(): void } }) => { if (event.key === 'Enter') event.currentTarget.blur() },
+        }),
+        h('span', { className: 'dmg-refresh-unit' }, t('sidebarRefreshUnit')),
+      ),
+    ),
+    h('p', { className: 'dmg-hint' }, t('sidebarRefreshHint')),
+    failed ? h('p', { className: 'dmg-error', role: 'alert' }, failed) : null,
+  )
 }

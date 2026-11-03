@@ -29,7 +29,7 @@ body:
         - scripts/sync.mjs(物化 / sync)
         - dsh.yaml(manifest 配置)
         - packages/worktree-session
-        - packages/sidebar-session-provider-icon
+        - packages/dsh-sidebar-session-provider-icon
         - packages/subscriptions-sandbox-shim
         - 第三方插件集成(remote customization)
         - 安装 / bootstrap(scripts/*.sh)

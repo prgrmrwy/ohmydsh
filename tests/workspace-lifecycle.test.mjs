@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 const ROOT=path.resolve(import.meta.dirname,'..')
-const CLEAN_PACKAGES=['sidebar-session-provider-icon','worktree-session','cockpit-memex-browse-shim','session-title-copy','sidebar-session-resources','home-network-model-guard','system-clock','dsh-openspec','dsh-memex','cockpit-worktree-open-shim','dsh-pet']
+const CLEAN_PACKAGES=['dsh-sidebar-session-provider-icon','worktree-session','cockpit-memex-browse-shim','dsh-session-id-copy','sidebar-session-resources','home-network-model-guard','system-clock','dsh-openspec','dsh-memex','cockpit-worktree-open-shim','dsh-pet']
 const pkg=async name=>JSON.parse(await readFile(path.join(ROOT,'packages',name,'package.json'),'utf8'))
 async function fixture(t){
   const root=await mkdtemp(path.join(os.tmpdir(),'ohmydsh lifecycle 中文 '))

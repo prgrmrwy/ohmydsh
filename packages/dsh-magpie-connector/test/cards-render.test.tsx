@@ -66,7 +66,7 @@ describe('只读用量卡片', () => {
     expect(text(windows[1])).not.toContain('0%')
     const codex = group('codex')!
     const resets = codex.querySelector('[data-field="resets"]')!
-    expect(text(resets.querySelector('[data-reset-count]'))).toBe('1')
+    expect(text(resets.querySelector('[data-reset-count]'))).toBe('可用 1 次')
     expect(resets.querySelector('time')?.getAttribute('datetime')).toBe('2026-11-06T23:30:34Z')
     const cardButtons = Array.from(codex.querySelectorAll('[data-card] button')).map(b => b.textContent)
     expect(cardButtons).toEqual(['刷新'])
@@ -78,10 +78,68 @@ describe('只读用量卡片', () => {
     await render(() => cardsOk([{ provider: 'codex', resets: { count: 2 } }]))
     const codex = group('codex')!
     const resets = codex.querySelector('[data-field="resets"]')!
-    expect(text(resets.querySelector('[data-reset-count]'))).toBe('2')
+    expect(text(resets.querySelector('[data-reset-count]'))).toBe('可用 2 次')
     expect(resets.querySelector('time')).toBeNull()
     expect(codex.querySelector('[data-field="plan"]')).toBeNull()
     for (const field of ['user', 'until', 'renew', 'balance', 'readAt', 'error']) expect(codex.querySelector(`[data-field="${field}"]`)).toBeNull()
+    noFabrication()
+  })
+
+  it('spec Scenario "逐张列出重置卡过期时间"', async () => {
+    await render(() => cardsOk([{ provider: 'codex', resets: {
+      count: 3,
+      until: '2026-11-06T23:30:34Z',
+      each: [{ until: '2026-11-06T23:30:34Z' }, { until: '2026-11-30T20:02:48Z' }],
+    } }]))
+    const resets = group('codex')!.querySelector('[data-field="resets"]')!
+    expect(text(resets.querySelector('[data-reset-count]'))).toBe('可用 3 次')
+    const items = Array.from(resets.querySelectorAll('[data-reset-item]'))
+    expect(items).toHaveLength(2)
+    expect(items.map(item => item.querySelector('time')?.getAttribute('datetime'))).toEqual(['2026-11-06T23:30:34Z', '2026-11-30T20:02:48Z'])
+    // 折叠摘要只给次数，逐张时间在展开区
+    expect(resets.tagName).toBe('DETAILS')
+    expect(text(resets.querySelector('summary'))).toContain('用量限制重置')
+    expect(text(resets.querySelector('summary'))).toContain('可用 3 次')
+    noFabrication()
+  })
+
+  it('spec Scenario "按窗口的次数"', async () => {
+    await render(() => cardsOk([{ provider: 'glm', resets: { byWindow: true, count: 0, fiveHour: 2, weekly: 1 } }]))
+    const resets = group('glm')!.querySelector('[data-field="resets"]')!
+    expect(text(resets)).toContain('5 小时 2 次')
+    expect(text(resets)).toContain('每周 1 次')
+    // 按窗口发放时没有单一总次数：网关给的 count 0 不显示
+    expect(text(resets.querySelector('[data-reset-count]'))).not.toContain('0')
+    noFabrication()
+  })
+
+  it('spec Scenario "缺失到期时间的重置卡"', async () => {
+    await render(() => cardsOk([{ provider: 'codex', resets: { count: 1, each: [{}] } }]))
+    const resets = group('codex')!.querySelector('[data-field="resets"]')!
+    const items = Array.from(resets.querySelectorAll('[data-reset-item]'))
+    expect(items).toHaveLength(1)
+    expect(text(items[0])).toContain('到期时间不可用')
+    expect(items[0]!.querySelector('time')).toBeNull()
+    noFabrication()
+  })
+
+  it('spec Scenario "相对过期提示"', async () => {
+    const until = new Date(Date.now() + 3 * 24 * 3600 * 1000 - 3600 * 1000).toISOString()
+    await render(() => cardsOk([{ provider: 'codex', resets: { count: 1, until } }]))
+    const resets = group('codex')!.querySelector('[data-field="resets"]')!
+    expect(resets.querySelector('time')?.getAttribute('datetime')).toBe(until)
+    expect(text(resets)).toContain('3 天后过期')
+  })
+
+  it('过期时刻显示已过期，无法解析则不附提示', async () => {
+    await render(() => cardsOk([
+      { provider: 'codex', resets: { count: 1, until: '2020-01-01T00:00:00Z' } },
+      { provider: 'claude', resets: { count: 1, until: 'not a time' } },
+    ]))
+    expect(text(group('codex')!.querySelector('[data-field="resets"]'))).toContain('已过期')
+    const claude = text(group('claude')!.querySelector('[data-field="resets"]'))
+    expect(claude).toContain('not a time')
+    expect(claude).not.toContain('已过期')
     noFabrication()
   })
 
