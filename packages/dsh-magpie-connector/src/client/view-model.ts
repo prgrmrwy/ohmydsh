@@ -10,9 +10,11 @@ export interface CardReset { until?: string; window?: string }
 /**
  * A card's reset credits as the gateway tells them: the count, the soonest
  * expiry, per-window counts for plans that hand out one kind each, and every
- * credit still held (`each`, soonest first).
+ * credit still held (`each`, soonest first). `redeemable` is the host's word
+ * that this card could spend one from here (Codex, a named account, and at
+ * least one credit the host knows the id of).
  */
-export interface CardResets { count?: number; until?: string; byWindow?: boolean; fiveHour?: number; weekly?: number; each?: CardReset[] }
+export interface CardResets { count?: number; until?: string; byWindow?: boolean; fiveHour?: number; weekly?: number; each?: CardReset[]; redeemable?: boolean }
 export interface Card {
   provider: string; name?: string; icon?: string; user?: string; plan?: string; until?: string; renew?: string | boolean
   balance?: string | number; readAt?: string; asOf?: string; error?: string
@@ -134,6 +136,68 @@ export function windowReading(window: CardWindow): string | undefined {
 export const readTime = (card: Card) => card.readAt ?? card.asOf
 export const cardKey = (card: Pick<Card, 'provider' | 'user'>) => `${card.provider}\u0000${card.user ?? ''}`
 export const sameTarget = (a: Card, b: Pick<Card, 'provider' | 'user'>) => a.provider === b.provider && (a.user ?? undefined) === (b.user ?? undefined)
+
+// ---- using a reset credit ------------------------------------------------
+
+/** The weekly window the reset guard reads; the gateway names Codex windows by their span. */
+export const RESET_WEEKLY_WINDOW = '7 days'
+/** Same floor the host revalidates against: a reset is wasted on a nearly idle week. */
+export const RESET_MIN_WEEKLY_PERCENT = 80
+
+/** Why the "use" button is not actionable right now, as a copy key. */
+export type ResetBlock = 'guard' | 'refresh' | 'restart'
+/**
+ * Client-side pre-check for the reset button. It only decides whether the button
+ * looks disabled and why — the host revalidates every condition against a fresh
+ * card read before it spends anything.
+ */
+export function resetBlock(card: Card, now = Date.now()): ResetBlock | undefined {
+  const weekly = card.windows?.find(window => window.name === RESET_WEEKLY_WINDOW)
+  if (!weekly || typeof weekly.used !== 'number' || !Number.isFinite(weekly.used)) return 'refresh'
+  if (weekly.used < RESET_MIN_WEEKLY_PERCENT) return 'guard'
+  const resetsAt = weekly.resetsAt === undefined ? NaN : Date.parse(weekly.resetsAt)
+  if (Number.isNaN(resetsAt) || resetsAt <= now) return 'refresh'
+  if (card.error) return 'refresh'
+  if (card.resets?.redeemable !== true) return 'restart'
+  return undefined
+}
+
+/** The account a reset would be spent for; only a named Codex card offers one. */
+export const resetAccount = (card: Card): string | undefined =>
+  card.provider === 'codex' && card.resets?.redeemable === true && str(card.user) ? card.user : undefined
+
+/** Prepared confirmation, as the host answered it. */
+export interface ResetTicket { ticket: string; expiresAt?: string; weeklyUsedPercent?: number; creditExpiresAt?: string }
+/** What spending the credit did, as the host classified it. */
+export interface ResetOutcome { outcome: string; code?: string; windows?: number; error?: string; cards?: Card[] }
+
+const num = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+
+/** Defensive parse of a prepare response: a ticket is the only required field. */
+export function parseResetTicket(body: unknown): ResetTicket | undefined {
+  const raw = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
+  if (!str(raw.ticket)) return undefined
+  return {
+    ticket: raw.ticket,
+    ...(str(raw.expiresAt) ? { expiresAt: raw.expiresAt } : {}),
+    ...(num(raw.weeklyUsedPercent) ? { weeklyUsedPercent: raw.weeklyUsedPercent } : {}),
+    ...(str(raw.creditExpiresAt) ? { creditExpiresAt: raw.creditExpiresAt } : {}),
+  }
+}
+
+/** Defensive parse of a consume response; `cards` is adopted only when it is a real list. */
+export function parseResetOutcome(body: unknown): ResetOutcome | undefined {
+  const raw = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
+  if (!str(raw.outcome)) return undefined
+  const cards = Array.isArray(raw.cards) ? raw.cards.filter((card): card is Card => !!card && typeof card === 'object' && str((card as Card).provider)) : undefined
+  return {
+    outcome: raw.outcome,
+    ...(str(raw.code) ? { code: raw.code } : {}),
+    ...(num(raw.windows) ? { windows: raw.windows } : {}),
+    ...(str(raw.error) ? { error: raw.error } : {}),
+    ...(cards ? { cards } : {}),
+  }
+}
 
 /** Provider groups in page order: catalog groups first, then card-only providers (never dropped). */
 export function providerOrder(groups: ModelGroup[], cards: Card[]): string[] {

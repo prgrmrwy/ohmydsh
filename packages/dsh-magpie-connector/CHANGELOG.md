@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0 — 2026-11-04
+
+- **用上 Codex 重置卡（首个写操作）。** 卡片展开区里最早到期的那一项带「使用…」；周窗口（`7 days`）用量达到 **80%**、且读数新鲜时才可用。host 在准备和提交前各重新读一次该卡并独立校验，不信任浏览器的判断。
+- **只用最早到期的那张。** host 从刚读到的 `resets.each[]` 里挑 `until` 最早、仍可用的一张，把它的 `id` 记进票据；浏览器拿不到也指定不了 `id`。提交前那张已不在可用列表时直接拒绝，不会改用别的卡。
+- **两段确认 + 全插件单飞。** 「使用…」→ 60 秒一次性票据 → 对话框（账号、周用量、所选卡到期时间、不可撤销警告）→ 必须勾选才能提交。同一时刻只允许一个准备/消费；新的准备会作废旧票据。
+- **结果判定。** `reset` 成功并用刷新响应更新卡片；`nothing_to_reset`/`no_credit`/`already_redeemed` 各有文案；4xx（权限不足、409 并发、入口白名单拒绝）说明没花掉，可重来；网络错误/超时/5xx/无法解析一律按「结果不确定」锁定该账号到 host 重启，不自动重试。
+- **传输边界。** 白名单新增 `POST /magpie/quotas/codex-reset`，query 只允许且必须带 `user`、`credit`；其它组合在发出前拒绝。
+- **UI 对齐 subscriptions。** 重置折叠块的箭头从 16px 字符换成 12px SVG（间距 6px），展开条目缩进 18px 与标题文字对齐，行高 28px，「使用…」紧贴「完整重置」。
+- 修复 README（中/英）里 0.5.2 遗留的重复行。规范：`openspec/changes/magpie-codex-reset-redeem/`。
+- 部署提示：线上入口（Cloudflare + 自建 nginx 白名单）放行 `codex-reset` 之前，该功能会如实显示网关的 403/404，卡片与生成不受影响；gateway key 需具备完整权限（只读/受限 key 被网关拒绝）。
+
 ## 0.6.2 — 2026-11-03
 
 - **Accordion instead of an overlay.** Expanding the sidebar usage card no longer covers the session list: the detail grows in flow inside the same card and the list gives up height from the bottom (the list keeps its top anchor, so rows do not jump). No divider line; the card surface and shadow carry the separation.

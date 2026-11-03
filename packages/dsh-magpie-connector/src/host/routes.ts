@@ -2,6 +2,7 @@ import type { MagpieRuntime } from './runtime.js'
 import { isVisible, validateVisibility } from './visibility.js'
 import { updateDefaultEffort } from './default-effort.js'
 import { CardsController } from './cards.js'
+import { ResetController } from './reset.js'
 import { SpeedController } from './speed.js'
 import { LatencyController } from './latency.js'
 export class SettingsController {
@@ -48,7 +49,7 @@ export interface FetchRegistration {
 }
 export interface FetchRegistry {register(route:FetchRegistration):()=>void}
 /** Register on the injected connection.fetch; caller owns the returned disposer. */
-export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=new SpeedController(),cards=new CardsController(runtime),latency=new LatencyController(()=>runtime.config())) {
+export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=new SpeedController(),cards=new CardsController(runtime),latency=new LatencyController(()=>runtime.config()),reset=new ResetController(runtime,cards)) {
  const settings=new SettingsController(runtime)
  const handlers={
   settings:async(request:Request,body:unknown)=>settings.handle(request.method==='POST'?body:undefined),
@@ -77,7 +78,12 @@ export function registerRoutes(fetch:FetchRegistry,runtime:MagpieRuntime,speed=n
    try {return await handlers.lineCheck(request,await request.json())}
    catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
   }}))
+  /** Write path for an irreversible action: POST only, never on the read surface above. */
+  disposers.push(fetch.register({path:'/api/dsh-magpie-connector/reset',methods:['POST'],requestBody:'buffered',fetch:async request=>{
+   try {return await reset.handle(await request.json())}
+   catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}
+  }}))
  } catch(error) {for(const dispose of disposers.reverse())dispose();throw error}
  let disposed=false
- return {settings,cards,speed,latency,dispose:()=>{if(disposed)return;disposed=true;latency.dispose();for(const dispose of disposers.reverse())dispose()}}
+ return {settings,cards,speed,latency,reset,dispose:()=>{if(disposed)return;disposed=true;latency.dispose();for(const dispose of disposers.reverse())dispose()}}
 }

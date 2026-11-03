@@ -23,7 +23,17 @@ export function validateIdentity(identity: ConnectionIdentity) {
   if (identity.accessMode === 'cloudflare' && !(id && secret)) throw new Error('MAGPIE_ACCESS_PAIR_REQUIRED')
   if (id && identity.baseUrl && new URL(identity.baseUrl).protocol !== 'https:') throw new Error('MAGPIE_ACCESS_HTTPS_REQUIRED')
 }
-const allowed = new Set(['GET /models', 'POST /responses', 'POST /chat/completions', 'GET /magpie/quotas/cards', 'POST /magpie/quotas/refresh'])
+const allowed = new Set(['GET /models', 'POST /responses', 'POST /chat/completions', 'GET /magpie/quotas/cards', 'POST /magpie/quotas/refresh', 'POST /magpie/quotas/codex-reset'])
+/**
+ * Query contract per endpoint: the only keys it may carry and the ones it must
+ * carry. Endpoints without an entry take no query at all. A reset names the
+ * account and the exact credit, so both are required — the gateway would
+ * otherwise spend whichever reset runs out first.
+ */
+const QUERY_RULES: Record<string, { allowed: readonly string[]; required: readonly string[] }> = {
+  'POST /magpie/quotas/refresh': { allowed: ['provider', 'user'], required: [] },
+  'POST /magpie/quotas/codex-reset': { allowed: ['user', 'credit'], required: ['user', 'credit'] },
+}
 export class GatewayTransport {
   readonly signal = new AbortController()
   /** Called when a request fails before the connection was established. */
@@ -35,8 +45,13 @@ export class GatewayTransport {
     const base = new URL(identity.baseUrl)
     const url = /^https?:/.test(path) ? new URL(path) : new URL(identity.baseUrl + path)
     const relative = url.pathname.slice(base.pathname.length)
-    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname + '/') || url.username || url.password || url.hash || !allowed.has(`${method} ${relative}`)) throw new Error('MAGPIE_ENDPOINT_FORBIDDEN')
-    if (url.search && !(method === 'POST' && relative === '/magpie/quotas/refresh' && [...url.searchParams.keys()].every(k => k === 'provider' || k === 'user'))) throw new Error('MAGPIE_QUERY_FORBIDDEN')
+    const endpoint = `${method} ${relative}`
+    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname + '/') || url.username || url.password || url.hash || !allowed.has(endpoint)) throw new Error('MAGPIE_ENDPOINT_FORBIDDEN')
+    const rule = QUERY_RULES[endpoint]
+    const keys = [...url.searchParams.keys()]
+    if (url.search) {
+      if (!rule || keys.some(key => !rule.allowed.includes(key)) || !rule.required.every(key => keys.includes(key))) throw new Error('MAGPIE_QUERY_FORBIDDEN')
+    } else if (rule && rule.required.length) throw new Error('MAGPIE_QUERY_FORBIDDEN')
     const headers = new Headers(init.headers)
     for (const [key, value] of Object.entries(attributionHeaders())) headers.set(key, value)
     headers.set('authorization', `Bearer ${identity.key}`)
