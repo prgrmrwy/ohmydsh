@@ -43,3 +43,9 @@ it('failed requests do not advance the committed watermark or replace cards',asy
 })
 it('projects fixed fields and redacts all strings before caching',async()=>{const {c,request}=await setup();request.mockResolvedValue(reply([{provider:'codex',user:'secret',error:'active-key',windows:[{name:'secret',used:0,display:'active-key',debug:'secret'}],resets:{count:2,debug:'secret'},debug:'secret'}]));const r=await body(await c.get());expect(JSON.stringify(r)).not.toContain('secret');expect(JSON.stringify(r)).not.toContain('active-key');expect(JSON.stringify(r)).not.toContain('debug');expect(r.cards[0]).toHaveProperty('error','[redacted]')})
 it('invalid request does not release another gate; waiting refresh is discarded on rotation',async()=>{const {c,request,runtime,gen}=await setup();const d=deferred();request.mockReturnValue(d.promise);const a=c.refresh({provider:'codex',user:'u@example.com'});await flush();expect((await c.refresh({provider:'codex'})).status).toBe(400);const b=c.refresh({all:true});await flush();expect(request).toHaveBeenCalledTimes(1);runtime.current={...gen,id:2};d.resolve(reply([card('OLD')]));expect((await a).status).toBe(409);expect((await b).status).toBe(409);expect(request).toHaveBeenCalledTimes(1)})
+it('spec Scenario "重置卡投影只保留固定字段"',async()=>{
+ const {c,request}=await setup()
+ request.mockResolvedValue(reply([{provider:'codex',resets:{count:2,until:'T',byWindow:true,fiveHour:1,weekly:1,each:[{until:'T1',window:'weekly',id:'r1',debug:'x'}],debug:'y'}}]))
+ const r=await body(await c.get())
+ expect((r.cards[0] as unknown as {resets:unknown}).resets).toEqual({count:2,until:'T',byWindow:true,fiveHour:1,weekly:1,each:[{until:'T1',window:'weekly'}]})
+})

@@ -13,13 +13,22 @@ function pick(raw:Record<string,unknown>, fields:string[], redact:(s:string)=>st
   }
   return result
 }
+/** Reset credits, projected to their fixed fields; each credit keeps only when it runs out and its window. */
+function projectResets(raw:Record<string,unknown>, redact:(s:string)=>string):Record<string,unknown> {
+  const resets=pick(raw,['count','until','byWindow','fiveHour','weekly'],redact)
+  if(Array.isArray(raw.each)) {
+    const each=raw.each.filter(record).map(item=>pick(item,['until','window'],redact))
+    if(each.length)resets.each=each
+  }
+  return resets
+}
 export function projectCards(body:unknown, redact:(s:string)=>string):Card[] {
   if (!record(body) || !Array.isArray(body.data)) throw new Error('Invalid cards response')
   return body.data.flatMap(raw=>{
     if (!record(raw) || typeof raw.provider!=='string' || !raw.provider) return []
     const card=pick(raw,['provider','name','icon','user','plan','until','renew','balance','readAt','asOf','error'],redact)
     if (Array.isArray(raw.windows)) card.windows=raw.windows.filter(record).map(w=>pick(w,['name','used','resetsAt','unlimited','display'],redact)) as never
-    if (record(raw.resets)) card.resets=pick(raw.resets,['count','until'],redact) as never
+    if (record(raw.resets)) card.resets=projectResets(raw.resets,redact) as never
     return [card as unknown as Card]
   })
 }
