@@ -45,6 +45,8 @@
 | specs/pet-locus-collaboration/spec.md → 换绑与归档按层处理 | 子会话不可用只换该入口一代 | packages/dsh-pet/test/locus-rebind-archive.test.ts | `子会话不可用只换该入口一代` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 换绑与归档按层处理 | 名额不足的冷恢复保留原代际 | packages/dsh-pet/test/locus-rebind-archive.test.ts | `名额不足的冷恢复保留原代际` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 换绑与归档按层处理 | locus 主会话不可用时整体迁移 | packages/dsh-pet/test/locus-rebind-archive.test.ts | `locus 主会话不可用时整体迁移` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 换绑与归档按层处理 | locus 主会话不可用时整体迁移（真实入站） | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | `恢复干活会话后由真实入站替换不可用 locus 主会话: archived / preset-drift` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 换绑与归档按层处理 | active 复用与所有者停止不复活（真实入站） | packages/dsh-pet/test/locus-on-demand-provisioning.test.ts | `locus 主会话 active 时真实入站复用；明确停止入口不会被替换` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 旧模型入口按退休规则处理 | 升级只加表 | packages/dsh-pet/test/locus-legacy-retire.test.ts | `升级只加表` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 旧模型入口按退休规则处理 | 旧入口首个授权 at | packages/dsh-pet/test/locus-legacy-retire.test.ts | `旧入口首个授权 at` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 旧模型入口按退休规则处理 | 旧入口非授权 at | packages/dsh-pet/test/locus-legacy-retire.test.ts | `旧入口非授权 at` | 🟢 green |

@@ -11,6 +11,10 @@
 
 范围：以 `d4a2108e` 为基线的本轮全部源码、夹具、回归测试与规范 diff。结论：PASS，无阻断项。核对了创建时 Pet 工作区真实 cwd/attach、持久配对与来源项目字段分离、resolver/controller 共用归属判据、旧 M 空闲迁移不重放、真实 Host 创建和重建作用域均从持久入口解析项目根、物理路径与私有根拒绝保持，以及 `[locus] <干活主会话名>` 命名。移除的两处持久层 workspace 相等检查原本把运行归属与项目归属混为一谈；普通会话身份、active main、entry parent、provisioning/WAL/代际/CAS 校验继续保留。全量 Pet 2933 passed / 4 skipped，根仓 703 passed / 3 skipped，build/typecheck/strict/specs/artifact 通过。最终仅改标题模板后另跑创建/controller/loader/Host wiring 100 项通过。测试中的冷恢复使用新 agent scope 与官方 toolFilter 契约，不冒称执行了完整 Host 重启验收。正式 GUI/飞书的跨工作区显示与业务回执待部署后核验，27.3/27.4 不据此勾选。
 
+## 2026-11-04 归档恢复的入站衔接实现审查（主控）
+
+范围：以 `86e7955a` 为基线的本轮全部修复 diff。结论：PASS，无阻断项。现行“换绑与归档按层处理”要求 W 可用而 M 归档/删除/preset 无效时替换 M。本轮修复该既有要求的路由断点，不改变授权模型：`needsInitialization=false` 只代表无需首次建入口，不能代表 M 可服务。已知入口进入 `ensureForDelivery` 核验并按既有策略复用/替换；仅具体的 `LocusResolutionError(locus-unusable)` 可从读拒绝进入该流程；未知读错仍拒绝，不把来源归档或所有者退出转为新建默认来源。已有真实 resolution/provisioning 保持来源、配对、空闲与代际校验。新增真实 admission→channel→resolution→provisioning 共享仓储测试，覆盖同时归档后只恢复 W、preset 漂移、active 复用与 stopped 保护；旧代码 2 failed / 22 passed，修复后 106 项定向通过。三个旧夹具把检查接口误写成“已有即抛错”，现改为返回与读接口相同的现有投影；图片降级、评论重投和官方独立轮次的行为断言保持。全量 Pet 2936 passed / 4 skipped，build/typecheck、strict change、artifact check 通过。本轮未新增 compat patch、依赖或数据库迁移。正式飞书响应及现场 M 替换仍待部署后所有者再次 at 验证，不据源码回归勾选 27.3。
+
 ## Metadata
 
 - 轮次：round 7；时间基准：2026-11-03T19:30:58+08:00。

@@ -12,6 +12,7 @@
  */
 
 import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
+import { createDurableLocusAuthorizationResolver } from '../src/host/locus/admission.js'
 import { describe, expect, it } from 'vitest'
 import { LocusChannelController } from '../src/host/channel/locus-controller.js'
 import { LocusController } from '../src/host/locus/controller.js'
@@ -89,6 +90,7 @@ async function composeOnDemandHost(options: { readonly failFirstEstablishment?: 
   const sessions = new Map([
     [PARENT_SESSION, { id: PARENT_SESSION, workspaceId: 'workspace-owner', title: 'Owner main', agentPreset: 'standard' }],
   ])
+  const archived = new Set<string>()
   const createdWorks: string[] = []
   const createdMains: string[] = []
   const spaces: string[] = []
@@ -103,7 +105,10 @@ async function composeOnDemandHost(options: { readonly failFirstEstablishment?: 
   const provisioning = new LocusController({
     repository: adapter,
     dsh: {
-      resolveSession: async id => sessions.get(id),
+      resolveSession: async id => {
+        const session = sessions.get(id)
+        return session === undefined ? undefined : { ...session, state: archived.has(id) ? 'archived' as const : 'active' as const }
+      },
       resolveDefaultWorkspace: async () => ({ id: 'workspace-auto' }),
       createMainSession: async ({ workspaceId, chatId }) => {
         const session = { id: `session-auto-${++sequence}`, workspaceId, title: `auto:${chatId}` }
@@ -139,12 +144,11 @@ async function composeOnDemandHost(options: { readonly failFirstEstablishment?: 
     locus: createLocusResolution({
       store: durable,
       mains: { find: id => durable.getLocusMain(id) },
-      verifyMain: id => sessions.get(id)?.agentPreset === LOCUS_MAIN_PRESET,
+      verifyMain: id => !archived.has(id) && sessions.get(id)?.agentPreset === LOCUS_MAIN_PRESET,
+      isSessionArchived: id => archived.has(id),
       provisioning: {
         ensureForDelivery: async ({ endpoint }) => {
-          const ensured = endpoint.threadId === undefined
-            ? await provisioning.ensureGroup({ chatId: endpoint.chatId })
-            : await provisioning.ensureTopic({ chatId: endpoint.chatId, threadId: endpoint.threadId })
+          const ensured = await provisioning.ensureEntry(endpoint)
           const record = ensured.locus
           if (record.state !== 'not-created') throw new Error(`Provisioning must not create a child: ${record.state}`)
           return {
@@ -201,15 +205,15 @@ async function composeOnDemandHost(options: { readonly failFirstEstablishment?: 
     admissionContext: {
       botOpenId: 'ou-bot', allowOpenIds: ['ou-owner', 'ou_owner'], watermark: 1000,
       isDuplicate: () => false,
-      // Real, not fixed: this is the exact fact the whole test is about.
-      // A fixed 'authorized' would force `needsInitialization: false` and
-      // never exercise `ensureForDelivery` at all — silently turning "the
-      // first @ builds the tree" into a no-op assertion. Uninitialized
-      // until the durable repository actually has an active group.
-      authorization: (endpoint: { chatId: string; threadId?: string }) => {
-        const record = durable.findCurrentLocus(endpoint)
-        return record?.state === 'active' || record?.state === 'not-created' ? 'authorized' : 'uninitialized'
-      },
+      // Use the production resolver so archive/restore and explicit owner exit
+      // cross the same admission boundary as actual incoming messages.
+      authorization: createDurableLocusAuthorizationResolver({
+        getLatestLocusByEndpoint: endpoint => {
+          const record = durable.getLatestLocusByEndpoint(endpoint)
+          const main = record === undefined ? undefined : durable.getLocusMain(record.parentSessionId)
+          return record === undefined ? undefined : { ...record, ...(main === undefined ? { legacy: true } : { workSessionId: main.workSessionId }) }
+        },
+      }, { find: () => undefined }, id => archived.has(id)),
     },
     docHasEntries: chatId => durable.listLoci().some(record => record.endpoint.chatId === chatId),
     ...(options.imCalls === undefined ? {} : {
@@ -236,7 +240,7 @@ async function composeOnDemandHost(options: { readonly failFirstEstablishment?: 
     now,
   })
 
-  return { harness, durable, adapter, provisioning, controller, queued, diagnostics, now,
+  return { harness, durable, adapter, provisioning, controller, queued, diagnostics, now, archived, sessions,
     createdWorks, createdMains, spaces, released, children,
     close: async () => { controller.dispose(); await harness.close() } }
 }
@@ -300,6 +304,55 @@ describe('locus tree is built on demand by the first qualifying @ message', () =
     } finally {
       await host.close()
     }
+  })
+
+  it.each(['archived', 'preset-drift'] as const)('恢复干活会话后由真实入站替换不可用 locus 主会话: %s', async unavailable => {
+    const host = await composeOnDemandHost()
+    try {
+      const initial = await host.provisioning.ensureGroup({ chatId: CHAT_ID, parentSessionId: PARENT_SESSION })
+      const oldMain = initial.locus.parentSessionId
+      await host.durable.publishCreatedChild({ locusId: initial.locus.locusId, generation: initial.locus.generation, childSessionId: initial.locus.reservedChildSessionId!, now: host.now() })
+      host.archived.add(PARENT_SESSION)
+      if (unavailable === 'archived') host.archived.add(oldMain)
+      else host.sessions.set(oldMain, { ...host.sessions.get(oldMain)!, agentPreset: 'standard' })
+      // While W is archived no incoming question can create a replacement.
+      expect(await host.controller.handle(inbound('om-source-archived', '@Pet 暂停'))).toMatchObject({ kind: 'ignored', reason: 'retired-endpoint' })
+      expect(host.createdMains).toHaveLength(1)
+      host.archived.delete(PARENT_SESSION)
+      // Do not restore M. Production admission now reports authorized / no init.
+      expect(await host.controller.handle(inbound('om-source-restored', '@Pet 继续'))).toMatchObject({ kind: 'accepted' })
+      const current = host.durable.getCurrentLocus({ chatId: CHAT_ID })!
+      expect(current.parentSessionId).not.toBe(oldMain)
+      expect(current.generation).toBe(initial.locus.generation + 1)
+      expect(host.durable.getLocusMain(current.parentSessionId)?.workSessionId).toBe(PARENT_SESSION)
+      expect(host.durable.getLocusMain(oldMain)?.status).toBe('retired')
+      expect(host.createdWorks).toEqual([])
+      expect(host.queued).toHaveLength(1)
+      expect(host.queued[0]!.prompt).toContain('继续')
+      expect(host.queued[0]!.childSessionId).not.toBe(initial.locus.reservedChildSessionId)
+      // An active replacement is reused, including while its first Delivery runs.
+      await host.controller.handle(inbound('om-reuse-main', '@Pet 下一条'))
+      expect(host.createdMains).toHaveLength(2)
+    } finally { await host.close() }
+  })
+
+  it('locus 主会话 active 时真实入站复用；明确停止入口不会被替换', async () => {
+    const host = await composeOnDemandHost()
+    try {
+      const initial = await host.provisioning.ensureGroup({ chatId: CHAT_ID, parentSessionId: PARENT_SESSION })
+      expect(await host.controller.handle(inbound('om-reuse-active', '@Pet 使用原入口'))).toMatchObject({ kind: 'accepted' })
+      expect(host.createdMains).toHaveLength(1)
+      expect(host.durable.getCurrentLocus({ chatId: CHAT_ID })?.parentSessionId).toBe(initial.locus.parentSessionId)
+    } finally { await host.close() }
+    const stopped = await composeOnDemandHost()
+    try {
+      const initial = await stopped.provisioning.ensureGroup({ chatId: CHAT_ID, parentSessionId: PARENT_SESSION })
+      await stopped.durable.stopLocus(initial.locus.locusId, stopped.now())
+      stopped.archived.add(initial.locus.parentSessionId)
+      expect(await stopped.controller.handle(inbound('om-stopped', '@Pet 不应复活'))).toMatchObject({ kind: 'ignored', reason: 'retired-endpoint' })
+      expect(stopped.createdMains).toHaveLength(1)
+      expect(stopped.queued).toEqual([])
+    } finally { await stopped.close() }
   })
 
   it('a space establishment failure publishes no partial locus and leaves no group marker', async () => {
