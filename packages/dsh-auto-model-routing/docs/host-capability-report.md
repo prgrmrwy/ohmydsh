@@ -72,7 +72,7 @@ npm install --prefix "$PROBE_HOME" --save-exact --ignore-scripts --no-audit --no
   @deepseek-ai/dsh-session-query-sqlite@0.2.0-rc.2 \
   @deepseek-ai/dsh-subagent-fork-in-process@0.2.0-rc.2 \
   @deepseek-ai/dsh-subagent-spawn-in-process@0.2.0-rc.2
-node packages/auto-model-routing/scripts/host-capability-probe.mjs "$PROBE_HOME"
+node packages/dsh-auto-model-routing/scripts/host-capability-probe.mjs "$PROBE_HOME"
 ```
 
 探针输出 7 项 PASS 后才表示整链成功。它有独立依赖装配要求，未加入默认单元测试命令。

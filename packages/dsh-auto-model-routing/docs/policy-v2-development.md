@@ -43,7 +43,7 @@
 重跑整链：先 package build；在原临时官方 prefix 的基础上，精确安装 `@deepseek-ai/dsh-tool-subagent@0.2.0-rc.2`、`@deepseek-ai/dsh-experimental-tool-agent-team@0.2.0-rc.2`、`@deepseek-ai/dsh-launch-environment@0.2.0-rc.2`（`--save-exact --ignore-scripts`），然后：
 
 ```sh
-node packages/auto-model-routing/scripts/host-probe-children.mjs "$PROBE_HOME"
+node packages/dsh-auto-model-routing/scripts/host-probe-children.mjs "$PROBE_HOME"
 ```
 
 官方 standing tool 的 `modelSelectionSettings:true` 要求 preset-scoped context；隔离脚本没有伪造该 composition，使用 standing fixed-schema 工具 + 合成 allowlist。因此显式选择与父快照另用 host tests 验证，真实 preset/GUI 组合不记为通过。

@@ -20,7 +20,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/auto-model-routing/**'
+      - 'packages/dsh-auto-model-routing/**'
       - 'packages/dsh-magpie-connector/**'
       - 'packages/dsh-sidebar-session-provider-icon/**'
       - 'packages/dsh-session-id-copy/**'
@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dir: auto-model-routing
+          - dir: dsh-auto-model-routing
             repo: dsh-auto-model-routing
             secret: MIRROR_KEY_AUTO_MODEL_ROUTING
           - dir: dsh-magpie-connector

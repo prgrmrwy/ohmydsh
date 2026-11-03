@@ -7,10 +7,10 @@ import { overlayFixture, REPO } from './helpers/overlay-fixture.mjs'
 
 // The fixture manifest must pin the package version that is actually checked out, otherwise sync
 // reports version drift on every run and the "no changes" idempotency assertion can never hold.
-const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(REPO, 'packages/auto-model-routing/package.json'), 'utf8')).version
+const PACKAGE_VERSION = JSON.parse(readFileSync(path.join(REPO, 'packages/dsh-auto-model-routing/package.json'), 'utf8')).version
 const manifest = (legacy = false, enabled = true) => `dshVersion: 0.2.0-rc.2
 customizations:
-  - id: auto-model-routing
+  - id: dsh-auto-model-routing
     type: package
     source: local
     version: ${PACKAGE_VERSION}
@@ -19,9 +19,9 @@ ${legacy ? '  - id: subagent-model-routing\n    type: skill\n    enabled: true\n
 
 async function migrated() {
   const fx = await overlayFixture({ externalRoot: false, manifest: manifest(true) })
-  const target = path.join(fx.repo, 'packages/auto-model-routing')
-  await cp(path.join(REPO, 'packages/auto-model-routing'), target, { recursive: true, filter: source => !source.split(path.sep).includes('node_modules') })
-  await symlink(path.join(REPO, 'packages/auto-model-routing/node_modules'), path.join(target, 'node_modules'), 'dir')
+  const target = path.join(fx.repo, 'packages/dsh-auto-model-routing')
+  await cp(path.join(REPO, 'packages/dsh-auto-model-routing'), target, { recursive: true, filter: source => !source.split(path.sep).includes('node_modules') })
+  await symlink(path.join(REPO, 'packages/dsh-auto-model-routing/node_modules'), path.join(target, 'node_modules'), 'dir')
   await cp(path.join(target, 'skills/subagent-model-routing'), path.join(fx.repo, 'skills/subagent-model-routing'), { recursive: true })
   const old = fx.sync()
   assert.equal(old.status, 0, old.stderr)

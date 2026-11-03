@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4 — 2026-11-03
+
+- 主仓目录与 `dsh.yaml` 条目 id 统一为 `dsh-auto-model-routing`，与 npm 包名、镜像仓库一致。
+- 包代码、插件 id、设置路径（`$DSH_HOME/plugins/dsh-auto-model-routing/`）、状态目录（`$DSH_HOME/state/auto-model-routing/`）与 RPC 命名不变；仅结构/文档变更，无行为变更。
+
 ## 0.6.3 — 2026-11-02
 
 - README 中英首屏改为 markdown 图片写法，商店详情页可直接渲染。

@@ -124,6 +124,6 @@ dsh plugin --profile web remove dsh-auto-model-routing
 
 ## 来源、许可与参与
 
-本插件在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh)（`packages/auto-model-routing`）中持续开发，[本仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)是发布镜像，自动发布到 [npm](https://www.npmjs.com/package/dsh-auto-model-routing) 与 [GitHub Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases)。[当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)也在主仓维护。
+本插件在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh)（`packages/dsh-auto-model-routing`）中持续开发，[本仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)是发布镜像，自动发布到 [npm](https://www.npmjs.com/package/dsh-auto-model-routing) 与 [GitHub Releases](https://github.com/prgrmrwy/dsh-auto-model-routing/releases)。[当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/auto-model-routing/spec.md)也在主仓维护。
 
 采用 [MIT](LICENSE) 许可。欢迎到 [prgrmrwy/dsh-auto-model-routing](https://github.com/prgrmrwy/dsh-auto-model-routing/issues) 提 issue 和 PR，包括支持 Claude、GPT 以外的模型家族。

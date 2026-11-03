@@ -34,9 +34,9 @@ whenToUse: 用户要求发布/上架自研 DSH 插件、完善其发布资料或
 | 环节 | 真相源 |
 | --- | --- |
 | 主仓同步与自动打 tag | [mirror-release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/.github/workflows/mirror-release.yml) |
-| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/.github/workflows/release.yml) |
-| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/package.json) |
-| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/auto-model-routing/README.md) |
+| npm + GitHub Release 全流程模板 | [AUTO release.yml](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/.github/workflows/release.yml) |
+| 包元数据与构建入口 | [AUTO package.json](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/package.json) |
+| 双语首屏与并排演示 | [AUTO README](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-auto-model-routing/README.md) |
 | 本仓文档规则 | [文档治理测试](https://github.com/prgrmrwy/ohmydsh/blob/main/tests/repo-docs-governance.test.mjs) |
 
 复制 AUTO workflow 时必须替换包名等专属内容，不把 AUTO 的名称、描述或测试假定原样带入新插件。
