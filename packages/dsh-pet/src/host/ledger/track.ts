@@ -16,6 +16,8 @@
  * a second, weaker resolver would duplicate — and could drift from — an
  * invariant `pet_locus_finish` already enforces.
  */
+import { locusIdentity } from '../collab/naming.js'
+import { endpointKeyOf } from '../locus/aggregate.js'
 import type { LocusContextRecord, LocusCurrentDelivery } from '../locus/context-repository.js'
 import type { TodoBackend } from './backend.js'
 import { LedgerStoreError } from './store.js'
@@ -63,7 +65,7 @@ export async function trackTodo(
   const registration: NewTodoInput = {
     itemId: deps.newItemId(),
     parentSessionId: authorized.main.sessionId,
-    locusId: authorized.locus.locusId,
+    locusId: locusIdentity(endpointKeyOf(delivery.endpoint)),
     generation: authorized.locus.generation,
     endpoint: delivery.endpoint.threadId === undefined
       ? { chatId: delivery.endpoint.chatId }

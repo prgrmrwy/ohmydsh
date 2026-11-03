@@ -71,6 +71,16 @@ function harness(options: {
 }
 
 describe('per-turn Delivery correlation', () => {
+  it('does not admit retired inquiry-result continuation claims', () => {
+    const h = harness()
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1 })
+    h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+    h.claim({ childSessionId: CHILD, messageId: 'obsolete-result', sourceKind: 'result', turn: 2 })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toBeUndefined()
+    expect(h.observer.deliveryForTurn?.(CHILD, 2)).toBeUndefined()
+    h.observer.dispose()
+  })
+
   it('keeps diagnostic association for a mixed Delivery turn without granting reply authority', () => {
     const h = harness()
     h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1 })

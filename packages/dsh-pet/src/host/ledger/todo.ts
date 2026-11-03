@@ -85,9 +85,12 @@ export interface TodoEvidence {
 /** One durable todo item — the only `kind: 'todo'` ledger item this change defines. */
 export interface TodoRecord {
   readonly itemId: string
+  /** The session whose space holds the todo: the locus main session (legacy rows: the old main). */
   readonly parentSessionId: string
+  /** The work main session that takes the todo; absent on legacy rows. */
+  readonly workSessionId?: string
   readonly kind: 'todo'
-  /** Stable source identity. Addressing uses this, never `generation`. */
+  /** Stable entry identity (`ext.pet.entry`). Addressing uses this, never `generation`. */
   readonly locusId: string
   /** Audit-only fact: which generation existed when this was registered. Never used for lookup. */
   readonly generation: number

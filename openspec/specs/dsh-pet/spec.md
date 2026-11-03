@@ -703,7 +703,7 @@ MUST NOT 在拖动过程中反复触发整页布局（layout）重算。
 
 ### Requirement: Locus child 创建使用官方 subagent 契约表达其不变量
 
-Pet 创建 locus child 时 SHALL 使用宿主官方已发布的 subagent 创建契约表达以下不变量：调用方预留的 child 身份、child 工具面限制及其跨冷恢复的持久化、以及 child 组合与父后续变更的隔离。
+Pet 创建 locus child 时 SHALL 使用宿主官方已发布的 subagent 创建契约表达以下不变量：调用方预留的 child 身份、child 工具面限制及其跨冷恢复的持久化、以及 child 组合与父后续变更的隔离。child 的父 SHALL 是 Pet 自建、preset 锁定为 `locus-base` 的 locus 主会话；创建 SHALL 使用官方 `startContinuable` 并携带首条 prompt，冷恢复按官方规则从父组合重建。"与父后续变更的隔离"由父 preset 不可更改保证：Host SHALL 在 child 发布与每次投递前核验父 preset 仍为 `locus-base`。
 
 上述不变量 MUST NOT 通过修改宿主源码实现，除非已按 `pet-compat-minimization` 的正面证据标准证明官方契约无法表达。
 
@@ -718,31 +718,12 @@ child 实际暴露的工具面 SHALL 在发布前被读取并核验；核验不�
 - **THEN** 该 child 的工具面限制 SHALL 与创建时一致
 
 #### Scenario: 父在 child 存活期间更改组合
-- **WHEN** 父会话在 locus child 存活期间切换其 preset 或组合
-- **THEN** 该 child SHALL 继续运行在其创建时的组合上，不受该变更影响
+- **WHEN** locus 主会话的 preset 在 locus child 存活期间被改为非 `locus-base`
+- **THEN** Host SHALL 拒绝向该 child 派发并按"换绑与归档按层处理"把 locus 主会话视为不可用，MUST NOT 让 child 以变更后的组合服务
 
 #### Scenario: child 实际工具面超出允许范围
 - **WHEN** 发布前核验发现 child 暴露了允许清单与 Pet 自有注册均无法解释的工具
 - **THEN** 系统 SHALL 拒绝发布该 child，MUST NOT 依赖工具过滤声明推定其安全
-
-### Requirement: 子代结算 MUST NOT 打断父会话的进行中工作
-
-Pet 拥有自有汇报通道的 locus child 结算时，系统 SHALL 确保该结算不会打断父会话正在进行的工作。父会话是用户实际使用的主会话，且一个主会话可关联多个 locus。
-
-当宿主官方契约无法表达非打断式结算投递时，系统 SHALL 保留满足 `pet-compat-minimization` 举证标准的最窄 compatibility seam，并记录其退役条件与上游报告状态。
-
-#### Scenario: 父会话工作期间子代结算
-- **WHEN** 某个 locus child 在父会话正在执行一个轮次时结算
-- **THEN** 父会话当前轮次 SHALL 不被该结算打断
-
-#### Scenario: 多个 locus 同时结算
-- **WHEN** 同一父会话关联的多个 locus child 先后结算
-- **THEN** 父会话受到的打断次数 SHALL 为零，不随 locus 数量增长
-
-#### Scenario: Host 重启后子代冷恢复再结算
-- **WHEN** 一个已配置非打断式结算的 locus child 经 Host 重启被重新物化，随后完成工作并结算
-- **THEN** 其结算策略 SHALL 与创建时一致，父会话受到的打断次数仍为零
-- **AND** 该策略 MUST 从子代自身的持久化记录还原，MUST NOT 依赖进程内存中的创建期状态
 
 ### Requirement: 会话内真人直输登记为 Invocation
 
@@ -788,17 +769,21 @@ qa-child 与 unified locus child 会话 MUST NOT 走该路径；渠道投递 MUS
 
 ### Requirement: Pet executor preset 按运行体的 preset 承载方式声明
 
-Pet 依赖的 executor preset（`dsh-pet-executor`）SHALL 以所 pin 运行体实际加载的方式提供，使 Pet 冷恢复与独立 child 组合时都能按 id 挂载它。所 pin 的运行体只接受在 profile 配置中声明 preset 时，该 preset SHALL 以声明形式出现在生效配置中。它的工具与 persona 组合 MUST 与迁移前等价。
+Pet 依赖的 preset（Pet Task executor 用 `dsh-pet-executor`；locus 主会话与子会话用 `locus-base`）SHALL 以所 pin 运行体实际加载的方式提供，使 Pet 创建与冷恢复时都能按 id 挂载它。`locus-base` SHALL 是白名单构建、名称中性、与 channel 无关且不含任何委派行的 preset。所 pin 的运行体只接受在 profile 配置中声明 preset 时，该 preset SHALL 以声明形式出现在生效配置中。`dsh-pet-executor` 的工具与 persona 组合 MUST 与迁移前等价。
 
-preset 无法按 id 挂载时，Pet SHALL fail closed：拒绝创建或恢复依赖该 preset 的 locus child，并给出可诊断说明。Pet MUST NOT 退化为挂载父会话的 preset。
+preset 无法按 id 挂载时，Pet SHALL fail closed：拒绝创建或恢复依赖该 preset 的会话，并给出可诊断说明。locus 主会话 MUST NOT 以其它 preset 创建。
 
 #### Scenario: 运行体只接受声明式 preset 时冷恢复 locus child
-- **WHEN** Host 重启后恢复一个记录了 `dsh-pet-executor` 的 locus child，且运行体只从 profile 声明加载 preset
-- **THEN** 该 child 按声明的 preset 挂载，其工具面与迁移前一致
+- **WHEN** Host 重启后恢复一个 locus child，且运行体只从 profile 声明加载 preset
+- **THEN** 其父 locus 主会话按声明的 `locus-base` 挂载，child 从父组合恢复，工具面与恢复前一致
 
 #### Scenario: preset 缺失
-- **WHEN** 生效配置中没有 `dsh-pet-executor` 的声明
-- **THEN** Pet 拒绝创建或恢复依赖它的 child 并报告缺失，MUST NOT 改用父会话的 preset
+- **WHEN** 生效配置中没有 `locus-base` 的声明
+- **THEN** Pet 拒绝创建 locus 主会话与 child 并报告缺失，MUST NOT 改用其它 preset
+
+#### Scenario: locus-base 不含委派
+- **WHEN** 展开 `locus-base` 的工具组合
+- **THEN** 不含 `subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message` 与 agent 控制工具
 
 ### Requirement: Locus child 的存在证明不依赖运行体可能移除的目录字段
 
@@ -812,15 +797,15 @@ Pet 判定某个 locus child 仍然存在时，所依据的字段 SHALL 在所 p
 
 所 pin 的运行体对同时激活的子代设有名额上限时，Pet 的 locus child 创建与恢复 SHALL 遵守该上限。名额不足时，Pet SHALL 显式报告并保留可重试状态，MUST NOT 静默丢弃投递，也 MUST NOT 把 child 标记为已失败或已结束。
 
-Pet 只为读取 child 状态而触发的物化 SHALL 在完成后归还名额，不得因只读访问长期占用名额。
+Pet 读取 child 状态 SHALL 经 `sessionQuery.observeSession` 冷读，MUST NOT 为只读访问物化 child。
 
 #### Scenario: 名额已满时创建 locus child
 - **WHEN** 已激活子代数达到运行体上限，此时 Pet 需要创建或恢复 locus child
 - **THEN** Pet 报告名额不足并保留待处理状态，名额释放后可以重试；不丢失投递，也不把 child 标为失败
 
 #### Scenario: 只读访问不长期占用名额
-- **WHEN** Pet 为读取某个 child 的状态而触发其物化
-- **THEN** 读取完成后该名额被归还，不影响后续创建
+- **WHEN** Pet 读取某个未驻留 child 的状态
+- **THEN** 经冷读完成，不物化该 child、不占用名额
 
 ### Requirement: Pet 管理接口只受理回环或 DSH 已信任的同源来源
 
@@ -852,3 +837,15 @@ Pet 来源检查拒绝请求时 SHALL 返回 403 和标准错误信封（`ok: fa
 #### Scenario: 客户端显示真实拒绝原因
 - **WHEN** Pet 来源检查拒绝一次管理调用
 - **THEN** 客户端显示的错误包含该 `message`，而不是"缺少 ok 标记"
+
+### Requirement: 子代结算按官方默认通知 locus 主会话
+
+locus child 结算 SHALL 使用官方默认的结算通知，通知其父 locus 主会话；locus 主会话是该结算的受众。Pet MUST NOT 使用静默结算兼容能力，干活主会话 MUST NOT 收到子代结算通知。
+
+#### Scenario: 结算通知只到 locus 主会话
+- **WHEN** 某入口的 child 完成一轮并结算
+- **THEN** locus 主会话收到官方结算通知；干活主会话的事件流中没有该结算
+
+#### Scenario: 多个入口结算不打断干活主会话
+- **WHEN** 同一 locus 主会话下的三个 child 先后结算，期间干活主会话正在执行轮次
+- **THEN** 干活主会话的当前轮次没有被注入或打断

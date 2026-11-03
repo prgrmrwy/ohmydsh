@@ -82,6 +82,23 @@ export class SessionAccess {
     }
     return { channel: resolved.channel, address: resolved.address, guard, ...(resolved.stamped ? { stamped: resolved.stamped } : {}) }
   }
+  /**
+   * Caller for an exact ordinary session the integrator vouches for (`owns`). Same admission as
+   * `header`; `guard` re-checks admission, the live ordinary identity and `owns` synchronously.
+   */
+  async owned(id: string, owns: (sessionId: string) => boolean): Promise<Caller> {
+    const holds = () => { try { return owns(id) === true } catch { return false } }
+    if (typeof id !== 'string' || !holds() || !await this.header(id)) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+    const guard = () => {
+      try {
+        if (!this.admissible(id) || !holds()) return false
+        const live = this.ctx.agents.get(SessionId(id))
+        return !live || (live.id === id && live.session.id === id && this.ordinary(live.session.header, live))
+      } catch { return false }
+    }
+    if (!guard()) throw new CollabError('COLLAB_CALLER_UNAVAILABLE')
+    return { channel: 'dsh-session', address: id, guard }
+  }
   async header(id: string): Promise<SessionHeader | undefined> {
     if (!this.admissible(id)) return
     const live = this.ctx.agents.get(SessionId(id))

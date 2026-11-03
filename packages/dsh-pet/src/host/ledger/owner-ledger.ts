@@ -7,13 +7,11 @@
  *  - When the collaboration layer cannot be read, the list says so
  *    (`collab: 'unavailable'`) and still carries the legacy todos — it never
  *    reads as an empty ledger.
- *  - Records the proxy received but could not route are listed for the owner.
  *
  * Pure composition over injected ports, so every branch is unit-testable.
  */
 import { PetError } from '../errors.js'
-import type { PetTodoAction, PetTodoLedgerView, PetTodoView, PetUnroutableView } from '../../wire.js'
-import type { ProxyInboxEntry } from '../collab/proxy.js'
+import type { PetTodoAction, PetTodoLedgerView, PetTodoView } from '../../wire.js'
 import type { TodoBackend } from './backend.js'
 import { LedgerStoreError } from './store.js'
 import { projectTodoForOwner } from './owner-view.js'
@@ -23,8 +21,6 @@ export interface OwnerLedgerDeps {
   readonly legacy: TodoBackend
   /** Whether Pet is currently attached to dsh-collab. */
   readonly collabAvailable: () => boolean
-  /** Unroutable proxy registrations for one main session. */
-  readonly unroutable: (parentSessionId: string) => readonly ProxyInboxEntry[]
 }
 
 export interface OwnerLedger {
@@ -38,16 +34,6 @@ export interface OwnerLedger {
 }
 
 const LEGACY_REFUSAL = '这是旧版待办（迁移前登记），只读保留，不能受理、完成或放弃。'
-
-function unroutableView(entry: ProxyInboxEntry): PetUnroutableView {
-  return {
-    seq: entry.seq,
-    ...(entry.at === undefined ? {} : { at: entry.at }),
-    subject: entry.subject,
-    ...(entry.messageId === undefined ? {} : { messageId: entry.messageId }),
-    ...(entry.itemId === undefined ? {} : { itemId: entry.itemId }),
-  }
-}
 
 export function createOwnerLedger(deps: OwnerLedgerDeps): OwnerLedger {
   return {
@@ -64,13 +50,11 @@ export function createOwnerLedger(deps: OwnerLedgerDeps): OwnerLedger {
           available = false
         }
       }
-      const unroutable = available ? deps.unroutable(parentSessionId).map(unroutableView) : []
       // Legacy first: they are older, and the list reads oldest-first.
       return {
         parentSessionId,
         items: [...legacy, ...collab],
         collab: available ? 'available' : 'unavailable',
-        ...(unroutable.length === 0 ? {} : { unroutable }),
       }
     },
     async guard(itemId) {

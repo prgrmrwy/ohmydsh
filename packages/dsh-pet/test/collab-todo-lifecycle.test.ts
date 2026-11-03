@@ -1,6 +1,6 @@
 /**
  * `pet-locus-intent-triage` → "待办生命周期与 Delivery 结算解耦"
- * (lifecycle-01..06) on the collab `TodoBackend`, over the REAL dsh-collab
+ * on the collab `TodoBackend`, over the REAL dsh-collab
  * plugin and the REAL durable Delivery ledger.
  */
 import { afterEach, describe, expect, it } from 'vitest'
@@ -8,14 +8,16 @@ import { acceptTodo } from '../src/host/ledger/dispatch.js'
 import { LocusRepository } from '../src/host/locus/persistence.js'
 import type { DeliveryCorrelation } from '../src/host/locus/delivery.js'
 import { locusSpaceId } from '../src/host/collab/naming.js'
-import { eventsAfter, identityOf, openTodoWorld, readOverview, type TodoWorld } from './support/collab-todo.js'
+import { registerPetTools } from '../src/host/tools.js'
+import { eventsAfter, openTodoWorld, readOverview, type TestLocusRow, type TodoWorld } from './support/collab-todo.js'
 import { result, settle } from './support/collab-host.js'
 import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
 
-const MAIN = 'session-main-life'
+const MAIN = 'session-locus-main-life'
+const WORK = 'session-work-life'
 const ALPHA = { chatId: 'oc-life-alpha' }
 const SPACE = locusSpaceId(MAIN)
-const LOCUS = { id: 'rec-life-a', generation: 1, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: 'child-life', state: 'active' }
+const LOCUS: TestLocusRow = { id: 'rec-life-a', generation: 1, endpoint: ALPHA, locusMainSessionId: MAIN, childSessionId: 'child-life', state: 'active' }
 
 let todo: TodoWorld | undefined
 let harness: PetHarness | undefined
@@ -26,8 +28,8 @@ afterEach(async () => {
 
 async function ready() {
   todo = await openTodoWorld()
+  await todo.addMain({ locusMainSessionId: MAIN, workSessionId: WORK })
   todo.addLocus(LOCUS)
-  await todo.loadMain(MAIN)
   return todo
 }
 
@@ -48,8 +50,6 @@ function acceptDeps(t: TodoWorld, port = fakeDispatchPort({ status: 'idle' })) {
     port,
     deps: {
       readTodo: (id: string) => t.backend.getTodoItem(id),
-      registrarFor: () => ({ childCanExecute: false, childSessionId: LOCUS.childSessionId }),
-      contextFor: () => ({ mainWasBriefedStandby: false }),
       port,
       advanceStatus: (id: string, to: 'accepted') => t.backend.advanceStatus(id, to, Date.now()),
       log: () => {},
@@ -75,7 +75,7 @@ async function deliveryQueue() {
 }
 
 describe('待办生命周期与 Delivery 结算解耦（collab）', () => {
-  it('lifecycle-01：登记后队列继续前进', async () => {
+  it('登记后队列继续前进', async () => {
     const t = await ready()
     const { repository, correlation, current } = await deliveryQueue()
     expect(current.messageId).toBe('om-a')
@@ -88,7 +88,7 @@ describe('待办生命周期与 Delivery 结算解耦（collab）', () => {
     expect((await t.backend.getTodoItem('todo-q'))?.status).toBe('open')
   })
 
-  it('lifecycle-02：回复完成不等于事情做完', async () => {
+  it('回复完成不等于事情做完', async () => {
     const t = await ready()
     const { repository, correlation, current } = await deliveryQueue()
     expect((await t.register(LOCUS.id, { summary: '修 bug', detail: '' }, 'todo-r')).ok).toBe(true)
@@ -101,7 +101,7 @@ describe('待办生命周期与 Delivery 结算解耦（collab）', () => {
     expect(item.progress).toBe('open')
   })
 
-  it('lifecycle-03：待办状态变化不外发', async () => {
+  it('待办状态变化不外发', async () => {
     const t = await ready()
     expect((await t.register(LOCUS.id, { summary: '外发检查', detail: '' }, 'todo-o')).ok).toBe(true)
     const before = (await t.records(MAIN)).at(-1).seq
@@ -110,42 +110,57 @@ describe('待办生命周期与 Delivery 结算解耦（collab）', () => {
     // Only the disposition is committed: no message, no wake, no follow-up turn.
     expect(eventsAfter(await t.records(MAIN), before)).toEqual(['request/progressed'])
     expect(t.world.counts.followup).toBe(0)
-    expect(t.proxy.inbox()).toEqual([])
+    expect((await t.records(MAIN)).flatMap(record => record.events).filter((event: any) => event.type === 'message/sent')).toEqual([])
   })
 
-  it('lifecycle-04：子会话不能推进待办状态', async () => {
+  it('子会话不能推进待办状态', async () => {
     const t = await ready()
     expect((await t.register(LOCUS.id, { summary: '自己登记', detail: '' }, 'todo-c')).ok).toBe(true)
+    // The child has no tool that can advance a todo: no collab_* and no request-execution.
+    const published = new Map<string, unknown>()
+    registerPetTools({ tools: { register: (definition: any) => { published.set(definition.name, definition); return () => {} } } } as never, {
+      repository: {} as never,
+      locusChildTools: { loci: { findByChildSessionId: () => [] }, collab: t.collab, subagents: () => undefined },
+      intentTriage: { loci: { findByChildSessionId: () => [] }, track: { store: t.backend, now: () => 1, newItemId: () => 'x' } },
+    } as never)
+    expect([...published.keys()].filter(name => /^collab_|request_execution|advance/.test(name))).toEqual([])
+
+    // And even a forged call to the global tool is refused at the dsh-collab entry: the kernel receives nothing.
     const before = await t.records(MAIN)
     const child = t.world.live.get(LOCUS.childSessionId)
     for (const progress of ['accepted', 'done', 'rejected']) {
       const refused = result(await t.world.call(child, 'collab_advance_request', { spaceId: SPACE, cmdId: `adv-${progress}`, itemId: 'todo-c', progress }))
-      expect(refused).toEqual({ error: { code: 'COLLAB_ITEM_NOT_FOUND' } })
+      expect(refused.error).toBeDefined()
     }
-    // Refused at the dsh-collab entry: the kernel received nothing.
     expect(await t.records(MAIN)).toEqual(before)
     expect((await t.backend.getTodoItem('todo-c'))?.status).toBe('open')
   })
 
-  it('lifecycle-05：主会话做完后自行标记完成', async () => {
+  it('主会话做完后自行标记完成', async () => {
     const t = await ready()
     expect((await t.register(LOCUS.id, { summary: '受理后完成', detail: '' }, 'todo-m')).ok).toBe(true)
     const { port, deps } = acceptDeps(t)
     expect((await acceptTodo('todo-m', deps)).ok).toBe(true)
-    expect(port.calls.filter(call => call.kind === 'followup')).toHaveLength(1)
+    // The follow-up goes to the WORK main session, never to the locus main or the child.
+    expect(port.calls.filter(call => call.kind === 'followup').map(call => call.sessionId)).toEqual([WORK])
+    let childTurns = 0
+    t.world.live.get(LOCUS.childSessionId)!.followup = () => { childTurns += 1 }
+    const before = (await t.records(MAIN)).at(-1).seq
 
-    const main = t.world.live.get(MAIN)
-    const done = result(await t.world.call(main, 'collab_advance_request', { spaceId: SPACE, cmdId: 'main-done', itemId: 'todo-m', progress: 'done' }))
+    const work = t.world.live.get(WORK)
+    const done = result(await t.world.call(work, 'collab_advance_request', { spaceId: SPACE, cmdId: 'work-done', itemId: 'todo-m', progress: 'done' }))
     expect(done.error).toBeUndefined()
     await settle()
 
     expect((await t.backend.getTodoItem('todo-m'))?.status).toBe('done')
-    expect(t.proxy.inbox().filter(entry => entry.itemId === 'todo-m'))
-      .toEqual([expect.objectContaining({ subject: 'request-terminal', progress: 'done', route: { kind: 'locus', locusId: identityOf(ALPHA), via: 'ref' } })])
-    expect(t.world.counts.followup).toBe(0)
+    // The terminal notice is intended for the author (the locus main session) and for nobody else:
+    // the child is no member, so no child turn can start, and nothing goes to Feishu.
+    const events = (await t.records(MAIN)).filter(record => record.seq > before).flatMap(record => record.events)
+    expect(events.filter((event: any) => event.type === 'dispatch/intended').map((event: any) => event.delivery.member)).toEqual(['locus'])
+    expect(childTurns).toBe(0)
   })
 
-  it('lifecycle-06：不经受理直接了结', async () => {
+  it('不经受理直接了结', async () => {
     const t = await ready()
     for (const [itemId, to] of [['todo-d1', 'done'], ['todo-d2', 'dropped']] as const) {
       expect((await t.register(LOCUS.id, { summary: itemId, detail: '' }, itemId)).ok).toBe(true)

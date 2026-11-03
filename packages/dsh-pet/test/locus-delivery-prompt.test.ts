@@ -113,6 +113,19 @@ describe('delivery prompt position', () => {
 })
 
 describe('delivery prompt fact assembly', () => {
+  it.each(['first', 'subsequent'])('states only effective values and flags pending changes in the %s prompt', position => {
+    const prompt = renderLocusDeliveryFor({
+      record: record({ childComposition: 'tier3', toolTier: { desired: 'shell', effective: 'safe' }, permission: { desired: 'write', effective: 'read' } }),
+      message: message(),
+      deliveries: position === 'first' ? [] : [delivery('prior', { inboxMessageId: 'prior-inbox' })],
+    })
+    expect(prompt).toContain('待应用档位变更')
+    expect(prompt).toContain('待应用权限变更')
+    expect(prompt).not.toContain('effective：shell')
+    expect(prompt).not.toContain('desired：write')
+    expect(prompt).not.toContain('当前是 shell 档')
+  })
+
   it('takes the effective tier from the durable record instead of defaulting to safe', () => {
     const prompt = renderLocusDeliveryFor({
       record: record({ toolTier: { effective: 'shell' } }),

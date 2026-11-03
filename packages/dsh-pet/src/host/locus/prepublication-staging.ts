@@ -9,9 +9,14 @@
  *
  * 1. reserve a fresh, registry-generated child id and its expected composition;
  * 2. pass that exact id to `startContinuable`;
- * 3. the synchronous `agent/created` path claims the reservation once;
- * 4. publish the durable active locus, then commit the reservation; or
- * 5. abort it on every failure path before compensating the child.
+ * 3. the `agent/created` path claims the reservation once, composes the child,
+ *    and then runs the creator's publication callback: the durable
+ *    child/marker/current association must exist BEFORE the child's first turn
+ *    is claimed, and the runtime claims that turn before `startContinuable`
+ *    returns (probes/agent-created-probe.md), so waiting for the return value
+ *    would let the first caller-bound tool run with nothing to resolve;
+ * 4. after creation succeeds, commit the reservation; or
+ * 5. on every failure path revert the publication if it ran, then abort.
  *
  * It is deliberately process-local and never a second durable truth.  Entries
  * have a hard-bounded count and lifetime, terminal handles are retained only by
@@ -33,14 +38,36 @@ export const LOCUS_PREPUBLICATION_MAX_CAPACITY = 4_096
 
 /** Expected durable identity, before the fresh child id has been allocated. */
 export interface LocusPrepublicationIdentity {
+  /**
+   * The child id to use, when the caller reserved one durably before this
+   * (the first Delivery of a `not-created` generation carries it). Absent, the
+   * registry allocates a fresh one.
+   */
+  readonly childSessionId?: string
   readonly parentSessionId: string
   readonly locusId: string
   readonly generation: number
   readonly permission: LocusChildPermission
-  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  readonly childComposition?: 'tier3'
   readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
   /** The entry the child serves (see {@link LocusChildComposition.endpoint}). */
   readonly endpoint?: { readonly chatId: string; readonly threadId?: string }
+}
+
+/**
+ * What the creator needs done inside `agent/created`, once the child is
+ * claimed and composed. Both callbacks are the creator's: the registry only
+ * sequences them and remembers whether `publish` completed.
+ */
+export interface LocusPrepublicationPublication {
+  /**
+   * Durably publish the child's association (active generation, composition
+   * marker, current Delivery). Atomic: a throw MUST leave nothing published,
+   * and it vetoes the child's creation.
+   */
+  publish(childSessionId: string, composition: LocusChildComposition): void | Promise<void>
+  /** Undo a completed `publish` when creation is rejected afterwards. */
+  unpublish(childSessionId: string, composition: LocusChildComposition): void | Promise<void>
 }
 
 /** Opaque capability held by the provisioning operation. */
@@ -56,6 +83,8 @@ export interface LocusPrepublicationSnapshot {
   readonly reservationId: string
   readonly composition: LocusChildComposition
   readonly state: 'reserved' | 'claimed'
+  /** Whether the creator's publication callback completed inside `agent/created`. */
+  readonly published: boolean
   readonly expiresAt: number
 }
 
@@ -74,6 +103,7 @@ export type LocusPrepublicationFailure =
   | 'already-aborted'
   | 'registry-disposed'
   | 'durable-stage-conflict'
+  | 'already-published'
 
 /** Error carrying a stable fail-closed reason. */
 export class LocusPrepublicationError extends Error {
@@ -102,7 +132,9 @@ type EntryState = LocusPrepublicationSnapshot['state'] | TerminalState
 
 interface StagingEntry {
   readonly reservation: LocusPrepublicationReservation
+  readonly publication?: LocusPrepublicationPublication
   state: EntryState
+  published: boolean
 }
 
 function isIdentifier(value: unknown): value is string {
@@ -130,9 +162,7 @@ function assertIdentity(identity: LocusPrepublicationIdentity): void {
     || !Number.isSafeInteger(identity.generation)
     || identity.generation <= 0
     || (identity.permission !== 'read' && identity.permission !== 'write')
-    || (identity.childComposition !== undefined
-      && identity.childComposition !== 'safe-v1'
-      && identity.childComposition !== 'safe-v2')
+    || (identity.childComposition !== undefined && identity.childComposition !== 'tier3')
     || (identity.toolTier !== undefined
       && (!['safe', 'shell'].includes(identity.toolTier.desired)
         || !['safe', 'shell'].includes(identity.toolTier.effective)))
@@ -196,7 +226,10 @@ export class LocusPrepublicationStagingRegistry {
    * stage an existing/old child.  The returned id must be passed unchanged to
    * the Host's continuable-child creation call.
    */
-  reserve(identity: LocusPrepublicationIdentity): LocusPrepublicationReservation {
+  reserve(
+    identity: LocusPrepublicationIdentity,
+    publication?: LocusPrepublicationPublication,
+  ): LocusPrepublicationReservation {
     this.assertUsable()
     assertIdentity(identity)
     this.sweepExpired()
@@ -209,7 +242,7 @@ export class LocusPrepublicationStagingRegistry {
       )
     }
 
-    const childSessionId = this.createChildSessionId()
+    const childSessionId = identity.childSessionId ?? this.createChildSessionId()
     const reservationId = this.createReservationId()
     if (!isIdentifier(childSessionId)) {
       throw new LocusPrepublicationError('invalid-identity', 'Child id factory returned no usable id')
@@ -236,7 +269,7 @@ export class LocusPrepublicationStagingRegistry {
       locusId: identity.locusId.trim(),
       generation: identity.generation,
       permission: identity.permission,
-      childComposition: identity.childComposition ?? 'safe-v2',
+      childComposition: identity.childComposition ?? 'tier3',
       toolTier: identity.toolTier ?? { desired: 'safe', effective: 'safe' },
       ...(identity.endpoint === undefined
         ? {}
@@ -252,7 +285,12 @@ export class LocusPrepublicationStagingRegistry {
       composition,
       expiresAt: this.now() + this.ttlMs,
     })
-    const entry: StagingEntry = { reservation, state: 'reserved' }
+    const entry: StagingEntry = {
+      reservation,
+      state: 'reserved',
+      published: false,
+      ...(publication === undefined ? {} : { publication }),
+    }
     this.byChild.set(reservation.childSessionId, entry)
     this.activeReservationIds.add(reservation.reservationId)
     this.byHandle.set(reservation as object, entry)
@@ -271,8 +309,55 @@ export class LocusPrepublicationStagingRegistry {
       reservationId: entry.reservation.reservationId,
       composition: entry.reservation.composition,
       state: entry.state,
+      published: entry.published,
       expiresAt: entry.reservation.expiresAt,
     })
+  }
+
+  /**
+   * Run the creator's publication callback for a child `agent/created` has
+   * already claimed. Awaited by the `agent/created` listener, so the runtime
+   * does not claim the child's first turn until it settles, and a rejection
+   * vetoes creation.
+   *
+   * A child with no publication callback (an ordinary reserved child) is a
+   * no-op. Publishing twice is an identity conflict and throws.
+   */
+  async publishClaimed(childSessionId: string): Promise<void> {
+    this.assertUsable()
+    if (!isIdentifier(childSessionId)) return
+    const entry = this.byChild.get(childSessionId)
+    if (entry === undefined || entry.publication === undefined) return
+    if (entry.state !== 'claimed') {
+      throw new LocusPrepublicationError(
+        'claim-required',
+        `Child ${childSessionId} must be claimed by agent/created before it is published`,
+      )
+    }
+    if (entry.published) {
+      throw new LocusPrepublicationError(
+        'already-published',
+        `Child ${childSessionId} was already published`,
+      )
+    }
+    await entry.publication.publish(childSessionId, entry.reservation.composition)
+    entry.published = true
+    // Durable identity and composition now exist; retire the one-shot bridge
+    // before the runtime is allowed to claim the first prompt.
+    this.commit(entry.reservation)
+  }
+
+  /**
+   * Revert a completed publication. Safe to call when nothing was published
+   * (returns false). Rethrows the callback's failure so the caller can report
+   * an incomplete rollback.
+   */
+  async revertPublication(childSessionId: string): Promise<boolean> {
+    const entry = this.byChild.get(childSessionId)
+    if (entry === undefined || entry.publication === undefined || !entry.published) return false
+    await entry.publication.unpublish(childSessionId, entry.reservation.composition)
+    entry.published = false
+    return true
   }
 
   /**

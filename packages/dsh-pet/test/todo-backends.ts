@@ -10,10 +10,10 @@
 import { legacyTodoBackend, type TodoBackend } from '../src/host/ledger/backend.js'
 import { SharedFactLedgerStore } from '../src/host/ledger/store.js'
 import type { NewTodoInput, TodoRecord } from '../src/host/ledger/todo.js'
-import { LocusCollabProxy, type ProxyLocusRecord } from '../src/host/collab/proxy.js'
+import { LocusCollab, type LocusMainRef } from '../src/host/collab/locus-collab.js'
 import { CollabTodoBackend } from '../src/host/collab/todo-backend.js'
 import { emptyMedium, openPetHarness } from './harness.js'
-import { SUBAGENT_HEADER, openCollabWorld } from './support/collab-host.js'
+import { openCollabWorld } from './support/collab-host.js'
 
 export interface OpenedTodoBackend {
   readonly backend: TodoBackend
@@ -59,25 +59,18 @@ export const collabTodoBackendCase: TodoBackendCase = {
   name: 'collab',
   async open() {
     const world = await openCollabWorld()
-    const loci: ProxyLocusRecord[] = []
-    const proxy = new LocusCollabProxy({ listLoci: () => loci, liveAgent: id => world.live.get(id) })
-    proxy.attach(world.service)
-    const inner = new CollabTodoBackend({
-      proxy,
-      childOf: ({ locusId, parentSessionId }) => loci.find(record => record.id === locusId && record.parentSessionId === parentSessionId)?.childSessionId,
-      liveAgent: id => world.live.get(id),
-    })
+    const mains: LocusMainRef[] = []
+    const collab = new LocusCollab({ directory: { list: () => mains } })
+    collab.attach(world.service)
+    const inner = new CollabTodoBackend({ collab, directory: { list: () => mains } })
+    // `parentSessionId` of a registration is the locus main session; each gets a work main session.
     const provision = async (input: NewTodoInput) => {
-      if (loci.some(record => record.id === input.locusId && record.parentSessionId === input.parentSessionId)) return
-      const child = `child-${input.parentSessionId}-${input.locusId}`
-      loci.push({
-        id: input.locusId, generation: input.generation, endpoint: input.endpoint,
-        parentSessionId: input.parentSessionId, childSessionId: child, state: 'active',
-      })
-      world.session(child, SUBAGENT_HEADER(input.parentSessionId))
-      if (!world.live.has(input.parentSessionId)) world.session(input.parentSessionId)
-      proxy.refresh()
-      const ensured = await proxy.ensureSpace(input.parentSessionId)
+      if (mains.some(ref => ref.locusMainSessionId === input.parentSessionId)) return
+      const ref: LocusMainRef = { locusMainSessionId: input.parentSessionId, workSessionId: `work-of-${input.parentSessionId}` }
+      mains.push(ref)
+      world.session(ref.locusMainSessionId)
+      world.session(ref.workSessionId)
+      const ensured = await collab.ensureSpace(ref)
       if (!ensured.ok) throw new Error(`collab fixture could not establish a space: ${JSON.stringify(ensured)}`)
     }
     const backend: TodoBackend = {

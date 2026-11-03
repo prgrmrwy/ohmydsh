@@ -38,12 +38,14 @@ test('the runtime patch is pinned to the manifest DSH version', async () => {
   assert.match(builder, /reviewed DSH source requires Node \^22\.19\.0 or >=24\.0\.0/)
 })
 
-test('the recorded patch hash matches the reviewable patch on disk', async () => {
-  const patch = await readFile(path.join(COMPAT, 'settlement-notice.patch'))
-  const builder = await text('build.mjs')
-  const actual = createHash('sha256').update(patch).digest('hex')
-
-  assert.match(builder, new RegExp(`patchSha256:\\s*'${actual}'`))
+test('both retained extension hashes match their reviewed templates and pins', async () => {
+  for (const [group, pin] of [['model-display', 'modelDisplayPatchSha256'], ['team-membership', 'teamMembershipHash']]) {
+    const patch = await readFile(path.join(COMPAT, `${group}.patch`))
+    const template = JSON.parse(await text(`${group}.package.template.json`))
+    const hash = createHash('sha256').update(patch).digest('hex')
+    assert.equal(template.patchSha256, hash)
+    assert.ok((await text('build.mjs')).includes(hash), `${pin} must be pinned`)
+  }
 })
 
 test('storage is no longer patched: Pet registers its own backend instead', async () => {
@@ -66,36 +68,10 @@ test('storage is no longer patched: Pet registers its own backend instead', asyn
   assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-storage[a-z-]*': `file:/)
 })
 
-test('the patch carries behavior, compatibility, and a runtime capability marker', async () => {
-  const patch = await text('settlement-notice.patch')
-
-  assert.match(patch, /settlementNotice/)
-  assert.match(patch, /SUPPORTED_DESCRIPTOR_VERSIONS/)
-  assert.match(patch, /supportsSettlementNotice/)
-  assert.match(patch, /if \(activation\.settlementNotice === 'silent'\) return/)
-})
-
-test('reviewed runtime patches stay confined to the approved package sources', async () => {
-  // The inquiry-isolation capability is approved only in agent-loop; the
-  // official dsh-agent source remains untouched. Keep each patch's source
-  // ownership explicit so a future broadening cannot silently inherit approval.
-  const subagentPatch = await text('settlement-notice.patch')
-  const loopPatch = await text('inquiry-isolation.patch')
-  const toolsPatch = await text('newinquiry-tools-guard.patch')
-  const effectsPatch = await text('native-managed-effects.patch')
-
-  const packagePaths = (patch) => [...new Set([...patch.matchAll(/^\+\+\+ b\/(\S+)/gm)]
-    .map(([, file]) => file.match(/^packages\/([^/]+\/[^/]+)/)?.[1]))]
-  assert.deepEqual(packagePaths(subagentPatch), ['subagent/subagent'])
-  assert.deepEqual(packagePaths(loopPatch), ['core/agent-loop'])
-  assert.deepEqual(packagePaths(toolsPatch), ['core/tools'])
-  assert.deepEqual(packagePaths(effectsPatch).sort(), [
-    'subagent/tool-subagent',
-    'subagent/tool-subagent-control',
-    'workflow/tool-workflow',
-    'workflow/tool-ralph',
-  ].sort())
-  assert.doesNotMatch(loopPatch, /packages\/core\/agent\/|packages\/agent\/agent/)
+test('all four retired patches and their subagent template are absent', () => {
+  for (const retired of ['settlement-notice.patch', 'package.template.json', 'inquiry-isolation.patch', 'newinquiry-tools-guard.patch', 'native-managed-effects.patch']) {
+    assert.equal(existsSync(path.join(COMPAT, retired)), false, `${retired} must be removed`)
+  }
 })
 
 test('the launcher installs reviewed overrides and safely publishes a self-contained runtime', async () => {
@@ -104,7 +80,6 @@ test('the launcher installs reviewed overrides and safely publishes a self-conta
   assert.match(launcher, /'@deepseek-ai\/dsh': version/)
   assert.match(launcher, /const npmVersion = '11\.19\.0'/)
   assert.match(launcher, /runCompatCommand\('corepack', \[`npm@\$\{npmVersion\}`/)
-  assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
   // The framework version is declared, not left to npm's resolution order:
   // several official packages pin cordis EXACTLY while others allow a range,
   // so a newer release satisfying the range first leaves the tree invalid.
@@ -121,22 +96,14 @@ test('the launcher installs reviewed overrides and safely publishes a self-conta
   // a named, reviewed fact rather than a pasted literal in the overrides.
   assert.match(launcher, /const UNDICI_COMPAT_PIN = '\d+\.\d+\.\d+'/)
   assert.match(launcher, /undici: UNDICI_COMPAT_PIN/)
-  // The subagent is always overridden for its published compatibility seam;
-  // agent-loop alone gets the narrow reviewed inquiry override. There is no
-  // approved dsh-agent source override.
-  assert.match(launcher, /'@deepseek-ai\/dsh-subagent': `file:\$\{join\(compatPackages, 'subagent'\)\}`/)
-  assert.match(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:\$\{join\(compatPackages, 'agent-loop'\)\}`/)
+  // The actual compiled graph is checked by test-packaging.cjs with an
+  // explicit PET_COMPAT_TEST_GRAPH; this source check pins its wiring only.
+  assert.match(launcher, /verify-official-runtime\.mjs/)
+  assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-subagent': `file:/)
   assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-agent': `file:/)
-  assert.match(launcher, /const expectedAgentLoopVersion = '0\.2\.0-rc\.2-locus-isolated-inquiry\.1'/)
-  assert.match(launcher, /agentLoopPatchSha256 = '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92'/)
-  assert.match(launcher, /nativeToolsTemplate\.packages/)
-  for (const nativeName of [
-    '@deepseek-ai/dsh-tool-subagent',
-    '@deepseek-ai/dsh-tool-subagent-control',
-    '@deepseek-ai/dsh-tool-workflow',
-    '@deepseek-ai/dsh-tool-ralph',
-  ]) assert.ok(launcher.includes(nativeName) === false, 'native owners are enumerated in the template, not copied into the runtime agent overrides')
-  assert.match(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:\$\{join\(compatPackages, 'agent-loop'\)\}`/)
+  assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-agent-loop': `file:/)
+  assert.doesNotMatch(launcher, /'@deepseek-ai\/dsh-tools': `file:/)
+  assert.doesNotMatch(launcher, /nativeToolsTemplate|agentLoopPatchSha256|toolsPatchSha256|managedEffectsPatchSha256/)
   assert.doesNotMatch(launcher, /overrideRuntimeAgent/)
   assert.match(launcher, /renameSync\(staging, buildDir\)/)
   assert.match(launcher, /publishLauncher\(\{ launcher, target: buildDir/)

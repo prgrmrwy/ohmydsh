@@ -178,6 +178,8 @@ export interface DeliveryRecord extends DeliveryCorrelation {
   readonly executionId?: string
   /** Exact DSH inbox message id returned by queueing; distinct from platform messageId. */
   readonly inboxMessageId?: string
+  /** A first typed prompt was rejected before submission; retry this request as text only. */
+  readonly imageRouteRejected?: true
   /**
    * Fail-closed restart disposition when safe continuation cannot be proven.
    * This records a Host decision without fabricating execution/turn proof.

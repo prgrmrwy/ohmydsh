@@ -14,6 +14,12 @@
  * half-composed child.
  */
 
+import { LOCUS_WRITE_ENABLED } from './policy-verification.js'
+import { LOCUS_BASE_PRESET } from './preset.js'
+
+/** The composition marker a child must carry to be served (Host-attested). */
+export const LOCUS_TIER3_COMPOSITION = 'tier3' as const
+
 /** The permission a locus grants its child; `write` requires Host proof. */
 export type LocusChildPermission = 'read' | 'write'
 
@@ -65,36 +71,14 @@ export type LocusToolTier = 'safe' | 'shell'
  * surfaces as a refused publication rather than a silent widening.
  */
 export const LOCUS_CALLER_BOUND_TOOLS: readonly string[] = Object.freeze([
-  'pet_collaboration_context',
-  'pet_collaboration_context_update',
-  'pet_collaborators',
+  'locus_ask_parent',
+  'locus_context',
   'pet_context',
-  'pet_inquire',
-  'pet_inquiry_answer',
   'pet_locus_chat_history',
   'pet_locus_doc_context',
   'pet_locus_finish',
-  'pet_locus_parent_lookup',
-  'pet_locus_request_execution',
   'pet_locus_track',
   'pet_locus_wait',
-])
-
-/**
- * The collaboration member tools Pet re-registers on a child's own scope
- * (design D6; see `collab/child-tools.ts` for why they are own-layer). They
- * are part of Pet's reviewed own surface, and their ABSENCE is not a fault:
- * without dsh-collab the child is composed without them.
- */
-export const LOCUS_COLLAB_MEMBER_TOOLS: readonly string[] = Object.freeze([
-  'collab_status',
-  'collab_read',
-  'collab_create_item',
-  'collab_revise_item',
-  'collab_ack_item',
-  'collab_send_message',
-  'collab_set_status',
-  'collab_advance_request',
 ])
 
 /** Outcome of one composition attestation. */
@@ -137,7 +121,6 @@ export function attestLocusComposition(
     ...LOCUS_SAFE_TOOL_NAMES,
     ...tierTools,
     ...LOCUS_CALLER_BOUND_TOOLS,
-    ...LOCUS_COLLAB_MEMBER_TOOLS,
   ])
   const leaks = [...new Set([...visible].filter(name => !allowed.has(name)))].sort()
   if (tier === 'shell' && !visible.includes('bash')) leaks.push('bash (required for shell tier)')
@@ -212,11 +195,22 @@ export interface LocusChildComposition {
   readonly childSessionId: string
   readonly locusId: string
   readonly generation: number
-  /** Host-verified permission of the locus generation. */
+  /** Durable version read before applying a pending grant. */
+  readonly revision?: number
+  /** Host-verified permission of the locus generation (the EFFECTIVE value). */
   readonly permission: LocusChildPermission
-  /** Missing means a legacy safe-v1 child. */
-  readonly childComposition?: 'safe-v1' | 'safe-v2'
-  /** Missing on legacy rows means safe. */
+  /**
+   * A permission change recorded while the child was released and not yet
+   * applied. Present only when it differs from {@link permission}; it is
+   * applied and read back on this publication, and never served before then.
+   */
+  readonly pendingPermission?: LocusChildPermission
+  /**
+   * Host-attested composition marker. Only `tier3` is served; `safe-v1`,
+   * `safe-v2` or a missing marker belong to the retired two-tier model.
+   */
+  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
+  /** The tier the row was published with; missing is read as `safe`. */
   readonly toolTier?: { readonly desired: LocusToolTier; readonly effective: LocusToolTier }
   /**
    * The entry this child serves. Fresh children are composed synchronously
@@ -242,6 +236,12 @@ export interface LocusCompositionLookup {
 
 /** Why a candidate child could not be composed. */
 export type LocusCompositionFailure =
+  /** The row is not a `tier3` child: it belongs to the retired model and must not serve. */
+  | 'legacy-composition'
+  /** The locus main's preset cannot be read, so the child's composition is not proven. */
+  | 'preset-unverified'
+  /** The locus main does not run the pinned preset. */
+  | 'preset-mismatch'
   | 'surface-unavailable'
   | 'surface-failed'
   | 'surface-not-attested'
@@ -263,6 +263,26 @@ export class LocusCompositionError extends Error {
   }
 }
 
+/**
+ * How a change recorded while the child was released turned out when its
+ * wake-up publication tried to apply it.
+ */
+export interface LocusPendingOutcome<T> {
+  readonly requested: T
+  /** What the child is actually composed with, after the attempt. */
+  readonly effective: T
+  /** True when `requested` verified and is now in force; false when it fell back. */
+  readonly applied: boolean
+  /** Why the request fell back; absent when applied. */
+  readonly reason?: string
+}
+
+/** Pending changes this publication resolved; the caller persists and reports them. */
+export interface LocusPendingResolution {
+  readonly permission?: LocusPendingOutcome<LocusChildPermission>
+  readonly toolTier?: LocusPendingOutcome<LocusToolTier>
+}
+
 /** Outcome of examining one candidate agent. */
 export type LocusCompositionResult =
   /** Not a locus child; the caller leaves it alone. */
@@ -272,13 +292,31 @@ export type LocusCompositionResult =
     readonly composed: true
     readonly composition: LocusChildComposition
     readonly effectivePermission: LocusChildPermission
+    /** Present only when a recorded pending change was resolved by this publication. */
+    readonly pending?: LocusPendingResolution
   }
 
 /** Ports one composer instance uses. */
 export interface LocusCompositionPorts {
   readonly lookup: LocusCompositionLookup
+  /**
+   * The preset the child's parent (the locus main) is persisted with, read
+   * synchronously from the live parent. A child composes from its parent's
+   * preset on creation and on every cold resume, so a parent that is not on
+   * the pinned preset makes the child's surface unreviewed.
+   *
+   * Required for a child to be served: absent means "cannot prove", and an
+   * unproven composition is refused rather than published.
+   */
+  readonly parentPreset?: (parentSessionId: string) => string | undefined
   readonly surface?: LocusScopedSurfacePort
   readonly policy?: LocusPolicyPort
+  /**
+   * Whether a `write` grant is honoured at all (the global switch). Defaults to
+   * {@link LOCUS_WRITE_ENABLED}; a pending write request is declined, not
+   * attempted, while it is off.
+   */
+  readonly writeEnabled?: boolean
 }
 
 /**
@@ -321,9 +359,25 @@ export function composeLocusChild(
     )
   }
 
+  // Only the current composition serves. A row with an older marker (or none)
+  // belongs to the retired model: it must not be composed, adopted or resumed,
+  // whatever surface it would have exposed.
+  if (composition.childComposition !== LOCUS_TIER3_COMPOSITION) {
+    throw new LocusCompositionError(
+      'legacy-composition',
+      `Locus child ${agent.id} is not a ${LOCUS_TIER3_COMPOSITION} composition and cannot be served`,
+    )
+  }
+
+  // The child composes from its parent's preset, on creation and on every cold
+  // resume. Prove that parent is the pinned one BEFORE any side effect, so a
+  // failed proof leaves nothing to undo.
+  verifyParentPreset(agent, composition, ports.parentPreset)
+
   // Policy first: the child must never observe a scope that outlives a failed
   // permission application, and the surface reports the permission it reads.
-  const effectivePermission = applyPolicy(agent, composition, ports.policy)
+  const permissionOutcome = applyPolicy(agent, composition, ports.policy, ports.writeEnabled ?? LOCUS_WRITE_ENABLED)
+  const effectivePermission = permissionOutcome.effective
 
   const surface = ports.surface
   if (surface === undefined) {
@@ -341,70 +395,126 @@ export function composeLocusChild(
       { cause: error },
     )
   }
-  if (composition.childComposition === 'safe-v2') {
-    const tier = composition.toolTier?.effective ?? 'safe'
-    if (surface.setToolTier === undefined) {
-      throw new LocusCompositionError(
-        'surface-not-attested',
-        `Host cannot apply the ${tier} tool tier to safe-v2 locus child ${agent.id}`,
-      )
-    }
-    try {
-      surface.setToolTier(agent, tier)
-    } catch (error) {
-      throw new LocusCompositionError(
-        'surface-not-attested',
-        `Host could not attest the ${tier} tool tier for locus child ${agent.id}`,
-        { cause: error },
-      )
-    }
-    if (surface.installOutboundGuard === undefined) {
-      throw new LocusCompositionError(
-        'surface-not-attested',
-        `Host cannot install the Lark CLI mistake-prevention guard for safe-v2 child ${agent.id}`,
-      )
-    }
-    try {
-      surface.installOutboundGuard(agent)
-    } catch (error) {
-      throw new LocusCompositionError(
-        'surface-not-attested',
-        `Host cannot install the Lark CLI mistake-prevention guard for safe-v2 child ${agent.id}`,
-        { cause: error },
-      )
-    }
+  // The persistent filter is a wide, delegation-free base; the tier narrows it
+  // by a restriction layer installed here, on every publication including cold
+  // resume. A child without that layer would be wider than its tier, so the
+  // layer and the outbound guard are both mandatory.
+  if (surface.setToolTier === undefined) {
+    throw new LocusCompositionError(
+      'surface-not-attested',
+      `Host cannot apply the ${composition.toolTier?.effective ?? 'safe'} tool tier to locus child ${agent.id}`,
+    )
   }
-
-  // The installed surface is a request; what the child can actually call is the
-  // effect. `safe-v1` claims the child cannot reach an execution or delegation
-  // route, and only this read can support that claim: the tool filter cannot
-  // remove an own-plane registration, and a preset change can add one without
-  // touching this package. Refuse publication rather than publish the claim.
-  let visible: readonly string[] | undefined
+  if (surface.installOutboundGuard === undefined) {
+    throw new LocusCompositionError(
+      'surface-not-attested',
+      `Host cannot install the Lark CLI mistake-prevention guard for locus child ${agent.id}`,
+    )
+  }
   try {
-    visible = surface.visibleTools?.(agent)
+    surface.installOutboundGuard(agent)
   } catch (error) {
     throw new LocusCompositionError(
       'surface-not-attested',
-      `Could not read the tool surface of locus child ${agent.id}`,
+      `Host cannot install the Lark CLI mistake-prevention guard for locus child ${agent.id}`,
       { cause: error },
     )
   }
-  const compositionTier: LocusToolTier = composition.childComposition === 'safe-v2'
-    ? composition.toolTier?.effective ?? 'safe'
-    : 'safe'
-  const attestation = attestLocusComposition(visible, compositionTier)
-  if (!attestation.ok) {
+
+  // The installed surface is a request; what the child can actually call is the
+  // effect. The tool filter cannot remove an own-plane registration, and a
+  // preset change can add one without touching this package, so each tier is
+  // applied and then READ BACK, and a tier is served only if the readback
+  // matches it. Refuse publication rather than publish an unproven claim.
+  const effectiveTier = composition.toolTier?.effective ?? 'safe'
+  const requestedTier = composition.toolTier?.desired ?? effectiveTier
+  const attemptTier = (tier: LocusToolTier): string | undefined => {
+    try {
+      surface.setToolTier!(agent, tier)
+    } catch (error) {
+      return `could not apply the ${tier} tool tier (${error instanceof Error ? error.message : String(error)})`
+    }
+    let visible: readonly string[] | undefined
+    try {
+      visible = surface.visibleTools?.(agent)
+    } catch (error) {
+      return `could not read the tool surface (${error instanceof Error ? error.message : String(error)})`
+    }
+    const attestation = attestLocusComposition(visible, tier)
+    if (attestation.ok) return undefined
+    return attestation.reason === 'unreadable'
+      ? 'no readable tool surface'
+      : `tools outside the ${tier} composition: ${attestation.leaks.join(', ')}`
+  }
+  const refuseTier = (tier: LocusToolTier, problem: string, cause?: unknown): never => {
     throw new LocusCompositionError(
       'surface-not-attested',
-      attestation.reason === 'unreadable'
-        ? `Locus child ${agent.id} exposes no readable tool surface`
-        : `Locus child ${agent.id} exposes tools outside its safe composition: `
-          + attestation.leaks.join(', '),
+      `Host could not attest the ${tier} tool tier for locus child ${agent.id}: ${problem}`,
+      cause === undefined ? undefined : { cause },
     )
   }
 
+  let tierOutcome: LocusPendingOutcome<LocusToolTier> | undefined
+  if (requestedTier !== effectiveTier) {
+    // A change recorded while the child was released: try it first, and on any
+    // mismatch return to the tier it was already serving under — which must
+    // verify in turn, or nothing is published.
+    const problem = attemptTier(requestedTier)
+    if (problem === undefined) {
+      tierOutcome = { requested: requestedTier, effective: requestedTier, applied: true }
+    } else {
+      const fallback = attemptTier(effectiveTier)
+      if (fallback !== undefined) refuseTier(effectiveTier, fallback)
+      tierOutcome = { requested: requestedTier, effective: effectiveTier, applied: false, reason: problem }
+    }
+  } else {
+    const problem = attemptTier(effectiveTier)
+    if (problem !== undefined) refuseTier(effectiveTier, problem)
+  }
+  const pending: LocusPendingResolution = {
+    ...(permissionOutcome.outcome === undefined ? {} : { permission: permissionOutcome.outcome }),
+    ...(tierOutcome === undefined ? {} : { toolTier: tierOutcome }),
+  }
+  if (pending.permission !== undefined || pending.toolTier !== undefined) {
+    return { composed: true, composition, effectivePermission, pending }
+  }
   return { composed: true, composition, effectivePermission }
+}
+
+/** Prove the child's parent runs the pinned preset, or refuse. */
+function verifyParentPreset(
+  agent: LocusCandidateAgent,
+  composition: LocusChildComposition,
+  read: LocusCompositionPorts['parentPreset'],
+): void {
+  if (read === undefined) {
+    throw new LocusCompositionError(
+      'preset-unverified',
+      `Host cannot read the preset of locus main ${composition.parentSessionId} for child ${agent.id}`,
+    )
+  }
+  let preset: string | undefined
+  try {
+    preset = read(composition.parentSessionId)
+  } catch (error) {
+    throw new LocusCompositionError(
+      'preset-unverified',
+      `Could not read the preset of locus main ${composition.parentSessionId} for child ${agent.id}`,
+      { cause: error },
+    )
+  }
+  if (preset === undefined) {
+    throw new LocusCompositionError(
+      'preset-unverified',
+      `Locus main ${composition.parentSessionId} reports no preset for child ${agent.id}`,
+    )
+  }
+  if (preset !== LOCUS_BASE_PRESET) {
+    throw new LocusCompositionError(
+      'preset-mismatch',
+      `Locus main ${composition.parentSessionId} runs preset ${preset}, not ${LOCUS_BASE_PRESET}`,
+    )
+  }
 }
 
 /**
@@ -414,44 +524,71 @@ export function composeLocusChild(
  * granted `read` must not run on a scope the Host resolved as `write`, and a
  * locus granted `write` must not silently degrade to `read` either: both are
  * a mismatch between the durable grant and the actual sandbox.
+ *
+ * A change recorded while the child was released is tried first; when it does
+ * not verify, the permission the child was already serving under is re-applied
+ * and must verify instead, or the child is not published.
  */
 function applyPolicy(
   agent: LocusCandidateAgent,
   composition: LocusChildComposition,
   policy: LocusPolicyPort | undefined,
-): LocusChildPermission {
+  writeEnabled: boolean,
+): { readonly effective: LocusChildPermission; readonly outcome?: LocusPendingOutcome<LocusChildPermission> } {
   if (policy === undefined) {
     throw new LocusCompositionError(
       'policy-unavailable',
       `Host exposes no file policy seam for locus child ${agent.id}`,
     )
   }
-  try {
-    policy.apply(agent.id, composition.permission)
-  } catch (error) {
-    throw new LocusCompositionError(
-      'policy-failed',
-      `Could not apply ${composition.permission} policy to locus child ${agent.id}`,
-      { cause: error },
-    )
+  const attempt = (permission: LocusChildPermission): LocusCompositionError | undefined => {
+    try {
+      policy.apply(agent.id, permission)
+    } catch (error) {
+      return new LocusCompositionError(
+        'policy-failed',
+        `Could not apply ${permission} policy to locus child ${agent.id}`,
+        { cause: error },
+      )
+    }
+    let resolved: LocusChildPermission | undefined
+    try {
+      resolved = policy.resolve(agent.id)
+    } catch (error) {
+      return new LocusCompositionError(
+        'policy-failed',
+        `Could not read back the resolved policy for locus child ${agent.id}`,
+        { cause: error },
+      )
+    }
+    if (resolved !== permission) {
+      return new LocusCompositionError(
+        'policy-not-verified',
+        `Locus child ${agent.id} requires ${permission} but the Host resolved `
+        + `${resolved ?? 'no policy'}`,
+      )
+    }
+    return undefined
   }
 
-  let resolved: LocusChildPermission | undefined
-  try {
-    resolved = policy.resolve(agent.id)
-  } catch (error) {
-    throw new LocusCompositionError(
-      'policy-failed',
-      `Could not read back the resolved policy for locus child ${agent.id}`,
-      { cause: error },
-    )
+  const priorEffective = !writeEnabled && composition.permission === 'write' ? 'read' : composition.permission
+  const requested = composition.pendingPermission
+  if (requested !== undefined && requested !== composition.permission) {
+    // A write request is declined, not attempted, while the global switch is off.
+    const problem = requested === 'write' && !writeEnabled
+      ? new LocusCompositionError('policy-not-verified', 'write grants are disabled')
+      : attempt(requested)
+    if (problem === undefined) {
+      return { effective: requested, outcome: { requested, effective: requested, applied: true } }
+    }
+    const fallback = attempt(priorEffective)
+    if (fallback !== undefined) throw fallback
+    return {
+      effective: priorEffective,
+      outcome: { requested, effective: priorEffective, applied: false, reason: problem.message },
+    }
   }
-  if (resolved !== composition.permission) {
-    throw new LocusCompositionError(
-      'policy-not-verified',
-      `Locus child ${agent.id} requires ${composition.permission} but the Host resolved `
-      + `${resolved ?? 'no policy'}`,
-    )
-  }
-  return resolved
+  const problem = attempt(priorEffective)
+  if (problem !== undefined) throw problem
+  return { effective: priorEffective }
 }

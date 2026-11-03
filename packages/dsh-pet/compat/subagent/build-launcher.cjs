@@ -40,29 +40,9 @@ const root = resolve(here, '../../../..')
 const version = '0.2.0-rc.2'
 const npmVersion = '11.19.0'
 const reviewedCommit = '639ed015397290b3745d163aafe02ffee4aa3f84'
-const subagentPatchSha256 = '78490e17d1bbeacc3e1f05aa03c01343dd765628a1deb8068f9388bf438005c8'
-const agentLoopPatchSha256 = '0973da4b6af46fe514ffd15297073922e0cd6c3fd0c8c84ce087f721be233c92'
-const toolsPatchSha256 = '62f9c313364e4aa7a1b2ce6eb8e33f7773802ffe21bc15c40ddb04654f7b13a3'
-const managedEffectsPatchSha256 = '645f55d882c346310f473437ef57950a27eb6dad1d2ccf670b8e2e453ecbad61'
 const modelDisplayPatchSha256 = '7ac67eabf1bb717ce63aad9fb178c9b8a09294b390b133831a20e1613183426f'
 const modelDisplayTemplate = readJson(join(here, 'model-display.package.template.json'))
 const teamMembershipTemplate = readJson(join(here, 'team-membership.package.template.json'))
-const nativeToolsTemplate = readJson(join(here, 'native-tools.package.template.json'))
-const expectedNativeToolsVersion = nativeToolsTemplate.version
-const toolsTemplate = readJson(join(here, 'newtools.package.template.json'))
-const expectedToolsVersion = toolsTemplate.version
-const expectedAgentLoopVersion = '0.2.0-rc.2-locus-isolated-inquiry.1'
-/**
- * Published Subagent artifact version. `build.mjs` derives it from the tracked
- * skeleton as `skeleton + 1`, so this must follow the same rule instead of
- * hardcoding a suffix that silently drifts when the skeleton is bumped.
- */
-const expectedSubagentVersion = (() => {
-  const skeleton = readJson(join(here, 'package.template.json'))
-  const build = Number(String(skeleton.version).split('.').pop() ?? 0) + 1
-  return `${version}-locus-settlement-notice.${build}`
-})()
-
 function run(command, args, cwd, capture = false) {
   return runCompatCommand(command, args, cwd, { capture })
 }
@@ -122,13 +102,6 @@ function verifyLauncher(directory, fingerprint) {
     if (!existsSync(stampFile) || !existsSync(realBin)) return undefined
     if (readFileSync(stampFile, 'utf8').trim() !== fingerprint) return undefined
     const requireFromLauncher = createRequire(join(directory, 'package.json'))
-    const subagentPath = requireFromLauncher.resolve('@deepseek-ai/dsh-subagent/package.json')
-    const subagent = readJson(subagentPath)
-    if (
-      subagent.version !== expectedSubagentVersion
-      || subagent.dsh_compat?.patchSha256 !== subagentPatchSha256
-      || subagent.dsh_compat?.upstreamBase !== reviewedCommit
-    ) return undefined
     for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
       const manifest = requireFromLauncher.resolve(`${spec.name}/package.json`)
       const pkg = readJson(manifest)
@@ -137,63 +110,7 @@ function verifyLauncher(directory, fingerprint) {
       if (spec.client && !existsSync(join(dirname(manifest), 'lib/client.js'))) return undefined
     }
     run(process.execPath, [join(here, 'verify-model-display.mjs'), '--graph', directory], here)
-    const toolsPath = requireFromLauncher.resolve('@deepseek-ai/dsh-tools/package.json')
-    const toolsPkg = readJson(toolsPath)
-    if (toolsPkg.version !== expectedToolsVersion || toolsPkg.dsh_compat?.patchSha256 !== toolsPatchSha256 || toolsPkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
-    const requireFromTools = createRequire(toolsPath)
-    const nestedToolsPath = requireFromTools.resolve('@deepseek-ai/dsh-tools/package.json')
-    if (realpathSync(toolsPath) !== realpathSync(nestedToolsPath)) return undefined
-    const toolsRuntime = readFileSync(join(dirname(toolsPath), 'lib', 'index.js'), 'utf8')
-    if (!toolsRuntime.includes('const denialReason = this.guardReason(exec)')) return undefined
-    for (const spec of nativeToolsTemplate.packages) {
-      const nativePath = requireFromLauncher.resolve(`${spec.name}/package.json`)
-      const nativeManifest = readJson(nativePath)
-      if (nativeManifest.version !== expectedNativeToolsVersion || nativeManifest.dsh_compat?.patchSha256 !== managedEffectsPatchSha256 || nativeManifest.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
-      if (realpathSync(requireFromLauncher.resolve(spec.name)) !== realpathSync(join(dirname(nativePath), nativeManifest.main))) return undefined
-      const nativeRuntime = readFileSync(join(dirname(nativePath), nativeManifest.main), 'utf8')
-      if (!nativeRuntime.includes('dsh.tool.managed-effect')) return undefined
-      const fromNative = createRequire(nativePath)
-      const nested = fromNative.resolve(`${spec.name}/package.json`)
-      if (realpathSync(nativePath) !== realpathSync(nested)) return undefined
-    }
-    const nativeBehaviorVerifier = join(here, 'verify-native-managed-effects.mjs')
-    if (!existsSync(nativeBehaviorVerifier)) fail('native managed-effects verifier has not been added')
-    run(process.execPath, [nativeBehaviorVerifier, '--graph', directory], here)
-    const loopPath = requireFromLauncher.resolve('@deepseek-ai/dsh-agent-loop/package.json')
-    const requireFromLoop = createRequire(loopPath)
-    const loopToolsPath = requireFromLoop.resolve('@deepseek-ai/dsh-tools/package.json')
-    const requireFromSubagent = createRequire(subagentPath)
-    const subagentToolsPath = requireFromSubagent.resolve('@deepseek-ai/dsh-tools/package.json')
-    if (realpathSync(toolsPath) !== realpathSync(loopToolsPath) || realpathSync(toolsPath) !== realpathSync(subagentToolsPath)) return undefined
-    const subagentLoopPath = requireFromSubagent.resolve('@deepseek-ai/dsh-agent-loop/package.json')
-    if (realpathSync(loopPath) !== realpathSync(subagentLoopPath)) return undefined
-    const loopPkg = readJson(loopPath)
-    if (loopPkg.version !== expectedAgentLoopVersion || loopPkg.dsh_compat?.patchSha256 !== agentLoopPatchSha256 || loopPkg.dsh_compat?.upstreamBase !== reviewedCommit) return undefined
-    const loopSource = readFileSync(join(dirname(loopPath), 'lib', 'index.js'), 'utf8')
-    if (!loopSource.includes('supportsIsolatedQueuedTurnClaim = true;')) return undefined
-    const behaviorVerifier = join(here, 'verify-isolated-loop.mjs')
-    run(process.execPath, [behaviorVerifier, '--graph', directory], here)
-    if (!/^0\.2\.0-rc\.2-locus-isolated-inquiry\./.test(loopPkg.version)) return undefined
-    const runtimeSource = readFileSync(join(dirname(subagentPath), 'lib', 'index.js'), 'utf8')
-    for (const marker of [
-      'supportsSettlementNotice',
-      'supportsIdleContinuableCreate',
-      'supportsLiveContinuableChildSession',
-      'supportsIndependentContinuableCreate',
-      'supportsIndependentChildAgentPreset',
-      // Host-authored delivery has no `supports*` companion flag — it is
-      // published only as a symbol-keyed method — so the five markers above
-      // all pass without it. Pet looks the symbol up by exact string and
-      // reports `inbox-unavailable` when absent, which then cascades through
-      // `idleChildProvisioning` → `locusProvisioning` →
-      // `locusProvisioningController` → `locusControlDispatch` and takes the
-      // entire unified Feishu channel down. Verify both the method name and
-      // the exact symbol string a consumer resolves.
-      'deliverSubagentPrompt',
-      'dsh.subagent.deliverPrompt',
-    ]) {
-      if (!runtimeSource.includes(marker)) return undefined
-    }
+    run(process.execPath, [join(here, 'verify-official-runtime.mjs'), '--graph', directory], here)
     const installScripts = runNpm(['install-scripts', 'ls'], directory, true).trim()
     if (!/^No packages with unreviewed install scripts\.?$/.test(installScripts)) return undefined
     // Validate the exact published shape, not just npm's temporary absolute
@@ -222,26 +139,18 @@ try {
     // Generated npm manifests contain absolute file: paths. Moving/cloning the
     // repository must invalidate the cache even when source bytes are equal.
     .update(realpathSync(here))
-    .update(readFileSync(join(here, 'settlement-notice.patch')))
-    .update(readFileSync(join(here, 'inquiry-isolation.patch')))
-    .update(readFileSync(join(here, 'newinquiry-tools-guard.patch')))
-    .update(readFileSync(join(here, 'native-managed-effects.patch')))
     .update(readFileSync(join(here, 'team-membership.patch')))
     .update(readFileSync(join(here, 'team-membership.package.template.json')))
     .update(readFileSync(join(here, 'model-display.patch')))
     .update(readFileSync(join(here, 'model-display.package.template.json')))
     .update(readFileSync(join(here, 'model-display.vitest.config.mjs')))
     .update(readFileSync(join(here, 'verify-model-display.mjs')))
+    .update(readFileSync(join(here, 'verify-official-runtime.mjs')))
     .update(readFileSync(join(here, '../../test/model-display-host.spec.ts')))
     .update(readFileSync(join(here, '../../test/model-display-react.spec.tsx')))
     .update(readFileSync(join(here, '../../test/model-display-routing.spec.ts')))
     .update(readFileSync(join(here, '../../test/model-display-popup.spec.ts')))
     .update(readFileSync(join(here, '../../test/model-display-builder.test.cjs')))
-    .update(readFileSync(join(here, 'native-tools.package.template.json')))
-    .update(readFileSync(join(here, 'verify-native-managed-effects.mjs')))
-    .update(readFileSync(join(here, 'test-native-managed-effects.cjs')))
-    .update(readFileSync(join(here, 'newtools.package.template.json')))
-    .update(readFileSync(join(here, 'agent-loop.package.template.json')))
     .update(readFileSync(join(here, 'build.mjs')))
     .update(readFileSync(join(here, 'build-launcher.cjs')))
     .update(readFileSync(join(here, 'compat-build-lock.cjs')))
@@ -249,8 +158,6 @@ try {
     .update(readFileSync(join(here, 'compat-script-policy.cjs')))
     .update(readFileSync(join(here, 'install-script-policy.json')))
     .update(readFileSync(join(here, 'compat-publish.cjs')))
-    .update(readFileSync(join(here, 'package.template.json')))
-    .update(readFileSync(join(here, 'verify-isolated-loop.mjs')))
     .update(readFileSync(join(here, 'test-packaging.cjs')))
     .update(readFileSync(join(here, 'README.zh.md')))
     .update(readFileSync(join(here, 'README.md')))
@@ -268,12 +175,6 @@ try {
     mkdirSync(artifactRoot, { recursive: true })
     if (isolatedOutput && readdirSync(artifactRoot).length > 0) fail('isolated output must remain empty before artifact generation')
     run(process.execPath, [join(here, 'build.mjs'), ...(isolatedOutput ? ['--isolated-output', artifactRoot] : [])], here)
-    const subagentArtifact = join(artifactRoot, isolatedOutput ? 'subagent' : '')
-    const loopArtifact = join(artifactRoot, 'agent-loop')
-    const toolsArtifact = join(artifactRoot, isolatedOutput ? 'tools' : 'tools')
-    if (!existsSync(join(toolsArtifact, 'lib', 'index.js'))) fail('tools build produced no runtime entry')
-    if (!existsSync(join(subagentArtifact, 'lib', 'index.js'))) fail('subagent build produced no runtime entry')
-
     // Staging must be a sibling of the compat source, not its child: the
     // launcher embeds a self-contained copy of that source and recursive copy
     // APIs correctly reject copying a directory into itself.
@@ -285,30 +186,6 @@ try {
     try {
       const compatPackages = join(staging, 'compat-packages')
       mkdirSync(compatPackages, { recursive: true })
-      const stagedSubagent = join(compatPackages, 'subagent')
-      mkdirSync(stagedSubagent, { recursive: true })
-      cpSync(join(subagentArtifact, 'lib'), join(stagedSubagent, 'lib'), { recursive: true })
-      cpSync(join(subagentArtifact, 'package.json'), join(stagedSubagent, 'package.json'))
-      const stagedLoop = join(compatPackages, 'agent-loop')
-      mkdirSync(stagedLoop, { recursive: true })
-      cpSync(join(loopArtifact, 'lib'), join(stagedLoop, 'lib'), { recursive: true })
-      cpSync(join(loopArtifact, 'package.json'), join(stagedLoop, 'package.json'))
-      const stagedTools = join(compatPackages, 'tools')
-      mkdirSync(stagedTools, { recursive: true })
-      cpSync(join(toolsArtifact, 'lib'), join(stagedTools, 'lib'), { recursive: true })
-      cpSync(join(toolsArtifact, 'package.json'), join(stagedTools, 'package.json'))
-      const nativeTools = new Map()
-      const nativeToolsSourceRoot = join(artifactRoot, 'native-tools')
-      if (!existsSync(nativeToolsSourceRoot)) fail('build produced no native managed-effects packages')
-      for (const spec of nativeToolsTemplate.packages) {
-        const localName = spec.sourceDir.split('/').at(-1)
-        const source = join(nativeToolsSourceRoot, localName)
-        const destination = join(compatPackages, localName)
-        mkdirSync(destination, { recursive: true })
-        cpSync(join(source, 'lib'), join(destination, 'lib'), { recursive: true })
-        cpSync(join(source, 'package.json'), join(destination, 'package.json'))
-        nativeTools.set(spec.name, localName)
-      }
       const modelDisplayPackages = new Map()
       for (const spec of [...modelDisplayTemplate.packages, ...teamMembershipTemplate.packages]) {
         const localName = spec.sourceDir.split('/').at(-1)
@@ -318,10 +195,7 @@ try {
         modelDisplayPackages.set(spec.name, localName)
       }
       const versions = upstreamVersions()
-      materializeWorkspaceRanges(stagedSubagent, versions)
-      materializeWorkspaceRanges(stagedLoop, versions)
-      materializeWorkspaceRanges(stagedTools, versions)
-      for (const localName of [...nativeTools.values(), ...modelDisplayPackages.values()]) materializeWorkspaceRanges(join(compatPackages, localName), versions)
+      for (const localName of modelDisplayPackages.values()) materializeWorkspaceRanges(join(compatPackages, localName), versions)
       // The framework versions the reviewed upstream tree is itself built on.
       // Read from that tree rather than pasted, for the same reason the patch
       // hashes are derived rather than hardcoded: a constant silently rots the
@@ -335,27 +209,8 @@ try {
       // happened to resolve correctly only as a side effect of the storage
       // `file:` overrides being expanded first — an accident, not a constraint.
       // Stating it makes the launcher's framework version a reviewed fact.
-      const stagedToolsManifest = readJson(join(staging, 'compat-packages', 'tools', 'package.json'))
-      // npm 11 rejects a direct dependency version that conflicts with a file:
-      // override for the same package. Keep each native package's root spec
-      // physically identical to its override during install, then rewrite both
-      // to the matching relative file: spec in the self-contained output.
-      const nativeToolDependencies = Object.fromEntries(
-        [...nativeTools].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
-      )
       const modelDisplayDependencies = Object.fromEntries(
         [...modelDisplayPackages].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`]),
-      )
-      const directToolsDependencies = Object.fromEntries(
-        Object.entries(stagedToolsManifest.dependencies ?? {}).map(([pkg, range]) => {
-          if (pkg.startsWith('@deepseek-ai/')) {
-            const pinned = versions.get(pkg)
-            if (pinned === undefined) fail(`cannot resolve reviewed upstream tools dependency ${pkg}`)
-            return [pkg, `^${pinned}`]
-          }
-          if (range.startsWith('workspace:')) fail(`non-framework workspace dependency ${pkg} is not a declared launcher root node`)
-          return [pkg, range]
-        }),
       )
       const frameworkPins = Object.fromEntries(
         ['@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-include'].map((pkg) => {
@@ -401,24 +256,12 @@ try {
         description: 'Generated isolated DSH Host runtime with reviewed Pet Locus compatibility overrides.',
         dependencies: {
           '@deepseek-ai/dsh': version,
-          // The overridden agent-loop package is installed by npm as a local
-          // package override; declare its transitive workspace dependencies in
-          // the final root graph so npm's dependency audit sees real nodes.
-          '@deepseek-ai/dsh-chunked-list': `^${versions.get('@deepseek-ai/dsh-chunked-list')}`,
-          '@deepseek-ai/dsh-util-time': `^${versions.get('@deepseek-ai/dsh-util-time')}`,
-          '@deepseek-ai/dsh-brand': `^${versions.get('@deepseek-ai/dsh-brand')}`,
-          ...directToolsDependencies,
-          ...nativeToolDependencies,
           ...modelDisplayDependencies,
         },
         // npm currently fails to resolve relative file: overrides here. Install
         // from staging-absolute paths, then replace npm's links with real
         // package copies before publish so the final launcher is self-contained.
         overrides: {
-          '@deepseek-ai/dsh-subagent': `file:${join(compatPackages, 'subagent')}`,
-          '@deepseek-ai/dsh-agent-loop': `file:${join(compatPackages, 'agent-loop')}`,
-          '@deepseek-ai/dsh-tools': `file:${join(compatPackages, 'tools')}`,
-          ...Object.fromEntries([...nativeTools].map(([name, localName]) => [name, `file:${join(compatPackages, localName)}`])),
           ...modelDisplayDependencies,
           ...frameworkPins,
           undici: UNDICI_COMPAT_PIN,
@@ -429,15 +272,8 @@ try {
       runNpm(['install'], staging)
       // Prove npm resolved one reviewed override tree while its file links still
       // match the install metadata. The links are converted to real copies next.
-      runNpm(['ls', '@deepseek-ai/dsh-subagent'], staging)
-      const packageCopies = new Map([
-        ...nativeTools,
-        ...modelDisplayPackages,
-        ['@deepseek-ai/dsh-subagent', 'subagent'],
-        ['@deepseek-ai/dsh-agent-loop', 'agent-loop'],
-        ['@deepseek-ai/dsh-tools', 'tools'],
-        ...nativeTools,
-      ])
+      runNpm(['ls', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-tools'], staging)
+      const packageCopies = modelDisplayPackages
       for (const [name, localName] of packageCopies) {
         const installed = join(staging, 'node_modules', ...name.split('/'))
         rmSync(installed, { recursive: true, force: true })

@@ -62,7 +62,7 @@ function harness(options: {
         repository.commitPermissionMutation(id, permission, now),
     },
     sessions: {
-      resolve: () => ({ id: options.resolvedId ?? 'session-child' }),
+      resolve: () => ({ id: options.resolvedId ?? 'session-child', isIdle: () => true }),
     },
     policy: { apply, resolve },
     now: () => 10,
@@ -77,8 +77,8 @@ describe('locus permission mutation', () => {
 
     // `write` means full access: a child's cwd is its parent's cwd, so a
     // directory-bounded mode could never reach the owner's worktrees.
-    expect(apply).toHaveBeenCalledWith({ id: 'session-child' }, 'danger-full-access')
-    expect(resolve).toHaveBeenCalledWith({ id: 'session-child' })
+    expect(apply).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-child' }), 'danger-full-access')
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-child' }))
     expect(next.permission).toMatchObject({ desired: 'write', effective: 'write', grantedBy: 'ou-owner', verifiedAt: 10 })
     expect(repository.getLocus('locus-current')?.permission.effective).toBe('write')
   })
@@ -151,7 +151,7 @@ describe('locus permission mutation', () => {
           abortPermissionMutation: (id, now) => repository.abortPermissionMutation(id, now),
           commitPermissionMutation: (id, permission, now) => repository.commitPermissionMutation(id, permission, now),
         },
-        sessions: { resolve: () => ({ id: 'session-child' }) },
+        sessions: { resolve: () => ({ id: 'session-child', isIdle: () => true }) },
         // A live workspace root that matches nothing the anchor claims: it must
         // stay irrelevant.
         policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/somewhere-else' }) },
@@ -188,7 +188,7 @@ describe('locus permission mutation', () => {
         abortPermissionMutation: (id, now) => repository.abortPermissionMutation(id, now),
         commitPermissionMutation: async () => { throw new Error('revision raced') },
       },
-      sessions: { resolve: () => ({ id: 'session-child' }) },
+      sessions: { resolve: () => ({ id: 'session-child', isIdle: () => true }) },
       policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/repo' }) },
       now: () => 10,
     })
@@ -228,13 +228,13 @@ describe('locus permission mutation', () => {
     // test/locus-policy-verification.test.ts.
     writeEnabled: true,
       repository,
-      sessions: { resolve: () => ({ id: 'session-child' }) },
+      sessions: { resolve: () => ({ id: 'session-child', isIdle: () => true }) },
       policy: { apply, resolve: () => ({ mode: effective, workspaceRoot: '/repo' }) },
       now: () => 20,
     })
 
     const pending = mutation.mutate({ locusId: 'locus-current', actorId: 'ou-owner', mode: to })
-    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith({ id: 'session-child' }, requested))
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledWith(expect.objectContaining({ id: 'session-child' }), requested))
     expect(repository.getLocus('locus-current')?.state).toBe('switching')
     await expect(repository.acceptDelivery({
       endpoint: seed.endpoint,
@@ -266,7 +266,7 @@ describe('locus permission mutation', () => {
     // test/locus-policy-verification.test.ts.
     writeEnabled: true,
       repository,
-      sessions: { resolve: () => ({ id: 'session-child' }) },
+      sessions: { resolve: () => ({ id: 'session-child', isIdle: () => true }) },
       policy: {
         apply: (_session, mode) => { effective = mode },
         resolve: () => ({ mode: effective, workspaceRoot: '/repo' }),

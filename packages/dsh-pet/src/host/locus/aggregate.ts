@@ -8,12 +8,19 @@
  * domain module, so it does not compromise that boundary.
  */
 
+import { LOCUS_BASE_PRESET } from './preset.js'
 import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './storage-key.js'
 
 export type LocusSource = 'auto' | 'inherited' | 'explicit' | 'qa-created'
 
 export type LocusState =
   | 'provisioning'
+  /**
+   * Published for an entry whose child session has not been created yet. The
+   * child is created lazily by the first deliverable message; until then the
+   * row carries no `childSessionId` and no `childComposition`.
+   */
+  | 'not-created'
   | 'active'
   | 'switching'
   | 'invalid'
@@ -22,11 +29,18 @@ export type LocusState =
 
 export type LocusPermissionMode = 'read' | 'write'
 
-/** Durable proof that this child was created with a reviewed tool composition. */
-export type LocusChildComposition = 'safe-v1' | 'safe-v2'
+/**
+ * Durable proof that this child was created with a reviewed tool composition.
+ *
+ * `tier3` is the only marker a row may SERVE under: it is published by the
+ * three-tier structure, whose child is created from a locus main session.
+ * `safe-v1` / `safe-v2` belong to the previous two-tier model; such rows stay
+ * readable (they are never rewritten) but are interpreted as legacy.
+ */
+export type LocusChildComposition = 'safe-v1' | 'safe-v2' | 'tier3'
 
-/** New children use the revocable per-tier composition with no delegation tools. */
-export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'safe-v2'
+/** New children carry the three-tier marker; only this marker may serve. */
+export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'tier3'
 
 /** Tool-access tier, independent from the file sandbox permission. */
 export type LocusToolTierName = 'safe' | 'shell'
@@ -40,32 +54,13 @@ export interface LocusToolTier {
 }
 
 /**
- * The preset every locus CHILD composes from, on creation and on every cold
- * resume, regardless of the preset its main session runs.
+ * The preset Pet mounts on a locus main session it creates.
  *
- * Load-bearing for the single-egress invariant. `LOCUS_SAFE_TOOL_FILTER` only
- * restricts the INHERITED tool plane; a preset that registers a row per agent
- * (the shipped `standard` preset does so for `subagent`, via
- * `modelSelectionSettings: true`) lands that tool in the child's OWN scope,
- * where no allow-list reaches it. Production met exactly that: a child
- * delegated to a descendant that kept `bash` and `lark-cli`.
- *
- * Deriving the child's preset from the main tied the child's safety to a value
- * the owner chooses for their own work, so an explicit `/bind` to an ordinary
- * `standard` session had to be refused. Naming the child's preset here removes
- * that coupling: any unarchived main session is bindable, and
- * `attestLocusComposition` still vetoes publication if the installed surface
- * ever exceeds the reviewed set.
+ * The locus main and its children compose from the same neutral whitelist
+ * preset (see `preset.ts`); the preset of a user's work session never matters
+ * to a child, because a child's parent is always the locus main.
  */
-export const LOCUS_CHILD_PRESET = 'dsh-pet-executor'
-
-/**
- * The preset Pet mounts on a main session IT creates (the auto path).
- *
- * Not a safety pin: the child composes from {@link LOCUS_CHILD_PRESET}, and an
- * owner-bound main may run any preset.
- */
-export const LOCUS_MAIN_PRESET = 'dsh-pet-executor'
+export const LOCUS_MAIN_PRESET = LOCUS_BASE_PRESET
 
 /** The normalized address of a Lark chat or a thread inside that chat. */
 export interface LocusEndpoint {
@@ -109,6 +104,13 @@ export interface LocusRecord {
   readonly endpoint: LocusEndpoint
   readonly parentSessionId: string
   readonly childSessionId?: string
+  /**
+   * Child session id reserved when the generation was published `not-created`.
+   * Deliveries accepted before the child exists correlate on it; the lazily
+   * created child MUST be exactly this id, and it never changes within the
+   * generation (a failed creation leaves it for the next attempt).
+   */
+  readonly reservedChildSessionId?: string
   /** Absent on legacy rows, which remain readable but are never serviceable. */
   readonly childComposition?: LocusChildComposition
   /** Persisted tool visibility tier, independent from the file permission. */
@@ -136,6 +138,7 @@ export interface NewLocusInput {
   readonly endpoint: LocusEndpoint
   readonly parentSessionId: string
   readonly childSessionId?: string
+  readonly reservedChildSessionId?: string
   readonly childComposition?: LocusChildComposition
   /** Persisted tool visibility tier, independent from the file permission. */
   readonly toolTier?: LocusToolTier
@@ -197,6 +200,7 @@ export class LocusError extends Error {
 const SOURCES: readonly LocusSource[] = ['auto', 'inherited', 'explicit', 'qa-created']
 const STATES: readonly LocusState[] = [
   'provisioning',
+  'not-created',
   'active',
   'switching',
   'invalid',
@@ -317,6 +321,11 @@ export function sameLocusEndpoint(left: LocusEndpoint, right: LocusEndpoint): bo
   return endpointKeyOf(left) === endpointKeyOf(right)
 }
 
+/** Whether this composition marker may carry the shell tool tier. */
+export function supportsShellTier(composition: LocusChildComposition | undefined): boolean {
+  return composition === 'safe-v2' || composition === 'tier3'
+}
+
 function assertString(value: unknown, field: string): asserts value is string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new LocusError('INVALID_LOCUS', `${field} must be a non-empty string`)
@@ -355,10 +364,19 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
   const state = input.state ?? 'active'
   assertState(state)
   if (input.childSessionId !== undefined) assertString(input.childSessionId, 'childSessionId')
+  if (input.reservedChildSessionId !== undefined) assertString(input.reservedChildSessionId, 'reservedChildSessionId')
+  if (
+    input.reservedChildSessionId !== undefined
+    && input.childSessionId !== undefined
+    && input.reservedChildSessionId !== input.childSessionId
+  ) {
+    throw new LocusError('INVALID_LOCUS', 'A created child must be the reserved child')
+  }
   if (
     input.childComposition !== undefined
     && input.childComposition !== 'safe-v1'
     && input.childComposition !== 'safe-v2'
+    && input.childComposition !== 'tier3'
   ) {
     throw new LocusError('INVALID_LOCUS', `Unknown child composition '${String(input.childComposition)}'`)
   }
@@ -370,11 +388,8 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
     if (toolTier.effective === 'shell' && toolTier.desired !== 'shell') {
       throw new LocusError('INVALID_LOCUS', 'Effective shell tier requires desired shell tier')
     }
-    if (toolTier.effective === 'shell' && input.childComposition !== 'safe-v2') {
-      throw new LocusError('INVALID_LOCUS', 'Only safe-v2 children may use shell tool tier')
-    }
-    if (input.childComposition !== 'safe-v2' && toolTier.effective === 'shell') {
-      throw new LocusError('INVALID_LOCUS', 'Only safe-v2 children may use shell tool tier')
+    if (toolTier.effective === 'shell' && !supportsShellTier(input.childComposition)) {
+      throw new LocusError('INVALID_LOCUS', 'Only safe-v2/tier3 children may use shell tool tier')
     }
     if (toolTier.verifiedAt !== undefined && (!Number.isSafeInteger(toolTier.verifiedAt) || toolTier.verifiedAt < 0)) {
       throw new LocusError('INVALID_LOCUS', 'toolTier.verifiedAt must be a non-negative safe integer')
@@ -392,8 +407,11 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
   if (input.busy !== undefined && typeof input.busy !== 'boolean') {
     throw new LocusError('INVALID_LOCUS', 'busy must be a boolean')
   }
-  if (input.busy === true && state !== 'active' && state !== 'switching') {
+  if (input.busy === true && state !== 'active' && state !== 'switching' && state !== 'not-created') {
     throw new LocusError('INVALID_LOCUS', 'Only a serviceable locus may carry a busy fence')
+  }
+  if (state === 'not-created' && (input.childSessionId !== undefined || input.childComposition !== undefined)) {
+    throw new LocusError('INVALID_LOCUS', 'A not-created locus has no child session or composition yet')
   }
 
   const generation = input.generation ?? 1
@@ -435,7 +453,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
   if (effective === 'write' && requestedPermission?.verifiedAt === undefined) {
     throw new LocusError('INVALID_PERMISSION', 'Effective write requires a verification timestamp')
   }
-  if (effective === 'write' && effective !== desired) {
+  if (effective === 'write' && effective !== desired && input.childComposition !== 'tier3') {
     throw new LocusError('INVALID_PERMISSION', 'Effective write requires desired write permission')
   }
   if (state === 'active' && input.childSessionId === undefined) {
@@ -463,6 +481,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
     endpoint: freezeEndpoint(normalized),
     parentSessionId: input.parentSessionId.trim(),
     ...(input.childSessionId !== undefined ? { childSessionId: input.childSessionId.trim() } : {}),
+    ...(input.reservedChildSessionId !== undefined ? { reservedChildSessionId: input.reservedChildSessionId.trim() } : {}),
     ...(input.childComposition !== undefined ? { childComposition: input.childComposition } : {}),
     toolTier: Object.freeze({ ...initialToolTier }),
     workspaceId: input.workspaceId.trim(),
@@ -537,7 +556,7 @@ export function transitionLocus(
   record: LocusRecord,
   state: LocusState,
   now: number,
-  patch: Partial<Pick<LocusRecord, 'childSessionId' | 'invalidReason' | 'busy'>> = {},
+  patch: Partial<Pick<LocusRecord, 'childSessionId' | 'childComposition' | 'invalidReason' | 'busy'>> = {},
 ): LocusRecord {
   assertState(state)
   if (!Number.isSafeInteger(now) || now < 0 || now < record.updatedAt) {
@@ -565,7 +584,8 @@ export function transitionLocus(
     throw new LocusError('INVALID_STATE', 'A retired locus cannot transition without explicit rebuild')
   }
   const legal: Readonly<Record<LocusState, readonly LocusState[]>> = {
-    provisioning: ['active', 'invalid', 'stopped', 'retired'],
+    provisioning: ['active', 'not-created', 'invalid', 'stopped', 'retired'],
+    'not-created': ['not-created', 'active', 'invalid', 'stopped', 'retired'],
     active: ['active', 'switching', 'invalid', 'stopped', 'retired'],
     switching: ['active', 'invalid', 'stopped', 'retired'],
     invalid: ['invalid', 'retired'],
@@ -583,6 +603,7 @@ export function transitionLocus(
   const next: LocusRecord = {
     ...record,
     ...(nextChild !== undefined ? { childSessionId: nextChild } : {}),
+    ...(patch.childComposition !== undefined ? { childComposition: patch.childComposition } : {}),
     state,
     permission: freezePermission(nextPermission),
     ...(unavailable && record.toolTier !== undefined
@@ -616,8 +637,11 @@ export function withLocusPermission(
   ) {
     throw new LocusError('INVALID_PERMISSION', 'An unavailable locus cannot change permission')
   }
-  if (permission.effective === 'write' && permission.desired !== 'write') {
-    throw new LocusError('INVALID_PERMISSION', 'Effective write requires desired write permission')
+  // A tier3 revoke remains effective write until its next Host readback.
+  if (permission.effective === 'write' && permission.desired !== 'write' && (
+    record.childComposition !== 'tier3' || record.permission.effective !== 'write' || record.permission.verifiedAt === undefined
+  )) {
+    throw new LocusError('INVALID_PERMISSION', 'Pending write revoke requires an existing verified tier3 write permission')
   }
   if (permission.effective === 'write' && permission.verifiedAt === undefined) {
     throw new LocusError('INVALID_PERMISSION', 'Effective write requires a verification timestamp')
@@ -643,8 +667,8 @@ export function withLocusToolTier(
   if (record.state !== 'active' && !(record.state === 'switching' && options.allowSwitching === true)) {
     throw new LocusError('INVALID_LOCUS', 'An unavailable locus cannot change tool tier')
   }
-  if (toolTier.effective === 'shell' && record.childComposition !== 'safe-v2') {
-    throw new LocusError('INVALID_LOCUS', 'Only safe-v2 children may use shell tool tier')
+  if (toolTier.effective === 'shell' && !supportsShellTier(record.childComposition)) {
+    throw new LocusError('INVALID_LOCUS', 'Only safe-v2/tier3 children may use shell tool tier')
   }
   return Object.freeze({
     ...record,
@@ -659,8 +683,77 @@ export function withLocusBusy(record: LocusRecord, busy: boolean, now: number): 
   if (!Number.isSafeInteger(now) || now < 0 || now < record.updatedAt) {
     throw new LocusError('INVALID_STATE', 'busy time must be a non-negative monotonic safe integer')
   }
-  if (busy && record.state !== 'active' && record.state !== 'switching') {
+  if (busy && record.state !== 'active' && record.state !== 'switching' && record.state !== 'not-created') {
     throw new LocusError('INVALID_STATE', `Unavailable locus ${record.id} cannot carry a busy fence`)
   }
   return Object.freeze({ ...record, busy, revision: (record.revision ?? 0) + 1, updatedAt: now })
+}
+
+/**
+ * Publish the lazily created child onto a `not-created` generation.
+ *
+ * Deliberately NOT a `transitionLocus`: the first Delivery that triggers the
+ * creation already holds the busy fence, and the generic transition refuses to
+ * change state under one. Idempotent for the same child, so a retried publish
+ * after a lost acknowledgement is not an error.
+ */
+export function withLocusCreatedChild(
+  record: LocusRecord,
+  childSessionId: string,
+  now: number,
+): LocusRecord {
+  assertString(childSessionId, 'childSessionId')
+  if (!Number.isSafeInteger(now) || now < 0 || now < record.updatedAt) {
+    throw new LocusError('INVALID_STATE', 'publish time must be a non-negative monotonic safe integer')
+  }
+  if (record.state === 'active' && record.childSessionId === childSessionId.trim()
+    && record.childComposition === LOCUS_SAFE_CHILD_COMPOSITION) {
+    return record
+  }
+  if (record.state !== 'not-created') {
+    throw new LocusError('INVALID_STATE', `Locus ${record.id} is ${record.state}, not not-created`)
+  }
+  if (record.reservedChildSessionId !== undefined && record.reservedChildSessionId !== childSessionId.trim()) {
+    // The reserved id is what every Delivery on this generation correlates on;
+    // a different child would orphan them.
+    throw new LocusError('INVALID_STATE', `Locus ${record.id} reserved child ${record.reservedChildSessionId}, not ${childSessionId}`)
+  }
+  return Object.freeze({
+    ...record,
+    childSessionId: childSessionId.trim(),
+    childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
+    state: 'active' as const,
+    revision: (record.revision ?? 0) + 1,
+    updatedAt: now,
+  })
+}
+
+/**
+ * Undo {@link withLocusCreatedChild} for exactly that child.
+ *
+ * Used when the creation is refused after the callback already published. The
+ * generation goes back to `not-created`; the child id is cleared so nothing can
+ * route to it. Refuses any other child, so a stale rollback cannot unpublish a
+ * different, healthy child.
+ */
+export function withLocusCreatedChildReverted(
+  record: LocusRecord,
+  childSessionId: string,
+  now: number,
+): LocusRecord {
+  if (record.state === 'not-created') return record
+  if (record.state !== 'active' || record.childSessionId !== childSessionId.trim()) {
+    throw new LocusError('INVALID_STATE', `Locus ${record.id} does not hold child ${childSessionId}`)
+  }
+  if (!Number.isSafeInteger(now) || now < 0 || now < record.updatedAt) {
+    throw new LocusError('INVALID_STATE', 'revert time must be a non-negative monotonic safe integer')
+  }
+  const { childSessionId: _child, childComposition: _composition, ...rest } = record
+  return Object.freeze({
+    ...rest,
+    state: 'not-created' as const,
+    toolTier: Object.freeze({ desired: record.toolTier?.desired ?? 'safe', effective: 'safe' as const }),
+    revision: (record.revision ?? 0) + 1,
+    updatedAt: now,
+  })
 }

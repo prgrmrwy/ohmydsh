@@ -3,7 +3,7 @@
  *
  * After a group-level `/bind` moves the group, its old topics still point at
  * the archived main and keep answering "stopped". Only these are moved:
- * topics of THIS chat, whose own recorded main is archived, still the current
+ * topics of THIS chat, whose own recorded work session is archived, still the current
  * generation of their endpoint, not owner-stopped, and not already on the
  * target. Nothing in another chat or document is touched, and a topic whose
  * main is still serving is left alone (that would be binding drift).
@@ -13,6 +13,7 @@
 interface TopicRow {
   readonly id: string
   readonly endpoint: { readonly chatId: string; readonly threadId?: string }
+  /** The WORK session behind the topic's locus main (not the locus main itself). */
   readonly parentSessionId: string
   readonly state: string
 }
@@ -45,7 +46,7 @@ export async function carryArchivedTopics(
   const topics = deps.listLoci().filter(row =>
     row.endpoint.chatId === group.chatId
     && row.endpoint.threadId !== undefined
-    && row.state === 'active'
+    && (row.state === 'active' || row.state === 'not-created')
     && row.parentSessionId !== parentSessionId
     && deps.isArchived(row.parentSessionId)
     && deps.latestIdOf(row.endpoint) === row.id)

@@ -944,7 +944,7 @@ export function createLocusManagementPort(
     if (!result.ok) {
       if (result.reason === 'busy') throw new LocusManagementError('LOCUS_BUSY', 'locus 仍有已接受或运行中的 Delivery，请等待入口空闲。')
       if (result.reason === 'not-found') throw new LocusManagementError('LOCUS_NOT_FOUND', '当前 locus 不存在、已替换或已不是入口当前代际。')
-      if (result.reason === 'legacy-v1-shell') throw new LocusManagementError('INVALID_REQUEST', '该入口是 safe-v1；请显式重建一次后再授予 shell。入口保持 safe 且继续服务。')
+      if (result.reason === 'legacy-composition') throw new LocusManagementError('INVALID_REQUEST', '该入口属于旧模型，关联已退休，未切换档位；下一条授权 at 将建立新的三层结构。')
       throw new LocusManagementError('INTEGRATION_FAILED', `工具档位变更未核验生效：${result.reason}`)
     }
     revision += 1

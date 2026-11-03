@@ -50,6 +50,7 @@ async function controllerFixture() {
   let sequence = 0
   const controller = new LocusController({
     repository: new ControllerLocusRepositoryAdapter(durable),
+    establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
     dsh: {
       resolveSession: async id => sessions.get(id),
       resolveDefaultWorkspace: async () => ({ id: 'workspace-auto' }),
@@ -58,17 +59,10 @@ async function controllerFixture() {
         sessions.set(session.id, session)
         return session
       },
-      createChildSession: async ({ parentSessionId }) => {
-        const parent = sessions.get(parentSessionId)
-        if (parent === undefined) throw new Error('missing parent fixture')
-        const child = {
-          id: `session-child-${++sequence}`,
-          parentSessionId,
-          workspaceId: parent.workspaceId,
-          childComposition: 'safe-v2' as const,
-        }
-        children.push(child)
-        return child
+      createLocusMainSession: async ({ workspaceId }) => {
+        const main = { id: `locus-main-${++sequence}`, workspaceId, title: 'Locus', agentPreset: LOCUS_MAIN_PRESET }
+        sessions.set(main.id, main)
+        return main
       },
     },
     lark: {
@@ -106,11 +100,11 @@ describe('design architecture acceptance A-F focused gaps', () => {
       const opened = await f.controller.createOrOpenDefaultQa({ parentSessionId: 'session-s1', ownerId: 'ou-owner' })
 
       expect([qa.locus, issueA.locus, issueB.locus].map(item => item.parentSessionId)).toEqual([
-        'session-s1', 'session-s1', 'session-s1',
+        qa.locus.parentSessionId, qa.locus.parentSessionId, qa.locus.parentSessionId,
       ])
-      expect(new Set([qa.locus.childSessionId, issueA.locus.childSessionId, issueB.locus.childSessionId]).size).toBe(3)
+      expect(new Set([qa.locus.reservedChildSessionId, issueA.locus.reservedChildSessionId, issueB.locus.reservedChildSessionId]).size).toBe(3)
       expect(opened).toMatchObject({ reused: true, locus: { locusId: qa.locus.locusId } })
-      expect(f.durable.getDefaultQaLocus('session-s1')?.id).toBe(qa.locus.locusId)
+      expect(f.durable.getDefaultQaLocus(qa.locus.parentSessionId)?.id).toBe(qa.locus.locusId)
     } finally {
       await f.harness.close()
     }
@@ -129,11 +123,11 @@ describe('design architecture acceptance A-F focused gaps', () => {
       })
       const newTopic = await f.controller.ensureTopic({ chatId: 'oc-project', threadId: 'omt-new' })
 
-      expect(oldTopic.locus.parentSessionId).toBe(groupBefore.group.mainSessionId)
-      expect(f.durable.getLocus(oldTopic.locus.locusId)).toMatchObject({ state: 'active', parentSessionId: groupBefore.group.mainSessionId })
-      expect(explicitS2.locus).toMatchObject({ parentSessionId: 'session-s2', source: 'explicit', permission: 'read' })
-      expect(switched.locus).toMatchObject({ parentSessionId: 'session-s1', generation: 2, permission: 'read' })
-      expect(newTopic.locus).toMatchObject({ parentSessionId: 'session-s1', source: 'inherited', permission: 'read' })
+      expect(oldTopic.locus.parentSessionId).toBe(groupBefore.locus.parentSessionId)
+      expect(f.durable.getLocus(oldTopic.locus.locusId)).toMatchObject({ state: 'not-created', parentSessionId: groupBefore.locus.parentSessionId })
+      expect(explicitS2.locus).toMatchObject({ workSessionId: 'session-s2', source: 'explicit', permission: 'read' })
+      expect(switched.locus).toMatchObject({ workSessionId: 'session-s1', generation: 2, permission: 'read' })
+      expect(newTopic.locus).toMatchObject({ workSessionId: 'session-s1', source: 'inherited', permission: 'read' })
       expect(f.durable.getLocus(groupBefore.locus.locusId)?.state).toBe('retired')
     } finally {
       await f.harness.close()
@@ -144,16 +138,25 @@ describe('design architecture acceptance A-F focused gaps', () => {
     const harness = await openPetHarness()
     try {
       const durable = new DurableLocusRepository(harness.domain)
+      const pairing = {
+        workSessionId: 'session-work', locusMainSessionId: 'session-main', status: 'active' as const,
+        generation: 1, spaceId: 'space-main', workspaceId: 'workspace-main', createdAt: 1, updatedAt: 1,
+      }
+      await harness.domain.table('locus_mains').put(pairing.locusMainSessionId, pairing)
       await durable.putLocus({
         id: 'locus-decision', generation: 1, endpoint: { chatId: 'oc-decision' },
-        parentSessionId: 'session-main', childSessionId: 'session-child', workspaceId: 'workspace-main',
-        source: 'auto', state: 'active', childComposition: 'safe-v2',
+        parentSessionId: pairing.locusMainSessionId, childSessionId: 'session-child', workspaceId: 'workspace-main',
+        source: 'auto', state: 'active', childComposition: 'tier3',
         permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, toolTier: { desired: 'safe', effective: 'safe' },
         busy: false, createdAt: 1, updatedAt: 1,
       })
       const queued: Array<{ childSessionId: string; prompt: string }> = []
       const controller = new LocusChannelController({
-        locus: createLocusResolution({ store: durable }) as never,
+        locus: createLocusResolution({
+          store: durable,
+          mains: { find: id => durable.getLocusMain(id) },
+          verifyMain: id => id === pairing.locusMainSessionId,
+        }) as never,
          allowOpenIds: () => ['ou-owner'],
          currentToolTier: endpoint => durable.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
          readAllowOpenIds: () => ['ou-owner'],
@@ -175,8 +178,8 @@ describe('design architecture acceptance A-F focused gaps', () => {
         },
         child: {
           ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
-          withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: 'session-child' }) }),
-          queueChild: input => {
+          queueChild: async input => {
+            expect(await input.fenceBeforeQueue()).toBe(true)
             queued.push({ childSessionId: input.child.childSessionId, prompt: input.content.filter(block => block.type === 'text').map(block => block.text).join('\n') })
             return {
               accepted: true as const,
@@ -185,7 +188,7 @@ describe('design architecture acceptance A-F focused gaps', () => {
             }
           },
         },
-        resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+        inspectResidentPolicy: () => ({ resident: false }),
         turns: { perTurnCorrelation: true, subscribe: () => () => {} },
         admissionContext: {
           botOpenId: 'ou-bot', allowOpenIds: ['ou-owner'], watermark: 1000,
@@ -207,6 +210,13 @@ describe('design architecture acceptance A-F focused gaps', () => {
       }
       const first = durable.findDeliveryByMessageId('om-question')!
       expect(first.status).toBe('current')
+      await expect(controller.handle(inbound('om-answer', '@Pet B'))).resolves.toMatchObject({ kind: 'accepted' })
+      expect(durable.findDeliveryByMessageId('om-answer')).toMatchObject({ status: 'accepted', queueState: 'backlog' })
+      expect(queued).toHaveLength(1)
+      // Redelivery is deduplicated by the real repository, not a fixed admission spy.
+      await controller.handle(inbound('om-answer', '@Pet B'))
+      expect(durable.listDeliveries()).toHaveLength(2)
+      expect(queued).toHaveLength(1)
       // `turn/end` never settles a Delivery: only the durable finish operation
       // (what the Host lifecycle callback performs for `pet_locus_finish`)
       // does. `no-reply` completes directly from `current`.
@@ -222,7 +232,6 @@ describe('design architecture acceptance A-F focused gaps', () => {
       controller.currentFinished({ deliveryId: first.deliveryId, correlation })
       await controller.dispatchNext(correlation)
 
-      await expect(controller.handle(inbound('om-answer', '@Pet B'))).resolves.toMatchObject({ kind: 'accepted' })
       expect(queued.map(item => item.childSessionId)).toEqual(['session-child', 'session-child'])
       expect(durable.findDeliveryByMessageId('om-question')?.status).toBe('no-reply')
       expect(durable.findDeliveryByMessageId('om-question')?.replyTarget?.messageId).toBe('om-question')

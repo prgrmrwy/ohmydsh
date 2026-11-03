@@ -1,14 +1,22 @@
 /**
  * Single Host boundary for changing one locus child file policy.
  *
- * A database label is never permission.  This adapter resolves the exact
- * durable child session, applies the narrow DSH sandbox mode, reads the policy
- * back from the Host, and only then persists permission plus its audit row.
- * It deliberately knows no unrestricted/danger mode.
+ * A database label is never permission.  For a child that is resident and
+ * idle, this adapter applies the narrow DSH sandbox mode on its live session,
+ * reads the policy back from the Host, and only then persists permission plus
+ * its audit row.  A child the runtime has released is not touched or woken:
+ * the request is recorded as PENDING (`desired` differs from `effective`), the
+ * child keeps serving under the permission it already has, and the next
+ * `agent/created` applies and verifies it (see `composeLocusChild`).
  */
 
 import type { LocusMutationFence, LocusPermissionMode, LocusRecord } from './aggregate.js'
-import { LOCUS_WRITE_ENABLED, verifyLocusLivePolicy, type LocusLiveSandboxPolicy } from './policy-verification.js'
+import {
+  LOCUS_WRITE_DISABLED_DIAGNOSTIC,
+  LOCUS_WRITE_ENABLED,
+  verifyLocusLivePolicy,
+  type LocusLiveSandboxPolicy,
+} from './policy-verification.js'
 
 /**
  * The two sandbox modes a locus may run under.
@@ -81,10 +89,18 @@ export interface LocusPermissionSession {
   readonly id: string
   /** Opaque live DSH session handle consumed only by the Host policy adapter. */
   readonly handle?: unknown
+  /** Whether no turn is open on this live child. Absent is read as "cannot prove idle". */
+  isIdle?(): boolean
 }
 
 export interface LocusPermissionSessionPort {
-  /** Resolve or cold-resume exactly this durable child session. */
+  /**
+   * Resolve this child's LIVE session, and nothing else.
+   *
+   * Returns `undefined` when the runtime has released the child — the normal
+   * resting state, not a fault. It must never wake, resume or borrow the child:
+   * a released child's change is recorded as pending instead (see below).
+   */
   resolve(childSessionId: string): Promise<LocusPermissionSession | undefined> | LocusPermissionSession | undefined
 }
 
@@ -230,27 +246,65 @@ export function createLocusPermissionMutation(options: {
           ...(current.revision !== undefined ? { expectedRevision: current.revision } : {}),
         })
       }
-      const childSession = async (): Promise<LocusPermissionSession> => {
-        const session = await sessions.resolve(childSessionId)
-        if (session === undefined || session.id !== childSessionId) {
+      let session: LocusPermissionSession | undefined
+      try {
+        session = await sessions.resolve(childSessionId)
+        if (session !== undefined && session.id !== childSessionId) {
           throw new LocusPermissionMutationError(
             'CHILD_SESSION_UNAVAILABLE',
             '无法解析当前 locus 的 exact child session，权限未修改。',
           )
         }
-        return session
-      }
-      let session: LocusPermissionSession
-      try {
-        session = await childSession()
       } catch (error) {
         await releaseFence()
         throw error
       }
 
+      if (session === undefined) {
+        // Released child: record the request, serve on the old permission.
+        // A write request is refused up front while write grants are off, so a
+        // grant that can never apply is not left pending.
+        if (request.mode === 'write' && !writeEnabled) {
+          await releaseFence()
+          throw new LocusPermissionMutationError(
+            'WRITE_UNSUPPORTED',
+            `${LOCUS_WRITE_DISABLED_DIAGNOSTIC} 已维持原 effective/read，未扩大权限。`,
+          )
+        }
+        if (previous.permission.effective === 'write' && previous.permission.verifiedAt === undefined) {
+          await releaseFence()
+          throw new LocusPermissionMutationError('POLICY_VERIFY_FAILED', '原写权限缺少 Host 核验证明，不能记录待应用变更。')
+        }
+        const recordedAt = now()
+        try {
+          const current = repository.getLocus(previous.id)
+          if (current === undefined || current.state !== 'switching' || current.generation !== fenced.generation) {
+            throw new Error('durable permission mutation fence was lost')
+          }
+          return await repository.commitPermissionMutation(previous.id, {
+            desired: request.mode,
+            effective: previous.permission.effective,
+            verifiedAt: previous.permission.verifiedAt ?? recordedAt,
+            grantedBy: actorId,
+          }, recordedAt, {
+            expectedGeneration: current.generation,
+            expectedUpdatedAt: current.updatedAt,
+            ...(current.revision !== undefined ? { expectedRevision: current.revision } : {}),
+          })
+        } catch (error) {
+          await releaseFence().catch(() => undefined)
+          throw new LocusPermissionMutationError('PERSISTENCE_FAILED', '权限变更未能记录，权限未修改。', error)
+        }
+      }
+      if (session.isIdle?.() !== true) {
+        await releaseFence()
+        throw new LocusPermissionMutationError('LOCUS_BUSY', '子会话正在运行，请等待入口空闲后重试。')
+      }
+      const liveSession: LocusPermissionSession = session
+
       const requestedSandbox = modeFor(request.mode)
       try {
-        await policy.apply(session, requestedSandbox)
+        await policy.apply(liveSession, requestedSandbox)
       } catch (error) {
         await releaseFence()
         throw new LocusPermissionMutationError(
@@ -264,13 +318,13 @@ export function createLocusPermissionMutation(options: {
       try {
         verification = verifyLocusLivePolicy(
           { ...previous, permission: { ...previous.permission, desired: request.mode, effective: request.mode } },
-          await policy.resolve(session),
+          await policy.resolve(liveSession),
           writeEnabled,
         )
       } catch (error) {
         return restorePolicy(
           policy,
-          session,
+          liveSession,
           previous,
           new LocusPermissionMutationError('POLICY_VERIFY_FAILED', 'sandbox 回读失败，权限未修改。', error),
           releaseFence,
@@ -286,7 +340,7 @@ export function createLocusPermissionMutation(options: {
             'POLICY_VERIFY_FAILED',
             verification.diagnostic,
           )
-        return restorePolicy(policy, session, previous, error, releaseFence)
+        return restorePolicy(policy, liveSession, previous, error, releaseFence)
       }
       const verified = verification.effective
 
@@ -312,7 +366,7 @@ export function createLocusPermissionMutation(options: {
       } catch (error) {
         return restorePolicy(
           policy,
-          session,
+          liveSession,
           previous,
           new LocusPermissionMutationError('PERSISTENCE_FAILED', 'sandbox 已核验但持久化失败；已尝试恢复原策略。', error),
           releaseFence,

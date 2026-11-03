@@ -15,7 +15,7 @@ function record(overrides: Partial<LocusRecord> = {}): LocusRecord {
     endpoint: ENDPOINT,
     parentSessionId: 'main-1',
     childSessionId: 'child-1',
-    childComposition: 'safe-v1',
+    childComposition: 'tier3',
     workspaceId: 'ws-1',
     source: 'auto',
     state: 'active',
@@ -36,6 +36,8 @@ function resolution(options: {
 } = {}) {
   const diagnostics: LocusResolutionRefusal[] = []
   const port = createLocusResolution({
+    mains: { find: () => ({ workSessionId: 'work-1', status: 'active' }) },
+    verifyMain: () => true,
     store: {
       getCurrentLocus: () => {
         if (options.throws !== undefined) throw options.throws
@@ -63,8 +65,9 @@ describe('durable locus resolution', () => {
       endpoint: ENDPOINT,
       generation: 2,
       parentSessionId: 'main-1',
+      workSessionId: 'work-1',
       childSessionId: 'child-1',
-      childComposition: 'safe-v1',
+      childComposition: 'tier3',
       workspaceId: 'ws-1',
       state: 'active',
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
@@ -76,7 +79,7 @@ describe('durable locus resolution', () => {
       current: record({ childComposition: undefined }),
     })
 
-    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(/safe-v1\/safe-v2 child composition proof/)
+    expect(() => port.resolveCurrent(ENDPOINT)).toThrow(/tier3 child composition proof/)
     expect(diagnostics).toEqual(['locus-unusable'])
   })
 
@@ -197,7 +200,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 3,
       parentSessionId: 'main-1',
       childSessionId: 'child-recovered',
-      childComposition: 'safe-v2' as const,
+      childComposition: 'tier3' as const,
       workspaceId: 'ws-1',
       state: 'active' as const,
     }
@@ -233,7 +236,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 1,
       parentSessionId: 'main-new',
       childSessionId: 'child-new',
-      childComposition: 'safe-v2' as const,
+      childComposition: 'tier3' as const,
       workspaceId: 'ws-new',
       state: 'active' as const,
     }
@@ -312,7 +315,7 @@ describe('establishing a locus for a new endpoint', () => {
       generation: 1,
       parentSessionId: 'main-new',
       childSessionId: 'child-new',
-      childComposition: 'safe-v2' as const,
+      childComposition: 'tier3' as const,
       workspaceId: 'ws-new',
       state: 'active' as const,
     }
@@ -349,23 +352,23 @@ describe('an archived main session stops the endpoint', () => {
   it('refuses the current generation with the rebuild reason, not a Host fault', () => {
     const { port, diagnostics } = resolution({
       current: record({ state: 'active' }),
-      archived: ['main-1'],
+      archived: ['work-1'],
     })
 
     // `retired-endpoint` is what the channel renders as "this entry needs an
     // explicit rebuild". Reporting a generic unusable reason would send the
     // owner looking for a Host fault that does not exist.
     expect(() => port.resolveCurrent(ENDPOINT)).toThrowError(
-      expect.objectContaining({ reason: 'retired-endpoint' }),
+      expect.objectContaining({ reason: 'source-archived' }),
     )
-    expect(diagnostics).toContain('retired-endpoint')
+    expect(diagnostics).toContain('source-archived')
   })
 
   it('does not auto-replace it, even though `invalid` alone would be replaceable', async () => {
     const ensureForDelivery = vi.fn(async () => { throw new Error('must not provision') })
     const { port } = resolution({
       current: record({ state: 'invalid', invalidReason: 'child re-attach failed' }),
-      archived: ['main-1'],
+      archived: ['work-1'],
       provisioning: { ensureForDelivery },
     })
 
@@ -380,7 +383,7 @@ describe('an archived main session stops the endpoint', () => {
   it('still replaces a Host-judged generation whose parent is NOT archived', async () => {
     const ensureForDelivery = vi.fn(async () => ({
       id: 'locus-2', generation: 3, endpoint: ENDPOINT, parentSessionId: 'main-1',
-      childSessionId: 'child-2', childComposition: 'safe-v2', workspaceId: 'ws-1',
+      childSessionId: 'child-2', childComposition: 'tier3', workspaceId: 'ws-1',
       source: 'auto', state: 'active',
       permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
       busy: false, createdAt: 2, updatedAt: 2,

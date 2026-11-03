@@ -50,9 +50,10 @@ export interface LocusReplyTarget {
 export interface LocusFacts {
   readonly locusId: string
   readonly generation: number
-  readonly state?: 'provisioning' | 'active' | 'switching' | 'invalid' | 'stopped' | 'retired'
-  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  readonly state?: 'provisioning' | 'not-created' | 'active' | 'switching' | 'invalid' | 'stopped' | 'retired'
+  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
   readonly toolTier?: 'safe' | 'shell'
+  readonly pendingToolTier?: boolean
 }
 
 /** The main session which owns the shared work context. */
@@ -366,6 +367,7 @@ export function renderLocusDeliveryPrompt(
     '',
     '### Tool tier',
     `- effective：${context.locus.toolTier ?? 'safe'}`,
+    ...(context.locus.pendingToolTier === true ? ['- 存在待应用档位变更；生效前仍按当前 effective 服务。'] : []),
     ...(context.locus.toolTier === 'shell'
       ? [
         ...(isDocEndpoint(context.endpoint)
@@ -380,7 +382,9 @@ export function renderLocusDeliveryPrompt(
     '',
     '### Permission',
     `- effective：${context.permission.effective}`,
-    `- desired：${context.permission.desired ?? '未确认'}`,
+    ...(context.permission.desired !== undefined && context.permission.desired !== context.permission.effective
+      ? ['- 存在待应用权限变更；生效前仍按当前 effective 服务。']
+      : []),
     `- verified at：${factValue(context.permission.verifiedAt)}`,
     ...(context.permission.grantedBy === undefined
       ? []
@@ -508,6 +512,9 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     context.locus.toolTier === 'shell'
       ? '- 工具档位：shell —— 可执行本机命令并以 bot 身份读取当前入口；业务正文仍只能经 `pet_locus_finish`。'
       : '- 工具档位：safe —— 不提供 shell、Skill 或直接 lark-cli 能力。',
+    ...(context.locus.pendingToolTier === true ? ['- 存在待应用档位变更；生效前仍按当前工具档位服务。'] : []),
+    ...(context.permission.desired !== undefined && context.permission.desired !== context.permission.effective
+      ? ['- 存在待应用权限变更；当前生效权限：' + context.permission.effective + '。'] : []),
     // Separate from the tier: a shell child can still hit an entrance it may
     // not read, and a safe child can read this one through the tool.
     ...(isDocEndpoint(context.endpoint)
@@ -533,9 +540,9 @@ export interface LocusPromptRecordFacts {
   readonly childSessionId: string
   readonly workspaceId: string
   readonly state?: LocusFacts['state']
-  readonly childComposition?: 'safe-v1' | 'safe-v2'
+  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
   /** Persisted effective tier; absent means the safe composition. */
-  readonly toolTier?: { readonly effective?: 'safe' | 'shell' } | undefined
+  readonly toolTier?: { readonly desired?: 'safe' | 'shell'; readonly effective?: 'safe' | 'shell' } | undefined
   readonly permission: LocusPermissionFacts
   readonly contextAnchor?: LocusContextAnchorFacts
 }
@@ -612,6 +619,7 @@ export function locusDeliveryPromptContext(input: {
       ...(record.state === undefined ? {} : { state: record.state }),
       ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
       toolTier: record.toolTier?.effective ?? 'safe',
+      ...(record.toolTier?.desired !== undefined && record.toolTier.desired !== (record.toolTier.effective ?? 'safe') ? { pendingToolTier: true } : {}),
     },
     main: { sessionId: record.parentSessionId },
     child: { sessionId: record.childSessionId },

@@ -2049,7 +2049,8 @@ describe('resume carries the model route', () => {
     for (let from = entry.indexOf('ctx.agents.resume('); from !== -1; from = entry.indexOf('ctx.agents.resume(', from + 1)) {
       blocks.push(entry.slice(from, entry.indexOf('setup:', from)))
     }
-    expect(blocks.length).toBeGreaterThanOrEqual(3)
+    // Two paths remain after the inquiry resume path was retired (design 决策 11).
+    expect(blocks.length).toBeGreaterThanOrEqual(2)
     // Without a model route the persona template's {{model}} has no value and
     // assembly fails before the agent ever runs.
     for (const block of blocks) expect(block).toMatch(/agentOptions: (model|\{\s*provider: current\.providerId)/)
@@ -2058,12 +2059,12 @@ describe('resume carries the model route', () => {
     for (const block of blocks) expect(block).not.toContain('agentPreset: current.agentPreset')
   })
 
-  it('cold inquiry and todo resume keep the session model instead of the Host default', async () => {
+  it('cold todo resume keeps the session model instead of the Host default', async () => {
     const { readFile } = await import('node:fs/promises')
     const entry = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
     // agents.resume routes by agentOptions, so passing the current Host default
     // silently switched a resumed session to the user's latest model pick.
-    for (const marker of ['resumeMain: async (sessionId', 'resume: async sessionId =>']) {
+    for (const marker of ['resume: async sessionId =>']) {
       const from = entry.indexOf(marker)
       expect(from).toBeGreaterThan(-1)
       const block = entry.slice(from, entry.indexOf('setup:', from))
@@ -2271,7 +2272,7 @@ describe('a locus child gets its own durable title', () => {
     // header. Every child then displayed as "## 当前 unified locus 投递（caller-"
     // and was indistinguishable in the sidebar and the management view, even
     // though the subagent descriptor already carried the right label.
-    const provisioning = index.slice(index.indexOf('const idleChildProvisioning'))
+    const provisioning = index.slice(index.indexOf('creator: createLocusLazyChildCreator'))
     const scope = provisioning.slice(0, provisioning.indexOf('const locusLarkPort'))
     expect(scope).toContain('ctx.sessionTitle.rename')
     expect(scope).toContain('input.label')

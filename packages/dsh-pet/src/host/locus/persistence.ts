@@ -18,6 +18,7 @@
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import {
   buildLocusRecord,
+  LOCUS_SAFE_CHILD_COMPOSITION,
   endpointKeyOf,
   endpointFromKey,
   isAutomaticSource,
@@ -62,7 +63,7 @@ import {
   type DeliveryWaitInput,
   isValidDocCommentQuote,
 } from './delivery.js'
-import { LocusError } from './aggregate.js'
+import { LocusError, withLocusCreatedChild, withLocusCreatedChildReverted } from './aggregate.js'
 import { STORAGE_KEY_SEPARATOR } from './storage-key.js'
 import type { LocusContextAnchorFacts } from './context.js'
 import type { LocusCurrentDelivery } from './context-repository.js'
@@ -72,6 +73,7 @@ import {
   petDomainSpec,
   type PetLocusDelivery,
   type PetLocusIndex,
+  type PetLocusMainRecord,
   type PetLocusOperation,
   type PetLocusRecord,
   type PetLocusSwitchNotice,
@@ -105,6 +107,7 @@ export type LocusDomain = Domain<typeof petDomainSpec> & {
 
 type LocusTable = KvTable<string, PetLocusRecord>
 type IndexTable = KvTable<string, PetLocusIndex>
+type MainTable = KvTable<string, PetLocusMainRecord>
 type DeliveryTable = KvTable<string, PetLocusDelivery>
 type OperationTable = KvTable<string, PetLocusOperation>
 
@@ -113,12 +116,14 @@ type StoredLocus = LocusRecord
 
 type TableName =
   | 'loci'
+  | 'locus_mains'
   | 'locus_indexes'
   | 'locus_deliveries'
   | 'locus_switch_notices'
   | 'locus_permission_audit'
 type TableChange =
   | { readonly table: 'loci'; readonly key: string; readonly value?: StoredLocus }
+  | { readonly table: 'locus_mains'; readonly key: string; readonly value?: PetLocusMainRecord }
   | { readonly table: 'locus_indexes'; readonly key: string; readonly value?: PetLocusIndex }
   | { readonly table: 'locus_deliveries'; readonly key: string; readonly value?: DeliveryRecord }
   | { readonly table: 'locus_switch_notices'; readonly key: string; readonly value?: PetLocusSwitchNotice }
@@ -183,7 +188,7 @@ export type LocusOperation = PetLocusOperation
 /** Controller-owned provisioning intent persisted before external creation. */
 export interface DurableProvisioningBegin {
   readonly provisioningId: string
-  readonly kind: 'group' | 'topic' | 'qa' | 'replacement' | 'rebuild'
+  readonly kind: 'group' | 'topic' | 'qa' | 'replacement' | 'rebuild' | 'regenerate'
   readonly endpoint: LocusEndpoint
   readonly parentSessionId?: string
   readonly startedAt: number
@@ -191,7 +196,10 @@ export interface DurableProvisioningBegin {
 
 /** External resources created under one provisioning intent. */
 export interface DurableProvisioningResources {
+  /** The work session Pet created itself (auto path). */
   readonly mainSessionId?: string
+  /** The locus main session Pet created for the work session. */
+  readonly locusMainSessionId?: string
   readonly childSessionId?: string
   readonly chatId?: string
 }
@@ -203,6 +211,11 @@ export interface DurableProvisioningResources {
 export interface DurableProvisioningCommit {
   readonly provisioningId: string
   readonly locus: LocusRecord
+  /**
+   * The locus main this locus is published under, when it is NEW. Published in
+   * the same transaction. Omit to publish under an already active main.
+   */
+  readonly main?: PetLocusMainRecord
   readonly group?: {
     readonly chatId: string
     readonly workspaceId: string
@@ -217,6 +230,8 @@ export interface DurableProvisioningCommit {
     readonly oldLocusId: string
     /** Debt committed with the replacement; dispatch remains gated until sent. */
     readonly noticeText: string
+    /** Controller proved the previous work session archived before this explicit bind. */
+    readonly archivedWork?: true
   }
   /** Owner-authorized rebuild over an unavailable latest marker. */
   readonly rebuild?: {
@@ -238,6 +253,34 @@ export interface DurableProvisioningCommit {
      */
     readonly predecessorDisposition?: 'archived-parent'
   }
+}
+
+/** One entry's successor generation inside a regeneration commit. */
+export interface DurableRegeneratedEntry {
+  readonly oldLocusId: string
+  /** Why the predecessor leaves service (recorded as its invalidReason). */
+  readonly reason: string
+  /**
+   * The predecessor is a previous-model row: its source (usually an explicit
+   * bind to the user's own session) described a relationship that no longer
+   * exists, so the successor is established the auto way instead of inheriting it.
+   */
+  readonly previousModel?: boolean
+  /** The successor: `not-created`, generation + 1, same endpoint (same source unless `previousModel`). */
+  readonly locus: LocusRecord
+}
+
+/**
+ * Publish successor generations for entries whose current generation cannot
+ * serve for a reason that is not an owner decision (unusable child, retired
+ * locus main, previous-model row). Optionally pairs them with a NEW locus main
+ * (and retires the one they leave), all in one transaction.
+ */
+export interface DurableRegenerationCommit {
+  readonly provisioningId: string
+  readonly entries: readonly DurableRegeneratedEntry[]
+  readonly main?: PetLocusMainRecord
+  readonly retireMain?: { readonly locusMainSessionId: string; readonly reason: string }
 }
 
 /**
@@ -286,6 +329,11 @@ export interface LocusStartupCompensators {
   }) => Promise<void>
   readonly mainSession?: (input: {
     readonly mainSessionId: string
+    readonly operationId: string
+  }) => Promise<void>
+  /** Release a locus main session that never entered service. */
+  readonly locusMainSession?: (input: {
+    readonly locusMainSessionId: string
     readonly operationId: string
   }) => Promise<void>
   readonly chat?: (input: { readonly chatId: string; readonly operationId: string }) => Promise<void>
@@ -409,6 +457,28 @@ export function defaultQaIndexKey(parentSessionId: string): string {
 export class LocusRepository {
   private writeChain: Promise<void> = Promise.resolve()
   private operationSequence = 0
+  /** Only this process's in-flight first creation may serve while its WAL is publishing. */
+  private readonly liveFirstPublications = new Set<string>()
+  private provisioningCompensators: LocusStartupCompensators | undefined
+  private diagnosticSink: ((message: string) => void) | undefined
+
+  /**
+   * Compensators the runtime retry of a stale failed provisioning uses. Startup
+   * passes its own through `reconcileStartup`; this is the same set, installed
+   * once so a request can reach it later without a restart.
+   */
+  setProvisioningCompensators(compensators: LocusStartupCompensators | undefined): void {
+    this.provisioningCompensators = compensators
+  }
+
+  /** Receive diagnostics that have no caller to throw to (e.g. a compensation that failed). */
+  setDiagnosticSink(sink: ((message: string) => void) | undefined): void {
+    this.diagnosticSink = sink
+  }
+
+  private diagnose(message: string): void {
+    try { this.diagnosticSink?.(message) } catch { /* diagnostics must never break a request */ }
+  }
 
   constructor(private readonly domain: LocusDomain) {
     // A LocusRepository is intentionally a single-writer adapter for one
@@ -439,7 +509,13 @@ export class LocusRepository {
         return existing
       }
       const endpointKey = endpointKeyOf(input.endpoint)
-      const blocking = this.findBlockingProvisioningOperation(endpointKey, input.parentSessionId)
+      let blocking = this.findBlockingProvisioningOperation(endpointKey, input.parentSessionId)
+      // B040: a failed creation stops blocking after the window, but only once
+      // its resources were really released. Compensation failing leaves it
+      // blocking, with the original error recorded.
+      while (blocking !== undefined && await this.clearStaleFailedProvisioning(blocking, input.startedAt)) {
+        blocking = this.findBlockingProvisioningOperation(endpointKey, input.parentSessionId)
+      }
       if (blocking !== undefined) {
         throw new LocusProvisioningError(
           'PROVISIONING_CONFLICT',
@@ -512,6 +588,11 @@ export class LocusRepository {
       assertIdentifier(input.provisioningId, 'provisioningId')
       const operation = this.getRequiredProvisioningOperation(input.provisioningId)
       const normalized = normalizeRecord(input.locus)
+      // The work session this locus serves: through the (new or existing)
+      // locus main pairing; a row with no pairing is its own "work" id only for
+      // callers that predate the three-tier structure.
+      const mainRecord = input.main ?? this.getLocusMain(normalized.parentSessionId)
+      const workSessionId = mainRecord?.workSessionId ?? normalized.parentSessionId
       const commitHash = provisioningCommitHash(input, normalized)
       if (operation.phase === 'committed') {
         if (operation.commitIntentHash !== commitHash) {
@@ -535,10 +616,16 @@ export class LocusRepository {
           `Provisioning ${input.provisioningId} cannot commit from ${operation.phase}`,
         )
       }
-      assertProvisioningCommitMatchesBegin(operation, input, normalized)
+      assertProvisioningCommitMatchesBegin(operation, input, normalized, workSessionId)
       assertProvisioningCommitForm(operation, input, normalized)
-      assertGroupProjection(input.group, normalized)
-      assertProvisioningResourcesMatch(operation, normalized, input.group)
+      assertGroupProjection(input.group, normalized, workSessionId)
+      assertProvisioningResourcesMatch(
+        operation,
+        normalized,
+        input.group,
+        workSessionId,
+        input.main?.locusMainSessionId,
+      )
 
       const before = this.collectLoci()
       assertNewTopicParent(before, normalized)
@@ -551,6 +638,36 @@ export class LocusRepository {
       }
       const latest = latestLocusForEndpoint(before, normalized.endpoint)
       const extra: TableChange[] = []
+      if (input.main !== undefined) {
+        const paired = input.main
+        if (
+          paired.status !== 'active' ||
+          paired.locusMainSessionId !== normalized.parentSessionId ||
+          paired.workspaceId !== normalized.workspaceId
+        ) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Locus main does not match the published locus')
+        }
+        const existingMain = this.getLocusMain(paired.locusMainSessionId)
+        if (existingMain !== undefined && !recordsEqual(existingMain, paired)) {
+          throw new LocusProvisioningError(
+            'PROVISIONING_CONFLICT',
+            `Locus main ${paired.locusMainSessionId} already exists with another pairing`,
+          )
+        }
+        const activeForWork = this.getActiveLocusMainForWork(paired.workSessionId)
+        if (activeForWork !== undefined && activeForWork.locusMainSessionId !== paired.locusMainSessionId) {
+          throw new LocusProvisioningError(
+            'PROVISIONING_CONFLICT',
+            `Work session ${paired.workSessionId} already has active locus main ${activeForWork.locusMainSessionId}`,
+          )
+        }
+        extra.push({ table: 'locus_mains', key: paired.locusMainSessionId, value: paired })
+      } else if (mainRecord !== undefined && mainRecord.status !== 'active') {
+        throw new LocusProvisioningError(
+          'PROVISIONING_CONFLICT',
+          `Locus main ${mainRecord.locusMainSessionId} is retired and cannot receive a new generation`,
+        )
+      }
       if (input.replace !== undefined && input.rebuild !== undefined) {
         throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'A commit cannot replace and rebuild simultaneously')
       }
@@ -615,7 +732,8 @@ export class LocusRepository {
             `Replacement predecessor ${input.replace.oldLocusId} is not the latest endpoint generation`,
           )
         }
-        if (!isAutomaticSource(previous.source) || previous.state !== 'active') {
+        if ((!isAutomaticSource(previous.source) && input.replace.archivedWork !== true) ||
+            (previous.state !== 'active' && previous.state !== 'not-created')) {
           throw new LocusProvisioningError(
             'PROVISIONING_CONFLICT',
             `Replacement predecessor ${previous.id} is not an active automatic locus`,
@@ -731,7 +849,7 @@ export class LocusRepository {
   }
 
   /** Mark an uncommitted provisioning operation failed, atomically and idempotently. */
-  async failProvisioning(provisioningId: string, reason: string): Promise<void> {
+  async failProvisioning(provisioningId: string, reason: string, at?: number): Promise<void> {
     const transaction = this.requireProvisioningTransaction('failProvisioning')
     await this.enqueue(async () => {
       const safeReason = reason.trim() === '' ? 'provisioning failed' : reason.slice(0, 500)
@@ -749,7 +867,7 @@ export class LocusRepository {
           `Provisioning ${provisioningId} cannot fail from ${operation.phase}`,
         )
       }
-      const now = Math.max(Date.now(), operation.updatedAt)
+      const now = Math.max(at ?? Date.now(), operation.updatedAt)
       const failed: PetLocusOperation = {
         ...operation,
         phase: 'failed',
@@ -852,7 +970,7 @@ export class LocusRepository {
     // debt is acknowledged. Keep the aggregate active for same-target bind
     // retries, but project switching to ordinary resolution consumers.
     if (
-      record.state === 'active' &&
+      (record.state === 'active' || record.state === 'not-created') &&
       this.domain.table('locus_switch_notices').get(switchNoticeKey(record.id, record.generation)) !== undefined
     ) {
       return Object.freeze({ ...record, state: 'switching' })
@@ -1503,6 +1621,64 @@ export class LocusRepository {
     })
   }
 
+  /** Close a cold-resume request without disturbing its awakening current Delivery. */
+  async resolvePendingApplication(input: {
+    readonly locusId: string
+    readonly generation: number
+    readonly childSessionId: string
+    /** Revision captured before applying the pending request, not after readback. */
+    readonly expectedRevision: number
+    readonly permission?: { readonly desired: 'read' | 'write'; readonly effective: 'read' | 'write'; readonly verifiedAt: number; readonly grantedBy: string }
+    readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt: number; readonly grantedBy: string }
+    readonly now: number
+  }): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      this.requireProvisioningTransaction('resolvePendingApplication')
+      const before = this.collectLoci()
+      const current = before.get(input.locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${input.locusId} does not exist`)
+      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+        throw new LocusError('REVISION_CONFLICT', 'Pending application requires its pre-apply revision')
+      }
+      assertLocusMutationFence(current, { expectedGeneration: input.generation, expectedRevision: input.expectedRevision })
+      const indexed = this.getCurrentLocus(current.endpoint)
+      if (current.state !== 'active' || indexed?.state !== 'active' || indexed.id !== current.id ||
+          latestLocusForEndpoint(before, current.endpoint)?.id !== current.id ||
+          current.childSessionId !== input.childSessionId || current.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+        throw new LocusError('REVISION_CONFLICT', 'Pending application no longer owns the active current child')
+      }
+      if (input.permission === undefined && input.toolTier === undefined) {
+        throw new LocusError('INVALID_PERMISSION', 'Pending application has no result')
+      }
+      let next: LocusRecord = current
+      const audit: TableChange[] = []
+      if (input.permission !== undefined) {
+        if (input.permission.desired !== input.permission.effective || current.permission.desired === current.permission.effective) {
+          throw new LocusError('INVALID_PERMISSION', 'Pending permission result must resolve an unapplied request')
+        }
+        const permission = { ...input.permission, grantedBy: current.permission.grantedBy ?? input.permission.grantedBy }
+        next = withLocusPermission(next, permission, input.now)
+        audit.push(...this.permissionAuditChanges(next, { ...permission, desired: current.permission.desired }, input.now))
+      }
+      if (input.toolTier !== undefined) {
+        if (input.toolTier.desired !== input.toolTier.effective || current.toolTier?.desired === current.toolTier?.effective) {
+          throw new LocusError('INVALID_PERMISSION', 'Pending tool-tier result must resolve an unapplied request')
+        }
+        const toolTier = { ...input.toolTier, grantedBy: current.toolTier?.grantedBy ?? input.toolTier.grantedBy }
+        next = withLocusToolTier(next, toolTier, input.now)
+        audit.push(...this.permissionAuditChanges(next, next.permission, input.now, {
+          ...toolTier, desired: current.toolTier!.desired,
+        }, audit.length))
+      }
+      const after = new Map(before).set(current.id, next)
+      assertLocusSet(after)
+      await this.persistLocusSet('locus-permission', before, after, {
+        locusId: current.id, expectedRevision: input.expectedRevision, pendingApplicationResolved: true,
+      }, audit)
+      return next
+    })
+  }
+
   /**
    * Build one append-only audit row for a permission or tool-tier mutation.
    *
@@ -1515,6 +1691,7 @@ export class LocusRepository {
     requested: LocusPermission,
     now: number,
     toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt: number; readonly grantedBy: string },
+    stagedAuditCount = 0,
   ): readonly TableChange[] {
     const grantedBy = toolTier?.grantedBy ?? requested.grantedBy ?? record.permission.grantedBy
     // Without a Host-derived operator there is nothing auditable to record;
@@ -1527,6 +1704,7 @@ export class LocusRepository {
       const parsed = Number(key.slice(prefix.length))
       if (Number.isSafeInteger(parsed) && parsed >= sequence) sequence = parsed + 1
     }
+    sequence += stagedAuditCount
     const refused = requested.desired !== record.permission.effective
     return [{
       table: 'locus_permission_audit',
@@ -1790,13 +1968,15 @@ export class LocusRepository {
       }
       const locus = this.getLocus(input.locusId)
       if (locus === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${input.locusId} does not exist`)
-      if (!isCurrentLocusState(locus.state) || locus.state !== 'active') {
+      // A `not-created` generation accepts Deliveries too: its first one
+      // creates the child, and it correlates by the id the generation reserved.
+      if (!isCurrentLocusState(locus.state) || (locus.state !== 'active' && locus.state !== 'not-created')) {
         throw new LocusError('LOCUS_INVALID', `Locus ${input.locusId} is not active`)
       }
       if (this.getSwitchNotice(locus.id, locus.generation) !== undefined) {
         throw new LocusError('LOCUS_INVALID', `Locus ${input.locusId} has a pending source-switch notice`)
       }
-      if (locus.childSessionId !== input.childSessionId) {
+      if ((locus.state === 'not-created' ? locus.reservedChildSessionId : locus.childSessionId) !== input.childSessionId) {
         throw new LocusError('CHILD_OCCUPIED', 'Delivery child does not match the locus child')
        }
        if (endpointKeyOf(locus.endpoint) !== endpointKeyOf(input.endpoint)) {
@@ -1892,10 +2072,13 @@ export class LocusRepository {
       }
       const locus = this.getLocus(record.locusId)
       if (locus === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${record.locusId} does not exist`)
-      if (locus.state !== 'active' || !isCurrentLocusState(locus.state)) {
+      if ((locus.state !== 'active' && locus.state !== 'not-created') || !isCurrentLocusState(locus.state)) {
         throw new LocusError('LOCUS_INVALID', `Locus ${record.locusId} is not active`)
       }
-      if (locus.generation !== record.generation || locus.childSessionId !== record.childSessionId) {
+      if (
+        locus.generation !== record.generation
+        || (locus.state === 'not-created' ? locus.reservedChildSessionId : locus.childSessionId) !== record.childSessionId
+      ) {
         throw new LocusError('CHILD_OCCUPIED', 'Delivery does not match the active locus generation/child')
       }
       if (endpointKeyOf(locus.endpoint) !== endpointKeyOf(record.endpoint)) {
@@ -2276,6 +2459,202 @@ export class LocusRepository {
     return this.settleByTurn({ ...input, settledAt: input.settledAt })
   }
 
+  /** Publish the first child and its current execution atomically, inside agent/created. */
+  async publishFirstDelivery(input: {
+    readonly locusId: string
+    readonly generation: number
+    readonly childSessionId: string
+    readonly deliveryId: string
+    readonly executionId: string
+    readonly now?: number
+  }): Promise<DeliveryRecord> {
+    return this.enqueue(async () => {
+      assertIdentifier(input.executionId, 'executionId')
+      const locus = this.getLocus(input.locusId)
+      const current = this.getDelivery(input.deliveryId)
+      const now = input.now ?? Date.now()
+      if (locus === undefined || current === undefined || locus.generation !== input.generation ||
+          current.locusId !== locus.id || current.generation !== locus.generation ||
+          current.childSessionId !== input.childSessionId || current.status !== 'current' ||
+          current.queueState !== 'current' || current.executionId !== undefined ||
+          latestLocusForEndpoint(this.collectLoci(), locus.endpoint)?.id !== locus.id ||
+          (current.deadlineAt !== undefined && now >= current.deadlineAt)) {
+        throw new LocusError('REVISION_CONFLICT', 'First Delivery is no longer the exact unpublished current')
+      }
+      const nextLocus = withLocusCreatedChild(locus, input.childSessionId, Math.max(now, locus.updatedAt))
+      const next = Object.freeze({ ...current, executionId: input.executionId })
+      if (this.domain.supportsTransaction !== true || this.domain.transaction === undefined) {
+        throw new LocusProvisioningError('TRANSACTION_UNAVAILABLE', 'First Delivery publication requires atomic storage')
+      }
+      const after = new Map(this.collectLoci()).set(locus.id, nextLocus)
+      assertLocusSet(after)
+      const indexes = this.deriveIndexes(after, this.collectDefaultPointers())
+      const changes = [
+        ...diffLocusTable(this.collectLoci(), after),
+        ...diffIndexTable(this.collectIndexes(), indexes),
+      ]
+      await this.domain.transaction(tx => {
+        for (const change of changes) {
+          if (change.value === undefined) tx.delete(change.table, change.key)
+          else tx.put(change.table, change.key, change.value)
+        }
+        tx.put('locus_deliveries', next.deliveryId, next)
+        tx.put('locus_operations', `first-child:${input.executionId}`, {
+          id: `first-child:${input.executionId}`, kind: 'delivery', operation: 'first-child-publication',
+          phase: 'publishing', locusId: locus.id, deliveryId: next.deliveryId, endpointKey: endpointKeyOf(locus.endpoint),
+          resourceRefs: { parentSessionId: locus.parentSessionId, childSessionId: input.childSessionId },
+          step: 0, attempts: 0, createdAt: now, updatedAt: now,
+        })
+      })
+      this.liveFirstPublications.add(`first-child:${input.executionId}`)
+      return next
+    })
+  }
+
+  /** The official creation returned and first-inbox binding completed. */
+  async commitFirstDelivery(input: { readonly executionId: string; readonly now?: number }): Promise<void> {
+    return this.enqueue(async () => {
+      const operation = this.getOperation(`first-child:${input.executionId}`)
+      if (operation?.operation !== 'first-child-publication' || operation.phase !== 'publishing') {
+        throw new LocusError('REVISION_CONFLICT', 'First child publication is not pending commit')
+      }
+      const now = input.now ?? Date.now()
+      await this.requireProvisioningTransaction('commitFirstDelivery').call(this.domain, tx => {
+        tx.put('locus_operations', operation.id, { ...operation, phase: 'committed', updatedAt: now, completedAt: now })
+      })
+      this.liveFirstPublications.delete(operation.id)
+    })
+  }
+
+  /** Durable compensation after callback publication, even though staging is already committed. */
+  async revertFirstDelivery(input: {
+    readonly locusId: string
+    readonly generation: number
+    readonly childSessionId: string
+    readonly deliveryId: string
+    readonly executionId: string
+    /** Official image admission refused before submit; preserve the same current for text only. */
+    readonly retryText?: boolean
+    readonly recoveryDebt?: boolean
+    readonly now?: number
+  }): Promise<void> {
+    return this.enqueue(async () => {
+      const operation = this.getOperation(`first-child:${input.executionId}`)
+      if (input.recoveryDebt) {
+        this.liveFirstPublications.delete(`first-child:${input.executionId}`)
+        const locus = this.getLocus(input.locusId)
+        const current = this.getDelivery(input.deliveryId)
+        if (locus === undefined || current === undefined || locus.generation !== input.generation ||
+            current.locusId !== locus.id || current.generation !== locus.generation ||
+            current.childSessionId !== input.childSessionId || current.status !== 'current' ||
+            (operation === undefined && (current.executionId !== undefined || locus.reservedChildSessionId !== input.childSessionId))) {
+          throw new LocusError('REVISION_CONFLICT', 'First child recovery debt lost its exact identity')
+        }
+        const now = input.now ?? Date.now()
+        const debt = operation ?? {
+          id: `first-child:${input.executionId}`, kind: 'delivery' as const, operation: 'first-child-publication',
+          locusId: locus.id, deliveryId: current.deliveryId, endpointKey: endpointKeyOf(locus.endpoint),
+          resourceRefs: { parentSessionId: locus.parentSessionId, childSessionId: input.childSessionId },
+          step: 0, attempts: 0, createdAt: now,
+        }
+        await this.requireProvisioningTransaction('firstDeliveryRecoveryDebt').call(this.domain, tx => {
+          tx.put('locus_operations', debt.id, { ...debt, phase: 'needs-recovery', updatedAt: now, manualRecoveryReason: 'Image-rejected child release could not be proven' })
+        })
+        return
+      }
+      if (input.retryText) {
+        // The retry marker and compensation commit atomically; until then the
+        // ordinary publication WAL still blocks replay after a crash.
+        this.liveFirstPublications.delete(`first-child:${input.executionId}`)
+        await this.revertFirstDeliveryLocked({ ...input, executionId: operation === undefined ? undefined : input.executionId })
+        return
+      }
+      this.liveFirstPublications.delete(`first-child:${input.executionId}`)
+      if (operation !== undefined) {
+        await this.requireProvisioningTransaction('firstDeliveryCompensating').call(this.domain, tx => {
+          tx.put('locus_operations', operation.id, { ...operation, phase: 'compensating', updatedAt: input.now ?? Date.now() })
+        })
+      }
+      await this.revertFirstDeliveryLocked(input)
+    })
+  }
+
+  /** Creation can leave a persisted Session id even when agent/created vetoed it. */
+  async failFirstDeliveryCreation(input: {
+    readonly locusId: string; readonly generation: number; readonly childSessionId: string
+    readonly deliveryId: string; readonly now?: number
+  }): Promise<void> {
+    return this.enqueue(async () => {
+      const locus = this.getLocus(input.locusId)
+      const current = this.getDelivery(input.deliveryId)
+      if (locus?.state !== 'not-created' || locus.reservedChildSessionId !== input.childSessionId ||
+          current?.status !== 'current' || current.executionId !== undefined || current.inboxMessageId !== undefined) return
+      await this.revertFirstDeliveryLocked({ ...input, executionId: undefined })
+    })
+  }
+
+  private async revertFirstDeliveryLocked(input: {
+    readonly locusId: string; readonly generation: number; readonly childSessionId: string
+    readonly deliveryId: string; readonly executionId: string | undefined; readonly now?: number; readonly retryText?: boolean
+  }): Promise<void> {
+    const locus = this.getLocus(input.locusId)
+    const current = this.getDelivery(input.deliveryId)
+    const operation = this.getOperation(`first-child:${input.executionId}`)
+    if (locus === undefined || current === undefined || locus.generation !== input.generation ||
+        current.childSessionId !== input.childSessionId || current.locusId !== locus.id ||
+        current.executionId !== input.executionId) throw new LocusError('REVISION_CONFLICT', 'First child rollback lost its exact durable identity')
+    const now = input.now ?? Date.now()
+    if (input.retryText && (current.status !== 'current' || current.queueState !== 'current' ||
+        current.inboxMessageId !== undefined || current.turnId !== undefined || current.startedAt !== undefined ||
+        current.imageRouteRejected === true || locus.reservedChildSessionId !== input.childSessionId ||
+        latestLocusForEndpoint(this.collectLoci(), locus.endpoint)?.id !== locus.id ||
+        (current.deadlineAt !== undefined && now >= current.deadlineAt))) {
+      throw new LocusError('REVISION_CONFLICT', 'Text fallback requires the same unissued first current')
+    }
+    const reverted = withLocusCreatedChildReverted(locus, input.childSessionId, Math.max(now, locus.updatedAt))
+    const freshChildSessionId = `session-${randomUUID()}`
+    const idleOrBacklogged = withLocusBusy(reverted, input.retryText === true || this.hasPendingDelivery(locus.id, locus.generation, current.deliveryId), Math.max(now, reverted.updatedAt))
+    const nextLocus = Object.freeze({
+      ...idleOrBacklogged,
+      reservedChildSessionId: freshChildSessionId,
+      revision: Math.max((locus.revision ?? 0) + 1, idleOrBacklogged.revision ?? 0),
+      updatedAt: Math.max(now, idleOrBacklogged.updatedAt),
+    })
+    // Only not-yet-injected backlog follows the new reservation; the failed
+    // Delivery and every already-issued execution keep their original evidence.
+    const retargeted = this.listDeliveries(locus.id).filter(row => row.deliveryId !== current.deliveryId &&
+      row.generation === locus.generation && row.childSessionId === input.childSessionId && (row.status === 'accepted' || row.status === 'current') &&
+      row.executionId === undefined && row.inboxMessageId === undefined && row.turnId === undefined)
+      .map(row => Object.freeze({ ...row, childSessionId: freshChildSessionId }))
+    const { queueState: _queueState, executionId: _executionId, ...unissued } = current
+    const { queueState: _failedQueue, ...rest } = current
+    const next = input.retryText ? Object.freeze({
+      ...unissued, childSessionId: freshChildSessionId, imageRouteRejected: true as const,
+      queueState: 'current' as const,
+      revision: (current.revision ?? current.stateRevision ?? 0) + 1,
+      stateRevision: (current.revision ?? current.stateRevision ?? 0) + 1,
+    }) : ['current', 'queued', 'running'].includes(current.status) ? Object.freeze({
+      ...rest, status: 'failed' as const,
+      failedAt: now, failureReason: 'child-create-failed',
+      ...(current.startedAt === undefined ? { dispatchFailure: current.inboxMessageId === undefined ? 'not-queued' as const : 'queued-not-started' as const } : {}),
+      revision: (current.revision ?? current.stateRevision ?? 0) + 1,
+      stateRevision: (current.revision ?? current.stateRevision ?? 0) + 1,
+    }) : current
+    const loci = this.collectLoci()
+    const after = new Map(loci).set(locus.id, nextLocus)
+    assertLocusSet(after)
+    const changes = [...diffLocusTable(loci, after), ...diffIndexTable(this.collectIndexes(), this.deriveIndexes(after, this.collectDefaultPointers()))]
+    await this.requireProvisioningTransaction('revertFirstDelivery').call(this.domain, tx => {
+      for (const change of changes) {
+        if (change.value === undefined) tx.delete(change.table, change.key)
+        else tx.put(change.table, change.key, change.value)
+      }
+      tx.put('locus_deliveries', next.deliveryId, next)
+      for (const row of retargeted) tx.put('locus_deliveries', row.deliveryId, row)
+      if (operation !== undefined) tx.put('locus_operations', operation.id, { ...operation, phase: 'compensated', updatedAt: now, completedAt: now })
+    })
+  }
+
   /** Bind a queued child turn to its exact execution token. */
   async bindQueued(input: {
     readonly deliveryId: string
@@ -2290,16 +2669,12 @@ export class LocusRepository {
       assertCorrelation(input.correlation)
       const current = this.getDelivery(input.deliveryId)
       if (current === undefined || !deliveryCorrelates(current, input.correlation)) return undefined
-      if (
-        current.status === 'queued' &&
-        current.executionId === input.executionId &&
-        current.inboxMessageId === input.inboxMessageId
-      ) return current
+      if (current.executionId === input.executionId && current.inboxMessageId === input.inboxMessageId) return current
       if (input.queuedAt !== undefined && current.acceptedAt !== undefined && input.queuedAt < current.acceptedAt) {
         throw new LocusError('INVALID_LOCUS', 'queuedAt must not precede acceptedAt')
       }
       if (current.status !== 'accepted' && current.status !== 'current') return undefined
-       if (current.executionId !== undefined) return undefined
+      if (current.executionId !== undefined && (current.executionId !== input.executionId || current.inboxMessageId !== undefined)) return undefined
       const inboxMatches = this.listDeliveries().filter(record =>
         record.deliveryId !== current.deliveryId && record.inboxMessageId === input.inboxMessageId,
       )
@@ -2546,6 +2921,275 @@ export class LocusRepository {
     return oldest
   }
 
+  // -- locus mains (work session <-> locus main session) --------------------
+
+  /** One pairing by its locus main session id, whatever its status. */
+  getLocusMain(locusMainSessionId: string): PetLocusMainRecord | undefined {
+    return this.mains().get(locusMainSessionId) as PetLocusMainRecord | undefined
+  }
+
+  /** Every pairing ever made, oldest first, including retired history. */
+  listLocusMains(): readonly PetLocusMainRecord[] {
+    return [...this.mains().entries()]
+      .map(([, value]) => value as PetLocusMainRecord)
+      .sort((left, right) => {
+        const byCreated = left.createdAt - right.createdAt
+        return byCreated !== 0 ? byCreated : left.locusMainSessionId.localeCompare(right.locusMainSessionId)
+      })
+  }
+
+  /** The single active locus main of a work session, if any. */
+  getActiveLocusMainForWork(workSessionId: string): PetLocusMainRecord | undefined {
+    const active = this.listLocusMains().filter(
+      main => main.workSessionId === workSessionId && main.status === 'active',
+    )
+    if (active.length > 1) {
+      throw new LocusError(
+        'INVALID_LOCUS',
+        `Work session ${workSessionId} has ${String(active.length)} active locus mains`,
+      )
+    }
+    return active[0]
+  }
+
+  /**
+   * Whether a row belongs to the previous two-tier model.
+   *
+   * Read-time interpretation only: the row is never rewritten. A row is of the
+   * three-tier model exactly when its parent session is a recorded locus main;
+   * `childComposition` cannot decide it, because a not-created row has none.
+   */
+  isLegacyLocus(record: Pick<LocusRecord, 'parentSessionId'>): boolean {
+    return this.getLocusMain(record.parentSessionId) === undefined
+  }
+
+  /**
+   * Publish successor generations (and optionally a new locus main) in ONE
+   * transaction. See {@link DurableRegenerationCommit}.
+   */
+  async commitRegeneration(input: DurableRegenerationCommit): Promise<readonly LocusRecord[]> {
+    const transaction = this.requireProvisioningTransaction('commitRegeneration')
+    return this.enqueue(async () => {
+      assertIdentifier(input.provisioningId, 'provisioningId')
+      const operation = this.getRequiredProvisioningOperation(input.provisioningId)
+      if (operation.operation !== 'provisioning:regenerate') {
+        throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Provisioning ${input.provisioningId} is not a regeneration`)
+      }
+      if (input.entries.length === 0) {
+        throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'A regeneration needs at least one entry')
+      }
+      const successors = input.entries.map(entry => normalizeRecord(entry.locus))
+      const commitHash = stableHash({
+        entries: input.entries.map((entry, index) => ({
+          old: entry.oldLocusId,
+          reason: entry.reason,
+          previousModel: entry.previousModel === true,
+          locus: successors[index],
+        })),
+        ...(input.main !== undefined ? { main: input.main } : {}),
+        ...(input.retireMain !== undefined ? { retireMain: input.retireMain } : {}),
+      })
+      if (operation.phase === 'committed') {
+        if (operation.commitIntentHash !== commitHash) {
+          throw new LocusProvisioningError(
+            'PROVISIONING_CONFLICT',
+            `Provisioning ${input.provisioningId} was committed with another intent`,
+          )
+        }
+        return successors.map(record => this.getLocus(record.id) as LocusRecord)
+      }
+      if (operation.phase !== 'provisioning') {
+        throw new LocusProvisioningError(
+          'PROVISIONING_CONFLICT',
+          `Provisioning ${input.provisioningId} cannot commit from ${operation.phase}`,
+        )
+      }
+
+      const extra: TableChange[] = []
+      let target: PetLocusMainRecord | undefined = input.main
+      if (input.main !== undefined) {
+        const existingMain = this.getLocusMain(input.main.locusMainSessionId)
+        if (input.main.status !== 'active' || (existingMain !== undefined && !recordsEqual(existingMain, input.main))) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'New locus main must be a fresh active pairing')
+        }
+        if (operation.resourceRefs?.locusMainSessionId !== input.main.locusMainSessionId) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'New locusMainSessionId was not durably recorded')
+        }
+        const activeForWork = this.getActiveLocusMainForWork(input.main.workSessionId)
+        if (activeForWork !== undefined && activeForWork.locusMainSessionId !== input.retireMain?.locusMainSessionId) {
+          throw new LocusProvisioningError(
+            'PROVISIONING_CONFLICT',
+            `Work session ${input.main.workSessionId} already has active locus main ${activeForWork.locusMainSessionId}`,
+          )
+        }
+        extra.push({ table: 'locus_mains', key: input.main.locusMainSessionId, value: input.main })
+      }
+      if (input.retireMain !== undefined) {
+        const leaving = this.getLocusMain(input.retireMain.locusMainSessionId)
+        if (leaving === undefined || input.main === undefined || leaving.workSessionId !== input.main.workSessionId) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'A locus main can only be retired in favour of a new one for the same work session')
+        }
+        const at = Math.max(input.main.createdAt, leaving.updatedAt)
+        extra.push({
+          table: 'locus_mains',
+          key: leaving.locusMainSessionId,
+          value: {
+            ...leaving,
+            status: 'retired',
+            retiredAt: at,
+            retiredReason: input.retireMain.reason,
+            updatedAt: at,
+          },
+        })
+      }
+
+      const before = this.collectLoci()
+      const after = new Map(before)
+      const defaults = this.collectDefaultPointers()
+      for (const [index, entry] of input.entries.entries()) {
+        const next = successors[index] as LocusRecord
+        const old = before.get(entry.oldLocusId)
+        if (old === undefined || latestLocusForEndpoint(before, old.endpoint)?.id !== old.id) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Regeneration predecessor ${entry.oldLocusId} is not the latest endpoint generation`)
+        }
+        if (old.state === 'stopped' || old.state === 'retired') {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Regeneration predecessor ${old.id} was exited by its owner`)
+        }
+        if (old.busy || this.hasPendingDelivery(old.id, old.generation)) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Regeneration predecessor ${old.id} is busy`)
+        }
+        const parentMain = target ?? this.getLocusMain(next.parentSessionId)
+        if (target === undefined) target = parentMain
+        if (
+          parentMain === undefined ||
+          parentMain.status !== 'active' ||
+          parentMain.locusMainSessionId !== next.parentSessionId ||
+          parentMain.workspaceId !== next.workspaceId
+        ) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Successor must be published under the active locus main')
+        }
+        if (
+          next.state !== 'not-created' ||
+          next.generation !== old.generation + 1 ||
+          next.replacesLocusId !== old.id ||
+          (next.source !== old.source && entry.previousModel !== true) ||
+          endpointKeyOf(next.endpoint) !== endpointKeyOf(old.endpoint) ||
+          next.childSessionId !== undefined
+        ) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Successor does not match its predecessor')
+        }
+        assertNewTopicParent(after, next)
+        if (after.has(next.id)) {
+          throw new LocusProvisioningError('PROVISIONING_CONFLICT', `Locus ${next.id} already exists`)
+        }
+        assertIdentifier(entry.reason, 'reason')
+        after.set(
+          old.id,
+          entry.previousModel === true || old.state === 'invalid'
+            ? old
+            : transitionLocus(old, 'invalid', Math.max(next.createdAt, old.updatedAt), { busy: false, invalidReason: entry.reason }),
+        )
+        after.set(next.id, next)
+        for (const [parentId, locusId] of [...defaults]) {
+          if (locusId === old.id) {
+            defaults.delete(parentId)
+            if (next.source === 'qa-created' && next.parentLocusId === undefined) defaults.set(next.parentSessionId, next.id)
+          }
+        }
+      }
+      assertLocusSet(after)
+      const at = Math.max(Date.now(), operation.updatedAt, ...successors.map(record => record.createdAt))
+      const committed: PetLocusOperation = {
+        ...operation,
+        phase: 'committed',
+        locusId: (successors[0] as LocusRecord).id,
+        newLocusId: (successors[0] as LocusRecord).id,
+        commitIntentHash: commitHash,
+        step: operation.step + 1,
+        attempts: operation.attempts + 1,
+        completedAt: at,
+        updatedAt: at,
+      }
+      const changes: TableChange[] = [
+        ...diffLocusTable(before, after),
+        ...diffIndexTable(this.collectIndexes(), this.deriveIndexes(after, defaults, at)),
+        ...extra,
+      ].filter(change => this.changesState(change))
+      await transaction.call(this.domain, tx => {
+        for (const change of changes) {
+          if (change.value === undefined) tx.delete(change.table, change.key)
+          else tx.put(change.table, change.key, change.value)
+        }
+        tx.put('locus_operations', input.provisioningId, committed)
+      })
+      return successors
+    })
+  }
+
+  /**
+   * Record the lazily created child on a `not-created` generation: the point at
+   * which the entry becomes `active` with the `tier3` marker.
+   *
+   * Called from inside the creation callback, BEFORE the first turn is claimed,
+   * so it must be idempotent for the same child and must keep the busy fence
+   * the triggering Delivery already holds.
+   */
+  async publishCreatedChild(input: {
+    readonly locusId: string
+    readonly generation: number
+    readonly childSessionId: string
+    readonly now?: number
+  }): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      const before = this.collectLoci()
+      const current = before.get(input.locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${input.locusId} does not exist`)
+      if (current.generation !== input.generation) {
+        throw new LocusError('REVISION_CONFLICT', `Locus ${input.locusId} generation is ${String(current.generation)}, not ${String(input.generation)}`)
+      }
+      if (latestLocusForEndpoint(before, current.endpoint)?.id !== current.id) {
+        throw new LocusError('REVISION_CONFLICT', `Locus ${input.locusId} is no longer the endpoint's latest generation`)
+      }
+      const next = withLocusCreatedChild(current, input.childSessionId, Math.max(input.now ?? Date.now(), current.updatedAt))
+      if (next === current) return current
+      const after = new Map(before).set(next.id, next)
+      assertLocusSet(after)
+      await this.persistLocusSet('locus-transition', before, after, {
+        locusId: next.id,
+        endpointKey: endpointKeyOf(next.endpoint),
+        expectedRevision: current.revision ?? current.updatedAt,
+      })
+      return next
+    })
+  }
+
+  /** Undo {@link publishCreatedChild} for exactly that child (creation was refused). */
+  async revertCreatedChild(input: {
+    readonly locusId: string
+    readonly generation: number
+    readonly childSessionId: string
+    readonly now?: number
+  }): Promise<LocusRecord> {
+    return this.enqueue(async () => {
+      const before = this.collectLoci()
+      const current = before.get(input.locusId)
+      if (current === undefined) throw new LocusError('LOCUS_NOT_FOUND', `Locus ${input.locusId} does not exist`)
+      if (current.generation !== input.generation) {
+        throw new LocusError('REVISION_CONFLICT', `Locus ${input.locusId} generation is ${String(current.generation)}, not ${String(input.generation)}`)
+      }
+      const next = withLocusCreatedChildReverted(current, input.childSessionId, Math.max(input.now ?? Date.now(), current.updatedAt))
+      if (next === current) return current
+      const after = new Map(before).set(next.id, next)
+      assertLocusSet(after)
+      await this.persistLocusSet('locus-transition', before, after, {
+        locusId: next.id,
+        endpointKey: endpointKeyOf(next.endpoint),
+        expectedRevision: current.revision ?? current.updatedAt,
+      })
+      return next
+    })
+  }
+
   // -- operation records ----------------------------------------------------
 
   getOperation(operationId: string): LocusOperation | undefined {
@@ -2568,6 +3212,13 @@ export class LocusRepository {
       operation.phase === 'failed' ||
       operation.phase === 'needs-recovery',
     )
+  }
+
+  /** Failed first-creation compensation must not be treated as a serving child. */
+  hasFirstDeliveryRecoveryDebt(locusId: string): boolean {
+    return this.listOperations().some(operation => operation.operation === 'first-child-publication' &&
+      operation.locusId === locusId && (operation.phase === 'compensating' || operation.phase === 'needs-recovery' ||
+        operation.phase === 'publishing' && !this.liveFirstPublications.has(operation.id)))
   }
 
   /** Explicit endpoint creation debts exposed to controllers and diagnostics. */
@@ -2627,6 +3278,27 @@ export class LocusRepository {
       const manualDeliveries: DeliveryRecord[] = []
       const compensatedOperations: LocusOperation[] = []
       const manualOperations: LocusOperation[] = []
+      // Creation can die after callback publication but before the API return.
+      // Its WAL is not an ordinary provisioning intent: undo the exact first
+      // execution before rebuilding Delivery dispatch, never replay that prompt.
+      const blockedFirstLoci = new Set<string>()
+      for (const operation of this.listRecoverableOperations().filter(item => item.operation === 'first-child-publication')) {
+        this.liveFirstPublications.delete(operation.id)
+        const current = operation.deliveryId === undefined ? undefined : this.getDelivery(operation.deliveryId)
+        try {
+          if (current === undefined || operation.locusId !== current.locusId || current.executionId === undefined ||
+              operation.resourceRefs?.childSessionId !== current.childSessionId) throw new Error('First child recovery identity is incomplete')
+          if (options.compensators?.childSession === undefined || operation.resourceRefs.parentSessionId === undefined) throw new Error('First child termination capability unavailable')
+          await options.compensators.childSession({ parentSessionId: operation.resourceRefs.parentSessionId, childSessionId: current.childSessionId, operationId: operation.id })
+          await this.revertFirstDeliveryLocked({ ...current, executionId: current.executionId, now })
+          compensatedOperations.push(this.getOperation(operation.id)!)
+        } catch (error) {
+          const debt = { ...operation, phase: 'needs-recovery' as const, attempts: operation.attempts + 1, updatedAt: now, manualRecoveryReason: error instanceof Error ? error.message : String(error) }
+          await requireTransaction().call(this.domain, tx => { tx.put('locus_operations', debt.id, debt) })
+          manualOperations.push(debt)
+          if (operation.locusId !== undefined) blockedFirstLoci.add(operation.locusId)
+        }
+      }
       const initialLoci = this.collectLoci()
       assertLocusSet(initialLoci)
       const initialIndexes = this.collectIndexes()
@@ -2716,6 +3388,10 @@ export class LocusRepository {
       for (const snapshot of this.listPendingDeliveries()) {
         const current = this.getDelivery(snapshot.deliveryId)
         if (current === undefined || !PENDING_DELIVERY_STATUSES.has(current.status)) continue
+        if (blockedFirstLoci.has(current.locusId)) {
+          manualDeliveries.push(current)
+          continue
+        }
 
         // A process may have died after the outbound request was issued. Never
         // inspect proof or send again: finishing is an at-most-once unknown
@@ -2740,10 +3416,12 @@ export class LocusRepository {
         }
 
         const locus = this.getLocus(current.locusId)
+        const unissued = current.executionId === undefined && current.inboxMessageId === undefined && current.turnId === undefined &&
+          (current.status === 'accepted' || current.status === 'current')
         const identityProven = locus !== undefined &&
-          locus.state === 'active' &&
+          (locus.state === 'active' && locus.childSessionId === current.childSessionId ||
+            locus.state === 'not-created' && unissued && locus.reservedChildSessionId === current.childSessionId) &&
           locus.generation === current.generation &&
-          locus.childSessionId === current.childSessionId &&
           endpointKeyOf(locus.endpoint) === endpointKeyOf(current.endpoint)
         if (!identityProven) {
           const debt = Object.freeze({
@@ -2776,6 +3454,10 @@ export class LocusRepository {
         // not need an open turn proof to survive restart; the Host will rebuild
         // its deadline timer and the observer/runtime may prove the next turn.
         if (current.status === 'current') {
+          if (locus?.state === 'not-created' && unissued) {
+            replayableDeliveries.push(current)
+            continue
+          }
           // ...unless the child's own log proves that fence was never crossed.
           // A dispatch that died before hand-off leaves a `current` row that no
           // turn will ever claim, so arming its deadline only schedules an
@@ -2931,6 +3613,7 @@ export class LocusRepository {
         await transaction.call(this.domain, tx => { tx.put('locus_operations', operation.id, operation) })
       }
       for (const snapshot of this.listRecoverableOperations()) {
+        if (snapshot.operation === 'first-child-publication') continue
         let operation = this.getOperation(snapshot.id)
         if (operation === undefined || operation.provisioningIntentHash === undefined) {
           if (operation !== undefined) manualOperations.push(operation)
@@ -2948,77 +3631,15 @@ export class LocusRepository {
             continue
           }
         }
-        const refs = operation.resourceRefs ?? {}
-        const required: Array<'chat' | 'child-session' | 'main-session'> = []
-        // Only Q&A provisioning owns a created chat. Group/topic endpoint chats
-        // pre-exist and must never be deleted as compensation.
-        if (operation.operation === 'provisioning:qa' && refs.chatId !== undefined) required.push('chat')
-        if (refs.childSessionId !== undefined) required.push('child-session')
-        if (refs.mainSessionId !== undefined) required.push('main-session')
-        const completed = new Set(operation.compensatedResources ?? [])
-        operation = {
-          ...operation,
-          phase: 'compensating',
-          attempts: operation.attempts + 1,
-          manualRecoveryReason: undefined,
-          updatedAt: Math.max(now, operation.updatedAt),
-        }
-        await saveOperation(operation)
-        let manualReason: string | undefined
-        for (const resource of required) {
-          if (completed.has(resource)) continue
-          try {
-            if (resource === 'chat') {
-              if (options.compensators?.chat === undefined || refs.chatId === undefined) throw new Error('chat compensator unavailable')
-              await options.compensators.chat({ chatId: refs.chatId, operationId: operation.id })
-            } else if (resource === 'child-session') {
-              const parentSessionId = refs.parentSessionId ?? refs.mainSessionId
-              if (options.compensators?.childSession === undefined || refs.childSessionId === undefined || parentSessionId === undefined) {
-                throw new Error('child-session ownership or compensator unavailable')
-              }
-              await options.compensators.childSession({
-                parentSessionId,
-                childSessionId: refs.childSessionId,
-                operationId: operation.id,
-              })
-            } else {
-              if (options.compensators?.mainSession === undefined || refs.mainSessionId === undefined) throw new Error('main-session compensator unavailable')
-              await options.compensators.mainSession({ mainSessionId: refs.mainSessionId, operationId: operation.id })
-            }
-            completed.add(resource)
-            operation = {
-              ...operation,
-              compensatedResources: [...completed],
-              step: operation.step + 1,
-              updatedAt: Math.max(now, operation.updatedAt),
-            }
-            await saveOperation(operation)
-          } catch (error) {
-            manualReason = error instanceof Error ? error.message : String(error)
-            break
-          }
-        }
-        if (manualReason === undefined) {
-          operation = {
-            ...operation,
-            phase: 'compensated',
-            compensatedResources: [...completed],
-            completedAt: Math.max(now, operation.updatedAt),
-            updatedAt: Math.max(now, operation.updatedAt),
-          }
-          await saveOperation(operation)
-          compensatedOperations.push(operation)
-        } else {
-          operation = {
-            ...operation,
-            phase: 'needs-recovery',
-            manualRecoveryReason: manualReason.slice(0, 500),
-            lastError: manualReason.slice(0, 500),
-            updatedAt: Math.max(now, operation.updatedAt),
-          }
-          await saveOperation(operation)
-          manualOperations.push(operation)
-        }
+        const outcome = await this.compensateOperation(
+          operation,
+          options.compensators,
+          now,
+          saveOperation,
+          'needs-recovery',
+        )
+        if (outcome.manualReason === undefined) compensatedOperations.push(outcome.operation)
+        else manualOperations.push(outcome.operation)
       }
 
       const beforeLoci = this.collectLoci()
@@ -3066,6 +3687,10 @@ export class LocusRepository {
 
   private loci(): LocusTable {
     return this.domain.table('loci')
+  }
+
+  private mains(): MainTable {
+    return this.domain.table('locus_mains')
   }
 
   private indexes(): IndexTable {
@@ -3344,6 +3969,7 @@ export class LocusRepository {
 
   private tableFor(table: TableName): KvTable<string, unknown> {
     if (table === 'loci') return this.loci() as unknown as KvTable<string, unknown>
+    if (table === 'locus_mains') return this.mains() as unknown as KvTable<string, unknown>
     if (table === 'locus_indexes') return this.indexes() as unknown as KvTable<string, unknown>
     if (table === 'locus_switch_notices') {
       return this.domain.table('locus_switch_notices') as unknown as KvTable<string, unknown>
@@ -3413,6 +4039,139 @@ export class LocusRepository {
   }
 
   /**
+   * Release the external resources an unpublished provisioning operation
+   * created, from its durable `resourceRefs` only.
+   *
+   * Shared by startup reconciliation and the runtime retry of a stale failed
+   * operation (B040): the same compensators, the same ownership proof, so the
+   * two paths cannot drift. They differ only in where a failed attempt lands —
+   * startup records `needs-recovery` debt, the runtime retry puts the operation
+   * back to `failed` with its original timestamp so the very next request tries
+   * again instead of waiting another window.
+   */
+  private async compensateOperation(
+    start: PetLocusOperation,
+    compensators: LocusStartupCompensators | undefined,
+    now: number,
+    save: (operation: PetLocusOperation) => Promise<void>,
+    failurePhase: 'needs-recovery' | 'failed',
+  ): Promise<{ readonly operation: PetLocusOperation; readonly manualReason?: string }> {
+    let operation = start
+    const refs = operation.resourceRefs ?? {}
+    const required: Array<'chat' | 'child-session' | 'locus-main-session' | 'main-session'> = []
+    // Only Q&A provisioning owns a created chat. Group/topic endpoint chats
+    // pre-exist and must never be deleted as compensation.
+    if (operation.operation === 'provisioning:qa' && refs.chatId !== undefined) required.push('chat')
+    if (refs.childSessionId !== undefined) required.push('child-session')
+    // The locus main is released before the work session it was created for.
+    if (refs.locusMainSessionId !== undefined) required.push('locus-main-session')
+    if (refs.mainSessionId !== undefined) required.push('main-session')
+    const completed = new Set(operation.compensatedResources ?? [])
+    operation = {
+      ...operation,
+      phase: 'compensating',
+      attempts: operation.attempts + 1,
+      manualRecoveryReason: undefined,
+      updatedAt: Math.max(now, operation.updatedAt),
+    }
+    await save(operation)
+    let manualReason: string | undefined
+    for (const resource of required) {
+      if (completed.has(resource)) continue
+      try {
+        if (resource === 'chat') {
+          if (compensators?.chat === undefined || refs.chatId === undefined) throw new Error('chat compensator unavailable')
+          await compensators.chat({ chatId: refs.chatId, operationId: operation.id })
+        } else if (resource === 'child-session') {
+          const parentSessionId = refs.parentSessionId ?? refs.mainSessionId
+          if (compensators?.childSession === undefined || refs.childSessionId === undefined || parentSessionId === undefined) {
+            throw new Error('child-session ownership or compensator unavailable')
+          }
+          await compensators.childSession({
+            parentSessionId,
+            childSessionId: refs.childSessionId,
+            operationId: operation.id,
+          })
+        } else if (resource === 'locus-main-session') {
+          if (compensators?.locusMainSession === undefined || refs.locusMainSessionId === undefined) {
+            throw new Error('locus-main-session compensator unavailable')
+          }
+          await compensators.locusMainSession({ locusMainSessionId: refs.locusMainSessionId, operationId: operation.id })
+        } else {
+          if (compensators?.mainSession === undefined || refs.mainSessionId === undefined) throw new Error('main-session compensator unavailable')
+          await compensators.mainSession({ mainSessionId: refs.mainSessionId, operationId: operation.id })
+        }
+        completed.add(resource)
+        operation = {
+          ...operation,
+          compensatedResources: [...completed],
+          step: operation.step + 1,
+          updatedAt: Math.max(now, operation.updatedAt),
+        }
+        await save(operation)
+      } catch (error) {
+        manualReason = error instanceof Error ? error.message : String(error)
+        break
+      }
+    }
+    if (manualReason === undefined) {
+      operation = {
+        ...operation,
+        phase: 'compensated',
+        compensatedResources: [...completed],
+        completedAt: Math.max(now, operation.updatedAt),
+        updatedAt: Math.max(now, operation.updatedAt),
+      }
+    } else if (failurePhase === 'failed') {
+      operation = {
+        ...operation,
+        phase: 'failed',
+        compensatedResources: [...completed],
+        lastError: manualReason.slice(0, 500),
+        // Deliberately the ORIGINAL failure time: the operation is still as old
+        // as it was, so the next request retries the compensation at once.
+        updatedAt: start.updatedAt,
+      }
+    } else {
+      operation = {
+        ...operation,
+        phase: 'needs-recovery',
+        manualRecoveryReason: manualReason.slice(0, 500),
+        lastError: manualReason.slice(0, 500),
+        updatedAt: Math.max(now, operation.updatedAt),
+      }
+    }
+    await save(operation)
+    return manualReason === undefined ? { operation } : { operation, manualReason }
+  }
+
+  /**
+   * Runtime counterpart of startup compensation for a failed provisioning that
+   * has outlived {@link LocusRepository.FAILED_PROVISIONING_BLOCK_MS} (B040).
+   *
+   * @returns true when the operation no longer blocks its endpoint.
+   */
+  private async clearStaleFailedProvisioning(operation: PetLocusOperation, now: number): Promise<boolean> {
+    if (operation.phase !== 'failed') return false
+    if (now - operation.updatedAt < LocusRepository.FAILED_PROVISIONING_BLOCK_MS) return false
+    const transaction = this.requireProvisioningTransaction('clearStaleFailedProvisioning')
+    const outcome = await this.compensateOperation(
+      operation,
+      this.provisioningCompensators,
+      now,
+      async next => { await transaction.call(this.domain, tx => { tx.put('locus_operations', next.id, next) }) },
+      'failed',
+    )
+    if (outcome.manualReason !== undefined) {
+      this.diagnose(
+        `provisioning ${operation.id} compensation failed and keeps blocking its endpoint: ${outcome.manualReason}`,
+      )
+      return false
+    }
+    return true
+  }
+
+  /**
    * Whether a compensation failure may resolve on a later attempt.
    *
    * `needs-recovery` must not mean "unreachable forever". When the cause is a
@@ -3443,6 +4202,13 @@ export class LocusRepository {
    * debt after {@link MANUAL_DEBT_RETRY_BUDGET} failures.
    */
   private static readonly MANUAL_DEBT_RETRY_BUDGET = 5
+
+  /**
+   * How long a FAILED provisioning keeps blocking its endpoint (B040). Past it,
+   * the next request compensates the operation's resources first and, only if
+   * that succeeds, proceeds as if the endpoint had no stored creation debt.
+   */
+  static readonly FAILED_PROVISIONING_BLOCK_MS = 10 * 60 * 1000
 
   private findBlockingProvisioningOperation(
     endpointKey: string,
@@ -3501,6 +4267,7 @@ function provisioningOperationKind(
 ): PetLocusOperation['kind'] {
   if (kind === 'qa') return 'ensure-default-qa'
   if (kind === 'replacement') return 'replace'
+  if (kind === 'regenerate') return 'rebuild'
   return 'ensure'
 }
 
@@ -3508,7 +4275,7 @@ function assertProvisioningBegin(input: DurableProvisioningBegin): void {
   assertIdentifier(input.provisioningId, 'provisioningId')
   normalizeLocusEndpoint(input.endpoint)
   if (input.parentSessionId !== undefined) assertIdentifier(input.parentSessionId, 'parentSessionId')
-  if (input.kind !== 'group' && input.parentSessionId === undefined) {
+  if (input.kind !== 'group' && input.kind !== 'regenerate' && input.parentSessionId === undefined) {
     throw new LocusProvisioningError(
       'PROVISIONING_CONFLICT',
       `${input.kind} provisioning requires parentSessionId`,
@@ -3520,12 +4287,14 @@ function assertProvisioningBegin(input: DurableProvisioningBegin): void {
 function assertProvisioningResources(resource: DurableProvisioningResources): void {
   if (
     resource.mainSessionId === undefined &&
+    resource.locusMainSessionId === undefined &&
     resource.childSessionId === undefined &&
     resource.chatId === undefined
   ) {
     throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Provisioning resource update is empty')
   }
   if (resource.mainSessionId !== undefined) assertIdentifier(resource.mainSessionId, 'mainSessionId')
+  if (resource.locusMainSessionId !== undefined) assertIdentifier(resource.locusMainSessionId, 'locusMainSessionId')
   if (resource.childSessionId !== undefined) assertIdentifier(resource.childSessionId, 'childSessionId')
   if (resource.chatId !== undefined) assertIdentifier(resource.chatId, 'chatId')
 }
@@ -3537,7 +4306,7 @@ function mergeProvisioningResources(
   const next: NonNullable<PetLocusOperation['resourceRefs']> = {
     ...(current ?? {}),
   }
-  for (const field of ['mainSessionId', 'childSessionId', 'chatId'] as const) {
+  for (const field of ['mainSessionId', 'locusMainSessionId', 'childSessionId', 'chatId'] as const) {
     const value = update[field]
     if (value === undefined) continue
     const previous = next[field]
@@ -3556,6 +4325,7 @@ function assertProvisioningCommitMatchesBegin(
   operation: PetLocusOperation,
   input: DurableProvisioningCommit,
   record: LocusRecord,
+  workSessionId?: string,
 ): void {
   const expectedEndpoint = operation.endpointKey
   const actualEndpoint = endpointKeyOf(record.endpoint)
@@ -3573,7 +4343,7 @@ function assertProvisioningCommitMatchesBegin(
     }
   }
   const begunParent = operation.resourceRefs?.parentSessionId
-  if (begunParent !== undefined && begunParent !== record.parentSessionId) {
+  if (begunParent !== undefined && begunParent !== record.parentSessionId && begunParent !== workSessionId) {
     throw new LocusProvisioningError(
       'PROVISIONING_CONFLICT',
       `Provisioning ${input.provisioningId} parent changed`,
@@ -3674,6 +4444,7 @@ function assertProvisioningCommitForm(
 function assertGroupProjection(
   group: DurableProvisioningCommit['group'],
   record: LocusRecord,
+  workSessionId: string = record.parentSessionId,
 ): void {
   if (group === undefined) {
     if (record.endpoint.threadId === undefined) {
@@ -3688,7 +4459,7 @@ function assertGroupProjection(
     record.endpoint.threadId !== undefined ||
     group.chatId !== record.endpoint.chatId ||
     group.workspaceId !== record.workspaceId ||
-    group.mainSessionId !== record.parentSessionId ||
+    group.mainSessionId !== workSessionId ||
     group.mainSource !== record.source ||
     group.state !== record.state ||
     group.createdAt !== record.createdAt ||
@@ -3714,7 +4485,7 @@ function assertNewTopicParent(
     parent === undefined ||
     parent.endpoint.threadId !== undefined ||
     parent.endpoint.chatId !== record.endpoint.chatId ||
-    parent.state !== 'active' ||
+    (parent.state !== 'active' && parent.state !== 'not-created') ||
     latestLocusForEndpoint(loci, parent.endpoint)?.id !== parent.id
   ) {
     throw new LocusProvisioningError(
@@ -3728,24 +4499,40 @@ function assertProvisioningResourcesMatch(
   operation: PetLocusOperation,
   record: LocusRecord,
   group: DurableProvisioningCommit['group'],
+  workSessionId: string = record.parentSessionId,
+  newMainSessionId?: string,
 ): void {
   const refs = operation.resourceRefs
-  if (refs?.childSessionId !== undefined && refs.childSessionId !== record.childSessionId) {
-    throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Recorded childSessionId does not match commit')
+  if (record.state === 'not-created') {
+    // Lazy child: nothing external exists for the child yet, so a recorded
+    // child would be a resource this commit does not publish.
+    if (refs?.childSessionId !== undefined) {
+      throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'A not-created locus cannot have a recorded child')
+    }
+  } else {
+    if (refs?.childSessionId !== undefined && refs.childSessionId !== record.childSessionId) {
+      throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Recorded childSessionId does not match commit')
+    }
+    if (record.childSessionId === undefined || refs?.childSessionId !== record.childSessionId) {
+      throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Committed childSessionId was not durably recorded')
+    }
   }
-  if (record.childSessionId === undefined || refs?.childSessionId !== record.childSessionId) {
-    throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Committed childSessionId was not durably recorded')
-  }
-  if (refs.mainSessionId !== undefined && refs.mainSessionId !== record.parentSessionId) {
+  if (refs?.mainSessionId !== undefined && refs.mainSessionId !== workSessionId) {
     throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Recorded mainSessionId does not match commit')
   }
-  if (group?.mainSource === 'auto' && refs.mainSessionId !== record.parentSessionId) {
+  if (refs?.locusMainSessionId !== undefined && refs.locusMainSessionId !== record.parentSessionId) {
+    throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Recorded locusMainSessionId does not match commit')
+  }
+  if (group?.mainSource === 'auto' && refs?.mainSessionId !== workSessionId) {
     throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Automatic mainSessionId was not durably recorded')
   }
-  if (operation.operation === 'provisioning:group' && refs.mainSessionId !== undefined && group === undefined) {
+  if (newMainSessionId !== undefined && refs?.locusMainSessionId !== newMainSessionId) {
+    throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'New locusMainSessionId was not durably recorded')
+  }
+  if (operation.operation === 'provisioning:group' && refs?.mainSessionId !== undefined && group === undefined) {
     throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Recorded main requires a chat-level group commit')
   }
-  if (operation.operation === 'provisioning:qa' && refs.chatId !== record.endpoint.chatId) {
+  if (operation.operation === 'provisioning:qa' && refs?.chatId !== record.endpoint.chatId) {
     throw new LocusProvisioningError('PROVISIONING_CONFLICT', 'Created Q&A chatId was not durably recorded')
   }
 }
@@ -3788,6 +4575,7 @@ function provisioningCommitHash(
   return stableHash({
     locus: normalized,
     ...(input.group !== undefined ? { group: input.group } : {}),
+    ...(input.main !== undefined ? { main: input.main } : {}),
     ...(input.defaultQaForParentSessionId !== undefined
       ? { defaultQaForParentSessionId: input.defaultQaForParentSessionId }
       : {}),
@@ -3834,7 +4622,7 @@ function normalizeRecord(record: LocusRecord): LocusRecord {
   if (record.retiredAt !== undefined && (record.retiredAt < record.createdAt || record.retiredAt > record.updatedAt)) {
     throw new LocusError('INVALID_LOCUS', 'retiredAt must be within locus lifetime')
   }
-  if (record.permission.effective === 'write' && record.permission.desired !== 'write') {
+  if (record.permission.effective === 'write' && record.permission.desired !== 'write' && record.childComposition !== 'tier3') {
     throw new LocusError('INVALID_PERMISSION', 'Effective write requires desired write permission')
   }
   if (record.permission.effective === 'write' && record.permission.verifiedAt === undefined) {
@@ -3873,6 +4661,19 @@ function assertLocusSet(loci: ReadonlyMap<string, StoredLocus>): void {
   const endpointGenerations = new Map<string, number[]>()
   const childOwners = new Map<string, string>()
   const parentWorkspaces = new Map<string, string>()
+  // A tier3 successor retires previous-model history by reference, never by rewriting its row.
+  const supersededLegacy = new Set<string>()
+  for (const successor of loci.values()) {
+    if (successor.replacesLocusId === undefined) continue
+    const old = loci.get(successor.replacesLocusId)
+    if (old !== undefined && old.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION &&
+        (successor.state === 'not-created' || successor.childComposition === LOCUS_SAFE_CHILD_COMPOSITION) &&
+        successor.generation === old.generation + 1 &&
+        successor.parentSessionId !== old.parentSessionId &&
+        endpointKeyOf(successor.endpoint) === endpointKeyOf(old.endpoint)) {
+      supersededLegacy.add(old.id)
+    }
+  }
 
   for (const record of loci.values()) {
     normalizeRecord(record)
@@ -3907,7 +4708,7 @@ function assertLocusSet(loci: ReadonlyMap<string, StoredLocus>): void {
       childOwners.set(record.childSessionId, record.id)
     }
 
-    if (isCurrentLocusState(record.state)) {
+    if (isCurrentLocusState(record.state) && !supersededLegacy.has(record.id)) {
       const endpoint = endpointKeyOf(record.endpoint)
       const endpointOwner = endpointOwners.get(endpoint)
       if (endpointOwner !== undefined && endpointOwner !== record.id) {

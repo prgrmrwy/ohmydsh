@@ -10,6 +10,9 @@ import {
   type LocusGroupRecord,
   type LocusRecord,
   type LocusRepository,
+  type LocusMainRecord,
+  type LocusProvisioningCommit,
+  type LocusRegenerationCommit,
   type ProvisionedSession,
 } from '../src/host/locus/controller.js'
 import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
@@ -31,6 +34,18 @@ function parent(
 }
 
 class MemoryLocusRepository implements LocusRepository {
+  readonly mains = new Map<string, LocusMainRecord>()
+  async findMain(id: string) { return this.mains.get(id) }
+  async findActiveMain(work: string) { return [...this.mains.values()].find(m => m.workSessionId === work && m.status === 'active') }
+  async listEntriesOfMain(id: string) { return [...this.loci.values()].filter(l => l.parentSessionId === id) }
+  async commitRegeneration(input: LocusRegenerationCommit) {
+    if (input.main) this.mains.set(input.main.locusMainSessionId, input.main)
+    if (input.retireMain) { const old = this.mains.get(input.retireMain.locusMainSessionId)!; this.mains.set(old.locusMainSessionId, { ...old, status: 'retired' }) }
+    for (const entry of input.entries) {
+      if (!entry.previousModel) { const old = this.loci.get(entry.oldLocusId)!; this.loci.set(old.locusId, { ...old, state: 'invalid' }) }
+      this.loci.set(entry.locus.locusId, entry.locus)
+    }
+  }
   readonly groups = new Map<string, LocusGroupRecord>()
   readonly loci = new Map<string, LocusRecord>()
   readonly defaults = new Map<string, string>()
@@ -53,7 +68,8 @@ class MemoryLocusRepository implements LocusRepository {
   }
 
   async findDefaultQa(parentSessionId: string): Promise<LocusRecord | undefined> {
-    const locusId = this.defaults.get(parentSessionId)
+    const main = await this.findActiveMain(parentSessionId)
+    const locusId = this.defaults.get(main?.locusMainSessionId ?? parentSessionId)
     return locusId === undefined ? undefined : this.loci.get(locusId)
   }
 
@@ -86,14 +102,8 @@ class MemoryLocusRepository implements LocusRepository {
     this.notices.delete(`${locusId}\u0000${String(generation)}`)
   }
 
-  async commitProvisioning(input: {
-    provisioningId: string
-    group?: LocusGroupRecord
-    locus: LocusRecord
-    defaultQaForParentSessionId?: string
-    replace?: { oldLocusId: string; noticeText: string }
-    rebuild?: { oldLocusId: string; predecessorDisposition?: 'archived-parent' }
-  }): Promise<void> {
+  async commitProvisioning(input: LocusProvisioningCommit): Promise<void> {
+    if (input.main) this.mains.set(input.main.locusMainSessionId, input.main)
     this.committed.push(input.provisioningId)
     if (input.rebuild !== undefined) {
       // Mirrors the durable guard, because a fixture that does not enforce it
@@ -199,18 +209,19 @@ function fakeHost(options: {
           },
         }
       },
-      createChildSession: async input => {
+      createLocusMainSession: async input => {
         const session = {
-          id: `child-${++sequence}`,
-          parentSessionId: input.parentSessionId,
-          workspaceId: sessions.get(input.parentSessionId)?.workspaceId ?? 'ws-default',
-          childComposition: 'safe-v2' as const,
+          id: `locus-main-${++sequence}`,
+          agentPreset: LOCUS_MAIN_PRESET,
+          workspaceId: input.workspaceId,
+          title: input.label,
+
           commit: async () => {
             if (failChildCommit) throw new Error('child finalize failed')
           },
         }
-        createdChildren.push({ parentSessionId: input.parentSessionId, endpoint: input.endpoint })
-        return session
+        sessions.set(session.id, session)
+        return { ...session, rollback: async () => { released.push(session.id); sessions.delete(session.id) } }
       },
       // Production provides this, and it only DETACHES: the session leaves its
       // workspace and reappears in the ungrouped bucket, which is exactly the
@@ -234,6 +245,7 @@ function fakeHost(options: {
         released.push(`chat:${id}`)
       },
     },
+    establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
     id: () => `id-${++sequence}`,
     now: () => 100,
   }
@@ -271,6 +283,10 @@ function fakeHost(options: {
       failNotification = value
     },
   }
+}
+
+function mainOf(host: FakeHost, work: string): string {
+  return [...host.repository.mains.values()].find(m => m.workSessionId === work && m.status === 'active')!.locusMainSessionId
 }
 
 function controller(host: FakeHost): LocusController {
@@ -311,12 +327,10 @@ describe('unified locus hierarchy', () => {
 
     expect(result.groupCreated).toBe(true)
     expect(result.group.mainSource).toBe('auto')
-    expect(result.locus.parentSessionId).toBe('source-1')
+    expect(result.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
     expect(result.locus.source).toBe('explicit')
-    expect(host.createdChildren.map(item => item.parentSessionId)).toEqual([
-      result.group.mainSessionId,
-      'source-1',
-    ])
+    expect(host.createdChildren).toEqual([])
+    expect(result.locus.workSessionId).toBe('source-1')
   })
 
   it('spec Scenario "同群话题关联不同主会话": two topics of one chat bound to different mains stay independent', async () => {
@@ -325,9 +339,9 @@ describe('unified locus hierarchy', () => {
     const a = await ctl.ensureTopic({ chatId: 'oc-project', threadId: 'omt-a', parentSessionId: 'source-1' })
     const b = await ctl.ensureTopic({ chatId: 'oc-project', threadId: 'omt-b', parentSessionId: 'source-2' })
 
-    expect(a.locus.parentSessionId).toBe('source-1')
-    expect(b.locus.parentSessionId).toBe('source-2')
-    expect(a.locus.childSessionId).not.toBe(b.locus.childSessionId)
+    expect(a.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
+    expect(b.locus.parentSessionId).toBe(mainOf(host, 'source-2'))
+    expect(a.locus.reservedChildSessionId).not.toBe(b.locus.reservedChildSessionId)
     expect(a.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-a' })
     expect(b.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-b' })
   })
@@ -342,7 +356,7 @@ describe('unified locus hierarchy', () => {
 
     expect(left.group.mainSessionId).toBe(right.group.mainSessionId)
     expect(host.createdMains).toHaveLength(1)
-    expect(host.createdChildren).toHaveLength(3)
+    expect(host.createdChildren).toHaveLength(0)
   })
 
   it('rejects a child session as an explicit parent', async () => {
@@ -373,9 +387,8 @@ describe('unified locus hierarchy', () => {
 
     expect(bound.group.mainSessionId).toBe('user-work')
     expect(host.createdMains).toHaveLength(0)
-    expect(host.createdChildren).toEqual([
-      expect.objectContaining({ parentSessionId: 'user-work' }),
-    ])
+    expect(host.createdChildren).toEqual([])
+    expect(bound.locus.parentSessionId).toBe(mainOf(host, 'user-work'))
   })
 
   it('does not cascade a stopped group to an existing topic and blocks new topics', async () => {
@@ -389,7 +402,7 @@ describe('unified locus hierarchy', () => {
     host.repository.loci.set(groupLocus.locusId, { ...groupLocus, state: 'stopped' })
 
     await expect(locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-existing' }))
-      .resolves.toMatchObject({ reused: true, locus: { locusId: existing.locus.locusId, state: 'active' } })
+      .resolves.toMatchObject({ reused: true, locus: { locusId: existing.locus.locusId, state: 'not-created' } })
     await expect(locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-new' }))
       .rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
     expect(host.createdChildren.filter(item => item.endpoint.threadId === 'omt-new')).toHaveLength(0)
@@ -412,7 +425,7 @@ describe('existing topic explicit bind', () => {
     expect(replaced).toMatchObject({ created: true, reused: false, groupCreated: false })
     expect(replaced.locus).toMatchObject({
       generation: first.locus.generation + 1,
-      parentSessionId: 'source-1',
+      parentSessionId: mainOf(host, 'source-1'),
       source: 'explicit',
       permission: 'read',
       replacesLocusId: first.locus.locusId,
@@ -432,7 +445,7 @@ describe('existing topic explicit bind', () => {
     const retried = await locus.ensureTopic({
       chatId: 'oc-topic-same',
       threadId: 'omt-review',
-      parentSessionId: first.locus.parentSessionId,
+      parentSessionId: first.locus.workSessionId!,
     })
 
     expect(retried).toMatchObject({ created: false, reused: true })
@@ -476,7 +489,7 @@ describe('existing topic explicit bind', () => {
       chatId: 'oc-topic-notice', threadId: 'omt-review', parentSessionId: 'source-1',
     })).rejects.toMatchObject({ code: 'NOTIFICATION_FAILED' })
     const current = await host.repository.findActive(first.locus.endpoint)
-    expect(current).toMatchObject({ generation: 2, source: 'explicit', parentSessionId: 'source-1' })
+    expect(current).toMatchObject({ generation: 2, source: 'explicit', parentSessionId: mainOf(host, 'source-1') })
     expect(host.repository.notices.size).toBe(1)
     const childCount = host.createdChildren.length
 
@@ -501,7 +514,7 @@ describe('default Q&A', () => {
     expect(first.created).toBe(true)
     expect(second.reused).toBe(true)
     expect(second.locus.locusId).toBe(first.locus.locusId)
-    expect(host.createdChildren).toHaveLength(1)
+    expect(host.createdChildren).toHaveLength(0)
   })
 
   it('reuses Q&A while issue entries remain independent children of the same main', async () => {
@@ -514,8 +527,8 @@ describe('default Q&A', () => {
 
     expect(opened.locus.locusId).toBe(defaultQa.locus.locusId)
     expect([defaultQa.locus, issueA.locus, issueB.locus].map(item => item.parentSessionId))
-      .toEqual(['source-1', 'source-1', 'source-1'])
-    expect(new Set([defaultQa.locus, issueA.locus, issueB.locus].map(item => item.childSessionId)).size).toBe(3)
+      .toEqual(Array(3).fill(mainOf(host, 'source-1')))
+    expect(new Set([defaultQa.locus, issueA.locus, issueB.locus].map(item => item.reservedChildSessionId)).size).toBe(3)
   })
 })
 
@@ -527,24 +540,24 @@ describe('provisioning rollback', () => {
     await expect(controller(host).ensureGroup({ chatId: 'oc-rollback' })).rejects.toMatchObject({
       code: 'PROVISIONING_FAILED',
     })
-    expect(host.released.filter(id => id.startsWith('child-'))).toHaveLength(1)
+    expect(host.released.filter(id => id.startsWith('locus-main-'))).toHaveLength(1)
     expect(host.released.filter(id => id.startsWith('main-'))).toHaveLength(1)
     expect(host.repository.loci).toHaveLength(0)
     expect(host.repository.failed).toHaveLength(1)
   })
 
-  it('releases the child when Q&A group creation fails', async () => {
+  it('releases the locus main when Q&A group creation fails', async () => {
     const host = fakeHost()
     host.failGroup = true
 
     await expect(
       controller(host).createOrOpenDefaultQa({ parentSessionId: 'source-1', ownerId: 'ou-owner' }),
     ).rejects.toMatchObject({ code: 'PROVISIONING_FAILED' })
-    expect(host.released.some(id => id.startsWith('child-'))).toBe(true)
+    expect(host.released.some(id => id.startsWith('locus-main-'))).toBe(true)
     expect(host.repository.loci).toHaveLength(0)
   })
 
-  it('keeps a published group and committed operation when child finalize fails', async () => {
+  it('keeps a published group and committed operation when locus main finalize fails', async () => {
     const host = fakeHost()
     host.failChildCommit = true
 
@@ -553,17 +566,17 @@ describe('provisioning rollback', () => {
       message: expect.stringContaining('已持久化发布'),
     })
 
-    expect(host.repository.groups.get('oc-published-group')?.state).toBe('active')
+    expect(host.repository.groups.get('oc-published-group')?.state).toBe('not-created')
     expect([...host.repository.loci.values()]).toContainEqual(expect.objectContaining({
       endpoint: { chatId: 'oc-published-group' },
-      state: 'active',
+      state: 'not-created',
     }))
     expect(host.repository.committed).toHaveLength(1)
     expect(host.repository.failed).toHaveLength(0)
     expect(host.released).toHaveLength(0)
   })
 
-  it('keeps a published topic child and committed operation when child finalize fails', async () => {
+  it('keeps a published topic child and committed operation when locus main finalize fails', async () => {
     const host = fakeHost()
     const locus = controller(host)
     await locus.ensureGroup({ chatId: 'oc-published-topic' })
@@ -574,6 +587,7 @@ describe('provisioning rollback', () => {
     await expect(locus.ensureTopic({
       chatId: 'oc-published-topic',
       threadId: 'omt-finalize-failure',
+      parentSessionId: 'source-1',
     })).rejects.toMatchObject({
       code: 'PROVISIONING_FAILED',
       message: expect.stringContaining('已持久化发布'),
@@ -581,14 +595,14 @@ describe('provisioning rollback', () => {
 
     expect([...host.repository.loci.values()]).toContainEqual(expect.objectContaining({
       endpoint: { chatId: 'oc-published-topic', threadId: 'omt-finalize-failure' },
-      state: 'active',
+      state: 'not-created',
     }))
     expect(host.repository.committed).toHaveLength(1)
     expect(host.repository.failed).toHaveLength(0)
     expect(host.released).toHaveLength(0)
   })
 
-  it('keeps a published Q&A group, child, default pointer and committed operation when child finalize fails', async () => {
+  it('keeps a published Q&A group, entry, default pointer and committed operation when locus main finalize fails', async () => {
     const host = fakeHost()
     host.failChildCommit = true
 
@@ -600,9 +614,9 @@ describe('provisioning rollback', () => {
       message: expect.stringContaining('已持久化发布'),
     })
 
-    const defaultLocusId = host.repository.defaults.get('source-1')
+    const defaultLocusId = host.repository.defaults.get(mainOf(host, 'source-1'))
     expect(defaultLocusId).toBeDefined()
-    expect(host.repository.loci.get(defaultLocusId!)?.state).toBe('active')
+    expect(host.repository.loci.get(defaultLocusId!)?.state).toBe('not-created')
     expect(host.repository.groups.size).toBe(1)
     expect(host.repository.committed).toHaveLength(1)
     expect(host.repository.failed).toHaveLength(0)
@@ -621,7 +635,7 @@ describe('automatic to explicit replacement', () => {
     })
 
     expect(replacement.created).toBe(true)
-    expect(replacement.locus.parentSessionId).toBe('source-1')
+    expect(replacement.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
     expect(replacement.locus.permission).toBe('read')
     expect(replacement.previousLocus.locusId).toBe(old.locus.locusId)
     expect(host.repository.loci.get(old.locus.locusId)?.state).toBe('retired')
@@ -641,7 +655,7 @@ describe('automatic to explicit replacement', () => {
     const newTopic = await locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-new' })
 
     expect(oldTopic.locus.parentSessionId).toBe(group.locus.parentSessionId)
-    expect(newTopic.locus.parentSessionId).toBe('source-1')
+    expect(newTopic.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
     expect(replacement.locus.permission).toBe('read')
     expect(newTopic.locus.permission).toBe('read')
     expect(oldTopic.locus.locusId).not.toBe(newTopic.locus.locusId)
@@ -673,7 +687,7 @@ describe('automatic to explicit replacement', () => {
     ).rejects.toMatchObject({ code: 'NOTIFICATION_FAILED' })
     expect(host.repository.loci.get(old.locus.locusId)?.state).toBe('retired')
     expect(host.released.some(id => id.startsWith('child-'))).toBe(false)
-    const current = [...host.repository.loci.values()].find(item => item.state === 'active')
+    const current = [...host.repository.loci.values()].find(item => item.state === 'not-created')
     expect(current).toBeDefined()
     expect(host.repository.notices.size).toBe(1)
 
@@ -688,7 +702,7 @@ describe('automatic to explicit replacement', () => {
     expect(retried.locus.locusId).toBe(current?.locusId)
     expect(retried.warningText).toContain('上下文来源发生变化')
     expect(host.repository.notices.size).toBe(0)
-    expect(host.createdChildren).toHaveLength(2)
+    expect(host.createdChildren).toHaveLength(0)
   })
 })
 
@@ -706,32 +720,23 @@ describe('explicit rebuild', () => {
     expect(rebuilt.locus).toMatchObject({
       endpoint: { chatId: 'oc-legacy-marker-only' },
       generation: 1,
-      parentSessionId: 'source-1',
+      parentSessionId: mainOf(host, 'source-1'),
       workspaceId: 'ws-source',
       permission: 'read',
       source: 'explicit',
-      state: 'active',
+      state: 'not-created',
     })
     expect(rebuilt.group).toMatchObject({ mainSessionId: 'source-1', workspaceId: 'ws-source' })
     expect(host.createdMains).toHaveLength(0)
   })
 
-  it('publishes safe-v2 only after the child returns the Host attestation', async () => {
+  it('publishes no child proof before the first Delivery creates its child', async () => {
     const host = fakeHost()
-    const controller = new LocusController(host.deps)
-
-    const created = await controller.ensureGroup({ chatId: 'oc-safe-marker' })
-    expect(created.locus.childComposition).toBe('safe-v2')
-
-    const unsafe = fakeHost()
-    unsafe.deps.dsh.createChildSession = async input => ({
-      id: 'child-unattested',
-      parentSessionId: input.parentSessionId,
-      workspaceId: input.workspaceId,
-    })
-    await expect(new LocusController(unsafe.deps).ensureGroup({ chatId: 'oc-unsafe-marker' }))
-      .rejects.toMatchObject({ code: 'PROVISIONING_FAILED' })
-    expect(unsafe.repository.loci.size).toBe(0)
+    const created = await controller(host).ensureGroup({ chatId: 'oc-safe-marker' })
+    expect(created.locus).toMatchObject({ state: 'not-created' })
+    expect(created.locus.childComposition).toBeUndefined()
+    expect(created.locus.childSessionId).toBeUndefined()
+    expect(host.createdChildren).toEqual([])
   })
 
   it('refuses a legacy-marker rebuild when unified state already exists', async () => {
@@ -762,13 +767,13 @@ describe('explicit rebuild', () => {
 
     expect(rebuilt.locus).toMatchObject({
       generation: 2,
-      parentSessionId: 'source-1',
+      parentSessionId: mainOf(host, 'source-1'),
       permission: 'read',
       source: 'explicit',
       replacesLocusId: first.locus.locusId,
     })
     expect(host.repository.loci.get(first.locus.locusId)?.state).toBe('stopped')
-    expect(host.repository.groups.get('oc-rebuild')).toMatchObject({ state: 'active', mainSessionId: 'source-1' })
+    expect(host.repository.groups.get('oc-rebuild')).toMatchObject({ state: 'not-created', mainSessionId: 'source-1' })
   })
 
   /**
@@ -819,7 +824,7 @@ describe('explicit rebuild', () => {
       expect(result.replaced).toEqual(created.map(entry => entry.locusId))
 
       const rebuilt = [...host.repository.loci.values()]
-        .filter(record => record.parentSessionId === result.parentSessionId)
+        .filter(record => record.workSessionId === result.parentSessionId)
       expect(rebuilt).toHaveLength(2)
       // Each entry's NEWEST generation is the one on the replacement session;
       // the old rows stay as durable history and are never resumed.
@@ -829,7 +834,7 @@ describe('explicit rebuild', () => {
           .sort((left, right) => left.generation - right.generation)
           .at(-1)
         expect(newest).toMatchObject({
-          parentSessionId: result.parentSessionId,
+          workSessionId: result.parentSessionId,
           replacesLocusId: entry.locusId,
         })
       }
@@ -885,7 +890,7 @@ describe('explicit rebuild', () => {
       const { host, controller, created } = await archivedHost(['oc-d'])
       const entry = created[0]!
       const record = host.repository.loci.get(entry.locusId)!
-      expect(record.state).toBe('active')
+      expect(record.state).toBe('not-created')
 
       // Without the owner-facing flag the generic rebuild still refuses an
       // active generation — the guard that keeps a healthy row from being
@@ -903,7 +908,7 @@ describe('explicit rebuild', () => {
         parentSessionId: 'source-2',
         replaceArchivedParent: true,
       })
-      expect(rebuilt.locus).toMatchObject({ parentSessionId: 'source-2', generation: record.generation + 1 })
+      expect(rebuilt.locus).toMatchObject({ workSessionId: 'source-2', generation: record.generation + 1 })
     })
 
     it('refuses the flag when the recorded parent is NOT archived', async () => {
@@ -1020,12 +1025,12 @@ describe('explicit rebuild', () => {
     })
 
     // A genuinely new main session, not a revived reference to the archived one.
-    expect(rebuilt.locus).toMatchObject({ generation: 2, state: 'active', permission: 'read' })
+    expect(rebuilt.locus).toMatchObject({ generation: 2, state: 'not-created', permission: 'read' })
     expect(rebuilt.locus.parentSessionId).not.toBe('source-archived')
     expect(host.createdMains).toHaveLength(mainsBefore + 1)
     // The replacement is published as its own generation; the invalid row is
     // left in place as durable history rather than being revived or erased.
-    expect(host.repository.loci.get(rebuilt.locus.locusId)?.state).toBe('active')
+    expect(host.repository.loci.get(rebuilt.locus.locusId)?.state).toBe('not-created')
     expect(host.repository.loci.get(first.locus.locusId)).toBeDefined()
   })
 

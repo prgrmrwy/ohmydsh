@@ -17,6 +17,7 @@ import {
 } from '../src/host/locus/serviceability.js'
 
 const ALL_STATES: readonly LocusState[] = [
+  'not-created',
   'provisioning',
   'active',
   'switching',
@@ -25,20 +26,14 @@ const ALL_STATES: readonly LocusState[] = [
   'stopped',
 ]
 
-const serve = { state: 'active' as const, childSessionId: 'child-1', childComposition: 'safe-v1' as const }
+const serve = { state: 'active' as const, childSessionId: 'child-1', childComposition: 'tier3' as const }
 
 describe('locus serviceability policy', () => {
-  it('serves active generations with either known composition proof', () => {
-    expect(dispositionOf(serve)).toEqual({
-      kind: 'serve',
-      childSessionId: 'child-1',
-      childComposition: 'safe-v1',
-    })
-    expect(dispositionOf({ ...serve, childComposition: 'safe-v2' })).toEqual({
-      kind: 'serve',
-      childSessionId: 'child-1',
-      childComposition: 'safe-v2',
-    })
+  it('serves tier3 and retires previous-model composition proofs', () => {
+    expect(dispositionOf(serve)).toEqual({ kind: 'serve', childSessionId: 'child-1', childComposition: 'tier3' })
+    for (const childComposition of ['safe-v1', 'safe-v2']) {
+      expect(dispositionOf({ ...serve, childComposition })).toMatchObject({ kind: 'replace' })
+    }
   })
 
   // The replacement is only ever a NEW generation: serving this one would let
@@ -82,8 +77,9 @@ describe('locus serviceability policy', () => {
   // Adding a state must be a deliberate act: this table is what makes the
   // compiler's silence insufficient and forces the decision to be recorded.
   it('classifies every known state exactly once', () => {
-    const expected: Record<LocusState, 'serve' | 'replace' | 'terminal'> = {
+    const expected: Record<LocusState, 'serve' | 'replace' | 'terminal' | 'create'> = {
       active: 'serve',
+      'not-created': 'create',
       invalid: 'replace',
       stopped: 'terminal',
       retired: 'terminal',

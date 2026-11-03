@@ -16,7 +16,8 @@ export function gate() {
  * Scripted integrator adapter. Bindings are keyed by Agent object, as a real
  * integrator would keep an in-memory projection of verified bindings.
  */
-export function scriptedAdapter() {
+export function scriptedAdapter(options: { owns?: boolean } = {}) {
+  const owned = new Set<string>()
   const bound = new Map<unknown, string>()
   const held = new Set<string>()
   const presence = new Map<string, string>()
@@ -30,9 +31,10 @@ export function scriptedAdapter() {
     async deliver(target: { name: string; address: string }, pointer: any) { calls.deliver++; deliveries.push({ target, pointer }) },
     resolveCaller(agent: unknown) { calls.resolveCaller++; return bound.get(agent) },
     holds(address: string) { return held.has(address) },
+    ...(options.owns === false ? {} : { owns: (sessionId: string) => owned.has(sessionId) }),
   }
   return {
-    adapter, bound, held, presence, calls, deliveries, hooks,
+    adapter, bound, held, owned, presence, calls, deliveries, hooks,
     bind(agent: unknown, address: string) { bound.set(agent, address); held.add(address) },
     unbind(agent: unknown) { const address = bound.get(agent); bound.delete(agent); if (address) held.delete(address) },
   }

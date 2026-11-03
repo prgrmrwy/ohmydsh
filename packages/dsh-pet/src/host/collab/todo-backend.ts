@@ -1,30 +1,30 @@
 /**
- * `TodoBackend` over the Locus collaboration space (design D6, D8, D9).
+ * `TodoBackend` over the Locus collaboration space
+ * (`locus-three-tier-structure` design D8; spec `pet-locus-intent-triage`
+ * "待办由 Host 以 locus 主会话身份代写").
  *
  * The space is the only truth: Pet keeps no todo rows of its own. A todo is a
- * `request` item authored by the proxy member `pet`, assigned to `main`, with
- * no required acks:
+ * `request` item authored by the locus main session (`locus`), assigned to the
+ * work main session (`work`), with no required acks:
  *  - `body` is canonical JSON `{"summary","detail"}`; but the EVIDENCE is
- *    always read from the `item/created` event, so a later revise by the main
+ *    always read from the `item/created` event, so a later revise by the work
  *    session never changes the registered snapshot.
- *  - `ext.pet` carries the fixed source facts; `ext.pet.locusId` (the stable
- *    entry identity) is merged in by dsh-collab from the caller's stamp.
- *    `TodoRecord.locusId` is `ext.pet.recordId`, the registering generation's
- *    record id — the same meaning the legacy store gives it.
+ *  - `ext.pet` carries the fixed source facts
+ *    `{entry, generation, endpoint, messageId, requester}`; `entry` is the
+ *    stable entry identity, `generation` is an audit fact only.
  *  - `createdAt` is the creation commit's `at`; `statusChangedAt` the latest
  *    `request/progressed` commit's `at`. A commit without `at` makes the space
  *    unreadable rather than inventing a time.
  *  - Status maps open/accepted/done/dropped ↔ open/accepted/done/rejected.
  *
- * Registration runs as the registering child itself (`command(exec, …)` with
- * the Host's CURRENT Agent object for that child). If that child is not in the
- * Host, registration fails as "collaboration layer unavailable" — never under
- * another identity.
+ * Registration runs as the locus main session through `actAs`, never as the
+ * registering child. Owner dispositions use the manager command
+ * `disposeRequest`, which wakes nobody, and still work for todos registered by
+ * a locus main session that has since been replaced or archived.
  *
- * Owner dispositions use the manager command `disposeRequest`, which wakes
- * nobody. The handle returns the full log on every read, so the incremental
- * cursor lives here: each space's folded todos are cached and only records
- * past the cursor are applied.
+ * The handle returns the full log on every read, so the incremental cursor
+ * lives here: each space's fold is cached and only records past the cursor
+ * are applied.
  */
 import { randomUUID } from 'node:crypto'
 import type { TodoBackend } from '../ledger/backend.js'
@@ -32,17 +32,15 @@ import { LedgerStoreError } from '../ledger/store.js'
 import {
   advanceTodoStatus, registerTodo, type NewTodoInput, type TodoRecord, type TodoStatus,
 } from '../ledger/todo.js'
-import { MAIN_MEMBER, PET_MEMBER, locusSpaceId } from './naming.js'
-import type { LocusCollabProxy } from './proxy.js'
-import { stampLocusId } from './routing.js'
+import type { LocusCollab, LocusMainDirectory, LocusMainRef } from './locus-collab.js'
+import { LOCUS_MEMBER, WORK_MEMBER, locusSpaceId } from './naming.js'
+import { applyRecord, emptySpace, type FoldedSpace } from './space-fold.js'
 import { isHandleError, type CollabCommitRecord, type CollabIntegrationHandle } from './types.js'
 
 export interface CollabTodoBackendDeps {
-  readonly proxy: LocusCollabProxy
-  /** The registering generation's child session for a locus record of that parent, if any. */
-  childOf(input: { readonly locusId: string; readonly parentSessionId: string }): string | undefined
-  /** The Host's CURRENT live Agent object, or undefined. Never resumes. */
-  liveAgent(sessionId: string): unknown
+  readonly collab: LocusCollab
+  /** Every locus main session Pet ever created, history included. */
+  readonly directory: LocusMainDirectory
   newAttemptId?(): string
 }
 
@@ -65,70 +63,71 @@ export function todoBody(evidence: { readonly summary: string; readonly detail: 
   return JSON.stringify({ summary: evidence.summary, detail: evidence.detail })
 }
 
-interface FoldState {
-  cursor: number
-  readonly todos: Map<string, TodoRecord>
-  readonly order: string[]
-}
-
 function unreadable(): never {
   throw new LedgerStoreError('TODO_CORRUPT')
 }
 
-/** Rebuild one todo from its `item/created` event; anything not shaped like a Pet todo is skipped. */
-function todoFromCreation(parentSessionId: string, item: Record<string, any>, at: number | undefined): TodoRecord | undefined {
-  if (item.kind !== 'request' || item.author !== PET_MEMBER || item.assignee !== MAIN_MEMBER) return undefined
+/** Rebuild one todo from its folded item; anything not shaped like a Pet todo is skipped. */
+function todoFromItem(ref: LocusMainRef, space: FoldedSpace, itemId: string): TodoRecord | undefined {
+  const current = space.items.get(itemId) as Record<string, any> | undefined
+  const created = space.itemCreated.get(itemId)
+  if (current === undefined || created === undefined) return undefined
+  // Everything but the progress comes from the creation event: a later revise
+  // by the work session never changes the registered snapshot.
+  const item = created.item as Record<string, any>
+  if (item.kind !== 'request' || item.author !== LOCUS_MEMBER || item.assignee !== WORK_MEMBER) return undefined
   const pet = item.ext?.pet
-  if (typeof pet !== 'object' || pet === null || pet.kind !== 'todo') return undefined
-  // The stamp (stable entry identity) must be present; the record's `locusId`
-  // keeps its legacy meaning — the REGISTERING generation's record id — so
-  // every existing consumer (`getLocus(todo.locusId)`) behaves as before.
-  if (stampLocusId(item.ext) === undefined) return undefined
-  const locusId = pet.recordId
-  if (typeof locusId !== 'string' || locusId === '') return undefined
-  if (at === undefined || !Number.isSafeInteger(at)) unreadable()
+  if (typeof pet !== 'object' || pet === null || typeof pet.entry !== 'string' || pet.entry === '') return undefined
+  if (created.at === undefined || !Number.isSafeInteger(created.at)) unreadable()
   let evidence: { summary?: unknown; detail?: unknown }
   try { evidence = JSON.parse(item.body) } catch { return unreadable() }
   if (typeof evidence?.summary !== 'string' || typeof evidence.detail !== 'string') unreadable()
+  const progressed = space.itemProgressed.get(itemId)
+  const status = progressed === undefined ? 'open' : STATUS_OF[current.progress]
+  if (status === undefined) return undefined
+  if (progressed !== undefined && (progressed.at === undefined || !Number.isSafeInteger(progressed.at))) unreadable()
   return Object.freeze({
-    itemId: item.id,
-    parentSessionId,
+    itemId,
+    parentSessionId: ref.locusMainSessionId,
+    workSessionId: ref.workSessionId,
     kind: 'todo',
-    locusId,
+    locusId: pet.entry,
     generation: pet.generation,
     endpoint: pet.endpoint?.threadId === undefined ? { chatId: pet.endpoint?.chatId } : { chatId: pet.endpoint.chatId, threadId: pet.endpoint.threadId },
-    triggerMessageId: pet.triggerMessageId,
-    requestedBy: pet.requestedBy,
+    triggerMessageId: pet.messageId,
+    requestedBy: pet.requester,
     evidence: { summary: evidence.summary as string, detail: evidence.detail as string },
-    status: 'open',
-    createdAt: at,
-    statusChangedAt: at,
+    status,
+    createdAt: created.at,
+    statusChangedAt: progressed?.at ?? created.at,
   }) as TodoRecord
 }
 
 export class CollabTodoBackend implements TodoBackend {
-  private readonly folds = new Map<string, FoldState>()
-  private readonly owners = new Map<string, string>()
+  private readonly folds = new Map<string, FoldedSpace>()
   private foldedHandle: CollabIntegrationHandle | undefined
 
   constructor(private readonly deps: CollabTodoBackendDeps) {}
 
   private handle(): CollabIntegrationHandle {
-    const handle = this.deps.proxy.currentHandle()
+    const handle = this.deps.collab.currentHandle()
     if (handle === undefined) throw new LedgerStoreError('COLLAB_UNAVAILABLE')
     if (handle !== this.foldedHandle) {
       // A new attachment reads from scratch: nothing cached survives a detach.
       this.folds.clear()
-      this.owners.clear()
       this.foldedHandle = handle
     }
     return handle
   }
 
-  /** Apply every record past the cursor; returns the folded todos of one parent's space. */
-  private async fold(parentSessionId: string): Promise<FoldState | undefined> {
+  private refOf(locusMainSessionId: string): LocusMainRef | undefined {
+    return this.deps.directory.list().find(ref => ref.locusMainSessionId === locusMainSessionId)
+  }
+
+  /** Apply every record past the cursor; returns the folded space, or undefined when unreadable as absent. */
+  private async fold(ref: LocusMainRef): Promise<FoldedSpace | undefined> {
     const handle = this.handle()
-    const spaceId = locusSpaceId(parentSessionId)
+    const spaceId = locusSpaceId(ref.locusMainSessionId)
     const records = await handle.readManaged(spaceId)
     if (isHandleError(records)) {
       if (records.error.code === 'COLLAB_SPACE_UNAVAILABLE') return undefined
@@ -137,94 +136,92 @@ export class CollabTodoBackend implements TodoBackend {
     let state = this.folds.get(spaceId)
     const last = records.at(-1)?.seq ?? 0
     if (state === undefined || last < state.cursor) {
-      state = { cursor: 0, todos: new Map(), order: [] }
+      state = emptySpace()
       this.folds.set(spaceId, state)
     }
     for (const record of records as readonly CollabCommitRecord[]) {
       if (record.seq <= state.cursor) continue
-      for (const event of record.events as readonly Record<string, any>[]) {
-        if (event.type === 'item/created') {
-          const todo = todoFromCreation(parentSessionId, event.item, record.at)
-          if (todo === undefined) continue
-          state.todos.set(todo.itemId, todo)
-          state.order.push(todo.itemId)
-          this.owners.set(todo.itemId, parentSessionId)
-        } else if (event.type === 'request/progressed') {
-          const current = state.todos.get(event.itemId)
-          const status = STATUS_OF[event.progress]
-          if (current === undefined || status === undefined) continue
-          if (record.at === undefined || !Number.isSafeInteger(record.at)) unreadable()
-          state.todos.set(event.itemId, Object.freeze({ ...current, status, statusChangedAt: record.at }))
-        }
-      }
-      state.cursor = record.seq
+      applyRecord(state, record)
     }
     return state
+  }
+
+  /** Every todo of one space, oldest first. */
+  private todosOf(ref: LocusMainRef, space: FoldedSpace): TodoRecord[] {
+    const todos: TodoRecord[] = []
+    for (const itemId of space.items.keys()) {
+      const todo = todoFromItem(ref, space, itemId)
+      if (todo !== undefined) todos.push(todo)
+    }
+    return todos.sort((a, b) => a.createdAt - b.createdAt)
   }
 
   async registerTodoItem(input: NewTodoInput): Promise<TodoRecord> {
     const built = registerTodo(input)
     if (!built.ok) throw new LedgerStoreError('TODO_INVALID', `Todo registration rejected: ${built.reason}`)
     const candidate = built.record
-    const handle = this.handle()
-    const parent = candidate.parentSessionId
-    if (!this.deps.proxy.isEstablished(parent)) throw new LedgerStoreError('SPACE_NOT_READY')
-    const child = this.deps.childOf({ locusId: candidate.locusId, parentSessionId: parent })
-    const agent = child === undefined ? undefined : this.deps.liveAgent(child)
-    if (agent === undefined) throw new LedgerStoreError('COLLAB_UNAVAILABLE')
+    this.handle()
+    const main = candidate.parentSessionId
+    const ref = this.refOf(main)
+    if (ref === undefined) throw new LedgerStoreError('SPACE_NOT_READY')
+    if (!(await this.deps.collab.isReady(main))) {
+      throw new LedgerStoreError(this.deps.collab.currentHandle() === undefined ? 'COLLAB_UNAVAILABLE' : 'SPACE_NOT_READY')
+    }
 
-    const created = await handle.command({ agent }, locusSpaceId(parent), `track-${candidate.itemId}`, {
+    const created = await this.deps.collab.actAs(main, `track-${candidate.itemId}`, {
       op: 'createItem',
       input: {
         itemId: candidate.itemId,
         kind: 'request',
-        assignee: MAIN_MEMBER,
+        assignee: WORK_MEMBER,
         requiredAcks: [],
         title: todoTitle(candidate.evidence.summary),
         body: todoBody(candidate.evidence),
         ext: {
           pet: {
-            kind: 'todo',
-            recordId: candidate.locusId,
+            entry: candidate.locusId,
             generation: candidate.generation,
             endpoint: candidate.endpoint,
-            triggerMessageId: candidate.triggerMessageId,
-            requestedBy: candidate.requestedBy,
+            messageId: candidate.triggerMessageId,
+            requester: candidate.requestedBy,
           },
         },
       },
     })
-    if (isHandleError(created)) {
-      const code = created.error.code
-      if (code === 'COLLAB_CALLER_UNAVAILABLE') {
-        throw new LedgerStoreError(this.deps.proxy.isEstablished(parent) ? 'COLLAB_UNAVAILABLE' : 'SPACE_NOT_READY')
-      }
+    if (!created.ok) {
+      const code = created.code
       if (code === 'COLLAB_BAD_ITEM' || code === 'COLLAB_CMD_CONFLICT') throw new LedgerStoreError('TODO_EXISTS')
       throw new LedgerStoreError('COLLAB_UNAVAILABLE')
     }
-    const stored = (await this.fold(parent))?.todos.get(candidate.itemId)
+    const space = await this.fold(ref)
+    const stored = space === undefined ? undefined : todoFromItem(ref, space, candidate.itemId)
     if (stored === undefined) throw new LedgerStoreError('TODO_CORRUPT')
     return stored
   }
 
   async getTodoItem(itemId: string): Promise<TodoRecord | undefined> {
-    const known = this.owners.get(itemId)
-    if (known !== undefined) {
-      const hit = (await this.fold(known))?.todos.get(itemId)
-      if (hit !== undefined) return hit
-    }
-    for (const parent of this.deps.proxy.knownParents()) {
-      if (parent === known) continue
-      const hit = (await this.fold(parent))?.todos.get(itemId)
-      if (hit !== undefined) return hit
+    for (const ref of this.deps.directory.list()) {
+      const space = await this.fold(ref)
+      if (space === undefined) continue
+      const todo = todoFromItem(ref, space, itemId)
+      if (todo !== undefined) return todo
     }
     return undefined
   }
 
-  async listForParent(parentSessionId: string): Promise<readonly TodoRecord[]> {
-    const state = await this.fold(parentSessionId)
-    if (state === undefined) return Object.freeze([])
-    return Object.freeze(state.order.map(id => state.todos.get(id)!))
+  /**
+   * Every todo of one session's spaces. `sessionId` is a locus main session
+   * (its own space) or a work main session (every space ever built for it,
+   * historical ones included); anything else resolves to `[]`.
+   */
+  async listForParent(sessionId: string): Promise<readonly TodoRecord[]> {
+    const refs = this.deps.directory.list().filter(ref => ref.locusMainSessionId === sessionId || ref.workSessionId === sessionId)
+    const todos: TodoRecord[] = []
+    for (const ref of refs) {
+      const space = await this.fold(ref)
+      if (space !== undefined) todos.push(...this.todosOf(ref, space))
+    }
+    return Object.freeze(todos)
   }
 
   async advanceStatus(itemId: string, to: TodoStatus, _now: number): Promise<TodoRecord> {
@@ -248,7 +245,7 @@ export class CollabTodoBackend implements TodoBackend {
     if (isHandleError(disposed)) {
       const code = disposed.error.code
       if (code === 'COLLAB_BAD_TRANSITION') {
-        // Moved underneath us (e.g. the main session advanced it): report against the fresh state.
+        // Moved underneath us (e.g. the work session advanced it): report against the fresh state.
         const fresh = await this.getTodoItem(itemId)
         throw new LedgerStoreError('TODO_INVALID', fresh !== undefined && fresh.status !== current.status
           ? 'Todo is already in a terminal status and cannot be advanced further.'
@@ -257,7 +254,9 @@ export class CollabTodoBackend implements TodoBackend {
       if (code === 'COLLAB_ITEM_NOT_FOUND') throw new LedgerStoreError('TODO_NOT_FOUND')
       throw new LedgerStoreError('COLLAB_UNAVAILABLE')
     }
-    const after = (await this.fold(current.parentSessionId))?.todos.get(itemId)
+    const ref = this.refOf(current.parentSessionId)
+    const space = ref === undefined ? undefined : await this.fold(ref)
+    const after = ref === undefined || space === undefined ? undefined : todoFromItem(ref, space, itemId)
     if (after === undefined) throw new LedgerStoreError('TODO_CORRUPT')
     return after
   }

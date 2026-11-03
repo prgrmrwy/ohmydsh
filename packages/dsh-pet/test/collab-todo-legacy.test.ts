@@ -1,6 +1,5 @@
 /**
- * `pet-locus-intent-triage` → "存量待办只读保留为旧版" (legacy-01..02), and the
- * owner surface for unroutable proxy deliveries (design D5 rule 3).
+ * `pet-locus-intent-triage` → "存量待办只读保留为旧版" (legacy-01..02).
  *
  * Legacy todos live in the Pet Domain store from before this change; new todos
  * live only in the Locus collaboration space (real dsh-collab plugin here).
@@ -9,16 +8,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { legacyTodoBackend } from '../src/host/ledger/backend.js'
 import { SharedFactLedgerStore } from '../src/host/ledger/store.js'
 import { createOwnerLedger } from '../src/host/ledger/owner-ledger.js'
-import { locusSpaceId } from '../src/host/collab/naming.js'
-import { openTodoWorld, readOverview, type TodoWorld } from './support/collab-todo.js'
-import { result, settle } from './support/collab-host.js'
+import { openTodoWorld, readOverview, type TestLocusRow, type TodoWorld } from './support/collab-todo.js'
 import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
 
-const MAIN = 'session-main-legacy'
+const MAIN = 'session-locus-main-legacy'
+const WORK = 'session-work-legacy'
 const ALPHA = { chatId: 'oc-legacy-alpha' }
 const BETA = { chatId: 'oc-legacy-beta' }
-const LOCUS_A = { id: 'rec-legacy-a', generation: 1, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: 'child-legacy-a', state: 'active' }
-const LOCUS_B = { id: 'rec-legacy-b', generation: 1, endpoint: BETA, parentSessionId: MAIN, childSessionId: 'child-legacy-b', state: 'active' }
+const LOCUS_A: TestLocusRow = { id: 'rec-legacy-a', generation: 1, endpoint: ALPHA, locusMainSessionId: MAIN, childSessionId: 'child-legacy-a', state: 'active' }
+const LOCUS_B: TestLocusRow = { id: 'rec-legacy-b', generation: 1, endpoint: BETA, locusMainSessionId: MAIN, childSessionId: 'child-legacy-b', state: 'active' }
 
 let todo: TodoWorld | undefined
 let harness: PetHarness | undefined
@@ -35,15 +33,14 @@ async function world() {
     triggerMessageId: 'om-before', requestedBy: 'ou_requester', evidence: { summary: '升级前登记', detail: '旧证据' }, createdAt: 1,
   })
   todo = await openTodoWorld()
+  await todo.addMain({ locusMainSessionId: MAIN, workSessionId: WORK })
   todo.addLocus(LOCUS_A)
   todo.addLocus(LOCUS_B)
-  await todo.loadMain(MAIN)
   const t = todo
   const owner = createOwnerLedger({
     collab: t.backend,
     legacy: legacyTodoBackend(store),
-    collabAvailable: () => t.proxy.currentHandle() !== undefined,
-    unroutable: parent => t.proxy.inbox().filter(entry => entry.parentSessionId === parent && entry.route.kind === 'unroutable'),
+    collabAvailable: () => t.collab.currentHandle() !== undefined,
   })
   const ledgerRows = () => [...harness!.domain.table('ledger_item').entries()].map(([key, value]) => [key, JSON.stringify(value)])
   return { t, store, owner, ledgerRows }
@@ -61,8 +58,8 @@ describe('存量待办只读保留为旧版', () => {
       ['todo-before-upgrade', true],
       ['todo-after-upgrade', false],
     ])
-    // The registering child reads only the new one through the collaboration tools.
-    const read = await readOverview(t.world, t.world.live.get(LOCUS_B.childSessionId), MAIN)
+    // The shared space holds only the new one: the legacy row never reaches it.
+    const read = await readOverview(t.world, t.world.live.get(WORK), MAIN)
     expect(Object.keys(read.items)).toEqual(['todo-after-upgrade'])
     expect(JSON.stringify(read)).not.toContain('todo-before-upgrade')
     // New registrations never touch the local table.
@@ -86,19 +83,6 @@ describe('存量待办只读保留为旧版', () => {
     // A collab todo is not refused by the legacy guard.
     expect((await t.register(LOCUS_B.id, { summary: '新的', detail: '' }, 'todo-new')).ok).toBe(true)
     await expect(owner.guard('todo-new', 'done')).resolves.toBeUndefined()
-  })
-
-  it('无法路由的登记在管理面可见，且不在任何子会话可见', async () => {
-    const { t, owner } = await world()
-    const main = t.world.live.get(MAIN)
-    const sent = result(await t.world.call(main, 'collab_send_message', { spaceId: locusSpaceId(MAIN), cmdId: 'unroutable-1', to: 'pet', body: '大家看看', needsReply: true }))
-    expect(sent.error).toBeUndefined()
-    await settle()
-    const view = await owner.list(MAIN)
-    expect(view.unroutable).toEqual([expect.objectContaining({ seq: sent.seq, subject: 'message' })])
-    for (const child of [LOCUS_A.childSessionId, LOCUS_B.childSessionId]) {
-      expect(JSON.stringify(await readOverview(t.world, t.world.live.get(child), MAIN))).not.toContain('大家看看')
-    }
   })
 })
 

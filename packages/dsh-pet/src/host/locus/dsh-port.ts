@@ -20,8 +20,10 @@
  * - runtime cleanup retains the exact Workspace and AgentHandle capabilities
  *   returned during creation. There is intentionally no generic
  *   `releaseSession(id)`;
- * - child creation remains unavailable until the pinned runtime exposes the
- *   required idle-parent continuation patch.
+ * - this adapter creates NO child session: a child is created lazily by the
+ *   first deliverable message (see the lazy-child creator), never here;
+ * - a locus main is verified before it is returned: its tool surface, approval
+ *   policy and sandbox mode are read back and must be the locked-down ones.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -30,7 +32,13 @@ import type { AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { foldSessionTitle as foldDshSessionTitle } from '@deepseek-ai/dsh-session-title'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { LOCUS_MAIN_PRESET, LOCUS_SAFE_CHILD_COMPOSITION } from './aggregate.js'
+import { LOCUS_MAIN_PRESET } from './aggregate.js'
+import {
+  attestLocusMainSurface,
+  foldLocusMainSettings,
+  type LocusMainObservedSurface,
+} from './locus-main.js'
+import { mountLocusPreset, type LocusPresetRegistry } from './preset.js'
 import type { LocusDshPort, LocusParentSession, LocusWorkspace } from './controller.js'
 import { delegationParentOf } from '../session-lineage.js'
 
@@ -108,6 +116,8 @@ export interface ProductionLocusDshPortDeps {
   readonly agentPresets: {
     readonly defaultId: string
     mount(agentContext: Context, presetId: string): Promise<unknown>
+    /** The declared preset catalog; a locus main refuses to build without it. */
+    list?: LocusPresetRegistry['list']
   }
   readonly agentDefaultModel: {
     currentSelection(): AgentOptions
@@ -120,25 +130,19 @@ export interface ProductionLocusDshPortDeps {
     rename(session: Session, title: string): { readonly title: string } | Promise<{ readonly title: string }>
   }
   /**
-   * Optional reviewed idle-child provisioner. It owns staging, the exact
-   * continuable adapter and rollback capabilities; absent keeps child creation
-   * fail closed.
+   * The locus main's lock-down, injected because each step needs the live
+   * runtime. Absent makes locus main creation fail closed.
    */
-  readonly idleChildren?: {
-    create(input: {
-      readonly parentSessionId: string
-      readonly workspaceId: string
-      readonly locusId: string
-      readonly generation: number
-      readonly label: string
-      /** The entry the child serves; decides its read tool before publication. */
-      readonly endpoint: { readonly chatId: string; readonly threadId?: string }
-      readonly permission: 'read'
-    }): Promise<{
-      readonly childSessionId: string
-      readonly commit: () => void
-      readonly rollback: () => Promise<void>
-    }>
+  readonly locusMainLockdown?: {
+    /**
+     * Install the deny-style tool restriction (bash/write/edit/delegation) in
+     * the agent factory's `setup`. A throw vetoes the creation.
+     */
+    restrict(agentContext: Context, agent: { readonly id: SessionId }): void | Promise<void>
+    /** Append approval `never` and sandbox `read-only` to the session log. */
+    applyPolicy(session: Session): void | Promise<void>
+    /** Names of every tool the live agent can see. */
+    visibleTools(agent: { readonly id: SessionId }): readonly string[]
   }
   /** Optional pure title-fold override for focused tests. */
   readonly foldSessionTitle?: (
@@ -192,6 +196,38 @@ export function composeLocusMainBriefing(input: LocusMainBriefingInput): string 
     '飞书侧的消息由本主会话下的专属子会话处理，不会自动回传到这里；你不需要主动分析项目、读取文件或给出结论。',
     '',
     '请只回复「了解」或「知道了」，然后保持待命（standby），等待所有者后续的显式指令。',
+  ].join('\n')
+}
+
+/** Facts stated to a locus main in its opening briefing. */
+export interface LocusCoordinatorBriefingInput {
+  readonly label: string
+  readonly workSessionId: string
+  readonly workspaceId: string
+  readonly workspacePath: string
+}
+
+/**
+ * Compose the locus main's opening briefing.
+ *
+ * Like {@link composeLocusMainBriefing} this is context, not a task, and for the
+ * same reason it tells the model to acknowledge and stand by: a capable model
+ * handed a workspace path starts investigating, and this session has no tools
+ * to investigate with and nobody watching.
+ * @param input - the identity facts to state.
+ * @returns the briefing prompt text.
+ */
+export function composeLocusCoordinatorBriefing(input: LocusCoordinatorBriefingInput): string {
+  return [
+    `你是 Pet 为一个干活主会话建立的 locus 主会话：${input.label}`,
+    '',
+    `- 干活主会话：${input.workSessionId}`,
+    `- 工作区：${input.workspaceId}`,
+    `- 执行根：${input.workspacePath}`,
+    '',
+    '你的职责只是协调：通过协作空间与干活主会话沟通，接收并回答飞书入口子会话经 locus_ask_parent 提出的问题，',
+    '用 locus_note 记录入口级信息。你没有 shell、写文件、编辑和委派能力，也不需要它们。',
+    '这条消息只陈述上下文，不是任务；请只回复「了解」，然后保持待命。',
   ].join('\n')
 }
 
@@ -341,12 +377,7 @@ export function createProductionLocusDshPort(
       // creates. This is not the child's safety pin: the locus child composes
       // from LOCUS_CHILD_PRESET whatever preset its main runs, which is why an
       // owner may `/bind` an ordinary `standard` session.
-      const presetId = LOCUS_MAIN_PRESET.trim()
-      if (presetId === '') {
-        throw new LocusDshCapabilityUnavailableError(
-          'The Host has no Agent preset for locus main creation',
-        )
-      }
+      const presetId = 'dsh-pet-executor'
       const selection = { ...deps.agentDefaultModel.currentSelection() }
       const allocatedSessionId = normalized(createSessionId())
       if (allocatedSessionId === undefined) {
@@ -420,29 +451,108 @@ export function createProductionLocusDshPort(
       }
     },
 
-    async createChildSession(input) {
-      const idleChildren = deps.idleChildren
-      if (idleChildren === undefined) {
+    async createLocusMainSession(input) {
+      const lockdown = deps.locusMainLockdown
+      if (lockdown === undefined) {
         throw new LocusDshCapabilityUnavailableError(
-          'Unified locus child creation requires the reviewed idle-continuable runtime',
+          'Cannot create a locus main without the lock-down capability',
         )
       }
-      const created = await idleChildren.create({
-        parentSessionId: input.parentSessionId,
-        workspaceId: input.workspaceId,
-        locusId: input.locusId,
-        generation: input.generation,
-        label: input.label,
-        endpoint: input.endpoint,
-        permission: input.permission,
+      const workSessionId = normalized(input.workSessionId)
+      const workspaceId = normalized(input.workspaceId)
+      if (workSessionId === undefined || workspaceId === undefined) {
+        throw new LocusDshCapabilityUnavailableError('Cannot create a locus main without a work session and workspace')
+      }
+      const workspace = deps.workspaceRegistry.get(WorkspaceId(workspaceId))
+      if (
+        workspace === undefined ||
+        String(workspace.id) !== workspaceId ||
+        normalized(workspace.path) === undefined ||
+        (await workspace.status()) !== 'ok'
+      ) {
+        throw new LocusDshCapabilityUnavailableError(
+          `Workspace ${workspaceId} is unavailable for locus main creation`,
+        )
+      }
+      const selection = { ...deps.agentDefaultModel.currentSelection() }
+      const allocatedSessionId = normalized(createSessionId())
+      if (allocatedSessionId === undefined) {
+        throw new Error('The locus main session id allocator returned an empty id')
+      }
+      const sessionId = SessionId(allocatedSessionId)
+
+      const handle = await deps.agents.create({
+        sessionId,
+        meta: { cwd: workspace.path, agentPreset: LOCUS_MAIN_PRESET },
+        agentOptions: selection,
+        setup: async (agentContext, agent) => {
+          // Neutral whitelist first, then the deny layer on top of it: the
+          // restriction removes from what the preset offers, never the reverse.
+          await mountLocusPreset(deps.agentPresets as LocusPresetRegistry, agentContext)
+          await lockdown.restrict(agentContext, { id: agent.id })
+        },
       })
+
+      let title: string
+      try {
+        await workspace.attachSession(sessionId)
+        const session = deps.sessions.get?.(handle.agent.id)
+        if (session === undefined) {
+          throw new LocusDshCapabilityUnavailableError(
+            `Session ${sessionId} is not resolvable after Agent creation`,
+          )
+        }
+        title = (await deps.sessionTitle.rename(session, input.label)).title
+
+        // Policy BEFORE the briefing: the first turn must already run locked.
+        await lockdown.applyPolicy(session)
+        deps.agents.brief?.(handle.agent, composeLocusCoordinatorBriefing({
+          label: input.label,
+          workSessionId,
+          workspaceId,
+          workspacePath: workspace.path,
+        }))
+        if (!(await deps.sessions.flush(session))) {
+          throw new LocusDshCapabilityUnavailableError(
+            `Session ${sessionId} has no durability listener, so it cannot be published as a locus main`,
+          )
+        }
+
+        // Read back, do not assume: settings from the durable log (their only
+        // store), tools from the live agent.
+        const inspection = await deps.sessionController.inspect(sessionId)
+        const settings = foldLocusMainSettings(inspection.events as unknown as readonly {
+          readonly type: string
+          readonly data?: unknown
+        }[])
+        const observed: LocusMainObservedSurface = {
+          toolNames: lockdown.visibleTools({ id: handle.agent.id }),
+          approval: settings.approval,
+          sandbox: settings.sandbox,
+        }
+        const attestation = attestLocusMainSurface(observed)
+        if (!attestation.ok) {
+          throw new LocusDshCapabilityUnavailableError(
+            `Locus main ${sessionId} is not the locked-down surface: ${attestation.leaks.join(', ')}`,
+          )
+        }
+      } catch (error) {
+        try {
+          await rollbackOwnedMain(workspace, handle, sessionId)
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, ...aggregateError(rollbackError)],
+            `Locus main session ${sessionId} provisioning failed and rollback was incomplete`,
+          )
+        }
+        throw error
+      }
+
       return {
-        id: created.childSessionId,
-        parentSessionId: input.parentSessionId,
-        childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
-        workspaceId: input.workspaceId,
-        commit: created.commit,
-        rollback: created.rollback,
+        id: sessionId,
+        workspaceId,
+        title,
+        rollback: () => rollbackOwnedMain(workspace, handle, sessionId),
       }
     },
 

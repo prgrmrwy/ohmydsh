@@ -578,60 +578,15 @@ describe('locus main opening briefing', () => {
 })
 
 describe('production LocusDshPort child capability gate', () => {
-  it('delegates to the reviewed idle child provisioner when composed', async () => {
-    const commit = vi.fn()
-    const rollback = vi.fn(async () => undefined)
-    const create = vi.fn(async () => ({
-      childSessionId: 'child-reserved',
-      commit,
-      rollback,
-    }))
-    const port = createProductionLocusDshPort(harness({ idleChildren: { create } }))
-
-    const child = await port.createChildSession({
-      parentSessionId: 'main-1',
-      workspaceId: 'ws-default',
-      locusId: 'locus-1',
-      generation: 1,
-      label: '项目子会话',
-      endpoint: { chatId: 'oc-project' },
-      permission: 'read',
-    })
-
-    expect(create).toHaveBeenCalledWith({
-      parentSessionId: 'main-1',
-      workspaceId: 'ws-default',
-      locusId: 'locus-1',
-      generation: 1,
-      label: '项目子会话',
-      // The fresh child's tool surface is chosen from its endpoint BEFORE the
-      // locus row exists, so the endpoint must travel with the reservation.
-      endpoint: { chatId: 'oc-project' },
-      permission: 'read',
-    })
-    expect(child).toMatchObject({
-      id: 'child-reserved',
-      parentSessionId: 'main-1',
-      workspaceId: 'ws-default',
-      commit,
-      rollback,
-    })
+  it('never exposes an eager child creation port', () => {
+    const port = createProductionLocusDshPort(harness())
+    expect(port).not.toHaveProperty('createChildSession')
   })
 
-  it('is explicitly unavailable until the idle-runtime patch is connected', async () => {
+  it('refuses coordinator creation without the lockdown capability', async () => {
     const port = createProductionLocusDshPort(harness())
-
-    await expect(port.createChildSession({
-      parentSessionId: 'session-parent',
-      workspaceId: 'ws-default',
-      locusId: 'locus-1',
-      generation: 1,
-      label: 'Locus child',
-      endpoint: { chatId: 'oc_project' },
-      permission: 'read',
-    })).rejects.toMatchObject({
-      name: 'LocusDshCapabilityUnavailableError',
-      code: 'CAPABILITY_UNAVAILABLE',
-    } satisfies Partial<LocusDshCapabilityUnavailableError>)
+    await expect(port.createLocusMainSession({
+      workSessionId: 'work-1', workspaceId: 'ws-default', label: 'Locus 协调会话',
+    })).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' })
   })
 })
