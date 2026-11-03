@@ -21,8 +21,8 @@
 
 ## 4. 文档与发布
 
-- [x] 4.1 `package.json` 升到 0.7.0；CHANGELOG、README.md / README.zh.md 更新「只读用量卡片」行与安全说明（含入口白名单需放行 `codex-reset` 的部署提示）
-- [x] 4.2 `dsh.yaml` 条目说明补 0.7.0；`openspec/specs` 同步由归档完成
+- [x] 4.1 `package.json` 升到 0.6.3；CHANGELOG、README.md / README.zh.md 更新「只读用量卡片」行与安全说明（含入口白名单需放行 `codex-reset` 的部署提示）
+- [x] 4.2 `dsh.yaml` 条目说明补 0.6.3；`openspec/specs` 同步由归档完成
 
 ## 5. 验证
 

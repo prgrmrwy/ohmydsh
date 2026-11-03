@@ -49,7 +49,7 @@
 
 ## Migration Plan
 
-纯增量：版本 0.7.0，`dsh build` 部署，重启 Host 生效。回滚：`dsh.yaml` 中改回 0.6.2 的源码提交或 `enabled:false`。网关是旧版本（没有 `each[].id`）时不出现按钮。
+纯增量：版本 0.6.3（按默认 patch 规则；0.7.0 是发版号误判，已从 npm 撤回），`dsh build` 部署，重启 Host 生效。回滚：`dsh.yaml` 中改回 0.6.2 的源码提交或 `enabled:false`。网关是旧版本（没有 `each[].id`）时不出现按钮。
 
 ## Open Questions
 

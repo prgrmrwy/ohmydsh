@@ -16,7 +16,7 @@
 - **传输白名单**新增 `POST /magpie/quotas/codex-reset`，query 只允许 `user`、`credit`。
 - **投影**：`resets.each[].id` 只留在 host 内部，不出现在发给浏览器的响应里（保持现有「each 只投影 until/window」的浏览器边界）。
 - **UI 对齐 subscriptions**：箭头改为 12px SVG（展开时旋转 90°），与标题间距 6px；展开条目缩进 18px，与标题文字左对齐；条目行高 28px 以容纳按钮；按钮紧贴「完整重置」文字。
-- 文案 zh/en；版本 0.7.0；README（中/英）、CHANGELOG、`dsh.yaml` 条目说明同步。
+- 文案 zh/en；版本 0.6.3；README（中/英）、CHANGELOG、`dsh.yaml` 条目说明同步。
 
 **不在本期范围**：
 - 自建 Cloudflare/nginx 入口白名单（`home-substore` 的 `ops/magpie-cloudflare/nginx.conf`）放行 `codex-reset`：属于另一个仓库与线上部署，需单独批准；放行前插件会如实显示网关返回的 403/404。
