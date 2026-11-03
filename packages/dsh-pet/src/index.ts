@@ -1265,7 +1265,7 @@ async function initialize(
 
   ctx.effect(
     () =>
-      ctx.on('agent/created', async (payload: { agent?: unknown }): Promise<undefined> => {
+      ctx.on('agent/created', async (payload: { agent?: unknown; source?: string }): Promise<undefined> => {
         const agent = payload?.agent as
           | { id?: unknown; ctx?: unknown }
           | undefined
@@ -1332,6 +1332,12 @@ async function initialize(
               }, result.composition, result.pending)
             }
             await locusPrepublication.publishClaimed(sessionId)
+            if (payload.source === 'resume') {
+              // Repair missing workspace accounting from an earlier creation.
+              void attachSessionToWorkspace(sessionId).catch(error => {
+                petLog(`dsh-pet locus child workspace accounting failed: ${String(error)}`)
+              })
+            }
             composedAgents.add(agent.ctx as object)
             contextToolAgents.add(agent.ctx as object)
             // The circle marker is deliberately NOT set here. `install()` adds
@@ -1634,10 +1640,10 @@ async function initialize(
     return queued.some(message => isClientUserMessage(message))
   }
 
-  const attachSessionToWorkspace = async (
+  async function attachSessionToWorkspace(
     sessionId: string,
     targetWorkspaceId?: string,
-  ): Promise<void> => {
+  ): Promise<void> {
     const target = targetWorkspaceId ?? workspaceId
     const workspace = ctx.workspaceRegistry.get(target as never)
     await workspace?.attachSession(sessionId as never)
@@ -1765,7 +1771,9 @@ async function initialize(
             } catch (error) {
               petLog(`dsh-pet locus child could not be titled: ${String(error)}`)
             }
-            void attachSessionToWorkspace(childSessionId, input.workspaceId).catch(error => {
+            // The entry's workspaceId authorizes the source project; the child
+            // inherits its locus main's Pet cwd and belongs to the Pet workspace.
+            void attachSessionToWorkspace(childSessionId).catch(error => {
               petLog(`dsh-pet locus child workspace accounting failed: ${String(error)}`)
             })
           },

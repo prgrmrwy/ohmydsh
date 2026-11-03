@@ -27,6 +27,7 @@
 | specs/dsh-pet/spec.md → 子代激活受运行体名额约束时 fail closed | 名额已满时创建 locus child | 既有测试（实施时定位） | `名额已满时创建 locus child` | 🟢 existing |
 | specs/dsh-pet/spec.md → 子代激活受运行体名额约束时 fail closed | 只读访问不长期占用名额 | packages/dsh-pet/test/locus-capacity.test.ts | `只读访问不长期占用名额` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 三层实体 | locus 主会话归 DSH Pet，入口仍关联干活项目 | packages/dsh-pet/test/locus-three-tier-entity.test.ts | `locus 主会话归 DSH Pet，入口仍关联干活项目` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 三层实体 | Pet 子会话新建与冷恢复登记，项目读取边界保持 | packages/dsh-pet/test/locus-host-wiring.test.ts | `Pet 工作区子会话仍按持久绑定读取项目，拒绝 Pet 状态且冷恢复保持` | 🟢 green |
 | specs/pet-locus-media-access/spec.md → Locus project-read guard 限制 safe child 文件读取 | Pet 运行目录与来源项目分离 | packages/dsh-pet/test/locus-project-read-guard.test.ts | `Pet cwd does not grant state access; the bound work project remains readable` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 三层实体 | 同一干活主会话服务多个入口 | packages/dsh-pet/test/locus-three-tier-entity.test.ts | `同一干活主会话服务多个入口` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 三层实体 | locus 主会话工具面锁死 | packages/dsh-pet/test/locus-three-tier-entity.test.ts | `locus 主会话工具面锁死` | 🟢 green |

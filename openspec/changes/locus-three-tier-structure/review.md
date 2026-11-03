@@ -15,6 +15,10 @@
 
 范围：以 `86e7955a` 为基线的本轮全部修复 diff。结论：PASS，无阻断项。现行“换绑与归档按层处理”要求 W 可用而 M 归档/删除/preset 无效时替换 M。本轮修复该既有要求的路由断点，不改变授权模型：`needsInitialization=false` 只代表无需首次建入口，不能代表 M 可服务。已知入口进入 `ensureForDelivery` 核验并按既有策略复用/替换；仅具体的 `LocusResolutionError(locus-unusable)` 可从读拒绝进入该流程；未知读错仍拒绝，不把来源归档或所有者退出转为新建默认来源。已有真实 resolution/provisioning 保持来源、配对、空闲与代际校验。新增真实 admission→channel→resolution→provisioning 共享仓储测试，覆盖同时归档后只恢复 W、preset 漂移、active 复用与 stopped 保护；旧代码 2 failed / 22 passed，修复后 106 项定向通过。三个旧夹具把检查接口误写成“已有即抛错”，现改为返回与读接口相同的现有投影；图片降级、评论重投和官方独立轮次的行为断言保持。全量 Pet 2936 passed / 4 skipped，build/typecheck、strict change、artifact check 通过。本轮未新增 compat patch、依赖或数据库迁移。正式飞书响应及现场 M 替换仍待部署后所有者再次 at 验证，不据源码回归勾选 27.3。
 
+## 2026-11-04 子会话工作区登记实现审查（主控）
+
+范围：以 `ca651235` 为基线的本轮全部 diff。结论：PASS，无阻断项。afterCreated 原来把来源项目 workspaceId 当成运行归属，官方 attach 因 cwd=Pet 拒绝；现改用已确保的 Pet workspace。仅修未来新建会留下现存 child 未登记，因此通过组合核验的 resume 路径也幂等补齐登记。辅助函数改为局部函数声明，允许较早注册的 resume 回调安全引用；运行归属依旧取已完成初始化的 Pet workspace。工作区登记保持 fail-soft，不改 header、来源项目、权限、工具档位或子代代际；失败仍记录诊断。Host 夹具不再把所有 ID 映射为一个 workspace，改为 Pet/项目两个独立对象并核验每次 attach 的 cwd；新建与冷恢复分别先观察 1 failed / 4 passed，再修复。最终 Pet build/typecheck 和全量 2936 passed / 4 skipped。只读真机证据已核对当前第 3 代、父子关系、工具白名单、finish 成功、completed turn、常驻数量与 Host RSS 单点，见 live-acceptance.md；不能据此提前确认尚未在新部署上触发的项目读/私有根拒绝/话题/改档位/中断恢复。
+
 ## Metadata
 
 - 轮次：round 7；时间基准：2026-11-03T19:30:58+08:00。
