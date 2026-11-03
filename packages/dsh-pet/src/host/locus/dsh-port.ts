@@ -143,6 +143,8 @@ export interface ProductionLocusDshPortDeps {
     applyPolicy(session: Session): void | Promise<void>
     /** Names of every tool the live agent can see. */
     visibleTools(agent: { readonly id: SessionId }): readonly string[]
+    /** Denied names an execution guard on this exact agent refuses. */
+    guardedTools?(agent: { readonly id: SessionId }): readonly string[]
   }
   /** Optional pure title-fold override for focused tests. */
   readonly foldSessionTitle?: (
@@ -527,6 +529,7 @@ export function createProductionLocusDshPort(
         }[])
         const observed: LocusMainObservedSurface = {
           toolNames: lockdown.visibleTools({ id: handle.agent.id }),
+          guarded: lockdown.guardedTools?.({ id: handle.agent.id }) ?? [],
           approval: settings.approval,
           sandbox: settings.sandbox,
         }

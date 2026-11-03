@@ -674,17 +674,19 @@ async function initialize(
     if (locusMainScopes.has(scope)) return
     const tools = scope.get('tools') as {
       restrict?: (filter: { deny: readonly string[] }) => () => void
+      guard?: (guard: (exec: { name: string }) => string | undefined) => () => void
     } | undefined
-    if (typeof tools?.restrict !== 'function') {
-      throw new PetError('INTERNAL', 'Agent-scoped tools.restrict is unavailable')
+    if (typeof tools?.restrict !== 'function' || typeof tools.guard !== 'function') {
+      throw new PetError('INTERNAL', 'Agent-scoped tools.restrict/guard is unavailable')
     }
-    // The whitelist always mounts fs and shell. Absent global delegation names
-    // cannot be passed to restrict; the runtime rejects unknown tool names.
-    const live = ctx.agents.get(sessionId as never)
-    const available = live === undefined
-      ? new Set(['bash', 'write', 'edit', ...ctx.tools.schemas().map(tool => tool.name)])
-      : new Set(ctx.tools.schemas(live).map(tool => tool.name))
-    tools.restrict({ deny: LOCUS_MAIN_DENIED_TOOLS.filter(name => available.has(name)) })
+    // restrict only accepts GLOBAL names; absent or scope-local names are
+    // rejected by the runtime. Scoped registrations (Agent Team mounts its
+    // tools into every ordinary root) stay visible, so the guard below is what
+    // refuses them, together with every other denied name.
+    const global = new Set(['bash', 'write', 'edit', ...ctx.tools.schemas().map(tool => tool.name)])
+    tools.restrict({ deny: LOCUS_MAIN_DENIED_TOOLS.filter(name => global.has(name)) })
+    const denied = new Set(LOCUS_MAIN_DENIED_TOOLS)
+    tools.guard(exec => denied.has(exec.name) ? 'Locus 主会话只做协调，不能调用该工具' : undefined)
     registerPetLocusMainTools(scope, locusMainToolsDeps)
     locusMainScopes.add(scope)
   }
@@ -1286,6 +1288,7 @@ async function initialize(
               toolNames: ctx.tools.schemas(live).map(tool => tool.name),
               approval: settings.approval,
               sandbox: settings.sandbox,
+              guarded: LOCUS_MAIN_DENIED_TOOLS,
             })
             if (!attestation.ok) throw new PetError('INTERNAL', `Locus main lockdown failed: ${attestation.leaks.join(', ')}`)
             return undefined
@@ -1938,6 +1941,12 @@ async function initialize(
           visibleTools: agent => {
             const live = ctx.agents.get(agent.id as never)
             return live === undefined ? [] : ctx.tools.schemas(live).map(schema => schema.name)
+          },
+          // restrict ran first; only a scope that passed installLocusMainScope
+          // carries the execution guard over the denied names.
+          guardedTools: agent => {
+            const live = ctx.agents.get(agent.id as never)
+            return live !== undefined && locusMainScopes.has(live.ctx as object) ? LOCUS_MAIN_DENIED_TOOLS : []
           },
         },
       })

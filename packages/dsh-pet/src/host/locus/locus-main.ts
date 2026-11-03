@@ -20,13 +20,31 @@
 import { LOCUS_MAIN_PRESET } from './aggregate.js'
 import { LOCUS_DELEGATION_DENYLIST } from './composition.js'
 
-/** Tools a locus main may never have, whatever the preset offers. */
-export const LOCUS_MAIN_DENIED_TOOLS: readonly string[] = Object.freeze([
+/**
+ * Tools the official Agent Team plugin registers into every ordinary root's OWN
+ * scope (a locus main is one). `tools.restrict` cannot hide scoped
+ * registrations, so for these the execution guard is the enforcement.
+ */
+export const LOCUS_TEAM_TOOLS: readonly string[] = Object.freeze([
+  'spawn_teammate',
+  'send_message',
+  'list_agents',
+  'interrupt_agent',
+  'wait_agent',
+  'team_task_create',
+  'team_task_get',
+  'team_task_list',
+  'team_task_update',
+])
+
+/** Tools a locus main may never call, whatever the preset or plugins offer. */
+export const LOCUS_MAIN_DENIED_TOOLS: readonly string[] = Object.freeze([...new Set([
   'bash',
   'write',
   'edit',
   ...LOCUS_DELEGATION_DENYLIST,
-])
+  ...LOCUS_TEAM_TOOLS,
+])])
 
 /** What the Host reads back about a freshly built locus main. */
 export interface LocusMainObservedSurface {
@@ -36,6 +54,8 @@ export interface LocusMainObservedSurface {
   readonly approval: string | undefined
   /** The effective sandbox mode, when it could be read. */
   readonly sandbox: string | undefined
+  /** Denied names a Host execution guard on this exact agent refuses. */
+  readonly guarded?: readonly string[]
 }
 
 export type LocusMainAttestation =
@@ -53,7 +73,9 @@ export type LocusMainAttestation =
 export function attestLocusMainSurface(observed: LocusMainObservedSurface): LocusMainAttestation {
   const leaks: string[] = []
   for (const name of observed.toolNames) {
-    if (LOCUS_MAIN_DENIED_TOOLS.includes(name)) leaks.push(`tool:${name}`)
+    // Visible-but-guarded is accepted only because scoped registrations
+    // cannot be hidden; an unguarded denied tool is a real leak.
+    if (LOCUS_MAIN_DENIED_TOOLS.includes(name) && !observed.guarded?.includes(name)) leaks.push(`tool:${name}`)
   }
   if (!observed.toolNames.some(name => name.startsWith('collab_'))) leaks.push('missing:collab_*')
   if (observed.approval !== 'never') leaks.push(`approval:${observed.approval ?? 'unreadable'}`)

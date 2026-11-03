@@ -28,6 +28,7 @@
 | specs/dsh-pet/spec.md → 子代激活受运行体名额约束时 fail closed | 只读访问不长期占用名额 | packages/dsh-pet/test/locus-capacity.test.ts | `只读访问不长期占用名额` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 三层实体 | 同一干活主会话服务多个入口 | packages/dsh-pet/test/locus-three-tier-entity.test.ts | `同一干活主会话服务多个入口` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 三层实体 | locus 主会话工具面锁死 | packages/dsh-pet/test/locus-three-tier-entity.test.ts | `locus 主会话工具面锁死` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → Locus 三层实体 | 插件挂入自有作用域的委派工具在执行时被拒 | packages/dsh-pet/test/locus-host-wiring.test.ts | `插件挂入自有作用域的委派工具在执行时被拒` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → Locus 三层实体 | 干活主会话不得是子会话 | packages/dsh-pet/test/locus-three-tier-entity.test.ts | `干活主会话不得是子会话` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 入口建立统一为一条路径 | auto 建立 | packages/dsh-pet/test/locus-establish.test.ts | `auto 建立` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 入口建立统一为一条路径 | 绑定到已有干活主会话复用 locus 主会话 | packages/dsh-pet/test/locus-establish.test.ts | `绑定到已有干活主会话复用 locus 主会话` | 🟢 green |

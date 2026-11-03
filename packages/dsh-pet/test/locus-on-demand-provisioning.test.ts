@@ -318,6 +318,20 @@ describe('locus tree is built on demand by the first qualifying @ message', () =
     }
   })
 
+  it('a failed establishment tells the owner instead of going silent', async () => {
+    const controls: { target: { chatId: string; messageId: string }; text: string; senderOpenId?: string }[] = []
+    const host = await composeOnDemandHost({ failFirstEstablishment: true, controls })
+    try {
+      await host.controller.handle(inbound('om-fails', '@Pet hello'))
+      expect(controls).toHaveLength(1)
+      expect(controls[0]!.target).toMatchObject({ chatId: CHAT_ID, messageId: 'om-fails' })
+      expect(controls[0]!.text).toMatch(/^入口建立失败：/)
+      expect(host.queued).toEqual([])
+    } finally {
+      await host.close()
+    }
+  })
+
   it('a first-child creation failure settles only that Delivery and retries the same generation on the next message', async () => {
     const host = await composeOnDemandHost({ failFirstCreate: true })
     try {

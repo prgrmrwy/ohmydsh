@@ -183,6 +183,25 @@ describe('actual Host three-tier assembly', () => {
     expect(before).not.toContain('locus_note')
   })
 
+  it('插件挂入自有作用域的委派工具在执行时被拒: refuses Agent Team tools mounted in its own scope', async () => {
+    const h = await host()
+    // The official Team plugin makes every ordinary root a Lead and registers
+    // its tools into that agent's OWN scope, which tools.restrict cannot hide.
+    const team = ['spawn_teammate', 'team_task_create']
+    const ran: string[] = []
+    for (const name of team) {
+      h.main.ctx.tools.register(defineTool({
+        name, description: 'Team probe', parameters: {},
+        output: { schema: { type: 'boolean' }, render: () => [] }, execute: async () => { ran.push(name); return true },
+      }))
+    }
+    await h.ctx.serial(scopeTarget(h.main, h.main), 'agent/created', { agent: h.main, source: 'resume' } as never)
+    expect(h.ctx.tools.schemas(h.main).map(tool => tool.name)).toEqual(expect.arrayContaining(team))
+    for (const name of team) expect(await h.execute(h.main, name)).toMatchObject({ isError: true })
+    expect(ran).toEqual([])
+    expect(await h.execute(h.main, 'collab_status')).not.toMatchObject({ isError: true })
+  })
+
   it.each(['resolve', 'reject'] as const)('首工具等待持久绑定 / 首轮持久绑定失败拒绝执行: gates first caller-bound body on deferred durable UUID bind: %s', async outcome => {
     const h = await host()
     await seedNotCreated(h)

@@ -908,7 +908,12 @@ Host 重启可能恰好发生在某条 Delivery 已被 child 认领并开始执�
 
 #### Scenario: locus 主会话工具面锁死
 - **WHEN** 读取 locus 主会话的已发布工具面与会话设置
-- **THEN** 不含 `bash`、`write`、`edit` 与任何委派工具，含 `collab_*`；审批为 `never`，沙箱为 `read-only`
+- **THEN** 不含 `bash`、`write`、`edit` 与任何全局委派工具，含 `collab_*`；审批为 `never`，沙箱为 `read-only`
+
+#### Scenario: 插件挂入自有作用域的委派工具在执行时被拒
+- **GIVEN** 官方 Agent Team 把 `spawn_teammate`、`team_task_*` 等工具注册进每个普通根会话的自有作用域（`tools.restrict` 无法隐藏自有作用域注册）
+- **WHEN** locus 主会话调用其中任一工具
+- **THEN** Host 在该 agent 作用域上的执行守卫拒绝，工具体不执行；可见但未受该守卫覆盖的禁用工具仍视为泄漏并拒绝发布
 
 #### Scenario: 干活主会话不得是子会话
 - **WHEN** 所有者以一个 subagent 会话为目标执行 `/bind`

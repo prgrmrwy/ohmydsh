@@ -2200,6 +2200,10 @@ export class LocusChannelController {
       })
     } catch (error: unknown) {
       this.logReason('locus-bootstrap-failed', error)
+      // Only an admitted owner reaches bootstrap; silence here left the owner
+      // with no signal at all. The controller's errors are owner-facing text.
+      const reason = error instanceof Error && error.message.trim() !== '' ? error.message : '原因未知'
+      await this.sendControlReceipt(message.replyTarget, `入口建立失败：${reason}`, message.senderOpenId)
       return undefined
     }
     locus = normalizeActiveLocus(raw, endpoint)
