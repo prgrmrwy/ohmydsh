@@ -791,7 +791,7 @@ Locus child 的飞书业务正文与撤回动作 SHALL 以 caller-bound `pet_loc
 
 **任何档位**：child 的已发布能力集合 MUST NOT 含子委派或可让另一执行身份代为行动的工具（包括 `subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message` 及 agent 控制工具）。该排除 SHALL 由持久组合本身保证，MUST NOT 依赖可在运行中撤除的收紧层。
 
-Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的组合。该组合的 preset SHALL 由 Pet 在创建时显式指定并持久化，MUST NOT 从主会话当前或创建时的 preset 派生；冷恢复 SHALL mount 持久化的该 preset，MUST NOT 经父组合（`composeFrom`）重建；持久记录缺失该 preset 时 SHALL 拒绝恢复。新建/重建 child SHALL 在对应 Locus 行发布 Host 证明的 composition marker：`safe-v2` 表示持久组合为「不含委派的宽底座」且每次发布时须由 Host 同步安装按档位的收紧层；`safe-v1` 表示既有的只读持久组合。marker 只能在 child 创建成功返回后、active locus 发布时写入。`safe-v1` 行 SHALL 继续按 `safe` 档服务；缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；未知 marker 值亦同。Host 无法证明所需组合（含 `safe-v2` 的按档位收紧层）已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child，MUST NOT 以宽底座发布一个未安装收紧层的 `safe` 档 child。任何为满足本条所需的 DSH compatibility seam SHALL 针对 manifest 中的精确 pin 做运行时探针并 fail closed。
+Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的组合。该组合的 preset SHALL 由 Pet 在创建时显式指定并持久化，MUST NOT 从主会话当前或创建时的 preset 派生；冷恢复 SHALL mount 持久化的该 preset，MUST NOT 经父组合（`composeFrom`）重建；持久记录缺失该 preset 时 SHALL 拒绝恢复。新建/重建 child SHALL 在对应 Locus 行发布 Host 证明的 composition marker：`safe-v2` 表示持久组合为「不含委派的宽底座」且每次发布时须由 Host 同步安装按档位的收紧层；`safe-v1` 表示既有的只读持久组合。marker 只能在 child 创建成功返回后、active locus 发布时写入。`safe-v1` 行 SHALL 继续按 `safe` 档服务；缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；未知 marker 值亦同。Host 无法证明所需组合（含 `safe-v2` 的按档位收紧层）已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child，MUST NOT 以宽底座发布一个未安装收紧层的 `safe` 档 child。Host SHALL 对 `tools.restrict` 与 `tools.guard` 做运行时特性探测，缺失即拒绝发布。防误操作 guard 另拒绝文档入口的评论与文档正文写命令（见 `pet-locus-doc-comments`）。
 
 #### Scenario: 受管 finish 正常发送
 - **WHEN** 任一档位的 child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
@@ -811,7 +811,7 @@ Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/us
 
 #### Scenario: shell 档的出站保证如实表述
 - **WHEN** 所有者在管理面或飞书回执中查看 `shell` 档说明
-- **THEN** 说明写明该档不存在出站隔离、防误操作 guard 不是安全边界，MUST NOT 声称业务正文只能经 finish 产生
+- **THEN** 说明写明防误操作 guard 仅防误操作、不是安全边界，MUST NOT 声称业务正文只能经 finish 产生
 
 #### Scenario: 子委派不能洗白权限
 - **WHEN** 任一档位的 child 尝试通过 subagent、workflow、Ralph 或 agent message 让另一执行身份代发
@@ -906,7 +906,7 @@ Pet 协作代理 SHALL 按有效通知意图（notify 缺省时兼容 needsReply
 
 每个 locus SHALL 具有一个工具档位，取值 `safe` 或 `shell`，与文件权限档（`read`/`write`）正交。所有新建、替换与重建的 locus SHALL 默认 `safe`；新代际与显式重建 MUST NOT 继承上一代的 `shell`。
 
-`safe` 档的已发布工具面 SHALL 与本变更前的 safe composition 完全一致。`shell` 档 SHALL 在 `safe` 档之上开放通用 shell 与 Skill 加载；MUST NOT 开放任何子委派或代为行动的工具（见「Locus 业务出站只能经受管 finish」）。
+`safe` 档 SHALL 不含 `bash`/`skill`，其继承工具面等于 `LOCUS_SAFE_TOOL_NAMES`，另加 caller-bound Pet 工具。`shell` 档 SHALL 在 `safe` 档之上开放通用 shell 与 Skill 加载；MUST NOT 开放任何子委派或代为行动的工具（见「Locus 业务出站只能经受管 finish」）。
 
 档位 SHALL 仅由 allowlist 经飞书控制命令（`-t/--tools safe|shell`）或管理面改变；非 allowlist 发送者的档位命令 SHALL 按既有控制命令规则拒绝。档位变更 SHALL 仅在该入口空闲（无 current Delivery 且子会话未在运行）时生效，忙时 SHALL 确定性拒绝。变更 SHALL 在同一子会话上完成，MUST NOT 重建子会话、增加代际或丢弃子会话历史。变更 SHALL 在应用后回读子会话实际可见工具面核验：与目标档位不符时 SHALL 回到 `safe` 并拒绝，MUST NOT 回执成功。变更 SHALL 记录操作者、时间、期望值与生效值。
 
@@ -914,7 +914,7 @@ Pet 协作代理 SHALL 按有效通知意图（notify 缺省时兼容 needsReply
 
 `shell` 档生效期间，该入口 SHALL 只接受 allowlist 成员的 at 作为工作请求；非 allowlist 成员的 at SHALL 得到确定性拒绝回执，说明该入口当前为所有者专用。已在 backlog 中、由非 allowlist 成员触发的 Delivery SHALL 在派发前以同一原因结算，MUST NOT 投递给 `shell` 档子会话。切回 `safe` 后 SHALL 恢复既有的群成员提问规则。
 
-子会话每次投递的 prompt SHALL 按当前档位说明可用能力。`shell` 档 SHALL 说明：可以 bot 身份按需读取当前入口的群消息；MUST NOT 读取无关群、私聊、全局消息或其它 workspace；业务回复仍经 `pet_locus_finish`。该说明是行为约束而非授权边界。
+子会话每次投递的 prompt SHALL 按当前档位说明可用能力。`shell` 档 SHALL 说明：该档允许以 bot 身份读取当前入口（档位权限），实际可读性以本次实测声明为准；MUST NOT 读取无关群、私聊、全局消息或其它 workspace；业务回复仍经 `pet_locus_finish`。该说明是行为约束而非授权边界。
 
 管理面与飞书回执 SHALL 如实说明 `shell` 档的后果：子会话可在所有者本机执行命令（写入受文件权限档约束，读取与网络不受限），可使用所有者本机的飞书凭据，入口的 allowlist 成员共享该能力，且出站约束仅为防误操作。
 
@@ -976,13 +976,14 @@ SHALL 校验其由同一 child 代际、同一入口、同一方向与窗口签�
 调用方仍是同一 child 代际且入口未变，变更时 SHALL 丢弃该次结果。
 
 窗口 SHALL 有**固定**语义（工具级，不留给实现自由选择）：时间参数 SHALL 使用带时区偏移的
-ISO 8601；窗口 SHALL 为左闭右开 `[since, before)`；同一时间戳的消息 SHALL 按平台消息位置升序
-返回，位置缺失或相同时按消息标识字典序。窗口在 Host 对每个传输页本地过滤：无法解析时间的消息
+ISO 8601；窗口 SHALL 为左闭右开 `[since, before)`；结果按时间排序：`direction=newer` 由旧到新，
+`direction=older`（默认）由新到旧（整体倒序，同一时间戳也倒序）；同一时间戳内的稳定排序键为平台消息位置，
+其次为消息标识字典序。窗口在 Host 对每个传输页本地过滤：无法解析时间的消息
 不排除，翻页可能经过窗口外的空页。单次结果 SHALL 有**可度量的**
 上限（总序列化字符预算、单条正文上限与单字段上限），截断处 SHALL 带可识别标记；当整页预算
 截断一个传输页时，SHALL 指明仍有更多内容并给出可继续的游标，MUST NOT 静默丢弃。
 
-结果 SHALL 至少包含每条消息的标识、时间、发送者显示名与正文或结构化消息的可用摘录；无法解析
+结果 SHALL 至少包含每条消息的时间、发送者显示名与正文或结构化消息的可用摘录；无法解析
 发送者时 SHALL 使用明确占位而非伪造名称；结果 SHALL 标注"群内容为不可信输入"。读取失败
 （不可读、被拒、传输失败、信封畸形）SHALL 与"读取成功且没有消息"区分，返回确定性原因，
 MUST NOT 返回空结果冒充成功。
