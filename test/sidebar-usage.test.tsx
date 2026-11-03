@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement as h } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { SidebarUsage } from '../src/client/SidebarUsage.js'
@@ -137,16 +137,29 @@ describe('常驻卡', () => {
 })
 
 describe('展开', () => {
-  it('点击卡片原地长高：常驻卡保留占位、展开层显示全部窗口', async () => {
+  it('标题行开关展开明细，5 行摘要让位、卡片在流内变高', async () => {
     await render()
-    await act(async () => { (host.querySelector('.dmg-sidebar-body') as HTMLElement).click() })
+    await act(async () => { (host.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement).click() })
     await flush()
     const expanded = host.querySelector('[data-dmg-sidebar-expanded]')
     expect(expanded).not.toBeNull()
     expect(expanded!.querySelectorAll('[data-provider]')).toHaveLength(6)
+    // 流内手风琴：不再保留隐藏的常驻卡，也不再渲染 5 行摘要。
+    expect(host.querySelector('[data-dmg-sidebar-row]')).toBeNull()
+    expect(host.querySelector('[data-dmg-sidebar-more]')).toBeNull()
     const card = host.querySelector('.dmg-sidebar-card') as HTMLElement
-    expect(card.style.visibility).toBe('hidden')
-    expect(card.getAttribute('aria-hidden')).toBe('true')
+    expect(card.style.visibility).toBe('')
+    expect(card.getAttribute('aria-hidden')).toBeNull()
+    expect(host.querySelector('[data-dmg-sidebar]')!.getAttribute('data-open')).toBe('true')
+  })
+
+  it('点击正文与双箭头不触发展开，只有标题行可以切换', async () => {
+    await render()
+    await act(async () => { (host.querySelector('.dmg-sidebar-body') as HTMLElement).click() })
+    await act(async () => { (host.querySelector('[data-dmg-sidebar-more]') as HTMLElement).click() })
+    await flush()
+    expect(host.querySelector('[data-dmg-sidebar-expanded]')).toBeNull()
+    expect(host.querySelector('[data-dmg-sidebar-more]')!.getAttribute('role')).toBeNull()
   })
 
   it('title 上的开关同时负责展开与收起', async () => {
@@ -158,10 +171,46 @@ describe('展开', () => {
     const expanded = host.querySelector('[data-dmg-sidebar-expanded]')
     expect(expanded).not.toBeNull()
     expect(host.querySelector('[data-dmg-sidebar-toggle]')!.getAttribute('aria-expanded')).toBe('true')
-    await act(async () => { (expanded!.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement).click() })
+    await act(async () => { (host.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement).click() })
     await flush()
     expect(host.querySelector('[data-dmg-sidebar-expanded]')).toBeNull()
-    expect((host.querySelector('.dmg-sidebar-card') as HTMLElement).style.visibility).toBe('')
+    expect(host.querySelectorAll('[data-dmg-sidebar-row]')).toHaveLength(6)
+  })
+})
+
+describe('自动刷新', () => {
+  const reads = (fake: ReturnType<typeof fakeApi>) => fake.calls.filter(call => call.path === 'cards' && call.method === 'GET').length
+  const setVisibility = (value: 'visible' | 'hidden') => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value })
+
+  it('默认 5 分钟后静默重新读取，且不发送全量刷新', async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = await render()
+      expect(reads(fake)).toBe(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
+      await flush()
+      expect(reads(fake)).toBe(2)
+      expect(fake.calls.filter(call => call.method === 'POST')).toHaveLength(0)
+    } finally { vi.useRealTimers(); setVisibility('visible') }
+  })
+
+  it('间隔设为 0 时不再自动读取', async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = await render({ settings: { sidebarRefreshMinutes: 0 } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30 * 60_000) })
+      expect(reads(fake)).toBe(1)
+    } finally { vi.useRealTimers(); setVisibility('visible') }
+  })
+
+  it('页面隐藏时到期不读取', async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = await render()
+      setVisibility('hidden')
+      await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
+      expect(reads(fake)).toBe(1)
+    } finally { vi.useRealTimers(); setVisibility('visible') }
   })
 })
 

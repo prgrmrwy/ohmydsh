@@ -5,7 +5,7 @@ import { errorText, type Api } from './api.js'
 import { settingsCss } from './styles.js'
 import { t } from './locales.js'
 import { loadCards, refreshCards } from './sidebar-api.js'
-import { hydrateSidebarPreference, readSidebarPreference, subscribeSidebarPreference } from './sidebar-preference.js'
+import { DEFAULT_REFRESH_MINUTES, hydrateSidebarPreference, readSidebarPreference, subscribeSidebarPreference, type SidebarPreference } from './sidebar-preference.js'
 import {
   ageMinutes, cardIdentity, cardReadTime, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
   type SidebarRow,
@@ -15,11 +15,12 @@ import { formatTime, type Card, type CardsView } from './view-model.js'
 /**
  * Sidebar usage card (`sidebar.footer.action`, owner prop `wide`).
  *
- * Wide sidebar: a dense resident card with one weekly row per upstream (at most
- * five visible), a double-chevron when more exist, and a single refresh.
- * Clicking it grows the same card upward in place; the resident card keeps its
- * flow slot so the session list never shrinks. Collapsed sidebar: one icon that
- * opens the same content as a 320px anchored popover.
+ * Wide sidebar: an accordion. The header row is the only interactive surface
+ * (except the refresh button): clicking it toggles the detail, which grows in
+ * flow and takes height away from the session list instead of covering it.
+ * Collapsed, it shows one weekly row per upstream (at most five) plus a
+ * decorative overflow chevron. Collapsed sidebar: one icon that opens the same
+ * content as a 320px anchored popover.
  *
  * Reads are event-driven through `sidebar-api` (60s TTL); no timers.
  */
@@ -32,7 +33,7 @@ const MAX_ROWS = 5
 const RAIL_POPOVER_WIDTH = 320
 
 export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
-  const [enabled, setEnabled] = useState<boolean | undefined>(() => readSidebarPreference())
+  const [preference, setPreference] = useState<SidebarPreference | undefined>(() => readSidebarPreference())
   const [view, setView] = useState<CardsView | undefined>(undefined)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -48,10 +49,12 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   // Follow the host preference (hydrated once per page, then kept live by the
   // settings toggle through the module store).
   useEffect(() => {
-    const unsubscribe = subscribeSidebarPreference(value => setEnabled(value))
-    void hydrateSidebarPreference(api).then(() => setEnabled(readSidebarPreference()))
+    const unsubscribe = subscribeSidebarPreference(value => setPreference(value))
+    void hydrateSidebarPreference(api).then(() => setPreference(readSidebarPreference()))
     return unsubscribe
   }, [api])
+  const enabled = preference?.usage
+  const refreshMinutes = preference?.refreshMinutes ?? DEFAULT_REFRESH_MINUTES
 
   useEffect(() => {
     if (enabled !== true || api === undefined) return
@@ -88,6 +91,26 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     document.addEventListener('visibilitychange', onVisibilityChange)
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [enabled, api])
+
+  // Auto refresh: only when the card is enabled and the interval is positive.
+  // A chained timeout avoids overlap; a hidden page only reschedules (the
+  // visibility listener above still re-reads once the page returns).
+  useEffect(() => {
+    if (enabled !== true || api === undefined || refreshMinutes <= 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stopped = false
+    const interval = refreshMinutes * 60_000
+    const read = (): void => { void loadCards(api, { force: true }).then(setView, () => { /* keep the last reading */ }) }
+    const schedule = (): void => {
+      timer = setTimeout(() => {
+        if (stopped) return
+        if (document.visibilityState === 'visible') read()
+        schedule()
+      }, interval)
+    }
+    schedule()
+    return () => { stopped = true; if (timer !== undefined) clearTimeout(timer) }
+  }, [enabled, api, refreshMinutes])
 
   const railOpen = open && !wide
   const pos = useAnchoredPosition({ open: railOpen, anchorRef, panelRef, side: 'top', align: 'start', gap: 8, margin: 12 })
@@ -163,33 +186,25 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   const scrollable = rows.length > MAX_ROWS
   return h('div', { className: 'dmg-sidebar', 'data-dmg-sidebar': '', 'data-open': open },
     style,
-    h('div', { className: 'dmg-sidebar-slot' },
-      h('div', { className: 'dmg-sidebar-card', ...(open ? { style: { visibility: 'hidden' as const }, 'aria-hidden': true } : {}) },
-        head(),
-        h('div', {
-          className: `dmg-sidebar-body${scrollable ? ' is-scroll' : ''}`, role: 'button', tabIndex: 0,
-          ref: (node: HTMLDivElement | null): void => { bodyRef.current = node },
-          ...(bodyMax === undefined ? {} : { style: { maxHeight: bodyMax } }),
-          'aria-expanded': open, 'aria-label': t('sidebarExpand'),
-          onClick: expand,
-          onKeyDown: (event: { key: string; preventDefault(): void }) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); expand() } },
-        },
-          status !== undefined
-            ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
-            : rows.map(row => compactRow(row)),
+    h('div', { className: 'dmg-sidebar-card' },
+      head(),
+      open
+        ? h(Fragment, null,
+          notice !== '' ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, notice) : null,
+          h('div', { className: 'dmg-sidebar-detail', 'data-dmg-sidebar-expanded': '' }, detail(cards, now, status)),
+        )
+        : h(Fragment, null,
+          h('div', {
+            className: `dmg-sidebar-body${scrollable ? ' is-scroll' : ''}`,
+            ref: (node: HTMLDivElement | null): void => { bodyRef.current = node },
+            ...(bodyMax === undefined ? {} : { style: { maxHeight: bodyMax } }),
+          },
+            status !== undefined
+              ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
+              : rows.map(row => compactRow(row)),
+          ),
+          scrollable ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
         ),
-        scrollable ? h('div', {
-          className: 'dmg-sidebar-more', role: 'button', tabIndex: 0, 'data-dmg-sidebar-more': '', 'aria-label': t('sidebarExpand'),
-          onClick: expand,
-          onKeyDown: (event: { key: string; preventDefault(): void }) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); expand() } },
-        }, doubleChevron()) : null,
-      ),
-      open ? h('div', { className: 'dmg-sidebar-expanded', role: 'dialog', 'aria-label': t('sidebarTitle'), 'data-dmg-sidebar-expanded': '' },
-        head(),
-        h('div', { className: 'dmg-sidebar-rule', 'aria-hidden': true }),
-        notice !== '' ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, notice) : null,
-        h('div', { className: 'dmg-sidebar-detail' }, detail(cards, now, status)),
-      ) : null,
     ),
   )
 }
