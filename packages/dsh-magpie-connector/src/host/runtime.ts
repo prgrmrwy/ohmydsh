@@ -171,6 +171,7 @@ export class MagpieRuntime {
     const next: Settings = {
       lines: value.lines ?? [], visibleModels: value.visibleModels ?? {}, defaultEfforts: value.defaultEfforts ?? {},
       ...(value.credentialUpdatePending ? { credentialUpdatePending: value.credentialUpdatePending } : {}),
+      ...(value.sidebarUsage === true ? { sidebarUsage: true } : {}),
       ...(this.owners.length ? { knownOwners: this.owners } : {}),
     }
     for (const [key, field] of Object.entries(patch)) {
@@ -553,17 +554,19 @@ export class MagpieRuntime {
       lastSyncAt: gen.lastSyncAt, lastSyncError: gen.lastSyncError, lastSyncErrorKind: gen.lastSyncErrorKind,
       groups: [...new Set(gen.catalog.map(m => m.provider))].map(provider => ({ provider, models: gen.catalog.filter(m => m.provider === provider).map(m => ({ id: m.info.id, name: m.info.name, efforts: m.efforts })) })),
       visibleModels: this.store.value.visibleModels, defaultEfforts: this.store.value.defaultEfforts,
+      sidebarUsage: this.store.value.sidebarUsage === true,
       knownOwnersReset: this.knownOwnersReset, ownerLimitReached: this.rejectedOwners.length > 0, rejectedOwners: this.rejectedOwners,
       ...(this.registrationError ? { routeRegistrationError: this.registrationError } : {}),
     }))
   }
   /** Preference-only writes also persist the single clean schema (drops legacy fields). */
-  savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string> }) {
+  savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>; sidebarUsage?: boolean }) {
     const config = this.loadConfig()
     this.writeSettings({
       lines: config.lines,
       visibleModels: patch.visibleModels ?? this.store.value.visibleModels ?? {},
       defaultEfforts: patch.defaultEfforts ?? this.store.value.defaultEfforts ?? {},
+      sidebarUsage: patch.sidebarUsage ?? this.store.value.sidebarUsage,
       credentialUpdatePending: this.failedFields.length ? this.failedFields : undefined,
     })
   }

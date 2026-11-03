@@ -20,6 +20,8 @@ export interface Settings {
   credentialUpdatePending?: PendingCredential[]
   /** Owner keys seen so far (first-seen order, max {@link MAX_OWNERS}); each owns one registered LLM route. */
   knownOwners?: string[]
+  /** Sidebar usage card preference (host-persisted; absent means false). */
+  sidebarUsage?: boolean
 }
 export class SettingsStore {
   value: Settings = { lines: [], visibleModels: {}, defaultEfforts: {} }

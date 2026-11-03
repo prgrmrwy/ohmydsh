@@ -33,6 +33,8 @@ export interface SettingsView {
   routeRegistrationError?: { code: string; route?: string }
   /** knownOwners was invalid at load and reset to empty (spec 归属 route 持久). */
   knownOwnersReset?: boolean
+  /** Host-persisted sidebar usage card preference (absent = false). */
+  sidebarUsage?: boolean
   /** The owner cap (32) rejected new owners; `rejectedOwners` lists them. */
   ownerLimitReached?: boolean; rejectedOwners?: string[]
 }

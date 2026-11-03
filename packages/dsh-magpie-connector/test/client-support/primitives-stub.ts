@@ -7,3 +7,7 @@ export const IconChevronUpOutlineRegular = icon('chevron-up')
 export const IconChevronDownOutlineRegular = icon('chevron-down')
 export const IconTrashOutlineRegular = icon('trash')
 export const Tooltip = ({ children }: { children: unknown }) => children
+// Anchored placement and outside-pointer dismissal are pure browser geometry; jsdom has no layout,
+// so the stub reports "not measured yet" and never dismisses. Components must tolerate both.
+export const useAnchoredPosition = (): null => null
+export const useDismissOnOutsidePointer = (): void => {}
