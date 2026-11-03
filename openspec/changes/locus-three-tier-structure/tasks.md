@@ -4,6 +4,7 @@
 - [x] 1.2 rc.2 探针：冷恢复经过 `agent/created`（`source:'resume'`）且监听器失败使恢复失败；首条 prompt 创建时 `agent/created` 先于首轮认领、失败则首轮不执行；`startContinuable` 在首轮认领后才返回，故关联必须在 `agent/created` 内发布。见 [probes/agent-created-probe.md](probes/agent-created-probe.md)（官方未打补丁包、纯运行时隔离、假模型）
 - [ ] 1.3 新增 `locus-base` preset（白名单、中性命名、不含委派）并在 `dsh.yaml` 声明；先写失败测试断言展开后不含委派工具
 - [ ] 1.4 编写官方 subagent / `sessionQuery` 替身与 dsh-collab `owns` 夹具
+- [ ] 1.5 在退役 4 个补丁后的隔离预览 launcher 图上复核：列出实际注册的 `tools/execute` 包装层，确认读取类与本地文件/命令类工具（含 Worktree Session 约束的工具）路径上没有在调用工具体前等待的包装层；结论写入 design Risks。若发现会等待的包装层，停下交所有者决定（接受时间窗或改由 Pet 在内层补重判）
 
 ## 2. collab-kernel：接入方代人处置其托管成员的 request
 
@@ -159,9 +160,11 @@
 
 - [ ] 26.1 Write failing tests：工具面断言不含 `pet_inquire`、`pet_inquiry_answer`、`pet_collaboration_context*`、`pet_collaborators`、`pet_locus_request_execution`、`pet_locus_parent_lookup` 与子会话 `collab_*`
 - [ ] 26.2 删除 inquiry 子系统写路径、代理成员/戳/投影、collaboration 工具与 `collaboration_contexts` 写入；inquiry 表保留只读，管理面标"已退役"
-- [ ] 26.3 移除 `settlement-notice.patch` 与 `inquiry-isolation.patch` 及其构建/校验引用；保留 `newinquiry-tools-guard.patch`；更新 compat README 与 `dsh.yaml` 说明；compat 构建与包测试通过
-- [ ] 26.4 `PET_DOMAIN_VERSION` 升 18、`migrate-state-version.mjs` 只加 `locus_mains` 表；迁移测试断言其它表逐字节不变
-- [ ] 26.5 新增 ADR-0009（逐条回答 ADR-0007 待决事项与前置），ADR-0006、ADR-0007 加注记；BACKLOG 更新 B040、B042
+- [ ] 26.3 Write failing check：compat 构建产物不再替换 `dsh-subagent`、`dsh-agent-loop`、`dsh-tools` 与 4 个原生工具 owner 包，`ctx.tools.supportsFinalToolGuardRecheck` 不存在且 Pet 不读取它，Pet 工具定义上没有 `dsh.tool.managed-effect` 标记
+- [ ] 26.4 移除 4 个补丁（`settlement-notice`、`inquiry-isolation`、`newinquiry-tools-guard`、`native-managed-effects`）与其构建/运行图校验（`build.mjs`、`build-launcher.cjs` 哈希与组合哈希、`native-tools.package.template.json`、`package.template.json`（dsh-subagent）、`agent-loop.package.template.json`、`newtools.package.template.json`、`verify-native-managed-effects.mjs`、`test-native-managed-effects.cjs`、`test-native-owner-verifier.cjs`、`test-packaging.cjs`/`verify-isolated-loop.mjs` 中对应断言）；删除 `src/host/inquiry/managed-effects.ts`、`src/host/tools.ts` 的 `managedEffects` 接缝及 `test/inquiry-*`、`vitest.inquiry-managed-effects.config.ts`、`vitest.config.ts` 中的排除项；保留 `team-membership`、`model-display`；compat 构建与包测试通过，26.3 转绿
+- [ ] 26.5 更新 compat README（中英）与 `dsh.yaml` dsh-pet 说明（overlay 只剩 team-membership 与 model-display 两组）
+- [ ] 26.6 `PET_DOMAIN_VERSION` 升 18、`migrate-state-version.mjs` 只加 `locus_mains` 表；迁移测试断言其它表逐字节不变
+- [ ] 26.7 新增 ADR-0009（逐条回答 ADR-0007 待决事项与前置），ADR-0006、ADR-0007 加注记；BACKLOG 更新 B040、B042
 
 ## 27. 收尾
 

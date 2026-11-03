@@ -122,7 +122,7 @@
 
 ## Coverage Notes
 
-- 共 115 个场景全部映射：新增或改写 75 个（🔴），沿用未改 40 个（🟢 existing）。`pet-inquiry-runtime-channel` 为整体 REMOVED，无场景；其退役以 `npm test` 中 inquiry 测试被删除、工具面断言不含 `pet_inquire`/`pet_inquiry_answer` 覆盖（见 tasks）。
+- 共 115 个场景全部映射：新增或改写 75 个（🔴），沿用未改 40 个（🟢 existing）。`pet-inquiry-runtime-channel` 为整体 REMOVED，无场景；其退役以 `npm test` 中 inquiry 测试被删除、工具面断言不含 `pet_inquire`/`pet_inquiry_answer` 覆盖（见 tasks）。4 个补丁的退役没有 spec 场景，由 tasks 26.3 的构建产物检查（不再替换相关官方包、无 `supportsFinalToolGuardRecheck`、无 managed-effect 标记）与 compat 包测试把关；退役最终守卫重判导致的读取时间窗是所有者接受的风险（design Risks），不设"工具体不执行"的回归测试，改由 tasks 1.5 在实际 launcher 图上复核包装层；随补丁删除的测试（`test-packaging.cjs`、`verify-native-managed-effects.mjs` 等中的对应断言、`test/inquiry-*`）不再计入。
 - 夹具：dsh-pet 现有 `test/harness.ts`（`failOnWriteNumber` 等）；新增官方 subagent 替身需能模拟 `startContinuable` 带首条 prompt、`agent/created` 回滚、名额拒绝、`sendMessage` 冷恢复；`sessionQuery.observeSession` 替身需能返回带/不带合成 `turn/end interrupted` 的事件；dsh-collab 侧用现有集成测试夹具加 adapter `owns`。
 - 运行时探针（非单测）：实施第一组任务在 rc.2 上实测"冷恢复经过 `agent/created`"与"首条 prompt 创建的顺序"（design 决策 3、6）；探针失败则停止实施、返回设计评审。
 - 依赖：本 worktree 缺 dsh-pet 测试依赖，实施前需 `ws promote` 后安装依赖。
