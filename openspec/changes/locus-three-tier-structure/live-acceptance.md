@@ -114,3 +114,15 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 新增 NOTICE-1：唤醒后的“档位已应用并核验”独立通知缺失。实际 safe 已生效，初始待应用控制回执也成功；pending-application 的通知却走了会主动拒绝话题的群事务端口。已补真实 Host 冷恢复回归并在旧代码得到 1 failed / 8 passed，最小修复复用当前投递经持久层验证的 replyTarget，缺失/群或话题不符/发送能力缺失时继续拒绝，保持已提交的实际档位。45 项定向、build/typecheck、全量 2940 passed / 4 skipped。修复 57203707 已受控合入 main 0090da10，两次生产构建第二次 no changes；运行中的 Host 尚未加载该新通知路径。修复加载和真机成功回执仍待下一次受控重启，不能把源码绿等同于已补发。
 
 下一批先做执行中断恢复：当前 C 话题 safe，所有者先授 shell，再发无写入、只 sleep 的持续执行请求；核验者观察实际运行后受控重启，同时加载 NOTICE-1 修复。重连后续消息验证旧 Delivery failed/turn-interrupted 与下一条立即派发，再撤回 safe 并用新唤醒验证 NOTICE-1。auto 新群与显式 /bind 首投前后、受控容量占用与释放、W/M 迁移与驻留/RSS 继续保持待验；不为测试占满日常资源，也不把不同 PID 的 RSS 当作增长差值。
+
+## H 执行中断恢复：重启前证据
+
+所有者已发送 H。官方投影/冷读截至 seq 175：原话题 generation 1、原 main/child，toolTier=shell/shell、permission=read/read、active 且 busy=true；turn 6 在 seq 161 开始，seq 170/171 pet_context 绑定 delivery-117（messageId=om_x100b619a5d75a8a4dd690e95e559633），seq 175 实际调用 bash，以 timeoutMs=600000、run_in_background=false 执行 Python 的开始标记、sleep(600)、结束标记。截点没有该调用结果或 turn/end。即将核对真实进程仍存在并执行已授权的受控重启；重启排程不等于 ready，中断结算与后继投递仍待重连取证。
+
+## H 重连结论：未通过自动释放，不重放
+
+重启前实际确认 Python PID 32441 仍在执行。restartId=20261104-074824-37613-0ddf64 的回执：07:48:24.931Z scheduling，07:48:31.281Z stopping，07:48:32.344Z stopped，07:48:34.966Z ready（本地 15:48:34）。该时间线不证明具体 teardown 超时或 child flush 成功。
+
+重连后官方页面截至 seq 178 展示了 interrupted-tool-result、step/end 和 turn/end interrupted，但尾部时间是 1793778002753（15:40:02.753），不是实际停机时刻。用当前构建的 withoutFabricatedClosers 对官方完整返回事件作只读核验：firstSeq=0、rawLastSeq=178、keptLastSeq=177，seq 178 被作为不可区分的补尾剔除，保留事件中没有 turn 6 的终止证明。原入口仍 generation 1、原 main/child、shell/shell + read/read、active/busy=true。早先仅按页面出现 interrupted 的判断已纠正：没有据此声称 failed/turn-interrupted。
+
+这符合当前 spec:1098–1122 的合成过滤/歧义等待，但不能算 27.4 的中断自动释放通过。独立只读核查官方 rc.2 发现 live loop 写的是 aborted（reason=user|parent|disposed），interrupted 只用于事后补尾；现 Pet 的冷恢复却只认 interrupted。另有官方 owner drain 可等待 idle 与持久写句柄关闭，当前 launcher 没有 SIGTERM 前的排空握手。原 H1 保留未知、不重发、不手改 busy 或日志；后继消息和 safe 控制暂不要求所有者发送。修订建议与待确认工作见 proposal/tasks 第 33 节；NOTICE-1 已随这次重启加载，但成功通知尚未真机复验。
