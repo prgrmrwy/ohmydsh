@@ -209,7 +209,9 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
     h('style', null, CSS),
     h('button', {
       type: 'button', className: 'amr-trigger', disabled: busy || !view, onClick: () => { if (locked) return; void toggle() },
-      'data-disabled': off ? 'true' : undefined, 'data-locked': locked ? 'true' : undefined,
+      // A locked session cannot run AUTO at all, so an earlier Jev failure is not actionable here: keep the
+      // neutral locked look instead of the red disabled state.
+      'data-disabled': !locked && off ? 'true' : undefined, 'data-locked': locked ? 'true' : undefined,
       'aria-disabled': locked ? 'true' : undefined, style: { border: 'none' },
       title: locked ? t('switchTitleLocked', { families: FAMILIES }) : off ? t('switchTitleDisabled', { hint: hint ?? off.category }) : t('switchTitleIdle'),
       'aria-label': locked ? t('switchAriaLocked', { mode: view?.mode ?? 'MANUAL' }) : t('switchAria', { mode: view?.mode ?? t('modeLoading') }),
