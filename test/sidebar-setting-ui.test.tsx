@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { act, createElement as h } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { MagpieSettings } from '../src/client/SettingsPage.js'
-import { resetSidebarPreference } from '../src/client/sidebar-preference.js'
+import { readSidebarPreference, resetSidebarPreference } from '../src/client/sidebar-preference.js'
 import { flush, ok, settingsView } from './client-support/fake-api.js'
 import { fakeApi } from './client-support/fake-api.js'
 
@@ -53,4 +53,26 @@ it('设置页提供分钟级自动刷新输入，提交后写入 sidebarRefreshM
   await flush()
   const post = fake.calls.find(call => call.method === 'POST' && call.path === 'settings')
   expect(post?.body).toEqual({ sidebarRefreshMinutes: 10 })
+})
+
+it('设置页提供窗口档位下拉，提交后写入 sidebarWindow', async () => {
+  const fake = fakeApi({
+    'GET settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindow: 'weekly' })),
+    'GET cards': () => ok({ status: 'ok', cards: [] }),
+    'GET latency': () => ok({}),
+    'POST settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindow: 'fiveHour' })),
+  })
+  await act(async () => root.render(h(MagpieSettings, { api: fake.api } as never)))
+  await flush()
+  const select = host.querySelector('[data-sidebar-window]') as HTMLSelectElement
+  expect(select).not.toBeNull()
+  expect(select.value).toBe('weekly')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'fiveHour')
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await flush()
+  const post = fake.calls.find(call => call.method === 'POST' && call.path === 'settings')
+  expect(post?.body).toEqual({ sidebarWindow: 'fiveHour' })
+  expect(readSidebarPreference()?.windowMode).toBe('fiveHour')
 })

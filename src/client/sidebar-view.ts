@@ -6,9 +6,12 @@
  * @module dsh-magpie-connector/client/sidebar-view
  */
 import type { Card, CardWindow } from './view-model.js'
+import { DEFAULT_SIDEBAR_WINDOW, type SidebarWindowMode } from '../shared/sidebar-window.js'
 
 /** The weekly window: the gateway names it freely (`7 days`, `weekly`, `周`…). */
 const WEEKLY = /7\s*days?|week|weekly|周/i
+/** The short rolling window; gateways write `5 hours`, `5-hour`, `5h`, `五小时`. */
+const FIVE_HOUR = /(?:^|[^0-9])5[\s-]*(?:hours?|hrs?|h)\b|five[\s-]*hours?|5\s*小时|五小时/i
 
 /** Colour tier of one reading; same thresholds as the settings page (AMD4). */
 export type UsageLevel = 'normal' | 'warn' | 'high'
@@ -20,17 +23,33 @@ const numericWindows = (card: Card): CardWindow[] =>
 
 const tightest = (windows: CardWindow[]): CardWindow => windows.reduce((best, window) => (window.used! > best.used! ? window : best))
 
+const named = (windows: CardWindow[], pattern: RegExp): CardWindow[] =>
+  windows.filter(window => typeof window.name === 'string' && pattern.test(window.name))
+
+/** The window one compact row shows, plus whether the configured tier was missing. */
+export interface WindowChoice {
+  window?: CardWindow
+  /** The configured tier does not exist upstream, so the row shows the nearest available thing. */
+  fallback: boolean
+}
+
 /**
- * The one window the compact row shows: the weekly window with the highest
- * `used`, else the window with the highest `used`, else the first window that
- * reports a display string or unlimited. The label stays the gateway's own.
+ * The one window the compact row shows. `weekly` (the default) prefers the weekly
+ * window, `fiveHour` the 5-hour window, `tightest` the highest reading; each falls
+ * back to the nearest available window rather than inventing one, and a gateway
+ * that reports no numbers at all still surfaces its own `display`/`unlimited`
+ * text. The label stays the gateway's own.
  */
-export function weeklyWindow(card: Card): CardWindow | undefined {
+export function selectWindow(card: Card, mode: SidebarWindowMode = DEFAULT_SIDEBAR_WINDOW): WindowChoice {
   const numeric = numericWindows(card)
-  const weekly = numeric.filter(window => typeof window.name === 'string' && WEEKLY.test(window.name))
-  if (weekly.length > 0) return tightest(weekly)
-  if (numeric.length > 0) return tightest(numeric)
-  return (card.windows ?? []).find(window => window.unlimited === true || (typeof window.display === 'string' && window.display !== ''))
+  const weekly = named(numeric, WEEKLY)
+  const fiveHour = named(numeric, FIVE_HOUR)
+  const preferred = mode === 'weekly' ? weekly : mode === 'fiveHour' ? fiveHour : numeric
+  if (preferred.length > 0) return { window: tightest(preferred), fallback: false }
+  const nearest = mode === 'fiveHour' && weekly.length > 0 ? weekly : numeric
+  if (nearest.length > 0) return { window: tightest(nearest), fallback: true }
+  const display = (card.windows ?? []).find(window => window.unlimited === true || (typeof window.display === 'string' && window.display !== ''))
+  return display === undefined ? { fallback: true } : { window: display, fallback: true }
 }
 
 /** One compact row: which card, which window, and what to render inside it. */
@@ -46,12 +65,14 @@ export interface SidebarRow {
   balance?: string
   /** The card itself failed: the row shows the failure instead of a reading. */
   failed: boolean
+  /** The row does not show the configured tier because the upstream does not report it. */
+  fallback?: boolean
 }
 
 /** Rows in gateway order (the product decision: no current-first, no severity sort). */
-export function sidebarRows(cards: Card[]): SidebarRow[] {
+export function sidebarRows(cards: Card[], mode: SidebarWindowMode = DEFAULT_SIDEBAR_WINDOW): SidebarRow[] {
   return cards.map(card => {
-    const window = weeklyWindow(card)
+    const { window, fallback } = selectWindow(card, mode)
     const used = typeof window?.used === 'number' && Number.isFinite(window.used) ? Math.min(100, Math.max(0, window.used)) : undefined
     return {
       card,
@@ -60,6 +81,7 @@ export function sidebarRows(cards: Card[]): SidebarRow[] {
       ...(typeof window?.display === 'string' && window.display !== '' ? { display: window.display } : {}),
       ...(window?.unlimited === true ? { unlimited: true } : {}),
       ...(card.balance === undefined || card.balance === null || card.balance === '' ? {} : { balance: String(card.balance) }),
+      fallback,
       failed: typeof card.error === 'string' && card.error !== '',
     }
   })

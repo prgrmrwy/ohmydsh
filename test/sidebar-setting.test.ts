@@ -51,3 +51,22 @@ test('sidebarUsage 默认关闭、可持久化、拒绝非布尔', async () => {
   expect((await (await restarted.handle({ sidebarUsage: false })).json() as { sidebarUsage: boolean }).sidebarUsage).toBe(false)
   expect((await readView(new SettingsController(mount(path)))).sidebarUsage).toBe(false)
 })
+
+test('sidebarWindow 默认 weekly、可持久化、拒绝未知档位', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'magpie-sidebar-window-')), 'settings.json')
+  const controller = new SettingsController(mount(path))
+  expect((await readView(controller)).sidebarWindow).toBe('weekly')
+
+  expect((await controller.handle({ sidebarWindow: 'fiveHour' })).status).toBe(200)
+  expect((await readView(controller)).sidebarWindow).toBe('fiveHour')
+
+  for (const invalid of ['7d', '', null, 5, true]) {
+    expect((await controller.handle({ sidebarWindow: invalid })).status).toBe(400)
+    expect((await readView(controller)).sidebarWindow).toBe('fiveHour')
+  }
+
+  // The chosen tier survives a restart with the rest of the preferences.
+  expect((await readView(new SettingsController(mount(path)))).sidebarWindow).toBe('fiveHour')
+  expect((await controller.handle({ sidebarWindow: 'tightest' })).status).toBe(200)
+  expect((await readView(new SettingsController(mount(path)))).sidebarWindow).toBe('tightest')
+})

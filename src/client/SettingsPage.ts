@@ -6,6 +6,7 @@ import { settingsCss } from './styles.js'
 import { UsageCard } from './UsageCard.js'
 import { t, type MagpieKey } from './locales.js'
 import { DEFAULT_REFRESH_MINUTES, MAX_REFRESH_MINUTES, setSidebarPreference } from './sidebar-preference.js'
+import { DEFAULT_SIDEBAR_WINDOW, isSidebarWindowMode, type SidebarWindowMode } from '../shared/sidebar-window.js'
 import {
   cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, parseResetOutcome, parseResetTicket, providerOrder, readTime, resetAccount, sameTarget,
   type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type ResetTicket, type SettingsView, type SyncErrorKind,
@@ -796,6 +797,7 @@ function SidebarUsagePreference({ settings, saving, mutateSettings }: {
   const [failed, setFailed] = useState('')
   const enabled = settings.sidebarUsage === true
   const savedMinutes = settings.sidebarRefreshMinutes ?? DEFAULT_REFRESH_MINUTES
+  const savedWindow: SidebarWindowMode = isSidebarWindowMode(settings.sidebarWindow) ? settings.sidebarWindow : DEFAULT_SIDEBAR_WINDOW
   const [draft, setDraft] = useState(String(savedMinutes))
   useEffect(() => { setDraft(String(savedMinutes)) }, [savedMinutes])
   const toggle = async () => {
@@ -804,6 +806,13 @@ function SidebarUsagePreference({ settings, saving, mutateSettings }: {
     const result = await mutateSettings({ sidebarUsage: next })
     if (result?.error) { setFailed(result.error); return }
     setSidebarPreference({ usage: result?.view === undefined ? next : result.view.sidebarUsage === true })
+  }
+  const commitWindow = async (next: string) => {
+    setFailed('')
+    if (!isSidebarWindowMode(next) || next === savedWindow) return
+    const result = await mutateSettings({ sidebarWindow: next })
+    if (result?.error) { setFailed(result.error); return }
+    setSidebarPreference({ windowMode: isSidebarWindowMode(result?.view?.sidebarWindow) ? result.view.sidebarWindow : next })
   }
   const commitMinutes = async () => {
     setFailed('')
@@ -828,6 +837,18 @@ function SidebarUsagePreference({ settings, saving, mutateSettings }: {
         onClick: () => { void toggle() },
       }, h('i', null)),
     ),
+    h('div', { className: 'dmg-refresh-row' },
+      h('span', null, t('sidebarWindowLabel')),
+      h('select', {
+        className: 'dmg-select', 'data-sidebar-window': '', disabled: saving,
+        'aria-label': t('sidebarWindowLabel'), value: savedWindow,
+        onChange: (event: { target: { value: string } }) => { void commitWindow(event.target.value) },
+      },
+      h('option', { value: 'weekly' }, t('sidebarWindowWeekly')),
+      h('option', { value: 'fiveHour' }, t('sidebarWindowFiveHour')),
+      h('option', { value: 'tightest' }, t('sidebarWindowTightest'))),
+    ),
+    h('p', { className: 'dmg-hint' }, t('sidebarWindowHint')),
     h('div', { className: 'dmg-refresh-row' },
       h('span', null, t('sidebarRefreshLabel')),
       h('span', { className: 'dmg-refresh-control' },
