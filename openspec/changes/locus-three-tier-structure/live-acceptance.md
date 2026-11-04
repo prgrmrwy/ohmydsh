@@ -156,3 +156,11 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 - 常驻与内存：本组合常驻 M 由 1 个替换为 1 个，child 均非驻留。同进程 RSS 依次 834.7 → 856.2 → 860.7 → 932.6（B 首投刚结束）→ 933.1 MiB（迁移后）。单点采样含 GC 与模型请求缓存噪声，只说明增加两个入口与一次迁移后未见持续增长，不当作精确单会话成本。
 
 名额不足重试仍待单独受控验证。
+
+## 名额不足保留原请求并重试：通过
+
+所有者在 GUI 把「子智能体并行数量上限」（官方 maxActiveSubagents，按同一主 Agent 计）临时改为 1。A、B 共用 M `session-b8734ecc…`。A 子会话 turn 3（seq 45 起）前台执行 sleep(120)，本机 PID 89746 自 21:55:30 运行。B 群消息 `…33bb1376` 于 1793800555013 接受；名额满时日志记录 child-capacity-exhausted，该 Delivery 保持 accepted、无 failureReason、未结算，B 仍为 generation 2 与原 child `session-ee6c5a26…`。A turn 3 于 1793800668358 completed 并回复 CAP-START/CAP-END；约 1.5 秒后 B 原 child 在 1793800669837 开始 turn 3，经 pet_locus_finish 回复“名额测试”后 completed。B 同一消息只开了这一轮，无换代、无新 child，所有者无需重发。
+
+### 测试中发现的缺陷 TIER-PROMPT-1
+
+非驻留子会话首次授予 shell 后被唤醒的那一轮：agent/created 已将 toolTier 应用并核验为 shell（该轮 request/header 工具列表含 bash、skill），但投递 prompt 在唤醒前生成，仍写“工具档位：safe……存在待应用档位变更；生效前仍按当前工具档位服务”。模型据此拒绝执行（A turn 2）。无越权，但授权后第一条请求被错误拒绝；重发后正常。待修。
