@@ -24,7 +24,8 @@ export function locusProjectReadDenialReason(allowedRoot: string): string {
     LOCUS_PROJECT_READ_DENIAL,
     '拒绝原因：请求的路径不在已确认工作区内，本次未读取任何内容。',
     `- 允许根：${allowedRoot}`,
-    '- 需要读取工作区外的路径时：请所有者在管理面显式确认该路径后再重试；不要改用其它工具、其它路径或未授权根绕过本限制。',
+    '- 需要其它项目路径时：请所有者核对并确认入口绑定的来源项目；不要改用其它工具、其它路径或未授权根绕过本限制。',
+    '- DSH/Pet 私有状态目录始终禁止读取，不能通过确认路径放行。',
   ].join('\n')
 }
 

@@ -185,6 +185,12 @@
 - [x] 30.2 新建 child 登记到 Pet；已存在 child 在通过组合核验的 resume 路径幂等补登记（冷恢复断言先观察 1 failed / 4 passed）；保留 child/代际/来源项目
 - [x] 30.3 最终 Pet build/typecheck、全量 2936 passed / 4 skipped；主控审查 PASS，分项现场证据和待测矩阵记录在 live-acceptance.md；27.3/27.4 保持未完成
 
+## 31. 真机验收修正：非驻留切档回执与拒绝提示
+
+- [x] 31.1 现场确认工具申请已存为 shell/safe、child 非驻留；真实 Host 适配回归复现 pending 丢失，拒绝提示回归复现私有目录缺少不可放行说明（合法 owner 夹具下 2 failed / 18 passed）
+- [x] 31.2 Host 适配透传已有 pending 标记，保留 effective、不启动 child；拒绝提示改为核对来源项目并明确私有状态根不能通过确认路径放行，保留机器错误码与前置守卫
+- [ ] 31.3 build/typecheck、全量回归、实现审查与严格规范/产物校验，受控部署后继续待应用重启保持验收；27.3/27.4 仍未完成
+
 ## 27. 收尾
 
 - [x] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更

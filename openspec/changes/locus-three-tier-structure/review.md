@@ -19,6 +19,10 @@
 
 范围：以 `ca651235` 为基线的本轮全部 diff。结论：PASS，无阻断项。afterCreated 原来把来源项目 workspaceId 当成运行归属，官方 attach 因 cwd=Pet 拒绝；现改用已确保的 Pet workspace。仅修未来新建会留下现存 child 未登记，因此通过组合核验的 resume 路径也幂等补齐登记。辅助函数改为局部函数声明，允许较早注册的 resume 回调安全引用；运行归属依旧取已完成初始化的 Pet workspace。工作区登记保持 fail-soft，不改 header、来源项目、权限、工具档位或子代代际；失败仍记录诊断。Host 夹具不再把所有 ID 映射为一个 workspace，改为 Pet/项目两个独立对象并核验每次 attach 的 cwd；新建与冷恢复分别先观察 1 failed / 4 passed，再修复。最终 Pet build/typecheck 和全量 2936 passed / 4 skipped。只读真机证据已核对当前第 3 代、父子关系、工具白名单、finish 成功、completed turn、常驻数量与 Host RSS 单点，见 live-acceptance.md；不能据此提前确认尚未在新部署上触发的项目读/私有根拒绝/话题/改档位/中断恢复。
 
+## 2026-11-04 冷态切档回执与拒绝提示审查（主控）
+
+范围：以 `b5b11bac`（当前 main 与任务分支的 merge-base）为基线的全部本轮 diff，包含 A/B/C 证据记录 `b3ec3ea7`。结论：PASS，无阻断项。领域层本来已正确提交 desired=shell/effective=safe 并返回 pending=true；control.ts 也有待应用回执，唯一断点在 index.ts 适配器漏传 pending。现只透传该标记，不伪造 effective，不触碰 apply/readback、grant actor、CAS/代际 fence、父子 ID 或业务排队。新增测试通过真实 Pet 初始化、共享持久仓储和 channel control 调用，验证已受理回执、原 safe 生效值、read 文件权限、未启动子代且未排业务；已有 dispatcher 单测仅用 pending 假对象，无法覆盖该映射断点。拒绝文案仅改来源项目引导并明确 DSH/Pet 私有根不可确认放行，稳定机器错误码与守卫体前拒绝保持。合法 owner 夹具下先观察 2 failed / 18 passed；修复后 72 项定向通过，Pet build/typecheck 通过，全量 2937 passed / 4 skipped。现场 D 目前只证明申请落盘，待应用记录跨重启、唤醒后实际 shell 与拒绝新文案的真机回读仍待继续；不得提前勾选 27.3/27.4。未新增依赖、compat patch 或数据库迁移。
+
 ## Metadata
 
 - 轮次：round 7；时间基准：2026-11-03T19:30:58+08:00。

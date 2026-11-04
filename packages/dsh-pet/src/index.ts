@@ -2284,6 +2284,7 @@ async function initialize(
           }
           return {
             tier: updated.effective,
+            ...(updated.pending === true ? { pending: true } : {}),
             ...(updated.locus.childComposition === undefined ? {} : { childComposition: updated.locus.childComposition }),
           }
         },

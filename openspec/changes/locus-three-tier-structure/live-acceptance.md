@@ -29,7 +29,7 @@
 
 同一 child 的 turn 3 中，seq 71 的 read 实际请求 Pet state.sqlite，seq 72 返回 isError=true、错误码 locus-project-read-outside-confirmed-workspace，允许根仍是 nexus；没有返回文件内容。seq 76/77 的 pet_locus_finish 正常提交原始拒绝说明，seq 82 的 turn/end 为 completed。所有者也贴回了同一拒绝文本。事后入口仍为 generation 3、read/safe、active 且 busy=false，因此 B 的执行拒绝与拒绝后正常回复通过。
 
-文案待核对项 LACOPY-1：目前通用提示建议“管理面显式确认该路径后再重试”，不能据此推导 DSH/Pet 私有目录可被批准读取。私有根属于独立禁止范围，该提示需细化；B 的拒绝行为通过，不等于任务 27.4 的全部拒绝文案验收已完成。先保持该项公开未完成，继续独立的话题拓扑用例 C，随后与剩余守卫文案一并处理。
+文案项 LACOPY-1：B 当时的通用提示建议“管理面显式确认该路径后再重试”，但 DSH/Pet 私有根属于独立禁止范围。后续源码已改为核对入口绑定的来源项目，并明确“DSH/Pet 私有状态目录始终禁止读取，不能通过确认路径放行”；稳定错误码和前置拒绝机制不变，真实 ToolRuntime 拒绝回归保持 body=0。该源码修复随 D 的回执修复部署，新的真机拒绝文案仍待回验，不提前判定任务 27.4 全部通过。
 
 ## 验收 C：话题共享 M、独立 child 通过
 
@@ -46,7 +46,7 @@
 | 两者归档后只恢复 W，新 M 替换并可回复 | 本次现场通过 | 多入口迁移计数、跳过 stopped 入口的现场组合仍待验 |
 | M 命名、普通 root、child 原生父子关系 | 现场通过，C 已证明群/话题共用同一 M | 更多入口和跨群共享组合仍待验 |
 | M/child 的真实 cwd 与来源 nexus 关联分离 | 现场通过，A 的冷恢复和 C 的新 child 均实际登记在 Pet | — |
-| 默认 read/safe 与 child 实际工具白名单 | 现场通过，A 项目 read 成功，B 私有状态读取被实际守卫拒绝并正常回复 | 通用拒绝提示需细化，见 LACOPY-1 |
+| 默认 read/safe 与 child 实际工具白名单 | 现场通过，A 项目 read 成功，B 私有状态读取被实际守卫拒绝并正常回复 | LACOPY-1 源码已修，部署后新文案待回验 |
 | 后续消息独立开轮且复用 child | A 现场通过：原代际、同 child、delivery-110 / turn 2 | 连续并发与父回复混入的更复杂组合仍待验 |
 | 首投回复及完成后 child 非驻留 | 本次现场通过 | 显式 bind 前后对照以验证首条前绝不预建 child |
 | 来源归档回执 | 所有者已观察到恢复提示 | 有限次数上限、恢复前绝不自动建来源的现场组合 |
@@ -71,4 +71,10 @@ A/B/C 的行为检查现已通过；LACOPY-1 仍公开未完成。
 
 ## 下一阶段 D：非驻留改档位与重启保持
 
-目标固定为 C 的话题入口与 child；当前该 child 不驻留且无运行中 turn。先由所有者在同一话题 at 机器人发送 `/tools shell`，只检查控制面：desired=shell、effective=safe 的待应用记录、无业务 child 启动、文件权限仍为 read，群主入口仍为 safe。然后在无待处理 Delivery 时受控重启，检查待应用记录和同一 child 身份保持，再让所有者触发一个仅输出固定字符串的 bash 用例，核对实际请求工具面与 effective=shell。完成后在同一话题恢复 `/tools safe` 并核对撤销；bot 历史读取另行证明，不用普通 user token 或本会话的 shell 代替。
+目标固定为 C 的话题入口与 child；当前该 child 不驻留且无运行中 turn。先由所有者在同一话题 at 机器人发送 `--tools shell`（也支持 `-t shell`、`--tools=shell`），只检查控制面：desired=shell、effective=safe 的待应用记录、无业务 child 启动、文件权限仍为 read，群主入口仍为 safe。然后在无待处理 Delivery 时受控重启，检查待应用记录和同一 child 身份保持，再让所有者触发一个仅输出固定字符串的 bash 用例，核对实际请求工具面与 effective=shell。完成后在同一话题恢复 `--tools safe` 并核对撤销；bot 历史读取另行证明，不用普通 user token 或本会话的 shell 代替。
+
+首次尝试未进入控制面：验收者误给了不支持的 `/tools shell`，所有者照发后该文本成为 `delivery-113`，在话题 child 的 turn 2 按普通消息执行。seq 39/40 的 pet_context 仍为 safe/read，seq 44/45 的 finish 明确回复没有切档，seq 50 completed；管理投影也仍是 safe/safe，没有提权。核对现行 spec 的 `-t shell` 场景、admission.ts 的解析分支以及 locus-admission.test.ts 的现有别名测试，确认正确命令为 flags 形式。已修正文档，不修改命令语法以掩盖验收指令错误；这一次不能算作 D 的控制面验证。
+
+第二次正确发送 `--tools shell` 后，日志为 control-command，但回执为 tools-not-applied（“工具档位未核验生效，未报告成功”）。只读管理投影实际已持久记录 desired=shell/effective=safe，话题 child 仍 agentAvailable=false/running=false，未多开业务轮次，群主入口仍 safe/safe、文件权限仍 read/read。根因已确认：tool-tier-mutation 本来返回 pending=true，control.ts 本来支持待应用回执，但 index.ts 的 Host 适配丢了此字段。新增真实 Host 共享仓储→控制面的回归在合法 owner 下复现误报，再以一行透传 pending 修复；不改变 effective 或重新授予申请。修复后 72 项定向、build/typecheck、全量 2937 passed / 4 skipped。
+
+下一次实际 shell 请求：由所有者在同一话题 at 机器人，要求先调用 pet_context，再调用 bash 执行 `printf locus-shell-ok`，最后报告工具档位、文件权限和 child ID。应保留原话题 child、generation 1，冷恢复后 effective=shell、permission=read，实际 bash 成功并经 finish 正常回复。重启前本申请已落盘，后续不需要重复发送切档命令；Host ready、跨重启保持、实际 shell 与回切 safe 都按现场证据分步记录。

@@ -170,6 +170,8 @@ describe('Locus canonical project-read guard', () => {
     expect(text).toContain(workspace)
     expect(text).toContain('所有者')
     expect(text).toContain('确认')
+    expect(text).toContain('DSH/Pet 私有状态目录始终禁止读取')
+    expect(text).not.toContain('显式确认该路径后再重试')
     // Still a denial: nothing was read, and the guidance is not an allowance.
     expect(result.isError).toBe(true)
     expect(bodies).toBe(0)
