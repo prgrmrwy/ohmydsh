@@ -1,4 +1,5 @@
 import { MagpieSettings } from './SettingsPage.js'
+import { ensureStyles } from './styles.js'
 import { SidebarUsage } from './SidebarUsage.js'
 import { SpeedSelect, createModelWatcher, createSpeedLoader, createSpeedSetter, type ModelDirectories } from './SpeedSelect.js'
 import { createFetchApi, type Api } from './api.js'
@@ -29,6 +30,7 @@ export const inject = ['slots', 'locale']
 
 export function apply(ctx: ClientContext, api: Api = createFetchApi()): void {
   ctx.effect(() => { ctx.locale.register(NS, { zh, en }); return () => {} }, 'dsh-magpie-connector: dictionaries')
+  ctx.effect(() => { const element = ensureStyles(); return () => { element?.remove() } }, 'dsh-magpie-connector: styles')
   bindLocale(ctx.locale.bind(NS) as unknown as (key: import('./locales.js').MagpieKey) => string)
   const label = () => 'Magpie'
   ctx.effect(() => registerMagpieSettingsNavIcon(label), 'dsh-magpie-connector: settings nav icon')

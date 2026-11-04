@@ -14,6 +14,18 @@ let host: HTMLElement
 beforeEach(() => { resetSidebarPreference(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); resetSidebarPreference() })
 
+it('设置页不内联样式，改用文档级样式表', async () => {
+  const fake = fakeApi({
+    'GET settings': () => ok(settingsView({ sidebarUsage: true })),
+    'GET cards': () => ok({ status: 'ok', cards: [] }),
+    'GET latency': () => ok({}),
+  })
+  await act(async () => root.render(h(MagpieSettings, { api: fake.api } as never)))
+  await flush()
+  expect(host.querySelector('style')).toBeNull()
+  expect(document.head.querySelector('style[data-dmg-magpie-styles]')).not.toBeNull()
+})
+
 it('设置页提供侧边栏开关，写入 sidebarUsage', async () => {
   const fake = fakeApi({
     'GET settings': () => ok(settingsView({ sidebarUsage: false })),

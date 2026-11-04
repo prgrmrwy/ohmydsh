@@ -58,10 +58,15 @@ describe('偏好', () => {
     expect(fake.calls.filter(call => call.path === 'cards')).toHaveLength(0)
   })
 
-  it('打开时渲染常驻卡并读一次卡片', async () => {
+  it('打开时渲染常驻卡并读一次卡片，样式走文档级样式表', async () => {
     const fake = await render()
     expect(host.querySelector('[data-dmg-sidebar]')).not.toBeNull()
     expect(fake.calls.filter(call => call.path === 'cards' && call.method === 'GET')).toHaveLength(1)
+    // A rebuild/restart used to drop the component-local <style> and leave the card as raw text.
+    expect(host.querySelector('style')).toBeNull()
+    const style = document.head.querySelector('style[data-dmg-magpie-styles]')
+    expect(style).not.toBeNull()
+    expect(style!.textContent).toContain('.dmg-sidebar-card{')
   })
 })
 
