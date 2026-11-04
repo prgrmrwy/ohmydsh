@@ -140,3 +140,7 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 同一诊断补齐 H1：delivery-117 failureReason=“delivery deadline expired”，确认此前 16:39:42 的释放来自 60 分钟租约到期，而非中断恢复；原记录保持，未手改。
 
 后继派发与 NOTICE-1 safe 通知仍待所有者下一批消息验证。
+
+## H2 后继与 NOTICE-1：通过
+
+重启后所有者依次发送后继、`--tools safe` 与唤醒消息，并确认话题内回复均符合预期（含独立的 safe 生效通知，回到原话题）。只读核对：child turn 8（seq 201–218）处理后继并经 pet_locus_finish 回复，正常 completed；turn 9（seq 222–241）唤醒后 toolTier desired/effective 均为 safe，verifiedAt=1793799352450，该轮无 bash 调用；generation 1、原 main/child、read/read 保持，busy=false。H 执行中断恢复与 NOTICE-1 均关闭。
