@@ -15,7 +15,7 @@ When an AI agent works on a repository it edits your checkout directly, so your 
 - **Guarded execution.** File tools, searches and Bash are confined to the worktree, so a bound session cannot quietly wander back into the main checkout.
 - **Safe cleanup.** Preview with a dry run first; cleanup refuses dirty, unmerged, active or in-flight worktrees and never deletes remote branches.
 
-**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `worktree-session`, `source: local`): set `enabled: true` and run `dsh build`. This README documents no standalone installation. For the surrounding repository see the [plugin index](../../README.md#plugins).
+**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `worktree-session`, `source: local`): set `enabled: true` and run `dsh build`. This README documents no standalone installation. For the surrounding repository see the [plugin index](https://github.com/prgrmrwy/ohmydsh/blob/main/README.md#plugins).
 
 **Jump to:** [How it works](#how-it-works) · [Dependency modes and promote](#dependency-modes-and-promote) · [Status and editor integration](#status-and-editor-integration) · [Configuration](#configuration) · [Safety guards](#safety-guards) · [Maintenance and cleanup](#maintenance-and-cleanup) · [Recovery](#recovery-and-persisted-binding) · [Runtime assumptions](#dsh-runtime-assumptions-and-upgrade-review) · [Development](#development) · [Attribution](#attribution)
 
@@ -140,7 +140,7 @@ Binding recovery and delegated-child inheritance both hook the Agent publication
 
 Install dependencies once from the repository root with `npm install` or `npm ci`. Run package commands with `--workspace dsh-worktree-session`. The exported `lib/` and `dsh-ws` CLI are generated, gitignored artifacts; root sync builds them before installing this local package.
 
-Current behavior is specified in [`source-workspace-worktree-session`](../../openspec/specs/source-workspace-worktree-session/spec.md). Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
+Current behavior is specified in [`source-workspace-worktree-session`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/source-workspace-worktree-session/spec.md). Release notes live in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Attribution
 

@@ -2,12 +2,12 @@
  * Copy dictionaries for the AUTO client UI (composer chip, decision panel,
  * feedback label and the settings section).
  *
- * Same pattern as `dsh-magpie-connector`: the plugin keeps a module-scoped
- * translator instead of threading `t` through every helper, `apply()` binds the
- * host translator once, and before that (unit tests, or a host without a locale
- * service) the Chinese reference set is used so existing tests and behaviour do
- * not change. Placeholders use the host's `{name}` syntax and are interpolated
- * here, so the fallback path and the bound path behave identically.
+ * The plugin keeps a module-scoped translator instead of threading `t`
+ * through every helper, `apply()` binds the host translator once, and before
+ * that (unit tests, or a host without a locale service) the Chinese reference
+ * set is used so existing tests and behaviour do not change. Placeholders use
+ * the host's `{name}` syntax and are interpolated here, so the fallback path and
+ * the bound path behave identically.
  *
  * @module dsh-auto-model-routing/client/locales
  */
@@ -55,7 +55,7 @@ export const en = {
   strategyFamilies: 'Capability mapping of the current sub-models',
   strategyFamilyItem: '{level} → {model} (recommended start {start})',
   strategyCatalogDefault: 'catalog default',
-  strategyTrailer: 'Magpie keeps the family prefix and the real provider and never falls back across entries; model and effort must both pass the current catalog and the official allowlist. Other families need an explicitly named model and a verifiable effort.',
+  strategyTrailer: 'AUTO keeps the family prefix and the real provider and never falls back across entries; model and effort must both pass the current catalog and the official allowlist. Families without a registered strategy need an explicitly named model and a verifiable effort.',
   strategyLimits: 'Constraints, failures and recovery',
   strategyLimitsBody: 'An explicit model or effort wins; when both are given, AUTO only validates and does not ask Jev. When the goal is missing, the catalog is invalid or the capability judgment fails, AUTO stops dispatching instead of silently inheriting or switching models. A failed main judgment visibly disables AUTO. A fresh subtask binds its exact identity when created; later messages and resumes do not re-select a model. fork is not supported yet. MANUAL stops new judgments while already bound subtasks keep their initial route.',
   strategyRules: 'The exact Jev criteria',
@@ -108,7 +108,7 @@ export const en = {
   removeKey: 'Remove key',
   invalidKey: 'The API key must not contain whitespace and must be at most 512 characters',
   jevTimeout: 'Judgment wait limit',
-  jevTimeoutHint: '1000–8000 ms, 5000 by default; after a timeout the session disables AUTO.',
+  jevTimeoutHint: '1000–8000 ms, 8000 by default; after a timeout the session disables AUTO.',
   msSuffix: ' ms',
   sessionSection: 'Session',
   sessionIntro: 'The main model never changes; subtasks select model capability and reasoning investment independently and apply them at creation. MANUAL makes no automatic judgment.',
@@ -119,7 +119,7 @@ export const en = {
   effortCap: 'Reasoning effort cap',
   autoSection: 'Automatic selection',
   autoIntro: 'The main session only adjusts reasoning investment; subtasks pick a capability tier that fits the goal and scope, then set the investment. Explicitly specified models and effort levels are preserved; there is no automatic retry or escalation.',
-  autoCatalogNote: 'Magpie uses the full model id and the official allowlist; when the catalog is unavailable or the goal is unclear, AUTO stops and says so. fresh subtasks are supported, fork is not.',
+  autoCatalogNote: 'AUTO uses the full model id and the official allowlist; when the catalog is unavailable or the goal is unclear, AUTO stops and says so. fresh subtasks are supported, fork is not.',
   noticeNotRouted: 'The latest subtask was not routed: {reason} (runs on DSH defaults)',
   lockedModel: 'AUTO does not support the current model',
   lockedModelLine: '{provider} / {model} is outside automatic routing and the session switched to MANUAL.',
@@ -202,7 +202,7 @@ export const zh: Record<AutoKey, string> = {
   strategyFamilies: '当前子模型能力映射',
   strategyFamilyItem: '{level} → {model}（推荐起点 {start}）',
   strategyCatalogDefault: '目录默认',
-  strategyTrailer: 'Magpie 保留对应家族前缀与真实 provider，不跨入口回退；模型与 effort 必须同时通过当前目录及官方允许列表校验。其他家族需显式指定模型及可验证投入。',
+  strategyTrailer: 'AUTO 保留对应家族前缀与真实 provider，不跨入口回退；模型与 effort 必须同时通过当前目录及官方允许列表校验。没有注册策略的家族需显式指定模型及可验证投入。',
   strategyLimits: '约束、失败与恢复',
   strategyLimitsBody: '显式指定的模型与投入优先；两者都指定时只校验、不请求 Jev。目标不足、目录失效或子判断失败时停止派发，不偷偷继承或换模。主判断失败则可见停用 AUTO。fresh 子任务创建时绑定精确身份；后续消息和恢复不重新选模。fork 暂不支持。MANUAL 停止新判断，已有绑定子任务仍保持初始路线。',
   strategyRules: 'Jev 实际判据原文',
@@ -255,7 +255,7 @@ export const zh: Record<AutoKey, string> = {
   removeKey: '删除 key',
   invalidKey: 'API key 不能含空白，且不能超过 512 字符',
   jevTimeout: '判断等待上限',
-  jevTimeoutHint: '1000–8000 毫秒，默认 5000；超时后该会话停用 AUTO。',
+  jevTimeoutHint: '1000–8000 毫秒，默认 8000；超时后该会话停用 AUTO。',
   msSuffix: ' 毫秒',
   sessionSection: '会话',
   sessionIntro: '主模型不变；子任务独立选择模型能力与推理投入，并在创建时应用。MANUAL 不进行自动判断。',
@@ -266,7 +266,7 @@ export const zh: Record<AutoKey, string> = {
   effortCap: '推理强度上限',
   autoSection: '自动选配',
   autoIntro: '主会话仅调整推理投入；子任务按目标与范围选择合适的能力档，再确定投入。保留显式指定的模型和推理等级，不自动重试或升级。',
-  autoCatalogNote: 'Magpie 使用完整模型 ID 与官方允许列表；目录不可用或目标不清楚时停止并提示。fresh 子任务受支持，fork 暂不支持。',
+  autoCatalogNote: 'AUTO 使用完整模型 ID 与官方允许列表；目录不可用或目标不清楚时停止并提示。fresh 子任务受支持，fork 暂不支持。',
   noticeNotRouted: '最近子任务未路由：{reason}（按 DSH 默认运行）',
   lockedModel: 'AUTO 不支持当前模型',
   lockedModelLine: '{provider} / {model} 不在自动路由支持范围，已切换为 MANUAL。',

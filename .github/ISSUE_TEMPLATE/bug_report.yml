@@ -7,7 +7,7 @@ body:
       value: |
         感谢你花时间报告问题!
 
-        ⚠️ **安全漏洞请不要用这个模板。** 请按 [SECURITY.md](../blob/main/SECURITY.md) 私下报告。
+        ⚠️ **安全漏洞请不要用这个模板。** 请通过 [GitHub 私密漏洞报告](https://github.com/prgrmrwy/ohmydsh/security/advisories/new) 提交。
 
   - type: checkboxes
     id: preflight

@@ -462,6 +462,9 @@ lines 元素的凭据字段语义 SHALL 为：省略 = 保持该线路现有值�
 - `POST /chat/completions`
 - `GET /magpie/quotas/cards`
 - `POST /magpie/quotas/refresh`
+- `POST /magpie/quotas/codex-reset`
+
+带 query 的请求 SHALL 只有两种：`POST /magpie/quotas/refresh` 只允许 `provider`、`user`；`POST /magpie/quotas/codex-reset` 只允许 `user`、`credit`，且 SHALL 同时带这两项。其它组合 SHALL 在发出前被拒绝。`POST /magpie/quotas/codex-reset` SHALL 只由「使用 Codex 重置卡」的确认消费发出，插件的其它路径 SHALL NOT 请求它。
 
 插件 SHALL NOT 跟随 HTTP 重定向：收到 3xx 时以错误结束，不向重定向目标发送任何请求。插件 SHALL NOT 请求 Magpie GUI 的 `/api/*`，SHALL NOT 提供 Magpie 账号的登录、退出、添加或删除，SHALL NOT 修改 Magpie 配置。
 
@@ -480,7 +483,13 @@ Access 请求头 SHALL 只附加到启用 Cloudflare Access 且地址为 https �
 
 - **GIVEN** 生效线路的网关 mock 记录收到的每个请求
 - **WHEN** 依次执行：目录同步、一次生成、读取卡片、刷新一张卡片、刷新全部
-- **THEN** 记录中的每个 `(method, path)` 都属于上述五项，且没有以 `/api/` 开头的路径
+- **THEN** 记录中的每个 `(method, path)` 都属于上述白名单前五项，没有 `codex-reset`，且没有以 `/api/` 开头的路径
+
+#### Scenario: 重置端点的 query 受限
+
+- **GIVEN** 生效线路可用
+- **WHEN** 插件传输层被要求发送 `POST /magpie/quotas/codex-reset?user=a%40b.com`（缺 `credit`）、`POST /magpie/quotas/codex-reset?user=a%40b.com&credit=r1&provider=x`、`GET /magpie/quotas/codex-reset?user=a%40b.com&credit=r1`
+- **THEN** 三个请求都在发出前被拒绝，网关 mock 收到 0 个请求
 
 #### Scenario: 重定向不被跟随
 
@@ -590,13 +599,15 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 - 摘要行的次数：`byWindow` 为真时按窗口显示 `fiveHour`/`weekly` 的次数（如「5 小时 2 次 · 每周 1 次」），否则在 `count` 存在时显示「可用 {count} 次」；
 - 展开后的每张重置卡：种类（该项 `window` 为 `fiveHour`/`weekly` 时显示对应窗口，否则显示「完整重置」）与到期时间；到期时间 SHALL 用 `<time dateTime>` 渲染，文案取自「{时间} 到期」；该项 `until` 缺失时 SHALL 显示「到期时间不可用」，不推断日期。
 
-`resets.each` SHALL 只投影每项的 `until` 与 `window`，拒绝其它字段。`each` 为空而 `until` 存在时，SHALL 用该 `until` 作为唯一一张重置卡列出。
+重置折叠块的版式 SHALL 与 `dsh-plugin-subscriptions` 一致：摘要行的展开箭头宽 12px，与标题间距 6px，展开时旋转 90°；展开区每张重置卡的左缘 SHALL 与摘要行标题文字的左缘对齐（缩进 = 箭头宽 + 间距）；每张重置卡一行，种类在左、到期时间右对齐。
+
+`resets.each` 发给浏览器时 SHALL 只投影每项的 `until` 与 `window`，拒绝其它字段；网关给出的 `id` SHALL 只留在 host 内部，供「使用 Codex 重置卡」挑选，SHALL NOT 出现在任何设置 API 响应中。host MAY 在 `resets` 上附加布尔字段 `redeemable`，表示该卡片满足「使用 Codex 重置卡」的展示前提。`each` 为空而 `until` 存在时，SHALL 用该 `until` 作为唯一一张重置卡列出。
 
 最早到期的那一张重置卡（按时间取 `each` 中最早者；没有 `each` 时取单独的 `until`）SHALL 附一个相对过期提示：未来时刻显示「N 天后过期」或不足 24 小时时「N 小时后过期」，已经过去的时刻显示「已过期」；时间字符串无法解析时不显示该提示。
 
 除重置卡的到期时间按上文明确标注「到期时间不可用」外，网关没给的字段 SHALL 省略，不显示占位值或推断值。带 `error` 的卡片 SHALL 显示该错误，不得被隐藏。
 
-插件设置页只在打开时读取一次卡片；用户手动刷新后，用刷新响应更新显示。插件 SHALL NOT 定时请求卡片或刷新端点。卡片中的字符串一律作为文本渲染。重置卡区 SHALL 只读：不提供任何使用/消费重置卡的控件，也不请求重置相关端点。
+插件设置页只在打开时读取一次卡片；用户手动刷新后，用刷新响应更新显示。插件 SHALL NOT 定时请求卡片或刷新端点。卡片中的字符串一律作为文本渲染。除「使用 Codex 重置卡」规定的那一个按钮外，重置卡区 SHALL NOT 提供其它使用/消费重置卡的控件。
 
 网关返回空集合或读取失败时，连接面板 SHALL 显示空状态「Magpie 未返回可见用量」（失败时为失败原因）和「获取模型与用量」入口（见「用量入口与颜色（AMD4）」）。全量刷新之后仍然为空时，SHALL 追加提示：受限的 gateway key 无法让 Magpie 首次读取用量，需要 Magpie 管理员先在 Magpie 中读取一次，或者改用不受限的 key。插件 SHALL NOT 承诺「获取模型与用量」一定能产生卡片，也 SHALL NOT 建议扩大网关权限或共享范围。
 
@@ -605,12 +616,17 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
   - claude：`{provider: "claude", plan: "max", windows: [{name: "7 days", used: 83, resetsAt: "2026-10-27T11:00:00+08:00"}, {name: "Chat", unlimited: true, display: "Unlimited"}]}`；
   - codex：`{provider: "codex", resets: {count: 1, until: "2026-11-06T23:30:34Z"}}`。
 - **WHEN** 渲染设置页
-- **THEN** `claude` 分组显示 `max`、`7 days 83%` 和对应的重置时间，`Chat` 窗口显示「无限」而不是 `0%`；`codex` 分组的重置折叠块摘要显示「可用 1 次」，展开区显示该过期时间，且没有与重置关联的按钮
+- **THEN** `claude` 分组显示 `max`、`7 days 83%` 和对应的重置时间，`Chat` 窗口显示「无限」而不是 `0%`；`codex` 分组的重置折叠块摘要显示「可用 1 次」，展开区显示该过期时间；因为没有 `each[].id`，没有「使用…」按钮
 
 #### Scenario: 逐张列出重置卡过期时间
 - **GIVEN** codex 卡片带 `resets: {count: 3, until: "2026-11-06T23:30:34Z", each: [{until: "2026-11-06T23:30:34Z"}, {until: "2026-11-30T20:02:48Z"}]}`
 - **WHEN** 渲染设置页
 - **THEN** 重置区是折叠块，摘要显示「用量限制重置」「可用 3 次」；展开区逐项显示两个 `<time>`（`datetime` 分别为这两项），而不是只显示最早的 `until`
+
+#### Scenario: 展开条目与标题对齐
+- **GIVEN** codex 卡片带两张重置卡
+- **WHEN** 渲染设置页并展开重置区
+- **THEN** 摘要行箭头元素宽 12px、与标题间距 6px；展开区缩进为 18px
 
 #### Scenario: 按窗口的次数
 - **GIVEN** 卡片带 `resets: {byWindow: true, count: 0, fiveHour: 2, weekly: 1}`
@@ -655,7 +671,88 @@ host SHALL 把网关卡片投影为固定字段集合，再返回给浏览器，
 #### Scenario: 重置卡投影只保留固定字段
 - **GIVEN** 网关卡片返回 `resets: {count: 2, until: "T", byWindow: true, fiveHour: 1, weekly: 1, each: [{until: "T1", window: "weekly", id: "r1", debug: "x"}], debug: "y"}`
 - **WHEN** host 读取卡片
-- **THEN** 返回给浏览器的 `resets` 只含 `count`、`until`、`byWindow`、`fiveHour`、`weekly`、`each`，`each` 的每项只含 `until` 与 `window`，响应中没有 `id` 或 `debug`
+- **THEN** 返回给浏览器的 `resets` 只含 `count`、`until`、`byWindow`、`fiveHour`、`weekly`、`each` 与可选的 `redeemable`，`each` 的每项只含 `until` 与 `window`，响应中没有 `id`、`r1` 或 `debug`
+
+### Requirement: Codex 重置卡的使用门槛
+
+设置页 SHALL 只在满足展示前提的卡片上提供「使用…」按钮：`provider` 为 `codex`、有非空 `user`、`resets.byWindow` 不为真，且 host 最近一次读到的 `resets.each` 中至少一张带 `id`。按钮 SHALL 只出现在展开区最早到期的那一项上。
+
+只有满足门槛才允许使用：周窗口（名为 `7 days`）的 `used` 为数字且 ≥ 80，`resetsAt` 晚于当前时刻，卡片没有 `error`，并且存在 `id` 不为空、`until` 缺失或晚于当前时刻的重置卡。浏览器 SHALL 按当前读数预判并禁用按钮、说明原因；host SHALL 在准备与消费两个阶段，都用刚对该 `provider`/`user` 执行 `POST /magpie/quotas/refresh` 得到的卡片独立重新校验，不信任浏览器。任一项无法证明时 SHALL NOT 提交。
+
+#### Scenario: 周用量未达门槛
+- **GIVEN** codex 卡片 `user: "u@example.com"`，`windows: [{name: "7 days", used: 49, resetsAt: <未来>}]`，`resets.each` 两张均带 `id`
+- **WHEN** 渲染设置页并展开重置区；再直接向 host 提交准备请求
+- **THEN** 只有最早到期那一项旁有「使用…」按钮，处于禁用态，提示含「80%」；准备请求被拒绝，网关 mock 没有收到 `codex-reset`
+
+#### Scenario: 只在最早到期那张上显示按钮
+- **GIVEN** codex 卡片周用量 85%，`resets.each` 三张，到期时间分别为 11-07、12-01、12-02（网关顺序打乱）
+- **WHEN** 渲染设置页并展开重置区
+- **THEN** 恰有 1 个「使用…」按钮，位于到期 11-07 的那一项，且可点击
+
+#### Scenario: 没有 id 的旧网关
+- **GIVEN** 网关卡片 `resets.each` 只有 `until`，没有 `id`
+- **WHEN** 渲染设置页
+- **THEN** 没有「使用…」按钮，`resets.redeemable` 不为真
+
+### Requirement: 只使用最早到期的重置卡
+
+host SHALL 从刚读到的卡片中选出可用重置卡里 `until` 最早的一张（`until` 缺失的排最后），把其 `id` 记入确认票据。浏览器 SHALL NOT 能指定或改变所用的重置卡；消费时票据记下的那张已不在可用列表中，SHALL 拒绝，SHALL NOT 改用其它重置卡。
+
+#### Scenario: 所选重置卡已不在
+- **GIVEN** 准备时选中 `r1`；消费前网关刷新返回的 `each` 中已没有 `r1`，只有 `r2`
+- **WHEN** 用户确认消费
+- **THEN** 请求被拒绝，提示该重置已不可用；网关 mock 没有收到 `codex-reset`，`r2` 未被使用
+
+### Requirement: 重置卡的两段确认
+
+使用重置卡 SHALL 经过准备与确认两段：
+1. 准备：浏览器只提交 `{provider: "codex", user}`；host 校验门槛后返回 60 秒有效的一次性票据、周用量百分比和所选卡的到期时间，不返回 `id`。
+2. 确认：对话框显示账号、周用量、到期时间与不可撤销警告；勾选「我理解将消耗一次额度」之前，确认按钮 SHALL 不可用。
+3. 消费：浏览器提交票据；票据不存在、过期或已用过时 SHALL 拒绝并提示重新开始；无论成败，票据只能用一次。全部校验通过后，host 才发送 `POST /magpie/quotas/codex-reset?user=<user>&credit=<id>`。
+
+#### Scenario: 完整两段确认并成功
+- **GIVEN** 网关 mock：刷新返回周用量 85%、`each: [{id: "r1", until: 11-07}, {id: "r2", until: 12-01}]`；`codex-reset` 返回 `200 {code: "reset", windows: 2}`
+- **WHEN** 用户点「使用…」，在对话框勾选确认并点「消耗一次重置」
+- **THEN** 网关 mock 恰好收到 1 个 `POST /v1/magpie/quotas/codex-reset?user=u%40example.com&credit=r1`；勾选前确认按钮为禁用态；完成后显示成功并更新卡片；浏览器收到的任何响应中都没有 `r1`/`r2`
+
+#### Scenario: 票据一次性且 60 秒过期
+- **GIVEN** 准备成功拿到票据
+- **WHEN** 用同一票据消费两次；或在 61 秒后才消费
+- **THEN** 第二次与过期的消费都被拒绝并提示重新开始；网关 mock 至多收到 1 个 `codex-reset`
+
+### Requirement: 同一时刻只允许一个重置
+
+整个插件同一时刻 SHALL 最多存在一张有效票据和一个进行中的准备或消费。新的准备请求 SHALL 作废此前未用的票据；已有准备或消费在进行时，新的准备与消费请求 SHALL 被拒绝并提示已有重置正在进行。
+
+#### Scenario: 不同账号也不能同时使用
+- **GIVEN** 账号 A 的消费已提交、网关尚未返回
+- **WHEN** 用户对账号 B 点「使用…」
+- **THEN** 准备请求被拒绝并提示已有重置正在进行；A 返回前网关 mock 只收到 1 个 `codex-reset`
+
+### Requirement: 重置结果判定与不确定锁定
+
+host SHALL 按网关响应分类结果：
+- 2xx 且 `code` 为 `reset`：成功，显示重置的窗口数，并用一次刷新响应更新卡片；`nothing_to_reset`（未消耗）、`no_credit`、`already_redeemed` 显示对应说明；未知 `code` 原样显示；
+- 4xx（含权限不足、409 正在使用、入口白名单拒绝）：未消耗，显示脱敏后的网关错误；
+- 网络错误、超时、5xx，或 2xx 但响应无法解析：结果不确定。host SHALL 把该账号锁定到插件 host 重启为止，期间对该账号的准备与消费一律拒绝，并提示先去 Magpie 核对；SHALL NOT 自动重试。
+
+浏览器到 host 的消费请求超时 SHALL 不短于 host 对网关请求的超时；浏览器侧超时也按结果不确定提示。
+
+#### Scenario: 结果不确定时锁定
+- **GIVEN** `codex-reset` 请求在网关返回前连接中断（或返回 502）
+- **WHEN** 消费结束，用户再次对同一账号点「使用…」
+- **THEN** 第一次显示「结果无法确认，请先在 Magpie 核对，不要重试」；第二次准备被拒绝；网关 mock 只收到过 1 个 `codex-reset`
+
+#### Scenario: 网关明确拒绝时不锁定
+- **GIVEN** `codex-reset` 返回 `401`，错误体说明需要完整权限的 gateway key
+- **WHEN** 消费结束，用户再次对同一账号点「使用…」
+- **THEN** 第一次显示脱敏后的网关错误；第二次可以正常进入准备阶段
+
+#### Scenario: 未消耗的结果
+- **GIVEN** `codex-reset` 返回 `200 {code: "nothing_to_reset", windows: 0}`
+- **WHEN** 消费结束
+- **THEN** 界面说明没有窗口需要重置、重置卡未被消耗；该账号未被锁定
+
 ### Requirement: 侧边栏额度开关
 
 插件设置页 SHALL 提供「在侧边栏常驻显示额度用量」开关（`role="switch"`，默认关闭），其值 SHALL 持久化在插件 host 设置的 `sidebarUsage` 布尔字段中；字段缺失时按 `false` 处理，写入非布尔值 SHALL 被拒绝（400）且设置不变。开关关闭时，客户端 SHALL NOT 渲染任何侧栏额度 UI，也 SHALL NOT 发起卡片请求。

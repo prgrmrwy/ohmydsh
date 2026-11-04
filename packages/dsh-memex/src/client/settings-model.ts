@@ -114,6 +114,71 @@ export interface WorkspaceEntryRow {
   readonly enabled?: boolean
 }
 
+/** Split one remote URL into its owner and repository name. */
+function remoteSegments(url: string): { owner: string; repo: string } {
+  const value = url.trim().replace(/\/+$/, '')
+  // scp-like (`git@host:owner/repo.git`) and URL forms both end in owner/repo.
+  const tail = value.includes(':') && !value.startsWith('http') ? value.slice(value.indexOf(':') + 1) : value
+  const segments = tail.replace(/\.git$/i, '').split('/').filter(Boolean)
+  const repo = segments.pop() ?? ''
+  return { owner: segments.pop() ?? '', repo }
+}
+
+function normalizeLibraryName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+}
+
+/**
+ * The library name a remote repository suggests.
+ *
+ * A library's own store repository says what the library is called, which is the
+ * gap this covers: a library created by workspace derivation keeps the workspace
+ * repository's name even after it is pointed at a different store repository. The
+ * repository name alone is the first choice; when another entry already uses it,
+ * the owner is prefixed — the same shape derivation uses, so the two never
+ * collide silently.
+ * @param url - the remote URL as typed.
+ * @param taken - names already used by other entries.
+ * @returns a normalized scope name, or `''` when the URL carries none.
+ */
+export function suggestedLibraryName(url: string, taken: readonly string[] = []): string {
+  const { owner, repo } = remoteSegments(url)
+  const plain = normalizeLibraryName(repo)
+  if (plain === '') return ''
+  if (!taken.includes(plain)) return plain
+  const qualified = normalizeLibraryName(`${owner}-${repo}`)
+  return qualified !== '' && !taken.includes(qualified) ? qualified : plain
+}
+
+/**
+ * Rename a library row without silently moving its cards.
+ *
+ * An entry without an explicit `home` takes its directory from its name, so a
+ * rename alone would point the library at `…/<new name>` — a directory that does
+ * not exist yet, while the cards stay behind in the old one. The rename therefore
+ * pins the directory the row resolves to today as an explicit path; moving the
+ * directory afterwards is a separate, deliberate action.
+ * @param rows - the draft rows.
+ * @param key - the row being renamed.
+ * @param name - the new name, as typed.
+ * @param namespaceDir - namespace the default home is derived from.
+ * @returns the rows with the pinned home.
+ */
+export function renameRow(
+  rows: readonly EditorRow[],
+  key: string,
+  name: string,
+  namespaceDir: string,
+): EditorRow[] {
+  return rows.map(row => {
+    if (row.key !== key) return row
+    const before = row.name.trim()
+    const after = name.trim()
+    const pin = row.home.trim() === '' && before !== '' && after !== ''
+    return { ...row, name, ...(pin ? { home: defaultHome(namespaceDir, before) } : {}) }
+  })
+}
+
 /** One workspace block: the unit the page is built from. */
 export interface WorkspaceView {
   /** Stable React key. */
@@ -704,6 +769,16 @@ export function stageAssumedPrimary(rows: readonly EditorRow[], view: WorkspaceV
   if (assumed === undefined || view.path === '') return [...rows]
   const already = claimersOf(rows, view.path, view.homeDir).some(row => row.name.trim() === assumed.scope)
   if (already) return [...rows]
+  // One configuration entry per library: a library declared on its own claims no
+  // workspace yet, and its derived route carries the same name. Declaring it must
+  // claim the path on that entry — a second row with the same name makes the draft
+  // unsavable (duplicate name, and both rows share one library path).
+  const declared = rows.find(row => row.name.trim() === assumed.scope)
+  if (declared !== undefined) {
+    return rows.map(row => (row.key === declared.key
+      ? { ...row, paths: row.paths.some(own => underPath(view.path, own, view.homeDir)) ? row.paths : [...row.paths, view.path] }
+      : row))
+  }
   addedCounter += 1
   return [...rows, {
     key: `assumed-${assumed.scope}-${String(addedCounter)}`,

@@ -128,6 +128,8 @@ export const MEMEX_CSS = `
 /* Buttons are inline by construction now; the class stays because every call
    site says so, and it is where the no-wrap rule used to live. */
 .dshmx-act-inline{}
+.dshmx-danger{color:var(--dsw-alias-label-danger,#d4380d);border-color:currentColor}
+.dshmx-danger-line{align-items:baseline;gap:8px}
 .dshmx-primary{
   font:inherit;font-size:12px;font-weight:500;
   color:var(--dsw-alias-label-primary-foreground,#fff);

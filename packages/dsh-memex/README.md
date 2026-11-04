@@ -15,7 +15,7 @@ An AI agent forgets everything when a session ends, and one shared notebook for 
 - **A guard on anything that gets published.** Writes to an externally published library are scanned for internal scope names, domains, remotes and workspace paths.
 - **A Memory settings page.** See and edit which libraries each workspace uses, switch memory off per workspace, set up remotes and open the cards in a browser, without editing files by hand.
 
-**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `dsh-memex`, `source: local`): set `enabled: true` and run `dsh build`. Setting `DSH_MEMEX_ENABLED=0` removes it at the next build. It needs the memex storage kernel as a global npm install, which `dsh` provisions for you; see [Installation and prerequisites](#installation-and-prerequisites). This README documents no standalone installation. For the surrounding repository see the [plugin index](../../README.md#plugins).
+**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `dsh-memex`, `source: local`): set `enabled: true` and run `dsh build`. Setting `DSH_MEMEX_ENABLED=0` removes it at the next build. It needs the memex storage kernel as a global npm install, which `dsh` provisions for you; see [Installation and prerequisites](#installation-and-prerequisites). This README documents no standalone installation. For the surrounding repository see the [plugin index](https://github.com/prgrmrwy/ohmydsh/blob/main/README.md#plugins).
 
 **Jump to:** [How it works](#how-it-works) · [Configuration](#configuration) · [Guard boundary](#guard-boundary) · [Installation and prerequisites](#installation-and-prerequisites) · [Development](#development)
 
@@ -142,7 +142,7 @@ Adding an entry picks from the libraries that exist (declared ones plus undeclar
 
 Each workspace also carries a **memory switch**. Off means the workspace is memory-free: no recall prompt, no write reminder, and every memex tool refuses there — the refusal happens before the library is ever materialized. It is a property of that workspace's route, so a library that also serves as another workspace's fallback target stays writable by that other workspace. The switch is read at session start, so turning it back on needs no restart. (`dsh.yaml`'s `DSH_MEMEX_ENABLED` is the other extreme: it takes the whole plugin out at build time.) Workspaces with memory off are gathered in a collapsed group at the end of the list.
 
-It also lists libraries that exist under the namespace but no entry declares (derived ones included) and can declare them, and offers a path probe that answers which library a directory resolves to **without creating anything**. Switching the primary entry is a replace: the old primary no longer serves that workspace.
+It also lists libraries that exist under the namespace but no entry declares (derived ones included), can declare them, or **delete** them (deletion needs a second confirmation that shows the absolute path and card count; the host only deletes an undeclared discovered library under the namespace), and offers a path probe that answers which library a directory resolves to **without creating anything**. Switching the primary entry is a replace: the old primary no longer serves that workspace. Before the replacement takes effect, the old primary library's `cards/` and `archive/` are copied into the new primary library, so the memory the workspace built up stays recallable and writable. When both libraries hold one slug the new library's copy wins and the incoming one is reported as skipped — never overwritten; the merge is idempotent and only adds. A failed merge keeps the current routing and warns instead, and the next edit retries. The migration touches only the two local library directories and never triggers a remote sync.
 
 Two claims are refused before a save: one library directory shared by two entries, and one repository pattern written verbatim under two entries. Whether two *different* patterns claim the same repository cannot be decided from the configuration, so that case is reported when a session actually resolves against it.
 
@@ -157,13 +157,21 @@ The page configures remotes, and only through the kernel CLI:
 | no remote configured | configure remote (`memex sync --init <url>`) |
 | remote configured | sync now, pull, auto-sync on/off, change remote (separate, confirmed) |
 
+Configuring or changing a remote can also **move the library to a new directory** (leave the directory field empty to
+keep it). Because `.git` and `.sync.json` live inside the directory, changing the configured path alone would strand the
+remote; so the cards are copied first (a shared card keeps the target directory's copy), the repository state follows
+only when the target has none, the kernel then runs **in the new directory** (`--init` when a new remote is given,
+`sync` when it is not), the page persists the new `home`, and only then is the old directory deleted — and only when the
+host can prove it moved that directory itself and the configuration now resolves to the target, refusing roots, the home
+directory, and paths that still contain a live library. The move is idempotent and a failure keeps the old directory. The same block can also **rename** the library to match its store repository (leave the name empty to keep it; the page suggests a name from the remote URL, falling back to `<owner>-<repo>` when the plain name is taken), and a rename can be combined with the move in one step.
+
 An already-configured library is **never re-initialized or rebuilt**: the kernel detects the existing repository and updates the remote instead. Every kernel call runs with a C locale, because the kernel decides "remote already exists" by matching an English git error string — a localized `git remote add` failure would otherwise make re-running `--init` refuse.
 
 The system never writes a library's own files: `.sync.json`, `.gitignore` and the git repository remain the kernel's.
 
 ### Browsing cards
 
-An expanded entry offers **Open cards**. It starts the kernel's own `memex serve` for that library on demand, runs it local-only, suppresses the kernel's attempt to open a browser on the Host machine, takes the address the kernel actually reports (the last one printed when ports collide), and stops it when the plugin stops. A library with memory off is refused before anything is spawned. No browsing UI is built here and no upstream resource is rewritten. Across machines the address is resolved through an extension point that [`cockpit-memex-browse-shim`](../cockpit-memex-browse-shim/README.md) connects to the cockpit; if that registration fails the button never falls back to a local address, which on a remote machine would point at the wrong host. Known limit: the upstream page loads its Markdown renderer from a public CDN, so rendering degrades offline.
+An expanded entry offers **Open cards**. It starts the kernel's own `memex serve` for that library on demand, runs it local-only, suppresses the kernel's attempt to open a browser on the Host machine, takes the address the kernel actually reports (the last one printed when ports collide), and stops it when the plugin stops. A library with memory off is refused before anything is spawned. No browsing UI is built here and no upstream resource is rewritten. Across machines the address is resolved through an extension point that [`cockpit-memex-browse-shim`](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/cockpit-memex-browse-shim/README.md) connects to the cockpit; if that registration fails the button never falls back to a local address, which on a remote machine would point at the wrong host. Known limit: the upstream page loads its Markdown renderer from a public CDN, so rendering degrades offline.
 
 ## Guard boundary
 <!-- section: guard -->

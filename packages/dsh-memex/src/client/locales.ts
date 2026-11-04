@@ -79,6 +79,23 @@ export type MemexKey =
   | 'saved'
   | 'unsaved'
   | 'saveFailed'
+  | 'saveBusy'
+  | 'relocateHint'
+  | 'relocateDone'
+  | 'relocateFailed'
+  | 'relocateKeptOld'
+  | 'relocateRetireFailed'
+  | 'columnLibraryName'
+  | 'namePlaceholder'
+  | 'actionUseSuggestedName'
+  | 'renameHint'
+  | 'actionDelete'
+  | 'actionDeleteConfirm'
+  | 'deleteConfirm'
+  | 'deleteCards'
+  | 'deleteDone'
+  | 'deleteFailed'
+  | 'deleteRefused'
   | 'conflictHome'
   | 'conflictPattern'
   | 'conflictName'
@@ -213,6 +230,23 @@ export const en: Record<MemexKey, string> = {
   saved: 'Saved',
   unsaved: 'Unsaved changes',
   saveFailed: 'Save rejected',
+  saveBusy: 'Saving: moving cards from the old primary library first…',
+  relocateHint: 'The library moves to this directory: its cards and git repository move over, a shared card keeps the target copy, and the old directory is deleted once the configuration points at the new one.',
+  relocateDone: 'Library moved and the old directory was removed.',
+  relocateFailed: 'Could not move the library.',
+  relocateKeptOld: 'The library was copied but the configuration was not accepted, so the old directory was kept.',
+  relocateRetireFailed: 'The library moved, but the old directory could not be deleted; remove it yourself once you have checked it.',
+  columnLibraryName: 'Library name',
+  namePlaceholder: 'Library name (empty keeps the current one)',
+  actionUseSuggestedName: 'Name it',
+  renameHint: 'The library is renamed and keeps its current directory; use the directory field above to move the directory too.',
+  actionDelete: 'Delete',
+  actionDeleteConfirm: 'Delete for good',
+  deleteConfirm: 'Deleting this directory and every card in it:',
+  deleteCards: 'cards',
+  deleteDone: 'Library deleted:',
+  deleteFailed: 'Could not delete the library.',
+  deleteRefused: 'The Host refused to delete this library.',
   conflictHome: 'Two entries share one library path',
   conflictPattern: 'Two entries declare the same repository pattern',
   conflictName: 'Every entry needs a unique name',
@@ -348,6 +382,23 @@ export const zh: Record<MemexKey, string> = {
   saved: '已保存',
   unsaved: '有未保存的修改',
   saveFailed: '保存被拒绝',
+  saveBusy: '正在保存：先把旧主入口库的卡片合并过来…',
+  relocateHint: '库会搬到这个目录：卡片与 git 仓库一起搬过去，同名卡片保留目标目录的版本；配置改到新目录后删除旧目录。',
+  relocateDone: '库已迁移，旧目录已删除。',
+  relocateFailed: '库迁移失败。',
+  relocateKeptOld: '库已复制，但配置未被接受，旧目录已保留。',
+  relocateRetireFailed: '库已迁移，但旧目录未能删除；核对后请手动删除。',
+  columnLibraryName: '库名',
+  namePlaceholder: '库名（留空保持当前名字）',
+  actionUseSuggestedName: '按此命名',
+  renameHint: '库会改名，目录保持不动；要一起搬目录，请在上面的目录输入里填新路径。',
+  actionDelete: '删除',
+  actionDeleteConfirm: '确认删除',
+  deleteConfirm: '将删除该目录及其中的全部卡片：',
+  deleteCards: '张卡片',
+  deleteDone: '已删除库：',
+  deleteFailed: '删除库失败。',
+  deleteRefused: '宿主拒绝删除这个库。',
   conflictHome: '两个条目共用了同一个库路径',
   conflictPattern: '两个条目声明了同一个仓库模式',
   conflictName: '每个条目的名称必须唯一',

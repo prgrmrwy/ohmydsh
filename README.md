@@ -10,7 +10,7 @@
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-English · [简体中文](README.zh.md) · [Quick start](#quick-start) · [Plugins](#plugins) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+English · [简体中文](README.zh.md) · [Quick start](#quick-start) · [Plugins](#plugins) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -213,7 +213,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — Connects the cockpit remote editor to Worktree Session's open action.
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
 - [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
-- [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — In AUTO, asks the Jev decision model for each turn's tier and adjusts only reasoning effort; any Jev failure turns AUTO off and says why. [Standalone repository](https://github.com/prgrmrwy/dsh-auto-model-routing).
+- [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — In AUTO, keeps the main model and adjusts only its reasoning effort per turn, selects model + effort for fresh sub-agents and shows each decision; a failed judgment turns AUTO off and says why, and model families are data in `src/strategies/`. [Standalone repository](https://github.com/prgrmrwy/dsh-auto-model-routing).
 
 ### Self-developed skills, preset and patch
 
@@ -227,7 +227,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — Adds a remote plugin to the manifest, builds it and asks about a restart.
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — Removes a plugin from the manifest, builds and asks about a restart.
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
-- [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — Calls route_subagent before delegating and passes its model and effort explicitly; pauses and asks on failure.
+- [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — Delegates with the official fresh tools and passes only user- or lead-specified model/effort; route_subagent is an optional preview, and failures pause and ask.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
 - [locus-base](presets/locus-base) — Fixed nondelegating preset for the Locus coordinating session and per-entry children.
 - [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
@@ -245,7 +245,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 ## Contributing
 <!-- section: contributing -->
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, plus [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Behavior changes go through an OpenSpec change. Any change to `README.md` must update `README.zh.md` in the same commit, and the other way round.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Security vulnerabilities go through [GitHub private vulnerability reporting](https://github.com/prgrmrwy/ohmydsh/security/advisories/new), never a public issue. Behavior changes go through an OpenSpec change. Any change to `README.md` must update `README.zh.md` in the same commit, and the other way round.
 
 ## License
 <!-- section: license -->

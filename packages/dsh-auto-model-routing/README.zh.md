@@ -6,7 +6,7 @@
 
 ![设置：决策服务、兼容端点与连接测试成功](docs/settings.png)
 
-*上：已应用的 AUTO 决策与投入分布；下：决策服务设置与连接测试成功。截图来自隔离 DSH 宿主，使用本地模拟 Jev/模型响应与合成任务。*
+*上：已应用的 AUTO 决策与投入分布；下：决策服务设置与连接测试成功。截图来自隔离 DSH 宿主，使用回环模拟决策服务与回环模拟模型 provider；端点、账号与任务均为合成数据。*
 
 ![AUTO 架构：独立判断、请求校验与分配反馈](docs/architecture-v2.zh.svg)
 
@@ -22,11 +22,11 @@
 | 场景 | AUTO 的作用 | 当前边界 |
 |---|---|---|
 | 主 Agent 用户回合 | 每个新用户回合判断 effort，主模型不换 | 不逐工具步骤重判；模型必须支持相应 effort |
-| 官方 fresh `subagent` | 首次请求前选择并绑定子 model + effort | 真实 Magpie Claude/GPT 普通子调用已验证；受目录和允许列表约束 |
+| 官方 fresh `subagent` | 首次请求前选择并绑定子 model + effort | Claude/GPT 普通子调用已在真实模型上验证；受目录和允许列表约束 |
 | 官方 fresh `spawn_teammate` | 按同一策略绑定新 teammate 的 model + effort | 已有 mock 宿主覆盖，尚未完成真实模型 teammate 验收 |
 | 已绑定子实例恢复或继续执行 | 重用初始路线，不重新分配 | 依赖插件保持启用及路由记录完整 |
 | 显式指定 model / effort | 保留已指定维度，仅判断未指定维度 | 两者都指定则只校验，不调用 Jev |
-| fork、第三方或未绑定创建路径 | 不承诺自动选配 | fork 与未绑定 AUTO 子路径会明确拒绝，不静默替代 |
+| fork、第三方或未绑定创建路径 | 不承诺自动选配 | 未绑定子实例（含 fork）原样放行；预览工具对 fork 返回不支持，AUTO 不会静默替换成别的路由 |
 
 这里是官方接入路径的覆盖说明，不代表所有 DSH 入口、CLI/TUI 界面或第三方插件都已验收。Web UI 是当前验证入口；MANUAL 不做新判断。`route_subagent` 仅预览，不是必须先调用的派发步骤。
 
@@ -57,12 +57,12 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 ### 主模型不换，子任务独立选配
 
-- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；通过官方 `selectModel` 同步选定 effort，同时保存全局默认值。
-- **仅支持 Claude / GPT 系列**：AUTO 只管理模型名（去掉 transport 前缀后）以 `claude-` 或 `gpt-` 开头的主模型。切换到其他主模型（DeepSeek、GLM、Grok、Gemini、Kimi、Qwen 等）会自动落为 MANUAL 并锁定芯片：芯片显示描边 info 图标，悬停整个按钮说明支持范围并提供仓库的 issue/PR 链接。切回 Claude / GPT 系列后芯片恢复可点击且保持 MANUAL，不会自动重新启用 AUTO。
-- **fresh 子任务**：能力需求为 `bounded / analytical / frontier`，推理投入独立判断。Claude 能力槽为 Haiku / Sonnet / Opus 5.5；GPT 为 Luna / Sol / Sol。实际路由必须同时满足当前目录、支持的 effort 和官方子智能体允许列表。Magpie 保留真实 provider 与家族前缀完整模型 ID，不回退到本地入口。
+- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；通过官方 `selectModel` 同步选定 effort，同时保存全局默认值。同步失败会记录告警，本次请求保留官方原有 effort；MANUAL 请求原样通过，已绑定子会话不写主选择。
+- **只管理已注册家族**：主模型的家族有注册策略时 AUTO 才接管；内置 `claude-` 与 `gpt-` 两个家族，id 在去掉 transport 前缀后匹配。切换到其他主模型（DeepSeek、GLM、Grok、Gemini、Kimi、Qwen 等）会自动落为 MANUAL 并锁定芯片：芯片显示描边 info 图标，悬停整个按钮说明支持范围并提供仓库的 issue/PR 链接。切回受支持模型后芯片恢复可点击且保持 MANUAL，不会自动重新启用 AUTO。新增家族属于数据变更而非引擎变更，见[自定义模型家族](#自定义模型家族)。
+- **fresh 子任务**：能力需求为 `bounded / analytical / frontier`，推理投入独立判断。Claude 能力槽为 Haiku / Sonnet / Opus 5.5；GPT 为 Luna / Sol / Sol。实际路由必须同时满足当前目录、支持的 effort 和官方子智能体允许列表。路由保留父会话精确 provider 与完整 model ID（含 transport 前缀），不回退到其它 provider。
 - **尊重显式选择**：只指定模型或投入时，仅判断另一维；两者都指定则不请求 Jev，只校验路由。缺少任务目标或范围时停止委派，不猜。
-- **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在子任务首次请求前绑定精确身份。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束。fork 和未绑定创建路径暂不支持，不静默替换。
-- **恢复保持初始路线**：根会话改为 MANUAL 后停止新判断，已有绑定子实例维持原路线。`applied` 只证明实际请求配置匹配，**不代表任务成功**。真实 Magpie Claude/GPT ordinary 调用已验证；fresh teammate 路由及冷恢复有 mock 宿主覆盖，不等于真实模型 teammate 已验收。
+- **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在子任务首次请求前绑定精确身份。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束；根会话为 MANUAL 时它直接返回 `routed: false`，不判断、不写状态。fork 和未绑定创建路径暂不支持，不静默替换。
+- **恢复保持初始路线**：根会话改为 MANUAL 后停止新判断，已有绑定子实例维持原路线。`applied` 只证明实际请求配置匹配，**不代表任务成功**。Claude/GPT 普通子调用已在真实模型上验证；fresh teammate 路由及冷恢复有 mock 宿主覆盖，不等于真实模型 teammate 已验收。
 
 ### 选择决策服务
 
@@ -77,11 +77,38 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 **判定确定度不等于选中概率**：Choice 公式为 `(pmax − 1/n) / (1 − 1/n)`，三个候选中最高概率 70% 对应确定度 55%。面板分别显示服务返回的确定度和完整分布，保留返回的 0%，缺值标未提供。两者都不是任务成功率。
 
-### Magpie transport 与选择器展示
+### 自定义模型家族
 
-AUTO 接受 `dsh-magpie-connector`、`dsh-magpie-connect` 两个精确 transport，不互为 alias：完整 model id、实时模型能力、支持 effort/cap、当前允许列表与父 captured allowlist 都按原 transport 校验。没有注册策略的家族需显式 model 及可验证的 effort。根会话为 MANUAL 时预览直接返回 `routed: false`，不判断、不写状态。已绑定子实例恢复原路线。
+AUTO 关于一个模型家族的全部知识都是 [`src/strategies/`](src/strategies/index.ts) 中的数据：每个家族一个文件，加一张 `BUILTIN_STRATEGIES` 列表。接入 DeepSeek、Qwen、Gemini 或自研家族，就是新增一个策略文件并注册；引擎本身不认识任何家族，provider 也从不写进策略。AUTO 也没有任何网关专属代码或配置，会话当前使用哪个 provider 就在哪个 provider 上工作。
 
-AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方 `selectModel` 同步同一 provider/model，并允许保存全局默认值。官方选择器只显示一个 effort。MANUAL 请求原样通过，已绑定子会话不写主选择；同步失败会记录告警，本次请求仍保留选定 effort。Magpie 菜单分组仍需 ohmydsh 受管五包 Host 扩展，stock rc.2 保持 flat 列表。见 [Magpie 配置与展示前提](<../dsh-magpie-connector/README.zh.md#模型菜单分组与-effort>)；本地测试不等于已部署或 live GUI 验收。
+| 字段 | 含义与约束 |
+|---|---|
+| `id` | 家族 id，全局唯一。子路由记录与反馈快照都会保存它，用量报告也按它分组，改名会让这些旧记录读不出来（fail closed）。 |
+| `label` | 显示在芯片锁定提示与设置页策略面板。 |
+| `modelPrefixes` | 与主模型 id 最后一个 `/` 之后的部分做大小写不敏感的前缀匹配，网关的 `family/` 前缀不算家族名。不属于任何家族的主模型会把会话锁为 MANUAL。 |
+| `effortStarts` | 精确裸模型 id（区分大小写）→ `low`、`medium`、`high` 或 `xhigh` 推荐起点，供 `lower / baseline / higher` 偏移与上限计算。没有起点的模型，在该 effort 也受支持时改用目录默认 effort（面板标「目录默认」）；两者都不可验证时自动 effort 不可用：主请求保持自身配置，子任务路由走退化链。 |
+| `childModels` | 每个能力槽一个裸模型名，`bounded` / `analytical` / `frontier`，不能含 `/`。只有位于父会话 provider 内、与父模型 transport 前缀相同、且目录中恰好匹配到一条时，槽位才生效。 |
+
+`createRegistry` 在插件加载时一次性校验整张列表，任何冲突都会让插件加载失败、不会以部分策略运行：`id` 缺失或重复；不同家族的 `modelPrefixes` 忽略大小写后互为前缀；起点不属于四个取值；同一模型起点键出现在两个家族；缺少某个能力槽；槽位含 `/`；出现上述五个字段以外的键。
+
+新增家族需要改包源码（ohmydsh 检出或你自己的 fork），照 [`claude.ts`](src/strategies/claude.ts) 或 [`codex.ts`](src/strategies/codex.ts) 的形状写文件（下面的 `deepseek-v5` 只是占位，须换成 provider 目录真实存在的 id）：
+
+```ts
+// src/strategies/deepseek.ts
+import type { FamilyStrategy } from './types.js'
+
+export const deepseek = {
+  id: 'deepseek',
+  label: 'DeepSeek',
+  modelPrefixes: ['deepseek-'],
+  effortStarts: { 'deepseek-v5': 'medium' },
+  childModels: { bounded: 'deepseek-v5', analytical: 'deepseek-v5', frontier: 'deepseek-v5' },
+} as const satisfies FamilyStrategy
+```
+
+再把 `deepseek` 加进 [`src/strategies/index.ts`](src/strategies/index.ts) 的 `BUILTIN_STRATEGIES`，运行 `npm test`、`npm run typecheck`、`npm run build`，装回重建后的包（ohmydsh 用 `dsh build`，或更新 npm 依赖），重启 DSH 并刷新页面。设置页策略面板、芯片锁定提示、子任务路由与用量报告都读这张注册表，因此其它文件不需要任何家族知识；若在 `src/strategies/` 之外重复内置家族 id 或前缀判断，包内测试会失败。
+
+新家族改变的是「AUTO 管哪些主模型」和「子任务可以挑哪些槽位模型」，不会新增 provider、transport 或回退路径：所有路由仍保持父会话 provider 与完整 model id，并且照旧逐条通过实时目录、四档 effort、禁用 `max`、官方子智能体允许列表与父会话 captured allowlist 校验；显式 model/effort 只保留或校验，绝不替换。家族知识只在构建期生效：设置页没有对应输入项，插件也没有策略文件或热加载。
 
 ## 须知
 
@@ -99,7 +126,7 @@ AUTO 将选定 effort 应用于本次主请求；effort 改变时，等待官方
 
 顶部的架构图为 AUTO 路径。主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
-入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、transport、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[真实 Magpie 验收](docs/magpie-live-acceptance.md)。
+入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[宿主能力核验](docs/host-capability-report.md)。
 
 ## 开发验证
 

@@ -268,3 +268,78 @@ describe('手动刷新用量（UI 侧）', () => {
     expect(text(group('codex')!.querySelector('[data-usage-alert]'))).toContain('502')
   })
 })
+
+describe('重置卡的使用入口（UI 侧）', () => {
+  const future = (days: number) => new Date(Date.now() + days * 24 * 3600 * 1000).toISOString()
+  const usable = (overrides: Record<string, unknown> = {}) => ({
+    provider: 'codex', user: 'u@example.com', windows: [{ name: '7 days', used: 85, resetsAt: future(3) }],
+    resets: { count: 3, redeemable: true, each: [{ until: future(30) }, { until: future(3) }, { until: future(20) }] }, ...overrides,
+  })
+  const resetButtons = () => Array.from(host.querySelectorAll('[data-reset-use]')) as HTMLButtonElement[]
+
+  it('spec Scenario "只在最早到期那张上显示按钮"', async () => {
+    await render(() => cardsOk([usable()]))
+    const buttons = resetButtons()
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]!.getAttribute('aria-disabled')).toBe('false')
+    const items = Array.from(group('codex')!.querySelectorAll('[data-reset-item]'))
+    // 最早到期的是第二项（3 天后）；按钮只挂在它上面
+    const withButton = items.map(item => !!item.querySelector('[data-reset-use]'))
+    expect(withButton).toEqual([false, true, false])
+  })
+
+  it('spec Scenario "周用量未达门槛"', async () => {
+    await render(() => cardsOk([usable({ windows: [{ name: '7 days', used: 49, resetsAt: future(3) }] })]))
+    const [button] = resetButtons()
+    expect(button!.getAttribute('aria-disabled')).toBe('true')
+    expect(button!.title).toContain('80%')
+    expect(button!.hasAttribute('data-ready')).toBe(false)
+  })
+
+  it('没有到期时间的重置卡仍有使用入口（落在第一项）', async () => {
+    await render(() => cardsOk([usable({ resets: { count: 1, redeemable: true, each: [{}] } })]))
+    const items = Array.from(group('codex')!.querySelectorAll('[data-reset-item]'))
+    expect(items).toHaveLength(1)
+    expect(items[0]!.querySelector('[data-reset-use]')).not.toBeNull()
+    expect(text(items[0])).toContain('到期时间不可用')
+  })
+
+  it('spec Scenario "没有 id 的旧网关"', async () => {
+    await render(() => cardsOk([usable({ resets: { count: 1, each: [{ until: future(3) }] } })]))
+    expect(resetButtons()).toHaveLength(0)
+  })
+
+  it('没有可用卡片时按钮不出现（byWindow / 没有 user）', async () => {
+    await render(() => cardsOk([
+      usable({ provider: 'glm', resets: { byWindow: true, count: 1, each: [{ until: future(3) }] } }),
+      usable({ user: undefined }),
+    ]))
+    expect(resetButtons()).toHaveLength(0)
+  })
+
+  it('带错误的卡片按钮禁用并提示刷新', async () => {
+    await render(() => cardsOk([usable({ error: 'token expired' })]))
+    const [button] = resetButtons()
+    expect(button).toBeDefined()
+    expect(button!.getAttribute('aria-disabled')).toBe('true')
+    expect(button!.title).toContain('刷新用量')
+    expect(text(group('codex')!.querySelector('[data-field="error"]'))).toContain('token expired')
+  })
+
+  it('spec Scenario "展开条目与标题对齐"', async () => {
+    const { settingsCss } = await import('../src/client/styles.js')
+    const ruleOf = (selector: string) => {
+      const start = settingsCss.indexOf(`${selector}{`)
+      expect(start).toBeGreaterThanOrEqual(0)
+      return settingsCss.slice(start, settingsCss.indexOf('}', start))
+    }
+    expect(ruleOf('.dmg-resets>summary')).toContain('gap:6px')
+    expect(ruleOf('.dmg-reset-chevron-slot')).toContain('width:12px')
+    expect(ruleOf('.dmg-reset-items')).toContain('padding-left:18px')
+    await render(() => cardsOk([usable()]))
+    const summary = group('codex')!.querySelector('[data-field="resets"] summary')!
+    const slot = summary.firstElementChild!
+    expect(slot.getAttribute('class')).toBe('dmg-reset-chevron-slot')
+    expect(slot.querySelector('svg')?.getAttribute('width')).toBe('12')
+  })
+})

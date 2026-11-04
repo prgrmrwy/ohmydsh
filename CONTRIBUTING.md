@@ -2,7 +2,7 @@
 
 Thanks for your interest in ohmydsh! This document explains how to submit changes to this repository efficiently and safely.
 
-The documentation is English-first. Every `README.md` has a Simplified Chinese twin, `README.zh.md`, in the same directory; the community documents (this file, [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)) are English only.
+The documentation is English-first. Every `README.md` has a Simplified Chinese twin, `README.zh.md`, in the same directory; this file is English only.
 
 ## What this repository is
 
@@ -137,7 +137,7 @@ docs(openspec): archive scope-npm-registry-injection
 - Before changing a third-party plugin integration, read the review record in `dsh.yaml` and the related OpenSpec/ADR to confirm the trust surface and DSH version compatibility.
 - **A plugin is third-party code**: read its source before introducing it, and write its provenance and review conclusion into `note`.
 
-Found a security vulnerability? Please **do not** open a public issue; report it privately following [SECURITY.md](SECURITY.md).
+Found a security vulnerability? Please **do not** open a public issue; report it privately through [GitHub private vulnerability reporting](https://github.com/prgrmrwy/ohmydsh/security/advisories/new).
 
 ## What must not be committed
 
@@ -147,10 +147,6 @@ Found a security vulnerability? Please **do not** open a public issue; report it
 - Any key, token or machine-private configuration (`.env.local` is gitignored).
 
 `npm run check:artifacts` enforces these rules.
-
-## Code of conduct
-
-By participating in this project you agree to abide by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

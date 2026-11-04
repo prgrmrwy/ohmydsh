@@ -47,11 +47,11 @@
 4. 原 collab-kernel 规划明确预留 Locus 后续作为成员来源接入。
 
 证据：
-- [manifest](../../../dsh.yaml#L99-L110)
-- [kernel 当前规范](../../../openspec/specs/collab-kernel/spec.md)
-- [dsh-collab 当前规范](../../../openspec/specs/dsh-collab/spec.md)
-- [原 kernel 规划](../../../openspec/changes/archive/2026-10-20-collab-kernel/proposal.md#L38-L43)
-- [Pet 询问生产验收与收尾记录](../../../openspec/changes/archive/2026-10-22-restore-pet-inquiry-runtime-channel/checkpoint.md#L26-L71)
+- [manifest](https://github.com/prgrmrwy/ohmydsh/blob/main/dsh.yaml#L99-L110)
+- [kernel 当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/collab-kernel/spec.md)
+- [dsh-collab 当前规范](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-collab/spec.md)
+- [原 kernel 规划](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-20-collab-kernel/proposal.md#L38-L43)
+- [Pet 询问生产验收与收尾记录](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-22-restore-pet-inquiry-runtime-channel/checkpoint.md#L26-L71)
 
 ### 不能直接替换的现状
 
@@ -64,8 +64,8 @@
 
 证据：
 - [普通会话身份与投递](../src/session-provider.ts#L23-L106)
-- [kernel 模型](../../collab-kernel/src/model/index.ts)
-- [kernel 条目修改](../../collab-kernel/src/service/index.ts#L279-L291)
+- [kernel 模型](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/collab-kernel/src/model/index.ts)
+- [kernel 条目修改](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/collab-kernel/src/service/index.ts#L279-L291)
 - Locus caller 校验 `packages/dsh-pet/src/host/collaboration/caller.ts`（已随 change `locus-three-tier-structure` 删除）
 - 询问规范 `openspec/specs/pet-inquiry-runtime-channel`（已由 change `locus-three-tier-structure` 退役，见其 delta）
 
@@ -291,7 +291,7 @@ dsh-collab
 
 此为建议，不代表已批准模块划分。Pet 的现役 inquiry 独立执行、原工作关联、守卫和回复权不能因引入通用消息就删除；后续需要证明统一模型如何承接，再迁移。
 
-[ADR-0006](../../../docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md) 要求完整 Locus 留在 Pet 内，不禁止消费独立协作内核；本讨论不自动废止该 ADR。
+[ADR-0006](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/dsh-pet/docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md) 要求完整 Locus 留在 Pet 内，不禁止消费独立协作内核；本讨论不自动废止该 ADR。
 
 ## 6. 尚待讨论的问题
 

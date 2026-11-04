@@ -7,8 +7,8 @@ import { UsageCard } from './UsageCard.js'
 import { t, type MagpieKey } from './locales.js'
 import { DEFAULT_REFRESH_MINUTES, MAX_REFRESH_MINUTES, setSidebarPreference } from './sidebar-preference.js'
 import {
-  cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, providerOrder, readTime, sameTarget,
-  type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type SettingsView, type SyncErrorKind,
+  cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, parseResetOutcome, parseResetTicket, providerOrder, readTime, resetAccount, sameTarget,
+  type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type ResetTicket, type SettingsView, type SyncErrorKind,
 } from './view-model.js'
 
 /**
@@ -36,6 +36,10 @@ type SettingsMutation = (body: Record<string, unknown> | ((current: SettingsView
 /** One rendered check result, bound to the draft it was produced from and to the then-active line. */
 type CheckEntry = { signature: string; activeLineId: string | null; result: CheckSnapshot }
 type SubmittedLine = { id?: string; baseUrl?: string; accessMode?: string; key?: string; accessClientId?: string | null; accessClientSecret?: string | null }
+/** Outcome line under a card's reset area. */
+type ResetStatus = { text: string; tone: 'ok' | 'error' | 'warn' }
+/** A prepared confirmation: what the dialog shows and the ticket the host will honour once. */
+type ResetConfirm = ResetTicket & { card: Card }
 
 /**
  * Does this submitted list touch the active line's identity? Only then the old usage cards must
@@ -81,6 +85,11 @@ export function MagpieSettings({ api }: { api: Api }) {
   const [usageAlert, setUsageAlert] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
   const [latency, setLatency] = useState<LatencyState>({ phase: 'idle' })
+  const [resetConfirm, setResetConfirm] = useState<ResetConfirm>()
+  const [resetBusyKey, setResetBusyKey] = useState<string>()
+  const [resetConsuming, setResetConsuming] = useState(false)
+  const [resetAcknowledged, setResetAcknowledged] = useState(false)
+  const [resetStatuses, setResetStatuses] = useState<Record<string, ResetStatus>>({})
   const settingsRef = useRef<SettingsView | undefined>(undefined)
   const settingsVersion = useRef(0)
   const settingsLock = useRef(false)
@@ -214,14 +223,67 @@ export function MagpieSettings({ api }: { api: Api }) {
 
   const groups = settings?.groups ?? []
   const cardList = cards?.cards ?? []
-  const busy = refreshing !== undefined
-  // Catalog first, then an all-provider usage read: the only bulk refresh left, for when no card exists yet.
+  const busy = refreshing !== undefined  // Catalog first, then an all-provider usage read: the only bulk refresh left, for when no card exists yet.
   const fetchAll = async () => {
     const result = await mutateSettings({ resync: true })
     if (result?.view) await refresh({ all: true })
     else if (result?.error) { setNoteScope(undefined); setUsageAlert(result.error) }
   }
   const groupNote = (provider: string) => noteScope === provider ? { notice, alert: usageAlert } : {}
+  const setResetStatus = (key: string, status: ResetStatus | undefined) => setResetStatuses(current => {
+    const next = { ...current }
+    if (status === undefined) delete next[key]
+    else next[key] = status
+    return next
+  })
+  /**
+   * Prepare a reset: the host re-reads the card, revalidates the guard and hands
+   * back a one-shot ticket. Nothing is spent until the dialog is confirmed.
+   */
+  const startReset = async (card: Card) => {
+    const account = resetAccount(card)
+    if (!account || resetBusyKey !== undefined || resetConsuming) return
+    const key = cardKey(card)
+    setResetBusyKey(key); setResetStatus(key, undefined)
+    try {
+      const response = await api({ method: 'POST', path: 'reset', body: { action: 'prepare', provider: 'codex', user: account } })
+      const ticket = isOk(response) ? parseResetTicket(response.body) : undefined
+      if (!ticket) { setResetStatus(key, { text: resetErrorText(response), tone: 'error' }); return }
+      setResetAcknowledged(false)
+      setResetConfirm({ card, ...ticket })
+    } catch {
+      setResetStatus(key, { text: t('resetUseReadFailed'), tone: 'error' })
+    } finally { setResetBusyKey(undefined) }
+  }
+  /** Spend the prepared credit. Every answer is reported where the button was. */
+  const confirmReset = async () => {
+    if (!resetConfirm || !resetAcknowledged || resetConsuming) return
+    const key = cardKey(resetConfirm.card)
+    setResetConsuming(true)
+    try {
+      const response = await api({ method: 'POST', path: 'reset', body: { action: 'consume', ticket: resetConfirm.ticket } })
+      const outcome = parseResetOutcome(response.body)
+      if (!isOk(response) || !outcome) {
+        setResetStatus(key, { text: resetErrorText(response), tone: response.status === 502 ? 'warn' : 'error' })
+        return
+      }
+      if (outcome.outcome === 'reset') {
+        if (outcome.cards) setCards(parseCards({ status: 'ok', cards: outcome.cards }, 200))
+        setResetStatus(key, {
+          text: outcome.windows === undefined ? t('resetUseSuccess') : `${t('resetUseSuccess')} · ${t('resetUseResetCode', { windows: outcome.windows })}`,
+          tone: 'ok',
+        })
+      } else if (outcome.outcome === 'uncertain') setResetStatus(key, { text: t('resetUseUncertain'), tone: 'warn' })
+      else if (outcome.outcome === 'unconsumed') setResetStatus(key, { text: t('resetUseUnconsumed', { reason: outcome.error ?? '' }), tone: 'error' })
+      else if (outcome.outcome === 'kept') setResetStatus(key, { text: t('resetUseKept'), tone: 'ok' })
+      else if (outcome.outcome === 'no-credit') setResetStatus(key, { text: t('resetUseNoCredit'), tone: 'error' })
+      else if (outcome.outcome === 'already') setResetStatus(key, { text: t('resetUseAlready'), tone: 'error' })
+      else setResetStatus(key, { text: t('resetUseUnknown', { code: outcome.code ?? '' }), tone: 'warn' })
+    } catch {
+      // The browser gave up before the host answered: the spend may have happened.
+      setResetStatus(key, { text: t('resetUseUncertain'), tone: 'warn' })
+    } finally { setResetConsuming(false); setResetConfirm(undefined) }
+  }
   return h('div', { className: 'dmg-settings' },
     h('style', null, settingsCss),
     h('p', { className: 'dmg-intro' }, t('intro')),
@@ -236,8 +298,16 @@ export function MagpieSettings({ api }: { api: Api }) {
       settings,
       cards: cardList.filter(c => c.provider === provider),
       busy, saving: savingSettings, mutateSettings, ...groupNote(provider),
+      resetBusyKey, resetStatuses,
+      onReset: (card: Card) => { void startReset(card) },
       onRefresh: (card: Card) => { void refresh({ provider: card.provider, ...(card.user !== undefined ? { user: card.user } : {}) }) },
-    })))
+    })),
+    h(ResetDialog, {
+      confirm: resetConfirm, acknowledged: resetAcknowledged, busy: resetConsuming,
+      onAcknowledge: setResetAcknowledged,
+      onCancel: () => { setResetConfirm(undefined); setResetAcknowledged(false) },
+      onConfirm: () => { void confirmReset() },
+    }))
 }
 
 /** What to tell the user after a 2xx refresh: unchanged read times, or a still-empty cold start. */
@@ -280,8 +350,53 @@ function UsageStatus({ cards, busy, saving, notice, alert, onFetchAll }: { cards
       h('button', { type: 'button', className: 'dmg-button', disabled: busy || saving, onClick: onFetchAll }, t('fetchModelsAndUsage'))) : null)
 }
 
-async function postSettings(api: Api, body: Record<string, unknown>): Promise<SettingsResult> {
-  try {
+/**
+ * Why the host or the gateway said no, in the page's words. The host's codes are
+ * fixed strings; anything else falls back to its (already redacted) message.
+ */
+export function resetErrorText(response: { status: number; body: unknown }): string {
+  const reason = (response.body as { error?: unknown } | null)?.error
+  const code = typeof reason === 'string' ? reason : ''
+  if (code === 'MAGPIE_RESET_BUSY') return t('resetUseBusy')
+  if (code === 'MAGPIE_RESET_UNCERTAIN' || code.startsWith('MAGPIE_RESET_UNCERTAIN:')) return t('resetUseUncertain')
+  if (code === 'MAGPIE_RESET_GUARD') return t('resetUseGuard')
+  if (code === 'MAGPIE_RESET_UNAVAILABLE' || code === 'MAGPIE_RESET_CREDIT_GONE') return t('resetUseUnavailable')
+  if (code === 'MAGPIE_RESET_REFRESH') return t('resetUseRefresh')
+  if (code === 'MAGPIE_RESET_TICKET_INVALID') return t('resetUseTicketInvalid')
+  if (code === 'MAGPIE_RESET_TICKET_EXPIRED') return t('resetUseTicketExpired')
+  if (code.startsWith('MAGPIE_RESET_READ_FAILED')) return t('resetUseReadFailed')
+  return failureText(response)
+}
+
+/**
+ * The confirmation of an irreversible spend. Rendered as an open `<dialog>` inside
+ * a backdrop: the shell has no modal service, and a plain element keeps the page
+ * testable without `showModal`. The confirm button stays inert until the box is ticked.
+ */
+function ResetDialog({ confirm, acknowledged, busy, onAcknowledge, onCancel, onConfirm }: {
+  confirm: ResetConfirm | undefined; acknowledged: boolean; busy: boolean
+  onAcknowledge: (acknowledged: boolean) => void; onCancel: () => void; onConfirm: () => void
+}) {
+  if (!confirm) return null
+  const { card } = confirm
+  return h('div', { className: 'dmg-modal-backdrop', 'data-reset-dialog': '' },
+    h('dialog', { open: true, className: 'dmg-modal', 'aria-labelledby': 'dmg-reset-title' },
+      h('h3', { id: 'dmg-reset-title' }, t('resetUseConfirmTitle')),
+      h('p', { className: 'dmg-hint', 'data-reset-account': '' }, `${t('resetUseAccount')}：${card.user ?? ''}`),
+      confirm.weeklyUsedPercent === undefined ? null : h('p', { className: 'dmg-hint', 'data-reset-weekly': '' },
+        `${t('resetUseWeekly')} ${Math.round(confirm.weeklyUsedPercent)}%`),
+      confirm.creditExpiresAt === undefined ? null : h('p', { className: 'dmg-hint', 'data-reset-credit': '' }, t('resetCreditExpires', { date: formatTime(confirm.creditExpiresAt) })),
+      h('p', { className: 'dmg-warn' }, t('resetUseWarning')),
+      h('label', { className: 'dmg-check-row' },
+        h('input', { type: 'checkbox', checked: acknowledged, 'data-reset-acknowledge': '', onChange: (e: { target: { checked: boolean } }) => onAcknowledge(e.target.checked) }),
+        h('span', null, t('resetUseAcknowledge'))),
+      h('div', { className: 'dmg-row' },
+        h('button', { type: 'button', className: 'dmg-button', onClick: onCancel }, t('cancel')),
+        h('button', { type: 'button', className: 'dmg-button', 'data-reset-confirm': '', disabled: !acknowledged || busy, onClick: onConfirm },
+          busy ? t('resetUseConfirming') : t('resetUseConfirm')))))
+}
+
+async function postSettings(api: Api, body: Record<string, unknown>): Promise<SettingsResult> {  try {
     const response = await api({ method: 'POST', path: 'settings', body })
     if (isOk(response)) return { view: response.body as SettingsView }
     return { error: response.status === 409 ? t('envKeyReadonly') : t('notSaved', { reason: failureText(response) }) }
@@ -593,11 +708,12 @@ function SyncStatus({ settings }: { settings: SettingsView }) {
 
 interface GroupProps {
   provider: string; group: ModelGroup | undefined; settings: SettingsView | undefined; cards: Card[]; busy: boolean
-  saving: boolean; mutateSettings: SettingsMutation; onRefresh: (card: Card) => void
+  saving: boolean; mutateSettings: SettingsMutation; onRefresh: (card: Card) => void; onReset: (card: Card) => void
+  resetBusyKey?: string | undefined; resetStatuses?: Record<string, ResetStatus>
   notice?: Notice | undefined; alert?: string
 }
 
-function ProviderGroup({ provider, group, settings, cards, busy, saving, mutateSettings, onRefresh, notice, alert }: GroupProps) {
+function ProviderGroup({ provider, group, settings, cards, busy, saving, mutateSettings, onRefresh, onReset, resetBusyKey, resetStatuses, notice, alert }: GroupProps) {
   const [error, setError] = useState('')
   const saved = settings?.visibleModels ?? {}
   const following = !Object.hasOwn(saved, provider)
@@ -636,7 +752,12 @@ function ProviderGroup({ provider, group, settings, cards, busy, saving, mutateS
       onVisible: (visible: boolean) => setVisible(model, visible),
       onEffort: (effort: string | null) => { void post({ defaultEffort: { model: model.id, effort } }) },
     }))) : null,
-    cards.length ? h('div', { className: 'dmg-cards' }, ...cards.map(card => h(UsageCard, { key: cardKey(card), card, busy, onRefresh: () => onRefresh(card) }))) : null,
+    cards.length ? h('div', { className: 'dmg-cards' }, ...cards.map(card => h(UsageCard, {
+      key: cardKey(card), card, busy, disabled: saving,
+      resetBusy: resetBusyKey === cardKey(card),
+      ...(resetStatuses?.[cardKey(card)] === undefined ? {} : { resetStatus: resetStatuses[cardKey(card)] }),
+      onRefresh: () => onRefresh(card), onReset: () => onReset(card),
+    }))) : null,
     notice === 'not-reread' ? h('p', { className: 'dmg-hint', role: 'status' }, t('notReread')) : null,
     alert ? h('p', { className: 'dmg-error', role: 'alert', 'data-usage-alert': '' }, alert) : null,
     error ? h('p', { className: 'dmg-error', role: 'alert' }, error) : null)

@@ -16,6 +16,24 @@ test('spec Scenario "完整流程只触达白名单"', async () => {
   for (const path of ['/api/usage', '/models?x=1', 'http://evil.test/v1/models', '/models/../api/usage']) await expect(t.request(identity, 'GET', path)).rejects.toThrow()
   expect(g.requests).toHaveLength(5)
 })
+test('spec Scenario "重置端点的 query 受限"', async () => {
+  const { g, t, identity } = await setup()
+  g.handlers.set('POST /v1/magpie/quotas/codex-reset', json({ code: 'reset', windows: 1 }))
+  for (const path of [
+    '/magpie/quotas/codex-reset?user=a%40b.com', // missing credit
+    '/magpie/quotas/codex-reset?credit=r1', // missing user
+    '/magpie/quotas/codex-reset', // no query at all
+    '/magpie/quotas/codex-reset?user=a%40b.com&credit=r1&provider=x', // key outside the rule
+    '/magpie/quotas/codex-reset?user=a%40b.com&credit=r1&url=http%3A%2F%2Fevil',
+  ]) await expect(t.request(identity, 'POST', path)).rejects.toThrow()
+  // GET on the reset path is not in the allowlist at all
+  await expect(t.request(identity, 'GET', '/magpie/quotas/codex-reset?user=a%40b.com&credit=r1')).rejects.toThrow()
+  expect(g.requests.filter(r => r.path.startsWith('/v1/magpie/quotas/codex-reset'))).toHaveLength(0)
+  const ok = await t.request(identity, 'POST', '/magpie/quotas/codex-reset?user=a%40b.com&credit=r1')
+  expect(ok.status).toBe(200); await ok.text()
+  expect(g.requests.at(-1)?.path).toBe('/v1/magpie/quotas/codex-reset')
+  expect(g.requests.at(-1)?.query).toBe('?user=a%40b.com&credit=r1')
+})
 test('spec Scenario "重定向不被跟随"', async () => {
   const { g, t, identity } = await setup(); const other = await createGateway(); cleanup.push(other.close)
   for (const location of [other.baseUrl, '/api/usage']) {

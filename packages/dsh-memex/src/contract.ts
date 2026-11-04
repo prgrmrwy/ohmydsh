@@ -37,6 +37,15 @@ export const MEMEX_REMOTE_ENDPOINT = 'remote'
  * resolves against whatever happens to listen on the user's own machine.
  */
 export const MEMEX_BROWSE_ENDPOINT = 'browse'
+/**
+ * Delete one library that no configured entry declares.
+ *
+ * The only destructive endpoint: it refuses every library the configuration
+ * knows about, and every path that is not exactly one discovered home under the
+ * namespace, so the page can offer it for leftovers without becoming a way to
+ * delete arbitrary directories.
+ */
+export const MEMEX_DELETE_ENDPOINT = 'delete'
 
 /** How a route was produced; mirrors the resolver's own vocabulary. */
 export type MemexRouteSource = 'config' | 'derived' | 'local' | 'discovered' | 'implicit'
@@ -209,8 +218,31 @@ export type MemexBrowseResult =
     readonly message: string
   }
 
-/** Every remote action the page may request; each maps to one kernel invocation. */
-export type MemexRemoteAction = 'init' | 'sync' | 'push' | 'pull' | 'auto-on' | 'auto-off'
+/**
+ * Every remote action the page may request; each maps to one kernel invocation.
+ *
+ * `retire` is not a kernel action: it is the second half of a library move. The
+ * page persists the new home first, then asks the host to delete the old
+ * directory, which the host only does once the configuration proves the move.
+ */
+export type MemexRemoteAction = 'init' | 'sync' | 'push' | 'pull' | 'auto-on' | 'auto-off' | 'retire'
+
+/** Request body of the `delete` endpoint. */
+export interface MemexDeleteRequest {
+  readonly scope: string
+}
+
+/** Outcome of a delete; transport succeeded whenever this is returned. */
+export interface MemexDeleteResult {
+  readonly status: 'ok' | 'refused'
+  /** Absolute library path that was (or would have been) removed. */
+  readonly home?: string
+  /** Cards the library held, for the confirmation the page showed. */
+  readonly cards?: number
+  /** Why nothing was removed. */
+  readonly reason?: 'declared' | 'not-discovered' | 'outside-namespace' | 'busy' | 'failed'
+  readonly message?: string
+}
 
 /** Request body of the `remote` endpoint. */
 export interface MemexRemoteRequest {
@@ -218,6 +250,15 @@ export interface MemexRemoteRequest {
   readonly action: MemexRemoteAction
   /** Required for `init`: the remote URL the user typed. */
   readonly url?: string
+  /**
+   * Move the library to this directory as part of the action.
+   *
+   * The host copies the cards (the target keeps its own copy of a shared slug),
+   * carries `.git` / `.sync.json` over when the target has none, runs the kernel
+   * in the new directory, and only then reports the move; the page persists the
+   * new home and asks for the old directory's retirement afterwards.
+   */
+  readonly home?: string
 }
 
 /** Outcome of one remote action; transport succeeded whenever this is returned. */
@@ -227,4 +268,6 @@ export interface MemexRemoteResult {
   readonly output?: string
   /** Failure summary — the kernel's stderr, capped. */
   readonly message?: string
+  /** Set when this action moved the library: the homes involved. */
+  readonly moved?: { readonly from: string; readonly to: string }
 }

@@ -4,7 +4,7 @@
 
 ## 状态
 
-2026-10-25 用户在最小真实 Magpie 验收后追加授权：AUTO 默认升级，不再要求版本开关。默认配置为内部 policy-v2；显式 legacy 仅供回滚。旧四档配置保留但不参与新策略，MANUAL 不变。已构建部署、通过分离控制进程重启现有3080服务，并在实际GUI验证无版本选择、显示 AUTO 已使用新策略。真实质量/返工/成本对照仍未完成，不宣称性能收益。
+2026-10-25 用户在最小真实网关验收后追加授权：AUTO 默认升级，不再要求版本开关。默认配置为内部 policy-v2；显式 legacy 仅供回滚。旧四档配置保留但不参与新策略，MANUAL 不变。已构建部署、通过分离控制进程重启现有3080服务，并在实际GUI验证无版本选择、显示 AUTO 已使用新策略。真实质量/返工/成本对照仍未完成，不宣称性能收益。
 
 ## 实现入口
 
@@ -54,13 +54,13 @@ node packages/dsh-auto-model-routing/scripts/host-probe-children.mjs "$PROBE_HOM
 
 `.bound` 标记只保存 child ID，不包含任务；路由 JSON 缺失而标记保留时 fail closed。整个插件状态目录（两份记录）同时丢失、或旧版无标记记录丢失，无法检测，不能泛称所有存储丢失都已覆盖。
 
-## Magpie 接入（2026-10-25）
+## 网关接入（2026-10-25）
 
-用户指定实际模型先只经 Magpie，OpenRouter 仅 Jev，不用本地 Claude/codex。v2 支持精确 `dsh-magpie-connect` transport，持久记录保留完整 model ID；自动映射使用 `claude/...` / `codex/...` 家族，不把网关 route 伪装为本地 provider。映射版本为 `capability-slots-2-magpie`，已有完成路由保持原配置；其他网关模型可显式使用，未定义能力槽时不自动猜；未知模型 effort 使用 LLM 目录 defaultEffort，缺失则停止。固定已知家族沿用版本化官方起点。
+用户指定实际模型先只经当时配置的自托管网关，OpenRouter 仅 Jev，不用本地 Claude/codex。v2 支持精确 transport 身份，持久记录保留完整 model ID；自动映射使用 `claude/...` / `codex/...` 家族，不把网关 route 伪装为本地 provider。旧映射版本已有完成路由保持原配置；其他网关模型可显式使用，未定义能力槽时不自动猜；未知模型 effort 使用 LLM 目录 defaultEffort，缺失则停止。固定已知家族沿用版本化官方起点。
 
-当前 legacy catalog 仍不包含 Magpie；持久子路由重放使用独立全量策略目录，避免关闭试验导致既有实例失效。目录/allowlist 校验对精确 provider+model 执行，模型名含斜线只在 v2 网关路径允许，旧配置校验不放宽。
+当前 legacy catalog 仍不包含该网关；持久子路由重放使用独立全量策略目录，避免关闭试验导致既有实例失效。目录/allowlist 校验对精确 provider+model 执行，模型名含斜线只在 v2 网关路径允许，旧配置校验不放宽。
 
-验证：190 测试、类型检查、构建通过；官方工具整链脚本加 `--magpie` 后通过 ordinary/fresh teammate 和全宿主冷恢复（fake adapter/Jev，无外网）。实际 dsh-magpie-connect 0.4.1 源码显示 resolveModel.reasoning 从缓存努力等级构建 defaultEffort；尚未验证在线生成或真实 effort 消费，不把缓存/模拟当实测。
+验证：190 测试、类型检查、构建通过；官方工具整链脚本加网关专用 flag 后通过 ordinary/fresh teammate 和全宿主冷恢复（fake adapter/Jev，无外网）。当时网关插件源码显示 resolveModel.reasoning 从缓存努力等级构建 defaultEffort；尚未验证在线生成或真实 effort 消费，不把缓存/模拟当实测。
 
 ## 回滚与后续
 

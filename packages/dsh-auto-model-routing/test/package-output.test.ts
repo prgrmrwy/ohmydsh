@@ -2,8 +2,9 @@ import { expect, it } from 'vitest'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import oracle from './fixtures/routing-oracle-0.4.2.json' with { type: 'json' }
 
 const pkg = resolve(import.meta.dirname, '..')
@@ -17,9 +18,10 @@ it('spec Scenario "源码与文案不含版本"', () => {
   for (const entry of readdirSync(pkg)) if (!['lib', 'node_modules'].includes(entry)) cpSync(join(pkg, entry), join(work, entry), { recursive: true })
   mkdirSync(join(work, 'lib'), { recursive: true })
   cpSync(join(pkg, 'test/fixtures/lib-0.4.2'), join(work, 'lib'), { recursive: true })
-  // Dependencies live next to the package in the standalone mirror and at the monorepo root here.
-  const modules = [join(pkg, 'node_modules'), resolve(pkg, '../../node_modules')].find(dir => existsSync(join(dir, 'typescript')))
-  if (!modules) throw new Error('cannot locate installed dependencies (typescript) for the package build')
+  // Dependencies resolve through the package's own Node lookup: inside the
+  // monorepo they are hoisted to the repository root, while a standalone
+  // checkout keeps them in this package. No `../../` monorepo assumption.
+  const modules = dirname(dirname(createRequire(join(pkg, 'package.json')).resolve('typescript/package.json')))
   symlinkSync(modules, join(work, 'node_modules'), 'dir')
   execFileSync('npm', ['run', 'build'], { cwd: work, stdio: 'pipe', env: { ...process.env, npm_config_offline: 'true' } })
   const output = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], { cwd: work, encoding: 'utf8', env: { ...process.env, npm_config_offline: 'true' } })) as { files: { path: string }[] }[] | Record<string, { files: { path: string }[] }>

@@ -10,7 +10,7 @@
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[English](README.md) · 简体中文 · [快速开始](#快速开始) · [插件索引](#插件索引) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [更新日志](CHANGELOG.md)
+[English](README.md) · 简体中文 · [快速开始](#快速开始) · [插件索引](#插件索引) · [贡献](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -213,7 +213,7 @@ tests/                   仓库级测试
 - [cockpit-worktree-open-shim](packages/cockpit-worktree-open-shim/README.md) — 把驾驶舱的远程编辑器接入 Worktree Session 的打开动作。
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
 - [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
-- [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — AUTO 下每回合请 Jev 决策模型判档，只调整推理强度；Jev 任何失败即停用 AUTO 并提示原因。[独立仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)。
+- [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — AUTO 下主模型不变、按回合只调整推理投入，并为 fresh 子任务选配模型与投入并展示决策；主判断失败即停用 AUTO 并提示原因，模型家族是 `src/strategies/` 中的数据。[独立仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)。
 
 ### 自研 skill、preset 与 patch
 
@@ -227,7 +227,7 @@ tests/                   仓库级测试
 - [add-dsh-plugin](skills/add-dsh-plugin/SKILL.md) — 把远端插件加入 manifest、build，并在重启前询问。
 - [remove-dsh-plugin](skills/remove-dsh-plugin/SKILL.md) — 从 manifest 移除插件、build，并在重启前询问。
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
-- [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — 委派前调用 route_subagent 并显式传入模型与 effort；失败时暂停并询问用户。
+- [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — 用官方 fresh 工具委派，只原样传递用户或 lead 指定的模型/effort；route_subagent 只是可选预览，失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
 - [locus-base](presets/locus-base) — Locus 协调会话与各入口子会话共用的固定、不可委派 preset。
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
@@ -245,7 +245,7 @@ tests/                   仓库级测试
 ## 贡献
 <!-- section: contributing -->
 
-欢迎提 issue 与 pull request，请先读 [CONTRIBUTING.md](CONTRIBUTING.md)，以及 [SECURITY.md](SECURITY.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。行为变化走 OpenSpec change。修改 `README.md` 时必须在同一次提交里同步修改 `README.zh.md`，反之亦然。
+欢迎提 issue 与 pull request，请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全漏洞请走 [GitHub 私密漏洞报告](https://github.com/prgrmrwy/ohmydsh/security/advisories/new)，不要开公开 issue。行为变化走 OpenSpec change。修改 `README.md` 时必须在同一次提交里同步修改 `README.zh.md`，反之亦然。
 
 ## 许可证
 <!-- section: license -->

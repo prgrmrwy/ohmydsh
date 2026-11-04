@@ -40,6 +40,16 @@ it('spec Scenario "停用状态在芯片与面板可见"',()=>{
  expect(normal.replace(/<[^>]+>/g,' ')).not.toContain('Jev 停用')
  expect(normal).not.toContain('data-disabled="true"')
 })
+it('locked MANUAL ignores an earlier Jev failure state',()=>{
+ const view={mode:'MANUAL',disabled:{category:'timeout',at:Date.UTC(2026,10,4,2,30)},autoSupport:{supported:false,provider:'opencode-go',model:'deepseek-v4.1-flash'}}
+ const chip=renderToStaticMarkup(createElement(RoutingChip,{sessionId:'S',rpc:{call:async()=>({ok:true})},initialView:view as never}))
+ const text=chip.replace(/<[^>]+>/g,' ')
+ expect(text).toContain('MANUAL')
+ expect(text).not.toContain('Jev 停用')
+ expect(chip).toContain('data-locked="true"')
+ expect(chip).not.toContain('data-disabled="true"')
+ expect(chip).toContain('amr-info')
+})
 it('spec Scenario "芯片样式与悬停面板"',()=>{
  const render=(open:boolean)=>renderToStaticMarkup(createElement(RoutingChip,{sessionId:'S',rpc:{call:async()=>({ok:true})},initialView:{mode:'MANUAL'},initiallyOpen:open}))
  const closed=render(false)

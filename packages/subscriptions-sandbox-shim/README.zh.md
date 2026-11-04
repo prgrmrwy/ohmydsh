@@ -45,7 +45,7 @@ DSH 部署侧缓解插件：把订阅 provider（默认 ChatGPT/Codex、Grok）�
 <!-- section: removal -->
 本插件连接两端：`dsh-plugin-subscriptions` 的**模型 provider 工具面**（Codex/Grok 适配器会广告并接受 `sandbox_permissions`），与会拒绝「不严格宽于当前模式」升级请求的 **DSH core sandbox 检查**。
 
-它是 [BACKLOG D001](../../BACKLOG.md) 所述 core 缺陷（组合期静态广告升级 enum + 执行期 strict-wider 检查）的部署侧缓解。满足以下任一条件即应移除：上游修复该缺陷（工具 schema 感知会话模式，或拒绝文案自纠），或 DSH 升级消除该缺陷；此外，转入合法升级重试有意义的受限部署之前也应移除。移除方式：manifest 删除条目 → sync → restart，无需任何迁移。
+它是 [BACKLOG D001](https://github.com/prgrmrwy/ohmydsh/blob/main/BACKLOG.md) 所述 core 缺陷（组合期静态广告升级 enum + 执行期 strict-wider 检查）的部署侧缓解。满足以下任一条件即应移除：上游修复该缺陷（工具 schema 感知会话模式，或拒绝文案自纠），或 DSH 升级消除该缺陷；此外，转入合法升级重试有意义的受限部署之前也应移除。移除方式：manifest 删除条目 → sync → restart，无需任何迁移。
 
 ## 开发
 

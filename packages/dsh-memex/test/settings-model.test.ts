@@ -22,6 +22,8 @@ import {
   declareRow,
   defaultHome,
   repoToPattern,
+  renameRow,
+  suggestedLibraryName,
   rowsFromSettings,
   storesByName,
   toScopes,
@@ -354,6 +356,51 @@ describe('workspace-first view', () => {
     // A derived primary already declared through `~/` is not staged again.
     const derived: EditorRow[] = [row({ key: 'd', name: 'documents-acme', paths: ['~/work/acme'] })]
     expect(stageAssumedPrimary(derived, workspaceViews([], registry)[0]!)).toHaveLength(1)
+  })
+
+  it('suggests a library name from its own remote repository', () => {
+    // The live case: the library was derived from the workspace repository
+    // (prgrmrwy/home-substore) and later syncs to prgrmrwy/memex-substore.
+    expect(suggestedLibraryName('git@github.com:prgrmrwy/memex-substore.git')).toBe('memex-substore')
+    expect(suggestedLibraryName('https://github.com/prgrmrwy/memex-substore')).toBe('memex-substore')
+    // A name already used by another entry gains the owner, mirroring derivation.
+    expect(suggestedLibraryName('git@github.com:prgrmrwy/memex-substore.git', ['memex-substore'])).toBe('prgrmrwy-memex-substore')
+    expect(suggestedLibraryName('')).toBe('')
+  })
+
+  it('pins the current library path when a default-home entry is renamed', () => {
+    // The home of an entry without an explicit path is derived from its name, so
+    // renaming would silently point the library at a new, empty directory and the
+    // cards would look gone. Renaming must keep the directory the cards are in.
+    const rows: EditorRow[] = [row({ key: 'a', name: 'prgrmrwy-home-substore', paths: ['/home/u/p'], home: '' })]
+    const next = renameRow(rows, 'a', 'memex-substore', '/ns')
+    expect(next[0]!.name).toBe('memex-substore')
+    expect(next[0]!.home).toBe('/ns/prgrmrwy-home-substore')
+    // An explicitly configured home is already pinned and stays untouched.
+    const configured: EditorRow[] = [row({ key: 'b', name: 'old', paths: [], home: '/elsewhere/lib' })]
+    expect(renameRow(configured, 'b', 'new', '/ns')[0]!.home).toBe('/elsewhere/lib')
+  })
+
+  it('declares a derived primary on an existing entry instead of adding a second row with its name', () => {
+    // Live shape: the library was declared on its own (no path claims), while the
+    // workspace still resolves through the repository-derived library of the same
+    // name. Declaring it must claim the workspace on that entry — adding a second
+    // row named the same makes the whole draft unsavable (duplicate name and one
+    // library path shared by two entries).
+    const rows: EditorRow[] = [row({ key: 'lib', name: 'prgrmrwy-home-substore', paths: [] })]
+    const registry = { known: true as const, homeDir: home, items: [{ id: 'w1', title: 'home-substore', path: '/home/u/projects/home-substore', route: {
+      path: '/home/u/projects/home-substore', scope: 'prgrmrwy-home-substore', home: '/ns/prgrmrwy-home-substore', publish: 'external' as const,
+      publishKnown: true, memory: true, fallback: true, personal: { read: true, write: true }, claim: { kind: 'none' as const },
+      offBy: { memory: [], fallback: [] }, source: 'derived' as const, exists: true, local: false,
+    } }] }
+    const view = workspaceViews(rows, registry)[0]!
+
+    const next = stageAssumedPrimary(rows, view)
+
+    expect(next).toHaveLength(1)
+    expect(next[0]!.name).toBe('prgrmrwy-home-substore')
+    expect(next[0]!.paths).toEqual(['/home/u/projects/home-substore'])
+    expect(conflicts(next, '/ns', messages, [], home)).toEqual([])
   })
 
   it('detaches a library from one workspace by dropping that path only', () => {

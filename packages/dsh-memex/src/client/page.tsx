@@ -25,10 +25,12 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/cli
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   MEMEX_CHANNEL,
+  MEMEX_DELETE_ENDPOINT,
   MEMEX_REMOTE_ENDPOINT,
   MEMEX_RESOLVE_ENDPOINT,
   MEMEX_STORES_ENDPOINT,
   MEMEX_WORKSPACES_ENDPOINT,
+  type MemexDeleteResult,
   type MemexRemoteAction,
   type MemexRemoteResult,
   type MemexResolveResult,
@@ -46,11 +48,13 @@ import {
   defaultHome,
   detachEntry,
   removePathFromGroup,
+  renameRow,
   rowsFromSettings,
   setPathInGroup,
   setPrimary,
   stageAssumedPrimary,
   storesByName,
+  suggestedLibraryName,
   toScopes,
   undeclaredStores,
   workspaceViews,
@@ -58,6 +62,7 @@ import {
   type EditorRow,
   type EntryCandidate,
   type MemexSettingsShape,
+  type MemexWorkspaceDeclaration,
   type WorkspaceEntryRow,
   type WorkspaceView,
 } from './settings-model.js'
@@ -102,10 +107,10 @@ interface Picker {
  * A declared primary is a name: renaming the library without it would leave a
  * declaration naming something that no longer claims the path.
  */
-function renamed(draft: Draft, key: string, name: string): Draft {
+function renamed(draft: Draft, key: string, name: string, namespaceDir: string): Draft {
   const before = draft.rows.find(row => row.key === key)?.name.trim()
   return {
-    rows: draft.rows.map(row => (row.key === key ? { ...row, name } : row)),
+    rows: renameRow(draft.rows, key, name, namespaceDir),
     workspaces: before === undefined ? draft.workspaces : draft.workspaces.map(declaration => (declaration.primary === before && before !== name.trim()
       ? { ...declaration, primary: name.trim() }
       : declaration)),
@@ -146,6 +151,12 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   const [busy, setBusy] = useState<string | undefined>(undefined)
   const [confirming, setConfirming] = useState<string | undefined>(undefined)
   const [urlDraft, setUrlDraft] = useState('')
+  /** New library directory typed into the remote block; empty keeps the current one. */
+  const [homeDraft, setHomeDraft] = useState('')
+  /** New library name typed into the remote block; empty keeps the current one. */
+  const [nameDraft, setNameDraft] = useState('')
+  /** Undeclared library awaiting a delete confirmation, by scope name. */
+  const [deleting, setDeleting] = useState<string | undefined>(undefined)
   const [copied, setCopied] = useState<string | undefined>(undefined)
   const [probePath, setProbePath] = useState('')
   const [probeResult, setProbeResult] = useState<MemexResolveResult | undefined>(undefined)
@@ -308,7 +319,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       const base = existing ?? { draft: savedDraft, intents: [] }
       return { ...base, draft: { ...base.draft, rows: [...change(base.draft.rows)] } }
     })
-  }, [savedDraft])
+  }, [savedDraft, namespaceDir])
 
   const edit = useCallback((key: string, change: (row: EditorRow) => EditorRow) => {
     editRows(base => base.map(row => (row.key === key ? change(row) : row)))
@@ -317,7 +328,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
   const rename = useCallback((key: string, name: string) => {
     setSession(existing => {
       const base = existing ?? { draft: savedDraft, intents: [] }
-      return { ...base, draft: renamed(base.draft, key, name) }
+      return { ...base, draft: renamed(base.draft, key, name, namespaceDir ?? '~/.dsh-memex') }
     })
   }, [savedDraft])
 
@@ -365,6 +376,76 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     }
   }, [rpc, t, loadStores])
 
+  /**
+   * Delete one undeclared library after the user has seen its absolute path.
+   *
+   * The page never guesses what to remove: the Host only accepts a discovered
+   * library under the namespace that no entry declares, and the confirmation line
+   * shows exactly the directory and how many cards it holds.
+   */
+  const runDelete = useCallback(async (scopeName: string): Promise<void> => {
+    setBusy(`${scopeName}:delete`)
+    setNotice(undefined)
+    try {
+      const response = (await rpc.call(MEMEX_CHANNEL, MEMEX_DELETE_ENDPOINT, { scope: scopeName })) as
+        { ok?: boolean; value?: MemexDeleteResult; error?: { message?: string } }
+      if (response.ok !== true || response.value === undefined) {
+        setNotice({ kind: 'error', text: response.error?.message ?? t('deleteFailed') })
+        return
+      }
+      const outcome = response.value
+      if (outcome.status !== 'ok') {
+        setNotice({ kind: 'error', text: outcome.message ?? t('deleteRefused') })
+        return
+      }
+      setDeleting(undefined)
+      setNotice({ kind: 'ok', text: `${t('deleteDone')} ${outcome.home ?? ''}` })
+      await loadStores()
+      await loadWorkspaces()
+    } catch (error) {
+      setNotice({ kind: 'error', text: messageOf(error) })
+    } finally {
+      setBusy(undefined)
+    }
+  }, [rpc, t, loadStores, loadWorkspaces])
+
+  /**
+   * Write the scope table (and the path declarations) to the Host.
+   *
+   * Two sets rather than the namespace root: an older page bundle that sets only
+   * `scopes` leaves the path declarations alone. DSH 0.2.0 `ConfigForm.mutate`
+   * resolves false when the Host refuses the write (validation, stale revision,
+   * or a higher layer shadowing the row) and has already reloaded Host state;
+   * only a transport failure throws.
+   */
+  const persistScopes = useCallback(async (
+    nextRows: readonly EditorRow[],
+    nextWorkspaces: readonly MemexWorkspaceDeclaration[],
+  ): Promise<boolean> => {
+    try {
+      return await scope.mutate([
+        {
+          op: 'set',
+          path: ['scopes'],
+          value: toScopes(nextRows).map(entry => ({
+            name: entry.name,
+            ...(entry.pathPrefixes === undefined ? {} : { pathPrefixes: [...entry.pathPrefixes] }),
+            ...(entry.remotePatterns === undefined ? {} : { remotePatterns: [...entry.remotePatterns] }),
+            ...(entry.home === undefined ? {} : { home: entry.home }),
+            ...(entry.primary === undefined ? {} : { primary: entry.primary }),
+            ...(entry.publish === undefined ? {} : { publish: entry.publish }),
+            ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
+            ...(entry.memory === undefined ? {} : { memory: entry.memory }),
+          })),
+        },
+        { op: 'set', path: ['workspaces'], value: nextWorkspaces.map(declaration => ({ ...declaration })) },
+      ])
+    } catch (error) {
+      setNotice({ kind: 'error', text: `${t('saveFailed')}: ${messageOf(error)}` })
+      return false
+    }
+  }, [scope, t])
+
   const save = useCallback(async (): Promise<void> => {
     if (problems.length > 0) {
       setNotice({ kind: 'error', text: problems.join(' · ') })
@@ -382,29 +463,11 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       setNotes(existing => [...existing, ...guarded.notes])
       return
     }
+    // The commit itself moves cards when the edit switches a primary entry, so
+    // the button reports the wait instead of looking inert for a large library.
+    setBusy('save')
     try {
-      // Two sets rather than the namespace root: an older page bundle that sets
-      // only `scopes` leaves the path declarations alone.
-      // DSH 0.2.0 ConfigForm.mutate resolves false when the Host refuses the
-      // write (validation, stale revision, or a higher layer shadowing the row)
-      // and has already reloaded Host state; only a transport failure throws.
-      const accepted = await scope.mutate([
-        {
-          op: 'set',
-          path: ['scopes'],
-          value: toScopes(rows).map(entry => ({
-            name: entry.name,
-            ...(entry.pathPrefixes === undefined ? {} : { pathPrefixes: [...entry.pathPrefixes] }),
-            ...(entry.remotePatterns === undefined ? {} : { remotePatterns: [...entry.remotePatterns] }),
-            ...(entry.home === undefined ? {} : { home: entry.home }),
-            ...(entry.primary === undefined ? {} : { primary: entry.primary }),
-            ...(entry.publish === undefined ? {} : { publish: entry.publish }),
-            ...(entry.fallback === undefined ? {} : { fallback: entry.fallback }),
-            ...(entry.memory === undefined ? {} : { memory: entry.memory }),
-          })),
-        },
-        { op: 'set', path: ['workspaces'], value: current.draft.workspaces.map(declaration => ({ ...declaration })) },
-      ])
+      const accepted = await persistScopes(rows, current.draft.workspaces)
       if (!accepted) {
         // Keep the draft: the page still shows the Host's last accepted value
         // beside the user's unsaved edits, never an intermediate state.
@@ -416,10 +479,123 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       setNotice({ kind: 'ok', text: t('saved') })
       await loadStores()
       await loadWorkspaces()
-    } catch (error) {
-      setNotice({ kind: 'error', text: `${t('saveFailed')}: ${messageOf(error)}` })
+    } finally {
+      setBusy(undefined)
     }
-  }, [scope, problems, current, env, rows, refusalText, t, loadStores, loadWorkspaces])
+  }, [problems, current, env, rows, refusalText, t, persistScopes, loadStores, loadWorkspaces])
+
+  /**
+   * Move a library to another directory while configuring its remote.
+   *
+   * Three steps, in this order: the host copies the library and runs the kernel
+   * in the new directory; the page persists the new home; only then does the host
+   * delete the old directory. Any failure before the persist leaves the old
+   * library in place, and a refused persist leaves it too — the move is
+   * idempotent, so retrying simply finishes it.
+   */
+  const runRelocate = useCallback(async (scopeName: string, toHome: string, url: string, nextName = ''): Promise<void> => {
+    setBusy(`${scopeName}:init`)
+    setNotice(undefined)
+    try {
+      const action: MemexRemoteAction = url === '' ? 'sync' : 'init'
+      const response = (await rpc.call(MEMEX_CHANNEL, MEMEX_REMOTE_ENDPOINT, {
+        scope: scopeName,
+        action,
+        home: toHome,
+        ...(url === '' ? {} : { url }),
+      })) as { ok?: boolean; value?: MemexRemoteResult; error?: { message?: string } }
+      if (response.ok !== true || response.value === undefined) {
+        setNotice({ kind: 'error', text: response.error?.message ?? t('remoteUnknown') })
+        return
+      }
+      if (response.value.status !== 'ok') {
+        setNotice({ kind: 'error', text: response.value.message ?? t('relocateFailed') })
+        return
+      }
+      const moved = response.value.moved
+      if (moved === undefined) {
+        setNotice({ kind: 'ok', text: response.value.output ?? t('saved') })
+        return
+      }
+      const row = rows.find(candidate => candidate.name.trim() === scopeName)
+      // The move may also rename the library: the row keeps its identity while the
+      // name, its declarations and the directory all follow.
+      const renamedDraft = nextName !== '' && row !== undefined
+        ? renamed(current.draft, row.key, nextName, namespaceDir ?? '~/.dsh-memex')
+        : current.draft
+      const nextRows = renamedDraft.rows.map(candidate => (candidate.key === row?.key ? { ...candidate, home: moved.to } : candidate))
+      const accepted = await persistScopes(nextRows, renamedDraft.workspaces)
+      if (!accepted) {
+        setNotice({ kind: 'error', text: t('relocateKeptOld') })
+        return
+      }
+      const retired = (await rpc.call(MEMEX_CHANNEL, MEMEX_REMOTE_ENDPOINT, { scope: scopeName, action: 'retire' })) as {
+        ok?: boolean
+        value?: MemexRemoteResult
+        error?: { message?: string }
+      }
+      setSession(undefined)
+      setNotes([])
+      setConfirming(undefined)
+      setUrlDraft('')
+      setHomeDraft('')
+      setNotice(retired.ok === true && retired.value?.status === 'ok'
+        ? { kind: 'ok', text: t('relocateDone') }
+        : { kind: 'error', text: retired.error?.message ?? t('relocateRetireFailed') })
+      await loadStores()
+      await loadWorkspaces()
+    } catch (error) {
+      setNotice({ kind: 'error', text: messageOf(error) })
+    } finally {
+      setBusy(undefined)
+    }
+  }, [rpc, t, rows, current, namespaceDir, persistScopes, loadStores, loadWorkspaces])
+
+  /**
+   * Rename a library, optionally pointing it at a new remote in the same step.
+   *
+   * The rename pins the current directory (see `renameRow`), so cards stay where
+   * they are; moving the directory itself is the relocation flow's job.
+   */
+  const runRename = useCallback(async (scopeName: string, nextName: string, url: string): Promise<void> => {
+    const row = rows.find(candidate => candidate.name.trim() === scopeName)
+    if (row === undefined) return
+    if (rows.some(candidate => candidate.key !== row.key && candidate.name.trim() === nextName)) {
+      setNotice({ kind: 'error', text: t('conflictName') })
+      return
+    }
+    setBusy(`${scopeName}:init`)
+    setNotice(undefined)
+    try {
+      if (url !== '') {
+        const response = (await rpc.call(MEMEX_CHANNEL, MEMEX_REMOTE_ENDPOINT, { scope: scopeName, action: 'init', url })) as
+          { ok?: boolean; value?: MemexRemoteResult; error?: { message?: string } }
+        if (response.ok !== true || response.value === undefined) {
+          setNotice({ kind: 'error', text: response.error?.message ?? t('remoteUnknown') })
+          return
+        }
+        if (response.value.status !== 'ok') {
+          setNotice({ kind: 'error', text: response.value.message ?? t('relocateFailed') })
+          return
+        }
+      }
+      const renamedDraft = renamed(current.draft, row.key, nextName, namespaceDir ?? '~/.dsh-memex')
+      if (!(await persistScopes(renamedDraft.rows, renamedDraft.workspaces))) return
+      setSession(undefined)
+      setNotes([])
+      setConfirming(undefined)
+      setUrlDraft('')
+      setHomeDraft('')
+      setNameDraft('')
+      setNotice({ kind: 'ok', text: t('saved') })
+      await loadStores()
+      await loadWorkspaces()
+    } catch (error) {
+      setNotice({ kind: 'error', text: messageOf(error) })
+    } finally {
+      setBusy(undefined)
+    }
+  }, [rpc, t, rows, current, namespaceDir, persistScopes, loadStores, loadWorkspaces])
 
   const runProbe = useCallback(async (): Promise<void> => {
     setProbeResult(undefined)
@@ -489,6 +665,11 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
     }
     const configured = sync.configured === true
     const token = `remote:${store.scope}`
+    // The name a store repository suggests, excluding this entry's own name.
+    const suggestion = urlDraft.trim() === ''
+      ? ''
+      : suggestedLibraryName(urlDraft, rows.map(item => item.name.trim()).filter(name => name !== '' && name !== store.scope))
+    const suggested = suggestion === '' ? undefined : suggestion
     return (
       <>
         <dl className="dshmx-facts">
@@ -547,15 +728,51 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                   placeholder={t('urlPlaceholder')}
                   onChange={event => setUrlDraft(event.target.value)}
                 />
+                {/*
+                  The directory belongs to the same decision: a library's git
+                  repository lives inside its directory, so changing the path
+                  alone would strand the remote. Leaving this empty keeps the
+                  current directory.
+                */}
+                <input
+                  className="dshmx-field dshmx-ident"
+                  aria-label={t('columnLibrary')}
+                  value={homeDraft}
+                  placeholder={store.home}
+                  onChange={event => setHomeDraft(event.target.value)}
+                />
+                {/*
+                  The library's own store repository names the library, which the
+                  workspace-derived name does not follow. Left empty, the name stays.
+                */}
+                <input
+                  className="dshmx-field dshmx-ident"
+                  aria-label={t('columnLibraryName')}
+                  value={nameDraft}
+                  placeholder={suggested ?? t('namePlaceholder')}
+                  onChange={event => setNameDraft(event.target.value)}
+                />
+                {suggested !== undefined && nameDraft.trim() === '' && (
+                  <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => setNameDraft(suggested)}>
+                    {`${t('actionUseSuggestedName')}: ${suggested}`}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="dshmx-act dshmx-act-inline"
-                  disabled={busy !== undefined || urlDraft.trim() === ''}
-                  onClick={() => void runRemote(store.scope, 'init', urlDraft.trim())}
+                  disabled={busy !== undefined || (urlDraft.trim() === '' && homeDraft.trim() === '' && nameDraft.trim() === '')}
+                  onClick={() => {
+                    const target = homeDraft.trim()
+                    const nextName = nameDraft.trim()
+                    const url = urlDraft.trim()
+                    if (target !== '' && target !== store.home) void runRelocate(store.scope, target, url, nextName)
+                    else if (nextName !== '' && nextName !== store.scope) void runRename(store.scope, nextName, url)
+                    else void runRemote(store.scope, 'init', url)
+                  }}
                 >
                   {configured ? t('actionConfirmChange') : t('actionConfigureRemote')}
                 </button>
-                <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => { setConfirming(undefined); setUrlDraft('') }}>{t('actionCancel')}</button>
+                <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => { setConfirming(undefined); setUrlDraft(''); setHomeDraft(''); setNameDraft('') }}>{t('actionCancel')}</button>
               </>
             )
             : (
@@ -563,12 +780,18 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
                 type="button"
                 className="dshmx-act dshmx-act-inline"
                 disabled={busy !== undefined}
-                onClick={() => { setConfirming(store.scope); setUrlDraft('') }}
+                onClick={() => { setConfirming(store.scope); setUrlDraft(''); setHomeDraft('') }}
               >
                 {configured ? t('actionChangeRemote') : t('actionConfigureRemote')}
               </button>
             )}
         </div>
+        {confirming === store.scope && homeDraft.trim() !== '' && homeDraft.trim() !== store.home && (
+          <span className="dshmx-note">{t('relocateHint')}</span>
+        )}
+        {confirming === store.scope && nameDraft.trim() !== '' && nameDraft.trim() !== store.scope && (
+          <span className="dshmx-note">{t('renameHint')}</span>
+        )}
         {confirming === store.scope && configured && <span className="dshmx-note">{t('changeRemoteWarning')}</span>}
       </>
     )
@@ -965,8 +1188,43 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
               >
                 {t('actionDeclare')}
               </button>
+              {/* Deleting a library is the one destructive action here: the
+                  confirmation spells out the absolute directory (and its cards)
+                  so the click is on a path the user has actually seen. */}
+              {deleting === store.scope
+                ? (
+                  <button
+                    type="button"
+                    className="dshmx-act dshmx-act-inline dshmx-danger"
+                    disabled={busy !== undefined}
+                    onClick={() => void runDelete(store.scope)}
+                  >
+                    {t('actionDeleteConfirm')}
+                  </button>
+                )
+                : (
+                  <button
+                    type="button"
+                    className="dshmx-act dshmx-act-inline"
+                    disabled={busy !== undefined}
+                    onClick={() => setDeleting(store.scope)}
+                  >
+                    {t('actionDelete')}
+                  </button>
+                )}
             </div>
           ))}
+          {deleting !== undefined && (
+            <div className="dshmx-line dshmx-danger-line">
+              <span className="dshmx-note">
+                {`${t('deleteConfirm')} ${undeclared.find(store => store.scope === deleting)?.home ?? ''}`}
+                {undeclared.find(store => store.scope === deleting)?.cards !== undefined
+                  ? ` — ${String(undeclared.find(store => store.scope === deleting)?.cards)} ${t('deleteCards')}`
+                  : ''}
+              </span>
+              <button type="button" className="dshmx-act dshmx-act-inline" onClick={() => setDeleting(undefined)}>{t('actionCancel')}</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1004,7 +1262,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
       )}
 
       <div className="dshmx-footer">
-        <button type="button" className="dshmx-primary" disabled={!writable || problems.length > 0} onClick={() => void save()}>{t('save')}</button>
+        <button type="button" className="dshmx-primary" disabled={!writable || problems.length > 0 || busy !== undefined} onClick={() => void save()}>{busy === 'save' ? t('saveBusy') : t('save')}</button>
         <button type="button" className="dshmx-act dshmx-act-inline" disabled={!dirty} onClick={() => { setSession(undefined); setNotes([]); setNotice(undefined) }}>{t('discard')}</button>
         <span className="dshmx-note">{dirty ? t('unsaved') : t('saved')}</span>
       </div>

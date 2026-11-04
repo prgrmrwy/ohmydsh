@@ -8,10 +8,7 @@ import { createEgressGate } from '../src/egress-gate.js'
 import { ComposerGuardController } from '../src/client/guard.js'
 import { apply, configPathOf } from '../src/index.js'
 import { NetworkVerdictCache } from '../src/network.js'
-import { parse } from 'yaml'
-import { readFileSync } from 'node:fs'
 
-const MAGPIE_ROUTES = ['dsh-magpie-connector-claude', 'dsh-magpie-connector-codex', 'dsh-magpie-connector-opencode-go', 'dsh-magpie-connector-deepseek', 'dsh-magpie-connector-other']
 const magpie = { provider: 'dsh-magpie-connector-claude', model: 'claude/claude-opus-5-5' }
 const dirs: string[] = []
 const temporary = () => { const dir = mkdtempSync(path.join(tmpdir(), 'guard-exempt-')); dirs.push(dir); return dir }
@@ -99,12 +96,4 @@ it('serves effective Host policy without Geo, applies persisted revocation at th
   expect(await handler('policy')).toEqual({ ok: true, value: { exemptProviders: [] } })
   await expect((async () => { for await (const _ of gate(magpie, next)) {} })()).rejects.toThrow('restricted')
   expect(loadGuardConfig(configPathOf(process.env.DSH_HOME!)).exemptProviders).toEqual([])
-})
-
-it('removes the old connect manifest entry and explicitly lists each Magpie owner route', () => {
-  const manifest = parse(readFileSync(new URL('../../../dsh.yaml', import.meta.url), 'utf8'))
-  expect(manifest.customizations.some((c: any) => c.id === 'dsh-magpie-connect')).toBe(false)
-  expect(manifest.customizations.find((c: any) => c.id === 'home-network-model-guard-config').enabled).toBe(true)
-  const patch = parse(readFileSync(new URL('../../../patches/home-network-model-guard-config.yml', import.meta.url), 'utf8'))
-  expect(patch).toEqual([{ id: 'dsh-home-network-model-guard', name: 'dsh-home-network-model-guard', config: { exemptProviders: MAGPIE_ROUTES } }])
 })

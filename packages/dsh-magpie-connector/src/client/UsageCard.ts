@@ -1,11 +1,11 @@
 import { createElement as h, type ReactNode } from 'react'
-import { expiryHint, formatTime, readTime, windowReading, type Card, type CardReset, type CardResets, type CardWindow } from './view-model.js'
+import { expiryHint, formatTime, readTime, resetAccount, resetBlock, windowReading, type Card, type CardReset, type CardResets, type CardWindow } from './view-model.js'
 import { t } from './locales.js'
 
 /**
- * One read-only usage card. Every gateway string is a React text child (never
- * HTML), absent fields are omitted, and the only control is "刷新" — there is
- * deliberately no reset action (the Codex reset credits are display-only).
+ * One usage card. Every gateway string is a React text child (never HTML),
+ * absent fields are omitted. The only controls are "刷新" and — on a card whose
+ * resets the host marked redeemable — "使用…" on the credit that expires first.
  */
 const time = (raw: string) => h('time', { dateTime: raw }, formatTime(raw))
 /** A reset credit's expiry: the localized instant, "expires …", in one machine-readable `<time>`. */
@@ -23,6 +23,10 @@ const windowLabel = (window: string | undefined) =>
 
 /** Bar colour: ≤70% normal (blue), above 70 and below 90 warn (orange), 90% and above high (red). */
 export const usageLevel = (used: number) => used >= 90 ? 'high' : used > 70 ? 'warn' : 'normal'
+
+/** The reset area's disclosure arrow: a 12px glyph, so the unfolded rows line up with the title text. */
+const ResetChevron = () => h('svg', { className: 'dmg-reset-chevron', 'aria-hidden': true, width: 12, height: 12, viewBox: '0 0 16 16' },
+  h('path', { d: 'm6 3 5 5-5 5', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }))
 
 function WindowRow({ window }: { window: CardWindow }) {
   const reading = windowReading(window)
@@ -54,38 +58,65 @@ function resetCount(resets: CardResets): ReactNode {
 }
 
 /** One reset credit: which kind it is, when it runs out and, for the soonest, how far off that is. */
-function resetItem(item: CardReset, soonest: number | undefined, key: string) {
+function resetItem(item: CardReset, soonest: number | undefined, key: string, action?: ReactNode) {
   const at = item.until
   const hint = present(at) && soonest !== undefined && Date.parse(at!) === soonest ? expiryHint(at!) : undefined
   return h('div', { className: 'dmg-reset-item', 'data-reset-item': '', key },
-    h('span', null, windowLabel(item.window) ?? t('resetCreditFull')),
-    h('span', null,
+    h('span', { className: 'dmg-reset-kind' },
+      h('span', null, windowLabel(item.window) ?? t('resetCreditFull')),
+      action === undefined ? null : action),
+    h('span', { className: 'dmg-reset-when' },
       present(at) ? expiryTime(at!) : t('resetCreditExpiryUnknown'),
       hint === undefined ? null : [' · ', hint]))
 }
 
+/** The "use" button of one credit: disabled state is explained on hover, never silently inert. */
+function resetButton(card: Card, busy: boolean, blocked: boolean, onReset: (() => void) | undefined) {
+  const reason = resetBlock(card)
+  const label = busy ? t('resetUseChecking') : t('resetUseButton')
+  const title = busy ? t('resetUseChecking') : reason === 'guard' ? t('resetUseGuard') : reason === 'refresh' ? t('resetUseRefresh') : reason === 'restart' ? t('resetUseRestart') : t('resetUseReady')
+  const inactive = busy || blocked || reason !== undefined
+  return h('button', {
+    type: 'button', className: 'dmg-reset-use', 'data-reset-use': '', 'aria-disabled': inactive ? 'true' : 'false', title,
+    ...(inactive ? {} : { 'data-ready': '' }),
+    onClick: () => { if (!inactive) onReset?.() },
+  }, label)
+}
+
 /**
  * The card's reset credits, folded like the subscriptions plugin does: the count
- * on the summary line, every credit and its expiry when opened. Read-only —
- * spending a credit is not offered here.
+ * on the summary line, every credit and its expiry when opened, and the use
+ * action on the credit that runs out first.
  */
-function ResetLine({ resets }: { resets: CardResets }) {
+function ResetLine({ card, resets, busy, blocked, onReset }: { card: Card; resets: CardResets; busy: boolean; blocked: boolean; onReset?: ((card: Card) => void) | undefined }) {
   const each = resets.each ?? []
   const items: CardReset[] = each.length ? each : present(resets.until) ? [{ until: resets.until! }] : []
   const times = items.flatMap(item => { const at = present(item.until) ? Date.parse(item.until!) : NaN; return Number.isNaN(at) ? [] : [at] })
-  // The soonest credit carries the relative hint; it is the one worth not wasting.
+  // The soonest credit carries the relative hint and the use action; it is the one worth not wasting.
   const soonest = times.length ? Math.min(...times) : undefined
   const count = resetCount(resets)
   if (count === null && items.length === 0) return null
+  // The host marks the card, but the premise is also checked here: only a named Codex
+  // account can be spent for, and without that there is nothing to send.
+  const actionable = resets.redeemable === true && resetAccount(card) !== undefined && onReset !== undefined
   return h('details', { className: 'dmg-resets', 'data-field': 'resets' },
     h('summary', null,
-      h('span', { className: 'dmg-chevron', 'aria-hidden': true }, '▸'),
+      h('span', { className: 'dmg-reset-chevron-slot', 'aria-hidden': true }, h(ResetChevron, null)),
       h('span', null, t('resetCreditsTitle')),
       count === null ? null : h('span', { className: 'dmg-resets-count' }, count)),
-    items.length ? h('div', { className: 'dmg-reset-items' }, ...items.map((item, index) => resetItem(item, soonest, `reset-${index}`))) : null)
+    items.length ? h('div', { className: 'dmg-reset-items' }, ...items.map((item, index) => {
+      const at = present(item.until) ? Date.parse(item.until!) : NaN
+      // A credit with no expiry never runs out, so every credit ties; the first one
+      // then stands in for "soonest" instead of leaving the card without an action.
+      const isSoonest = soonest === undefined ? index === 0 : !Number.isNaN(at) && at === soonest
+      return resetItem(item, soonest, `reset-${index}`, actionable && isSoonest ? resetButton(card, busy, blocked, () => onReset(card)) : undefined)
+    })) : null)
 }
 
-export function UsageCard({ card, busy, onRefresh }: { card: Card; busy: boolean; onRefresh: () => void }) {
+export function UsageCard({ card, busy, onRefresh, disabled, resetBusy, resetStatus, onReset }: {
+  card: Card; busy: boolean; onRefresh: () => void; disabled?: boolean
+  resetBusy?: boolean; resetStatus?: { text: string; tone: 'ok' | 'error' | 'warn' }; onReset?: (card: Card) => void
+}) {
   const read = readTime(card)
   const facts = [
     present(card.user) && fact('user', t('usageUser'), card.user),
@@ -99,9 +130,10 @@ export function UsageCard({ card, busy, onRefresh }: { card: Card; busy: boolean
   return h('article', { className: 'dmg-card', 'data-card': '' },
     h('div', { className: 'dmg-card-title' },
       h('strong', null, present(card.name) ? card.name : card.provider),
-      h('button', { type: 'button', className: 'dmg-button', disabled: busy, onClick: onRefresh }, t('refresh'))),
+      h('button', { type: 'button', className: 'dmg-button', disabled: busy || disabled === true, onClick: onRefresh }, t('refresh'))),
     facts.length ? h('div', { className: 'dmg-facts' }, ...facts) : null,
     ...(card.windows ?? []).map((window, index) => h(WindowRow, { key: `window-${index}`, window })),
-    resets ? h(ResetLine, { resets }) : null,
+    resets ? h(ResetLine, { resets, card, busy: resetBusy === true, blocked: disabled === true, onReset }) : null,
+    resetStatus ? h('p', { className: resetStatus.tone === 'error' ? 'dmg-error' : resetStatus.tone === 'warn' ? 'dmg-warn' : 'dmg-ok', role: resetStatus.tone === 'error' ? 'alert' : 'status', 'data-reset-status': resetStatus.tone }, resetStatus.text) : null,
     present(card.error) ? h('p', { className: 'dmg-error', 'data-field': 'error', role: 'alert' }, card.error) : null)
 }

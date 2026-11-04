@@ -4,11 +4,9 @@
 
 English · [简体中文](README.zh.md)
 
-![Sidebar: each session row shows the logo of its selected provider and model](docs/overview.en.png)
+![Sidebar: each session row shows the logo of its selected provider and model, in light and dark theme — Claude, GPT, Grok, Gemini, OpenCode with GLM, and Magpie via Trae to DeepSeek](docs/overview.en.png)
 
-![Rendering rules: same-vendor selections show one logo; aggregator routes show the provider logo with the model logo in the corner (light and dark theme)](docs/screenshot.en.png)
-
-*Top: the sidebar with demo sessions. Bottom: rendering rules for single and composite badges. Synthetic rendering of an isolated DSH instance in English — that instance has no model credentials, so badges and rows are rendered from the plugin's own output rather than recorded from a live session.*
+*Synthetic English sidebar illustration, light theme on the left and dark theme on the right with the same rows: single vendor marks for Claude, GPT, Grok and Gemini, an aggregator route mark for OpenCode with the GLM vendor corner, and the composite badge for Magpie behind a gateway — Trae in the bottom-left transit corner, DeepSeek in the bottom-right vendor corner. `currentColor` marks follow the theme while Gemini, GLM and DeepSeek keep their brand color in both. It renders an isolated DSH instance that has no model credentials, so badges and rows come from the plugin's own output rather than a recorded live session.*
 
 ![Architecture: the composer selection, the official modelSelection projection and a Host provider projection feed provider-map, which renders a brand badge in front of each sidebar row](docs/architecture.en.svg)
 
