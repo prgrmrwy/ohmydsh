@@ -1,8 +1,8 @@
-import { createElement as h, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createElement as h, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { IconChevronDownOutlineRegular, IconChevronUpOutlineRegular, IconTrashOutlineRegular, IconTriangleRightFillRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { errorText, failureText, isOk, type Api } from './api.js'
 import { lineLatency, parseLatency, type LatencyState, type LineLatency } from './latency.js'
-import { settingsCss } from './styles.js'
+import { ensureStyles } from './styles.js'
 import { UsageCard } from './UsageCard.js'
 import { t, type MagpieKey } from './locales.js'
 import { DEFAULT_REFRESH_MINUTES, MAX_REFRESH_MINUTES, setSidebarPreference } from './sidebar-preference.js'
@@ -77,6 +77,9 @@ export function describeCheck(snapshot: CheckSnapshot, diff: { added: string[]; 
 }
 
 export function MagpieSettings({ api }: { api: Api }) {
+  // The stylesheet is document-level: a settings remount must never be the only
+  // thing keeping the card styled (see `ensureStyles`).
+  useLayoutEffect(() => { ensureStyles() })
   const [settings, setSettings] = useState<SettingsView>()
   const [settingsError, setSettingsError] = useState('')
   const [cards, setCards] = useState<CardsView>()
@@ -286,7 +289,7 @@ export function MagpieSettings({ api }: { api: Api }) {
     } finally { setResetConsuming(false); setResetConfirm(undefined) }
   }
   return h('div', { className: 'dmg-settings' },
-    h('style', null, settingsCss),
+
     h('p', { className: 'dmg-intro' }, t('intro')),
     settingsError ? h('p', { className: 'dmg-error', role: 'alert' }, t('settingsReadFailed', { error: settingsError })) : null,
     settings ? h(Connection, { settings, saving: savingSettings, mutateSettings, api, latency, onRefreshLatency: (lineId: string) => { void readLatency(lineId) },

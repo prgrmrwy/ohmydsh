@@ -819,3 +819,22 @@ inbox → 模型被拉回去再走一步（去写卡）→ 以一句写卡汇报
 另外一条：文档评论事件的 compact 输出里没有 `is_whole`。要判断是全文评论还是划词评论，必须以 bot 身份查一次评论（`drive +batch-query-comments`）。长连接事件处理完就算确认，不会重推，所以这次查询失败时要在进程内重试，否则这条评论就永久丢失。
 
 **排查顺序**：先看连接计数；再看本机有没有遗留的 `+subscribe` 进程；最后看 bus（`lark-cli event status`）。
+
+---
+
+## 15. 组件内渲染 `<style>`：重挂载/热载后会整片样式消失
+
+`dsh-magpie-connector` 早期把整张插件样式表 `settingsCss` 作为 `<style>` 元素放在组件自己的渲染树里（`h('style', null, settingsCss)`）。日常可用，但重建或重启 DSH 之后偶尔出现侧栏额度卡变成一串裸文字：标题、读数、百分比全在，卡片背景、间距、颜色全没了，图标退化成浏览器默认按钮方框。
+
+- **为什么**：样式表挂在一个 slot 组件子树里。slot 重新挂载、插件模块重新加载、或该子树被壳层替换时，`<style>` 跟着被卸载；而数据是重新渲染出来的，于是出现「有内容、没样式」的中间态。组件内样式表的生命周期和它要覆盖的 DOM（侧栏卡、设置页、portal 到 `document.body` 的浮层）根本不一致。
+- **做法**：样式表作为文档级资源注入一次，带 marker 便于查找，并在 `ctx.effect` 里负责清理：
+
+  ```ts
+  ctx.effect(() => {
+    const element = ensureStyles()   // style[data-<plugin>-styles] → document.head
+    return () => { element?.remove() }
+  }, '<plugin>: styles')
+  ```
+
+  `ensureStyles()` 幂等，组件挂载时再调一次兜底（`useLayoutEffect`），被外部移除也能补回。判断标准：**任何跨 slot / portal 的全局样式，都不该由组件渲染树持有。**
+- **另一个易混点**：同一次故障里用户看到的 DOM 可能还是旧版模块渲染的（例如缺少新版本才有的字段），说明页面还握着旧的插件 bundle。样式修复能保证「样式不再随组件树丢失」，但要让新 bundle 生效仍需要刷新页面 / 重启 Host；排查时先用「DOM 里有没有新版本才有的属性」区分「样式丢了」还是「整个模块还是旧的」。

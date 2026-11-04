@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.12 — 2026-11-04
+
+- **修复重建/重启后侧栏额度卡偶尔「裸文字」的样式丢失。** 之前整张样式表是作为 `<style>` 挂在组件渲染树里的，slot 重挂载或插件模块重载会把 `<style>` 一起卸载，于是标题、读数、百分比都在但没有卡片背景、间距和颜色，刷新按钮退化成默认按钮方框。现在样式表在 `apply()` 里通过 `ctx.effect` 注入一次到 `document.head`（`style[data-dmg-magpie-styles]`，幂等、dispose 时移除），组件挂载时再兜底调用 `ensureStyles()`；设置页和侧栏卡都不再内联 `<style>`。
+- 顺带说明：同一现象里如果看到的还是旧版 DOM（例如缺新版才有的括号、到期时间列），那是页面仍握着旧的插件 bundle，样式修复不会改变这一点——刷新页面或重启 Host 后才会拿到新 bundle。
+- 新增 `test/styles.test.ts`（注入一次、被移除后补回）与两条组件断言（DOM 里不再有内联 `<style>`）；`docs/architecture/dsh-plugin-integration-pitfalls.md` 增加第 15 条。包内 535 vitest、typecheck、build 通过。
+
 ## 0.6.11 — 2026-11-04
 
 - **正文上限改为 320px。** 收起卡正文不再按「第 5 行」测量截断（多行块高度不一，像素上限更稳），改为固定 `max-height:320px`，超出照旧在卡内滚动（滚动条仍隐藏）。

@@ -2,7 +2,7 @@ import { createElement as h, Fragment, useEffect, useLayoutEffect, useRef, useSt
 import { createPortal } from 'react-dom'
 import { useAnchoredPosition, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import { errorText, type Api } from './api.js'
-import { settingsCss } from './styles.js'
+import { ensureStyles } from './styles.js'
 import { t } from './locales.js'
 import { loadCards, refreshCards } from './sidebar-api.js'
 import { DEFAULT_REFRESH_MINUTES, hydrateSidebarPreference, readSidebarPreference, subscribeSidebarPreference, type SidebarPreference } from './sidebar-preference.js'
@@ -41,6 +41,8 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   const [notice, setNotice] = useState('')
   const anchorRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+  // Document-level stylesheet: a slot remount must not be able to drop it.
+  useLayoutEffect(() => { ensureStyles() })
   const [bodyOverflow, setBodyOverflow] = useState(false)
   const [bodyMore, setBodyMore] = useState(false)
   const [detailOverflow, setDetailOverflow] = useState(false)
@@ -159,7 +161,6 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   const rows = sidebarRows(cards, windows)
   const latest = cards.map(cardReadTime).filter((value): value is string => typeof value === 'string').sort().at(-1)
   const status = statusText(view, error)
-  const style = h('style', null, settingsCss)
   const head = (): ReactNode => h('div', { className: 'dmg-sidebar-head', onClick: toggle },
     h('span', { className: 'dmg-sidebar-bird', 'aria-hidden': true }),
     h('span', { className: 'dmg-sidebar-title' }, t('sidebarTitle')),
@@ -174,7 +175,6 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
 
   if (!wide) {
     return h(Fragment, null,
-      style,
       h('button', {
         type: 'button', className: 'dmg-sidebar-rail is-button', 'data-dmg-sidebar-rail': '',
         ref: (node: HTMLElement | null): void => { anchorRef.current = node },
@@ -191,7 +191,6 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   }
 
   return h('div', { className: 'dmg-sidebar', 'data-dmg-sidebar': '', 'data-open': open },
-    style,
     h('div', { className: 'dmg-sidebar-card' },
       head(),
       open

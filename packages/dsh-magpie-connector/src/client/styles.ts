@@ -196,3 +196,28 @@ export const settingsCss = `
 .dmg-refresh-input:disabled{opacity:.6}
 .dmg-refresh-unit{font-size:12px;color:var(--dsw-alias-label-tertiary)}
 `
+
+
+/** Marker on the document-level stylesheet so a re-apply can find it again. */
+export const STYLE_ATTR = 'data-dmg-magpie-styles'
+
+/**
+ * Add the plugin stylesheet to `document.head` once and return it.
+ *
+ * The styles must not live inside a component: the settings section, the wide
+ * sidebar card and the rail popover are three different slot/portal trees, and a
+ * slot remount or a client-plugin reload that drops one of those subtrees used
+ * to take the `<style>` element with it — leaving the card as raw text (the
+ * classic "unstyled after a rebuild/restart" symptom). Document-level injection
+ * with a marker keeps the sheet independent of any mount lifecycle.
+ */
+export function ensureStyles(): HTMLStyleElement | null {
+  if (typeof document === 'undefined' || document.head === null) return null
+  const existing = document.head.querySelector<HTMLStyleElement>(`style[${STYLE_ATTR}]`)
+  if (existing !== null) return existing
+  const element = document.createElement('style')
+  element.setAttribute(STYLE_ATTR, '')
+  element.textContent = settingsCss
+  document.head.append(element)
+  return element
+}
