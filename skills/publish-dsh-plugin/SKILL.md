@@ -231,7 +231,7 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 演示图：AUTO 0.5.3 与 Magpie 0.3.1 起由 GIF 换为代表性 PNG（取自原录制的代表帧），Sidebar 与 Session ID Copy 一直是 PNG；只有推 main 并核对商店详情页后，才能说商店已展示新图。
 
-演示图语言（2026-10-30 起的要求）：Session ID Copy 已按要求分成两套（`docs/overview.png` 中文真实截图、`docs/overview.en.png` 英文 illustration），Sidebar 也已分成两套（中文 `overview.png`/`screenshot.png` + 英文单张 `overview.en.png`；2026-11-04 起英文 README 只保留这一张浅色左 / 深色右的六行侧栏 illustration：Claude、GPT、Grok、Gemini 单一 logo，OpenCode route logo，Magpie+Trae+DeepSeek 复合徽标；源与渲染命令随包）。
+演示图语言（2026-10-30 起的要求）：Session ID Copy 已按要求分成两套（`docs/overview.png` 中文真实截图、`docs/overview.en.png` 英文 illustration），Sidebar 也已分成两套（中文 `overview.png`/`screenshot.png` + 英文单张 `overview.en.png`；2026-11-04 起英文 README 只保留这一张浅色左 / 深色右的六行侧栏 illustration：Claude、GPT、Grok、Gemini 单一 logo，OpenCode+GLM 复合徽标，Magpie+Trae+DeepSeek 三品牌复合徽标；源与渲染命令随包）。
 
 **改名镜像包的目录会让 mirror-release 的非快进保护触发。** `git subtree split` 以路径前缀为键，把 `packages/<dir>` 改名后重新 split 出的历史与镜像 `main` 无关，主仓的 mirror-release 会按设计以 `! [rejected] ... (fetch first)` 失败，镜像停在旧 commit、也不会打新 tag。2026-11-02 处理方式：给 `.github/workflows/mirror-release.yml` 的 `workflow_dispatch` 加 `force` 输入，`gh workflow run mirror-release.yml -f force=true` 一次性 `--force` 重写两个镜像的 `main`，随后由 tag 触发镜像自己的 release 流水线正常发版；常规 push 仍严格快进。镜像是一次生成物，重写其 main 历史可接受，历史 tag 保留原位。改名还要同步：镜像矩阵路径、issue 模板、根与 `packages/README` 的清单、`tests/repo-docs-governance.test.mjs` 的 tier/illustration 名单、`tests/workspace-lifecycle.test.mjs` 的 CLEAN_PACKAGES、`package-lock.json`（删掉旧路径的 `extraneous` 条目并重装 workspace 链接）。`openspec/changes/archive/**` 里的旧名字是历史证据，不改。
 
