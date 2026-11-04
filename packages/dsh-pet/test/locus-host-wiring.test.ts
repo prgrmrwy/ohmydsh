@@ -16,6 +16,7 @@ import * as lark from '../src/host/channel/lark.js'
 import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { LocusRepository } from '../src/host/locus/persistence.js'
+import { PetRepository } from '../src/host/repository.js'
 import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES, LOCUS_DELEGATION_DENYLIST } from '../src/host/locus/composition.js'
 
@@ -177,6 +178,31 @@ function admit(h: Awaited<ReturnType<typeof host>>) {
 }
 
 describe('actual Host three-tier assembly', () => {
+  it('cold tool-tier control preserves the pending receipt through the actual Host adapter', async () => {
+    const h = await host()
+    const config = new PetRepository(h.ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    await config.updateChannelConfig(current => ({ ...current, allowOpenIds: ['ou_owner'] }))
+    await h.repository.putLocus({
+      id: 'entry', generation: 1, endpoint: { chatId: 'chat' }, parentSessionId: 'main', childSessionId: 'child', workspaceId: 'ws',
+      source: 'auto', state: 'active', childComposition: 'tier3', permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+      toolTier: { desired: 'safe', effective: 'safe' }, busy: false, createdAt: 1, updatedAt: 1,
+    })
+    const result = await h.controller.handleAdmission!({
+      kind: 'control', authorization: 'authorized', command: { kind: 'tools', tier: 'shell' },
+      message: { kind: 'message', chatType: 'group', messageId: 'tools-command', endpoint: { chatId: 'chat' }, senderOpenId: 'ou_owner', text: '@Pet --tools shell', replyTarget: { chatId: 'chat', messageId: 'tools-command' } },
+    })
+    expect(h.repository.getCurrentLocus({ chatId: 'chat' })).toMatchObject({
+      generation: 1, childSessionId: 'child', permission: { desired: 'read', effective: 'read' },
+      toolTier: { desired: 'shell', effective: 'safe' }, state: 'active', busy: false,
+    })
+    expect(result).toMatchObject({ kind: 'control', ok: true, text: expect.stringContaining('已记录，将在子会话下次唤醒时应用并核验') })
+    expect('text' in result && result.text).toContain('按原档位 safe 服务')
+    expect('text' in result && result.text).not.toContain('已核验为 shell')
+    expect(h.start).not.toHaveBeenCalled()
+    expect(h.queue).not.toHaveBeenCalled()
+    expect(h.agents.has('child')).toBe(false)
+  })
+
   it('cold-restores a locked main with its own tools, preserving collab and ordinary sessions', async () => {
     const h = await host()
     const before = h.ctx.tools.schemas(h.ordinary).map(tool => tool.name)

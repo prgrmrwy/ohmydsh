@@ -138,6 +138,8 @@
 | specs/pet-locus-collaboration/spec.md → 启动恢复证据经官方冷读获取 | 真实中断立即结算推进 | packages/dsh-pet/test/locus-startup-cold-read.test.ts | `真实中断立即结算推进` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 启动恢复证据经官方冷读获取 | live 中断不剔除 | packages/dsh-pet/test/locus-startup-cold-read.test.ts | `live 中断不剔除` | 🟢 green |
 
+| specs/pet-locus-collaboration/spec.md → 非驻留子会话的权限变更以待应用协议提交 | 实际 Host 透传待应用工具档位回执 | packages/dsh-pet/test/locus-host-wiring.test.ts | `cold tool-tier control preserves the pending receipt through the actual Host adapter` | 🟢 green |
+
 ## Coverage Notes
 
 - 共 115 个场景全部映射：新增或改写 75 个（🔴），沿用未改 40 个（🟢 existing）。`pet-inquiry-runtime-channel` 为整体 REMOVED，无场景；其退役以 `npm test` 中 inquiry 测试被删除、工具面断言不含 `pet_inquire`/`pet_inquiry_answer` 覆盖（见 tasks）。4 个补丁的退役没有 spec 场景，由 tasks 26.3 的构建产物检查（不再替换相关官方包、无 `supportsFinalToolGuardRecheck`、无 managed-effect 标记）与 compat 包测试把关；退役最终守卫重判导致的读取时间窗是所有者接受的风险（design Risks），不设"工具体不执行"的回归测试，改由 tasks 1.5 在实际 launcher 图上复核包装层；随补丁删除的测试（`test-packaging.cjs`、`verify-native-managed-effects.mjs` 等中的对应断言、`test/inquiry-*`）不再计入。
