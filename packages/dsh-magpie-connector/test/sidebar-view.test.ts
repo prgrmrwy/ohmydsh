@@ -54,6 +54,26 @@ describe('sidebarRows', () => {
     expect(row!.windows.every(entry => entry.fallback === undefined)).toBe(true)
   })
 
+  it('lists three window lines in canonical order when all kinds are selected', () => {
+    const [row] = sidebarRows(
+      [card({ windows: [{ name: '30 days', used: 61 }, { name: '7 days', used: 20 }, { name: '5 hours', used: 44 }] })],
+      ['monthly', 'weekly', 'fiveHour'],
+    )
+    expect(row!.windows.map(entry => [entry.kind, entry.window.name, entry.used])).toEqual([
+      ['fiveHour', '5 hours', 44],
+      ['weekly', '7 days', 20],
+      ['monthly', '30 days', 61],
+    ])
+  })
+
+  it('recognizes the monthly spellings the gateway may use', () => {
+    for (const name of ['monthly', 'Month', '30 days', '每月']) {
+      const [row] = sidebarRows([card({ windows: [{ name, used: 61 }] })], ['monthly'])
+      expect(row!.windows[0]?.kind).toBe('monthly')
+      expect(row!.windows[0]?.used).toBe(61)
+    }
+  })
+
   it('recognizes the 5-hour spellings the gateway may use', () => {
     for (const name of ['5 hours', '5-hour', '5h', '五小时']) {
       const [row] = sidebarRows([card({ windows: [{ name, used: 44 }] })], ['fiveHour'])

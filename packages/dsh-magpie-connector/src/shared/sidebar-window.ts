@@ -5,16 +5,18 @@
  * both builds.
  *
  * The selection is a non-empty subset: with one kind selected the card keeps the
- * compact one-line row, with several it lists one line per window.
+ * compact one-line row, with several it lists one line per window. Gateways name
+ * windows freely, so the kinds are the spans they describe: 5 hours, weekly,
+ * monthly.
  *
  * @module dsh-magpie-connector/shared/sidebar-window
  */
 
-/** The concrete windows a gateway reports and the card can list. */
-export type SidebarWindowKind = 'fiveHour' | 'weekly'
+/** The concrete windows a gateway reports and the card can list, short span first. */
+export type SidebarWindowKind = 'fiveHour' | 'weekly' | 'monthly'
 
-/** Canonical order: the short window first, then the weekly one (also the row order). */
-export const SIDEBAR_WINDOW_KINDS = ['fiveHour', 'weekly'] as const satisfies readonly SidebarWindowKind[]
+/** Canonical order: 5-hour, weekly, monthly (also the order of a card's window lines). */
+export const SIDEBAR_WINDOW_KINDS = ['fiveHour', 'weekly', 'monthly'] as const satisfies readonly SidebarWindowKind[]
 
 /** Before this setting existed the card showed the weekly window only. */
 export const DEFAULT_SIDEBAR_WINDOWS: readonly SidebarWindowKind[] = ['weekly']

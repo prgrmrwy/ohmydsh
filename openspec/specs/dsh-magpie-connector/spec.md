@@ -771,9 +771,9 @@ host SHALL 按网关响应分类结果：
 
 ### Requirement: 侧边栏显示窗口档位（多选）
 
-插件 host 设置 SHALL 提供 `sidebarWindows` 数组：元素取值 `fiveHour`、`weekly`，至少一项、不得重复，SHALL 按规范顺序（`fiveHour` 在前、`weekly` 在后）持久化与返回；字段缺失时按 `["weekly"]` 处理。空数组、含未知项、非数组或非字符串项 SHALL 被拒绝（400）且设置不变。为兼容 0.6.7，读取时 SHALL 把旧的单值 `sidebarWindow`（`weekly`/`fiveHour`/`tightest`）迁移为对应数组（`tightest` 迁移为两项），且不再写回旧字段。设置页 SHALL 以多选 checkbox 呈现（每个档位一个 `input[type=checkbox][data-sidebar-window]`）并附说明文案；用户取消最后一项时 SHALL NOT 写入设置，并 SHALL 给出「至少保留一个档位」的提示。
+插件 host 设置 SHALL 提供 `sidebarWindows` 数组：元素取值 `fiveHour`、`weekly`、`monthly`，至少一项、不得重复，SHALL 按规范顺序（`fiveHour` → `weekly` → `monthly`）持久化与返回；字段缺失时按 `["weekly"]` 处理。空数组、含未知项、非数组或非字符串项 SHALL 被拒绝（400）且设置不变。为兼容 0.6.7，读取时 SHALL 把旧的单值 `sidebarWindow`（`weekly`/`fiveHour`/`tightest`）迁移为对应数组（`tightest` 迁移为三项），且不再写回旧字段。设置页 SHALL 以多选 checkbox 呈现（每个档位一个 `input[type=checkbox][data-sidebar-window]`）并附说明文案；用户取消最后一项时 SHALL NOT 写入设置，并 SHALL 给出「至少保留一个档位」的提示。
 
-客户端 SHALL 按勾选集合决定常驻卡每个上游显示的内容：勾选且网关存在的档位，每个显示一行；只勾一个且存在时 SHALL 保持单行布局（名称后括号跟窗口名）；勾选多个且存在多项时 SHALL 以「上游名称单独一行 + 每个窗口一行」呈现，每行包含窗口名、到期时间与读数，并各带一条整宽进度条。勾选的档位在该上游都不存在时，SHALL 回退到该上游读数最高的窗口，再退到网关 `display`/「无限」，最后只有 `balance` 时显示余额；SHALL NOT 显示空读数或伪造档位，回退行的窗口名 SHALL 用 `title` 说明原因。标题行 SHALL 只包含刷新与展开/收起按钮，SHALL NOT 增加额外的说明 icon。
+客户端 SHALL 按勾选集合决定常驻卡每个上游显示的内容：勾选且网关存在的档位，每个显示一行；只勾一个且存在时 SHALL 保持单行布局（名称后括号跟窗口名）；勾选多个且存在多项时 SHALL 以「上游名称单独一行 + 每个窗口一行」呈现，行顺序固定为 5 小时 → 周 → 月，每行包含窗口名、到期时间与读数，并各带一条整宽进度条。勾选的档位在该上游都不存在时，SHALL 回退到该上游读数最高的窗口，再退到网关 `display`/「无限」，最后只有 `balance` 时显示余额；SHALL NOT 显示空读数或伪造档位，回退行的窗口名 SHALL 用 `title` 说明原因。标题行 SHALL 只包含刷新与展开/收起按钮，SHALL NOT 增加额外的说明 icon。
 
 #### Scenario: 只勾一个档位
 
@@ -781,16 +781,16 @@ host SHALL 按网关响应分类结果：
 - **WHEN** 渲染常驻卡
 - **THEN** 该上游显示单行 `Claude (7 days)`、`20%`，不显示 `44%`，且没有多行块
 
-#### Scenario: 勾选两个档位
+#### Scenario: 勾选多个档位
 
-- **GIVEN** `claude` 同时有 `5 hours`（`used` 50）与 `7 days`（`used` 20）窗口，`sidebarWindows` 为 `["fiveHour", "weekly"]`
+- **GIVEN** `claude` 同时有 `5 hours`（`used` 50）、`7 days`（`used` 20）与 `30 days`（`used` 61）窗口，`sidebarWindows` 为 `["monthly", "weekly", "fiveHour"]`
 - **WHEN** 渲染常驻卡
-- **THEN** 该上游先显示名称 `Claude`，随后两行分别是 `5 hours` 与 `7 days`（顺序固定），每行带到期时间、读数与独立进度条
+- **THEN** 该上游先显示名称 `Claude`，随后三行依次是 `5 hours`、`7 days`、`30 days`（网关写法照抄），每行带到期时间、读数与独立进度条
 - **AND** 窗口名不再包在括号里
 
 #### Scenario: 缺少勾选的档位时回退并说明
 
-- **GIVEN** 某上游只有 `7 days` 窗口，`sidebarWindows` 为 `["fiveHour"]`
+- **GIVEN** 某上游只有 `7 days` 窗口，`sidebarWindows` 为 `["fiveHour", "monthly"]`
 - **WHEN** 渲染常驻卡
 - **THEN** 该上游显示 `(7 days)` 与其读数，窗口名的 `title` 说明该上游没有勾选的档位
 - **AND** 只有余额或只有 `display` 的上游仍然显示可用的内容，不出现空读数

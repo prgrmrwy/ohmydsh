@@ -420,7 +420,7 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.6.8
+    version: 0.6.9
     enabled: true
     brief: 接入自托管 Magpie 网关；按 owned_by 原生分组，含保存前线路检查、用量卡片、侧栏额度卡与 Access
     note: '自研 MIT,change:add-dsh-magpie-plugin;0.3.0 BREAKING:按网关 owned_by 注册多 route dsh-magpie-connector-<owner>,旧单 route 无别名,AUTO/guard 需另适配(ROUTE_CHANGED)。信任面:只读线路凭据、不回显、探测仅 TCP、undici 只直连白名单 API 拒重定向。0.6.x 侧栏额度卡:手风琴、sidebarRefreshMinutes、重置卡折叠列表、收起行到期时间(M/D HH:mm)、档位 sidebarWindow(weekly 默认/fiveHour/tightest,非法 400,卡头 ⓘ 说明,缺档位回退其它窗口/文字/余额)。0.6.3 首个写操作:Codex 重置卡(周用量≥80%、只用最早到期那张、两段确认+60s票据、全插件单飞、4xx=未消耗、应答不可解析锁账号到重启);白名单加 POST /magpie/quotas/codex-reset(必须 user+credit)。⚠入口(CF+nginx)放行 codex-reset 前会显示403/404;key 需完整权限。移除:enabled:false → dsh build → 重启。'

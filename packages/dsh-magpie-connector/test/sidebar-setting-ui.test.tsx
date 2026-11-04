@@ -66,10 +66,13 @@ it('设置页用多选 checkbox 配置窗口档位，提交后写入 sidebarWind
   await flush()
   const weekly = host.querySelector('[data-sidebar-window="weekly"]') as HTMLInputElement
   const five = host.querySelector('[data-sidebar-window="fiveHour"]') as HTMLInputElement
+  const monthly = host.querySelector('[data-sidebar-window="monthly"]') as HTMLInputElement
   expect(weekly).not.toBeNull()
   expect(weekly.type).toBe('checkbox')
   expect(weekly.checked).toBe(true)
   expect(five.checked).toBe(false)
+  expect(monthly).not.toBeNull()
+  expect(monthly.checked).toBe(false)
   await act(async () => { five.click() })
   await flush()
   const post = fake.calls.find(call => call.method === 'POST' && call.path === 'settings')

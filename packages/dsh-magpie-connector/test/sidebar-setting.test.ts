@@ -61,8 +61,12 @@ test('sidebarWindows 默认周窗口、可多选、非法值拒绝', async () =>
   expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour'])
 
   // A stored list is canonicalised: known kinds only, deduplicated, canonical order.
-  expect((await controller.handle({ sidebarWindows: ['weekly', 'fiveHour', 'weekly'] })).status).toBe(200)
-  expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour', 'weekly'])
+  expect((await controller.handle({ sidebarWindows: ['monthly', 'weekly', 'fiveHour', 'weekly'] })).status).toBe(200)
+  expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour', 'weekly', 'monthly'])
+
+  expect((await controller.handle({ sidebarWindows: ['monthly'] })).status).toBe(200)
+  expect((await readView(controller)).sidebarWindows).toEqual(['monthly'])
+  expect((await controller.handle({ sidebarWindows: ['fiveHour', 'weekly'] })).status).toBe(200)
 
   for (const invalid of [[], ['7d'], 'weekly', null, 5, { fiveHour: true }]) {
     expect((await controller.handle({ sidebarWindows: invalid })).status).toBe(400)

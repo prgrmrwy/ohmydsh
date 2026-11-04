@@ -788,7 +788,7 @@ function ModelLine({ model, visible, effort, disabled, onVisible, onEffort }: {
 
 /** Copy for one checkbox in the window selection. */
 const windowKindLabel = (kind: SidebarWindowKind): string =>
-  kind === 'fiveHour' ? t('sidebarWindowFiveHour') : t('sidebarWindowWeekly')
+  kind === 'fiveHour' ? t('sidebarWindowFiveHour') : kind === 'weekly' ? t('sidebarWindowWeekly') : t('sidebarWindowMonthly')
 
 /**
  * The sidebar preference: one host-persisted flag. The host is the source of

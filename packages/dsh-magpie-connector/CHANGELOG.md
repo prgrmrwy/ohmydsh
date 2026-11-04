@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.9 — 2026-11-04
+
+- **月窗口档位。** 档位 checkbox 增加「月窗口（30 days）」：`sidebarWindows` 允许 `monthly`，规范顺序固定为 5 小时 → 周 → 月；识别网关的 `month`、`monthly`、`30 days`、`每月` 写法。勾选后与其它档位一样按行显示，没有该档位时照旧回退，不编造读数。
+- 规范「侧边栏显示窗口档位（多选）」、中英 README、dsh.yaml 说明同步；包内 530 个 vitest、typecheck、build 通过。
+
 ## 0.6.8 — 2026-11-04
 
 - **窗口档位改多选。** 设置 → Magpie → 侧栏额度把单选下拉换成 checkbox：可同时勾选「5 小时窗口」与「周窗口（7 days）」，写 host 设置 `sidebarWindows`（数组、至少一项、按 `fiveHour`→`weekly` 规范顺序；缺失默认 `["weekly"]`，非法值 400 且设置不变）。0.6.7 的单值 `sidebarWindow`（含 `tightest`）在读取时迁移为数组，之后不再写回旧字段；取消最后一项不会提交，界面提示「至少保留一个档位」。
