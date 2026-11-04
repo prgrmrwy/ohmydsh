@@ -7,7 +7,7 @@ import { t } from './locales.js'
 import { loadCards, refreshCards } from './sidebar-api.js'
 import { DEFAULT_REFRESH_MINUTES, hydrateSidebarPreference, readSidebarPreference, subscribeSidebarPreference, type SidebarPreference } from './sidebar-preference.js'
 import {
-  ageMinutes, cardIdentity, cardReadTime, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
+  ageMinutes, cardIdentity, cardReadTime, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
   type SidebarRow,
 } from './sidebar-view.js'
 import { formatTime, type Card, type CardsView } from './view-model.js'
@@ -201,7 +201,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
           },
             status !== undefined
               ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
-              : rows.map(row => compactRow(row)),
+              : rows.map(row => compactRow(row, now)),
           ),
           scrollable ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
         ),
@@ -209,14 +209,23 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   )
 }
 
-/** One compact row: name, weekly window, reading, bar (or the failure text). */
-function compactRow(row: SidebarRow): ReactNode {
+/** One compact row: name (window in brackets), reset deadline, reading, bar. */
+function compactRow(row: SidebarRow, now: number): ReactNode {
   const reading = rowReading(row)
   const level = row.used === undefined || row.failed ? undefined : usedLevel(row.used)
+  const resetsAt = row.failed ? undefined : row.window?.resetsAt
+  const deadline = resetsAt === undefined ? undefined : formatResetDeadline(resetsAt, now)
+  const deadlineTitle = resetsAt === undefined ? '' : `${t('usageResetAt')}${formatTime(resetsAt)}`
   return h('div', { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key: cardIdentity(row.card) },
     h('div', { className: 'dmg-sidebar-row-line' },
-      h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider),
-      row.failed || row.window?.name === undefined ? null : h('span', { className: 'dmg-sidebar-window' }, row.window.name),
+      h('span', { className: 'dmg-sidebar-label' },
+        h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider),
+        row.failed || row.window?.name === undefined ? null : h('span', { className: 'dmg-sidebar-window' }, `(${row.window.name})`),
+      ),
+      deadline === undefined ? null : h('span', {
+        className: 'dmg-sidebar-expiry', 'data-dmg-sidebar-expiry': '',
+        title: deadlineTitle,
+      }, deadline),
       h('span', {
         className: 'dmg-sidebar-pct', 'data-reading': '', ...(level === undefined ? {} : { 'data-level': level }),
         ...(row.failed || row.used !== undefined || row.display !== undefined || row.unlimited === true || row.balance === undefined

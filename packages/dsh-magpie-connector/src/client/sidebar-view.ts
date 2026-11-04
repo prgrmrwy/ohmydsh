@@ -95,6 +95,23 @@ export function formatResetShort(resetsAt: string | undefined, now: number): str
   return clock
 }
 
+/**
+ * Reset label for one compact sidebar row: always a date and a clock
+ * (`11/10 11:00`, `2027/1/2 09:05` when it is another year). The compact row
+ * keeps the date even for a reset later today on purpose: the gateway's window
+ * name (`7 days`) says nothing about when the quota comes back, and the row has
+ * no other place to put it.
+ */
+export function formatResetDeadline(resetsAt: string | undefined, now: number): string | undefined {
+  if (resetsAt === undefined || resetsAt === '') return undefined
+  const time = Date.parse(resetsAt)
+  if (Number.isNaN(time)) return undefined
+  const reset = new Date(time)
+  const clock = `${pad(reset.getHours())}:${pad(reset.getMinutes())}`
+  const day = `${reset.getMonth() + 1}/${reset.getDate()} ${clock}`
+  return reset.getFullYear() === new Date(now).getFullYear() ? day : `${reset.getFullYear()}/${day}`
+}
+
 /** Stable identity of one card across reads: provider + account. */
 export const cardIdentity = (card: Pick<Card, 'provider' | 'user'>): string => `${card.provider}\u0000${card.user ?? ''}`
 

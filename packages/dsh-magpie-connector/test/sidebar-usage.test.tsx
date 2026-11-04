@@ -79,6 +79,27 @@ describe('常驻卡', () => {
     expect(row.textContent).toContain('8%')
   })
 
+  it('收起行把窗口名放进括号，并显示到期时间与百分比', async () => {
+    const resetsAt = new Date(2026, 10, 20, 11, 0).toISOString()
+    await render({
+      cards: () => cardsOk([
+        { provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '7 days', used: 20, resetsAt }] },
+      ]),
+    })
+    const row = rowOf('claude')!
+    expect(row.querySelector('.dmg-sidebar-window')!.textContent).toBe('(7 days)')
+    const expiry = row.querySelector('[data-dmg-sidebar-expiry]') as HTMLElement
+    expect(expiry).not.toBeNull()
+    expect(expiry.textContent).toContain('11/20 11:00')
+    expect(expiry.title).toContain('重置于')
+    expect(row.querySelector('[data-reading]')!.textContent).toBe('20%')
+  })
+
+  it('没有到期时间时不显示占位', async () => {
+    await render({ cards: () => cardsOk([{ provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '7 days', used: 20 }] }]) })
+    expect(rowOf('claude')!.querySelector('[data-dmg-sidebar-expiry]')).toBeNull()
+  })
+
   it('最多 5 行：超出的行靠卡内滚动，并出现双箭头', async () => {
     await render()
     expect(rows()).toHaveLength(6)
