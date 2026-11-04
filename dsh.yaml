@@ -322,7 +322,7 @@ customizations:
     source: remote
     spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz'
     name: dsh-cockpit-bridge
-    version: 0.6.5
+    version: 0.6.4
     enabled: true
     brief: 驾驶舱桥接(会话点击上报 + 0.1.2 待审批/提问观测,顶栏完成提醒自动清除)
     note: '自研,https://github.com/prgrmrwy/dsh-cockpit(MIT),GitHub release tarball。纯 web client:把会话打开确认、完成未读状态与待审批/提问快照上报本机驾驶舱,并向两个 cockpit-*-shim 提供 cockpitBridge.forwards 等服务名;只传 sessionId 等标识符与协议元数据,不碰内容/设置/凭据;驾驶舱不可达时静默降级。每台接驾驶舱的机器都装,0.6.4 须配 dsh-cockpit 服务端 2f51565 及之后,否则完成未读上报被忽略。升级复核:与驾驶舱服务端版本配对,及两个 shim 所用服务名;旧 portForward 消费者不可回退到 0.5.2。回滚:spec/version 改回上一 release tarball → dsh build → 刷新设备页面。 tarball SHA256 877b1312d85e5f077c318d98815dbb15f238b26e9a118d671c850a71ffb005f2'
