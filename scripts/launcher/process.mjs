@@ -165,14 +165,17 @@ export async function probePort(port, { platform = process.platform, env = proce
 export async function stopServer(port, options = {}) {
   const { platform = process.platform, env = process.env, run = runPlatformCommand, connect = portReachable, signal = (pid, kind) => process.kill(pid, kind), warn = message => console.warn(message) } = options
   const deadline = Math.min(options.deadline ?? Infinity, Date.now() + 20_000)
-  const probe = options.probe ?? (() => probePort(port, { platform, env, run, connect, deadline: Math.min(deadline, Date.now() + PROBE_TIMEOUT_MS) }))
+  const probe = () => (options.probe ?? probePort)(port, { platform, env, run, connect, deadline: Math.min(deadline, Date.now() + PROBE_TIMEOUT_MS) })
   const fail = (state, error) => ({ ok: false, state, error })
   if (!validPort(port)) return fail('probe-error', 'Invalid port')
-  let initial = await probe()
-  if (initial.state === 'empty') return { ok: true, state: 'empty' }
-  if (initial.state !== 'owned' || !initial.processes?.length) return fail(initial.state, initial.error || 'Listener is not provably DSH; refusing to kill')
-  const originals = initial.processes
+  const initial = options.expectedIdentity
+  if (!initial || !['empty', 'owned'].includes(initial.state) || !Array.isArray(initial.processes) || (initial.state === 'empty' && initial.processes.length)) return fail('unknown', 'Pre-handshake listener identity is required; refusing to kill')
+  if (initial.state === 'owned' && (!initial.processes.length || initial.processes.some(record => !positivePid(record.pid) || typeof record.created !== 'string' || !record.created || !Array.isArray(record.argv) || !record.argv.length || !record.argv.every(arg => typeof arg === 'string') || typeof record.executable !== 'string' || !record.executable))) return fail('unknown', 'Complete pre-handshake process identity is required; refusing to kill')
+  const originals = initial.processes.map(record => ({ ...record, argv: [...record.argv] }))
+  const observed = await probe()
+  if (observed.state === 'empty') return { ok: true, state: 'empty' }
   const revalidate = current => current.state === 'owned' && current.processes?.length > 0 && current.processes.every(record => originals.some(original => sameProcessIdentity(original, record)))
+  if (!revalidate(observed)) return fail(observed.state === 'owned' ? 'unknown' : observed.state, 'Listener identity changed since pre-handshake probe; refusing to signal')
   const send = async kind => {
     for (const original of originals) {
       if (Date.now() >= deadline) return fail('probe-error', 'Stop deadline expired')
@@ -182,6 +185,10 @@ export async function stopServer(port, options = {}) {
       const record = current.processes.find(item => item.pid === original.pid)
       if (!record) continue
       try {
+        // The prepared ticket gates only the first graceful signal. After
+        // SIGTERM the Pet route is already going away; escalation to SIGKILL
+        // relies on the full process identity rechecked above.
+        if (kind === 'SIGTERM') await options.beforeSignal?.()
         if (platform === 'win32') {
           warn('Windows: 强制停止已核验 DSH 进程树 (forced termination; no graceful flush guarantee)')
           const result = await run('taskkill.exe', ['/PID', String(record.pid), '/T', '/F'], { env, timeoutMs: Math.max(1, Math.min(5_000, deadline - Date.now())) })

@@ -44,3 +44,19 @@ ADR-0007 规定三层只能以自身理由立项，并须先回答四个待决�
 - 兼容：旧模型 locus 行不改写，读取时按退休规则处理，所有者需对旧入口 `/bind` 或重新 @ 建立新结构。
 - 依赖：本 change 以三个在途 Pet change（shell-tier、feishu-read-and-delivery-fixes、interrupted-delivery-recovery）归档后的 spec 为基础。
 - 不在范围：跨机 collab（`collab-cross-machine-spi`）、托管成员机制的裁剪（Pet 不再用代理成员，但 dsh-collab 的托管 SPI 保留）。
+
+## H 验收发现的范围修订（所有者已确认）
+
+所有者已选择“修复重启恢复，再重测”；以下增补纳入本 change，沿用既有合入/部署/重启授权。
+
+2026-11-04 真机 H 在真实 Python 进程仍运行时执行受控重启，15:48:34 ready；恢复后的尾部与官方补尾相同，按现规范保持 busy。进一步核对 rc.2：live cancel 实写 `aborted`，其中 `reason` 为 `{kind:'user'|'parent'|'disposed'}` 对象，`interrupted` 从不由 live loop 写出，只在事后补尾（官方 core/session/src/types.ts:203–221、agent-loop/src/agent.ts:366–385）。因此原先只认实写 interrupted 的判据不能覆盖正常取消；仅延长停机等待也不会修复它。
+
+建议纳入以下增补，再更新 delta specs/design 并实施：
+
+- 恢复接受唯一 turn/inbox UUID 匹配、真实且持久化的原生 `aborted`，领域结算仍为 `failed/turn-interrupted`；保留合成尾部过滤、歧义等待、禁止自动重放和所有代际/CAS fence。
+- 在 SIGTERM 前增加受鉴权的 Host owner 排空握手：先冻结新派发和新建，等待已有受管操作到达安全点，再用真实 live locus main 身份 await 官方 `drainContinuableChildren/Descendants`。只有排空/持久化成功才回准备完成，编排器核对同一 Host 与请求身份后才 stop；失败或超时不得声称成功或静默跳过。仅取消 Pet 拥有的原生子会话，不扩为任意 Agent 中断 API。
+- 第一次载入时旧 Host 没有该握手，需要明确的一次维护重启；该次不作为排空验收。旧 H1 的中断原因不倒补、不重放；其占位已在 16:39:42+08:00 释放，后续 H2 可复用原话题、原 child，以新请求和新 turn 重测，无需为重测手动替换入口。
+
+影响限定为 Pet 的真实终止证据、受管停机协调和本仓 launcher 的握手消费者；不加 compat patch、不改官方源码、不改变 W/M/child 身份模型、文件权限或工具档位。突发崩溃、强杀且无真实终止证据的情况仍保守等待；H1 最终释放占位不计为重启立即恢复成功。
+
+完成证明：真实官方取消产物经 cold reader 精确结算；prepared 合成、UUID/代际不符均不结算；Host 组装证明冻结期间不新建/不派发，排空失败不回 ready；launcher 证明无成功应答不声称协调停机；正式 H2 重启后 `failed/turn-interrupted`、下一条立即派发、safe 回切与 NOTICE-1 真机成功。完整修改前还需核验首次升级的旧 Host 兼容路径和握手失败后的维护状态恢复，不能默认已有这些能力。

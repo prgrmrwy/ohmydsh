@@ -197,7 +197,16 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 
 ### Requirement: 启动恢复证据经官方冷读获取
 
-启动恢复需要子会话日志证据时 SHALL 经 `sessionQuery.observeSession` 读取；冷读在日志末尾补出的合成 `turn/end interrupted` MUST NOT 作为"已中断"证据，只有日志中实际写入的事件才算。`sessionQuery` 不可用或读取失败时 SHALL 视为证据不足，按既有规则保持等待。
+启动恢复需要子会话日志证据时 SHALL 经 `sessionQuery.observeSession` 读取；冷读在日志末尾补出的合成 `turn/end interrupted` MUST NOT 作为"已中断"证据，只有日志中实际写入的事件才算。除可证明的真实 `interrupted` 外，SHALL 接受原生 `aborted` 且其 `reason` 对象的 `kind` 为 `user`、`parent` 或 `disposed` 的真实取消记录；其 turn 与 inbox UUID 必须唯一匹配现行 Delivery，execution、代际及 revision fence 不得省略。缺失、字符串、未知、hook 或 legacy 取消原因 MUST NOT 推定为受控中断。证据成立时领域结果为 `failed/turn-interrupted`，不得重放原 prompt；普通 completed turn 不因结束而成为业务结算。`sessionQuery` 不可用或读取失败时 SHALL 视为证据不足，按既有规则保持等待。
+
+#### Scenario: 原生取消经全新冷读结算
+- **GIVEN** 官方原生运行实际写入并持久化 `aborted`，reason.kind 为 user、parent 或 disposed，turn/inbox 唯一绑定现行请求
+- **WHEN** 新上下文经官方 prepared 冷读恢复
+- **THEN** 该 Delivery 结算为 failed/turn-interrupted，允许下一条 backlog 派发，原 prompt 不重放，child 和代际保持
+
+#### Scenario: 取消原因或执行身份不足不结算
+- **WHEN** 原因缺失或不是上述三种对象 kind，或 turn/inbox/execution/代际与现行请求不符
+- **THEN** 保持现行记录及 deadline，不推定中断，不重发
 
 #### Scenario: 合成中断不算证据
 - **GIVEN** 子会话日志最后一个 turn 未写入 `turn/end`
@@ -254,6 +263,41 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 #### Scenario: 常驻空闲时当场生效
 - **WHEN** C 常驻且空闲时所有者发送 `-t shell`
 - **THEN** 当场应用并回读，回执已生效，不产生待应用记录
+
+### Requirement: 受控停机在原生信号前排空自有执行
+
+受控 stop/restart SHALL 在 SIGTERM 前经既有官方 Connection 鉴权的精确准备接口冻结 Pet 新派发、新建及受管 mutation，等待已进入操作到安全点，再以真实 live locus main 身份 await 官方精确自有 children drain 和领域提交。请求 MUST NOT 接受任意 Agent ID 或模型声明的身份；只有持久配对、当前代际和官方 catalog 能决定排空对象。只有全部排空与提交完成才 SHALL 返回绑定同 Host PID、bootId、请求 nonce 和期限的 prepared；端口消失、cancel accepted 或 best-effort flush 不构成成功。
+
+#### Scenario: 完成排空和领域提交后才允许停机
+- **GIVEN** 原 child 正在执行，下一条消息已为 backlog
+- **WHEN** 停机准备冻结入口并排空自有 child
+- **THEN** 原生严格关闭和领域提交均完成才应答 prepared；原请求按真实终止结算，后继直到新 Host 或显式 resume 才可派发
+
+#### Scenario: 冻结同时覆盖管理和主子消息
+- **WHEN** 停机准备已冻结，新入站、管理 mutation 或主子投递试图开始
+- **THEN** 不发生新建或物理派发；已进入操作被等待，读取管理状态仍可用
+
+#### Scenario: 未鉴权或错宿主不能排空
+- **WHEN** cookie/Origin 不成立、PID/bootId/nonce 不符，或请求携带 Agent ID 等额外字段
+- **THEN** 排空未被调用，无业务或工具档位变更
+
+#### Scenario: 排空失败与超时保留明确维护状态
+- **WHEN** 任一关闭/持久化失败或请求超时
+- **THEN** 不应答 prepared，不发送停机信号；后台操作未全部 settle 时不得 resume，settle 后只有经鉴权的显式 resume 可恢复派发（不要求原 nonce，避免调用方丢失 nonce 后永久冻结），恢复中旧票据不可复用
+
+#### Scenario: 过期票据与替换宿主不发送信号
+- **WHEN** launcher 将要发信号而应答过期、状态不再 prepared、bootId 变化，或完整 pid/created/argv/executable 与握手前不符
+- **THEN** 拒绝停止，不能重新采纳替换宿主作为目标
+
+#### Scenario: 无 Pet 组合仍有真实宿主证明
+- **GIVEN** 目标实际 Loader 已 ready，完整观察证明不存在 Pet，且没有失败/未展开或未知动态载体
+- **WHEN** launcher 准备停止该 Host
+- **THEN** 独立 profile 控制插件按同协议证明无自有执行；缺接口、当前 manifest 或磁盘 dump 相等不能代替该证明
+
+#### Scenario: 旧 Host 首次维护不计排空成功
+- **GIVEN** 旧 Host 缺少协议且所有者明确使用首次维护分支
+- **WHEN** 按完整旧进程身份维护加载新版本
+- **THEN** 回执明确 drained=false，新 Host 验证新鉴权协议；该次不计作 H2 中断恢复验收
 
 ## MODIFIED Requirements
 

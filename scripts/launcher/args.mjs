@@ -6,7 +6,7 @@ export function isOfficialInvocation(argv) {
 export function parseArgs(argv) {
   const flags = { port: undefined, portExplicit: false, passthrough: [] }
   const commandFlags = { build: 'buildOnly', stop: 'stop', restart: 'restart', reset: 'reset', history: 'history', doctor: 'doctor', 'plugin-update': 'pluginUpdate' }
-  const options = { '-b': 'build', '--build': 'build', '--foreground': 'foreground', '--open': 'open', '--no-open': 'noOpen', '--check': 'check', '--dry-run': 'dryRun', '-y': 'yes', '--yes': 'yes', '-h': 'help', '--help': 'help' }
+  const options = { '-b': 'build', '--build': 'build', '--foreground': 'foreground', '--allow-legacy-restart': 'allowLegacyRestart', '--open': 'open', '--no-open': 'noOpen', '--check': 'check', '--dry-run': 'dryRun', '-y': 'yes', '--yes': 'yes', '-h': 'help', '--help': 'help' }
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index]
     if (commandFlags[arg]) flags[commandFlags[arg]] = true
@@ -26,6 +26,7 @@ export function parseArgs(argv) {
   if (flags.port !== undefined && (!/^\d+$/.test(String(flags.port)) || Number(flags.port) < 1 || Number(flags.port) > 65535)) throw new Error('参数 --port must be an integer in 1..65535')
   if (flags.port !== undefined) flags.port = Number(flags.port)
   if (flags.check && !flags.doctor) throw new Error('--check 只能与 doctor 一起使用')
+  if (flags.allowLegacyRestart && !flags.restart && !flags.stop) throw new Error('--allow-legacy-restart 只能与 stop/restart 一起使用')
   return flags
 }
 
@@ -51,7 +52,8 @@ export const HELP = `ohmydsh — customization repository launcher
 
 Usage: dsh [web] [options]
   build | -b                 build only, or build before start
-  stop | restart             safely stop/restart the owned Host
+  stop | restart             safely stop/restart the owned Host after authenticated Pet preparation
+  --allow-legacy-restart      explicit maintenance stop/restart for a legacy Host without a descriptor
   reset                      reset managed customizations
   history                    show last twenty startup records
   doctor [--check]            heal/check machine prerequisites

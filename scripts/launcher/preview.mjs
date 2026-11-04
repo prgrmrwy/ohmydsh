@@ -32,14 +32,14 @@ export function writePreview(home, record) {
   try { fs.writeFileSync(temp, JSON.stringify(record) + '\n', { mode: 0o600, flag: 'wx' }); fs.renameSync(temp, file) }
   finally { fs.rmSync(temp, { force: true }) }
 }
-export async function stopPreview(home, { env = process.env, probe = probePort, stop = stopServer, warn = console.error } = {}) {
+export async function stopPreview(home, { env = process.env, probe = probePort, stop = stopServer, initial, warn = console.error } = {}) {
   const record = readPreview(home)
   if (!record) return { ok: true, state: 'empty' }
-  const current = await probe(record.port, { env })
+  const current = initial ?? await probe(record.port, { env })
   if (current.state === 'probe-error') throw new Error(current.error || 'Preview ownership probe failed')
   if (matchesPreview(current, record)) {
-    const result = await stop(record.port, { env, warn, probe: async () => {
-      const next = await probe(record.port, { env })
+    const result = await stop(record.port, { env, warn, expectedIdentity: current, probe: async (_port, options = {}) => {
+      const next = await probe(record.port, { env, ...options })
       return next.state === 'empty' || matchesPreview(next, record) ? next : { ...next, state: 'unknown', error: 'Preview identity changed' }
     } })
     if (!result.ok) throw new Error(result.error || 'Failed to stop own preview')

@@ -31,7 +31,7 @@ export async function terminalFixture(t) {
   t.after(async()=>{
     const current=await probePort(port)
     if(current.state==='owned'&&current.processes.every(item=>item.argv?.[1]===bin)){
-      const stopped=await stopServer(port)
+      const stopped=await stopServer(port,{expectedIdentity:current})
       if(!stopped.ok)throw new Error('Owned terminal fixture Host could not stop: '+stopped.error)
     }else if(current.state!=='empty')throw new Error('Refusing cleanup of a terminal fixture port with unknown ownership')
     await rm(root,{recursive:true,force:true})
