@@ -126,3 +126,5 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 重连后官方页面截至 seq 178 展示了 interrupted-tool-result、step/end 和 turn/end interrupted，但尾部时间是 1793778002753（15:40:02.753），不是实际停机时刻。用当前构建的 withoutFabricatedClosers 对官方完整返回事件作只读核验：firstSeq=0、rawLastSeq=178、keptLastSeq=177，seq 178 被作为不可区分的补尾剔除，保留事件中没有 turn 6 的终止证明。原入口仍 generation 1、原 main/child、shell/shell + read/read、active/busy=true。早先仅按页面出现 interrupted 的判断已纠正：没有据此声称 failed/turn-interrupted。
 
 这符合当前 spec:1098–1122 的合成过滤/歧义等待，但不能算 27.4 的中断自动释放通过。独立只读核查官方 rc.2 发现 live loop 写的是 aborted（reason=user|parent|disposed），interrupted 只用于事后补尾；现 Pet 的冷恢复却只认 interrupted。另有官方 owner drain 可等待 idle 与持久写句柄关闭，当前 launcher 没有 SIGTERM 前的排空握手。原 H1 保留未知、不重发、不手改 busy 或日志；后继消息和 safe 控制暂不要求所有者发送。修订建议与待确认工作见 proposal/tasks 第 33 节；NOTICE-1 已随这次重启加载，但成功通知尚未真机复验。
+
+后续状态复查：管理投影已变为 active/busy=false，updatedAt=1793781582505，即 16:39:42.505+08:00；原 main/child、generation 1、shell/shell 与 read/read 全部保持。该释放约在接受 H 一小时后、重启 ready 约 51 分钟后，符合 delivery.ts:75 的默认 60 分钟租约；但管理投影不提供该 Delivery 终态原因，现有日志也未取到对应结算原因，因此只确认占位已释放，不把它记成已证明的 expired 或 failed/turn-interrupted。后继与 safe 通知现在可以独立收口，H 的“重启后立即释放”仍未通过；没有手改记录或重放 H。
