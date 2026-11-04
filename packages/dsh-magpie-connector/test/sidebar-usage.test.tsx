@@ -170,23 +170,28 @@ describe('常驻卡', () => {
     expect(expiry.title).toContain('网关没有提供')
   })
 
-  it('最多 5 个上游：溢出在卡内滚动，双箭头随滚动位置出现和消失', async () => {
+  it('正文限高 320px，溢出的双箭头随滚动隐藏但提示带保留高度', async () => {
     await render()
     expect(rows()).toHaveLength(6)
     const body = host.querySelector('.dmg-sidebar-body') as HTMLElement
     const { settingsCss } = await import('../src/client/styles.js')
-    expect(settingsCss).toContain('.dmg-sidebar-body{max-height:145px')
+    expect(settingsCss).toContain('.dmg-sidebar-body{max-height:320px')
+    expect(settingsCss).toContain('.dmg-sidebar-more.is-hidden{visibility:hidden}')
     const overflow = (scrollTop: number) => {
-      Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 400 })
-      Object.defineProperty(body, 'clientHeight', { configurable: true, value: 145 })
+      Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 600 })
+      Object.defineProperty(body, 'clientHeight', { configurable: true, value: 320 })
       body.scrollTop = scrollTop
       return act(async () => { body.dispatchEvent(new Event('scroll', { bubbles: true })) })
     }
     await overflow(0)
-    expect(host.querySelector('[data-dmg-sidebar-more]')).not.toBeNull()
+    const band = host.querySelector('[data-dmg-sidebar-more]') as HTMLElement
+    expect(band).not.toBeNull()
+    expect(band.className).not.toContain('is-hidden')
     expect(body.className).toContain('is-scroll')
-    await overflow(255)
-    expect(host.querySelector('[data-dmg-sidebar-more]')).toBeNull()
+    await overflow(280)
+    const hidden = host.querySelector('[data-dmg-sidebar-more]') as HTMLElement
+    expect(hidden).not.toBeNull()
+    expect(hidden.className).toContain('is-hidden')
     expect(body.className).not.toContain('is-scroll')
   })
 
@@ -265,8 +270,8 @@ describe('展开', () => {
   it('点击正文与双箭头不触发展开，只有标题行可以切换', async () => {
     await render()
     const body = host.querySelector('.dmg-sidebar-body') as HTMLElement
-    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 400 })
-    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 145 })
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 600 })
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 320 })
     await act(async () => { body.dispatchEvent(new Event('scroll', { bubbles: true })) })
     await act(async () => { body.click() })
     await act(async () => { (host.querySelector('[data-dmg-sidebar-more]') as HTMLElement).click() })
@@ -275,7 +280,7 @@ describe('展开', () => {
     expect(host.querySelector('[data-dmg-sidebar-more]')!.getAttribute('role')).toBeNull()
   })
 
-  it('展开时溢出也显示双箭头，滚到底后消失', async () => {
+  it('展开明细溢出时同样显示双箭头，滚到底后隐藏但保留高度', async () => {
     await render()
     await act(async () => { (host.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement).click() })
     await flush()
@@ -291,7 +296,7 @@ describe('展开', () => {
     await overflow(0)
     expect(host.querySelector('[data-dmg-sidebar-more]')).not.toBeNull()
     await overflow(260)
-    expect(host.querySelector('[data-dmg-sidebar-more]')).toBeNull()
+    expect((host.querySelector('[data-dmg-sidebar-more]') as HTMLElement).className).toContain('is-hidden')
   })
 
   it('title 上的开关同时负责展开与收起', async () => {

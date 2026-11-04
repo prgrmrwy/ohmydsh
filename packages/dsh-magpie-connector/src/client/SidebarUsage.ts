@@ -30,7 +30,6 @@ export interface SidebarUsageProps {
   wide?: boolean
 }
 
-const MAX_ROWS = 5
 const RAIL_POPOVER_WIDTH = 320
 
 export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
@@ -42,8 +41,9 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   const [notice, setNotice] = useState('')
   const anchorRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
-  const [bodyMax, setBodyMax] = useState<number | undefined>(undefined)
+  const [bodyOverflow, setBodyOverflow] = useState(false)
   const [bodyMore, setBodyMore] = useState(false)
+  const [detailOverflow, setDetailOverflow] = useState(false)
   const [detailMore, setDetailMore] = useState(false)
   const detailRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -68,30 +68,17 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     return () => { alive = false }
   }, [enabled, api])
 
-  // Show exactly MAX_ROWS rows: measure the fifth row's bottom instead of
-  // assuming a per-row height (host font metrics and rows without a bar differ).
-  useLayoutEffect(() => {
-    const element = bodyRef.current
-    if (element === null || typeof ResizeObserver === 'undefined') return
-    const measure = (): void => {
-      const fifth = element.children[MAX_ROWS - 1]
-      if (element.children.length <= MAX_ROWS || !(fifth instanceof HTMLElement)) { setBodyMax(undefined); return }
-      const height = Math.round(fifth.getBoundingClientRect().bottom - element.getBoundingClientRect().top)
-      if (height > 0) setBodyMax(height)
-    }
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(element)
-    for (const child of Array.from(element.children)) if (child instanceof HTMLElement) observer.observe(child)
-    return () => observer.disconnect()
-  }, [enabled, open, view])
-
-  // Overflow hint for both states: the passive double chevron stays visible while
-  // a scroll container still has content below the fold, and hides at the bottom.
+  // The collapsed body caps at 320px in CSS. Track whether a surface overflows
+  // (so the hint band can reserve its space) and whether content is still below
+  // the fold (so the glyph shows without the band itself coming and going).
   useLayoutEffect(() => {
     const sync = (): void => {
-      setBodyMore(hasMore(bodyRef.current))
-      setDetailMore(hasMore(detailRef.current))
+      const body = bodyRef.current
+      setBodyOverflow(overflows(body))
+      setBodyMore(belowFold(body))
+      const detail = detailRef.current
+      setDetailOverflow(overflows(detail))
+      setDetailMore(belowFold(detail))
     }
     sync()
     if (typeof ResizeObserver === 'undefined') return
@@ -99,7 +86,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     for (const element of [bodyRef.current, detailRef.current]) if (element !== null) observer.observe(element)
     for (const element of Array.from(bodyRef.current?.children ?? [])) if (element instanceof HTMLElement) observer.observe(element)
     return () => observer.disconnect()
-  }, [enabled, open, view, bodyMax])
+  }, [enabled, open, view])
 
   // Returning to the page re-reads once (the 60s TTL suppresses it otherwise).
   useEffect(() => {
@@ -213,22 +200,25 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
           h('div', {
             className: 'dmg-sidebar-detail', 'data-dmg-sidebar-expanded': '',
             ref: (node: HTMLDivElement | null): void => { detailRef.current = node },
-            onScroll: () => setDetailMore(hasMore(detailRef.current)),
+            onScroll: () => { setDetailOverflow(overflows(detailRef.current)); setDetailMore(belowFold(detailRef.current)) },
           }, detail(cards, now, status)),
-          detailMore ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
+          detailOverflow ? h('div', {
+            className: `dmg-sidebar-more${detailMore ? '' : ' is-hidden'}`, 'aria-hidden': true, 'data-dmg-sidebar-more': '',
+          }, doubleChevron()) : null,
         )
         : h(Fragment, null,
           h('div', {
             className: `dmg-sidebar-body${bodyMore ? ' is-scroll' : ''}`,
             ref: (node: HTMLDivElement | null): void => { bodyRef.current = node },
-            onScroll: () => setBodyMore(hasMore(bodyRef.current)),
-            ...(bodyMax === undefined ? {} : { style: { maxHeight: bodyMax } }),
+            onScroll: () => { setBodyOverflow(overflows(bodyRef.current)); setBodyMore(belowFold(bodyRef.current)) },
           },
             status !== undefined
               ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
               : rows.map(row => compactRow(row, now)),
           ),
-          bodyMore ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
+          bodyOverflow ? h('div', {
+            className: `dmg-sidebar-more${bodyMore ? '' : ' is-hidden'}`, 'aria-hidden': true, 'data-dmg-sidebar-more': '',
+          }, doubleChevron()) : null,
         ),
     ),
   )
@@ -303,8 +293,12 @@ function expiry(window: CardWindow, now: number): ReactNode {
   return h('span', { className: 'dmg-sidebar-expiry', 'data-dmg-sidebar-expiry': '', title: `${t('usageResetAt')}${formatTime(resetsAt)}` }, label)
 }
 
+/** Does this scroll container scroll at all? */
+const overflows = (element: HTMLElement | null): boolean =>
+  element !== null && element.scrollHeight - element.clientHeight > 1
+
 /** Does this scroll container still have content below the fold? */
-const hasMore = (element: HTMLElement | null): boolean =>
+const belowFold = (element: HTMLElement | null): boolean =>
   element !== null && element.scrollHeight - element.scrollTop - element.clientHeight > 1
 
 const reading = (row: SidebarWindowRow): ReactNode =>

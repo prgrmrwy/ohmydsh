@@ -131,7 +131,7 @@ export const settingsCss = `
 .dmg-sidebar-icon svg{width:12px;height:12px}
 .dmg-sidebar-chevron{transition:transform .15s ease}
 .dmg-sidebar-chevron.is-open{transform:rotate(180deg)}
-.dmg-sidebar-body{max-height:145px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;-ms-overflow-style:none;margin-top:2px}
+.dmg-sidebar-body{max-height:320px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;-ms-overflow-style:none;margin-top:2px}
 .dmg-sidebar-body.is-scroll{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 6px),rgba(0,0,0,.6));mask-image:linear-gradient(to bottom,#000 calc(100% - 6px),rgba(0,0,0,.6))}
 .dmg-sidebar-body::-webkit-scrollbar{display:none;width:0;height:0}
 .dmg-sidebar-row{padding:2px 0 3px;min-width:0}
@@ -155,6 +155,7 @@ export const settingsCss = `
 .dmg-sidebar-bar>i[data-level=high]{background:var(--dsw-alias-state-error-primary)}
 .dmg-sidebar-row-error{margin:2px 0 0;font-size:10.5px;line-height:15px;color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
 .dmg-sidebar-more{flex:none;height:16px;display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary)}
+.dmg-sidebar-more.is-hidden{visibility:hidden}
 .dmg-sidebar-more svg{width:12px;height:12px}
 .dmg-sidebar-status{margin:2px 0 4px;font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}
 .dmg-sidebar-rule{border-top:.5px solid var(--dsw-alias-border-l2);margin:4px 0 6px;flex:none}
