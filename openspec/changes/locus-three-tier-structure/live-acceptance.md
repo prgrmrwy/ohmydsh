@@ -144,3 +144,15 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 ## H2 后继与 NOTICE-1：通过
 
 重启后所有者依次发送后继、`--tools safe` 与唤醒消息，并确认话题内回复均符合预期（含独立的 safe 生效通知，回到原话题）。只读核对：child turn 8（seq 201–218）处理后继并经 pet_locus_finish 回复，正常 completed；turn 9（seq 222–241）唤醒后 toolTier desired/effective 均为 safe，verifiedAt=1793799352450，该轮无 bash 调用；generation 1、原 main/child、read/read 保持，busy=false。H 执行中断恢复与 NOTICE-1 均关闭。
+
+## 新群 auto、显式 /bind、归档回执与多入口迁移：通过
+
+同一 Host PID 67963 内取证（基线 RSS 834.7 MiB，70 个 locus 行）。
+
+- auto（A 群）：首个授权 at 在 default workspace nexus 新建 W `session-e6169bcd…`，在 Pet workspace 新建 M `session-bd9ddddb…`；入口 createdAt 1793799601619，child descriptor 1793799603043 与首轮同时写入，未预建；turn 1 经 pet_locus_finish 回复后 completed，tier3、safe/read，child 不驻留。RSS 856.2 MiB。
+- 显式 /bind（B 群）：`/bind <W 全 ID>` 后新入口 source=explicit、generation 1、复用同一 M，状态 not-created 且无 child id/marker（RSS 860.7 MiB）；首条消息 1793799762242 才创建 child，父为同一 M，回复 completed，两个 child 都不驻留。
+- 归档回执：只归档 W 后 A 群连发 4 次，所有者确认前 3 次收到“来源已归档，请 /bind”回执、第 4 次静默，与 SOURCE_ARCHIVED_RECEIPT_LIMIT=3 一致，未投递给 child。
+- 多入口迁移：再归档 M、只恢复 W 后，A/B 两个入口在同一时刻 1793799999897 迁移：旧 generation 1 行标为 invalid（“locus 主会话不可用，入口已迁移到新的 locus 主会话”），旧 M 显示 archived 且未被复活；两入口均发布 generation 2，共用新 M `session-b8734ecc…`，各自惰性新建 child 并回复“迁移 A/B”。
+- 常驻与内存：本组合常驻 M 由 1 个替换为 1 个，child 均非驻留。同进程 RSS 依次 834.7 → 856.2 → 860.7 → 932.6（B 首投刚结束）→ 933.1 MiB（迁移后）。单点采样含 GC 与模型请求缓存噪声，只说明增加两个入口与一次迁移后未见持续增长，不当作精确单会话成本。
+
+名额不足重试仍待单独受控验证。
