@@ -191,6 +191,12 @@
 - [x] 31.2 Host 适配透传已有 pending 标记，保留 effective、不启动 child；拒绝提示改为核对来源项目并明确私有状态根不能通过确认路径放行，保留机器错误码与前置守卫
 - [x] 31.3 build/typecheck、72 项定向与全量 2937 passed / 4 skipped、实现审查及严格规范/产物校验；已受控部署 main 968a1ff4，两次构建第二次无变更，11:46:08 ready，已核实待应用记录和父子身份跨重启保持；实际 shell 与 27.3/27.4 仍未完成
 
+## 32. E/F 批测与话题生效通知修正
+
+- [x] 32.1 一轮取证核验 E/F 八项：话题独立标记、未知参数、无效 token、原 child 内同 profile bot CLI、撤回待应用回执、safe 工具面、拒绝新文案和 finish；保留额外发现的生效通知缺口，真实签名篡改未覆盖
+- [x] 32.2 完整 Host 夹具复现话题通知走群端口被拒（1 failed / 8 passed）；复用精确当前投递的可信回复目标，缺失或错配拒绝，不扩大到群；保持提交结果不因通知失败回滚
+- [ ] 32.3 45 项定向、build/typecheck、全量 2940 passed / 4 skipped；完成审查、严格规范/产物校验和受控合入构建；修复加载与生效通知真机复验合并到下一批中断重启，27.3/27.4 仍未完成
+
 ## 27. 收尾
 
 - [x] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更

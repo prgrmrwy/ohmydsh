@@ -94,4 +94,23 @@ D 的 shell 冷恢复已通过：重启后的同一话题 child 在 turn 3 的 s
 
 本批 oracle：E1 话题读取不混主群标记；E2 未知参数拒绝；E3 伪造 cursor 拒绝（区分签名篡改与无效格式）；E4 同 profile bot CLI 真实读取；F1 撤回 shell 控制回执；F2 冷恢复 safe 工具面与原身份；F3 私有根新文案及内容不返回；F4 拒绝后正常回复。不能只按模型自述勾选；真实工具调用未发生记未执行，失败保留原因并继续独立子项。机器参数依据 locus-history-tool.ts:78/108，固定 CLI profile 依据 channel/cli.ts:4。
 
-后续按服务编排另组：auto 新群与显式 /bind 的首投前后对照、受控容量占用与释放、执行中重启与后继投递。它们需要额外的状态前置和观测窗口，不与当前档位回切混为同一通过结论。
+## E/F 实测结果（2026-11-04 14:37–14:40）
+
+八项计划检查通过，证据均来自同一原话题 child/generation 1 的官方冷读；不把新发现的生效通知失败包含在通过结论中。
+
+| 项 | 实际证据 | 结论 |
+| --- | --- | --- |
+| E1 话题隔离 | turn 4，seq 95/96 的专用历史工具返回 10 条同一话题记录，包含内侧标记，不含主群标记；seq 115/116 的独立 CLI 群读确实包含外侧标记，messageId=om_x100b619965a59cb0dd693884e1bdd23 | 通过，两个读取结果分别判断 |
+| E2 未知参数 | seq 100/101 实际传 unknown_field，原始结果明确 does not accept argument，且说明是失败而非空页 | 通过 |
+| E3 伪造 cursor | 正常结果无 cursor；seq 105/106 实际传无效 token，返回 cursor-invalid | 无效 token 分支通过，真实签名篡改未覆盖 |
+| E4 bot CLI | seq 110/111 先帮助，seq 115/116 在 child 中用 dsh-pet profile、显式 as bot、当前群和 page-size 2 执行，ok=true、identity=bot、返回 2 条 | 通过，不使用本会话的 CLI 代替 |
+| F1 撤回控制回执 | 14:39，同一话题的 om_x100b61997f5e7ca8df7d36b439f4ec3 明确 safe 已记录、唤醒应用、生效前仍 shell；核验者只读 bot CLI 取证该回执 | 通过 |
+| F2 safe 工具面与身份 | turn 5 的原生 request/header 移除 bash/skill，pet_context 为 safe/read，main/child 和 generation 1 保持 | 通过，未虚构一次不存在的 bash 调用 |
+| F3 新拒绝文案 | seq 146/147 实际 read 私有 state.sqlite，isError=true、稳定机器码未变；明确私有状态根始终禁止、不能通过确认路径放行，无文件内容 | 通过，LACOPY-1 现场关闭 |
+| F4 拒绝后正常回复 | E seq 120/121 和 F seq 151/152 的 finish 成功，两个业务 turn 正常 completed（F 截止 seq 157） | 通过 |
+
+E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真实 cursor，没有用其他来源补推；E2/E3 外层 tool result 的 isError=false 不是领域读取成功，判断采用明确拒绝正文。
+
+新增 NOTICE-1：唤醒后的“档位已应用并核验”独立通知缺失。实际 safe 已生效，初始待应用控制回执也成功；pending-application 的通知却走了会主动拒绝话题的群事务端口。已补真实 Host 冷恢复回归并在旧代码得到 1 failed / 8 passed，最小修复复用当前投递经持久层验证的 replyTarget，缺失/群或话题不符/发送能力缺失时继续拒绝，保持已提交的实际档位。45 项定向、build/typecheck、全量 2940 passed / 4 skipped。生效通知的修复加载和真机成功回执仍待下一次受控重启，不能把源码绿等同于已补发。
+
+下一批先做执行中断恢复：当前 C 话题 safe，所有者先授 shell，再发无写入、只 sleep 的持续执行请求；核验者观察实际运行后受控重启，同时加载 NOTICE-1 修复。重连后续消息验证旧 Delivery failed/turn-interrupted 与下一条立即派发，再撤回 safe 并用新唤醒验证 NOTICE-1。auto 新群与显式 /bind 首投前后、受控容量占用与释放、W/M 迁移与驻留/RSS 继续保持待验；不为测试占满日常资源，也不把不同 PID 的 RSS 当作增长差值。

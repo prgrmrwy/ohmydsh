@@ -137,8 +137,8 @@
 | specs/pet-locus-collaboration/spec.md → 启动恢复证据经官方冷读获取 | 不可区分中断保持等待 | packages/dsh-pet/test/locus-startup-cold-read.test.ts | `不可区分中断保持等待` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 启动恢复证据经官方冷读获取 | 真实中断立即结算推进 | packages/dsh-pet/test/locus-startup-cold-read.test.ts | `真实中断立即结算推进` | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 启动恢复证据经官方冷读获取 | live 中断不剔除 | packages/dsh-pet/test/locus-startup-cold-read.test.ts | `live 中断不剔除` | 🟢 green |
-
 | specs/pet-locus-collaboration/spec.md → 非驻留子会话的权限变更以待应用协议提交 | 实际 Host 透传待应用工具档位回执 | packages/dsh-pet/test/locus-host-wiring.test.ts | `cold tool-tier control preserves the pending receipt through the actual Host adapter` | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 非驻留子会话的权限变更以待应用协议提交 | 唤醒时用当前话题投递目标告知生效，不扩大到群 | packages/dsh-pet/test/locus-host-wiring.test.ts | `pending topic notification uses the waking Delivery target without widening`（valid/missing/mismatched） | 🟢 green |
 
 ## Coverage Notes
 

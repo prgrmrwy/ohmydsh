@@ -1327,7 +1327,19 @@ async function initialize(
             if (result.pending !== undefined) {
               await resolveLocusPendingApplication({
                 repository: locusRepository,
-                notify: input => locusLarkPort.sendControlMessage(input).then(() => undefined),
+                notify: async input => {
+                  if (input.endpoint.threadId === undefined || isDocEndpoint(input.endpoint)) {
+                    await locusLarkPort.sendControlMessage(input)
+                    return
+                  }
+                  const delivery = locusRepository.findCurrentSerializedDelivery(result.composition)
+                  const target = delivery?.replyTarget
+                  if (target === undefined || target.chatId !== input.endpoint.chatId ||
+                      target.threadId !== input.endpoint.threadId || typeof larkClient.replyToTarget !== 'function') {
+                    throw new Error('Pending topic notice has no current matching reply target')
+                  }
+                  await larkClient.replyToTarget(target, input.text)
+                },
                 log: message => petLog(`dsh-pet locus permission: ${message}`),
               }, result.composition, result.pending)
             }
