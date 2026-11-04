@@ -119,15 +119,15 @@ test('overlay-regression-09: public manifest exposes no private fixture entries'
   assert.equal((await fx.profilePkg()).dependencies[name], `file:${path.join(fx.overlayRoot, 'packages', id)}`)
 })
 
-test('overlay-regression-06: missing fields, remote identity and runtime mismatch fail before writes', async (t) => {
+test('overlay-regression-06: missing fields, remote identity and retired fields fail before writes', async (t) => {
   for (const [body, pattern] of [
     ['  - id: no-version\n    type: package\n    source: local\n', /requires version/],
     ['  - id: bad-remote\n    type: package\n    source: remote\n    spec: not-an-npm-spec\n    version: 1.0.0\n', /requires an explicit name/],
-    ['  - id: dsh-pet\n    type: package\n    source: local\n    version: 1.0.0\n    hostRuntimeCompatibility:\n      kind: pet-unified-locus-v1\n      supportedDshVersion: 9.9.9\n', /re-audit or remove/],
+    ['  - id: dsh-pet\n    type: package\n    source: local\n    version: 1.0.0\n    hostRuntimeCompatibility:\n      kind: pet-unified-locus-v1\n      supportedDshVersion: 9.9.9\n', /"hostRuntimeCompatibility" 已退役/],
   ]) {
     const fx = await fixture(t, [], { initProfile: false })
     await fx.writeOverlay(`customizations:\n${body}`)
-    await unchangedOnFailure(fx, pattern, body.includes('hostRuntimeCompatibility') ? 'dsh-pet hostRuntimeCompatibility' : fx.overlayFile)
+    await unchangedOnFailure(fx, pattern, fx.overlayFile)
   }
 })
 

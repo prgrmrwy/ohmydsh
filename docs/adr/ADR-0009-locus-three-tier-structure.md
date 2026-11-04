@@ -96,7 +96,7 @@ inquiry 五张表与必要解析/管理读路径仅为历史保留，**没有 ru
 | `native-managed-effects.patch` | inquiry 的原生 effect-owner 标记消费者与 Pet managedEffects 接缝退役，不再给四个原生工具 owner 打标。 |
 | `newinquiry-tools-guard.patch` | readiness 标记消费者随 inquiry 退役，但其 Host 级最终 guard 重判不是“官方已有”等价能力；移除该行为是所有者明确接受 TOCTOU 风险后的决定。 |
 
-launcher 不再替换 dsh-subagent、dsh-agent-loop、dsh-tools 与四个原生工具 owner，剩余扩展仅 **team-membership 一包**（与 Locus 无关；model-display 已在主干另行退役）。保留面、版本/provenance 和各自退役条件以 [compat README](../../packages/dsh-pet/compat/subagent/README.md) 为准，不能称为完全无 compat 的 Host。
+launcher 不再替换 dsh-subagent、dsh-agent-loop、dsh-tools 与四个原生工具 owner，当时剩余扩展仅 **team-membership 一包**（与 Locus 无关；model-display 已在主干另行退役）。**后续更新（2026-11-04）**：team-membership 也已退役，`packages/dsh-pet/compat/` 与 `hostRuntimeCompatibility` 机制整体移除，Host 始终使用官方精确运行体；所有者接受 agent-team roster 判定窗口风险（OpenSpec change `retire-pet-host-runtime-compat`）。上文“不能称为完全无 compat 的 Host”的限定随之失效。
 
 ### 已接受的 TOCTOU 风险，未恢复最终 guard
 

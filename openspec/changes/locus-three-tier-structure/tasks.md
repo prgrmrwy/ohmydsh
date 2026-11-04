@@ -206,7 +206,7 @@
 - [x] 33.1 Pet 恢复判据与规范接受真实、持久化且唯一绑定的原生 aborted（reason.kind 为 user/parent/disposed）；真实官方取消 → JSONL → 全新 prepared 冷读、UUID/turn/execution 错配与合成对照通过，5 文件 113 项通过；不伪造、不重发
 - [x] 33.2 Host owner 的停机排空握手冻结新建/派发并 await 官方 drain；真实 Host 接缝证明只处理自有子会话、失败/超时不回 ready、维护状态可明确恢复（`locus-host-wiring` 实际 WebServer 路由 + `locus-shutdown-freeze` 21 项 + `locus-stop-preparation` + `locus-interrupted-current-cas`；dsh-pet 全量 3012 通过 / 4 跳过）
 - [x] 33.3 launcher 在 SIGTERM 前消费同一 Host 的受鉴权握手；脚本测试覆盖成功、失败、过期应答和旧 Host 首次载入路径，不静默绕过（无 Pet profile 由 `scripts/launcher/no-pet-stop-plugin.mjs` 经官方 Loader/appReady 提供同协议；官方构建图专项 111/111，仓库全量 770 通过 / 0 失败 / 3 跳过）
-- [ ] 33.4 审查、定向/相关全量及严格校验后受控部署；新请求 H2 真机证明中断结算、后继派发及 safe 通知（原话题占位已释放，可复用原 child），旧 H1 不伪装为自动恢复成功
+- [x] 33.4 审查、定向/相关全量及严格校验后受控部署；新请求 H2 真机证明中断结算、后继派发及 safe 通知（原话题占位已释放，可复用原 child），旧 H1 不伪装为自动恢复成功
 
 ## 27. 收尾
 

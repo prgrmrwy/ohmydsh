@@ -128,3 +128,41 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 这符合当前 spec:1098–1122 的合成过滤/歧义等待，但不能算 27.4 的中断自动释放通过。独立只读核查官方 rc.2 发现 live loop 写的是 aborted（reason=user|parent|disposed），interrupted 只用于事后补尾；现 Pet 的冷恢复却只认 interrupted。另有官方 owner drain 可等待 idle 与持久写句柄关闭，当前 launcher 没有 SIGTERM 前的排空握手。原 H1 保留未知、不重发、不手改 busy 或日志；后继消息和 safe 控制暂不要求所有者发送。修订建议与待确认工作见 proposal/tasks 第 33 节；NOTICE-1 已随这次重启加载，但成功通知尚未真机复验。
 
 后续状态复查：管理投影已变为 active/busy=false，updatedAt=1793781582505，即 16:39:42.505+08:00；原 main/child、generation 1、shell/shell 与 read/read 全部保持。该释放约在接受 H 一小时后、重启 ready 约 51 分钟后，符合 delivery.ts:75 的默认 60 分钟租约；但管理投影不提供该 Delivery 终态原因，现有日志也未取到对应结算原因，因此只确认占位已释放，不把它记成已证明的 expired 或 failed/turn-interrupted。后继与 safe 通知现在可以独立收口，H 的“重启后立即释放”仍未通过；没有手改记录或重放 H。
+
+## H2 受控握手重启：通过
+
+部署：8a52289c 经 ws-merge 合入 main 079de93e，两次生产构建第二次 no changes。旧 Host 无协议，首次以显式维护重启 20261104-130734-47594-6a8de7 加载（重启前 70 个 locus 全部 busy=false；回执声明不计 drain 验收）；随后 launcher 自身 verifyStopProtocol 对新 Host PID 47814 只读确认 0600 descriptor 与鉴权 active status。
+
+所有者在原 C 话题发送 H2。重启前只读证据：child turn 7 seq 182 开始，seq 190 pet_context 绑定 delivery-118，seq 194 前台 bash（timeoutMs=600000、run_in_background=false）执行只 sleep 的 python；本机 PID 67029 实际运行；原 generation 1、原 main/child、shell/shell、read/read，busy=true。
+
+握手重启 20261104-133042-67502-8f1c45（不带 legacy 参数）：13:30:49.504Z preparing-pet → 13:30:51.447Z stopping → 13:30:52.475Z stopped → 13:30:55.010Z ready。child 日志 seq 195/196 为真实 tool/result、step/end，seq 197 为真实写入的 `turn/end {kind:'aborted', reason:{kind:'parent'}}`，time=1793799049720（13:30:49.720Z，即准备阶段内，不是事后补尾）。delivery-118 在 1793799049722 结算为 stage=failed，failureReason 为 turn-interrupted 的标准说明（消息已入 child inbox、不重发）；话题同刻 busy=false，generation、main/child、档位与权限不变；python 进程已结束，无重放。prepared 应答先于 SIGTERM，满足 27.4 中“重启后立即释放”。
+
+同一诊断补齐 H1：delivery-117 failureReason=“delivery deadline expired”，确认此前 16:39:42 的释放来自 60 分钟租约到期，而非中断恢复；原记录保持，未手改。
+
+后继派发与 NOTICE-1 safe 通知仍待所有者下一批消息验证。
+
+## H2 后继与 NOTICE-1：通过
+
+重启后所有者依次发送后继、`--tools safe` 与唤醒消息，并确认话题内回复均符合预期（含独立的 safe 生效通知，回到原话题）。只读核对：child turn 8（seq 201–218）处理后继并经 pet_locus_finish 回复，正常 completed；turn 9（seq 222–241）唤醒后 toolTier desired/effective 均为 safe，verifiedAt=1793799352450，该轮无 bash 调用；generation 1、原 main/child、read/read 保持，busy=false。H 执行中断恢复与 NOTICE-1 均关闭。
+
+## 新群 auto、显式 /bind、归档回执与多入口迁移：通过
+
+同一 Host PID 67963 内取证（基线 RSS 834.7 MiB，70 个 locus 行）。
+
+- auto（A 群）：首个授权 at 在 default workspace nexus 新建 W `session-e6169bcd…`，在 Pet workspace 新建 M `session-bd9ddddb…`；入口 createdAt 1793799601619，child descriptor 1793799603043 与首轮同时写入，未预建；turn 1 经 pet_locus_finish 回复后 completed，tier3、safe/read，child 不驻留。RSS 856.2 MiB。
+- 显式 /bind（B 群）：`/bind <W 全 ID>` 后新入口 source=explicit、generation 1、复用同一 M，状态 not-created 且无 child id/marker（RSS 860.7 MiB）；首条消息 1793799762242 才创建 child，父为同一 M，回复 completed，两个 child 都不驻留。
+- 归档回执：只归档 W 后 A 群连发 4 次，所有者确认前 3 次收到“来源已归档，请 /bind”回执、第 4 次静默，与 SOURCE_ARCHIVED_RECEIPT_LIMIT=3 一致，未投递给 child。
+- 多入口迁移：再归档 M、只恢复 W 后，A/B 两个入口在同一时刻 1793799999897 迁移：旧 generation 1 行标为 invalid（“locus 主会话不可用，入口已迁移到新的 locus 主会话”），旧 M 显示 archived 且未被复活；两入口均发布 generation 2，共用新 M `session-b8734ecc…`，各自惰性新建 child 并回复“迁移 A/B”。
+- 常驻与内存：本组合常驻 M 由 1 个替换为 1 个，child 均非驻留。同进程 RSS 依次 834.7 → 856.2 → 860.7 → 932.6（B 首投刚结束）→ 933.1 MiB（迁移后）。单点采样含 GC 与模型请求缓存噪声，只说明增加两个入口与一次迁移后未见持续增长，不当作精确单会话成本。
+
+名额不足重试仍待单独受控验证。
+
+## 名额不足保留原请求并重试：通过
+
+所有者在 GUI 把「子智能体并行数量上限」（官方 maxActiveSubagents，按同一主 Agent 计）临时改为 1。A、B 共用 M `session-b8734ecc…`。A 子会话 turn 3（seq 45 起）前台执行 sleep(120)，本机 PID 89746 自 21:55:30 运行。B 群消息 `…33bb1376` 于 1793800555013 接受；名额满时日志记录 child-capacity-exhausted，该 Delivery 保持 accepted、无 failureReason、未结算，B 仍为 generation 2 与原 child `session-ee6c5a26…`。A turn 3 于 1793800668358 completed 并回复 CAP-START/CAP-END；约 1.5 秒后 B 原 child 在 1793800669837 开始 turn 3，经 pet_locus_finish 回复“名额测试”后 completed。B 同一消息只开了这一轮，无换代、无新 child，所有者无需重发。
+
+### 测试中发现的缺陷 TIER-PROMPT-1
+
+非驻留子会话首次授予 shell 后被唤醒的那一轮：agent/created 已将 toolTier 应用并核验为 shell（该轮 request/header 工具列表含 bash、skill），但投递 prompt 在唤醒前生成，仍写“工具档位：safe……存在待应用档位变更；生效前仍按当前工具档位服务”。模型据此拒绝执行（A turn 2）。无越权，但授权后第一条请求被错误拒绝；重发后正常。待修。
+
+TIER-PROMPT-1 修复（源码，待部署）：投递 prompt 在应用待定档位的唤醒之前生成，无法得知结果；首投与续投两处的待应用说明改为“可能已在本次唤醒时应用，以本轮实际可用工具和 pet_context 的 effective 为准”，不再断言旧档位约束本轮。新增 locus-pending-tier-prompt 回归（旧代码 2 failed，修复后 2 passed）。真机复验需下次受控重启后在非驻留入口首次授权时观察。

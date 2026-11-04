@@ -367,7 +367,7 @@ export function renderLocusDeliveryPrompt(
     '',
     '### Tool tier',
     `- effective：${context.locus.toolTier ?? 'safe'}`,
-    ...(context.locus.pendingToolTier === true ? ['- 存在待应用档位变更；生效前仍按当前 effective 服务。'] : []),
+    ...(context.locus.pendingToolTier === true ? ['- 投递时存在待应用档位变更，可能已在本次唤醒时应用：以本轮实际可用工具和 `pet_context` 中的 effective 为准。'] : []),
     ...(context.locus.toolTier === 'shell'
       ? [
         ...(isDocEndpoint(context.endpoint)
@@ -512,7 +512,9 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     context.locus.toolTier === 'shell'
       ? '- 工具档位：shell —— 可执行本机命令并以 bot 身份读取当前入口；业务正文仍只能经 `pet_locus_finish`。'
       : '- 工具档位：safe —— 不提供 shell、Skill 或直接 lark-cli 能力。',
-    ...(context.locus.pendingToolTier === true ? ['- 存在待应用档位变更；生效前仍按当前工具档位服务。'] : []),
+    // This prompt is rendered before the wake that applies a pending tier, so
+    // it cannot state the outcome; point at the verified source instead.
+    ...(context.locus.pendingToolTier === true ? [`- 投递时存在待应用档位变更，可能已在本次唤醒时应用：以本轮实际可用工具和 \`pet_context\` 中的 effective 为准，不要仅凭上一行拒绝。`] : []),
     ...(context.permission.desired !== undefined && context.permission.desired !== context.permission.effective
       ? ['- 存在待应用权限变更；当前生效权限：' + context.permission.effective + '。'] : []),
     // Separate from the tier: a shell child can still hit an entrance it may

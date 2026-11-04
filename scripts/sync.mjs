@@ -11,8 +11,7 @@ import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
 import { resolveExecutable } from './lib/package-manager.cjs'
-import { assertHostRuntimeSources, declaredHostRuntimeFromManifest } from './lib/dsh-host-runtime.mjs'
-import { assertNoReservedEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
+import { assertNoReservedEntryKeys, assertNoRetiredEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
 import { applyEnvLocal, enabledEnvNames, isCustomizationEnabled } from './lib/env-local.mjs'
 import { withProfileLock } from './lib/profile-lock.mjs'
 import { planSeedRows, reconcileOwnedKeys, settingsLiveInProfile } from './lib/legacy-settings.mjs'
@@ -225,18 +224,18 @@ function loadManifest() {
   if (typeof doc !== 'object' || doc === null) throw new Error(`manifest ${file} is empty or not a YAML mapping`)
   if (typeof doc.dshVersion !== 'string' || doc.dshVersion === '') throw new Error('manifest: dshVersion is required')
   if (!Array.isArray(doc.customizations)) throw new Error('manifest: customizations must be a list')
-  // Append the local overlay's customizations *before* the Host runtime fence
-  // and before per-entry normalization. Both are load-bearing:
-  //   - declaredHostRuntimeFromManifest() receives the whole doc and asserts
-  //     "at most one owner of hostRuntimeCompatibility". Merging after it would
-  //     let an overlay entry bypass the version fence outright and would break
-  //     that invariant silently (one public + one overlay = two real owners).
-  //   - Merging into `doc` rather than into the normalized `items` means overlay
-  //     entries traverse the exact same validation chain below, so no consumer
-  //     needs a per-source branch and no check can be accidentally skipped.
+  // Append the local overlay's customizations before per-entry normalization.
+  // Merging into `doc` rather than into the normalized `items` means overlay
+  // entries traverse the exact same validation chain below, so no consumer
+  // needs a per-source branch and no check can be accidentally skipped.
   // Public entries are checked before their owning root is attached, overlay
-  // entries inside the overlay loader: neither file may choose its own root.
-  doc.customizations.forEach((item, index) => assertNoReservedEntryKeys(item, `customizations[${index}] (${item?.id})`))
+  // entries inside the overlay loader: neither file may choose its own root,
+  // and neither may declare a retired field (hostRuntimeCompatibility).
+  doc.customizations.forEach((item, index) => {
+    const at = `customizations[${index}] (${item?.id})`
+    assertNoReservedEntryKeys(item, at)
+    assertNoRetiredEntryKeys(item, at)
+  })
   doc.customizations = doc.customizations.map((item) =>
     item !== null && typeof item === 'object' && !Array.isArray(item) ? { ...item, sourceRoot: REPO } : item)
   // `.env.local` is only sourced by bin/dsh; a bare `node scripts/sync.mjs`
@@ -248,11 +247,6 @@ function loadManifest() {
   const overlay = loadOverlayCustomizations({ repo: REPO, env: process.env, strict: true })
   mergeOverlayCustomizations(doc, overlay.customizations, overlay.file)
   logEnvLocal(applyEnvLocal({ repo: REPO, names: enabledEnvNames(doc), env: process.env, strict: true }))
-  // Version-fence the reviewed Host overlay before even normalizing the rest of
-  // the manifest. loadManifest itself is side-effect free, and main performs no
-  // profile/state operation until this entire validation returns.
-  const hostRuntime = declaredHostRuntimeFromManifest(doc, { repo: REPO, env: process.env })
-
   // top-level dependencies: bundle-less support packages (exact-version npm specs)
   const deps = (doc.dependencies ?? []).map((spec, index) => {
     const label = `dependencies[${index}]`
@@ -377,7 +371,6 @@ function loadManifest() {
     deps,
     thirdPartyResources,
     agentInstructions,
-    hostRuntime,
     web: { open: web.open !== false },
   }
 }
@@ -787,13 +780,8 @@ function requiredSourcesOf(item) {
  * are collected and reported together; the materializers keep their own
  * existence checks as a TOCTOU backstop.
  */
-function preflightSources(items, hostRuntime = null) {
+function preflightSources(items) {
   const errors = []
-  try {
-    assertHostRuntimeSources(hostRuntime)
-  } catch (error) {
-    errors.push(String(error?.message ?? error))
-  }
   for (const item of items) {
     if (!item.enabled) continue
     const root = item.sourceRoot ?? REPO
@@ -2030,7 +2018,7 @@ async function main() {
     await syncAgentInstructions(manifest.agentInstructions, { reset: true })
   } else {
     // 预检全部在任何 $DSH_HOME 写入之前(design D7)。
-    preflightSources(manifest.items, manifest.hostRuntime)
+    preflightSources(manifest.items)
     const packageNames = resolvePackageNames(manifest.items, manifest.deps)
     await mkdir(PROFILE_DIR, { recursive: true })
     // 全新机器上 profile 骨架尚不存在;package 物化以它为前置。
