@@ -107,26 +107,24 @@ test('preflight failure on a fresh DSH_HOME leaves it empty', async (t) => {
   assert.deepEqual(await snapshotTree(fx.dshHome), {})
 })
 
-test('reset succeeds when the host runtime builder is missing', async (t) => {
+test('reset succeeds when a local package source is missing', async (t) => {
   const petEntry = [
-    '  - id: dsh-pet', '    type: package', '    source: local', '    version: 1.0.0', '    enabled: true',
-    '    hostRuntimeCompatibility:', '      kind: pet-unified-locus-v1', '      supportedDshVersion: 0.1.0-rc.7', '',
+    '  - id: dsh-pet', '    type: package', '    source: local', '    version: 1.0.0', '    enabled: true', '',
   ].join('\n')
   const fx = await overlayFixture({ manifest: `${HEAD}dependencies:\n  - dsh-dep@1.0.0\ncustomizations:\n${petEntry}` })
   cleanup(t, fx)
-  await fx.putPublic('packages/dsh-pet/package.json', localPackageJson('dsh-pet'))
+  const manifestFile = await fx.putPublic('packages/dsh-pet/package.json', localPackageJson('dsh-pet'))
   await fx.putPublic('packages/dsh-pet/index.js', 'export default 1\n')
-  const builder = await fx.putPublic('packages/dsh-pet/compat/subagent/build-launcher.cjs', '')
   const first = fx.sync()
   assert.equal(first.status, 0, first.stdout + first.stderr)
   assert.ok((await fx.profilePkg()).dependencies['dsh-dep'])
-  await rm(builder)
+  await rm(manifestFile)
 
-  // Normal sync: a missing builder is a source preflight failure — nothing changes.
+  // Normal sync: a missing source is a source preflight failure — nothing changes.
   const before = await snapshotTree(fx.dshHome)
   const normal = fx.sync()
   assert.notEqual(normal.status, 0, normal.stdout)
-  assert.ok(normal.stderr.includes(builder), normal.stderr)
+  assert.ok(normal.stderr.includes(manifestFile), normal.stderr)
   assert.deepEqual(await snapshotTree(fx.dshHome), before)
 
   // Reset: undoing managed deployment must not depend on sources being present.

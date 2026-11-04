@@ -28,7 +28,7 @@ export function loadEnvironment(repo, caller = process.env, { platform = process
     const normalize = value => platform === 'win32' ? value.replaceAll('\\', '/').toLowerCase() : value
     if (env.DSH_BIN && normalize(env.DSH_BIN) === normalize(legacy)) {
       delete env.DSH_BIN
-      warn('info: 忽略 .env.local 中旧 dsh-pet DSH_BIN；Host runtime 现由 dsh.yaml 声明管理')
+      warn('info: 忽略 .env.local 中旧 dsh-pet DSH_BIN；该 compat Host 运行体已退役，Host 使用官方精确运行体')
     }
   }
   const get = name => env[platform === 'win32' ? keyOf(env, name) : name]

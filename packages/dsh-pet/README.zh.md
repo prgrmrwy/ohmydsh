@@ -261,9 +261,6 @@ Host 作为服务运行在已有的 `dsh web` 进程内——不是单独的守�
   source: local
   version: 0.1.0
   enabled: true
-  hostRuntimeCompatibility:
-    kind: pet-unified-locus-v1
-    supportedDshVersion: 0.2.0-rc.2
 ```
 
 配套的 `dsh-pet-executor` 条目（`type: preset`）提供 executor preset，它等于 DSH 标准 preset 去掉文件系统 Skill provider。运行 `dsh build`（或 `node scripts/sync.mjs`）即可物化。设为 `enabled: false` 并重新构建即可回滚；`$DSH_HOME/plugins/dsh-pet/` 会被保留，所以重新启用后数据可以找回。
@@ -274,7 +271,7 @@ Host 作为服务运行在已有的 `dsh web` 进程内——不是单独的守�
 
 ### 支持的 DSH 范围
 
-peer dependency 面向 DSH `^0.2.0-rc.2`，本仓库固定在 `0.2.0-rc.2`。这些都是尚未稳定的候选版本：client slot、Host Agent 服务和会话元数据都可能在版本之间变化。长期运行的 `dsh web` Host 还会为 `@deepseek-ai/dsh-subagent` 运行一份最小的源码级兼容 overlay，Locus 子会话依赖它；每次 DSH 版本变化都会重新构建并复核，见 [compat/subagent](compat/subagent/README.zh.md)。缺少这些宿主能力时，飞书通道保持不可用，Pet 的其余部分不受影响。
+peer dependency 面向 DSH `^0.2.0-rc.2`，本仓库固定在 `0.2.0-rc.2`。这些都是尚未稳定的候选版本：client slot、Host Agent 服务和会话元数据都可能在版本之间变化。长期运行的 `dsh web` Host 使用官方精确版本运行体：已不再有自定义 Host 运行体（compat），manifest 中出现 `hostRuntimeCompatibility` 字段会被当作已退役字段拒绝。原 team-membership 扩展同样已退役，所有者已接受由此带来的 agent-team roster 时间窗风险。缺少这些宿主能力时，飞书通道保持不可用，Pet 的其余部分不受影响。
 
 ### 能力可用性
 

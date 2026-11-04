@@ -5,7 +5,6 @@ import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { createRequire } from 'node:module'
 
 const ROOT = path.resolve(import.meta.dirname,'..')
 async function fixture(t) {
@@ -68,21 +67,4 @@ test('host prerequisite install resolution failure is diagnostic rather than an 
   assert.equal(result.status,1)
   assert.match(result.stderr,/fixture unsupported npm layout/)
   assert.doesNotMatch(result.stderr,/at resolveExecutable|file:\/\//)
-})
-
-test('compat CJS resolves Corepack while preserving pins supervisor wire capture and scoped env',async t=>{
-  const fx=await fixture(t)
-  const compat=path.join(fx.root,'packages/dsh-pet/compat/subagent')
-  await mkdir(compat,{recursive:true})
-  await cp(path.join(ROOT,'packages/dsh-pet/compat/subagent/compat-run.cjs'),path.join(compat,'compat-run.cjs'))
-  await writeFile(path.join(fx.root,'scripts/lib/run-bounded.mjs'),"import fs from 'node:fs';const request=JSON.parse(fs.readFileSync(0,'utf8'));console.log(JSON.stringify(request))")
-  const require=createRequire(import.meta.url)
-  const {runCompatCommand}=require(path.join(compat,'compat-run.cjs'))
-  const request=JSON.parse(runCompatCommand('corepack',['npm@11.19.0','install','two words'],fx.root,{capture:true,timeoutMs:1234,env:{CLOSURE_MARKER:'compat'}}))
-  assert.equal(request.command,process.execPath)
-  assert.deepEqual(request.args,[fx.fake,'npm@11.19.0','install','two words'])
-  assert.equal(request.cwd,fx.root)
-  assert.equal(request.timeoutMs,1234)
-  assert.equal(request.killGraceMs,2000)
-  assert.deepEqual(request.env,{CLOSURE_MARKER:'compat'})
 })

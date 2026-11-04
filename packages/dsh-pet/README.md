@@ -281,9 +281,6 @@ Closing the browser does not stop a running Invocation. Stopping `dsh web` stops
   source: local
   version: 0.1.0
   enabled: true
-  hostRuntimeCompatibility:
-    kind: pet-unified-locus-v1
-    supportedDshVersion: 0.2.0-rc.2
 ```
 
 A companion `dsh-pet-executor` entry (`type: preset`) supplies the quick-action executor preset, which equals DSH's standard preset minus the filesystem Skill provider. A separate `locus-base` preset supplies the non-delegating base for locus mains and children; it must be declared in the profile, or Locus creation and recovery refuse rather than substitute another preset. Run `dsh build` (or `node scripts/sync.mjs`) to materialize. Set `enabled: false` and rebuild to disable Pet; `$DSH_HOME/plugins/dsh-pet/` is preserved. Re-enabling does not reactivate retired two-tier associations.
@@ -294,7 +291,7 @@ The package does not depend on ohmydsh at runtime. Install it into any DSH profi
 
 ### Supported DSH range
 
-The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-rc.2`. These are pre-stable release candidates: client slots, Host Agent services and session metadata may change between versions. Three-tier Locus uses official subagent, agent-loop, tools and native tool-owner packages; the four legacy Locus/inquiry patches are retired. The long-lived `dsh web` Host retains only the team-membership one-package extension, rebuilt and reviewed on each DSH version change; see [compat/subagent](compat/subagent/README.md), including the explicitly accepted final-guard recheck time-window risk. Missing official runtime capabilities still disable the Lark channel with a diagnostic; the rest of Pet is unaffected.
+The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-rc.2`. These are pre-stable release candidates: client slots, Host Agent services and session metadata may change between versions. Three-tier Locus uses official subagent, agent-loop, tools and native tool-owner packages; the four legacy Locus/inquiry patches are retired. The long-lived `dsh web` Host runs the official exact-version runtime: there is no custom Host runtime (compat) any more, and a `hostRuntimeCompatibility` field in the manifest is rejected as retired. The former team-membership extension is retired too; the owner has accepted the resulting agent-team roster time-window risk. Missing official runtime capabilities still disable the Lark channel with a diagnostic; the rest of Pet is unaffected.
 
 ### Capability availability
 

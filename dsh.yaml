@@ -175,13 +175,8 @@ customizations:
     source: local
     version: 0.2.15
     enabled: true
-    # 仅长期 dsh web Host 使用的 Pet Locus 兼容运行时；build/plugin 等官方
-    # CLI 仍按 dshVersion 走官方精确版本。版本变化必须重新审查，不自动套补丁。
-    hostRuntimeCompatibility:
-      kind: pet-unified-locus-v1
-      supportedDshVersion: 0.2.0-rc.2
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web,状态在 $DSH_HOME/plugins/dsh-pet/sqlite;凭据留在 lark-cli,不读 provider 凭据。飞书默认关闭,allowlist 为空静默拒绝;lark-cli>=1.0.97,单条 event+subscribe,同应用其它 profile 不可并行订阅。三层 Locus 使用官方子会话/结算/冷读和固定 locus-base;四项历史补丁退役,七个 owner 使用官方包。compat 仅保留 team-membership(一包);DSH 升级必须重审。移除 tools 最终重查扩大 guard 到工具体的时间窗,连同完整 profile 实测的 checkpoint 落盘等待,所有者已接受;见 compat/subagent/README 与 locus-three-tier-structure/design。管理面限回环或 --trusted-host 同源。移除:enabled:false→dsh build→重启。Lottie 单文件表情;下载沿用 Host 网络/代理。'
+    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web,状态在 $DSH_HOME/plugins/dsh-pet/sqlite;凭据留在 lark-cli,不读 provider 凭据。飞书默认关闭,allowlist 为空静默拒绝;lark-cli>=1.0.97,单条 event+subscribe,同应用其它 profile 不可并行订阅。三层 Locus 使用官方子会话/结算/冷读和固定 locus-base;四项历史补丁退役,七个 owner 使用官方包。已无 compat 运行体,Host 使用官方精确运行体(hostRuntimeCompatibility 机制已退役);team-membership 退役,所有者接受 agent-team roster 窗口风险。移除 tools 最终重查扩大 guard 到工具体的时间窗,连同完整 profile 实测的 checkpoint 落盘等待,所有者已接受;见 locus-three-tier-structure/design。管理面限回环或 --trusted-host 同源。移除:enabled:false→dsh build→重启。Lottie 单文件表情;下载沿用 Host 网络/代理。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0

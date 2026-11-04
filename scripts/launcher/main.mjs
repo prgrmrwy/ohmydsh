@@ -257,8 +257,8 @@ async function launch(argv, options) {
       announcePreview()
     }
     const pluginNames = await runScript('plugin-list.mjs', ['--names'], { capture: true })
-    appendEvent(home, `dshVersion=${doc.dshVersion} runtime=${prepared.DSH_RUNTIME_KIND} owner=${prepared.DSH_RUNTIME_OWNER || 'none'} compat=${prepared.DSH_RUNTIME_COMPAT || 'none'} fingerprint=${prepared.DSH_RUNTIME_FINGERPRINT || 'none'} port=${flags.port} plugins=[${pluginNames.status === 0 ? pluginNames.stdout.trim() : ''}]`)
-    log(`Host runtime: ${prepared.DSH_RUNTIME_KIND}${prepared.DSH_RUNTIME_OWNER ? ` (${prepared.DSH_RUNTIME_OWNER})` : ''}`)
+    appendEvent(home, `dshVersion=${doc.dshVersion} runtime=${prepared.DSH_RUNTIME_KIND} port=${flags.port} plugins=[${pluginNames.status === 0 ? pluginNames.stdout.trim() : ''}]`)
+    log(`Host runtime: ${prepared.DSH_RUNTIME_KIND}`)
     await ui(doc)
     log(`dsh 已启动: http://127.0.0.1:${flags.port} (dshVersion=${doc.dshVersion};未自动打开 UI 时可 dsh --open)`)
     await showPlugins()
