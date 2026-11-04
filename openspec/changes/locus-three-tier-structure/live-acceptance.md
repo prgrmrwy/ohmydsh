@@ -77,4 +77,21 @@ A/B/C 的行为检查现已通过；LACOPY-1 仍公开未完成。
 
 第二次正确发送 `--tools shell` 后，日志为 control-command，但回执为 tools-not-applied（“工具档位未核验生效，未报告成功”）。只读管理投影实际已持久记录 desired=shell/effective=safe，话题 child 仍 agentAvailable=false/running=false，未多开业务轮次，群主入口仍 safe/safe、文件权限仍 read/read。根因已确认：tool-tier-mutation 本来返回 pending=true，control.ts 本来支持待应用回执，但 index.ts 的 Host 适配丢了此字段。新增真实 Host 共享仓储→控制面的回归在合法 owner 下复现误报，再以一行透传 pending 修复；不改变 effective 或重新授予申请。修复后 72 项定向、build/typecheck、全量 2937 passed / 4 skipped。
 
-下一次实际 shell 请求：由所有者在同一话题 at 机器人，要求先调用 pet_context，再调用 bash 执行 `printf locus-shell-ok`，最后报告工具档位、文件权限和 child ID。应保留原话题 child、generation 1，冷恢复后 effective=shell、permission=read，实际 bash 成功并经 finish 正常回复。重启前本申请已落盘，后续不需要重复发送切档命令；Host ready、跨重启保持、实际 shell 与回切 safe 都按现场证据分步记录。
+重启保持已核实：修复 `fbf4db5d` 已随生产 main `968a1ff4` 部署，两次构建第二次无变更；重启 `20261104-034558-2610-112080` 于 11:46:08.116 ready，Pet 订阅 connected。重连后官方管理投影仍为原话题 generation 1、原 main/child、desired=shell/effective=safe，文件权限 read/read，active 且 busy=false；群主入口仍为第 3 代 safe/safe。待应用记录与身份跨 Host 重启保持通过，尚未触发唤醒后的 shell 实际执行，因此 D 整体仍未完成。
+
+D 的 shell 冷恢复已通过：重启后的同一话题 child 在 turn 3 的 seq 63 调用 pet_context，seq 68/69 实际调用 bash 执行 `printf locus-shell-ok` 并返回 isError=false、stdout=locus-shell-ok；seq 73/74 的 finish 正常回群，seq 79 completed。管理投影已更新 desired=shell/effective=shell，原 child 和 generation 1 保持，文件权限 read/read。剩余为回切 safe 与 bot 历史等组合，不据此判定整个 27.4 完成。
+
+本次实际 shell 请求：由所有者在同一话题 at 机器人，要求先调用 pet_context，再调用 bash 执行 `printf locus-shell-ok`，最后报告工具档位、文件权限和 child ID。应保留原话题 child、generation 1，冷恢复后 effective=shell、permission=read，实际 bash 成功并经 finish 正常回复。重启前本申请已落盘，后续不需要重复发送切档命令；Host ready、跨重启保持、实际 shell 与回切 safe 都按现场证据分步记录。
+
+## E/F 联合批次：一次发送后统一取证
+
+所有者要求减少逐条往返，按环境与控制依赖合并为四条消息，最后统一告知核验者，不等待核验者在中间逐项确认。
+
+1. 原群主聊天发无 at 标记 `ROOT_ONLY_BATCH_20261104`，作为话题历史不能混入的独立 oracle。
+2. C 话题 at 发综合 E（带标记 `TOPIC_ONLY_BATCH_20261104`）：先 pet_context；调用 pet_locus_chat_history({}) 读当前话题，核对本话题/主群标记；再实际传未知参数 {"unknown_field":"acceptance"}；再传伪造 cursor（若有正常 cursor 则改一字符，否则用 invalid-acceptance-cursor 并说明只测无效 token）；最后在该 shell child 内执行 bot 历史 CLI，只使用 `--profile dsh-pet --as bot` 和 pet_context 给出的当前 chatId。CLI 参数先看帮助，仅取少量，权限失败不重试、不换 user 身份；一次 finish 汇总每项实际结果或未执行原因。
+3. E 完成后在同一话题 at `--tools safe`。若仍忙则按回执等空闲后重发，直到收到已记录/已核验回执；不能把忙拒绝当成已撤销。
+4. 随后同一话题发 F：pet_context 核对 safe/read 与原 child；核对 bash 不再可用（不编造调用或换工具）；真实 read Pet state.sqlite，取得新版拒绝文案，再 finish 汇总。
+
+本批 oracle：E1 话题读取不混主群标记；E2 未知参数拒绝；E3 伪造 cursor 拒绝（区分签名篡改与无效格式）；E4 同 profile bot CLI 真实读取；F1 撤回 shell 控制回执；F2 冷恢复 safe 工具面与原身份；F3 私有根新文案及内容不返回；F4 拒绝后正常回复。不能只按模型自述勾选；真实工具调用未发生记未执行，失败保留原因并继续独立子项。机器参数依据 locus-history-tool.ts:78/108，固定 CLI profile 依据 channel/cli.ts:4。
+
+后续按服务编排另组：auto 新群与显式 /bind 的首投前后对照、受控容量占用与释放、执行中重启与后继投递。它们需要额外的状态前置和观测窗口，不与当前档位回切混为同一通过结论。
