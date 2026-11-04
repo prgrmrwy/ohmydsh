@@ -1,6 +1,6 @@
 # Cloudflare 524：长会话的 Magpie 请求在 125 秒边缘超时
 
-> 状态：**已定位，未修复**。跟踪条目见 [BACKLOG D014](../../../BACKLOG.md)。
+> 状态：**已定位，未修复**。跟踪条目见 [BACKLOG D014](https://github.com/prgrmrwy/ohmydsh/blob/main/BACKLOG.md)。
 > 记录时间：2026-10-28。本文是排查记录，不是当前实现规范。
 
 ## 1. 结论摘要
