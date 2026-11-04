@@ -12,6 +12,11 @@ import { DEFAULT_SIDEBAR_WINDOWS, SIDEBAR_WINDOW_KINDS, type SidebarWindowKind }
 const WEEKLY = /7\s*days?|week|weekly|周/i
 /** The short rolling window; gateways write `5 hours`, `5-hour`, `5h`, `五小时`. */
 const FIVE_HOUR = /(?:^|[^0-9])5[\s-]*(?:hours?|hrs?|h)\b|five[\s-]*hours?|5\s*小时|五小时/i
+/** The monthly window; gateways write `month`, `monthly`, `30 days`, `每月`. */
+const MONTHLY = /month|30\s*days?|月/i
+
+/** Which gateway window names answer each selectable kind. */
+const WINDOW_PATTERNS: Record<SidebarWindowKind, RegExp> = { fiveHour: FIVE_HOUR, weekly: WEEKLY, monthly: MONTHLY }
 
 /** Colour tier of one reading; same thresholds as the settings page (AMD4). */
 export type UsageLevel = 'normal' | 'warn' | 'high'
@@ -74,7 +79,7 @@ export function sidebarRows(cards: Card[], kinds: readonly SidebarWindowKind[] =
     if (!failed) {
       for (const kind of SIDEBAR_WINDOW_KINDS) {
         if (!kinds.includes(kind)) continue
-        const matches = named(numeric, kind === 'fiveHour' ? FIVE_HOUR : WEEKLY).filter(window => !windows.some(row => row.window === window))
+        const matches = named(numeric, WINDOW_PATTERNS[kind]).filter(window => !windows.some(row => row.window === window))
         if (matches.length > 0) windows.push(windowRow(tightest(matches), kind))
       }
       if (windows.length === 0) {
