@@ -135,9 +135,11 @@ export const settingsCss = `
 .dmg-sidebar-body::-webkit-scrollbar{width:5px}
 .dmg-sidebar-body::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l3);border-radius:3px}
 .dmg-sidebar-row{padding:2px 0 3px;min-width:0}
-.dmg-sidebar-row-line{display:flex;align-items:baseline;gap:6px;min-width:0}
-.dmg-sidebar-name{flex:1;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dmg-sidebar-row-line{display:flex;align-items:baseline;gap:5px;min-width:0}
+.dmg-sidebar-label{display:flex;align-items:baseline;gap:2px;flex:1;min-width:0}
+.dmg-sidebar-name{flex:0 1 auto;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dmg-sidebar-window{flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+.dmg-sidebar-expiry{flex:none;font-size:10px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap}
 .dmg-sidebar-pct{flex:none;min-width:36px;text-align:right;font-size:11.5px;color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}
 .dmg-sidebar-pct[data-level=warn]{color:var(--dsw-alias-state-warn-label)}
 .dmg-sidebar-pct[data-level=high]{color:var(--dsw-alias-state-error-primary)}

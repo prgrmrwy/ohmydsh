@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6 — 2026-11-04
+
+- **侧栏收起行补上到期时间。** 每行改成「名称(网关窗口原名) … 到期时间 … 读数」：窗口名紧跟在名称后的括号里（`Claude (7 days)`），右侧在读数之前显示该窗口的重置时间（`11/20 11:00`，当年只给月/日与时间，跨年带年份，完整时间放在 `title`），`7 days` 不再是一个看不出何时恢复的模糊标签。网关没给该窗口 `resetsAt` 时位置留空，不显示占位或推算时间；余额行与读取失败行照旧。
+- 空间不足时只有名称省略号截断，到期时间与读数保持可读；规范 `openspec/specs/dsh-magpie-connector` 常驻卡要求、中英 README 与 CHANGELOG 同步。README 截图仍为 0.6.2 的旧行样式，未重截。
+
 ## 0.6.5 — 2026-11-04
 
 - **重置卡截图与 README 小节。** 新增 `docs/reset-credits.png` / `docs/reset-credits.en.png`：codex 用量卡片展开「用量限制重置」，最早到期那张带「使用…」，到期时间右对齐、条目与标题文字对齐。中英 README 各加一节「使用一张重置卡／Spending a reset」说明入口与门槛，`screenshots.json` 与 `docs/SCREENSHOTS.md` 同步登记。

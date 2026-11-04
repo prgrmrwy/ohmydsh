@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ageMinutes, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel, weeklyWindow,
+  ageMinutes, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel, weeklyWindow,
 } from '../src/client/sidebar-view.js'
 import type { Card } from '../src/client/view-model.js'
 
@@ -98,6 +98,16 @@ describe('formatting', () => {
     expect(formatResetShort(new Date(2027, 0, 2, 9, 5).toISOString(), now)).toBe('2027/1/2 09:05')
     expect(formatResetShort('nope', now)).toBeUndefined()
     expect(formatResetShort(undefined, now)).toBeUndefined()
+  })
+
+  it('always keeps a date on the compact-row reset label', () => {
+    const now = Date.parse('2026-11-03T10:00:00')
+    expect(formatResetDeadline(new Date(2026, 10, 3, 19, 20).toISOString(), now)).toBe('11/3 19:20')
+    expect(formatResetDeadline(new Date(2026, 10, 20, 11, 0).toISOString(), now)).toBe('11/20 11:00')
+    expect(formatResetDeadline(new Date(2027, 0, 2, 9, 5).toISOString(), now)).toBe('2027/1/2 09:05')
+    expect(formatResetDeadline('nope', now)).toBeUndefined()
+    expect(formatResetDeadline('', now)).toBeUndefined()
+    expect(formatResetDeadline(undefined, now)).toBeUndefined()
   })
 })
 
