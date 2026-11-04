@@ -164,3 +164,5 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 ### 测试中发现的缺陷 TIER-PROMPT-1
 
 非驻留子会话首次授予 shell 后被唤醒的那一轮：agent/created 已将 toolTier 应用并核验为 shell（该轮 request/header 工具列表含 bash、skill），但投递 prompt 在唤醒前生成，仍写“工具档位：safe……存在待应用档位变更；生效前仍按当前工具档位服务”。模型据此拒绝执行（A turn 2）。无越权，但授权后第一条请求被错误拒绝；重发后正常。待修。
+
+TIER-PROMPT-1 修复（源码，待部署）：投递 prompt 在应用待定档位的唤醒之前生成，无法得知结果；首投与续投两处的待应用说明改为“可能已在本次唤醒时应用，以本轮实际可用工具和 pet_context 的 effective 为准”，不再断言旧档位约束本轮。新增 locus-pending-tier-prompt 回归（旧代码 2 failed，修复后 2 passed）。真机复验需下次受控重启后在非驻留入口首次授权时观察。
