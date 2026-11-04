@@ -136,10 +136,15 @@ async function host() {
   const drain = vi.fn(async (_parent: unknown, children: readonly string[]) => { for (const id of children) agents.delete(id) })
   ctx.provide('subagents', {
     startContinuable: start, drainContinuableChildren: drain, getProvider: () => ({ inheritsParentContext: false }),
-    listChildren: async () => [], sendMessage,
+    listChildren: async (parentId: string) => [...sessions.values()].filter(session => session.header.parentSession === parentId).map(session => ({ id: session.id, parentSessionId: parentId, mode: 'continuable' })), sendMessage,
     [Symbol.for('dsh.subagent.deliverPrompt')]: queue,
   })
+  const replyToTarget = vi.fn(async () => ({ messageId: 'notice-receipt' }))
+  const strictPort = lark.createLocusLarkPort()
+  const controlMessage = vi.fn(strictPort.sendControlMessage)
+  vi.spyOn(lark, 'createLocusLarkPort').mockReturnValue({ ...strictPort, sendControlMessage: controlMessage })
   vi.spyOn(lark, 'createLarkCliClient').mockReturnValue({
+    replyToTarget,
     probeEntranceRead: async () => true, chatName: async () => 'Project', resolveMemberName: async () => 'Owner',
     listChatBots: async () => [], addReaction: async () => undefined, removeReaction: async () => {}, reply: async () => 'receipt',
   } as never)
@@ -160,20 +165,24 @@ async function host() {
   })
   const controller = (capability as channelCapability.AvailableLocusChannelCapability).controller
   const execute = (agent: any, name: string) => ctx.tools.execute({ agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
-  return { ctx, home, project, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
+  return { ctx, home, project, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, replyToTarget, controlMessage, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
 }
 
-async function seedNotCreated(h: Awaited<ReturnType<typeof host>>) {
-  await h.repository.putLocus({
-    id: 'entry', generation: 1, endpoint: { chatId: 'chat' }, parentSessionId: 'main', reservedChildSessionId: 'child', workspaceId: 'ws',
+async function seedNotCreated(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; threadId?: string } = { chatId: 'chat' }) {
+  const record = {
+    id: 'entry', generation: 1, endpoint, parentSessionId: 'main', reservedChildSessionId: 'child', workspaceId: 'ws',
     source: 'auto', state: 'not-created', permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, toolTier: { desired: 'safe', effective: 'safe' }, busy: false, createdAt: 1, updatedAt: 1,
-  })
+  } as const
+  if (endpoint.threadId !== undefined) {
+    await h.repository.putLocus({ ...record, id: 'parent-entry', endpoint: { chatId: endpoint.chatId }, reservedChildSessionId: 'parent-child' })
+  }
+  await h.repository.putLocus({ ...record, ...(endpoint.threadId === undefined ? {} : { parentLocusId: 'parent-entry', source: 'inherited' }) })
 }
 
-function admit(h: Awaited<ReturnType<typeof host>>) {
+function admit(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; threadId?: string } = { chatId: 'chat' }, messageId = 'original-message', senderOpenId = 'owner') {
   return h.controller.handleAdmission!({
     kind: 'accepted', authorization: 'authorized', needsInitialization: false,
-    message: { kind: 'message', chatType: 'group', messageId: 'original-message', endpoint: { chatId: 'chat' }, senderOpenId: 'owner', text: 'original question', replyTarget: { chatId: 'chat', messageId: 'original-message' } },
+    message: { kind: 'message', chatType: 'group', messageId, endpoint, senderOpenId, text: 'original question', replyTarget: { ...endpoint, messageId, ...(endpoint.threadId === undefined ? {} : { rootMessageId: 'root-message' }) } },
   })
 }
 
@@ -201,6 +210,52 @@ describe('actual Host three-tier assembly', () => {
     expect(h.start).not.toHaveBeenCalled()
     expect(h.queue).not.toHaveBeenCalled()
     expect(h.agents.has('child')).toBe(false)
+  })
+
+  it.each(['valid', 'missing', 'mismatched'] as const)('pending topic notification uses the waking Delivery target without widening: %s', async targetKind => {
+    const h = await host()
+    const endpoint = { chatId: 'chat', threadId: 'thread' }
+    await seedNotCreated(h, endpoint)
+    await admit(h, endpoint)
+    const child = h.agents.get('child')
+    const finished = await h.ctx.tools.execute({ agent: child, name: 'pet_locus_finish', callId: 'settle-first' as never, arguments: { outcome: 'no-reply', reason: 'fixture completed' }, signal: new AbortController().signal })
+    expect(finished.isError).toBe(false)
+    child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    h.agents.delete('child')
+    const config = new PetRepository(h.ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    await config.updateChannelConfig(current => ({ ...current, allowOpenIds: ['ou_owner'] }))
+    await h.controller.handleAdmission!({
+      kind: 'control', authorization: 'authorized', command: { kind: 'tools', tier: 'shell' },
+      message: { kind: 'message', chatType: 'group', messageId: 'grant-message', endpoint, senderOpenId: 'ou_owner', text: '--tools shell', replyTarget: { ...endpoint, messageId: 'grant-message', rootMessageId: 'root-message' } },
+    })
+    expect(h.repository.getLocus('entry')?.toolTier).toMatchObject({ desired: 'shell', effective: 'safe' })
+    const original = LocusRepository.prototype.findCurrentSerializedDelivery
+    if (targetKind !== 'valid') {
+      vi.spyOn(LocusRepository.prototype, 'findCurrentSerializedDelivery').mockImplementation(function(input) {
+        const current = original.call(this, input)
+        return targetKind === 'missing' || current?.replyTarget === undefined ? undefined
+          : { ...current, replyTarget: { ...current.replyTarget, threadId: 'another-thread' } }
+      })
+    }
+    const restored = { ...child }
+    restored.ctx = createScope(h.agentFactoryContext, restored).ctx
+    restored.ctx.tools.restrict(h.start.mock.calls[0]![0].request.toolFilter)
+    h.queue.mockImplementationOnce(async () => {
+      h.agents.set('child', restored)
+      await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
+      return 'later-inbox'
+    })
+    h.replyToTarget.mockClear()
+    h.controlMessage.mockClear()
+    const waking = await admit(h, endpoint, 'wake-message', 'ou_owner')
+    expect(h.queue, JSON.stringify(waking)).toHaveBeenCalledTimes(1)
+    expect(h.repository.getLocus('entry')).toMatchObject({ generation: 1, childSessionId: 'child', toolTier: { desired: 'shell', effective: 'shell' } })
+    if (targetKind === 'valid') {
+      expect(h.replyToTarget).toHaveBeenCalledExactlyOnceWith({ ...endpoint, messageId: 'wake-message', rootMessageId: 'root-message' }, '工具档位已在子会话唤醒时应用并核验为 shell。')
+    } else {
+      expect(h.replyToTarget).not.toHaveBeenCalled()
+    }
+    for (const [input] of h.controlMessage.mock.calls) expect(input.endpoint.threadId).toBe(endpoint.threadId)
   })
 
   it('cold-restores a locked main with its own tools, preserving collab and ordinary sessions', async () => {

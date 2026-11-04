@@ -23,6 +23,10 @@
 
 范围：以 `b5b11bac`（当前 main 与任务分支的 merge-base）为基线的全部本轮 diff，包含 A/B/C 证据记录 `b3ec3ea7`。结论：PASS，无阻断项。领域层本来已正确提交 desired=shell/effective=safe 并返回 pending=true；control.ts 也有待应用回执，唯一断点在 index.ts 适配器漏传 pending。现只透传该标记，不伪造 effective，不触碰 apply/readback、grant actor、CAS/代际 fence、父子 ID 或业务排队。新增测试通过真实 Pet 初始化、共享持久仓储和 channel control 调用，验证已受理回执、原 safe 生效值、read 文件权限、未启动子代且未排业务；已有 dispatcher 单测仅用 pending 假对象，无法覆盖该映射断点。拒绝文案仅改来源项目引导并明确 DSH/Pet 私有根不可确认放行，稳定机器错误码与守卫体前拒绝保持。合法 owner 夹具下先观察 2 failed / 18 passed；修复后 72 项定向通过，Pet build/typecheck 通过，全量 2937 passed / 4 skipped。现场 D 目前只证明申请落盘，待应用记录跨重启、唤醒后实际 shell 与拒绝新文案的真机回读仍待继续；不得提前勾选 27.3/27.4。未新增依赖、compat patch 或数据库迁移。
 
+## 2026-11-04 话题待应用生效通知审查（主控）
+
+范围：以 `fbf4db5d`（当前 main 与任务分支的 merge-base）为基线的本轮全部 diff，含 `ce273bea` 的验收记录。结论：PASS，无阻断项。E/F 八项有真实工具与独立外侧标记证据；额外日志来自 pending-application 的 best-effort 通知，原 Host 一律调仅支持群的严格事务端口，该端口遇话题主动拒绝，未误发到群。修复只在 IM 话题分支读取当前序列化 Delivery，要求 locus/generation/child 精确且 replyTarget 的群/话题与组合一致，复用已有严格 replyToTarget。群和文档保持原路径，无目标/错配/能力缺失继续拒绝；不为通知猜 root、不扫描任意 FIFO、不借 session、不回滚已提交的实际档位。Host 回归经过真实创建、结算、冷态申请、原生 continuable 目录、当前投递、agent/created 与持久 pending 结算，覆盖有效、缺失、错配目标；正确夹具下旧代码 1 failed / 8 passed，修复后 45 项定向、build/typecheck、全量 2940 passed / 4 skipped。通知仍 best-effort，GUI 唤醒没有可信投递或平台失败时记录诊断；本轮不新增通知重试队列。修复加载和真机成功通知保留待验，与下一批执行中断重启合并，不能冒称本次遗漏的通知已补发。未新增依赖、compat patch 或数据库迁移。
+
 ## Metadata
 
 - 轮次：round 7；时间基准：2026-11-03T19:30:58+08:00。
