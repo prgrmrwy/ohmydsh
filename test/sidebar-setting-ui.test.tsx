@@ -55,24 +55,39 @@ it('设置页提供分钟级自动刷新输入，提交后写入 sidebarRefreshM
   expect(post?.body).toEqual({ sidebarRefreshMinutes: 10 })
 })
 
-it('设置页提供窗口档位下拉，提交后写入 sidebarWindow', async () => {
+it('设置页用多选 checkbox 配置窗口档位，提交后写入 sidebarWindows', async () => {
   const fake = fakeApi({
-    'GET settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindow: 'weekly' })),
+    'GET settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindows: ['weekly'] })),
     'GET cards': () => ok({ status: 'ok', cards: [] }),
     'GET latency': () => ok({}),
-    'POST settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindow: 'fiveHour' })),
+    'POST settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindows: ['fiveHour', 'weekly'] })),
   })
   await act(async () => root.render(h(MagpieSettings, { api: fake.api } as never)))
   await flush()
-  const select = host.querySelector('[data-sidebar-window]') as HTMLSelectElement
-  expect(select).not.toBeNull()
-  expect(select.value).toBe('weekly')
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, 'fiveHour')
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  const weekly = host.querySelector('[data-sidebar-window="weekly"]') as HTMLInputElement
+  const five = host.querySelector('[data-sidebar-window="fiveHour"]') as HTMLInputElement
+  expect(weekly).not.toBeNull()
+  expect(weekly.type).toBe('checkbox')
+  expect(weekly.checked).toBe(true)
+  expect(five.checked).toBe(false)
+  await act(async () => { five.click() })
   await flush()
   const post = fake.calls.find(call => call.method === 'POST' && call.path === 'settings')
-  expect(post?.body).toEqual({ sidebarWindow: 'fiveHour' })
-  expect(readSidebarPreference()?.windowMode).toBe('fiveHour')
+  expect(post?.body).toEqual({ sidebarWindows: ['fiveHour', 'weekly'] })
+  expect(readSidebarPreference()?.windows).toEqual(['fiveHour', 'weekly'])
+})
+
+it('取消最后一个档位被拒绝并提示', async () => {
+  const fake = fakeApi({
+    'GET settings': () => ok(settingsView({ sidebarUsage: true, sidebarWindows: ['weekly'] })),
+    'GET cards': () => ok({ status: 'ok', cards: [] }),
+    'GET latency': () => ok({}),
+    'POST settings': () => ok(settingsView({ sidebarUsage: true })),
+  })
+  await act(async () => root.render(h(MagpieSettings, { api: fake.api } as never)))
+  await flush()
+  await act(async () => { (host.querySelector('[data-sidebar-window="weekly"]') as HTMLInputElement).click() })
+  await flush()
+  expect(fake.calls.filter(call => call.method === 'POST' && call.path === 'settings')).toHaveLength(0)
+  expect(host.textContent).toContain('至少保留一个档位')
 })

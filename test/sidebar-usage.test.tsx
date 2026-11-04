@@ -95,9 +95,9 @@ describe('常驻卡', () => {
     expect(row.querySelector('[data-reading]')!.textContent).toBe('20%')
   })
 
-  it('按设置的档位显示 5 小时窗口，卡头 icon 说明当前档位', async () => {
+  it('只勾选 5 小时档位时显示单行的 5 小时窗口', async () => {
     await render({
-      settings: { sidebarWindow: 'fiveHour' },
+      settings: { sidebarWindows: ['fiveHour'] },
       cards: () => cardsOk([
         { provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '5 hours', used: 44 }, { name: '7 days', used: 20 }] },
       ]),
@@ -106,32 +106,59 @@ describe('常驻卡', () => {
     expect(row.textContent).toContain('(5 hours)')
     expect(row.textContent).toContain('44%')
     expect(row.textContent).not.toContain('20%')
-    const info = host.querySelector('[data-dmg-sidebar-info]') as HTMLElement
-    expect(info).not.toBeNull()
-    expect(info.title).toContain('5 小时窗口')
-    expect(info.getAttribute('aria-label')).toContain('5 小时窗口')
+    expect(row.querySelector('[data-dmg-sidebar-multi]')).toBeNull()
   })
 
-  it('缺少所设档位时回退到可用窗口，并在窗口名上说明原因', async () => {
+  it('勾选两个档位时上游名称单独一行，每个窗口一行并各带进度条', async () => {
+    const five = new Date(2026, 10, 4, 11, 20).toISOString()
+    const days = new Date(2026, 10, 20, 11, 0).toISOString()
     await render({
-      settings: { sidebarWindow: 'fiveHour' },
+      settings: { sidebarWindows: ['fiveHour', 'weekly'] },
+      cards: () => cardsOk([{
+        provider: 'claude', name: 'Claude', readAt: 'T1',
+        windows: [{ name: '5 hours', used: 50, resetsAt: five }, { name: '7 days', used: 20, resetsAt: days }],
+      }]),
+    })
+    const row = rowOf('claude')!
+    expect(row.hasAttribute('data-dmg-sidebar-multi')).toBe(true)
+    expect(row.querySelector('.dmg-sidebar-group-name')!.textContent).toBe('Claude')
+    expect(row.textContent).not.toContain('(5 hours)')
+    const lines = Array.from(row.querySelectorAll('.dmg-sidebar-win-row'))
+    expect(lines.map(line => line.getAttribute('data-dmg-sidebar-tier'))).toEqual(['fiveHour', 'weekly'])
+    expect(lines.map(line => line.querySelector('[data-reading]')!.textContent)).toEqual(['50%', '20%'])
+    expect(lines[0]!.querySelector('[data-dmg-sidebar-expiry]')!.textContent).toContain('11/4 11:20')
+    expect(lines[1]!.querySelector('[data-dmg-sidebar-expiry]')!.textContent).toContain('11/20 11:00')
+    expect(row.querySelectorAll('.dmg-sidebar-bar')).toHaveLength(2)
+  })
+
+  it('只剩一个档位时不会渲染多行块', async () => {
+    await render({
+      settings: { sidebarWindows: ['weekly'] },
+      cards: () => cardsOk([{ provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '5 hours', used: 44 }, { name: '7 days', used: 20 }] }]),
+    })
+    expect(rowOf('claude')!.hasAttribute('data-dmg-sidebar-multi')).toBe(false)
+  })
+
+  it('缺少勾选的档位时回退到可用窗口，并在窗口名上说明原因', async () => {
+    await render({
+      settings: { sidebarWindows: ['fiveHour'] },
       cards: () => cardsOk([{ provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '7 days', used: 20 }] }]),
     })
     const row = rowOf('claude')!
     expect(row.textContent).toContain('(7 days)')
     const window = row.querySelector('.dmg-sidebar-window') as HTMLElement
-    expect(window.title).toContain('没有5 小时窗口')
+    expect(window.title).toContain('没有勾选的档位')
     expect(window.title).toContain('7 days')
   })
 
-  it('默认仍是周窗口档位', async () => {
+  it('默认仍是周窗口档位，且卡头没有 info icon', async () => {
     await render({
       cards: () => cardsOk([
         { provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '5 hours', used: 44 }, { name: '7 days', used: 20 }] },
       ]),
     })
     expect(host.querySelector('.dmg-sidebar-window')!.textContent).toBe('(7 days)')
-    expect((host.querySelector('[data-dmg-sidebar-info]') as HTMLElement).title).toContain('周窗口')
+    expect(host.querySelector('[data-dmg-sidebar-info]')).toBeNull()
   })
 
   it('没有到期时间时不显示占位', async () => {

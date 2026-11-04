@@ -8,7 +8,11 @@ import { GatewayTransport, validateIdentity, type ConnectionIdentity } from './t
 import { LineSelector, type Probe } from './selection.js'
 import { mapCatalog, routeOf, type CatalogModel } from './catalog.js'
 import type { PublishResult } from './registrar.js'
-import { DEFAULT_SIDEBAR_WINDOW, isSidebarWindowMode, type SidebarWindowMode } from '../shared/sidebar-window.js'
+import { DEFAULT_SIDEBAR_WINDOWS, migrateLegacySidebarWindow, normalizeSidebarWindows, type SidebarWindowKind } from '../shared/sidebar-window.js'
+
+/** Effective sidebar window selection: stored value, else the 0.6.7 legacy string, else the default. */
+export const sidebarWindowsOf = (value: Pick<Settings, 'sidebarWindows' | 'sidebarWindow'>): SidebarWindowKind[] | null =>
+  normalizeSidebarWindows(value.sidebarWindows) ?? migrateLegacySidebarWindow(value.sidebarWindow)
 
 export type Credentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>
 
@@ -169,12 +173,13 @@ export class MagpieRuntime {
    */
   writeSettings(patch: { [K in keyof Settings]?: Settings[K] | undefined }): void {
     const value = this.store.value
+    const storedWindows = sidebarWindowsOf(value)
     const next: Settings = {
       lines: value.lines ?? [], visibleModels: value.visibleModels ?? {}, defaultEfforts: value.defaultEfforts ?? {},
       ...(value.credentialUpdatePending ? { credentialUpdatePending: value.credentialUpdatePending } : {}),
       ...(value.sidebarUsage === true ? { sidebarUsage: true } : {}),
       ...(typeof value.sidebarRefreshMinutes === 'number' ? { sidebarRefreshMinutes: value.sidebarRefreshMinutes } : {}),
-      ...(isSidebarWindowMode(value.sidebarWindow) ? { sidebarWindow: value.sidebarWindow } : {}),
+      ...(storedWindows ? { sidebarWindows: storedWindows } : {}),
       ...(this.owners.length ? { knownOwners: this.owners } : {}),
     }
     for (const [key, field] of Object.entries(patch)) {
@@ -559,13 +564,13 @@ export class MagpieRuntime {
       visibleModels: this.store.value.visibleModels, defaultEfforts: this.store.value.defaultEfforts,
       sidebarUsage: this.store.value.sidebarUsage === true,
       sidebarRefreshMinutes: this.store.value.sidebarRefreshMinutes ?? 5,
-      sidebarWindow: isSidebarWindowMode(this.store.value.sidebarWindow) ? this.store.value.sidebarWindow : DEFAULT_SIDEBAR_WINDOW,
+      sidebarWindows: sidebarWindowsOf(this.store.value) ?? [...DEFAULT_SIDEBAR_WINDOWS],
       knownOwnersReset: this.knownOwnersReset, ownerLimitReached: this.rejectedOwners.length > 0, rejectedOwners: this.rejectedOwners,
       ...(this.registrationError ? { routeRegistrationError: this.registrationError } : {}),
     }))
   }
   /** Preference-only writes also persist the single clean schema (drops legacy fields). */
-  savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>; sidebarUsage?: boolean; sidebarRefreshMinutes?: number; sidebarWindow?: SidebarWindowMode }) {
+  savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>; sidebarUsage?: boolean; sidebarRefreshMinutes?: number; sidebarWindows?: SidebarWindowKind[] }) {
     const config = this.loadConfig()
     this.writeSettings({
       lines: config.lines,
@@ -573,7 +578,7 @@ export class MagpieRuntime {
       defaultEfforts: patch.defaultEfforts ?? this.store.value.defaultEfforts ?? {},
       sidebarUsage: patch.sidebarUsage ?? this.store.value.sidebarUsage,
       sidebarRefreshMinutes: patch.sidebarRefreshMinutes ?? this.store.value.sidebarRefreshMinutes,
-      sidebarWindow: patch.sidebarWindow ?? this.store.value.sidebarWindow,
+      sidebarWindows: patch.sidebarWindows ?? sidebarWindowsOf(this.store.value) ?? [...DEFAULT_SIDEBAR_WINDOWS],
       credentialUpdatePending: this.failedFields.length ? this.failedFields : undefined,
     })
   }

@@ -4,7 +4,7 @@
  * fabricates placeholders or inferred values.
  */
 import { t } from './locales.js'
-import type { SidebarWindowMode } from '../shared/sidebar-window.js'
+import type { SidebarWindowKind } from '../shared/sidebar-window.js'
 export interface CardWindow { name?: string; used?: number; resetsAt?: string; unlimited?: boolean; display?: string }
 /** One Codex-style reset credit: when it runs out and, counted by window, which window's. */
 export interface CardReset { until?: string; window?: string }
@@ -48,8 +48,8 @@ export interface SettingsView {
   sidebarUsage?: boolean
   /** Sidebar auto-refresh interval in minutes (absent = 5, 0 = off). */
   sidebarRefreshMinutes?: number
-  /** Quota window the sidebar card shows (absent = weekly). */
-  sidebarWindow?: SidebarWindowMode
+  /** Gateway windows the sidebar card lists (absent = weekly). */
+  sidebarWindows?: SidebarWindowKind[]
   /** The owner cap (32) rejected new owners; `rejectedOwners` lists them. */
   ownerLimitReached?: boolean; rejectedOwners?: string[]
 }

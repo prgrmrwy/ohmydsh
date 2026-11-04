@@ -6,7 +6,7 @@ import { settingsCss } from './styles.js'
 import { UsageCard } from './UsageCard.js'
 import { t, type MagpieKey } from './locales.js'
 import { DEFAULT_REFRESH_MINUTES, MAX_REFRESH_MINUTES, setSidebarPreference } from './sidebar-preference.js'
-import { DEFAULT_SIDEBAR_WINDOW, isSidebarWindowMode, type SidebarWindowMode } from '../shared/sidebar-window.js'
+import { DEFAULT_SIDEBAR_WINDOWS, SIDEBAR_WINDOW_KINDS, normalizeSidebarWindows, type SidebarWindowKind } from '../shared/sidebar-window.js'
 import {
   cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, parseResetOutcome, parseResetTicket, providerOrder, readTime, resetAccount, sameTarget,
   type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type ResetTicket, type SettingsView, type SyncErrorKind,
@@ -786,6 +786,10 @@ function ModelLine({ model, visible, effort, disabled, onVisible, onEffort }: {
     ...efforts.map(id => h('option', { key: id, value: id }, id))) : null)
 }
 
+/** Copy for one checkbox in the window selection. */
+const windowKindLabel = (kind: SidebarWindowKind): string =>
+  kind === 'fiveHour' ? t('sidebarWindowFiveHour') : t('sidebarWindowWeekly')
+
 /**
  * The sidebar preference: one host-persisted flag. The host is the source of
  * truth; the module store is updated so the already-mounted sidebar card
@@ -797,7 +801,7 @@ function SidebarUsagePreference({ settings, saving, mutateSettings }: {
   const [failed, setFailed] = useState('')
   const enabled = settings.sidebarUsage === true
   const savedMinutes = settings.sidebarRefreshMinutes ?? DEFAULT_REFRESH_MINUTES
-  const savedWindow: SidebarWindowMode = isSidebarWindowMode(settings.sidebarWindow) ? settings.sidebarWindow : DEFAULT_SIDEBAR_WINDOW
+  const savedWindows: SidebarWindowKind[] = normalizeSidebarWindows(settings.sidebarWindows) ?? [...DEFAULT_SIDEBAR_WINDOWS]
   const [draft, setDraft] = useState(String(savedMinutes))
   useEffect(() => { setDraft(String(savedMinutes)) }, [savedMinutes])
   const toggle = async () => {
@@ -807,12 +811,15 @@ function SidebarUsagePreference({ settings, saving, mutateSettings }: {
     if (result?.error) { setFailed(result.error); return }
     setSidebarPreference({ usage: result?.view === undefined ? next : result.view.sidebarUsage === true })
   }
-  const commitWindow = async (next: string) => {
+  // At least one kind stays selected: unchecking the last one only explains why.
+  const toggleKind = async (kind: SidebarWindowKind, checked: boolean) => {
     setFailed('')
-    if (!isSidebarWindowMode(next) || next === savedWindow) return
-    const result = await mutateSettings({ sidebarWindow: next })
+    const next = SIDEBAR_WINDOW_KINDS.filter(candidate => candidate === kind ? checked : savedWindows.includes(candidate))
+    if (next.length === 0) { setFailed(t('sidebarWindowAtLeastOne')); return }
+    if (next.join() === savedWindows.join()) return
+    const result = await mutateSettings({ sidebarWindows: next })
     if (result?.error) { setFailed(result.error); return }
-    setSidebarPreference({ windowMode: isSidebarWindowMode(result?.view?.sidebarWindow) ? result.view.sidebarWindow : next })
+    setSidebarPreference({ windows: normalizeSidebarWindows(result?.view?.sidebarWindows) ?? next })
   }
   const commitMinutes = async () => {
     setFailed('')
@@ -837,18 +844,19 @@ function SidebarUsagePreference({ settings, saving, mutateSettings }: {
         onClick: () => { void toggle() },
       }, h('i', null)),
     ),
-    h('div', { className: 'dmg-refresh-row' },
+    h('div', { className: 'dmg-field', 'data-sidebar-windows': '' },
       h('span', null, t('sidebarWindowLabel')),
-      h('select', {
-        className: 'dmg-select', 'data-sidebar-window': '', disabled: saving,
-        'aria-label': t('sidebarWindowLabel'), value: savedWindow,
-        onChange: (event: { target: { value: string } }) => { void commitWindow(event.target.value) },
-      },
-      h('option', { value: 'weekly' }, t('sidebarWindowWeekly')),
-      h('option', { value: 'fiveHour' }, t('sidebarWindowFiveHour')),
-      h('option', { value: 'tightest' }, t('sidebarWindowTightest'))),
+      h('div', { className: 'dmg-check-list' }, ...SIDEBAR_WINDOW_KINDS.map(kind => (
+        h('label', { className: 'dmg-check-row', key: kind },
+          h('input', {
+            type: 'checkbox', 'data-sidebar-window': kind, checked: savedWindows.includes(kind), disabled: saving,
+            onChange: (event: { target: { checked: boolean } }) => { void toggleKind(kind, event.target.checked) },
+          }),
+          h('span', null, windowKindLabel(kind)),
+        )
+      ))),
     ),
-    h('p', { className: 'dmg-hint' }, t('sidebarWindowHint')),
+    h('p', { className: 'dmg-hint' }, t('sidebarWindowsHint')),
     h('div', { className: 'dmg-refresh-row' },
       h('span', null, t('sidebarRefreshLabel')),
       h('span', { className: 'dmg-refresh-control' },

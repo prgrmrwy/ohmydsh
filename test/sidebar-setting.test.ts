@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MagpieRuntime } from '../src/host/runtime.js'
@@ -52,21 +52,35 @@ test('sidebarUsage 默认关闭、可持久化、拒绝非布尔', async () => {
   expect((await readView(new SettingsController(mount(path)))).sidebarUsage).toBe(false)
 })
 
-test('sidebarWindow 默认 weekly、可持久化、拒绝未知档位', async () => {
-  const path = join(mkdtempSync(join(tmpdir(), 'magpie-sidebar-window-')), 'settings.json')
+test('sidebarWindows 默认周窗口、可多选、非法值拒绝', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'magpie-sidebar-windows-')), 'settings.json')
   const controller = new SettingsController(mount(path))
-  expect((await readView(controller)).sidebarWindow).toBe('weekly')
+  expect((await readView(controller)).sidebarWindows).toEqual(['weekly'])
 
-  expect((await controller.handle({ sidebarWindow: 'fiveHour' })).status).toBe(200)
-  expect((await readView(controller)).sidebarWindow).toBe('fiveHour')
+  expect((await controller.handle({ sidebarWindows: ['fiveHour'] })).status).toBe(200)
+  expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour'])
 
-  for (const invalid of ['7d', '', null, 5, true]) {
-    expect((await controller.handle({ sidebarWindow: invalid })).status).toBe(400)
-    expect((await readView(controller)).sidebarWindow).toBe('fiveHour')
+  // A stored list is canonicalised: known kinds only, deduplicated, canonical order.
+  expect((await controller.handle({ sidebarWindows: ['weekly', 'fiveHour', 'weekly'] })).status).toBe(200)
+  expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour', 'weekly'])
+
+  for (const invalid of [[], ['7d'], 'weekly', null, 5, { fiveHour: true }]) {
+    expect((await controller.handle({ sidebarWindows: invalid })).status).toBe(400)
+    expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour', 'weekly'])
   }
 
-  // The chosen tier survives a restart with the rest of the preferences.
-  expect((await readView(new SettingsController(mount(path)))).sidebarWindow).toBe('fiveHour')
-  expect((await controller.handle({ sidebarWindow: 'tightest' })).status).toBe(200)
-  expect((await readView(new SettingsController(mount(path)))).sidebarWindow).toBe('tightest')
+  expect((await readView(new SettingsController(mount(path)))).sidebarWindows).toEqual(['fiveHour', 'weekly'])
+})
+
+test('0.6.7 的单值 sidebarWindow 在读取时迁移为多选', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'magpie-sidebar-legacy-')), 'settings.json')
+  writeFileSync(path, JSON.stringify({ lines: [], visibleModels: {}, defaultEfforts: {}, sidebarWindow: 'fiveHour' }))
+  const controller = new SettingsController(mount(path))
+  expect((await readView(controller)).sidebarWindows).toEqual(['fiveHour'])
+
+  // Any later preference write persists the new key and drops the legacy one.
+  expect((await controller.handle({ sidebarUsage: true })).status).toBe(200)
+  const stored = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+  expect(stored.sidebarWindows).toEqual(['fiveHour'])
+  expect('sidebarWindow' in stored).toBe(false)
 })
