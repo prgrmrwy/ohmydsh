@@ -7,5 +7,6 @@
 
 ## 2. 部署
 
-- [ ] 2.1 所有者确认后与 locus-three-tier-structure 一并受控合入，主 checkout 两次 build（第二次 no changes）
-- [ ] 2.2 受控握手重启，确认启动事件为官方运行体、Pet 停机协议仍可鉴权确认
+- [x] 2.1 所有者确认后与 locus-three-tier-structure 一并受控合入（main 00d0df89），主 checkout 两次 build（第二次 no changes），profile 无 worktree 路径
+- [x] 2.2 受控握手重启 20261104-144816-74450-19aa56（preparing-pet→stopping→ready 14:48:26Z，无 legacy 参数）；新 Host PID 74859 由 npx-cache 官方 @deepseek-ai/dsh 0.2.0-rc.2 启动，verifyStopProtocol 鉴权确认 descriptor 与 active status
+- [x] 2.3 本机残留清理：确认未被 git 跟踪、无进程占用后删除 main checkout `packages/dsh-pet/compat/`（5.3G，含旧 .launcher/.upstream 等生成物）、worktree 的 `packages/dsh-pet/compat/`（2.1G）与 `.compat-isolated/`（4.1G）。`.gitignore` 的退役规则保留，防其它机器的残留进入 git status。官方无 Pet 专项需另行指定 `DSH_TEST_OFFICIAL_RUNTIME`
