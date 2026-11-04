@@ -58,6 +58,30 @@ export function assertNoReservedEntryKeys(item, label) {
 }
 
 /**
+ * Entry fields whose mechanism has been removed. They are not silently ignored:
+ * a manifest that still declares one is asking for behaviour that no longer
+ * exists, so both manifests (public and overlay) fail closed with the reason.
+ */
+export const RETIRED_ENTRY_KEYS = Object.freeze({
+  hostRuntimeCompatibility:
+    '自定义 Host 运行体（compat）机制已退役：Host 始终使用官方精确 dshVersion 运行体，请从该条目删除此字段 ' +
+    '(retired: the custom Host runtime compatibility mechanism was removed; delete this field)',
+})
+
+/**
+ * Throw if a raw manifest entry declares a retired field.
+ *
+ * @param {object} item - raw entry as parsed from YAML.
+ * @param {string} label - diagnostic prefix naming the entry.
+ */
+export function assertNoRetiredEntryKeys(item, label) {
+  if (typeof item !== 'object' || item === null) return
+  for (const [key, reason] of Object.entries(RETIRED_ENTRY_KEYS)) {
+    if (Object.hasOwn(item, key)) throw new Error(`${label}: "${key}" 已退役 — ${reason}`)
+  }
+}
+
+/**
  * Resolve which overlay path is in effect.
  *
  * `DSH_LOCAL_MANIFEST` *replaces* the repository-root default rather than
@@ -182,6 +206,7 @@ export function parseOverlay(content, file) {
     if (seen.has(item.id)) throw new Error(`${at}: duplicate id "${item.id}" within the overlay`)
     seen.add(item.id)
     assertNoReservedEntryKeys(item, `${at} (${item.id})`)
+    assertNoRetiredEntryKeys(item, `${at} (${item.id})`)
     // Source tag travels with the entry so downstream diagnostics can say which
     // file an entry came from without re-reading either manifest.
     return { ...item, overlaySource: file }
@@ -238,6 +263,11 @@ export function loadManifestWithOverlay({ manifestPath, repo, env = process.env,
   const doc = yaml.load(readFileSync(manifestPath, 'utf8'))
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
     throw new Error(`manifest ${manifestPath} is empty or not a YAML mapping`)
+  }
+  // Every consumer of the merged view (prerequisites, update checks, listings)
+  // must reject retired fields the same way sync does.
+  if (Array.isArray(doc.customizations)) {
+    doc.customizations.forEach((item, index) => assertNoRetiredEntryKeys(item, `customizations[${index}] (${item?.id})`))
   }
   const overlay = loadOverlayCustomizations({ repo, env, strict })
   mergeOverlayCustomizations(doc, overlay.customizations, overlay.file)

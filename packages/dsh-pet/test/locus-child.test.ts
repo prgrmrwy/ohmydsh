@@ -16,7 +16,6 @@ import {
   type LocusParentPort,
   type LocusSubagentPort,
 } from '../src/host/locus/child.js'
-import { LOCUS_CHILD_PRESET } from '../src/host/locus/aggregate.js'
 
 
 const PARENT_ID = 'session-parent'
@@ -52,9 +51,6 @@ function subagentPort(
     messageId: MessageId('message-1'),
   }),
   options: {
-    readonly supportsSettlementNotice?: boolean
-    readonly supportsIndependentContinuableCreate?: boolean
-    readonly supportsIndependentChildAgentPreset?: boolean
     /**
      * Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves independence, exactly
      * as the real `spawn` provider does (`inheritsParentContext: false`).
@@ -67,9 +63,6 @@ function subagentPort(
   const proven = options.independentContextProven ?? true
   return {
     startContinuable: vi.fn(start),
-    supportsSettlementNotice: options.supportsSettlementNotice ?? true,
-    supportsIndependentContinuableCreate: options.supportsIndependentContinuableCreate ?? true,
-    supportsIndependentChildAgentPreset: options.supportsIndependentChildAgentPreset ?? true,
     getProvider: vi.fn((name: string) =>
       proven && name === LOCUS_CHILD_PROVIDER ? { inheritsParentContext: false } : undefined),
   }
@@ -180,15 +173,16 @@ describe('generic locus child adapter', () => {
       inbox,
     })
 
-    const created = await adapter.createChild({
+    const created = await adapter.createChild({ childId: CHILD_ID,
       parentSessionId: PARENT_ID,
       label: '项目话题 child',
-      prompt: 'initialize locus',
+      prompt: [{ type: 'text', text: 'initialize locus' }],
     })
 
     expect(created).toEqual({
       ok: true,
       created: true,
+      messageId: 'message-1',
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
     expect(start.startContinuable).toHaveBeenCalledWith(
@@ -198,19 +192,17 @@ describe('generic locus child adapter', () => {
         request: {
           prompt: [{ type: 'text', text: 'initialize locus' }],
           parent: live,
+          toolFilter: LOCUS_BASE_TOOL_FILTER,
         },
-        // A locus child answers in its own Feishu entry, so the runtime must
-        // not push its settlement account into the main session.
-        settlementNotice: 'silent',
       }),
     )
     expect(adapter.activeChild).toEqual({ parentSessionId: PARENT_ID, childSessionId: CHILD_ID })
     expect(adapter.activeChild).not.toHaveProperty('parent')
 
-    const repeated = await adapter.createChild({
+    const repeated = await adapter.createChild({ childId: CHILD_ID,
       parentSessionId: PARENT_ID,
       label: 'ignored label',
-      prompt: 'ignored prompt',
+      prompt: [{ type: 'text', text: 'ignored prompt' }],
     })
     expect(repeated).toEqual({
       ok: true,
@@ -220,33 +212,6 @@ describe('generic locus child adapter', () => {
     expect(start.startContinuable).toHaveBeenCalledTimes(1)
   })
 
-  it('refuses to create a child on a runtime that cannot suppress the parent account', async () => {
-    for (const supportsSettlementNotice of [false, undefined]) {
-      const start: LocusSubagentPort = {
-        startContinuable: vi.fn(async spec => ({
-          childId: spec.childId ?? SessionId(CHILD_ID),
-          messageId: MessageId('message-1'),
-        })),
-        // `undefined` is the unknown case: an old runtime exposes no such flag.
-        ...(supportsSettlementNotice === undefined ? {} : { supportsSettlementNotice }),
-      }
-      const adapter = createLocusChildAdapter({
-        parent: parentPort({ resident: parent() }),
-        subagent: start,
-        inbox: inboxPort(),
-      })
-
-      // Fail closed BEFORE creation: conclusions written into the parent's log
-      // cannot be retracted, so an unproven capability must not be attempted.
-      await expect(adapter.createChild({
-        parentSessionId: PARENT_ID,
-        label: 'child',
-        prompt: 'seed',
-      })).resolves.toEqual({ ok: false, reason: 'settlement-notice-unsupported' })
-      expect(start.startContinuable).not.toHaveBeenCalled()
-      expect(adapter.activeChild).toBeUndefined()
-    }
-  })
 
   it('refuses to create with the default provider when its independence is unproven (D2 fail closed)', async () => {
     // Three ways a runtime can fail to prove it: no lookup method at all, the
@@ -265,112 +230,20 @@ describe('generic locus child adapter', () => {
         subagent: start,
         inbox: inboxPort(),
       })
-      await expect(adapter.createChild({
+      await expect(adapter.createChild({ childId: CHILD_ID,
         parentSessionId: PARENT_ID,
         label: 'child',
-        prompt: 'seed',
+        prompt: [{ type: 'text', text: 'seed' }],
       })).resolves.toEqual({ ok: false, reason: 'independent-context-unproven' })
       expect(startSpy).not.toHaveBeenCalled()
       expect(adapter.activeChild).toBeUndefined()
 
-      const idleStart = {
-        ...subagentPort(),
-        createIdleContinuable: vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) })),
-      }
-      const idleVariant: LocusSubagentPort = {
-        ...idleStart,
-        supportsIdleContinuableCreate: true,
-        getProvider: start.getProvider,
-      }
-      const idleAdapter = createLocusChildAdapter({
-        parent: parentPort({ resident: parent() }),
-        subagent: idleVariant,
-        inbox: inboxPort(),
-      })
-      await expect(idleAdapter.createIdleChild({
-        parentSessionId: PARENT_ID,
-        childId: 'reserved-id',
-        label: 'child',
-      })).resolves.toEqual({ ok: false, reason: 'independent-context-unproven' })
-      expect(idleStart.createIdleContinuable).not.toHaveBeenCalled()
+
     }
   })
 
-  it('refuses idle creation before side effects when the safe-composition seam is unproven', async () => {
-    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }))
-    const start: LocusSubagentPort = {
-      ...subagentPort(undefined, { supportsIndependentContinuableCreate: false }),
-      createIdleContinuable,
-      supportsIdleContinuableCreate: true,
-    }
-    const adapter = createLocusChildAdapter({
-      parent: parentPort({ resident: parent() }),
-      subagent: start,
-      inbox: inboxPort(),
-    })
 
-    await expect(adapter.createIdleChild({
-      parentSessionId: PARENT_ID,
-      childId: CHILD_ID,
-      label: 'unsafe locus child',
-    })).resolves.toEqual({ ok: false, reason: 'safe-composition-unsupported' })
-    expect(createIdleContinuable).not.toHaveBeenCalled()
-  })
 
-  it('creates idle children with the exact durable independent safe composition', async () => {
-    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }))
-    const start: LocusSubagentPort = {
-      ...subagentPort(),
-      createIdleContinuable,
-      supportsIdleContinuableCreate: true,
-    }
-    const adapter = createLocusChildAdapter({
-      parent: parentPort({ resident: parent() }),
-      subagent: start,
-      inbox: inboxPort(),
-    })
-
-    await expect(adapter.createIdleChild({
-      parentSessionId: PARENT_ID,
-      childId: CHILD_ID,
-      label: 'safe locus child',
-    })).resolves.toMatchObject({ ok: true, created: true })
-    expect(createIdleContinuable).toHaveBeenCalledWith({
-      childId: CHILD_ID,
-      provider: LOCUS_CHILD_PROVIDER,
-      label: 'safe locus child',
-      parent: parent(),
-      settlementNotice: 'silent',
-      contextMode: 'independent-v1',
-      // Pet names the child's preset; the main's own preset never reaches it.
-      agentPreset: LOCUS_CHILD_PRESET,
-      toolFilter: LOCUS_BASE_TOOL_FILTER,
-      signal: expect.any(AbortSignal),
-    })
-  })
-
-  it('refuses idle creation when the runtime cannot honor an explicit child preset', async () => {
-    // Without the marker the runtime would ignore `agentPreset` and compose
-    // the child from whatever preset the main runs — a `standard` main would
-    // then hand the child an own-scope `subagent` no filter can remove.
-    const createIdleContinuable = vi.fn(async (spec: { childId: string }) => ({ childId: SessionId(spec.childId) }))
-    const adapter = createLocusChildAdapter({
-      parent: parentPort({ resident: parent() }),
-      subagent: {
-        ...subagentPort(undefined, { supportsIndependentChildAgentPreset: false }),
-        createIdleContinuable,
-        supportsIdleContinuableCreate: true,
-      },
-      inbox: inboxPort(),
-    })
-
-    await expect(adapter.createIdleChild({
-      parentSessionId: PARENT_ID,
-      childId: CHILD_ID,
-      label: 'unsafe locus child',
-    })).resolves.toEqual({ ok: false, reason: 'safe-composition-unsupported' })
-    expect(createIdleContinuable).not.toHaveBeenCalled()
-  })
 
   it('keeps the safe compatibility filter narrow and the durable base free of delegation', () => {
     expect(LOCUS_SAFE_TOOL_FILTER).toEqual({
@@ -402,10 +275,10 @@ describe('generic locus child adapter', () => {
       subagent: start,
       inbox: inboxPort(),
     })
-    await expect(adapter.createChild({
+    await expect(adapter.createChild({ childId: CHILD_ID,
       parentSessionId: PARENT_ID,
       label: 'child',
-      prompt: 'seed',
+      prompt: [{ type: 'text', text: 'seed' }],
       provider: 'fork',
     })).resolves.toMatchObject({ ok: true, created: true })
     expect(start.startContinuable).toHaveBeenCalledWith(
@@ -420,12 +293,12 @@ describe('generic locus child adapter', () => {
       subagent: start,
       inbox: inboxPort(),
     })
-    await adapter.createChild({ parentSessionId: PARENT_ID, label: 'one', prompt: 'one' })
+    await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'one', prompt: [{ type: 'text', text: 'one' }] })
 
-    const result = await adapter.createChild({
+    const result = await adapter.createChild({ childId: CHILD_ID,
       parentSessionId: 'session-other',
       label: 'two',
-      prompt: 'two',
+      prompt: [{ type: 'text', text: 'two' }],
     })
     expect(result).toEqual({ ok: false, reason: 'active-child-conflict' })
     expect(start.startContinuable).toHaveBeenCalledTimes(1)
@@ -442,8 +315,8 @@ describe('generic locus child adapter', () => {
       proof,
     })
 
-    const first = adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
-    const second = adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const first = adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
+    const second = adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     const adoption = adapter.adoptChild({ parentSessionId: PARENT_ID, childSessionId: 'persisted-child' })
     await flushLifecycle()
     expect(start.startContinuable).toHaveBeenCalledTimes(1)
@@ -451,6 +324,7 @@ describe('generic locus child adapter', () => {
     await expect(first).resolves.toEqual({
       ok: true,
       created: true,
+      messageId: 'message-1',
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
     // Preserve the existing same in-flight request semantics: both callers
@@ -458,6 +332,7 @@ describe('generic locus child adapter', () => {
     await expect(second).resolves.toEqual({
       ok: true,
       created: true,
+      messageId: 'message-1',
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
     await expect(adoption).resolves.toEqual({ ok: false, reason: 'active-child-conflict' })
@@ -474,7 +349,7 @@ describe('generic locus child adapter', () => {
       compensation: { release },
     })
 
-    const pending = adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const pending = adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     await flushLifecycle()
     adapter.dispose()
     gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') })
@@ -494,7 +369,7 @@ describe('generic locus child adapter', () => {
       subagent: subagentPort(),
       inbox: inboxPort(async () => gate.promise),
     })
-    const created = await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const created = await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     if (!created.ok) throw new Error('expected child')
 
     const pending = adapter.queuePrompt({ text: 'request', identity: created.identity, signal: controller.signal })
@@ -532,61 +407,7 @@ describe('generic locus child adapter', () => {
     expect(adopted.activeChild).toEqual({ parentSessionId: PARENT_ID, childSessionId: CHILD_ID })
   })
 
-  it('uses the continuation owner to expose only the exact adopted child Session', async () => {
-    const liveParent = parent()
-    const session = { id: CHILD_ID, header: { parentSession: PARENT_ID } }
-    const access = vi.fn(async (
-      spec: { parent: LocusLiveParent; childId: string },
-      operation: (candidate: unknown) => unknown,
-    ) => operation(session))
-    const adapter = createLocusChildAdapter({
-      parent: parentPort({ resident: liveParent }),
-      subagent: {
-        ...subagentPort(),
-        supportsLiveContinuableChildSession: true,
-        withLiveContinuableChildSession: access,
-      },
-      inbox: inboxPort(),
-      proof: {
-        findChild: vi.fn(async (parentSessionId, childSessionId) => ({ parentSessionId, childSessionId })),
-      },
-    })
-    const identity = { parentSessionId: PARENT_ID, childSessionId: CHILD_ID }
-    await adapter.adoptChild(identity)
 
-    await expect(adapter.withChildSession({
-      identity,
-      operation: candidate => (candidate as typeof session).id,
-    })).resolves.toEqual({ ok: true, value: CHILD_ID, identity })
-    expect(access).toHaveBeenCalledWith(
-      { parent: liveParent, childId: CHILD_ID, signal: expect.any(AbortSignal) },
-      expect.any(Function),
-    )
-
-    await expect(adapter.withChildSession({
-      identity: { parentSessionId: 'other-parent', childSessionId: CHILD_ID },
-      operation: () => 'must not run',
-    })).resolves.toEqual({ ok: false, reason: 'child-identity-mismatch' })
-    expect(access).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps child Session access unavailable without the literal runtime marker', async () => {
-    const access = vi.fn(async () => 'unsafe')
-    const adapter = createLocusChildAdapter({
-      parent: parentPort({ resident: parent() }),
-      subagent: { ...subagentPort(), withLiveContinuableChildSession: access },
-      inbox: inboxPort(),
-      proof: {
-        findChild: vi.fn(async (parentSessionId, childSessionId) => ({ parentSessionId, childSessionId })),
-      },
-    })
-    const identity = { parentSessionId: PARENT_ID, childSessionId: CHILD_ID }
-    await adapter.adoptChild(identity)
-
-    await expect(adapter.withChildSession({ identity, operation: () => 'unsafe' }))
-      .resolves.toEqual({ ok: false, reason: 'child-session-access-unsupported' })
-    expect(access).not.toHaveBeenCalled()
-  })
 
   it('rejects a proof that belongs to another parent or cannot find the child', async () => {
     const adapter = createLocusChildAdapter({
@@ -622,13 +443,13 @@ describe('generic locus child adapter', () => {
       inbox: inboxPort(),
       compensation: { release: vi.fn(async () => releaseGate.promise) },
     })
-    const created = await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const created = await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     if (!created.ok) throw new Error('expected child')
 
     const releasing = adapter.compensateChild({ identity: created.identity })
     await flushLifecycle()
     await expect(
-      adapter.createChild({ parentSessionId: PARENT_ID, label: 'replacement', prompt: 'replacement' }),
+      adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'replacement', prompt: [{ type: 'text', text: 'replacement' }] }),
     ).resolves.toEqual({ ok: false, reason: 'active-child-conflict' })
 
     releaseGate.resolve()
@@ -647,7 +468,7 @@ describe('generic locus child adapter', () => {
     await flushLifecycle()
 
     await expect(
-      adapter.createChild({ parentSessionId: PARENT_ID, label: 'new-child', prompt: 'new-child' }),
+      adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'new-child', prompt: [{ type: 'text', text: 'new-child' }] }),
     ).resolves.toEqual({ ok: false, reason: 'active-child-conflict' })
 
     proofGate.resolve({ parentSessionId: PARENT_ID, childSessionId: 'persisted-child' })
@@ -671,13 +492,15 @@ describe('generic locus child adapter', () => {
       inbox: inboxPort(),
     })
 
-    await expect(adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })).resolves.toEqual({
+    await expect(adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })).resolves.toEqual({
       ok: false,
       reason: 'child-create-failed',
+      detail: 'transient host failure',
     })
-    await expect(adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })).resolves.toEqual({
+    await expect(adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })).resolves.toEqual({
       ok: true,
       created: true,
+      messageId: 'message-1',
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
     expect(start.startContinuable).toHaveBeenCalledTimes(2)
@@ -701,7 +524,7 @@ describe('generic locus child adapter', () => {
       settlement,
     })
     adapter.onActivationSettled(listener)
-    await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     emit?.({ id: CHILD_ID })
 
     expect(subscribe).toHaveBeenCalledTimes(1)
@@ -718,7 +541,7 @@ describe('generic locus child adapter', () => {
       subagent: subagentPort(),
       inbox,
     })
-    const created = await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const created = await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     if (!created.ok) throw new Error('expected child')
 
     const queued = await adapter.queuePrompt({ text: 'current request', identity: created.identity })
@@ -744,7 +567,7 @@ describe('generic locus child adapter', () => {
         throw new Error('inbox unavailable')
       }),
     })
-    await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
 
     const stale: LocusChildIdentity = {
       parentSessionId: PARENT_ID,
@@ -770,7 +593,7 @@ describe('generic locus child adapter', () => {
       subagent: subagentPort(),
       inbox: inboxPort(async () => { throw error }),
     })
-    const created = await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const created = await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     if (!created.ok) throw new Error('expected child')
 
     await expect(adapter.queuePrompt({
@@ -796,7 +619,7 @@ describe('generic locus child adapter', () => {
       inbox: inboxPort(),
       compensation: { release },
     })
-    const created = await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    const created = await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     if (!created.ok) throw new Error('expected child')
 
     expect(await adapter.compensateChild({ identity: created.identity, reason: 'publish failed' })).toEqual({
@@ -820,7 +643,7 @@ describe('generic locus child adapter', () => {
       subagent: subagentPort(),
       inbox: inboxPort(),
     })
-    await withoutPort.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    await withoutPort.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     expect(await withoutPort.compensateChild()).toEqual({
       ok: false,
       reason: 'compensation-unavailable',
@@ -833,7 +656,7 @@ describe('generic locus child adapter', () => {
       inbox: inboxPort(),
       compensation: { release: vi.fn(async () => { throw new Error('no release') }) },
     })
-    await failedRelease.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    await failedRelease.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     expect(await failedRelease.compensateChild()).toEqual({
       ok: false,
       reason: 'compensation-failed',
@@ -856,7 +679,7 @@ describe('generic locus child adapter', () => {
       },
     })
     adapter.onActivationSettled(listener)
-    await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
 
     emit?.({ id: 'some-other-child', stopReason: 'completed' })
     expect(listener).not.toHaveBeenCalled()
@@ -894,7 +717,7 @@ describe('generic locus child adapter', () => {
         },
       },
     })
-    await adapter.createChild({ parentSessionId: PARENT_ID, label: 'child', prompt: 'seed' })
+    await adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     adapter.dispose()
     emit?.({ id: CHILD_ID })
 
@@ -973,66 +796,13 @@ describe('the measured symbol-keyed inbox adapter', () => {
 })
 
 describe('probed host child seams', () => {
-  /** A host exposing every seam the probe requires. */
-  /**
-   * Regression: the runtime's `createIdleContinuable` takes a NESTED
-   * `ContinuableStartSpec` (`request.parent`), while Pet's port is flat
-   * (`parent`). The probe bridged them by passing the flat object straight
-   * through, so the runtime died on `request.parent` and NO group child could
-   * ever be created — every first @ was refused as `locus-unavailable`.
-   *
-   * The pre-existing stub ignored the spec entirely, which is why this
-   * survived 2682 passing tests. This one asserts the wire shape the target
-   * actually reads.
-   */
-  it('translates the flat creation spec into the runtime nested request shape', async () => {
-    const seen: Record<string, unknown>[] = []
-    const probe = probeLocusChildPorts(hostCtx({
-      supportsSettlementNotice: true,
-      supportsIdleContinuableCreate: true,
-      independentContextProven: true,
-      captureIdleSpec: seen,
-    }))
-    expect(probe.available).toBe(true)
-    if (!probe.available) return
-    await probe.ports.subagent.createIdleContinuable!({
-      childId: CHILD_ID,
-      provider: LOCUS_CHILD_PROVIDER,
-      label: 'Locus 子会话',
-      parent: parent(),
-      settlementNotice: 'silent',
-      contextMode: 'independent-v1',
-      agentPreset: LOCUS_CHILD_PRESET,
-      signal: AbortSignal.timeout(1000),
-    } as never)
-
-    const spec = seen[0]!
-    // The runtime reads `request.parent`; a flat `parent` made it throw
-    // "Cannot read properties of undefined (reading 'parent')".
-    expect(spec['request']).toBeDefined()
-    expect((spec['request'] as Record<string, unknown>)['parent']).toBeDefined()
-    // Nothing is submitted initially: an idle child's first Delivery is its
-    // first prompt, so the child transcript stays free of invented work.
-    expect((spec['request'] as Record<string, unknown>)['prompt']).toEqual([])
-    expect(spec['contextMode']).toBe('independent-v1')
-    expect(spec['agentPreset']).toBe(LOCUS_CHILD_PRESET)
-    expect(spec['settlementNotice']).toBe('silent')
-    expect(spec['provider']).toBe(LOCUS_CHILD_PROVIDER)
-  })
-
   function hostCtx(overrides: {
     readonly sessionController?: unknown
     readonly children?: readonly unknown[]
     /** Literal capability marker from the runtime actually loaded. */
-    readonly supportsSettlementNotice?: boolean
-    readonly supportsIdleContinuableCreate?: boolean
-    readonly supportsIndependentContinuableCreate?: boolean
-    readonly supportsIndependentChildAgentPreset?: boolean
-    readonly supportsLiveContinuableChildSession?: boolean
     /** Whether `getProvider(LOCUS_CHILD_PROVIDER)` proves provider independence. */
     readonly independentContextProven?: boolean
     /** Records the exact spec the bridge hands the runtime, for wire-shape tests. */
-    readonly captureIdleSpec?: Record<string, unknown>[]
   } = {}) {
     const services: Record<string, unknown> = {
       // A resident parent, so a creation test exercises the capability gate
@@ -1040,34 +810,11 @@ describe('probed host child seams', () => {
       agents: { get: (id: string) => (id === PARENT_ID ? parent() : undefined), resume: async () => undefined },
       subagents: {
         startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
-        createIdleContinuable: async (spec: { childId: string }) => {
-          overrides.captureIdleSpec?.push(spec as unknown as Record<string, unknown>)
-          return { childId: SessionId(spec.childId) }
-        },
-        withLiveContinuableChildSession: async (
-          _spec: unknown,
-          operation: (session: unknown) => unknown,
-        ) => operation({ id: CHILD_ID }),
         listChildren: async () => overrides.children ?? [],
         getProvider: (name: string) =>
           overrides.independentContextProven === true && name === LOCUS_CHILD_PROVIDER
             ? { inheritsParentContext: false }
             : undefined,
-        ...(overrides.supportsSettlementNotice === true
-          ? { supportsSettlementNotice: true }
-          : {}),
-        ...(overrides.supportsIdleContinuableCreate === true
-          ? { supportsIdleContinuableCreate: true }
-          : {}),
-        ...(overrides.supportsIndependentContinuableCreate !== false
-          ? { supportsIndependentContinuableCreate: true }
-          : {}),
-        ...(overrides.supportsIndependentChildAgentPreset !== false
-          ? { supportsIndependentChildAgentPreset: true }
-          : {}),
-        ...(overrides.supportsLiveContinuableChildSession === true
-          ? { supportsLiveContinuableChildSession: true }
-          : {}),
         [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'message-1',
       },
       ...(overrides.sessionController === undefined
@@ -1077,21 +824,7 @@ describe('probed host child seams', () => {
     return { get: (name: string) => services[name], on: () => () => {} }
   }
 
-  it('keeps the entire child seam unavailable without the independent-continuation marker', () => {
-    const probe = probeLocusChildPorts(hostCtx({ supportsIndependentContinuableCreate: false }))
-    expect(probe).toEqual({
-      available: false,
-      diagnostic: 'independent-continuable-create-unavailable',
-    })
-  })
 
-  it('keeps the entire child seam unavailable without the explicit child-preset marker', () => {
-    const probe = probeLocusChildPorts(hostCtx({ supportsIndependentChildAgentPreset: false }))
-    expect(probe).toEqual({
-      available: false,
-      diagnostic: 'independent-child-preset-unavailable',
-    })
-  })
 
   it('resumes the main session through the session controller, not a bare resume', async () => {
     const resolveAgent = vi.fn(() => ({ agent: parent() }))
@@ -1124,19 +857,6 @@ describe('probed host child seams', () => {
       : undefined).resolves.toBeUndefined()
   })
 
-  it('adapts continuation-owned child Session access only with its runtime marker', async () => {
-    const marked = probeLocusChildPorts(hostCtx({ supportsLiveContinuableChildSession: true }))
-    expect(marked.available && marked.ports.subagent.supportsLiveContinuableChildSession).toBe(true)
-    await expect(marked.available
-      ? marked.ports.subagent.withLiveContinuableChildSession?.(
-        { parent: parent(), childId: CHILD_ID, signal: new AbortController().signal },
-        session => (session as { id: string }).id,
-      )
-      : undefined).resolves.toBe(CHILD_ID)
-
-    const unmarked = probeLocusChildPorts(hostCtx())
-    expect(unmarked.available && unmarked.ports.subagent.supportsLiveContinuableChildSession).toBeUndefined()
-  })
 
   it('binds getProvider to the exact loaded subagent service, so creation can prove independence', async () => {
     const marked = probeLocusChildPorts(hostCtx({ independentContextProven: true }))
@@ -1157,14 +877,12 @@ describe('probed host child seams', () => {
     ).toBeUndefined()
 
     // No such method on the loaded runtime at all: the port omits it entirely
-    // rather than fabricating any stand-in, matching the createIdleContinuable
-    // precedent above.
+    // rather than fabricating any stand-in, matching other optional seam
+    // adapters.
     const noMethod = probeLocusChildPorts({
       get: (name: string) => (name === 'subagents'
         ? {
           startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
-          supportsIndependentContinuableCreate: true,
-          supportsIndependentChildAgentPreset: true,
           [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'm',
         }
         : name === 'agents' ? { get: () => undefined, resume: async () => undefined } : undefined),
@@ -1173,69 +891,30 @@ describe('probed host child seams', () => {
     expect(noMethod.available && noMethod.ports.subagent.getProvider).toBeUndefined()
   })
 
-  it('creates a child once the loaded runtime proves it can suppress the parent report', async () => {
-    // The literal belongs to the runtime instance the Host actually loaded.
-    // An official older runtime has no marker, even though JavaScript would
-    // accept and silently ignore an unknown `settlementNotice` field.
+  it('creates through the official runtime without compat markers', async () => {
     const probe = probeLocusChildPorts(hostCtx({
-      supportsSettlementNotice: true,
       independentContextProven: true,
     }))
     expect(probe.available).toBe(true)
-    expect(probe.available && probe.ports.subagent.supportsSettlementNotice).toBe(true)
 
     const adapter = createLocusChildAdapter(probe.available ? probe.ports : ({} as never))
-    await expect(adapter.createChild({
+    await expect(adapter.createChild({ childId: CHILD_ID,
       parentSessionId: PARENT_ID,
       label: 'locus child',
-      prompt: 'seed',
+      prompt: [{ type: 'text', text: 'seed' }],
     })).resolves.toMatchObject({ ok: true, created: true })
   })
 
-  it('creates an idle child only when the loaded runtime publishes both markers', async () => {
-    const probe = probeLocusChildPorts(hostCtx({
-      supportsSettlementNotice: true,
-      supportsIdleContinuableCreate: true,
-      independentContextProven: true,
-    }))
-    expect(probe.available).toBe(true)
-    const adapter = createLocusChildAdapter(probe.available ? probe.ports : ({} as never))
-
-    await expect(adapter.createIdleChild({
-      parentSessionId: PARENT_ID,
-      childId: 'child-reserved',
-      label: 'locus child',
-    })).resolves.toMatchObject({
-      ok: true,
-      created: true,
-      identity: { parentSessionId: PARENT_ID, childSessionId: 'child-reserved' },
-    })
-  })
-
-  it('keeps idle creation unavailable when only settlement silence is supported', async () => {
-    const probe = probeLocusChildPorts(hostCtx({ supportsSettlementNotice: true }))
-    expect(probe.available).toBe(true)
-    const adapter = createLocusChildAdapter(probe.available ? probe.ports : ({} as never))
-
-    await expect(adapter.createIdleChild({
-      parentSessionId: PARENT_ID,
-      childId: 'child-reserved',
-      label: 'locus child',
-    })).resolves.toEqual({ ok: false, reason: 'idle-child-create-unsupported' })
-  })
 
   it('keeps creation unavailable while that capability is unproven', async () => {
-    // Exactly the pinned runtime's state: the seams exist, the suppression
-    // option does not.
     const probe = probeLocusChildPorts(hostCtx())
-    expect(probe.available && probe.ports.subagent.supportsSettlementNotice).toBeUndefined()
 
     const adapter = createLocusChildAdapter(probe.available ? probe.ports : ({} as never))
-    await expect(adapter.createChild({
+    await expect(adapter.createChild({ childId: CHILD_ID,
       parentSessionId: PARENT_ID,
       label: 'locus child',
-      prompt: 'seed',
-    })).resolves.toEqual({ ok: false, reason: 'settlement-notice-unsupported' })
+      prompt: [{ type: 'text', text: 'seed' }],
+    })).resolves.toEqual({ ok: false, reason: 'independent-context-unproven' })
   })
 
   it('accepts a persisted child only when it is a continuable child', async () => {

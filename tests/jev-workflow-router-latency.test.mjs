@@ -105,6 +105,60 @@ test('single-frame logs still decode, and empty or garbage input is refused', ()
   assert.equal(decodeZstdText(Buffer.from('not zstd at all')).ok, false)
 })
 
+test('valid frame payload may contain zstd magic bytes', () => {
+  const payload = Buffer.from([65, 0x28, 0xb5, 0x2f, 0xfd, 66, 67, 68, 10])
+  // Single-segment frame with one final raw block, including an embedded magic.
+  const frame = Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 9, 0x49, 0, 0]), payload])
+  assert.deepEqual(decodeZstdFrames(frame), [payload])
+  assert.deepEqual(decodeZstdFrames(Buffer.concat([frame, encodeZstdFrames(['after\n'])])), [payload, Buffer.from('after\n')])
+})
+
+test('invalid segments are never skipped or accepted as a complete log', () => {
+  const first = encodeZstdFrames(['first\n'])
+  const last = encodeZstdFrames(['last\n'])
+  const corrupt = Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0xff, 0xff])
+  for (const bytes of [
+    Buffer.concat([first, corrupt, last]),
+    Buffer.concat([first, Buffer.from('junk'), last]),
+    Buffer.concat([Buffer.from('junk'), first]),
+    Buffer.concat([first, Buffer.from('junk')]),
+    Buffer.concat([first, last.subarray(0, last.length - 2)]),
+  ]) {
+    assert.deepEqual(decodeZstdText(bytes), { ok: false, reason: 'decode-failed' })
+    assert.throws(() => decodeZstdFrames(bytes))
+  }
+})
+
+test('frame scanning handles RLE, window descriptors, and optional content sizes', () => {
+  const magic = [0x28, 0xb5, 0x2f, 0xfd]
+  const rle = Buffer.from([...magic, 0x20, 5, 0x2b, 0, 0, 65])
+  assert.deepEqual(decodeZstdFrames(rle), [Buffer.from('AAAAA')])
+  const windowed = Buffer.from([...magic, 0, 0, 0x19, 0, 0, 65, 66, 67])
+  assert.deepEqual(decodeZstdFrames(windowed), [Buffer.from('ABC')])
+  const sized = Buffer.from([...magic, 0x60, 0, 0, 0x03, 0x08, 0, 65])
+  assert.deepEqual(decodeZstdFrames(sized), [Buffer.alloc(256, 65)])
+})
+
+test('checksum damage and reserved block types refuse the whole log', async () => {
+  const { constants, zstdCompressSync } = await import('node:zlib')
+  const frame = zstdCompressSync(Buffer.from('checked\n'), { params: { [constants.ZSTD_c_checksumFlag]: 1 } })
+  assert.equal(decodeZstdText(frame).text, 'checked\n')
+  for (let length = 1; length < frame.length; length++) {
+    assert.equal(decodeZstdText(frame.subarray(0, length)).ok, false)
+  }
+  frame[frame.length - 1] ^= 1
+  assert.equal(decodeZstdText(frame).ok, false)
+  const reserved = Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x20, 0, 7, 0, 0])
+  assert.equal(decodeZstdText(reserved).ok, false)
+})
+
+test('every truncated prefix of a frame is refused', () => {
+  const frame = encodeZstdFrames(['complete\n'])
+  for (let length = 1; length < frame.length; length++) {
+    assert.deepEqual(decodeZstdText(frame.subarray(0, length)), { ok: false, reason: 'decode-failed' }, `prefix ${length}`)
+  }
+})
+
 test('session log lookup prefers v4 and reports specific reasons', async t => {
   const home = await temporaryHome(t)
   assert.equal(findSessionLog({ dshHome: home, sessionId: '' }).reason, 'no-session-id')
@@ -144,6 +198,28 @@ test('latency is summed from session event timestamps, not agent self-timing', a
 
   const [record] = await storedRecords(home)
   assert.deepEqual(record.metrics.latency, { availability: 'measured', milliseconds: 2502, truncated: false })
+})
+
+test('latency stays unavailable when matching calls surround a corrupt frame', async t => {
+  const home = await temporaryHome(t)
+  const sessionId = 'session-corrupt'
+  await writeLog(home, sessionId, [[{ type: 'session' }]])
+  await writeFile(join(home, 'sessions', 'ws', sessionId, 'session.v4.jsonl.zstd'), Buffer.concat([
+    encodeZstdFrames([JSON.stringify({ type: 'tool/call', time: 1000, data: { name: 'mcp__jev__jev_classify', callId: 'c1' } }) + '\n']),
+    Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0xff]),
+    encodeZstdFrames([JSON.stringify({ type: 'tool/result', time: 1800, data: { toolCallId: 'c1' } }) + '\n']),
+  ]))
+  const env = { DSH_SESSION_ID: sessionId }
+  const recorded = await run(home, ['record'], recordInput({ observedWindow: { from: 500, to: 2000 } }), env)
+  assert.equal(recorded.code, 0, recorded.stderr)
+  const id = JSON.parse(recorded.stdout).observationId
+  const measured = await run(home, ['latency', id], undefined, env)
+  assert.equal(measured.code, 0, measured.stderr)
+  const outcome = JSON.parse(measured.stdout)
+  assert.equal(outcome.measured, false)
+  assert.equal(outcome.reason, 'decode-failed')
+  const [record] = await storedRecords(home)
+  assert.equal(record.metrics?.latency?.availability === 'measured', false)
 })
 
 test('the observed window keeps foreign Jev calls out of a judgement', async t => {

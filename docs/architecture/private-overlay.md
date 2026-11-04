@@ -35,7 +35,7 @@ The overlay can only append customization entries.
 | File absent | silently ignored (the normal case) |
 | File present but unreadable or not a mapping | sync errors; the startup listing degrades without blocking |
 
-Overlay entries go through the same checks as public ones: required fields, exact version pins for `source: remote`, `deps` integrity, `enabledEnv` naming, and the `hostRuntimeCompatibility` version fence, whose "at most one owner" assertion counts public and overlay entries together.
+Overlay entries go through the same checks as public ones: required fields, exact version pins for `source: remote`, `deps` integrity, `enabledEnv` naming, and the retired-field check: a `hostRuntimeCompatibility` field (the removed custom Host runtime mechanism) in an overlay entry fails closed with a "retired" error, exactly as it does in the public manifest.
 
 ## Overlay root (isomorphic private repository)
 

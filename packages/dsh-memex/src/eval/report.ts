@@ -4,10 +4,17 @@ import type { ExecutionAudit } from './audit.js'
 import type { EvidenceSelection } from './selection.js'
 import type { BoundaryHit } from './boundary.js'
 import type { FrozenProgramEvidence } from './program-evidence.js'
-export interface ReportDiagnostics { programs?: Record<string, FrozenProgramEvidence>; contaminated?: Record<string, readonly BoundaryHit[]>; selections?: Record<string, EvidenceSelection['coverage']>; defaultModelNotice?: string; executions?: Record<string, ExecutionAudit>; judges?: { calls: number; inputTokens: number; outputTokens: number } }
+import type { TargetRankDiagnostic } from './rank-diagnostic.js'
+
+// Reporting metadata for the historical protocol; never changes frozen fixtures.
+export function selftestTarget(version: string, question: string): string | undefined {
+  if (version !== 'selftest-v1') return undefined
+  return ({ know: 'retry-limit', stale: 'lease-duration', writeback: 'lease-duration' } as Record<string, string>)[question]
+}
+export interface ReportDiagnostics { ranks?: Record<string, TargetRankDiagnostic>; programs?: Record<string, FrozenProgramEvidence>; contaminated?: Record<string, readonly BoundaryHit[]>; selections?: Record<string, EvidenceSelection['coverage']>; defaultModelNotice?: string; executions?: Record<string, ExecutionAudit>; judges?: { calls: number; inputTokens: number; outputTokens: number } }
 export function renderSelftestReport(plan: FixedRound, judged: Record<string, ItemJudgements>, diagnostics?: ReportDiagnostics): { markdown: string; exitCode: number } {
   const ids = new Set(plan.items.map(item => item.id))
-  for (const id of [...Object.keys(diagnostics?.programs ?? {}), ...Object.keys(diagnostics?.executions ?? {}), ...Object.keys(diagnostics?.selections ?? {}), ...Object.keys(diagnostics?.contaminated ?? {})]) if (!ids.has(id)) throw new Error('Diagnostic item outside frozen plan')
+  for (const id of [...Object.keys(diagnostics?.ranks ?? {}), ...Object.keys(diagnostics?.programs ?? {}), ...Object.keys(diagnostics?.executions ?? {}), ...Object.keys(diagnostics?.selections ?? {}), ...Object.keys(diagnostics?.contaminated ?? {})]) if (!ids.has(id)) throw new Error('Diagnostic item outside frozen plan')
   const polluted = new Set(Object.entries(diagnostics?.contaminated ?? {}).filter(([, hits]) => hits.length).map(([id]) => id))
   // contaminated items never enter judgement: their semantic results are dropped and stay unknown
   const outcomes = Object.fromEntries(Object.entries(judged).filter(([id]) => !polluted.has(id)))
@@ -65,6 +72,15 @@ export function renderSelftestReport(plan: FixedRound, judged: Record<string, It
     }), '',
     incomplete ? '状态：未完成（unknown/缺证不得当作通过）。' : '状态：语义判据已收齐；fail 是观察结果，不是链路缺证。', '',
     ...contamination,
+    '## 目标卡召回名次诊断', '',
+    '仅从已冻结的检索工具返回解析目标卡是否出现及最好名次；排名不改变各层或端到端判定。未召回表示所有已知检索都未返回目标卡；无法解析或缺证记 unknown，无记忆条件记 N/A。', '',
+    '| 条件 | 目标卡 | 是否召回 | 最好名次 |', '| --- | --- | --- | ---: |',
+    ...plan.items.map(item => {
+      const rank = item.condition === 'nomem' ? { status: 'N/A' as const } : diagnostics?.ranks?.[item.id]
+      const status = rank?.status === 'recalled' ? '已召回' : rank?.status === 'not-recalled' ? '未召回' : rank?.status ?? 'unknown'
+      const position = rank?.status === 'recalled' ? rank.bestRank : rank?.status === 'not-recalled' ? '—' : rank?.status ?? 'unknown'
+      return `| ${item.id} | ${selftestTarget(plan.version, item.question) ?? 'unknown'} | ${status} | ${position} |`
+    }), '',
     ...(diagnostics?.programs ? [
       '## 程序观察与写回时序', '',
       '仅核验固定字面事实到达、成功工具结果与目标身份；链接不展开，失败调用不算写入。内容语义由独立裁判项判定。写入分类逐会话依事件时间，不跨会话猜因果；未知输入的写意图及无 diff 的新增/更新类型记 unknown，不得当主动或已核验最终磁盘状态。', '',

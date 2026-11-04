@@ -54,6 +54,9 @@ import {
  *                is still never served or resumed; see `toActive`'s use.
  * - `terminal` — it cannot, and only the owner may act. Ordinary work is
  *                refused with a reason a member can relay.
+ * - `create`   — a `not-created` entry: it can take work, but its child
+ *                session does not exist yet; the first deliverable message
+ *                creates it.
  */
 export type LocusDisposition =
   /**
@@ -67,8 +70,18 @@ export type LocusDisposition =
       readonly childComposition: LocusChildComposition
       readonly toolTier?: LocusToolTier
     }
-  | { readonly kind: 'replace'; readonly reason: string }
+  | { readonly kind: 'create' }
+  | { readonly kind: 'replace'; readonly reason: string; readonly why?: LocusReplaceWhy }
   | { readonly kind: 'terminal'; readonly reason: string }
+
+/** Why a generation is replaceable, so the replacement can be the right one. */
+export type LocusReplaceWhy =
+  /** A row of the previous two-tier model (no locus main pairing). */
+  | 'previous-model'
+  /** The locus main it hangs under is retired, archived, deleted or mis-composed. */
+  | 'locus-main-unavailable'
+  /** The Host judged this generation's child unusable. */
+  | 'child-unusable'
 
 /** The fields any caller can supply; keeps this usable from projections too. */
 export interface ServiceabilitySubject {
@@ -93,6 +106,14 @@ export interface ServiceabilitySubject {
    * restoring the session restores service with no rebuild in between.
    */
   readonly parentArchived?: boolean
+  /**
+   * The row belongs to the previous two-tier model: its parent session has no
+   * `locus_mains` pairing. Read-time interpretation only; the row is not
+   * rewritten. Such a row never serves and its child is never adopted.
+   */
+  readonly legacy?: boolean
+  /** The locus main this row hangs under cannot serve (retired/archived/gone). */
+  readonly mainUnavailable?: boolean
 }
 
 /**
@@ -131,27 +152,52 @@ export function mayReplaceWithoutOwner(subject: Pick<ServiceabilitySubject, 'sta
  * @returns the disposition every delivery-path layer must agree on.
  */
 export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition {
-  // An archived main session outranks every other classification, including
+  // An archived work session outranks every other classification, including
   // `active`: the child is intact and reachable, so nothing downstream would
   // notice on its own that the session this endpoint belongs to was retired
   // from the owner's view.
   if (subject.parentArchived === true) {
     return {
       kind: 'terminal',
-      reason: 'the main session of this endpoint is archived by its owner; '
-        + 'restore that session, or rebuild the endpoint against a new one',
+      reason: 'the source (work) session of this endpoint is archived by its owner; '
+        + 'restore that session, or /bind the endpoint to a new one',
     }
   }
+  // The owner's own exit is honoured before any "previous model" reading: an
+  // explicitly stopped/retired row is never revived just because it is old.
+  if (isOwnerExit(subject.state)) {
+    return { kind: 'terminal', reason: `endpoint was explicitly ${subject.state} by its owner` }
+  }
+  if (subject.legacy === true) {
+    return {
+      kind: 'replace',
+      why: 'previous-model',
+      reason: 'row belongs to the previous two-tier model and is retired',
+    }
+  }
+  if (subject.mainUnavailable === true) {
+    return {
+      kind: 'replace',
+      why: 'locus-main-unavailable',
+      reason: 'the locus main session of this endpoint is unavailable',
+    }
+  }
+  if (subject.state === 'not-created') return { kind: 'create' }
   if (subject.state === 'active') {
     const childSessionId = subject.childSessionId?.trim() ?? ''
     if (childSessionId === '') {
-      return { kind: 'replace', reason: 'active generation has no child session' }
+      return { kind: 'replace', why: 'child-unusable', reason: 'active generation has no child session' }
     }
-    if (subject.childComposition !== 'safe-v1' && subject.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-      // Refusing to SERVE this is what keeps the parent preset from being
-      // inherited by a child whose composition cannot be proven. Replacing it
-      // is safe: the replacement is created fresh WITH the proof.
-      return { kind: 'replace', reason: 'no durable safe-v1/safe-v2 child composition proof' }
+    if (subject.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+      // Refusing to SERVE this is what keeps a composition nobody proved from
+      // running: only the `tier3` marker is published by the three-tier
+      // structure. Replacing it is safe: the replacement is created fresh WITH
+      // the proof.
+      return {
+        kind: 'replace',
+        why: 'child-unusable',
+        reason: 'no durable tier3 child composition proof',
+      }
     }
     return {
       kind: 'serve',
@@ -160,12 +206,10 @@ export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition 
       ...(subject.toolTier !== undefined ? { toolTier: subject.toolTier } : {}),
     }
   }
-  if (isOwnerExit(subject.state)) {
-    return { kind: 'terminal', reason: `endpoint was explicitly ${subject.state} by its owner` }
-  }
   if (mayReplaceWithoutOwner(subject)) {
     return {
       kind: 'replace',
+      why: 'child-unusable',
       reason: subject.invalidReason === undefined
         ? 'generation was invalidated by the Host'
         : `generation was invalidated by the Host (${subject.invalidReason})`,

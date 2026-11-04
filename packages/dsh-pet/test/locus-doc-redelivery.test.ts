@@ -40,19 +40,24 @@ async function seed(repository: DurableLocusRepository) {
 }
 
 function controllerFor(repository: DurableLocusRepository, rendered: NormalizedLocusMessage[], commentQueries: { count: number }) {
+  const read = (endpoint: { chatId: string; threadId?: string }) => {
+    const record = repository.getCurrentLocus(endpoint)
+    return record === undefined ? undefined : {
+      id: record.id, endpoint: record.endpoint, generation: record.generation,
+      parentSessionId: record.parentSessionId, childSessionId: record.childSessionId as string,
+      workspaceId: record.workspaceId, state: 'active' as const,
+      childComposition: 'tier3' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
+      permission: record.permission,
+    }
+  }
   return new LocusChannelController({
     locus: {
-      resolveCurrent: endpoint => {
-        const record = repository.getCurrentLocus(endpoint)
-        return record === undefined ? undefined : {
-          id: record.id, endpoint: record.endpoint, generation: record.generation,
-          parentSessionId: record.parentSessionId, childSessionId: record.childSessionId as string,
-          workspaceId: record.workspaceId, state: 'active' as const,
-          childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
-          permission: record.permission,
-        }
+      resolveCurrent: read,
+      ensureForDelivery: ({ endpoint }: { endpoint: { chatId: string; threadId?: string } }) => {
+        const record = read(endpoint)
+        if (record === undefined) throw new Error('dispatch never creates an unknown entry')
+        return record
       },
-      ensureForDelivery: () => { throw new Error('dispatch never provisions') },
     } as never,
     deliveries: {
       findByMessageId: id => repository.findDeliveryByMessageId(id),
@@ -69,10 +74,9 @@ function controllerFor(repository: DurableLocusRepository, rendered: NormalizedL
     },
     child: {
       ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
-      withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: input.identity.childSessionId }) }),
       queueChild: input => ({ accepted: true as const, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
     },
-    resolveLivePolicy: () => ({ mode: 'read-only', workspaceRoot: '/repo' }),
+    inspectResidentPolicy: () => ({ resident: true, policy: { mode: 'read-only', workspaceRoot: '/repo' } }),
     turns: { perTurnCorrelation: true, subscribe: () => () => {} },
     // The only place a comment fact could come from on this path. Counting it
     // proves the redelivery never re-queried the platform.

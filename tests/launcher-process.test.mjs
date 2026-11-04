@@ -5,7 +5,7 @@ const implementation = () => import('../scripts/launcher/process.mjs')
 // Snapshots must bind a listener to a creation identity, not merely a PID or
 // a familiar word appearing anywhere in a command string.
 const owned = (overrides = {}) => ({
-  pid: 1234, parentPid: 1000, created: 'creation-1',
+  pid: 1234, parentPid: 1000, created: 'creation-1', executable: process.execPath,
   argv: ['/usr/bin/node', '/cache/node_modules/@deepseek-ai/dsh/lib/bin.js', 'web', '--port', '40001'],
   ...overrides,
 })
@@ -79,7 +79,7 @@ test('stop revalidates identity immediately before signaling and refuses changed
   const { stopServer } = await implementation()
   const calls = []
   let reads = 0
-  const result = await stopServer(40001, {
+  const result = await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] },
     probe: async () => ({ state: 'owned', processes: [owned({ created: ++reads === 1 ? 'creation-1' : 'creation-2' })] }),
     signal: async (...args) => calls.push(args),
   })
@@ -91,17 +91,17 @@ test('stop verifies all listeners before any signal and refuses unknown states',
   const { stopServer } = await implementation()
   for (const state of ['unknown', 'probe-error']) {
     const calls = []
-    const result = await stopServer(40001, { probe: async () => ({ state, processes: [] }), signal: async (...args) => calls.push(args) })
+    const result = await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] }, probe: async () => ({ state, processes: [] }), signal: async (...args) => calls.push(args) })
     assert.equal(result.ok, false)
     assert.deepEqual(calls, [])
   }
-  assert.equal((await stopServer(40001, { probe: async () => ({ state: 'empty', processes: [] }) })).ok, true)
+  assert.equal((await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] }, probe: async () => ({ state: 'empty', processes: [] }) })).ok, true)
 })
 
 test('POSIX stop sends TERM and succeeds only after an empty final ownership check', async () => {
   const { stopServer } = await implementation()
   const calls = []; let reads = 0
-  const result = await stopServer(40001, {
+  const result = await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] },
     platform: 'linux',
     probe: async () => (++reads < 3 ? { state: 'owned', processes: [owned()] } : { state: 'empty', processes: [] }),
     connect: async () => false,
@@ -115,7 +115,7 @@ test('POSIX stop sends TERM and succeeds only after an empty final ownership che
 test('Windows stop uses argv taskkill only for revalidated identity and diagnoses force', async () => {
   const { stopServer } = await implementation()
   const calls = []; const warnings = []; let reads = 0
-  const result = await stopServer(40001, {
+  const result = await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] },
     platform: 'win32',
     probe: async () => (++reads < 3 ? { state: 'owned', processes: [owned()] } : { state: 'empty', processes: [] }),
     connect: async () => false,
@@ -150,10 +150,10 @@ test('Windows probe executes one fixed encoded query and rejects malformed outpu
 test('expired stop deadline and taskkill not-found never imply a stopped listener', async () => {
   const { stopServer } = await implementation()
   const calls = []
-  const expired = await stopServer(40001, { deadline: Date.now() - 1, probe: async () => ({ state: 'owned', processes: [owned()] }), signal: async (...args) => calls.push(args) })
+  const expired = await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] }, deadline: Date.now() - 1, probe: async () => ({ state: 'owned', processes: [owned()] }), signal: async (...args) => calls.push(args) })
   assert.equal(expired.ok, false)
   assert.deepEqual(calls, [])
-  const missing = await stopServer(40001, { platform: 'win32', probe: async () => ({ state: 'owned', processes: [owned()] }), run: async () => ({ status: 128 }), warn: () => {} })
+  const missing = await stopServer(40001, { expectedIdentity: { state: 'owned', processes: [owned()] }, platform: 'win32', probe: async () => ({ state: 'owned', processes: [owned()] }), run: async () => ({ status: 128 }), warn: () => {} })
   assert.equal(missing.ok, false)
 })
 
@@ -198,7 +198,7 @@ if (process.platform !== 'win32') test('real POSIX probe verifies package identi
   const record = await probePort(own.port)
   assert.equal(record.state, 'owned', record.error)
   assert.equal(record.processes[0].pid, own.child.pid)
-  assert.equal((await stopServer(own.port)).ok, true)
+  assert.equal((await stopServer(own.port, { expectedIdentity: record })).ok, true)
   assert.equal((await probePort(own.port)).state, 'empty')
 })
 

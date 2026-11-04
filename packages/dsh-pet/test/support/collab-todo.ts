@@ -1,57 +1,68 @@
 /**
- * A Locus todo world over the REAL dsh-collab plugin: Pet's proxy and the
- * collab `TodoBackend`, with locus records the test can add, switch and retire.
+ * A Locus todo world over the REAL dsh-collab plugin: Pet's `LocusCollab` and
+ * the collab `TodoBackend`, with locus main sessions and entries the test can
+ * add, replace and retire.
  *
  * `register` goes through `trackTodo` — the exact function `pet_locus_track`
- * runs — with an authorized current-Delivery record built from the locus row.
+ * runs — with an authorized current-Delivery record built from the entry row.
  */
 import { endpointKeyOf, type LocusEndpoint } from '../../src/host/locus/aggregate.js'
 import type { LocusContextRecord } from '../../src/host/locus/context-repository.js'
 import { locusIdentity, locusSpaceId } from '../../src/host/collab/naming.js'
-import { LocusCollabProxy, type ProxyLocusRecord } from '../../src/host/collab/proxy.js'
+import { LocusCollab, type LocusMainRef } from '../../src/host/collab/locus-collab.js'
 import { CollabTodoBackend } from '../../src/host/collab/todo-backend.js'
 import { trackTodo, type TrackResult } from '../../src/host/ledger/track.js'
 import { SUBAGENT_HEADER, openCollabWorld, result, type CollabWorld } from './collab-host.js'
 
+/** One entry generation under a locus main session. */
+export interface TestLocusRow {
+  readonly id: string
+  readonly generation: number
+  readonly endpoint: LocusEndpoint
+  readonly locusMainSessionId: string
+  readonly childSessionId: string
+  readonly state: string
+}
+
 export interface TodoWorld {
   readonly world: CollabWorld
-  readonly proxy: LocusCollabProxy
+  readonly collab: LocusCollab
   readonly backend: CollabTodoBackend
-  /** Add (or replace) a locus record; its child is published live unless `live: false`. */
-  addLocus(record: ProxyLocusRecord, options?: { live?: boolean }): void
-  /** Replace a record in place (state change), keeping the rest. */
-  updateLocus(id: string, patch: Partial<ProxyLocusRecord>): void
-  /** Load a main session; establishes its space when it has an active locus. */
-  loadMain(parentSessionId: string): Promise<void>
-  /** Register a todo exactly as `pet_locus_track` does for this locus's current child. */
+  readonly mains: LocusMainRef[]
+  readonly loci: TestLocusRow[]
+  /** Register a locus main + work main pair: both live, space established. */
+  addMain(ref: LocusMainRef): Promise<void>
+  /** Add (or replace) an entry row; its child is published live unless `live: false`. */
+  addLocus(row: TestLocusRow, options?: { live?: boolean }): void
+  updateLocus(id: string, patch: Partial<TestLocusRow>): void
+  /** Register a todo exactly as `pet_locus_track` does for this entry row's current child. */
   register(recordId: string, evidence: { summary: string; detail: string }, itemId?: string): Promise<TrackResult>
-  /** Full manager read of a parent's space. */
-  records(parentSessionId: string): Promise<any[]>
-  /** A fresh proxy + backend over the SAME dsh-collab store (a Pet restart). */
+  /** Full manager read of a locus main session's space. */
+  records(locusMainSessionId: string): Promise<any[]>
+  /** A fresh LocusCollab + backend over the SAME dsh-collab store (a Pet restart). */
   restartPet(): Promise<TodoWorld>
-  readonly loci: ProxyLocusRecord[]
 }
 
 export function identityOf(endpoint: LocusEndpoint): string {
   return locusIdentity(endpointKeyOf(endpoint))
 }
 
-export function authorizedFor(record: ProxyLocusRecord, messageId = `om-${record.id}`): LocusContextRecord {
+export function authorizedFor(row: TestLocusRow, messageId = `om-${row.id}`): LocusContextRecord {
   return {
-    endpoint: record.endpoint,
-    locus: { locusId: record.id, generation: record.generation, state: 'active' },
-    main: { sessionId: record.parentSessionId },
-    child: { sessionId: record.childSessionId! },
+    endpoint: row.endpoint,
+    locus: { locusId: row.id, generation: row.generation, state: 'active' },
+    main: { sessionId: row.locusMainSessionId },
+    child: { sessionId: row.childSessionId },
     workspace: { workspaceId: 'ws-todo' },
     permission: { effective: 'read' },
     contextAnchor: { status: 'unknown' },
     currentDelivery: {
       deliveryId: `delivery-${messageId}`,
       messageId,
-      endpoint: record.endpoint,
-      locusId: record.id,
-      generation: record.generation,
-      childSessionId: record.childSessionId!,
+      endpoint: row.endpoint,
+      locusId: row.id,
+      generation: row.generation,
+      childSessionId: row.childSessionId,
       status: 'current',
       queueState: 'current',
       senderOpenId: 'ou_requester',
@@ -61,75 +72,65 @@ export function authorizedFor(record: ProxyLocusRecord, messageId = `om-${record
 
 let itemSeq = 0
 
-function compose(world: CollabWorld, loci: ProxyLocusRecord[]): Omit<TodoWorld, 'restartPet'> {
-  const proxy = new LocusCollabProxy({ listLoci: () => loci, liveAgent: id => world.live.get(id) })
-  proxy.attach(world.service)
-  const backend = new CollabTodoBackend({
-    proxy,
-    childOf: ({ locusId, parentSessionId }) => loci.find(record => record.id === locusId && record.parentSessionId === parentSessionId)?.childSessionId,
-    liveAgent: id => world.live.get(id),
-  })
-  const self: Omit<TodoWorld, 'restartPet'> = {
-    world, proxy, backend, loci,
-    addLocus(record, options = {}) {
-      const index = loci.findIndex(existing => existing.id === record.id)
-      if (index >= 0) loci.splice(index, 1, record)
-      else loci.push(record)
-      if (options.live !== false && record.childSessionId !== undefined) {
-        world.session(record.childSessionId, SUBAGENT_HEADER(record.parentSessionId))
-      }
-      proxy.refresh()
+function compose(world: CollabWorld, mains: LocusMainRef[], loci: TestLocusRow[]): Omit<TodoWorld, 'restartPet'> {
+  const collab = new LocusCollab({ directory: { list: () => mains } })
+  collab.attach(world.service)
+  const backend = new CollabTodoBackend({ collab, directory: { list: () => mains } })
+  return {
+    world, collab, backend, mains, loci,
+    async addMain(ref) {
+      if (!mains.some(existing => existing.locusMainSessionId === ref.locusMainSessionId)) mains.push(ref)
+      world.session(ref.locusMainSessionId)
+      if (!world.live.has(ref.workSessionId)) world.session(ref.workSessionId)
+      const ensured = await collab.ensureSpace(ref)
+      if (!ensured.ok) throw new Error(`space not established: ${JSON.stringify(ensured)}`)
+    },
+    addLocus(row, options = {}) {
+      const index = loci.findIndex(existing => existing.id === row.id)
+      if (index >= 0) loci.splice(index, 1, row)
+      else loci.push(row)
+      if (options.live !== false) world.session(row.childSessionId, SUBAGENT_HEADER(row.locusMainSessionId))
     },
     updateLocus(id, patch) {
       const index = loci.findIndex(existing => existing.id === id)
       if (index < 0) throw new Error(`no locus ${id}`)
       loci.splice(index, 1, { ...loci[index]!, ...patch })
-      proxy.refresh()
-    },
-    async loadMain(parentSessionId) {
-      world.session(parentSessionId)
-      const ensured = await proxy.ensureSpace(parentSessionId)
-      if (!ensured.ok) throw new Error(`space not established: ${JSON.stringify(ensured)}`)
     },
     register(recordId, evidence, itemId) {
-      const record = loci.find(existing => existing.id === recordId)
-      if (record === undefined) throw new Error(`no locus ${recordId}`)
-      return trackTodo(authorizedFor(record), evidence, {
+      const row = loci.find(existing => existing.id === recordId)
+      if (row === undefined) throw new Error(`no locus ${recordId}`)
+      return trackTodo(authorizedFor(row), evidence, {
         store: backend,
         now: () => Date.now(),
         newItemId: () => itemId ?? `todo-${++itemSeq}`,
       })
     },
-    async records(parentSessionId) {
-      const value = await proxy.currentHandle()!.readManaged(locusSpaceId(parentSessionId))
-      return value as any[]
+    async records(locusMainSessionId) {
+      const value = await collab.readSpace(locusMainSessionId)
+      return (value ?? []) as any[]
     },
   }
-  return self
 }
 
 export async function openTodoWorld(): Promise<TodoWorld> {
   const world = await openCollabWorld()
-  const loci: ProxyLocusRecord[] = []
-  const build = (): TodoWorld => {
-    const self = compose(world, loci)
-    return {
-      ...self,
-      async restartPet() {
-        // The old proxy detaches; a fresh Pet attaches and rebuilds from durable facts only.
-        const handle = self.proxy.currentHandle()
-        handle?.dispose()
-        const next = compose(world, loci)
-        for (const parent of new Set(loci.map(record => record.parentSessionId))) await next.proxy.probe(parent)
-        return { ...next, restartPet: () => { throw new Error('restart once') } }
-      },
-    }
+  const mains: LocusMainRef[] = []
+  const loci: TestLocusRow[] = []
+  const self = compose(world, mains, loci)
+  return {
+    ...self,
+    async restartPet() {
+      // The old attachment detaches; a fresh Pet attaches and rebuilds from durable facts only.
+      self.collab.currentHandle()?.dispose()
+      const next = compose(world, mains, loci)
+      for (const ref of mains) await next.collab.probe(ref)
+      return { ...next, restartPet: () => { throw new Error('restart once') } }
+    },
   }
-  return build()
 }
 
-export async function readOverview(world: CollabWorld, agent: unknown, parentSessionId: string) {
-  return result(await world.call(agent, 'collab_read', { view: 'overview', spaceId: locusSpaceId(parentSessionId) }))
+export async function readOverview(world: CollabWorld, agent: unknown, locusMainSessionId: string) {
+  return result(await world.call(agent, 'collab_read', { view: 'overview', spaceId: locusSpaceId(locusMainSessionId) }))
 }
 
 /** Every event type committed after `afterSeq`. */

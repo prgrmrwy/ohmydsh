@@ -8,7 +8,8 @@ import { loadProgramEvidence } from './program-evidence.js'
 import { loadSelection } from './selection.js'
 import { readFrozenInput } from './freeze.js'
 import type { ExecutionAudit } from './audit.js'
-import { renderSelftestReport, type ReportDiagnostics } from './report.js'
+import { renderSelftestReport, selftestTarget, type ReportDiagnostics } from './report.js'
+import { loadTargetRank } from './rank-diagnostic.js'
 
 function directoryPresent(path: string): boolean {
   try {
@@ -72,7 +73,9 @@ export function buildOfflineReport(root: string, roundId: string): { markdown: s
   const executions: NonNullable<ReportDiagnostics['executions']> = {}
   const contaminated: NonNullable<ReportDiagnostics['contaminated']> = {}
   const programs: NonNullable<ReportDiagnostics['programs']> = {}
+  const ranks: NonNullable<ReportDiagnostics['ranks']> = {}
   for (const item of plan.items) {
+    ranks[item.id] = loadTargetRank(join(root, roundId, item.id), plan.version, item.condition, selftestTarget(plan.version, item.question))
     const program = loadProgramEvidence(join(root, roundId, item.id))
     if (program) programs[item.id] = program
     const boundaryDirectory = join(root, roundId, item.id, 'boundary-hits')
@@ -99,5 +102,5 @@ export function buildOfflineReport(root: string, roundId: string): { markdown: s
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Invalid frozen selection directory')
     selections[item.id] = loadSelection(directory).coverage
   }
-  return renderSelftestReport(plan, outcomes, { selections, executions, contaminated, programs, defaultModelNotice: new DefaultModelNotice(join(root, roundId)).describeOffline() })
+  return renderSelftestReport(plan, outcomes, { selections, executions, contaminated, programs, ranks, defaultModelNotice: new DefaultModelNotice(join(root, roundId)).describeOffline() })
 }

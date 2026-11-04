@@ -453,6 +453,29 @@ describe('keyword queries reach the kernel segmented', () => {
     return args[args.indexOf('--') + 1]!
   }
 
+  it.each([
+    [{}, ['search', '--limit', '10']],
+    [{ query: '', list: true }, ['search', '--limit', '10', '--list']],
+    [{ query: '  ASCII ./a-b.ts v1.2  ', semantic: false }, ['search', '--limit', '10', '--', '  ASCII ./a-b.ts v1.2  ']],
+    [{ query: '--semantic' }, ['search', '--limit', '10', '--', '--semantic']],
+    [{ query: '代理配置 API.fn', list: true, limit: 2 }, ['search', '--limit', '2', '--list', '--', '代理 理配 配置 API.fn']],
+    ...[0, -2, 1, 10, 50, 99].map(limit => [{ query: 'card', limit }, ['search', '--limit', String(Math.min(Math.max(limit, 1), 50)), '--', 'card']]),
+  ])('preserves keyword parameters for %j', async (args, expected) => {
+    const runner = vi.fn(async () => ok())
+    await call(capture(runner as never).get('memex_search')!, args)
+    expect(runner).toHaveBeenCalledExactlyOnceWith(expected, expect.objectContaining({ home: '/memex/current' }))
+  })
+
+  it('keeps the merged result limit clamped to 1 through 50', async () => {
+    const stdout = Array.from({ length: 55 }, (_, i) => `## card-${i}\nCard ${i}\nBody\n`).join('\n')
+    const runner = vi.fn(async () => ok(stdout))
+    const tools = capture(runner as never)
+    for (const [limit, count] of [[0, 1], [2, 2], [99, 50]]) {
+      const result = await call(tools.get('memex_search')!, { query: 'card', limit })
+      expect(result.hits).toHaveLength(count!)
+    }
+  })
+
   it('segments Han runs for memex_search', async () => {
     const runner = vi.fn(async () => ok())
     const tools = capture(runner as never)
@@ -484,12 +507,13 @@ describe('keyword queries reach the kernel segmented', () => {
     expect(sentQuery(runner)).toBe('connection.rpc.handle 405')
   })
 
-  it('passes the query through unchanged for semantic search', async () => {
-    // Segmentation would shred the text the embedding is computed from.
+  it('被拒绝的语义请求是唯一例外', async () => {
     const runner = vi.fn(async () => ok())
     const tools = capture(runner as never)
-    await call(tools.get('memex_search')!, { query: '子进程能不能用上代理', semantic: true })
-    expect(sentQuery(runner)).toBe('子进程能不能用上代理')
+    const outcome = await call(tools.get('memex_search')!, { query: '子进程能不能用上代理', semantic: true }).catch(error => error)
+    expect(runner).not.toHaveBeenCalled()
+    expect(outcome).toBeInstanceOf(TypeError)
+    expect(outcome.message).toContain('语义检索当前未启用')
   })
 })
 

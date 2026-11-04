@@ -112,7 +112,7 @@ export interface LocusContextRepository {
       readonly deliveryId?: string
       readonly executionId: string
       readonly turnId: string
-      readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
+      readonly source: 'delivery' | 'agent-message'
       readonly locusId?: string
       readonly generation?: number
     }
@@ -125,7 +125,7 @@ export interface LocusContextRepository {
       readonly deliveryId?: string
       readonly executionId: string
       readonly turnId: string
-      readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
+      readonly source: 'delivery' | 'agent-message'
       readonly locusId?: string
       readonly generation?: number
     }
@@ -142,6 +142,8 @@ export interface LocusContextRepository {
  */
 export interface LocusAggregateLookup {
   findByChildSession(childSessionId: string): LocusRecordWithContext | undefined
+  /** A failed first-creation compensation cannot authorize tools while recovery is pending. */
+  hasFirstDeliveryRecoveryDebt?(locusId: string): boolean
   /** Optional lossless lookup; when absent the adapter uses the single-row API. */
   findAllByChildSession?(childSessionId: string): readonly LocusRecordWithContext[]
   /** Optional exact caller-bound lookup; child/generation alone is not proof. */
@@ -186,7 +188,7 @@ export function asLocusContextRepository(
     })()
   const inspectCurrentDeliveryAuthorization = (input: Parameters<NonNullable<LocusContextRepository['inspectCurrentDeliveryAuthorization']>>[0]): LocusCurrentAuthorizationResult => {
     if (input.childSessionId.trim() === '') return { ok: false, reason: 'capability-unavailable' }
-    if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message' && input.proof.source !== 'inquiry-result') {
+    if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message') {
       return { ok: false, reason: 'association-unproven' }
     }
     const currentProof = currentTurnProof?.(input.childSessionId)
@@ -197,7 +199,7 @@ export function asLocusContextRepository(
     if (records.length === 0) return { ok: false, reason: 'association-unproven' }
     if (records.length !== 1) return { ok: false, reason: 'association-unproven' }
     const record = records[0]!
-    if (record.state !== 'active' || record.childSessionId !== input.childSessionId) {
+    if (record.state !== 'active' || record.childSessionId !== input.childSessionId || repository.hasFirstDeliveryRecoveryDebt?.(record.id) === true) {
       return { ok: false, reason: 'association-unproven' }
     }
     const current = repository.findCurrentSerializedDelivery?.({
@@ -266,6 +268,7 @@ function projectAggregateRecord(
   const state =
     record.state === 'provisioning' ||
         record.state === 'active' ||
+        record.state === 'not-created' ||
         record.state === 'switching' ||
         record.state === 'invalid' ||
         record.state === 'stopped' ||
@@ -281,6 +284,7 @@ function projectAggregateRecord(
       ...(state !== undefined ? { state } : {}),
       ...(record.childComposition !== undefined ? { childComposition: record.childComposition } : {}),
       toolTier: record.toolTier?.effective ?? 'safe',
+      ...(record.toolTier?.desired !== undefined && record.toolTier.desired !== (record.toolTier.effective ?? 'safe') ? { pendingToolTier: true } : {}),
     },
     main: { sessionId: record.parentSessionId },
     child: {

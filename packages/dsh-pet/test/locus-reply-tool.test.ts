@@ -48,7 +48,7 @@ function lifecycleTools(current = true, overrides: {
   readonly logAuthorizationRefusal?: (input: unknown) => void
   readonly onFinishRefused?: (execution: unknown) => void
   readonly onDeliveryContinued?: (execution: unknown) => void
-} = {}, managedEffects?: Parameters<typeof registerPetTools>[1]['managedEffects']) {
+} = {}) {
   const definitions: Array<{ name: string; parameters: unknown; execute(args: unknown, exec: unknown): Promise<unknown> }> = []
   const authorizeCurrentDelivery = overrides.authorizeCurrentDelivery ?? (() => current ? contextRecord(true) : undefined)
   const repository = {
@@ -78,7 +78,6 @@ function lifecycleTools(current = true, overrides: {
       ...(overrides.finishCurrentDelivery === undefined ? {} : { finishCurrentDelivery: overrides.finishCurrentDelivery }),
       ...(overrides.waitCurrentDelivery === undefined ? {} : { waitCurrentDelivery: overrides.waitCurrentDelivery }),
     },
-    managedEffects,
   })
   return {
     finish: definitions.find(item => item.name === PET_LOCUS_FINISH_TOOL)!,
@@ -106,9 +105,6 @@ describe('caller-bound Feishu lifecycle tools', () => {
     await expect(finish.execute({ outcome: 'reply', text: '' }, childExec)).rejects.toBeDefined()
     expect(refused).toHaveBeenCalledTimes(1)
     expect(continued).not.toHaveBeenCalled()
-    const guarded = lifecycleTools(true, { onFinishRefused: refused }, { register: () => {}, assertEntry: () => { throw new Error('managed denied') } })
-    await expect(guarded.finish.execute({ outcome: 'reply', text: 'answer' }, childExec)).rejects.toThrow('managed denied')
-    expect(refused).toHaveBeenCalledTimes(1)
   })
   it('reports successful finish and accepted wait, not failed leases', async () => {
     const continued = vi.fn()

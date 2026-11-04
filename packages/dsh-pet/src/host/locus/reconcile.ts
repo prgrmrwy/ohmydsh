@@ -30,6 +30,14 @@ export type ChildLiveness =
   | { readonly kind: 'unusable'; readonly reason: string }
   /** The runtime could not answer; this is not evidence of absence. */
   | { readonly kind: 'unknown'; readonly diagnostic: string }
+  /**
+   * The runtime is at its activation limit, so the child could not be resumed.
+   * Says nothing about the child: it is neither invalidated nor replaced, and
+   * the entry keeps its generation until capacity frees. Treated exactly like
+   * `unknown`; named separately so a reader can see capacity is a retry, not a
+   * repair.
+   */
+  | { readonly kind: 'capacity-limited'; readonly diagnostic: string }
 
 /** Probes the live runtime for one locus child. */
 export interface ChildLivenessProbe {
@@ -62,6 +70,7 @@ export type ReconcileDiagnostic =
   | 'probe-unavailable'
   | 'child-unusable'
   | 'child-unknown'
+  | 'child-capacity-limited'
   | 'stale-busy-cleared'
 
 /** Outcome of one reconciliation pass. */
@@ -94,17 +103,17 @@ export async function reconcileLocusChildren(
   const busyCleared: string[] = []
   let usable = 0
 
+  // `not-created` rows have no child to probe; only `active` rows do.
   const candidates = loci.filter(record => record.state === 'active')
   const safeCandidates: LocusRecord[] = []
   for (const record of candidates) {
     if (signal.aborted) break
-    if (record.childComposition !== 'safe-v1' && record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-      // This durable fact is checked before any runtime probe: probing may
-      // resolve/adopt/cold-resume the child and thereby inherit the parent preset.
-      const reason = '该代际缺少 safe child composition 证明，需要所有者重新建立。'
-      await ports.store.invalidate(record.id, reason, now())
-      invalidated.push({ locusId: record.id, reason })
-      ports.log?.('child-unusable')
+    if (record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
+      // Not a three-tier child. Previous-model rows are read as such and left
+      // exactly as they are: probing one could resolve, adopt or cold-resume its
+      // child under a parent preset nobody reviewed, and invalidating it would
+      // rewrite a row the retirement rules say not to touch. A successor retires
+      // it by reference; the historical row itself never changes.
       continue
     }
     safeCandidates.push(record)
@@ -155,9 +164,9 @@ export async function reconcileLocusChildren(
       ports.log?.('child-unusable')
       continue
     }
-    if (liveness.kind === 'unknown') {
+    if (liveness.kind === 'unknown' || liveness.kind === 'capacity-limited') {
       unproven.push(record.id)
-      ports.log?.('child-unknown')
+      ports.log?.(liveness.kind === 'unknown' ? 'child-unknown' : 'child-capacity-limited')
       continue
     }
 

@@ -419,6 +419,7 @@ describe('controller to durable locus repository write boundary', () => {
     }))
     const locus = new LocusController({
       repository: adapter,
+      establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
       dsh: {
         resolveSession: async () => undefined,
         resolveDefaultWorkspace: async () => ({ id: 'workspace-main' }),
@@ -577,13 +578,16 @@ describe('controller to durable locus repository write boundary', () => {
     let sequence = 0
     const locus = new LocusController({
       repository: adapter,
+      establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
       dsh: {
         resolveDefaultWorkspace: async () => ({ id: 'workspace-main' }),
         resolveSession: async id => sessions.get(id),
         createMainSession: async () => ({ id: 'unused', workspaceId: 'workspace-main' }),
-        createChildSession: async ({ parentSessionId }) => ({
-          id: `session-child-${String(++sequence)}`, parentSessionId, workspaceId: 'workspace-main', childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
-        }),
+        createLocusMainSession: async ({ workspaceId }) => {
+          const session = { id: `locus-main-${String(++sequence)}`, workspaceId, agentPreset: LOCUS_MAIN_PRESET }
+          sessions.set(session.id, session)
+          return session
+        },
       },
       lark: { createGroup: async () => ({ chatId: 'oc_default_rebuild' }), sendControlMessage: async () => {} },
       id: () => `id-${String(++sequence)}`,
@@ -601,7 +605,7 @@ describe('controller to durable locus repository write boundary', () => {
 
     expect(rebuilt.locus).toMatchObject({ generation: 2, permission: 'read', source: 'qa-created' })
     expect(durable.getLocus(original.locus.locusId)?.state).toBe('stopped')
-    expect(durable.getDefaultQaLocus('session-main')?.id).toBe(rebuilt.locus.locusId)
+    expect(durable.getDefaultQaLocus(rebuilt.locus.parentSessionId)?.id).toBe(rebuilt.locus.locusId)
     await harness.close()
   })
 
@@ -614,6 +618,7 @@ describe('controller to durable locus repository write boundary', () => {
     let sequence = 0
     const locus = new LocusController({
       repository: adapter,
+      establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
       dsh: {
         resolveDefaultWorkspace: async () => ({ id: 'workspace-main' }),
         resolveSession: async sessionId => sessions.get(sessionId),
@@ -622,12 +627,11 @@ describe('controller to durable locus repository write boundary', () => {
           sessions.set(session.id, session)
           return session
         },
-        createChildSession: async ({ parentSessionId }) => ({
-          id: `session-child-${String(++sequence)}`,
-          parentSessionId,
-          workspaceId: 'workspace-main',
-          childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
-        }),
+        createLocusMainSession: async ({ workspaceId }) => {
+          const session = { id: `locus-main-${String(++sequence)}`, workspaceId, agentPreset: LOCUS_MAIN_PRESET }
+          sessions.set(session.id, session)
+          return session
+        },
       },
       id: () => `id-${String(++sequence)}`,
       now: () => 10,
@@ -636,7 +640,7 @@ describe('controller to durable locus repository write boundary', () => {
     const group = await locus.ensureGroup({ chatId: 'oc_end_to_end' })
     const topic = await locus.ensureTopic({ chatId: 'oc_end_to_end', threadId: 'omt_topic' })
 
-    expect(group.locus.state).toBe('active')
+    expect(group.locus.state).toBe('not-created')
     expect(topic.locus.parentLocusId).toBe(group.locus.locusId)
     expect(durable.getLatestLocusByEndpoint(topic.locus.endpoint)).toMatchObject({
       id: topic.locus.locusId,
@@ -663,6 +667,7 @@ describe('controller to durable locus repository write boundary', () => {
     const sent: string[] = []
     const locus = new LocusController({
       repository: adapter,
+      establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
       dsh: {
         resolveDefaultWorkspace: async () => ({ id: 'workspace-main' }),
         resolveSession: async id => sessions.get(id),
@@ -671,12 +676,11 @@ describe('controller to durable locus repository write boundary', () => {
           sessions.set(session.id, session)
           return session
         },
-        createChildSession: async ({ parentSessionId }) => ({
-          id: `session-child-${String(++sequence)}`,
-          parentSessionId,
-          workspaceId: sessions.get(parentSessionId)!.workspaceId,
-          childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
-        }),
+        createLocusMainSession: async ({ workspaceId }) => {
+          const session = { id: `locus-main-${String(++sequence)}`, workspaceId, agentPreset: LOCUS_MAIN_PRESET }
+          sessions.set(session.id, session)
+          return session
+        },
       },
       lark: {
         createGroup: async () => ({ chatId: 'unused' }),
@@ -698,7 +702,7 @@ describe('controller to durable locus repository write boundary', () => {
     const current = durable.getLatestLocusByEndpoint(original.locus.endpoint)
     expect(current).toMatchObject({
       generation: 2,
-      parentSessionId: 'session-source-1',
+      parentSessionId: durable.getActiveLocusMainForWork('session-source-1')!.locusMainSessionId,
       workspaceId: 'workspace-source',
       source: 'explicit',
       permission: { desired: 'read', effective: 'read' },
@@ -937,6 +941,7 @@ describe('controller to durable locus repository write boundary', () => {
     let failNotice = true
     const locus = new LocusController({
       repository: adapter,
+      establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
       dsh: {
         resolveDefaultWorkspace: async () => ({ id: 'workspace-main' }),
         resolveSession: async sessionId => sessions.get(sessionId),
@@ -945,17 +950,11 @@ describe('controller to durable locus repository write boundary', () => {
           sessions.set(session.id, session)
           return session
         },
-        createChildSession: async ({ parentSessionId }) => {
-          const id = `session-child-${String(++sequence)}`
-          children.push(id)
-          return {
-            id,
-            parentSessionId,
-            workspaceId: parentSessionId === 'session-source-1'
-              ? 'workspace-source'
-              : 'workspace-main',
-            childComposition: 'safe-v2' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
-          }
+        createLocusMainSession: async ({ workspaceId }) => {
+          const session = { id: `locus-main-${String(++sequence)}`, workspaceId, agentPreset: LOCUS_MAIN_PRESET }
+          children.push(session.id)
+          sessions.set(session.id, session)
+          return session
         },
       },
       lark: {
@@ -979,11 +978,11 @@ describe('controller to durable locus repository write boundary', () => {
     })).rejects.toMatchObject({ code: 'NOTIFICATION_FAILED' })
 
     const current = durable.getLatestLocusByEndpoint({ chatId: 'oc_notice_retry' })
-    expect(current).toMatchObject({ source: 'explicit', parentSessionId: 'session-source-1' })
+    expect(current).toMatchObject({ source: 'explicit', parentSessionId: durable.getActiveLocusMainForWork('session-source-1')!.locusMainSessionId })
     const debt = durable.getSwitchNotice(current!.id, current!.generation)
     expect(debt?.text).toContain('上下文来源发生变化')
     const exactText = debt!.text
-    const resolution = createLocusResolution({ store: durable })
+    const resolution = createLocusResolution({ store: durable, mains: { find: id => durable.getLocusMain(id) }, verifyMain: () => true })
     expect(() => resolution.resolveCurrent({ chatId: 'oc_notice_retry' })).toThrowError(
       expect.objectContaining({ reason: 'locus-unusable' }),
     )
@@ -992,7 +991,7 @@ describe('controller to durable locus repository write boundary', () => {
       endpoint: current!.endpoint,
       locusId: current!.id,
       generation: current!.generation,
-      childSessionId: current!.childSessionId!,
+      childSessionId: current!.reservedChildSessionId!,
       messageId: 'message-before-notice',
       senderOpenId: 'ou_sender',
       acceptedAt: 11,
@@ -1010,7 +1009,7 @@ describe('controller to durable locus repository write boundary', () => {
     expect(durable.getSwitchNotice(current!.id, current!.generation)).toBeUndefined()
     expect(resolution.resolveCurrent({ chatId: 'oc_notice_retry' })).toMatchObject({
       id: current!.id,
-      state: 'active',
+      state: 'not-created',
     })
     expect(durable.listOperations()).toHaveLength(operationsAfterCommit)
     expect(children).toHaveLength(childrenAfterCommit)

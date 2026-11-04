@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import { agentPresetProjectionDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-title'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
@@ -54,43 +54,21 @@ import { createPetEnvContributor } from './host/shell-env.js'
 import { createPetSkillProvider, resolveInvocationSkill } from './host/skill-provider.js'
 import { createWorktreeProvider } from './host/worktree-adapter.js'
 import { loadWorktreeStatus } from './host/worktree-status.js'
-import { registerPetTools } from './host/tools.js'
-import { CollaborationContextStore } from './host/collaboration/context-store.js'
-import { createCollaborationHostIdentity } from './host/collaboration/host-identity.js'
-import { createCollaborationContextRoutes } from './host/collaboration/routes.js'
-import {
-  composeCollaborationSurface,
-  type CollaborationAssembly,
-} from './host/collaboration/assembly.js'
-import { InquiryLedgerStore } from './host/inquiry/ledger-store.js'
-import { composeProductionInquiry } from './host/inquiry/composition.js'
-import { createInquiryAgentResolver } from './host/inquiry/agent-resolver.js'
-import { createInquiryManagedEffects } from './host/inquiry/managed-effects.js'
-import type { InquiryScope } from './host/inquiry/ledger.js'
+import { registerPetTools, registerPetLocusMainTools } from './host/tools.js'
 import { SharedFactLedgerStore } from './host/ledger/store.js'
 import { legacyTodoBackend } from './host/ledger/backend.js'
 import { projectTodoForOwner } from './host/ledger/owner-view.js'
 import { createOwnerLedger } from './host/ledger/owner-ledger.js'
-import { LocusCollabProxy } from './host/collab/proxy.js'
+import { LocusCollab, type LocusMainRef } from './host/collab/locus-collab.js'
+import type { LocusMainToolsDeps, SubagentMessenger } from './host/collab/locus-tools.js'
 import { CollabTodoBackend } from './host/collab/todo-backend.js'
-import { installLocusCollabTools, type DelegableToolDefinition } from './host/collab/child-tools.js'
 import type { TodoBackend } from './host/ledger/backend.js'
 import type { CollabService } from './host/collab/types.js'
 import {
   acceptTodo,
-  requestTodoExecution,
   type AcceptTodoDeps,
   type TodoDispatchPort,
 } from './host/ledger/dispatch.js'
-import { InquiryOutboxStore } from './host/inquiry/outbox-store.js'
-import { createInquiryOwnerProjection } from './host/inquiry/owner-projection.js'
-import { summarizeInquiryReconciliation } from './host/inquiry/reconcile.js'
-import {
-  createInquirySessionEvidence,
-  createInquiryWorkEvidence,
-  planInquiryRecoveryForMembers,
-  runInquiryStartupRecovery,
-} from './host/inquiry/startup-recovery.js'
 import type {
   PetLocusFinishInput,
   PetLocusFinishResult,
@@ -110,12 +88,13 @@ import {
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
 import { createRefusedReplyTracker } from './host/locus/refused-reply.js'
+import { StopPreparation, PET_PREPARE_STOP_ROUTE, publishStopDescriptor, releaseStopDescriptor } from './host/locus/stop-preparation.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { petRoute } from './host/http.js'
 import { resumeModelFor } from './host/inquiry/resume-model.js'
-import type { InquiryExecutionProof, InquiryAgent as InquiryAgentAdapter } from './host/inquiry/agent-adapter.js'
 import {
-  proveInterruptedStartupDelivery,
-  proveLiveStartupDelivery,
-  proveUnconsumedStartupDelivery,
+  proveStartupDeliveryFromColdRead,
+  type LocusSessionQueryLike,
 } from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
@@ -123,20 +102,25 @@ import {
   type LocusHostContextLike,
 } from './host/locus/child.js'
 import { createLocusChildDelivery } from './host/locus/child-delivery.js'
+import { createLocusLazyChildCreator } from './host/locus/lazy-child.js'
+import { createFirstPromptRegistry } from './host/locus/first-prompt.js'
+import { createFirstDeliveryPublication } from './host/locus/first-delivery-publication.js'
+import { createDeliveryExecutionProof } from './host/locus/delivery-execution-proof.js'
+import { resolveLocusPendingApplication } from './host/locus/pending-application.js'
+import { retiredInquiryOwnerProjection } from './host/inquiry/retired-history.js'
+import { isLocusPresetDeclared, LOCUS_BASE_PRESET } from './host/locus/preset.js'
 import {
   createLocusChannelCapability,
   unavailableLocusChannelCapability,
 } from './host/channel/locus-capability.js'
 import { createLocusTurnObserver } from './host/locus/turn-observer.js'
-import { proveInquiryResultDelivery } from './host/locus/inquiry-result-proof.js'
-import { InquiryHandoffStore } from './host/inquiry/handoff-store.js'
-import { InquiryWorkStore } from './host/inquiry/work-store.js'
 import {
   entranceReadProbeFor,
   measureEntranceReadability,
 } from './host/channel/entrance-capability.js'
 import { createLocusManagementPort, createLocusSessionDescriber, type LocusSessionPeek } from './host/locus/management.js'
 import { createLocusResolution } from './host/locus/resolution.js'
+import { attestLocusMainSurface, foldLocusMainSettings, isUsableLocusMainSession, LOCUS_MAIN_DENIED_TOOLS } from './host/locus/locus-main.js'
 import { createLocusController } from './host/locus/controller.js'
 import { ControllerLocusRepositoryAdapter } from './host/locus/controller-persistence-adapter.js'
 import { createProductionLocusDshPort } from './host/locus/dsh-port.js'
@@ -366,11 +350,6 @@ async function initialize(
   // The additive locus store is a separate source of truth. It is opened on
   // the same durable domain but never falls back to legacy chat bindings.
   const locusRepository = new LocusRepository(domain)
-  const collaborationContextStore = new CollaborationContextStore(domain as never)
-  const collaborationHostIdentity = createCollaborationHostIdentity({
-    sessionController: ctx.get('sessionController') as never,
-    workspaceRegistry: ctx.workspaceRegistry as never,
-  })
   // Startup recovery is deliberately deferred until the exact child runtime,
   // turn observer and operation-owned compensation ports have been composed.
   // Running it here with no options would persist manual debt before the Host
@@ -408,7 +387,7 @@ async function initialize(
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
+    readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
     readonly generation?: number
   }
@@ -450,38 +429,30 @@ async function initialize(
       readonly outcome?: 'settled' | 'failed'
     }) => void
     readonly dispatchNext?: (correlation: DeliveryCorrelation) => Promise<void>
+    readonly freezeForShutdown?: () => Promise<void>
+    readonly resumeAfterShutdown?: () => Promise<void>
+    readonly runWhileActive?: <T>(operation: () => Promise<T>) => Promise<T>
   } | undefined
+  // Nested calls inside an already-admitted mutation must not be refused
+  // half-way by a freeze that is itself waiting for that mutation.
+  const admittedLocusMutation = new AsyncLocalStorage<true>()
+  const runLocusMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (admittedLocusMutation.getStore() === true) return operation()
+    try {
+      return await (locusChannelController?.runWhileActive === undefined
+        ? admittedLocusMutation.run(true, operation)
+        : locusChannelController.runWhileActive(() => admittedLocusMutation.run(true, operation)))
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'LOCUS_SHUTDOWN_FROZEN') {
+        throw new PetError('LOCUS_BUSY', 'Host 正在准备停机，请稍后重试。')
+      }
+      throw error
+    }
+  }
   const locusContextRepository = asLocusContextRepository(
     locusRepository,
     childSessionId => currentLocusTurnProof(childSessionId),
   )
-
-  /**
-   * Agent scopes already carrying the scoped collaboration + inquiry surface.
-   *
-   * A fourth marker alongside `composedAgents`/`allowlistAgents`/
-   * `contextToolAgents` below, following the same discipline for the same
-   * reason: the SAME agent can be offered this surface from more than one
-   * entry point (the synchronous locus-child boundary, the `agent/created`
-   * fall-through, the live-parent repair after a first locus is published),
-   * and a second registration of the same tool name throws
-   * `tool "..." is already registered in this scope`. An explicit weak marker
-   * is the deduplication; swallowing a duplicate-registration error is exactly
-   * how the `shellEnv` incident cost the executor its `bash` tool.
-   *
-   * Declared here rather than beside the others because the assembly that
-   * consumes it is composed before them.
-   */
-  const collaborationAgents = new WeakSet<object>()
-
-  /**
-   * Durable inquiry ledger over the same opened domain.
-   *
-   * Constructed unconditionally: it proves the atomic-batch capability itself
-   * on every call and rejects without it, and the assembly below refuses to
-   * publish anything when that capability is absent.
-   */
-  const inquiryLedgerStore = new InquiryLedgerStore(domain as never)
 
   /**
    * Durable shared-fact ledger (`pet-locus-intent-triage`) over the same
@@ -517,291 +488,24 @@ async function initialize(
    * assembly pitfalls warn about, and it would be invisible to a unit test
    * that calls `registerPetTools` directly.
    *
-   * `inspect` is PROBED rather than injected — a Host without cold-read keeps
-   * every other tool working while the parent-lookup tool reports itself
-   * unavailable (spec: 缺少冷读能力时如实降级，不猜测、不降级为提问).
    */
-  const intentTriageDeps = (() => {
-    const controller = ctx.get('sessionController') as
-      | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
-      | undefined
-    const inspect = controller?.inspect
-    return {
-      // Returns EVERY durable generation for the child identity; rejecting
-      // ambiguity is the caller's job — exactly `resolveLedgerCaller`'s contract.
-      loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
-      track: {
-        store: todoBackend,
-        now: () => Date.now(),
-        newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
-      },
-      ...(typeof inspect !== 'function' ? {} : {
-        parentLookup: {
-          // Keep the receiver: `inspect` is a service method that uses `this`.
-          inspect: async (sessionId: string) =>
-            await inspect.call(controller, sessionId) as { readonly events?: readonly unknown[] },
-        },
-      }),
-    }
-  })()
-  // The result outbox is the other half of restart reconciliation: without it
-  // the pass can classify inquiries but cannot see whether a result already
-  // exists, so it would report a fault instead of reconciling on a guess.
-  const inquiryOutboxStore = new InquiryOutboxStore(domain as never)
-  const inquiryWorkStore = new InquiryWorkStore(domain as never)
-
-  /**
-   * Synchronous, cheap durable description of one circle member.
-   *
-   * The roster contract forbids reading or summarizing a member's history, and
-   * requires a SYNCHRONOUS answer, so the owner-facing
-   * `createLocusSessionDescriber` (an async cold log read used for the
-   * management view) is deliberately not reused here. `sessions.get` means
-   * LOADED, not "exists" — which is precisely the distinction the roster wants:
-   * a durable member DSH has unloaded is `unloaded`, i.e. `needs-restore`, not
-   * missing. Archived members never reach this function; the caller resolver
-   * excludes them from the circle first.
-   */
-  const describeCollaborator = (sessionId: string): { title?: string; availability?: 'available' | 'unloaded' } => {
-    const session = ctx.sessions.get(sessionId as never)
-    if (session === undefined) return { availability: 'unloaded' }
-    // Titles are log-only `session/title` events, never header fields.
-    const snapshot = ctx.sessionTitle.get(session as never) as { title?: unknown } | undefined
-    const title = typeof snapshot?.title === 'string' && snapshot.title.trim() !== ''
-      ? snapshot.title
-      : undefined
-    return { availability: 'available', ...(title === undefined ? {} : { title }) }
+  const intentTriageDeps = {
+    // Returns EVERY durable generation for the child identity; rejecting
+    // ambiguity is the caller's job — exactly `resolveLedgerCaller`'s contract.
+    loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
+    track: {
+      store: todoBackend,
+      now: () => Date.now(),
+      newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
+    },
   }
-
-
-  /**
-   * Inquiry readiness is evaluated live and remains fail-closed unless durable
-   * storage, the actually loaded AgentLoop isolation probe, ToolRuntime final
-   * guard recheck, and installed per-agent managed guards are all present.
-   */
-  const managedEffects = createInquiryManagedEffects()
-  const inquiryAdapters = new Map<string, InquiryAgentAdapter>()
+  type RefusedReplyExecutionProof = {
+    readonly sessionId: string
+    readonly turn: number
+    readonly scope: { readonly kind: 'child'; readonly locusId: string; readonly generation: number }
+  }
   let refusedReplies: ReturnType<typeof createRefusedReplyTracker> | undefined
-  const currentInquiryScope = (sessionId: string): InquiryScope | undefined => {
-    try {
-      const owned = locusRepository.findByChildSessionId(sessionId)
-      if (owned.length > 1) return undefined
-      const row = owned[0]
-      if (row !== undefined) {
-        if (row.state !== 'active' || row.childSessionId !== sessionId) return undefined
-        return { kind: 'child', sessionId, locusId: row.id, generation: row.generation }
-      }
-      if (locusRepository.getLocusByChild(sessionId) !== undefined) return undefined
-      return { kind: 'main', sessionId }
-    } catch {
-      return undefined
-    }
-  }
-  const agentLoop = ctx.get('agentLoop')
-  const claimProbe = typeof (agentLoop as { probeIsolatedQueuedTurnClaim?: unknown } | undefined)?.probeIsolatedQueuedTurnClaim === 'function'
-    ? (agentLoop as { probeIsolatedQueuedTurnClaim: (...args: never[]) => unknown }).probeIsolatedQueuedTurnClaim.bind(agentLoop)
-    : undefined
-  const getInquiryLiveAgent = (sessionId: string) => {
-    try {
-      const candidate = ctx.agents.get(sessionId as never) as {
-        id?: unknown; session?: unknown; inbox?: unknown; followup?: unknown; ctx?: unknown
-      } | undefined
-      if (!candidate || typeof candidate.id !== 'string' || candidate.id !== sessionId || !candidate.session || !candidate.inbox
-        || typeof candidate.followup !== 'function' || !candidate.ctx) return undefined
-      return candidate as { readonly id: string }
-    } catch { return undefined }
-  }
-  const inquiryAgentResolver = createInquiryAgentResolver({
-    getLive: getInquiryLiveAgent,
-    resumeMain: async (sessionId, _signal) => {
-      const { presetId, model } = await persistedCompositionFor(sessionId)
-      await ctx.agents.resume({
-        resumeSessionId: SessionId(sessionId),
-        agentOptions: model,
-        setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, presetId) },
-      })
-    },
-    parentSessionOf: childSessionId => {
-      const rows = locusRepository.findByChildSessionId(childSessionId)
-      if (rows.length !== 1) return undefined
-      const row = rows[0]
-      return row !== undefined && row.state === 'active' && row.childSessionId === childSessionId ? row.parentSessionId : undefined
-    },
-    materializeChild: async (parent, childSessionId, signal) => {
-      const subagents = ctx.get('subagents') as {
-        supportsLiveContinuableChildSession?: unknown
-        withLiveContinuableChildSession?: (spec: { parent: unknown; childId: string; signal: AbortSignal }, operation: (session: unknown) => unknown) => Promise<unknown>
-      } | undefined
-      if (subagents?.supportsLiveContinuableChildSession !== true || typeof subagents.withLiveContinuableChildSession !== 'function') {
-        throw new Error('child-session-access-unsupported')
-      }
-      await subagents.withLiveContinuableChildSession.call(
-        subagents,
-        { parent, childId: childSessionId, signal },
-        async () => undefined,
-      )
-    },
-    log: message => petLog(`dsh-pet: ${message}`),
-  })
-  const composed = composeProductionInquiry({
-    domain: domain as never,
-    currentScope: currentInquiryScope,
-    resolveAgent: inquiryAgentResolver as never,
-    agentLoop,
-    probeIsolatedClaim: claimProbe,
-    tools: ctx.get('tools') as never,
-    readinessManagedGuard: () => (ctx.get('tools') as { supportsFinalToolGuardRecheck?: boolean } | undefined)?.supportsFinalToolGuardRecheck === true,
-    log: petLog,
-    onError: error => petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`),
-    now: Date.now,
-    newMessageId: () => randomUUID(),
-    newInquiryId: () => randomUUID(),
-  })
-  const deliveryExecution = (execution: ToolRunContext): InquiryExecutionProof | undefined => {
-    const child = execution.agent?.id
-    if (typeof child !== 'string') return undefined
-    const proof = inquiryAdapters.get(child)?.executionProof(execution as ToolExecution)
-    if (!proof?.active || proof.scope.kind !== 'child' || proof.inquirySegment?.phase === 'target') return undefined
-    return proof
-  }
-  const installInquiryAgent = (candidate: unknown): void => {
-    const agent = candidate as { id?: unknown; ctx?: { effect?: (...args: never[]) => unknown } } | undefined
-    if (!agent || typeof agent.id !== 'string' || !agent.ctx) return
-    const id = agent.id
-    if (inquiryAdapters.has(id)) return
-    let disposeGuard: (() => void) | undefined
-    try {
-      const proofForExecution = (agentId: string, execution: unknown) => inquiryAdapters.get(agentId)?.executionProof(execution as ToolExecution)
-      // ManagedExecution is structurally supplied by ToolRuntime at execution time.
-      disposeGuard = managedEffects.install(agent as never, proofForExecution as never, currentInquiryScope)
-    } catch (error) {
-      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
-      return
-    }
-    let adapter: unknown
-    try {
-      adapter = composed.install(agent as never)
-    } catch (error) {
-      disposeGuard()
-      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
-      return
-    }
-    const installed = adapter as InquiryAgentAdapter
-    inquiryAdapters.set(id, installed)
-    installed.on('agent/turn-end', async ({ turn }) => {
-      try { await refusedReplies?.end(id, turn) }
-      catch { petLog('dsh-pet locus reply-refused settlement failed') }
-    })
-    try {
-      ;(agent.ctx as { effect: (factory: () => () => void, name: string) => unknown }).effect(
-        () => () => {
-          try { disposeGuard?.() } catch (error) { petLog(`dsh-pet: inquiry guard dispose error (${error instanceof Error ? error.message : String(error)})`) }
-          try { composed.release(agent as never) } catch (error) { petLog(`dsh-pet: inquiry adapter release error (${error instanceof Error ? error.message : String(error)})`) }
-          try { refusedReplies?.release(id); inquiryAdapters.delete(id) } catch (error) { petLog(`dsh-pet: inquiry adapter cleanup error (${error instanceof Error ? error.message : String(error)})`) }
-        },
-        'dsh-pet: inquiry managed guard',
-      )
-    } catch (error) {
-      disposeGuard()
-      inquiryAdapters.delete(id)
-      petLog(`dsh-pet: inquiry runtime error (${error instanceof Error ? error.message : String(error)})`)
-    }
-  }
-  const collaborationSurface: CollaborationAssembly | undefined = composeCollaborationSurface({
-    atomicStorage: locusRepository.supportsAtomicProvisioning(),
-    loci: locusRepository,
-    identity: collaborationHostIdentity,
-    contextStore: collaborationContextStore,
-    ledger: inquiryLedgerStore,
-    resultOutbox: inquiryOutboxStore,
-    describe: describeCollaborator,
-    agentLoop,
-    probeIsolatedClaim: claimProbe,
-    answerStore: composed.answerStore,
-    inquiryRuntime: {
-      get ready() { return composed.ready },
-      forExecution: composed.forExecution,
-      afterAnswer: composed.afterAnswer,
-      answerBinding: composed.answerBinding,
-    },
-    installed: collaborationAgents,
-  })
-  if (collaborationSurface === undefined) {
-    petLog('dsh-pet: scoped collaboration/inquiry surface unavailable — required seams are missing')
-  } else if (!collaborationSurface.inquiryDispatch.available) {
-    petLog(
-      'dsh-pet: inquiry dispatch stays unavailable '
-      + `(${collaborationSurface.inquiryDispatch.reason}); members are reported as not inquirable`,
-    )
-  }
-
-  /**
-   * Settle durable inquiry work left behind by the previous process.
-   *
-   * Runs BEFORE the channel starts so a recovered request is never raced by new
-   * intake. It only classifies and settles from durable rows: provably
-   * undispatched work stays dispatchable, dispatched-but-unknown work becomes
-   * needs-review and is never auto-retried. Long-waiting queued work remains
-   * recoverable regardless of downtime; only explicit cancellation or a
-   * Host-proven unknown dispatch changes its disposition. It wakes no model,
-   * starts no turn and sends nothing outbound, so a
-   * failure here degrades diagnostics — not intake.
-   */
-  if (collaborationSurface !== undefined) {
-    const reconciled = await lifecycle.contain('Pet inquiry reconciliation', () =>
-      collaborationSurface.reconcileInquiries())
-    if (reconciled !== undefined) {
-      petLog(`dsh-pet: ${summarizeInquiryReconciliation(reconciled)}`)
-    }
-  }
-
-  /**
-   * Install the collaboration surface on ONE live agent scope, if it belongs.
-   *
-   * Eligibility is a durable hint used to decide whether to install at all;
-   * every tool body still re-derives the caller and re-authorizes, so a revoked
-   * child cannot use a tool that merely remains visible to it. Returns whether
-   * anything was installed, and THROWS on a real installation failure so the
-   * synchronous locus boundary can veto publication; asynchronous callers
-   * contain it themselves.
-   * @param agentCtx - the agent's own scope; never the Host context.
-   * @param sessionId - the agent's session id.
-   * @returns whether the surface is now present on that scope.
-   */
-  const installCollaborationScope = (agentCtx: unknown, sessionId: string): boolean => {
-    if (collaborationSurface === undefined) return false
-    if (agentCtx === null || typeof agentCtx !== 'object') return false
-    if (collaborationSurface.isInstalled(agentCtx)) return true
-    if (!collaborationSurface.eligible(sessionId)) return false
-    collaborationSurface.install(agentCtx)
-    return true
-  }
-
-  /** Same installation, contained: for paths that repair a PUBLISHED agent. */
-  const repairCollaborationScope = (agentCtx: unknown, sessionId: string): void => {
-    try {
-      installCollaborationScope(agentCtx, sessionId)
-    } catch (error) {
-      petWarn(
-        `dsh-pet: could not install the collaboration surface on ${sessionId} (${
-          error instanceof Error ? error.message : String(error)
-        })`,
-      )
-    }
-  }
-
-  /** The live agent's own scope for one session, when DSH has it loaded. */
-  const liveAgentScope = (sessionId: string): unknown => {
-    try {
-      const handle = ctx.agents.get(sessionId as never) as
-        | { ctx?: unknown; agent?: { ctx?: unknown } }
-        | undefined
-      return handle?.ctx ?? handle?.agent?.ctx
-    } catch {
-      return undefined
-    }
-  }
-
+  let deliveryExecutionProof = (_execution: ToolRunContext): RefusedReplyExecutionProof | undefined => undefined
   const workspaceId = await lifecycle.contain('Pet Workspace', () =>
     ensurePetWorkspace(ctx.workspaceRegistry as never, paths),
   )
@@ -944,83 +648,78 @@ async function initialize(
     changes.publish()
   }), 'dsh-pet: publish committed inquiry projection changes')
 
-  // Locus collaboration proxy (`pet-locus-collab-integration` D1–D5). The
-  // projection follows committed locus rows; dsh-collab is an OPTIONAL peer
-  // consumed through a dynamic inject, so Pet loads unchanged without it.
-  // Nothing here resumes a main session, opens a turn or sends to Feishu.
-  const locusCollab = new LocusCollabProxy({
-    listLoci: () => locusRepository.listLoci(),
-    liveAgent: sessionId => ctx.agents.get(sessionId as never),
+  // Locus collaboration (`locus-three-tier-structure` D8). dsh-collab is an
+  // OPTIONAL peer consumed through a dynamic inject, so Pet loads unchanged
+  // without it. The space has exactly two ordinary members (work main and
+  // locus main); Pet writes AS the locus main session through `actAs`.
+  // Nothing here opens a turn or sends to Feishu.
+  const locusMainDirectory = { list: (): readonly LocusMainRef[] => locusRepository.listLocusMains() }
+  const locusCollab = new LocusCollab({
+    directory: locusMainDirectory,
     log: message => petLog(message),
   })
-  const collabTodoBackend = new CollabTodoBackend({
-    proxy: locusCollab,
-    // The registering generation's child, only when that record belongs to the
-    // same main session; anything else fails as "collaboration unavailable".
-    childOf: ({ locusId, parentSessionId }) => {
-      const record = locusRepository.getLocus(locusId)
-      return record?.parentSessionId === parentSessionId ? record.childSessionId : undefined
-    },
-    liveAgent: sessionId => ctx.agents.get(sessionId as never),
-  })
+  const collabTodoBackend = new CollabTodoBackend({ collab: locusCollab, directory: locusMainDirectory })
   const ownerLedger = createOwnerLedger({
     collab: collabTodoBackend,
     legacy: legacyTodos,
     collabAvailable: () => locusCollab.currentHandle() !== undefined,
-    unroutable: parentSessionId => locusCollab.inbox()
-      .filter(entry => entry.parentSessionId === parentSessionId && entry.route.kind === 'unroutable'),
   })
-  const ensureLocusSpaces = () => {
-    void locusCollab.ensureAll().catch(error => petWarn(`dsh-pet collab: ${String(error)}`))
-  }
-  ctx.effect(() => ctx.on('domain/changed', change => {
-    if (change.domain !== PET_DOMAIN_NAME || change.table !== 'loci') return
-    locusCollab.refresh()
-    ensureLocusSpaces()
-  }), 'dsh-pet: follow locus rows into the collaboration proxy')
-  // A main session that just loaded may now be able to establish its space.
-  ctx.effect(() => ctx.on('agent/created', (): undefined => { ensureLocusSpaces(); return undefined }),
-    'dsh-pet: establish Locus spaces when a main session loads')
   /**
-   * The child collaboration tool face (design D6): own-scope delegates of the
-   * eight global dsh-collab member tools. Bound to the attach lifecycle —
-   * present only while Pet is attached, re-installed on re-attach, and given
-   * to every Locus child whose scoped surface is (or was) installed. See
-   * `host/collab/child-tools.ts` for why the definitions are copied.
+   * The official `subagents.sendMessage` as the Locus tools see it. Resolved
+   * per call so a service that registers late is still picked up; the sender
+   * must be the exact live Agent executing the tool.
    */
-  const locusChildScopes = new Map<string, Context>()
-  const locusChildCollabTools = new Map<string, () => void>()
-  let collabAttached = false
-  const installChildCollabTools = (childSessionId: string, scope: Context) => {
-    locusChildCollabTools.get(childSessionId)?.()
-    locusChildCollabTools.delete(childSessionId)
-    if (!collabAttached) return
-    const scoped = scope.get('tools') as { register(definition: unknown): () => void } | undefined
-    const global = ctx.get('tools') as { get(name: string): unknown } | undefined
-    if (scoped === undefined || global === undefined) return
-    const dispose = installLocusCollabTools(scoped, name => global.get(name) as DelegableToolDefinition | undefined)
-    if (dispose !== undefined) locusChildCollabTools.set(childSessionId, dispose)
+  const officialSubagentMessenger = (): SubagentMessenger | undefined => {
+    const service = ctx.get('subagents') as {
+      sendMessage?: (sender: unknown, target: unknown, content: unknown, options: { signal: AbortSignal }) => Promise<unknown>
+    } | undefined
+    if (typeof service?.sendMessage !== 'function') return undefined
+    return { sendMessage: (sender, target, content, options) => runLocusMutation(() => service.sendMessage!.call(service, sender, target, content, options)) }
   }
-  const removeAllChildCollabTools = () => {
-    for (const dispose of locusChildCollabTools.values()) dispose()
-    locusChildCollabTools.clear()
+  /** Dependencies of the locus MAIN session's own tools (`locus_note`, `locus_reply_child`). */
+  const locusMainToolsDeps: LocusMainToolsDeps = {
+    loci: locusRepository,
+    collab: locusCollab,
+    subagents: officialSubagentMessenger,
+  }
+  const locusMainScopes = new WeakSet<object>()
+  const livePresetFor = (sessionId: string): string | undefined => {
+    const session = ctx.sessions.get(sessionId as never)
+    if (session === undefined) return undefined
+    let preset = agentPresetProjectionDefinition.init(session.header)
+    for (const event of session.snapshotEvents()) {
+      preset = agentPresetProjectionDefinition.apply(preset, event)
+    }
+    return typeof preset === 'string' ? preset : undefined
+  }
+  const installLocusMainScope = (scope: Context, sessionId: string): void => {
+    if (locusMainScopes.has(scope)) return
+    const tools = scope.get('tools') as {
+      restrict?: (filter: { deny: readonly string[] }) => () => void
+      guard?: (guard: (exec: { name: string }) => string | undefined) => () => void
+    } | undefined
+    if (typeof tools?.restrict !== 'function' || typeof tools.guard !== 'function') {
+      throw new PetError('INTERNAL', 'Agent-scoped tools.restrict/guard is unavailable')
+    }
+    // restrict only accepts GLOBAL names; absent or scope-local names are
+    // rejected by the runtime. Scoped registrations (Agent Team mounts its
+    // tools into every ordinary root) stay visible, so the guard below is what
+    // refuses them, together with every other denied name.
+    const global = new Set(['bash', 'write', 'edit', ...ctx.tools.schemas().map(tool => tool.name)])
+    tools.restrict({ deny: LOCUS_MAIN_DENIED_TOOLS.filter(name => global.has(name)) })
+    const denied = new Set(LOCUS_MAIN_DENIED_TOOLS)
+    tools.guard(exec => denied.has(exec.name) ? 'Locus 主会话只做协调，不能调用该工具' : undefined)
+    registerPetLocusMainTools(scope, locusMainToolsDeps)
+    locusMainScopes.add(scope)
   }
   ctx.inject(['dshCollab'], collabCtx => {
     collabCtx.effect(() => {
       const detach = locusCollab.attach((collabCtx as unknown as { dshCollab: CollabService }).dshCollab)
-      collabAttached = true
-      for (const [childSessionId, scope] of [...locusChildScopes]) {
-        // A child no longer in the Host keeps nothing; its scope is gone.
-        if (ctx.agents.get(childSessionId as never) === undefined) { locusChildScopes.delete(childSessionId); continue }
-        installChildCollabTools(childSessionId, scope)
+      // Spaces that already exist on disk are recognized, never created here.
+      for (const ref of locusMainDirectory.list()) {
+        void locusCollab.probe(ref).catch(error => petWarn(`dsh-pet collab: probe failed: ${String(error)}`))
       }
-      locusCollab.refresh()
-      ensureLocusSpaces()
-      return () => {
-        collabAttached = false
-        removeAllChildCollabTools()
-        detach()
-      }
+      return () => { detach() }
     }, 'dsh-pet: attach pet-locus to dsh-collab')
   })
 
@@ -1169,7 +868,7 @@ async function initialize(
                 repository,
                 locusRepository: locusContextRepository,
                 intentTriage: intentTriageDeps,
-                managedEffects: { register: managedEffects.register, assertEntry: managedEffects.assertEntry },
+                locusChildTools: { loci: intentTriageDeps.loci, collab: locusCollab, subagents: officialSubagentMessenger },
                 // A user message typed into this executor registers its
                 // Invocation through the durable inbox splice, which can still
                 // be landing when the turn's first step asks for context.
@@ -1224,12 +923,6 @@ async function initialize(
     await installPetScope(agentCtx, includeAllowlist)
   }
 
-  // This is intentionally a separate Host owner proof from locusIdentity
-  // (`host:dsh-pet` is a plugin identity, not a browser principal). Until the
-  // Connection service exposes a target-parent local-owner verdict, the route
-  // stays unmounted rather than upgrading an allowlist or agent label.
-  const collaborationOwnerIdentity = (): undefined => undefined
-
   /** Whether an Agent already carries the Pet-owned scoped surface. */
   const isComposed = (agent: unknown): boolean => {
     const agentCtx = (agent as { ctx?: unknown } | undefined)?.ctx
@@ -1277,15 +970,6 @@ async function initialize(
         })`,
       )
     }
-    // A Pet executor session can also be the MAIN session of a circle — an
-    // owner may bind a Feishu entry to it like any other session. Eligibility
-    // decides; an ordinary executor with no locus and no shared record gets
-    // nothing, which is the "do not change existing behaviour" case.
-    //
-    // Separately contained from the Pet scope above: losing the circle surface
-    // must never cost an executor `pet_context`, and a failure here must not
-    // make the fail-closed dispatch check below reject a usable Invocation.
-    repairCollaborationScope(view.ctx, String(sessionId))
   }
 
   /**
@@ -1299,6 +983,17 @@ async function initialize(
    * different guarantee.
    */
   const locusPrepublication = new LocusPrepublicationStagingRegistry()
+  const firstPrompts = createFirstPromptRegistry({
+    bindQueued: async (delivery, inboxMessageId) => {
+      const bound = await locusRepository.bindQueued({
+        deliveryId: delivery.deliveryId,
+        correlation: delivery.correlation,
+        executionId: delivery.executionId,
+        inboxMessageId,
+      })
+      if (bound === undefined) throw new Error('First Delivery inbox binding was rejected')
+    },
+  })
   ctx.effect(
     () => () => { locusPrepublication.dispose() },
     'dsh-pet: dispose locus pre-publication staging',
@@ -1308,16 +1003,22 @@ async function initialize(
       const matches = locusRepository.findByChildSessionId(sessionId)
       // Exactly one active generation may own a child. Anything else is
       // unproven identity, and the composer refuses rather than guessing.
-      if (matches.length !== 1) return undefined
-      const record = matches[0]
-      if (record === undefined || record.state !== 'active') return undefined
-      if (record.childSessionId !== sessionId) return undefined
+      if (matches.length === 0) return undefined
+      if (matches.length !== 1) throw new PetError('INTERNAL', 'Locus child ownership is ambiguous')
+      const record = matches[0]!
+      if (record.state !== 'active' || locusRepository.hasFirstDeliveryRecoveryDebt(record.id)) {
+        throw new PetError('INTERNAL', 'Locus child is retired or has unresolved creation recovery debt')
+      }
+      if (record.childSessionId !== sessionId) throw new PetError('INTERNAL', 'Locus child identity changed')
       return {
         parentSessionId: record.parentSessionId,
         childSessionId: sessionId,
         locusId: record.id,
         generation: record.generation,
+        revision: record.revision ?? 0,
+        endpoint: record.endpoint,
         permission: record.permission.effective,
+        ...(record.permission.desired === record.permission.effective ? {} : { pendingPermission: record.permission.desired }),
         ...(record.childComposition !== undefined ? { childComposition: record.childComposition } : {}),
         ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
       }
@@ -1357,6 +1058,7 @@ async function initialize(
   locusCompositionPorts = {
     // Durable rows serve restores; the one-shot staging fallback serves the
     // fresh `agent/created` emitted before active publication.
+    parentPreset: livePresetFor,
     lookup: createPrepublicationCompositionLookup({
       durable: durableLocusCompositionLookup,
       staging: locusPrepublication,
@@ -1366,6 +1068,10 @@ async function initialize(
     surface: {
       install: (agent, composition) => {
         const scope = agent.scope as unknown as Context
+        scope.on('tools/pre-execute', async (_exec, next) => {
+          await firstPrompts.whenBound(agent.id)
+          return next()
+        })
         const tools = scope.get('tools') as { register(definition: unknown): unknown } | undefined
         if (tools === undefined) {
           throw new PetError('INTERNAL', 'Agent scope exposes no tools service')
@@ -1387,16 +1093,19 @@ async function initialize(
         ) {
           throw new PetError('INTERNAL', 'Exact child project-read roots are unavailable')
         }
+        const entry = locusRepository.getLocus(composition.locusId)
+        const project = entry === undefined ? undefined : ctx.workspaceRegistry.get(entry.workspaceId as never)
+        if (project === undefined) throw new PetError('INTERNAL', 'Bound locus project workspace is unavailable')
         installLocusProjectReadGuard(scope, {
           childCwd,
           parentCwd,
           workspaceRoot,
+          projectRoot: project.path,
           deniedRoots: locusDeniedRoots(paths),
         })
         registerPetTools(agent.scope as never, {
           repository,
           locusRepository: locusContextRepository,
-          managedEffects: { register: managedEffects.register, assertEntry: managedEffects.assertEntry },
           locusLifecycle: {
             locusRepository: locusContextRepository,
             lark: larkClient,
@@ -1408,7 +1117,7 @@ async function initialize(
             logAuthorizationRefusal: ({ operation, reason }) =>
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
             onFinishRefused: execution => {
-              const proof = deliveryExecution(execution)
+              const proof = deliveryExecutionProof(execution)
               if (!proof || proof.scope.kind !== 'child') return
               const associated = locusTurnObserver?.deliveryForTurn?.(proof.sessionId, proof.turn)
               if (!associated || associated.correlation.locusId !== proof.scope.locusId || associated.correlation.generation !== proof.scope.generation) return
@@ -1417,7 +1126,7 @@ async function initialize(
               refusedReplies?.refused(current, proof.turn)
             },
             onDeliveryContinued: execution => {
-              const proof = deliveryExecution(execution)
+              const proof = deliveryExecutionProof(execution)
               if (proof) refusedReplies?.continued(proof.sessionId, proof.turn)
             },
             // Delegate through mutable Host-owned closures. The scoped Agent
@@ -1439,12 +1148,8 @@ async function initialize(
               { ok: false as const, reason: 'capability-unavailable' as const },
             logAuthorizationRefusal: ({ operation, reason }) =>
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
-            // Deferred on purpose: the dispatch chain is composed far below
-            // this registration, and routing through the same late binding is
-            // what keeps the child tool and the owner button on ONE chain
-            // instead of two copies that can drift (design D10).
-            requestExecution: input => runTodoExecutionRequest(input),
           },
+          locusChildTools: { loci: intentTriageDeps.loci, collab: locusCollab, subagents: officialSubagentMessenger },
           // One read tool per child, by entry kind (D9/D10): a document child
           // gets the doc read and never the group-history read, and an IM child
           // never sees the doc read. Each is published only when the runtime
@@ -1471,23 +1176,6 @@ async function initialize(
               },
             })),
         })
-        // The circle surface rides the SAME synchronous boundary, so a locus
-        // child never starts its first turn able to read shared facts but not
-        // to list its collaborators, or the reverse. Installed unconditionally
-        // rather than through the durable eligibility hint: the composer has
-        // already proven this exact session is a current locus child, and for a
-        // FRESH child the durable row is not active yet, so the hint would say
-        // no precisely when the surface matters most.
-        //
-        // A throw here vetoes publication, which is the same guarantee the
-        // caller-bound surface above already has. An absent assembly is not a
-        // failure: the whole surface is simply not published and the child
-        // behaves exactly as it did before this existed.
-        collaborationSurface?.install(agent.scope)
-        // The collaboration member tools ride the same boundary; absent while
-        // dsh-collab is not attached, which the attestation accepts.
-        locusChildScopes.set(agent.id, scope)
-        installChildCollabTools(agent.id, scope)
       },
       setToolTier: (agent, tier) => {
         const scope = agent.scope as unknown as Context
@@ -1599,7 +1287,7 @@ async function initialize(
 
   ctx.effect(
     () =>
-      ctx.on('agent/created', (payload: { agent?: unknown }): undefined => {
+      ctx.on('agent/created', async (payload: { agent?: unknown; source?: string }): Promise<undefined> => {
         const agent = payload?.agent as
           | { id?: unknown; ctx?: unknown }
           | undefined
@@ -1610,7 +1298,27 @@ async function initialize(
         // composition fail as a duplicate publication. `composed:false` is
         // the ordinary-session answer and falls through unchanged.
         if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
-          installInquiryAgent(payload.agent)
+          const main = locusRepository.getLocusMain(sessionId)
+          if (main !== undefined || locusMainScopes.has(agent.ctx as object)) {
+            if ((main !== undefined && main.status !== 'active') || livePresetFor(sessionId) !== LOCUS_BASE_PRESET) {
+              throw new PetError('INTERNAL', 'Locus main is retired or its preset changed')
+            }
+            const session = ctx.sessions.get(sessionId as never)
+            const live = ctx.agents.get(sessionId as never)
+            if (session === undefined || live === undefined) throw new PetError('INTERNAL', 'Locus main is unavailable')
+            installLocusMainScope(agent.ctx as Context, sessionId)
+            setSandboxMode(session, 'read-only')
+            ;(session as { append(type: string, data: unknown): unknown }).append('approval/policy', { policy: 'never' })
+            const settings = foldLocusMainSettings(session.snapshotEvents())
+            const attestation = attestLocusMainSurface({
+              toolNames: ctx.tools.schemas(live).map(tool => tool.name),
+              approval: settings.approval,
+              sandbox: settings.sandbox,
+              guarded: LOCUS_MAIN_DENIED_TOOLS,
+            })
+            if (!attestation.ok) throw new PetError('INTERNAL', `Locus main lockdown failed: ${attestation.leaks.join(', ')}`)
+            return undefined
+          }
           const candidate: LocusCandidateAgent = { id: sessionId, scope: agent.ctx as never }
           // Rethrown deliberately: only a candidate that matched durable or
           // staged locus identity may veto publication. Logged first because the
@@ -1638,6 +1346,32 @@ async function initialize(
             throw error
           }
           if (result.composed) {
+            if (result.pending !== undefined) {
+              await resolveLocusPendingApplication({
+                repository: locusRepository,
+                notify: async input => {
+                  if (input.endpoint.threadId === undefined || isDocEndpoint(input.endpoint)) {
+                    await locusLarkPort.sendControlMessage(input)
+                    return
+                  }
+                  const delivery = locusRepository.findCurrentSerializedDelivery(result.composition)
+                  const target = delivery?.replyTarget
+                  if (target === undefined || target.chatId !== input.endpoint.chatId ||
+                      target.threadId !== input.endpoint.threadId || typeof larkClient.replyToTarget !== 'function') {
+                    throw new Error('Pending topic notice has no current matching reply target')
+                  }
+                  await larkClient.replyToTarget(target, input.text)
+                },
+                log: message => petLog(`dsh-pet locus permission: ${message}`),
+              }, result.composition, result.pending)
+            }
+            await locusPrepublication.publishClaimed(sessionId)
+            if (payload.source === 'resume') {
+              // Repair missing workspace accounting from an earlier creation.
+              void attachSessionToWorkspace(sessionId).catch(error => {
+                petLog(`dsh-pet locus child workspace accounting failed: ${String(error)}`)
+              })
+            }
             composedAgents.add(agent.ctx as object)
             contextToolAgents.add(agent.ctx as object)
             // The circle marker is deliberately NOT set here. `install()` adds
@@ -1647,18 +1381,6 @@ async function initialize(
             // then permanently suppress the repair paths that would fix it.
             return undefined
           }
-          // This is the COLD RESTORE and NATIVE GUI LOAD entry point for a main
-          // session, and for a locus child whose durable row was already active
-          // when DSH republished it. Neither is a Pet Task executor, so the
-          // foreign-executor path below leaves both untouched.
-          //
-          // Contained rather than rethrown: unlike a fresh locus child, this
-          // agent is an ordinary user session that DSH is publishing for its own
-          // reasons. Vetoing that publication because Pet could not add its
-          // circle tools would take the user's session away over an additive
-          // capability. The surface is simply absent and every tool body would
-          // have refused anyway.
-          repairCollaborationScope(agent.ctx, sessionId)
         }
         // Cordis event listeners are observe-only here. Await the scoped
         // installation without allowing an async rejection to escape into the
@@ -1952,10 +1674,10 @@ async function initialize(
     return queued.some(message => isClientUserMessage(message))
   }
 
-  const attachSessionToWorkspace = async (
+  async function attachSessionToWorkspace(
     sessionId: string,
     targetWorkspaceId?: string,
-  ): Promise<void> => {
+  ): Promise<void> {
     const target = targetWorkspaceId ?? workspaceId
     const workspace = ctx.workspaceRegistry.get(target as never)
     await workspace?.attachSession(sessionId as never)
@@ -2067,6 +1789,32 @@ async function initialize(
         ...locusChildProbe.ports,
         log: message => petLog(`dsh-pet locus child: ${message}`),
       }),
+      parentPreset: persistedPresetFor,
+      lazy: {
+        creator: createLocusLazyChildCreator({
+          staging: locusPrepublication,
+          createAdapter: () => createLocusChildAdapter({
+            ...locusChildProbe.ports,
+            log: message => petLog(`dsh-pet locus child: ${message}`),
+          }),
+          presetDeclared: () => isLocusPresetDeclared(ctx.agentPresets),
+          afterCreated: (childSessionId, input) => {
+            try {
+              const session = ctx.sessions.get(childSessionId as never)
+              if (session !== undefined) ctx.sessionTitle.rename(session, input.label)
+            } catch (error) {
+              petLog(`dsh-pet locus child could not be titled: ${String(error)}`)
+            }
+            // The entry's workspaceId authorizes the source project; the child
+            // inherits its locus main's Pet cwd and belongs to the Pet workspace.
+            void attachSessionToWorkspace(childSessionId).catch(error => {
+              petLog(`dsh-pet locus child workspace accounting failed: ${String(error)}`)
+            })
+          },
+          log: message => petLog(`dsh-pet locus child: ${message}`),
+        }),
+        publication: createFirstDeliveryPublication({ repository: locusRepository, firstPrompts }),
+      },
       // Without this port every child-delivery refusal (safe-composition-unproven,
       // child-not-found, parent-unavailable, ...) is discarded: the controller's
       // catch collapses all of them into one `child-unavailable`, which is not
@@ -2148,122 +1896,6 @@ async function initialize(
   if (!locusChildProbe.available) {
     petLog(`dsh-pet: unified locus child seam unavailable — ${locusChildProbe.diagnostic}`)
   }
-  const idleChildProvisioning = locusChildProbe.available
-    && locusChildProbe.ports.subagent.supportsSettlementNotice === true
-    && locusChildProbe.ports.subagent.supportsIdleContinuableCreate === true
-    && locusChildProbe.ports.subagent.supportsIndependentContinuableCreate === true
-    && locusChildProbe.ports.subagent.supportsIndependentChildAgentPreset === true
-    ? {
-      create: async (input: {
-        parentSessionId: string
-        workspaceId: string
-        locusId: string
-        generation: number
-        label: string
-        endpoint: { readonly chatId: string; readonly threadId?: string }
-        permission: 'read'
-      }) => {
-        const reservation = locusPrepublication.reserve({
-          parentSessionId: input.parentSessionId,
-          locusId: input.locusId,
-          generation: input.generation,
-          permission: input.permission,
-          childComposition: 'safe-v2',
-          toolTier: { desired: 'safe', effective: 'safe' },
-          endpoint: input.endpoint,
-        })
-        const adapter = createLocusChildAdapter({
-          ...locusChildProbe.ports,
-          // The provisioning path builds its own adapter; without this sink a
-          // child-creation failure here is the fourth silent swallow on the
-          // way from a Feishu message to a published locus.
-          log: message => petLog(`dsh-pet locus child: ${message}`),
-        })
-        try {
-          const created = await adapter.createIdleChild({
-            parentSessionId: input.parentSessionId,
-            childId: reservation.childSessionId,
-            label: input.label,
-          })
-          if (!created.ok) throw new Error(`Idle locus child creation failed (${created.reason})`)
-          // createIdleContinuable returns only after agent/created. That event
-          // must have consumed the one-shot composition claim before we expose
-          // the resource to the durable controller.
-          if (locusPrepublication.inspect(reservation.childSessionId)?.state !== 'claimed') {
-            throw new Error('Idle locus child was created without synchronous scoped composition')
-          }
-
-          // Give the child its own durable title, exactly as the main creation
-          // path does. The subagent descriptor already carries this label, but
-          // a descriptor is not a Session title: leaving the title unset lets
-          // DSH's fallback generator derive one from the first user message —
-          // which is the long caller-bound delivery header — so every locus
-          // child showed up as "## 当前 unified locus 投递（caller-" and was
-          // indistinguishable in the sidebar and the management view.
-          //
-          // Best-effort by design: the child is already durably created and its
-          // locus identity lives in Pet's own records, so a naming failure must
-          // not roll back a usable child. It is logged, not swallowed silently.
-          const childSession = ctx.sessions.get(reservation.childSessionId as never)
-          if (childSession !== undefined) {
-            try {
-              ctx.sessionTitle.rename(childSession, input.label)
-            } catch (error) {
-              petLog(
-                `dsh-pet: locus child ${reservation.childSessionId} could not be titled (${
-                  error instanceof Error ? error.message : String(error)
-                })`,
-              )
-            }
-          }
-
-          let finalized = false
-          return {
-            childSessionId: reservation.childSessionId,
-            commit: () => {
-              if (finalized) return
-              locusPrepublication.commit(reservation)
-              finalized = true
-              adapter.dispose()
-              // The controller calls this only AFTER the active locus row is
-              // durably committed, so this is the first instant the main
-              // session is provably a circle parent. Install its circle
-              // surface now, while it is loaded, so the tools are present in
-              // its NEXT tool snapshot rather than after a failed call.
-              //
-              // Deliberately does NOT start a turn, send a message, mount a
-              // preset or touch the main session's existing composition: the
-              // spec forbids waking the parent model to announce a membership
-              // change. An unloaded parent is simply repaired by the
-              // `agent/created` path when DSH next publishes it.
-              const parentScope = liveAgentScope(input.parentSessionId)
-              if (parentScope !== undefined) {
-                repairCollaborationScope(parentScope, input.parentSessionId)
-              }
-            },
-            rollback: async () => {
-              if (!finalized && locusPrepublication.inspect(reservation.childSessionId) !== undefined) {
-                locusPrepublication.abort(reservation)
-              }
-              const released = await adapter.compensateChild({
-                identity: created.identity,
-                reason: 'locus provisioning rollback',
-              })
-              adapter.dispose()
-              if (!released.ok) throw new Error(`Could not roll back locus child (${released.reason})`)
-            },
-          }
-        } catch (error) {
-          if (locusPrepublication.inspect(reservation.childSessionId) !== undefined) {
-            locusPrepublication.abort(reservation)
-          }
-          adapter.dispose()
-          throw error
-        }
-      },
-    }
-    : undefined
-
   const imLocusLarkPort = createLocusLarkPort()
   // Display-only doc metadata, cached: the management panel refreshes often,
   // and a failed read is retried after a shorter delay than a successful one.
@@ -2301,7 +1933,9 @@ async function initialize(
     },
   }
   const locusProvisioning = (() => {
-    if (idleChildProvisioning === undefined || !locusRepository.supportsAtomicProvisioning()) {
+    // No child is created by provisioning any more (the first deliverable
+    // message creates it), so the idle-child runtime capability is not needed here.
+    if (!locusRepository.supportsAtomicProvisioning()) {
       return undefined
     }
     const sessionController = ctx.get('sessionController') as
@@ -2311,6 +1945,7 @@ async function initialize(
     try {
       const dsh = createProductionLocusDshPort({
         repository,
+        locusMainWorkspaceId: workspaceId,
         sessionController: sessionController as never,
         workspaceRegistry: ctx.workspaceRegistry as never,
         agents: {
@@ -2338,12 +1973,37 @@ async function initialize(
         agentDefaultModel: ctx.agentDefaultModel as never,
         sessions: ctx.sessions as never,
         sessionTitle: ctx.sessionTitle as never,
-        idleChildren: idleChildProvisioning,
+        // The locus main's lock-down. Each step needs the live runtime, so it
+        // is composed here and read back by the port before it hands anything
+        // out: a locus main that is not provably locked down is never published.
+        locusMainLockdown: {
+          restrict: (agentContext, agent) => installLocusMainScope(agentContext, String(agent.id)),
+          // The two settings' only stores are log-only session events; these are
+          // exactly what `setSandboxMode` / `setApprovalPolicy` append.
+          applyPolicy: session => {
+            setSandboxMode(session as never, 'read-only' as never)
+            ;(session as unknown as { append(type: string, data: unknown): void })
+              .append('approval/policy', { policy: 'never' })
+          },
+          visibleTools: agent => {
+            const live = ctx.agents.get(agent.id as never)
+            return live === undefined ? [] : ctx.tools.schemas(live).map(schema => schema.name)
+          },
+          // restrict ran first; only a scope that passed installLocusMainScope
+          // carries the execution guard over the denied names.
+          guardedTools: agent => {
+            const live = ctx.agents.get(agent.id as never)
+            return live !== undefined && locusMainScopes.has(live.ctx as object) ? LOCUS_MAIN_DENIED_TOOLS : []
+          },
+        },
       })
       const controller = createLocusController({
         repository: new ControllerLocusRepositoryAdapter(locusRepository),
         dsh,
         lark: locusLarkPort,
+        // The dsh-collab space of a work/locus-main pair; owned by the collab
+        // side, this is only the seam the establishment path calls.
+        establishSpace: input => locusCollab.ensureSpace(input),
         log: message => petLog(`dsh-pet locus provisioning: ${message}`),
       })
       return { controller, dsh }
@@ -2376,10 +2036,15 @@ async function initialize(
   const locusAuthorizationStore: LocusAuthorizationStore = {
     getLatestLocusByEndpoint: endpoint => {
       const record = locusRepository.getLatestLocusByEndpoint(endpoint)
-      return record === undefined ? undefined : {
+      if (record === undefined) return undefined
+      // A row whose parent is a recorded locus main is three-tier and is judged
+      // by its WORK session; any other row is the previous model, read as such.
+      const pairing = locusRepository.getLocusMain(record.parentSessionId)
+      return {
         id: record.id,
         state: record.state,
         parentSessionId: record.parentSessionId,
+        ...(pairing === undefined ? { legacy: true } : { workSessionId: pairing.workSessionId }),
         ...(record.toolTier === undefined ? {} : { toolTier: record.toolTier }),
         ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
       }
@@ -2395,6 +2060,21 @@ async function initialize(
     store: locusRepository,
     retired: retiredAssociations,
     isSessionArchived,
+    mains: {
+      find: parentSessionId => {
+        const pairing = locusRepository.getLocusMain(parentSessionId)
+        return pairing === undefined ? undefined : { workSessionId: pairing.workSessionId, status: pairing.status }
+      },
+    },
+    // The delivery path only: whether the locus main still resolves, is not
+    // archived and still runs the neutral preset. Without the Host port nothing
+    // can prove it, and an unproven locus main does not serve.
+    ...(locusDshPort === undefined
+      ? {}
+      : {
+        verifyMain: async (locusMainSessionId: string) =>
+          isUsableLocusMainSession(await locusDshPort.resolveSession(locusMainSessionId), locusMainSessionId, workspaceId),
+      }),
     ...(locusProvisioningController === undefined
       ? {}
       : {
@@ -2413,76 +2093,25 @@ async function initialize(
             } catch {
               chatName = undefined
             }
-            const named = chatName === undefined ? {} : { chatName }
-            // A generation the Host itself invalidated (failed child re-attach
-            // after a restart, lost composition proof) is replaced rather than
-            // reported as "must be rebuilt": the owner never exited anything,
-            // so there is no exit to honour, and the management surface offers
-            // that rebuild only against the same recorded parent — which may
-            // itself be archived, making it impossible. Creating a fresh
-            // generation is safe precisely because the invalid child is NOT
-            // adopted or resumed; `resolution.toActive` still refuses it, and
-            // `rebuildExplicit` retires it as durable history.
-            const invalidCurrent = (() => {
-              try {
-                const current = locusRepository.getLatestLocusByEndpoint(endpoint)
-                return current?.state === 'invalid' ? current : undefined
-              } catch {
-                // A read failure here is not a reason to skip normal ensure:
-                // let the standard path surface its own diagnostic.
-                return undefined
-              }
-            })()
-            const recover = async (target: typeof invalidCurrent & object) =>
-              await locusProvisioningController.rebuildExplicit({
-                endpoint: target.endpoint,
-                previousLocusId: target.id,
-                parentSessionId: target.parentSessionId,
-                allowFreshParent: true,
-              })
-            if (invalidCurrent !== undefined) {
-              // A topic cannot be rebuilt while the chat-level generation it
-              // nests under is itself invalid: the rebuild path needs an active
-              // parent locus (`requireActiveLocus`). Recover the group first so
-              // a topic mention is not stuck behind a group problem the member
-              // never caused and cannot see.
-              if (endpoint.threadId !== undefined) {
-                const groupCurrent = (() => {
-                  try {
-                    const group = locusRepository.getLatestLocusByEndpoint({ chatId: endpoint.chatId })
-                    return group?.state === 'invalid' ? group : undefined
-                  } catch {
-                    return undefined
-                  }
-                })()
-                if (groupCurrent !== undefined) {
-                  await recover({ ...groupCurrent, endpoint: { chatId: endpoint.chatId } })
-                }
-              }
-            }
-            const ensured = invalidCurrent === undefined
-              ? (endpoint.threadId === undefined
-                ? await locusProvisioningController.ensureGroup({ chatId: endpoint.chatId, ...named })
-                : await locusProvisioningController.ensureTopic({
-                  chatId: endpoint.chatId,
-                  threadId: endpoint.threadId,
-                  ...named,
-                }))
-              : await recover({ ...invalidCurrent, endpoint })
+            // ONE repair entry point decides what this entry needs: first
+            // establishment, replacing a previous-model row, moving onto a new
+            // locus main, or a new generation for an unusable child. It never
+            // creates a child session; the first deliverable message does.
+            const ensured = await locusProvisioningController.ensureEntry({
+              chatId: endpoint.chatId,
+              ...(endpoint.threadId === undefined ? {} : { threadId: endpoint.threadId }),
+              ...(chatName === undefined ? {} : { chatName }),
+            })
             const record = ensured.locus
-            if (record.state !== 'active' || record.childComposition !== 'safe-v2') {
-              throw new Error(`Provisioned locus is not an active safe-v2 generation`)
-            }
-            return {
+            const base = {
               id: record.locusId,
               endpoint: record.endpoint,
               generation: record.generation,
               parentSessionId: record.parentSessionId,
-              childSessionId: record.childSessionId,
-              childComposition: record.childComposition,
+              ...(record.workSessionId === undefined ? {} : { workSessionId: record.workSessionId }),
+              ...(record.reservedChildSessionId === undefined ? {} : { reservedChildSessionId: record.reservedChildSessionId }),
               ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
               workspaceId: record.workspaceId,
-              state: 'active' as const,
               permission: {
                 desired: record.permission,
                 effective: record.permission,
@@ -2490,6 +2119,17 @@ async function initialize(
                 // verification; write still needs a separate authorized root.
                 verifiedAt: Date.now(),
               },
+              ...(ensured.notice === undefined ? {} : { notice: ensured.notice }),
+            }
+            if (record.state === 'not-created') return { ...base, state: 'not-created' as const }
+            if (record.state !== 'active' || record.childSessionId === undefined || record.childComposition !== 'tier3') {
+              throw new Error('Provisioned locus is neither a not-created entry nor an active tier3 generation')
+            }
+            return {
+              ...base,
+              childSessionId: record.childSessionId,
+              childComposition: record.childComposition,
+              state: 'active' as const,
             }
           },
         },
@@ -2525,69 +2165,19 @@ async function initialize(
     return createLocusPermissionMutation({
       repository: locusRepository,
       sessions: {
-        resolve: async (childSessionId) => {
-          const locus = locusRepository.getLocusByChild(childSessionId)
-          if (
-            locus === undefined
-            || (locus.state !== 'active' && locus.state !== 'switching')
-            || locus.childSessionId !== childSessionId
-          ) return undefined
-          const identity = {
-            parentSessionId: locus.parentSessionId,
-            childSessionId,
+        resolve: childSessionId => {
+          const agent = ctx.agents.get(childSessionId as never)
+          if (agent === undefined) return undefined
+          return {
+            id: String(agent.id),
+            handle: agent.session,
+            isIdle: () => liveLocusToolTierSurface(childSessionId)?.isIdle() === true,
           }
-          try {
-            const adopted = await locusChildDelivery.ensureChild({
-              id: locus.id,
-              parentSessionId: locus.parentSessionId,
-              childSessionId,
-              ...(locus.childComposition === undefined ? {} : { childComposition: locus.childComposition }),
-            }, new AbortController().signal)
-            if (
-              adopted.parentSessionId !== identity.parentSessionId
-              || adopted.childSessionId !== identity.childSessionId
-            ) return undefined
-          } catch {
-            return undefined
-          }
-          return { id: childSessionId, handle: identity }
         },
       },
       policy: {
-        apply: async (resolved, mode) => {
-          const identity = resolved.handle as
-            | { parentSessionId?: unknown; childSessionId?: unknown }
-            | undefined
-          if (
-            identity?.parentSessionId === undefined
-            || identity.childSessionId !== resolved.id
-          ) throw new Error('Resolved child identity is incomplete')
-          const result = await locusChildDelivery.withChildSession({
-            identity: {
-              parentSessionId: String(identity.parentSessionId),
-              childSessionId: resolved.id,
-            },
-            operation: session => { setSandboxMode(session as never, mode as never) },
-          })
-          if (!result.ok) throw new Error(`Continuation owner rejected child Session (${result.reason})`)
-        },
-        resolve: async (resolved) => {
-          const identity = resolved.handle as
-            | { parentSessionId?: unknown; childSessionId?: unknown }
-            | undefined
-          if (
-            identity?.parentSessionId === undefined
-            || identity.childSessionId !== resolved.id
-          ) return undefined
-          const result = await locusChildDelivery.withChildSession({
-            identity: {
-              parentSessionId: String(identity.parentSessionId),
-              childSessionId: resolved.id,
-            },
-            operation: session => policy.resolve!({ session }),
-          })
-          return result.ok ? result.value : undefined
-        },
+        apply: (resolved, mode) => { setSandboxMode(resolved.handle as never, mode) },
+        resolve: resolved => policy.resolve!({ session: resolved.handle }),
       },
     })
   })()
@@ -2599,7 +2189,11 @@ async function initialize(
   ): Promise<CarriedTopics> => locusProvisioningController === undefined
     ? Promise.resolve({ movedTopics: 0, skippedTopics: [] })
     : carryArchivedTopics({
-      listLoci: () => locusRepository.listLoci(),
+      // Archive is judged on the WORK session behind each topic's locus main.
+      listLoci: () => locusRepository.listLoci().map(row => ({
+        ...row,
+        parentSessionId: locusRepository.getLocusMain(row.parentSessionId)?.workSessionId ?? row.parentSessionId,
+      })),
       latestIdOf: topic => locusRepository.getLatestLocusByEndpoint(topic)?.id,
       isArchived: isSessionArchived,
       rebuild: input => locusProvisioningController.rebuildExplicit(input),
@@ -2639,7 +2233,7 @@ async function initialize(
               // A same-source retry in a group whose old topics were left on an
               // archived main (e.g. the group was moved before topics were
               // carried along) is the owner's repair path for those topics.
-              if (!result.reused || result.locus.parentSessionId !== parentSessionId) return result
+              if (!result.reused || result.group.mainSessionId !== parentSessionId) return result
               const carried = await moveArchivedTopics(endpoint, parentSessionId)
               return carried.movedTopics === 0 && carried.skippedTopics.length === 0
                 ? result
@@ -2674,7 +2268,9 @@ async function initialize(
             // entry to another session: the owner already gave up the old one.
             // rebuildExplicit re-proves the archive fact; a serving main still
             // refuses, so binding drift stays blocked.
-            const archivedParent = previous.state === 'active' ? previous.parentSessionId : undefined
+            const archivedParent = previous.state === 'active' || previous.state === 'not-created'
+              ? previous.parentSessionId
+              : undefined
             const rebuilt = await locusProvisioningController.rebuildExplicit({
               endpoint,
               previousLocusId: previous.id,
@@ -2716,12 +2312,13 @@ async function initialize(
             const error = new Error(`Tool tier change refused: ${updated.reason}`) as Error & { code?: string }
             error.code = updated.reason === 'busy' ? 'LOCUS_BUSY'
               : updated.reason === 'not-found' ? 'LOCUS_NOT_CURRENT'
-                : updated.reason === 'legacy-v1-shell' ? 'LOCUS_LEGACY_V1_SHELL'
+                : updated.reason === 'legacy-composition' ? 'LOCUS_LEGACY_V1_SHELL'
                   : 'POLICY_VERIFY_FAILED'
             throw error
           }
           return {
             tier: updated.effective,
+            ...(updated.pending === true ? { pending: true } : {}),
             ...(updated.locus.childComposition === undefined ? {} : { childComposition: updated.locus.childComposition }),
           }
         },
@@ -2784,7 +2381,7 @@ async function initialize(
         onTurnEnd: listener =>
           ctx.on(sessionEvent as never, ((
             session: { id?: unknown },
-            event: { type?: unknown; data?: { turn?: unknown; reason?: { kind?: unknown; error?: { message?: unknown } } } },
+            event: { type?: unknown; data?: { turn?: unknown; reason?: { kind?: unknown; reason?: { kind?: unknown }; error?: { message?: unknown } } } },
           ) => {
             if (event?.type !== 'turn/end') return
             const childSessionId = session?.id
@@ -2792,6 +2389,8 @@ async function initialize(
             if (typeof childSessionId !== 'string' || typeof turn !== 'number') return
             const kind = event.data?.reason?.kind
             const message = event.data?.reason?.error?.message
+            const cause = event.data?.reason?.reason?.kind
+            const cancelCause = kind === 'aborted' && (cause === 'user' || cause === 'parent' || cause === 'disposed') ? cause : undefined
             listener({
               childSessionId,
               turn,
@@ -2802,12 +2401,16 @@ async function initialize(
                   : kind === 'blocked'
                     ? 'blocked'
                     : 'failed',
-              ...(typeof message === 'string' ? { reason: message } : {}),
+              ...(cancelCause !== undefined ? { reason: cancelCause } : typeof message === 'string' ? { reason: message } : {}),
+            })
+            void refusedReplies?.end(childSessionId, turn).catch(error => {
+              petLog(`dsh-pet locus refused reply settlement: ${String(error)}`)
             })
           }) as never),
         lookup: {
           find: ({ childSessionId, messageId }) => {
             const record = locusRepository.findDeliveryByInboxMessageId(messageId)
+            if (record === undefined) return firstPrompts.resolve({ childSessionId, messageId })
             // Child identity AND an execution binding are both required: a
             // claim for another child, or for a Delivery that was never
             // queued, must not become a settlement proof.
@@ -2824,27 +2427,6 @@ async function initialize(
               },
             }
           },
-        },
-        // Read-only durable proof for `pet-inquiry-result` claims. Same domain
-        // as composeProductionInquiry's stores; construction has no side effects.
-        inquiryResult: {
-          prove: (() => {
-            const resultHandoffs = new InquiryHandoffStore(domain as never)
-            const resultWorks = new InquiryWorkStore(domain as never)
-            return proveInquiryResultDelivery({
-              findResultHandoff: messageId => resultHandoffs.findByMessageId(messageId),
-              getInquiry: inquiryId => inquiryLedgerStore.get(inquiryId),
-              getWork: (sessionId, workId) => resultWorks.get(sessionId, workId),
-              findDeliveryByInboxMessageId: inboxMessageId => locusRepository.findDeliveryByInboxMessageId(inboxMessageId),
-              now: () => Date.now(),
-              currentScopeOf: childSessionId => {
-                const locus = locusRepository.getLocusByChild(childSessionId)
-                return locus === undefined || locus.state !== 'active'
-                  ? undefined
-                  : { locusId: locus.id, generation: locus.generation }
-              },
-            })
-          })(),
         },
         log: code => petLog(`dsh-pet locus turn: ${code}`),
       })
@@ -2869,7 +2451,8 @@ async function initialize(
     })
     currentLocusCapability = childSessionId => {
       const capability = locusTurnObserver.currentCapabilityForChild?.(childSessionId)
-      return capability === undefined ? undefined : projectCapability(capability)
+      return capability === undefined || locusRepository.hasFirstDeliveryRecoveryDebt(capability.correlation.locusId)
+        ? undefined : projectCapability(capability)
     }
     inspectCurrentLocusCapability = childSessionId => {
       const inspection = locusTurnObserver.inspectCurrentCapabilityForChild?.(childSessionId)
@@ -2879,6 +2462,16 @@ async function initialize(
         : inspection
     }
   }
+
+  deliveryExecutionProof = createDeliveryExecutionProof({
+    currentForChild: childSessionId => locusRepository.listDeliveries().filter(row => row.childSessionId === childSessionId),
+    findByInboxMessageId: messageId => locusRepository.findDeliveryByInboxMessageId(messageId),
+    deliveryForTurn: (childSessionId, turn) => locusTurnObserver?.deliveryForTurn?.(childSessionId, turn),
+    isActive: delivery => {
+      const row = locusRepository.getLocus(delivery.locusId)
+      return row?.state === 'active' && !locusRepository.hasFirstDeliveryRecoveryDebt(row.id) && row.childSessionId === delivery.childSessionId && row.generation === delivery.generation
+    },
+  })
 
   const deliveryCorrelation = (input: {
     readonly childSessionId: string
@@ -2956,7 +2549,7 @@ async function initialize(
   })
   scheduleCurrentDelivery = (record: DeliveryRecord): void => { expiryScheduler.schedule(record) }
 
-  finishCurrentDelivery = async (input: PetLocusFinishInput): Promise<PetLocusFinishResult> => {
+  finishCurrentDelivery = async (input: PetLocusFinishInput): Promise<PetLocusFinishResult> => runLocusMutation<PetLocusFinishResult>(async () => {
     const correlation = deliveryCorrelation(input)
     return withLocusDispatchLane(correlation, async () => {
       const current = loadCurrentDelivery(correlation, input.delivery.deliveryId)
@@ -3034,9 +2627,9 @@ async function initialize(
       await finishAndAdvance(completed.record, correlation, outboundResult === 'success' ? 'settled' : 'failed')
       return { sent: outboundResult === 'success', outcome: 'reply' }
     })
-  }
+  })
 
-  waitCurrentDelivery = async (input: PetLocusWaitInput): Promise<PetLocusWaitResult> => {
+  waitCurrentDelivery = async (input: PetLocusWaitInput): Promise<PetLocusWaitResult> => runLocusMutation<PetLocusWaitResult>(async () => {
     const correlation = deliveryCorrelation(input)
     return withLocusDispatchLane(correlation, async () => {
       const current = loadCurrentDelivery(correlation, input.delivery.deliveryId)
@@ -3070,7 +2663,7 @@ async function initialize(
         capped: settled.deadlineAt >= hard,
       }
     })
-  }
+  })
 
   /**
    * Finish the ONE durable startup recovery pass only after its authoritative
@@ -3141,8 +2734,21 @@ async function initialize(
           console.log(`[dsh-pet] locus startup: compensating orphaned main ${mainSessionId} (${operationId})`)
           await locusDshPort.releaseSession!(mainSessionId)
         },
+        // The locus main Pet built for a work session whose establishment never
+        // completed. Same restart-safe release as the work session above: it
+        // unlists the session and keeps its history.
+        locusMainSession: async ({ locusMainSessionId, operationId }) => {
+          console.log(`[dsh-pet] locus startup: compensating unused locus main ${locusMainSessionId} (${operationId})`)
+          await ctx.workspaceRegistry.archiveSession(locusMainSessionId as never)
+          await locusDshPort.releaseSession!(locusMainSessionId)
+        },
       }),
   }
+  // The same compensators also serve the RUNTIME retry of a stale failed
+  // creation (B040): without them a failure would stay blocking until a
+  // restart. Installed before intake starts, used by a later request.
+  locusRepository.setProvisioningCompensators(startupCompensators)
+  locusRepository.setDiagnosticSink(message => petLog(`dsh-pet locus provisioning: ${message}`))
   const locusStartup = await lifecycle.contain('Locus startup reconciliation', () =>
     locusRepository.reconcileStartup({
       deliveryProof: async (delivery: DeliveryRecord) => {
@@ -3155,42 +2761,17 @@ async function initialize(
             state: 'running' as const,
           }
         }
-        if (!locusChildProbe.available || locusChildDelivery === undefined) return undefined
         const locus = locusRepository.getLocus(delivery.locusId)
         if (
-          locus === undefined ||
-          locus.generation !== delivery.generation ||
-          locus.parentSessionId.trim() === '' ||
+          locus === undefined || locus.generation !== delivery.generation ||
           locus.childSessionId !== delivery.childSessionId
         ) return undefined
-        const identity = { parentSessionId: locus.parentSessionId, childSessionId: delivery.childSessionId }
-        try {
-          const adopted = await locusChildDelivery.ensureChild({
-            id: locus.id,
-            parentSessionId: identity.parentSessionId,
-            childSessionId: identity.childSessionId,
-            ...(locus.childComposition === undefined ? {} : { childComposition: locus.childComposition }),
-          }, new AbortController().signal)
-          if (
-            adopted.parentSessionId !== identity.parentSessionId ||
-            adopted.childSessionId !== identity.childSessionId
-          ) return undefined
-          const result = await locusChildDelivery.withChildSession({
-            identity,
-            operation: session =>
-              proveLiveStartupDelivery(delivery, session)
-              // Consulted when the open-turn proof declined. A `current` row can
-              // be one whose dispatch died before hand-off (`unconsumed`), or one
-              // whose turn already ended interrupted because the Host restarted
-              // mid-turn (`interrupted`) — the child's own log is the only thing
-              // that tells those apart from a genuinely live execution.
-              ?? proveInterruptedStartupDelivery(delivery, session)
-              ?? proveUnconsumedStartupDelivery(delivery, session),
-          })
-          return result.ok ? result.value : undefined
-        } catch {
-          return undefined
-        }
+        return proveStartupDeliveryFromColdRead({
+          delivery,
+          parentSessionId: locus.parentSessionId,
+          query: ctx.get('sessionQuery') as LocusSessionQueryLike | undefined,
+          log: reason => petLog(`dsh-pet locus recovery: ${reason}`),
+        })
       },
       compensators: startupCompensators,
     }),
@@ -3254,25 +2835,6 @@ async function initialize(
   if (typeof locusRepository.claimCurrentDelivery !== 'function') {
     locusChannelGaps.push('durable Delivery dispatcher is not composed')
   }
-  // A locus child answers in its own Feishu entry, so the runtime must be able
-  // to keep its automatic settlement report out of the main session. Until the
-  // runtime carrying that option is the pinned one, creating a locus child
-  // would violate the "no automatic report to the parent" boundary.
-  if (locusChildProbe.available && locusChildProbe.ports.subagent.supportsSettlementNotice !== true) {
-    locusChannelGaps.push('runtime cannot suppress a child\'s automatic parent report')
-  }
-  if (locusChildProbe.available && locusChildProbe.ports.subagent.supportsIdleContinuableCreate !== true) {
-    // Without idle creation the only API submits a real prompt before the
-    // active locus can commit, reopening the fresh-child composition race.
-    locusChannelGaps.push('runtime cannot create an idle continuable child')
-  }
-  if (locusChildProbe.available
-    && locusChildProbe.ports.subagent.supportsLiveContinuableChildSession !== true) {
-    // Generic Session routing rejects subagent-owned children. Scope mutation
-    // therefore needs the continuation owner to expose the exact live Session
-    // after validating both parent and child identities.
-    locusChannelGaps.push('runtime cannot authorize a live continuable child Session')
-  }
   /**
    * Compose the unified channel controller only when every gate is closed.
    *
@@ -3297,7 +2859,14 @@ async function initialize(
         findByMessageId: messageId => locusRepository.findDeliveryByMessageId(messageId),
         getById: deliveryId => locusRepository.getDelivery(deliveryId),
         accept: input => locusRepository.acceptDelivery(input),
-        bindQueued: input => locusRepository.bindQueued(input),
+        bindQueued: async input => {
+          const bound = await locusRepository.bindQueued(input)
+          if (bound !== undefined) {
+            await firstPrompts.whenBound(input.correlation.childSessionId)
+            firstPrompts.retire(input.correlation.childSessionId)
+          }
+          return bound
+        },
         bindTurn: input => locusRepository.bindTurn(input),
         settleByTurn: input => locusRepository.settleByTurn(input),
         failBeforeDispatch: input => locusRepository.failBeforeDispatch(input),
@@ -3313,11 +2882,14 @@ async function initialize(
       },
       child: locusChildDelivery,
       media: locusMedia,
-      resolveLivePolicy: session => {
+      inspectResidentPolicy: childSessionId => {
+        const agent = ctx.agents.get(childSessionId as never)
+        if (agent === undefined) return { resident: false }
         const policy = ctx.get('sandboxPolicy') as
           | { resolve?: (input: { session: unknown }) => { mode?: string; workspaceRoot?: string } | undefined }
           | undefined
-        return policy?.resolve?.({ session })
+        const resolved = policy?.resolve?.({ session: agent.session })
+        return { resident: true, ...(resolved === undefined ? {} : { policy: resolved }) }
       },
       invalidatePolicyDrift: async ({ locus, reason }) => {
         const current = locusRepository.getLocus(locus.id ?? locus.locusId ?? '')
@@ -3396,8 +2968,8 @@ async function initialize(
         if (locusId === undefined) throw new Error('Active locus is missing its durable id')
         const record = locusRepository.getLocus(locusId)
         if (
-          record === undefined || record.state !== 'active' ||
-          record.childSessionId !== locus.childSessionId ||
+          record === undefined || (record.state !== 'active' && record.state !== 'not-created') ||
+          (record.childSessionId ?? record.reservedChildSessionId) !== locus.childSessionId ||
           record.generation !== locus.generation
         ) {
           throw new Error('Active locus changed before delivery prompt rendering')
@@ -3420,8 +2992,8 @@ async function initialize(
         // prompt rendered from the record we just measured.
         const revalidated = locusRepository.getLocus(locusId)
         if (
-          revalidated === undefined || revalidated.state !== 'active' ||
-          revalidated.childSessionId !== locus.childSessionId ||
+          revalidated === undefined || (revalidated.state !== 'active' && revalidated.state !== 'not-created') ||
+          (revalidated.childSessionId ?? revalidated.reservedChildSessionId) !== locus.childSessionId ||
           revalidated.generation !== locus.generation
         ) {
           throw new Error('Active locus changed while measuring entrance readability')
@@ -3433,13 +3005,15 @@ async function initialize(
         // runtime counter would reset across restarts. The Delivery being
         // rendered is excluded, so rendering never consumes the first delivery.
         const current = locusRepository.findDeliveryByMessageId(message.messageId)
-        return renderLocusDeliveryFor({
+        const project = ctx.workspaceRegistry.get(revalidated.workspaceId as never)
+        if (project === undefined || await project.status() !== 'ok') throw new Error('Bound locus project workspace is unavailable')
+        const prompt = renderLocusDeliveryFor({
           record: {
             id: revalidated.id,
             generation: revalidated.generation,
             endpoint: revalidated.endpoint,
             parentSessionId: revalidated.parentSessionId,
-            childSessionId: revalidated.childSessionId,
+            childSessionId: locus.childSessionId,
             workspaceId: revalidated.workspaceId,
             state: revalidated.state,
             ...(revalidated.childComposition === undefined ? {} : { childComposition: revalidated.childComposition }),
@@ -3467,6 +3041,7 @@ async function initialize(
           deliveries: locusRepository.listDeliveries(record.id),
           ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),
         })
+        return `Host 确认的绑定项目根：${JSON.stringify(project.path)}。文件读取与搜索使用该项目的绝对路径；运行 cwd 不代表项目授权，DSH/Pet 状态目录不可读取。\n\n${prompt}`
       },
       turns: locusTurnObserver,
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
@@ -3703,56 +3278,22 @@ async function initialize(
   }
 
   /**
-   * The collaborators owner accept and child request-execution BOTH use.
-   *
-   * Built once so the two entry points cannot drift: same execution-target
-   * resolution, same body, same dispatch port, same outcome vocabulary — the
-   * spec requires them to share one chain (design D10).
+   * The collaborators owner accept uses. Accepting is the only path that
+   * delivers a follow-up task, and it targets the todo's WORK main session.
    */
   const todoAcceptDeps = (): AcceptTodoDeps => ({
     readTodo: id => todoBackend.getTodoItem(id),
-    // No locus child can execute today, so every request resolves to the
-    // handoff branch. Passing it as a FACT rather than hardcoding the main
-    // session keeps the future branch a caller decision (design D3).
-    registrarFor: todo => ({
-      childCanExecute: false,
-      childSessionId: locusRepository.getLocus(todo.locusId)?.childSessionId ?? '',
-    }),
-    // Proxy indicator: Host keeps no "was briefed" flag, and
-    // `createMainSession` — the only caller of the standby briefing — runs
-    // only on the `auto` branch (design D4, verified in task 1.1).
-    contextFor: todo => ({
-      mainWasBriefedStandby: locusRepository.getLocus(todo.locusId)?.source === 'auto',
-    }),
     port: todoDispatchPort,
     advanceStatus: async (id, to) => todoBackend.advanceStatus(id, to, Date.now()),
     log: reason => petWarn(`dsh-pet ledger: ${reason}`),
   })
 
-  /** Child-side entry point; the owner-side one lives on `todoLedger.advance`. */
-  const runTodoExecutionRequest = async (input: {
-    readonly itemId: string
-    readonly callerChildSessionId: string
-  }): Promise<
-    | { readonly ok: true; readonly outcome: 'dispatched' | 'queued' | 'unreachable' }
-    | { readonly ok: false; readonly reason: string }
-  > => {
-    const result = await requestTodoExecution(input, {
-      ...todoAcceptDeps(),
-      // Ownership is proven from the todo's own locus, never from an argument.
-      lookupRegistrarChild: todo => locusRepository.getLocus(todo.locusId)?.childSessionId ?? '',
-    })
-    return result.ok ? { ok: true, outcome: result.outcome } : { ok: false, reason: result.reason }
-  }
-
   let locusManagement!: ReturnType<typeof createLocusManagementPort>
-  const projectInquiry = createInquiryOwnerProjection({
-    domain: domain as never,
-    capability: () => ({ available: collaborationSurface?.inquiryDispatch.available === true }),
-  })
   locusManagement = createLocusManagementPort({
+    ownerProjection: ({ locus }) => retiredInquiryOwnerProjection(
+      [...domain.table('inquiries').entries()].map(([, row]) => row), locus,
+    ),
     repository: locusRepository as never,
-    ownerProjection: input => ({ inquiry: projectInquiry(input) }),
     // The same live reader admission and resolution already share: the panel
     // must agree with the channel about whether this entry can still serve,
     // otherwise one of them offers a repair while the other refuses it.
@@ -4163,14 +3704,98 @@ async function initialize(
     void coordinator.pump(task.id).catch(() => undefined)
   }
 
-  const collaborationRoutes = collaborationOwnerIdentity() === undefined
-    ? []
-    : createCollaborationContextRoutes({
-        store: collaborationContextStore,
-        browserAuth: ctx.connection,
-        ownerIdentity: collaborationOwnerIdentity,
-        now: Date.now,
-      })
+  const stopIdentity = { hostPid: process.pid, bootId: randomUUID() }
+  const stopPreparation = new StopPreparation(stopIdentity, {
+    freeze: async () => {
+      if (locusChannelController?.freezeForShutdown === undefined || locusChannelController.resumeAfterShutdown === undefined) {
+        throw new PetError('LOCUS_UNAVAILABLE', 'This Host cannot freeze Locus admission.')
+      }
+      await locusChannelController.freezeForShutdown()
+    },
+    drain: async () => {
+      if (!locusChildProbe.available || locusChildProbe.ports.compensation === undefined || locusChildProbe.ports.proof === undefined) {
+        throw new PetError('LOCUS_UNAVAILABLE', 'Owned child drain and catalog proof are unavailable.')
+      }
+      const ports = locusChildProbe.ports
+      const compensation = ports.compensation!
+      if (!('drainContinuableChildren' in compensation) || typeof compensation.drainContinuableChildren !== 'function') {
+        throw new PetError('LOCUS_UNAVAILABLE', 'Exact owned-child drain is unavailable.')
+      }
+      const drainChild = compensation.drainContinuableChildren.bind(compensation)
+      const tasks: Array<() => Promise<void>> = []
+      const interrupted: Array<{ childSessionId: string; parentSessionId: string; deliveryId: string }> = []
+      // Include cold catalog records: an activation admitted before freezing
+      // may not yet have published an Agent in the live registry.
+      for (const row of locusRepository.listLoci()) {
+        if (row.childComposition !== 'tier3' || row.childSessionId === undefined) continue
+        const liveChild = ctx.agents.get(row.childSessionId as never)
+        const pair = locusRepository.getLocusMain(row.parentSessionId)
+        const current = locusRepository.getCurrentLocus(row.endpoint)
+        if (pair?.status !== 'active' || current?.id !== row.id || current.generation !== row.generation) {
+          if (liveChild !== undefined) throw new PetError('LOCUS_CONFLICT', 'A live Pet child has no current owning generation.')
+          continue
+        }
+        const parent = ports.parent.get(row.parentSessionId as never)
+        if (parent === undefined) {
+          if (liveChild !== undefined) throw new PetError('LOCUS_CONFLICT', 'A live Pet child has no live owner.')
+          continue
+        }
+        const proof = await ports.proof!.findChild(row.parentSessionId, row.childSessionId, new AbortController().signal)
+        if (proof?.parentSessionId !== row.parentSessionId || proof.childSessionId !== row.childSessionId) {
+          throw new PetError('LOCUS_CONFLICT', 'Owned child catalog identity could not be proven.')
+        }
+        if (liveChild !== undefined) {
+          for (const delivery of locusRepository.listDeliveries(row.id)) {
+            if ((delivery.status === 'current' || delivery.status === 'running') && delivery.childSessionId === row.childSessionId && delivery.generation === row.generation) {
+              interrupted.push({ childSessionId: row.childSessionId, parentSessionId: row.parentSessionId, deliveryId: delivery.deliveryId })
+            }
+          }
+        }
+        tasks.push(() => drainChild(parent, [row.childSessionId!]))
+      }
+      const results = await Promise.allSettled(tasks.map(task => task()))
+      const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (errors.length > 0) throw new AggregateError(errors, 'Owned child drain failed')
+      // Native close is durable; now wait for the event observer's Pet commits.
+      await locusChannelController!.freezeForShutdown!()
+      for (const target of interrupted) {
+        const delivery = locusRepository.getDelivery(target.deliveryId)
+        if (delivery === undefined || (delivery.status !== 'current' && delivery.status !== 'running')) continue
+        const proof = await proveStartupDeliveryFromColdRead({
+          delivery, parentSessionId: target.parentSessionId,
+          query: ctx.get('sessionQuery') as LocusSessionQueryLike | undefined,
+          log: message => petLog(`dsh-pet shutdown evidence: ${message}`),
+        })
+        if (proof?.state !== 'interrupted' || delivery.inboxMessageId === undefined || delivery.executionId === undefined || delivery.turnId === undefined || delivery.revision === undefined) {
+          // Not an interrupted execution (idle awaiting continuation, never
+          // started, or unprovable): it stays durable current, exactly as an
+          // ordinary restart leaves it for startup recovery or its lease.
+          petLog(`dsh-pet shutdown: ${delivery.deliveryId} retained without interruption proof`)
+          continue
+        }
+        const result = await locusRepository.settleByTurn({
+          deliveryId: delivery.deliveryId, executionId: delivery.executionId,
+          inboxMessageId: delivery.inboxMessageId, expectedRevision: delivery.revision,
+          correlation: { endpoint: delivery.endpoint, locusId: delivery.locusId, generation: delivery.generation, childSessionId: target.childSessionId, turnId: delivery.turnId },
+          outcome: 'failed', failureReason: 'turn-interrupted', settledAt: Date.now(),
+        })
+        if (!result.changed) throw new PetError('LOCUS_CONFLICT', 'Interrupted execution could not be durably settled.')
+      }
+    },
+    resume: async () => { await locusChannelController?.resumeAfterShutdown?.() },
+  })
+  ctx.effect(() => () => stopPreparation.dispose(), 'dsh-pet: shutdown preparation')
+  const controlPort = ctx.webServer.port
+  const profileName = ctx.get('profileContext')?.name
+  if (Number.isInteger(controlPort) && controlPort > 0 && typeof profileName === 'string' && typeof ctx.connection.authenticatedUrl === 'function') {
+    const origin = `http://127.0.0.1:${controlPort}`
+    await lifecycle.contain('Pet shutdown discovery', () => publishStopDescriptor(paths.dshHome, controlPort, {
+      v: 1, pid: stopIdentity.hostPid, bootId: stopIdentity.bootId, profile: profileName,
+      origin, authenticatedUrl: ctx.connection.authenticatedUrl(origin),
+    }))
+    // The descriptor carries a credential URL; never leave it behind this boot.
+    ctx.effect(() => () => releaseStopDescriptor(paths.dshHome, controlPort, stopIdentity.bootId), 'dsh-pet: release shutdown discovery')
+  }
 
   for (const route of [...createPetRoutes({
     repository,
@@ -4189,6 +3814,7 @@ async function initialize(
     // Owner-facing locus view/discovery and durable lifecycle transitions.
     // The identity is Host-derived; routes reject any actor a browser sends.
     locus: locusManagement,
+    withLocusMutation: runLocusMutation,
     locusIdentity: () => ({ actorId: 'host:dsh-pet' }),
     // Shared-fact ledger todo surface. Projects the durable record for the
     // owner panel; `generation` rides along as an audit fact only — the
@@ -4270,15 +3896,10 @@ async function initialize(
         return undefined
       }
     },
-  }), ...collaborationRoutes]) {
+  }), petRoute(PET_PREPARE_STOP_ROUTE, ({ body }) => stopPreparation.request(body))]) {
     ctx.effect(
       () => {
-        // Collaboration routes are already fenced by their factory; applying
-        // the standard fence twice is harmless but would obscure the explicit
-        // owner-proof boundary in tests and diagnostics.
-        const protectedRoute = collaborationRoutes.includes(route)
-          ? route
-          : withBrowserAuth(route, ctx.connection)
+        const protectedRoute = withBrowserAuth(route, ctx.connection)
         return ctx.webServer.register({
           kind: 'exact',
           path: protectedRoute.path,
@@ -4287,54 +3908,6 @@ async function initialize(
       },
       `dsh-pet: ${route.path}`,
     )
-  }
-
-  /**
-   * Restart recovery for the NEW inquiry handoff protocol (design D6).
-   *
-   * Runs after every dependency above is initialised (cold resume needs `selection` and
-   * `persistedPresetFor`) and BEFORE the Feishu channel starts. It only triggers the existing
-   * runtime pumps for rows the read-only planner proves were never put in an inbox; anything it
-   * cannot prove is reported, never retried, and nothing durable is written. The pumps re-check
-   * readiness, identity, generation and inbox de-duplication themselves. Log lines are counts only.
-   */
-  if (!composed.ready) {
-    petLog('dsh-pet: inquiry startup recovery skipped (runtime not ready)')
-  } else {
-    const recovered = await lifecycle.contain('Pet inquiry startup recovery', () => {
-      const sessionController = ctx.get('sessionController') as
-        | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
-        | undefined
-      return runInquiryStartupRecovery({
-        plan: () => planInquiryRecoveryForMembers({
-          domain: domain as never,
-          ready: composed.ready,
-          currentScope: currentInquiryScope,
-          sessionEvidence: createInquirySessionEvidence({
-            getLive: getInquiryLiveAgent as never,
-            readEvents: async sessionId => {
-              if (typeof sessionController?.inspect !== 'function') return undefined
-              const inspection = await sessionController.inspect(sessionId) as { readonly events?: readonly unknown[] } | undefined
-              return inspection?.events
-            },
-          }),
-          workEvidence: createInquiryWorkEvidence((sessionId, workId) => inquiryWorkStore.get(sessionId, workId)),
-        }),
-        pumpTarget: composed.pumpTarget,
-        pumpResults: composed.pumpResults,
-        log: code => petLog(`dsh-pet: ${code}`),
-      })
-    })
-    if (recovered !== undefined) {
-      petLog(
-        'dsh-pet: inquiry-startup-recovery'
-        + ` dispatched-target=${String(recovered.dispatchedTarget)}`
-        + ` dispatched-result=${String(recovered.dispatchedResult)}`
-        + ` awaiting=${String(recovered.awaiting)}`
-        + ` review=${String(recovered.review)}`
-        + ` failed=${String(recovered.failed)}`,
-      )
-    }
   }
 
   // Starts only when configuration says the channel is enabled, and stops

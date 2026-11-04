@@ -40,7 +40,7 @@ async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
     workspaceId: 'workspace-settle',
     source: 'auto',
     state: 'active',
-    childComposition: 'safe-v1',
+    childComposition: 'tier3',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     busy: false,
     createdAt: 1,
@@ -56,7 +56,7 @@ async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
     parentLocusId: 'locus-settle-group',
     source: 'inherited',
     state: 'active',
-    childComposition: 'safe-v1',
+    childComposition: 'tier3',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     busy: false,
     createdAt: 2,
@@ -129,7 +129,7 @@ async function composeSettlementHost(options: {
   const diagnostics: string[] = []
   // The REAL durable resolution adapter, not a fixed row: this is what proves
   // the endpoint index, the stop marker and the child identity are honoured.
-  const resolution = createLocusResolution({ store: repository })
+  const resolution = createLocusResolution({ store: repository, mains: { find: () => ({ workSessionId: 'work', status: 'active' }) }, verifyMain: () => true })
   const controller = new LocusChannelController({
     locus: resolution as never,
     // Thin naming adapter over the durable repository: the controller's port
@@ -156,7 +156,6 @@ async function composeSettlementHost(options: {
     },
     child: {
       ensureChild: () => ({ parentSessionId: PARENT, childSessionId: CHILD }),
-      withChildSession: async input => ({ ok: true as const, value: await input.operation({ id: CHILD }) }),
       queueChild: async (input) => {
         // A real Host queues the turn and the runtime reports the claim; the
         // claim can arrive before this call resolves, which is why the
@@ -183,7 +182,7 @@ async function composeSettlementHost(options: {
         return { accepted: true as const, executionId: input.executionId, inboxMessageId }
       },
     },
-    resolveLivePolicy: () => livePolicy,
+    inspectResidentPolicy: () => ({ resident: true, ...(livePolicy === undefined ? {} : { policy: livePolicy }) }),
     ...(options.renderPrompt === undefined
       ? {}
       : { renderPrompt: options.renderPrompt as never }),
@@ -604,7 +603,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       host.controller.dispose()
 
       const recovered = new LocusChannelController({
-        locus: createLocusResolution({ store: host.repository }) as never,
+        locus: createLocusResolution({ store: host.repository, mains: { find: () => ({ workSessionId: 'work', status: 'active' }) }, verifyMain: () => true }) as never,
         deliveries: {
           findByMessageId: (messageId: string) => host.repository.findDeliveryByMessageId(messageId),
           getById: (deliveryId: string) => host.repository.getDelivery(deliveryId),

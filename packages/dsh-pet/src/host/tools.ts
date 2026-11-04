@@ -51,11 +51,13 @@ import {
 export { PET_LOCUS_CHAT_HISTORY_TOOL }
 import type { PetRepository } from './repository.js'
 import type { LarkClient } from './channel/lark.js'
-import { resolveLedgerCaller, LedgerCallerUnavailableError, type LedgerCallerLocusLookup } from './ledger/caller.js'
-import { lookupParentTranscript, type ParentLookupDeps } from './ledger/parent-lookup.js'
+import type { LedgerCallerLocusLookup } from './ledger/caller.js'
 import { trackFailureText, trackTodo, type TrackDeps, type TrackFailureReason } from './ledger/track.js'
 import { INTENT_TRIAGE_GUIDANCE } from './ledger/prompt.js'
-import { requestExecutionFailureText } from './ledger/dispatch.js'
+import {
+  askParent, askParentFailureText, contextFailureText, mainToolFailureText, readLocusContext, renderLocusContext, replyChild, writeLocusNote,
+  type LocusChildToolsDeps, type LocusContextResult, type LocusMainToolsDeps,
+} from './collab/locus-tools.js'
 import type {
   LocusContextRecord,
   LocusCurrentAuthorizationResult,
@@ -72,11 +74,13 @@ import type {
 export const PET_CONTEXT_PARAMETERS = {} as const
 export const PET_LOCUS_FINISH_TOOL = 'pet_locus_finish'
 export const PET_LOCUS_WAIT_TOOL = 'pet_locus_wait'
-/** `pet-locus-intent-triage`: caller-bound, zero-argument, read-only. */
-export const PET_LOCUS_PARENT_LOOKUP_TOOL = 'pet_locus_parent_lookup'
 export const PET_LOCUS_TRACK_TOOL = 'pet_locus_track'
-/** Caller-bound request-execution tool: asks for a registered todo to be executed (design D10). */
-export const PET_LOCUS_REQUEST_EXECUTION_TOOL = 'pet_locus_request_execution'
+/** Child tools (`locus-three-tier-structure` design D9): caller-bound, no target arguments. */
+export const LOCUS_CONTEXT_TOOL = 'locus_context'
+export const LOCUS_ASK_PARENT_TOOL = 'locus_ask_parent'
+/** Locus main session tools: write an entry-level note, reply to a current-generation child. */
+export const LOCUS_NOTE_TOOL = 'locus_note'
+export const LOCUS_REPLY_CHILD_TOOL = 'locus_reply_child'
 
 export type PetLocusFinishOutcome = 'reply' | 'no-reply'
 
@@ -110,7 +114,7 @@ interface LocusToolCapability {
   readonly deliveryId: string
   readonly executionId: string
   readonly turnId: string
-  readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
+  readonly source: 'delivery' | 'agent-message'
   readonly locusId?: string
   readonly generation?: number
 }
@@ -128,7 +132,7 @@ export interface PetLocusLifecycleDependencies {
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
+    readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
     readonly generation?: number
   } | undefined
@@ -332,7 +336,7 @@ export interface PetIntentTriageDependencies {
     readonly deliveryId: string
     readonly executionId: string
     readonly turnId: string
-    readonly source: 'delivery' | 'agent-message' | 'inquiry-result'
+    readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
     readonly generation?: number
   } | undefined
@@ -349,23 +353,7 @@ export interface PetIntentTriageDependencies {
     readonly operation: LocusToolOperation
     readonly reason: LocusCurrentCapabilityReason
   }) => void
-  readonly parentLookup?: ParentLookupDeps
   readonly track?: TrackDeps
-  /**
-   * Executes a child's request to run a todo it registered (design D10).
-   *
-   * Shaped as a single callback rather than the orchestration's own deps so
-   * this module stays free of the dispatch chain: the Host composes owner
-   * accept and child request-execution from the SAME collaborators, and this
-   * seam only carries the caller-bound request across.
-   */
-  readonly requestExecution?: (input: {
-    readonly itemId: string
-    readonly callerChildSessionId: string
-  }) => Promise<
-    | { readonly ok: true; readonly outcome: 'dispatched' | 'queued' | 'unreachable' }
-    | { readonly ok: false; readonly reason: string }
-  >
 }
 
 export function registerPetTools(
@@ -384,25 +372,14 @@ export function registerPetTools(
      * `locusHistory` / `locusDocContext` is published per child, by entry kind.
      */
     readonly locusDocContext?: Omit<LocusDocContextDeps, 'callerSessionId'>
-    readonly managedEffects?: {
-      register(definition: ToolDefinition, effect: 'delivery' | 'todo-execution'): () => void
-      assertEntry(execution: ToolRunContext): void
-    }
+    /** Child-side `locus_context` and `locus_ask_parent`; absent means neither is published. */
+    readonly locusChildTools?: LocusChildToolsDeps
   },
 ): () => void {
   const disposers: (() => void)[] = []
-  const register = (definition: ToolDefinition, effect?: 'delivery' | 'todo-execution') => {
-    const disposeNative = ctx.tools.register(definition)
-    try {
-      const disposeManaged = effect === undefined ? undefined : deps.managedEffects?.register(definition, effect)
-      if (disposeManaged !== undefined) disposers.push(disposeManaged)
-      disposers.push(disposeNative)
-    } catch (error) {
-      disposeNative()
-      throw error
-    }
+  const register = (definition: ToolDefinition) => {
+    disposers.push(ctx.tools.register(definition))
   }
-  const assertManagedEntry = (execution: ToolRunContext) => deps.managedEffects?.assertEntry(execution)
 
   register(
     defineTool({
@@ -463,7 +440,6 @@ export function registerPetTools(
         render: (_args, value) => [{ type: 'text', text: value.sent ? '已提交当前飞书请求。' : '当前请求未发送正文。' }],
       },
       async execute(args, exec) {
-        assertManagedEntry(exec)
         const input = requireKnownArguments(args, ['outcome', 'text', 'reason'], PET_LOCUS_FINISH_TOOL)
         const outcome = input.outcome
         const text = typeof input.text === 'string' ? input.text : undefined
@@ -480,7 +456,6 @@ export function registerPetTools(
           }
           throw error
         }
-        assertManagedEntry(exec)
         const delivery = locus.currentDelivery!
         if (lifecycle.finishCurrentDelivery === undefined) {
           // A direct Lark fallback would send without the durable finishing CAS,
@@ -492,7 +467,7 @@ export function registerPetTools(
         lifecycle.onDeliveryContinued?.(exec)
         return result
       },
-    }), 'delivery')
+    }))
 
     register(defineTool({
       name: PET_LOCUS_WAIT_TOOL,
@@ -505,63 +480,22 @@ export function registerPetTools(
         render: (_args, value) => [{ type: 'text', text: `等待期限：${String(value.deadline)}` }],
       },
       async execute(args, exec) {
-        assertManagedEntry(exec)
         const input = requireKnownArguments(args, ['waitMinutes', 'reason'], PET_LOCUS_WAIT_TOOL)
         const waitMinutes = input.waitMinutes
         if (typeof waitMinutes !== 'number' || !Number.isSafeInteger(waitMinutes) || waitMinutes < 1 || waitMinutes > 1440) throw new PetError('INVALID_REQUEST', 'waitMinutes must be an integer from 1 through 1440.')
         if (hasOwnArgument(input, 'reason') && typeof input.reason !== 'string') throw new PetError('INVALID_REQUEST', 'reason must be a string when provided.')
         const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'wait')
-        assertManagedEntry(exec)
         if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
         const reason = typeof input.reason === 'string' ? input.reason : undefined
         const result = await lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
         if (result.accepted) lifecycle.onDeliveryContinued?.(exec)
         return result
       },
-    }), 'delivery')
+    }))
   }
 
   const intentTriage = deps.intentTriage
   if (intentTriage !== undefined) {
-    register(defineTool({
-      name: PET_LOCUS_PARENT_LOOKUP_TOOL,
-      description:
-        INTENT_TRIAGE_GUIDANCE +
-        '\n\nThis tool performs the read-only lookup: it returns your caller-bound main ' +
-        'session\'s already-persisted transcript. It takes no arguments — the target is resolved ' +
-        'from the calling session and cannot be redirected. It is a pure data read: it never wakes ' +
-        'the main session, never occupies its run slot, and multiple children may call it ' +
-        'concurrently. The result is a conversational fact, not a persisted authorization — a write ' +
-        'grant still requires the owner\'s explicit confirmation through the management panel.',
-      parameters: {},
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            ok: { type: 'boolean', required: true },
-            reason: { type: 'string' },
-            transcript: { type: 'string' },
-          },
-        },
-        render: (_args, value) => [{ type: 'text', text: value.ok ? String(value.transcript) : `未获取到内容：${String(value.reason)}` }],
-      },
-      async execute(_args, exec) {
-        const sessionId = callerSessionId(exec as ExecutionLike)
-        let caller
-        try {
-          caller = resolveLedgerCaller(sessionId, intentTriage.loci)
-        } catch (error) {
-          if (error instanceof LedgerCallerUnavailableError) return { ok: false, reason: 'unavailable' }
-          throw error
-        }
-        if (intentTriage.parentLookup === undefined) return { ok: false, reason: 'unavailable' }
-        const result = await lookupParentTranscript(caller, intentTriage.parentLookup)
-        if (!result.ok) return { ok: false, reason: result.reason }
-        return { ok: true, transcript: JSON.stringify(result.transcript) }
-      },
-    }))
-
     register(defineTool({
       name: PET_LOCUS_TRACK_TOOL,
       description:
@@ -600,66 +534,69 @@ export function registerPetTools(
         return result.ok ? { ok: true } : { ok: false, reason: result.reason }
       },
     }))
+  }
 
+  const childTools = deps.locusChildTools
+  if (childTools !== undefined) {
     register(defineTool({
-      name: PET_LOCUS_REQUEST_EXECUTION_TOOL,
+      name: LOCUS_CONTEXT_TOOL,
       description:
-        'Ask for a todo YOU registered to be executed. Provide only `itemId` — the Host resolves ' +
-        'where the work runs from the todo\'s own attribution, so there is no target/session/chat ' +
-        'argument and you cannot choose a destination. Today a locus child cannot make file ' +
-        'changes itself, so this hands the work to the session that can; that is a consequence of ' +
-        'the current permission model, not part of this tool\'s meaning. It marks the todo accepted ' +
-        'ONLY when a follow-up task was really delivered. It cannot mark a todo done or dropped — ' +
-        'settling a todo stays the owner\'s decision.',
-      parameters: {
-        itemId: { type: 'string', required: true },
-      },
+        INTENT_TRIAGE_GUIDANCE +
+        '\n\nThis tool performs the read: it returns the consensus (agreed charters) visible to THIS ' +
+        'entry plus the progress of the todos this entry registered. It takes no arguments — the ' +
+        'target is resolved from the calling session and cannot be redirected. It never returns ' +
+        'messages or other entries\' items. The result is a conversational fact, not an ' +
+        'authorization: a write grant still requires the owner\'s explicit confirmation. A failure ' +
+        'is reported as a failure, never as an empty list.',
+      parameters: {},
       output: {
         schema: {
           type: 'object',
           additionalProperties: false,
           properties: {
             ok: { type: 'boolean', required: true },
-            outcome: { type: 'string' },
             reason: { type: 'string' },
+            charters: { type: 'json' },
+            todos: { type: 'json' },
           },
+        },
+        render: (_args, value) => [{ type: 'text', text: renderLocusContext(value as LocusContextResult) }],
+      },
+      async execute(_args, exec) {
+        const result = await readLocusContext(callerSessionId(exec as ExecutionLike), childTools)
+        return result.ok
+          ? { ok: true, charters: result.charters.map(charter => ({ ...charter })), todos: result.todos.map(todo => ({ ...todo })) }
+          : { ok: false, reason: result.reason }
+      },
+    }))
+
+    register(defineTool({
+      name: LOCUS_ASK_PARENT_TOOL,
+      description:
+        'Ask your parent locus main session one question. The Host delivers it as the parent\'s next ' +
+        'turn input; there is no target argument and only the current generation of an entry can ask. ' +
+        'It returns only whether the question was delivered, never an answer: the parent replies as ' +
+        'a later message to this session, and you then continue the SAME current Delivery and ' +
+        'settle it with `pet_locus_finish`. It does not create or change any Delivery.',
+      parameters: { question: { type: 'string', required: true } },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { ok: { type: 'boolean', required: true }, reason: { type: 'string' } },
         },
         render: (_args, value) => [{
           type: 'text',
-          text: value.ok
-            ? `已请求执行（${value.outcome === 'queued' ? '目标忙碌，已排队' : '已开始'}）。`
-            : String(value.reason),
+          text: value.ok ? '问题已投递给 locus 主会话；回复会作为后续消息到达，到时继续处理同一条 Delivery。' : askParentFailureText(value.reason as never),
         }],
       },
       async execute(args, exec) {
-        assertManagedEntry(exec)
-        const input = requireKnownArguments(args, ['itemId'], PET_LOCUS_REQUEST_EXECUTION_TOOL)
-        if (typeof input.itemId !== 'string' || input.itemId.trim() === '') {
-          // Malformed is not "not found": point at the one place a legal value
-          // comes from, so a retry is possible instead of a guess.
-          throw new PetError(
-            'INVALID_REQUEST',
-            'itemId must be the exact identifier of a todo you registered, as shown by collab_read. '
-            + 'Read your collaboration space with collab_read first, then retry with that itemId.',
-          )
-        }
-        const sessionId = callerSessionId(exec as ExecutionLike)
-        if (intentTriage.requestExecution === undefined) {
-          return { ok: false, reason: requestExecutionFailureText('dispatch-failed') }
-        }
-        // Same authorization proof `pet_locus_track` uses: a caller without a
-        // unique current Delivery cannot prove which locus it speaks for.
-        await resolveAuthorizedCurrent(intentTriage, sessionId, 'track')
-        assertManagedEntry(exec)
-        const result = await intentTriage.requestExecution({
-          itemId: input.itemId.trim(),
-          callerChildSessionId: sessionId,
-        })
-        return result.ok
-          ? { ok: true, outcome: result.outcome }
-          : { ok: false, reason: result.reason }
+        const input = requireKnownArguments(args, ['question'], LOCUS_ASK_PARENT_TOOL)
+        const signal = (exec as { signal?: AbortSignal }).signal ?? new AbortController().signal
+        const result = await askParent((exec as ExecutionLike).agent, callerSessionId(exec as ExecutionLike), input.question, signal, childTools)
+        return result.ok ? { ok: true } : { ok: false, reason: result.reason }
       },
-    }), 'todo-execution')
+    }))
   }
 
   const docContext = deps.locusDocContext
@@ -746,6 +683,80 @@ export function registerPetTools(
     }))
   }
 
+  return () => {
+    for (const dispose of disposers.splice(0).reverse()) dispose()
+  }
+}
+
+/**
+ * Register the locus MAIN session's own tools (`locus_note`, `locus_reply_child`).
+ *
+ * @param ctx - the locus main session's SCOPED agent context (an unscoped
+ *   context would publish both tools to every session).
+ * @param deps - lookup of this main session's entries, the collab port and the
+ *   official `subagents` service.
+ * @returns a disposer removing both registrations.
+ */
+export function registerPetLocusMainTools(ctx: Context, deps: LocusMainToolsDeps): () => void {
+  const disposers: (() => void)[] = []
+  const register = (definition: ToolDefinition) => {
+    disposers.push(ctx.tools.register(definition))
+  }
+  register(defineTool({
+    name: LOCUS_NOTE_TOOL,
+    description:
+      'Write an entry-level conclusion into the shared collaboration space for ONE entry that sits ' +
+      'under this locus main session. `entry` is the entry identity quoted in the child\'s question. ' +
+      'The Host marks the item with that entry, so only that entry (and, for a group, its topics) ' +
+      'sees it through `locus_context` once the work session has acknowledged it. Items written with ' +
+      'the ordinary `collab_*` tools are workspace-level and visible to every entry.',
+    parameters: {
+      entry: { type: 'string', required: true },
+      title: { type: 'string', required: true },
+      body: { type: 'string', required: true },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { ok: { type: 'boolean', required: true }, itemId: { type: 'string' }, reason: { type: 'string' } },
+      },
+      render: (_args, value) => [{
+        type: 'text',
+        text: value.ok ? `已写入入口级结论（${String(value.itemId)}），待干活主会话确认后入口可见。` : mainToolFailureText(value.reason as never),
+      }],
+    },
+    async execute(args, exec) {
+      const input = requireKnownArguments(args, ['entry', 'title', 'body'], LOCUS_NOTE_TOOL)
+      const result = await writeLocusNote(callerSessionId(exec as ExecutionLike), input as never, deps)
+      return result.ok ? { ok: true, itemId: result.itemId } : { ok: false, reason: result.reason }
+    },
+  }))
+  register(defineTool({
+    name: LOCUS_REPLY_CHILD_TOOL,
+    description:
+      'Reply to a locus child session of this main session, through the official session message ' +
+      'delivery. `childSessionId` is the id quoted in the child\'s question; only the CURRENT ' +
+      'generation of an entry that belongs to this main session can be replied to.',
+    parameters: {
+      childSessionId: { type: 'string', required: true },
+      text: { type: 'string', required: true },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { ok: { type: 'boolean', required: true }, reason: { type: 'string' } },
+      },
+      render: (_args, value) => [{ type: 'text', text: value.ok ? '已回复子会话。' : mainToolFailureText(value.reason as never) }],
+    },
+    async execute(args, exec) {
+      const input = requireKnownArguments(args, ['childSessionId', 'text'], LOCUS_REPLY_CHILD_TOOL)
+      const signal = (exec as { signal?: AbortSignal }).signal ?? new AbortController().signal
+      const result = await replyChild((exec as ExecutionLike).agent, callerSessionId(exec as ExecutionLike), input as never, signal, deps)
+      return result.ok ? { ok: true } : { ok: false, reason: result.reason }
+    },
+  }))
   return () => {
     for (const dispose of disposers.splice(0).reverse()) dispose()
   }

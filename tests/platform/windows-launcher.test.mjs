@@ -47,7 +47,7 @@ test('native Windows ownership preserves Unicode spaced entry paths and stops on
   const before = await probePort(port)
   assert.equal(before.state, 'owned', JSON.stringify({ expected: entry, actual: before.processes?.[0]?.argv?.[1], error: before.error }))
   assert.equal(before.processes[0].argv[1], entry)
-  assert.equal((await stopServer(port, { warn: () => {} })).ok, true)
+  assert.equal((await stopServer(port, { expectedIdentity: before, warn: () => {} })).ok, true)
   assert.equal((await probePort(port)).state, 'empty')
 })
 

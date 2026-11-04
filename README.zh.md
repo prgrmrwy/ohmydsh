@@ -229,6 +229,7 @@ tests/                   仓库级测试
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
 - [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — 用官方 fresh 工具委派，只原样传递用户或 lead 指定的模型/effort；route_subagent 只是可选预览，失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
+- [locus-base](presets/locus-base) — Locus 协调会话与各入口子会话共用的固定、不可委派 preset。
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
 - [memex-eval-config](patches/memex-eval-config.yml) — 添加固定自检目录的关闭声明，保留用户 scope 与工作区设置。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。

@@ -13,7 +13,7 @@ function locus(overrides: Partial<LocusRecord> = {}): LocusRecord {
     endpoint: { chatId: 'oc-1' },
     parentSessionId: 'main-1',
     childSessionId: 'child-1',
-    childComposition: 'safe-v1',
+    childComposition: 'tier3',
     workspaceId: 'ws-1',
     source: 'auto',
     state: 'active',
@@ -58,7 +58,7 @@ describe('startup reconciliation', () => {
     expect(h.invalidated).toEqual([])
   })
 
-  it('invalidates legacy active rows before any child liveness probe', async () => {
+  it('leaves retired legacy rows unchanged before any child liveness probe', async () => {
     const check = vi.fn(async () => ({ kind: 'usable' as const }))
     const h = harness(() => ({ kind: 'usable' }))
 
@@ -66,7 +66,8 @@ describe('startup reconciliation', () => {
       locus({ childComposition: undefined }),
     ], { ...h.ports, probe: { check } })
 
-    expect(report.invalidated[0]?.reason).toContain('缺少 safe child composition 证明')
+    expect(report.invalidated).toEqual([])
+    expect(h.invalidated).toEqual([])
     expect(check).not.toHaveBeenCalled()
   })
 

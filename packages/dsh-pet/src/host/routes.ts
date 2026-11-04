@@ -107,6 +107,8 @@ export interface RouteDeps {
   readonly channel?: ChannelControl
   /** Unified locus management capability; absent routes fail closed. */
   readonly locus?: LocusManagementPort
+  /** Shares the channel acquisition fence with owner management mutations. */
+  readonly withLocusMutation?: <T>(operation: () => Promise<T>) => Promise<T>
   /**
    * Owner-facing message -> generation -> child -> execution chains.
    *
@@ -614,9 +616,9 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
     }
     return actorId
   }
-  const invokeLocus = async <T>(operation: string, run: () => T | Promise<T>): Promise<T> => {
+  const invokeLocus = async <T>(operation: string, run: () => T | Promise<T>, mutation = true): Promise<T> => {
     try {
-      return await run()
+      return await (mutation && deps.withLocusMutation !== undefined ? deps.withLocusMutation(async () => run()) : run())
     } catch (error) {
       if (error instanceof LocusManagementError) {
         const code = error.code === 'CAPABILITY_UNAVAILABLE' || error.code === 'ACTION_UNAVAILABLE'
@@ -652,7 +654,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
     petRoute(LOCUS_ROUTES.view, async () => {
       requireReady(lifecycle)
       requireLocusActor()
-      return invokeLocus('读取 locus', () => requireLocus().view())
+      return invokeLocus('读取 locus', () => requireLocus().view(), false)
     }),
     petRoute(LOCUS_ROUTES.discovery, async ({ body }) => {
       const record = strictBody(body, ['endpoint', 'parentSessionId', 'childSessionId'])
@@ -683,13 +685,13 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         return invokeLocus('查询 locus endpoint', () => requireLocus().discovery({ endpoint: {
           chatId,
           ...(threadId === undefined ? {} : { threadId }),
-        } }))
+        } }), false)
       }
       if (typeof parentSessionId === 'string' && parentSessionId.trim() !== '') {
-        return invokeLocus('查询 locus parent', () => requireLocus().discovery({ parentSessionId: parentSessionId.trim() }))
+        return invokeLocus('查询 locus parent', () => requireLocus().discovery({ parentSessionId: parentSessionId.trim() }), false)
       }
       if (typeof childSessionId === 'string' && childSessionId.trim() !== '') {
-        return invokeLocus('查询 locus child', () => requireLocus().discovery({ childSessionId: childSessionId.trim() }))
+        return invokeLocus('查询 locus child', () => requireLocus().discovery({ childSessionId: childSessionId.trim() }), false)
       }
       throw new PetError('INVALID_REQUEST', 'Discovery selector must be a non-empty string')
     }),
@@ -811,7 +813,7 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
             : { ...(listed as PetTodoLedgerView), parentSessionId })
         }
         return { ledgers }
-      })
+      }, false)
     }),
     petRoute(LOCUS_ROUTES.todoAction, async ({ body }) => {
       const record = strictBody(body, ['itemId', 'action'])

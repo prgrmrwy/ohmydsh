@@ -14,6 +14,16 @@ test('Node args retain local command flags and priority inputs', async () => {
   assert.equal(isOfficialInvocation(['plugin-update','--dry-run']), false)
   assert.equal(isOfficialInvocation(['stop','--profile','web']), true)
 })
+test('legacy maintenance is explicit and local to stop/restart', async () => {
+  const { parseArgs, HELP } = await implementation()
+  for (const command of ['stop', 'restart']) {
+    const flags = parseArgs([command, '--allow-legacy-restart'])
+    assert.equal(flags.allowLegacyRestart, true)
+    assert.deepEqual(flags.passthrough, [])
+  }
+  assert.throws(() => parseArgs(['--allow-legacy-restart']), /stop\/restart/)
+  assert.match(HELP, /--allow-legacy-restart/)
+})
 test('DSH_TRUSTED_HOSTS maps to official --trusted-host args and rejects malformed values', async () => {
   const { trustedHostArgs } = await implementation()
   assert.deepEqual(trustedHostArgs({}), [])

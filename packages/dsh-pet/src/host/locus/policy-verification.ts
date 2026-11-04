@@ -126,3 +126,27 @@ export function verifyLocusLivePolicy(
   // downstream display and authorization claim something untrue.
   return { ok: true, effective: requested }
 }
+
+/**
+ * Verify a durable permission without reading any live Session.
+ *
+ * The sandbox is applied and read back when a child is created or republished,
+ * and the child is published only if the read matched (see
+ * `composeLocusChild`). So at delivery time the recorded grant is the proof, and
+ * the one thing left to check is whether this build still honours it.
+ *
+ * @param locus - The durable record whose permission is being checked.
+ * @param writeEnabled - Whether write grants are honoured; defaults to {@link LOCUS_WRITE_ENABLED}.
+ * @returns the permission in force, or why the generation must not serve.
+ */
+export function verifyLocusPersistedPolicy(
+  locus: Pick<LocusRecord, 'permission' | 'contextAnchor'>,
+  writeEnabled: boolean = LOCUS_WRITE_ENABLED,
+):
+  | { readonly ok: true; readonly effective: LocusPermissionMode }
+  | { readonly ok: false; readonly reason: 'write-disabled' | 'permission-unverified'; readonly diagnostic: string } {
+  if (locus.permission.effective === 'write' && locus.permission.verifiedAt === undefined) {
+    return { ok: false, reason: 'permission-unverified', diagnostic: '原写权限缺少 Host 核验证明；该入口已暂停。' }
+  }
+  return { ok: true, effective: !writeEnabled && locus.permission.effective === 'write' ? 'read' : locus.permission.effective }
+}

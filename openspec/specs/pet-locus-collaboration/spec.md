@@ -1,96 +1,10 @@
+# pet-locus-collaboration Specification
+
 ## Purpose
 
 统一描述研发工作上下文与飞书协作现场的关联：所有入口先取得主会话，再由专属子会话持续服务。覆盖研发先行、project 群先行、群与话题的层级补齐、双向发现、权限及上下文切换，不以旧 QA 或 workspace executor 的实现分类组织产品。
 
 ## Requirements
-
-### Requirement: Locus 统一关联主会话子会话与飞书入口
-
-系统 SHALL 以 locus 表达一段持续协作关联，包含飞书入口、workspace 归属、主会话、专属子会话、权限和生命周期。入口 SHALL 以根标识 `chatId` 与可选子入口标识 `threadId` 寻址。IM 入口的 `chatId` 是飞书 chat 标识，`threadId` 是话题标识。文档入口的 `chatId` 是带前缀的 `doc:docx:<文档底层 token>`，`threadId` 是划词评论的 `comment_id`（见 `pet-locus-doc-comments`）。入口类别 SHALL 仅由 `chatId` 前缀判定，以 `doc:` 开头即为文档入口，因此两类入口天然落在互不相交的键空间。既有 IM 记录的寻址与存储键 MUST 与本变更前逐字节相同，且不被改写。带 `doc:` 前缀的根标识 MUST NOT 被任何 IM 接口当作 chat 使用。普通消息标识与单条评论回复标识（`reply_id`）MUST NOT 作为长期入口身份。workspace SHALL 与主会话归属一致。一个入口 SHALL 至多有一个活跃 locus，一个活跃 locus SHALL 恰好拥有一个专属子会话；一个主会话 SHALL 可关联多个 locus。系统 MUST NOT 以子会话作为绑定源产生孙辈。
-
-#### Scenario: 同一研发主会话服务多个现场
-- **WHEN** 同一主会话分别关联开发群、issue 群和话题
-- **THEN** 每个入口拥有独立子会话，全部直属该主会话，不共享执行历史
-
-#### Scenario: 同群话题关联不同主会话
-- **WHEN** 两个话题分别显式指定不同主会话
-- **THEN** 两个 locus 独立寻址，workspace 各自随主会话，不改变彼此关联
-
-「子会话」SHALL 指委派产生的会话（会话头 `origin: subagent` 或 `delegationDepth ≥ 1`）。用户从某会话**分叉**出的会话（会话头 `isSeeded: true`、深度 0、无 `origin`）虽也记录了来源会话，SHALL 视为普通主会话，可被绑定、可作为协作中的主会话；其它带来源会话的会话头 SHALL 一律按子会话处理（fail closed）。
-
-#### Scenario: 子会话不能作为绑定源
-- **WHEN** 绑定前缀仅命中一个子会话
-- **THEN** 不建立关联，回执与无可用匹配一致
-
-#### Scenario: 分叉会话可作为绑定源
-- **WHEN** 绑定前缀唯一命中一个由用户分叉出的未归档会话
-- **THEN** 按普通主会话建立关联，不因其记录了来源会话而当作子会话拒绝
-
-#### Scenario: 既有群入口键不变
-- **GIVEN** 升级前持久化的群 locus（chatId `oc_A`）与话题 locus（`oc_A` + thread `omt_T`）
-- **WHEN** 升级后加载并计算入口键
-- **THEN** 两者被判定为 IM 入口，键分别与升级前完全相同，行字节未被改写
-
-#### Scenario: 文档与群标识不串键
-- **GIVEN** 文档 token `X`，以及一个虚构的、字面值同为 `X` 的 chat 标识
-- **WHEN** 分别以 `doc:docx:X` 与 `X` 计算入口键、解析授权、比较 Delivery 关联
-- **THEN** 两者键不同；以其中一个查询，不会返回另一个的 locus、授权或 Delivery
-
-#### Scenario: 规范化不丢失文档前缀
-- **GIVEN** 文档评论级入口 `(doc:docx:D, c2)`
-- **WHEN** 依次经过入口规范化、键计算与键反解析
-- **THEN** 结果仍为 `(doc:docx:D, c2)`，并被判定为文档入口
-
-### Requirement: 自动主会话按群建立且只使用 default workspace
-
-系统 SHALL 为协作先行的群或文档，在已配置且可用的 default workspace 中创建一个该群或该文档专属的自动主会话，并持久复用。不同群、不同文档，或群与文档之间，MUST NOT 因 default workspace 相同而共用自动主会话。文档根由带前缀的 `chatId`（`doc:docx:<token>`）标识。本期 MUST NOT 应用旧 chat 到 workspace 覆盖路由。default 缺失/不可用时 SHALL 停止创建并诊断，不能选择其它目录。
-
-bot 入群 MUST NOT 产生任何持久后果：不建主会话、不建子会话、不写 locus 记录，也不分析历史或执行项目工作。关联结构 SHALL 由 allowlist 成员的首个合格 @ 按需建立，并在同一次准入中投递该消息。
-
-#### Scenario: 入群不建自动主会话
-- **WHEN** bot 被拉进一个尚无关联的群
-- **THEN** 不产生群级标记、主会话、子会话或 locus 记录，直到该群出现首个合格 @
-
-#### Scenario: 首次消息补齐
-- **WHEN** 该群尚无关联，allowlist 成员首次 @bot
-- **THEN** 创建群专属自动主会话和 locus 子会话，再处理该消息
-
-#### Scenario: 重复初始化
-- **WHEN** 同群多个首次请求并发到达
-- **THEN** 仅产生一个群级自动主会话，重复调用复用同一结构
-
-#### Scenario: default 不可用
-- **WHEN** 自动创建时 default workspace 无法解析
-- **THEN** 不创建主/子会话，不回退其它 workspace，管理面说明原因
-
-#### Scenario: 文档首次评论建立文档专属主会话
-- **GIVEN** 文档 `D1`、`D2` 和群 `oc_G` 都还没有 locus，default workspace 可用
-- **WHEN** allowlist 成员先后在 `D1` 的评论、`D2` 的评论和 `oc_G` 中首次 @bot
-- **THEN** 产生三个互不相同的自动主会话，分别归属 `doc:docx:D1`、`doc:docx:D2`、`oc_G`
-
-### Requirement: 自动主会话创建即具备可辨识身份且不可被当作新会话占用
-
-自动主会话 SHALL 在创建时经常规会话生命周期收到一条开场说明，陈述其 locus 身份（飞书入口 chat、workspace 与执行根）。该主会话 MUST NOT 停留在零轮次形态：宿主把无 `turn/start` 的会话归为 blank，而 blank 会清空标题、隐藏会话标识并使其可被「新建会话」复用。
-
-开场说明 SHALL 明确自身只是上下文陈述而非任务，要求主会话确认知悉后保持待命，MUST NOT 要求或诱导其分析项目、读取文件或给出结论。开场说明 SHALL 说明飞书消息由子会话处理且不会自动回传。
-
-开场说明 SHALL 复用常规用户消息投递路径，MUST NOT 为此特化会话日志结构或手工构造事件。主会话的持久发布 SHALL 依据创建事实，MUST NOT 依赖该开场说明的模型回复；模型不可用时 MUST NOT 阻断 locus 建立。
-
-#### Scenario: 跳转后可证明身份
-- **WHEN** 所有者从管理面打开一个刚创建、尚无业务往来的自动主会话
-- **THEN** 该会话显示自己的标题与开场身份说明，可据此确认所属 locus、workspace 与执行根，不呈现为「新会话」
-
-#### Scenario: 新建会话不得占用主会话
-- **WHEN** 用户在该 default workspace 中点击「新建会话」
-- **THEN** 宿主不得把已有 Locus 主会话作为空白会话交付复用，用户输入不进入协作根
-
-#### Scenario: 开场说明不触发工作
-- **WHEN** 自动主会话收到开场说明
-- **THEN** 它只需确认知悉并保持待命，不分析项目、不读取文件、不产生业务结论
-
-#### Scenario: 模型不可用不阻断建立
-- **WHEN** 开场说明因模型不可用而未能得到回复
-- **THEN** locus 与子会话仍按创建事实正常发布，该主会话仍不被判为空白会话
 
 ### Requirement: 管理面的会话可用性以持久证据判定
 
@@ -110,123 +24,15 @@ bot 入群 MUST NOT 产生任何持久后果：不建主会话、不建子会话
 - **WHEN** 宿主未提供会话冷读能力
 - **THEN** 省略可用性事实，不断言会话缺失
 
-### Requirement: 群与话题按层级补齐且继承在创建时固定
-
-Locus 树 SHALL 只由飞书入口的**首条合格消息**按需建立。Bot 加入群 MUST NOT 创建主会话、子会话或 locus，也 MUST NOT 产生其它持久后果；群与话题 SHALL 使用同一建树时机，不因入口类型而提前或延后。
-
-话题新建 SHALL 先确保所属群的根结构存在；群无主会话时 SHALL 先创建群自动主会话。新话题默认 SHALL 使用群当前主会话，显式来源优先。群级与话题级子会话 SHALL 是主会话下的兄弟，而非递归父子。已建立话题 SHALL 固定其主会话，不在每次消息时重新继承群来源。
-
-消息无法确定 thread 归属时 MUST NOT 将它冒充群本体投递；失效的明确关联 MUST NOT 当作不存在而自动换来源。
-
-#### Scenario: 入群不产生持久后果
-- **WHEN** bot 被拉进任何群，群内尚无人 @ 过 bot
-- **THEN** 不创建主会话、子会话或 locus，管理面不出现该入口的关联记录；平台侧的群成员关系仍可直接查询，不依赖本地副本
-
-#### Scenario: 首条合格消息建立整棵树
-- **WHEN** 尚无 locus 的群收到第一条 @ bot 的合格消息
-- **THEN** 在该次投递中建立主会话、子会话与 active locus，随后正常投递该消息；建立失败时不发布半成品，按既有补偿回收已创建资源
-
-#### Scenario: 群与话题建树时机一致
-- **WHEN** 分别向尚无 locus 的群本体与尚无 locus 的话题发送首条合格消息
-- **THEN** 两者都在首条消息到达时建树，得到结构等价的归属，不存在一方在入群时已预先建立的差异
-
-#### Scenario: 话题先行
-- **WHEN** 第一条合格消息来自尚无群结构的话题
-- **THEN** 先建立群主会话，再建立话题子会话，与先群后话题得到等价归属
-
-#### Scenario: 两话题并发首次创建
-- **WHEN** 同群两个新话题同时触发
-- **THEN** 共用同一个已确保的群主会话，各自持有不同子会话
-
-#### Scenario: 显式话题来源不改变群
-- **WHEN** 群默认主会话是 S0，话题显式绑定 S1
-- **THEN** 仅该话题使用 S1，其它新话题仍默认 S0
-
-#### Scenario: 话题身份不确定
-- **WHEN** 入站事实或解析不足以证明消息属于哪个入口
-- **THEN** 停止派发并诊断，不投递给较宽的群本体子会话
-
-### Requirement: Q&A 是默认入口的创建或打开
-
-GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能力。首次 SHALL 创建该主会话的默认答疑群并指定发起者为群主，建立 read locus 与专属子会话。后续 SHALL 打开该默认入口并标明复用，MUST NOT 因其它群绑定或最近使用时间改变默认对象。创建失败 SHALL 不发布半成品关联，回收未发布资源；无法回收的群 SHALL 明示残留。
-
-#### Scenario: 首次 Q&A
-- **WHEN** 主会话尚无默认答疑入口且创建成功
-- **THEN** 发起者拥有新群，群绑定该主会话的 read 子会话，结果标明新建
-
-#### Scenario: 有多个关联仍打开默认群
-- **WHEN** 主会话已有默认 Q&A、另有多个 issue locus，用户再次点击 Q&A
-- **THEN** 打开原默认 Q&A，不创建新群、不跳转最近 issue 群
-
-#### Scenario: 默认入口失效
-- **WHEN** 默认入口已失效或退役
-- **THEN** 如实提示状态并提供重建，不把它当可用复用对象，也不悄悄换成其它绑定
-
-#### Scenario: 创建中途失败
-- **WHEN** 子会话或群已创建但关联不能完成
-- **THEN** 不发布 active locus，执行补偿并明示不可回收残留
-
-### Requirement: 显式绑定可替换自动关联并警告上下文改变
-
-`-b/--bind <prefix>` 及 `/bind <prefix>` SHALL 只由 allowlist 触发。前缀 SHALL 至少六位，唯一匹配未归档主会话；无匹配/多匹配 SHALL 同一句回执，不暴露其它会话。主会话运行的 Agent preset MUST NOT 成为绑定条件：locus 子会话的组合与主会话 preset 无关（见「Locus 业务出站只能经受管 finish」），因此用户自己的 `standard` 等会话与 Pet 自建主会话同样可绑定。拒绝绑定 SHALL 给出真实原因；只有「前缀命中子会话」按无匹配同一句回执。群名 SHALL 取平台事实，未知留空，不承诺管理不属于自己的群。
-
-尚未建立 locus 的入口收到 `/bind` 时 SHALL 直接以指定主会话建立该入口的 locus，MUST NOT 先建立自动来源再改绑：入群不预建关联，因而不存在需要被替换的自动归属。此时 MUST NOT 发出上下文变更警告——没有发生来源变化。
-
-自动建立或默认继承的 locus 在空闲时 SHALL 允许显式切换到 S1；已显式绑定的不同来源 SHALL 拒绝直接覆盖并指向解除，同源重试 SHALL 幂等。存在运行或已接受待处理消息时 SHALL 拒绝切换并提示稍后。
-
-例外：当前代际记录的主会话**已被所有者归档**时，allowlist 的 `/bind S1` SHALL 直接把本入口改挂到 S1（新代际、新只读子会话，旧代际标为失效并保留历史），不要求先解除——所有者已放弃原主会话，不存在需要防止的绑定漂移。归档事实 SHALL 在改挂时重新证明；原主会话仍在服务时 SHALL 维持上述拒绝。在**群级**入口执行时，同一群内主会话同样已归档、且未被所有者停止/退役的话题 SHALL 一起改挂到 S1（每个话题新代际、新只读子会话，归档事实逐个重新证明）；这与下文「已有话题 MUST NOT 自动迁移」不冲突——那条约束的是原主会话仍在服务时的切换。此动作 MUST NOT 改动其它群或文档的入口，也 MUST NOT 改动主会话仍在服务的话题。群已挂在 S1 上时再次 `/bind S1` SHALL 只补迁这些遗留话题。在话题里执行时只改该话题。回执 SHALL 同时写明原主会话与新主会话、说明旧对话未自动合并，并报告一起改挂的话题数量与未能改挂的话题及原因。「已停止服务」的提示 SHALL 把这条出路与「恢复主会话」「用新的主会话接替」并列给出。
-
-切换 SHALL 建立新子会话、新代际且默认 read；旧子会话历史保留。当前入口 MUST 明确收到“从 S0 切换到 S1，上下文来源发生变化，旧对话未自动合并”的提示，使用标题或短标识；通知未送达时 MUST NOT 无提示开始新来源工作。已有话题 MUST NOT 自动迁移，新话题 SHALL 默认使用新群主会话。
-
-#### Scenario: 首次绑定一次建对
-- **WHEN** bot 已在群内但该入口尚无 locus，allowlist 发送 `/bind S1`
-- **THEN** 直接建立以 S1 为主会话的 locus，`mainSource` 记为显式来源，不产生自动 main、不执行改绑、不发送上下文变更警告
-
-#### Scenario: 绑定用户自己的 standard 会话
-- **WHEN** allowlist 发送 `/bind S1`，S1 是运行 `standard` preset 的未归档用户主会话
-- **THEN** 建立以 S1 为主会话的 locus；子会话仍以 Pet 指定的 safe preset 组合，不获得 `subagent` 等委派工具
-
-#### Scenario: 自动来源显式切换
-- **WHEN** 空闲自动 locus S0 收到 allowlist `/bind S1`
-- **THEN** 创建 S1 的新 read 子会话并切换，当前入口收到明确的 S0→S1 上下文警告，旧历史不自动合并
-
-#### Scenario: 群切换不迁移旧话题
-- **WHEN** 群从 S0 切换到 S1，存在话题 A 且随后新建话题 B
-- **THEN** A 继续 S0，B 默认 S1，管理视图如实展示不同来源
-
-#### Scenario: 显式来源被覆盖
-- **WHEN** 已显式绑定 S1 的 locus 收到绑定 S2，且 S1 未归档
-- **THEN** 拒绝并说明需先解除；同 S1 重试只返回既有结果
-
-#### Scenario: 原主会话已归档时 /bind 直接改挂
-- **WHEN** 已显式绑定 S1 的空闲 locus 收到 allowlist 的 `/bind S2`，且 S1 已被所有者归档
-- **THEN** 建立以 S2 为主会话的新只读代际，原代际标为失效并保留历史；回执写明从 S1 改挂到 S2、旧对话未自动合并
-
-#### Scenario: 群级改挂连带同群遗留话题
-- **WHEN** 群 G 与其话题 A、B 均挂在已归档的 S1 上，话题 C 已被所有者停止，另一群 H 也挂在 S1 上；allowlist 在 G 发送 `/bind S2`
-- **THEN** G、A、B 改挂到 S2，C 与 H 不变；回执报告一起改挂 2 个话题
-
-#### Scenario: 群已改挂后补迁遗留话题
-- **WHEN** 群 G 已挂在 S2 上，其话题 A 仍挂在已归档的 S1 上；allowlist 在 G 再次发送 `/bind S2`
-- **THEN** A 改挂到 S2，G 不重建；回执报告一起改挂 1 个话题
-
-#### Scenario: 忙时切换
-- **WHEN** 当前子会话有执行中或排队消息时收到改绑
-- **THEN** 不强杀、不改来源，提示稍后重试
-
-#### Scenario: 非 allowlist 控制请求
-- **WHEN** 群成员不在 allowlist 但发送绑定、解绑或 scope 命令
-- **THEN** 静默丢弃，不把命令作为普通问题送给子会话
-
 ### Requirement: 全部飞书工作统一为子会话常规交互
 
-新模型 SHALL 仅对 mention 自身 bot 的消息触发工作，包括单聊；普通非 mention 内容 MUST NOT 启动推理、总结或自动更新主会话。消息 SHALL 由对应 locus 的同一个长期 child session 持续处理，MUST NOT 建立飞书 root executor/Invocation 或 waiting-user 执行分支。
+新模型 SHALL 仅对 mention 自身 bot 的消息触发工作，包括单聊；普通非 mention 内容 MUST NOT 启动推理、总结或自动更新主会话。消息 SHALL 由对应 locus 的同一个长期 child session 持续处理（子会话在该代第一条消息到达时才创建，见"子会话在首条消息到达时创建"），MUST NOT 建立飞书 root executor/Invocation 或 waiting-user 执行分支。
 
 每个 locus SHALL 维护按接受序排列的持久 Delivery 队列，任意时刻至多向 child 投递一个 current Delivery。后续合格消息 SHALL 先进入 backlog，只有 current 进入终态后才可投递下一条未过期消息；MUST NOT 依赖 DSH `next-turn`/`next-step` 的合批顺序推断两个飞书请求或父回复的业务归属。
 
 子会话需要决策时 SHALL 直接向当前飞书入口发问，后续 at 回答 SHALL 在同一子会话继续。歧义回答 SHALL 澄清，不自动解释为授权。模型 turn 结束 MUST NOT 被显示为整个项目完成，也 MUST NOT 单独完成 current Delivery。Host 超时推进 SHALL 继续复用同一个 child session及其历史，MUST NOT 自动重建 session 或增加 locus generation。
 
-子会话的运行体驻留 SHALL NOT 被当作代际可用性的一部分。运行体 MAY 在子会话空闲且 inbox 为空时释放它（这是常态而非故障），因此宿主 MUST 以「按需冷恢复该 durable child」的方式取得其 live session 与策略，MUST NOT 因「当前不在内存中」判定该 child 不可用、作废代际或另建 child。宿主提供的「读取 exact child session」能力 SHALL 自身完成驻留解析，MUST NOT 要求调用方先证明它已驻留——否则每条消息都会在第二次投递时失败，并表现为一代只服务一条消息。
+子会话的运行体驻留 SHALL NOT 被当作代际可用性的一部分。运行体 MAY 在子会话空闲且 inbox 为空时释放它（这是常态而非故障），因此宿主 MUST 以「按需冷恢复该 durable child」的方式取得其 live session 与策略，MUST NOT 因「当前不在内存中」判定该 child 不可用、作废代际或另建 child。宿主 MUST NOT 依赖借出子会话 Session 的兼容能力：需要 live agent 的操作（如就地改沙箱、回读）只在子会话常驻时经 `ctx.agents.get` 进行，否则延后到下一次 `agent/created`；投递经官方 `startContinuable`（首条）与官方 Host prompt 队列（后续，官方负责冷恢复）。
 
 #### Scenario: 普通资料发布
 - **WHEN** 成员发送 PRD、Figma、会议资料但未 at bot
@@ -248,25 +54,10 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 - **WHEN** current Delivery 达到 Host deadline 而未完成
 - **THEN** Host 终结该 Delivery、尽力中止其当前运行并在同一 child session 上推进下一条，保留该 locus 已积累的 session 历史
 
-### Requirement: 关联具备双向发现且不过度披露
-
-系统 SHALL 从入口查当前 locus/主会话/子会话，从主会话列出全部 locus，从子会话找到唯一 locus。正反向结果 SHALL 同源一致并区分历史和活跃代际。所有者管理面 SHALL 展示来源、群/话题、默认 Q&A、权限、工作根和状态。群内回执 MUST NOT 泄露完整 session ID、其它群 ID 或其它 locus 列表。子会话与主会话之间的协作 SHALL 经该主会话的 Locus 协作空间：子会话以代理成员 `pet` 的身份使用协作工具（`collab_status`、`collab_read`、`collab_create_item`、`collab_revise_item`、`collab_ack_item`、`collab_send_message`、`collab_set_status`、`collab_advance_request`），不提供建空间、邀请与成员管理工具；只读档与 shell 档子会话的协作工具面相同。兄弟子会话 MUST NOT 直接往来：子会话在正常读取中读不到兄弟写的记录，不能向兄弟发消息，也不能修改、确认或推进主会话的条目；需要兄弟上下文时问主会话，由主会话转述。该约束防误泄，不承诺防有意串通。
-
-#### Scenario: 双向核对
-- **WHEN** 所有者从研发主会话查看协作入口，再从某入口打开会话
-- **THEN** 两个方向指向同一个 locus 与对应主/子会话
-
-#### Scenario: 子会话反查
-- **WHEN** 子会话查询自身关联
-- **THEN** 只返回自己的 locus，不因共享 parent 获得所有兄弟入口的公开枚举
-
-#### Scenario: 子会话的协作工具面
-- **WHEN** 读取只读档与 shell 档子会话的真实工具快照
-- **THEN** 两者都恰含上述 8 个协作工具，都不含 `collab_space`、`collab_invite`、`collab_member`；`pet_locus_ledger_read` 不在其中；两份快照中的协作工具名集合相同（shell 档另含其既有 shell 工具）
-
-#### Scenario: 子会话不能向兄弟发消息
-- **WHEN** 子会话 A 调用 `collab_send_message`，`to` 为 `pet` 或任何非 `main` 的值
-- **THEN** dsh-collab 以 `COLLAB_BAD_RECIPIENT` 拒绝，不调用内核，不产生投递
+#### Scenario: 业务结算后下一条仍为独立轮次
+- **GIVEN** current A 已业务结算，但其运行 turn 尚未结束，消息 B 已在 backlog；父回复经 `sendMessage` 只续进 A
+- **WHEN** Host 派发 B
+- **THEN** B 经官方 Host `queuePrompt` 以 `user` 来源排入独立后续轮次，持久绑定 B 自己的 inbox UUID；不使用 `steer` 并入 A，不把父回复认作 B 的投递证据
 
 ### Requirement: 默认 read 与 allowlist 授权独立于绑定
 
@@ -349,13 +140,13 @@ GUI Q&A SHALL 仅接受未归档主会话，验证 bot、所有者及宿主能�
 
 系统 SHALL 在创建前核验所用 provider 确实不继承父上下文；无法证明时 SHALL 拒绝创建并如实报告，MUST NOT 静默退回复制父历史的 provider，也 MUST NOT 把拒绝表述为已建立独立 child。已有 fork child 不受本条影响：它们不会被本 change 的创建路径重新创建，其历史 MUST NOT 被裁剪或静默改造。
 
-初始化任务书 SHALL 告知子会话在工作根、约束或相关事实不足时，可通过宿主原生消息能力询问 caller-bound 主会话，MUST NOT 允许指定其它 parent 或 locus。主会话回复只是对话事实，SHALL NOT 因此成为持久授权；锚点仍须由所有者在管理面显式确认后写入。答复只提供上下文事实；路径存在性不等于写授权。
+初始化任务书 SHALL 告知子会话在工作根、约束或相关事实不足时，可通过宿主原生消息能力询问 caller-bound 父会话即 locus 主会话，MUST NOT 允许指定其它 parent 或 locus。locus 主会话不知道干活现场的事实时 SHALL 经 dsh-collab 向干活主会话提问，再以 `locus_reply_child` 回复子会话。父会话回复只是对话事实，SHALL NOT 因此成为持久授权；锚点仍须由所有者在管理面显式确认后写入。答复只提供上下文事实；路径存在性不等于写授权。
 
 父子或 agent 间的 `agent-message` SHALL 只作为子会话上下文通信，不参与 Delivery 路由选择：它 MUST NOT 建立、修改、替换或撤销 current Delivery 已由 Host 绑定的回复目标。current Delivery 存续时，原始飞书投递 turn 结束后的 `agent-message` SHALL 可唤醒同一 child 继续处理该 current；没有唯一 current 时，`agent-message` MUST NOT 自行产生飞书 finish/wait 能力。GUI/user steer、来源不明的参与者消息与第二个已投递 Delivery仍 SHALL fail closed。
 
-caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已确认局部锚点、权限与 Host 确认的 current Delivery 状态，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。未知锚点 SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传主会话；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
+caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已确认局部锚点、权限与 Host 确认的 current Delivery 状态，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。未知锚点 SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传干活主会话；官方结算通知送达 locus 主会话是明确例外，且收到通知不等于结论已被采纳为 agreed charter 或已被干活主会话知晓；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
 
-主会话 SHALL 被表述为工作归属与可询问的上下文来源，MUST NOT 因其父节点身份宣称已统合所有协作现场的最新认知。用户显式发起的查阅与汇总不属于自动回传；系统 SHALL 区分可发现、可读取与已采纳，缺少历史读取能力或权限时如实说明。当前模型 MUST NOT 宣称已提供 project 级自动知识同步或多人分布式协同。旧 QA/chat 绑定仍遵守前置版本的退役隔离，不因本兼容规则恢复服务。
+干活主会话 SHALL 被表述为工作归属，locus 主会话为可询问的上下文来源，MUST NOT 因其父节点身份宣称已统合所有协作现场的最新认知。用户显式发起的查阅与汇总不属于自动回传；系统 SHALL 区分可发现、可读取与已采纳，缺少历史读取能力或权限时如实说明。当前模型 MUST NOT 宣称已提供 project 级自动知识同步或多人分布式协同。旧 QA/chat 绑定仍遵守前置版本的退役隔离，不因本兼容规则恢复服务。
 
 #### Scenario: 长父历史不能冒充子身份
 - **WHEN** 活跃主会话已有大量 GUI 验收对话并创建新 Q&A child
@@ -395,7 +186,7 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 
 #### Scenario: 子会话发现不自动成为主会话认知
 - **WHEN** QA 子会话产生新发现，而用户未发起主会话查阅或采纳，也没有关联询问
-- **THEN** 系统不自动更新主会话，不将该发现呈现为主会话已知的项目决策
+- **THEN** 系统不自动更新干活主会话，不将该发现呈现为干活主会话已知的项目决策；locus 主会话可能收到官方结算通知，但这不构成采纳
 
 #### Scenario: 用户主动查阅受实际能力约束
 - **WHEN** 用户要求查阅一个可通过索引发现、但当前无权读取或缺少宿主读取能力的子会话历史
@@ -406,8 +197,8 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 - **THEN** 恢复同一 child 的历史，不插入恢复时的父历史，不更换身份
 
 #### Scenario: 旧 fork child 不受影响
-- **WHEN** 已有继承父前缀的 child 继续服务其入口
-- **THEN** 其历史和行为不被裁剪或静默改造，因为它不会被本 change 的创建路径重新创建
+- **WHEN** 存在本变更前继承父前缀的旧 child
+- **THEN** 其历史保留不被裁剪或改造；它所在的旧模型入口按退休规则退出路由，不再服务
 
 ### Requirement: 投递与结算关联独立于会话运行状态
 
@@ -511,56 +302,6 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 #### Scenario: 宿主重启无法证明关联
 - **WHEN** 恢复时无法精确证明持久 current 对应原 child 与 locus generation
 - **THEN** 暂停该 locus intake 并诊断，不猜 FIFO、最近消息或新建替代身份
-
-### Requirement: 生命周期退出保留历史且旧关联不兼容
-
-归档/解绑 SHALL 停止当前 locus 服务并保留主/子会话历史与飞书资源；忙时拒绝强制退出。主会话失效 SHALL 使相关 locus **退出服务**：宿主 SHALL 如实明示需要重建、普通 at MUST NOT 自动复活、MUST NOT 自动换来源；「退出服务」的判据 SHALL 由实时读取的归档事实得出，MUST NOT 要求把代际记录改写成停止/失效标记，使所有者恢复该主会话后即恢复服务、无需一次多余的重建。退役群 locus 不得级联改变仍有效的话题来源。明确退出的入口 SHALL 保留停止标记，普通 at MUST NOT 自动复活，需所有者显式重新建立；退出回执 SHALL 说明此行为。群级结构整体退出时，已有有效话题继续使用其固定主会话，但新话题 MUST NOT 以自动补齐绕过退出，需先显式重新建立群级结构。
-
-旧版本关联 SHALL 标为不可用且不迁移到新模型，不参与路由或权限恢复；普通 Pet 轮盘数据保持不变。所有者 SHALL 显式重新建立旧入口，不能无提示以 default 新身份接管。用户接受破坏性升级 MUST NOT 被解释为授权删除旧会话、群或历史。
-
-「普通 at MUST NOT 自动复活」的主语 SHALL 严格限于**所有者明确退出**的入口（`stopped` / `retired`）。宿主自行判定不可用的代际（`invalid`，如重启后子会话重新附着失败、缺少 composition 证明）MUST NOT 与之等同：所有者从未作出退出决定，不存在需要保留的意图。此类入口 SHALL 按「无存量入口」处理，由下一次**已授权**的 at 直接建立新代际；allowlist 门禁不变，普通成员 MUST NOT 借此引导建立。此区分是必需的而非优化：宿主判定失效的入口若被要求显式重建，而该代际记录的主会话恰已归档，重建将必然失败，入口将永久不可达。
-
-**主会话被归档**是这两类之外的第三种情形，且 MUST NOT 被归入"宿主判定"：所有者确实作出了决定（归档该会话），只是决定的对象不是本 locus。因此：该入口 SHALL 退出服务并由宿主如实明示需要重建，普通 at MUST NOT 自动复活它，MUST NOT 自动改挂到新建的主会话（这正是「不自动换来源」）；同时宿主 MUST NOT 把 locus 记录改写成所有者退出的标记（`stopped` / `retired`）——那会伪造一个所有者从未作出的、针对本入口的决定。此分类 SHALL 由读取归档事实得出，MUST NOT 落盘成代际状态。
-
-管理面 SHALL 与通道对「本入口是否还能服务」给出一致判断：主会话已归档时，即使 locus 记录仍是 `active`，管理面 SHALL 允许所有者显式重建它（见下条的两条修法），MUST NOT 出现"通道提示去重建、管理面却不提供重建"的死角。
-
-运行体本身 MUST NOT 被归档语义绕过：任何解析主会话的路径 SHALL 在 `get` / `resume` 之前先判定该会话是否已归档，MUST NOT 因"归档会话在运行体中仍可 `resume`"而把它复活并继续服务。此闸门 SHALL NOT 依赖运行体自身的归档校验——`dsh-agent` 与 session controller 都不校验归档，归档只是一份 registry 清单。
-
-「建立新代际」SHALL 严格限于发布一个**新创建**的代际：失效代际的子会话 MUST NOT 被 adopt、冷恢复或复用（其缺少 safe-v1 composition 证明，恢复即继承父 preset），失效行 SHALL 作为历史保留并退出路由。原主会话不可用（归档或缺失）时，恢复 SHALL 按首次建立的方式新建主会话，MUST NOT 因此拒绝服务。管理面的所有者显式重建 MAY 保持不自动新建主会话（以便就地说明需恢复哪个会话），但自动恢复路径 MUST 具备该回退，否则该入口在两条路径下都不可达。话题入口的群级父代际同样失效时，恢复 SHALL 先恢复群级再恢复话题，MUST NOT 因群级问题拒绝话题。
-
-管理面的所有者显式重建 SHALL 同时提供两条互斥的修法，且都不要求先还原归档：**恢复该主会话**（本入口随之自动恢复，无需任何重建），或**用新的主会话接替**（为整个主会话新建一个主会话，把名下入口一起迁过去）。两者 SHALL 都把来源变化如实告知，MUST NOT 让入口在所有者以为仍挂在原主会话时静默改挂到新主会话。既有「原主会话已归档」的拒绝文案 SHALL 同时给出这两条修法，MUST NOT 只给"先恢复归档"这一条——那只覆盖了所有者不再想要该主会话的情形。
-
-修法提示 SHALL 按该入口**自身状态**给出，MUST NOT 无条件罗列上述两条：所有者已停止/退役的入口既不会被会话级迁移搬走（那等于复活一次主动退出），恢复主会话也不会复活它，因此对这类入口上述两条**均不可达**，提示 SHALL 如实说明其唯一出路是恢复主会话后显式重建本入口。给出一条在当前状态下不可达的出路，比不给出更有害——所有者会照着做且毫无反应。
-
-「换主会话」SHALL 是会**会话级**动作，MUST NOT 挂在单个入口行上：该决定的对象是主会话而不是这条入口，且名下入口原本共享同一个主会话，MUST 迁到同一个新主会话——按入口逐个"新建主会话"会把一份共享会话拆成与入口数量相同的新会话。入口行在主会话已归档时 SHALL NOT 提供重建（重建复用记录中的主会话，即那条无法服务的主会话，必然失败），SHALL 只如实说明原因并把所有者引向会话级动作。会话级迁移 MUST NOT 迁移所有者已明确停止/退役的入口——那等于复活一个所有者主动作出的退出；被跳过时 SHALL 逐条报告原因。迁移 SHALL 在被归档主会话自己的工作区内新建主会话，MUST NOT 把所有者的工作静默挪到默认工作区。若一条也没能迁移，SHALL NOT 留下无人使用的新主会话。
-
-会话级动作的结果 SHALL 被如实回执：已迁移数量、新主会话标识、以及每条被跳过入口的原因。此要求不是润色——迁移成功后入口会离开本会话分组、动作按钮因无可迁对象而消失、旧代际又被默认筛选隐藏，三者叠加使**成功与空操作在界面上无法区分**。同理，归档主会话下无可迁移入口时 SHALL 说明原因（名下入口已迁走、或仅剩不参与迁移的已停止入口），MUST NOT 以「不渲染任何东西」表示。
-
-失效诊断 SHALL 保留宿主原始错误信息，MUST NOT 仅以稳定原因码记录——原因码无法区分瞬时重附着竞争与真正不可用的子会话，使失效无法被事后定位。
-
-读不到 live policy（读取失败或读到空值）MUST NOT 被记为 drift：它不构成「存储的授权已不再描述该 child」的证据。但它确实意味着该代际此刻无法服务，因此宿主 SHALL 退休该代际并经建立路径重建一次，用新代际继续服务这条消息，MUST NOT 让入口停在 `active` 却对之后每条消息永久拒答——那等于一个读不到的子会话永久静音整个入口。重建后仍读不到时 SHALL 失败关闭并保留诊断。能力整体缺失（如组合中不存在策略解析能力）属于组合事实而非该 child 的事实，重建无法修复，MUST NOT 因此触发重建。
-
-#### Scenario: 退出单个 locus
-- **WHEN** 所有者在空闲 locus 解绑或归档
-- **THEN** 停止接收该关联消息，历史可查，主会话其它 locus 不受影响
-
-#### Scenario: 宿主判定失效的入口重新可用
-- **WHEN** 某入口当前代被宿主置为 `invalid`（非所有者退出），此后收到 allowlist 成员的普通 at
-- **THEN** 按无存量入口建立新代际并正常应答，不要求显式重建、不因原主会话已归档而拒绝；普通成员的同一消息仍按 allowlist 拒绝
-
-#### Scenario: 来源失效
-- **WHEN** 主会话归档、删除或无法恢复
-- **THEN** 关联入口有限次提示失效，不自动创建新主会话继续回答
-
-#### Scenario: 升级旧入口
-- **WHEN** 升级后旧绑定入口收到消息
-- **THEN** 不使用旧执行路径；向有权重建者说明需要重建，未确认前不静默换成自动来源
-
-显式重建 SHALL 使用被重建入口自身记录的原主会话作为新 parent；管理面 MUST NOT 提供替换 parent 的自由输入（`### Requirement: 管理面不提供新建外部资源的入口`）。归档与真正缺失/删除是两类不同的不可用：前者可逆（会话字节与历史仍在，仅工作区注册表成员关系被隐藏），后者不可逆。显式重建的原 parent 恰好处于归档状态时，拒绝理由 SHALL 指出"已被归档"并说明所有者可通过恢复该会话解除阻塞；MUST NOT 与真正缺失/删除会话使用相同措辞，避免所有者把一个可逆状态误判为死路。
-
-#### Scenario: 显式重建的原 parent 已归档
-- **WHEN** 所有者对某入口发起显式重建，其记录的原主会话当前处于已归档状态
-- **THEN** 拒绝重建并指出该会话已被归档、需先恢复；所有者恢复该会话后，同一重建请求（parent 不变）SHALL 成功，不要求提供另一个 parent
 
 ### Requirement: 管理面按入口聚合且区分代际
 
@@ -783,39 +524,63 @@ claim-before-bind、expiry→promotion、Host 恢复和 next-step/next-turn batc
 
 ### Requirement: Locus 业务出站只能经受管 finish
 
-Locus child 的飞书业务正文与撤回动作 SHALL 只能由 caller-bound `pet_locus_finish` 的 Host 实现产生。child 的已发布能力集合 MUST NOT 提供可经 Skill、shell、脚本、CLI、通用 HTTP、子委派或其它执行身份直接发送或撤回飞书消息的路径；普通 assistant 文本仍不得外发。
+Locus child 的飞书业务正文与撤回动作 SHALL 以 caller-bound `pet_locus_finish` 的 Host 实现为唯一受管出口；普通 assistant 文本仍不得外发。该出口在各工具档位下的保证强度 SHALL 按档位区分，并 SHALL 如实陈述，MUST NOT 把较弱档位的保证表述为较强档位的保证。
 
-该边界 SHALL 由工具/执行 authority 隔离强制执行，MUST NOT 仅依赖 prompt、Skill 省略、命令字符串黑名单、PATH/HOME 隐藏或 read-only 文件沙箱。若当前 pinned runtime 无法证明在保留通用进程执行时隔离飞书凭据与 Lark 网络出口，发布的 Locus safe composition SHALL 移除 `bash`、`pwsh`、任意代码执行和可代为执行的子委派能力，只保留受控只读工具与 caller-bound Pet 工具。
+**`safe` 档（默认）**：child 的已发布能力集合 MUST NOT 提供可经 Skill、shell、脚本、CLI、通用 HTTP、子委派或其它执行身份直接发送或撤回飞书消息的路径。该边界 SHALL 由工具/执行 authority 隔离强制执行，MUST NOT 仅依赖 prompt、Skill 省略、命令字符串黑名单、PATH/HOME 隐藏或 read-only 文件沙箱。若当前 pinned runtime 无法证明在保留通用进程执行时隔离飞书凭据与 Lark 网络出口，`safe` 档 SHALL 不提供 `bash`、`pwsh`、`skill`、任意代码执行和可代为执行的子委派能力，只保留受控只读工具与 caller-bound Pet 工具。
 
-Locus child 创建和冷恢复 SHALL 使用同一份持久、不可由 parent/user preset 漂移的 safe composition。该 composition 的 preset SHALL 由 Pet 在创建时显式指定并持久化，MUST NOT 从主会话当前或创建时的 preset 派生；冷恢复 SHALL mount 持久化的该 preset，MUST NOT 经父组合（`composeFrom`）重建；持久记录缺失该 preset 时 SHALL 拒绝恢复。每个成功完成 independent marker 与精确 durable toolFilter 装配的新建/重建 child，SHALL 在对应 Locus 行发布 Host 证明的 `safe-v1` composition marker；该 marker 只能在 child 创建成功返回后、active locus 发布时写入。缺少 marker 的旧行仍 SHALL 可被 schema/persistence 读取，但 startup reconciliation SHALL 将其置为 invalid，resolution、adoption 与 dispatch SHALL 在任何 parent/child cold resume 之前拒绝；非 `safe-v1` 值亦同。Host 无法证明该 composition 已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 静默回退到继承父 preset 的 child。任何为满足本条所需的 DSH compatibility seam SHALL 针对 manifest 中的精确 pin 做运行时探针并 fail closed。
+**`shell` 档（所有者显式授予，见「Locus 工具档位由所有者显式授予且不重建子会话」）**：child 可执行通用 shell，因而**不存在**执行 authority 层面的出站隔离。此时唯一出口 SHALL 由防误操作 guard 维持：Host SHALL 在该 child 作用域拒绝经 shell 调用 `lark-cli` 发送、回复、编辑、撤回飞书消息的命令，并在拒绝原因中指明改用 `pet_locus_finish`、finish 被拒时报告原因而非绕行。该 guard MUST NOT 在规范、管理面、飞书回执或 prompt 中被表述为安全边界；有意绕过（脚本、HTTP、复制的可执行文件）不在其保证范围内。
+
+**任何档位**：child 的已发布能力集合 MUST NOT 含子委派或可让另一执行身份代为行动的工具（包括 `subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message` 及 agent 控制工具）。该排除 SHALL 由持久组合本身保证，MUST NOT 依赖可在运行中撤除的收紧层。
+
+Locus child SHALL 以 locus 主会话为父、经官方 `startContinuable` 创建，冷恢复按官方规则从父会话当前 preset 重建组合。父会话 SHALL 是 Pet 自建、挂中性白名单 preset（`locus-base`，不含任何委派行）的 locus 主会话，其 preset MUST NOT 被更改：Host SHALL 在 locus 主会话与子会话的 `agent/created` 以及每次投递前核验所挂 preset 等于 `locus-base`，不符即拒绝创建、恢复或派发。子会话的 `toolFilter` SHALL 是不含委派的宽底座，Host SHALL 在每次发布（含冷恢复）时同步安装按档位的收紧层。新建子会话 SHALL 在对应 Locus 行发布 Host 证明的 composition marker `tier3`；带其它 marker（`safe-v1`、`safe-v2`）或缺少 marker 的行属于旧模型，SHALL 按"旧模型入口按退休规则处理"退出路由，MUST NOT 被 adopt 或冷恢复。Host 无法证明所需组合（含收紧层）已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 以宽底座发布一个未安装收紧层的 `safe` 档 child。Host SHALL 对 `tools.restrict` 与 `tools.guard` 做运行时特性探测，缺失即拒绝发布。防误操作 guard 另拒绝文档入口的评论与文档正文写命令（见 `pet-locus-doc-comments`）。
 
 #### Scenario: 受管 finish 正常发送
-- **WHEN** safe child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
+- **WHEN** 任一档位的 child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
 - **THEN** Host 按 durable CAS 和固定触发消息发送一次正文并记录结果
 
 #### Scenario: shell 旁路不可达
-- **WHEN** child 尝试以 `lark-cli`、绝对路径脚本、`msg.py`、Python/Node/curl 或复制后的可执行文件直接调用飞书接口
+- **WHEN** `safe` 档 child 尝试以 `lark-cli`、绝对路径脚本、`msg.py`、Python/Node/curl 或复制后的可执行文件直接调用飞书接口
 - **THEN** 已发布执行 authority 不能产生飞书业务消息，且 Delivery 状态不因尝试而改变
 
+#### Scenario: shell 档误用 lark-cli 发送被拦截
+- **WHEN** `shell` 档 child 在 finish 被拒后执行 `lark-cli im +messages-send …` 或等价的回复/撤回/编辑命令
+- **THEN** 该工具调用在执行前被拒绝，拒绝原因指明使用 `pet_locus_finish` 并报告 finish 的拒绝原因；Delivery 状态不因尝试而改变
+
+#### Scenario: shell 档读取当前群不被拦截
+- **WHEN** `shell` 档 child 以 `lark-cli` 读取当前入口群的历史消息
+- **THEN** guard 不拒绝该调用
+
+#### Scenario: shell 档的出站保证如实表述
+- **WHEN** 所有者在管理面或飞书回执中查看 `shell` 档说明
+- **THEN** 说明写明防误操作 guard 仅防误操作、不是安全边界，MUST NOT 声称业务正文只能经 finish 产生
+
 #### Scenario: 子委派不能洗白权限
-- **WHEN** child 尝试通过 subagent、workflow、Ralph 或 agent message 让另一执行身份代发
-- **THEN** safe composition 不提供该旁路，或接收方同样无飞书出站 authority；业务正文仍只能由原 current 的 finish 产生
+- **WHEN** 任一档位的 child 尝试通过 subagent、workflow、Ralph 或 agent message 让另一执行身份代发
+- **THEN** 已发布能力集合不含这些工具；业务正文不能由另一执行身份产生
+
+#### Scenario: 收紧层未安装时不发布
+- **WHEN** `tier3` child 被发布（新建或冷恢复），而 Host 无法同步安装或回读核验其档位对应的收紧层
+- **THEN** 拒绝发布并给出确定性诊断，MUST NOT 以宽底座发布该 child
 
 #### Scenario: 隔离能力无法证明时不发布
-- **WHEN** runtime 既不能持久固定无进程执行的 safe composition，也不能提供隔离凭据与 Lark egress 的独立 execution world
+- **WHEN** runtime 不能核验 locus 主会话 preset 为 `locus-base`，或不能提供按档位收紧的作用域限制
 - **THEN** Locus intake/child 能力保持 unavailable 并给出确定性诊断，MUST NOT 以字符串过滤或 prompt 警告宣称安全
 
+#### Scenario: safe-v1 行继续服务
+- **WHEN** 一个既有 active locus 的 child 带 `safe-v1` marker
+- **THEN** 该行属于旧模型，按退休规则退出路由；入口下次被授权 at 时提示所有者建立三层结构，不冷恢复该 child
+
 #### Scenario: 主会话 preset 不影响子会话工具面
-- **WHEN** 主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
-- **THEN** 该主会话下的 locus child 仍以 Pet 指定的 preset 创建，其已发布工具面与 Pet 自建主会话下的 child 相同
+- **WHEN** 用户的干活主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
+- **THEN** 子会话的父是 locus 主会话而非干活主会话，其已发布工具面只由 `locus-base`、`toolFilter` 与档位收紧层决定，不含委派工具
 
 #### Scenario: 冷恢复不回落到父组合
-- **WHEN** Host 重启后首次向一个 independent locus child 投递
-- **THEN** runtime mount 其持久化的 preset 恢复组合，不调用父会话的组合继承；运行时不支持显式 child preset 时 locus child 能力保持 unavailable
+- **WHEN** Host 重启后首次向一个 `tier3` child 投递
+- **THEN** 官方冷恢复从 locus 主会话的 `locus-base` 重建组合，Host 在发布前安装收紧层并核验；locus 主会话 preset 不是 `locus-base` 时拒绝派发
 
 #### Scenario: 升级前的 legacy child 不可恢复服务
-- **WHEN** 一个历史 active locus 的 durable child 没有 Host attested safe-composition marker
-- **THEN** 启动恢复或派发前将该 locus 标记为不可服务并要求显式重建，MUST NOT adopt 或冷恢复该 child 后继承父 preset
+- **WHEN** 一个历史 active locus 的 durable child 没有 Host attested composition marker
+- **THEN** 启动恢复或派发前将该 locus 按旧模型退出路由，MUST NOT adopt 或冷恢复该 child
 
 ### Requirement: Delivery 保留有界结构化 addressing 事实
 
@@ -870,10 +635,520 @@ Host MUST 独立证明被拒调用的精确活跃轮关联该 Delivery，MUST NO
 - **WHEN** A 的收尾与 deadline 过期同时发生
 - **THEN** A 只终结一次；未获胜的一方不改变 A、不消费 B
 
-### Requirement: 代理协作消息以通知意图登记
+### Requirement: Locus 工具档位由所有者显式授予且不重建子会话
 
-Pet 协作代理 SHALL 按有效通知意图（notify 缺省时兼容 needsReply）识别发给 pet 的通知消息，保留现有 ref、戳与点名路由规则。notify:true、needsReply:false 的结果 SHALL 登记为通知来源；notify:false 的消息即使需要回复也 MUST NOT 因同批其它通知被顺带登记。此登记 MUST NOT 自行恢复子会话或创建执行回合。
+每个 locus SHALL 具有一个工具档位，取值 `safe` 或 `shell`，与文件权限档（`read`/`write`）正交。所有新建、替换与重建的 locus SHALL 默认 `safe`；新代际与显式重建 MUST NOT 继承上一代的 `shell`。
 
-#### Scenario: 通知与回复分别处理
-- **WHEN** 主会话向 pet 发 notify:false、needsReply:true 的消息，再发 notify:true、needsReply:false 的消息
-- **THEN** 代理只登记后者并按现有规则路由，前者不被后一次指针追扫登记；不新增子会话执行
+`safe` 档 SHALL 不含 `bash`/`skill`，其继承工具面等于 `LOCUS_SAFE_TOOL_NAMES`，另加 caller-bound Pet 工具。`shell` 档 SHALL 在 `safe` 档之上开放通用 shell 与 Skill 加载；MUST NOT 开放任何子委派或代为行动的工具（见「Locus 业务出站只能经受管 finish」）。
+
+档位 SHALL 仅由 allowlist 经飞书控制命令（`-t/--tools safe|shell`）或管理面改变；非 allowlist 发送者的档位命令 SHALL 按既有控制命令规则拒绝。档位命令 SHALL 只在接受命令时该入口空闲（无 current Delivery 且子会话未在运行）时受理，忙时 SHALL 确定性拒绝。变更 SHALL 在同一子会话上完成，MUST NOT 重建子会话、增加代际或丢弃子会话历史。子会话常驻时 SHALL 当场应用并回读实际可见工具面：与目标档位不符时 SHALL 回到 `safe` 并拒绝，MUST NOT 回执成功。子会话不常驻时 SHALL 适用"非驻留子会话的权限变更以待应用协议提交"：延迟提交在下一次冷恢复的首个业务工具执行前完成，不因用于唤醒的 Delivery 已成为 current 而拒绝；核验失败恢复原生效值；原值也无法核验时按"Locus 业务出站只能经受管 finish"的总则拒绝发布。变更 SHALL 记录操作者、时间、期望值与生效值。
+
+只有带 `tier3` marker 的 locus 可以服务与切换档位；其它 marker 的行属于旧模型，按"旧模型入口按退休规则处理"退出路由。
+
+`shell` 档生效期间，该入口 SHALL 只接受 allowlist 成员的 at 作为工作请求；非 allowlist 成员的 at SHALL 得到确定性拒绝回执，说明该入口当前为所有者专用。已在 backlog 中、由非 allowlist 成员触发的 Delivery SHALL 在派发前以同一原因结算，MUST NOT 投递给 `shell` 档子会话。切回 `safe` 后 SHALL 恢复既有的群成员提问规则。
+
+子会话每次投递的 prompt SHALL 按当前档位说明可用能力。`shell` 档 SHALL 说明：该档允许以 bot 身份读取当前入口（档位权限），实际可读性以本次实测声明为准；MUST NOT 读取无关群、私聊、全局消息或其它 workspace；业务回复仍经 `pet_locus_finish`。该说明是行为约束而非授权边界。
+
+管理面与飞书回执 SHALL 如实说明 `shell` 档的后果：子会话可在所有者本机执行命令（写入受文件权限档约束，读取与网络不受限），可使用所有者本机的飞书凭据，入口的 allowlist 成员共享该能力，且出站约束仅为防误操作。
+
+#### Scenario: 授予 shell 档
+- **WHEN** allowlist 在一个子会话常驻且空闲的 `tier3` locus 发送 `-t shell`
+- **THEN** 同一子会话的可见工具面增加 shell 档工具且不含任何委派工具，核验通过后回执并记录授权；子会话 id、代际与历史不变
+
+#### Scenario: 撤回 shell 档
+- **WHEN** allowlist 在子会话常驻且空闲的 `shell` 档 locus 发送 `-t safe`
+- **THEN** 同一子会话的可见工具面恢复为 safe composition，核验通过后回执并记录
+
+#### Scenario: 忙时拒绝
+- **WHEN** 入口存在 current Delivery 或子会话正在运行时收到档位命令
+- **THEN** 确定性拒绝并说明需等待空闲，不改变档位
+
+#### Scenario: 核验失败回到 safe
+- **WHEN** 子会话常驻时，档位应用后回读的工具面与目标不符
+- **THEN** 回到 `safe` 并拒绝，回执给出确定性原因，不回执成功
+
+#### Scenario: safe-v1 入口请求 shell
+- **WHEN** allowlist 对一个仅带 `safe-v1` marker 的旧模型入口发送 `-t shell`
+- **THEN** 不切换档位、不恢复旧子会话；回执说明旧关联已退休，下一条授权 at 将建立三层结构
+
+#### Scenario: shell 档拒绝普通成员
+- **WHEN** `shell` 档入口收到非 allowlist 群成员的 at
+- **THEN** 不创建 Delivery 工作，回执说明该入口当前为所有者专用
+
+#### Scenario: 切换前排队的普通成员请求
+- **WHEN** 入口在 backlog 中有非 allowlist 成员的 Delivery 时切到 `shell`
+- **THEN** 这些 Delivery 在派发前以「入口当前为所有者专用」结算，不投递给子会话
+
+#### Scenario: 冷恢复保持档位
+- **WHEN** `shell` 档 `tier3` 子会话被释放后冷恢复
+- **THEN** 发布时按持久档位安装收紧层，恢复后的可见工具面与恢复前一致
+
+#### Scenario: 重建不继承 shell
+- **WHEN** 一个 `shell` 档入口被显式重建或切换来源产生新代际
+- **THEN** 新代际为 `safe` 档
+
+#### Scenario: 非 allowlist 档位命令
+- **WHEN** 非 allowlist 群成员发送 `-t shell`
+- **THEN** 按控制命令规则拒绝，档位不变
+
+### Requirement: Locus child 具备 caller-bound 的当前入口群只读能力
+
+每个 IM 入口（群或话题）的 active locus 的 child SHALL 能以 caller-bound 只读工具读取**当前入口**的历史消息，并以
+**bot 身份**读取（本 change 不引入任何其它身份路径）。文档入口 locus 不装配该工具（见 `pet-locus-doc-comments`）。
+
+读取目标 MUST 只来自调用方 child 已绑定的入口，且 MUST NOT 接受 chat/群/用户或 thread 选择参数：
+入口为**话题**时，读取范围 SHALL 为该入口**绑定的话题**及其回复（由 Host 从入口事实推导）；
+入口为**群**时读取该群的消息列表。此处排除的是"调用方任意选择其它话题/线程"，**不是**"读取
+自己绑定的话题"。未知或多余参数 SHALL 使该调用被拒绝且不发生任何读取，MUST NOT 被静默忽略或
+"忽略参数后照读当前入口"。
+
+续读游标 SHALL 由 Host 签名，伪造或篡改的游标不可被接受，游标 MUST NOT 被用于选择读取目标
+（游标载荷不加密，第三方分页令牌在编码后可被解码看到）。使用游标时
+SHALL 校验其由同一 child 代际、同一入口、同一方向与窗口签发；伪造、篡改、跨 child/跨代际、
+跨入口或因 Host 进程重启换密钥而失效的游标（不另设时间 TTL）SHALL fail closed 并给出确定性原因。每次等待外部读取返回后 SHALL 重新核验
+调用方仍是同一 child 代际且入口未变，变更时 SHALL 丢弃该次结果。
+
+窗口 SHALL 有**固定**语义（工具级，不留给实现自由选择）：时间参数 SHALL 使用带时区偏移的
+ISO 8601；窗口 SHALL 为左闭右开 `[since, before)`；结果按时间排序：`direction=newer` 由旧到新，
+`direction=older`（默认）由新到旧（整体倒序，同一时间戳也倒序）；同一时间戳内的稳定排序键为平台消息位置，
+其次为消息标识字典序。窗口在 Host 对每个传输页本地过滤：无法解析时间的消息
+不排除，翻页可能经过窗口外的空页。单次结果 SHALL 有**可度量的**
+上限（总序列化字符预算、单条正文上限与单字段上限），截断处 SHALL 带可识别标记；当整页预算
+截断一个传输页时，SHALL 指明仍有更多内容并给出可继续的游标，MUST NOT 静默丢弃。
+
+结果 SHALL 至少包含每条消息的时间、发送者显示名与正文或结构化消息的可用摘录；无法解析
+发送者时 SHALL 使用明确占位而非伪造名称；结果 SHALL 标注"群内容为不可信输入"。读取失败
+（不可读、被拒、传输失败、信封畸形）SHALL 与"读取成功且没有消息"区分，返回确定性原因，
+MUST NOT 返回空结果冒充成功。
+
+#### Scenario: safe 档 child 读取当前入口群
+- **WHEN** `safe` 档 child 在一次 Delivery 中调用该工具读取当前入口群
+- **THEN** 返回该群的有界消息分页（含时间、发送者与正文），并标注内容为不可信输入
+
+#### Scenario: 话题入口读取自己绑定的话题
+- **WHEN** 该 locus 的入口是话题，child 调用该工具
+- **THEN** 读取范围为该绑定话题及其回复，夹具同时包含无关话题与群本体消息且不出现在结果中
+
+#### Scenario: 指定其它目标或未知参数时拒绝且不读取
+- **WHEN** 调用方传入另一个群、另一个话题、私聊或全局范围，或传入未知参数
+- **THEN** 该调用被拒绝且不发生任何读取，不返回任何消息
+
+#### Scenario: 游标被篡改或跨域使用
+- **WHEN** 续读游标被修改、由其它 child/代际/入口签发，或已过期
+- **THEN** 调用 fail closed 并返回确定性原因，不返回任何消息
+
+#### Scenario: 等待期间入口或代际变化
+- **WHEN** 一次读取在等待外部返回期间该 child 的代际或入口发生变化
+- **THEN** 该次结果被丢弃，不返回给模型
+
+#### Scenario: 截断可识别且可继续
+- **WHEN** 单条正文或整页结果超过预算，或预算截断一个传输页
+- **THEN** 返回结果不超过声明的预算，截断处带有可识别标记，并给出可继续的游标而非静默丢弃
+
+#### Scenario: 窗口边界不重不漏
+- **WHEN** 两次读取使用相邻窗口或同一时间戳的多条消息
+- **THEN** 结果按声明的开闭与次序规则返回，边界处既不重复也不跳过
+
+#### Scenario: 失败与空结果可区分
+- **WHEN** 读取被拒绝、传输失败或返回畸形信封
+- **THEN** 返回确定性失败原因，MUST NOT 返回空历史
+
+### Requirement: 投递 prompt 的首投前言与逐次档位声明
+
+每个 child 的**完整前言**（入口标识、locus 与代际、主/子会话与 workspace、文件权限、工具档位及
+其能力、上下文锚点状态、按需读取说明、"不自动把结论回传主会话"的约束）SHALL 在系统能证明该
+child 尚未收到前言时发送；一旦存在**已证明送达**的投递，系统 MUST NOT 再发送完整前言。
+
+"已证明送达" SHALL 优先使用可获得的最强证据：至少包括该 child 的持久 Delivery 行上"内容已进入
+其 inbox"的绑定事实；实现 MAY 使用等价的精确对账证据（例如该 child 自身会话日志证明某条 inbox
+消息进入过 turn）来避免重复。MUST NOT 把"已接受""已渲染"或运行期计数当作送达证据。
+
+结果不可判定时（例如队列已接受但持久绑定未提交、回执丢失、进程在绑定前终止）系统 SHALL 视为
+**未收到**并在下一次真正投递时携带完整前言。该策略**允许在不可判定情形下重发一次完整前言**；
+重复发送的代价已由所有者接受（2026-10-12 决策），因此系统 MUST NOT 因该可能性而暂停投递、
+阻塞 intake 或要求所有者重建。反之，若持久绑定已提交而仅控制回执丢失，SHALL 按已送达处理，
+MUST NOT 重发。
+
+**后续每次**投递 SHALL 只携带必要请求事实（请求、回复关联、本轮回复目标）并指向 caller-bound
+`pet_context` 复核持久事实，但 MUST 声明本次投递时生效的工具档位能力（`safe`/`shell`），
+MUST NOT 让 child 只能靠猜测或主动查询才知道自己具备什么读取能力。档位事实 SHALL 取自持久 locus 记录；
+记录缺省档位时视为 `safe`，渲染层 MUST NOT 忽略记录中的 `shell`。
+
+#### Scenario: 首次投递收到完整前言
+- **WHEN** 一个新建 child 收到第一条真正进入其 inbox 的 Delivery
+- **THEN** 渲染出的是携带档位能力与锚点状态的完整前言，而不是"沿用首次投递"的续投变体
+
+#### Scenario: 渲染成功但未入队不消耗首投
+- **WHEN** 某条 Delivery 已持久化并被渲染，但在进入 child inbox 之前失败或结果不确定
+- **THEN** 下一条真正投递的 Delivery 仍携带完整前言
+
+#### Scenario: backlog 中已有其它已接受投递
+- **WHEN** 该 child 还有其它已接受但未证明入队的 Delivery
+- **THEN** 本次仍按"尚未收到前言"处理，不以这些未入队投递作为已送达证据
+
+#### Scenario: 队列已接受但持久绑定失败
+- **WHEN** 内容可能已进入 child inbox，但持久绑定未提交（进程在绑定前终止或持久化失败）
+- **THEN** 该投递不被计为已送达，下一次真正投递携带完整前言（允许重复一次），且投递不因此暂停
+
+#### Scenario: 绑定已提交但控制回执丢失
+- **WHEN** 持久绑定已提交，仅控制回执丢失
+- **THEN** 该投递计为已送达，后续投递按最小投递渲染，MUST NOT 重发完整前言
+
+#### Scenario: 第二次投递不重复前言但声明档位
+- **WHEN** 该 child 已有被证明送达的投递，本次是后续投递
+- **THEN** prompt 不重复完整前言，但仍声明当前持久档位对应的能力并携带本轮回复目标
+
+#### Scenario: 重启后按送达证据决定
+- **WHEN** Host 重启或 child 被冷恢复后收到新 Delivery
+- **THEN** 存在送达证据时不重发完整前言；无送达证据时按未收到处理并携带完整前言
+
+#### Scenario: 受既有缺陷影响的 child
+- **WHEN** 一个既有 child 的投递有送达证据，但它从未收到过完整前言
+- **THEN** 系统不自动重发完整前言，但每次投递仍声明当前档位能力；需要完整前言时由所有者显式重建该 child
+
+### Requirement: 读取守卫的拒绝可诊断且不额外放行
+
+child 的本地读取守卫 SHALL 继续只允许已确认工作区内的路径；本 change MUST NOT 新增任何工作区外
+放行。
+
+拒绝 SHALL 返回稳定的机器可读原因，并 SHALL 附带最小可执行指引：被允许的根是什么、需要额外
+路径时应由所有者如何确认。该指引只面向模型与本地诊断。
+
+Host 自动发送的飞书正文 MUST NOT 含该诊断；投递提示词 MUST NOT 指示模型把诊断内容转述进业务
+正文。受管出站 SHALL 在既有**受管变换**（例如把 `@显示名` 渲染为平台真实提醒）之外不改动模型
+提供的正文，MUST NOT 附加任何诊断、路径或允许根信息。模型自行把诊断写入正文不属于 Host 可
+保证的范围。
+
+#### Scenario: 工作区外读取被拒且原因稳定
+- **WHEN** child 尝试读取已确认工作区之外的路径
+- **THEN** 读取被拒绝并返回稳定原因码与被允许根
+
+#### Scenario: 指引可执行
+- **WHEN** 模型收到一次守卫拒绝
+- **THEN** 拒绝信息包含被允许根与申请额外路径的方式，足以决定下一步
+
+#### Scenario: Host 出站不附加诊断
+- **WHEN** 受管出站发送一条纯文本正文
+- **THEN** 发送内容与模型提供的正文一致，不附加任何守卫诊断、路径或允许根信息
+
+#### Scenario: 含提及的正文只做既有受管变换
+- **WHEN** 模型提供的正文含可唯一解析的 `@显示名`
+- **THEN** 出站仅执行既有的提及渲染，不因本 change 改变渲染结果，也不附加诊断或路径
+
+#### Scenario: prompt 不指示模型转述诊断
+- **WHEN** Host 渲染投递提示词
+- **THEN** 提示词不要求或建议模型把守卫诊断内容写入飞书正文
+
+### Requirement: 未装配的 caller-bound 能力不得以可见但必然失败的形式暴露
+
+只装配了一半的 caller-bound 能力 MUST NOT 以"工具可见、调用必然失败"的形式暴露给 child：当某项
+能力在当前 Host 尚未装配（例如协作上下文尚无可用范围）时，其工具 SHALL NOT 出现在 child 的工具面
+中；装配完成后 SHALL 可注册并对其授权 caller 正常工作；该判定 SHALL 在 cold restore 后保持一致。
+
+#### Scenario: 能力未装配时不可见
+- **WHEN** 当前 Host 没有可供该 caller 使用的协作上下文范围
+- **THEN** 该工具不出现在 child 的工具面中，child 不因调用它而得到无法解释的失败
+
+#### Scenario: 装配后可用
+- **WHEN** 该能力在当前 Host 已装配且 caller 有合法范围
+- **THEN** 工具可注册，授权 caller 调用成功
+
+#### Scenario: 冷恢复后判定一致
+- **WHEN** child 被冷恢复
+- **THEN** 工具面与该能力当前是否装配一致，不因恢复路径不同而漂移
+
+### Requirement: 启动恢复结算被中断的投递并不阻塞后续消息
+
+Host 重启可能恰好发生在某条 Delivery 已被 child 认领并开始执行 turn 之后。此时该 turn 已随进程消失，
+**永远不会有任何执行者结算这条 Delivery**；而它占据该 locus 的 current 位置，会让同入口后续所有消息
+只能停留在 backlog。系统 SHALL 在启动恢复时依据持久证据识别这种投递并立即结算，MUST NOT 让后续消息
+等待原投递的完整租约。
+
+判定 SHALL 只用**可证明**的证据：该 Delivery 已绑定 `executionId` 与 `inboxMessageId`，且 child 会话
+日志中进入过该 inbox 消息的那个 turn 已经结束（存在 `turn/end`）、其结束原因为 `interrupted`。证据
+不足或存在歧义时 SHALL fail closed，保持既有等待语义。
+
+结算 SHALL 是终态且**不重发正文**：内容既已进入 child inbox（持久绑定已提交），按既有"送达即送达"的
+策略计为已送达；结算表示"承认不会有回复"，MUST NOT 被实现为重试或重发。结算 SHALL 带上可诊断的原因。
+
+被提升（backlog → current）的 Delivery SHALL 获得不小于最小执行租约的执行窗口，且不超过其 24 小时
+硬上限，避免出现"被提升即到期"的循环。
+
+#### Scenario: 重启打断进行中的 turn
+- **WHEN** 一条 current Delivery 的绑定 turn 在 child 会话日志中被证明以 `interrupted` 结束
+- **THEN** 启动恢复以终态结算该 Delivery（非重发、非重试），并让同入口的 backlog 立即可被派发
+
+#### Scenario: 结算后不再占用 current 位置
+- **WHEN** 上述被中断的 Delivery 被结算，而同一 locus 已有 backlog 投递
+- **THEN** 该 locus 处于"有 backlog、无 current"，后续投递 SHALL 在启动排空时被提升并派发，MUST NOT 继续等待原投递的租约
+
+#### Scenario: 结算原因是可诊断的
+- **WHEN** 查看被中断结算的 Delivery 记录
+- **THEN** 其终态带有明确说明"turn 被中断、未重发正文"的原因与启动处置标记，而不是笼统的 deadline 过期
+
+#### Scenario: 证据不足时不结算
+- **WHEN** 无法证明中断（该 turn 仍处于打开状态、`turn/end` 原因不是 `interrupted`、inbox 绑定与记录不匹配、或会话日志不可读）
+- **THEN** 保持既有等待语义：不提前结算、不重派、不做任何推断
+
+#### Scenario: 被提升的投递获得最小执行租约
+- **WHEN** 一条 backlog Delivery 在其自身软租约临近或已经过去时被提升为 current
+- **THEN** 它的执行租约至少延长到"提升时刻 + 最小执行租约"，且不超过 24 小时硬上限
+
+#### Scenario: 不重发正文
+- **WHEN** 被中断结算的 Delivery 内容此前已进入 child inbox
+- **THEN** 系统 MUST NOT 把该消息正文再次投递给 child 或用户；仅结算该条 Delivery
+
+### Requirement: Locus 三层实体
+
+系统 SHALL 以三层表达一段协作：用户的**干活主会话**（普通一级会话，承担工作归属）←dsh-collab→ Pet 创建的一级 **locus 主会话**（与干活主会话 1:1）→ 每个入口一个 **locus 子会话**（父为 locus 主会话）。`loci` 行的父会话字段 SHALL 指 locus 主会话；干活主会话与 locus 主会话的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSessionId, generation, status, spaceId}`），同一干活主会话任一时刻至多一个 active 的 locus 主会话。入口寻址（`chatId`/`threadId`、文档入口前缀规则）与本变更前相同。干活主会话 SHALL 留在来源 workspace；locus 主会话及其官方子会话 SHALL 建在专用 `DSH Pet` workspace。`locus_mains.workspaceId` 记录 locus 主会话的工作区；`loci.workspaceId` 继续记录绑定的干活项目工作区，供项目读取授权与入口管理使用，不得以 Pet 运行目录替代项目根。已有位于来源工作区的 locus 主会话 SHALL 在入口空闲且下一条授权消息到来时走既有主会话替换流程，不改写旧会话 header、不搬移或删除历史。locus 主会话 SHALL 由 Host 设审批 `never`、沙箱 `read-only`，并以 deny 式 `tools.restrict` 挡掉 `bash`、`write`、`edit` 与委派类工具，保留 Host 层的 `collab_*` 工具；Pet 只对自己创建的 locus 主会话向 dsh-collab 声明 `owns`。
+
+#### Scenario: 同一干活主会话服务多个入口
+- **WHEN** 同一干活主会话分别关联开发群与一个话题
+- **THEN** 两个入口的子会话都以同一个 locus 主会话为父，`locus_mains` 中该干活主会话只有一条 active 记录
+
+#### Scenario: locus 主会话归 DSH Pet，入口仍关联干活项目
+- **WHEN** 为 nexus 等来源工作区的干活主会话建立或替换 locus 主会话
+- **THEN** 干活主会话留在来源工作区，locus 主会话运行且归属 DSH Pet，标题为 `[locus] <干活主会话名>`（无标题时用干活会话短码），入口持久工作区仍为来源项目；旧工作区中的 locus 主会话经既有空闲迁移协议替换，历史保留
+
+#### Scenario: locus 主会话工具面锁死
+- **WHEN** 读取 locus 主会话的已发布工具面与会话设置
+- **THEN** 不含 `bash`、`write`、`edit` 与任何全局委派工具，含 `collab_*`；审批为 `never`，沙箱为 `read-only`
+
+#### Scenario: 插件挂入自有作用域的委派工具在执行时被拒
+- **GIVEN** 官方 Agent Team 把 `spawn_teammate`、`team_task_*` 等工具注册进每个普通根会话的自有作用域（`tools.restrict` 无法隐藏自有作用域注册）
+- **WHEN** locus 主会话调用其中任一工具
+- **THEN** Host 在该 agent 作用域上的执行守卫拒绝，工具体不执行；可见但未受该守卫覆盖的禁用工具仍视为泄漏并拒绝发布
+
+#### Scenario: 干活主会话不得是子会话
+- **WHEN** 所有者以一个 subagent 会话为目标执行 `/bind`
+- **THEN** 绑定被拒绝，不建立 locus 主会话
+
+### Requirement: 入口建立统一为一条路径
+
+auto、Q&A 与显式绑定 SHALL 走同一建立路径，只在"干活主会话从哪来"上不同：auto（未绑定入口首个授权 at）由 Pet 在 default workspace 新建干活主会话；Q&A 以所有者打开的会话为干活主会话；`/bind` 以所有者指定的普通一级会话为干活主会话。之后 SHALL 一致地：复用该干活主会话的 active locus 主会话，没有则新建 locus 主会话并按\"协作空间由干活主会话与 locus 主会话两个普通成员组成\"建立空间；为入口发布一个子会话状态为 `not-created` 的新代际。建立 MUST NOT 预先创建子会话。显式绑定改变入口来源时 SHALL 如实告知上下文改变。
+
+#### Scenario: auto 建立
+- **WHEN** 一个从未关联的群收到所有者的首个 at
+- **THEN** Pet 新建干活主会话与 locus 主会话，建立协作空间，入口新代际为 `not-created`，随后按首条消息创建子会话并处理该消息
+
+#### Scenario: 绑定到已有干活主会话复用 locus 主会话
+- **GIVEN** 干活主会话 W 已有 active locus 主会话 M
+- **WHEN** 所有者把另一个群 `/bind` 到 W
+- **THEN** 不新建 locus 主会话，新入口的父为 M
+
+#### Scenario: 建立失败不留半成品
+- **WHEN** 新建 locus 主会话成功但建立协作空间失败
+- **THEN** 本次建立失败并回执；provisioning 操作按\"provisioning 失败超时后不再阻塞\"处理，补偿器归档未投入使用的 locus 主会话
+
+### Requirement: 子会话在首条消息到达时创建
+
+入口代际处于 `not-created` 时，第一条可投递的 Delivery SHALL 以官方 `startContinuable`（provider `spawn`，`parent` 为 locus 主会话，`prompt` 为该 Delivery 的投递 prompt，`toolFilter` 为不含委派的宽底座）创建子会话，并在 `agent/created` 中安装档位收紧层、设置沙箱并回读；任一步失败 SHALL 令创建失败并回滚。发布 SHALL 在 `agent/created` 回调内完成，而不是等 `startContinuable` 返回（实测其在首轮认领之后才返回）：创建前持久预留子会话身份；回调内依次认领预留、安装组合并回读、发布同一 `childId` 的 marker `tier3`、current、执行身份以及仅可消费一次的首条 prompt 预留关联，最后完成预留交接；这些步骤 MUST 早于首轮认领。官方首条 inbox UUID 仅在认领时或 API 返回时可知，Host SHALL 在首条业务认领时同步将 UUID 关联到该预留，并在首个 caller-bound 工具体执行前等待该 UUID 的持久绑定完成；MUST NOT 以消息正文猜测关联或再次投递首条消息。回调内发布之后若创建流程仍被拒绝，Host SHALL 回滚已写入的持久状态（不得留下可服务的 active/current），该 Delivery 按非名额失败结算、代际回到 `not-created`；MUST NOT 以撤销已提交的预留代替补偿。创建失败 SHALL 分两类：运行体名额不足属于可重试失败，该 Delivery SHALL 保持待处理（不结算、不换代、不补偿），名额释放或下一次派发时以同一 Delivery 重试创建，且不超过其 deadline；其它失败（组合核验、provider、首轮回读等）该 Delivery SHALL 以确定性原因结算并回执，代际保持 `not-created`，下一条消息重试创建。后续 Delivery SHALL 经官方 Host prompt 队列能力（`queueHostPrompt` / Host access 的 `queuePrompt`，`delivery:queue`、`source:user`）投递为独立轮次；MUST NOT 用会产生 `steer` / `agent-message` 的 `sendMessage` 代替用户 Delivery。系统 MUST NOT 使用空闲创建或借出子会话 Session 的兼容能力。
+
+首条图片消息的文本降级 SHALL 保持现有语义：仅在官方返回结构化 `MODEL_DOES_NOT_SUPPORT_IMAGES`、原 prompt 含 typed image、且 Host 可证明首条用户 prompt 未被接受或认领时，允许先补偿尚未执行的 child，再以纯文本重试同一 Delivery 一次。该已证明的投递前图片拒绝不按普通创建失败结算：原 Delivery 的身份、deadline 与 FIFO 顺序不变，已持久化的失败 child 身份 MUST NOT 再使用；新的预留 child 身份与未注入 backlog 的关联 SHALL 原子更新。无法证明未执行时 MUST NOT 重放。容量拒绝仍保留原预留身份。
+
+#### Scenario: 首条图片不支持时安全降为文本
+- **GIVEN** 首次惰性创建已持久化 child，但官方在接受用户 prompt 前返回结构化图片不支持，Host 无用户 claim 或 inbox 绑定
+- **WHEN** Host 进行一次文本降级
+- **THEN** 同一原 Delivery 在同代际以新预留 child 身份携带文本 prompt 恰执行一次，保留原 deadline 与 backlog 顺序；有已接受或已认领证据时不降级重放
+
+#### Scenario: 首图降级交接使用新快照
+- **GIVEN** 图片拒绝发生于回调内已发布 current、执行身份与旧 first-child WAL 之后，但用户 prompt 确未被接受或认领
+- **WHEN** 旧 child 补偿成功且原子轮换提交后进行文本尝试
+- **THEN** 保留原 Delivery/deadline/FIFO，退出旧 first-prompt 桥和旧 WAL；重新获取 current/locus/child 快照并用新执行身份提交，旧闭包不得绕过 exact-current
+
+#### Scenario: 首图补偿失败保留恢复债务
+- **WHEN** 首图降级的旧 child 补偿失败，或在补偿与轮换事务提交附近崩溃
+- **THEN** 未完成的状态由持久恢复债务阻止服务，按最后已提交事实恢复；不将原 Delivery 擅自成功结算，不在不确定状态提交文本或重放图片
+
+#### Scenario: 首图降级跨崩溃最多一次文本
+- **GIVEN** 文本降级标记已持久化，随后文本提交成功或其接受结果不确定时 Host 重启
+- **THEN** 根据原 Delivery 的持久标记与精确投递证据恢复，不因内存标记丢失第三次提交；同一用户请求至多一次文本尝试被接受
+
+#### Scenario: 已接受或认领的图片拒绝不重放
+- **WHEN** 有已接受、已认领证据或不能证明官方投递前拒绝时出现图片不支持错误
+- **THEN** 不进入文本降级例外，不把 absence 或错误文本当作未执行证明；名额拒绝仍走原 Delivery 与原预留 child 身份的可重试路径
+
+#### Scenario: 首条消息即首个 prompt
+- **WHEN** `not-created` 代际收到第一条 at
+- **THEN** 恰调用一次 `startContinuable`，其 `prompt` 为该 Delivery 的投递 prompt；代际转为 active 并带 `tier3`
+
+#### Scenario: API 返回前首轮已能解析身份
+- **GIVEN** 替身在 `startContinuable` 返回之前依次触发 `agent/created`、首条 prompt 认领与首个 caller-bound 工具调用
+- **WHEN** 首个工具为 `pet_context`
+- **THEN** 工具解析到原 Delivery 与本入口；该 Delivery 只投递一次，Host 未再次调用 prompt 队列或 `sendMessage`
+
+#### Scenario: 首工具等待持久绑定
+- **GIVEN** 首条用户 claim 已同步绑定原 Delivery 的 inbox UUID，但对应持久写入仍处于 pending
+- **WHEN** 真实 Host 的 `tools/pre-execute` 收到该子会话 caller-bound 工具调用
+- **THEN** 工具体在持久写入成功前不执行；成功后仅执行一次且解析到原 Delivery，不二次投递
+
+#### Scenario: 首轮持久绑定失败拒绝执行
+- **GIVEN** 同上，但持久写入被拒绝
+- **THEN** 工具体不执行，不自动重投首条 prompt，不使用只有内存关联的事实授权业务出站
+
+#### Scenario: 回调内发布后创建被拒时回滚
+- **WHEN** 回调内已发布 marker 与 current，随后创建流程拒绝
+- **THEN** 不留下 active 代际或 current；该 Delivery 以确定性原因结算，代际为 `not-created`；下一条 at 可再次创建
+
+#### Scenario: 创建失败不推进代际
+- **WHEN** `startContinuable` 因 `agent/created` 回读不符而失败
+- **THEN** 该 Delivery 结算为失败并回执原因；代际仍为 `not-created`；下一条 at 再次尝试创建
+
+#### Scenario: 名额不足时保留原请求
+- **WHEN** `not-created` 代际的第一条 Delivery 创建时运行体名额已满，随后名额释放
+- **THEN** 该 Delivery 在名额满时保持待处理且未回执失败；释放后以同一 Delivery 恰创建一次子会话并投递，用户无需重发
+
+#### Scenario: provider 不能证明独立上下文
+- **WHEN** `spawn` provider 不可用或声明继承父上下文
+- **THEN** 不调用 `startContinuable`，Delivery 以能力不可用结算
+
+### Requirement: 换绑与归档按层处理
+
+- 干活主会话被归档时，其全部入口 SHALL 停止服务；授权 at SHALL 得到有限次回执，说明来源会话已归档并提示所有者 `/bind` 到新的干活主会话；MUST NOT 自动复活或自动换来源。
+- 入口子会话永久不可用（被删除、组合或身份核验失败、非名额原因的冷恢复失败）时 SHALL 在同一 locus 主会话下发布新代际（`not-created`），不影响同一 locus 主会话下的其它入口。
+- 冷恢复因运行体名额不足失败时 SHALL 保留原子会话、原代际与原 Delivery，按"子代激活受运行体名额约束时 fail closed"在名额释放后重试，且不超过该 Delivery 的 deadline；MUST NOT 换代。
+- locus 主会话不可用（被归档、删除或 preset 核验失败）时 SHALL 为该干活主会话新建 locus 主会话，迁移其名下全部未被所有者停止/退役的入口（每个入口发布 `not-created` 新代际），并建立新协作空间；旧 locus 主会话及其子会话一律不再恢复。迁移结果 SHALL 回执已迁移数与逐条跳过原因。
+- 所有者停止/退役的入口 MUST NOT 被上述任一路径复活。
+
+#### Scenario: 干活主会话归档
+- **WHEN** 干活主会话 W 被归档后，W 名下某群收到所有者 at
+- **THEN** 不投递给子会话，群内收到"来源会话已归档，请 /bind"回执；同一入口的后续 at 在达到次数上限后不再回执
+
+#### Scenario: 子会话不可用只换该入口一代
+- **GIVEN** locus 主会话 M 下有入口 A、B
+- **WHEN** A 的子会话因组合核验失败（非名额原因）无法冷恢复
+- **THEN** A 发布新代际（`not-created`），B 的代际与子会话不变
+
+#### Scenario: 名额不足的冷恢复保留原代际
+- **GIVEN** 入口 A 的子会话 C 已被释放，代际为 g
+- **WHEN** 下一条 Delivery D 到达时名额已满导致恢复失败，随后名额释放
+- **THEN** 名额满时 D 保持待处理、A 仍为代际 g；释放后恢复的是同一子会话 C 并投递 D，没有新代际
+
+#### Scenario: locus 主会话不可用时整体迁移
+- **GIVEN** M 下有 active 入口 A 与所有者已停止的入口 C
+- **WHEN** M 被归档
+- **THEN** 新建 M2，A 迁到 M2 并为 `not-created`；C 不迁移并在回执中说明原因；`locus_mains` 中 M 为非 active、M2 为 active
+
+### Requirement: 旧模型入口按退休规则处理
+
+本变更之前创建的 locus 行（父为用户会话或 Pet standby 主会话、marker 不是 `tier3`）SHALL 不被改写；读取时 SHALL 视为旧模型并退出路由。持久层版本 SHALL 升为 18，升级只新增 `locus_mains` 表。旧模型入口的下一条授权 at SHALL 按\"入口建立统一为一条路径\"的 auto 规则建立三层结构，并在回执中说明旧关联已退休；非授权 at MUST NOT 引发建立。旧模型行的子会话 MUST NOT 被 adopt 或冷恢复。
+
+#### Scenario: 升级只加表
+- **WHEN** 对 v17 数据库运行迁移脚本
+- **THEN** 数据库版本为 18，新增 `locus_mains` 表，其它表的行逐字节不变
+
+#### Scenario: 旧入口首个授权 at
+- **WHEN** 升级后，一个旧模型群入口收到所有者 at
+- **THEN** 新建三层结构并处理该消息，回执说明旧关联已退休；旧子会话未被恢复
+
+#### Scenario: 旧入口非授权 at
+- **WHEN** 同一旧入口收到非 allowlist 成员的 at
+- **THEN** 不建立任何会话，按既有规则处理
+
+### Requirement: provisioning 失败超时后不再阻塞
+
+处于 `failed` 的 provisioning 操作超过 10 分钟后 SHALL 不再阻塞同一 endpoint；下一次针对该 endpoint 的建立请求 SHALL 先在运行期调用与启动对账相同的补偿器清理其 `resourceRefs`，补偿成功后再按无存量入口建立。补偿失败时 SHALL 继续阻塞并记录诊断。该规则 SHALL 对全部 provisioning kind 一致适用。
+
+#### Scenario: 超时后重试
+- **GIVEN** endpoint E 的建立在 t0 失败，已创建的 locus 主会话记在 `resourceRefs`
+- **WHEN** t0 + 11 分钟时 E 收到授权 at
+- **THEN** 补偿器归档该 locus 主会话，随后建立成功；不需要重启 Host
+
+#### Scenario: 超时前仍阻塞
+- **WHEN** t0 + 5 分钟时 E 收到授权 at
+- **THEN** 按既有规则拒绝并说明正在恢复，补偿器未被调用
+
+#### Scenario: 补偿失败继续阻塞
+- **WHEN** 超时后补偿器抛错
+- **THEN** 不建立新入口，诊断记录原始错误，下一次请求再次尝试补偿
+
+### Requirement: 子会话读共识与 locus 主会话工具
+
+子会话 SHALL 获得 caller-bound 只读工具 `locus_context`：Host 经 dsh-collab `actAs(locus 主会话).read` 读取协作空间，只返回 status 为 agreed 的 charter 与本入口登记的待办进度；没有 `ext.pet.entry` 的条目为工作空间级、对全部入口可见，带 `ext.pet.entry` 的条目只对该入口可见（话题入口另可见其所在群的条目）。MUST NOT 返回消息、其它入口的条目或成员 statusText。
+
+子会话 SHALL 获得 caller-bound 工具 `locus_ask_parent({question})`：Host 从实际执行 caller 解析其入口与现行代，只在 caller 是该入口现行代子会话时，经官方会话投递接口把问题（附入口名与 `entry` 身份）作为下一回合输入投给其父 locus 主会话；工具 MUST NOT 接受任何目标参数，MUST NOT 新建或改变 Delivery，返回仅表示已投递。投递失败 SHALL 返回确定性原因。通用 `send_message` 与 agent 控制工具仍不可用。
+
+locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.pet.entry` 的条目；入口须是该 locus 主会话名下的入口）与 `locus_reply_child`（Host 以官方 `subagents.sendMessage` 发给该 locus 主会话名下某入口的现行代子会话；不是现行代或不属于它时拒绝）。locus 主会话用普通 `collab_*` 工具写的条目一律为工作空间级。
+
+#### Scenario: 按入口过滤
+- **GIVEN** 空间中有 agreed charter X（无标记）、入口 A 的 agreed charter Y、入口 B 的待办 T、一条消息
+- **WHEN** 入口 A 的子会话调用 `locus_context`
+- **THEN** 返回 X 与 Y，不含 T 与消息
+
+#### Scenario: 话题可见所在群条目
+- **GIVEN** 群入口 G 有 agreed charter Z，话题入口 H 属于 G
+- **WHEN** H 的子会话调用 `locus_context`
+- **THEN** 结果包含 Z
+
+#### Scenario: 子会话向父询问并在同一 current 上继续
+- **GIVEN** 入口 A 的 current Delivery D 正由子会话处理
+- **WHEN** 子会话调用 `locus_ask_parent`，locus 主会话收到问题后以 `locus_reply_child` 回复
+- **THEN** locus 主会话恰收到一条带入口 A 身份的问题；子会话以 `agent-message` 收到回复并在后续 turn 对 D 调用 `pet_locus_finish`；D 的回复目标不变，没有新 Delivery
+
+#### Scenario: 旧代子会话不能询问
+- **WHEN** 已被换代的旧子会话调用 `locus_ask_parent`
+- **THEN** 返回拒绝，locus 主会话未收到任何投递
+
+#### Scenario: 回复非现行代子会话被拒
+- **WHEN** locus 主会话以 `locus_reply_child` 回复一个已被换代的入口旧子会话
+- **THEN** 返回拒绝，未调用 `subagents.sendMessage`
+
+### Requirement: 启动恢复证据经官方冷读获取
+
+启动恢复需要子会话日志证据时 SHALL 经 `sessionQuery.observeSession` 读取；冷读在日志末尾补出的合成 `turn/end interrupted` MUST NOT 作为"已中断"证据，只有日志中实际写入的事件才算。`sessionQuery` 不可用或读取失败时 SHALL 视为证据不足，按既有规则保持等待。
+
+#### Scenario: 合成中断不算证据
+- **GIVEN** 子会话日志最后一个 turn 未写入 `turn/end`
+- **WHEN** 冷读返回的事件末尾带合成 `turn/end {interrupted}`
+- **THEN** 启动恢复不把该 Delivery 结算为 `turn-interrupted`
+
+#### Scenario: 冷读服务不可用
+- **WHEN** 启动时 `sessionQuery` 未注册
+- **THEN** 不结算任何需要日志证据的 Delivery，诊断记录证据不可用
+
+#### Scenario: 不可区分中断保持等待
+- **GIVEN** prepared 观察末尾的真实 `interrupted` 事件与官方合成器对前缀生成的事件逐项相同
+- **WHEN** 启动恢复检查该 Delivery
+- **THEN** 按证据歧义保守等待，不结算为中断、不重发该 Delivery
+
+#### Scenario: 真实中断立即结算推进
+- **GIVEN** prepared 观察含可与合成尾部区分的真实 `turn/end interrupted`，其 turn 与 inbox UUID 唯一匹配 current
+- **WHEN** 启动恢复检查该 Delivery
+- **THEN** 该 Delivery 结算为 `failed/turn-interrupted`，下一条合格 backlog 可立即派发，原 prompt 不重发
+
+#### Scenario: live 中断不剔除
+- **GIVEN** live 观察末尾含与合成器产物逐项相同的真实 `turn/end interrupted`
+- **WHEN** 启动恢复检查该 Delivery
+- **THEN** 保留该 live 事件并据此结算，合成尾部过滤只用于 prepared 观察
+
+### Requirement: 非驻留子会话的权限变更以待应用协议提交
+
+所有者变更工具档位或文件权限时，若子会话常驻且空闲，Host SHALL 经 live agent 当场应用并回读，按既有规则回执。若子会话不常驻，Host SHALL：
+
+1. 持久记录该变更为**待应用**（期望值），生效值保持不变；回执 SHALL 说明"已记录，将在子会话下次唤醒时应用并核验，生效前按原设置服务"，MUST NOT 回执为已生效。
+2. 在下一次该子会话的 `agent/created`（冷恢复）中先应用期望值并回读：一致则生效值更新为期望值、清除待应用标记，并在该次投递前向所有者回执已生效；不一致则 SHALL 按原生效值完成组合并回读核验、清除待应用标记且不保留期望值，并向所有者回执失败原因；原生效值也无法核验时 SHALL 拒绝发布该子会话（"Locus 业务出站只能经受管 finish"的总则）。
+3. 待应用期间 MUST NOT 以期望值服务，管理面与投递 prompt SHALL 只陈述生效值，并标注存在待应用变更。
+
+后到的变更 SHALL 覆盖未应用的期望值。
+
+#### Scenario: 非驻留时授予 shell 并在唤醒时生效
+- **GIVEN** `tier3` 子会话 C 已被释放，档位 `safe`
+- **WHEN** 所有者发送 `-t shell`，随后一条 Delivery 唤醒 C 且回读与 shell 一致
+- **THEN** 第一次回执说明待应用；唤醒前管理面显示生效值 `safe`；唤醒时 C 以 shell 档服务，所有者收到已生效回执
+
+#### Scenario: 唤醒时核验失败不留授权
+- **GIVEN** 同上，但唤醒时回读与 shell 不一致
+- **THEN** C 以 `safe` 档服务该 Delivery；待应用标记与期望值被清除；所有者收到失败回执；之后再次唤醒仍为 `safe`
+
+#### Scenario: 非驻留撤回 shell 核验失败恢复原值
+- **GIVEN** `tier3` 子会话 C 档位为 `shell` 且已被释放
+- **WHEN** 所有者发送 `-t safe`，下一条 Delivery D 唤醒 C 时 safe 工具面回读不符，而原 shell 工具面回读一致
+- **THEN** C 以 `shell` 档服务 D；期望值被清除；所有者收到撤回失败回执；C 的会话 id 与代际不变
+
+#### Scenario: 原值也无法核验时不发布
+- **GIVEN** 同上，但原 shell 工具面回读也不符
+- **THEN** 拒绝发布 C 并给出确定性诊断，D 不被投递给未经核验的组合
+
+#### Scenario: 常驻空闲时当场生效
+- **WHEN** C 常驻且空闲时所有者发送 `-t shell`
+- **THEN** 当场应用并回读，回执已生效，不产生待应用记录

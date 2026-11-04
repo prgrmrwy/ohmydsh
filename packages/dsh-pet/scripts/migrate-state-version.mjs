@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-off Pet state version restamp (v2..v16 -> current PET_DOMAIN_VERSION).
+ * One-off Pet state version restamp (v2..v17 -> current PET_DOMAIN_VERSION).
  *
  * Why this exists as a standalone script rather than only as in-process
  * migration: the SQLite backend opens Pet's database with
@@ -18,7 +18,10 @@
  * parallel, additive lines: doc-comment loci (ordinary locus rows whose chatId
  * carries a `doc:docx:` prefix; a Delivery gains one optional `docComment`) and
  * inquiry answers. v16 → v17 adds opaque inquiry handoff/work tables only, and
- * fences a Host from either v16 line. No existing row or log is converted,
+ * fences a Host from either v16 line. v17 → v18 adds only the `locus_mains`
+ * table (work session ↔ locus main pairing): no `loci` row is rewritten, and a
+ * row whose parent has no `locus_mains` record is read as the previous two-tier
+ * model by the Host's retirement rules. No existing row or log is converted,
  * cleared, or rewritten; a legacy deadline is validated and stripped only
  * from the in-memory value. Existing Delivery rows are not guessed into a
  * current slot and no outbound send is replayed by this script. Local
@@ -39,10 +42,10 @@ import os from 'node:os'
 
 /** Domain identity; must match src/host/spec.ts. */
 const PET_DOMAIN_NAME = 'dsh_pet'
-const PET_DOMAIN_VERSION = 17
+const PET_DOMAIN_VERSION = 18
 /** Versions this script is allowed to restamp. v1 needs a separate explicit
  * cleanup because its rows reference a store layout that is gone. */
-const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+const RESTAMPABLE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
 
 function parseArgs(argv) {
   const args = { dryRun: false, yes: false, db: undefined, help: false }
@@ -148,7 +151,7 @@ try {
   if (current === 1) {
     fail(
       'Version 1 requires a separate explicit legacy cleanup (it drops rows ' +
-      'that reference a removed store layout); this CLI only restamps v2..v15.',
+      'that reference a removed store layout); this CLI only migrates v2..v17.',
     )
   }
   if (!RESTAMPABLE.includes(current)) {
@@ -197,6 +200,8 @@ try {
 
   db.exec('BEGIN IMMEDIATE')
   try {
+    // v18 adds only this empty pairing table; opaque previous-model rows stay untouched.
+    db.exec('CREATE TABLE IF NOT EXISTS "u_dsh_pet_locus_mains" (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT')
     db.prepare('UPDATE units SET version = ? WHERE name = ?')
       .run(PET_DOMAIN_VERSION, PET_DOMAIN_NAME)
 

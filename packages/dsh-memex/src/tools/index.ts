@@ -11,13 +11,12 @@ import { KERNEL_VERSION, TOOL_DESCRIPTIONS } from './descriptions.generated.js'
 import { evaluateCrossWrite } from '../guard/index.js'
 import type { OrgProfile } from '../org.js'
 import { mapConcurrent } from '../run/concurrency.js'
-import { segmentQuery } from './query-segment.js'
+import { kernelQuery, MAX_SEARCH_RESULTS, searchArgs, SEMANTIC_SEARCH_DISABLED } from './search-args.js'
 import { anchored, buildRecord, explainHit, normalizeIntent, queryShape, RECALL_INTENTS, type HitRecord, type LibrarySnapshot } from '../telemetry/record.js'
 import { appendRecord, appendWriteEvent } from '../telemetry/sink.js'
 import { cardFacts, librarySnapshot, sessionHash } from '../telemetry/snapshot.js'
 
 const DEFAULT_FANOUT_CONCURRENCY = 4
-const MAX_SEARCH_RESULTS = 50
 const SCOPE_DESCRIPTION = ' Scope selects the memory library: omit or use "current" for this session; search also accepts "all" or a list of scope names within the current readable binding.'
 const WRITE_SCOPE_DESCRIPTION = ' Optional scope selects one or more additional writable libraries. The current library is written first; rejected additional targets do not roll back completed writes.'
 
@@ -194,23 +193,6 @@ function guardWrite(
 }
 
 /**
- * The query text to hand the kernel, given the search mode.
- *
- * Keyword search gets Han runs segmented — the kernel treats a run as one
- * literal token, so an unsegmented Chinese question matches nothing. Semantic
- * search gets the query verbatim, because segmentation would shred the input
- * the embedding is computed from.
- *
- * Every keyword search MUST route through here. Two entry points (`memex_search`
- * and `memex_recall`) issue kernel searches independently; if only one segments,
- * the same question yields different results depending on which tool asked, and
- * nothing in the tool output or logs reveals why.
- */
-function kernelQuery(query: string, semantic: boolean | undefined): string {
-  return semantic === true ? query : segmentQuery(query)
-}
-
-/**
  * Record one keyword recall, best effort.
  *
  * Every caller reaches this *after* the memory-disabled rejection in
@@ -314,14 +296,6 @@ function cardExists(home: string, slug: string): boolean {
 
 /** Whether the raw query carried Han characters, for the shape record only. */
 const HAN_QUERY_RE = /\p{Unified_Ideograph}/u
-
-function searchArgs(args: { query?: string; limit?: number; list?: boolean; semantic?: boolean }): string[] {
-  const result = ['search', '--limit', String(Math.min(Math.max(Math.trunc(args.limit ?? 10), 1), MAX_SEARCH_RESULTS))]
-  if (args.list === true) result.push('--list')
-  if (args.semantic === true) result.push('--semantic')
-  if (args.query !== undefined && args.query !== '') result.push('--', kernelQuery(args.query, args.semantic))
-  return result
-}
 
 function syncConfig(home: string): { auto?: boolean; remote?: string } {
   try { return JSON.parse(readFileSync(join(home, '.sync.json'), 'utf8')) as { auto?: boolean; remote?: string } } catch { return {} }
@@ -487,6 +461,7 @@ export function registerMemexTools(ctx: Context, resolver: ScopeService, options
     },
     output: outputSchema(),
     async execute(args, exec) {
+      if (args.semantic === true) throw new TypeError(SEMANTIC_SEARCH_DISABLED)
       const current = currentFor(exec, resolver)
       const targets = selectedSearchScopes(args.scope, current, resolver)
       const outcomes = await mapConcurrent(targets, concurrency, async target => {

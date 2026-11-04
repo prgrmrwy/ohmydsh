@@ -10,9 +10,9 @@
  * Neither alone is enough. The claim proves which message a turn is running;
  * the turn end only proves that this execution segment stopped. This module
  * joins claims on the exact `(childSessionId, turn)` pair and reports the
- * `started` execution fact. It deliberately does not turn `turn/end` into a
- * business Delivery outcome: a Delivery may continue in a later turn after a
- * trusted `agent-message` wake-up.
+ * `started` execution fact. Normal turn completion leaves the Delivery open
+ * for a trusted `agent-message` continuation. An exact live `aborted` with an
+ * official user/parent/disposed cause also reports interruption for a Host CAS.
  *
  * What it deliberately does NOT do:
  *
@@ -40,10 +40,13 @@ export interface LocusTurnCorrelationEvent {
   readonly executionId: string
   readonly turnId: string
   readonly correlation: DeliveryCorrelation
+  readonly reason?: 'turn-interrupted'
+  /** Explicit official live cancellation cause, never a synthesized interrupted tail. */
+  readonly cancelReason?: 'user' | 'parent' | 'disposed'
 }
 
 /** The source proof accepted for a caller-bound current capability. */
-export type LocusCurrentCapabilitySource = 'delivery' | 'agent-message' | 'inquiry-result'
+export type LocusCurrentCapabilitySource = 'delivery' | 'agent-message'
 
 /**
  * A current capability proof for the caller-bound lifecycle tools.
@@ -173,7 +176,7 @@ export interface LocusInboxClaim {
 export interface LocusTurnEnd {
   readonly childSessionId: string
   readonly turn: number
-  /** Runtime outcome; anything other than a completion settles as failed. */
+  /** Runtime outcome; only explicit official aborted causes prove interruption. */
   readonly outcome: 'completed' | 'aborted' | 'failed' | 'blocked'
   readonly reason?: string
 }
@@ -186,18 +189,6 @@ export interface LocusTurnObserverPorts {
   onTurnEnd(listener: (end: LocusTurnEnd) => void): () => void
   /** Resolve a claimed message to its durable Delivery. */
   readonly lookup: LocusDeliveryClaimLookup
-  /**
-   * Optional Host-owned, read-only proof for a `pet-inquiry-result` claim.
-   * It must return the ORIGINAL pending Delivery only when durable rows prove
-   * the result message belongs to it; anything else (undefined, throw, port
-   * absent) leaves the result turn foreign+mixed, i.e. without reply authority.
-   */
-  readonly inquiryResult?: {
-    prove(input: {
-      readonly childSessionId: string
-      readonly messageId: string
-    }): LocusClaimedDelivery | undefined
-  }
   /**
    * Report a fact this observer refused to correlate. Diagnostics only: it
    * carries no message text and never becomes a settlement.
@@ -319,8 +310,6 @@ interface ObservedTurn {
   readonly foreign: Set<string>
   /** Trusted agent-message claims admitted to continue retained lineage. */
   readonly agentMessages: Set<string>
-  /** Proven `pet-inquiry-result` claims admitted to continue retained lineage. */
-  readonly inquiryResults: Set<string>
   /** Sticky overflow fuse; excess ids are never retained. */
   saturated: boolean
   mixed: boolean
@@ -509,7 +498,6 @@ export function createLocusTurnObserver(
         unresolved: new Map(),
         foreign: new Set(),
         agentMessages: new Set(),
-        inquiryResults: new Set(),
         saturated: false,
         mixed: false,
       }
@@ -519,16 +507,25 @@ export function createLocusTurnObserver(
   }
 
   const settleTurn = (key: string, observed: ObservedTurn): void => {
-    // A segment end is diagnostic only. It never emits a terminal business
-    // event and never clears the current Delivery lineage; a later trusted
-    // agent-message may continue the same current request.
+    // Normal completion retains lineage for a later trusted continuation.
+    // Only an official live cancellation with an explicit cause proves interruption.
     if (observed.end === undefined) return
     if (observed.unresolved.size > 0) return
     const claimed = observed.deliveries.size === 1 && !observed.mixed && !observed.saturated
       ? observed.deliveries.values().next().value as PendingTurn | undefined
       : undefined
     if (claimed !== undefined && (claimed.status === undefined || isPendingDeliveryStatus(claimed.status))) {
-      retainCurrent(key, claimed)
+      const cause = observed.end.reason
+      if (observed.end.outcome === 'aborted' && (cause === 'user' || cause === 'parent' || cause === 'disposed') &&
+          claimed.correlation.childSessionId === observed.childSessionId && observed.foreign.size === 0) {
+        emit({
+          phase: 'failed', deliveryId: claimed.deliveryId, executionId: claimed.executionId,
+          turnId: observed.turnId, correlation: claimed.correlation,
+          reason: 'turn-interrupted', cancelReason: cause,
+        })
+      } else {
+        retainCurrent(key, claimed)
+      }
     }
     clearTurn(key)
     rememberEnded(key)
@@ -616,78 +613,6 @@ export function createLocusTurnObserver(
     retainedCurrent.lastTurn = claim.turn
   }
 
-  /**
-   * Admit a `pet-inquiry-result` claim as a continuation of the retained
-   * Delivery lineage, only with a durable Host proof for this exact message.
-   * Returns whether it was admitted; every refusal (including a throwing or
-   * missing proof port) returns false so the caller falls back to the
-   * foreign+mixed path. Nothing is recorded before the proof succeeds.
-   */
-  const admitInquiryResultContinuation = (claim: LocusInboxClaim): boolean => {
-    try {
-      if (disposed || ports.inquiryResult === undefined) return false
-      if (
-        claim === null || typeof claim !== 'object' ||
-        !isNonEmpty(claim.childSessionId) || !isNonEmpty(claim.messageId) || !isTurn(claim.turn)
-      ) return false
-      const currentKey = continuationByChild.get(claim.childSessionId)
-      if (currentKey === undefined) return false
-      const retainedCurrent = retained.get(currentKey)
-      if (retainedCurrent === undefined) return false
-      const key = turnKey(claim.childSessionId, claim.turn)
-      if (turns.get(key)?.inquiryResults.has(claim.messageId) === true) return true
-      if (key === currentKey || ended.has(key)) return false
-      if (retainedCurrent.lastTurn < 1 || claim.turn <= retainedCurrent.lastTurn) return false
-      const retainedStatus = retainedCurrent.delivery.status
-      if (retainedStatus !== undefined && !isPendingDeliveryStatus(retainedStatus)) return false
-      const nextTurnId = turnIdOf(claim.childSessionId, claim.turn)
-      const previousContinuation = retainedCurrent.continuationTurnId
-      if (previousContinuation !== undefined && previousContinuation !== nextTurnId) {
-        // A continuation segment that already finished no longer blocks the
-        // next proven result (one Delivery may await several inquiries). A
-        // still-active different segment is ambiguous and stays refused.
-        const stillActive = [...turns.values()].some(observed =>
-          observed.turnId === previousContinuation && observed.end === undefined,
-        )
-        if (stillActive) return false
-      }
-      const existing = turns.get(key)
-      if (existing !== undefined) {
-        // Same-turn pollution is never split into partial authority.
-        if (
-          existing.mixed || existing.saturated || existing.end !== undefined ||
-          existing.deliveries.size !== 0 || existing.unresolved.size !== 0 ||
-          existing.foreign.size !== 0 || existing.inquiryResults.size !== 0
-        ) return false
-      }
-      const proven = ports.inquiryResult.prove({
-        childSessionId: claim.childSessionId,
-        messageId: claim.messageId,
-      })
-      if (proven === undefined || proven === null) return false
-      const original = retainedCurrent.delivery
-      if (proven.status !== undefined && !isPendingDeliveryStatus(proven.status)) return false
-      if (
-        proven.deliveryId !== original.deliveryId ||
-        proven.executionId !== original.executionId ||
-        proven.correlation === null || typeof proven.correlation !== 'object' ||
-        proven.correlation.childSessionId !== claim.childSessionId ||
-        proven.correlation.childSessionId !== original.correlation.childSessionId ||
-        proven.correlation.locusId !== original.correlation.locusId ||
-        proven.correlation.generation !== original.correlation.generation ||
-        proven.correlation.endpoint?.chatId !== original.correlation.endpoint.chatId ||
-        proven.correlation.endpoint?.threadId !== original.correlation.endpoint.threadId
-      ) return false
-      const observed = ensureTurn(claim)
-      observed.inquiryResults.add(claim.messageId)
-      retainedCurrent.continuationTurnId = observed.turnId
-      retainedCurrent.lastTurn = claim.turn
-      return true
-    } catch {
-      return false
-    }
-  }
-
   const handleClaim = (claim: LocusInboxClaim): void => {
     if (disposed) return
     if (
@@ -720,9 +645,6 @@ export function createLocusTurnObserver(
       return
     }
     const observed = ensureTurn(claim)
-    // A participant message sharing a turn with a proven inquiry result is
-    // proven pollution: never split authority between the two.
-    if (observed.inquiryResults.size > 0) observed.mixed = true
     // Runtime duplicate notifications for the same message are idempotent;
     // distinct message ids are distinct claims and must never overwrite.
     if (
@@ -795,9 +717,6 @@ export function createLocusTurnObserver(
       admitAgentContinuation(claim)
       return
     }
-    if (claim !== null && typeof claim === 'object' && claim.sourceKind === 'pet-inquiry-result') {
-      if (admitInquiryResultContinuation(claim)) return
-    }
     handleClaim(claim)
   })
 
@@ -836,8 +755,7 @@ export function createLocusTurnObserver(
     if (active.length === 1) {
       const observed = active[0]!
       if (
-        observed.mixed || observed.saturated || observed.foreign.size > 0 || observed.deliveries.size > 1 ||
-        observed.inquiryResults.size > 1 || (observed.inquiryResults.size > 0 && observed.deliveries.size > 0)
+        observed.mixed || observed.saturated || observed.foreign.size > 0 || observed.deliveries.size > 1
       ) {
         return { ok: false, reason: 'mixed-source' }
       }
@@ -881,10 +799,9 @@ export function createLocusTurnObserver(
     if (continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 ||
         continuation.foreign.size !== 0) return { ok: false, reason: 'mixed-source' }
     if (continuation.unresolved.size !== 0) return { ok: false, reason: 'claim-unbound' }
-    if (continuation.agentMessages.size === 0 && continuation.inquiryResults.size === 0) {
+    if (continuation.agentMessages.size === 0) {
       return { ok: false, reason: 'association-unproven' }
     }
-    if (continuation.inquiryResults.size > 1) return { ok: false, reason: 'mixed-source' }
     return {
       ok: true,
       capability: {
@@ -892,7 +809,7 @@ export function createLocusTurnObserver(
         executionId: retainedCurrent.delivery.executionId,
         turnId: retainedCurrent.continuationTurnId,
         correlation: retainedCurrent.delivery.correlation,
-        source: continuation.inquiryResults.size > 0 ? 'inquiry-result' : 'agent-message',
+        source: 'agent-message',
       },
     }
   }
@@ -915,14 +832,14 @@ export function createLocusTurnObserver(
       if (disposed) return undefined
       const observed = turns.get(turnKey(childSessionId, turn))
       if (observed === undefined || observed.end !== undefined || observed.saturated) return undefined
-      if (observed.deliveries.size === 1 && observed.inquiryResults.size === 0) {
+      if (observed.deliveries.size === 1) {
         return observed.deliveries.values().next().value
       }
-      if (observed.deliveries.size !== 0 || observed.inquiryResults.size > 1) return undefined
+      if (observed.deliveries.size !== 0) return undefined
       const key = continuationByChild.get(childSessionId)
       const current = key === undefined ? undefined : retained.get(key)
       return current?.continuationTurnId === observed.turnId &&
-        (observed.inquiryResults.size === 1 || observed.agentMessages.size > 0)
+        observed.agentMessages.size > 0
         ? current.delivery : undefined
     },
     inspectCurrentCapabilityForChild,
@@ -968,7 +885,6 @@ export function createLocusTurnObserver(
           !observed.mixed &&
           !observed.saturated &&
           observed.deliveries.size === 1 &&
-          observed.inquiryResults.size === 0 &&
           observed.unresolved.size === 0 &&
           observed.foreign.size === 0
         ) {
@@ -987,7 +903,7 @@ export function createLocusTurnObserver(
       )
       if (activeForChild.length !== 1) return undefined
       const continuation = activeForChild.find(observed => observed.turnId === current.continuationTurnId)
-      if (continuation === undefined || continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 || continuation.unresolved.size !== 0 || continuation.foreign.size !== 0 || continuation.inquiryResults.size > 1 || (continuation.agentMessages.size === 0 && continuation.inquiryResults.size === 0)) return undefined
+      if (continuation === undefined || continuation.mixed || continuation.saturated || continuation.deliveries.size !== 0 || continuation.unresolved.size !== 0 || continuation.foreign.size !== 0 || (continuation.agentMessages.size === 0)) return undefined
       return { executionId: current.delivery.executionId, turnId: current.continuationTurnId }
     },
     deliveryAvailable(input) {

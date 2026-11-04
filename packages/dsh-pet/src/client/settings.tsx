@@ -1298,27 +1298,17 @@ function OwnerProjectionFacts(props: {
             : '未知 / 未确认'}
         </span>
       )}
-      {inquiry === undefined ? (
-        <span className="dshpet-meta">询问台账：Host 未提供真实快照，不能伪造询问记录</span>
-      ) : (
-        <>
-          <span className="dshpet-meta">
-            询问派发{' '}
-            {inquiry.dispatchCapability === 'available'
-              ? '可用'
-              : inquiry.dispatchCapability === 'unavailable' ? '不可用' : '未知'}
-          </span>
-          {inquiry.snapshotStatus === 'available' && inquiry.inquiries !== undefined
-            ? inquiry.inquiries.length === 0
-              ? <span className="dshpet-meta">当前没有在途询问</span>
-              : inquiry.inquiries.map(row => (
-                <span className="dshpet-meta" key={row.inquiryId ?? `${row.createdAt}:${row.status}`}>
-                  询问 {ownerInquiryStatusLabel(row.status)} · {row.reason ?? '无诊断'}
-                </span>
-              ))
-            : <span className="dshpet-meta">询问台账：Host 尚未提供可验证快照，当前显示未知</span>}
-        </>
-      )}
+      <span className="dshpet-meta">询问已退役：仅保留只读历史，不再续进</span>
+      {inquiry?.snapshotStatus === 'available' && inquiry.inquiries !== undefined
+        ? inquiry.inquiries.length === 0
+          ? <span className="dshpet-meta">没有历史询问记录</span>
+          : inquiry.inquiries.map(row => (
+            <span className="dshpet-meta" key={row.inquiryId ?? `${row.createdAt}:${row.status}`}>
+              已退役 · 原状态 {ownerInquiryStatusLabel(row.status)} · {row.reason ?? '无诊断'}
+            </span>
+          ))
+        : <span className="dshpet-meta">历史询问：快照不可用，不能推断为空</span>}
+
     </span>
   )
 }

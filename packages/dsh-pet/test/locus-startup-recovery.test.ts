@@ -272,6 +272,45 @@ describe('production startup proof for an interrupted bound turn', () => {
     ).toBeUndefined()
   })
 
+  it.each(['user', 'parent', 'disposed'])('accepts the official aborted cause %s as interrupted proof', kind => {
+    expect(proveInterruptedStartupDelivery(interrupted(), session([
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'user/message', data: { id: 'inbox-1' } },
+      { type: 'turn/end', data: { turn: 7, reason: { kind: 'aborted', reason: { kind } } } },
+    ]))).toEqual({
+      deliveryId: 'delivery-1', executionId: 'execution-1', turnId: 'child-1#7', state: 'interrupted',
+    })
+  })
+
+  it.each([
+    { name: 'missing cause', cause: undefined },
+    { name: 'null cause', cause: null },
+    { name: 'missing kind', cause: {} },
+    { name: 'a bare string instead of the official cause object', cause: 'user' },
+    { name: 'unknown cause', cause: { kind: 'unknown' } },
+    { name: 'legacy cause', cause: { kind: 'legacy' } },
+    { name: 'hook cause', cause: { kind: 'hook', reason: 'plugin stop' } },
+  ])('rejects aborted with $name', ({ cause }) => {
+    expect(proveInterruptedStartupDelivery(interrupted(), session([
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'user/message', data: { id: 'inbox-1' } },
+      { type: 'turn/end', data: { turn: 7, reason: { kind: 'aborted', reason: cause } } },
+    ]))).toBeUndefined()
+  })
+
+  it.each([
+    { name: 'wrong inbox UUID', patch: { inboxMessageId: 'inbox-other' } },
+    { name: 'wrong durable turn', patch: { turnId: 'child-1#6' } },
+    { name: 'missing execution identity', patch: { executionId: undefined } },
+    { name: 'missing inbox identity', patch: { inboxMessageId: undefined } },
+  ])('rejects a real aborted turn with $name', ({ patch }) => {
+    expect(proveInterruptedStartupDelivery(interrupted(patch), session([
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'user/message', data: { id: 'inbox-1' } },
+      { type: 'turn/end', data: { turn: 7, reason: { kind: 'aborted', reason: { kind: 'disposed' } } } },
+    ]))).toBeUndefined()
+  })
+
   it('refuses an empty log and a session without events', () => {
     expect(proveInterruptedStartupDelivery(interrupted(), session([]))).toBeUndefined()
     expect(proveInterruptedStartupDelivery(interrupted(), {})).toBeUndefined()

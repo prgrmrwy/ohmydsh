@@ -12,8 +12,8 @@ Routine chores such as cleaning up a worktree or answering a teammate's question
 **What you get**
 
 - **Quick actions without leaving your work.** A draggable mascot with a wheel of shortcuts. Each one runs an ordinary DSH Skill that you import yourself, in its own executor session, against an immutable snapshot of the session or workspace you were in.
-- **A traceable record.** Every request is a Task, Invocation and Run you can inspect in the task panel; nothing is written into your development session.
-- **Chat as an entry point (optional, off by default).** Bind a Lark bot and an allowlisted teammate can mention it in a group or message it directly; a dedicated, read-only child session answers from the context of your work.
+- **A traceable record.** Quick-action requests have Tasks, Invocations and Runs in the task panel; Lark requests have their own per-entry Delivery queue. Quick actions do not write into your development session.
+- **Chat as an entry point (optional, off by default).** Bind a Lark bot and an allowlisted teammate can mention it in a group or direct chat; a dedicated child session, read-only by default, handles that entry through a Pet-owned coordinator rather than running inside your working session.
 - **A Q&A group for a session.** One click on the wheel opens a Lark group tied to the session you have been working in, so others can ask questions without touching your session.
 - **Fail-closed by design.** Pet never reads provider credentials, never accepts a model-invented destination, and degrades on its own when a dependency is missing instead of breaking DSH.
 
@@ -125,13 +125,19 @@ Settings → Pet → General → **Animated mascot** replaces the mascot's stati
 ## Lark channel and Locus
 <!-- section: lark-channel -->
 
-Pet can take work from Lark: mention the bound bot in a group, or message it directly. It is **off by default** and needs an explicit binding first. Unified **Locus** is the only production Lark execution path: a Locus is one durable association between a Lark entry (a group, or a topic inside it), a DSH **main session** and a dedicated **child session** that serves the entry. If the Host cannot compose everything Locus needs, the channel stays unavailable with a diagnostic and every inbound event fails closed; the rest of Pet keeps working.
+Pet can take work from Lark: mention the bound bot in a group or direct chat. It is **off by default** and needs an explicit binding first; even a direct message must mention the bot. **Locus** is the channel's execution path, with three distinct roles:
+
+- **Working session** — an ordinary DSH root session that owns the work. Binding your session does not change its preset or make it the parent of chat agents.
+- **Locus main** — a Pet-owned coordinator in the same workspace, shared by entries bound to that working session. It is read-only, cannot run shell commands, write files or delegate, and communicates with the working session through dsh-collab.
+- **Entry child** — one continuable child per group, topic or document-comment entry, created only when its first business message is ready. It has its own history and is read-only with the `safe` tool tier by default.
+
+The working session and coordinator are ordinary collaboration members; entry children are not. Child settlement notifications go to the coordinator, not your working session. Establishing their collaboration space may wake the working session once with an invitation pointer; this is not a promise that it can never be notified. If the Host cannot prove the required composition or identity, Locus stays unavailable with a diagnostic; the rest of Pet keeps working. See [ADR-0009](docs/adr/ADR-0009-locus-three-tier-structure.md) for the architecture and its accepted limits.
 
 ### Binding and admission
 
 Binding uses a dedicated `lark-cli` profile named `dsh-pet` (create a new bot, or connect an existing one). Binding immediately verifies the profile and stores the bound app's own `open_id`; display names are presentation only and never an authorization key. The app secret lives in `lark-cli`; Pet only ever passes one *through* to that CLI on stdin when connecting an existing bot.
 
-A message reaches the Locus controller only if it passes every gate: the sender is a real user, the bot is mentioned (a direct message is no exception), message-id deduplication, a start-up watermark against replays, and a supported message type. Anything refused is dropped with a low-cardinality diagnostic and nothing else — no reaction, no reply — so a bot sitting in an unrelated group never reveals that an agent stands behind it.
+A message reaches the Locus controller only if it passes every basic gate: the sender is a real user, the bot is mentioned (a direct message is no exception), message-id deduplication, a start-up watermark against replays, and a supported message type. Events that fail these gates are dropped with a low-cardinality diagnostic — no reaction or reply. For a recognized entry, lifecycle and tool-tier refusals can instead give the bounded explanation described below; a bot sitting in an unrelated group does not reveal that an agent stands behind it.
 
 Who may ask depends on the entry:
 
@@ -143,12 +149,13 @@ Who may ask depends on the entry:
 
 ### How a conversation is built and served
 
-- **Nothing is created when the bot joins a group.** The whole tree is built on demand by the first qualifying mention: an automatic main session for that chat in the configured **default workspace** (different chats never share one; if the default workspace is missing, nothing is created and Settings says why), plus a dedicated child session. A topic first ensures its group's structure; group and topic children are siblings under the main session, and a topic keeps the main session it was created with.
-- **The child has its own context.** It starts from its own identity and the entry it serves, not from a copy of the main session's history, and Pet refuses to create it when it cannot prove the provider does not inherit parent history. When it lacks facts such as the working root, it may ask its own main session through the host's native messaging; that answer is context, never authorization.
-- **One request at a time.** Each Locus keeps a durable FIFO queue of Deliveries and hands the child exactly one current Delivery. A model turn ending does not complete a Delivery. The only way to answer is the caller-bound `pet_locus_finish` tool (`reply` with a body, or `no-reply` with a reason); `pet_locus_wait` extends the deadline (initially one hour from acceptance, never beyond 24 hours). A timeout moves on to the next message on the same child session without rebuilding it.
-- **Reactions are the Host's, replies are the Agent's.** The Host maintains working → done/failed reactions on the triggering message. Business text is sent by the Agent through `pet_locus_finish`, to the exact triggering message; `@name` references to chat members in a reply are rendered into real mentions when the name resolves to exactly one member.
-- **Images.** Images in the current message are fetched by the Host through the pinned official `lark-cli` into a private spool, handed to the child as typed image content and deleted before settlement; see [media-download.md](docs/media-download.md) (written in Chinese). If the pinned binary or the private directory cannot be proven, only the image part is unavailable and text Deliveries continue.
-- **Pet deliberately does not flatten chat history into the prompt.** The Agent uses `lark-cli` as the bound bot to fetch richer context on demand, within the tool tier it was granted.
+- **Joining a group creates nothing.** The first allowlisted mention establishes an automatic working session for that chat in the configured **default workspace**, its locus main and the entry. Different chats do not share an automatic working session. A missing default workspace stops creation rather than selecting another directory. `/bind` and Q&A use an existing working session and reuse its locus main. Group and topic children are siblings; a topic keeps its chosen working-session source.
+- **The child is lazy and independent.** Binding alone leaves it “not created”; its first Delivery is also its first prompt, not a separate warm-up. Pet refuses creation if independent context cannot be proven. Later messages continue the same child history, including after idle release and cold recovery. A runtime capacity refusal keeps the original request pending for retry, up to its deadline, instead of silently losing it or creating another generation.
+- **Context is explicit, not automatically shared.** `locus_context` returns agreed charters visible to this entry (including its parent group) and its own todo progress, not collaboration messages or sibling histories. The child can ask its locus main for missing facts; the coordinator can consult the working session through collab and reply. These answers are context, never permission. Settlement does not mean the working session has learned or adopted a child's conclusions. The old inquiry execution channel is retired; its records remain read-only and are not resumed.
+- **One request at a time.** Each entry has a durable FIFO queue of Deliveries and at most one current request. Later Deliveries wait for independent turns; a coordinator reply continues the current request, not the next one. A model turn ending does not complete a Delivery. The caller-bound `pet_locus_finish` submits `reply` with a body or `no-reply` with a reason; `pet_locus_wait` extends its deadline (initially one hour from acceptance, never beyond 24 hours). A timeout advances the queue on the same child without rebuilding it. An uncertain send or recovery result is not automatically replayed.
+- **Answers and todos are different outcomes.** The child can answer an information request or register an evidenced todo for work it cannot perform. Registration does not wake the working session or mean the work has started. Only the owner can initiate follow-up execution from the management surface; the working session can also handle its assigned request. Completing a Delivery is not completing the todo, and a todo state change does not send a new Lark reply.
+- **Reactions are the Host's, replies are the Agent's.** The Host maintains working → done/failed reactions on the triggering message. Business text goes through `pet_locus_finish` to that exact message; `@name` references become real mentions only when exactly one current member matches.
+- **Images and on-demand reads.** The Host fetches current-message images through the pinned official `lark-cli` into a private spool and supplies typed image content; see [media-download.md](docs/media-download.md). A first-image rejection permits one text-only attempt only when the runtime proves it never accepted or claimed the image prompt; uncertainty is not a retry signal. Chat history is not flattened into the prompt: caller-bound tools read the current entry's chat or document context on demand. General `lark-cli` use requires the explicitly granted `shell` tier and remains subject to bot permissions.
 
 ### Control commands
 
@@ -156,20 +163,21 @@ Only allowlisted senders can issue these; anyone else's command is dropped silen
 
 | Command | Effect |
 | --- | --- |
-| `/bind <prefix>` (`-b`) | Attach this chat to an existing main session. The prefix is the six-character short id on the session badge (at least six characters, unique, unarchived, and not a child). No match and several matches get the *same* reply, with no count and no hint that other sessions exist. An entry with no Locus yet is bound directly, with no context-change warning; an automatic entry that is idle can be switched, with an explicit "context source changed" notice; an entry already bound explicitly refuses to be overwritten until released; a busy entry refuses. |
-| `/unbind` (`-u`) | Release the entry. History of both sessions stays readable. |
+| `/bind <prefix>` (`-b`) | Associate this entry with an existing **working session**, not directly with a child. The prefix must be at least six characters and uniquely match an unarchived ordinary root session; no match and several matches get the same reply. Pet establishes or reuses that session's locus main and leaves the child uncreated until work arrives. Changing an existing source requires an explicit context-change notice; a busy entry refuses, and a live explicit binding must be released before another source replaces it. An archived source can be replaced explicitly with `/bind`. |
+| `/unbind` (`-u`) | Stop serving this entry without deleting working-session, locus-main or child history. |
 | `/scope read\|write` (`-s`) | Change the file-permission tier (below). |
 | `/tools safe\|shell` (`-t`) | Change the tool tier (below). |
 
 ### Permission tiers
 
-- **Every new or replaced Locus starts `read`**, and the live file policy is re-verified before work is accepted and before each Delivery. A drift pauses the entry.
+- **Every new or replaced Locus starts `read` and `safe`.** Pet verifies the child's actual composition and file policy when it is created or cold-restored; an unproven combination cannot serve. File permission and tool tier are separate settings, and neither changes the working session's own permissions.
 - **`write` is globally disabled in the current build** (`LOCUS_WRITE_ENABLED = false`): a request is refused at the door with the real reason, and an existing `write` record is served as `read` while the durable record keeps the owner's intent. If the switch is ever turned on, `write` maps to DSH's `danger-full-access`, meaning whole-machine, unscoped file writes shared by every member of the entry. This is an explicit security decision, see [ADR-0005](docs/adr/ADR-0005-locus-write-grants-full-access.md).
-- **Tool tier `safe` (default) or `shell`** is independent of the file tier. `shell` additionally exposes `bash` and `skill` to the child of that one entry, never delegation tools. It is not a security isolation mode: a guard that rejects common Lark send commands only lowers the chance of accidents, and the bot's credentials are reachable by a model driven by allowlisted people. See [ADR-0008](docs/adr/ADR-0008-locus-shell-tier.md); its OpenSpec change `pet-locus-shell-tier` is still in progress, so treat the tier as not yet part of the current specs.
+- **Tool tier `safe` (default) or `shell`** is independent of the file tier. `safe` has controlled read tools, no shell or Skill execution and no delegation. `shell` adds `bash` and `skill` for that entry, never delegates, and restricts incoming work to allowlisted senders. It can access local bot credentials; command execution, reads and network access are not confined to the project by this tier. The guard against common Lark send commands is accident prevention, **not** a security boundary against scripts or HTTP. See [ADR-0008](docs/adr/ADR-0008-locus-shell-tier.md) and its [three-tier successor](docs/adr/ADR-0009-locus-three-tier-structure.md).
+- **Changing a setting is not always immediate.** Changes require an idle entry. A resident child's setting is applied and read back immediately. For a released child, Pet records a pending desired value; the effective value stays unchanged until the next wake-up verifies it. This applies to both grants and revocations. If that wake-up verification fails, Pet discards the request and restores the previous effective setting; if even that cannot be verified, the child does not serve. A pending revocation is therefore not a completed revocation.
 
 ### Document comments
 
-The same model works in Feishu documents. A **whole-document comment** behaves like the group, and an **anchored (selected-text) comment** behaves like a topic. The first allowlisted `@bot` in a document builds that document's own automatic main session. Once a document entry exists, anyone who can comment there may ask, and the first entry of each document says so in a reply. Commands work in comments with the same rules as in a chat: in a whole-document comment they apply to the document, and in an anchored comment they apply only to that comment. Replies are appended under the triggering comment as plain text, so `@` there does not notify anyone. Reactions use `Typing`, then `DONE` or `CRY`. Wiki documents are rooted at their underlying docx token. Only `docx` is supported.
+The same three-tier model works in Feishu documents. A **whole-document comment** behaves like the group, and an **anchored (selected-text) comment** behaves like a topic. The first allowlisted `@bot` establishes that document's own automatic working session and locus main; only an entry with a business message gets a child. Once a document entry exists, people who can comment there may ask under the same tool-tier rules, and the first entry explains that audience. Commands apply to the document or, for an anchored comment, only that comment. An anchored reply stays under its triggering comment as plain text; a whole-document answer is a new whole-document comment that mentions the requester, because Feishu does not support replies to whole-document comments. Reactions use `Typing`, then `DONE` or `CRY`. Wiki entries use their underlying docx token; only `docx` is supported.
 
 Deployment prerequisites (Feishu developer console):
 - the long-connection event `drive.notice.comment_add_v1`;
@@ -181,13 +189,17 @@ Inbound events arrive on **one** `lark-cli event +subscribe` connection (lark-cl
 
 ### Q&A group
 
-Click the Q&A group action on the wheel (shown as 答疑群 in the Chinese UI) while looking at a session. Pet creates the default Q&A group for that main session, with you as the group owner, and binds it to a `read` Locus with its own child session. Clicking it again opens the same group rather than creating another one. If creation fails part-way, Pet rolls back what it created and reports anything it could not reclaim.
+Click the Q&A group action on the wheel (shown as 答疑群 in the Chinese UI) while looking at an unarchived ordinary session. Pet uses it as the working session, creates or reuses its locus main, and creates your default Q&A group with you as owner. The entry starts `read`/`safe`; the child is created by the first business message, not by opening the group. Clicking the action again opens the same default group. A partial failure is compensated, and anything that could not be reclaimed is reported.
 
-You then invite whoever should be able to ask. Members who mention the bot are answered by a child that works from its own context and can consult your main session, not by a fresh executor reading the code cold. The Locus tab marks the default Q&A entry; it never offers to create one.
+Invite whoever should be able to ask. Members who mention the bot are answered by the entry's own child, which can consult the coordinator but does not inherit your working-session history. The Locus tab identifies the default Q&A entry; it never offers to create one.
 
 ### Lifecycle
 
-Unbinding or archiving an entry stops serving it and keeps history; it refuses while the entry is busy. If the main session is **archived**, the entry goes out of service and says so: restoring that session brings the entry back by itself, or in the Locus tab you can replace the main session, which moves every entry under it to one newly created main session in the same workspace. A mention never silently revives an entry its owner stopped, and never silently switches an entry to a different main session. An entry the Host itself invalidated (for example a failed re-attach after a restart) is rebuilt by the next *allowlisted* mention. Associations created by an older version are not migrated; re-establish them with `/bind`, which starts at `read`.
+Unbinding or stopping an entry preserves history and refuses while it is busy. An owner-stopped entry is never revived by an ordinary mention. If the **working session is archived**, its entries stop serving rather than resuming it or choosing another source. An allowlisted mention receives a bounded explanation with the option to restore that session or `/bind` to a new working session; the current receipt cap is three per entry per Host run, not a persistent cross-restart limit.
+
+A permanently unusable **child** is replaced only for that entry, with a fresh, initially uncreated generation. A runtime capacity refusal instead keeps the same child, generation and pending request. An unusable **locus main** is replaced for the same working session, migrating its non-stopped entries to new uncreated generations; old histories and collaboration-space todos remain, and skipped entries are reported.
+
+Old two-tier associations (including `safe-v1`/`safe-v2` children or a missing locus-main pairing) are retired, not converted or cold-restored. `/bind` explicitly establishes a new association; the next allowlisted mention can also establish the three-tier auto structure and reports the retirement. Old queued work is not replayed into the new child. The v18 state migration adds only the pairing table and preserves old data; it does not migrate old conversations or resume retired inquiries.
 
 ## Trust model and guards
 <!-- section: trust-model -->
@@ -196,7 +208,7 @@ Prompt text is **not** an authorization boundary. These mechanisms are:
 
 1. **`pet_context`** — a zero-argument tool. The target is resolved from the real executing session id, so a model cannot pass an identifier to redirect at another Task, session or workspace. It fails closed for ordinary sessions, archived Tasks and ambiguous or missing current work. The Locus tools (`pet_locus_finish`, `pet_locus_wait` and the read-only lookups) are caller-bound in the same way and accept no chat, message, thread or target selector.
 2. **Bounded tools** — side effects (sending a message, cleaning a worktree) run through deterministic tools and existing safety gates, never through free-text destinations the model invented.
-3. **Fixed child composition.** A Locus child is created from a Pet-chosen, persisted preset (`dsh-pet-executor`), never derived from the main session's preset, and is re-attached from that record after a restart. The safe tier has no general process execution, no delegation and no way to send or recall Lark messages except `pet_locus_finish`. A project-read guard also keeps the child away from the DSH home, Pet state root and attachments.
+3. **Fixed Locus composition.** Pet fixes the coordinator's preset to `locus-base`; children cold-restore from that same non-delegating base, independently of the working session's preset or any delegates it creates. Pet verifies each child's actual tool surface and applies its tool tier and sandbox before publication. The default `safe` tier has no general execution or delegation; its managed business reply route is `pet_locus_finish`. A project-read guard rejects protected paths at the call boundary, but is not a race-free filesystem boundary: retiring the legacy tools patch also retires its final guard recheck. The owner accepted that time window; this is not equivalent protection. `shell` has the weaker guarantees described above.
 4. **Admission is closed and silent** (see [Lark channel and Locus](#lark-channel-and-locus)); a main-session resolution failure never falls back to a different workspace or session.
 
 Pet never reads, copies or stores provider credentials. It records only the selected provider/model **ids**; authentication stays with the DSH provider and subscription plugins. The same holds for Lark credentials, which stay in `lark-cli`. Environment values are not a credential store (see above).
@@ -269,12 +281,9 @@ Closing the browser does not stop a running Invocation. Stopping `dsh web` stops
   source: local
   version: 0.1.0
   enabled: true
-  hostRuntimeCompatibility:
-    kind: pet-unified-locus-v1
-    supportedDshVersion: 0.2.0-rc.2
 ```
 
-A companion `dsh-pet-executor` entry (`type: preset`) supplies the executor preset, which equals DSH's standard preset minus the filesystem Skill provider. Run `dsh build` (or `node scripts/sync.mjs`) to materialize. Set `enabled: false` and rebuild to roll back; `$DSH_HOME/plugins/dsh-pet/` is preserved so re-enabling recovers your data.
+A companion `dsh-pet-executor` entry (`type: preset`) supplies the quick-action executor preset, which equals DSH's standard preset minus the filesystem Skill provider. A separate `locus-base` preset supplies the non-delegating base for locus mains and children; it must be declared in the profile, or Locus creation and recovery refuse rather than substitute another preset. Run `dsh build` (or `node scripts/sync.mjs`) to materialize. Set `enabled: false` and rebuild to disable Pet; `$DSH_HOME/plugins/dsh-pet/` is preserved. Re-enabling does not reactivate retired two-tier associations.
 
 ### Independent installation
 
@@ -282,7 +291,7 @@ The package does not depend on ohmydsh at runtime. Install it into any DSH profi
 
 ### Supported DSH range
 
-The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-rc.2`. These are pre-stable release candidates: client slots, Host Agent services and session metadata may change between versions. The long-lived `dsh web` Host additionally runs a minimal source-level compatibility overlay for `@deepseek-ai/dsh-subagent`, which Locus child sessions rely on; it is rebuilt and reviewed on every DSH version change, see [compat/subagent](compat/subagent/README.md). Without those host capabilities the Lark channel stays unavailable, and the rest of Pet is unaffected.
+The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-rc.2`. These are pre-stable release candidates: client slots, Host Agent services and session metadata may change between versions. Three-tier Locus uses official subagent, agent-loop, tools and native tool-owner packages; the four legacy Locus/inquiry patches are retired. The long-lived `dsh web` Host runs the official exact-version runtime: there is no custom Host runtime (compat) any more, and a `hostRuntimeCompatibility` field in the manifest is rejected as retired. The former team-membership extension is retired too; the owner has accepted the resulting agent-team roster time-window risk. Missing official runtime capabilities still disable the Lark channel with a diagnostic; the rest of Pet is unaffected.
 
 ### Capability availability
 

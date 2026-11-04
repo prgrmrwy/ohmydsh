@@ -64,11 +64,11 @@ The package registers the eight tools exposed by memex's Pi extension:
 - `memex_recall`, `memex_retro`, `memex_search`, `memex_read`
 - `memex_write`, `memex_links`, `memex_archive`, `memex_organize`
 
-Names and descriptions come verbatim from the pinned memex release. Scope is implicit (`current`) unless the operation accepts an optional `scope`: only search, read and write take it, because recall and the graph-level tools (links, archive, organize) are facts about one library. Multi-library search fans out concurrently, one normal memex CLI call per library, and every hit carries the scope it came from so it can be read back. A write can also name a second library to receive a copy, within the writable reach of the session's binding. Keyword search segments runs of Han characters in the query before it reaches the kernel; no vector search is involved.
+Names and descriptions come verbatim from the pinned memex release. Scope is implicit (`current`) unless the operation accepts an optional `scope`: only search, read and write take it, because recall and the graph-level tools (links, archive, organize) are facts about one library. Multi-library search fans out concurrently, one normal memex CLI call per library, and every hit carries the scope it came from so it can be read back. A write can also name a second library to receive a copy, within the writable reach of the session's binding. Keyword search segments runs of Han characters in the query before it reaches the kernel. Requests with `semantic: true` are rejected before any library or kernel call, including multi-library searches: the upstream kernel can select a remote embedding provider from inherited credentials. Tool names and generated descriptions still follow upstream verbatim.
 
 ### Recall guidance and write reminder
 
-At session start the plugin injects a bounded recall guide (the resolved scope and library, how to recall, when to write a card) before the first turn; it is read-only and a failure only logs a warning. The guide adds three local requirements: search results show only each card's title and first paragraph, so that paragraph should state when it applies, the conclusion or steps, its boundaries and the minimum check before reuse; recall calls should pass an `intent`; and when a recalled card is checked against the current code or environment and found wrong or outdated, it should be fixed in the same turn with `memex_write` (keeping its title and `created` date, correcting the first paragraph, appending a dated note with the evidence), changing only facts actually checked. The card format and the upstream methodology are unchanged; the plugin never detects or edits stale cards itself.
+At session start the plugin injects a bounded recall guide (the resolved scope and library, how to recall, when to write a card) before the first turn; it is read-only and a failure only logs a warning. The guide adds local requirements: search results show only each card's title and first paragraph, so that paragraph should state when it applies, the conclusion or steps, its boundaries and the minimum check before reuse; recall calls should pass an `intent`; and when a recalled card is checked against the current code or environment and found wrong or outdated, it should be fixed in the same turn with `memex_write` (keeping its title and `created` date, correcting the first paragraph, appending a dated note with the evidence), changing only facts actually checked. Evaluation, probe and handoff cards should reference question IDs or a gold-set path instead of copying query text, which would contaminate later retrieval measurements. The card format and the upstream methodology are unchanged; the plugin never detects or edits stale cards itself.
 
 After a session has recalled something and not yet written a card, the plugin nudges the model to save what it learned. The nudge is delivered with the **next** turn, never inside the one that just finished, so a turn always ends on the answer to the request it was asked for. If the conversation stops after that turn, no reminder is delivered and no card is written on its own.
 
@@ -86,6 +86,19 @@ Every successful card write (including additional libraries) appends an event to
 ```bash
 dsh-memex-recall-report --days 14 --scope personal
 ```
+
+## Offline retrieval baseline
+
+The retrieval CLI runs keyword search against a private, hashed copy of a library. It uses no LLM and writes no recall telemetry. Supply a JSON gold set with `id`, `query`, `targets` (any accepted slug), `type` (`single-hop` or `multi-hop`, labels only), `topic`, `origin` and `set` (`dev` or `holdout`). Topics must not cross sets.
+
+```bash
+dsh-memex-eval-retrieval --library ~/.dsh-memex/personal --goldset /private/gold.json --set dev
+dsh-memex-eval-retrieval --recompute ~/.dsh-memex-eval/retrieval/<run-id>
+```
+
+Runs live under `~/.dsh-memex-eval/retrieval/` with private permissions; there is no custom output path. JSON and Markdown reports freeze returned slugs, errors, timings, character counts and input hashes, so recomputation needs neither the source library nor the kernel. Reports include hit@1/3/10, MRR, empty and wrong-first-result rates, alongside costs. Failed questions stay in the denominator and mark a run incomplete; changed snapshots mark it invalid. Samples below 30 questions are marked as insufficient. These measurements cover retrieval only, not whether an agent used the memory or saved work. See [evaluation methodology](docs/evaluation-methodology.md).
+
+Default exclusions remove `handoff`/`eval` categories and probe/handoff prefixes; `--help` lists overrides, distractors and expected-hash validation. Category values support plain strings and quoted strings with JSON escapes. Ambiguous YAML category forms (such as aliases, merges or block values) are rejected before a run. The path checks reject links and existing library ancestors. A known, accepted limit remains: a configured but uninitialized library whose home overlaps the evaluation root cannot be detected without reading Host settings. Keep library homes out of this private evaluation directory.
 
 ## Configuration
 <!-- section: configuration -->

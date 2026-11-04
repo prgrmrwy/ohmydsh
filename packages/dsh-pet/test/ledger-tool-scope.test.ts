@@ -1,6 +1,6 @@
 /**
- * Task 9.7 — tool-visibility scoping for the three `pet-locus-intent-triage`
- * tools, using the SAME real `ToolRuntime`/`dsh-scope` primitives
+ * Task 9.7 — tool-visibility scoping for the `pet-locus-intent-triage` track
+ * tool and the child tools `locus_context` / `locus_ask_parent`, using the SAME real `ToolRuntime`/`dsh-scope` primitives
  * `test/tool-scope.test.ts` established for `pet_context`/`pet_locus_finish`/
  * `pet_locus_wait` — not a hand-rolled double, so a wrong assumption about
  * `tools.register()`'s scope-tag contract cannot hide behind a mock.
@@ -12,14 +12,13 @@ import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
+  LOCUS_ASK_PARENT_TOOL,
+  LOCUS_CONTEXT_TOOL,
   PET_LOCUS_CHAT_HISTORY_TOOL,
-  PET_LOCUS_PARENT_LOOKUP_TOOL,
-  PET_LOCUS_REQUEST_EXECUTION_TOOL,
   PET_LOCUS_TRACK_TOOL,
   registerPetTools,
 } from '../src/host/tools.js'
 import { createLocusHistoryCursor } from '../src/host/locus/history-cursor.js'
-import { requestExecutionFailureText } from '../src/host/ledger/dispatch.js'
 import type { PetRepository } from '../src/host/repository.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 
@@ -59,6 +58,7 @@ async function installOnScope(
   repository: PetRepository,
   intentTriage?: Parameters<typeof registerPetTools>[1]['intentTriage'],
   locusHistory?: Parameters<typeof registerPetTools>[1]['locusHistory'],
+  locusChildTools?: Parameters<typeof registerPetTools>[1]['locusChildTools'],
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     scoped.inject(['tools'], toolCtx => {
@@ -67,6 +67,7 @@ async function installOnScope(
           repository,
           ...(intentTriage === undefined ? {} : { intentTriage }),
           ...(locusHistory === undefined ? {} : { locusHistory }),
+          ...(locusChildTools === undefined ? {} : { locusChildTools }),
         })
         resolve()
       } catch (error) {
@@ -77,6 +78,11 @@ async function installOnScope(
 }
 
 const stubIntentTriage = { loci: { findByChildSessionId: () => [] } }
+const stubChildTools = {
+  loci: { findByChildSessionId: () => [] },
+  collab: { currentHandle: () => undefined, isReady: async () => false, actAs: async () => ({ ok: false as const, code: 'COLLAB_UNAVAILABLE' }) },
+  subagents: () => undefined,
+} as never
 const CHILD_SESSION = 'child-history-1'
 
 /**
@@ -176,43 +182,47 @@ describe('the caller-bound entrance read is published only when assembled', () =
   })
 })
 
-describe('the three pet-locus-intent-triage tools are scoped to Pet executors', () => {
-  it('all three are visible to the executor scope that installed them, when intentTriage deps are supplied', async () => {
+describe('the intent-triage and child tools are scoped to Pet executors', () => {
+  it('all are visible to the executor scope that installed them, when their deps are supplied', async () => {
     harness = await openPetHarness()
     const ctx = await hostContext()
     const key = {} as never
     const scope = createScope(ctx, key)
-    await installOnScope(scope.ctx, harness.repository, stubIntentTriage)
+    await installOnScope(scope.ctx, harness.repository, stubIntentTriage, undefined, stubChildTools)
 
-    expect(visibleTools(ctx, key)).toContain(PET_LOCUS_PARENT_LOOKUP_TOOL)
-    // Retired (design D6): children read their ledger through collab_read.
-    expect(visibleTools(ctx, key)).not.toContain('pet_locus_ledger_read')
-    expect(visibleTools(ctx, key)).toContain(PET_LOCUS_TRACK_TOOL)
+    const visible = visibleTools(ctx, key)
+    expect(visible).toContain(LOCUS_CONTEXT_TOOL)
+    expect(visible).toContain(LOCUS_ASK_PARENT_TOOL)
+    expect(visible).toContain(PET_LOCUS_TRACK_TOOL)
+    // Retired: the parent is a Pet-owned locus main session now, and only a person can take a todo on.
+    for (const retired of ['pet_locus_ledger_read', 'pet_locus_parent_lookup', 'pet_locus_request_execution']) {
+      expect(visible).not.toContain(retired)
+    }
   })
 
-  it('task 9.7: none of the three register at all when intentTriage deps are absent — an ordinary Pet executor (no locus) never sees them', async () => {
+  it('task 9.7: none of them register at all when their deps are absent — an ordinary Pet executor (no locus) never sees them', async () => {
     harness = await openPetHarness()
     const ctx = await hostContext()
     const key = {} as never
     const scope = createScope(ctx, key)
-    // No `intentTriage` passed — matches how an ordinary (non-locus) Pet
-    // executor is composed today.
+    // Neither `intentTriage` nor `locusChildTools` passed — matches how an
+    // ordinary (non-locus) Pet executor is composed.
     await installOnScope(scope.ctx, harness.repository)
 
     const visible = visibleTools(ctx, key)
-    expect(visible).not.toContain(PET_LOCUS_PARENT_LOOKUP_TOOL)
-    expect(visible).not.toContain('pet_locus_ledger_read')
+    expect(visible).not.toContain(LOCUS_CONTEXT_TOOL)
+    expect(visible).not.toContain(LOCUS_ASK_PARENT_TOOL)
     expect(visible).not.toContain(PET_LOCUS_TRACK_TOOL)
   })
 
-  it('REGRESSION GUARD: both production composition paths in index.ts actually pass intentTriage — a unit test calling registerPetTools directly cannot catch this', async () => {
+  it('REGRESSION GUARD: both production composition paths in index.ts actually pass intentTriage and locusChildTools — a unit test calling registerPetTools directly cannot catch this', async () => {
     // This test exists because of a real defect found only at deployment:
-    // `tools.ts` correctly registered the three tools *when given*
+    // `tools.ts` correctly registered the tools *when given*
     // `intentTriage`, and every scope test above passes by supplying it by
     // hand — but neither production call site in `index.ts` actually passed
     // it, so the tools were never registered on the real Host at all.
     //
-    // Both paths must pass it, for the same reason the collaboration surface
+    // Both paths must pass them, for the same reason the collaboration surface
     // is installed on both: a locus child composed by Pet's own executor
     // setup and one adopted from DSH's native agent load must get the SAME
     // surface, or a child can register a todo through one path and not the
@@ -227,6 +237,7 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     for (const [i, start] of starts.entries()) {
       const end = starts[i + 1] ?? source.length
       expect(source.slice(start, end)).toContain('intentTriage')
+      expect(source.slice(start, end)).toContain('locusChildTools')
     }
     // `pet_locus_track` additionally needs the current-Delivery proof seam,
     // reusing the exact one `pet_locus_finish` uses.
@@ -238,14 +249,14 @@ describe('the three pet-locus-intent-triage tools are scoped to Pet executors', 
     const ctx = await hostContext()
     const key = {} as never
     const scope = createScope(ctx, key)
-    await installOnScope(scope.ctx, harness.repository, stubIntentTriage)
+    await installOnScope(scope.ctx, harness.repository, stubIntentTriage, undefined, stubChildTools)
 
     const otherKey = {} as never
     createScope(ctx, otherKey)
 
     const otherScopeVisible = visibleTools(ctx, otherKey)
-    expect(otherScopeVisible).not.toContain(PET_LOCUS_PARENT_LOOKUP_TOOL)
-    expect(otherScopeVisible).not.toContain('pet_locus_ledger_read')
+    expect(otherScopeVisible).not.toContain(LOCUS_CONTEXT_TOOL)
+    expect(otherScopeVisible).not.toContain(LOCUS_ASK_PARENT_TOOL)
     expect(otherScopeVisible).not.toContain(PET_LOCUS_TRACK_TOOL)
   })
 })
@@ -258,32 +269,29 @@ describe('model-facing tools cannot settle a todo (design D10)', () => {
       nodePath.resolve(__dirname, '..', 'src', 'host', 'tools.ts'),
       'utf8',
     )
-    // The narrowed invariant: a model may hand work off (reach `accepted`
-    // through a real dispatch), but may never declare work finished.
+    // The invariant: a model may register a todo, but may never move its
+    // status at all — not even to `accepted` (the request-execution tool is
+    // retired; only the owner's accept or the work main session advances it).
     //
-    // Assert on CODE, not prose: the tool description legitimately says it
-    // cannot mark a todo done or dropped, so a bare substring check would
-    // fail on its own documentation. What must not exist is a terminal
+    // Assert on CODE, not prose: a tool description may legitimately say a
+    // todo can be marked done or dropped by someone else, so a bare substring
+    // check would fail on its own documentation. What must not exist is a
     // status VALUE flowing through any registered tool.
     const code = tools.replace(/'(?:[^'\\]|\\.)*'/g, match =>
       match.includes(' ') ? "''" : match)
     expect(code).not.toContain("'done'")
     expect(code).not.toContain("'dropped'")
-    // And the one tool that does move status exposes no status argument.
-    // Slice from the REGISTRATION, not the constant declaration near the top.
-    const block = tools.slice(tools.indexOf('name: PET_LOCUS_REQUEST_EXECUTION_TOOL'))
-    const params = block.slice(block.indexOf('parameters: {'), block.indexOf('output: {'))
-    expect(params).toContain('itemId')
-    expect(params).not.toContain('status')
-    expect(params).not.toContain('action')
+    expect(code).not.toContain("'accepted'")
+    expect(tools).not.toContain('advanceStatus')
+    expect(tools).not.toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
   })
 })
 
 /**
  * Tool-level feedback: what the model actually receives when the ledger cannot
- * be read or an execution request names something it cannot resolve.
+ * be written.
  */
-describe('ledger tool feedback is actionable and never leaks ids', () => {
+describe('track tool feedback is actionable and never leaks ids', () => {
   const CHILD = 'child-scope-1'
   const LOCUS = {
     id: 'locus-scope-1',
@@ -347,29 +355,6 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     source: 'locus' as const,
   }
 
-  it('an unusable todo id points at the ledger read and enumerates nothing', async () => {
-    const wired = {
-      loci: { findByChildSessionId: () => [LOCUS] },
-      currentCapability: () => ({
-        deliveryId: 'delivery-1',
-        executionId: 'exec-1',
-        turnId: `${CHILD}#1`,
-        source: 'delivery' as const,
-      }),
-      authorizeCurrentDelivery: async () => ACTIVE_RECORD,
-      // The real dispatch refusal text, so this pins the render path the model sees.
-      requestExecution: async () => ({ ok: false as const, reason: requestExecutionFailureText('unknown-item') }),
-    }
-
-    const refused = await execute(wired, PET_LOCUS_REQUEST_EXECUTION_TOOL, { itemId: 'todo-does-not-exist' })
-
-    expect(refused.isError).toBe(false)
-    expect(refused.text).toContain('collab_read')
-    expect(refused.text).toContain('重试')
-    // Nothing about the ledger's other rows may appear.
-    expect(refused.text).not.toMatch(/item-|locus-|oc_|ou_/)
-  })
-
   it('track executes through the real runtime with a schema-valid result', async () => {
     const registered: string[] = []
     const wired = {
@@ -400,14 +385,5 @@ describe('ledger tool feedback is actionable and never leaks ids', () => {
     expect(done.isError).toBe(false)
     expect(done.text).toContain('已登记待办')
     expect(registered).toEqual(['todo-runtime-1'])
-  })
-
-  it('a malformed todo id points at the ledger read instead of only refusing', async () => {
-    const wired = { loci: { findByChildSessionId: () => [LOCUS] } }
-
-    const refused = await execute(wired, PET_LOCUS_REQUEST_EXECUTION_TOOL, { itemId: '   ' })
-
-    expect(refused.isError).toBe(true)
-    expect(refused.text).toContain('collab_read')
   })
 })

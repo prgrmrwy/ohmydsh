@@ -145,7 +145,22 @@ export interface LocusScopeMutationPort {
     readonly endpoint: LocusEndpoint
     readonly actorId: string
     readonly mode: 'read' | 'write'
-  }): PromiseLike<{ readonly mode: 'read' | 'write' }> | { readonly mode: 'read' | 'write' }
+  }): PromiseLike<LocusScopeMutationResult> | LocusScopeMutationResult
+}
+
+/**
+ * `mode` is what the child serves under NOW. `pending` means the request was
+ * only recorded (the child is released) and applies, verified, on its next wake.
+ */
+export interface LocusScopeMutationResult {
+  readonly mode: 'read' | 'write'
+  readonly pending?: boolean
+}
+
+/** As {@link LocusScopeMutationResult}, for the tool tier. */
+export interface LocusToolTierMutationResult {
+  readonly tier: 'safe' | 'shell'
+  readonly pending?: boolean
 }
 
 export interface LocusToolTierMutationPort {
@@ -153,7 +168,7 @@ export interface LocusToolTierMutationPort {
     readonly endpoint: LocusEndpoint
     readonly actorId: string
     readonly tier: 'safe' | 'shell'
-  }): PromiseLike<{ readonly tier: 'safe' | 'shell'; readonly childComposition?: 'safe-v1' | 'safe-v2' }> | { readonly tier: 'safe' | 'shell'; readonly childComposition?: 'safe-v1' | 'safe-v2' }
+  }): PromiseLike<LocusToolTierMutationResult> | LocusToolTierMutationResult
 }
 
 export interface CreateLocusControlDispatcherOptions {
@@ -198,8 +213,8 @@ function safeControlError(error: unknown): LocusControlDispatchResult {
   if (code === 'LOCUS_STOPPED' || code === 'GROUP_UNAVAILABLE') {
     return failure('stopped', '当前入口已停止，需要所有者显式重建后才能继续。')
   }
-  if (code === 'LOCUS_LEGACY_V1_SHELL') {
-    return failure('tools-legacy-v1', '该入口仍是 safe-v1 组合；请所有者显式重建一次后再授予 shell。入口保持 safe 且继续服务。')
+  if (code === 'LOCUS_LEGACY_COMPOSITION') {
+    return failure('tools-legacy-composition', '该入口属于旧模型，关联已退休，未切换档位；下一条授权 at 将建立新的三层结构。')
   }
   // The only PARENT_NOT_ALLOWED a control command can reach is "the prefix
   // resolved to a child session", which the spec requires to read exactly like
@@ -364,6 +379,12 @@ export function createLocusControlDispatcher(
               actorId: request.senderId,
               mode: command.mode,
             })
+            if (result.pending === true) {
+              return {
+                ok: true,
+                text: `权限变更（${command.mode}）已记录，将在子会话下次唤醒时应用并核验；生效前按原权限 ${result.mode} 服务，若唤醒时核验失败会另行告知。`,
+              }
+            }
             return result.mode === command.mode
               ? { ok: true, text: `当前入口共享权限已核验为 ${command.mode}。` }
               : failure('scope-not-applied', '权限变更未核验生效，已拒绝报告成功。')
@@ -373,10 +394,13 @@ export function createLocusControlDispatcher(
               return failure('tools-unavailable', '当前入口暂不支持工具档位变更。')
             }
             const result = await (options.toolTierMutation ?? options.tools)!.setCurrentTier!({ endpoint, actorId: request.senderId, tier: command.tier })
-            if (result.tier !== command.tier) return failure('tools-not-applied', '工具档位未核验生效，未报告成功。')
-            if (command.tier === 'shell' && result.childComposition !== 'safe-v2') {
-              return failure('tools-legacy-v1', '该入口仍是 safe-v1 组合；请所有者显式重建一次后再授予 shell。入口保持 safe 且继续服务。')
+            if (result.pending === true) {
+              return {
+                ok: true,
+                text: `工具档位变更（${command.tier}）已记录，将在子会话下次唤醒时应用并核验；生效前按原档位 ${result.tier} 服务，若唤醒时核验失败会另行告知。`,
+              }
             }
+            if (result.tier !== command.tier) return failure('tools-not-applied', '工具档位未核验生效，未报告成功。')
             return {
               ok: true,
               text: command.tier === 'shell'

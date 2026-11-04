@@ -53,7 +53,15 @@ const MODE_FORMAT = /^[a-z][a-z0-9-]{0,31}:[a-z][a-z0-9-]{0,31}$/
  * final commit/read boundary; false or throwing rejects with COLLAB_CALLER_STALE.
  */
 export interface ReadContext { principal: Principal; spaceId: string; guard?: () => boolean }
-export interface CommandContext extends ReadContext { cmdId: string }
+export interface CommandContext extends ReadContext {
+  cmdId: string
+  /**
+   * Manager `disposeManagedRequest` only: the host's synchronous judgement that an ordinary
+   * `dsh-session` address belongs to the integrator. Evaluated inside the transaction right before
+   * the guard, so it holds at the commit boundary; absent or throwing counts as false.
+   */
+  authorOwned?: (address: string) => boolean
+}
 type ManagerCommand = 'admitMember' | 'rebindMember' | 'retireMember' | 'disposeManagedRequest'
 export interface ServiceOptions { serviceId: string; store: CollabStore; providers: ChannelProvider[]; convention?: { version: string; sha256: string; text: string }; project?: (state: Overview) => string; /** Clock for commit times; defaults to Date.now. */ now?: () => number }
 export function canonical(value: unknown): string {
@@ -487,12 +495,15 @@ export class CollabService {
     const item = (typeof input.itemId === 'string' && Object.hasOwn(s.items, input.itemId) ? s.items[input.itemId] : undefined) ?? fail('COLLAB_ITEM_NOT_FOUND')
     if (item.kind !== 'request') fail('COLLAB_FORBIDDEN')
     const author = Object.hasOwn(s.members, item.author) ? s.members[item.author] : undefined
-    if (author?.managedBy !== channel) fail('COLLAB_FORBIDDEN')
+    if (author?.managedBy !== channel && !(author?.binding.channel === 'dsh-session' && this.owned(ctx, author.binding.address))) fail('COLLAB_FORBIDDEN')
     checkedItem(s, item.id, 'advanceRequest')
     const transitions: Record<Progress, Progress[]> = { open: ['accepted', 'done', 'rejected'], accepted: ['done', 'rejected'], done: [], rejected: [] }
     if (!transitions[item.progress].includes(input.progress)) fail('COLLAB_BAD_TRANSITION')
     return [{ type: 'request/progressed', actor, itemId: item.id, progress: input.progress }]
   }) }
+  private owned(ctx: CommandContext, address: string): boolean {
+    try { return ctx.authorOwned?.(address) === true } catch { return false }
+  }
   private readState(ctx: ReadContext): SpaceState { this.entry(ctx); const s = this.state(ctx.spaceId); if (ctx.principal.kind !== 'internal' && this.lookup(s, ctx.principal).status !== 'active') fail('COLLAB_MEMBER_INACTIVE'); return s }
   async overview(ctx: ReadContext): Promise<Overview> {
     ctx = this.snapshot(ctx)

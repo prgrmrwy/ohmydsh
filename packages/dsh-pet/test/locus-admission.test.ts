@@ -119,8 +119,8 @@ describe('durable production authorization resolver', () => {
     // `retired` is what produces the "needs an explicit rebuild" notice and
     // suppresses auto-provisioning. `unusable` would let an ordinary mention
     // establish a generation on a main session the owner never chose.
-    expect(byState('active', true)).toBe('retired')
-    expect(byState('invalid', true)).toBe('retired')
+    expect(byState('active', true)).toMatchObject({ state: 'retired', reason: 'source-archived' })
+    expect(byState('invalid', true)).toMatchObject({ state: 'retired', reason: 'source-archived' })
 
     // Unarchived behaviour, including the Host-judged replacement, is untouched.
     expect(byState('active', false)).toMatchObject({ state: 'authorized' })

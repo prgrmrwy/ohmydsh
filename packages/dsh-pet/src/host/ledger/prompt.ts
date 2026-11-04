@@ -24,11 +24,10 @@ export const INTENT_TRIAGE_GUIDANCE =
   'handed over. Never say the work has begun, is in progress, or will finish soon, and never claim it ' +
   'is done. If you could not confirm a target path, directory, or recipient, present it as a guess and ' +
   'ask the requester or owner to confirm it — never state an unconfirmed location as the place the ' +
-  'work will happen. If the work should start now rather than wait for the owner to ' +
-  'pick it up, you may additionally call `pet_locus_request_execution` with the `itemId` you just ' +
-  'registered: it asks for that todo to be executed and the Host decides where the work runs. It ' +
-  'marks the todo accepted only when a follow-up task was really delivered, and it can never mark a ' +
-  'todo done or dropped — settling a todo stays the owner\'s decision.\n' +
+  'work will happen. You cannot start the work yourself: only the owner or the work main session can start ' +
+  'a registered todo, and only they can mark it done or dropped. Call `locus_context` to read the ' +
+  'consensus and the progress of the todos this entry registered, and `locus_ask_parent` when you ' +
+  'must ask the locus main session something.\n' +
   '3. REFERENCE-ONLY: this bot is merely copied, cited, introduced as a contact, or mentioned as an ' +
   'associated party, with no request for this bot to answer or act. For example: a message tells ' +
   'another participant “if you have questions, contact this bot” while also mentioning this bot. ' +
@@ -65,8 +64,9 @@ export function intentTriageGuidanceCoversRequiredPoints(guidance: string): bool
     'SAME persistent child',
     'do not create a todo',
     'do not retain a current Delivery',
-    '`pet_locus_request_execution`',
-    'can never mark a todo done or dropped',
+    '`locus_context`',
+    '`locus_ask_parent`',
+    'only the owner or the work main session can start',
     'DURABLE state',
     'NOT STARTED',
     'Never say the work has begun',

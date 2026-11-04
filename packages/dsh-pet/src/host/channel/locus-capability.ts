@@ -29,6 +29,12 @@ export interface LocusChannelControllerPort {
   currentFinished?(input: { readonly deliveryId: string; readonly correlation: import('../locus/delivery.js').DeliveryCorrelation }): void
   /** Claim and physically queue the next FIFO Delivery for this locus. */
   dispatchNext?(correlation: import('../locus/delivery.js').DeliveryCorrelation): Promise<void>
+  /** Close intake and await controller/management mutations, excluding native turns. */
+  freezeForShutdown?(): Promise<void>
+  /** Called only once the owner's drain has actually ended. */
+  resumeAfterShutdown?(): Promise<void>
+  /** Share the controller's freeze boundary with HTTP management mutations. */
+  runWhileActive?<T>(operation: () => Promise<T>): Promise<T>
   dispose(): void
 }
 

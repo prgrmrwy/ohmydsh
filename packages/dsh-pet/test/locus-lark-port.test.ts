@@ -93,7 +93,7 @@ describe('strict LocusLarkPort control messages', () => {
         '--text', '上下文来源发生变化。',
         '--json',
       ],
-      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 },
+      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
     )
   })
 
@@ -133,7 +133,7 @@ describe('strict LocusLarkPort deletion', () => {
         '--as', 'bot',
         '--json',
       ],
-      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 },
+      { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true },
     )
   })
 

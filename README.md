@@ -229,6 +229,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
 - [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — Delegates with the official fresh tools and passes only user- or lead-specified model/effort; route_subagent is an optional preview, and failures pause and ask.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
+- [locus-base](presets/locus-base) — Fixed nondelegating preset for the Locus coordinating session and per-entry children.
 - [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
 - [memex-eval-config](patches/memex-eval-config.yml) — Adds fixed selftest workspace closures without replacing user scope or workspace settings.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.

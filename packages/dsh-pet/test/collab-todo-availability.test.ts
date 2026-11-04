@@ -11,11 +11,11 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { trackFailureText, trackTodo } from '../src/host/ledger/track.js'
-import { LocusCollabProxy } from '../src/host/collab/proxy.js'
+import { LocusCollab, type LocusMainRef } from '../src/host/collab/locus-collab.js'
 import { CollabTodoBackend } from '../src/host/collab/todo-backend.js'
 import { LocusRepository } from '../src/host/locus/persistence.js'
 import type { DeliveryCorrelation } from '../src/host/locus/delivery.js'
-import { authorizedFor, identityOf, openTodoWorld } from './support/collab-todo.js'
+import { authorizedFor, identityOf, openTodoWorld, type TestLocusRow } from './support/collab-todo.js'
 import { legacyTodoBackend } from '../src/host/ledger/backend.js'
 import { SharedFactLedgerStore } from '../src/host/ledger/store.js'
 import { createOwnerLedger } from '../src/host/ledger/owner-ledger.js'
@@ -23,19 +23,23 @@ import { PET_LOCUS_FINISH_TOOL, PET_LOCUS_TRACK_TOOL, registerPetTools } from '.
 import { locusSpaceId } from '../src/host/collab/naming.js'
 import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
 
-const MAIN = 'session-main-avail'
+const MAIN = 'session-locus-main-avail'
+const WORK = 'session-work-avail'
 const ALPHA = { chatId: 'oc-avail-alpha' }
-const LOCUS = { id: 'rec-avail', generation: 1, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: 'child-avail', state: 'active' }
+const REF: LocusMainRef = { locusMainSessionId: MAIN, workSessionId: WORK }
+const LOCUS: TestLocusRow = { id: 'rec-avail', generation: 1, endpoint: ALPHA, locusMainSessionId: MAIN, childSessionId: 'child-avail', state: 'active' }
+/** Pet without dsh-collab: the collab object never attaches, so there is no handle. */
+const unattachedBackend = () => new CollabTodoBackend({
+  collab: new LocusCollab({ directory: { list: () => [REF] } }),
+  directory: { list: () => [REF] },
+})
 
 let harness: PetHarness | undefined
 afterEach(async () => { await harness?.close(); harness = undefined })
 
 describe('协作层不可用时台账与待办 fail closed', () => {
   it('availability-01（登记与 Delivery 部分）：协作层缺失时登记失败而 Delivery 照常结算', async () => {
-    // dsh-collab absent: the proxy never attaches, so there is no handle.
-    const child = { id: LOCUS.childSessionId }
-    const proxy = new LocusCollabProxy({ listLoci: () => [LOCUS], liveAgent: id => id === child.id ? child : undefined })
-    const backend = new CollabTodoBackend({ proxy, childOf: () => LOCUS.childSessionId, liveAgent: id => id === child.id ? child : undefined })
+    const backend = unattachedBackend()
 
     harness = await openPetHarness(emptyMedium())
     const repository = new LocusRepository(harness.domain)
@@ -64,8 +68,7 @@ describe('协作层不可用时台账与待办 fail closed', () => {
   })
   it('availability-01：协作层缺失时登记失败而回复照常（pet_locus_track 与 pet_locus_finish 两个工具）', async () => {
     const child = { id: LOCUS.childSessionId }
-    const proxy = new LocusCollabProxy({ listLoci: () => [LOCUS], liveAgent: id => id === child.id ? child : undefined })
-    const backend = new CollabTodoBackend({ proxy, childOf: () => LOCUS.childSessionId, liveAgent: id => id === child.id ? child : undefined })
+    const backend = unattachedBackend()
     const definitions: { name: string; execute(args: unknown, exec: unknown): Promise<unknown> }[] = []
     const record = authorizedFor(LOCUS)
     const finishCurrentDelivery = vi.fn(async () => ({ sent: true as const, outcome: 'reply' as const }))
@@ -97,13 +100,12 @@ describe('协作层不可用时台账与待办 fail closed', () => {
       itemId: 'todo-old', parentSessionId: MAIN, locusId: LOCUS.id, generation: 1, endpoint: ALPHA,
       triggerMessageId: 'om-old', requestedBy: 'ou_requester', evidence: { summary: '旧版待办', detail: '' }, createdAt: 1,
     })
-    // dsh-collab absent: the proxy never attaches.
-    const proxy = new LocusCollabProxy({ listLoci: () => [LOCUS], liveAgent: () => undefined })
+    // dsh-collab absent: Pet never attaches.
+    const collab = new LocusCollab({ directory: { list: () => [REF] } })
     const owner = createOwnerLedger({
-      collab: new CollabTodoBackend({ proxy, childOf: () => undefined, liveAgent: () => undefined }),
+      collab: new CollabTodoBackend({ collab, directory: { list: () => [REF] } }),
       legacy: legacyTodoBackend(store),
-      collabAvailable: () => proxy.currentHandle() !== undefined,
-      unroutable: () => [],
+      collabAvailable: () => collab.currentHandle() !== undefined,
     })
     const view = await owner.list(MAIN)
     expect(view.collab).toBe('unavailable')
@@ -113,33 +115,32 @@ describe('协作层不可用时台账与待办 fail closed', () => {
   it('availability-03：协作层恢复后自动重新可用', async () => {
     const t = await openTodoWorld()
     try {
-      const gen2 = { id: 'rec-avail-g2', generation: 2, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: 'child-avail-g2', state: 'active' }
+      const gen2: TestLocusRow = { id: 'rec-avail-g2', generation: 2, endpoint: ALPHA, locusMainSessionId: MAIN, childSessionId: 'child-avail-g2', state: 'active' }
+      await t.addMain(REF)
       t.addLocus(gen2)
-      await t.loadMain(MAIN)
       expect((await t.register(gen2.id, { summary: '第 2 代', detail: '' }, 'todo-avail-g2')).ok).toBe(true)
-      const membersBefore = (t.world.live.get(MAIN) && (await t.records(MAIN)).flatMap((r: any) => r.events).filter((e: any) => e.type === 'member/joined').map((e: any) => e.member.name))
+      const membersOf = (records: any[]) => records.flatMap((r: any) => r.events).filter((e: any) => e.type === 'member/joined').map((e: any) => e.member.name)
+      const membersBefore = membersOf(await t.records(MAIN))
 
       // dsh-collab goes away: Pet's handle is disposed.
-      const detach = t.proxy.currentHandle()!
-      detach.dispose()
-      expect((await t.register(gen2.id, { summary: '不可用期间', detail: '' }, 'todo-avail-down')).ok).toBe(false)
-      // Meanwhile the locus switches to generation 3.
+      t.collab.currentHandle()!.dispose()
+      const down = await t.register(gen2.id, { summary: '不可用期间', detail: '' }, 'todo-avail-down')
+      expect(down).toEqual({ ok: false, reason: 'collab-unavailable' })
+      // Meanwhile the entry switches to generation 3.
       t.updateLocus(gen2.id, { state: 'retired' })
-      t.addLocus({ id: 'rec-avail-g3', generation: 3, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: 'child-avail-g3', state: 'active' })
+      t.addLocus({ id: 'rec-avail-g3', generation: 3, endpoint: ALPHA, locusMainSessionId: MAIN, childSessionId: 'child-avail-g3', state: 'active' })
 
-      // dsh-collab comes back: Pet re-attaches and rebuilds from durable facts.
-      t.proxy.attach(t.world.service)
-      t.proxy.refresh()
-      await t.proxy.ensureAll()
+      // dsh-collab comes back: Pet re-attaches and rebuilds from durable facts only.
+      t.collab.attach(t.world.service)
+      expect(await t.collab.probe(REF)).toBe(true)
       const registered = await t.register('rec-avail-g3', { summary: '第 3 代', detail: '' }, 'todo-avail-g3')
       expect(registered.ok).toBe(true)
       const records = await t.records(MAIN)
       const created = records.flatMap((r: any) => r.events).filter((e: any) => e.type === 'item/created').map((e: any) => e.item)
       const g3 = created.find((item: any) => item.id === 'todo-avail-g3')
-      expect(g3).toMatchObject({ author: 'pet', ext: { pet: { locusId: identityOf(ALPHA) } } })
+      expect(g3).toMatchObject({ author: 'locus', ext: { pet: { entry: identityOf(ALPHA), generation: 3 } } })
       expect(created.some((item: any) => item.id === 'todo-avail-down')).toBe(false)
-      const membersAfter = records.flatMap((r: any) => r.events).filter((e: any) => e.type === 'member/joined').map((e: any) => e.member.name)
-      expect(membersAfter).toEqual(membersBefore)
+      expect(membersOf(records)).toEqual(membersBefore)
       expect(locusSpaceId(MAIN)).toBe(records[0].events[0].spaceId)
     } finally {
       await t.world.stop()

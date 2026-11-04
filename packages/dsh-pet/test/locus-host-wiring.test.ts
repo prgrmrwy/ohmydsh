@@ -1,0 +1,473 @@
+/** Real Pet entry + Cordis/Storage/Tools: exercise Host wiring, not helper replicas. */
+import { mkdtemp, writeFile, readFile, stat, rm } from 'node:fs/promises'
+import WebServer from '@deepseek-ai/dsh-host-webserver'
+import { PET_PREPARE_STOP_ROUTE } from '../src/host/locus/stop-preparation.js'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
+import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as petPlugin from '../src/index.js'
+import * as PetStorage from '../src/host/storage/plugin.js'
+import * as channelCapability from '../src/host/channel/locus-capability.js'
+import * as lark from '../src/host/channel/lark.js'
+import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
+import { PET_DOMAIN_NAME } from '../src/host/spec.js'
+import { LocusRepository } from '../src/host/locus/persistence.js'
+import { PetRepository } from '../src/host/repository.js'
+import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
+import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES, LOCUS_DELEGATION_DENYLIST } from '../src/host/locus/composition.js'
+
+const hosts: Context[] = []
+const temporaryRoots: string[] = []
+afterEach(async () => {
+  for (const ctx of hosts.splice(0)) await ctx.fiber.dispose()
+  for (const directory of temporaryRoots.splice(0)) {
+    if (!path.isAbsolute(directory) || path.dirname(directory) !== tmpdir() || !/^pet-host-(wiring|project)-/.test(path.basename(directory))) throw new Error('Unsafe test cleanup path')
+    await rm(directory, { recursive: true, force: true })
+  }
+  vi.restoreAllMocks()
+})
+
+function deferred() {
+  let resolve!: () => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
+async function host() {
+  const home = await mkdtemp(path.join(tmpdir(), 'pet-host-wiring-'))
+  const project = await mkdtemp(path.join(tmpdir(), 'pet-host-project-'))
+  temporaryRoots.push(home, project)
+  const ctx = new Context()
+  hosts.push(ctx)
+  await ctx.plugin(Storage)
+  await ctx.plugin(SystemPrompt)
+  await ctx.plugin(ToolRuntime)
+  // AgentLoop mints its agent scopes from an injected runtime context. A scope
+  // minted under a bare test root has no declared tools API in Cordis.
+  let agentFactoryContext!: Context
+  await ctx.plugin({ name: 'official-agent-context', inject: ['tools', 'systemPrompt'], apply(scope: Context) { agentFactoryContext = scope } })
+  const routes: unknown[] = []
+  const sessions = new Map<string, ReturnType<typeof makeSession>>()
+  const agents = new Map<string, any>()
+  function makeSession(id: string, parentSession?: string) {
+    const events: any[] = []
+    return {
+      id, header: { id, cwd: project, agentPreset: id === 'ordinary' ? 'standard' : LOCUS_BASE_PRESET, ...(parentSession ? { parentSession, origin: 'subagent' } : {}) },
+      seq: 0,
+      snapshotEvents: () => events,
+      append(type: string, data: unknown) { events.push({ type, data, seq: events.length + 1, time: Date.now() }); this.seq++ },
+    }
+  }
+  function addAgent(id: string, child = false) {
+    const session = makeSession(id, child ? 'main' : undefined)
+    if (child) session.header.cwd = main.session.header.cwd
+    sessions.set(id, session)
+    const agent: any = { id, session, followup: vi.fn(), whenIdle: async () => {} }
+    const scoped = createScope(agentFactoryContext, agent)
+    agent.ctx = scoped.ctx
+    agents.set(id, agent)
+    return agent
+  }
+  for (const name of new Set([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES, 'write', 'edit', ...LOCUS_DELEGATION_DENYLIST, 'collab_status'])) {
+    ctx.tools.register(defineTool({
+      name, description: 'Host composition probe', parameters: {},
+      output: { schema: { type: 'boolean' }, render: () => [] }, execute: async () => true,
+    }))
+  }
+  const main = addAgent('main')
+  const ordinary = addAgent('ordinary')
+  const petPath = path.join(home, 'plugins', 'dsh-pet', 'workspace')
+  main.session.header.cwd = petPath
+  const workspace = {
+    id: 'ws', path: project, title: 'Project', sessionIds: ['ordinary'],
+    status: async () => 'ok', attachSession: vi.fn(async (id: string) => {
+      if (sessions.get(id)?.header.cwd !== project) throw new Error('session cwd does not match project workspace')
+      workspace.sessionIds.push(id)
+    }), detachSession: async () => {},
+  }
+  const petWorkspace = {
+    id: 'ws-pet', path: petPath, title: 'DSH Pet', sessionIds: ['main'],
+    status: async () => 'ok', attachSession: vi.fn(async (id: string) => {
+      if (sessions.get(id)?.header.cwd !== petPath) throw new Error('session cwd does not match Pet workspace')
+      petWorkspace.sessionIds.push(id)
+    }), detachSession: async () => {},
+  }
+  await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
+  const registerRoute = ctx.webServer.register.bind(ctx.webServer)
+  vi.spyOn(ctx.webServer, 'register').mockImplementation(route => { routes.push(route); return registerRoute(route) })
+  const authentication = { requestRejection: vi.fn((_request: unknown): 401 | 403 | undefined => undefined), authenticatedUrl: (origin: string) => `${origin}/?token=fixture-only` }
+  ctx.provide('connection', authentication)
+  ctx.provide('profileContext', { name: 'web', dir: home })
+  ctx.provide('workspaceRegistry', { list: () => [workspace, petWorkspace], get: (id: string) => id === 'ws-pet' ? petWorkspace : id === 'ws' ? workspace : undefined, create: async () => petWorkspace, archivedSessionIds: [], archiveSession: async () => {} })
+  ctx.provide('sessions', { list: () => [...sessions.values()], get: (id: string) => sessions.get(id), flush: async () => true })
+  ctx.provide('agents', { list: () => [...agents.values()], get: (id: string) => agents.get(id), resume: async () => undefined, create: async () => { throw new Error('unexpected main creation') } })
+  ctx.provide('sessionController', {
+    inspect: async (id: string) => { const session = sessions.get(id); if (!session) throw new Error('missing'); return { meta: session.header, events: session.snapshotEvents() } },
+    resolveAgent: async (id: string) => ({ agent: agents.get(id) }),
+  })
+  ctx.provide('sessionQuery', {
+    observeSession: async (id: string) => {
+      const session = sessions.get(id)
+      if (!session) throw new Error('missing durable session')
+      return { header: session.header, events: session.snapshotEvents(), source: 'live', projections: { values: { agentPreset: session.header.agentPreset } }, [Symbol.dispose]() {} }
+    },
+  })
+  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) })
+  ctx.provide('agentPresets', { list: async () => [{ id: LOCUS_BASE_PRESET }], mount: async () => {} })
+  ctx.provide('llm', { listProviders: () => [{ id: 'test' }] })
+  ctx.provide('sessionTitle', { rename: async (_session: unknown, title: string) => ({ title }), get: () => 'Project' })
+  ctx.provide('skills', { register: () => () => {}, registerProvider: () => () => {} })
+  ctx.provide('sandboxPolicy', {
+    resolve: ({ session }: { session: ReturnType<typeof makeSession> }) => ({
+      mode: [...session.snapshotEvents()].reverse().find(event => event.type === 'sandbox/mode')?.data.mode,
+      workspaceRoot: session.header.cwd,
+    }),
+  })
+  const queue = vi.fn(async () => 'later-inbox')
+  const sendMessage = vi.fn(async () => ({}))
+  let firstTool: ((agent: any) => Promise<void>) | undefined
+  let apiReturned = false
+  const start = vi.fn(async (spec: any) => {
+    expect(spec.request.parent).toBe(main)
+    const child = addAgent(spec.childId, true)
+    child.ctx.tools.restrict(spec.request.toolFilter)
+    await ctx.serial(scopeTarget(child, child), 'agent/created', { agent: child, source: 'create' } as never)
+    child.session.append('turn/start', { turn: 1 })
+    ctx.emit(scopeTarget(child, child), 'agent/inbox/claimed' as never, { agent: child, message: { id: 'first-inbox', source: { kind: 'user' } }, turn: 1 } as never)
+    await firstTool?.(child)
+    apiReturned = true
+    return { childId: child.id, messageId: 'first-inbox' }
+  })
+  const drain = vi.fn(async (_parent: unknown, children: readonly string[]) => { for (const id of children) agents.delete(id) })
+  ctx.provide('subagents', {
+    startContinuable: start, drainContinuableChildren: drain, getProvider: () => ({ inheritsParentContext: false }),
+    listChildren: async (parentId: string) => [...sessions.values()].filter(session => session.header.parentSession === parentId).map(session => ({ id: session.id, parentSessionId: parentId, mode: 'continuable' })), sendMessage,
+    [Symbol.for('dsh.subagent.deliverPrompt')]: queue,
+  })
+  const replyToTarget = vi.fn(async () => ({ messageId: 'notice-receipt' }))
+  const strictPort = lark.createLocusLarkPort()
+  const controlMessage = vi.fn(strictPort.sendControlMessage)
+  vi.spyOn(lark, 'createLocusLarkPort').mockReturnValue({ ...strictPort, sendControlMessage: controlMessage })
+  vi.spyOn(lark, 'createLarkCliClient').mockReturnValue({
+    replyToTarget,
+    probeEntranceRead: async () => true, chatName: async () => 'Project', resolveMemberName: async () => 'Owner',
+    listChatBots: async () => [], addReaction: async () => undefined, removeReaction: async () => {}, reply: async () => 'receipt',
+  } as never)
+  let capability: channelCapability.LocusChannelCapability | undefined
+  const createCapability = channelCapability.createLocusChannelCapability
+  vi.spyOn(channelCapability, 'createLocusChannelCapability').mockImplementation(deps => {
+    capability = createCapability(deps)
+    return capability
+  })
+  await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
+  await ctx.plugin(StorageDomain, { backend: PET_BACKEND_NAME })
+  await ctx.plugin(petPlugin, { home, version: 'test' })
+  await vi.waitFor(() => expect(routes.length).toBeGreaterThan(0))
+  expect(capability).toMatchObject({ status: 'available' })
+  const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+  await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('locus_mains').put('main', {
+    workSessionId: 'ordinary', locusMainSessionId: 'main', workspaceId: 'ws-pet', generation: 1, status: 'active', spaceId: 'space', createdAt: 1, updatedAt: 1,
+  })
+  const controller = (capability as channelCapability.AvailableLocusChannelCapability).controller
+  const execute = (agent: any, name: string) => ctx.tools.execute({ agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
+  return { ctx, home, project, authentication, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, replyToTarget, controlMessage, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
+}
+
+async function seedNotCreated(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; threadId?: string } = { chatId: 'chat' }) {
+  const record = {
+    id: 'entry', generation: 1, endpoint, parentSessionId: 'main', reservedChildSessionId: 'child', workspaceId: 'ws',
+    source: 'auto', state: 'not-created', permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, toolTier: { desired: 'safe', effective: 'safe' }, busy: false, createdAt: 1, updatedAt: 1,
+  } as const
+  if (endpoint.threadId !== undefined) {
+    await h.repository.putLocus({ ...record, id: 'parent-entry', endpoint: { chatId: endpoint.chatId }, reservedChildSessionId: 'parent-child' })
+  }
+  await h.repository.putLocus({ ...record, ...(endpoint.threadId === undefined ? {} : { parentLocusId: 'parent-entry', source: 'inherited' }) })
+}
+
+function admit(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; threadId?: string } = { chatId: 'chat' }, messageId = 'original-message', senderOpenId = 'owner') {
+  return h.controller.handleAdmission!({
+    kind: 'accepted', authorization: 'authorized', needsInitialization: false,
+    message: { kind: 'message', chatType: 'group', messageId, endpoint, senderOpenId, text: 'original question', replyTarget: { ...endpoint, messageId, ...(endpoint.threadId === undefined ? {} : { rootMessageId: 'root-message' }) } },
+  })
+}
+
+async function ownerRoute(h: Awaited<ReturnType<typeof host>>, route: string, body: Record<string, unknown>) {
+  const origin = `http://127.0.0.1:${h.ctx.webServer.port}`
+  const response = await fetch(`${origin}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify(body) })
+  const text = await response.text()
+  let result
+  try { result = JSON.parse(text) } catch { result = text }
+  return { status: response.status, body: result }
+}
+async function stopRequest(h: Awaited<ReturnType<typeof host>>, action = 'prepare', extra: Record<string, unknown> = {}) {
+  const filename = path.join(h.home, 'run', 'dsh-pet-stop', `${h.ctx.webServer.port}.json`)
+  const descriptor = JSON.parse(await readFile(filename, 'utf8'))
+  expect((await stat(filename)).mode & 0o777).toBe(0o600)
+  expect((await stat(path.dirname(filename))).mode & 0o777).toBe(0o700)
+  return ownerRoute(h, PET_PREPARE_STOP_ROUTE, { v: 1, action, nonce: 'host-stop-request', expectedHostPid: descriptor.pid, expectedBootId: descriptor.bootId, deadlineAt: Date.now() + 10_000, ...extra })
+}
+
+describe('actual Host three-tier assembly', () => {
+  it('prepares only after exact owned native close and Pet commit; backlog waits for resume', async () => {
+    const h = await host()
+    await seedNotCreated(h); await admit(h); await admit(h, { chatId: 'chat' }, 'successor')
+    const closed = deferred()
+    h.drain.mockImplementation(async (parent, children) => {
+      expect(parent).toBe(h.main); expect(children).toEqual(['child'])
+      const child = h.agents.get('child')
+      child.session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'parent' } } })
+      h.ctx.emit('session/event' as never, child.session, child.session.snapshotEvents().at(-1))
+      await closed.promise
+      h.agents.delete('child')
+    })
+    let prepared = false
+    const operation = stopRequest(h).then(result => { prepared = true; return result })
+    try {
+    await vi.waitFor(() => expect(h.repository.listDeliveries().find(row => row.messageId === 'original-message')?.startupDisposition).toBe('turn-interrupted'))
+    expect(prepared).toBe(false); expect(h.queue).not.toHaveBeenCalled()
+    expect(await admit(h, { chatId: 'chat' }, 'during-stop')).toMatchObject({ kind: 'refused', reason: 'shutdown-frozen' })
+    const management = await ownerRoute(h, '/dsh-pet/api/locus-default-qa', { parentSessionId: 'ordinary' })
+    expect(management.body).toMatchObject({ ok: false, error: 'LOCUS_BUSY' })
+    expect((await ownerRoute(h, '/dsh-pet/api/locus', {})).status).toBe(200)
+    closed.resolve()
+    expect(await operation).toMatchObject({ status: 200, body: { ok: true, data: { phase: 'prepared', hostPid: process.pid } } })
+    expect(h.queue).not.toHaveBeenCalled()
+    expect(await stopRequest(h, 'resume')).toMatchObject({ body: { ok: true, data: { phase: 'active' } } })
+    expect(h.queue).toHaveBeenCalledTimes(1)
+    expect(h.agents.has('ordinary')).toBe(true)
+    } finally { closed.resolve(); await operation.catch(() => undefined) }
+  })
+
+  it('authenticates and rejects foreign wire fields before freezing or draining', async () => {
+    const h = await host()
+    h.authentication.requestRejection.mockReturnValueOnce(401)
+    expect((await stopRequest(h)).status).toBe(401)
+    expect(await h.controller.runWhileActive!(async () => true)).toBe(true)
+    expect((await stopRequest(h, 'prepare', { childSessionId: 'ordinary' })).status).toBe(400)
+    expect((await stopRequest(h, 'prepare', { expectedHostPid: process.pid + 1 })).status).toBe(400)
+    expect(h.drain).not.toHaveBeenCalled()
+    expect(await h.controller.runWhileActive!(async () => true)).toBe(true)
+  })
+
+  it('keeps admission frozen after native durability failure until explicit resume', async () => {
+    const h = await host()
+    await seedNotCreated(h); await admit(h)
+    h.drain.mockRejectedValueOnce(new Error('native durable close failed'))
+    expect((await stopRequest(h)).body).toMatchObject({ ok: false })
+    expect((await stopRequest(h, 'status')).body).toMatchObject({ data: { phase: 'failed' } })
+    await expect(h.controller.runWhileActive!(async () => true)).rejects.toThrow('frozen')
+    expect((await stopRequest(h, 'resume')).body).toMatchObject({ ok: true, data: { phase: 'active' } })
+    expect(h.repository.listDeliveries()[0]?.status).toBe('current')
+  })
+  it('cold tool-tier control preserves the pending receipt through the actual Host adapter', async () => {
+    const h = await host()
+    const config = new PetRepository(h.ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    await config.updateChannelConfig(current => ({ ...current, allowOpenIds: ['ou_owner'] }))
+    await h.repository.putLocus({
+      id: 'entry', generation: 1, endpoint: { chatId: 'chat' }, parentSessionId: 'main', childSessionId: 'child', workspaceId: 'ws',
+      source: 'auto', state: 'active', childComposition: 'tier3', permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+      toolTier: { desired: 'safe', effective: 'safe' }, busy: false, createdAt: 1, updatedAt: 1,
+    })
+    const result = await h.controller.handleAdmission!({
+      kind: 'control', authorization: 'authorized', command: { kind: 'tools', tier: 'shell' },
+      message: { kind: 'message', chatType: 'group', messageId: 'tools-command', endpoint: { chatId: 'chat' }, senderOpenId: 'ou_owner', text: '@Pet --tools shell', replyTarget: { chatId: 'chat', messageId: 'tools-command' } },
+    })
+    expect(h.repository.getCurrentLocus({ chatId: 'chat' })).toMatchObject({
+      generation: 1, childSessionId: 'child', permission: { desired: 'read', effective: 'read' },
+      toolTier: { desired: 'shell', effective: 'safe' }, state: 'active', busy: false,
+    })
+    expect(result).toMatchObject({ kind: 'control', ok: true, text: expect.stringContaining('已记录，将在子会话下次唤醒时应用并核验') })
+    expect('text' in result && result.text).toContain('按原档位 safe 服务')
+    expect('text' in result && result.text).not.toContain('已核验为 shell')
+    expect(h.start).not.toHaveBeenCalled()
+    expect(h.queue).not.toHaveBeenCalled()
+    expect(h.agents.has('child')).toBe(false)
+  })
+
+  it.each(['valid', 'missing', 'mismatched'] as const)('pending topic notification uses the waking Delivery target without widening: %s', async targetKind => {
+    const h = await host()
+    const endpoint = { chatId: 'chat', threadId: 'thread' }
+    await seedNotCreated(h, endpoint)
+    await admit(h, endpoint)
+    const child = h.agents.get('child')
+    const finished = await h.ctx.tools.execute({ agent: child, name: 'pet_locus_finish', callId: 'settle-first' as never, arguments: { outcome: 'no-reply', reason: 'fixture completed' }, signal: new AbortController().signal })
+    expect(finished.isError).toBe(false)
+    child.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    h.agents.delete('child')
+    const config = new PetRepository(h.ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    await config.updateChannelConfig(current => ({ ...current, allowOpenIds: ['ou_owner'] }))
+    await h.controller.handleAdmission!({
+      kind: 'control', authorization: 'authorized', command: { kind: 'tools', tier: 'shell' },
+      message: { kind: 'message', chatType: 'group', messageId: 'grant-message', endpoint, senderOpenId: 'ou_owner', text: '--tools shell', replyTarget: { ...endpoint, messageId: 'grant-message', rootMessageId: 'root-message' } },
+    })
+    expect(h.repository.getLocus('entry')?.toolTier).toMatchObject({ desired: 'shell', effective: 'safe' })
+    const original = LocusRepository.prototype.findCurrentSerializedDelivery
+    if (targetKind !== 'valid') {
+      vi.spyOn(LocusRepository.prototype, 'findCurrentSerializedDelivery').mockImplementation(function(input) {
+        const current = original.call(this, input)
+        return targetKind === 'missing' || current?.replyTarget === undefined ? undefined
+          : { ...current, replyTarget: { ...current.replyTarget, threadId: 'another-thread' } }
+      })
+    }
+    const restored = { ...child }
+    restored.ctx = createScope(h.agentFactoryContext, restored).ctx
+    restored.ctx.tools.restrict(h.start.mock.calls[0]![0].request.toolFilter)
+    h.queue.mockImplementationOnce(async () => {
+      h.agents.set('child', restored)
+      await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
+      return 'later-inbox'
+    })
+    h.replyToTarget.mockClear()
+    h.controlMessage.mockClear()
+    const waking = await admit(h, endpoint, 'wake-message', 'ou_owner')
+    expect(h.queue, JSON.stringify(waking)).toHaveBeenCalledTimes(1)
+    expect(h.repository.getLocus('entry')).toMatchObject({ generation: 1, childSessionId: 'child', toolTier: { desired: 'shell', effective: 'shell' } })
+    if (targetKind === 'valid') {
+      expect(h.replyToTarget).toHaveBeenCalledExactlyOnceWith({ ...endpoint, messageId: 'wake-message', rootMessageId: 'root-message' }, '工具档位已在子会话唤醒时应用并核验为 shell。')
+    } else {
+      expect(h.replyToTarget).not.toHaveBeenCalled()
+    }
+    for (const [input] of h.controlMessage.mock.calls) expect(input.endpoint.threadId).toBe(endpoint.threadId)
+  })
+
+  it('cold-restores a locked main with its own tools, preserving collab and ordinary sessions', async () => {
+    const h = await host()
+    const before = h.ctx.tools.schemas(h.ordinary).map(tool => tool.name)
+    await h.ctx.serial(scopeTarget(h.main, h.main), 'agent/created', { agent: h.main, source: 'resume' } as never)
+    const names = h.ctx.tools.schemas(h.main).map(tool => tool.name)
+    expect(names).toEqual(expect.arrayContaining(['locus_note', 'locus_reply_child', 'collab_status']))
+    for (const name of ['bash', 'write', 'edit', ...LOCUS_DELEGATION_DENYLIST]) expect(names).not.toContain(name)
+    expect(h.main.session.snapshotEvents()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'sandbox/mode', data: { mode: 'read-only' } }),
+      expect.objectContaining({ type: 'approval/policy', data: { policy: 'never' } }),
+    ]))
+    await h.ctx.serial(scopeTarget(h.ordinary, h.ordinary), 'agent/created', { agent: h.ordinary, source: 'resume' } as never)
+    expect(h.ctx.tools.schemas(h.ordinary).map(tool => tool.name)).toEqual(before)
+    expect(h.ordinary.session.snapshotEvents()).toEqual([])
+    expect(h.ordinary.session.header.agentPreset).toBe('standard')
+    expect(before).toEqual(expect.arrayContaining(['bash', 'write', 'edit', ...LOCUS_DELEGATION_DENYLIST]))
+    expect(before).not.toContain('locus_note')
+  })
+
+  it('插件挂入自有作用域的委派工具在执行时被拒: refuses Agent Team tools mounted in its own scope', async () => {
+    const h = await host()
+    // The official Team plugin makes every ordinary root a Lead and registers
+    // its tools into that agent's OWN scope, which tools.restrict cannot hide.
+    const team = ['spawn_teammate', 'team_task_create']
+    const ran: string[] = []
+    for (const name of team) {
+      h.main.ctx.tools.register(defineTool({
+        name, description: 'Team probe', parameters: {},
+        output: { schema: { type: 'boolean' }, render: () => [] }, execute: async () => { ran.push(name); return true },
+      }))
+    }
+    await h.ctx.serial(scopeTarget(h.main, h.main), 'agent/created', { agent: h.main, source: 'resume' } as never)
+    expect(h.ctx.tools.schemas(h.main).map(tool => tool.name)).toEqual(expect.arrayContaining(team))
+    for (const name of team) expect(await h.execute(h.main, name)).toMatchObject({ isError: true })
+    expect(ran).toEqual([])
+    expect(await h.execute(h.main, 'collab_status')).not.toMatchObject({ isError: true })
+  })
+
+  it('Pet 工作区子会话仍按持久绑定读取项目，拒绝 Pet 状态且冷恢复保持', async () => {
+    const h = await host()
+    const petCwd = path.join(h.home, 'plugins', 'dsh-pet', 'workspace')
+    h.main.session.header.cwd = petCwd
+    const projectFile = path.join(h.project, 'readme.txt')
+    const privateFile = path.join(petCwd, 'private.txt')
+    await writeFile(projectFile, 'project')
+    await writeFile(privateFile, 'private')
+    await seedNotCreated(h)
+    const results: boolean[] = []
+    const check = async (child: any) => {
+      expect(child.session.header.cwd).toBe(petCwd)
+      for (const file of [projectFile, privateFile]) {
+        const result = await h.ctx.tools.execute({ agent: child, name: 'read', callId: `read-${results.length}` as never, arguments: { file_path: file }, signal: new AbortController().signal })
+        results.push(result.isError)
+      }
+    }
+    h.firstTool(check)
+    await admit(h)
+    expect(h.repository.getLocus('entry')).toMatchObject({ state: 'active', workspaceId: 'ws' })
+    expect(h.petWorkspace.attachSession).toHaveBeenCalledWith('child')
+    expect(h.workspace.attachSession).not.toHaveBeenCalled()
+    expect(results).toEqual([false, true])
+    expect(JSON.stringify(h.start.mock.calls[0]![0].request.prompt)).toContain(h.project)
+    // A new agent scope stands for native cold reconstruction of the same id.
+    const child = h.agents.get('child')
+    const restored = { ...child }
+    restored.ctx = createScope(h.agentFactoryContext, restored).ctx
+    restored.ctx.tools.restrict(h.start.mock.calls[0]![0].request.toolFilter)
+    h.agents.set('child', restored)
+    await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
+    await check(restored)
+    expect(h.petWorkspace.attachSession).toHaveBeenCalledTimes(2)
+    expect(h.workspace.attachSession).not.toHaveBeenCalled()
+    expect(results).toEqual([false, true, false, true])
+  })
+
+  it.each(['resolve', 'reject'] as const)('首工具等待持久绑定 / 首轮持久绑定失败拒绝执行: gates first caller-bound body on deferred durable UUID bind: %s', async outcome => {
+    const h = await host()
+    await seedNotCreated(h)
+    const binding = deferred()
+    const originalBind = LocusRepository.prototype.bindQueued
+    const bind = vi.spyOn(LocusRepository.prototype, 'bindQueued').mockImplementation(async function(input) {
+      await binding.promise
+      return originalBind.call(this, input)
+    })
+    const bodies = vi.fn()
+    let result: unknown
+    h.firstTool(async child => {
+      expect(h.apiReturned()).toBe(false)
+      expect(h.repository.getLocus('entry')).toMatchObject({ state: 'active', childComposition: 'tier3', childSessionId: child.id })
+      const definition = h.ctx.tools.get('pet_context', child)!
+      const body = definition.execute
+      vi.spyOn(definition, 'execute').mockImplementation(async (...args: any[]) => {
+        bodies()
+        const value = await body(...args)
+        expect(JSON.parse((value as { json: string }).json)).toMatchObject({
+          scope: 'locus', locus: { locusId: 'entry' },
+          currentDelivery: { messageId: 'original-message', text: 'original question' },
+        })
+        expect(h.apiReturned()).toBe(false)
+        return value
+      })
+      // This goes through the REAL Tools runtime, including the hook installed
+      // by src/index.ts; no direct registry.whenBound call can make it pass.
+      result = await h.execute(child, 'pet_context')
+    })
+    const handling = admit(h)
+    await vi.waitFor(() => expect(bind).toHaveBeenCalled(), { timeout: 2_000 })
+    expect(bind).toHaveBeenCalledWith(expect.objectContaining({ inboxMessageId: 'first-inbox' }))
+    expect(h.repository.findDeliveryByInboxMessageId('first-inbox')).toBeUndefined()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(bodies).not.toHaveBeenCalled()
+    expect(h.apiReturned()).toBe(false)
+    if (outcome === 'resolve') binding.resolve()
+    else binding.reject(new Error('durable UUID bind refused'))
+    await handling
+    expect(h.start).toHaveBeenCalledTimes(1)
+    expect(h.queue).not.toHaveBeenCalled()
+    expect(h.sendMessage).not.toHaveBeenCalled()
+    expect(h.start.mock.calls[0]![0].request.prompt).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'text', text: expect.stringContaining('original question') })]))
+    if (outcome === 'resolve') {
+      expect(bodies).toHaveBeenCalledTimes(1)
+      expect(result).toMatchObject({ isError: false })
+      expect(JSON.stringify(result)).toContain('original-message')
+      expect(h.repository.findDeliveryByInboxMessageId('first-inbox')).toMatchObject({ messageId: 'original-message', locusId: 'entry' })
+    } else {
+      expect(bodies).not.toHaveBeenCalled()
+      expect(result).toMatchObject({ isError: true })
+      expect(h.repository.findDeliveryByInboxMessageId('first-inbox')).toBeUndefined()
+      expect(h.drain).toHaveBeenCalledTimes(1)
+      expect(h.repository.getLocus('entry')).toMatchObject({ state: 'not-created', busy: false })
+      expect(h.repository.findDeliveryByMessageId('original-message')).toMatchObject({ status: 'failed' })
+    }
+  })
+})

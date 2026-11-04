@@ -93,6 +93,18 @@
 - **WHEN** 运行就绪检查
 - **THEN** 两个事件都被解析到，`toolCount` 与 `routerSkill` 都反映完整日志内容
 
+共享读取器 SHALL 按标准 zstd 帧的 header 与 block 结构确定边界，再逐帧解压校验；MUST NOT 把 payload 内的 magic 当作边界，也 MUST NOT 跳过失败段后返回完整读取成功。非帧前后缀、中间损坏、校验失败和未完成尾帧 SHALL 返回 `decode-failed`，不提供部分日志。此规则同时适用于 readiness 和 recorder 的延迟取证；不改变会话存储后端自身的恢复政策。
+
+#### Scenario: 有效 payload 内含 magic
+- **GIVEN** 一个有效标准 zstd 帧，其 raw block 内包含 `28 b5 2f fd`
+- **WHEN** 共享读取器解码
+- **THEN** 保留该帧完整 payload，不误切为多个帧
+
+#### Scenario: 坏帧不能被跳过
+- **GIVEN** 好帧、坏帧、好帧拼接的日志，或带非帧前后缀、未完成尾帧的日志
+- **WHEN** readiness 或 recorder 读取
+- **THEN** readiness 报告不可用且原因为 `decode-failed`；recorder 不从部分日志产出已测延迟，报告 `decode-failed`
+
 ### Requirement: Readiness reports an actionable reason when a session cannot be read
 就绪检查 SHALL 在无法读取会话时报告具体的失败原因（至少区分文件缺失、解压失败与解析后无 `request/header` 事件），MUST NOT 只以一个笼统布尔字段表达失败，也 MUST NOT 因此让整个就绪检查以非 0 退出或输出凭据值。
 

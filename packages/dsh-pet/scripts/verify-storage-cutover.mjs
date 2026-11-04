@@ -100,18 +100,17 @@ for (const name of ['dsh-storage', 'dsh-storage-domain', 'dsh-storage-sqlite']) 
   }
 }
 
-// 3. The startup log must show the Host picked the compat runtime, and which.
+// 3. The startup log must show the Host runs an official exact runtime. The
+// custom compat Host runtime (customization-host-runtime) is retired.
 try {
   const log = await readFile(path.join(home, 'dsh-startup.log'), 'utf8')
   const lines = log.trimEnd().split('\n')
   const last = lines[lines.length - 1] ?? ''
-  const fingerprint = /fingerprint=([a-f0-9]+)/.exec(last)?.[1]
   check(
-    last.includes('runtime=customization-host-runtime') && last.includes('owner=dsh-pet'),
-    'Host runtime 身份正确',
+    /\bruntime=(?:npx-cache|pnpm-cache)\b/.test(last) && !last.includes('customization-host-runtime'),
+    'Host runtime 为官方精确运行体',
     last.slice(0, 120),
   )
-  if (fingerprint !== undefined) console.log(`  fingerprint: ${fingerprint.slice(0, 16)}…`)
 } catch {
   check(false, '读取 dsh-startup.log', '找不到启动日志')
 }
