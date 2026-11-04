@@ -15,7 +15,7 @@
 - **受约束的执行。** 文件工具、搜索和 Bash 都被限制在 worktree 内，绑定后的会话不会悄悄回到主 checkout 操作。
 - **安全清理。** 先 dry run 预览；清理会拒绝有未提交修改、未合并、仍活跃或正在进行中的 worktree，且永不删除远端分支。
 
-**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `worktree-session`，`source: local`）：设为 `enabled: true` 后运行 `dsh build`。本 README 没有记录独立安装方式。周边仓库见[插件索引](../../README.zh.md#插件索引)。
+**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `worktree-session`，`source: local`）：设为 `enabled: true` 后运行 `dsh build`。本 README 没有记录独立安装方式。周边仓库见[插件索引](https://github.com/prgrmrwy/ohmydsh/blob/main/README.zh.md#插件索引)。
 
 **快速跳转：**[工作方式](#工作方式) · [依赖模式与 promote](#依赖模式与-promote) · [状态与编辑器集成](#状态与编辑器集成) · [配置](#配置) · [安全守卫](#安全守卫) · [维护与清理](#维护与清理) · [恢复与持久绑定](#恢复与持久绑定) · [运行时假设](#dsh-运行时假设与升级复核) · [开发](#开发) · [归属说明](#归属说明)
 
@@ -140,7 +140,7 @@ operation 记录位于 `<git-common-dir>/ws/operations/<operationId>.json`，保
 
 在仓库根目录用 `npm install` 或 `npm ci` 一次性安装依赖，用 `--workspace dsh-worktree-session` 运行 package 命令。导出的 `lib/` 与 `dsh-ws` CLI 是生成的、被 git 忽略的产物；根目录 sync 会在安装本 local package 之前先构建它们。
 
-当前行为由 [`source-workspace-worktree-session`](../../openspec/specs/source-workspace-worktree-session/spec.md) 规范定义。发布记录见 [`CHANGELOG.md`](CHANGELOG.md)。
+当前行为由 [`source-workspace-worktree-session`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/source-workspace-worktree-session/spec.md) 规范定义。发布记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 归属说明
 

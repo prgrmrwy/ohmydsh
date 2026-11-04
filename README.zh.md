@@ -10,7 +10,7 @@
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[English](README.md) · 简体中文 · [快速开始](#快速开始) · [插件索引](#插件索引) · [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [更新日志](CHANGELOG.md)
+[English](README.md) · 简体中文 · [快速开始](#快速开始) · [插件索引](#插件索引) · [贡献](CONTRIBUTING.md) · [更新日志](CHANGELOG.md)
 
 </div>
 
@@ -244,7 +244,7 @@ tests/                   仓库级测试
 ## 贡献
 <!-- section: contributing -->
 
-欢迎提 issue 与 pull request，请先读 [CONTRIBUTING.md](CONTRIBUTING.md)，以及 [SECURITY.md](SECURITY.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。行为变化走 OpenSpec change。修改 `README.md` 时必须在同一次提交里同步修改 `README.zh.md`，反之亦然。
+欢迎提 issue 与 pull request，请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全漏洞请走 [GitHub 私密漏洞报告](https://github.com/prgrmrwy/ohmydsh/security/advisories/new)，不要开公开 issue。行为变化走 OpenSpec change。修改 `README.md` 时必须在同一次提交里同步修改 `README.zh.md`，反之亦然。
 
 ## 许可证
 <!-- section: license -->

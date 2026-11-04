@@ -17,7 +17,7 @@
 - **会话专属的答疑群。** 在轮盘上点一下，就会开出一个与你正在工作的会话绑定的飞书群，别人可以提问，却碰不到你的会话。
 - **默认 fail closed。** Pet 从不读取 provider 凭据，不接受模型自己编出来的目的地，缺少依赖时只让自己降级，而不会拖垮 DSH。
 
-**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `dsh-pet`，`source: local`）：设为 `enabled: true` 后运行 `dsh build`。该 package 运行时不依赖 ohmydsh，也可以独立安装，见[安装与兼容性](#安装与兼容性)。周边仓库见[插件索引](../../README.zh.md#插件索引)。
+**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `dsh-pet`，`source: local`）：设为 `enabled: true` 后运行 `dsh build`。该 package 运行时不依赖 ohmydsh，也可以独立安装，见[安装与兼容性](#安装与兼容性)。周边仓库见[插件索引](https://github.com/prgrmrwy/ohmydsh/blob/main/README.zh.md#插件索引)。
 
 **快速跳转：**[产品概念](#产品概念) · [Skill 与环境变量](#skill-与环境变量) · [设置](#设置) · [飞书通道与 Locus](#飞书通道与-locus) · [信任模型与守卫](#信任模型与守卫) · [运行时状态与生命周期](#运行时状态与生命周期) · [安装与兼容性](#安装与兼容性) · [开发](#开发)
 
@@ -50,7 +50,7 @@ Pet 作为一个 package 发布，包含 **Host 半区**（持久化、任务协
 
 Pet **不会**继承 DSH 的全局 Skill 发现机制，也**不自带任何 Skill**。所有能力都来自用户显式导入的普通 DSH Skill。每个 Skill 分开保存两项事实：是否已登记，以及是否启用（外加是否作为快捷方式出现）。
 
-关键在于，Pet 不会从 `SKILL.md` 里读取**任何 Pet 专属**内容。没有 `petLabel`、`petIcon` 或 `petContext`——Skill 无法为了在 Pet 里获得更好待遇而特意适配，因此「为 Pet 适配的」与「普通的」Skill 是同一回事。能力的标签就是 Skill 名，描述就是 Skill 自己的描述。这也是 ohmydsh 仓库里的 [`skills/ws`](../../skills/ws/SKILL.md) 不用做任何改动就能直接当 Pet 能力使用的原因。
+关键在于，Pet 不会从 `SKILL.md` 里读取**任何 Pet 专属**内容。没有 `petLabel`、`petIcon` 或 `petContext`——Skill 无法为了在 Pet 里获得更好待遇而特意适配，因此「为 Pet 适配的」与「普通的」Skill 是同一回事。能力的标签就是 Skill 名，描述就是 Skill 自己的描述。这也是 ohmydsh 仓库里的 [`skills/ws`](https://github.com/prgrmrwy/ohmydsh/blob/main/skills/ws/SKILL.md) 不用做任何改动就能直接当 Pet 能力使用的原因。
 
 唯一的安装来源是**本地导入**，路径是*运行 `dsh web` 的 Host 机器*上的绝对路径（不是浏览器所在机器）。导入分两步：先做只读检查，展示名称、描述和文件清单，再由你单独确认登记。
 
@@ -164,8 +164,8 @@ Pet 可以从飞书接收工作：在群里 @ 已绑定的 bot，或直接给它
 ### 权限档位
 
 - **每个新建或被替换的 Locus 都从 `read` 开始**，并且在接受工作前、每次 Delivery 前都会重新核验实际生效的文件策略。出现漂移会暂停该入口。
-- **`write` 在当前构建中被全局禁用**（`LOCUS_WRITE_ENABLED = false`）：请求会在入口处被拒绝并给出真实原因；已有的 `write` 记录按 `read` 提供服务，而持久记录保留所有者原本的意图。如果以后打开该开关，`write` 会映射为 DSH 的 `danger-full-access`，也就是整机范围、无目录限制的文件写入，由该入口的所有成员共享。这是一项明确的安全决策，见 [ADR-0005](../../docs/adr/ADR-0005-locus-write-grants-full-access.md)。
-- **工具档位 `safe`（默认）或 `shell`** 独立于文件档位。`shell` 只对该入口的子会话额外开放 `bash` 和 `skill`，绝不开放委派类工具。它不是安全隔离模式：拒绝常见飞书发送命令的守卫只能降低误操作概率，而 bot 的凭据对由白名单用户驱动的模型是可触达的。见 [ADR-0008](../../docs/adr/ADR-0008-locus-shell-tier.md)；它对应的 OpenSpec change `pet-locus-shell-tier` 仍在进行中，因此该档位尚不属于当前 spec。
+- **`write` 在当前构建中被全局禁用**（`LOCUS_WRITE_ENABLED = false`）：请求会在入口处被拒绝并给出真实原因；已有的 `write` 记录按 `read` 提供服务，而持久记录保留所有者原本的意图。如果以后打开该开关，`write` 会映射为 DSH 的 `danger-full-access`，也就是整机范围、无目录限制的文件写入，由该入口的所有成员共享。这是一项明确的安全决策，见 [ADR-0005](docs/adr/ADR-0005-locus-write-grants-full-access.md)。
+- **工具档位 `safe`（默认）或 `shell`** 独立于文件档位。`shell` 只对该入口的子会话额外开放 `bash` 和 `skill`，绝不开放委派类工具。它不是安全隔离模式：拒绝常见飞书发送命令的守卫只能降低误操作概率，而 bot 的凭据对由白名单用户驱动的模型是可触达的。见 [ADR-0008](docs/adr/ADR-0008-locus-shell-tier.md)；它对应的 OpenSpec change `pet-locus-shell-tier` 仍在进行中，因此该档位尚不属于当前 spec。
 
 ### 文档评论
 
@@ -278,7 +278,7 @@ peer dependency 面向 DSH `^0.2.0-rc.2`，本仓库固定在 `0.2.0-rc.2`。这
 
 ### 能力可用性
 
-组织专属的集成（内部 CLI、聊天传输、Worktree Session）可能缺失。可用性是**计算出来的**：缺少某个依赖，只会带着诊断禁用对应能力，而不会弄坏 Pet。基础 Pet 与独立安装始终可以加载。构建这些集成时发现的跨进程陷阱汇总在 [dsh-plugin-integration-pitfalls](../../docs/architecture/dsh-plugin-integration-pitfalls.md)。
+组织专属的集成（内部 CLI、聊天传输、Worktree Session）可能缺失。可用性是**计算出来的**：缺少某个依赖，只会带着诊断禁用对应能力，而不会弄坏 Pet。基础 Pet 与独立安装始终可以加载。构建这些集成时发现的跨进程陷阱汇总在 [dsh-plugin-integration-pitfalls](https://github.com/prgrmrwy/ohmydsh/blob/main/docs/architecture/dsh-plugin-integration-pitfalls.md)。
 
 ## 开发
 <!-- section: development -->
@@ -291,7 +291,7 @@ npm test           # vitest
 
 客户端会把 `lottie-web` **打包进** `lib/client.js`。依赖清单变化后，先在仓库根执行 `npm install`（或 `npm ci`）再构建：缺少该依赖时打包器会静默把它留成运行时 `require`，DSH web 启动会报 `client-modules: ... missed the module table`。`npm run build:client` 末尾的 `scripts/verify-client-bundle.mjs` 会显式拦截这种漂移，并提示先安装依赖。
 
-测试针对真实的 DSH 存储层和真实的 SQLite backend 运行，并对符号链接投影使用真实文件系统，而不是 mock 这些契约。当前行为的规范位于 `openspec/specs/`（`dsh-pet`、`pet-lark-channel`、`pet-locus-collaboration`、`pet-locus-media-access`、`pet-workspace-env`、`pet-top-layer`）；设计决策见本 package 的 [`docs/adr/`](docs/adr/ADR-0001-executor-preset.md) 以及仓库级的 [ADR](../../docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md)。
+测试针对真实的 DSH 存储层和真实的 SQLite backend 运行，并对符号链接投影使用真实文件系统，而不是 mock 这些契约。当前行为的规范位于 `openspec/specs/`（`dsh-pet`、`pet-lark-channel`、`pet-locus-collaboration`、`pet-locus-media-access`、`pet-workspace-env`、`pet-top-layer`）；设计决策见本 package 的 [`docs/adr/`](docs/adr/ADR-0001-executor-preset.md)，其中也包括 locus 相关 ADR（[ADR-0004](docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md) 及之后）。
 
 ## 许可证
 

@@ -15,7 +15,7 @@ OpenSpec 为 AI Agent 提供的规范驱动工作流，通常得在每个项目�
 - **默认安静且私密。** 唯一的网络请求是可选的、不带凭据的版本检查，受管 CLI 的遥测默认关闭，除非你主动打开。
 - **可逆。** 禁用 manifest 条目并 sync 即可；旧的 generation 会被保留，绝不静默改写。
 
-**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `dsh-openspec`，`source: local`）：启用后运行 `dsh build`。本 README 没有记录独立安装方式。周边仓库见[插件索引](../../README.zh.md#插件索引)。
+**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `dsh-openspec`，`source: local`）：启用后运行 `dsh build`。本 README 没有记录独立安装方式。周边仓库见[插件索引](https://github.com/prgrmrwy/ohmydsh/blob/main/README.zh.md#插件索引)。
 
 **快速跳转：**[工作方式](#工作方式) · [用法](#用法) · [配置](#配置) · [Generation 与宿主机依赖布局](#generation-与宿主机依赖布局) · [安全与隐私](#安全与隐私) · [升级与移除](#升级与移除) · [恢复](#恢复) · [已知范围缺口](#已知范围缺口) · [开发](#开发) · [归属说明](#归属说明)
 
@@ -67,7 +67,7 @@ dsh-openspec: startup contributions failed (<code>); no Skills or commands were 
 
 ## 升级与移除
 
-**状态：进行中（WIP）。** 整体变更尚未验收；真实运行时下的升级/重载以及策略拒绝的证据仍然缺失（见[已归档变更的验证记录](../../openspec/changes/archive/2026-10-09-add-dsh-openspec-adapter/verify.md)）。评审 I1 报告的本地 Host 变更绕过已被移除：处理器只准备指引，显式请求的动作必须通过调用方会话的 Bash 执行 `lib/session-updater.js`。这一修复尚未在已部署的运行时中验证。
+**状态：进行中（WIP）。** 整体变更尚未验收；真实运行时下的升级/重载以及策略拒绝的证据仍然缺失（见[已归档变更的验证记录](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-09-add-dsh-openspec-adapter/verify.md)）。评审 I1 报告的本地 Host 变更绕过已被移除：处理器只准备指引，显式请求的动作必须通过调用方会话的 Bash 执行 `lib/session-updater.js`。这一修复尚未在已部署的运行时中验证。
 
 升级/回滚是源码所有的事务，需要通过调用方会话受控的 Bash 显式批准；它不会顺带刷新项目指令或重启 DSH。公开语法：
 
@@ -89,13 +89,13 @@ dsh-openspec: startup contributions failed (<code>); no Skills or commands were 
 
 ## 已知范围缺口
 
-DSH 会把宿主层的 Skill provider 合并进每个 scope，包括 Pet executor 和 Locus 子 scope。本适配器沿用现有宿主 provider 的做法，不实现按 preset 的隔离。该问题以跨 provider 的方式记录在 [`BACKLOG.md`](../../BACKLOG.md) 的 D006 中，必须在 Pet/注册表边界一次性修复。
+DSH 会把宿主层的 Skill provider 合并进每个 scope，包括 Pet executor 和 Locus 子 scope。本适配器沿用现有宿主 provider 的做法，不实现按 preset 的隔离。该问题以跨 provider 的方式记录在 [`BACKLOG.md`](https://github.com/prgrmrwy/ohmydsh/blob/main/BACKLOG.md) 的 D006 中，必须在 Pet/注册表边界一次性修复。
 
 ## 开发
 
 在仓库根目录用 `npm install` 或 `npm ci` 安装依赖，然后用 `--workspace dsh-openspec` 运行 package 命令：`build` 与 `typecheck` 使用 `tsc`，`test` 运行 `vitest`（并先构建）。生成的 `lib/` 不被跟踪。
 
-当前行为由 [`dsh-openspec-session`](../../openspec/specs/dsh-openspec-session/spec.md)、[`dsh-openspec-updates`](../../openspec/specs/dsh-openspec-updates/spec.md) 与 [`dsh-openspec-routing-extension`](../../openspec/specs/dsh-openspec-routing-extension/spec.md) 规范定义。
+当前行为由 [`dsh-openspec-session`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-openspec-session/spec.md)、[`dsh-openspec-updates`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-openspec-updates/spec.md) 与 [`dsh-openspec-routing-extension`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-openspec-routing-extension/spec.md) 规范定义。
 
 ## 归属说明
 

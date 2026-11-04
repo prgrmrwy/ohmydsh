@@ -86,14 +86,16 @@ test('requires both facade diagrams with their sources', () => {
   }
 })
 
-test('rejects root debug screenshot and generated architecture note', () => {
+test('rejects root bitmaps and generated architecture note', () => {
   const violations = artifactPolicyViolations([
     ...allowed,
     '.cdp-scratch-shot.png',
+    '.rv-settings.png',
     'worktree-session-architecture.md',
   ])
-  assert.equal(violations.length, 2)
-  assert.ok(violations.some((entry) => entry.startsWith('.cdp-scratch-shot.png:')))
+  assert.equal(violations.length, 3)
+  assert.ok(violations.some((entry) => entry === '.cdp-scratch-shot.png: root-level bitmap must live in the owning package or docs/assets/'))
+  assert.ok(violations.some((entry) => entry === '.rv-settings.png: root-level bitmap must live in the owning package or docs/assets/'))
   assert.ok(violations.some((entry) => entry.startsWith('worktree-session-architecture.md:')))
 })
 

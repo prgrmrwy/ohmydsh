@@ -1,6 +1,6 @@
 ## 1. 决策与前置实测
 
-- [x] 1.1 撰写 `docs/adr/ADR-0008-locus-shell-tier.md`（所有者接受的风险、出站仅防误操作、委派结构性排除、回滚说明），更新 `docs/adr` 索引（若有）
+- [x] 1.1 撰写 `packages/dsh-pet/docs/adr/ADR-0008-locus-shell-tier.md`（所有者接受的风险、出站仅防误操作、委派结构性排除、回滚说明），更新 `docs/adr` 索引（若有）
 - [ ] 1.2 在真实 read 档 locus 子会话等价沙箱下实测 `lark-cli --as bot im +chat-messages-list --chat-id <当前群>` 能否工作；结论写回 design.md「Open Questions」，失败则先补设计决策再继续（私有测试群外部 bot/API 检查仍返回 230027；已补 fail-closed 决策；尚非真实 child 等价沙箱实测，见 design.md）
 - [x] 1.3 回归测试：`LOCUS_SAFE_TOOL_NAMES ∪ LOCUS_SHELL_TIER_TOOL_NAMES` 是 `dsh-pet-executor` 全局（可 restrict）工具集的子集，且与委派 denylist 不相交（shell 集合基于该 preset 实际挂载项：`bash`、`skill`）
 

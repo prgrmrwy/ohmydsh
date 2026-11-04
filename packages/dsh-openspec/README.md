@@ -15,7 +15,7 @@ OpenSpec's guided, spec-driven workflows for AI agents normally have to be insta
 - **Quiet and private by default.** The only network request is an optional, credential-free version check, and telemetry of the managed CLI is off unless you turn it on.
 - **Reversible.** Disable the manifest entry and sync; old generations are retained, never silently rewritten.
 
-**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `dsh-openspec`, `source: local`): enable it, then run `dsh build`. This README documents no standalone installation. For the surrounding repository see the [plugin index](../../README.md#plugins).
+**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `dsh-openspec`, `source: local`): enable it, then run `dsh build`. This README documents no standalone installation. For the surrounding repository see the [plugin index](https://github.com/prgrmrwy/ohmydsh/blob/main/README.md#plugins).
 
 **Jump to:** [How it works](#how-it-works) · [Usage](#usage) · [Configuration](#configuration) · [Generations and the host dependency layout](#generations-and-the-host-dependency-layout) · [Safety and privacy](#safety-and-privacy) · [Upgrade and removal](#upgrade-and-removal) · [Recovery](#recovery) · [Known scope gap](#known-scope-gap) · [Development](#development) · [Attribution](#attribution)
 
@@ -67,7 +67,7 @@ dsh-openspec: startup contributions failed (<code>); no Skills or commands were 
 
 ## Upgrade and removal
 
-**Status: work in progress.** The overall change is not accepted yet; real-runtime upgrade/reload and policy-denial evidence is still outstanding (see the [archived change verification](../../openspec/changes/archive/2026-10-09-add-dsh-openspec-adapter/verify.md)). The local Host mutation bypass reported by review I1 has been removed: the handler only prepares guidance, and an explicitly requested action must execute `lib/session-updater.js` through the calling session's Bash. This repair has not been verified in a deployed runtime.
+**Status: work in progress.** The overall change is not accepted yet; real-runtime upgrade/reload and policy-denial evidence is still outstanding (see the [archived change verification](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/changes/archive/2026-10-09-add-dsh-openspec-adapter/verify.md)). The local Host mutation bypass reported by review I1 has been removed: the handler only prepares guidance, and an explicitly requested action must execute `lib/session-updater.js` through the calling session's Bash. This repair has not been verified in a deployed runtime.
 
 Upgrade/rollback is a source-owned transaction with explicit approval through the calling session's controlled Bash; it does not refresh project instructions or restart DSH as a side effect. Public grammar:
 
@@ -89,13 +89,13 @@ Transactions lock both this profile and the physical source checkout (across pro
 
 ## Known scope gap
 
-DSH merges host-level Skill providers into every scope, including Pet executor and Locus child scopes. This adapter follows existing host-provider practice and does not implement per-preset isolation. The issue is tracked cross-provider in [`BACKLOG.md`](../../BACKLOG.md) D006 and must be fixed once at the Pet/registry boundary.
+DSH merges host-level Skill providers into every scope, including Pet executor and Locus child scopes. This adapter follows existing host-provider practice and does not implement per-preset isolation. The issue is tracked cross-provider in [`BACKLOG.md`](https://github.com/prgrmrwy/ohmydsh/blob/main/BACKLOG.md) D006 and must be fixed once at the Pet/registry boundary.
 
 ## Development
 
 Install dependencies from the repository root with `npm install` or `npm ci`, then run package commands with `--workspace dsh-openspec`: `build` and `typecheck` use `tsc`, `test` runs `vitest` (and builds first). The generated `lib/` is not tracked.
 
-Current behavior is specified in [`dsh-openspec-session`](../../openspec/specs/dsh-openspec-session/spec.md), [`dsh-openspec-updates`](../../openspec/specs/dsh-openspec-updates/spec.md) and [`dsh-openspec-routing-extension`](../../openspec/specs/dsh-openspec-routing-extension/spec.md).
+Current behavior is specified in [`dsh-openspec-session`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-openspec-session/spec.md), [`dsh-openspec-updates`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-openspec-updates/spec.md) and [`dsh-openspec-routing-extension`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-openspec-routing-extension/spec.md).
 
 ## Attribution
 

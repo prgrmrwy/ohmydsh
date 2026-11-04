@@ -15,7 +15,7 @@ AI agent 一旦会话结束就什么都忘了；而把所有项目的笔记混�
 - **对外发布的内容有守门。** 写入对外发布的库之前，会扫描其中是否含有内部 scope 名、域名、remote 与工作区路径。
 - **「记忆」设置页。** 不用手改文件，就能查看并编辑每个工作区用哪些库、按工作区关闭记忆、配置远端，并在浏览器里打开卡片。
 
-**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `dsh-memex`，`source: local`）：设为 `enabled: true` 后运行 `dsh build`。设置 `DSH_MEMEX_ENABLED=0` 会在下次 build 时把它整体移除。它需要 memex 存储内核作为全局 npm 安装，`dsh` 会替你自动补齐，见[安装与前置条件](#安装与前置条件)。本 README 没有记录独立安装方式。周边仓库见[插件索引](../../README.zh.md#插件索引)。
+**安装。** 在 ohmydsh 里，本 package 由 `dsh.yaml` 管理（条目 `dsh-memex`，`source: local`）：设为 `enabled: true` 后运行 `dsh build`。设置 `DSH_MEMEX_ENABLED=0` 会在下次 build 时把它整体移除。它需要 memex 存储内核作为全局 npm 安装，`dsh` 会替你自动补齐，见[安装与前置条件](#安装与前置条件)。本 README 没有记录独立安装方式。周边仓库见[插件索引](https://github.com/prgrmrwy/ohmydsh/blob/main/README.zh.md#插件索引)。
 
 **快速跳转：**[工作方式](#工作方式) · [配置](#配置) · [守门边界](#守门边界) · [安装与前置条件](#安装与前置条件) · [开发](#开发)
 
@@ -152,7 +152,7 @@ Web 半区在 DSH 网页设置面板里注册了一个 **记忆**（英文界面
 
 ### 浏览卡片
 
-展开的入口提供**打开卡片**。它会按需为该库启动内核自带的 `memex serve`，仅在本地运行，抑制内核在 Host 机器上自动打开浏览器的行为，采用内核实际报告的地址（端口冲突时取最后打印的那个），并在插件停止时回收。关闭了记忆的库在拉起任何进程之前就会被拒绝。这里没有自研任何浏览界面，也不改写任何上游资源。跨机器时，地址通过一个扩展点解析，由 [`cockpit-memex-browse-shim`](../cockpit-memex-browse-shim/README.zh.md) 把它接到驾驶舱；如果注册失败，按钮绝不会回退到本机地址，因为在远程机器上那会指向错误的主机。已知限制：上游页面从公网 CDN 加载 Markdown 渲染器，离线时渲染会降级。
+展开的入口提供**打开卡片**。它会按需为该库启动内核自带的 `memex serve`，仅在本地运行，抑制内核在 Host 机器上自动打开浏览器的行为，采用内核实际报告的地址（端口冲突时取最后打印的那个），并在插件停止时回收。关闭了记忆的库在拉起任何进程之前就会被拒绝。这里没有自研任何浏览界面，也不改写任何上游资源。跨机器时，地址通过一个扩展点解析，由 [`cockpit-memex-browse-shim`](https://github.com/prgrmrwy/ohmydsh/blob/main/packages/cockpit-memex-browse-shim/README.zh.md) 把它接到驾驶舱；如果注册失败，按钮绝不会回退到本机地址，因为在远程机器上那会指向错误的主机。已知限制：上游页面从公网 CDN 加载 Markdown 渲染器，离线时渲染会降级。
 
 ## 守门边界
 <!-- section: guard -->

@@ -17,7 +17,7 @@ Routine chores such as cleaning up a worktree or answering a teammate's question
 - **A Q&A group for a session.** One click on the wheel opens a Lark group tied to the session you have been working in, so others can ask questions without touching your session.
 - **Fail-closed by design.** Pet never reads provider credentials, never accepts a model-invented destination, and degrades on its own when a dependency is missing instead of breaking DSH.
 
-**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `dsh-pet`, `source: local`): set `enabled: true` and run `dsh build`. The package does not depend on ohmydsh at runtime and can also be installed on its own; see [Installation and compatibility](#installation-and-compatibility). For the surrounding repository see the [plugin index](../../README.md#plugins).
+**Install.** In an ohmydsh setup this package is managed through `dsh.yaml` (entry `dsh-pet`, `source: local`): set `enabled: true` and run `dsh build`. The package does not depend on ohmydsh at runtime and can also be installed on its own; see [Installation and compatibility](#installation-and-compatibility). For the surrounding repository see the [plugin index](https://github.com/prgrmrwy/ohmydsh/blob/main/README.md#plugins).
 
 **Jump to:** [Product concepts](#product-concepts) · [Skills and environment values](#skills-and-environment-values) · [Settings](#settings) · [Lark channel and Locus](#lark-channel-and-locus) · [Trust model and guards](#trust-model-and-guards) · [Runtime state and lifecycle](#runtime-state-and-lifecycle) · [Installation and compatibility](#installation-and-compatibility) · [Development](#development)
 
@@ -50,7 +50,7 @@ The active session is browser UI state. The Host cannot observe it and cannot re
 
 Pet does **not** inherit DSH's global Skill discovery, and it ships **no Skills of its own**. Every capability comes from an ordinary DSH Skill the user imports explicitly. Two facts are stored separately per Skill: whether it is registered, and whether it is enabled (plus whether it appears as a shortcut).
 
-Crucially, Pet reads **nothing Pet-specific** from a `SKILL.md`. There is no `petLabel`, `petIcon` or `petContext` — a Skill cannot opt into better treatment inside Pet, so "Pet-adapted" and "ordinary" Skills are the same thing. The capability's label is the Skill name and its description is the Skill's own. This is why [`skills/ws`](../../skills/ws/SKILL.md) from the ohmydsh repository works as a Pet capability with no changes whatsoever.
+Crucially, Pet reads **nothing Pet-specific** from a `SKILL.md`. There is no `petLabel`, `petIcon` or `petContext` — a Skill cannot opt into better treatment inside Pet, so "Pet-adapted" and "ordinary" Skills are the same thing. The capability's label is the Skill name and its description is the Skill's own. This is why [`skills/ws`](https://github.com/prgrmrwy/ohmydsh/blob/main/skills/ws/SKILL.md) from the ohmydsh repository works as a Pet capability with no changes whatsoever.
 
 The single install source is **local import** from an absolute path *on the Host machine running `dsh web`* (not the browser's machine). Import is two steps: a read-only inspection showing name, description and file inventory, then a separately confirmed registration.
 
@@ -164,8 +164,8 @@ Only allowlisted senders can issue these; anyone else's command is dropped silen
 ### Permission tiers
 
 - **Every new or replaced Locus starts `read`**, and the live file policy is re-verified before work is accepted and before each Delivery. A drift pauses the entry.
-- **`write` is globally disabled in the current build** (`LOCUS_WRITE_ENABLED = false`): a request is refused at the door with the real reason, and an existing `write` record is served as `read` while the durable record keeps the owner's intent. If the switch is ever turned on, `write` maps to DSH's `danger-full-access`, meaning whole-machine, unscoped file writes shared by every member of the entry. This is an explicit security decision, see [ADR-0005](../../docs/adr/ADR-0005-locus-write-grants-full-access.md).
-- **Tool tier `safe` (default) or `shell`** is independent of the file tier. `shell` additionally exposes `bash` and `skill` to the child of that one entry, never delegation tools. It is not a security isolation mode: a guard that rejects common Lark send commands only lowers the chance of accidents, and the bot's credentials are reachable by a model driven by allowlisted people. See [ADR-0008](../../docs/adr/ADR-0008-locus-shell-tier.md); its OpenSpec change `pet-locus-shell-tier` is still in progress, so treat the tier as not yet part of the current specs.
+- **`write` is globally disabled in the current build** (`LOCUS_WRITE_ENABLED = false`): a request is refused at the door with the real reason, and an existing `write` record is served as `read` while the durable record keeps the owner's intent. If the switch is ever turned on, `write` maps to DSH's `danger-full-access`, meaning whole-machine, unscoped file writes shared by every member of the entry. This is an explicit security decision, see [ADR-0005](docs/adr/ADR-0005-locus-write-grants-full-access.md).
+- **Tool tier `safe` (default) or `shell`** is independent of the file tier. `shell` additionally exposes `bash` and `skill` to the child of that one entry, never delegation tools. It is not a security isolation mode: a guard that rejects common Lark send commands only lowers the chance of accidents, and the bot's credentials are reachable by a model driven by allowlisted people. See [ADR-0008](docs/adr/ADR-0008-locus-shell-tier.md); its OpenSpec change `pet-locus-shell-tier` is still in progress, so treat the tier as not yet part of the current specs.
 
 ### Document comments
 
@@ -286,7 +286,7 @@ The peer dependencies target DSH `^0.2.0-rc.2`, and this repository pins `0.2.0-
 
 ### Capability availability
 
-Organization-specific integrations (internal CLIs, chat transports, Worktree Session) may be absent. Availability is **computed**: a missing dependency disables that capability with a diagnostic instead of breaking Pet. Base Pet and independent installation always load. Cross-process pitfalls found while building these integrations are collected in [dsh-plugin-integration-pitfalls](../../docs/architecture/dsh-plugin-integration-pitfalls.md).
+Organization-specific integrations (internal CLIs, chat transports, Worktree Session) may be absent. Availability is **computed**: a missing dependency disables that capability with a diagnostic instead of breaking Pet. Base Pet and independent installation always load. Cross-process pitfalls found while building these integrations are collected in [dsh-plugin-integration-pitfalls](https://github.com/prgrmrwy/ohmydsh/blob/main/docs/architecture/dsh-plugin-integration-pitfalls.md).
 
 ## Development
 <!-- section: development -->
@@ -299,7 +299,7 @@ npm test           # vitest
 
 The client bundles `lottie-web` **into** `lib/client.js`. After any dependency change, run `npm install` (or `npm ci`) at the repository root before building: a missing dependency is silently left as a runtime `require` by the bundler, and DSH web then fails at boot with `client-modules: ... missed the module table`. `scripts/verify-client-bundle.mjs`, run at the end of `npm run build:client`, turns that drift into a build failure with the install hint.
 
-Tests run against the real DSH storage layer and real SQLite backend, and use real filesystems for symlink projection, rather than mocking those contracts. The current behavior is specified under `openspec/specs/` (`dsh-pet`, `pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-media-access`, `pet-workspace-env`, `pet-top-layer`); design decisions live in [`docs/adr/`](docs/adr/ADR-0001-executor-preset.md) of this package and in the repository-level [ADRs](../../docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md).
+Tests run against the real DSH storage layer and real SQLite backend, and use real filesystems for symlink projection, rather than mocking those contracts. The current behavior is specified under `openspec/specs/` (`dsh-pet`, `pet-lark-channel`, `pet-locus-collaboration`, `pet-locus-media-access`, `pet-workspace-env`, `pet-top-layer`); design decisions live in this package's [`docs/adr/`](docs/adr/ADR-0001-executor-preset.md), including the locus ADRs ([ADR-0004](docs/adr/ADR-0004-consolidate-locus-specs-into-pet-locus-collaboration.md) and later).
 
 ## License
 

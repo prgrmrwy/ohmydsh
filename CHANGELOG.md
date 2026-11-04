@@ -16,9 +16,9 @@
 
 ### Added
 
-- 开源社区标准文档:`LICENSE`(MIT)、`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`SECURITY.md`、本 CHANGELOG。
+- 开源社区标准文档:`LICENSE`(MIT)、`CONTRIBUTING.md`、本 CHANGELOG。
 - GitHub 协作配置:CI 工作流、Issue / PR 模板、Dependabot 依赖更新。
-- `README.en.md` 英文说明,以及 `.editorconfig` 统一编辑器风格。
+- 双语根说明(`README.md` / `README.zh.md`),以及 `.editorconfig` 统一编辑器风格。
 - 启动器 npm 环境作用域收窄的规范与回归测试(`openspec/specs/launcher-npm-environment`)。
 - 全新机器上的 profile 骨架自动物化,避免首次部署因缺失骨架失败。
 - 部署面完整性核验:sync 按 manifest 承诺校验并自愈残缺 package。

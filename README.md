@@ -10,7 +10,7 @@
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196.svg)](https://www.conventionalcommits.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-English · [简体中文](README.zh.md) · [Quick start](#quick-start) · [Plugins](#plugins) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+English · [简体中文](README.zh.md) · [Quick start](#quick-start) · [Plugins](#plugins) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -244,7 +244,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 ## Contributing
 <!-- section: contributing -->
 
-Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, plus [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Behavior changes go through an OpenSpec change. Any change to `README.md` must update `README.zh.md` in the same commit, and the other way round.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. Security vulnerabilities go through [GitHub private vulnerability reporting](https://github.com/prgrmrwy/ohmydsh/security/advisories/new), never a public issue. Behavior changes go through an OpenSpec change. Any change to `README.md` must update `README.zh.md` in the same commit, and the other way round.
 
 ## License
 <!-- section: license -->

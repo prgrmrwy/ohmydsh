@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-09-23
-- **Relates to**: `docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md`（同一轮评审的另一半）；`packages/dsh-pet/compat/subagent/README.md`（seam 退役纪律）；`openspec/specs/pet-locus-collaboration/spec.md`；BACKLOG B040 / B042；commit `6329b209`（本轮已修的安全面降级）
+- **Relates to**: `ADR-0006-keep-locus-inside-dsh-pet.md`（同目录）（同一轮评审的另一半）；`packages/dsh-pet/compat/subagent/README.md`（seam 退役纪律）；`openspec/specs/pet-locus-collaboration/spec.md`；BACKLOG B040 / B042；commit `6329b209`（本轮已修的安全面降级）
 
 ## Context
 

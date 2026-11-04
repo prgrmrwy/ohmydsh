@@ -45,7 +45,7 @@ In restricted deployments (`read-only` / `workspace-write` + `approval: ask`) yo
 <!-- section: removal -->
 This plugin connects two ends: the **model-provider tool surface** of `dsh-plugin-subscriptions` (Codex/Grok adapters that advertise and accept `sandbox_permissions`) and the **DSH core sandbox check** that rejects an escalation that is not strictly wider than the current mode.
 
-It is the deployment-side mitigation for the core defect recorded as [BACKLOG D001](../../BACKLOG.md) (a statically advertised escalation enum at composition time plus a strict-wider check at execution time). Remove it exactly when one of these holds: upstream fixes the defect (the tool schema becomes aware of the session mode, or the rejection text self-corrects), or a DSH upgrade eliminates it; and also before moving to a restricted deployment where escalation retries are legitimate. To remove: delete the manifest entry → sync → restart. Nothing needs migrating.
+It is the deployment-side mitigation for the core defect recorded as [BACKLOG D001](https://github.com/prgrmrwy/ohmydsh/blob/main/BACKLOG.md) (a statically advertised escalation enum at composition time plus a strict-wider check at execution time). Remove it exactly when one of these holds: upstream fixes the defect (the tool schema becomes aware of the session mode, or the rejection text self-corrects), or a DSH upgrade eliminates it; and also before moving to a restricted deployment where escalation retries are legitimate. To remove: delete the manifest entry → sync → restart. Nothing needs migrating.
 
 ## Development
 

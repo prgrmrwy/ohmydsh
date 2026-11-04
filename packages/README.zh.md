@@ -17,6 +17,7 @@ packages/<name>/
 ```
 
 - 依赖安装统一在仓库根执行 `npm install` / `npm ci`；根 `package-lock.json` 是唯一 lock，不要在 package 子目录生成或提交 lockfile；
+- **每个 package 都是自包含单元。** `packages/<id>/` 内的文件只能用绝对 URL 引用包外的仓库内容；相对路径不得逃出包目录，因为镜像发布的包会被原样同步到独立仓库。仓库可以链接进包，反之不行。`tests/package-self-containment.test.mjs` 强制这条规则；
 - TypeScript package 的 `src/` 是代码真相源，`lib/` 由根 workspace build 或 sync 自动生成并保持 gitignored；不要提交 JS、declaration 或 source map 构建产物；
 - 安装：manifest 里声明（`type: package, source: local, version: x.y.z`），sync 先按需构建，再用 `dsh plugin add file:<path>` 安装并自动进 profile bundles；
 - sync 会按源码/配置输入哈希重建，并按可发布内容哈希决定是否重装；构建失败发生在移除旧部署之前；

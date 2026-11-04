@@ -37,7 +37,13 @@ export function artifactPolicyViolations(files) {
     if (file.startsWith('docs/') && !DOCS_WHITELIST.some((prefix) => file.startsWith(prefix))) {
       violations.push(`${file}: tracked docs must live under docs/adr/, docs/architecture/ or docs/assets/ (docs whitelist)`)
     }
-    if (file === '.cdp-scratch-shot.png') violations.push(`${file}: root debug screenshot must not be tracked`)
+    // Screenshots belong to the owning package (`packages/<id>/docs/`) or to
+    // `docs/assets/`; the repository root is not a place for bitmaps. This once
+    // caught `.cdp-scratch-shot.png` and the `.rv-*` screenshot drafts that
+    // belonged to `packages/dsh-magpie-connector/docs/`.
+    if (/^[^/]+\.(?:png|jpe?g|gif|webp|bmp|tiff?)$/i.test(file)) {
+      violations.push(`${file}: root-level bitmap must live in the owning package or docs/assets/`)
+    }
   }
   const set = new Set(files.map((file) => file.split(path.sep).join('/')))
   for (const required of REQUIRED_TRACKED_PATHS) {
