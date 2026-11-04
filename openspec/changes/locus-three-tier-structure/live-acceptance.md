@@ -128,3 +128,15 @@ E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真�
 这符合当前 spec:1098–1122 的合成过滤/歧义等待，但不能算 27.4 的中断自动释放通过。独立只读核查官方 rc.2 发现 live loop 写的是 aborted（reason=user|parent|disposed），interrupted 只用于事后补尾；现 Pet 的冷恢复却只认 interrupted。另有官方 owner drain 可等待 idle 与持久写句柄关闭，当前 launcher 没有 SIGTERM 前的排空握手。原 H1 保留未知、不重发、不手改 busy 或日志；后继消息和 safe 控制暂不要求所有者发送。修订建议与待确认工作见 proposal/tasks 第 33 节；NOTICE-1 已随这次重启加载，但成功通知尚未真机复验。
 
 后续状态复查：管理投影已变为 active/busy=false，updatedAt=1793781582505，即 16:39:42.505+08:00；原 main/child、generation 1、shell/shell 与 read/read 全部保持。该释放约在接受 H 一小时后、重启 ready 约 51 分钟后，符合 delivery.ts:75 的默认 60 分钟租约；但管理投影不提供该 Delivery 终态原因，现有日志也未取到对应结算原因，因此只确认占位已释放，不把它记成已证明的 expired 或 failed/turn-interrupted。后继与 safe 通知现在可以独立收口，H 的“重启后立即释放”仍未通过；没有手改记录或重放 H。
+
+## H2 受控握手重启：通过
+
+部署：8a52289c 经 ws-merge 合入 main 079de93e，两次生产构建第二次 no changes。旧 Host 无协议，首次以显式维护重启 20261104-130734-47594-6a8de7 加载（重启前 70 个 locus 全部 busy=false；回执声明不计 drain 验收）；随后 launcher 自身 verifyStopProtocol 对新 Host PID 47814 只读确认 0600 descriptor 与鉴权 active status。
+
+所有者在原 C 话题发送 H2。重启前只读证据：child turn 7 seq 182 开始，seq 190 pet_context 绑定 delivery-118，seq 194 前台 bash（timeoutMs=600000、run_in_background=false）执行只 sleep 的 python；本机 PID 67029 实际运行；原 generation 1、原 main/child、shell/shell、read/read，busy=true。
+
+握手重启 20261104-133042-67502-8f1c45（不带 legacy 参数）：13:30:49.504Z preparing-pet → 13:30:51.447Z stopping → 13:30:52.475Z stopped → 13:30:55.010Z ready。child 日志 seq 195/196 为真实 tool/result、step/end，seq 197 为真实写入的 `turn/end {kind:'aborted', reason:{kind:'parent'}}`，time=1793799049720（13:30:49.720Z，即准备阶段内，不是事后补尾）。delivery-118 在 1793799049722 结算为 stage=failed，failureReason 为 turn-interrupted 的标准说明（消息已入 child inbox、不重发）；话题同刻 busy=false，generation、main/child、档位与权限不变；python 进程已结束，无重放。prepared 应答先于 SIGTERM，满足 27.4 中“重启后立即释放”。
+
+同一诊断补齐 H1：delivery-117 failureReason=“delivery deadline expired”，确认此前 16:39:42 的释放来自 60 分钟租约到期，而非中断恢复；原记录保持，未手改。
+
+后继派发与 NOTICE-1 safe 通知仍待所有者下一批消息验证。
