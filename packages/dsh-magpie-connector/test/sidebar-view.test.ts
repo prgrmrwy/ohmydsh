@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ageMinutes, formatResetDeadline, formatResetShort, formatUsed, selectWindow, sidebarRows, unchangedReads, usedLevel,
+  ageMinutes, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
 } from '../src/client/sidebar-view.js'
 import type { Card } from '../src/client/view-model.js'
 
@@ -12,98 +12,89 @@ describe('usedLevel', () => {
   })
 })
 
-describe('selectWindow', () => {
-  it('prefers the weekly window over a tighter short window by default', () => {
-    const choice = selectWindow(card({ windows: [{ name: '5 hours', used: 90 }, { name: '7 days', used: 8 }] }))
-    expect(choice.window?.name).toBe('7 days')
-    expect(choice.window?.used).toBe(8)
-    expect(choice.fallback).toBe(false)
-  })
-
-  it('takes the highest used weekly window when several exist', () => {
-    expect(selectWindow(card({ windows: [{ name: '7 days', used: 8 }, { name: '7 days · Fable', used: 5 }] })).window?.used).toBe(8)
-  })
-
-  it('accepts the other weekly spellings the gateway may use', () => {
-    for (const name of ['weekly', 'Week', '每周', '7 day']) {
-      expect(selectWindow(card({ windows: [{ name, used: 12 }] })).window?.used).toBe(12)
-    }
-  })
-
-  it('falls back to the tightest numeric window when no weekly window exists', () => {
-    const choice = selectWindow(card({ windows: [{ name: '5 hours', used: 44 }, { name: 'daily', used: 66 }] }))
-    expect(choice.window?.name).toBe('daily')
-    expect(choice.fallback).toBe(true)
-  })
-
-  it('falls back to a display/unlimited window when nothing is numeric', () => {
-    expect(selectWindow(card({ windows: [{ name: 'Chat', unlimited: true }] })).window?.unlimited).toBe(true)
-    expect(selectWindow(card({ windows: [{ name: 'Chat', display: 'Unlimited' }] })).window?.display).toBe('Unlimited')
-    expect(selectWindow(card({ windows: [{ name: 'Chat' }] })).window).toBeUndefined()
-    expect(selectWindow(card({ windows: [{ name: 'Chat' }] })).fallback).toBe(true)
-  })
-
-  it('shows the 5-hour window when that tier is selected', () => {
-    for (const name of ['5 hours', '5-hour', '5h', '五小时']) {
-      const choice = selectWindow(card({ windows: [{ name, used: 44 }, { name: '7 days', used: 20 }] }), 'fiveHour')
-      expect(choice.window?.name).toBe(name)
-      expect(choice.window?.used).toBe(44)
-      expect(choice.fallback).toBe(false)
-    }
-  })
-
-  it('falls back to the weekly window when the selected 5-hour tier is missing', () => {
-    const choice = selectWindow(card({ windows: [{ name: '7 days', used: 20 }] }), 'fiveHour')
-    expect(choice.window?.name).toBe('7 days')
-    expect(choice.fallback).toBe(true)
-  })
-
-  it('tightest shows the highest reading and is never a fallback for numeric windows', () => {
-    const choice = selectWindow(card({ windows: [{ name: '5 hours', used: 44 }, { name: '7 days', used: 20 }] }), 'tightest')
-    expect(choice.window?.name).toBe('5 hours')
-    expect(choice.fallback).toBe(false)
-  })
-})
-
 describe('sidebarRows', () => {
   it('keeps gateway order and clamps readings', () => {
     const rows = sidebarRows([
       card({ provider: 'codex', windows: [{ name: '7 days', used: 120 }] }),
       card({ provider: 'claude', windows: [{ name: '7 days', used: -5 }] }),
     ])
-    expect(rows.map(row => row.card.provider)).toEqual(['codex', 'claude'])
-    expect(rows.map(row => row.used)).toEqual([100, 0])
+    expect(rows.map(row => row!.card.provider)).toEqual(['codex', 'claude'])
+    expect(rows.map(row => row!.windows[0]?.used)).toEqual([100, 0])
   })
 
-  it('marks a card with an error as failed and does not expose a reading', () => {
-    const [row] = sidebarRows([card({ provider: 'codex', error: 'token expired', windows: [{ name: '7 days', used: 91 }] })])
-    expect(row?.failed).toBe(true)
-    expect(row?.card.error).toBe('token expired')
+  it('shows only the weekly window by default, never the short one', () => {
+    const [row] = sidebarRows([card({ windows: [{ name: '5 hours', used: 90 }, { name: '7 days', used: 8 }] })])
+    expect(row!.windows.map(entry => entry.window.name)).toEqual(['7 days'])
+    expect(row!.windows[0]?.kind).toBe('weekly')
+    expect(row!.windows[0]?.used).toBe(8)
+    expect(row!.windows[0]?.fallback).toBeUndefined()
   })
 
-  it('carries display and unlimited markers through', () => {
-    const [row] = sidebarRows([card({ windows: [{ name: 'Chat', unlimited: true }] })])
-    expect(row?.unlimited).toBe(true)
-    expect(row?.used).toBeUndefined()
+  it('takes the highest used weekly window when several exist', () => {
+    const [row] = sidebarRows([card({ windows: [{ name: '7 days', used: 8 }, { name: '7 days · Fable', used: 5 }] })])
+    expect(row!.windows[0]?.used).toBe(8)
+  })
+
+  it('accepts the other weekly spellings the gateway may use', () => {
+    for (const name of ['weekly', 'Week', '每周', '7 day']) {
+      const [row] = sidebarRows([card({ windows: [{ name, used: 12 }] })])
+      expect(row!.windows[0]?.used).toBe(12)
+    }
+  })
+
+  it('lists the 5-hour window before the weekly one when both are selected', () => {
+    const [row] = sidebarRows(
+      [card({ windows: [{ name: '7 days', used: 20 }, { name: '5 hours', used: 44 }] })],
+      ['weekly', 'fiveHour'],
+    )
+    expect(row!.windows.map(entry => [entry.kind, entry.window.name, entry.used])).toEqual([
+      ['fiveHour', '5 hours', 44],
+      ['weekly', '7 days', 20],
+    ])
+    expect(row!.windows.every(entry => entry.fallback === undefined)).toBe(true)
+  })
+
+  it('recognizes the 5-hour spellings the gateway may use', () => {
+    for (const name of ['5 hours', '5-hour', '5h', '五小时']) {
+      const [row] = sidebarRows([card({ windows: [{ name, used: 44 }] })], ['fiveHour'])
+      expect(row!.windows[0]?.kind).toBe('fiveHour')
+      expect(row!.windows[0]?.used).toBe(44)
+    }
+  })
+
+  it('falls back to the highest numeric window when no selected kind exists', () => {
+    const [row] = sidebarRows([card({ windows: [{ name: '5 hours', used: 44 }, { name: 'daily', used: 66 }] })], ['weekly'])
+    expect(row!.windows).toHaveLength(1)
+    expect(row!.windows[0]).toMatchObject({ kind: 'other', used: 66, fallback: true })
+    expect(row!.windows[0]?.window.name).toBe('daily')
+  })
+
+  it('falls back to a display/unlimited window when nothing is numeric', () => {
+    expect(sidebarRows([card({ windows: [{ name: 'Chat', unlimited: true }] })])[0]?.windows[0]).toMatchObject({ kind: 'other', unlimited: true, fallback: true })
+    expect(sidebarRows([card({ windows: [{ name: 'Chat', display: 'Unlimited' }] })])[0]?.windows[0]).toMatchObject({ kind: 'other', display: 'Unlimited' })
+    expect(sidebarRows([card({ windows: [{ name: 'Chat' }] })])[0]?.windows).toEqual([])
+  })
+
+  it('never lists the same window twice when one name matches both kinds', () => {
+    const [row] = sidebarRows([card({ windows: [{ name: '5 hours weekly', used: 30 }] })], ['fiveHour', 'weekly'])
+    expect(row!.windows).toHaveLength(1)
+  })
+
+  it('marks a card with an error as failed and exposes no windows', () => {
+    const row = sidebarRows([card({ provider: 'codex', error: 'token expired', windows: [{ name: '7 days', used: 91 }] })])[0]!
+    expect(row!.failed).toBe(true)
+    expect(row!.windows).toEqual([])
+    expect(row!.card.error).toBe('token expired')
   })
 
   it('carries the balance of a balance-only account', () => {
-    const [row] = sidebarRows([card({ provider: 'deepseek', balance: '¥42.50' })])
-    expect(row?.window).toBeUndefined()
-    expect(row?.used).toBeUndefined()
-    expect(row?.balance).toBe('¥42.50')
+    const row = sidebarRows([card({ provider: 'deepseek', balance: '¥42.50' })])[0]!
+    expect(row!.windows).toEqual([])
+    expect(row!.balance).toBe('¥42.50')
   })
 
   it('omits empty balances', () => {
     expect(sidebarRows([card({ balance: '' })])[0]?.balance).toBeUndefined()
-  })
-
-  it('passes the configured tier and the fallback flag through', () => {
-    const cards = [card({ provider: 'claude', windows: [{ name: '5 hours', used: 44 }, { name: '7 days', used: 20 }] })]
-    expect(sidebarRows(cards, 'fiveHour')[0]).toMatchObject({ used: 44, fallback: false })
-    expect(sidebarRows(cards, 'tightest')[0]).toMatchObject({ used: 44 })
-    expect(sidebarRows(cards)[0]).toMatchObject({ used: 20 })
-    expect(sidebarRows([card({ windows: [{ name: 'daily', used: 66 }] })], 'fiveHour')[0]).toMatchObject({ used: 66, fallback: true })
   })
 })
 

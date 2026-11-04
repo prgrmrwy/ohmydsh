@@ -6,7 +6,7 @@
  * @module dsh-magpie-connector/client/sidebar-view
  */
 import type { Card, CardWindow } from './view-model.js'
-import { DEFAULT_SIDEBAR_WINDOW, type SidebarWindowMode } from '../shared/sidebar-window.js'
+import { DEFAULT_SIDEBAR_WINDOWS, SIDEBAR_WINDOW_KINDS, type SidebarWindowKind } from '../shared/sidebar-window.js'
 
 /** The weekly window: the gateway names it freely (`7 days`, `weekly`, `周`…). */
 const WEEKLY = /7\s*days?|week|weekly|周/i
@@ -26,64 +26,66 @@ const tightest = (windows: CardWindow[]): CardWindow => windows.reduce((best, wi
 const named = (windows: CardWindow[], pattern: RegExp): CardWindow[] =>
   windows.filter(window => typeof window.name === 'string' && pattern.test(window.name))
 
-/** The window one compact row shows, plus whether the configured tier was missing. */
-export interface WindowChoice {
-  window?: CardWindow
-  /** The configured tier does not exist upstream, so the row shows the nearest available thing. */
-  fallback: boolean
-}
-
-/**
- * The one window the compact row shows. `weekly` (the default) prefers the weekly
- * window, `fiveHour` the 5-hour window, `tightest` the highest reading; each falls
- * back to the nearest available window rather than inventing one, and a gateway
- * that reports no numbers at all still surfaces its own `display`/`unlimited`
- * text. The label stays the gateway's own.
- */
-export function selectWindow(card: Card, mode: SidebarWindowMode = DEFAULT_SIDEBAR_WINDOW): WindowChoice {
-  const numeric = numericWindows(card)
-  const weekly = named(numeric, WEEKLY)
-  const fiveHour = named(numeric, FIVE_HOUR)
-  const preferred = mode === 'weekly' ? weekly : mode === 'fiveHour' ? fiveHour : numeric
-  if (preferred.length > 0) return { window: tightest(preferred), fallback: false }
-  const nearest = mode === 'fiveHour' && weekly.length > 0 ? weekly : numeric
-  if (nearest.length > 0) return { window: tightest(nearest), fallback: true }
-  const display = (card.windows ?? []).find(window => window.unlimited === true || (typeof window.display === 'string' && window.display !== ''))
-  return display === undefined ? { fallback: true } : { window: display, fallback: true }
-}
-
-/** One compact row: which card, which window, and what to render inside it. */
-export interface SidebarRow {
-  card: Card
-  window?: CardWindow
+/** One window line inside a card block: which window, its reading, and why it is there. */
+export interface SidebarWindowRow {
+  window: CardWindow
+  /** The configured kind this line answers, or `other` when the upstream reports none of them. */
+  kind: SidebarWindowKind | 'other'
   /** Clamped used percentage when the gateway reported a usable number. */
   used?: number
   /** Gateway display string, rendered verbatim. */
   display?: string
   unlimited?: boolean
-  /** Balance-only accounts (no quota windows): shown instead of a dash. */
-  balance?: string
-  /** The card itself failed: the row shows the failure instead of a reading. */
-  failed: boolean
-  /** The row does not show the configured tier because the upstream does not report it. */
+  /** None of the configured kinds exist upstream, so this is the best the card has. */
   fallback?: boolean
 }
 
-/** Rows in gateway order (the product decision: no current-first, no severity sort). */
-export function sidebarRows(cards: Card[], mode: SidebarWindowMode = DEFAULT_SIDEBAR_WINDOW): SidebarRow[] {
+/** One upstream block: its name, one line per configured window, and a balance fallback. */
+export interface SidebarRow {
+  card: Card
+  windows: SidebarWindowRow[]
+  /** Balance-only accounts (no quota windows): shown instead of a dash. */
+  balance?: string
+  /** The card itself failed: the block shows the failure instead of readings. */
+  failed: boolean
+}
+
+const windowRow = (window: CardWindow, kind: SidebarWindowRow['kind'], fallback = false): SidebarWindowRow => ({
+  window,
+  kind,
+  ...(typeof window.used === 'number' && Number.isFinite(window.used) ? { used: Math.min(100, Math.max(0, window.used)) } : {}),
+  ...(typeof window.display === 'string' && window.display !== '' ? { display: window.display } : {}),
+  ...(window.unlimited === true ? { unlimited: true } : {}),
+  ...(fallback ? { fallback: true } : {}),
+})
+
+/**
+ * Blocks in gateway order (the product decision: no current-first, no severity
+ * sort). Each block lists one line for every configured kind the upstream really
+ * reports, `fiveHour` before `weekly`; when it reports none of them the block
+ * falls back to its highest numeric window, then to a `display`/unlimited one,
+ * and a balance-only account keeps its balance. Nothing is invented.
+ */
+export function sidebarRows(cards: Card[], kinds: readonly SidebarWindowKind[] = DEFAULT_SIDEBAR_WINDOWS): SidebarRow[] {
   return cards.map(card => {
-    const { window, fallback } = selectWindow(card, mode)
-    const used = typeof window?.used === 'number' && Number.isFinite(window.used) ? Math.min(100, Math.max(0, window.used)) : undefined
-    return {
-      card,
-      ...(window === undefined ? {} : { window }),
-      ...(used === undefined ? {} : { used }),
-      ...(typeof window?.display === 'string' && window.display !== '' ? { display: window.display } : {}),
-      ...(window?.unlimited === true ? { unlimited: true } : {}),
-      ...(card.balance === undefined || card.balance === null || card.balance === '' ? {} : { balance: String(card.balance) }),
-      fallback,
-      failed: typeof card.error === 'string' && card.error !== '',
+    const failed = typeof card.error === 'string' && card.error !== ''
+    const numeric = failed ? [] : numericWindows(card)
+    const windows: SidebarWindowRow[] = []
+    if (!failed) {
+      for (const kind of SIDEBAR_WINDOW_KINDS) {
+        if (!kinds.includes(kind)) continue
+        const matches = named(numeric, kind === 'fiveHour' ? FIVE_HOUR : WEEKLY).filter(window => !windows.some(row => row.window === window))
+        if (matches.length > 0) windows.push(windowRow(tightest(matches), kind))
+      }
+      if (windows.length === 0) {
+        const best = numeric.length > 0
+          ? tightest(numeric)
+          : (card.windows ?? []).find(window => window.unlimited === true || (typeof window.display === 'string' && window.display !== ''))
+        if (best !== undefined) windows.push(windowRow(best, 'other', true))
+      }
     }
+    const balance = card.balance === undefined || card.balance === null || card.balance === '' ? undefined : String(card.balance)
+    return { card, windows, ...(balance === undefined ? {} : { balance }), failed }
   })
 }
 

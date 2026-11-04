@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { dirname } from 'node:path'
-import type { SidebarWindowMode } from '../shared/sidebar-window.js'
+import type { SidebarWindowKind } from '../shared/sidebar-window.js'
 
 export type AccessMode = 'direct' | 'cloudflare'
 export type CredentialField = 'key' | 'accessClientId' | 'accessClientSecret'
@@ -25,8 +25,10 @@ export interface Settings {
   sidebarUsage?: boolean
   /** Sidebar card auto-refresh interval in whole minutes; 0 disables, absent = 5. */
   sidebarRefreshMinutes?: number
-  /** Quota window the sidebar card shows; absent = `weekly` (the pre-setting behaviour). */
-  sidebarWindow?: SidebarWindowMode
+  /** Gateway windows the sidebar card lists, canonically ordered; absent = `['weekly']`. */
+  sidebarWindows?: SidebarWindowKind[]
+  /** 0.6.7 legacy single tier; read once for migration, never written. */
+  sidebarWindow?: unknown
 }
 export class SettingsStore {
   value: Settings = { lines: [], visibleModels: {}, defaultEfforts: {} }

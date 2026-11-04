@@ -769,32 +769,47 @@ host SHALL 按网关响应分类结果：
 - **WHEN** 重新读取设置
 - **THEN** 返回的 `sidebarUsage` 为 `true`；写入 `"yes"` 等非布尔值返回 400 且设置不变
 
-### Requirement: 侧边栏显示窗口档位
+### Requirement: 侧边栏显示窗口档位（多选）
 
-插件 host 设置 SHALL 提供 `sidebarWindow` 字符串：`weekly`（默认）、`fiveHour`、`tightest`；字段缺失时按 `weekly` 处理，其它值（含 `null`、数字、空字符串）SHALL 被拒绝（400）且设置不变，所选值 SHALL 持久化并在重启后保持。设置页 SHALL 提供对应下拉（`data-sidebar-window`，默认选中 `weekly`）与说明文案。客户端 SHALL 按该值选择常驻卡每行的窗口：`weekly` 取周窗口、`fiveHour` 取 5 小时窗口、`tightest` 取读数最高的窗口；所选档位在该上游缺失时 SHALL 依次回退到该上游另一个数字窗口、网关 `display`/「无限」、余额，SHALL NOT 显示空读数或伪造档位，回退行的窗口名 SHALL 用 `title` 说明原因。常驻卡标题行 SHALL 有一个说明当前档位与回退规则的 icon（同时提供 `title` 与 `aria-label`）。
+插件 host 设置 SHALL 提供 `sidebarWindows` 数组：元素取值 `fiveHour`、`weekly`，至少一项、不得重复，SHALL 按规范顺序（`fiveHour` 在前、`weekly` 在后）持久化与返回；字段缺失时按 `["weekly"]` 处理。空数组、含未知项、非数组或非字符串项 SHALL 被拒绝（400）且设置不变。为兼容 0.6.7，读取时 SHALL 把旧的单值 `sidebarWindow`（`weekly`/`fiveHour`/`tightest`）迁移为对应数组（`tightest` 迁移为两项），且不再写回旧字段。设置页 SHALL 以多选 checkbox 呈现（每个档位一个 `input[type=checkbox][data-sidebar-window]`）并附说明文案；用户取消最后一项时 SHALL NOT 写入设置，并 SHALL 给出「至少保留一个档位」的提示。
 
-#### Scenario: 切到 5 小时档位
+客户端 SHALL 按勾选集合决定常驻卡每个上游显示的内容：勾选且网关存在的档位，每个显示一行；只勾一个且存在时 SHALL 保持单行布局（名称后括号跟窗口名）；勾选多个且存在多项时 SHALL 以「上游名称单独一行 + 每个窗口一行」呈现，每行包含窗口名、到期时间与读数，并各带一条整宽进度条。勾选的档位在该上游都不存在时，SHALL 回退到该上游读数最高的窗口，再退到网关 `display`/「无限」，最后只有 `balance` 时显示余额；SHALL NOT 显示空读数或伪造档位，回退行的窗口名 SHALL 用 `title` 说明原因。标题行 SHALL 只包含刷新与展开/收起按钮，SHALL NOT 增加额外的说明 icon。
 
-- **GIVEN** `claude` 同时有 `5 hours`（`used` 44）与 `7 days`（`used` 20）窗口，`sidebarWindow` 为 `fiveHour`
+#### Scenario: 只勾一个档位
+
+- **GIVEN** `claude` 同时有 `5 hours`（`used` 44）与 `7 days`（`used` 20）窗口，`sidebarWindows` 为 `["weekly"]`
 - **WHEN** 渲染常驻卡
-- **THEN** 该行显示 `(5 hours)` 与 `44%`，不显示 `20%`；标题行 icon 的说明文字包含「5 小时窗口」
+- **THEN** 该上游显示单行 `Claude (7 days)`、`20%`，不显示 `44%`，且没有多行块
 
-#### Scenario: 缺少所选档位时回退并说明
+#### Scenario: 勾选两个档位
 
-- **GIVEN** 某上游只有 `7 days` 窗口，`sidebarWindow` 为 `fiveHour`
+- **GIVEN** `claude` 同时有 `5 hours`（`used` 50）与 `7 days`（`used` 20）窗口，`sidebarWindows` 为 `["fiveHour", "weekly"]`
 - **WHEN** 渲染常驻卡
-- **THEN** 该行显示 `(7 days)` 与其读数，窗口名的 `title` 说明该上游没有 5 小时窗口
+- **THEN** 该上游先显示名称 `Claude`，随后两行分别是 `5 hours` 与 `7 days`（顺序固定），每行带到期时间、读数与独立进度条
+- **AND** 窗口名不再包在括号里
+
+#### Scenario: 缺少勾选的档位时回退并说明
+
+- **GIVEN** 某上游只有 `7 days` 窗口，`sidebarWindows` 为 `["fiveHour"]`
+- **WHEN** 渲染常驻卡
+- **THEN** 该上游显示 `(7 days)` 与其读数，窗口名的 `title` 说明该上游没有勾选的档位
 - **AND** 只有余额或只有 `display` 的上游仍然显示可用的内容，不出现空读数
 
 #### Scenario: 非法档位被拒绝
 
-- **GIVEN** 当前 `sidebarWindow` 为 `weekly`
-- **WHEN** 写入 `sidebarWindow: "7d"`、`""`、`null`、`5` 或 `true`
-- **THEN** host 返回 400，`GET settings` 仍返回 `weekly`
+- **GIVEN** 当前 `sidebarWindows` 为 `["weekly"]`
+- **WHEN** 写入 `[]`、`["7d"]`、`"weekly"`、`null` 或 `5`
+- **THEN** host 返回 400，`GET settings` 仍返回 `["weekly"]`
+
+#### Scenario: 0.6.7 单值迁移
+
+- **GIVEN** 设置文件里只有旧字段 `sidebarWindow: "fiveHour"`
+- **WHEN** 读取设置
+- **THEN** `GET settings` 返回 `sidebarWindows: ["fiveHour"]`；之后任意偏好写入落盘为 `sidebarWindows` 且不再包含 `sidebarWindow`
 
 ### Requirement: 侧边栏常驻额度卡
 
-开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游一行，显示「侧边栏显示窗口档位」所选窗口（默认 `7 days`）的读数与整宽进度条，窗口名照抄网关原文并紧跟在名称后的括号里；读数左侧 SHALL 显示该窗口的绝对重置时间（当年 `M/D HH:mm`，跨年 `YYYY/M/D HH:mm`，完整时间放在 `title` 属性），网关未提供该窗口 `resetsAt` 时 SHALL NOT 显示占位或推算时间。所选档位缺失时按「侧边栏显示窗口档位」回退；没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡 SHALL 最多显示 5 行，溢出时在卡内滚动，并在底部显示无分割线的双下箭头；该箭头 SHALL 只是溢出提示，SHALL NOT 可点击。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
+开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游显示「侧边栏显示窗口档位」勾选的窗口（默认只有 `7 days`），单行布局下窗口名照抄网关原文并紧跟名称后的括号里，多选布局见该要求；每行读数左侧 SHALL 显示该窗口的绝对重置时间（当年 `M/D HH:mm`，跨年 `YYYY/M/D HH:mm`，完整时间放在 `title` 属性），网关未提供该窗口 `resetsAt` 时 SHALL NOT 显示占位或推算时间。所选档位缺失时按「侧边栏显示窗口档位」回退；没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡 SHALL 最多显示 5 行，溢出时在卡内滚动，并在底部显示无分割线的双下箭头；该箭头 SHALL 只是溢出提示，SHALL NOT 可点击。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
 
 #### Scenario: 默认档位只显示周窗口且最多 5 行
 
@@ -809,11 +824,11 @@ host SHALL 按网关响应分类结果：
 - **THEN** 该行依次显示 `Claude (7 days)`、`11/20 11:00`、`20%`，进度条宽度为 20%
 - **AND** 该行没有 `resetsAt` 时不显示到期时间，只有余额的行也不显示
 
-#### Scenario: 缺少周窗口时回退到最紧窗口
+#### Scenario: 缺少勾选档位时回退到最紧窗口
 
-- **GIVEN** 某上游只有 `5 hours` 窗口（`used` 44）且没有周窗口
+- **GIVEN** 某上游只有 `5 hours` 窗口（`used` 44）且没有周窗口，`sidebarWindows` 为 `["weekly"]`
 - **WHEN** 渲染常驻卡
-- **THEN** 该行显示 `5 hours 44%`，不显示空读数或伪造的 `7 days`
+- **THEN** 该行显示 `5 hours 44%`，不显示空读数或伪造的 `7 days`，窗口名的 `title` 说明这是回退
 
 #### Scenario: 只有余额的上游不显示破折号
 

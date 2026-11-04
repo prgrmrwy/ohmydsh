@@ -8,10 +8,10 @@ import { loadCards, refreshCards } from './sidebar-api.js'
 import { DEFAULT_REFRESH_MINUTES, hydrateSidebarPreference, readSidebarPreference, subscribeSidebarPreference, type SidebarPreference } from './sidebar-preference.js'
 import {
   ageMinutes, cardIdentity, cardReadTime, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
-  type SidebarRow,
+  type SidebarRow, type SidebarWindowRow,
 } from './sidebar-view.js'
-import { DEFAULT_SIDEBAR_WINDOW, type SidebarWindowMode } from '../shared/sidebar-window.js'
-import { formatTime, type Card, type CardsView } from './view-model.js'
+import { DEFAULT_SIDEBAR_WINDOWS } from '../shared/sidebar-window.js'
+import { formatTime, type Card, type CardWindow, type CardsView } from './view-model.js'
 
 /**
  * Sidebar usage card (`sidebar.footer.action`, owner prop `wide`).
@@ -56,7 +56,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   }, [api])
   const enabled = preference?.usage
   const refreshMinutes = preference?.refreshMinutes ?? DEFAULT_REFRESH_MINUTES
-  const windowMode = preference?.windowMode ?? DEFAULT_SIDEBAR_WINDOW
+  const windows = preference?.windows ?? [...DEFAULT_SIDEBAR_WINDOWS]
 
   useEffect(() => {
     if (enabled !== true || api === undefined) return
@@ -151,7 +151,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
 
   const now = Date.now()
   const cards = view?.cards ?? []
-  const rows = sidebarRows(cards, windowMode)
+  const rows = sidebarRows(cards, windows)
   const latest = cards.map(cardReadTime).filter((value): value is string => typeof value === 'string').sort().at(-1)
   const status = statusText(view, error)
   const style = h('style', null, settingsCss)
@@ -159,11 +159,6 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     h('span', { className: 'dmg-sidebar-bird', 'aria-hidden': true }),
     h('span', { className: 'dmg-sidebar-title' }, t('sidebarTitle')),
     latest === undefined ? null : h('span', { className: 'dmg-sidebar-fresh' }, ageText(latest, now)),
-    h('span', {
-      className: 'dmg-sidebar-info', 'data-dmg-sidebar-info': '', role: 'img',
-      title: t('sidebarWindowInfo', { mode: windowModeLabel(windowMode) }),
-      'aria-label': t('sidebarWindowInfo', { mode: windowModeLabel(windowMode) }),
-    }, infoIcon()),
     refreshButton(refresh, busy),
     h('button', {
       type: 'button', className: 'dmg-sidebar-icon', 'data-dmg-sidebar-toggle': '',
@@ -208,7 +203,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
           },
             status !== undefined
               ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
-              : rows.map(row => compactRow(row, now, windowMode)),
+              : rows.map(row => compactRow(row, now)),
           ),
           scrollable ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
         ),
@@ -216,42 +211,78 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   )
 }
 
-/** One compact row: name (window in brackets), reset deadline, reading, bar. */
-function compactRow(row: SidebarRow, now: number, mode: SidebarWindowMode): ReactNode {
-  const reading = rowReading(row)
-  const level = row.used === undefined || row.failed ? undefined : usedLevel(row.used)
-  const resetsAt = row.failed ? undefined : row.window?.resetsAt
-  const deadline = resetsAt === undefined ? undefined : formatResetDeadline(resetsAt, now)
-  const deadlineTitle = resetsAt === undefined ? '' : `${t('usageResetAt')}${formatTime(resetsAt)}`
-  // A row that cannot show the configured tier says so on hover instead of pretending.
-  const fallbackTitle = row.fallback && !row.failed && row.window?.name !== undefined
-    ? t('sidebarWindowFallbackTitle', { mode: windowModeLabel(mode), window: row.window.name })
-    : undefined
-  return h('div', { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key: cardIdentity(row.card) },
-    h('div', { className: 'dmg-sidebar-row-line' },
-      h('span', { className: 'dmg-sidebar-label' },
-        h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider),
-        row.failed || row.window?.name === undefined ? null : h('span', {
-          className: 'dmg-sidebar-window', ...(fallbackTitle === undefined ? {} : { title: fallbackTitle }),
-        }, `(${row.window.name})`),
-      ),
-      deadline === undefined ? null : h('span', {
-        className: 'dmg-sidebar-expiry', 'data-dmg-sidebar-expiry': '',
-        title: deadlineTitle,
-      }, deadline),
-      h('span', {
-        className: 'dmg-sidebar-pct', 'data-reading': '', ...(level === undefined ? {} : { 'data-level': level }),
-        ...(row.failed || row.used !== undefined || row.display !== undefined || row.unlimited === true || row.balance === undefined
-          ? {}
-          : { 'data-balance': '', title: `${t('usageBalance')} ${row.balance}` }),
-      }, reading),
-    ),
-    row.failed || row.used === undefined
-      ? null
-      : h('div', { className: 'dmg-sidebar-bar', 'aria-hidden': true },
-        h('i', { ...(level === undefined ? {} : { 'data-level': level }), style: { width: `${row.used}%` } })),
-  )
+/**
+ * One upstream block. A single window keeps the dense one-line row
+ * (`Claude (7 days) · 11/20 11:00 · 20%`); several configured windows become a
+ * name heading with one line per window, each with its own bar. A failed card
+ * and a balance-only card stay single-line.
+ */
+function compactRow(row: SidebarRow, now: number): ReactNode {
+  const attrs = { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key: cardIdentity(row.card) }
+  const name = h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider)
+  if (row.failed) {
+    return h('div', attrs,
+      h('div', { className: 'dmg-sidebar-row-line' },
+        h('span', { className: 'dmg-sidebar-label' }, name),
+        h('span', { className: 'dmg-sidebar-pct', 'data-reading': '' }, t('usageReadingFailed'))))
+  }
+  if (row.windows.length === 0) {
+    return h('div', attrs,
+      h('div', { className: 'dmg-sidebar-row-line' },
+        h('span', { className: 'dmg-sidebar-label' }, name),
+        h('span', {
+          className: 'dmg-sidebar-pct', 'data-reading': '', 'data-balance': '',
+          ...(row.balance === undefined ? {} : { title: `${t('usageBalance')} ${row.balance}` }),
+        }, row.balance ?? '—')))
+  }
+  if (row.windows.length === 1) {
+    const only = row.windows[0]!
+    return h('div', attrs,
+      h('div', { className: 'dmg-sidebar-row-line' },
+        h('span', { className: 'dmg-sidebar-label' }, name, windowLabel(only, true)),
+        expiry(only.window, now),
+        reading(only)),
+      bar(only))
+  }
+  return h('div', { ...attrs, className: 'dmg-sidebar-row is-multi', 'data-dmg-sidebar-multi': '' },
+    h('div', { className: 'dmg-sidebar-group-name' }, row.card.name ?? row.card.provider),
+    ...row.windows.map((window, index) => h(Fragment, { key: index },
+      h('div', { className: 'dmg-sidebar-win-row', 'data-dmg-sidebar-tier': window.kind },
+        h('span', { className: 'dmg-sidebar-win-label', ...windowTitle(window) }, window.window.name ?? '—'),
+        expiry(window.window, now),
+        reading(window)),
+      bar(window))))
 }
+
+/** The gateway's own window name, in brackets next to the account on single-line rows. */
+function windowLabel(row: SidebarWindowRow, parens: boolean): ReactNode {
+  if (row.window.name === undefined) return null
+  return h('span', {
+    className: 'dmg-sidebar-window', 'data-dmg-sidebar-tier': row.kind, ...windowTitle(row),
+  }, parens ? `(${row.window.name})` : row.window.name)
+}
+
+const windowTitle = (row: SidebarWindowRow): { title?: string } =>
+  row.fallback && row.window.name !== undefined ? { title: t('sidebarWindowFallbackTitle', { window: row.window.name }) } : {}
+
+/** Absolute reset deadline; the full timestamp stays in `title`. */
+function expiry(window: CardWindow, now: number): ReactNode {
+  const resetsAt = window.resetsAt
+  if (resetsAt === undefined) return null
+  const label = formatResetDeadline(resetsAt, now)
+  if (label === undefined) return null
+  return h('span', { className: 'dmg-sidebar-expiry', 'data-dmg-sidebar-expiry': '', title: `${t('usageResetAt')}${formatTime(resetsAt)}` }, label)
+}
+
+const reading = (row: SidebarWindowRow): ReactNode =>
+  h('span', {
+    className: 'dmg-sidebar-pct', 'data-reading': '',
+    ...(row.used === undefined ? {} : { 'data-level': usedLevel(row.used) }),
+  }, windowReading(row))
+
+const bar = (row: SidebarWindowRow): ReactNode =>
+  row.used === undefined ? null : h('div', { className: 'dmg-sidebar-bar', 'aria-hidden': true },
+    h('i', { 'data-level': usedLevel(row.used), style: { width: `${row.used}%` } }))
 
 /** Expanded content: every upstream with every window, reset, balance and error. */
 function detail(cards: Card[], now: number, status: string | undefined): ReactNode {
@@ -311,10 +342,6 @@ const providerMeta = (card: Card, now: number): string => {
 
 const resetShort = (resetsAt: string | undefined, now: number): string | undefined => formatResetShort(resetsAt, now)
 
-/** Copy for the configured window tier, used by the header hint and fallback titles. */
-const windowModeLabel = (mode: SidebarWindowMode): string =>
-  mode === 'fiveHour' ? t('sidebarWindowFiveHour') : mode === 'tightest' ? t('sidebarWindowTightest') : t('sidebarWindowWeekly')
-
 const resetLine = (count: number): string => count === 1 ? t('resetCountLineOne') : t('resetCountLineMany', { n: count })
 
 const windowReading = (window: { used?: number; display?: string; unlimited?: boolean }): string => {
@@ -322,11 +349,6 @@ const windowReading = (window: { used?: number; display?: string; unlimited?: bo
   if (window.display !== undefined && window.display !== '') return window.display
   if (typeof window.used === 'number' && Number.isFinite(window.used)) return formatUsed(Math.min(100, Math.max(0, window.used)))
   return '—'
-}
-const rowReading = (row: SidebarRow): string => {
-  if (row.failed) return t('usageReadingFailed')
-  if (row.used === undefined && row.display === undefined && row.unlimited !== true && row.balance !== undefined) return row.balance
-  return windowReading({ ...(row.used === undefined ? {} : { used: row.used }), ...(row.display === undefined ? {} : { display: row.display }), ...(row.unlimited === true ? { unlimited: true } : {}) })
 }
 const ageText = (readAt: string, now: number): string | undefined => {
   const minutes = ageMinutes(readAt, now)
@@ -344,8 +366,6 @@ const refreshButton = (refresh: () => Promise<void>, busy: boolean): ReactNode =
     disabled: busy, onClick: (event: { stopPropagation(): void }) => { event.stopPropagation(); void refresh() },
   }, refreshIcon())
 
-const infoIcon = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
-  h('circle', { cx: 8, cy: 8, r: 6.2 }), h('path', { d: 'M8 7.4v3.5' }), h('path', { d: 'M8 5.1v.5' }))
 const refreshIcon = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
   h('path', { d: 'M13 8a5 5 0 1 1-1.6-3.7' }), h('path', { d: 'M13 2.4V5h-2.6' }))
 const chevron = (open: boolean): ReactNode => h('svg', {
