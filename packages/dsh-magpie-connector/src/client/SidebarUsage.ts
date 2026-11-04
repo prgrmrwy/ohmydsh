@@ -43,6 +43,9 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   const anchorRef = useRef<HTMLElement | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const [bodyMax, setBodyMax] = useState<number | undefined>(undefined)
+  const [bodyMore, setBodyMore] = useState(false)
+  const [detailMore, setDetailMore] = useState(false)
+  const detailRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<CardsView | undefined>(undefined)
   viewRef.current = view
@@ -82,6 +85,21 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     for (const child of Array.from(element.children)) if (child instanceof HTMLElement) observer.observe(child)
     return () => observer.disconnect()
   }, [enabled, open, view])
+
+  // Overflow hint for both states: the passive double chevron stays visible while
+  // a scroll container still has content below the fold, and hides at the bottom.
+  useLayoutEffect(() => {
+    const sync = (): void => {
+      setBodyMore(hasMore(bodyRef.current))
+      setDetailMore(hasMore(detailRef.current))
+    }
+    sync()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(sync)
+    for (const element of [bodyRef.current, detailRef.current]) if (element !== null) observer.observe(element)
+    for (const element of Array.from(bodyRef.current?.children ?? [])) if (element instanceof HTMLElement) observer.observe(element)
+    return () => observer.disconnect()
+  }, [enabled, open, view, bodyMax])
 
   // Returning to the page re-reads once (the 60s TTL suppresses it otherwise).
   useEffect(() => {
@@ -185,7 +203,6 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     )
   }
 
-  const scrollable = rows.length > MAX_ROWS
   return h('div', { className: 'dmg-sidebar', 'data-dmg-sidebar': '', 'data-open': open },
     style,
     h('div', { className: 'dmg-sidebar-card' },
@@ -193,19 +210,25 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
       open
         ? h(Fragment, null,
           notice !== '' ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, notice) : null,
-          h('div', { className: 'dmg-sidebar-detail', 'data-dmg-sidebar-expanded': '' }, detail(cards, now, status)),
+          h('div', {
+            className: 'dmg-sidebar-detail', 'data-dmg-sidebar-expanded': '',
+            ref: (node: HTMLDivElement | null): void => { detailRef.current = node },
+            onScroll: () => setDetailMore(hasMore(detailRef.current)),
+          }, detail(cards, now, status)),
+          detailMore ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
         )
         : h(Fragment, null,
           h('div', {
-            className: `dmg-sidebar-body${scrollable ? ' is-scroll' : ''}`,
+            className: `dmg-sidebar-body${bodyMore ? ' is-scroll' : ''}`,
             ref: (node: HTMLDivElement | null): void => { bodyRef.current = node },
+            onScroll: () => setBodyMore(hasMore(bodyRef.current)),
             ...(bodyMax === undefined ? {} : { style: { maxHeight: bodyMax } }),
           },
             status !== undefined
               ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
               : rows.map(row => compactRow(row, now)),
           ),
-          scrollable ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
+          bodyMore ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
         ),
     ),
   )
@@ -265,14 +288,24 @@ function windowLabel(row: SidebarWindowRow, parens: boolean): ReactNode {
 const windowTitle = (row: SidebarWindowRow): { title?: string } =>
   row.fallback && row.window.name !== undefined ? { title: t('sidebarWindowFallbackTitle', { window: row.window.name }) } : {}
 
-/** Absolute reset deadline; the full timestamp stays in `title`. */
+/** Absolute reset deadline; the full timestamp stays in `title`, and a missing one shows `—`. */
 function expiry(window: CardWindow, now: number): ReactNode {
   const resetsAt = window.resetsAt
-  if (resetsAt === undefined) return null
-  const label = formatResetDeadline(resetsAt, now)
-  if (label === undefined) return null
+  const label = resetsAt === undefined ? undefined : formatResetDeadline(resetsAt, now)
+  if (resetsAt === undefined || label === undefined) {
+    // Some windows (an unused rolling 5-hour one, for instance) carry no reset
+    // time; a dash keeps the column honest instead of looking like a layout bug.
+    return h('span', {
+      className: 'dmg-sidebar-expiry is-unknown', 'data-dmg-sidebar-expiry': '', 'data-unknown': '',
+      title: t('sidebarResetUnknown'),
+    }, '—')
+  }
   return h('span', { className: 'dmg-sidebar-expiry', 'data-dmg-sidebar-expiry': '', title: `${t('usageResetAt')}${formatTime(resetsAt)}` }, label)
 }
+
+/** Does this scroll container still have content below the fold? */
+const hasMore = (element: HTMLElement | null): boolean =>
+  element !== null && element.scrollHeight - element.scrollTop - element.clientHeight > 1
 
 const reading = (row: SidebarWindowRow): ReactNode =>
   h('span', {

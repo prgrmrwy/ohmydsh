@@ -161,18 +161,40 @@ describe('常驻卡', () => {
     expect(host.querySelector('[data-dmg-sidebar-info]')).toBeNull()
   })
 
-  it('没有到期时间时不显示占位', async () => {
+  it('网关没给重置时间时显示 — 并说明原因', async () => {
     await render({ cards: () => cardsOk([{ provider: 'claude', name: 'Claude', readAt: 'T1', windows: [{ name: '7 days', used: 20 }] }]) })
-    expect(rowOf('claude')!.querySelector('[data-dmg-sidebar-expiry]')).toBeNull()
+    const expiry = rowOf('claude')!.querySelector('[data-dmg-sidebar-expiry]') as HTMLElement
+    expect(expiry).not.toBeNull()
+    expect(expiry.textContent).toBe('—')
+    expect(expiry.hasAttribute('data-unknown')).toBe(true)
+    expect(expiry.title).toContain('网关没有提供')
   })
 
-  it('最多 5 行：超出的行靠卡内滚动，并出现双箭头', async () => {
+  it('最多 5 个上游：溢出在卡内滚动，双箭头随滚动位置出现和消失', async () => {
     await render()
     expect(rows()).toHaveLength(6)
-    expect(host.querySelector('.dmg-sidebar-body')?.className).toContain('is-scroll')
-    expect(host.querySelector('[data-dmg-sidebar-more]')).not.toBeNull()
+    const body = host.querySelector('.dmg-sidebar-body') as HTMLElement
     const { settingsCss } = await import('../src/client/styles.js')
     expect(settingsCss).toContain('.dmg-sidebar-body{max-height:145px')
+    const overflow = (scrollTop: number) => {
+      Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 400 })
+      Object.defineProperty(body, 'clientHeight', { configurable: true, value: 145 })
+      body.scrollTop = scrollTop
+      return act(async () => { body.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    }
+    await overflow(0)
+    expect(host.querySelector('[data-dmg-sidebar-more]')).not.toBeNull()
+    expect(body.className).toContain('is-scroll')
+    await overflow(255)
+    expect(host.querySelector('[data-dmg-sidebar-more]')).toBeNull()
+    expect(body.className).not.toContain('is-scroll')
+  })
+
+  it('不改展示滚动条', async () => {
+    const { settingsCss } = await import('../src/client/styles.js')
+    expect(settingsCss).not.toContain('scrollbar-width:thin')
+    expect(settingsCss.match(/scrollbar-width:none/g)?.length).toBeGreaterThanOrEqual(3)
+    expect(settingsCss).toContain('.dmg-sidebar-body::-webkit-scrollbar{display:none')
   })
 
   it('没有溢出时不渲染双箭头', async () => {
@@ -242,11 +264,34 @@ describe('展开', () => {
 
   it('点击正文与双箭头不触发展开，只有标题行可以切换', async () => {
     await render()
-    await act(async () => { (host.querySelector('.dmg-sidebar-body') as HTMLElement).click() })
+    const body = host.querySelector('.dmg-sidebar-body') as HTMLElement
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 400 })
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 145 })
+    await act(async () => { body.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    await act(async () => { body.click() })
     await act(async () => { (host.querySelector('[data-dmg-sidebar-more]') as HTMLElement).click() })
     await flush()
     expect(host.querySelector('[data-dmg-sidebar-expanded]')).toBeNull()
     expect(host.querySelector('[data-dmg-sidebar-more]')!.getAttribute('role')).toBeNull()
+  })
+
+  it('展开时溢出也显示双箭头，滚到底后消失', async () => {
+    await render()
+    await act(async () => { (host.querySelector('[data-dmg-sidebar-toggle]') as HTMLElement).click() })
+    await flush()
+    const detail = host.querySelector('[data-dmg-sidebar-expanded]') as HTMLElement
+    expect(detail).not.toBeNull()
+    expect(host.querySelector('[data-dmg-sidebar-more]')).toBeNull()
+    const overflow = (scrollTop: number) => {
+      Object.defineProperty(detail, 'scrollHeight', { configurable: true, value: 520 })
+      Object.defineProperty(detail, 'clientHeight', { configurable: true, value: 260 })
+      detail.scrollTop = scrollTop
+      return act(async () => { detail.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    }
+    await overflow(0)
+    expect(host.querySelector('[data-dmg-sidebar-more]')).not.toBeNull()
+    await overflow(260)
+    expect(host.querySelector('[data-dmg-sidebar-more]')).toBeNull()
   })
 
   it('title 上的开关同时负责展开与收起', async () => {
