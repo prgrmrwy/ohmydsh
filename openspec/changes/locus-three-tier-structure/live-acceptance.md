@@ -111,6 +111,6 @@ D 的 shell 冷恢复已通过：重启后的同一话题 child 在 turn 3 的 s
 
 E 的模型汇总如实标明历史工具不提供逐条 messageId、没有真实 cursor，没有用其他来源补推；E2/E3 外层 tool result 的 isError=false 不是领域读取成功，判断采用明确拒绝正文。
 
-新增 NOTICE-1：唤醒后的“档位已应用并核验”独立通知缺失。实际 safe 已生效，初始待应用控制回执也成功；pending-application 的通知却走了会主动拒绝话题的群事务端口。已补真实 Host 冷恢复回归并在旧代码得到 1 failed / 8 passed，最小修复复用当前投递经持久层验证的 replyTarget，缺失/群或话题不符/发送能力缺失时继续拒绝，保持已提交的实际档位。45 项定向、build/typecheck、全量 2940 passed / 4 skipped。生效通知的修复加载和真机成功回执仍待下一次受控重启，不能把源码绿等同于已补发。
+新增 NOTICE-1：唤醒后的“档位已应用并核验”独立通知缺失。实际 safe 已生效，初始待应用控制回执也成功；pending-application 的通知却走了会主动拒绝话题的群事务端口。已补真实 Host 冷恢复回归并在旧代码得到 1 failed / 8 passed，最小修复复用当前投递经持久层验证的 replyTarget，缺失/群或话题不符/发送能力缺失时继续拒绝，保持已提交的实际档位。45 项定向、build/typecheck、全量 2940 passed / 4 skipped。修复 57203707 已受控合入 main 0090da10，两次生产构建第二次 no changes；运行中的 Host 尚未加载该新通知路径。修复加载和真机成功回执仍待下一次受控重启，不能把源码绿等同于已补发。
 
 下一批先做执行中断恢复：当前 C 话题 safe，所有者先授 shell，再发无写入、只 sleep 的持续执行请求；核验者观察实际运行后受控重启，同时加载 NOTICE-1 修复。重连后续消息验证旧 Delivery failed/turn-interrupted 与下一条立即派发，再撤回 safe 并用新唤醒验证 NOTICE-1。auto 新群与显式 /bind 首投前后、受控容量占用与释放、W/M 迁移与驻留/RSS 继续保持待验；不为测试占满日常资源，也不把不同 PID 的 RSS 当作增长差值。
