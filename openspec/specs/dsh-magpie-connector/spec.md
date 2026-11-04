@@ -769,11 +769,34 @@ host SHALL 按网关响应分类结果：
 - **WHEN** 重新读取设置
 - **THEN** 返回的 `sidebarUsage` 为 `true`；写入 `"yes"` 等非布尔值返回 400 且设置不变
 
+### Requirement: 侧边栏显示窗口档位
+
+插件 host 设置 SHALL 提供 `sidebarWindow` 字符串：`weekly`（默认）、`fiveHour`、`tightest`；字段缺失时按 `weekly` 处理，其它值（含 `null`、数字、空字符串）SHALL 被拒绝（400）且设置不变，所选值 SHALL 持久化并在重启后保持。设置页 SHALL 提供对应下拉（`data-sidebar-window`，默认选中 `weekly`）与说明文案。客户端 SHALL 按该值选择常驻卡每行的窗口：`weekly` 取周窗口、`fiveHour` 取 5 小时窗口、`tightest` 取读数最高的窗口；所选档位在该上游缺失时 SHALL 依次回退到该上游另一个数字窗口、网关 `display`/「无限」、余额，SHALL NOT 显示空读数或伪造档位，回退行的窗口名 SHALL 用 `title` 说明原因。常驻卡标题行 SHALL 有一个说明当前档位与回退规则的 icon（同时提供 `title` 与 `aria-label`）。
+
+#### Scenario: 切到 5 小时档位
+
+- **GIVEN** `claude` 同时有 `5 hours`（`used` 44）与 `7 days`（`used` 20）窗口，`sidebarWindow` 为 `fiveHour`
+- **WHEN** 渲染常驻卡
+- **THEN** 该行显示 `(5 hours)` 与 `44%`，不显示 `20%`；标题行 icon 的说明文字包含「5 小时窗口」
+
+#### Scenario: 缺少所选档位时回退并说明
+
+- **GIVEN** 某上游只有 `7 days` 窗口，`sidebarWindow` 为 `fiveHour`
+- **WHEN** 渲染常驻卡
+- **THEN** 该行显示 `(7 days)` 与其读数，窗口名的 `title` 说明该上游没有 5 小时窗口
+- **AND** 只有余额或只有 `display` 的上游仍然显示可用的内容，不出现空读数
+
+#### Scenario: 非法档位被拒绝
+
+- **GIVEN** 当前 `sidebarWindow` 为 `weekly`
+- **WHEN** 写入 `sidebarWindow: "7d"`、`""`、`null`、`5` 或 `true`
+- **THEN** host 返回 400，`GET settings` 仍返回 `weekly`
+
 ### Requirement: 侧边栏常驻额度卡
 
-开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游一行，显示其 `7 days` 窗口读数与整宽进度条，窗口名照抄网关原文并紧跟在名称后的括号里；读数左侧 SHALL 显示该窗口的绝对重置时间（当年 `M/D HH:mm`，跨年 `YYYY/M/D HH:mm`，完整时间放在 `title` 属性），网关未提供该窗口 `resetsAt` 时 SHALL NOT 显示占位或推算时间。没有周窗口时回退到读数最高的窗口，没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡 SHALL 最多显示 5 行，溢出时在卡内滚动，并在底部显示无分割线的双下箭头；该箭头 SHALL 只是溢出提示，SHALL NOT 可点击。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
+开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游一行，显示「侧边栏显示窗口档位」所选窗口（默认 `7 days`）的读数与整宽进度条，窗口名照抄网关原文并紧跟在名称后的括号里；读数左侧 SHALL 显示该窗口的绝对重置时间（当年 `M/D HH:mm`，跨年 `YYYY/M/D HH:mm`，完整时间放在 `title` 属性），网关未提供该窗口 `resetsAt` 时 SHALL NOT 显示占位或推算时间。所选档位缺失时按「侧边栏显示窗口档位」回退；没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡 SHALL 最多显示 5 行，溢出时在卡内滚动，并在底部显示无分割线的双下箭头；该箭头 SHALL 只是溢出提示，SHALL NOT 可点击。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
 
-#### Scenario: 常驻卡只显示周窗口且最多 5 行
+#### Scenario: 默认档位只显示周窗口且最多 5 行
 
 - **GIVEN** 网关返回 6 张卡片：其中 `claude` 同时有 `5 hours` 与 `7 days` 窗口，其余各只有 `7 days`
 - **WHEN** 渲染常驻卡

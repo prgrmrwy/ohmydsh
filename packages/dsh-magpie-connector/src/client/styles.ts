@@ -123,6 +123,8 @@ export const settingsCss = `
 .dmg-sidebar-bird{flex:none;width:15px;height:15px;background-color:var(--dsw-alias-label-secondary);${birdMask}}
 .dmg-sidebar-title{font-size:12px;font-weight:500;color:var(--dsw-alias-label-primary);white-space:nowrap}
 .dmg-sidebar-fresh{margin-left:auto;font-size:10px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;white-space:nowrap}
+.dmg-sidebar-info{flex:none;width:14px;height:14px;display:inline-flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);cursor:default}
+.dmg-sidebar-info svg{width:13px;height:13px}
 .dmg-sidebar-icon{width:18px;height:18px;flex:none;border:0;border-radius:5px;padding:0;background:transparent;color:var(--dsw-alias-label-tertiary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
 .dmg-sidebar-icon:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
 .dmg-sidebar-icon:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}

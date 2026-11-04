@@ -5,6 +5,7 @@ import { CardsController } from './cards.js'
 import { ResetController } from './reset.js'
 import { SpeedController } from './speed.js'
 import { LatencyController } from './latency.js'
+import { isSidebarWindowMode } from '../shared/sidebar-window.js'
 export class SettingsController {
   private pending: Promise<void> = Promise.resolve()
   constructor(readonly runtime:MagpieRuntime) {}
@@ -18,7 +19,7 @@ export class SettingsController {
     const runtime=this.runtime
     if(body!==undefined) {
       try {
-        if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['lines','resync','visibleModels','defaultEffort','sidebarUsage','sidebarRefreshMinutes'].includes(k))) throw new Error('Invalid settings')
+        if(!body || typeof body!=='object' || Array.isArray(body) || Object.keys(body).some(k=>!['lines','resync','visibleModels','defaultEffort','sidebarUsage','sidebarRefreshMinutes','sidebarWindow'].includes(k))) throw new Error('Invalid settings')
         const input=body as Record<string,unknown>
         // Validate the entire union before credentials, disk writes or synchronization.
         if('lines' in input) { if(!Array.isArray(input.lines)) throw new Error('Invalid lines'); if(input.lines.length<1||input.lines.length>5) throw new Error('Invalid lines') }
@@ -27,13 +28,15 @@ export class SettingsController {
         const visibleModels='visibleModels' in input ? validateVisibility(input.visibleModels) : undefined
         if('sidebarUsage' in input && typeof input.sidebarUsage!=='boolean') throw new Error('Invalid sidebarUsage')
         if('sidebarRefreshMinutes' in input && (!Number.isInteger(input.sidebarRefreshMinutes) || (input.sidebarRefreshMinutes as number)<0 || (input.sidebarRefreshMinutes as number)>1440)) throw new Error('Invalid sidebarRefreshMinutes')
+        if('sidebarWindow' in input && !isSidebarWindowMode(input.sidebarWindow)) throw new Error('Invalid sidebarWindow')
         const sidebarUsage='sidebarUsage' in input ? input.sidebarUsage as boolean : undefined
         const sidebarRefreshMinutes='sidebarRefreshMinutes' in input ? input.sidebarRefreshMinutes as number : undefined
+        const sidebarWindow=isSidebarWindowMode(input.sidebarWindow) ? input.sidebarWindow : undefined
         const defaultEfforts='defaultEffort' in input ? updateDefaultEffort(runtime.store.value.defaultEfforts,input.defaultEffort,runtime.current.catalog) : undefined
         const connection=Object.fromEntries(Object.entries(input).filter(([k])=>['lines','resync'].includes(k)))
         if(Object.keys(connection).length) {const result=await runtime.settings(connection);if(!result.ok)return result}
-        if(visibleModels!==undefined || defaultEfforts!==undefined || sidebarUsage!==undefined || sidebarRefreshMinutes!==undefined) {
-          runtime.savePreferences({ ...(visibleModels===undefined?{}:{visibleModels}), ...(defaultEfforts===undefined?{}:{defaultEfforts}), ...(sidebarUsage===undefined?{}:{sidebarUsage}), ...(sidebarRefreshMinutes===undefined?{}:{sidebarRefreshMinutes}) })
+        if(visibleModels!==undefined || defaultEfforts!==undefined || sidebarUsage!==undefined || sidebarRefreshMinutes!==undefined || sidebarWindow!==undefined) {
+          runtime.savePreferences({ ...(visibleModels===undefined?{}:{visibleModels}), ...(defaultEfforts===undefined?{}:{defaultEfforts}), ...(sidebarUsage===undefined?{}:{sidebarUsage}), ...(sidebarRefreshMinutes===undefined?{}:{sidebarRefreshMinutes}), ...(sidebarWindow===undefined?{}:{sidebarWindow}) })
           if(visibleModels!==undefined || defaultEfforts!==undefined) runtime.publish()
         }
       } catch(error) {return Response.json({error:runtime.redact(error instanceof Error?error.message:String(error))},{status:400})}

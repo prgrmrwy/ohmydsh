@@ -8,6 +8,7 @@ import { GatewayTransport, validateIdentity, type ConnectionIdentity } from './t
 import { LineSelector, type Probe } from './selection.js'
 import { mapCatalog, routeOf, type CatalogModel } from './catalog.js'
 import type { PublishResult } from './registrar.js'
+import { DEFAULT_SIDEBAR_WINDOW, isSidebarWindowMode, type SidebarWindowMode } from '../shared/sidebar-window.js'
 
 export type Credentials = Pick<CredentialProvider, 'describe' | 'resolve' | 'set' | 'unset'>
 
@@ -173,6 +174,7 @@ export class MagpieRuntime {
       ...(value.credentialUpdatePending ? { credentialUpdatePending: value.credentialUpdatePending } : {}),
       ...(value.sidebarUsage === true ? { sidebarUsage: true } : {}),
       ...(typeof value.sidebarRefreshMinutes === 'number' ? { sidebarRefreshMinutes: value.sidebarRefreshMinutes } : {}),
+      ...(isSidebarWindowMode(value.sidebarWindow) ? { sidebarWindow: value.sidebarWindow } : {}),
       ...(this.owners.length ? { knownOwners: this.owners } : {}),
     }
     for (const [key, field] of Object.entries(patch)) {
@@ -557,12 +559,13 @@ export class MagpieRuntime {
       visibleModels: this.store.value.visibleModels, defaultEfforts: this.store.value.defaultEfforts,
       sidebarUsage: this.store.value.sidebarUsage === true,
       sidebarRefreshMinutes: this.store.value.sidebarRefreshMinutes ?? 5,
+      sidebarWindow: isSidebarWindowMode(this.store.value.sidebarWindow) ? this.store.value.sidebarWindow : DEFAULT_SIDEBAR_WINDOW,
       knownOwnersReset: this.knownOwnersReset, ownerLimitReached: this.rejectedOwners.length > 0, rejectedOwners: this.rejectedOwners,
       ...(this.registrationError ? { routeRegistrationError: this.registrationError } : {}),
     }))
   }
   /** Preference-only writes also persist the single clean schema (drops legacy fields). */
-  savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>; sidebarUsage?: boolean; sidebarRefreshMinutes?: number }) {
+  savePreferences(patch: { visibleModels?: Record<string, string[]>; defaultEfforts?: Record<string, string>; sidebarUsage?: boolean; sidebarRefreshMinutes?: number; sidebarWindow?: SidebarWindowMode }) {
     const config = this.loadConfig()
     this.writeSettings({
       lines: config.lines,
@@ -570,6 +573,7 @@ export class MagpieRuntime {
       defaultEfforts: patch.defaultEfforts ?? this.store.value.defaultEfforts ?? {},
       sidebarUsage: patch.sidebarUsage ?? this.store.value.sidebarUsage,
       sidebarRefreshMinutes: patch.sidebarRefreshMinutes ?? this.store.value.sidebarRefreshMinutes,
+      sidebarWindow: patch.sidebarWindow ?? this.store.value.sidebarWindow,
       credentialUpdatePending: this.failedFields.length ? this.failedFields : undefined,
     })
   }

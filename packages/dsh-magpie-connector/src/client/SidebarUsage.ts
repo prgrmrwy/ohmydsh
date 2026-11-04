@@ -10,6 +10,7 @@ import {
   ageMinutes, cardIdentity, cardReadTime, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
   type SidebarRow,
 } from './sidebar-view.js'
+import { DEFAULT_SIDEBAR_WINDOW, type SidebarWindowMode } from '../shared/sidebar-window.js'
 import { formatTime, type Card, type CardsView } from './view-model.js'
 
 /**
@@ -55,6 +56,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   }, [api])
   const enabled = preference?.usage
   const refreshMinutes = preference?.refreshMinutes ?? DEFAULT_REFRESH_MINUTES
+  const windowMode = preference?.windowMode ?? DEFAULT_SIDEBAR_WINDOW
 
   useEffect(() => {
     if (enabled !== true || api === undefined) return
@@ -149,7 +151,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
 
   const now = Date.now()
   const cards = view?.cards ?? []
-  const rows = sidebarRows(cards)
+  const rows = sidebarRows(cards, windowMode)
   const latest = cards.map(cardReadTime).filter((value): value is string => typeof value === 'string').sort().at(-1)
   const status = statusText(view, error)
   const style = h('style', null, settingsCss)
@@ -157,6 +159,11 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
     h('span', { className: 'dmg-sidebar-bird', 'aria-hidden': true }),
     h('span', { className: 'dmg-sidebar-title' }, t('sidebarTitle')),
     latest === undefined ? null : h('span', { className: 'dmg-sidebar-fresh' }, ageText(latest, now)),
+    h('span', {
+      className: 'dmg-sidebar-info', 'data-dmg-sidebar-info': '', role: 'img',
+      title: t('sidebarWindowInfo', { mode: windowModeLabel(windowMode) }),
+      'aria-label': t('sidebarWindowInfo', { mode: windowModeLabel(windowMode) }),
+    }, infoIcon()),
     refreshButton(refresh, busy),
     h('button', {
       type: 'button', className: 'dmg-sidebar-icon', 'data-dmg-sidebar-toggle': '',
@@ -201,7 +208,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
           },
             status !== undefined
               ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
-              : rows.map(row => compactRow(row, now)),
+              : rows.map(row => compactRow(row, now, windowMode)),
           ),
           scrollable ? h('div', { className: 'dmg-sidebar-more', 'aria-hidden': true, 'data-dmg-sidebar-more': '' }, doubleChevron()) : null,
         ),
@@ -210,17 +217,23 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
 }
 
 /** One compact row: name (window in brackets), reset deadline, reading, bar. */
-function compactRow(row: SidebarRow, now: number): ReactNode {
+function compactRow(row: SidebarRow, now: number, mode: SidebarWindowMode): ReactNode {
   const reading = rowReading(row)
   const level = row.used === undefined || row.failed ? undefined : usedLevel(row.used)
   const resetsAt = row.failed ? undefined : row.window?.resetsAt
   const deadline = resetsAt === undefined ? undefined : formatResetDeadline(resetsAt, now)
   const deadlineTitle = resetsAt === undefined ? '' : `${t('usageResetAt')}${formatTime(resetsAt)}`
+  // A row that cannot show the configured tier says so on hover instead of pretending.
+  const fallbackTitle = row.fallback && !row.failed && row.window?.name !== undefined
+    ? t('sidebarWindowFallbackTitle', { mode: windowModeLabel(mode), window: row.window.name })
+    : undefined
   return h('div', { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key: cardIdentity(row.card) },
     h('div', { className: 'dmg-sidebar-row-line' },
       h('span', { className: 'dmg-sidebar-label' },
         h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider),
-        row.failed || row.window?.name === undefined ? null : h('span', { className: 'dmg-sidebar-window' }, `(${row.window.name})`),
+        row.failed || row.window?.name === undefined ? null : h('span', {
+          className: 'dmg-sidebar-window', ...(fallbackTitle === undefined ? {} : { title: fallbackTitle }),
+        }, `(${row.window.name})`),
       ),
       deadline === undefined ? null : h('span', {
         className: 'dmg-sidebar-expiry', 'data-dmg-sidebar-expiry': '',
@@ -298,6 +311,10 @@ const providerMeta = (card: Card, now: number): string => {
 
 const resetShort = (resetsAt: string | undefined, now: number): string | undefined => formatResetShort(resetsAt, now)
 
+/** Copy for the configured window tier, used by the header hint and fallback titles. */
+const windowModeLabel = (mode: SidebarWindowMode): string =>
+  mode === 'fiveHour' ? t('sidebarWindowFiveHour') : mode === 'tightest' ? t('sidebarWindowTightest') : t('sidebarWindowWeekly')
+
 const resetLine = (count: number): string => count === 1 ? t('resetCountLineOne') : t('resetCountLineMany', { n: count })
 
 const windowReading = (window: { used?: number; display?: string; unlimited?: boolean }): string => {
@@ -327,6 +344,8 @@ const refreshButton = (refresh: () => Promise<void>, busy: boolean): ReactNode =
     disabled: busy, onClick: (event: { stopPropagation(): void }) => { event.stopPropagation(); void refresh() },
   }, refreshIcon())
 
+const infoIcon = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
+  h('circle', { cx: 8, cy: 8, r: 6.2 }), h('path', { d: 'M8 7.4v3.5' }), h('path', { d: 'M8 5.1v.5' }))
 const refreshIcon = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
   h('path', { d: 'M13 8a5 5 0 1 1-1.6-3.7' }), h('path', { d: 'M13 2.4V5h-2.6' }))
 const chevron = (open: boolean): ReactNode => h('svg', {
