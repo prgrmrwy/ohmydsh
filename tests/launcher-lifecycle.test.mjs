@@ -34,7 +34,7 @@ async function fixture(t) {
     const timer=setTimeout(()=>c.kill('SIGKILL'),12000)
     c.once('close',(status,signal)=>{clearTimeout(timer);resolve({status,signal,stdout,stderr})})
   })
-  t.after(async()=>{const status=await probePort(port);if(status.state==='owned')await stopServer(port);await rm(root,{recursive:true,force:true})})
+  t.after(async()=>{const status=await probePort(port);if(status.state==='owned')await stopServer(port,{expectedIdentity:status});await rm(root,{recursive:true,force:true})})
   return {root,home,port,run}
 }
 
@@ -58,7 +58,7 @@ test('test_detached_host_outlives_launcher',async t=>{
   assert.match(log,/plugins=\[fixture-plugin\]/)
   assert.match(started.stdout,/Host runtime: npx-cache/)
   assert.match(started.stdout,/  - fixture-plugin/)
-  const stopped=await f.run(['stop'])
+  const stopped=await f.run(['stop','--allow-legacy-restart'])
   assert.equal(stopped.status,0,stopped.stderr)
   assert.equal((await probePort(f.port)).state,'empty')
 })

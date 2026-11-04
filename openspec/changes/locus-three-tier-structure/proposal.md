@@ -45,9 +45,11 @@ ADR-0007 规定三层只能以自身理由立项，并须先回答四个待决�
 - 依赖：本 change 以三个在途 Pet change（shell-tier、feishu-read-and-delivery-fixes、interrupted-delivery-recovery）归档后的 spec 为基础。
 - 不在范围：跨机 collab（`collab-cross-machine-spi`）、托管成员机制的裁剪（Pet 不再用代理成员，但 dsh-collab 的托管 SPI 保留）。
 
-## H 验收发现的范围修订建议（待所有者确认）
+## H 验收发现的范围修订（所有者已确认）
 
-2026-11-04 真机 H 在真实 Python 进程仍运行时执行受控重启，15:48:34 ready；恢复后的尾部与官方补尾相同，按现规范保持 busy。进一步核对 rc.2：live cancel 实写 `aborted(reason=user|parent|disposed)`，`interrupted` 从不由 live loop 写出，只在事后补尾（官方 core/session/src/types.ts:203–221、agent-loop/src/agent.ts:366–385）。因此原先只认实写 interrupted 的判据不能覆盖正常取消；仅延长停机等待也不会修复它。
+所有者已选择“修复重启恢复，再重测”；以下增补纳入本 change，沿用既有合入/部署/重启授权。
+
+2026-11-04 真机 H 在真实 Python 进程仍运行时执行受控重启，15:48:34 ready；恢复后的尾部与官方补尾相同，按现规范保持 busy。进一步核对 rc.2：live cancel 实写 `aborted`，其中 `reason` 为 `{kind:'user'|'parent'|'disposed'}` 对象，`interrupted` 从不由 live loop 写出，只在事后补尾（官方 core/session/src/types.ts:203–221、agent-loop/src/agent.ts:366–385）。因此原先只认实写 interrupted 的判据不能覆盖正常取消；仅延长停机等待也不会修复它。
 
 建议纳入以下增补，再更新 delta specs/design 并实施：
 

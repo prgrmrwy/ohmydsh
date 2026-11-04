@@ -88,6 +88,9 @@ import {
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
 import { createRefusedReplyTracker } from './host/locus/refused-reply.js'
+import { StopPreparation, PET_PREPARE_STOP_ROUTE, publishStopDescriptor, releaseStopDescriptor } from './host/locus/stop-preparation.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { petRoute } from './host/http.js'
 import { resumeModelFor } from './host/inquiry/resume-model.js'
 import {
   proveStartupDeliveryFromColdRead,
@@ -426,7 +429,26 @@ async function initialize(
       readonly outcome?: 'settled' | 'failed'
     }) => void
     readonly dispatchNext?: (correlation: DeliveryCorrelation) => Promise<void>
+    readonly freezeForShutdown?: () => Promise<void>
+    readonly resumeAfterShutdown?: () => Promise<void>
+    readonly runWhileActive?: <T>(operation: () => Promise<T>) => Promise<T>
   } | undefined
+  // Nested calls inside an already-admitted mutation must not be refused
+  // half-way by a freeze that is itself waiting for that mutation.
+  const admittedLocusMutation = new AsyncLocalStorage<true>()
+  const runLocusMutation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (admittedLocusMutation.getStore() === true) return operation()
+    try {
+      return await (locusChannelController?.runWhileActive === undefined
+        ? admittedLocusMutation.run(true, operation)
+        : locusChannelController.runWhileActive(() => admittedLocusMutation.run(true, operation)))
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'LOCUS_SHUTDOWN_FROZEN') {
+        throw new PetError('LOCUS_BUSY', 'Host 正在准备停机，请稍后重试。')
+      }
+      throw error
+    }
+  }
   const locusContextRepository = asLocusContextRepository(
     locusRepository,
     childSessionId => currentLocusTurnProof(childSessionId),
@@ -652,7 +674,7 @@ async function initialize(
       sendMessage?: (sender: unknown, target: unknown, content: unknown, options: { signal: AbortSignal }) => Promise<unknown>
     } | undefined
     if (typeof service?.sendMessage !== 'function') return undefined
-    return { sendMessage: (sender, target, content, options) => service.sendMessage!.call(service, sender, target, content, options) }
+    return { sendMessage: (sender, target, content, options) => runLocusMutation(() => service.sendMessage!.call(service, sender, target, content, options)) }
   }
   /** Dependencies of the locus MAIN session's own tools (`locus_note`, `locus_reply_child`). */
   const locusMainToolsDeps: LocusMainToolsDeps = {
@@ -2359,7 +2381,7 @@ async function initialize(
         onTurnEnd: listener =>
           ctx.on(sessionEvent as never, ((
             session: { id?: unknown },
-            event: { type?: unknown; data?: { turn?: unknown; reason?: { kind?: unknown; error?: { message?: unknown } } } },
+            event: { type?: unknown; data?: { turn?: unknown; reason?: { kind?: unknown; reason?: { kind?: unknown }; error?: { message?: unknown } } } },
           ) => {
             if (event?.type !== 'turn/end') return
             const childSessionId = session?.id
@@ -2367,6 +2389,8 @@ async function initialize(
             if (typeof childSessionId !== 'string' || typeof turn !== 'number') return
             const kind = event.data?.reason?.kind
             const message = event.data?.reason?.error?.message
+            const cause = event.data?.reason?.reason?.kind
+            const cancelCause = kind === 'aborted' && (cause === 'user' || cause === 'parent' || cause === 'disposed') ? cause : undefined
             listener({
               childSessionId,
               turn,
@@ -2377,7 +2401,7 @@ async function initialize(
                   : kind === 'blocked'
                     ? 'blocked'
                     : 'failed',
-              ...(typeof message === 'string' ? { reason: message } : {}),
+              ...(cancelCause !== undefined ? { reason: cancelCause } : typeof message === 'string' ? { reason: message } : {}),
             })
             void refusedReplies?.end(childSessionId, turn).catch(error => {
               petLog(`dsh-pet locus refused reply settlement: ${String(error)}`)
@@ -2525,7 +2549,7 @@ async function initialize(
   })
   scheduleCurrentDelivery = (record: DeliveryRecord): void => { expiryScheduler.schedule(record) }
 
-  finishCurrentDelivery = async (input: PetLocusFinishInput): Promise<PetLocusFinishResult> => {
+  finishCurrentDelivery = async (input: PetLocusFinishInput): Promise<PetLocusFinishResult> => runLocusMutation<PetLocusFinishResult>(async () => {
     const correlation = deliveryCorrelation(input)
     return withLocusDispatchLane(correlation, async () => {
       const current = loadCurrentDelivery(correlation, input.delivery.deliveryId)
@@ -2603,9 +2627,9 @@ async function initialize(
       await finishAndAdvance(completed.record, correlation, outboundResult === 'success' ? 'settled' : 'failed')
       return { sent: outboundResult === 'success', outcome: 'reply' }
     })
-  }
+  })
 
-  waitCurrentDelivery = async (input: PetLocusWaitInput): Promise<PetLocusWaitResult> => {
+  waitCurrentDelivery = async (input: PetLocusWaitInput): Promise<PetLocusWaitResult> => runLocusMutation<PetLocusWaitResult>(async () => {
     const correlation = deliveryCorrelation(input)
     return withLocusDispatchLane(correlation, async () => {
       const current = loadCurrentDelivery(correlation, input.delivery.deliveryId)
@@ -2639,7 +2663,7 @@ async function initialize(
         capped: settled.deadlineAt >= hard,
       }
     })
-  }
+  })
 
   /**
    * Finish the ONE durable startup recovery pass only after its authoritative
@@ -3680,6 +3704,99 @@ async function initialize(
     void coordinator.pump(task.id).catch(() => undefined)
   }
 
+  const stopIdentity = { hostPid: process.pid, bootId: randomUUID() }
+  const stopPreparation = new StopPreparation(stopIdentity, {
+    freeze: async () => {
+      if (locusChannelController?.freezeForShutdown === undefined || locusChannelController.resumeAfterShutdown === undefined) {
+        throw new PetError('LOCUS_UNAVAILABLE', 'This Host cannot freeze Locus admission.')
+      }
+      await locusChannelController.freezeForShutdown()
+    },
+    drain: async () => {
+      if (!locusChildProbe.available || locusChildProbe.ports.compensation === undefined || locusChildProbe.ports.proof === undefined) {
+        throw new PetError('LOCUS_UNAVAILABLE', 'Owned child drain and catalog proof are unavailable.')
+      }
+      const ports = locusChildProbe.ports
+      const compensation = ports.compensation!
+      if (!('drainContinuableChildren' in compensation) || typeof compensation.drainContinuableChildren !== 'function') {
+        throw new PetError('LOCUS_UNAVAILABLE', 'Exact owned-child drain is unavailable.')
+      }
+      const drainChild = compensation.drainContinuableChildren.bind(compensation)
+      const tasks: Array<() => Promise<void>> = []
+      const interrupted: Array<{ childSessionId: string; parentSessionId: string; deliveryId: string }> = []
+      // Include cold catalog records: an activation admitted before freezing
+      // may not yet have published an Agent in the live registry.
+      for (const row of locusRepository.listLoci()) {
+        if (row.childComposition !== 'tier3' || row.childSessionId === undefined) continue
+        const liveChild = ctx.agents.get(row.childSessionId as never)
+        const pair = locusRepository.getLocusMain(row.parentSessionId)
+        const current = locusRepository.getCurrentLocus(row.endpoint)
+        if (pair?.status !== 'active' || current?.id !== row.id || current.generation !== row.generation) {
+          if (liveChild !== undefined) throw new PetError('LOCUS_CONFLICT', 'A live Pet child has no current owning generation.')
+          continue
+        }
+        const parent = ports.parent.get(row.parentSessionId as never)
+        if (parent === undefined) {
+          if (liveChild !== undefined) throw new PetError('LOCUS_CONFLICT', 'A live Pet child has no live owner.')
+          continue
+        }
+        const proof = await ports.proof!.findChild(row.parentSessionId, row.childSessionId, new AbortController().signal)
+        if (proof?.parentSessionId !== row.parentSessionId || proof.childSessionId !== row.childSessionId) {
+          throw new PetError('LOCUS_CONFLICT', 'Owned child catalog identity could not be proven.')
+        }
+        if (liveChild !== undefined) {
+          for (const delivery of locusRepository.listDeliveries(row.id)) {
+            if ((delivery.status === 'current' || delivery.status === 'running') && delivery.childSessionId === row.childSessionId && delivery.generation === row.generation) {
+              interrupted.push({ childSessionId: row.childSessionId, parentSessionId: row.parentSessionId, deliveryId: delivery.deliveryId })
+            }
+          }
+        }
+        tasks.push(() => drainChild(parent, [row.childSessionId!]))
+      }
+      const results = await Promise.allSettled(tasks.map(task => task()))
+      const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (errors.length > 0) throw new AggregateError(errors, 'Owned child drain failed')
+      // Native close is durable; now wait for the event observer's Pet commits.
+      await locusChannelController!.freezeForShutdown!()
+      for (const target of interrupted) {
+        const delivery = locusRepository.getDelivery(target.deliveryId)
+        if (delivery === undefined || (delivery.status !== 'current' && delivery.status !== 'running')) continue
+        const proof = await proveStartupDeliveryFromColdRead({
+          delivery, parentSessionId: target.parentSessionId,
+          query: ctx.get('sessionQuery') as LocusSessionQueryLike | undefined,
+          log: message => petLog(`dsh-pet shutdown evidence: ${message}`),
+        })
+        if (proof?.state !== 'interrupted' || delivery.inboxMessageId === undefined || delivery.executionId === undefined || delivery.turnId === undefined || delivery.revision === undefined) {
+          // Not an interrupted execution (idle awaiting continuation, never
+          // started, or unprovable): it stays durable current, exactly as an
+          // ordinary restart leaves it for startup recovery or its lease.
+          petLog(`dsh-pet shutdown: ${delivery.deliveryId} retained without interruption proof`)
+          continue
+        }
+        const result = await locusRepository.settleByTurn({
+          deliveryId: delivery.deliveryId, executionId: delivery.executionId,
+          inboxMessageId: delivery.inboxMessageId, expectedRevision: delivery.revision,
+          correlation: { endpoint: delivery.endpoint, locusId: delivery.locusId, generation: delivery.generation, childSessionId: target.childSessionId, turnId: delivery.turnId },
+          outcome: 'failed', failureReason: 'turn-interrupted', settledAt: Date.now(),
+        })
+        if (!result.changed) throw new PetError('LOCUS_CONFLICT', 'Interrupted execution could not be durably settled.')
+      }
+    },
+    resume: async () => { await locusChannelController?.resumeAfterShutdown?.() },
+  })
+  ctx.effect(() => () => stopPreparation.dispose(), 'dsh-pet: shutdown preparation')
+  const controlPort = ctx.webServer.port
+  const profileName = ctx.get('profileContext')?.name
+  if (Number.isInteger(controlPort) && controlPort > 0 && typeof profileName === 'string' && typeof ctx.connection.authenticatedUrl === 'function') {
+    const origin = `http://127.0.0.1:${controlPort}`
+    await lifecycle.contain('Pet shutdown discovery', () => publishStopDescriptor(paths.dshHome, controlPort, {
+      v: 1, pid: stopIdentity.hostPid, bootId: stopIdentity.bootId, profile: profileName,
+      origin, authenticatedUrl: ctx.connection.authenticatedUrl(origin),
+    }))
+    // The descriptor carries a credential URL; never leave it behind this boot.
+    ctx.effect(() => () => releaseStopDescriptor(paths.dshHome, controlPort, stopIdentity.bootId), 'dsh-pet: release shutdown discovery')
+  }
+
   for (const route of [...createPetRoutes({
     repository,
     capabilities,
@@ -3697,6 +3814,7 @@ async function initialize(
     // Owner-facing locus view/discovery and durable lifecycle transitions.
     // The identity is Host-derived; routes reject any actor a browser sends.
     locus: locusManagement,
+    withLocusMutation: runLocusMutation,
     locusIdentity: () => ({ actorId: 'host:dsh-pet' }),
     // Shared-fact ledger todo surface. Projects the durable record for the
     // owner panel; `generation` rides along as an audit fact only — the
@@ -3778,7 +3896,7 @@ async function initialize(
         return undefined
       }
     },
-  }) ]) {
+  }), petRoute(PET_PREPARE_STOP_ROUTE, ({ body }) => stopPreparation.request(body))]) {
     ctx.effect(
       () => {
         const protectedRoute = withBrowserAuth(route, ctx.connection)

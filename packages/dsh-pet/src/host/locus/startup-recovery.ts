@@ -191,10 +191,10 @@ export function proveUnconsumedStartupDelivery(
  *
  * The evidence is exact and already persisted: the child's own log shows the
  * turn that entered this Delivery's `inboxMessageId` closing with
- * `turn/end { reason: { kind: 'interrupted' } }`. The fold is deliberately as
- * conservative as the `running`/`unconsumed` proofs — any malformed event, turn
- * overlap, missing or duplicate entry, mismatched durable `turnId`, a closed
- * turn whose reason is NOT `interrupted`, or a still-open turn refuses.
+ * a persisted `interrupted`, or the official live `aborted` with an explicit
+ * `user`, `parent`, or `disposed` cause. Unknown or missing causes prove nothing.
+ * The fold refuses malformed events, overlapping turns, missing or duplicate
+ * entries, mismatched durable `turnId`, other endings, and still-open turns.
  *
  * @param delivery - the `current` Delivery to prove.
  * @param session - the exact live child Session.
@@ -238,7 +238,10 @@ export function proveInterruptedStartupDelivery(
       const turn = positiveTurn(data?.['turn'])
       if (turn === undefined || openTurn === undefined || turn !== openTurn) return undefined
       const reason = recordOf(data?.['reason'])
-      if (enteredTurn === openTurn && reason?.['kind'] === 'interrupted') {
+      const cause = reason?.['kind'] === 'aborted' ? recordOf(reason['reason'])?.['kind'] : undefined
+      if (enteredTurn === openTurn && (
+        reason?.['kind'] === 'interrupted' || cause === 'user' || cause === 'parent' || cause === 'disposed'
+      )) {
         interruptedTurn = openTurn
       }
       openTurn = undefined

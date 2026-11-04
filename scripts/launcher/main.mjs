@@ -8,6 +8,8 @@ import { loadEnvironment } from './environment.mjs'
 import { run as defaultRun } from './runner.mjs'
 import { autoUpdate, appendEvent, ensurePrerequisites } from './maintenance.mjs'
 import { probePort, stopServer } from './process.mjs'
+import { preparePetStop, verifyStopProtocol } from './pet-stop.mjs'
+import { noPetStopPatch } from './no-pet-stop-profile.mjs'
 import { isolatedHome, readPreview, writePreview, matchesPreview, stopPreview, previewPorts } from './preview.mjs'
 import { openUi, closeUi } from './ui.mjs'
 import { sessionEvidence, scheduleRestart, orchestrateRestart, restartHistory, withoutSessionMarkers } from './session-restart.mjs'
@@ -79,14 +81,32 @@ async function launch(argv, options) {
     const result = await openUi({ ...uiOptions, doc, flags })
     return result.opened
   }
+  let current
+  const guardedStop = async (port, stopOptions = {}) => {
+    const initial = structuredClone(stopOptions.expectedIdentity ?? current ?? await probe(port, { env }))
+    if (!['owned', 'empty'].includes(initial.state)) throw new Error(initial.error || 'Listener is not provably DSH; refusing to kill')
+    const boundProbe = stopOptions.probe ?? ((_port, options = {}) => probe(port, { env, ...options }))
+    onPhase('preparing-pet')
+    const ticket = await preparePetStop({ home, port, initial, probe: boundProbe, env, allowLegacyRestart: flags.allowLegacyRestart, warn })
+    try {
+      await ticket.beforeSignal()
+      onPhase('stopping')
+      const result = await stop(port, { ...stopOptions, env, warn, expectedIdentity: initial, probe: boundProbe, beforeSignal: ticket.beforeSignal })
+      if (!result.ok) throw new Error(result.error || 'Failed to stop verified Host')
+      return result
+    } catch (error) {
+      const recovery = await ticket.resume()
+      throw new Error(`${error.message}; Host 未确认停止${recovery === 'pending' ? '；Pet 仍在维护中，drain 或恢复尚未确认' : recovery === 'resumed' ? '；Pet 已恢复' : ''}`)
+    }
+  }
   const doStop = async () => {
     if (preview) {
       if (flags.portExplicit && previewRecord?.port !== flags.port) { log('no recorded preview on this port'); return }
-      await stopPreview(home, { env, probe, stop, warn })
+      await stopPreview(home, { env, probe, stop: guardedStop, initial: current, warn })
       log('preview stopped or no matching preview is running')
       return
     }
-    const result = await stop(flags.port, { env, warn })
+    const result = await guardedStop(flags.port)
     await closeUi(uiOptions)
     if (!result.ok) throw new Error(result.error || `port ${flags.port} listener is not provably DSH; refusing to kill`)
     log(result.state === 'empty' ? `no dsh server found on port ${flags.port}` : `dsh server stopped(port ${flags.port})`)
@@ -110,7 +130,6 @@ async function launch(argv, options) {
       return scheduleRestart({ argv, repo, home, caller, evidence, platform, log, warn, ...(options.restartSpawn ? { spawn: options.restartSpawn } : {}) })
     }
   }
-  let current
   if (!flags.buildOnly) {
     current = await probe(flags.port, { env })
     if (preview) {
@@ -144,7 +163,6 @@ async function launch(argv, options) {
   }
   if (flags.restart) {
     prepared = await prepare()
-    onPhase('stopping')
     await doStop()
     onPhase('stopped')
     current = { state: 'empty' }
@@ -157,12 +175,13 @@ async function launch(argv, options) {
     return 0
   }
   prepared ??= await prepare()
+  const protocolPatch = prepared.DSH_RUNTIME_KIND === 'env' ? [] : ['--patch', noPetStopPatch(home, repo, doc.dshVersion)]
   const ports = preview ? previewPorts(flags.port, flags.portExplicit) : [flags.port]
   for (const port of ports) {
     flags.port = port
     uiOptions.port = port
     if (preview && (await probe(port, { env })).state !== 'empty') continue
-    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', '--port', String(flags.port), '--no-open', ...hostTrustArgs, ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
+    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', ...protocolPatch, '--port', String(flags.port), '--no-open', ...hostTrustArgs, ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
     fs.mkdirSync(home, { recursive: true })
     const fd = flags.foreground ? undefined : fs.openSync(path.join(home, 'dsh.log'), 'a')
     let child
@@ -222,6 +241,15 @@ async function launch(argv, options) {
       }
       warn(`error: server ${childError ? 'cannot start' : child.exitCode !== null ? 'exited early' : 'readiness failed (ownership unknown or 30s deadline)'} — see ${path.join(home, 'dsh.log')}`)
       return child.exitCode || 1
+    }
+    if (flags.restart && flags.allowLegacyRestart) {
+      try {
+        await verifyStopProtocol({ home, port, initial: { state: 'owned', processes: [readyIdentity] }, probe, env, deadlineAt: Math.max(deadline, Date.now() + 5_000) })
+        log('新版 Host descriptor 与受鉴权 status 已确认；首次 legacy 维护停止不计为 drain 验收。')
+      } catch (error) {
+        child.unref()
+        throw new Error(`新版 Host 已启动，但停机协议尚未确认；维护不计为 drained：${error.message}`)
+      }
     }
     if (preview) {
       if (!readyIdentity?.created) throw new Error('Preview listener creation identity missing')

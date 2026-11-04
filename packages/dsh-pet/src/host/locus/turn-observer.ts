@@ -10,9 +10,9 @@
  * Neither alone is enough. The claim proves which message a turn is running;
  * the turn end only proves that this execution segment stopped. This module
  * joins claims on the exact `(childSessionId, turn)` pair and reports the
- * `started` execution fact. It deliberately does not turn `turn/end` into a
- * business Delivery outcome: a Delivery may continue in a later turn after a
- * trusted `agent-message` wake-up.
+ * `started` execution fact. Normal turn completion leaves the Delivery open
+ * for a trusted `agent-message` continuation. An exact live `aborted` with an
+ * official user/parent/disposed cause also reports interruption for a Host CAS.
  *
  * What it deliberately does NOT do:
  *
@@ -40,6 +40,9 @@ export interface LocusTurnCorrelationEvent {
   readonly executionId: string
   readonly turnId: string
   readonly correlation: DeliveryCorrelation
+  readonly reason?: 'turn-interrupted'
+  /** Explicit official live cancellation cause, never a synthesized interrupted tail. */
+  readonly cancelReason?: 'user' | 'parent' | 'disposed'
 }
 
 /** The source proof accepted for a caller-bound current capability. */
@@ -173,7 +176,7 @@ export interface LocusInboxClaim {
 export interface LocusTurnEnd {
   readonly childSessionId: string
   readonly turn: number
-  /** Runtime outcome; anything other than a completion settles as failed. */
+  /** Runtime outcome; only explicit official aborted causes prove interruption. */
   readonly outcome: 'completed' | 'aborted' | 'failed' | 'blocked'
   readonly reason?: string
 }
@@ -504,16 +507,25 @@ export function createLocusTurnObserver(
   }
 
   const settleTurn = (key: string, observed: ObservedTurn): void => {
-    // A segment end is diagnostic only. It never emits a terminal business
-    // event and never clears the current Delivery lineage; a later trusted
-    // agent-message may continue the same current request.
+    // Normal completion retains lineage for a later trusted continuation.
+    // Only an official live cancellation with an explicit cause proves interruption.
     if (observed.end === undefined) return
     if (observed.unresolved.size > 0) return
     const claimed = observed.deliveries.size === 1 && !observed.mixed && !observed.saturated
       ? observed.deliveries.values().next().value as PendingTurn | undefined
       : undefined
     if (claimed !== undefined && (claimed.status === undefined || isPendingDeliveryStatus(claimed.status))) {
-      retainCurrent(key, claimed)
+      const cause = observed.end.reason
+      if (observed.end.outcome === 'aborted' && (cause === 'user' || cause === 'parent' || cause === 'disposed') &&
+          claimed.correlation.childSessionId === observed.childSessionId && observed.foreign.size === 0) {
+        emit({
+          phase: 'failed', deliveryId: claimed.deliveryId, executionId: claimed.executionId,
+          turnId: observed.turnId, correlation: claimed.correlation,
+          reason: 'turn-interrupted', cancelReason: cause,
+        })
+      } else {
+        retainCurrent(key, claimed)
+      }
     }
     clearTurn(key)
     rememberEnded(key)

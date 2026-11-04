@@ -1,5 +1,7 @@
 /** Real Pet entry + Cordis/Storage/Tools: exercise Host wiring, not helper replicas. */
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, stat, rm } from 'node:fs/promises'
+import WebServer from '@deepseek-ai/dsh-host-webserver'
+import { PET_PREPARE_STOP_ROUTE } from '../src/host/locus/stop-preparation.js'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -21,8 +23,13 @@ import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES, LOCUS_DELEGATION_DENYLIST } from '../src/host/locus/composition.js'
 
 const hosts: Context[] = []
+const temporaryRoots: string[] = []
 afterEach(async () => {
   for (const ctx of hosts.splice(0)) await ctx.fiber.dispose()
+  for (const directory of temporaryRoots.splice(0)) {
+    if (!path.isAbsolute(directory) || path.dirname(directory) !== tmpdir() || !/^pet-host-(wiring|project)-/.test(path.basename(directory))) throw new Error('Unsafe test cleanup path')
+    await rm(directory, { recursive: true, force: true })
+  }
   vi.restoreAllMocks()
 })
 
@@ -36,6 +43,7 @@ function deferred() {
 async function host() {
   const home = await mkdtemp(path.join(tmpdir(), 'pet-host-wiring-'))
   const project = await mkdtemp(path.join(tmpdir(), 'pet-host-project-'))
+  temporaryRoots.push(home, project)
   const ctx = new Context()
   hosts.push(ctx)
   await ctx.plugin(Storage)
@@ -91,8 +99,12 @@ async function host() {
       petWorkspace.sessionIds.push(id)
     }), detachSession: async () => {},
   }
-  ctx.provide('webServer', { register: (route: unknown) => { routes.push(route); return () => {} } })
-  ctx.provide('connection', { requestRejection: () => undefined })
+  await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
+  const registerRoute = ctx.webServer.register.bind(ctx.webServer)
+  vi.spyOn(ctx.webServer, 'register').mockImplementation(route => { routes.push(route); return registerRoute(route) })
+  const authentication = { requestRejection: vi.fn((_request: unknown): 401 | 403 | undefined => undefined), authenticatedUrl: (origin: string) => `${origin}/?token=fixture-only` }
+  ctx.provide('connection', authentication)
+  ctx.provide('profileContext', { name: 'web', dir: home })
   ctx.provide('workspaceRegistry', { list: () => [workspace, petWorkspace], get: (id: string) => id === 'ws-pet' ? petWorkspace : id === 'ws' ? workspace : undefined, create: async () => petWorkspace, archivedSessionIds: [], archiveSession: async () => {} })
   ctx.provide('sessions', { list: () => [...sessions.values()], get: (id: string) => sessions.get(id), flush: async () => true })
   ctx.provide('agents', { list: () => [...agents.values()], get: (id: string) => agents.get(id), resume: async () => undefined, create: async () => { throw new Error('unexpected main creation') } })
@@ -165,7 +177,7 @@ async function host() {
   })
   const controller = (capability as channelCapability.AvailableLocusChannelCapability).controller
   const execute = (agent: any, name: string) => ctx.tools.execute({ agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
-  return { ctx, home, project, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, replyToTarget, controlMessage, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
+  return { ctx, home, project, authentication, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, replyToTarget, controlMessage, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
 }
 
 async function seedNotCreated(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; threadId?: string } = { chatId: 'chat' }) {
@@ -186,7 +198,74 @@ function admit(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; 
   })
 }
 
+async function ownerRoute(h: Awaited<ReturnType<typeof host>>, route: string, body: Record<string, unknown>) {
+  const origin = `http://127.0.0.1:${h.ctx.webServer.port}`
+  const response = await fetch(`${origin}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify(body) })
+  const text = await response.text()
+  let result
+  try { result = JSON.parse(text) } catch { result = text }
+  return { status: response.status, body: result }
+}
+async function stopRequest(h: Awaited<ReturnType<typeof host>>, action = 'prepare', extra: Record<string, unknown> = {}) {
+  const filename = path.join(h.home, 'run', 'dsh-pet-stop', `${h.ctx.webServer.port}.json`)
+  const descriptor = JSON.parse(await readFile(filename, 'utf8'))
+  expect((await stat(filename)).mode & 0o777).toBe(0o600)
+  expect((await stat(path.dirname(filename))).mode & 0o777).toBe(0o700)
+  return ownerRoute(h, PET_PREPARE_STOP_ROUTE, { v: 1, action, nonce: 'host-stop-request', expectedHostPid: descriptor.pid, expectedBootId: descriptor.bootId, deadlineAt: Date.now() + 10_000, ...extra })
+}
+
 describe('actual Host three-tier assembly', () => {
+  it('prepares only after exact owned native close and Pet commit; backlog waits for resume', async () => {
+    const h = await host()
+    await seedNotCreated(h); await admit(h); await admit(h, { chatId: 'chat' }, 'successor')
+    const closed = deferred()
+    h.drain.mockImplementation(async (parent, children) => {
+      expect(parent).toBe(h.main); expect(children).toEqual(['child'])
+      const child = h.agents.get('child')
+      child.session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: { kind: 'parent' } } })
+      h.ctx.emit('session/event' as never, child.session, child.session.snapshotEvents().at(-1))
+      await closed.promise
+      h.agents.delete('child')
+    })
+    let prepared = false
+    const operation = stopRequest(h).then(result => { prepared = true; return result })
+    try {
+    await vi.waitFor(() => expect(h.repository.listDeliveries().find(row => row.messageId === 'original-message')?.startupDisposition).toBe('turn-interrupted'))
+    expect(prepared).toBe(false); expect(h.queue).not.toHaveBeenCalled()
+    expect(await admit(h, { chatId: 'chat' }, 'during-stop')).toMatchObject({ kind: 'refused', reason: 'shutdown-frozen' })
+    const management = await ownerRoute(h, '/dsh-pet/api/locus-default-qa', { parentSessionId: 'ordinary' })
+    expect(management.body).toMatchObject({ ok: false, error: 'LOCUS_BUSY' })
+    expect((await ownerRoute(h, '/dsh-pet/api/locus', {})).status).toBe(200)
+    closed.resolve()
+    expect(await operation).toMatchObject({ status: 200, body: { ok: true, data: { phase: 'prepared', hostPid: process.pid } } })
+    expect(h.queue).not.toHaveBeenCalled()
+    expect(await stopRequest(h, 'resume')).toMatchObject({ body: { ok: true, data: { phase: 'active' } } })
+    expect(h.queue).toHaveBeenCalledTimes(1)
+    expect(h.agents.has('ordinary')).toBe(true)
+    } finally { closed.resolve(); await operation.catch(() => undefined) }
+  })
+
+  it('authenticates and rejects foreign wire fields before freezing or draining', async () => {
+    const h = await host()
+    h.authentication.requestRejection.mockReturnValueOnce(401)
+    expect((await stopRequest(h)).status).toBe(401)
+    expect(await h.controller.runWhileActive!(async () => true)).toBe(true)
+    expect((await stopRequest(h, 'prepare', { childSessionId: 'ordinary' })).status).toBe(400)
+    expect((await stopRequest(h, 'prepare', { expectedHostPid: process.pid + 1 })).status).toBe(400)
+    expect(h.drain).not.toHaveBeenCalled()
+    expect(await h.controller.runWhileActive!(async () => true)).toBe(true)
+  })
+
+  it('keeps admission frozen after native durability failure until explicit resume', async () => {
+    const h = await host()
+    await seedNotCreated(h); await admit(h)
+    h.drain.mockRejectedValueOnce(new Error('native durable close failed'))
+    expect((await stopRequest(h)).body).toMatchObject({ ok: false })
+    expect((await stopRequest(h, 'status')).body).toMatchObject({ data: { phase: 'failed' } })
+    await expect(h.controller.runWhileActive!(async () => true)).rejects.toThrow('frozen')
+    expect((await stopRequest(h, 'resume')).body).toMatchObject({ ok: true, data: { phase: 'active' } })
+    expect(h.repository.listDeliveries()[0]?.status).toBe('current')
+  })
   it('cold tool-tier control preserves the pending receipt through the actual Host adapter', async () => {
     const h = await host()
     const config = new PetRepository(h.ctx.storage.domain.get(PET_DOMAIN_NAME) as never)

@@ -39,12 +39,31 @@ function queryWith(events: readonly FakeSessionEvent[], parent: string | undefin
 const noop = () => undefined
 
 describe('冷读证据与真实持久 current/backlog 的接缝', () => {
-  it.each([
-    { name: 'prepared 合成中断只等待，不重发', live: false, endTime: undefined, interrupted: false },
-    { name: '不可区分中断保持等待', live: false, endTime: 1002, interrupted: false },
-    { name: '真实中断立即结算推进', live: false, endTime: 1500, interrupted: true },
-    { name: 'live 中断不剔除', live: true, endTime: 1002, interrupted: true },
-  ])('$name', async ({ live, endTime, interrupted }) => {
+  it.each<{
+    name: string; live: boolean; endTime: number | undefined; interrupted: boolean
+    reason: Record<string, unknown>; inboxId?: string; boundTurn?: number; proofExecutionId?: string
+  }>([
+    { name: 'prepared 合成中断只等待，不重发', live: false, endTime: undefined, interrupted: false, reason: { kind: 'interrupted' } },
+    { name: '不可区分中断保持等待', live: false, endTime: 1002, interrupted: false, reason: { kind: 'interrupted' } },
+    { name: '真实中断立即结算推进', live: false, endTime: 1500, interrupted: true, reason: { kind: 'interrupted' } },
+    { name: 'live 中断不剔除', live: true, endTime: 1002, interrupted: true, reason: { kind: 'interrupted' } },
+    ...['user', 'parent', 'disposed'].flatMap(kind => [false, true].map(live => ({
+      name: `${live ? 'live' : 'prepared'} 真实 aborted ${kind} 立即结算推进`,
+      live, endTime: 1002, interrupted: true, reason: { kind: 'aborted', reason: { kind } },
+    }))),
+    ...[
+      { name: 'wrong inbox UUID', inboxId: 'inbox-other' },
+      { name: 'wrong bound turn', boundTurn: 2 },
+      { name: 'stale execution proof', proofExecutionId: 'exec-other' },
+    ].map(mismatch => ({
+      ...mismatch, live: false, endTime: 1002, interrupted: false,
+      reason: { kind: 'aborted', reason: { kind: 'disposed' } },
+    })),
+    ...[undefined, { kind: 'unknown' }, { kind: 'legacy' }, { kind: 'hook', reason: 'plugin stop' }].map(cause => ({
+      name: `aborted ${cause?.kind ?? 'missing cause'} keeps waiting`, live: false, endTime: 1002, interrupted: false,
+      reason: { kind: 'aborted', reason: cause },
+    })),
+  ])('$name', async ({ live, endTime, interrupted, reason, inboxId, boundTurn, proofExecutionId }) => {
     const world = await openThreeTier()
     try {
       const established = await world.controller.ensureGroup({ chatId: 'cold-read-chat', parentSessionId: 'work-1' })
@@ -56,14 +75,19 @@ describe('冷读证据与真实持久 current/backlog 的接缝', () => {
       const b = await world.durable.acceptDelivery({ ...correlation, messageId: 'B', senderOpenId: 'owner', text: 'backlog B', acceptedAt: 1001 })
       await world.durable.claimCurrentDelivery({ correlation, now: 1002 })
       await world.durable.bindQueued({ deliveryId: a.record.deliveryId, correlation, executionId: 'exec-A', inboxMessageId: INBOX, queuedAt: 1003 })
+      await world.durable.bindTurn({ deliveryId: a.record.deliveryId, correlation, executionId: 'exec-A', turnId: `${childSessionId}#${boundTurn ?? 1}`, startedAt: 1004 })
+      const before = world.durable.getDelivery(a.record.deliveryId)!
       const query = new FakeSessionQuery()
       query.add(childSessionId, row.parentSessionId, [
-        ...OPEN_TURN,
-        ...(endTime === undefined ? [] : [event('turn/end', 3, endTime, { turn: 1, reason: { kind: 'interrupted' } })]),
+        ...OPEN_TURN.map(entry => entry.type === 'user/message' ? { ...entry, data: { id: inboxId ?? INBOX } } : entry),
+        ...(endTime === undefined ? [] : [event('turn/end', 3, endTime, { turn: 1, reason })]),
       ], live)
       const report = await world.durable.reconcileStartup({
         now: 2000,
-        deliveryProof: record => proveStartupDeliveryFromColdRead({ delivery: record, parentSessionId: row.parentSessionId, query, log: noop }),
+        deliveryProof: async record => {
+          const proof = await proveStartupDeliveryFromColdRead({ delivery: record, parentSessionId: row.parentSessionId, query, log: noop })
+          return proof === undefined || proofExecutionId === undefined ? proof : { ...proof, executionId: proofExecutionId }
+        },
       })
       // Evidence never authorizes resending A, even when it cannot close A yet.
       expect(report.replayableDeliveries.some(record => record.deliveryId === a.record.deliveryId)).toBe(false)
@@ -72,7 +96,11 @@ describe('冷读证据与真实持久 current/backlog 的接缝', () => {
         expect(world.durable.getDelivery(a.record.deliveryId)).toMatchObject({ status: 'failed', startupDisposition: 'turn-interrupted' })
         expect(next?.deliveryId).toBe(b.record.deliveryId)
       } else {
-        expect(world.durable.getDelivery(a.record.deliveryId)).toMatchObject({ status: 'current', inboxMessageId: INBOX })
+        expect(world.durable.getDelivery(a.record.deliveryId)).toMatchObject({
+          status: 'current', inboxMessageId: INBOX, executionId: before.executionId,
+          turnId: before.turnId, deadlineAt: before.deadlineAt,
+        })
+        expect(report.failedDeliveries).toEqual([])
         expect(next).toBeUndefined()
       }
       expect(world.durable.getLocus(row.id)?.generation).toBe(row.generation)

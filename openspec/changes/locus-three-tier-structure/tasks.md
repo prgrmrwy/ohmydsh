@@ -199,13 +199,13 @@
 - [x] 32.4 修复 57203707 已受控合入 main 0090da10 并两次生产构建，第二次 no changes；H 的受控重启已于 15:48:34 ready，加载该版本
 - [ ] 32.5 NOTICE-1 的真机成功回执仍待新唤醒；H 自动释放未过，27.3/27.4 不勾选
 
-## 33. H 恢复范围增补建议（待确认，不开始实施）
+## 33. H 恢复范围增补（所有者已确认，实施中）
 
-与 proposal 的 H 修订建议对应；已有真实证据过滤不能删除。范围确认后再更新正式 delta specs、design 和 test-plan，原已通过的三层/档位/读取验收保留。
+所有者已选择修复并重测；与 proposal 的 H 修订对应，同步正式 delta specs、design 和 test-plan。已有真实证据过滤不能删除，原已通过的三层/档位/读取验收保留。
 
-- [ ] 33.1 Pet 恢复判据与规范接受真实、持久化且唯一绑定的原生 aborted；真实官方取消与 prepared/UUID 错配对照证明不伪造、不重发
-- [ ] 33.2 Host owner 的停机排空握手冻结新建/派发并 await 官方 drain；真实 Host 接缝证明只处理自有子会话、失败/超时不回 ready、维护状态可明确恢复
-- [ ] 33.3 launcher 在 SIGTERM 前消费同一 Host 的受鉴权握手；脚本测试覆盖成功、失败、过期应答和旧 Host 首次载入路径，不静默绕过
+- [x] 33.1 Pet 恢复判据与规范接受真实、持久化且唯一绑定的原生 aborted（reason.kind 为 user/parent/disposed）；真实官方取消 → JSONL → 全新 prepared 冷读、UUID/turn/execution 错配与合成对照通过，5 文件 113 项通过；不伪造、不重发
+- [x] 33.2 Host owner 的停机排空握手冻结新建/派发并 await 官方 drain；真实 Host 接缝证明只处理自有子会话、失败/超时不回 ready、维护状态可明确恢复（`locus-host-wiring` 实际 WebServer 路由 + `locus-shutdown-freeze` 21 项 + `locus-stop-preparation` + `locus-interrupted-current-cas`；dsh-pet 全量 3012 通过 / 4 跳过）
+- [x] 33.3 launcher 在 SIGTERM 前消费同一 Host 的受鉴权握手；脚本测试覆盖成功、失败、过期应答和旧 Host 首次载入路径，不静默绕过（无 Pet profile 由 `scripts/launcher/no-pet-stop-plugin.mjs` 经官方 Loader/appReady 提供同协议；官方构建图专项 111/111，仓库全量 770 通过 / 0 失败 / 3 跳过）
 - [ ] 33.4 审查、定向/相关全量及严格校验后受控部署；新请求 H2 真机证明中断结算、后继派发及 safe 通知（原话题占位已释放，可复用原 child），旧 H1 不伪装为自动恢复成功
 
 ## 27. 收尾

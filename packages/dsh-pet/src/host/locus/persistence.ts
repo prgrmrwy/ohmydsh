@@ -2368,6 +2368,9 @@ export class LocusRepository {
     readonly outcome: DeliveryOutcome
     readonly settledAt: number
     readonly failureReason?: string
+    /** Required for a current row: captured before reading its termination proof. */
+    readonly inboxMessageId?: string
+    readonly expectedRevision?: number
   }): Promise<LocusDeliveryMutation> {
     return this.enqueue(async () => {
       assertIdentifier(input.deliveryId, 'deliveryId')
@@ -2385,18 +2388,32 @@ export class LocusRepository {
       }
       if (current.status === input.outcome) return mutation(current, false, 'already-in-state')
       if (TERMINAL_DELIVERY_STATUSES.has(current.status)) return mutation(current, false, 'already-terminal')
-      if (current.status !== 'running') return mutation(current, false, 'invalid-transition')
+      const interruptedCurrent = current.status === 'current' && input.outcome === 'failed' && input.failureReason === 'turn-interrupted'
+      if (current.status !== 'running' && !interruptedCurrent) return mutation(current, false, 'invalid-transition')
       if (input.settledAt < (current.startedAt ?? current.queuedAt ?? current.acceptedAt ?? 0)) {
         throw new LocusError('INVALID_LOCUS', 'settledAt must not precede prior Delivery timestamps')
       }
-      const next: DeliveryRecord = Object.freeze({
-        ...current,
-        status: input.outcome,
-        executionId: input.executionId,
-        turnId: input.correlation.turnId,
-        ...(input.outcome === 'settled' ? { settledAt: input.settledAt } : { failedAt: input.settledAt }),
-        ...(input.failureReason !== undefined ? { failureReason: input.failureReason } : {}),
-      })
+      let next: DeliveryRecord
+      if (interruptedCurrent) {
+        if (input.inboxMessageId === undefined || current.inboxMessageId !== input.inboxMessageId) return mutation(current, false, 'correlation-mismatch')
+        if (input.expectedRevision === undefined || current.revision !== input.expectedRevision) return mutation(current, false, 'revision-mismatch')
+        const active = this.getCurrentLocus(current.endpoint)
+        if (active?.id !== current.locusId || active.state !== 'active' || active.generation !== current.generation || active.childSessionId !== current.childSessionId) return mutation(current, false, 'correlation-mismatch')
+        const abandoned = applyAbandonInterruptedDelivery({
+          byMessageId: { [current.messageId]: current }, byDeliveryId: { [current.deliveryId]: current }, nextDeliverySequence: current.sequence + 1,
+        }, { ...input.correlation, deliveryId: current.deliveryId, expectedRevision: input.expectedRevision, now: input.settledAt })
+        if (!abandoned.changed || abandoned.record === undefined) return mutation(current, false, 'invalid-transition')
+        next = Object.freeze({ ...abandoned.record, stateRevision: abandoned.record.revision! })
+      } else {
+        next = Object.freeze({
+          ...current,
+          status: input.outcome,
+          executionId: input.executionId,
+          turnId: input.correlation.turnId,
+          ...(input.outcome === 'settled' ? { settledAt: input.settledAt } : { failedAt: input.settledAt }),
+          ...(input.failureReason !== undefined ? { failureReason: input.failureReason } : {}),
+        })
+      }
       const locus = this.getLocus(current.locusId)
       const afterLocus = locus !== undefined && locus.busy && !this.hasPendingDelivery(current.locusId, current.generation, current.deliveryId)
         ? withLocusBusy(locus, false, Math.max(input.settledAt, locus.updatedAt))
