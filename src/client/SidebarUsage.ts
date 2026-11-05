@@ -19,7 +19,7 @@ import { formatTime, type Card, type CardWindow, type CardsView } from './view-m
  * Wide sidebar: an accordion. The header row is the only interactive surface
  * (except the refresh button): clicking it toggles the detail, which grows in
  * flow and takes height away from the session list instead of covering it.
- * Collapsed, it shows one weekly row per upstream (at most five) plus a
+ * Collapsed, it shows one weekly row per upstream (the body caps at 320px) plus a
  * decorative overflow chevron. Collapsed sidebar: one icon that opens the same
  * content as a 320px anchored popover.
  *

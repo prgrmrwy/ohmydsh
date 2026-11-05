@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.7 — 2026-11-05
+
+- **README 演示图按当前界面重截。** `docs/usage.png`/`usage.en.png`/`settings.png`/`settings.en.png` 换成 0.6.7 构建在隔离 DSH_HOME（`ws prepare-preview`，端口 3228）里、对本地 loopback mock Magpie 网关注入合成数据的真实截图：收起卡展示 Claude 的 5 小时/周/月三行与各自到期时间、Codex 91%、OpenCode Go 三档位、DeepSeek 余额和一条读取失败；设置页展示三个档位 checkbox、自动刷新 5 分钟与连接线路。中英各一套，界面语言与 README 语言一致；`docs/SCREENSHOTS.md` 同步登记（usage 为 deviceScaleFactor 3，settings 为 2）。
+- 顺手修掉开关说明里过期的「最多 5 行」：0.6.11 起收起正文按 320px 限高，中英文案与代码注释一并改成当前行为。
+- **适配上游 DSH 0.2.1 的 `llm/adapters-updated` 语义。** 宿主现在自行包含该事件监听器的异常（只记录告警，不再让监听器否决提交）；旧的「首次注册 INVARIANT 不当作成功」用例改为「注册按提交结果处理」，current spec 同步说明，避免把宿主已包含的监听器异常误判成注册失败。
+- 无用户可见行为变化；包内 535 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.6 — 2026-11-04
 
 **侧栏额度卡：到期时间、窗口档位多选与滚动细节。**
