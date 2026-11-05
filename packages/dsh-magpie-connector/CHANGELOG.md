@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.8 — 2026-11-05
+
+- **修复独立安装（镜像 CI）下 `owner-persistence` 用例对宿主版本的假设。** `llm/adapters-updated` 监听器异常的处理随 DSH 版本不同：0.2.0 会冒泡成 `INVARIANT`，0.2.1 起宿主自行包含（只 warn、不让监听器否决提交）。用例改为按实际宿主语义分支断言，两种版本下都验证「归属与配置文件不被破坏」，0.6.7 因此在镜像 CI 的 Verify 步失败、npm 未发布；本版只动测试与版本号，用户可见行为与 0.6.7 完全一致。
+- 包内 535 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.7 — 2026-11-05
 
 - **README 演示图按当前界面重截。** `docs/usage.png`/`usage.en.png`/`settings.png`/`settings.en.png` 换成 0.6.7 构建在隔离 DSH_HOME（`ws prepare-preview`，端口 3228）里、对本地 loopback mock Magpie 网关注入合成数据的真实截图：收起卡展示 Claude 的 5 小时/周/月三行与各自到期时间、Codex 91%、OpenCode Go 三档位、DeepSeek 余额和一条读取失败；设置页展示三个档位 checkbox、自动刷新 5 分钟与连接线路。中英各一套，界面语言与 README 语言一致；`docs/SCREENSHOTS.md` 同步登记（usage 为 deviceScaleFactor 3，settings 为 2）。
