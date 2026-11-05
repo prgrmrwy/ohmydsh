@@ -117,6 +117,7 @@
 - 取值：`read-only`（沙箱 `read-only`，工具面不含 bash/skill）、`danger-full-access`（沙箱 `danger-full-access`，加 bash/skill，只接受 allowlist 成员的 @）。任何档位都不开放委派工具。
 - 新建、原地重建、`stopped` 重新启用、改绑、迁移后，一律为 `read-only`。
 - 命令：飞书侧统一为 `/access read|full`（短参 `-a`）；原 `/scope`、`/tools`、`-s`、`-t` 不再改变状态，回执提示改用 `/access`。
+- 访问变更只对 `not-created` / `active` 行受理；`stopped` / `invalid` 行以 `INVALID_REQUEST` 拒绝，因为重新启用或原地重建本来就会重置为只读（实现阶段补充，2026-11-06）。
 - **变更流程（ponytail-2 #3、#4）**：
   1. `acquireAccessChange(locusId)`：作为仓储写队列（`enqueue`）里的一个短操作，在队列内复查无未终态投递、不在 `accessChanging` 集合中，加入集合并返回当时的 `{locusId, revision}`。`acceptDelivery` 在它自己的队列回调里检查这个集合；stop、rebind、migrate、原地重建的提交也在队列内检查集合。不在整个外部操作期间占用队列。
   2. 证明 live 空闲：保留现有的 turn 边界检查（`index.ts:1038`，含 GUI/inquiry turn）。不空闲、或第 3 步释放失败，都以 `LOCUS_BUSY` 拒绝。

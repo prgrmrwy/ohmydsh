@@ -818,6 +818,170 @@ export type LocusRecordView = PetLocusRecordView
 export const LOCUS_VIEW_ROUTE = LOCUS_ROUTES.view
 export const LOCUS_DISCOVERY_ROUTE = LOCUS_ROUTES.discovery
 export const LOCUS_ACTION_ROUTE = LOCUS_ROUTES.action
+
+// ---------------------------------------------------------------------------
+// v20 isomorphic-entry management wire (openspec pet-locus-isomorphic-entries)
+//
+// ADDITIVE contract freeze (task 1.3). Everything below carries a `V20` suffix
+// and lives beside the pre-v20 types above; the owners of the management
+// surface (2D) and the Host routes migrate callers onto these and delete the
+// old `PetLocus*` shapes in their own scope. Nothing here imports from the
+// Host: the client bundle compiles this file on its own.
+// ---------------------------------------------------------------------------
+
+/** The five Host error codes of the v20 locus actions (design D5, D6, D8). */
+export const PET_LOCUS_ERROR_CODES_V20 = [
+  'INVALID_REQUEST',
+  'LOCUS_NOT_FOUND',
+  'LOCUS_CONFLICT',
+  'LOCUS_BUSY',
+  'EXPLICIT_PARENT_CONFLICT',
+] as const
+
+export type PetLocusErrorCodeV20 = (typeof PET_LOCUS_ERROR_CODES_V20)[number]
+
+/** Error body of a refused v20 locus action. */
+export interface PetLocusErrorBodyV20 {
+  readonly error: PetLocusErrorCodeV20
+  readonly message: string
+}
+
+/** Exactly the four row states of v20 (design D2); snapshot validation accepts no others. */
+export const PET_LOCUS_STATES_V20 = ['not-created', 'active', 'invalid', 'stopped'] as const
+
+export type PetLocusStateV20 = (typeof PET_LOCUS_STATES_V20)[number]
+
+/** The one access value of an entry (design D8). */
+export const PET_LOCUS_ACCESS_MODES_V20 = ['read-only', 'danger-full-access'] as const
+
+export type PetLocusAccessModeV20 = (typeof PET_LOCUS_ACCESS_MODES_V20)[number]
+
+/** The work session (W) a group of entries serves; availability describes W (design D10). */
+export interface PetLocusWorkViewV20 {
+  readonly sessionId: string
+  readonly title?: string
+  /** `unknown`: the cold read could not prove it. Rebind is greyed for anything but `archived`. */
+  readonly availability: 'available' | 'archived' | 'missing' | 'unknown'
+}
+
+/** The locus main session (M) a chat's entries hang under. */
+export interface PetLocusMainViewV20 {
+  readonly sessionId: string
+  readonly title?: string
+  readonly availability?: 'available' | 'archived' | 'missing'
+}
+
+/**
+ * One entry row: a chat/doc root (group row) or a topic/comment (topic row).
+ * No generation, permission, toolTier, contextAnchor, childComposition or
+ * history count exists (design D2, D10).
+ */
+export interface PetLocusEntryViewV20 {
+  readonly locusId: string
+  /** Fence value for stop / access / rebind. */
+  readonly revision: number
+  readonly endpoint: PetLocusEndpointView
+  /** Reserved-or-created session id; `state` says whether it exists yet. */
+  readonly sessionId: string
+  readonly state: PetLocusStateV20
+  readonly invalidReason?: string
+  readonly accessMode: PetLocusAccessModeV20
+  readonly grantedBy?: string
+  readonly verifiedAt?: number
+  /** Any non-terminal Delivery exists: drives the 「投递中」 badge and greys stop / access (design D10). */
+  readonly inFlight: boolean
+  /** A `current` (queued / running / finishing included) Delivery exists: the only thing that greys rebind (design D10). */
+  readonly hasCurrentDelivery: boolean
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly stoppedAt?: number
+}
+
+/** A group row (chat or document root) with the topic rows nested under it by `chatId`. */
+export interface PetLocusChatViewV20 {
+  readonly group: PetLocusEntryViewV20
+  readonly topics: readonly PetLocusEntryViewV20[]
+  readonly locusMain: PetLocusMainViewV20
+  readonly workspace: PetLocusWorkspaceView
+  /** The archived W this chat was rebound from, when it was rebound. */
+  readonly reboundFrom?: string
+  /** This group is its M's default Q&A group. Group rows only. */
+  readonly defaultQa?: boolean
+}
+
+/** Chats grouped by the work session they serve. */
+export interface PetLocusWorkGroupViewV20 {
+  readonly work: PetLocusWorkViewV20
+  readonly chats: readonly PetLocusChatViewV20[]
+}
+
+/** Complete v20 management snapshot. */
+export interface PetLocusManagementViewV20 {
+  /** Monotonic snapshot generation. */
+  readonly generation: number
+  readonly works: readonly PetLocusWorkGroupViewV20[]
+  /** `LOCUS_WRITE_ENABLED`: when false only the 「完全访问」 option is disabled (design D8, D10). */
+  readonly writeEnabled: boolean
+}
+
+/** The only fence of a v20 mutation: the entry row's identity and revision (design D3). */
+export interface PetLocusFenceV20 {
+  readonly expectedLocusId: string
+  readonly expectedRevision: number
+}
+
+/** Stop one entry; accepted only when it has no non-terminal Delivery (design D7). */
+export interface PetLocusStopActionV20 extends PetLocusFenceV20 {
+  readonly action: 'stop'
+  readonly endpoint: PetLocusEndpointInput
+}
+
+/** Set one entry's access mode (design D8). */
+export interface PetLocusAccessActionV20 extends PetLocusFenceV20 {
+  readonly action: 'access'
+  readonly endpoint: PetLocusEndpointInput
+  readonly mode: PetLocusAccessModeV20
+}
+
+/** Rebind a chat whose W is archived to another W (design D6). The fence is the group row's. */
+export interface PetLocusRebindActionV20 extends PetLocusFenceV20 {
+  readonly action: 'rebind'
+  readonly chatId: string
+  /** Full sessionId of the new work session; a short code is never resolved. */
+  readonly workSessionId: string
+}
+
+/** Read-only actions that share the route (design D10). */
+export interface PetLocusViewActionV20 {
+  readonly action: 'view'
+}
+
+export interface PetLocusDefaultQaActionV20 {
+  readonly action: 'defaultQa'
+  readonly parentSessionId: string
+  readonly groupName?: string
+}
+
+export interface PetLocusTodosActionV20 {
+  readonly action: 'todos'
+}
+
+/** The v20 `locus-action` request union (replaces `PetLocusActionRequest`). */
+export type PetLocusActionRequestV20 =
+  | PetLocusStopActionV20
+  | PetLocusAccessActionV20
+  | PetLocusRebindActionV20
+  | PetLocusViewActionV20
+  | PetLocusDefaultQaActionV20
+  | PetLocusTodosActionV20
+
+/** Result of a v20 stop / access / rebind: the chat as it is after the action. */
+export interface PetLocusActionResultV20 {
+  readonly action: 'stop' | 'access' | 'rebind'
+  readonly chat: PetLocusChatViewV20
+  /** Honest receipt text; an access change never claims it was applied (design D8). */
+  readonly receipt?: string
+}
 export const LOCUS_DEFAULT_QA_ROUTE = LOCUS_ROUTES.defaultQa
 export const LOCUS_BIND_ROUTE = LOCUS_ROUTES.bind
 export const LOCUS_UNBIND_ROUTE = LOCUS_ROUTES.unbind

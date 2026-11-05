@@ -691,7 +691,7 @@ export const petLocusIndex = z.object({
 export const DOC_COMMENT_QUOTE_MAX = 2_000
 
 /** Durable association between one accepted platform message and one child turn. */
-export const petLocusDelivery = z.object({
+export const petLocusDeliveryBase = z.object({
   deliveryId: z.string().min(1),
   messageId: z.string().min(1),
   endpoint: petLocusEndpoint,
@@ -774,7 +774,16 @@ export const petLocusDelivery = z.object({
   inProgressReactionId: z.string().min(1).optional(),
   terminalFeedbackAt: z.number().int().nonnegative().optional(),
   terminalFeedbackError: z.string().optional(),
-}).superRefine((delivery, issueCtx) => {
+})
+
+/**
+ * The fields {@link refineLocusDelivery} reads. It never touches `generation`
+ * or `childSessionId`, so the v20 Delivery row (contract-v20.ts) shares it.
+ */
+export type LocusDeliveryRefinable = Omit<z.infer<typeof petLocusDeliveryBase>, 'generation' | 'childSessionId'>
+
+/** Cross-field Delivery invariants, shared by the v19 and v20 Delivery schemas. */
+export function refineLocusDelivery(delivery: LocusDeliveryRefinable, issueCtx: z.core.$RefinementCtx<unknown>): void {
   const hasExecution = delivery.executionId !== undefined
   const hasTurn = delivery.turnId !== undefined
   const hasInboxMessage = delivery.inboxMessageId !== undefined
@@ -935,7 +944,9 @@ export const petLocusDelivery = z.object({
       delivery.feedbackTarget.messageId !== delivery.messageId) {
     issueCtx.addIssue({ code: 'custom', message: 'Delivery feedbackTarget must derive from endpoint/message' })
   }
-})
+}
+
+export const petLocusDelivery = petLocusDeliveryBase.superRefine(refineLocusDelivery)
 
 /**
  * One source-switch notice an endpoint is still owed.
