@@ -36,6 +36,7 @@ Coverage includes the full shipped base+Web profile and presets stopping without
 Limits:
 
 - `-p/--port` is mandatory; the default port belongs to the web Host. `$DSH_HOME/profiles/<profile>/cordis.yml` must already exist.
+- If the profile's `cordis.patch.yml` sets `webserver` `config`, it replaces the Web bundle's port settings and the Host ignores `--port`. Keep its `port` equal to `-p`, or drop that entry.
 - Only start is managed. The no-pet-stop patch is not loaded (a custom profile bundle cannot pass its static-module attestation), so no stop descriptor is published, and `dsh stop/restart` refuses before any signal. Stop the Host through its own management script. Explicit manual maintenance can use `--allow-legacy-restart`, which skips Pet drain.
 - `build`, `-b`, `reset`, `plugin-update`, and `doctor` are refused, and the start path skips `autoUpdate`. All of these would run sync or plugin maintenance against `DSH_PROFILE` and write the ohmydsh customizations into the other profile. Worktree previews support only `web`. `history` is still allowed; each record carries `profile=<profile>`.
 - Process scope isolation is the caller's job: the launcher adds no detach logic. A Host started from inside a DSH session belongs to that Host's subprocess scope unless the caller wraps the launcher, for example `systemd-run --user --scope … dsh -p 3082 --foreground`. Background mode shares `$DSH_HOME/dsh.log` with the web Host.

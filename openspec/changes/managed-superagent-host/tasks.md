@@ -20,4 +20,5 @@
 - [x] 4.2 `npm run check:artifacts`
 - [x] 4.3 `node scripts/sync.mjs` twice (second run reports no change; `dsh.yaml` untouched)
 - [x] 4.4 `openspec validate managed-superagent-host --strict`
-- [ ] 4.5 Live acceptance on the deployment side after merging to main: `DSH_PROFILE=superagent dsh -p 3082` inside a `dsh-superagent-*.scope`, `dsh history` shows `profile=superagent`, SA survives a 3080 restart
+- [x] 4.5 Real-runtime isolated acceptance (temp DSH_HOME, ports 3291/3195, 3080/3082 untouched): superagent via launcher inside `systemd-run --user --scope` → argv `superagent --port 3291 --no-open`, cgroup `dsh-superagent-accept-*.scope`, ownership owned (web probe unknown), `profile=superagent` record, no descriptor, stop/restart refused, web stop refused, PID unchanged, `--allow-legacy-restart` stop OK; web preview → `web --patch no-pet-stop`, descriptor published, authenticated stop without legacy OK. Found: profile `webserver` config overrides `--port` (see design Known limits)
+- [ ] 4.6 Live acceptance on the deployment side after merging to main: `DSH_PROFILE=superagent dsh -p 3082` inside a `dsh-superagent-*.scope`, `dsh history` shows `profile=superagent`, SA survives a 3080 restart
