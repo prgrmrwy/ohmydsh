@@ -16,7 +16,7 @@ it('uses official archive and scoped drain, with exact root authority', async ()
   ctx.provide('workspaceRegistry')
   ctx.provide('subagents')
   ctx.set('workspaceRegistry', { archiveSession: async (id: string, options: unknown) => { calls.push([id, options]) } })
-  ctx.set('subagents', { drainContinuableDescendants: async (parents: unknown[]) => { calls.push(parents) } })
+  ctx.set('subagents', { drainDescendants: async (parents: unknown[]) => { calls.push(parents) } })
   try {
     const operations = hostRetirementOperations(ctx, root as never, ledger, { healthy: () => true, settleJobs: async () => {} }, async () => { calls.push('one-shot') })
     await operations.archive(id)

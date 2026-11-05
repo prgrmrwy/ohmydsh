@@ -49,11 +49,11 @@ function seamStub(options: { resumeFails?: boolean } = {}) {
       }),
     },
     subagents: {
-      startContinuable: vi.fn(async (spec: { childId?: string }) => {
+      startActivation: vi.fn(async (spec: { childId?: string }) => {
         started.push({ ...(spec.childId !== undefined ? { childId: spec.childId } : {}) })
-        return { childId: spec.childId ?? 'child' }
+        return { childId: spec.childId ?? 'child', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }
       }),
-      drainContinuableChildren: vi.fn(async (_p: LiveAgentLike, ids: readonly string[]) => {
+      drainChildren: vi.fn(async (_p: LiveAgentLike, ids: readonly string[]) => {
         drained.push(...ids)
       }),
       listChildren: vi.fn(async () => []),

@@ -62,7 +62,7 @@ Replace `dsh.yaml` with the minimal manifest below and run `dsh build`. No new c
 
 <!-- fixture: minimal-manifest -->
 ```yaml
-dshVersion: 0.2.0-rc.2
+dshVersion: 0.2.1-rc.5
 autoUpdate:
   enabled: false
 customizations: []
@@ -114,7 +114,6 @@ The repository declares *what should be installed*. `scripts/sync.mjs` (run by `
 | Source | Declared as | Example |
 |---|---|---|
 | Third-party npm package | `source: remote`, exact version pin | `width-tiers` |
-| Official optional bundle | `source: remote`, pinned to the DSH version | `experimental-schedule` |
 | Self-developed package in this repository | `source: local`, code in `packages/<id>/` | `dsh-memex` |
 | Self-developed package in another repository | `source: remote`, GitHub release tarball | `dsh-cockpit-bridge` |
 | Skill | `type: skill`, `skills/<id>/` | `ws` |
@@ -177,12 +176,9 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — Switches the conversation width between five tiers.
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — Turns the sidebar into a service-backed workbench with tabs.
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — Sends the session header that OpenCode Go requires, fixing missing-session errors.
-- [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context, without running tools or writing back to the main conversation. Temporarily installed from a fork release of upstream MichengAI/dsh-btw PR #16.
+- [michengai-btw](https://github.com/MichengAI/dsh-btw) — Adds `/btw` for one-off side questions answered from the current context; by default it runs no tools and does not write back to the main conversation.
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — Brings the models of a Magpie AI gateway into the model picker, alongside the direct providers.
 
-### Official optional
-
-- [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — Official scheduled-automation page, schedule tools and time context.
 
 ### Third-party resources
 
@@ -229,7 +225,8 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — Notes on sandbox permissions and the "not strictly wider" error.
 - [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — Delegates with the official fresh tools and passes only user- or lead-specified model/effort; route_subagent is an optional preview, and failures pause and ask.
 - [dsh-pet-executor](presets/dsh-pet-executor) — Preset for Pet execution sessions without the global skill provider.
-- [locus-base](presets/locus-base) — Fixed nondelegating preset for the Locus coordinating session and per-entry children.
+- [locus-base](presets/locus-base) — Fixed nondelegating preset for the Locus coordinating session.
+- [locus-child](presets/locus-child) — Read-only variant of locus-base (no write/edit) that bounds the tools of each Locus per-entry child.
 - [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
 - [memex-eval-config](patches/memex-eval-config.yml) — Adds fixed selftest workspace closures without replacing user scope or workspace settings.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.

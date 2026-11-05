@@ -10,7 +10,7 @@ import {
   type LocusChildComposition,
   type LocusCompositionPorts,
 } from '../src/host/locus/composition.js'
-import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
+import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
 
 const CHILD = 'child-1'
 
@@ -54,6 +54,7 @@ function ports(
   return {
     lookup: { find: vi.fn(() => composition()) },
     parentPreset: vi.fn(() => LOCUS_BASE_PRESET),
+    childPreset: vi.fn(() => LOCUS_CHILD_PRESET),
     writeEnabled: true,
     surface: surface(),
     policy: {
@@ -341,6 +342,40 @@ describe('unified locus child publication', () => {
       expect(deps.surface?.install).not.toHaveBeenCalled()
       expect(deps.policy?.apply).not.toHaveBeenCalled()
     }
+  })
+
+  it('子会话自身 preset 无法证明或偏离 locus-child 时不发布（工具上限即该 preset）', () => {
+    // DSH 0.2.1 has no per-request tool filter: the child's ceiling is the preset
+    // it was started with, re-mounted from the persisted selection on cold
+    // resume. A child whose own preset cannot be read, or is not the pinned
+    // one — e.g. one that fell back to its parent's composition — is refused.
+    for (const deps of [
+      { ...ports(), childPreset: undefined },
+      ports({ childPreset: vi.fn(() => { throw new Error('session gone') }) }),
+      ports({ childPreset: vi.fn(() => undefined) }),
+    ]) {
+      try {
+        composeLocusChild(agent(), deps)
+        expect.unreachable('an unprovable child preset must not publish the child')
+      } catch (error) {
+        expect((error as LocusCompositionError).reason).toBe('preset-unverified')
+      }
+      expect(deps.surface?.install).not.toHaveBeenCalled()
+      expect(deps.policy?.apply).not.toHaveBeenCalled()
+    }
+    for (const preset of [LOCUS_BASE_PRESET, 'standard', 'dsh-pet-executor']) {
+      const deps = ports({ childPreset: vi.fn(() => preset) })
+      try {
+        composeLocusChild(agent(), deps)
+        expect.unreachable(`a child on ${preset} must not be published`)
+      } catch (error) {
+        expect((error as LocusCompositionError).reason).toBe('preset-mismatch')
+      }
+      expect(deps.surface?.install).not.toHaveBeenCalled()
+    }
+    const deps = ports()
+    expect(composeLocusChild(agent(), deps)).toMatchObject({ composed: true })
+    expect(deps.childPreset).toHaveBeenCalledWith(CHILD)
   })
 
   it('主会话 preset 不影响子会话工具面', () => {

@@ -124,7 +124,7 @@ export async function forkQaChild(
   // The seed is the source session's completed-turn prefix; an in-flight turn
   // is excluded by the fork provider, which is why both entry points tell the
   // user the child sees "the most recent completed round".
-  await deps.seam.subagents.startContinuable({
+  const activation = await deps.seam.subagents.startActivation({
     provider: FORK_PROVIDER,
     label: options.label,
     childId: SessionId(options.childId),
@@ -154,6 +154,24 @@ export async function forkQaChild(
       parent: options.parent,
     },
     signal: options.signal,
+    // `parent`: when the child settles, the source session receives the
+    // settlement notice — what the earlier runtime always did and what the
+    // QA path was built against. `caller` would silence it.
+    delivery: 'parent',
+  })
+  // The result promise exists whether or not anyone reads it. Delivery state
+  // comes from the settlement observer, not from this promise, so a capture
+  // failure is only reported — never left as an unhandled rejection.
+  activation.result.then(undefined, (error: unknown) => {
+    try {
+      deps.log?.(
+        `qa child ${options.childId} activation result failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    } catch {
+      // A diagnostic sink never changes the outcome.
+    }
   })
 
   // File the child where its parent lives, so it appears under the same
@@ -344,7 +362,7 @@ async function releaseChild(
   childId: string,
 ): Promise<void> {
   try {
-    await deps.seam.subagents.drainContinuableChildren(parent, [SessionId(childId)])
+    await deps.seam.subagents.drainChildren(parent, [SessionId(childId)])
   } catch (error) {
     // Reported, not rethrown: the caller is already failing, and the original
     // reason is more useful than a cleanup error stacked on top.

@@ -6,6 +6,8 @@ import { installJudgeBoundary, type BoundaryProtocol } from './judge-boundary.js
 import { requirePristineJudgeParent } from './judge-parent.js'
 import { runBoundedJudge } from './judge-lifetime.js'
 
+/** Preset the judge parent is mounted with (registered-judge.ts): tool presentation only, no tools. */
+const JUDGE_PRESET = 'memex-eval-judge'
 const busy = new WeakSet<Agent>()
 
 export async function runHostJudge(ctx: Context, parent: Agent, protocol: BoundaryProtocol, signal: AbortSignal, timeoutMs: number, budget?: { claim(): void }): Promise<unknown> {
@@ -28,11 +30,18 @@ export async function runHostJudge(ctx: Context, parent: Agent, protocol: Bounda
     if (acknowledged?.mode !== 'MANUAL' || actual?.mode !== 'MANUAL') throw new Error('Judge parent MANUAL readback mismatch; child not spawned')
     requirePristineJudgeParent(parent)
     return await runBoundedJudge(signal, timeoutMs, async childSignal => {
-      const run = await subagents.start('spawn', {
-        parent, signal: childSignal, prompt: [{ type: 'text', text: protocol.prompt }],
-        agentOptions: { provider: protocol.provider, model: protocol.model, maxTokens: 2048,
-          ...(protocol.effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(protocol.effort) }) },
-        outputSchema: protocol.schema as ObjectJsonSchema, maxDepth: 1, toolFilter: { allow: [] },
+      // DSH 0.2.1 removed `toolFilter` from start requests (it would be silently
+      // ignored). The empty tool surface is now expressed by the judge preset,
+      // which carries only tool presentation; naming it explicitly keeps the
+      // child tool-less even if the parent's generation ever changed.
+      const run = await subagents.startActivation({
+        provider: 'spawn', label: 'memex-eval-judge', signal: childSignal, delivery: 'caller',
+        request: {
+          parent, prompt: [{ type: 'text', text: protocol.prompt }], agentPreset: JUDGE_PRESET,
+          agentOptions: { provider: protocol.provider, model: protocol.model, maxTokens: 2048,
+            ...(protocol.effort === undefined ? {} : { reasoningEffort: ReasoningEffortId(protocol.effort) }) },
+          outputSchema: protocol.schema as ObjectJsonSchema, maxDepth: 1,
+        },
       })
       return {
         result: run.result.then(result => {

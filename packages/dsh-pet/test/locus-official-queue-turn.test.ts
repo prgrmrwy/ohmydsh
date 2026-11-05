@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
-import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Query from '@deepseek-ai/dsh-session-query'
 import Agents from '@deepseek-ai/dsh-agent'
 import Llm, { LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -9,7 +9,10 @@ import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Loop from '@deepseek-ai/dsh-agent-loop'
 import Subagents from '@deepseek-ai/dsh-subagent'
+import FsLocal from '@deepseek-ai/dsh-fs-local'
+import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import { realpathSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -51,6 +54,8 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
       }
     }())
     await ctx.plugin(Loop, { agents: [], maxParallelToolCalls: 1 })
+    // DSH 0.2.1 subagent runtime injects workingDirectory (which injects fs).
+    await ctx.plugin(FsLocal, { cwd: realpathSync(tmpdir()) }); await ctx.plugin(WorkingDirectory, { defaultDirectory: realpathSync(tmpdir()) })
     await ctx.plugin(Subagents)
     await ctx.plugin(Spawn)
     const entry = await world.controller.ensureGroup({ chatId: 'queue-chat', parentSessionId: 'work-1' })
@@ -77,7 +82,7 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
     ctx.on('session/event', (session, event) => { if (session.id === childId && event.type === 'turn/end') ended({ childSessionId: childId, turn: event.data.turn, outcome: 'completed' }) })
     const a = await world.durable.acceptDelivery({ ...correlation, messageId: 'A', text: 'A', senderOpenId: 'owner', acceptedAt: 1001 })
     await world.durable.claimCurrentDelivery({ correlation, now: 1002 })
-    const start = await ctx.subagents.startContinuable({ provider: 'spawn', label: 'queue-child', childId: SessionId(childId), request: { parent, prompt: [{ type: 'text', text: 'A' }] }, signal: new AbortController().signal })
+    const start = await ctx.subagents.startActivation({ provider: 'spawn', label: 'queue-child', childId: SessionId(childId), request: { parent, prompt: [{ type: 'text', text: 'A' }] }, signal: new AbortController().signal, delivery: 'parent' })
     await world.durable.bindQueued({ deliveryId: a.record.deliveryId, correlation, executionId: 'execution-A', inboxMessageId: start.messageId, queuedAt: 1003 })
     turns.deliveryAvailable!({ childSessionId: childId, messageId: start.messageId })
     await aStarted.promise

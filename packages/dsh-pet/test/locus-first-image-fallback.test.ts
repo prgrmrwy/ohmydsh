@@ -45,10 +45,10 @@ async function fixture(options: { failText?: boolean; publish?: boolean; imageIn
   })
   const createAdapter = () => createLocusChildAdapter({
     parent: { get: id => runtime.agents.get(id) as unknown as LocusLiveParent, resume: async () => undefined },
-    subagent: { startContinuable: spec => runtime.startContinuable(spec as never), getProvider: name => runtime.getProvider(name) },
+    subagent: { startActivation: spec => runtime.startActivation(spec as never), getProvider: name => runtime.getProvider(name) },
     proof: { findChild: async (parentSessionId, childSessionId) => runtime.listChildren(parentSessionId).some(child => child.id === childSessionId) ? { parentSessionId, childSessionId } : undefined },
     inbox: { queuePrompt: (parent, childId, content) => runtime.queuePrompt(parent, childId, content) },
-    ...(options.cleanupUnavailable ? {} : { compensation: { drainContinuableChildren: async (_parent, childIds) => {
+    ...(options.cleanupUnavailable ? {} : { compensation: { drainChildren: async (_parent, childIds) => {
       if (options.cleanupFails) throw new Error('cleanup failed')
       for (const childId of childIds) runtime.release(childId)
     } } }),

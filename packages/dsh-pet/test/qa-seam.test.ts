@@ -30,8 +30,8 @@ function hostContext(
       'subagents' in options
         ? options.subagents
         : {
-            startContinuable: async () => ({ childId: 'c' }),
-            drainContinuableChildren: async () => undefined,
+            startActivation: async () => ({ childId: 'c', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }),
+            drainChildren: async () => undefined,
             listChildren: async () => [],
             [QUEUE]: async () => 'message-1',
           },
@@ -73,8 +73,8 @@ describe('probing the subagent seam', () => {
     const probe = probeSubagentSeam(
       hostContext({
         subagents: {
-          startContinuable: async () => ({ childId: 'c' }),
-          drainContinuableChildren: async () => undefined,
+          startActivation: async () => ({ childId: 'c', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }),
+          drainChildren: async () => undefined,
           listChildren: async () => [],
         },
       }),
@@ -97,8 +97,8 @@ describe('probing the subagent seam', () => {
     const probe = probeSubagentSeam(
       hostContext({
         subagents: {
-          startContinuable: async () => ({ childId: 'c' }),
-          drainContinuableChildren: async () => undefined,
+          startActivation: async () => ({ childId: 'c', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }),
+          drainChildren: async () => undefined,
           listChildren: async () => [],
           [QUEUE]: async (...args: unknown[]) => {
             calls.push(args)
@@ -151,8 +151,8 @@ describe('resolving a live parent', () => {
     return {
       agents,
       subagents: {
-        startContinuable: async () => ({ childId: 'c' }),
-        drainContinuableChildren: async () => undefined,
+        startActivation: async () => ({ childId: 'c', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }),
+        drainChildren: async () => undefined,
         listChildren: async () => [],
       },
       queuePrompt: async () => 'm',

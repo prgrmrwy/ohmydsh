@@ -2,7 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as Sqlite from '@deepseek-ai/dsh-storage-sqlite'
 import * as Domain from '@deepseek-ai/dsh-storage-domain'
-import Jsonl from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as Jsonl from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Workspace from '@deepseek-ai/dsh-workspace'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { mkdtempSync, realpathSync } from 'node:fs'
@@ -25,7 +25,7 @@ it('archives only the registered test identity through the real WorkspaceRegistr
     const handle = await ctx.sessionPersistence.create({ id, version: 4, createdAt: 1, cwd: directory, isSeeded: false, delegationDepth: 0 })
     try {
       await handle.flush()
-      ctx.provide('subagents'); ctx.set('subagents', { drainContinuableDescendants: async () => {} })
+      ctx.provide('subagents'); ctx.set('subagents', { drainDescendants: async () => {} })
       const operations = hostRetirementOperations(ctx, { id } as never, ledger, { healthy: () => true, settleJobs: async () => {} }, async () => {})
       let stopRequested = false
       ctx.on('workspace/session-stop', request => { expect(request.sessionId).toBe(id); stopRequested = true; throw new Error('fictional stop provider failed') })

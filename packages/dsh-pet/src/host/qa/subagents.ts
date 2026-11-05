@@ -9,10 +9,12 @@
  * plugin keeps compiling against a host that has none of them — the QA action
  * then probes as unavailable instead of preventing Pet from loading at all.
  *
- * The shapes mirror `@deepseek-ai/dsh-subagent` 0.1.2 as MEASURED by the
- * spike (`spike/qa-subagent/FINDINGS.md`), not as guessed from names:
+ * The shapes mirror `@deepseek-ai/dsh-subagent` as MEASURED by the 0.1.2 spike
+ * (`spike/qa-subagent/FINDINGS.md`), not as guessed from names, and as renamed
+ * by 0.2.1 (`startContinuable` → `startActivation`, `drainContinuableChildren`
+ * → `drainChildren`):
  *
- * - `startContinuable` needs an exact live parent `Agent` object, not an id.
+ * - `startActivation` needs an exact live parent `Agent` object, not an id.
  * - the host delivery entry point is symbol-keyed by the target's internal
  *   `deliverSubagentPrompt` symbol and reached through the package's `internal` subpath.
  * - resolving either only means the child's inbox ACCEPTED the message; it
@@ -22,7 +24,7 @@
 import type { Agent, AgentHandle, ResumeAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
-import type { SubagentListEntry, ContinuableStart, ContinuableStartSpec } from '@deepseek-ai/dsh-subagent'
+import type { SubagentListEntry, SubagentActivation, SubagentActivationSpec } from '@deepseek-ai/dsh-subagent'
 
 /** Public target Agent identity; the Session is intentionally not assumed. */
 export type LiveAgentLike = Agent
@@ -42,11 +44,12 @@ export type SubagentChildEntry = Extract<SubagentListEntry, { readonly kind: 'ch
 /** The `ctx.subagents` operations the QA path needs. */
 export interface SubagentsPortLike {
   /**
-   * Establish one durable continuable child and deliver its first prompt.
-   * @param spec - Provider, label, optional reserved child id, and request.
-   * @returns the durable child id.
+   * Establish one durable managed child and deliver its first prompt.
+   * @param spec - Provider, label, optional reserved child id, request, and
+   *   the result recipient (`delivery`).
+   * @returns the accepted activation; its `result` promise must be observed.
    */
-  startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>
+  startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>
   /**
    * Release selected resident children of one exact live parent.
    *
@@ -55,7 +58,7 @@ export interface SubagentsPortLike {
    * @param parent - Exact live parent.
    * @param childIds - Children to release.
    */
-  drainContinuableChildren(parent: LiveAgentLike, childIds: readonly BrandedSessionId[]): Promise<void>
+  drainChildren(parent: LiveAgentLike, childIds: readonly BrandedSessionId[]): Promise<void>
   /**
    * Enumerate a parent's direct children.
    * @param parentSessionId - Parent session.
@@ -129,7 +132,7 @@ export function probeSubagentSeam(ctx: HostContextLike): SeamProbe {
   const subagents = ctx.get?.('subagents') as
     | (SubagentsPortLike & Record<symbol, unknown>)
     | undefined
-  if (subagents === undefined || typeof subagents.startContinuable !== 'function') {
+  if (subagents === undefined || typeof subagents.startActivation !== 'function') {
     return { available: false, diagnostic: '此 DSH Host 未装配 subagents 服务' }
   }
   const deliver = subagents[DELIVER_PROMPT_SYMBOL]

@@ -22,11 +22,17 @@
 # 本 shim 不改 connection 的 config/trustedHosts,不复制 RPC 协议与鉴权,
 # 也不改变非 Web surface。
 #
+# 0.2.1 复核(2026-11-05):官方 `webRuntime` 服务已删除,trustedHosts 改由 `webStartup`
+# 提供;官方行为 `inject: [webStartup]`(dsh-web-app 0.2.1-rc.5 cordis.patch.yml:234-241),
+# 仍不含 webServer,而 client-connection 的 `register()` 仍走 `owner.webServer.register`,
+# 所以本 fragment 继续保留,并随官方改为注入 webStartup。注入已删除的 webRuntime 会让
+# Connection 永远等待、整个 Web 起不来。
+#
 # 退休条件:官方 connection 行的 `inject` 自己带上 `webServer` 时,本 fragment 必须删除。
 # 上游讨论:https://github.com/deepseek-ai/deepseek-harness/discussions/5926
 # 社区同款做法:https://github.com/ysr666/dsh-vision-router/pull/481
 - id: connection
   name: '@deepseek-ai/dsh-client-connection'
-  inject: [webRuntime, webServer]
+  inject: [webStartup, webServer]
   config:
-    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    trustedHosts: !!js ctx.webStartup.trustedHosts

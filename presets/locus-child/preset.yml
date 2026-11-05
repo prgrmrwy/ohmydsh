@@ -1,0 +1,2 @@
+name: Locus 子会话（只读文件）
+description: 白名单 preset，只含只读文件、搜索、Web 搜索、shell、Skill 目录与压缩；不含 write/edit，也不含任何委派、workflow 与 agent 控制工具。

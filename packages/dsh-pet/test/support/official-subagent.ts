@@ -1,9 +1,9 @@
 /**
  * Stand-ins for the OFFICIAL continuable-subagent runtime and `sessionQuery`
- * (DSH 0.2.0-rc.2, unpatched), shaped after what the rc.2 probe observed
+ * (DSH 0.2.0-rc.2 shapes, renamed for 0.2.1: `startContinuable` is `startActivation`), shaped after what the rc.2 probe observed
  * (`openspec/changes/locus-three-tier-structure/probes/agent-created-probe.md`):
  *
- * - `startContinuable` emits `agent/created` (source `startup`) BEFORE the first
+ * - `startActivation` emits `agent/created` (source `startup`) BEFORE the first
  *   prompt is claimed, and returns only AFTER that first claim;
  * - a listener that throws makes creation fail and the first prompt never runs;
  * - a child that is not resident is cold-resumed by `queuePrompt`/`sendMessage`,
@@ -49,17 +49,18 @@ export interface FakeStartSpec {
   readonly request: {
     readonly prompt: readonly { readonly type: string; readonly text?: string }[]
     readonly parent: { readonly id: string }
-    readonly toolFilter?: { readonly allow?: readonly string[]; readonly deny?: readonly string[] }
+    readonly agentPreset?: string
     readonly [key: string]: unknown
   }
   readonly signal: AbortSignal
+  readonly delivery?: 'parent' | 'caller'
   readonly [key: string]: unknown
 }
 
 export interface FakeRuntimeOptions {
   /** Maximum simultaneously resident children, mirroring the official active limit. */
   readonly activeLimit?: number
-  /** Whether the `spawn` provider declares `inheritsParentContext: false` (it does). */
+  /** Whether the `spawn` provider declares `inheritsParentContext: false` (it does) and `capabilities.agentPreset: true`. */
   readonly spawnIndependent?: boolean
   /** Official submitMaterialized checks this AFTER materialization, BEFORE inbox submission. */
   readonly imageInput?: boolean
@@ -89,7 +90,7 @@ export class FakeOfficialRuntime {
 
   /** Serial `agent/created` listeners; a throw or rejection fails creation/resume. */
   readonly agentCreatedListeners: ((event: FakeAgentCreated) => unknown | Promise<unknown>)[] = []
-  /** Runs when a turn claims a prompt, before `startContinuable` returns. */
+  /** Runs when a turn claims a prompt, before `startActivation` returns. */
   onClaim: (event: { readonly childId: string; readonly messageId: string }) => unknown | Promise<unknown> = () => undefined
   /** Lets a test make creation fail AFTER the `agent/created` listeners succeeded. */
   failAfterCreated: Error | undefined
@@ -111,9 +112,9 @@ export class FakeOfficialRuntime {
     return [...this.agents.values()].filter(agent => agent.parentId !== undefined).length
   }
 
-  getProvider(name: string): { readonly inheritsParentContext?: boolean } | undefined {
-    if (name === 'spawn') return { inheritsParentContext: !this.spawnIndependent }
-    if (name === 'fork') return { inheritsParentContext: true }
+  getProvider(name: string): { readonly inheritsParentContext?: boolean; readonly capabilities?: { readonly agentPreset?: boolean } } | undefined {
+    if (name === 'spawn') return { inheritsParentContext: !this.spawnIndependent, capabilities: { agentPreset: true } }
+    if (name === 'fork') return { inheritsParentContext: true, capabilities: { agentPreset: false } }
     return undefined
   }
 
@@ -130,7 +131,12 @@ export class FakeOfficialRuntime {
     }
   }
 
-  async startContinuable(spec: FakeStartSpec): Promise<{ childId: ReturnType<typeof SessionId>; messageId: ReturnType<typeof MessageId> }> {
+  async startActivation(spec: FakeStartSpec): Promise<{
+    childId: ReturnType<typeof SessionId>
+    messageId: ReturnType<typeof MessageId>
+    result: Promise<unknown>
+    dispose(): Promise<void>
+  }> {
     this.startCalls.push(spec)
     const parent = this.agents.get(spec.request.parent.id)
     if (parent === undefined || parent !== spec.request.parent as unknown) {
@@ -159,7 +165,12 @@ export class FakeOfficialRuntime {
       this.milestones.push(`claimed:${childId}`)
       await this.onClaim({ childId, messageId })
       this.milestones.push(`returned:${childId}`)
-      return { childId: SessionId(childId), messageId: MessageId(messageId) }
+      return {
+        childId: SessionId(childId),
+        messageId: MessageId(messageId),
+        result: new Promise<unknown>(() => undefined),
+        dispose: async () => undefined,
+      }
     } catch (error) {
       // Creation failed: the official runtime disposes the child it made.
       this.agents.delete(childId)

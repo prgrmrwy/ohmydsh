@@ -56,6 +56,7 @@ describe('durable first Delivery publication', () => {
       const composed = composeLocusChild({ id: agent.id, scope: agent.ctx }, {
         lookup: createPrepublicationCompositionLookup({ durable: { find: () => undefined }, staging }),
         parentPreset: () => 'locus-base',
+        childPreset: () => 'locus-child',
         policy: { apply: () => {}, resolve: () => 'read' },
         surface: { install: () => {}, setToolTier: () => {}, installOutboundGuard: () => {}, visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS] },
       })
@@ -63,7 +64,7 @@ describe('durable first Delivery publication', () => {
     })
     const creator = createLocusLazyChildCreator({ staging, presetDeclared: () => true, createAdapter: () => createLocusChildAdapter({
       parent: { get: id => runtime.agents.get(id) as unknown as LocusLiveParent, resume: async () => undefined },
-      subagent: { startContinuable: spec => runtime.startContinuable(spec as never), getProvider: name => runtime.getProvider(name) },
+      subagent: { startActivation: spec => runtime.startActivation(spec as never), getProvider: name => runtime.getProvider(name) },
     }) })
     try {
       await f.world.durable.acceptDelivery({ ...f.correlation, messageId: 'next', senderOpenId: 'owner', text: 'next', acceptedAt: 1001 })
@@ -128,7 +129,7 @@ describe('durable first Delivery publication', () => {
     runtime.onClaim = ({ childId, messageId }) => { f.firstPrompts.resolve({ childSessionId: childId, messageId }) }
     const creator = createLocusLazyChildCreator({ staging, presetDeclared: () => true, createAdapter: () => createLocusChildAdapter({
       parent: { get: id => runtime.agents.get(id) as unknown as LocusLiveParent, resume: async () => undefined },
-      subagent: { startContinuable: spec => runtime.startContinuable(spec as never), getProvider: name => runtime.getProvider(name) },
+      subagent: { startActivation: spec => runtime.startActivation(spec as never), getProvider: name => runtime.getProvider(name) },
     }) })
     const request = { parentSessionId: f.row.parentSessionId, workspaceId: f.row.workspaceId, locusId: f.row.id, generation: f.row.generation, label: 'entry', endpoint: f.row.endpoint, permission: 'read' as const, prompt: [{ type: 'text' as const, text: 'first' }] }
     try {
@@ -233,7 +234,7 @@ describe('durable first Delivery publication', () => {
     } finally { await f.world.close() }
   })
 
-  it('does not revive a first Delivery that finished before startContinuable returned', async () => {
+  it('does not revive a first Delivery that finished before startActivation returned', async () => {
     const f = await fixture()
     try {
       await f.publication.publish(f.correlation.childSessionId, f.composition)

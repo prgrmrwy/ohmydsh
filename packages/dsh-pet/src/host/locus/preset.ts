@@ -18,21 +18,32 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 
-/** Preset id every locus main is created with and every locus child recovers from. */
+/** Preset id every locus main is created with. */
 export const LOCUS_BASE_PRESET = 'locus-base'
+
+/**
+ * Preset id every locus child is started with, as an independent selection.
+ *
+ * DSH 0.2.1 no longer carries a per-request tool filter, so the child's tool
+ * ceiling is a property of this preset: `locus-base` with the file-writing
+ * tools removed. The selection is persisted with the child
+ * (`agent-preset/selected`) and mounted again on every cold resume.
+ */
+export const LOCUS_CHILD_PRESET = 'locus-child'
 
 /** Stable code carried by {@link LocusPresetMissingError}. */
 export const LOCUS_PRESET_MISSING_CODE = 'locus-preset-missing' as const
 
-/** The effective configuration does not offer {@link LOCUS_BASE_PRESET}. */
+/** The effective configuration does not offer a locus preset (the main's by default). */
 export class LocusPresetMissingError extends Error {
   override readonly name = 'LocusPresetMissingError'
   readonly code = LOCUS_PRESET_MISSING_CODE
   readonly presetId: string
 
-  constructor(detail: string, options?: ErrorOptions) {
-    super(`Locus preset ${LOCUS_BASE_PRESET} is unavailable (${detail})`, options)
-    this.presetId = LOCUS_BASE_PRESET
+  constructor(detail: string, options?: ErrorOptions & { readonly presetId?: string }) {
+    const presetId = options?.presetId ?? LOCUS_BASE_PRESET
+    super(`Locus preset ${presetId} is unavailable (${detail})`, options)
+    this.presetId = presetId
   }
 }
 
@@ -43,19 +54,37 @@ export interface LocusPresetRegistry {
 }
 
 /**
- * Whether the effective configuration declares {@link LOCUS_BASE_PRESET}.
+ * Whether the effective configuration declares a locus preset.
  *
  * An unreadable catalog is "not proven", never "assumed present".
  * @param presets - the Host preset registry.
+ * @param presetId - the preset to look for; the main's preset by default.
  * @returns true only when the catalog was read and lists the preset.
  */
-export async function isLocusPresetDeclared(presets: Pick<LocusPresetRegistry, 'list'>): Promise<boolean> {
+export async function isLocusPresetDeclared(
+  presets: Pick<LocusPresetRegistry, 'list'>,
+  presetId: string = LOCUS_BASE_PRESET,
+): Promise<boolean> {
   try {
     const listed = await presets.list()
-    return listed.some(preset => preset.id === LOCUS_BASE_PRESET)
+    return listed.some(preset => preset.id === presetId)
   } catch {
     return false
   }
+}
+
+/**
+ * Whether BOTH presets a locus needs are declared: the main's and the child's.
+ *
+ * A locus whose child preset is missing would fail at its first child start
+ * (the runtime refuses an unknown independent preset), after a reservation was
+ * already made, so creation checks both up front.
+ * @param presets - the Host preset registry.
+ * @returns true only when both were read and listed.
+ */
+export async function areLocusPresetsDeclared(presets: Pick<LocusPresetRegistry, 'list'>): Promise<boolean> {
+  return (await isLocusPresetDeclared(presets, LOCUS_BASE_PRESET))
+    && (await isLocusPresetDeclared(presets, LOCUS_CHILD_PRESET))
 }
 
 /**

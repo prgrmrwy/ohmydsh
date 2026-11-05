@@ -2,14 +2,14 @@
  * Creation of a locus child on its first message.
  *
  * An entry starts `not-created`. The first deliverable message creates the
- * child with the official `startContinuable`, carrying that message as the
+ * child with the official `startActivation`, carrying that message as the
  * child's first prompt, so there is no idle child, no initialization turn and
  * no second hand-off for the same message.
  *
  * Order matters and was measured on the official runtime
  * (`openspec/changes/locus-three-tier-structure/probes/agent-created-probe.md`):
  * `agent/created` fires first, the first prompt is claimed next, and
- * `startContinuable` returns only after that claim. Everything the first turn
+ * `startActivation` returns only after that claim. Everything the first turn
  * depends on — the durable child/marker/current association — is therefore
  * published INSIDE `agent/created` against an identity reserved beforehand, and
  * never from the return value. If creation is rejected after that publication

@@ -20,13 +20,14 @@ describe('three-tier child context ownership', () => {
       composeLocusChild({ id: agent.id, scope: agent.ctx }, {
         lookup: { find: () => ({ parentSessionId: 'locus-main', childSessionId: agent.id, locusId: 'locus', generation: 1, permission: 'read', childComposition: 'tier3' }) },
         parentPreset: () => 'locus-base',
+        childPreset: () => 'locus-child',
         policy: { apply: () => {}, resolve: () => 'read' },
         surface: { install: () => {}, setToolTier: () => {}, installOutboundGuard: () => {}, visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS] },
       })
     })
     const adapter = createLocusChildAdapter({
       parent: { get: id => runtime.agents.get(id) as unknown as LocusLiveParent, resume: async () => undefined },
-      subagent: { startContinuable: spec => runtime.startContinuable(spec as never), getProvider: name => runtime.getProvider(name) },
+      subagent: { startActivation: spec => runtime.startActivation(spec as never), getProvider: name => runtime.getProvider(name) },
     })
     expect(await adapter.createChild({ parentSessionId: 'locus-main', childId: 'child', label: 'entry', prompt: [{ type: 'text', text: 'ENTRY_FINDING' }] })).toMatchObject({ ok: true })
     expect(work.inbox).toEqual([])

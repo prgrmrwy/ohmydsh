@@ -1,7 +1,7 @@
 /** Official AgentLoop cancellation persisted to JSONL and read by a fresh sessionQuery. */
 import { Context } from '@deepseek-ai/cordis'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
-import Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Query from '@deepseek-ai/dsh-session-query'
 import Agents from '@deepseek-ai/dsh-agent'
 import Llm, { LlmAdapter } from '@deepseek-ai/dsh-llm'
@@ -10,7 +10,10 @@ import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Loop from '@deepseek-ai/dsh-agent-loop'
 import Subagents from '@deepseek-ai/dsh-subagent'
+import FsLocal from '@deepseek-ai/dsh-fs-local'
+import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import { realpathSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -38,6 +41,8 @@ it.each(['user', 'parent', 'disposed'] as const)('official aborted %s survives p
       }
     }())
     await writer.plugin(Loop, { agents: [], maxParallelToolCalls: 1 })
+    // DSH 0.2.1 subagent runtime injects workingDirectory (which injects fs).
+    await writer.plugin(FsLocal, { cwd: realpathSync(tmpdir()) }); await writer.plugin(WorkingDirectory, { defaultDirectory: realpathSync(tmpdir()) })
     await writer.plugin(Subagents)
     await writer.plugin(Spawn)
     const entry = await world.controller.ensureGroup({ chatId: 'cancel-chat', parentSessionId: 'work-1' })
@@ -49,9 +54,9 @@ it.each(['user', 'parent', 'disposed'] as const)('official aborted %s survives p
     const b = await world.durable.acceptDelivery({ ...correlation, messageId: 'B', text: 'B', senderOpenId: 'owner', acceptedAt: 1002 })
     await world.durable.claimCurrentDelivery({ correlation, now: 1003 })
     const parent = await writer.agentLoop.create(SessionId(row.parentSessionId), { provider: 'fake', model: 'text' })
-    const submitted = await writer.subagents.startContinuable({
+    const submitted = await writer.subagents.startActivation({
       provider: 'spawn', label: 'cancel-child', childId: SessionId(childSessionId),
-      request: { parent, prompt: [{ type: 'text', text: 'A' }] }, signal: new AbortController().signal,
+      request: { parent, prompt: [{ type: 'text', text: 'A' }] }, signal: new AbortController().signal, delivery: 'parent',
     })
     await started.promise
     await world.durable.bindQueued({ deliveryId: a.record.deliveryId, correlation, executionId: 'exec-A', inboxMessageId: submitted.messageId, queuedAt: 1004 })

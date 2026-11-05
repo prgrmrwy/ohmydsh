@@ -19,8 +19,8 @@ import { PET_BACKEND_NAME } from '../src/host/storage/backend.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { LocusRepository } from '../src/host/locus/persistence.js'
 import { PetRepository } from '../src/host/repository.js'
-import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
-import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES, LOCUS_DELEGATION_DENYLIST } from '../src/host/locus/composition.js'
+import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
+import { attestLocusComposition, LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES, LOCUS_DELEGATION_DENYLIST } from '../src/host/locus/composition.js'
 
 const hosts: Context[] = []
 const temporaryRoots: string[] = []
@@ -120,7 +120,7 @@ async function host() {
     },
   })
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) })
-  ctx.provide('agentPresets', { list: async () => [{ id: LOCUS_BASE_PRESET }], mount: async () => {} })
+  ctx.provide('agentPresets', { list: async () => [{ id: LOCUS_BASE_PRESET }, { id: LOCUS_CHILD_PRESET }], mount: async () => {} })
   ctx.provide('llm', { listProviders: () => [{ id: 'test' }] })
   ctx.provide('sessionTitle', { rename: async (_session: unknown, title: string) => ({ title }), get: () => 'Project' })
   ctx.provide('skills', { register: () => () => {}, registerProvider: () => () => {} })
@@ -137,17 +137,22 @@ async function host() {
   const start = vi.fn(async (spec: any) => {
     expect(spec.request.parent).toBe(main)
     const child = addAgent(spec.childId, true)
-    child.ctx.tools.restrict(spec.request.toolFilter)
+    // DSH 0.2.1 persists the independent preset selection with the child; there
+    // is no request-level tool filter any more (a stale field would be ignored).
+    expect(spec.request).not.toHaveProperty('toolFilter')
+    expect(spec.request.agentPreset).toBe(LOCUS_CHILD_PRESET)
+    expect(spec.delivery).toBe('parent')
+    child.session.header.agentPreset = spec.request.agentPreset
     await ctx.serial(scopeTarget(child, child), 'agent/created', { agent: child, source: 'create' } as never)
     child.session.append('turn/start', { turn: 1 })
     ctx.emit(scopeTarget(child, child), 'agent/inbox/claimed' as never, { agent: child, message: { id: 'first-inbox', source: { kind: 'user' } }, turn: 1 } as never)
     await firstTool?.(child)
     apiReturned = true
-    return { childId: child.id, messageId: 'first-inbox' }
+    return { childId: child.id, messageId: 'first-inbox', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }
   })
   const drain = vi.fn(async (_parent: unknown, children: readonly string[]) => { for (const id of children) agents.delete(id) })
   ctx.provide('subagents', {
-    startContinuable: start, drainContinuableChildren: drain, getProvider: () => ({ inheritsParentContext: false }),
+    startActivation: start, drainChildren: drain, getProvider: () => ({ inheritsParentContext: false, capabilities: { agentPreset: true } }),
     listChildren: async (parentId: string) => [...sessions.values()].filter(session => session.header.parentSession === parentId).map(session => ({ id: session.id, parentSessionId: parentId, mode: 'continuable' })), sendMessage,
     [Symbol.for('dsh.subagent.deliverPrompt')]: queue,
   })
@@ -318,7 +323,9 @@ describe('actual Host three-tier assembly', () => {
     }
     const restored = { ...child }
     restored.ctx = createScope(h.agentFactoryContext, restored).ctx
-    restored.ctx.tools.restrict(h.start.mock.calls[0]![0].request.toolFilter)
+    // Cold reconstruction re-reads the persisted preset selection from the same
+    // session; nothing about the ceiling is carried by the request any more.
+    expect(restored.session.header.agentPreset).toBe(LOCUS_CHILD_PRESET)
     h.queue.mockImplementationOnce(async () => {
       h.agents.set('child', restored)
       await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
@@ -403,9 +410,14 @@ describe('actual Host three-tier assembly', () => {
     const child = h.agents.get('child')
     const restored = { ...child }
     restored.ctx = createScope(h.agentFactoryContext, restored).ctx
-    restored.ctx.tools.restrict(h.start.mock.calls[0]![0].request.toolFilter)
+    expect(restored.session.header.agentPreset).toBe(LOCUS_CHILD_PRESET)
     h.agents.set('child', restored)
     await h.ctx.serial(scopeTarget(restored, restored), 'agent/created', { agent: restored, source: 'resume' } as never)
+    // The resumed child is served only after its surface read back as the
+    // reviewed safe set: write/edit/delegation/collab globals stay hidden.
+    const resumedNames = h.ctx.tools.schemas(restored).map(tool => tool.name)
+    expect(attestLocusComposition(resumedNames, 'safe')).toMatchObject({ ok: true, leaks: [] })
+    for (const hidden of ['write', 'edit', 'subagent', 'workflow', 'collab_status', 'bash', 'skill']) expect(resumedNames).not.toContain(hidden)
     await check(restored)
     expect(h.petWorkspace.attachSession).toHaveBeenCalledTimes(2)
     expect(h.workspace.attachSession).not.toHaveBeenCalled()

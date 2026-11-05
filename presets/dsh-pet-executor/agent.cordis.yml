@@ -20,7 +20,10 @@
 # ── identity ────────────────────────────────────────────────────────────────
 
 # The preset's own persona, shadowing the deployment default for this agent.
-# `{{model}}` and `{{cwd}}` resolve from the agent's own route and workspace.
+# `{{model}}` resolves from the agent's own route. DSH 0.2.1 removed the
+# built-in `{{cwd}}` variable (an unresolved variable fails before the model
+# request); the working directory now reaches the model through the official
+# working-directory context instead, so this preset no longer carries a suffix.
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   # DSH 0.1.5 replaced the single `text` field with `prefix`/`suffix`;
@@ -31,8 +34,6 @@
   config:
     prefix: >-
       You are a coding agent powered by the {{model}} model.
-    suffix: >-
-      Your working directory is {{cwd}}.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'
@@ -199,14 +200,12 @@
       config:
         provider: spawn
         toolName: subagent
-        backgroundMode: continuable
 
     - id: tool-subagent-fork
       name: '@deepseek-ai/dsh-tool-subagent'
       config:
         provider: fork
         toolName: subagent_fork
-        backgroundMode: continuable
 
     # Production dsh does not install these optional providers. Install the
     # matching Bundle in this Profile and restart the Host, then copy this
@@ -218,7 +217,6 @@
       config:
         provider: codex
         toolName: subagent_codex
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     - id: tool-subagent-claude-code
@@ -227,7 +225,6 @@
       config:
         provider: claude-code
         toolName: subagent_claude_code
-        backgroundMode: one-shot
         maxDepth: provider-managed
 
     # DSH 0.2.0 retired `@deepseek-ai/dsh-workflow-worker-thread`; the shipped
@@ -241,11 +238,9 @@
     - id: tool-workflow
       name: '@deepseek-ai/dsh-tool-workflow'
 
-    - id: tool-ralph
-      name: '@deepseek-ai/dsh-tool-ralph'
-      config:
-        subagentProvider: spawn
-        maxRounds: 64
+    # DSH 0.2.1 moved `@deepseek-ai/dsh-tool-ralph` out of the default
+    # composition into the optional experimental Ralph bundle, so this preset
+    # no longer mounts it (change upgrade-dsh-0-2-1-runtime).
 
 # ── remaining model-facing rows ─────────────────────────────────────────────
 

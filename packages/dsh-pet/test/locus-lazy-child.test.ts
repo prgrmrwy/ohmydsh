@@ -37,6 +37,7 @@ function world(options: { activeLimit?: number; spawnIndependent?: boolean; pres
   const compositionPorts: LocusCompositionPorts = {
     lookup: createPrepublicationCompositionLookup({ durable: { find: () => undefined }, staging }),
     parentPreset: () => LOCUS_BASE_PRESET,
+    childPreset: () => 'locus-child',
     surface: {
       install: vi.fn(),
       setToolTier: vi.fn(),
@@ -62,7 +63,7 @@ function world(options: { activeLimit?: number; spawnIndependent?: boolean; pres
       resume: async () => undefined,
     },
     subagent: {
-      startContinuable: spec => runtime.startContinuable(spec as never),
+      startActivation: spec => runtime.startActivation(spec as never),
       getProvider: name => runtime.getProvider(name),
     },
   }
@@ -144,7 +145,7 @@ describe('API 返回前首轮已能解析身份', () => {
     })
     let resolvedAtFirstTool: ReturnType<typeof firstPrompt.resolve>
     // The first caller-bound tool call (`pet_context`) runs inside the first
-    // turn, which the runtime claims BEFORE `startContinuable` returns, so the
+    // turn, which the runtime claims BEFORE `startActivation` returns, so the
     // durable (child, message) binding cannot exist yet.
     runtime.onClaim = ({ childId, messageId }) => {
       expect(staging.activeCount).toBe(0)

@@ -21,6 +21,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
 import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES } from './composition.js'
+import { LOCUS_CHILD_PRESET } from './preset.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
 export type LocusLiveParent = Agent
@@ -48,51 +49,94 @@ export interface LocusParentPort {
 /** Typed block vocabulary accepted unchanged by the measured DSH child inbox seam. */
 export type LocusContentBlock = ContentBlock
 
-/** Persisted global-tool restriction accepted by the reviewed Subagent runtime. */
+/** A global-tool restriction, as `tools.restrict` takes it on a child scope. */
 export interface LocusToolRestriction {
   readonly allow?: readonly string[]
   readonly deny?: readonly string[]
 }
 
 /**
- * Complete inherited global-tool allowlist for a Locus child.
+ * Complete inherited-tool allowlist for a Locus child.
  *
- * The runtime validates every name against the mounted preset and applies the
- * restriction after that preset is mounted. Unknown or missing names therefore
- * abort child creation, while tools registered directly in the child scope stay
- * visible — which is why the installed surface is attested separately
- * ({@link attestLocusComposition}) rather than trusted from this filter.
+ * DSH 0.2.1 removed the per-request `toolFilter` of a subagent start and now
+ * IGNORES it silently, so this list is no longer handed to the runtime. Pet
+ * applies it itself with `tools.restrict` on the child's own scope at every
+ * publication (creation and cold resume alike, from the same synchronous
+ * `agent/created` boundary that installs the tier layer), because a preset can
+ * only decide which tools it registers: it cannot hide tools other plugins
+ * register globally, and an `allow` list is what removes those. The reviewed
+ * file-writing tools are additionally absent from the child's preset
+ * ({@link LOCUS_CHILD_PRESET}).
+ *
+ * `restrict` validates every name against the child's visible tools, so an
+ * unknown or missing name aborts publication. Tools registered directly in the
+ * child scope stay visible — which is why the installed surface is attested
+ * separately ({@link attestLocusComposition}) rather than trusted from this
+ * list.
  */
 export const LOCUS_BASE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
   allow: Object.freeze([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]),
 })
+
+/**
+ * Apply {@link LOCUS_BASE_TOOL_FILTER} to one Locus child's own scope.
+ *
+ * Call it from the synchronous `agent/created` boundary, on every publication.
+ * A throw — `restrict` missing, or an allowed name the child's preset does not
+ * provide — must veto publication, so it is never swallowed here.
+ * @param tools - the `tools` service resolved on the CHILD's scope (a restriction
+ *   made through the Host scope would mask every agent, and the runtime refuses it).
+ * @returns the disposer that lifts the restriction.
+ */
+export function applyLocusInheritedToolCeiling(
+  tools: { restrict?: (restriction: { allow?: readonly string[]; deny?: readonly string[] }) => () => void } | undefined,
+): () => void {
+  if (typeof tools?.restrict !== 'function') {
+    throw new Error('Agent-scoped tools.restrict is unavailable')
+  }
+  return tools.restrict(LOCUS_BASE_TOOL_FILTER)
+}
 
 /** Compatibility alias retained for call sites/tests that assert the old safe list. */
 export const LOCUS_SAFE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
   allow: LOCUS_SAFE_TOOL_NAMES,
 })
 
+/** What one accepted activation hands back (`SubagentActivation`, with the reserved-id overload). */
+export interface LocusSubagentActivation {
+  readonly childId: BrandedSessionId
+  readonly messageId: import('@deepseek-ai/dsh-llm').MessageId
+  /**
+   * Settles when this activation ends, and rejects when capturing its result
+   * failed. Pet never consumes the value, but the promise exists whether or not
+   * anyone reads it, so the adapter always attaches a handler.
+   */
+  readonly result: PromiseLike<unknown>
+  dispose(): Promise<void>
+}
+
 /**
- * The continuable-child creation operation, exactly as the OFFICIAL runtime
- * offers it. There is no silent settlement, no idle creation, no explicit
- * context mode or preset and no borrowed child Session: the child composes from
- * its parent's preset on every (re)start, and the parent is a locus main that
- * Pet created and pinned, so each of those is either the default or a
- * structural fact rather than something to request.
+ * The managed-child creation operation, exactly as the OFFICIAL runtime offers
+ * it (`SubagentRuntime.startActivation`, DSH 0.2.1). There is no silent
+ * settlement, no idle creation, no explicit context mode and no borrowed child
+ * Session. There is also no per-request tool filter: the child's tool ceiling
+ * is the independent `agentPreset` it is started with.
  */
 export interface LocusSubagentPort {
-  startContinuable(spec: {
+  startActivation(spec: {
     readonly provider: string
     readonly label: string
     readonly childId?: SessionId
     readonly request: {
       readonly prompt: LocusContentBlock[]
       readonly parent: LocusLiveParent
-      /** Inherited global-tool allowlist; persisted by the runtime for cold resume. */
-      readonly toolFilter?: LocusToolRestriction
+      /** Independent preset; persisted by the runtime and mounted again on cold resume. */
+      readonly agentPreset: string
     }
     readonly signal: AbortSignal
-  }): Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>
+    /** `parent`: settlement notifies the parent session. `caller`: result only. */
+    readonly delivery: 'parent' | 'caller'
+  }): Promise<LocusSubagentActivation>
   /**
    * Look up one registered provider by name, when the runtime exposes its
    * provider registry synchronously. Used only to prove
@@ -100,7 +144,10 @@ export interface LocusSubagentPort {
    * absent method or an unproven provider keeps creation unavailable rather
    * than assuming independence.
    */
-  getProvider?(name: string): { readonly inheritsParentContext?: boolean } | undefined
+  getProvider?(name: string): {
+    readonly inheritsParentContext?: boolean
+    readonly capabilities?: { readonly agentPreset?: boolean }
+  } | undefined
 }
 
 /** Source metadata for a host-authored inbox message. */
@@ -139,7 +186,7 @@ export interface LocusChildCompensationPort {
  * controller/channel callers.
  */
 export interface LocusChildDrainPort {
-  drainContinuableChildren(
+  drainChildren(
     parent: LocusLiveParent,
     childIds: readonly string[],
   ): Promise<void>
@@ -382,13 +429,19 @@ export const LOCUS_CHILD_PROVIDER = DEFAULT_CHILD_PROVIDER
  */
 function defaultProviderProvenIndependent(subagent: LocusSubagentPort): boolean {
   if (typeof subagent.getProvider !== 'function') return false
-  let provider: { readonly inheritsParentContext?: boolean } | undefined
+  let provider: ReturnType<NonNullable<LocusSubagentPort['getProvider']>>
   try {
     provider = subagent.getProvider(DEFAULT_CHILD_PROVIDER)
   } catch {
     return false
   }
-  return provider !== undefined && provider !== null && provider.inheritsParentContext === false
+  // Independent context AND independent preset selection: the child's tool
+  // ceiling is the preset it is started with, so a provider that cannot take one
+  // would leave the child on its parent's composition.
+  return provider !== undefined
+    && provider !== null
+    && provider.inheritsParentContext === false
+    && provider.capabilities?.agentPreset === true
 }
 
 /** Return whether an object has a usable non-empty identifier. */
@@ -439,7 +492,7 @@ export function sameLocusChildIdentity(
 /**
  * Resolve an exact live parent, resuming it only when it is not resident.
  *
- * The returned object is the exact object passed to `startContinuable` and
+ * The returned object is the exact object passed to `startActivation` and
  * `queuePrompt`; an id alone is not a substitute because DSH checks lineage
  * against the live Agent object.  Host failures are intentionally collapsed to
  * a diagnostic result so callers can stop publishing a locus.
@@ -618,7 +671,7 @@ export class LocusChildAdapter {
   /**
    * Adopt an already-created durable child after a Host restart or Agent
    * unload.  Adoption validates/resumes the exact parent but never calls
-   * `startContinuable`; passing a persisted child id to that creation API would
+   * `startActivation`; passing a persisted child id to that creation API would
    * risk duplicate-child rejection or an accidental replacement identity.
    */
   async adoptChild(input: LocusChildAdoptionInput): Promise<LocusChildAdoptionResult> {
@@ -685,7 +738,7 @@ export class LocusChildAdapter {
   /**
    * Create a child whose first prompt is the caller's first real message.
    *
-   * The child is born with that prompt (`startContinuable`), so there is no
+   * The child is born with that prompt (`startActivation`), so there is no
    * idle stage and no artificial initialization turn. `childId` is the identity
    * the caller reserved BEFORE this call: the runtime emits `agent/created`
    * while this call is still pending and the first turn is claimed before it
@@ -803,7 +856,7 @@ export class LocusChildAdapter {
   /**
    * Start the child with the official contract and publish its identity.
    * Adoption of a persisted child is separate ({@link adoptChild}) so a stored
-   * id can never be passed to `startContinuable` as a duplicate-creation hint.
+   * id can never be passed to `startActivation` as a duplicate-creation hint.
    */
   private async startChild(
     input: {
@@ -833,19 +886,32 @@ export class LocusChildAdapter {
     if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
     if (signal.aborted) return { ok: false, reason: 'aborted' }
 
-    let result: { readonly childId: string; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }
+    let result: LocusSubagentActivation
     try {
-      result = await this.ports.subagent.startContinuable({
+      result = await this.ports.subagent.startActivation({
         provider: input.provider ?? DEFAULT_CHILD_PROVIDER,
         label: input.label,
         childId: SessionId(input.childId),
         request: {
           prompt: [...input.prompt],
           parent: parentResult.parent,
-          toolFilter: LOCUS_BASE_TOOL_FILTER,
+          // The tool ceiling. DSH 0.2.1 has no per-request tool filter (and
+          // ignores one silently), so the child is started on its own
+          // independent preset; the runtime persists the selection and mounts
+          // it again on every cold resume.
+          agentPreset: LOCUS_CHILD_PRESET,
         },
         signal,
+        // `parent` is what the earlier runtime always did: when an activation
+        // settles, the parent (the locus main) receives the settlement notice.
+        // The main depends on it (see locus-settlement-notify), and later
+        // activations of the same child (queued prompts after a cold resume)
+        // are notifying activations regardless of how the first one began.
+        delivery: 'parent',
       })
+      // The result promise exists whether or not anyone reads it; a capture
+      // failure after this point must not become an unhandled rejection.
+      this.observeActivationResult(input.childId, result)
     } catch (error: unknown) {
       if (this.disposed) return { ok: false, reason: 'adapter-disposed' }
       if (signal.aborted) return { ok: false, reason: 'aborted' }
@@ -860,8 +926,8 @@ export class LocusChildAdapter {
         // before allowing a fresh child for the same unsubmitted request.
         const compensation = this.ports.compensation
         try {
-          if (compensation !== undefined && 'drainContinuableChildren' in compensation) {
-            await compensation.drainContinuableChildren(parentResult.parent, [input.childId])
+          if (compensation !== undefined && 'drainChildren' in compensation) {
+            await compensation.drainChildren(parentResult.parent, [input.childId])
           } else if (compensation !== undefined && 'release' in compensation) {
             await compensation.release({ parent: parentResult.parent, childId: input.childId, signal })
           } else {
@@ -898,6 +964,29 @@ export class LocusChildAdapter {
     return { ok: true, created: true, identity, messageId: result.messageId }
   }
 
+  /**
+   * Attach the mandatory handler to an activation's `result` promise.
+   *
+   * The value is never consumed: delivery outcome is correlated by the
+   * controller from the child's own session events, not from this promise. A
+   * rejection only means capturing the activation result failed, so it is
+   * reported as a diagnostic and nothing else changes.
+   */
+  private observeActivationResult(childId: string, activation: LocusSubagentActivation): void {
+    const result = (activation as { readonly result?: PromiseLike<unknown> } | undefined)?.result
+    if (result === undefined || result === null || typeof result.then !== 'function') return
+    result.then(
+      () => undefined,
+      (error: unknown) => {
+        try {
+          this.reportFailure(`child ${childId} activation result`, error)
+        } catch {
+          // A diagnostic sink never changes the outcome.
+        }
+      },
+    )
+  }
+
   /** Release a child that was created but failed the publication fence. */
   private async releaseUnpublishedChild(
     parent: LocusLiveParent,
@@ -914,10 +1003,10 @@ export class LocusChildAdapter {
           reason: 'child activation publication fenced',
         })
       } else if (
-        'drainContinuableChildren' in compensation &&
-        typeof compensation.drainContinuableChildren === 'function'
+        'drainChildren' in compensation &&
+        typeof compensation.drainChildren === 'function'
       ) {
-        await compensation.drainContinuableChildren(parent, [childSessionId])
+        await compensation.drainChildren(parent, [childSessionId])
       }
     } catch {
       // The activation was never published.  There is no safe active identity
@@ -1077,10 +1166,10 @@ export class LocusChildAdapter {
           ...(options.reason !== undefined ? { reason: options.reason } : {}),
         })
       } else if (
-        'drainContinuableChildren' in compensation &&
-        typeof compensation.drainContinuableChildren === 'function'
+        'drainChildren' in compensation &&
+        typeof compensation.drainChildren === 'function'
       ) {
-        await compensation.drainContinuableChildren(parentResult.parent, [active.childSessionId])
+        await compensation.drainChildren(parentResult.parent, [active.childSessionId])
       } else {
         return { ok: false, reason: 'compensation-unavailable' }
       }
@@ -1282,12 +1371,12 @@ export function probeLocusChildPorts(
     return { available: false, diagnostic: 'subagent-service-unavailable' }
   }
   const subagentRecord = subagentService as {
-    startContinuable?: unknown
-    drainContinuableChildren?: unknown
+    startActivation?: unknown
+    drainChildren?: unknown
     listChildren?: unknown
     getProvider?: unknown
   }
-  if (typeof subagentRecord.startContinuable !== 'function') {
+  if (typeof subagentRecord.startActivation !== 'function') {
     return { available: false, diagnostic: 'subagent-service-unavailable' }
   }
   const inbox = adaptLocusInboxPort(subagentService)
@@ -1330,26 +1419,26 @@ export function probeLocusChildPorts(
     },
   }
   const subagent: LocusSubagentPort = {
-    startContinuable: spec =>
+    startActivation: spec =>
       Promise.resolve(
-        (subagentRecord.startContinuable as (input: unknown) => unknown).call(subagentService, spec),
-      ) as Promise<{ readonly childId: BrandedSessionId; readonly messageId: import('@deepseek-ai/dsh-llm').MessageId }>,
+        (subagentRecord.startActivation as (input: unknown) => unknown).call(subagentService, spec),
+      ) as Promise<LocusSubagentActivation>,
     // Bound to the exact loaded service, so `defaultProviderProvenIndependent`
     // reads this runtime's own provider registry rather than a copy.
     ...(typeof subagentRecord.getProvider === 'function'
       ? {
         getProvider: (name: string) => (subagentRecord.getProvider as (
           name: string,
-        ) => { readonly inheritsParentContext?: boolean } | undefined).call(subagentService, name),
+        ) => ReturnType<NonNullable<LocusSubagentPort['getProvider']>>).call(subagentService, name),
       }
       : {}),
   }
   const compensation: LocusChildDrainPort | undefined =
-    typeof subagentRecord.drainContinuableChildren === 'function'
+    typeof subagentRecord.drainChildren === 'function'
       ? {
-          drainContinuableChildren: (liveParent, childIds) =>
+          drainChildren: (liveParent, childIds) =>
             Promise.resolve(
-              (subagentRecord.drainContinuableChildren as (parent: LocusLiveParent, ids: readonly string[]) => unknown).call(
+              (subagentRecord.drainChildren as (parent: LocusLiveParent, ids: readonly string[]) => unknown).call(
                 subagentService,
                 liveParent,
                 childIds,

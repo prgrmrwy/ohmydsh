@@ -2,7 +2,7 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.2.0-rc.2     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.2.1-rc.5     # 启动脚本 bin/dsh 运行时读取,单一版本来源
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
@@ -26,9 +26,9 @@ thirdPartyResources:
     version: 2.0.1
     integrity: sha512-G5P8ossz5R7lDuUWAO1v5aVG93qVjk3D85+tF2gkPGVhnVgdfEZ+pqllsAo+IEMsKa7/KE52ohbAhb9m+r0XtQ==
     provider:
-      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.0-rc.2'
-      version: 0.2.0-rc.2
-      integrity: sha512-V/88b4uEFwhCAewQhI/VE7/IvgBkDQb//3/zQjK7xieZ+D9wVpOc5AY8GCcQThZu5aGBnI1gX5ITHPlUHjKUtQ==
+      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.1-rc.5'
+      version: 0.2.1-rc.5
+      integrity: sha512-KrCbl/NZXtTuO5MrzJWZkCj5jWZ9lZRMJQ9F2W/8POpQKG7TsZTYmdrC4X1oBGXqwjVeMWl/a6MBNP4TmR2BIg==
     providerName: spec-superflow-upstream
     skills: [bug-investigator, build-executor, code-reviewer, contract-builder, need-explorer, release-archivist, spec-merger, spec-writer, workflow-start]
   - id: jev
@@ -38,9 +38,9 @@ thirdPartyResources:
     version: 0.14.5
     integrity: sha512-Imqfmx3wfA64MRqjOs6ZJYJYJz/v6qMxS+RPggDQYyjpbbe9LWvpYd/zamZ2RDv6m2p6qJdQeCS10DvkH4A+WA==
     bridge:
-      spec: '@deepseek-ai/dsh-mcp-client@0.2.0-rc.2'
-      version: 0.2.0-rc.2
-      integrity: sha512-UqP2sY1r6qAhBPFeuclqrXiMBBxPaCNrXlXRqKxAON7uI1wmZZ0B3/1GmBviQ3/WjjTQlOOkj0su2v4e5DMkug==
+      spec: '@deepseek-ai/dsh-mcp-client@0.2.1-rc.5'
+      version: 0.2.1-rc.5
+      integrity: sha512-E4ZsTZ0MPpT2njtl8dh7lTKyvsDoGG97FxmXzuVolcDPU0OqTxe0I/NXH58Z17/b+Saq7G0cGe1H/vVlEsR1rQ==
     serverName: jev
     jevProvider: openrouter          # 闭集 typesafe|openrouter;TypeSafe 直连对本机出口返回 451(change configurable-jev-provider)
     credentialEnv: OPENROUTER_API_KEY  # 必须与 jevProvider 的固定映射一致;回滚:改回 typesafe / TYPESAFE_API_KEY
@@ -189,6 +189,12 @@ customizations:
     enabled: true
     brief: Locus 主会话与子会话共用的白名单 preset(不含任何委派行)
     note: '自研白名单 preset,change locus-three-tier-structure。由短清单构建(persona/agent-instructions/shell/fs/fs-search/skill/compaction/web),不含 subagent/workflow/ralph/send_message/agent 控制/job 控制,也不含 plan mode、goal、skill-filesystem:委派行按 agent 安装会落在会话自有层,toolFilter 关不上,只能让它不在上限里。名称中性,与 channel 无关。0.2+ 由 sync 渲染为 @deepseek-ai/dsh-agent-preset 声明行(id preset-locus-base),运行体只接受声明式 preset,缺声明时 Pet 拒绝创建 locus 会话且不改用其它 preset。升级复核:官方 standard preset 的工具行变化时对照差异(新增行不会自动进入)。移除:随 dsh-pet 一并 enabled:false。'
+  - id: locus-child
+    type: preset
+    version: 0.1.0
+    enabled: true
+    brief: Locus 子会话专用白名单 preset(locus-base 去掉 write/edit,不含任何委派行)
+    note: '自研白名单 preset,change upgrade-dsh-0-2-1-runtime。DSH 0.2.1 删除并静默忽略子代理启动请求的 toolFilter,Locus 子会话的工具上限改由 request.agentPreset 表达:与 locus-base 的唯一差别是 tool-fs 行只读配置(write/edit 不注册)。该选择随子会话持久化(agent-preset/selected),冷恢复重新挂载同一 preset;Pet 另在每次发布时对子会话 scope 重放 allow 收窄(preset 无法隐藏其它插件的全局层工具)并读回工具面核验,偏差即拒绝发布。不含 subagent/workflow/ralph/send_message/agent 控制/job 控制,也不含 plan mode、goal、skill-filesystem。0.2+ 由 sync 渲染为 @deepseek-ai/dsh-agent-preset 声明行(id preset-locus-child),缺声明时 Pet 拒绝创建 locus 会话且不改用其它 preset。升级复核:官方 standard preset 或 dsh-tool-fs 配置变化时对照差异(尤其 write/edit 开关)。移除:随 dsh-pet 一并 enabled:false。'
   - id: case-verify
     type: skill
     enabled: true
@@ -312,11 +318,11 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.26.1
-    version: 0.26.1
+    spec: dsh-better-sidebar@0.28.2
+    version: 0.28.2
     enabled: true
     brief: 服务化侧边栏工作台
-    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(0.24.1 起走官方 terminal 能力,不再自带 node-pty;0.25.0 起为不持有 PTY 的底部终端 tab,新增 @xterm 依赖)、Git 面板、后台任务、侧边对话(完整上下文继承,费 token,可设置关闭);可选工具 terminal_*/sidebar_open 默认关闭;0.25.0 另增 wslpath/rg/fd 探针(全 argv、无 shell:true)与信任栅栏两条窄放宽。升级复核:peer 下界 ^0.2.0-rc.2 等于当前 dshVersion,随运行体同批;确认 registerTab 仍在、pnpm why 仅一份实例、出站域名不变。回滚:随运行体一起回到 0.19.1(其 peer 只满足 0.1.5)。 pin 校验 sha512-0/BXLEAqFJnd3SI/aryQVFHayrjE+RHcFgWIy57GrCYUeppEFTujfQOkO4U9V4QRd3qTVHFE7DZzNzUyU+kscw=='
+    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(官方 terminal 能力,不持有 PTY)、Git 面板、后台任务、侧边对话(继承完整上下文,可关);可选工具 terminal_*/sidebar_open 默认关。0.28.2(peer ^0.2.1-rc.1)随 0.2.1 运行体同批:0.26.1 注入已删除的 webRuntime,在 0.2.1 上静默挂起。复核(2026-11-05):出站域名与依赖同 0.26.1;新增只读 git 提交图 execFile(固定 argv、无 shell、限时限量);两个新 peer 为 optional。回滚:随运行体回 0.26.1。 pin 校验 sha512-JxtRoCoNA/02VexkInZ1K4+c/1Tvk+DVS01dRfjbGKxWfXGZ6NEyemsdERGOhQ3DsLxOWc4Mj0ol+5s+6V0Egg=='
   # 自研(remote):驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package
@@ -343,16 +349,6 @@ customizations:
     enabled: true
     brief: 驾驶舱端口发布能力接入 dsh-memex 卡片浏览(可移除 shim)
     note: '自研,change upgrade-dsh-0-2-0-runtime(spec cockpit-memex-browse-shim)。纯 Web client adapter:把 cockpitBridge.forwards 接给 dshMemex.browseAddress,两端互不引用、无顶层 inject。按设备端口单飞 acquire,只交付 ready 的当前地址(最多等 15 秒,不缓存 URL);仅 CockpitForwardsError code=local-device 回落 localhost,unavailable/网络/业务错误原样传播;已接线的 bridge 消失时保持 fail-closed,避免远端静默误路由。须配 bridge >=0.6.1(已删旧 portForward,不能搭配 shim 0.1.1)。升级复核:bridge 的 forwards 契约。移除:删除本条即解耦;回滚旧 shim 必须同时回滚 bridge 到旧服务版本。'
-  # 官方可选(remote):Schedule / 自动化任务。0.1.5 默认组合自带,0.2.0 移入默认关闭的官方可选包
-  # 已知副作用(B049):schedule_* 只注册给 root agent,fork 子会话工具集因此与父不一致,读不到父会话 prompt cache;待上游修复。
-  - id: experimental-schedule
-    type: package
-    source: remote
-    spec: '@deepseek-ai/dsh-experimental-schedule-bundle@0.2.0-rc.2'
-    version: 0.2.0-rc.2
-    enabled: true
-    brief: 官方可选 Schedule(侧栏自动化任务页 + schedule_* 工具 + 时间上下文)
-    note: '官方 bundle @deepseek-ai/dsh-experimental-schedule-bundle,与 dshVersion 同版本精确 pin。0.2.0 把 time-context/schedule/ui-schedule 三行移出出厂 Web 组合并放入本包(依赖同版本三个官方包);用户选择默认打开以保留 0.1.5 能力。任务存于会话日志内的会话本地投影。升级复核:升级 dshVersion 时须同步改本 pin。回滚/移除:enabled:false → dsh build → 重启(只撤销三行,已存任务保留)。 pin 校验 sha512-6oGDFceBMAsrKeJfFxByyvXBPE+Obfd0oMCwNYdWesPmRBueuRwj5lwp8BY+v59mQAc3Jzdkx1hZh/E6xRcMng=='
   # 第三方(remote):OpenCode Go 400 MissingSessionID 补丁(社区插件,非官方;官方适配发布后评估移除)
   - id: dsh-opencode-session-header
     type: package
@@ -390,7 +386,7 @@ customizations:
     type: patch
     enabled: true
     brief: 让 connection provider 自身等待 webServer,恢复全部 Connection RPC 通道注册
-    note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webRuntime, webServer];整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。'
+    note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webStartup, webServer](0.2.1 删除 webRuntime,官方行仍缺 webServer);整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。'
 
   # 第三方纯提示词 skill(无 dsh.bundle):remote 精确 pin + 专属 skill-filesystem provider。
   - id: ponytail
@@ -406,17 +402,15 @@ customizations:
     enabled: true
     brief: 为 ponytail 包挂专属 skill-filesystem provider(不含默认根)
     note: '组合补丁(patches/ponytail-skills.yml):插入 @deepseek-ai/dsh-skill-filesystem 行,providerName ponytail-plugin,includeDefaultRoots:false,skills 目录由 profile baseUrl 经包主入口解析(包的 exports 未导出 package.json,不能照搬 archify 写法)。升级复核:确认包主入口仍位于 .opencode/plugins/ 下两级(目录结构变化需同步改路径)。移除:enabled:false → dsh build。'
-  # 第三方 /btw 旁问(BACKLOG B049):暂用 PR #16 构建(唯一能复用主会话 cache 的版本),合入发版后改回 npm 精确版本。
-  # spec 必须是各机器都能取到的地址:file: 本机路径会让其他机器 dsh build 报 ENOENT。
+  # 第三方 /btw 旁问(BACKLOG B049)。PR #16(复用主会话 cache)已于 2026-10-24 合入上游并随 1.0.6 发布,fork tarball 已回收为 npm 精确版本。
   - id: michengai-btw
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-btw/releases/download/pr16-e28856d/michengai-dsh-btw-1.0.4-pr16-e28856d.tgz'
-    name: '@michengai/dsh-btw'
-    version: 1.0.4
+    spec: '@michengai/dsh-btw@1.3.2'
+    version: 1.3.2
     enabled: true
-    brief: /btw 旁问(只依据当前上下文回答、不执行工具、答案不写回主会话;暂用 PR #16 构建)
-    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),peer 支持 DSH 0.2.0-rc.1–0.2.1-rc.2,含版本门。审查(2026-10-22 读 lib/index.js):注册 /btw 与两个隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 拒绝其全部工具;无出站、不读凭据、不写盘。现装 PR #16 构建,发布于本人 fork 的 release(commit e28856d,tarball SHA256 586c1c62…2226a),相对 1.0.4 只去掉 persona 与空工具白名单。B049 实测:该构建在父子工具集一致时 Claude/codex 首请求均近全量命中主会话 cache,1.0.4 恒为 0;experimental-schedule 启用时工具集不一致,同样不命中。合入发版后改回 npm 精确版本。移除:enabled:false → dsh build → 重启。'
+    brief: /btw 旁问(只依据当前上下文回答、默认不执行工具、答案默认不写回主会话)
+    note: '第三方 https://github.com/MichengAI/dsh-btw(Apache-2.0),engines.dsh 与 peer 均为 >=0.2.0-rc.1 <0.3.0-0。审查(2026-11-05 读 1.3.2 lib/index.js,对比 1.0.4 PR #16 构建):注册 /btw 与隐藏内部命令,经上游 fork provider 起一次性子代理,全局 tools.guard 闸门;无出站、不读凭据、不写盘。相对 PR 构建新增两点信任面:1.1.0 起旁问可调 send_message 但仅限发给自己的父会话(用户明确要求时回传);1.3.0 起插件页可配置工具白名单与提示词,留空即默认只允许纯文字回答,本仓不配置。PR #16 的 cache 复用已在上游(1.0.6),B049 实测结论沿用;Automation 内置后的工具集一致性在 0.2.1 候选中复验。升级复核:复读 lib/index.js 闸门与白名单默认值。移除:enabled:false → dsh build → 重启。 pin 校验 sha512-gTZ3JVtp7BAXfVPiDyqrMVsTtHYy7V00liQ403Oi8nnVrAK2qg5Vuwu6TLs+U48OSF5FuOgR3Azxd5BKs5nDNw=='
 
   - id: dsh-magpie-connector
     type: package

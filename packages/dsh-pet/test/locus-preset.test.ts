@@ -10,10 +10,14 @@ import {
   LOCUS_SHELL_TIER_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
 import {
+  areLocusPresetsDeclared,
+  isLocusPresetDeclared,
   LOCUS_BASE_PRESET,
+  LOCUS_CHILD_PRESET,
   LocusPresetMissingError,
   mountLocusPreset,
 } from '../src/host/locus/preset.js'
+import { LOCUS_BASE_TOOL_FILTER } from '../src/host/locus/child.js'
 
 const REPO = nodePath.resolve(import.meta.dirname, '../../..')
 
@@ -53,8 +57,20 @@ const ROW_TOOLS: Readonly<Record<string, readonly string[]>> = {
   'tool-skill': ['skill'],
 }
 
+/** A row's declaration without comments or blank lines, so banners between rows do not count. */
+function withoutComments(text: string): string {
+  return text.split('\n').filter(line => line.trim() !== '' && !line.trim().startsWith('#')).join('\n')
+}
+
+/** `tool-fs` registers each of its tools unless its row switches that tool off. */
+const FS_TOOL_FLAGS: Readonly<Record<string, string>> = { read: 'read', read_image: 'readImage', write: 'write', edit: 'edit' }
+
 function mountedToolNames(rows: readonly PresetRow[]): string[] {
-  return rows.filter(row => !row.disabled).flatMap(row => ROW_TOOLS[row.id] ?? [])
+  return rows.filter(row => !row.disabled).flatMap(row => {
+    const names = ROW_TOOLS[row.id] ?? []
+    if (row.id !== 'tool-fs') return names
+    return names.filter(name => !new RegExp(`^\\s+${FS_TOOL_FLAGS[name]}:\\s*false\\s*$`, 'm').test(row.text))
+  })
 }
 
 function fakePresets(declared: readonly string[]) {
@@ -109,6 +125,59 @@ describe('locus-base 不含委派', () => {
   })
 })
 
+describe('locus-child 以声明式 preset 表达子会话工具上限', () => {
+  it('registers exactly the reviewed ceiling: the old allow list, nothing else', async () => {
+    const rows = await readPresetRows(LOCUS_CHILD_PRESET)
+    const tools = mountedToolNames(rows).sort()
+    // The old persisted filter was `allow: safe + shell tier`; the preset now
+    // registers exactly those names, and the filter is what Pet re-applies.
+    expect(tools).toEqual([...LOCUS_BASE_TOOL_FILTER.allow!].sort())
+    for (const name of ['write', 'edit', ...LOCUS_DELEGATION_DENYLIST]) expect(tools).not.toContain(name)
+    for (const row of rows) {
+      expect(row.name, `row ${row.id}`).not.toMatch(
+        /dsh-tool-subagent|dsh-tool-workflow|dsh-tool-ralph|workflow-ptc|dsh-tool-jobs|dsh-tool-send-message|skill-filesystem/,
+      )
+      expect(row.id, `row ${row.id}`).not.toMatch(/subagent|workflow|ralph|send-message|jobs|list-agents|planning|goal/)
+    }
+  })
+
+  it('is locus-base with only the tool-fs row made read-only (the locus main keeps its wider base)', async () => {
+    const base = await readPresetRows(LOCUS_BASE_PRESET)
+    const child = await readPresetRows(LOCUS_CHILD_PRESET)
+    expect(child.map(row => row.id)).toEqual(base.map(row => row.id))
+    for (const [index, row] of child.entries()) {
+      if (row.id === 'tool-fs') continue
+      expect(withoutComments(row.text), `row ${row.id}`).toBe(withoutComments(base[index]!.text))
+    }
+    // Control: the base preset really does register the file-writing tools, so
+    // the read-only row is what the child's ceiling rests on.
+    expect(mountedToolNames(base)).toEqual(expect.arrayContaining(['write', 'edit']))
+    expect(child.find(row => row.id === 'tool-fs')!.text).toMatch(/write:\s*false[\s\S]*edit:\s*false/)
+  })
+
+  it('is neutral, declared in the manifest, and versioned with its file', async () => {
+    const rows = await readPresetRows(LOCUS_CHILD_PRESET)
+    const meta = await readFile(nodePath.join(REPO, 'presets', LOCUS_CHILD_PRESET, 'preset.yml'), 'utf8')
+    expect(LOCUS_CHILD_PRESET).toBe('locus-child')
+    expect(`${meta}${rows.map(row => row.text).join('\n')}`.toLowerCase()).not.toMatch(/lark|feishu|\bpet\b/)
+    const manifest = await readFile(nodePath.join(REPO, 'dsh.yaml'), 'utf8')
+    const version = (await readFile(nodePath.join(REPO, 'presets', LOCUS_CHILD_PRESET, 'VERSION'), 'utf8')).trim()
+    expect(manifest).toContain(`- id: locus-child\n    type: preset\n    version: ${version}\n    enabled: true`)
+  })
+
+  it('both presets must be declared before a locus is created; a missing one is never replaced', async () => {
+    const onlyMain = fakePresets([LOCUS_BASE_PRESET, 'standard'])
+    const onlyChild = fakePresets([LOCUS_CHILD_PRESET, 'standard'])
+    const both = fakePresets([LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET])
+    expect(await areLocusPresetsDeclared(onlyMain)).toBe(false)
+    expect(await areLocusPresetsDeclared(onlyChild)).toBe(false)
+    expect(await areLocusPresetsDeclared(both)).toBe(true)
+    expect(await isLocusPresetDeclared(onlyChild, LOCUS_CHILD_PRESET)).toBe(true)
+    expect(await areLocusPresetsDeclared({ list: async () => { throw new Error('catalog offline') } })).toBe(false)
+    expect(new LocusPresetMissingError('x', { presetId: LOCUS_CHILD_PRESET })).toMatchObject({ presetId: LOCUS_CHILD_PRESET })
+  })
+})
+
 describe('运行体只接受声明式 preset 时冷恢复 locus child', () => {
   it('运行体只接受声明式 preset 时冷恢复 locus child', async () => {
     const rows = await readPresetRows(LOCUS_BASE_PRESET)
@@ -129,6 +198,7 @@ describe('运行体只接受声明式 preset 时冷恢复 locus child', () => {
       { id: 'child-1', scope: { get: () => ({}) } },
       {
         parentPreset: () => LOCUS_BASE_PRESET,
+        childPreset: () => 'locus-child',
         lookup: {
           find: () => ({
             parentSessionId: 'main-1',

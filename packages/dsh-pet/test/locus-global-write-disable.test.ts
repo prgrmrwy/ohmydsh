@@ -14,7 +14,7 @@ function world(pendingPermission?: LocusChildPermission) {
   const apply = vi.fn((_id: string, permission: LocusChildPermission) => { applied.push(permission) })
   const resolve = vi.fn(() => applied.at(-1))
   const run = () => composeLocusChild({ id: 'child', scope: {} }, {
-    lookup: { find: () => composition }, parentPreset: () => LOCUS_BASE_PRESET, writeEnabled: false,
+    lookup: { find: () => composition }, parentPreset: () => LOCUS_BASE_PRESET, childPreset: () => 'locus-child', writeEnabled: false,
     surface: {
       install() {}, setToolTier() {}, installOutboundGuard() {},
       visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS],

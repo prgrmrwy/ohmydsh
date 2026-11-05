@@ -1,5 +1,6 @@
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { MessageId } from '@deepseek-ai/dsh-llm'
+import { LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
 import { describe, expect, it, vi } from 'vitest'
 import {
   adaptLocusInboxPort,
@@ -46,9 +47,11 @@ function parentPort(options: {
 }
 
 function subagentPort(
-  start: LocusSubagentPort['startContinuable'] = async spec => ({
+  start: LocusSubagentPort['startActivation'] = async spec => ({
     childId: spec.childId ?? SessionId(CHILD_ID),
     messageId: MessageId('message-1'),
+    result: Promise.resolve({ output: [], stopReason: 'completed' }),
+    dispose: async () => undefined,
   }),
   options: {
     /**
@@ -62,9 +65,11 @@ function subagentPort(
 ): LocusSubagentPort {
   const proven = options.independentContextProven ?? true
   return {
-    startContinuable: vi.fn(start),
+    startActivation: vi.fn(start),
     getProvider: vi.fn((name: string) =>
-      proven && name === LOCUS_CHILD_PROVIDER ? { inheritsParentContext: false } : undefined),
+      proven && name === LOCUS_CHILD_PROVIDER
+        ? { inheritsParentContext: false, capabilities: { agentPreset: true } }
+        : undefined),
   }
 }
 
@@ -163,7 +168,7 @@ describe('generic locus child adapter', () => {
     })
   })
 
-  it('creates one child with startContinuable and exposes only its active identity', async () => {
+  it('creates one child with startActivation and exposes only its active identity', async () => {
     const live = parent()
     const start = subagentPort()
     const inbox = inboxPort()
@@ -185,15 +190,18 @@ describe('generic locus child adapter', () => {
       messageId: 'message-1',
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
-    expect(start.startContinuable).toHaveBeenCalledWith(
+    expect(start.startActivation).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: LOCUS_CHILD_PROVIDER,
         label: '项目话题 child',
         request: {
           prompt: [{ type: 'text', text: 'initialize locus' }],
           parent: live,
-          toolFilter: LOCUS_BASE_TOOL_FILTER,
+          // The ceiling is the independent preset; a `toolFilter` field would
+          // be silently ignored by DSH 0.2.1.
+          agentPreset: LOCUS_CHILD_PRESET,
         },
+        delivery: 'parent',
       }),
     )
     expect(adapter.activeChild).toEqual({ parentSessionId: PARENT_ID, childSessionId: CHILD_ID })
@@ -209,9 +217,42 @@ describe('generic locus child adapter', () => {
       created: false,
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
-    expect(start.startContinuable).toHaveBeenCalledTimes(1)
+    expect(start.startActivation).toHaveBeenCalledTimes(1)
   })
 
+
+  it('attaches a handler to the activation result so a capture failure is reported, not unhandled', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const failure = new Error('result capture failed')
+      const log = vi.fn()
+      const start = subagentPort(async spec => ({
+        childId: spec.childId ?? SessionId(CHILD_ID),
+        messageId: MessageId('message-1'),
+        result: Promise.reject(failure),
+        dispose: async () => undefined,
+      }))
+      const adapter = createLocusChildAdapter({
+        parent: parentPort({ resident: parent() }),
+        subagent: start,
+        inbox: inboxPort(),
+        log,
+      })
+      await expect(adapter.createChild({
+        childId: CHILD_ID,
+        parentSessionId: PARENT_ID,
+        label: 'child',
+        prompt: [{ type: 'text', text: 'seed' }],
+      })).resolves.toMatchObject({ ok: true, created: true })
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(unhandled).toEqual([])
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('result capture failed'))
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
 
   it('refuses to create with the default provider when its independence is unproven (D2 fail closed)', async () => {
     // Three ways a runtime can fail to prove it: no lookup method at all, the
@@ -220,11 +261,15 @@ describe('generic locus child adapter', () => {
     const variants: LocusSubagentPort[] = [
       subagentPort(undefined, { independentContextProven: false }),
       { ...subagentPort(), getProvider: undefined },
-      { ...subagentPort(), getProvider: () => ({ inheritsParentContext: true }) },
+      { ...subagentPort(), getProvider: () => ({ inheritsParentContext: true, capabilities: { agentPreset: true } }) },
+      // Independent context but no independent preset selection: the child
+      // would run on its parent's composition, so the ceiling is unproven.
+      { ...subagentPort(), getProvider: () => ({ inheritsParentContext: false, capabilities: { agentPreset: false } }) },
+      { ...subagentPort(), getProvider: () => ({ inheritsParentContext: false }) },
       { ...subagentPort(), getProvider: () => { throw new Error('registry unavailable') } },
     ]
     for (const start of variants) {
-      const startSpy = vi.spyOn(start, 'startContinuable')
+      const startSpy = vi.spyOn(start, 'startActivation')
       const adapter = createLocusChildAdapter({
         parent: parentPort({ resident: parent() }),
         subagent: start,
@@ -281,7 +326,7 @@ describe('generic locus child adapter', () => {
       prompt: [{ type: 'text', text: 'seed' }],
       provider: 'fork',
     })).resolves.toMatchObject({ ok: true, created: true })
-    expect(start.startContinuable).toHaveBeenCalledWith(
+    expect(start.startActivation).toHaveBeenCalledWith(
       expect.objectContaining({ provider: 'fork' }),
     )
   })
@@ -301,11 +346,11 @@ describe('generic locus child adapter', () => {
       prompt: [{ type: 'text', text: 'two' }],
     })
     expect(result).toEqual({ ok: false, reason: 'active-child-conflict' })
-    expect(start.startContinuable).toHaveBeenCalledTimes(1)
+    expect(start.startActivation).toHaveBeenCalledTimes(1)
   })
 
   it('shares one in-flight create and fences adopt until create publishes', async () => {
-    const gate = deferred<{ childId: ReturnType<typeof SessionId>; messageId: ReturnType<typeof MessageId> }>()
+    const gate = deferred<Awaited<ReturnType<LocusSubagentPort['startActivation']>>>()
     const start = subagentPort(async () => gate.promise)
     const proof = { findChild: vi.fn(async () => ({ parentSessionId: PARENT_ID, childSessionId: 'persisted-child' })) }
     const adapter = createLocusChildAdapter({
@@ -319,8 +364,8 @@ describe('generic locus child adapter', () => {
     const second = adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     const adoption = adapter.adoptChild({ parentSessionId: PARENT_ID, childSessionId: 'persisted-child' })
     await flushLifecycle()
-    expect(start.startContinuable).toHaveBeenCalledTimes(1)
-    gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') })
+    expect(start.startActivation).toHaveBeenCalledTimes(1)
+    gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1'), result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined })
     await expect(first).resolves.toEqual({
       ok: true,
       created: true,
@@ -340,7 +385,7 @@ describe('generic locus child adapter', () => {
   })
 
   it('does not publish a child when disposed while creation is in flight', async () => {
-    const gate = deferred<{ childId: ReturnType<typeof SessionId>; messageId: ReturnType<typeof MessageId> }>()
+    const gate = deferred<Awaited<ReturnType<LocusSubagentPort['startActivation']>>>()
     const release = vi.fn(async () => undefined)
     const adapter = createLocusChildAdapter({
       parent: parentPort({ resident: parent() }),
@@ -352,7 +397,7 @@ describe('generic locus child adapter', () => {
     const pending = adapter.createChild({ childId: CHILD_ID, parentSessionId: PARENT_ID, label: 'child', prompt: [{ type: 'text', text: 'seed' }] })
     await flushLifecycle()
     adapter.dispose()
-    gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') })
+    gate.resolve({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1'), result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined })
 
     await expect(pending).resolves.toEqual({ ok: false, reason: 'adapter-disposed' })
     expect(adapter.activeChild).toBeUndefined()
@@ -503,7 +548,7 @@ describe('generic locus child adapter', () => {
       messageId: 'message-1',
       identity: { parentSessionId: PARENT_ID, childSessionId: CHILD_ID },
     })
-    expect(start.startContinuable).toHaveBeenCalledTimes(2)
+    expect(start.startActivation).toHaveBeenCalledTimes(2)
   })
 
   it('falls back to subscribe when onChildSettled is malformed', async () => {
@@ -809,11 +854,11 @@ describe('probed host child seams', () => {
       // rather than stopping at parent resolution.
       agents: { get: (id: string) => (id === PARENT_ID ? parent() : undefined), resume: async () => undefined },
       subagents: {
-        startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
+        startActivation: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1'), result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }),
         listChildren: async () => overrides.children ?? [],
         getProvider: (name: string) =>
           overrides.independentContextProven === true && name === LOCUS_CHILD_PROVIDER
-            ? { inheritsParentContext: false }
+            ? { inheritsParentContext: false, capabilities: { agentPreset: true } }
             : undefined,
         [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'message-1',
       },
@@ -863,7 +908,7 @@ describe('probed host child seams', () => {
     expect(marked.available && typeof marked.ports.subagent.getProvider).toBe('function')
     expect(
       marked.available ? marked.ports.subagent.getProvider!(LOCUS_CHILD_PROVIDER) : undefined,
-    ).toEqual({ inheritsParentContext: false })
+    ).toEqual({ inheritsParentContext: false, capabilities: { agentPreset: true } })
     expect(
       marked.available ? marked.ports.subagent.getProvider!('fork') : undefined,
     ).toBeUndefined()
@@ -882,7 +927,7 @@ describe('probed host child seams', () => {
     const noMethod = probeLocusChildPorts({
       get: (name: string) => (name === 'subagents'
         ? {
-          startContinuable: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1') }),
+          startActivation: async () => ({ childId: SessionId(CHILD_ID), messageId: MessageId('message-1'), result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }),
           [LOCUS_DELIVER_PROMPT_SYMBOL]: async () => 'm',
         }
         : name === 'agents' ? { get: () => undefined, resume: async () => undefined } : undefined),

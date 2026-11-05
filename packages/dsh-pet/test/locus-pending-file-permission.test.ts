@@ -39,7 +39,7 @@ function compose(row: LocusRecord, readback: (applied: LocusChildPermission[]) =
     ...(row.permission.desired === row.permission.effective ? {} : { pendingPermission: row.permission.desired }),
   }
   const run = () => composeLocusChild({ id: row.childSessionId!, scope: { get: () => ({}) } }, {
-    lookup: { find: () => composition }, parentPreset: () => LOCUS_BASE_PRESET, writeEnabled: true,
+    lookup: { find: () => composition }, parentPreset: () => LOCUS_BASE_PRESET, childPreset: () => 'locus-child', writeEnabled: true,
     surface: {
       install: () => {}, setToolTier: () => {}, installOutboundGuard: () => {},
       visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS],

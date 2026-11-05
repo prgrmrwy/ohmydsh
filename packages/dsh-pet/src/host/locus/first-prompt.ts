@@ -1,7 +1,7 @@
 /**
  * Claim resolution for a child's FIRST prompt.
  *
- * A child created by `startContinuable` takes its first turn before the call
+ * A child created by `startActivation` takes its first turn before the call
  * returns, so the inbox message id of that prompt is not known to the Host when
  * the turn claims it — it is returned only afterwards. Everything else that
  * claims a Delivery resolves it by `(child, inbox message id)` from the durable

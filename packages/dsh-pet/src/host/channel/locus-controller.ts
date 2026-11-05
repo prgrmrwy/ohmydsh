@@ -1894,7 +1894,7 @@ export class LocusChannelController {
     if (bound !== undefined && bound.deliveryId === pending.deliveryId && exactCorrelation(bound, correlation) &&
         bound.executionId === executionId && bound.inboxMessageId === queued.inboxMessageId.trim() &&
         ['replied', 'no-reply', 'failed', 'expired', 'unknown-terminal'].includes(bound.status)) {
-      // The first turn can finish before startContinuable returns. Never revive
+      // The first turn can finish before startActivation returns. Never revive
       // its queue slot or emit an in-progress receipt after terminal feedback.
       this.pending.delete(pending.deliveryId)
       return { kind: 'accepted', deliveryId: bound.deliveryId, executionId, locusId: bound.locusId, generation: bound.generation }

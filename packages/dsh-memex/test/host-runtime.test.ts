@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllEnvs())
 
 it('defaults to the package-owned official Host graph', () => {
   vi.stubEnv('MEMEX_TEST_HOST_PACKAGE', undefined)
-  expect(hostTestRequire()('@deepseek-ai/dsh-subagent/package.json').version).toBe('0.2.0-rc.2')
+  expect(hostTestRequire()('@deepseek-ai/dsh-subagent/package.json').version).toBe('0.2.1-rc.5')
   expect(hostTestRequire()('@deepseek-ai/dsh-subagent/package.json').dsh_compat).toBeUndefined()
 })
 

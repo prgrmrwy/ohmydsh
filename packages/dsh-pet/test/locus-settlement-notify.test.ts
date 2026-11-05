@@ -13,7 +13,7 @@ function portsOver(runtime: FakeOfficialRuntime): LocusChildPorts {
       resume: async () => undefined,
     },
     subagent: {
-      startContinuable: spec => runtime.startContinuable(spec as never),
+      startActivation: spec => runtime.startActivation(spec as never),
       getProvider: name => runtime.getProvider(name),
     },
   }

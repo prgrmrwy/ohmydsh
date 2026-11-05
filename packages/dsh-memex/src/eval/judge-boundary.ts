@@ -33,7 +33,12 @@ export function installJudgeBoundary(ctx: Context, parent: Agent, protocol: Boun
     if (!child) return next()
     if (!isAgentLoopRequest(request) || ctx.agents.get(child.id) !== child || !ctx.agents.isOwnedBy(child.id, parent)) throw new Error('Judge exact live identity mismatch')
     requirePristineJudgeParent(parent)
-    verifyJudgeRequest(request, protocol)
+    // 0.2.1 injects the committed working directory as a required runtime-context line;
+    // bind it to this child's own directory, which must still equal the judge parent's.
+    const directories = ctx.get('workingDirectory' as never) as { get(session: unknown): string } | undefined
+    const directory = directories?.get(child.session)
+    if (directory !== undefined && directory !== directories!.get(parent.session)) throw new Error('Judge working directory mismatch')
+    verifyJudgeRequest(request, protocol, directory)
     budget?.claim()
     checked++
     return next()

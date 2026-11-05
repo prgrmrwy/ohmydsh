@@ -245,6 +245,7 @@ describe('Locus tool tier scenarios on a resident child', () => {
         }),
       },
       parentPreset: () => LOCUS_BASE_PRESET,
+      childPreset: () => 'locus-child',
       surface: {
         install: () => {},
         setToolTier: (_agent, tier) => {

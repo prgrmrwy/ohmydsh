@@ -44,7 +44,7 @@ it('cancels a real owned job, awaits producer release, and leaves unowned work a
       let archived = false
       ctx.provide('workspaceRegistry'); ctx.provide('subagents')
       ctx.set('workspaceRegistry', { archiveSession: async (id: string, options: unknown) => { expect(id).toBe(handle.agent.id); expect(options).toEqual({ stopActivity: true }); archived = true } })
-      ctx.set('subagents', { drainContinuableDescendants: async () => {}, listDescendants: async () => [] })
+      ctx.set('subagents', { drainDescendants: async () => {}, listDescendants: async () => [] })
       await createHostRetirer(ctx, ledger, tracking)(handle.agent.id)
       expect(archived).toBe(true)
       expect(ctx.agents.get(handle.agent.id)).toBe(handle.agent)

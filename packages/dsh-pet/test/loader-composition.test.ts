@@ -32,7 +32,7 @@ import {
   LOCUS_SAFE_TOOL_NAMES,
   LOCUS_SHELL_TIER_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
-import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
+import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
 import { LOCUS_ROUTES, ROUTES } from '../src/wire.js'
 
@@ -851,6 +851,10 @@ describe('a locus child is composed at the real creation boundary', () => {
       ...LOCUS_SAFE_TOOL_NAMES,
       ...LOCUS_SHELL_TIER_TOOL_NAMES,
       ...LOCUS_CALLER_BOUND_TOOLS,
+      // Tools a DSH 0.2.1 child would see without the request-level tool filter
+      // (which is gone): other plugins' GLOBAL registrations. Publication must
+      // remove them through the inherited-tool allow list Pet applies itself.
+      'memex_recall', 'collab_read',
     ])
     const sessions = new Map<string, {
       id: string
@@ -864,7 +868,8 @@ describe('a locus child is composed at the real creation boundary', () => {
       if (current !== undefined) return current
       const session = {
         id,
-        header: { cwd: projectRoot, agentPreset: LOCUS_BASE_PRESET },
+        // A locus child runs its own preset; the locus main runs the base one.
+        header: { cwd: projectRoot, agentPreset: id === 'child-live' ? LOCUS_CHILD_PRESET : LOCUS_BASE_PRESET },
         snapshotEvents: () => [],
         seq: 0,
         append(type: string, data: { mode?: string }) {
@@ -984,10 +989,19 @@ describe('a locus child is composed at the real creation boundary', () => {
     const tools = {
       register: (definition: { name?: string }) => { registered.push(definition.name ?? '?'); return () => {} },
       ...(options.withoutRestrict ? {} : {
-        restrict: (restriction: { deny: readonly string[] }) => {
+        restrict: (restriction: { allow?: readonly string[]; deny?: readonly string[] }) => {
           if (options.failRestrict) throw new Error('injected restrict failure')
-          for (const name of restriction.deny) visible.delete(name)
-          return () => { for (const name of restriction.deny) visible.add(name) }
+          // Like the real runtime, an `allow` list filters the INHERITED plane
+          // only; the child's own caller-bound registrations stay visible.
+          const own = new Set<string>(LOCUS_CALLER_BOUND_TOOLS)
+          const removed = new Set<string>()
+          for (const name of visible) {
+            if (own.has(name)) continue
+            if (restriction.allow !== undefined && !restriction.allow.includes(name)) removed.add(name)
+            if (restriction.deny?.includes(name)) removed.add(name)
+          }
+          for (const name of removed) visible.delete(name)
+          return () => { for (const name of removed) visible.add(name) }
         },
       }),
       ...(options.withoutGuard ? {} : { guard: () => () => {} }),
@@ -1278,7 +1292,7 @@ describe('owner-facing locus management is served by the real routes', () => {
         resolve: ({ session }: { session: { id: string } }) => ({ mode: modes.get(session.id) }),
       })
       ctx.provide('subagents', {
-        startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
+        startActivation: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
         getProvider: () => ({ inheritsParentContext: false }),
         listChildren: async (_parentSessionId: string) => {
           return [{
@@ -1516,7 +1530,7 @@ describe('startup reconciliation runs against the real runtime', () => {
     // A runtime that can enumerate children and reports none: real evidence
     // that the persisted child cannot take another turn.
     ctx.provide('subagents', {
-      startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
+      startActivation: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
       getProvider: () => ({ inheritsParentContext: false }),
       listChildren: async () => [],
       [Symbol.for('dsh.subagent.deliverPrompt')]: async () => 'message-1',
@@ -1687,9 +1701,9 @@ describe('the unified Feishu channel stays gated on real capabilities', () => {
     await ctx.plugin(Storage)
     stubServices(ctx, routes)
     // An official runtime without a Host inbox queue is unusable even when
-    // startContinuable exists; a steer/sendMessage fallback is not permitted.
+    // startActivation exists; a steer/sendMessage fallback is not permitted.
     ctx.provide('subagents', {
-      startContinuable: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
+      startActivation: async () => ({ childId: SessionId('child-live'), messageId: MessageId('message-1') }),
       getProvider: () => ({ inheritsParentContext: false }),
       listChildren: async () => [],
     })

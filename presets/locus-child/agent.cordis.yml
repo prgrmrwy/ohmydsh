@@ -1,0 +1,105 @@
+# The tool ceiling of a Locus CHILD session: `locus-base` with the file-writing
+# tools removed.
+#
+# DSH 0.2.1 dropped the per-request `toolFilter` of a subagent start, and it
+# ignores the field silently. The ceiling the filter used to carry therefore has
+# to be a property of the preset the child is started with (`agentPreset`, an
+# independent selection that is persisted with the child and mounted again on
+# every cold resume). What the preset can express is the set of tools it
+# REGISTERS: `tool-fs` below is configured read-only, so `write` and `edit` do
+# not exist in a child at all. What a preset cannot express is hiding tools
+# other plugins register globally; Pet re-applies that cut on the child scope at
+# every publication, and reads the surface back before serving it.
+#
+# Same rules as `locus-base`: built up from a short list, no delegation,
+# workflow, agent-control, job-control, plan-mode, goal or `skill-filesystem`
+# row. The only intended difference between the two files is the `tool-fs` row,
+# which a test pins.
+#
+# Same plane rules as the `standard` preset: a service row would need an
+# `isolate` realm; every row below only registers model-facing tools.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: >-
+      You are a coding agent powered by the {{model}} model.
+    # DSH 0.2.1 removed the built-in `{{cwd}}` variable (an unresolved variable
+    # fails before the model request); the working directory reaches the model
+    # through the official working-directory context instead.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+# Read-only: the tool-fs package registers `write` and `edit` unless told not
+# to, and a child must never hold them whatever its sandbox mode says.
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+  config:
+    read: true
+    readImage: true
+    write: false
+    edit: false
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# `skill-filesystem` is deliberately not loaded: it would make every globally
+# installed Skill discoverable. The catalog and loader stay, so the host can
+# publish an explicit allowlist through its own scoped provider.
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# Long-lived sessions compact their own history. `tokenMeter` stays on the host
+# plane, as in `standard`.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── web ─────────────────────────────────────────────────────────────────────
+
+# The `web` service and its search provider stay in the host composition; only
+# the model-facing tool is per-session. `fetch` stays off: search only.
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000

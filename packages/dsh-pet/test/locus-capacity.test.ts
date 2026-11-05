@@ -12,7 +12,7 @@ describe('名额已满时创建 locus child', () => {
     runtime.agents.set('session-busy', { id: 'session-busy', ctx: { agentId: 'session-busy' }, parentId: LOCUS_MAIN, inbox: [], turnOpen: false })
     const ports: LocusChildPorts = {
       parent: { get: id => runtime.agents.get(id) as unknown as LocusLiveParent | undefined, resume: async () => undefined },
-      subagent: { startContinuable: spec => runtime.startContinuable(spec as never), getProvider: name => runtime.getProvider(name) },
+      subagent: { startActivation: spec => runtime.startActivation(spec as never), getProvider: name => runtime.getProvider(name) },
     }
     const input = {
       parentSessionId: LOCUS_MAIN,

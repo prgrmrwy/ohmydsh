@@ -15,7 +15,7 @@
  */
 
 import { LOCUS_WRITE_ENABLED } from './policy-verification.js'
-import { LOCUS_BASE_PRESET } from './preset.js'
+import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from './preset.js'
 
 /** The composition marker a child must carry to be served (Host-attested). */
 export const LOCUS_TIER3_COMPOSITION = 'tier3' as const
@@ -240,7 +240,7 @@ export type LocusCompositionFailure =
   | 'legacy-composition'
   /** The locus main's preset cannot be read, so the child's composition is not proven. */
   | 'preset-unverified'
-  /** The locus main does not run the pinned preset. */
+  /** The locus main, or the child itself, does not run its pinned preset. */
   | 'preset-mismatch'
   | 'surface-unavailable'
   | 'surface-failed'
@@ -309,6 +309,19 @@ export interface LocusCompositionPorts {
    * unproven composition is refused rather than published.
    */
   readonly parentPreset?: (parentSessionId: string) => string | undefined
+  /**
+   * The preset the child ITSELF is persisted with, read synchronously from the
+   * live child.
+   *
+   * The child's tool ceiling is that preset (DSH 0.2.1 has no per-request tool
+   * filter), and the runtime mounts it again from the persisted selection on
+   * every cold resume. Reading it back on every publication is what proves a
+   * resumed child kept the reviewed ceiling instead of joining its parent's.
+   *
+   * Required for a child to be served: absent means "cannot prove", and an
+   * unproven composition is refused rather than published.
+   */
+  readonly childPreset?: (childSessionId: string) => string | undefined
   readonly surface?: LocusScopedSurfacePort
   readonly policy?: LocusPolicyPort
   /**
@@ -373,6 +386,7 @@ export function composeLocusChild(
   // resume. Prove that parent is the pinned one BEFORE any side effect, so a
   // failed proof leaves nothing to undo.
   verifyParentPreset(agent, composition, ports.parentPreset)
+  verifyChildPreset(agent, ports.childPreset)
 
   // Policy first: the child must never observe a scope that outlives a failed
   // permission application, and the surface reports the permission it reads.
@@ -513,6 +527,41 @@ function verifyParentPreset(
     throw new LocusCompositionError(
       'preset-mismatch',
       `Locus main ${composition.parentSessionId} runs preset ${preset}, not ${LOCUS_BASE_PRESET}`,
+    )
+  }
+}
+
+/** Prove the child runs its own pinned preset (its tool ceiling), or refuse. */
+function verifyChildPreset(
+  agent: LocusCandidateAgent,
+  read: LocusCompositionPorts['childPreset'],
+): void {
+  if (read === undefined) {
+    throw new LocusCompositionError(
+      'preset-unverified',
+      `Host cannot read the preset of locus child ${agent.id}`,
+    )
+  }
+  let preset: string | undefined
+  try {
+    preset = read(agent.id)
+  } catch (error) {
+    throw new LocusCompositionError(
+      'preset-unverified',
+      `Could not read the preset of locus child ${agent.id}`,
+      { cause: error },
+    )
+  }
+  if (preset === undefined) {
+    throw new LocusCompositionError(
+      'preset-unverified',
+      `Locus child ${agent.id} reports no preset`,
+    )
+  }
+  if (preset !== LOCUS_CHILD_PRESET) {
+    throw new LocusCompositionError(
+      'preset-mismatch',
+      `Locus child ${agent.id} runs preset ${preset}, not ${LOCUS_CHILD_PRESET}`,
     )
   }
 }

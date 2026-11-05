@@ -1,18 +1,18 @@
 /**
  * Synchronous pre-publication identity staging for fresh locus children.
  *
- * DSH emits `agent/created` while `startContinuable()` is still publishing the
+ * DSH emits `agent/created` while `startActivation()` is still publishing the
  * fresh child.  The durable locus row cannot be active until that call returns,
  * so a durable-only reverse lookup misses exactly the first event that must
  * install the caller-bound surface and file policy.  This registry bridges only
  * that narrow interval:
  *
  * 1. reserve a fresh, registry-generated child id and its expected composition;
- * 2. pass that exact id to `startContinuable`;
+ * 2. pass that exact id to `startActivation`;
  * 3. the `agent/created` path claims the reservation once, composes the child,
  *    and then runs the creator's publication callback: the durable
  *    child/marker/current association must exist BEFORE the child's first turn
- *    is claimed, and the runtime claims that turn before `startContinuable`
+ *    is claimed, and the runtime claims that turn before `startActivation`
  *    returns (probes/agent-created-probe.md), so waiting for the return value
  *    would let the first caller-bound tool run with nothing to resolve;
  * 4. after creation succeeds, commit the reservation; or

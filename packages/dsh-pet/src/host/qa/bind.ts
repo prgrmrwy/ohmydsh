@@ -232,7 +232,7 @@ export async function bindExistingGroup(
     // Unlike the create path there is no group to strand here — nothing was
     // created in Lark — so rollback is just releasing the child.
     try {
-      await deps.seam.subagents.drainContinuableChildren(liveParent, [SessionId(childId)])
+      await deps.seam.subagents.drainChildren(liveParent, [SessionId(childId)])
     } catch (releaseError) {
       deps.log?.(
         `bind rollback could not release child ${childId}: ${

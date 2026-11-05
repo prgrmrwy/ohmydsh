@@ -28,6 +28,6 @@ export function hostRetirementOperations(ctx: Context, root: Agent, ledger: Eval
       if (id !== root.id || !ledger.read().some(e => e.kind === 'reserved' && e.id === id)) throw new Error('Refusing archive of unregistered test root')
       await workspaces.archiveSession(SessionId(id), { stopActivity: true })
     },
-    async drainDescendants(): Promise<void> { await subagents.drainContinuableDescendants([root]) },
+    async drainDescendants(): Promise<void> { await subagents.drainDescendants([root]) },
   }
 }

@@ -58,12 +58,12 @@ function seamStub(
         }),
       },
       subagents: {
-        startContinuable: vi.fn(async (spec: { childId?: string; label: string }) => {
+        startActivation: vi.fn(async (spec: { childId?: string; label: string }) => {
           if (options.startFails !== undefined) throw options.startFails
           started.push({ ...(spec.childId !== undefined ? { childId: spec.childId } : {}), label: spec.label })
-          return { childId: spec.childId ?? 'child-generated' }
+          return { childId: spec.childId ?? 'child-generated', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }
         }),
-        drainContinuableChildren: vi.fn(async (_parent: LiveAgentLike, ids: readonly string[]) => {
+        drainChildren: vi.fn(async (_parent: LiveAgentLike, ids: readonly string[]) => {
           drained.push(...ids)
         }),
         listChildren: vi.fn(async () => []),
@@ -300,10 +300,10 @@ describe('the child is told where it may work', () => {
     harness = await ready()
     const seam = seamStub()
     const prompts: string[] = []
-    vi.mocked(seam.seam.subagents.startContinuable).mockImplementation(
+    vi.mocked(seam.seam.subagents.startActivation).mockImplementation(
       async (spec: { childId?: string; request: { prompt: { text: string }[] } }) => {
         prompts.push(spec.request.prompt[0]?.text ?? '')
-        return { childId: spec.childId ?? 'c' }
+        return { childId: spec.childId ?? 'c', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }
       },
     )
 
@@ -341,10 +341,10 @@ describe('the child is told where it may work', () => {
     harness = await ready()
     const seam = seamStub()
     const prompts: string[] = []
-    vi.mocked(seam.seam.subagents.startContinuable).mockImplementation(
+    vi.mocked(seam.seam.subagents.startActivation).mockImplementation(
       async (spec: { childId?: string; request: { prompt: { text: string }[] } }) => {
         prompts.push(spec.request.prompt[0]?.text ?? '')
-        return { childId: spec.childId ?? 'c' }
+        return { childId: spec.childId ?? 'c', result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined }
       },
     )
 

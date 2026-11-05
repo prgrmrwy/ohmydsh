@@ -24,8 +24,9 @@
   config:
     prefix: >-
       You are a coding agent powered by the {{model}} model.
-    suffix: >-
-      Your working directory is {{cwd}}.
+    # DSH 0.2.1 removed the built-in `{{cwd}}` variable (an unresolved variable
+    # fails before the model request); the working directory reaches the model
+    # through the official working-directory context instead.
 
 - id: agent-instructions
   name: '@deepseek-ai/dsh-agent-instructions'

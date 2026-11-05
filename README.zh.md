@@ -62,7 +62,7 @@ POSIX start/stop/restart 要求 `lsof`、`ps`（用系统包管理器安装 lsof
 
 <!-- fixture: minimal-manifest -->
 ```yaml
-dshVersion: 0.2.0-rc.2
+dshVersion: 0.2.1-rc.5
 autoUpdate:
   enabled: false
 customizations: []
@@ -114,7 +114,6 @@ dsh doctor         检查并补齐本机运行前提
 | 来源 | 声明方式 | 示例 |
 |---|---|---|
 | 第三方 npm 包 | `source: remote`，精确版本 pin | `width-tiers` |
-| 官方可选 bundle | `source: remote`，与 DSH 版本同 pin | `experimental-schedule` |
 | 本仓库自研 package | `source: local`，代码在 `packages/<id>/` | `dsh-memex` |
 | 独立仓库自研 package | `source: remote`，GitHub release 压缩包 | `dsh-cockpit-bridge` |
 | Skill | `type: skill`，`skills/<id>/` | `ws` |
@@ -177,12 +176,9 @@ tests/                   仓库级测试
 - [width-tiers](https://github.com/aaronlei/dsh-width-tiers) — 在五档之间切换对话区宽度。
 - [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) — 把侧边栏变成服务化的多标签工作台。
 - [dsh-opencode-session-header](https://github.com/beihzb/dsh-opencode-session-header) — 发送 OpenCode Go 要求的会话头，修复缺少会话 ID 的报错。
-- [michengai-btw](https://github.com/prgrmrwy/dsh-btw) — 增加 `/btw` 旁问：只依据当前上下文一次性作答，不执行工具，也不写回主会话。暂时从 fork 的 release 安装上游 MichengAI/dsh-btw 的 PR #16 构建。
+- [michengai-btw](https://github.com/MichengAI/dsh-btw) — 增加 `/btw` 旁问：只依据当前上下文一次性作答，默认不执行工具，也不写回主会话。
 - [dsh-magpie-connect](https://github.com/bitxeno/dsh-magpie-connect) — 把 Magpie AI 网关的模型接入模型选择器，与直连 provider 并存。
 
-### 官方可选
-
-- [experimental-schedule](https://www.npmjs.com/package/@deepseek-ai/dsh-experimental-schedule-bundle) — 官方的定时自动化页面、schedule 工具与时间上下文。
 
 ### 第三方资源
 
@@ -229,7 +225,8 @@ tests/                   仓库级测试
 - [dsh-sandbox-notes](skills/dsh-sandbox-notes/SKILL.md) — 关于 sandbox 权限与「not strictly wider」报错的避坑笔记。
 - [subagent-model-routing](packages/dsh-auto-model-routing/skills/subagent-model-routing/SKILL.md) — 用官方 fresh 工具委派，只原样传递用户或 lead 指定的模型/effort；route_subagent 只是可选预览，失败时暂停并询问用户。
 - [dsh-pet-executor](presets/dsh-pet-executor) — 不加载全局 skill provider 的 Pet 执行会话 preset。
-- [locus-base](presets/locus-base) — Locus 协调会话与各入口子会话共用的固定、不可委派 preset。
+- [locus-base](presets/locus-base) — Locus 协调会话使用的固定、不可委派 preset。
+- [locus-child](presets/locus-child) — locus-base 的只读变体（不注册 write/edit），限定各入口子会话的工具上限。
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
 - [memex-eval-config](patches/memex-eval-config.yml) — 添加固定自检目录的关闭声明，保留用户 scope 与工作区设置。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。

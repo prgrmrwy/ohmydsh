@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -22,8 +22,8 @@ it('reads actual official backend output with the pinned layout rather than a ha
     try {
       await handle.append([{ type: 'session/end-seed', seq: 0, time: 1, data: {} }] as never)
       await handle.flush()
-      const read = storedEvidenceReader(async request => locateRegisteredArtifact({ name: 'session-persistence-jsonl', version: '0.2.0-rc.2', root, compression: 'zstd' }, { id: request, cwd }))
-      const hostRead = createHostEvidenceReader(ctx, ledger, { name: 'session-persistence-jsonl', version: '0.2.0-rc.2', root, compression: 'zstd' })
+      const read = storedEvidenceReader(async request => locateRegisteredArtifact({ name: 'session-persistence-jsonl', version: '0.2.1-rc.5', root, compression: 'zstd' }, { id: request, cwd }))
+      const hostRead = createHostEvidenceReader(ctx, ledger, { name: 'session-persistence-jsonl', version: '0.2.1-rc.5', root, compression: 'zstd' })
       expect(await hostRead(id)).toEqual(await read(id))
       await expect(hostRead('session-daily')).rejects.toThrow(/unregistered/)
       expect(await read(id)).toMatchObject({ id, inheritedEventCount: 0, events: [{ type: 'session/end-seed', seq: 0 }] })

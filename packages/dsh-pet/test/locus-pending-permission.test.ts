@@ -123,6 +123,7 @@ function world(options: { tier?: 'safe' | 'shell'; resident?: boolean; idle?: bo
     const result = composeLocusChild({ id: row.childSessionId!, scope: { get: () => ({}) } }, {
       lookup: { find: () => composition },
       parentPreset: () => LOCUS_BASE_PRESET,
+      childPreset: () => 'locus-child',
       writeEnabled: true,
       surface: {
         install: vi.fn(),
@@ -296,6 +297,7 @@ describe('a pending file permission change', () => {
       ports: {
         lookup: { find: () => pendingWrite() },
         parentPreset: () => LOCUS_BASE_PRESET,
+        childPreset: () => 'locus-child',
         writeEnabled: true,
         surface: {
           install: vi.fn(),

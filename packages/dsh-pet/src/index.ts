@@ -98,6 +98,7 @@ import {
 } from './host/locus/startup-recovery.js'
 import {
   createLocusChildAdapter,
+  applyLocusInheritedToolCeiling,
   probeLocusChildPorts,
   type LocusHostContextLike,
 } from './host/locus/child.js'
@@ -108,7 +109,7 @@ import { createFirstDeliveryPublication } from './host/locus/first-delivery-publ
 import { createDeliveryExecutionProof } from './host/locus/delivery-execution-proof.js'
 import { resolveLocusPendingApplication } from './host/locus/pending-application.js'
 import { retiredInquiryOwnerProjection } from './host/inquiry/retired-history.js'
-import { isLocusPresetDeclared, LOCUS_BASE_PRESET } from './host/locus/preset.js'
+import { areLocusPresetsDeclared, LOCUS_BASE_PRESET } from './host/locus/preset.js'
 import {
   createLocusChannelCapability,
   unavailableLocusChannelCapability,
@@ -1059,6 +1060,7 @@ async function initialize(
     // Durable rows serve restores; the one-shot staging fallback serves the
     // fresh `agent/created` emitted before active publication.
     parentPreset: livePresetFor,
+    childPreset: livePresetFor,
     lookup: createPrepublicationCompositionLookup({
       durable: durableLocusCompositionLookup,
       staging: locusPrepublication,
@@ -1072,10 +1074,22 @@ async function initialize(
           await firstPrompts.whenBound(agent.id)
           return next()
         })
-        const tools = scope.get('tools') as { register(definition: unknown): unknown } | undefined
+        const tools = scope.get('tools') as {
+          register(definition: unknown): unknown
+          restrict?: (restriction: { allow?: readonly string[]; deny?: readonly string[] }) => () => void
+        } | undefined
         if (tools === undefined) {
           throw new PetError('INTERNAL', 'Agent scope exposes no tools service')
         }
+        // The inherited-tool ceiling. DSH 0.2.1 ignores a `toolFilter` on the
+        // subagent start request, and a preset cannot hide tools that other
+        // plugins register globally, so the allow list is applied here, on the
+        // child's own scope, on every publication (creation and cold resume
+        // both reach this boundary). It is the same primitive the runtime used
+        // for the retired request field. A throw — including an allowed name the
+        // child's preset does not provide — vetoes publication. The `write`/`edit`
+        // half of the ceiling is the child preset itself (`locus-child`).
+        applyLocusInheritedToolCeiling(tools)
         const childSession = ctx.sessions.get(agent.id as never)
         const parentSession = ctx.sessions.get(composition.parentSessionId as never)
         const sandboxPolicy = ctx.get('sandboxPolicy') as
@@ -1797,7 +1811,7 @@ async function initialize(
             ...locusChildProbe.ports,
             log: message => petLog(`dsh-pet locus child: ${message}`),
           }),
-          presetDeclared: () => isLocusPresetDeclared(ctx.agentPresets),
+          presetDeclared: () => areLocusPresetsDeclared(ctx.agentPresets),
           afterCreated: (childSessionId, input) => {
             try {
               const session = ctx.sessions.get(childSessionId as never)
@@ -3718,10 +3732,10 @@ async function initialize(
       }
       const ports = locusChildProbe.ports
       const compensation = ports.compensation!
-      if (!('drainContinuableChildren' in compensation) || typeof compensation.drainContinuableChildren !== 'function') {
+      if (!('drainChildren' in compensation) || typeof compensation.drainChildren !== 'function') {
         throw new PetError('LOCUS_UNAVAILABLE', 'Exact owned-child drain is unavailable.')
       }
-      const drainChild = compensation.drainContinuableChildren.bind(compensation)
+      const drainChild = compensation.drainChildren.bind(compensation)
       const tasks: Array<() => Promise<void>> = []
       const interrupted: Array<{ childSessionId: string; parentSessionId: string; deliveryId: string }> = []
       // Include cold catalog records: an activation admitted before freezing
@@ -3787,7 +3801,7 @@ async function initialize(
   ctx.effect(() => () => stopPreparation.dispose(), 'dsh-pet: shutdown preparation')
   const controlPort = ctx.webServer.port
   const profileName = ctx.get('profileContext')?.name
-  if (Number.isInteger(controlPort) && controlPort > 0 && typeof profileName === 'string' && typeof ctx.connection.authenticatedUrl === 'function') {
+  if (typeof controlPort === 'number' && Number.isInteger(controlPort) && controlPort > 0 && typeof profileName === 'string' && typeof ctx.connection.authenticatedUrl === 'function') {
     const origin = `http://127.0.0.1:${controlPort}`
     await lifecycle.contain('Pet shutdown discovery', () => publishStopDescriptor(paths.dshHome, controlPort, {
       v: 1, pid: stopIdentity.hostPid, bootId: stopIdentity.bootId, profile: profileName,

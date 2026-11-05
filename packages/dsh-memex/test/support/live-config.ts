@@ -2,7 +2,7 @@
  * Mount a plugin behind a real Cordis Loader and edit its raw config through
  * `entry.update`, the same path DSH 0.2.0 profile reconciliation takes.
  * Adapted from upstream deepseek-harness packages/settings/settings/tests/live-config.ts
- * (tag dsh-v0.2.0-rc.2).
+ * (tag dsh-v0.2.1-rc.5).
  */
 import { resolveConfig, type Context, type Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'

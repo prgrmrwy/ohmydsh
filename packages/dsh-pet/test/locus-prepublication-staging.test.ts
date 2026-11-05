@@ -69,6 +69,7 @@ describe('locus child pre-publication staging', () => {
     const result = composeLocusChild(candidate, {
       lookup,
       parentPreset: () => LOCUS_BASE_PRESET,
+      childPreset: () => 'locus-child',
       surface: {
         install: vi.fn(),
         setToolTier: (_agent, target) => {
@@ -102,6 +103,7 @@ describe('locus child pre-publication staging', () => {
     expect(() => composeLocusChild({ id: childSessionId, scope: { get: vi.fn() } }, {
       lookup,
       parentPreset: () => LOCUS_BASE_PRESET,
+      childPreset: () => 'locus-child',
       surface: {
         install: vi.fn(),
         setToolTier: () => { throw new Error('restrict failed on cold restore') },
@@ -121,6 +123,7 @@ describe('locus child pre-publication staging', () => {
       {
         lookup,
         parentPreset: () => LOCUS_BASE_PRESET,
+        childPreset: () => 'locus-child',
         surface: {
           install: vi.fn(),
           setToolTier: () => { throw new Error('restriction unavailable') },
@@ -146,6 +149,7 @@ describe('locus child pre-publication staging', () => {
     const result = composeLocusChild(agent, {
       lookup,
       parentPreset: () => LOCUS_BASE_PRESET,
+      childPreset: () => 'locus-child',
       surface: {
         install,
         setToolTier: vi.fn(),
@@ -206,6 +210,7 @@ describe('locus child pre-publication staging', () => {
     const result = composeLocusChild({ id: childSessionId, scope: { get: vi.fn() } }, {
       lookup,
       parentPreset: () => LOCUS_BASE_PRESET,
+      childPreset: () => 'locus-child',
       surface: {
         install: vi.fn(),
         setToolTier,

@@ -119,8 +119,8 @@ async function build(
       }),
     },
     subagents: {
-      startContinuable: vi.fn(async () => ({ childId: CHILD })),
-      drainContinuableChildren: vi.fn(async () => undefined),
+      startActivation: vi.fn(async () => ({ childId: CHILD, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => undefined })),
+      drainChildren: vi.fn(async () => undefined),
       listChildren: vi.fn(async () => []),
     },
     queuePrompt: vi.fn(async (parent: LiveAgentLike, childId: string, text: string) => {

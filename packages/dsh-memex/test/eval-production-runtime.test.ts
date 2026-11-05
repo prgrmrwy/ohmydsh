@@ -36,7 +36,7 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
   // a test failure, not a silent trip through the developer's subscriptions.
   const network = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('Offline test forbids network') })
   const [cordis, llm, agents, loop, sessions, projections, prompt, tools, subagents, spawn, loader,
-    presets, native, defaults, jobs, storage, sqlite, domain, persistence, workspace, query, typert, controller, titles, titleProvider, fs, fsTools, delegation] = await Promise.all([
+    presets, native, defaults, jobs, storage, sqlite, domain, persistence, workspace, query, typert, controller, titles, titleProvider, fs, fsTools, delegation, workingDirectory, remoteAccess] = await Promise.all([
     '@deepseek-ai/cordis', '@deepseek-ai/dsh-llm', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop',
     '@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools',
     '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-subagent-spawn-in-process', '@deepseek-ai/cordis-plugin-loader',
@@ -45,6 +45,7 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     '@deepseek-ai/dsh-session-persistence-jsonl', '@deepseek-ai/dsh-workspace', '@deepseek-ai/dsh-session-query',
     '@deepseek-ai/dsh-typert-registry', '@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-session-title',
     '@deepseek-ai/dsh-session-title-first-prompt-llm', '@deepseek-ai/dsh-fs-local', '@deepseek-ai/dsh-tool-fs', '@deepseek-ai/dsh-tool-subagent',
+    '@deepseek-ai/dsh-working-directory', '@deepseek-ai/dsh-api-remote-access',
   ].map(load))
   const ctx = new cordis.Context() as HostContext & Record<string, any>
   const install = async (module: any, config?: any) => { await ctx.plugin(module.default ?? module, config) }
@@ -58,18 +59,20 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     for (const name of ['@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-experimental-agent-team']) {
       const manifest = JSON.parse(readFileSync(graph.resolve(`${name}/package.json`), 'utf8'))
       if (process.env.MEMEX_TEST_HOST_PACKAGE === undefined) {
-        expect(manifest.version).toBe('0.2.0-rc.2')
+        expect(manifest.version).toBe('0.2.1-rc.5')
         expect(manifest.dsh_compat).toBeUndefined()
       } else {
-        expect(manifest.version).toMatch(/^0\.2\.0-rc\.2(?:-|$)/)
+        expect(manifest.version).toMatch(/^0\.2\.1-rc\.5(?:-|$)/)
       }
     }
     await install(llm); await install(storage); await install(sqlite, { path: ':memory:' }); await install(domain, { backend: 'sqlite' })
     await install(persistence, { root: join(dshHome, 'sessions'), compression: 'zstd' })
     await install(sessions); await install(projections); await install(prompt, { persona: '' }); await install(tools)
+    // 0.2.1: dsh-subagent injects workingDirectory (fs + sessionProjections + systemPrompt); the Session controller injects remoteAccess.
+    await install(fs, { cwd: home }); await install(workingDirectory, { defaultDirectory: home }); await install(remoteAccess)
     await install(agents); await install(loop, { agents: [] }); await install(subagents); await install(spawn, { providerName: 'spawn' })
     await install(jobs, {}); detachController = ctx.jobs.attachController('offline-selftest-producer')
-    await install(workspace); await install(query); await install(typert); await install(fs, { cwd: home })
+    await install(workspace); await install(query); await install(typert)
     await install(loader)
     await install(defaults, { provider: 'offline', model: 'tested' })
     await install(await load('@deepseek-ai/dsh-tool-subagent/model-selection-settings'), { enabled: false, allowedModels: [] })
@@ -135,9 +138,12 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     ctx.on('agent/created', ({ agent }) => {
       created.push(agent)
       if (agent.session.header.origin === 'subagent') {
-        // Creation precedes the first-step descriptor: this is the regression window.
-        expect(agent.session.snapshotEvents().some(event => event.type === 'subagent/descriptor')).toBe(false)
-        // Judge isolation must hold even when stock Team misclassifies this window.
+        // DSH 0.2.0 created the child before its first-step descriptor, a window in which
+        // stock Team misclassified it. 0.2.1 appends `subagent/descriptor` during setup,
+        // before `agent/created` (dsh-subagent 0.2.1-rc.5 lib/index.js:1797-1800), so the
+        // window is closed upstream; assert that, so a regression to the old order fails here.
+        expect(agent.session.snapshotEvents().some(event => event.type === 'subagent/descriptor')).toBe(true)
+        // Judge isolation must still hold independently of Team classification.
         expect(agent.ctx.tools.schemas(agent).map((tool: { name: string }) => tool.name)).toContain('structured_output')
       } else if (!agent.session.header.parentSession) {
         expect(ctx.agentTeams.tryMembership(agent)?.role).toBe('lead')
