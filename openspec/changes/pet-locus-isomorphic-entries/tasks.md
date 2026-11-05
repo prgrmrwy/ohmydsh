@@ -3,7 +3,7 @@
 - [x] 0.1 Record `cd packages/dsh-pet && npm run typecheck` (host + client tsconfig) result before any change. — baseline: typecheck exit 0.
 - [x] 0.2 Record `cd packages/dsh-pet && npx vitest run` file and test counts (passed / skipped / failed) before any change; keep the numbers in `verify.md` as the baseline. — baseline: 207 files passed + 2 skipped; 3061 pass / 0 fail / 4 skip.
 - [x] 0.3 Record root `npm test` (`node scripts/test.mjs`) counts and `npm run check:artifacts` before any change. — baseline: root 757 tests: 754 pass / 0 fail / 3 skip after fixing review-report links; check:artifacts ok.
-- [ ] 0.4 Run the 93 ⚪ rows' test files from `test-plan.md` once on the baseline and note any that are already red (a ⚪ row that fails at baseline is reclassified 🔴 before work starts).
+- [x] 0.4 Run the 93 ⚪ rows' test files from `test-plan.md` once on the baseline and note any that are already red (a ⚪ row that fails at baseline is reclassified 🔴 before work starts). — baseline: full dsh-pet suite green, so no ⚪ row starts red.
 - [x] 0.5 Work on the main checkout (no worktree, shared by all teammates); no push, no deploy, no migration of the live DB (proposal "不包含"). — baseline: main checkout.
 
 ## 1. Contract freeze (lead) — everything below depends on this group
