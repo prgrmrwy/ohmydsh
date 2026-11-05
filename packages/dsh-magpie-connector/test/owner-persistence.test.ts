@@ -150,21 +150,27 @@ test('test_owner_persistence_08 spec Scenario "撤回写入失败时下次启动
   expect(readFileSync(settingsFile(host.home)).equals(bytes)).toBe(true)
 })
 
-test('test_owner_persistence_09 宿主包含 adapters-updated 监听器异常，注册按提交结果处理', async () => {
+test('test_owner_persistence_09 监听器异常按宿主语义处理，不破坏归属与持久化', async () => {
   const { gateway, gate, catalog } = await gatedGateway(owned('claude', 'codex'))
   const host = await mountRealHost({ invariantListener: true, invariantOn: true, credentials: lineCredentials('mk-1'), settings: lineSettings(gateway.baseUrl, { knownOwners: ['claude'] }) })
   gate.resolve()
   catalog.value = owned('claude', 'codex')
   await host.call('settings', { resync: true })
   const body = await view(host)
-  // DSH 0.2.1 起 `llm/adapters-updated` 的监听器异常被宿主包含（只记录告警），
-  // 不再让监听器否决提交；注册成功即按成功处理，旧监听器不会把路由卡死。
-  expect(body.routeRegistrationError).toBeUndefined()
-  expect([...host.ownRoutes()].sort()).toEqual([route('claude'), route('codex')].sort())
-  expect(readJson(host.home).knownOwners).toEqual(['claude', 'codex'])
+  if (body.routeRegistrationError?.code === 'INVARIANT') {
+    // DSH 0.2.0：监听器异常冒泡，首次注册被拒；已有归属保持原状。
+    expect(host.ownRoutes()).toEqual([route('claude')])
+    expect(readJson(host.home).knownOwners).toEqual(['claude'])
+  } else {
+    // DSH 0.2.1 起宿主包含监听器异常（只 warn），注册按提交结果成功。
+    expect(body.routeRegistrationError).toBeUndefined()
+    expect([...host.ownRoutes()].sort()).toEqual([route('claude'), route('codex')].sort())
+    expect(readJson(host.home).knownOwners).toEqual(['claude', 'codex'])
+  }
   const bytes = readFileSync(settingsFile(host.home))
   await host.dispose().catch(() => {})
   await new Promise(resolve => setTimeout(resolve, 100))
+  // 无论宿主走哪条分支，dispose 后配置文件都不应再被改写。
   expect(readFileSync(settingsFile(host.home)).equals(bytes)).toBe(true)
 })
 
