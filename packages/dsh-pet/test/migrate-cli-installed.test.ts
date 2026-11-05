@@ -6,7 +6,7 @@
  * to everything, which would hide a missing declaration, so this test rebuilds
  * a production-shaped layout from the packed tarball: only the package's
  * DECLARED `dependencies` are installed inside it (not hoisted), the Host's
- * peers sit beside it, the command is reached through a `node_modules/.bin`
+ * peers are absent (as in a real profile), the command is reached through a `node_modules/.bin`
  * symlink, and the working directory is outside any repository.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -45,11 +45,9 @@ function installFromTarball(): { readonly bin: string; readonly cwd: string } {
     const source = packageDirOf(name)
     if (source !== undefined) link(source, path.join(installed, 'node_modules', name))
   }
-  // What the Host provides: the peers, beside the package.
-  for (const name of Object.keys(manifest.peerDependencies ?? {})) {
-    const source = packageDirOf(name)
-    if (source !== undefined) link(source, path.join(root, 'node_modules', name))
-  }
+  // Host peers are deliberately NOT laid out: in a real DSH profile they live
+  // in the Host's own install and are unresolvable from a standalone script.
+  // Linking them here once hid a crash on `@deepseek-ai/dsh-storage-domain`.
   const bin = path.join(root, 'node_modules', '.bin', 'dsh-pet-migrate-state')
   mkdirSync(path.dirname(bin), { recursive: true })
   symlinkSync('../dsh-pet/scripts/migrate-state-version.mjs', bin)
@@ -57,6 +55,11 @@ function installFromTarball(): { readonly bin: string; readonly cwd: string } {
 }
 
 describe('the installed migration command', () => {
+  it('keeps Host-provided peers off the import path of spec.ts', () => {
+    const source = readFileSync(path.join(PACKAGE_DIR, 'src/host/spec.ts'), 'utf8')
+    expect(source).not.toMatch(/from '@deepseek-ai\//)
+  })
+
   it('declares zod as a runtime dependency', () => {
     const manifest = JSON.parse(readFileSync(path.join(PACKAGE_DIR, 'package.json'), 'utf8')) as Manifest
     expect(manifest.dependencies?.zod).toBeDefined()

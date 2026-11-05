@@ -71,7 +71,6 @@ import { extractResourceRefs, operationKindOf } from './persistence-helper.js'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   PET_DOMAIN_VERSION,
-  petDomainSpec,
   petLocusRecord,
   type PetLocusDelivery,
   type PetLocusIndex,
@@ -81,6 +80,7 @@ import {
   type PetLocusSwitchNotice,
   type PetLocusPermissionAudit,
 } from '../spec.js'
+import type { petDomainSpec } from '../domain.js'
 
 /**
  * One staged write inside a durable locus transaction.

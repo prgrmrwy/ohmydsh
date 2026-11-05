@@ -12,7 +12,6 @@ import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { PetError } from './errors.js'
 import {
   envKey,
-  petDomainSpec,
   revisionKey,
   PET_CHANNEL_CONFIG_KEY,
   PET_CHAT_ID_PATTERN,
@@ -25,6 +24,7 @@ import {
   type PetGlobalState,
   type PetInvocationChannel,
 } from './spec.js'
+import type { petDomainSpec } from './domain.js'
 import {
   occupiesCurrentSlot,
   type PetInvocationRecord,

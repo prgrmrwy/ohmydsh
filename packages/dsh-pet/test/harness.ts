@@ -18,7 +18,8 @@ import Storage, {
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import { PetRepository } from '../src/host/repository.js'
-import { petDomainSpec, PET_DOMAIN_NAME } from '../src/host/spec.js'
+import { PET_DOMAIN_NAME } from '../src/host/spec.js'
+import { petDomainSpec } from '../src/host/domain.js'
 import { withAtomicWrites } from '../src/host/storage/atomic-domain.js'
 
 /** Serialized medium contents, so a "restart" can reopen the same bytes. */

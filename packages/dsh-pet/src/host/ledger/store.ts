@@ -28,7 +28,7 @@
  * bounded evidence fields the pure model already validated.
  */
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
-import type { petDomainSpec } from '../spec.js'
+import type { petDomainSpec } from '../domain.js'
 import {
   registerTodo, advanceTodoStatus, isTodoTerminal, parseTodoRecord,
   type NewTodoInput, type TodoRecord, type TodoStatus,

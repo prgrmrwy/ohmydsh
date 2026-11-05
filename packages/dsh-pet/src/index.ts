@@ -154,7 +154,8 @@ import {
 import { installLocusProjectReadGuard, locusDeniedRoots } from './host/locus/project-read-guard.js'
 import { locusLarkCliOutboundGuard } from './host/locus/lark-cli-egress-guard.js'
 import { currentAllowlist } from './host/skill-provider.js'
-import { PET_DOMAIN_NAME, petDomainSpec } from './host/spec.js'
+import { PET_DOMAIN_NAME } from './host/spec.js'
+import { petDomainSpec } from './host/domain.js'
 import { withAtomicWrites } from './host/storage/atomic-domain.js'
 import { PET_BACKEND_NAME } from './host/storage/backend.js'
 import {
@@ -4019,7 +4020,8 @@ export { SourceContextRegistry, resolveTrustedContext } from './host/capture.js'
 export { executePetContext, PET_CONTEXT_TOOL } from './host/context-tool.js'
 export { createWorktreeProvider } from './host/worktree-adapter.js'
 export { resolvePetPaths, ensurePetDirectories, isContainedBy } from './host/paths.js'
-export { petDomainSpec, PET_DOMAIN_NAME, PET_DOMAIN_VERSION } from './host/spec.js'
+export { PET_DOMAIN_NAME, PET_DOMAIN_VERSION } from './host/spec.js'
+export { petDomainSpec } from './host/domain.js'
 export { inspectBundle, BUNDLE_LIMITS } from './host/skill-bundle.js'
 export {
   rebuildProjection,

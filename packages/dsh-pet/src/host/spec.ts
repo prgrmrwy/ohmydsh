@@ -7,7 +7,6 @@
  * fails loud at open instead of silently producing partial state.
  */
 
-import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 import { parseCollaborationContext } from './collaboration/context.js'
 import { parseInquiry } from './inquiry/ledger.js'
@@ -168,7 +167,7 @@ const petInvocationStatus = z.enum([
   'recovering',
 ])
 
-const petTaskRecord = z.object({
+export const petTaskRecord = z.object({
   id: z.string().min(1),
   scopeKey: z.string().min(1),
   epoch: z.number().int().nonnegative(),
@@ -195,7 +194,7 @@ const petTaskRecord = z.object({
   revision: z.number().int().nonnegative(),
 })
 
-const petInvocationRecord = z.object({
+export const petInvocationRecord = z.object({
   id: z.string().min(1),
   taskId: z.string().min(1),
   capabilityId: z.string().min(1),
@@ -220,7 +219,7 @@ const petInvocationRecord = z.object({
   revision: z.number().int().nonnegative(),
 })
 
-const petSourceSnapshot = z.object({
+export const petSourceSnapshot = z.object({
   id: z.string().min(1),
   invocationId: z.string().min(1),
   sourceKind: petSourceKind,
@@ -248,7 +247,7 @@ const petSourceSnapshot = z.object({
   capturedAt: z.number().int(),
 })
 
-const petRunRecord = z.object({
+export const petRunRecord = z.object({
   id: z.string().min(1),
   invocationId: z.string().min(1),
   attempt: z.number().int().positive(),
@@ -261,7 +260,7 @@ const petRunRecord = z.object({
 // One registration per Skill, keyed by name. A Skill is the user's own
 // directory rather than an immutable copy, so there are no revisions to
 // version, compare or garbage-collect.
-const petSkillRevision = z.object({
+export const petSkillRevision = z.object({
   skillName: z.string().min(1),
   /** Canonical directory on the Host that the projection links to. */
   sourcePath: z.string().min(1),
@@ -284,7 +283,7 @@ const petSkillRevision = z.object({
   totalBytes: z.number().int().nonnegative(),
 })
 
-const petSkillSelection = z.object({
+export const petSkillSelection = z.object({
   skillName: z.string().min(1),
   /** Present when the Skill is enabled; a Skill has no versions to pick. */
   enabled: z.boolean().optional(),
@@ -316,7 +315,7 @@ export const PET_ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/
  * scopes are independent rows: a workspace entry OVERRIDES a global one of the
  * same key at injection time, but neither overwrites the other in storage.
  */
-const petEnvEntry = z.object({
+export const petEnvEntry = z.object({
   scope: z.string().min(1),
   key: z.string().regex(PET_ENV_KEY_PATTERN),
   value: z.string().min(1),
@@ -348,7 +347,7 @@ export const PET_CHANNEL_CONFIG_KEY = 'channel'
  * facts used to prove which bot is bound and to decide whether an inbound
  * mention targets us; neither is a secret.
  */
-const petChannelConfig = z.object({
+export const petChannelConfig = z.object({
   /** Disabled until the user explicitly turns the channel on. */
   enabled: z.boolean(),
   /** Bound bot's app id, as reported by `lark-cli auth status`. */
@@ -420,7 +419,7 @@ const petChannelConfig = z.object({
  * kind-specific shape is enforced by `superRefine` rather than a union so a
  * v4 row — which has no `kind` key at all — still parses through the default.
  */
-const petChatBinding = z
+export const petChatBinding = z
   .object({
     chatId: z.string().regex(PET_CHAT_ID_PATTERN),
     chatType: z.enum(['p2p', 'group']),
@@ -514,7 +513,7 @@ const petChatBinding = z
  * user id is ever accepted, so the row is the only authority for "where does
  * this answer go".
  */
-const petInvocationChannel = z.object({
+export const petInvocationChannel = z.object({
   invocationId: z.string().min(1),
   chatId: z.string().regex(PET_CHAT_ID_PATTERN),
   chatType: z.enum(['p2p', 'group']),
@@ -1194,7 +1193,7 @@ export const petLedgerItemRecord = z.unknown().transform((input, issueCtx) => {
   }
 })
 
-const petGlobalState = z.object({
+export const petGlobalState = z.object({
   /** Bumped whenever the enabled skill selection changes. */
   skillSetGeneration: z.number().int().nonnegative(),
   /** Monotonic epoch allocator per scope key. */
@@ -1230,61 +1229,6 @@ const petGlobalState = z.object({
   workspaceId: z.string().optional(),
 })
 
-/** The complete `dsh-pet` domain declaration. */
-export const petDomainSpec = defineDomain({
-  name: PET_DOMAIN_NAME,
-  version: PET_DOMAIN_VERSION,
-  global: {
-    schema: petGlobalState,
-    initial: {
-      skillSetGeneration: 1,
-      scopeEpochs: {},
-      defaultContextPolicy: 'current-session' as const,
-    },
-  },
-  tables: {
-    tasks: domainTable<string, z.infer<typeof petTaskRecord>>(petTaskRecord),
-    invocations: domainTable<string, z.infer<typeof petInvocationRecord>>(petInvocationRecord),
-    snapshots: domainTable<string, z.infer<typeof petSourceSnapshot>>(petSourceSnapshot),
-    runs: domainTable<string, z.infer<typeof petRunRecord>>(petRunRecord),
-    skill_revisions: domainTable<string, z.infer<typeof petSkillRevision>>(petSkillRevision),
-    skill_selections: domainTable<string, z.infer<typeof petSkillSelection>>(petSkillSelection),
-    workspace_env: domainTable<string, z.infer<typeof petEnvEntry>>(petEnvEntry),
-    channel_config: domainTable<string, z.infer<typeof petChannelConfig>>(petChannelConfig),
-    chat_bindings: domainTable<string, z.infer<typeof petChatBinding>>(petChatBinding),
-    invocation_channel:
-      domainTable<string, z.infer<typeof petInvocationChannel>>(petInvocationChannel),
-    // Unified locus storage is deliberately additive. The legacy channel tables
-    // above remain declared so existing rows can be opened and preserved; the
-    // locus adapter below never reads or mutates them.
-    loci: domainTable<string, z.infer<typeof petLocusRecord>>(petLocusRecord),
-    locus_indexes: domainTable<string, z.infer<typeof petLocusIndex>>(petLocusIndex),
-    locus_deliveries: domainTable<string, z.infer<typeof petLocusDelivery>>(petLocusDelivery),
-    locus_operations: domainTable<string, z.infer<typeof petLocusOperation>>(petLocusOperation),
-    locus_switch_notices: domainTable<string, z.infer<typeof petLocusSwitchNotice>>(petLocusSwitchNotice),
-    locus_permission_audit: domainTable<string, z.infer<typeof petLocusPermissionAudit>>(petLocusPermissionAudit),
-    // Retired two-tier collaboration and inquiry tables are read-only history.
-    // Keep the original parsers and keys; no runtime store writes or replays them.
-    collaboration_contexts: domainTable<string, z.infer<typeof petCollaborationContextRecord>>(petCollaborationContextRecord),
-    collaboration_context_revisions: domainTable<string, z.infer<typeof petCollaborationContextRecord>>(petCollaborationContextRecord),
-    inquiries: domainTable<string, z.infer<typeof petInquiryRecord>>(petInquiryRecord),
-    inquiry_results: domainTable<string, z.infer<typeof petInquiryResultRecord>>(petInquiryResultRecord),
-    inquiry_answers: domainTable<string, z.infer<typeof petInquiryAnswerRecord>>(petInquiryAnswerRecord),
-    inquiry_handoffs: domainTable<string, z.infer<typeof petInquiryHandoffRecord>>(petInquiryHandoffRecord),
-    inquiry_works: domainTable<string, z.infer<typeof petInquiryWorkRecord>>(petInquiryWorkRecord),
-    // Shared-fact ledger, keyed by parentSessionId. Additive at v15. One row
-    // per main session that has ever registered a ledger item; ensured
-    // idempotently and never deleted, including when its last item is removed.
-    shared_fact_ledger: domainTable<string, z.infer<typeof petSharedFactLedgerRecord>>(petSharedFactLedgerRecord),
-    // Ledger items, keyed by itemId. Additive at v15. Every row today is
-    // `kind: 'todo'`; the field is a namespace partition (design D4), not a
-    // discriminated union this table's schema branches on.
-    ledger_item: domainTable<string, z.infer<typeof petLedgerItemRecord>>(petLedgerItemRecord),
-    // Work session <-> locus main session pairing, keyed by locusMainSessionId.
-    // Additive at v18; see PET_DOMAIN_VERSION.
-    locus_mains: domainTable<string, z.infer<typeof petLocusMainRecord>>(petLocusMainRecord),
-  },
-})
 
 /** Pet global configuration state as stored. */
 export type PetGlobalState = z.infer<typeof petGlobalState>

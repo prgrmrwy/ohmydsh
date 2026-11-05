@@ -40,7 +40,7 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
   it('every table (including v17 inquiry tables) follows the same domainTable<string, z.infer<typeof X>>(X) shape', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
-      new URL('../src/host/spec.ts', import.meta.url),
+      new URL('../src/host/domain.ts', import.meta.url),
       'utf8',
     )
     const tableDecls = [...specSource.matchAll(/(\w+):\s*domainTable<string, z\.infer<typeof (\w+)>>\((\w+)\)/g)]
@@ -58,7 +58,7 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
   it('v15 ledger, v16 answer, and v17 inquiry tables land alongside the 20 pre-existing tables', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
-      new URL('../src/host/spec.ts', import.meta.url),
+      new URL('../src/host/domain.ts', import.meta.url),
       'utf8',
     )
     const existingNames = [...specSource.matchAll(/^\s*(\w+):\s*domainTable</gm)].map(m => m[1])

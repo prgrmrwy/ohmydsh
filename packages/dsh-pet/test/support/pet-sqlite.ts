@@ -11,7 +11,8 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { PetStorageBackend } from '../../src/host/storage/backend.js'
-import { PET_DOMAIN_NAME, petDomainSpec } from '../../src/host/spec.js'
+import { PET_DOMAIN_NAME } from '../../src/host/spec.js'
+import { petDomainSpec } from '../../src/host/domain.js'
 
 export type PetTableName = keyof typeof petDomainSpec.tables & string
 

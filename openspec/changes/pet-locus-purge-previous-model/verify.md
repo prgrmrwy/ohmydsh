@@ -55,3 +55,10 @@ Lock 文件：子会话手改的 `package-lock.json` 里，`packages/dsh-pet/nod
 - **W6 纵深防御保留**：`composition.ts` 里 `legacy-composition` 的 fail-closed 闸门保留了。理由是 spec 仍然规定，没有 `tier3` 的 child 不得 adopt 或恢复。`locus-composition.test.ts` 里对应的两个测试改名为 "defence in depth…"，断言没有改。
 - **W7 未做真机验收**：迁移脚本只在临时数据库和打包安装的布局下验证过。线上库的迁移（`dsh stop` → `--dry-run` → `--yes` → `dsh`）需要所有者另外确认后再执行。
 - 其它：实现过程中误覆盖了 tracked 文件 `test/zz-probe.test.ts`，已经从 git 恢复，`git status` 显示它是干净的。
+
+## 部署后修正（2026-11-05，提交 92be8902 之后）
+
+- 所有者在日常 profile 运行 `dsh-pet-migrate-state --dry-run` 失败：`Cannot find package '@deepseek-ai/dsh-storage-domain' imported from .../dsh-pet/lib/host/spec.js`。原因是 `spec.ts` 同时承载行 schema 与 `petDomainSpec`，后者依赖 Host 提供的 peer；独立脚本解析不到 peer。`migrate-cli-installed.test.ts` 当时把 peer 链接到了包旁边，与真实 profile 不符，所以没测出来。
+- 修正：`petDomainSpec` 移到新文件 `src/host/domain.ts`，`spec.ts` 只依赖 zod；installed 测试不再提供 peer，并新增断言 `spec.ts` 不导入 `@deepseek-ai/*`。
+- 根 `npm test` 原有 1 个失败：评审报告中的链接写成了仓库根相对路径，已改为文件相对路径，指向未跟踪文件（`node_modules`、`lib/`、本机路径）的改为纯文本。
+- 重跑：dsh-pet `npm test` 3059 pass / 0 fail / 4 skip；根 `npm test` 751 / 0 / 3；`check:artifacts` 通过；strict validate 通过；`lib/host/spec.js` 不再引用 `dsh-storage-domain`。

@@ -23,7 +23,7 @@ import { z } from 'zod'
 import { verifyBackendOwnership, verifyDatabaseLocation } from '../src/host/backend.js'
 import { ensurePetDirectories, resolvePetPaths, type PetPaths } from '../src/host/paths.js'
 import { PetRepository } from '../src/host/repository.js'
-import { petDomainSpec } from '../src/host/spec.js'
+import { petDomainSpec } from '../src/host/domain.js'
 import { testTask } from './harness.js'
 
 /** Stand-in for an unrelated DSH domain that must stay on the default backend. */
