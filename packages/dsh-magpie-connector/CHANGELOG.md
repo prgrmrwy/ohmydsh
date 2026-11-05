@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.10 — 2026-11-05
+
+- **修复热载后整个插件客户端 UI 消失（侧栏额度卡、设置页 Magpie 面板、输入框速度栏）。** `apply()` 注册 zh/en 字典时用了 `ctx.effect(() => { registry.register(...); return () => {} })`，空的清理函数从不释放字典；而 `@deepseek-ai/dsh-client-locale` 的 `register` 在同一命名空间已被占用时直接抛错（`locale namespace "settings.magpie" already has locale "zh"`）。页面开着时客户端 bundle 被重建（`dsh build`/HMR 推送新 bundle）会先卸载旧条目、再对新模块重新执行 `apply`，于是第二次 `register` 抛错、条目导入失败，插件注册的全部 slot 一起消失，直到刷新页面才恢复——表现为「侧栏 Magpie 额卡经常展示不出来」。现在这个 effect 返回 `locale.register` 自己的 disposer；本地用与真实服务同契约的假 locale 加了回归测试（重复注册抛错、disposer 删除命名空间），覆盖「卸载后重新 apply」与「卸载后命名空间已释放」。设置页导航图标的同款写法原本就返回了 disposer，未受影响。
+- 包内 538 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.9 — 2026-11-05
 
 - **侧栏额度自动刷新改为真实刷新。** 之前每个 `sidebarRefreshMinutes` 只发一次卡片读取（`GET cards`），但网关的卡片接口按当前语义只返回它上次读到的缓存、不会向上游重读：`GET /v1/magpie/quotas/cards`（`quotaCards`）直接取 `provider.CachedCards`，注释写明 “no vendor asked for it”，只有 `POST /v1/magpie/quotas/refresh` 才让网关重读（同一张卡 30 秒内最多一次）。于是定时器虽然按 spec 在跑，读数和卡片头部的「N 分钟前」却一直不变，表现为「5 分钟自动刷新失效」；Claude 的 5 小时窗口也一直停留在上一次真实读取时的 0%（实测本机网关：`GET cards` 的 Claude `readAt` 停在 2026-11-03T21:33-05:00、`5 hours used=0`，强制刷新后变成 `5 hours used=8%`、`7 days` 20%→33%）。现在自动刷新与卡头刷新按钮走同一路径：按间隔静默发一次全量刷新（`POST cards {all:true}`），由网关重读上游；失败时保留旧读数、不显示错误、不影响其它功能，页面隐藏时到期不刷新、恢复可见后补读一次。事件驱动读取（挂载、展开、页面重新可见）仍走 `GET cards` + 60 秒缓存，默认 5 分钟、`0` 关闭不变。
