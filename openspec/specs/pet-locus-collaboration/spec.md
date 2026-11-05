@@ -197,8 +197,9 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、已�
 - **THEN** 恢复同一 child 的历史，不插入恢复时的父历史，不更换身份
 
 #### Scenario: 旧 fork child 不受影响
-- **WHEN** 存在本变更前继承父前缀的旧 child
-- **THEN** 其历史保留不被裁剪或改造；它所在的旧模型入口按退休规则退出路由，不再服务
+- **GIVEN** 存在继承父前缀的旧 child，指向它的旧模型 locus 行已被离线迁移清除
+- **WHEN** Host 启动并处理任意入口的消息
+- **THEN** 该 child 的会话历史不被裁剪或改造；没有任何 locus 行引用它，Pet 不向它投递、不 adopt 也不冷恢复它
 
 ### Requirement: 投递与结算关联独立于会话运行状态
 
@@ -247,7 +248,7 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 #### Scenario: 升级需离线迁移并先备份
 - **GIVEN** 版本戳为 15 的状态库，DSH 已停止
 - **WHEN** 执行 `dsh-pet-migrate-state --yes`
-- **THEN** 同目录生成 `state.sqlite.v15.bak-<ms>`，内容与迁移前逐字节相同；版本戳变为当前域版本（≥16，文档评论引入 16；与 inquiry 线合并后为 17）；随后当前 Host 能打开存储，原有 IM locus 照常服务
+- **THEN** 同目录生成 `state.sqlite.v15.bak-<ms>`，用它打开得到的全部行与迁移前相同（它是独占锁内 checkpoint 之后的完整快照）；版本戳变为当前域版本 19；v15 库没有 `locus_mains`，因此原有 locus 行全部属于旧模型并被清除，按"旧模型 locus 数据经离线迁移清除"处理；随后当前 Host 能打开存储，原 IM 入口在下一条授权 at 时按 auto 规则建立三层结构
 
 #### Scenario: 未迁移时当前版本拒绝打开
 - **GIVEN** 版本戳为 15 的状态库，且未执行迁移
@@ -532,7 +533,7 @@ Locus child 的飞书业务正文与撤回动作 SHALL 以 caller-bound `pet_loc
 
 **任何档位**：child 的已发布能力集合 MUST NOT 含子委派或可让另一执行身份代为行动的工具（包括 `subagent`、`subagent_fork`、`workflow`、`ralph`、`send_message` 及 agent 控制工具）。该排除 SHALL 由持久组合本身保证，MUST NOT 依赖可在运行中撤除的收紧层。
 
-Locus child SHALL 以 locus 主会话为父、经官方 `startContinuable` 创建，冷恢复按官方规则从父会话当前 preset 重建组合。父会话 SHALL 是 Pet 自建、挂中性白名单 preset（`locus-base`，不含任何委派行）的 locus 主会话，其 preset MUST NOT 被更改：Host SHALL 在 locus 主会话与子会话的 `agent/created` 以及每次投递前核验所挂 preset 等于 `locus-base`，不符即拒绝创建、恢复或派发。子会话的 `toolFilter` SHALL 是不含委派的宽底座，Host SHALL 在每次发布（含冷恢复）时同步安装按档位的收紧层。新建子会话 SHALL 在对应 Locus 行发布 Host 证明的 composition marker `tier3`；带其它 marker（`safe-v1`、`safe-v2`）或缺少 marker 的行属于旧模型，SHALL 按"旧模型入口按退休规则处理"退出路由，MUST NOT 被 adopt 或冷恢复。Host 无法证明所需组合（含收紧层）已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 以宽底座发布一个未安装收紧层的 `safe` 档 child。Host SHALL 对 `tools.restrict` 与 `tools.guard` 做运行时特性探测，缺失即拒绝发布。防误操作 guard 另拒绝文档入口的评论与文档正文写命令（见 `pet-locus-doc-comments`）。
+Locus child SHALL 以 locus 主会话为父、经官方 `startActivation` 创建。父会话 SHALL 是 Pet 自建、挂中性白名单 preset（`locus-base`，不含任何委派行）的 locus 主会话，其 preset MUST NOT 被更改；子会话 SHALL 以独立选择的 `locus-child` preset 启动（`locus-base` 去掉写文件工具），该选择随子会话持久化并在每次冷恢复时重新挂载，不从父会话继承。Host SHALL 在 `agent/created` 以及每次投递前核验 locus 主会话的 preset 为 `locus-base`、子会话的 preset 为 `locus-child`，不符即拒绝创建、恢复或派发。runtime 不再携带每次请求的 `toolFilter`；Host SHALL 在每次发布（含冷恢复）时，于子会话自有作用域以 `tools.restrict` 安装不含委派的工具上限与按档位的收紧层。新建子会话 SHALL 在对应 Locus 行发布 Host 证明的 composition marker `tier3`；持久层只承载 `tier3` marker（从未创建 child 的行没有 marker），见"持久层只承载三层模型的 locus 行"；MUST NOT adopt 或冷恢复任何没有 `tier3` marker 的 child。Host 无法证明所需组合（含收紧层）已安装时 SHALL 拒绝创建、恢复或派发；MUST NOT 以宽底座发布一个未安装收紧层的 `safe` 档 child。Host SHALL 对 `tools.restrict` 与 `tools.guard` 做运行时特性探测，缺失即拒绝发布。防误操作 guard 另拒绝文档入口的评论与文档正文写命令（见 `pet-locus-doc-comments`）。
 
 #### Scenario: 受管 finish 正常发送
 - **WHEN** 任一档位的 child 对其已证明的 current Delivery 调用 `pet_locus_finish(reply)`
@@ -567,20 +568,22 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startContinuable` 创�
 - **THEN** Locus intake/child 能力保持 unavailable 并给出确定性诊断，MUST NOT 以字符串过滤或 prompt 警告宣称安全
 
 #### Scenario: safe-v1 行继续服务
-- **WHEN** 一个既有 active locus 的 child 带 `safe-v1` marker
-- **THEN** 该行属于旧模型，按退休规则退出路由；入口下次被授权 at 时提示所有者建立三层结构，不冷恢复该 child
+- **GIVEN** 持久层中一条 locus 行的 `childComposition` 为 `safe-v1` 或 `safe-v2`
+- **WHEN** Pet 打开持久层
+- **THEN** 打开失败，Pet 保持未就绪，诊断包含该行的 key；没有任何入口被路由或投递
 
 #### Scenario: 主会话 preset 不影响子会话工具面
 - **WHEN** 用户的干活主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
-- **THEN** 子会话的父是 locus 主会话而非干活主会话，其已发布工具面只由 `locus-base`、`toolFilter` 与档位收紧层决定，不含委派工具
+- **THEN** 子会话的父是 locus 主会话而非干活主会话，其已发布工具面只由 `locus-child` preset、Host 安装的作用域上限与档位收紧层决定，不含委派工具
 
 #### Scenario: 冷恢复不回落到父组合
 - **WHEN** Host 重启后首次向一个 `tier3` child 投递
-- **THEN** 官方冷恢复从 locus 主会话的 `locus-base` 重建组合，Host 在发布前安装收紧层并核验；locus 主会话 preset 不是 `locus-base` 时拒绝派发
+- **THEN** 冷恢复重新挂载子会话持久化的 `locus-child` preset，Host 在发布前安装作用域上限与收紧层并核验；子会话 preset 不是 `locus-child` 或 locus 主会话 preset 不是 `locus-base` 时拒绝派发
 
 #### Scenario: 升级前的 legacy child 不可恢复服务
-- **WHEN** 一个历史 active locus 的 durable child 没有 Host attested composition marker
-- **THEN** 启动恢复或派发前将该 locus 按旧模型退出路由，MUST NOT adopt 或冷恢复该 child
+- **GIVEN** 持久层中一条 `active` locus 行没有 `childComposition`
+- **WHEN** Pet 打开持久层
+- **THEN** 打开失败，Pet 保持未就绪并给出确定性诊断；该行的 child 不被 adopt 或冷恢复
 
 ### Requirement: Delivery 保留有界结构化 addressing 事实
 
@@ -643,7 +646,7 @@ Host MUST 独立证明被拒调用的精确活跃轮关联该 Delivery，MUST NO
 
 档位 SHALL 仅由 allowlist 经飞书控制命令（`-t/--tools safe|shell`）或管理面改变；非 allowlist 发送者的档位命令 SHALL 按既有控制命令规则拒绝。档位命令 SHALL 只在接受命令时该入口空闲（无 current Delivery 且子会话未在运行）时受理，忙时 SHALL 确定性拒绝。变更 SHALL 在同一子会话上完成，MUST NOT 重建子会话、增加代际或丢弃子会话历史。子会话常驻时 SHALL 当场应用并回读实际可见工具面：与目标档位不符时 SHALL 回到 `safe` 并拒绝，MUST NOT 回执成功。子会话不常驻时 SHALL 适用"非驻留子会话的权限变更以待应用协议提交"：延迟提交在下一次冷恢复的首个业务工具执行前完成，不因用于唤醒的 Delivery 已成为 current 而拒绝；核验失败恢复原生效值；原值也无法核验时按"Locus 业务出站只能经受管 finish"的总则拒绝发布。变更 SHALL 记录操作者、时间、期望值与生效值。
 
-只有带 `tier3` marker 的 locus 可以服务与切换档位；其它 marker 的行属于旧模型，按"旧模型入口按退休规则处理"退出路由。
+只有带 `tier3` marker 的 locus 可以服务与切换档位。持久层只接受 `tier3` 标记（从未创建 child 的行没有标记）；其它标记的行由"旧模型 locus 数据经离线迁移清除"处理，不会出现在可加载的持久层中。
 
 `shell` 档生效期间，该入口 SHALL 只接受 allowlist 成员的 at 作为工作请求；非 allowlist 成员的 at SHALL 得到确定性拒绝回执，说明该入口当前为所有者专用。已在 backlog 中、由非 allowlist 成员触发的 Delivery SHALL 在派发前以同一原因结算，MUST NOT 投递给 `shell` 档子会话。切回 `safe` 后 SHALL 恢复既有的群成员提问规则。
 
@@ -668,8 +671,9 @@ Host MUST 独立证明被拒调用的精确活跃轮关联该 Delivery，MUST NO
 - **THEN** 回到 `safe` 并拒绝，回执给出确定性原因，不回执成功
 
 #### Scenario: safe-v1 入口请求 shell
-- **WHEN** allowlist 对一个仅带 `safe-v1` marker 的旧模型入口发送 `-t shell`
-- **THEN** 不切换档位、不恢复旧子会话；回执说明旧关联已退休，下一条授权 at 将建立三层结构
+- **GIVEN** 某群曾是 `safe-v1` 旧模型入口，其 locus 行已被离线迁移清除，此后没有新的授权 at
+- **WHEN** allowlist 在该群发送 `-t shell`
+- **THEN** 该入口没有 locus，命令按"当前入口不存在或已失效"拒绝；不建立任何结构，不切换档位
 
 #### Scenario: shell 档拒绝普通成员
 - **WHEN** `shell` 档入口收到非 allowlist 群成员的 at
@@ -1029,22 +1033,6 @@ auto、Q&A 与显式绑定 SHALL 走同一建立路径，只在"干活主会话�
 - **WHEN** M 被归档
 - **THEN** 新建 M2，A 迁到 M2 并为 `not-created`；C 不迁移并在回执中说明原因；`locus_mains` 中 M 为非 active、M2 为 active
 
-### Requirement: 旧模型入口按退休规则处理
-
-本变更之前创建的 locus 行（父为用户会话或 Pet standby 主会话、marker 不是 `tier3`）SHALL 不被改写；读取时 SHALL 视为旧模型并退出路由。持久层版本 SHALL 升为 18，升级只新增 `locus_mains` 表。旧模型入口的下一条授权 at SHALL 按\"入口建立统一为一条路径\"的 auto 规则建立三层结构，并在回执中说明旧关联已退休；非授权 at MUST NOT 引发建立。旧模型行的子会话 MUST NOT 被 adopt 或冷恢复。
-
-#### Scenario: 升级只加表
-- **WHEN** 对 v17 数据库运行迁移脚本
-- **THEN** 数据库版本为 18，新增 `locus_mains` 表，其它表的行逐字节不变
-
-#### Scenario: 旧入口首个授权 at
-- **WHEN** 升级后，一个旧模型群入口收到所有者 at
-- **THEN** 新建三层结构并处理该消息，回执说明旧关联已退休；旧子会话未被恢复
-
-#### Scenario: 旧入口非授权 at
-- **WHEN** 同一旧入口收到非 allowlist 成员的 at
-- **THEN** 不建立任何会话，按既有规则处理
-
 ### Requirement: provisioning 失败超时后不再阻塞
 
 处于 `failed` 的 provisioning 操作超过 10 分钟后 SHALL 不再阻塞同一 endpoint；下一次针对该 endpoint 的建立请求 SHALL 先在运行期调用与启动对账相同的补偿器清理其 `resourceRefs`，补偿成功后再按无存量入口建立。补偿失败时 SHALL 继续阻塞并记录诊断。该规则 SHALL 对全部 provisioning kind 一致适用。
@@ -1152,3 +1140,137 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 #### Scenario: 常驻空闲时当场生效
 - **WHEN** C 常驻且空闲时所有者发送 `-t shell`
 - **THEN** 当场应用并回读，回执已生效，不产生待应用记录
+
+### Requirement: 旧模型 locus 数据经离线迁移清除
+
+持久层版本 SHALL 升为 19。离线迁移脚本 SHALL 在 DSH 停止时运行，把版本 2..18 的数据库迁移到 19。旧模型 locus 行指：父会话（`parentSessionId`）在 `locus_mains` 中没有记录的 locus 行；记这些行的 id 集合为 L。
+
+- `--dry-run` SHALL 只读：报告当前版本、目标版本，列出 L 中每一行的 id 与入口，并按表报告将被删除的行数，MUST NOT 写入任何文件。
+- 以下任一条件成立时，脚本 SHALL 拒绝迁移（`--dry-run` 也报告为拒绝），以非零码退出并列出违规行。拒绝的写入保证分两种：预检阶段（含 `--dry-run` 与未确认运行）的拒绝不产生任何物理写入；`--yes` 锁内复查的拒绝保证不做 checkpoint、不写备份、不改变任何行与版本号，但取得独占锁、打开连接等 SQLite 自身的物理副作用不在此保证之内：
+  - 全库存在状态不在终态集合内的投递；终态集合 SHALL 与 Host 的 `TERMINAL_STATUSES` 相同；
+  - 全库存在 phase 不是 `committed` 或 `compensated` 的 locus 操作；
+  - 删除 L 之后保留的 locus 集合不满足 v19 加载条件：每条行的父会话在 `locus_mains` 中有记录；`childComposition` 若存在为 `tier3`；`active` 行带 marker；并且整个集合通过 Host 现有的全部集合不变量（包括带 `parentLocusId` 的行其父行被保留、同一入口剩余代际相邻连续、入口与子会话唯一）。脚本 SHALL 与 Host 使用同一份集合校验规则，MUST NOT 另写一份子集。
+- 拒绝时 SHALL 说明处理方式：在途工作等其结束；无法自行结束的恢复债（`needs-recovery` 或 `failed` 的操作、停在非终态的投递）须先用当前版本 Host 清理或由所有者人工处理，再运行迁移。
+- `--dry-run`、未确认运行与预检拒绝 SHALL 只做只读查询，MUST NOT 做 WAL checkpoint 或产生任何物理写入。`--yes` SHALL 先取得独占锁并持有到事务提交；在锁内重新读取版本戳、表结构与数据并重新执行全部拒绝判定（锁内发现已是 19 时报告无需迁移，发现不支持的版本时拒绝）；锁内拒绝时 SHALL 不做 checkpoint、不写备份、不改变任何行或版本号。锁内判定通过后 SHALL 依次：做 WAL checkpoint；写数据库备份（它是 checkpoint 之后的完整快照）；再在单个事务内完成：版本 ≤17 时补建 `locus_mains` 表；删除 L 中的 locus 行；删除 `locusId ∈ L` 的投递、切换通知与权限审计（按记录中的 `locusId` 字段精确匹配）；删除 `locusId`、`oldLocusId` 或 `newLocusId` ∈ L 的操作；把版本号改为 19。事务失败 SHALL 回滚，版本号与全部行不变，备份保留。
+- 脚本 SHALL 按相对自身文件位置的路径导入包内 `lib/` 中 Host 的校验代码，经 `node_modules/.bin` 符号链接、在仓库以外的工作目录调用时同样可用；这些代码的运行时依赖 SHALL 声明为包的运行时依赖。
+- 脚本 MUST NOT 修改 `locus_indexes`。Host SHALL 在打开 locus 持久层后、注册任何会读取索引的回调（agent 创建、工具、飞书接收）之前，按剩余 locus 行重新推导并写回索引；指向已删除行的默认 Q&A 指针在推导时被丢弃。启动对账沿用同一推导。
+- 脚本 MUST NOT 修改 locus 以外的表：待办台账、询问、`chat_bindings`、`invocation_channel` 等保持逐字节不变。
+- 未给出 `--dry-run` 或 `--yes` 时 SHALL 不写入任何东西并说明需要确认；数据库被占用（DSH 未停止）时 SHALL 给出可操作的提示并失败；已是 19 时 SHALL 报告无需迁移并退出 0。
+
+#### Scenario: dry-run 列出将删除的行且不写入
+- **GIVEN** 一个 v18 数据库，含 3 条旧模型 locus 行、引用它们的 4 条终态投递，以及 2 条三层 locus 行
+- **WHEN** 以 `--dry-run` 运行脚本
+- **THEN** 输出包含这 3 条旧模型行的 id，以及 locus 3、投递 4 的计数；数据库文件与 WAL 文件字节不变，没有生成备份文件
+
+#### Scenario: 确认后清除旧模型数据
+- **GIVEN** 同上的 v18 数据库，DSH 已停止
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 版本为 19；3 条旧模型 locus 行及引用它们的投递、审计、操作都不存在；2 条三层 locus 行逐字节不变；`locus_indexes` 逐字节不变；备份文件存在，且用它打开得到的全部行与迁移前相同
+
+#### Scenario: 迁移后的库能打开并完成启动对账
+- **GIVEN** 一个旧模型行与三层行共享入口、且存在指向旧模型行的默认 Q&A 指针的 v18 数据库，已以 `--yes` 迁移
+- **WHEN** 用 Pet 持久层打开该库并运行启动对账
+- **THEN** 打开与对账都成功；对账后的 `endpoint-current`、`parent-loci`、`child-locus`、`default-qa` 索引与按剩余行推导的结果相同，不含任何已删除行的 id
+
+#### Scenario: 删除历史前代后保留行仍可服务与重建
+- **GIVEN** 入口 E 的第 1 代是旧模型行、第 2 代是 `invalid` 的三层行，第 3 代是 `not-created` 的三层行；已以 `--yes` 迁移
+- **WHEN** 打开持久层，对 E 发布第 4 代
+- **THEN** 打开成功；第 2、3 代保留且 `replacesLocusId` 原样保留（可能指向已删除行）；第 4 代发布成功
+
+#### Scenario: 删除中间代际造成断档时拒绝
+- **GIVEN** 入口 E 的第 1 代是 `invalid` 的三层行、第 2 代是旧模型行、第 3 代是 `not-created` 的三层行
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 脚本以非零码退出并指出入口 E 的代际断档；数据库不变
+
+#### Scenario: 未创建 child 的历史行可以没有 marker
+- **GIVEN** 有配对的三层行中，一条在首条消息前被所有者停止（`stopped`，无 marker），一条在未创建 child 时因 locus 主会话迁移变为 `invalid`（无 marker）
+- **WHEN** 以 `--yes` 运行脚本后用 Pet 打开
+- **THEN** 迁移成功，两条行逐字节保留，Pet 打开成功
+
+#### Scenario: 启动早期的冷恢复不读到悬空索引
+- **GIVEN** 一个已迁移的库，某入口迁移前的 `endpoint-current` 索引指向一条已删除的旧模型行，另有一个保留的三层子会话带待应用权限
+- **WHEN** Host 启动，在启动对账完成之前该子会话被冷恢复
+- **THEN** 待应用权限按剩余 locus 行解析；不出现指向已删除行的结果，也不留下部分应用的状态
+
+#### Scenario: 非 locus 表不受影响且仍可读取
+- **GIVEN** 待办台账、询问、`chat_bindings` 中有引用旧模型 locus 的行
+- **WHEN** 以 `--yes` 运行脚本后打开 Pet，并读取所有者待办列表与已退休询问列表
+- **THEN** 这些表的全部行逐字节不变；两个列表的读取都成功，返回的条目与迁移前相同
+
+#### Scenario: 切换通知按 locusId 精确删除
+- **GIVEN** L 中有 id 为 `locus-a` 的行，另有保留的三层行 `locus-a2`，二者各有一条切换通知
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 只有 `locus-a` 的通知被删除，`locus-a2` 的通知逐字节不变
+
+#### Scenario: 预检通过后出现非终态投递时锁内拒绝
+- **GIVEN** 预检通过后、取得独占锁之前，另一个写入者向库中写入一条 `queued` 投递（含 WAL 中尚未 checkpoint 的写入）
+- **WHEN** `--yes` 取得锁并在锁内复查
+- **THEN** 脚本以非零码退出并指出该投递；没有做 checkpoint、没有备份文件，全部行与版本号不变
+
+#### Scenario: 预检后版本已变化
+- **GIVEN** 预检时版本为 18，取得锁之前该库已被迁移到 19
+- **WHEN** `--yes` 在锁内复读版本戳
+- **THEN** 报告已是目标版本并以 0 退出，不写入任何东西
+
+#### Scenario: 已安装的命令在仓库外可用
+- **GIVEN** 按生产方式安装的 dsh-pet 包（依赖不提升到上层目录），当前目录不在仓库内
+- **WHEN** 经 `node_modules/.bin/dsh-pet-migrate-state --dry-run --db <测试库>` 调用
+- **THEN** 脚本成功加载包内校验代码并输出报告，没有模块解析错误
+
+#### Scenario: 存在非终态投递时拒绝
+- **GIVEN** 库中任意一条投递处于 `queued`
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 脚本以非零码退出并指出该投递及处理方式；版本号与全部行不变，没有写入备份
+
+#### Scenario: 存在未完成的操作时拒绝
+- **GIVEN** 库中一条 locus 操作处于 `provisioning`，且没有任何 locus id 字段
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 脚本以非零码退出并指出该操作；数据库不变
+
+#### Scenario: 保留行不满足 v19 条件时拒绝
+- **GIVEN** 一条有配对但 `childComposition` 为 `safe-v2` 的 locus 行；或一条有配对、`active` 但没有 marker 的行；或一条保留的话题行，其 `parentLocusId` 指向 L 中的行
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 脚本以非零码退出并指出违规行；数据库不变
+
+#### Scenario: 未确认时不写入
+- **WHEN** 不带 `--dry-run` 和 `--yes` 运行脚本
+- **THEN** 脚本以非零退出码结束，数据库不变，没有备份文件
+
+#### Scenario: 已是目标版本时无操作
+- **GIVEN** 已迁移到 19 的数据库
+- **WHEN** 再次以 `--yes` 运行脚本
+- **THEN** 报告已是目标版本并以 0 退出，不写入任何东西
+
+#### Scenario: 从更早版本迁移时全部 locus 行都是旧模型
+- **GIVEN** 一个 v17 数据库，含 2 条 locus 行，没有 `locus_mains` 表
+- **WHEN** 以 `--yes` 运行脚本
+- **THEN** 备份写在任何改动之前；版本为 19，`locus_mains` 表存在且为空，两条 locus 行都被删除
+
+### Requirement: 持久层只承载三层模型的 locus 行
+
+v19 持久层的 locus 行 SHALL 满足：`childComposition` 若存在则为 `tier3`；`active` 行带 `childComposition`；从未创建 child 的行（含其后被停止、失效或退役的）可以没有 `childComposition`。这两条由持久行 schema 逐行校验，不满足时 Domain 打开失败。另外，每一条 locus 行的父会话 SHALL 在 `locus_mains` 中有记录，由 Host 启动对账在接收任何飞书消息之前检查。任一条件不满足时，Pet SHALL 保持未就绪，诊断中包含违规记录的 key 或 id，MUST NOT 跳过违规行继续服务。代码中按旧模型退休、重建或展示旧模型入口的分支 SHALL 被删除。某个干活主会话从未建立 locus 主会话时，按它查找入口（如默认 Q&A）SHALL 返回"未建立"而不是报错；只有已读到 locus 行而其父会话缺少配对时才是非法数据。基于 `chat_bindings` 的退休标记路径不属于旧模型 locus 行，保持不变。
+
+#### Scenario: 合规数据正常就绪
+- **GIVEN** 持久层只含满足上述条件的 locus 行
+- **WHEN** Pet 启动
+- **THEN** Pet 就绪，管理路由注册，所有入口按既有规则服务
+
+#### Scenario: 非 tier3 marker 使 Domain 打开失败
+- **GIVEN** v19 持久层中一条 locus 行的 `childComposition` 为 `safe-v2`
+- **WHEN** Pet 启动
+- **THEN** Pet 未就绪，诊断包含该行的 key；不注册管理路由，不接收飞书消息
+
+#### Scenario: 无配对的行使启动对账失败
+- **GIVEN** v19 持久层中一条 `tier3` 行的父会话不在 `locus_mains` 中
+- **WHEN** Pet 启动
+- **THEN** 启动对账失败，Pet 未就绪，诊断包含该行 id；不接收飞书消息
+
+#### Scenario: 从未建立 locus 主会话的会话首次打开 Q&A
+- **GIVEN** 干活主会话 W 没有任何 locus 主会话
+- **WHEN** 所有者为 W 打开默认 Q&A
+- **THEN** 查找默认 Q&A 返回未建立，随后正常新建 locus 主会话与 Q&A 群
+
+#### Scenario: chat_bindings 退休标记仍然生效
+- **GIVEN** 某群没有 locus 行，但有一条 `chat_bindings` 旧标记
+- **WHEN** 该群收到所有者授权 at
+- **THEN** 按既有退休标记规则要求所有者显式重建，不自动建立三层结构
