@@ -5,7 +5,7 @@ The managed start path in `scripts/launcher/main.mjs` writes the profile as `web
 ## Decisions (user-confirmed; not reopened here)
 
 1. **Interface**: `DSH_PROFILE=<profile> dsh -p <port>`. Default `web`; a non-web profile requires an explicit port. `--profile` stays an official passthrough.
-2. **Scope isolation belongs to the caller**: `systemd-run --user --scope` in the deployment script. The launcher adds no detach logic. `--foreground` keeps the launcher as the caller-visible parent.
+2. **Process isolation belongs to the caller**, implemented as a transient systemd **service** in the deployment script: `systemd-run --user --wait --collect --unit=dsh-superagent-<profile> -p StandardOutput=append:<log> -p StandardError=append:<log> -- env DSH_PROFILE=<profile> dsh --foreground -p <port> --no-open`. The launcher adds no detach logic. `--foreground` keeps the launcher as the unit's main process. A transient `--scope` is not enough: its client process is the launched command itself, still in the caller's pane/process group, so killing the tmux pane or session scope kills the Host. A service is parented by the user manager; deployment-side acceptance on 2026-11-05 put the Host in `dsh-superagent-superagent.service`, and it survived both killing a session scope that contained the client and killing the tmux server.
 3. **Managed start only**: no no-pet-stop patch for non-web profiles, so no descriptor; non-web stop/restart fails closed. `--allow-legacy-restart` stays explicit manual maintenance.
 
 ## Implementation
@@ -51,6 +51,6 @@ The managed start path in `scripts/launcher/main.mjs` writes the profile as `web
 ## Known limits
 
 - If a profile's `cordis.patch.yml` overrides the `webserver` entry's `config`, that block replaces the Web bundle's port configuration and the Host ignores `--port`. A `port:` there wins over `-p`; a `config` without `port` fails startup (`$.port missing required value`). Ownership then fails because argv `--port` and the real listener differ. Either keep the configured port equal to `-p`, or remove the `webserver` entry and let `-p` decide (verified 2026-11-05 with 0.2.1-rc.5).
-- A non-web Host started in background mode appends to the shared `$DSH_HOME/dsh.log`. The deployment caller uses `--foreground` in its own scope.
+- A non-web Host started in background mode appends to the shared `$DSH_HOME/dsh.log`. The deployment caller uses `--foreground` inside its own transient service.
 - `-p 3080` with a non-web profile is not refused. If a web Host holds 3080, ownership refuses the start; if 3080 is free, the profile Host takes it. Choosing the port is the caller's job.
 - Writing `dsh web` together with `DSH_PROFILE=<non-web>` starts the non-web profile (`web` is an ignored token for the argument parser, as before).
