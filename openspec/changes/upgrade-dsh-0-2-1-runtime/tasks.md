@@ -45,7 +45,7 @@
 - [x] 6.1 `dsh build` → `ws prepare-preview` → `dsh`，按最小分组（裸运行体 → local package → remote 插件）逐组组合，记录启动清单、loader 结果、功能证据与基线差异
 - [x] 6.2 用真实 Session/Pet/Automation 备份副本验证打开、继续写入、重启后一致；确认是否发生单向格式迁移，并据此补全回滚步骤
 - [x] 6.3 复跑 1.2 全部人工项；重点验证子任务完成通知回到父会话、Automation 旧任务仍在官方页面、better-sidebar 0.26.1 激活
-- [ ] 6.4 devbox 清洁构建 gate：按精确 commit 在 devbox 隔离执行构建与场景矩阵
+- [x] 6.4 devbox 清洁构建 gate：按精确 commit 在 devbox 隔离执行构建与场景矩阵（devbox 774ed60c，见 checking/devbox-gate.md）
 - [x] 6.5 四个商店包在候选（0.2.1-rc.5）与现役（0.2.0-rc.2）上分别验证当前代码，结论写入 `checking/store-packages.md`，并据此确定各包下界
 
 ## 7. 原子切换（需用户批准）
