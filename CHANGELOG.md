@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.9 — 2026-11-05
+
+- **侧栏额度自动刷新改为真实刷新。** 之前每个 `sidebarRefreshMinutes` 只发一次卡片读取（`GET cards`），但网关的卡片接口按当前语义只返回它上次读到的缓存、不会向上游重读：`GET /v1/magpie/quotas/cards`（`quotaCards`）直接取 `provider.CachedCards`，注释写明 “no vendor asked for it”，只有 `POST /v1/magpie/quotas/refresh` 才让网关重读（同一张卡 30 秒内最多一次）。于是定时器虽然按 spec 在跑，读数和卡片头部的「N 分钟前」却一直不变，表现为「5 分钟自动刷新失效」；Claude 的 5 小时窗口也一直停留在上一次真实读取时的 0%（实测本机网关：`GET cards` 的 Claude `readAt` 停在 2026-11-03T21:33-05:00、`5 hours used=0`，强制刷新后变成 `5 hours used=8%`、`7 days` 20%→33%）。现在自动刷新与卡头刷新按钮走同一路径：按间隔静默发一次全量刷新（`POST cards {all:true}`），由网关重读上游；失败时保留旧读数、不显示错误、不影响其它功能，页面隐藏时到期不刷新、恢复可见后补读一次。事件驱动读取（挂载、展开、页面重新可见）仍走 `GET cards` + 60 秒缓存，默认 5 分钟、`0` 关闭不变。
+- 包内 536 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.8 — 2026-11-05
 
 - **修复独立安装（镜像 CI）下 `owner-persistence` 用例对宿主版本的假设。** `llm/adapters-updated` 监听器异常的处理随 DSH 版本不同：0.2.0 会冒泡成 `INVARIANT`，0.2.1 起宿主自行包含（只 warn、不让监听器否决提交）。用例改为按实际宿主语义分支断言，两种版本下都验证「归属与配置文件不被破坏」，0.6.7 因此在镜像 CI 的 Verify 步失败、npm 未发布；本版只动测试与版本号，用户可见行为与 0.6.7 完全一致。

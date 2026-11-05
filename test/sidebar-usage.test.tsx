@@ -36,12 +36,12 @@ const six = () => [
   weekly('glm-coding', 46),
 ]
 
-async function render(options: { enabled?: boolean; wide?: boolean; cards?: () => ApiResponse | Promise<ApiResponse>; settings?: Record<string, unknown> } = {}) {
+async function render(options: { enabled?: boolean; wide?: boolean; cards?: () => ApiResponse | Promise<ApiResponse>; refresh?: () => ApiResponse | Promise<ApiResponse>; settings?: Record<string, unknown> } = {}) {
   const enabled = options.enabled ?? true
   const fake = fakeApi({
     'GET settings': () => ok(settingsView({ sidebarUsage: enabled, ...options.settings })),
     'GET cards': options.cards ?? (() => cardsOk(six())),
-    'POST cards': (request) => cardsOk(six()).status === 200 ? cardsOk(six()) : cardsOk([]),
+    'POST cards': options.refresh ?? (() => cardsOk(six())),
   })
   await act(async () => root.render(h(SidebarUsage, { api: fake.api, wide: options.wide ?? true } as never)))
   await flush()
@@ -322,36 +322,62 @@ describe('展开', () => {
 
 describe('自动刷新', () => {
   const reads = (fake: ReturnType<typeof fakeApi>) => fake.calls.filter(call => call.path === 'cards' && call.method === 'GET').length
+  const refreshes = (fake: ReturnType<typeof fakeApi>) => fake.calls.filter(call => call.path === 'cards' && call.method === 'POST')
   const setVisibility = (value: 'visible' | 'hidden') => Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value })
 
-  it('默认 5 分钟后静默重新读取，且不发送全量刷新', async () => {
+  it('默认 5 分钟后静默全量刷新（POST）并更新读数，不再发 GET', async () => {
     vi.useFakeTimers()
     try {
-      const fake = await render()
+      const fake = await render({
+        cards: () => cardsOk([weekly('claude', 8)]),
+        refresh: () => cardsOk([weekly('claude', 33)]),
+      })
       expect(reads(fake)).toBe(1)
+      expect(refreshes(fake)).toHaveLength(0)
+      expect(rowOf('claude')!.querySelector('[data-reading]')!.textContent).toBe('8%')
       await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
       await flush()
-      expect(reads(fake)).toBe(2)
-      expect(fake.calls.filter(call => call.method === 'POST')).toHaveLength(0)
+      expect(reads(fake)).toBe(1)
+      expect(refreshes(fake)).toHaveLength(1)
+      expect(refreshes(fake)[0]!.body).toEqual({ all: true })
+      expect(rowOf('claude')!.querySelector('[data-reading]')!.textContent).toBe('33%')
     } finally { vi.useRealTimers(); setVisibility('visible') }
   })
 
-  it('间隔设为 0 时不再自动读取', async () => {
+  it('间隔设为 0 时不再自动刷新', async () => {
     vi.useFakeTimers()
     try {
       const fake = await render({ settings: { sidebarRefreshMinutes: 0 } })
       await act(async () => { await vi.advanceTimersByTimeAsync(30 * 60_000) })
       expect(reads(fake)).toBe(1)
+      expect(refreshes(fake)).toHaveLength(0)
     } finally { vi.useRealTimers(); setVisibility('visible') }
   })
 
-  it('页面隐藏时到期不读取', async () => {
+  it('页面隐藏时到期不刷新', async () => {
     vi.useFakeTimers()
     try {
       const fake = await render()
       setVisibility('hidden')
       await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
       expect(reads(fake)).toBe(1)
+      expect(refreshes(fake)).toHaveLength(0)
+    } finally { vi.useRealTimers(); setVisibility('visible') }
+  })
+
+  it('刷新失败时静默保留旧读数，不显示错误', async () => {
+    vi.useFakeTimers()
+    try {
+      const fake = await render({
+        cards: () => cardsOk([weekly('claude', 8)]),
+        refresh: () => ({ status: 502, body: { status: 'error', cards: [], error: 'HTTP 502' } }),
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000) })
+      await flush()
+      expect(refreshes(fake)).toHaveLength(1)
+      expect(rowOf('claude')!.querySelector('[data-reading]')!.textContent).toBe('8%')
+      expect(host.querySelector('.dmg-sidebar-status')).toBeNull()
+      expect(host.textContent).not.toContain('502')
     } finally { vi.useRealTimers(); setVisibility('visible') }
   })
 })
