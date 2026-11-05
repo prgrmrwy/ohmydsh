@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { apply, inject } from '../../src/index.js'
 import { credentialsMock } from './credentials.js'
 
-/** The real stock DSH LLM registry type (dsh-llm 0.2.0-rc.2). */
+/** The real stock DSH LLM registry type (dsh-llm, the pinned devDependency). */
 export type HostLlm = InstanceType<typeof LlmRuntime>
 
 export interface RealHostOptions {
@@ -37,9 +37,30 @@ export async function mountRealHost(options: RealHostOptions = {}) {
   const llm = (ctx as unknown as { llm: HostLlm }).llm
   const invariant = { on: options.invariantOn === true }
   if (options.invariantListener) {
+    const invariantError = () => Object.assign(new Error('test invariant listener'), { code: 'INVARIANT' })
+    let thrown = false
     ctx.on('llm/adapters-updated' as never, (() => {
-      if (invariant.on) throw Object.assign(new Error('test invariant listener'), { code: 'INVARIANT' })
+      if (invariant.on) { thrown = true; throw invariantError() }
     }) as never)
+    // DSH 0.2.0 rethrows a listener's INVARIANT from registerAdapter/replace after the
+    // registry has committed; 0.2.1 only logs it. The plugin still supports 0.2.0 Hosts,
+    // so reproduce the 0.2.0 contract (commit, then throw) around the real calls; on a
+    // 0.2.0 registry the call itself already throws and this wrapper is never reached.
+    const like020 = <T>(call: () => T): T => {
+      thrown = false
+      const result = call()
+      if (thrown) throw invariantError()
+      return result
+    }
+    const registerAdapter = llm.registerAdapter.bind(llm) as (...args: unknown[]) => unknown
+    ;(llm as unknown as { registerAdapter: unknown }).registerAdapter = (...args: unknown[]) => {
+      const handle = like020(() => registerAdapter(...args)) as { replace?(next: string[]): unknown }
+      if (handle && typeof handle.replace === 'function') {
+        const replace = handle.replace.bind(handle)
+        handle.replace = (next: string[]) => like020(() => replace(next))
+      }
+      return handle
+    }
   }
   const foreign: (() => void)[] = []
   if (options.foreignRoutes?.length) {
