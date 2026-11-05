@@ -92,18 +92,6 @@ describe('Locus tool-tier mutation', () => {
     expect(h.row()).toMatchObject({ state: 'active', toolTier: { effective: 'safe' } })
   })
 
-  it('safe-v1 入口请求 shell', async () => {
-    for (const childComposition of ['safe-v1', 'safe-v2', undefined]) {
-      const h = setup({ initial: { childComposition } })
-      const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })
-      // Neither switched nor resumed: the old row is retired, not adopted.
-      expect(result).toEqual({ ok: false, reason: 'legacy-composition' })
-      expect(h.repository.beginToolTierMutation).not.toHaveBeenCalled()
-      expect(h.surface.setToolTier).not.toHaveBeenCalled()
-      expect(h.row()).toMatchObject({ state: 'active', toolTier: { desired: 'safe', effective: 'safe' } })
-    }
-  })
-
   it('核验失败回到 safe', async () => {
     const h = setup({ desiredAttests: false })
     const result = await h.mutation.set({ locusId: 'locus-a', endpoint: { chatId: 'oc-a' }, tier: 'shell', actor: 'owner' })

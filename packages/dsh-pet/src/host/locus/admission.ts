@@ -107,7 +107,7 @@ export interface LocusAuthorizationStore {
     | {
         readonly id?: string
         readonly state: 'provisioning' | 'not-created' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped'
-        /** The session this generation hangs under (its locus main, or a previous-model parent). */
+        /** The session this generation hangs under: its locus main. */
         readonly parentSessionId: string
         /**
          * The work session behind the locus main. Archived state is read from
@@ -115,14 +115,8 @@ export interface LocusAuthorizationStore {
          * out of service, not anything about Pet's coordinator.
          */
         readonly workSessionId?: string
-        /**
-         * The row belongs to the previous two-tier model (no locus-main
-         * pairing). Such an entry is not "authorized": its next owner @
-         * establishes the three-tier structure, and nobody else's @ does.
-         */
-        readonly legacy?: boolean
         readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
-        readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
+        readonly childComposition?: 'tier3'
       }
     | undefined
 }
@@ -202,12 +196,6 @@ export function createDurableLocusAuthorizationResolver(
       : { chatId: endpoint.chatId, threadId: endpoint.threadId }
     const current = store.getLatestLocusByEndpoint(exact)
     if (current !== undefined) {
-      // A previous-model row is read as "never established under the new
-      // structure": only an allowlisted owner's @ may build it, and that @
-      // retires the old row. An owner's own stop/retire is still honoured.
-      if (current.legacy === true && !isOwnerExit(current.state)) {
-        return { state: 'uninitialized', reason: 'previous-model' }
-      }
       if (archivedParentOutranks(current.state, current.workSessionId ?? current.parentSessionId)) {
         return { state: 'retired', reason: 'source-archived' }
       }
@@ -228,9 +216,6 @@ export function createDurableLocusAuthorizationResolver(
     if (parent === undefined) {
       return legacy.find({ chatId: endpoint.chatId }) === undefined ? 'uninitialized' : 'legacy'
     }
-    if (parent.legacy === true && !isOwnerExit(parent.state)) {
-      return { state: 'uninitialized', reason: 'previous-model' }
-    }
     if (archivedParentOutranks(parent.state, parent.workSessionId ?? parent.parentSessionId)) {
       return { state: 'retired', reason: 'source-archived' }
     }
@@ -243,7 +228,7 @@ export function createDurableLocusAuthorizationResolver(
     const current = store.getLatestLocusByEndpoint(endpoint.threadId === undefined
       ? { chatId: endpoint.chatId }
       : { chatId: endpoint.chatId, threadId: endpoint.threadId })
-    return current?.state === 'active' && current.legacy !== true ? current.toolTier?.effective ?? 'safe' : undefined
+    return current?.state === 'active' ? current.toolTier?.effective ?? 'safe' : undefined
   }
   return resolve
 }

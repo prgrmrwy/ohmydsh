@@ -63,7 +63,7 @@ async function deliveryQueue() {
   const repository = new LocusRepository(harness.domain)
   await repository.putLocus({
     id: LOCUS.id, generation: 1, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: LOCUS.childSessionId,
-    workspaceId: 'ws-life', source: 'auto', state: 'active', childComposition: 'safe-v1',
+    workspaceId: 'ws-life', source: 'auto', state: 'active', childComposition: 'tier3',
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, busy: false, createdAt: 1, updatedAt: 1,
   })
   const correlation: DeliveryCorrelation = { endpoint: ALPHA, locusId: LOCUS.id, generation: 1, childSessionId: LOCUS.childSessionId }

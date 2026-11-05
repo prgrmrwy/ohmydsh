@@ -403,17 +403,26 @@ describe('unified locus command dispatcher', () => {
     })
   })
 
-  it('answers a tier request for a retired-model entry without switching anything', async () => {
+  it('spec Scenario "safe-v1 入口请求 shell"', async () => {
+    // The group was a previous-model entry; the migration deleted its row, so
+    // there is no locus at all. The owner's tier command is refused as an
+    // entry that does not exist, and nothing is built or switched.
+    const bind = vi.fn()
+    const setCurrentTier = vi.fn(async () => {
+      throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
+    })
     const dispatcher = createLocusControlDispatcher({
       allowOpenIds: () => [OWNER],
       listSessions: () => [],
-      bind: { bind: vi.fn() },
+      bind: { bind },
       exit: { unbindCurrent: vi.fn() },
-      toolTierMutation: { setCurrentTier: async () => { throw Object.assign(new Error('safe-v1'), { code: 'LOCUS_LEGACY_COMPOSITION' }) } },
+      toolTierMutation: { setCurrentTier },
     })
     await expect(dispatcher.dispatch({
       command: { kind: 'tools', tier: 'shell' }, endpoint: ENDPOINT, senderId: OWNER,
-    })).resolves.toMatchObject({ ok: false, reason: 'tools-legacy-composition', text: expect.stringContaining('下一条授权 at 将建立新的三层结构') })
+    })).resolves.toEqual({ ok: false, reason: 'not-found', text: '当前入口不存在或已失效。' })
+    expect(setCurrentTier).toHaveBeenCalledOnce()
+    expect(bind).not.toHaveBeenCalled()
   })
 
   it('maps busy control mutations to a deterministic retry receipt', async () => {

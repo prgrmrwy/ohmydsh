@@ -32,12 +32,12 @@ export type LocusPermissionMode = 'read' | 'write'
 /**
  * Durable proof that this child was created with a reviewed tool composition.
  *
- * `tier3` is the only marker a row may SERVE under: it is published by the
- * three-tier structure, whose child is created from a locus main session.
- * `safe-v1` / `safe-v2` belong to the previous two-tier model; such rows stay
- * readable (they are never rewritten) but are interpreted as legacy.
+ * `tier3` is the only marker: it is published by the three-tier structure,
+ * whose child is created from a locus main session. A row that never created a
+ * child has no marker. The previous two-tier markers are purged by the offline
+ * migration (persistence v19) and are not representable.
  */
-export type LocusChildComposition = 'safe-v1' | 'safe-v2' | 'tier3'
+export type LocusChildComposition = 'tier3'
 
 /** New children carry the three-tier marker; only this marker may serve. */
 export const LOCUS_SAFE_CHILD_COMPOSITION: LocusChildComposition = 'tier3'
@@ -111,7 +111,7 @@ export interface LocusRecord {
    * generation (a failed creation leaves it for the next attempt).
    */
   readonly reservedChildSessionId?: string
-  /** Absent on legacy rows, which remain readable but are never serviceable. */
+  /** Absent until the child is created (not-created, or ended before one existed). */
   readonly childComposition?: LocusChildComposition
   /** Persisted tool visibility tier, independent from the file permission. */
   readonly toolTier?: LocusToolTier
@@ -323,7 +323,7 @@ export function sameLocusEndpoint(left: LocusEndpoint, right: LocusEndpoint): bo
 
 /** Whether this composition marker may carry the shell tool tier. */
 export function supportsShellTier(composition: LocusChildComposition | undefined): boolean {
-  return composition === 'safe-v2' || composition === 'tier3'
+  return composition === 'tier3'
 }
 
 function assertString(value: unknown, field: string): asserts value is string {
@@ -372,12 +372,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
   ) {
     throw new LocusError('INVALID_LOCUS', 'A created child must be the reserved child')
   }
-  if (
-    input.childComposition !== undefined
-    && input.childComposition !== 'safe-v1'
-    && input.childComposition !== 'safe-v2'
-    && input.childComposition !== 'tier3'
-  ) {
+  if (input.childComposition !== undefined && input.childComposition !== 'tier3') {
     throw new LocusError('INVALID_LOCUS', `Unknown child composition '${String(input.childComposition)}'`)
   }
   const toolTier = input.toolTier
@@ -389,7 +384,7 @@ export function buildLocusRecord(input: NewLocusInput): LocusRecord {
       throw new LocusError('INVALID_LOCUS', 'Effective shell tier requires desired shell tier')
     }
     if (toolTier.effective === 'shell' && !supportsShellTier(input.childComposition)) {
-      throw new LocusError('INVALID_LOCUS', 'Only safe-v2/tier3 children may use shell tool tier')
+      throw new LocusError('INVALID_LOCUS', 'Only tier3 children may use shell tool tier')
     }
     if (toolTier.verifiedAt !== undefined && (!Number.isSafeInteger(toolTier.verifiedAt) || toolTier.verifiedAt < 0)) {
       throw new LocusError('INVALID_LOCUS', 'toolTier.verifiedAt must be a non-negative safe integer')
@@ -668,7 +663,7 @@ export function withLocusToolTier(
     throw new LocusError('INVALID_LOCUS', 'An unavailable locus cannot change tool tier')
   }
   if (toolTier.effective === 'shell' && !supportsShellTier(record.childComposition)) {
-    throw new LocusError('INVALID_LOCUS', 'Only safe-v2/tier3 children may use shell tool tier')
+    throw new LocusError('INVALID_LOCUS', 'Only tier3 children may use shell tool tier')
   }
   return Object.freeze({
     ...record,

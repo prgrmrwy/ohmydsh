@@ -70,7 +70,9 @@ import type { LocusCurrentDelivery } from './context-repository.js'
 import { extractResourceRefs, operationKindOf } from './persistence-helper.js'
 import { createHash, randomUUID } from 'node:crypto'
 import {
+  PET_DOMAIN_VERSION,
   petDomainSpec,
+  petLocusRecord,
   type PetLocusDelivery,
   type PetLocusIndex,
   type PetLocusMainRecord,
@@ -260,20 +262,14 @@ export interface DurableRegeneratedEntry {
   readonly oldLocusId: string
   /** Why the predecessor leaves service (recorded as its invalidReason). */
   readonly reason: string
-  /**
-   * The predecessor is a previous-model row: its source (usually an explicit
-   * bind to the user's own session) described a relationship that no longer
-   * exists, so the successor is established the auto way instead of inheriting it.
-   */
-  readonly previousModel?: boolean
-  /** The successor: `not-created`, generation + 1, same endpoint (same source unless `previousModel`). */
+  /** The successor: `not-created`, generation + 1, same endpoint and source. */
   readonly locus: LocusRecord
 }
 
 /**
  * Publish successor generations for entries whose current generation cannot
  * serve for a reason that is not an owner decision (unusable child, retired
- * locus main, previous-model row). Optionally pairs them with a NEW locus main
+ * locus main). Optionally pairs them with a NEW locus main
  * (and retires the one they leave), all in one transaction.
  */
 export interface DurableRegenerationCommit {
@@ -2969,17 +2965,6 @@ export class LocusRepository {
   }
 
   /**
-   * Whether a row belongs to the previous two-tier model.
-   *
-   * Read-time interpretation only: the row is never rewritten. A row is of the
-   * three-tier model exactly when its parent session is a recorded locus main;
-   * `childComposition` cannot decide it, because a not-created row has none.
-   */
-  isLegacyLocus(record: Pick<LocusRecord, 'parentSessionId'>): boolean {
-    return this.getLocusMain(record.parentSessionId) === undefined
-  }
-
-  /**
    * Publish successor generations (and optionally a new locus main) in ONE
    * transaction. See {@link DurableRegenerationCommit}.
    */
@@ -2999,7 +2984,6 @@ export class LocusRepository {
         entries: input.entries.map((entry, index) => ({
           old: entry.oldLocusId,
           reason: entry.reason,
-          previousModel: entry.previousModel === true,
           locus: successors[index],
         })),
         ...(input.main !== undefined ? { main: input.main } : {}),
@@ -3087,7 +3071,7 @@ export class LocusRepository {
           next.state !== 'not-created' ||
           next.generation !== old.generation + 1 ||
           next.replacesLocusId !== old.id ||
-          (next.source !== old.source && entry.previousModel !== true) ||
+          next.source !== old.source ||
           endpointKeyOf(next.endpoint) !== endpointKeyOf(old.endpoint) ||
           next.childSessionId !== undefined
         ) {
@@ -3100,7 +3084,7 @@ export class LocusRepository {
         assertIdentifier(entry.reason, 'reason')
         after.set(
           old.id,
-          entry.previousModel === true || old.state === 'invalid'
+          old.state === 'invalid'
             ? old
             : transitionLocus(old, 'invalid', Math.max(next.createdAt, old.updatedAt), { busy: false, invalidReason: entry.reason }),
         )
@@ -3286,6 +3270,17 @@ export class LocusRepository {
     return this.enqueue(async () => {
       const requireTransaction = (): NonNullable<LocusDomain['transaction']> =>
         this.requireProvisioningTransaction('reconcileStartup')
+      // v19 carries only three-tier rows: every parent session is a recorded
+      // locus main. The check reads the persisted `locus_mains`, which at this
+      // point no transaction is still staging, and refuses to serve at all
+      // rather than skip the offending rows.
+      const unpaired = [...this.collectLoci().values()].filter(record => this.getLocusMain(record.parentSessionId) === undefined)
+      if (unpaired.length > 0) {
+        throw new LocusError(
+          'INVALID_LOCUS',
+          `Locus rows without a locus_mains pairing for their parent session: ${unpaired.map(record => record.id).join(', ')}`,
+        )
+      }
       const now = options.now ?? Date.now()
       const failedDeliveries: DeliveryRecord[] = []
       const retainedDeliveries: DeliveryRecord[] = []
@@ -3314,23 +3309,7 @@ export class LocusRepository {
           if (operation.locusId !== undefined) blockedFirstLoci.add(operation.locusId)
         }
       }
-      const initialLoci = this.collectLoci()
-      assertLocusSet(initialLoci)
-      const initialIndexes = this.collectIndexes()
-      const initialExpectedIndexes = preserveEquivalentIndexTimestamps(
-        initialIndexes,
-        deriveIndexes(initialLoci, this.collectDefaultPointers(initialIndexes), now),
-      )
-      const initialIndexChanges = diffIndexTable(initialIndexes, initialExpectedIndexes)
-      if (initialIndexChanges.length > 0) {
-        const transaction = requireTransaction()
-        await transaction.call(this.domain, tx => {
-          for (const change of initialIndexChanges) {
-            if (change.value === undefined) tx.delete(change.table, change.key)
-            else tx.put(change.table, change.key, change.value)
-          }
-        })
-      }
+      const initialIndexChanges = await this.repairDerivedIndexesLocked(now)
 
       const writeDelivery = async (
         current: DeliveryRecord,
@@ -3657,26 +3636,10 @@ export class LocusRepository {
         else manualOperations.push(outcome.operation)
       }
 
-      const beforeLoci = this.collectLoci()
-      assertLocusSet(beforeLoci)
-      const existingIndexes = this.collectIndexes()
-      const expectedIndexes = preserveEquivalentIndexTimestamps(
-        existingIndexes,
-        deriveIndexes(beforeLoci, this.collectDefaultPointers(existingIndexes), now),
-      )
-      const changes = diffIndexTable(existingIndexes, expectedIndexes)
-      if (changes.length > 0) {
-        const transaction = requireTransaction()
-        await transaction.call(this.domain, tx => {
-          for (const change of changes) {
-            if (change.value === undefined) tx.delete(change.table, change.key)
-            else tx.put(change.table, change.key, change.value)
-          }
-        })
-      }
+      const trailingIndexChanges = await this.repairDerivedIndexesLocked(now)
       const pendingDeliveries = this.listPendingDeliveries()
       const recoverableOperations = this.listRecoverableOperations()
-      const indexChanges = initialIndexChanges.length + changes.length
+      const indexChanges = initialIndexChanges + trailingIndexChanges
       return {
         indexStatus: indexChanges === 0 ? 'unchanged' : 'rebuilt',
         indexChanges,
@@ -3691,6 +3654,43 @@ export class LocusRepository {
         sideEffectsReplayed: false,
       }
     })
+  }
+
+  /**
+   * Re-derive every materialized index from the remaining `loci` rows and write
+   * back the difference.
+   *
+   * Pure derived data, so it needs no compensator and is safe before the rest
+   * of startup recovery. The Host calls it once right after opening this
+   * repository and before registering any callback that reads an index: an
+   * offline migration may have deleted rows an index still names, and an
+   * early cold resume would otherwise dereference them.
+   * @returns the number of index rows written or deleted.
+   */
+  repairDerivedIndexes(now: number = Date.now()): Promise<number> {
+    return this.enqueue(() => this.repairDerivedIndexesLocked(now))
+  }
+
+  /** The repair itself, for callers already inside {@link enqueue}. */
+  private async repairDerivedIndexesLocked(now: number): Promise<number> {
+    const transaction = this.requireProvisioningTransaction('repairDerivedIndexes')
+    const loci = this.collectLoci()
+    assertLocusSet(loci)
+    const existing = this.collectIndexes()
+    const expected = preserveEquivalentIndexTimestamps(
+      existing,
+      deriveIndexes(loci, this.collectDefaultPointers(existing), now),
+    )
+    const changes = diffIndexTable(existing, expected)
+    if (changes.length > 0) {
+      await transaction.call(this.domain, tx => {
+        for (const change of changes) {
+          if (change.value === undefined) tx.delete(change.table, change.key)
+          else tx.put(change.table, change.key, change.value)
+        }
+      })
+    }
+    return changes.length
   }
 
   /** Alias for startup callers that prefer recovery terminology. */
@@ -4676,20 +4676,6 @@ function assertLocusSet(loci: ReadonlyMap<string, StoredLocus>): void {
   const endpointGenerations = new Map<string, number[]>()
   const childOwners = new Map<string, string>()
   const parentWorkspaces = new Map<string, string>()
-  // A tier3 successor retires previous-model history by reference, never by rewriting its row.
-  const supersededLegacy = new Set<string>()
-  for (const successor of loci.values()) {
-    if (successor.replacesLocusId === undefined) continue
-    const old = loci.get(successor.replacesLocusId)
-    if (old !== undefined && old.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION &&
-        (successor.state === 'not-created' || successor.childComposition === LOCUS_SAFE_CHILD_COMPOSITION) &&
-        successor.generation === old.generation + 1 &&
-        successor.parentSessionId !== old.parentSessionId &&
-        endpointKeyOf(successor.endpoint) === endpointKeyOf(old.endpoint)) {
-      supersededLegacy.add(old.id)
-    }
-  }
-
   for (const record of loci.values()) {
     normalizeRecord(record)
     const endpointKey = endpointKeyOf(record.endpoint)
@@ -4723,7 +4709,7 @@ function assertLocusSet(loci: ReadonlyMap<string, StoredLocus>): void {
       childOwners.set(record.childSessionId, record.id)
     }
 
-    if (isCurrentLocusState(record.state) && !supersededLegacy.has(record.id)) {
+    if (isCurrentLocusState(record.state)) {
       const endpoint = endpointKeyOf(record.endpoint)
       const endpointOwner = endpointOwners.get(endpoint)
       if (endpointOwner !== undefined && endpointOwner !== record.id) {
@@ -4741,6 +4727,55 @@ function assertLocusSet(loci: ReadonlyMap<string, StoredLocus>): void {
       }
     }
   }
+}
+
+/**
+ * Whether a retained set of raw `loci` rows can be opened by this Host.
+ *
+ * The offline migration script calls this on the rows it would keep, so "the
+ * script let it through" and "the Host opens it" are the same rule rather than
+ * two lists that can drift (change pet-locus-purge-previous-model D3.3):
+ * every row parses under the current row schema (`tier3` marker only, `active`
+ * needs one), is stored under its own id, has a paired locus main, and the
+ * whole set passes `assertLocusSet` (parent rows exist, adjacent generations,
+ * unique endpoint and child).
+ *
+ * @param rows - Raw JSON values keyed by `loci` table key.
+ * @param mainIds - Every `locus_mains` key, including retired pairings.
+ * @returns one human-readable line per violation; empty when the set is valid.
+ */
+export function validateLocusSetForStorage(
+  rows: ReadonlyMap<string, unknown>,
+  mainIds: ReadonlySet<string>,
+): string[] {
+  const violations: string[] = []
+  const parsed = new Map<string, StoredLocus>()
+  for (const [key, value] of rows) {
+    const result = petLocusRecord.safeParse(value)
+    if (!result.success) {
+      const issues = result.error.issues.map(issue => `${issue.path.join('.') || '(row)'}: ${issue.message}`)
+      violations.push(`locus row ${key} is not a valid v${String(PET_DOMAIN_VERSION)} row: ${issues.join('; ')}`)
+      continue
+    }
+    const record = result.data as StoredLocus
+    if (key !== record.id) {
+      violations.push(`locus row ${key} is stored under a key that does not match its id ${record.id}`)
+      continue
+    }
+    if (!mainIds.has(record.parentSessionId)) {
+      violations.push(`locus ${record.id} has no locus_mains pairing for its parent session ${record.parentSessionId}`)
+    }
+    parsed.set(key, record)
+  }
+  // A set with unreadable rows would only produce misleading gap errors.
+  if (parsed.size === rows.size) {
+    try {
+      assertLocusSet(parsed)
+    } catch (error) {
+      violations.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+  return violations
 }
 
 /** Derive all materialized indexes from locus records and default pointers. */

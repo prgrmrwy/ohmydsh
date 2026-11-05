@@ -16,7 +16,20 @@ import type {
 import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
-import { openPetHarness } from './harness.js'
+import { emptyMedium, openPetHarness, type MemoryMedium } from './harness.js'
+import { openThreeTier } from './support/three-tier.js'
+
+/** An empty medium whose default parent session is a recorded locus main (v19 pairing). */
+function pairedMedium(): MemoryMedium {
+  const medium = emptyMedium()
+  medium.tables.locus_mains = { 'session-main': JSON.stringify(PAIRING) }
+  return medium
+}
+
+const PAIRING = {
+  locusMainSessionId: 'session-main', workSessionId: 'work-main', generation: 1, status: 'active' as const,
+  spaceId: 'space-main', workspaceId: 'workspace-pet', createdAt: 1, updatedAt: 1,
+}
 
 function durableRecord(
   overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {},
@@ -26,7 +39,7 @@ function durableRecord(
     endpoint: { chatId: 'oc_project' },
     parentSessionId: 'session-main',
     childSessionId: 'session-child',
-    childComposition: 'safe-v2',
+    childComposition: 'tier3',
     workspaceId: 'workspace-main',
     source: 'auto',
     createdAt: 10,
@@ -45,7 +58,7 @@ function controllerRecord(
     workspaceId: 'workspace-main',
     parentSessionId: 'session-main',
     childSessionId: 'session-child-controller',
-    childComposition: 'safe-v2',
+    childComposition: 'tier3',
     source: 'auto',
     state: 'active',
     permission: 'read',
@@ -147,14 +160,15 @@ describe('controller to durable locus repository read adapter', () => {
       updatedAt: 12,
     })
 
-    expect(projectLocusRecord(durable)).toEqual({
+    expect(projectLocusRecord(durable, PAIRING)).toEqual({
       locusId: 'durable-id',
       generation: 3,
       endpoint: { chatId: 'oc_project' },
       workspaceId: 'workspace-main',
       parentSessionId: 'session-main',
+      workSessionId: 'work-main',
       childSessionId: 'session-child',
-      childComposition: 'safe-v2',
+      childComposition: 'tier3',
       source: 'auto',
       state: 'active',
       permission: 'read',
@@ -162,10 +176,10 @@ describe('controller to durable locus repository read adapter', () => {
       replacesLocusId: 'durable-old',
       toolTier: { desired: 'safe', effective: 'safe' },
     })
-    expect(projectGroupRecord(durable)).toEqual({
+    expect(projectGroupRecord(durable, PAIRING)).toEqual({
       chatId: 'oc_project',
       workspaceId: 'workspace-main',
-      mainSessionId: 'session-main',
+      mainSessionId: 'work-main',
       mainSource: 'auto',
       state: 'active',
       createdAt: 10,
@@ -174,7 +188,7 @@ describe('controller to durable locus repository read adapter', () => {
   })
 
   it('finds current, group, default Q&A and exact idle state from durable records', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const qa = await durable.putLocus(durableRecord({ source: 'qa-created' }))
@@ -190,7 +204,7 @@ describe('controller to durable locus repository read adapter', () => {
     await expect(adapter.findGroup(qa.endpoint.chatId)).resolves.toEqual({
       chatId: qa.endpoint.chatId,
       workspaceId: qa.workspaceId,
-      mainSessionId: qa.parentSessionId,
+      mainSessionId: 'work-main',
       mainSource: 'qa-created',
       state: 'active',
       createdAt: qa.createdAt,
@@ -206,7 +220,8 @@ describe('controller to durable locus repository read adapter', () => {
       endpoint: topic.endpoint,
       source: 'inherited',
     })
-    await expect(adapter.findDefaultQa(qa.parentSessionId)).resolves.toMatchObject({
+    // The caller asks by the WORK session; the pointer hangs from its locus main.
+    await expect(adapter.findDefaultQa('work-main')).resolves.toMatchObject({
       locusId: qa.id,
       source: 'qa-created',
     })
@@ -232,7 +247,7 @@ describe('controller to durable locus repository read adapter', () => {
     ['invalid', 'invalid'],
     ['retired', 'retired'],
   ] as const)('keeps a %s chat-level marker visible instead of folding it into missing', async (durableState, projectedState) => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const locus = await durable.putLocus(durableRecord())
@@ -254,7 +269,7 @@ describe('controller to durable locus repository read adapter', () => {
   })
 
   it('selects the latest retired generation even when the current index falls back to older invalid history', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
     const original = await durable.putLocus(durableRecord())
@@ -287,7 +302,7 @@ describe('controller to durable locus repository read adapter', () => {
   })
 
   it('does not use a legacy chat binding as a group or current locus fallback', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     await harness.domain.table('chat_bindings').put('oc_legacy', {
       chatId: 'oc_legacy',
       chatType: 'group',
@@ -322,8 +337,8 @@ describe('controller to durable locus repository read adapter', () => {
         grantedBy: 'ou_owner',
       },
     })
-    expect(projectLocusRecord(writable).permission).toBe('write')
-    expect(projectLocusRecord(refused).permission).toBe('read')
+    expect(projectLocusRecord(writable, PAIRING).permission).toBe('write')
+    expect(projectLocusRecord(refused, PAIRING).permission).toBe('read')
   })
 })
 
@@ -441,7 +456,7 @@ describe('controller to durable locus repository write boundary', () => {
   })
 
   it('atomically publishes one chat-level locus and indexes, with idempotent retries', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     enableAtomicTransactions(harness)
     const durable = new DurableLocusRepository(harness.domain)
     const adapter = new ControllerLocusRepositoryAdapter(durable)
@@ -457,7 +472,7 @@ describe('controller to durable locus repository write boundary', () => {
       group: {
         chatId: 'oc_controller',
         workspaceId: 'workspace-main',
-        mainSessionId: 'session-main',
+        mainSessionId: 'work-main',
         mainSource: 'auto',
         state: 'active',
         createdAt: 10,
@@ -466,7 +481,7 @@ describe('controller to durable locus repository write boundary', () => {
     }
 
     await adapter.beginProvisioning(provisioning)
-    await adapter.recordProvisioningResource(provisioning.provisioningId, { mainSessionId: 'session-main' })
+    await adapter.recordProvisioningResource(provisioning.provisioningId, { mainSessionId: 'work-main' })
     await adapter.recordProvisioningResource(provisioning.provisioningId, { childSessionId: 'session-child-controller' })
     await adapter.commitProvisioning(commit)
     await adapter.completeProvisioning(provisioning.provisioningId)
@@ -488,13 +503,13 @@ describe('controller to durable locus repository write boundary', () => {
       phase: 'committed',
       newLocusId: commit.locus.locusId,
       resourceRefs: expect.objectContaining({
-        mainSessionId: 'session-main',
+        mainSessionId: 'work-main',
         childSessionId: 'session-child-controller',
       }),
     })
     // Group is only a projection of the chat-level locus; no group table exists.
     await expect(adapter.findGroup('oc_controller')).resolves.toMatchObject({
-      mainSessionId: 'session-main',
+      mainSessionId: 'work-main',
       state: 'active',
     })
     await harness.close()
@@ -1133,4 +1148,42 @@ describe('controller to durable locus repository write boundary', () => {
     })
   })
 
+})
+
+describe('v19: only three-tier rows reach the controller', () => {
+  it('spec Scenario "从未建立 locus 主会话的会话首次打开 Q&A": no active main means not established, never an error', async () => {
+    const harness = await openPetHarness()
+    const durable = new DurableLocusRepository(harness.domain)
+    const adapter = new ControllerLocusRepositoryAdapter(durable)
+    // A default-Q&A pointer keyed by the work session itself could only come from
+    // a previous-model row. With no locus main for that session it is not a lookup.
+    const stray = await durable.putLocus(durableRecord({ id: 'stray', source: 'qa-created', parentSessionId: 'work-fresh', childSessionId: 'child-stray' }))
+    await durable.setDefaultQaLocus('work-fresh', stray.id)
+
+    await expect(adapter.findActiveMain('work-fresh')).resolves.toBeUndefined()
+    await expect(adapter.findDefaultQa('work-fresh')).resolves.toBeUndefined()
+    await harness.close()
+  })
+
+  it('spec Scenario "从未建立 locus 主会话的会话首次打开 Q&A": the controller then builds the main and the group', async () => {
+    const world = await openThreeTier()
+    try {
+      const qa = await world.controller.createOrOpenDefaultQa({ parentSessionId: 'work-1', ownerId: 'ou-owner' })
+      expect(qa.created).toBe(true)
+      expect(world.world.createdMains).toHaveLength(1)
+      expect(qa.locus.workSessionId).toBe('work-1')
+      expect(world.durable.getLocusMain(qa.locus.parentSessionId)?.workSessionId).toBe('work-1')
+    } finally { await world.close() }
+  })
+
+  it('refuses to project a row it did read whose parent session has no locus_mains pairing', async () => {
+    const harness = await openPetHarness()
+    const durable = new DurableLocusRepository(harness.domain)
+    const adapter = new ControllerLocusRepositoryAdapter(durable)
+    const unpaired = await durable.putLocus(durableRecord({ id: 'unpaired', parentSessionId: 'user-session' }))
+
+    await expect(adapter.findActive(unpaired.endpoint)).rejects.toMatchObject({ code: 'CONTROLLER_RECORD_UNREPRESENTABLE' })
+    await expect(adapter.findGroup(unpaired.endpoint.chatId)).rejects.toMatchObject({ code: 'CONTROLLER_RECORD_UNREPRESENTABLE' })
+    await harness.close()
+  })
 })

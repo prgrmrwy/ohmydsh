@@ -216,8 +216,6 @@ export interface LocusRegeneratedEntry {
   readonly oldLocusId: string
   /** Recorded as the predecessor's `invalidReason`. */
   readonly reason: string
-  /** The predecessor is a previous-model row; the successor is established the auto way. */
-  readonly previousModel?: boolean
   readonly locus: LocusRecord
 }
 
@@ -479,12 +477,7 @@ export interface EnsureEntryResult {
   readonly migration?: LocusMainMigration
 }
 
-const LEGACY_RETIRED_REASON = '旧版协作模型入口已退休，由三层结构接替'
 const MAIN_MIGRATED_REASON = 'locus 主会话不可用，入口已迁移到新的 locus 主会话'
-
-/** Receipt line telling a previous-model entry its old association is retired. */
-export const LEGACY_RETIRED_NOTICE =
-  '这个入口来自旧版协作模型，旧的关联已退休（历史会话保留，但不会再被恢复）；已为它建立新的协作结构。'
 
 function renderMigrationNotice(migration: LocusMainMigration): string {
   const head = `locus 主会话已更换，已迁移 ${String(migration.migrated)} 个入口。`
@@ -688,19 +681,6 @@ export class LocusController {
     return this.withLock(`group:${endpoint.chatId}`, async () => {
       const existing = await this.deps.repository.findGroup(endpoint.chatId)
       if (existing !== undefined) {
-        const previousModel = await this.previousModelRow(endpoint)
-        if (previousModel !== undefined) {
-          // The owner's bind over a previous-model entry: retire it and build the
-          // three-tier structure on the session they named (or the auto way).
-          const established = await this.establishFromPreviousModelLocked(
-            endpoint,
-            previousModel,
-            request.chatName,
-            explicitParent,
-          )
-          const group = await this.requireGroup(endpoint.chatId)
-          return { group, locus: established.locus, created: true, reused: false }
-        }
         if (!isServingState(existing.state)) {
           throw new LocusControllerError(
             'GROUP_UNAVAILABLE',
@@ -753,23 +733,6 @@ export class LocusController {
       return this.withLock(`endpoint:${locusEndpointKey(endpoint)}`, async () => {
         const existing = await this.deps.repository.findActive(endpoint)
         if (existing !== undefined) {
-          const previousModel = await this.previousModelRow(endpoint)
-          if (previousModel !== undefined) {
-            // A previous-model topic: retire it under the new structure.
-            const established = await this.establishFromPreviousModelLocked(
-              endpoint,
-              previousModel,
-              request.chatName,
-              explicitParent,
-            )
-            return {
-              group: await this.requireGroup(endpoint.chatId),
-              locus: established.locus,
-              created: true,
-              reused: false,
-              groupCreated: false,
-            }
-          }
           const group = await this.requireGroup(endpoint.chatId)
           if (explicitParent !== undefined && workOf(existing) === explicitParent) {
             // Same-source bind is idempotent, and is also the explicit retry
@@ -1135,16 +1098,6 @@ export class LocusController {
     const endpoint: LocusEndpoint = { chatId: requireNonEmpty(request.chatId, 'chatId') }
     const existing = await this.deps.repository.findGroup(endpoint.chatId)
     if (existing !== undefined) {
-      const previousModel = await this.previousModelRow(endpoint)
-      if (previousModel !== undefined) {
-        const established = await this.establishFromPreviousModelLocked(
-          endpoint,
-          previousModel,
-          request.chatName,
-          explicitParent,
-        )
-        return { group: await this.requireGroup(endpoint.chatId), locus: established.locus, created: true, reused: false }
-      }
       if (!isServingState(existing.state)) {
         throw new LocusControllerError(
           'GROUP_UNAVAILABLE',
@@ -1745,8 +1698,6 @@ export class LocusController {
    * different repair:
    *
    * - no row at all: first establishment (auto);
-   * - a previous-model row: retired and re-established the auto way, in a
-   *   brand-new work session — never on the user's session it used to borrow;
    * - the locus main is unavailable: a new locus main for the SAME work
    *   session, with every entry the owner did not exit moved onto it;
    * - only this entry's child is unusable: a new generation under the SAME
@@ -1801,26 +1752,12 @@ export class LocusController {
             : `入口 ${endpointLabel(endpoint)} ${disposition.reason}，不会静默重建。`,
         )
       case 'replace': {
-        if (disposition.why === 'previous-model') {
-          return this.establishFromPreviousModelLocked(endpoint, current, chatName)
-        }
-        if (disposition.why === 'locus-main-unavailable' && main !== undefined) {
+        if (disposition.why === 'locus-main-unavailable') {
           return this.migrateLocusMainLocked(main, endpoint, current)
         }
         return this.regenerateUnderSameMainLocked(endpoint, current, main, disposition.reason)
       }
     }
-  }
-
-  /**
-   * The endpoint's latest row when it belongs to the previous model and the
-   * owner did not exit it; undefined otherwise. An owner's stop is never read as
-   * "old", so an old but stopped entry stays stopped.
-   */
-  private async previousModelRow(endpoint: LocusEndpoint): Promise<LocusRecord | undefined> {
-    const latest = await this.deps.repository.findActive(endpoint)
-    if (latest === undefined || isOwnerExit(latest.state)) return undefined
-    return (await this.deps.repository.findMain(latest.parentSessionId)) === undefined ? latest : undefined
   }
 
   /**
@@ -1830,10 +1767,10 @@ export class LocusController {
   private async regenerateUnderSameMainLocked(
     endpoint: LocusEndpoint,
     current: LocusRecord,
-    main: LocusMainRecord | undefined,
+    main: LocusMainRecord,
     reason: string,
   ): Promise<EnsureEntryResult> {
-    if (main === undefined || main.status !== 'active') {
+    if (main.status !== 'active') {
       throw new LocusControllerError('LOCUS_MAIN_UNAVAILABLE', `入口 ${endpointLabel(endpoint)} 的 locus 主会话不可用。`)
     }
     if (!(await this.deps.repository.isLocusIdle(current.locusId))) {
@@ -1862,90 +1799,6 @@ export class LocusController {
       await this.failProvisioning(provisioningId, safeErrorMessage(error))
       if (error instanceof LocusControllerError) throw error
       throw new LocusControllerError('PROVISIONING_FAILED', `入口 ${endpointLabel(endpoint)} 的新一代发布失败，旧代际保持不变。`, error)
-    }
-  }
-
-  /**
-   * Retire a previous-model entry and establish the three-tier structure the
-   * auto way: a NEW work session in the default workspace and a locus main for
-   * it. The old row is not rewritten here — the commit marks it `invalid` as
-   * the successor is published, and its child is never adopted or resumed.
-   */
-  private async establishFromPreviousModelLocked(
-    endpoint: LocusEndpoint,
-    previous: LocusRecord,
-    chatName: string | undefined,
-    /** An owner's `/bind` target; absent means the auto way. */
-    explicitWork?: string,
-  ): Promise<EnsureEntryResult> {
-    if (!(await this.deps.repository.isLocusIdle(previous.locusId))) {
-      throw new LocusControllerError('BUSY', `入口 ${endpointLabel(endpoint)} 仍有执行中或排队消息，请空闲后再建立。`)
-    }
-    const isTopic = endpoint.threadId !== undefined
-    // A topic is established under its group, which is established first.
-    let groupLocus: LocusRecord | undefined
-    let groupResult: EnsureEntryResult | undefined
-    if (isTopic) {
-      const groupEndpoint: LocusEndpoint = { chatId: endpoint.chatId }
-      const latestGroup = await this.deps.repository.findActive(groupEndpoint)
-      if (latestGroup === undefined) {
-        throw new LocusControllerError('GROUP_UNAVAILABLE', `话题 ${endpointLabel(endpoint)} 缺少群级结构。`)
-      }
-      groupResult = await this.repairEntryLocked(groupEndpoint, latestGroup, chatName)
-      groupLocus = groupResult.locus
-    }
-
-    const provisioningId = generatedId('provisioning', this.id)
-    await this.beginProvisioning({ provisioningId, kind: 'regenerate', endpoint })
-    const resources: ProvisionedResources = {}
-    let published = false
-    try {
-      let work: LocusParentSession
-      if (explicitWork !== undefined) {
-        work = await this.resolveMainParent(explicitWork, '显式绑定的干活主会话')
-      } else if (isTopic) {
-        const groupMain = await this.deps.repository.findMain((groupLocus as LocusRecord).parentSessionId)
-        if (groupMain === undefined) {
-          throw new LocusControllerError('GROUP_UNAVAILABLE', '群级入口尚未建立三层结构。')
-        }
-        work = await this.resolveMainParent(groupMain.workSessionId, '话题继承的干活主会话')
-      } else {
-        work = await this.createAutoWorkSession(provisioningId, endpoint, chatName, resources)
-      }
-      const { main, created: mainCreated } = await this.ensureLocusMain(work, provisioningId, resources)
-      const successor = this.notCreatedLocus({
-        endpoint,
-        work,
-        main,
-        source: explicitWork !== undefined ? 'explicit' : isTopic ? 'inherited' : 'auto',
-        generation: previous.generation + 1,
-        replacesLocusId: previous.locusId,
-        ...(groupLocus === undefined ? {} : { parentLocusId: groupLocus.locusId }),
-      })
-      await this.deps.repository.commitRegeneration({
-        provisioningId,
-        entries: [{ oldLocusId: previous.locusId, reason: LEGACY_RETIRED_REASON, previousModel: true, locus: successor }],
-        ...(mainCreated ? { main } : {}),
-      })
-      published = true
-      this.releaseMainLease(provisioningId)
-      await resources.locusMain?.commit?.()
-      await this.completeProvisioning(provisioningId)
-      return {
-        locus: successor,
-        ...(groupResult?.group === undefined ? {} : { group: groupResult.group }),
-        created: true,
-        notice: LEGACY_RETIRED_NOTICE,
-      }
-    } catch (error) {
-      if (published) {
-        this.logPublishedFinalizeFailure(provisioningId, `旧入口 ${endpointLabel(endpoint)}`, error)
-        throw new LocusControllerError('PROVISIONING_FAILED', '旧入口的新结构已发布，但会话 finalize 失败；等待恢复对账。', error)
-      }
-      await this.rollbackResources(resources)
-      await this.failProvisioning(provisioningId, safeErrorMessage(error))
-      if (error instanceof LocusControllerError) throw error
-      throw new LocusControllerError('PROVISIONING_FAILED', `旧入口 ${endpointLabel(endpoint)} 的新结构建立失败，旧标记保持不变。`, error)
     }
   }
 
@@ -2309,19 +2162,24 @@ export class LocusController {
 
   /**
    * The shared serviceability policy applied to one stored row, with the facts
-   * only this layer can read: whether the row has a locus-main pairing (no
-   * pairing = previous model), whether that main can still serve, and whether
-   * the work session behind it is archived.
+   * only this layer can read: the row's locus-main pairing, whether that main
+   * can still serve, and whether the work session behind it is archived.
    */
   private async classify(locus: LocusRecord): Promise<{
     readonly disposition: ReturnType<typeof dispositionOf>
-    readonly main: LocusMainRecord | undefined
+    readonly main: LocusMainRecord
     readonly workArchived: boolean
   }> {
     const main = await this.deps.repository.findMain(locus.parentSessionId)
-    const legacy = main === undefined
-    const workArchived = !legacy && await this.isArchivedSession(main.workSessionId)
-    const mainUnavailable = !legacy && !workArchived && !isOwnerExit(locus.state) &&
+    if (main === undefined) {
+      // A row that was read always has its pairing; its absence is invalid data.
+      throw new LocusControllerError(
+        'REPOSITORY_INCONSISTENT',
+        `locus ${locus.locusId} 的父会话 ${locus.parentSessionId} 没有 locus_mains 配对。`,
+      )
+    }
+    const workArchived = await this.isArchivedSession(main.workSessionId)
+    const mainUnavailable = !workArchived && !isOwnerExit(locus.state) &&
       !(main.status === 'active' && await this.isMainUsable(main))
     return {
       main,
@@ -2329,7 +2187,6 @@ export class LocusController {
       disposition: dispositionOf({
         ...locus,
         parentArchived: workArchived,
-        legacy,
         mainUnavailable,
       }),
     }

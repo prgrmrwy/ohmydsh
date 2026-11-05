@@ -20,10 +20,9 @@
  * marker exists for.
  *
  * Three-tier reading of a row: its parent is a locus main, and the locus main
- * is paired with the work session the owner archives or keeps. A row whose
- * parent has no pairing is a previous-model row (read, never rewritten): it
- * does not serve, its child is never adopted, and an establishing @ replaces it.
- * A row whose locus main cannot serve is replaced the same way, one level up.
+ * is paired with the work session the owner archives or keeps. Every stored
+ * row has that pairing; one without it is invalid data and is refused.
+ * A row whose locus main cannot serve is replaced by an establishing @, one level up.
  * A `not-created` row serves, but has no child yet: the dispatcher creates it.
  */
 
@@ -64,7 +63,7 @@ export interface ResolvedActiveLocus {
   readonly state: 'active' | 'not-created'
   readonly permission: LocusRecord['permission']
   readonly contextAnchor?: NonNullable<LocusRecord['contextAnchor']>
-  /** Owner-visible note to relay with the receipt (e.g. a previous-model entry was retired). */
+  /** Owner-visible note to relay with the receipt (e.g. an entry moved onto a new locus main). */
   readonly notice?: string
 }
 
@@ -134,10 +133,11 @@ export interface LocusProvisioningPort {
 export interface LocusResolutionPorts {
   readonly store: LocusResolutionStore
   /**
-   * Locus main pairings. Absent reads every row as the previous model, which is
-   * the safe reading: nothing serves until the pairing can be proven.
+   * Locus main pairings. Every row the store returns is paired (the persistence
+   * layer carries only three-tier rows); a row whose pairing cannot be found is
+   * invalid data and is refused, never served as some other model.
    */
-  readonly mains?: LocusMainLookup
+  readonly mains: LocusMainLookup
   /**
    * Whether a locus main can still serve (resolves, not archived, right
    * preset). Consulted only on the delivery path; absent means "not proven",
@@ -170,8 +170,7 @@ export interface LocusResolutionPorts {
 
 /** Facts about a row that only the resolver's ports can supply. */
 interface RowFacts {
-  readonly legacy: boolean
-  readonly workSessionId: string | undefined
+  readonly workSessionId: string
   readonly workArchived: boolean
   readonly mainUnavailable: boolean
 }
@@ -188,13 +187,11 @@ function toActive(record: LocusRecord, facts: RowFacts): ResolvedActiveLocus {
   // Classify via the ONE policy module rather than restating the rules here.
   // Serving stays strict for every non-serve disposition — including
   // `replace`, whose whole point is that the CURRENT generation is never
-  // resumed (it is a previous-model row, hangs under a locus main that cannot
-  // serve, or its child lacks the proof; adopting it would run something
-  // nobody reviewed).
+  // resumed (it hangs under a locus main that cannot serve, or its child lacks
+  // the proof; adopting it would run something nobody reviewed).
   const disposition = dispositionOf({
     ...record,
     parentArchived: facts.workArchived,
-    legacy: facts.legacy,
     mainUnavailable: facts.mainUnavailable,
   })
   if (disposition.kind === 'terminal') {
@@ -230,7 +227,7 @@ function toActive(record: LocusRecord, facts: RowFacts): ResolvedActiveLocus {
     endpoint: { ...record.endpoint },
     generation: record.generation,
     parentSessionId: record.parentSessionId,
-    ...(facts.workSessionId === undefined ? {} : { workSessionId: facts.workSessionId }),
+    workSessionId: facts.workSessionId,
     workspaceId: record.workspaceId,
     permission: record.permission,
     ...(record.contextAnchor === undefined ? {} : { contextAnchor: record.contextAnchor }),
@@ -310,13 +307,12 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
   }
 
   const factsOf = (record: LocusRecord, mainUnavailable: boolean): RowFacts => {
-    const pairing = ports.mains?.find(record.parentSessionId)
+    const pairing = ports.mains.find(record.parentSessionId)
     if (pairing === undefined) {
-      return { legacy: true, workSessionId: undefined, workArchived: false, mainUnavailable: false }
+      throw new LocusResolutionError('locus-unusable', `Locus ${record.id} has no locus_mains pairing for its parent session.`)
     }
     const workArchived = isArchived(pairing.workSessionId)
     return {
-      legacy: false,
       workSessionId: pairing.workSessionId,
       workArchived,
       mainUnavailable: !workArchived && (mainUnavailable || pairing.status !== 'active' || isArchived(record.parentSessionId)),
@@ -325,7 +321,6 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
 
   /** Whether the row's locus main verifiably serves; only the delivery path asks. */
   const mainUnavailable = async (record: LocusRecord): Promise<boolean> => {
-    if (ports.mains?.find(record.parentSessionId) === undefined) return false
     if (ports.verifyMain === undefined) return true
     try {
       return (await ports.verifyMain(record.parentSessionId)) !== true
@@ -367,8 +362,8 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
         } catch (error) {
           // Ask the ONE policy module whether this generation may be replaced
           // without the owner. `stopped`/`retired` record an owner decision
-          // and stay terminal; a previous-model row, a locus main that cannot
-          // serve, or a Host-invalidated child falls through to establishment.
+          // and stay terminal; a locus main that cannot serve, or a
+          // Host-invalidated child falls through to establishment.
           //
           // `toActive` refusing it remains the point: the unavailable
           // generation's child is never adopted or cold-resumed. Only the
@@ -377,7 +372,6 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
           const disposition = dispositionOf({
             ...record,
             parentArchived: facts.workArchived,
-            legacy: facts.legacy,
             mainUnavailable: facts.mainUnavailable,
           })
           if (disposition.kind !== 'replace') return refuse(error)

@@ -542,3 +542,30 @@ describe('authorization snapshot lookup', () => {
     ).toBe('retired')
   })
 })
+
+describe('v19: the chat_bindings retirement marker is the only legacy path left', () => {
+  const authorization = (marker: unknown) => createDurableLocusAuthorizationResolver(
+    { getLatestLocusByEndpoint: () => undefined },
+    { find: () => marker },
+  )
+
+  it('spec Scenario "chat_bindings 退休标记仍然生效"', () => {
+    // No locus row at all, but the older chat_bindings table still names this group.
+    const withMarker = authorization({ chatId: GROUP })
+    expect(withMarker({ chatId: GROUP, key: GROUP })).toBe('legacy')
+
+    const owner = groupEvent({ sender_id: OWNER, content: '@Pet ordinary work' })
+    expect(admitLocusEvent(owner, context({ authorization: withMarker }))).toMatchObject({
+      admit: false, reason: 'legacy-endpoint', authorization: 'legacy',
+    })
+    // Only the owner's explicit rebuild goes through, never an automatic build.
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: OWNER, content: '@Pet /bind abc123' }),
+      context({ authorization: withMarker }),
+    )).toMatchObject({ admit: true, authorization: 'legacy', command: { kind: 'bind', prefix: 'abc123' } })
+
+    // The same group without the marker is simply a new entry: the owner's at builds it.
+    expect(admitLocusEvent(owner, context({ authorization: authorization(undefined) })))
+      .toMatchObject({ admit: true, needsInitialization: true, authorization: 'uninitialized' })
+  })
+})

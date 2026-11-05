@@ -103,7 +103,7 @@ export interface LocusCompositionAttestation {
  * `lark-cli`.
  *
  * A filter cannot express this property, so publication reads what the child
- * really exposes and refuses to publish `safe-v1` when the read disagrees. That
+ * really exposes and refuses to publish a `safe` tier child when the read disagrees. That
  * keeps the guarantee independent of which preset or registration style produced
  * the child, and it fails closed when the surface cannot be read.
  *
@@ -206,10 +206,10 @@ export interface LocusChildComposition {
    */
   readonly pendingPermission?: LocusChildPermission
   /**
-   * Host-attested composition marker. Only `tier3` is served; `safe-v1`,
-   * `safe-v2` or a missing marker belong to the retired two-tier model.
+   * Host-attested composition marker. Only `tier3` exists; a missing marker
+   * (no child was ever created) is never served.
    */
-  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
+  readonly childComposition?: 'tier3'
   /** The tier the row was published with; missing is read as `safe`. */
   readonly toolTier?: { readonly desired: LocusToolTier; readonly effective: LocusToolTier }
   /**

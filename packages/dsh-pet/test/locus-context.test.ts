@@ -69,7 +69,7 @@ function deliveryContext(
 describe('unified locus delivery context', () => {
   it('renders shell-tier capabilities and accurately describes the mistake-prevention guard', () => {
     const prompt = renderLocusDeliveryPrompt(deliveryContext({
-      locus: { locusId: 'locus-project-1', generation: 3, state: 'active', childComposition: 'safe-v2', toolTier: 'shell' },
+      locus: { locusId: 'locus-project-1', generation: 3, state: 'active', childComposition: 'tier3', toolTier: 'shell' },
     }))
 
     for (const fact of [
@@ -224,6 +224,42 @@ describe('unified locus delivery context', () => {
     expect(prompt).toContain('不自动运行 ws/sw')
     expect(prompt).not.toContain('/repo/.worktrees/project')
     expect(prompt).not.toContain('write 已生效')
+  })
+
+  it('spec Scenario "主会话无法回答"', () => {
+    // The context a child asked its parent for never arrived: the anchor stays
+    // unknown while a write request is still unapplied.
+    const prompt = renderLocusDeliveryPrompt(deliveryContext({
+      permission: { effective: 'read', desired: 'write', grantedBy: 'ou_owner' },
+      contextAnchor: { status: 'unknown' },
+    }))
+
+    // It reports "unconfirmed" instead of guessing, hands the gap to the owner ...
+    expect(prompt).toContain('execution root：未确认')
+    expect(prompt).toContain('必须如实说明缺失并请所有者在管理面显式确认')
+    // ... the question having been accepted is not an answer ...
+    expect(prompt).toContain('收到资料不等于已采纳')
+    // ... and the permission is not relaxed: effective stays read, the desired write is only pending.
+    expect(prompt).toContain('effective：read')
+    expect(prompt).not.toContain('write 已生效')
+    expect(prompt).not.toContain('/repo/.worktrees/project')
+  })
+
+  it('spec Scenario "用户主动查阅受实际能力约束"', () => {
+    // Discoverable is not readable: the prompt states what the Host measured for
+    // THIS entrance, and an unreadable one must be reported as such.
+    const unreadable = renderLocusDeliveryPrompt(deliveryContext({ readability: 'unreadable' }))
+    expect(unreadable).toContain('当前不可读')
+    expect(unreadable).toContain('请如实说明该限制，不要假装读过')
+    expect(unreadable).not.toContain('已实测可读')
+
+    const unconfirmed = renderLocusDeliveryPrompt(deliveryContext())
+    expect(unconfirmed).not.toContain('已实测可读')
+
+    const readable = renderLocusDeliveryPrompt(deliveryContext({ readability: 'readable' }))
+    expect(readable).toContain('已实测可读')
+    // Receiving material is still not adopting it, whatever the readability.
+    for (const prompt of [unreadable, unconfirmed, readable]) expect(prompt).toContain('收到资料不等于已采纳')
   })
 
   it('explicitly drops reply authority for a local GUI turn', () => {

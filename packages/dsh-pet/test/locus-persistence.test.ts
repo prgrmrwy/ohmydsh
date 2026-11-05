@@ -39,12 +39,25 @@ function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarn
   }
 }
 
+/** An empty medium whose default parent session is a recorded locus main (v19 pairing). */
+function pairedMedium(parentSessionId = 'session-main'): MemoryMedium {
+  const medium = emptyMedium()
+  medium.tables.locus_mains = {
+    [parentSessionId]: JSON.stringify({
+      locusMainSessionId: parentSessionId, workSessionId: 'work-main', generation: 1, status: 'active',
+      spaceId: 'space-main', workspaceId: 'workspace-pet', createdAt: 1, updatedAt: 1,
+    }),
+  }
+  return medium
+}
+
 function record(overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {}): LocusRecord {
   return buildLocusRecord({
     id: 'locus-group',
     endpoint: { chatId: 'oc_project' },
     parentSessionId: 'session-main',
     childSessionId: 'child-group',
+    childComposition: 'tier3',
     workspaceId: 'workspace-main',
     source: 'auto',
     createdAt: 1,
@@ -63,7 +76,7 @@ async function reopen(medium: MemoryMedium) {
 
 describe('durable unified locus repository', () => {
   it('persists refused-reply failure once and releases B across reopen', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     enableAtomicTransactions(first)
     const repository = new DurableLocusRepository(first.domain)
@@ -86,21 +99,22 @@ describe('durable unified locus repository', () => {
     } finally { await second.close() }
   })
 
-  it('keeps legacy rows readable while round-tripping additive composition and tier facts', async () => {
-    expect(petLocusRecord.safeParse({ ...record(), childComposition: undefined }).success).toBe(true)
-    expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v1' }).childComposition).toBe('safe-v1')
-    expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v2' }).childComposition).toBe('safe-v2')
-    expect(petLocusRecord.safeParse({ ...record(), childComposition: 'unsafe-v0' }).success).toBe(false)
-    expect(petLocusRecord.parse({ ...record(), childComposition: 'safe-v2', toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'owner' } }).toolTier?.effective).toBe('shell')
-    expect(petLocusRecord.safeParse({ ...record(), toolTier: { desired: 'safe', effective: 'shell' } }).success).toBe(false)
-    expect(petLocusRecord.safeParse({ ...record(), childComposition: 'safe-v1', toolTier: { desired: 'shell', effective: 'shell' } }).success).toBe(false)
-    const legacy = { ...record(), toolTier: undefined }
-    expect(petLocusRecord.safeParse(legacy).success).toBe(true)
+  it('round-trips the tier3 marker and tier facts; only tier3 is representable', async () => {
+    const neverCreated = { ...record({ state: 'not-created', childSessionId: undefined, childComposition: undefined }) }
+    expect(petLocusRecord.safeParse(neverCreated).success).toBe(true)
+    expect(petLocusRecord.parse({ ...record(), childComposition: 'tier3' }).childComposition).toBe('tier3')
+    for (const marker of ['safe-v1', 'safe-v2', 'unsafe-v0']) {
+      expect(petLocusRecord.safeParse({ ...record(), childComposition: marker }).success).toBe(false)
+    }
+    expect(petLocusRecord.safeParse({ ...record(), childComposition: undefined }).success).toBe(false)
+    expect(petLocusRecord.parse({ ...record(), childComposition: 'tier3', toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'owner' } }).toolTier?.effective).toBe('shell')
+    expect(petLocusRecord.safeParse({ ...neverCreated, toolTier: { desired: 'shell', effective: 'shell' } }).success).toBe(false)
+    expect(petLocusRecord.safeParse({ ...record(), toolTier: undefined }).success).toBe(true)
     expect(record().toolTier).toEqual({ desired: 'safe', effective: 'safe' })
   })
 
   it('round-trips an explicit context anchor and keeps it separate from permission', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const anchored = await repository.putLocus(record({
@@ -133,7 +147,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('persists owner-confirmed anchors without turning paths into authority or routing', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const original = await repository.putLocus(record())
@@ -175,7 +189,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('rejects stale or busy owner anchor confirmation', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const original = await repository.putLocus(record())
     await expect(repository.confirmContextAnchor(
@@ -195,11 +209,11 @@ describe('durable unified locus repository', () => {
   })
 
   it('fences, commits, aborts, and invalidates tool-tier mutations with append-only audit', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     enableAtomicTransactions(harness)
     const repository = new DurableLocusRepository(harness.domain)
     const current = await repository.putLocus(record({
-      childComposition: 'safe-v2',
+      childComposition: 'tier3',
       toolTier: { desired: 'safe', effective: 'safe' },
       revision: 1,
     }))
@@ -240,12 +254,12 @@ describe('durable unified locus repository', () => {
   })
 
   it('persists tool tier alongside loci and indexes across a domain restart', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const group = await repository.putLocus(record({
       source: 'qa-created',
-      childComposition: 'safe-v2',
+      childComposition: 'tier3',
       toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'owner' },
     }))
     const topic = await repository.putLocus(
@@ -304,7 +318,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('keeps historical and current indexes coherent during replacement and retirement', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const original = await repository.putLocus(record())
     const switched = await repository.replaceLocus(
@@ -347,7 +361,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('rejects stale lifecycle fences after a serialized mutation', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const fence = {
@@ -368,7 +382,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('applies stale fences to durable permission and stop operations', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const fence = {
@@ -390,7 +404,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('records Delivery WAL metadata and compensates a failed partial write', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -414,7 +428,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('persists the anchored-comment quote with the Delivery and reads it back after a restart', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     // Endpoint shape does not matter for this round-trip; a doc root keeps the fixture minimal.
@@ -440,7 +454,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('refuses to persist an oversized or empty quote, so a bad row can never block the next storage open', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record({ endpoint: { chatId: 'doc:docx:Dx0000000000000000000000001' } }))
     const base = {
@@ -483,7 +497,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('accepts overlapping same-locus messages into one durable FIFO backlog while controls stay busy', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const base = {
@@ -514,7 +528,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('binds an accepted Delivery as queued and never leaves accepted execution proof', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const correlation = {
@@ -543,7 +557,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('never lets an explicit newer durable delivery id leapfrog the oldest row', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const correlation = {
@@ -568,7 +582,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('persists definitive queue failure, releases busy, and accepts a retry message', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const correlation = {
@@ -612,7 +626,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('rejects duplicate inbox message ids and fails closed on corrupt multi-match lookup', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const correlation = {
@@ -657,7 +671,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('restores multiple pending proof-free Deliveries and preserves the busy fence', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const pending = {
@@ -697,7 +711,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('publishes a replacement and its endpoint pointer in one transaction', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const original = await repository.putLocus(record())
@@ -729,7 +743,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('leaves no partial state on the medium when a mutation fails', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const original = await repository.putLocus(record())
@@ -756,7 +770,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('keeps an append-only permission trail that a later downgrade cannot erase', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -778,7 +792,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('records a refused escalation instead of leaving it invisible', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
 
@@ -799,7 +813,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('does not carry a permission trail across a replaced generation', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const original = await repository.putLocus(record())
     await repository.setLocusMode(original.id, 'write', 'ou_owner', 10)
@@ -819,7 +833,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('commits a source switch and the notice it owes in one transaction', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const original = await repository.putLocus(record())
@@ -857,7 +871,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('leaves neither the switch nor its notice when the commit fails', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const original = await repository.putLocus(record())
@@ -884,7 +898,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('retains an accepted backlog Delivery across restart as durable dispatchable admission', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const firstRepository = new DurableLocusRepository(first.domain)
     const locus = await firstRepository.putLocus(record())
@@ -935,7 +949,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('expires an accepted backlog Delivery on restart once it crosses its own 24-hour hard cap', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const firstRepository = new DurableLocusRepository(first.domain)
     const locus = await firstRepository.putLocus(record())
@@ -972,7 +986,7 @@ describe('durable unified locus repository', () => {
     // record the domain refused on the next boot, degrading the whole plugin
     // with `stored record ... does not match its schema`. The medium is
     // reopened here because that validation runs at domain open, not at write.
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     enableAtomicTransactions(first)
     const firstRepository = new DurableLocusRepository(first.domain)
@@ -1020,7 +1034,7 @@ describe('durable unified locus repository', () => {
     // less than the lease already grants. That must come back as satisfied
     // with the real deadline, never as a refusal, and it must persist nothing
     // so the holder's `expectedRevision` still matches on its next CAS.
-    const harness = await openPetHarness(emptyMedium())
+    const harness = await openPetHarness(pairedMedium())
     enableAtomicTransactions(harness)
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
@@ -1060,7 +1074,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('retains a queued Delivery only with exact live-turn proof across restart', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -1122,7 +1136,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('settles a current Delivery whose bound turn was interrupted, then frees the backlog', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -1213,7 +1227,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('spec Scenario "Host 重启处理遗留 finishing": a restart converges finishing to unknown-terminal, frees the queue, never resends', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -1249,7 +1263,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('spec Scenario "Host 重启恢复未过期 current": keeps an unproven current Delivery waiting instead of settling it early', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -1305,7 +1319,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('spec Scenario "宿主重启无法证明关联": keeps queued work busy as explicit manual debt when termination is unavailable', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -1344,7 +1358,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('fails queued work after exact termination, invalidates the locus, and never replays', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const locus = await repository.putLocus(record())
@@ -1420,7 +1434,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('rebuilds stale indexes and reports pending work without replaying side effects', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     await repository.acceptDelivery({
@@ -1492,7 +1506,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('leaves a consistent index set unchanged on repeated startup recovery', async () => {
-    const harness = await openPetHarness()
+    const harness = await openPetHarness(pairedMedium())
     const repository = new DurableLocusRepository(harness.domain)
     const locus = await repository.putLocus(record())
     const first = await repository.reconcileStartup({ now: 10 })
@@ -1538,7 +1552,7 @@ describe('durable unified locus repository', () => {
     ['topic without parent', { endpoint: { chatId: 'oc_live_bad', threadId: 'omt_bad' } }],
     ['chat with topic parent', { endpoint: { chatId: 'oc_live_bad' }, parentLocusId: 'locus-parent' }],
   ] as const)('rejects malformed live %s writes without poisoning reopen', async (_label, patch) => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const repository = new DurableLocusRepository(first.domain)
     const malformed = {
@@ -1567,7 +1581,7 @@ describe('durable unified locus repository', () => {
   })
 
   it('isolates new locus routing from legacy chat and invocation rows', async () => {
-    const medium = emptyMedium()
+    const medium = pairedMedium()
     const first = await openPetHarness(medium)
     const legacyChat = {
       chatId: 'oc_legacy',
@@ -1632,7 +1646,7 @@ describe('durable unified locus repository', () => {
     }
 
     it('reconcileStartup no longer aborts Pet initialization on a truncated row', async () => {
-      const medium = emptyMedium()
+      const medium = pairedMedium()
       const first = await openPetHarness(medium)
       const firstRepository = new DurableLocusRepository(first.domain)
       const group = await firstRepository.putLocus(
@@ -1683,7 +1697,7 @@ describe('durable unified locus repository', () => {
     })
 
     it('serves the corrupted endpoint correctly once a write path re-derives its index', async () => {
-      const medium = emptyMedium()
+      const medium = pairedMedium()
       const first = await openPetHarness(medium)
       const firstRepository = new DurableLocusRepository(first.domain)
       const group = await firstRepository.putLocus(
@@ -1745,7 +1759,7 @@ describe('durable unified locus repository', () => {
     })
 
     it('still fails closed on a genuinely unrelated key/value mismatch', async () => {
-      const medium = emptyMedium()
+      const medium = pairedMedium()
       const first = await openPetHarness(medium)
       const firstRepository = new DurableLocusRepository(first.domain)
       const group = await firstRepository.putLocus(

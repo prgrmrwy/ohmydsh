@@ -99,7 +99,7 @@ function locus(input: LocusInput): PetLocusView {
     },
     permission: { desired: 'read', effective: 'read' },
     toolTier: { desired: 'safe', effective: 'safe' },
-    childComposition: 'safe-v2',
+    childComposition: 'tier3',
     state: {
       state: input.state ?? 'active',
       busy: false,

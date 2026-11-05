@@ -32,7 +32,7 @@ async function boot(): Promise<{ harness: PetHarness; repository: LocusRepositor
     workspaceId: 'workspace-preamble',
     source: 'auto',
     state: 'active',
-    childComposition: 'safe-v2',
+    childComposition: 'tier3',
     toolTier: { desired: 'shell', effective: 'shell' },
     permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
     busy: false,

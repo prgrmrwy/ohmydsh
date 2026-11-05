@@ -20,7 +20,7 @@
  *   separate, once-only decision made by the caller.
  */
 
-import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusRecord } from './aggregate.js'
+import type { LocusRecord } from './aggregate.js'
 
 /** What the runtime could prove about one locus child. */
 export type ChildLiveness =
@@ -105,32 +105,19 @@ export async function reconcileLocusChildren(
 
   // `not-created` rows have no child to probe; only `active` rows do.
   const candidates = loci.filter(record => record.state === 'active')
-  const safeCandidates: LocusRecord[] = []
-  for (const record of candidates) {
-    if (signal.aborted) break
-    if (record.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-      // Not a three-tier child. Previous-model rows are read as such and left
-      // exactly as they are: probing one could resolve, adopt or cold-resume its
-      // child under a parent preset nobody reviewed, and invalidating it would
-      // rewrite a row the retirement rules say not to touch. A successor retires
-      // it by reference; the historical row itself never changes.
-      continue
-    }
-    safeCandidates.push(record)
-  }
   if (ports.probe === undefined) {
-    // A missing liveness seam proves nothing about otherwise safe-v1 rows.
-    if (safeCandidates.length > 0) ports.log?.('probe-unavailable')
+    // A missing liveness seam proves nothing about the active rows.
+    if (candidates.length > 0) ports.log?.('probe-unavailable')
     return {
       checked: invalidated.length,
       usable: 0,
       invalidated,
-      unproven: safeCandidates.map(record => record.id),
+      unproven: candidates.map(record => record.id),
       busyCleared: [],
     }
   }
 
-  for (const record of safeCandidates) {
+  for (const record of candidates) {
     if (signal.aborted) break
     if (record.childSessionId === undefined) {
       // An active generation with no child cannot serve work at all.

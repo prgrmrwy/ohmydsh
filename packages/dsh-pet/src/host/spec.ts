@@ -125,9 +125,15 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // locus-three-tier-structure D1/D2): the new `locus_mains` table records the
 // 1:1 pairing of a work session and the locus main session Pet creates for it.
 // Additive only: no `loci` row is rewritten. A `loci` row whose parent session
-// has no `locus_mains` record belongs to the previous two-tier model and is
-// interpreted as such at READ time (retirement rules), never converted.
-export const PET_DOMAIN_VERSION = 18
+// has no `locus_mains` record belongs to the previous two-tier model; v18
+// left such rows in place and v19 deletes them (see below).
+//
+// Bumped to 19 by openspec pet-locus-purge-previous-model: the offline
+// migration deletes every previous-model `loci` row (parent without a
+// `locus_mains` record) with the rows that reference them, and the row schema
+// now admits only the three-tier model — `childComposition` may only be
+// `tier3` and an `active` row must carry it. No row is rewritten.
+export const PET_DOMAIN_VERSION = 19
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -589,8 +595,12 @@ export const petLocusRecord = z.object({
    * child exists correlate on it, and the lazily created child must BE it.
    */
   reservedChildSessionId: z.string().min(1).optional(),
-  /** Additive Host attestation; absent legacy rows parse but cannot serve. */
-  childComposition: z.enum(['safe-v1', 'safe-v2', 'tier3']).optional(),
+  /**
+   * Host attestation of the child's composition. Only `tier3` exists; a row that
+   * never created a child (not-created, or stopped/invalid/retired before one)
+   * has none, and an `active` row must have it.
+   */
+  childComposition: z.enum(['tier3']).optional(),
   /** Additive per-locus tool tier; absent legacy rows are treated as safe. */
   toolTier: z.object({
     desired: z.enum(['safe', 'shell']),
@@ -627,16 +637,15 @@ export const petLocusRecord = z.object({
   invalidReason: z.string().optional(),
   replacesLocusId: z.string().min(1).optional(),
 }).superRefine((record, issueCtx) => {
-  // Only tier3 has the pending revoke protocol; legacy write rows stay fail-closed.
+  if (record.state === 'active' && record.childComposition === undefined) {
+    issueCtx.addIssue({ code: 'custom', message: 'an active locus requires the tier3 childComposition marker' })
+  }
+  // Only a child that exists (tier3) has the pending revoke protocol.
   if (record.permission.effective === 'write' && record.permission.desired !== 'write' && record.childComposition !== 'tier3') {
     issueCtx.addIssue({ code: 'custom', message: 'effective write requires desired write outside tier3' })
   }
-  if (
-    record.toolTier?.effective === 'shell'
-    && record.childComposition !== 'safe-v2'
-    && record.childComposition !== 'tier3'
-  ) {
-    issueCtx.addIssue({ code: 'custom', message: 'only safe-v2/tier3 children may use shell tier' })
+  if (record.toolTier?.effective === 'shell' && record.childComposition !== 'tier3') {
+    issueCtx.addIssue({ code: 'custom', message: 'only tier3 children may use shell tier' })
   }
   if (record.endpoint.threadId !== undefined && record.parentLocusId === undefined) {
     issueCtx.addIssue({ code: 'custom', message: 'topic locus requires parentLocusId' })

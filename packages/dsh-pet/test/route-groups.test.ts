@@ -137,7 +137,7 @@ const LOCUS_VIEW = {
   workspace: { workspaceId: 'ws-1', title: '项目A', executionRoot: '/repo/acme' },
   permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
   toolTier: { desired: 'safe', effective: 'safe' },
-  childComposition: 'safe-v2',
+  childComposition: 'tier3',
   state: { state: 'active', busy: false, createdAt: 1, updatedAt: 1 },
   source: 'explicit',
   isDefaultQa: false,
@@ -184,7 +184,7 @@ describe('Channel settings use unified onboarding only', () => {
     expect(host.textContent).toContain('Host 未返回完整的统一子会话与默认只读核验证明')
   })
 
-  it('renders owner-safe and shell-tier management controls for a safe-v2 entry', async () => {
+  it('renders owner-safe and shell-tier management controls for a tier3 entry', async () => {
     const requests: { path: string; body?: string }[] = []
     const shellLocus = { ...LOCUS_VIEW, toolTier: { desired: 'shell' as const, effective: 'shell' as const } }
     vi.stubGlobal('fetch', vi.fn(async (path: string, init?: { body?: string }) => {

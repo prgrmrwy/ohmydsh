@@ -59,7 +59,7 @@ export function locus(
     workspaceId: 'workspace',
     source: 'explicit',
     state: 'active',
-    childComposition: 'safe-v1',
+    childComposition: 'tier3',
     ...overrides,
   })
 }
@@ -110,6 +110,8 @@ export async function openPetDomain(ctx: Context): Promise<never> {
 export interface LoadedHost {
   ctx: Context
   routes: { path: string }[]
+  /** `[dsh-pet]` degradation lines captured while the Host started. */
+  degradedDiagnostics: string[]
   publish(sessionId: string, scope: unknown): void
   toolNames(scope?: unknown): string[]
   route(routePath: string): RouteRegistration | undefined
@@ -122,6 +124,7 @@ export async function loadPetHost(
   existingHome?: string,
   seedDomain?: (domain: Awaited<ReturnType<typeof openPetDomain>>) => Promise<void>,
   beforePet?: (ctx: Context) => Promise<void>,
+  options: { readonly expectDegraded?: boolean } = {},
 ): Promise<LoadedHost> {
   const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
   const routes: { path: string }[] = []
@@ -219,19 +222,34 @@ export async function loadPetHost(
   }
 
   await beforePet?.(ctx)
-  await ctx.plugin(petPlugin, { home, version: '0.1.0' })
-
-  // Pet's initialization is contained and asynchronous; poll for its observable
-  // end state rather than guessing a delay.
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && routes.length === 0) {
-    await new Promise(resolve => setTimeout(resolve, 25))
+  // Pet reports degradation through `console.warn`; capture it so a test can
+  // assert the diagnostic instead of scraping stderr.
+  const degradedDiagnostics: string[] = []
+  const originalWarn = console.warn
+  console.warn = (...args: unknown[]) => {
+    const line = args.map(String).join(' ')
+    if (line.startsWith('[dsh-pet] degraded:')) degradedDiagnostics.push(line)
+    originalWarn(...args)
   }
-  expect(routes.length).toBeGreaterThan(0)
+  try {
+    await ctx.plugin(petPlugin, { home, version: '0.1.0' })
+
+    // Pet's initialization is contained and asynchronous; poll for its observable
+    // end state rather than guessing a delay.
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline && (options.expectDegraded === true ? degradedDiagnostics.length === 0 : routes.length === 0)) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+  } finally {
+    console.warn = originalWarn
+  }
+  if (options.expectDegraded === true) expect(degradedDiagnostics.length).toBeGreaterThan(0)
+  else expect(routes.length).toBeGreaterThan(0)
 
   return {
     ctx,
     routes,
+    degradedDiagnostics,
     publish(sessionId, scope) {
       ctx.emit('agent/created' as never, { agent: { id: sessionId, ctx: scope } } as never)
     },

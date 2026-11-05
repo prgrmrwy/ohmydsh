@@ -5,10 +5,17 @@ import { FakeOfficialRuntime } from './support/official-subagent.js'
 
 describe('three-tier child context ownership', () => {
   it('旧 fork child 不受影响', () => {
+    // GIVEN a fork child that inherited its parent's prefix. The migration deleted
+    // the previous-model row that pointed at it, so no locus row references it.
     const install = vi.fn()
-    expect(composeLocusChild({ id: 'historical-fork', scope: {} }, {
-      lookup: { find: () => undefined }, surface: { install, visibleTools: () => [] },
+    const find = vi.fn(() => undefined)
+    const scope = Object.freeze({})
+    // WHEN it is published/resumed, THEN it is an ordinary session: not composed,
+    // nothing installed on its scope, its history never consulted or trimmed.
+    expect(composeLocusChild({ id: 'historical-fork', scope }, {
+      lookup: { find }, surface: { install, visibleTools: () => [] },
     } as never)).toEqual({ composed: false })
+    expect(find).toHaveBeenCalledWith('historical-fork')
     expect(install).not.toHaveBeenCalled()
   })
 

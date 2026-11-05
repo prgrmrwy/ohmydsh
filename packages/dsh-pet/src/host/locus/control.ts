@@ -213,8 +213,10 @@ function safeControlError(error: unknown): LocusControlDispatchResult {
   if (code === 'LOCUS_STOPPED' || code === 'GROUP_UNAVAILABLE') {
     return failure('stopped', '当前入口已停止，需要所有者显式重建后才能继续。')
   }
-  if (code === 'LOCUS_LEGACY_COMPOSITION') {
-    return failure('tools-legacy-composition', '该入口属于旧模型，关联已退休，未切换档位；下一条授权 at 将建立新的三层结构。')
+  if (code === 'LOCUS_NOT_FOUND') {
+    // No locus row for the entry (including one a migration purged): nothing is
+    // built or switched by a control command.
+    return failure('not-found', '当前入口不存在或已失效。')
   }
   // The only PARENT_NOT_ALLOWED a control command can reach is "the prefix
   // resolved to a child session", which the spec requires to read exactly like

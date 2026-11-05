@@ -8,7 +8,7 @@
  * the child's next `agent/created` (see `composeLocusChild`). Nothing here may
  * borrow a live Session or wake a child just to change its tools.
  */
-import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusMutationFence, type LocusToolTier, type LocusToolTierName } from './aggregate.js'
+import type { LocusMutationFence, LocusToolTier, LocusToolTierName } from './aggregate.js'
 
 export interface ToolTierMutationLocus {
   readonly id: string
@@ -59,7 +59,7 @@ export type ToolTierMutationResult =
     /** The change was only recorded; it applies and is verified on the child's next wake. */
     readonly pending?: true
   }
-  | { readonly ok: false; readonly reason: 'not-found' | 'busy' | 'legacy-composition' | 'apply-failed' | 'verification-failed' }
+  | { readonly ok: false; readonly reason: 'not-found' | 'busy' | 'apply-failed' | 'verification-failed' }
 
 async function restoreSafeOrInvalidate(
   current: ToolTierMutationLocus,
@@ -139,11 +139,6 @@ export function createLocusToolTierMutation(ports: ToolTierMutationPorts) {
           || input.fence?.expectedUpdatedAt !== undefined && input.fence.expectedUpdatedAt !== current.updatedAt
           || input.fence?.expectedRevision !== undefined && input.fence.expectedRevision !== current.revision) {
           return { ok: false, reason: 'busy' }
-        }
-        // Only a `tier3` row serves or switches tiers; any other marker belongs
-        // to the retired model and is neither adopted nor resumed here.
-        if (current.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-          return { ok: false, reason: 'legacy-composition' }
         }
         const fence = input.fence ?? {
           expectedGeneration: current.generation,

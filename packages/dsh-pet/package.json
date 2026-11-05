@@ -99,7 +99,8 @@
     "react": "^18.2.0"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-storage-sqlite": "^0.2.1-rc.5"
+    "@deepseek-ai/dsh-storage-sqlite": "^0.2.1-rc.5",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
@@ -140,8 +141,7 @@
     "react-dom": "^18.2.0",
     "tsdown": "^0.23.1",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5",
-    "zod": "^4.4.3"
+    "vitest": "^5.0.5"
   },
   "ohmydsh": {
     "docTier": "A"

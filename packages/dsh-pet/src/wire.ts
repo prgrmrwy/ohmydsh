@@ -374,7 +374,7 @@ export interface PetLocusView {
   readonly contextAnchor?: PetLocusContextAnchorView
   readonly permission: PetLocusPermissionView
   readonly toolTier: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt?: number; readonly grantedBy?: string }
-  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
+  readonly childComposition?: 'tier3'
   readonly state: PetLocusStateView
   readonly source: PetLocusSource
   /** Chat-level locus that structurally owns this topic, when applicable. */

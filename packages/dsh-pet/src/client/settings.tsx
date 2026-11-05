@@ -1582,10 +1582,8 @@ export function LocusDetails(props: {
           <button
             type="button"
             aria-pressed={shellTier}
-            disabled={blocked || !canManageCurrent || shellTier || head.childComposition !== 'safe-v2'}
-            title={head.childComposition === 'safe-v1'
-              ? 'safe-v1 子会话需显式重建一次后才能授予 shell。'
-              : '开放 bash 与 Skill；allowlist 成员共享本机命令、飞书凭据、读取与网络能力。出站 guard 仅防误操作，不是安全边界。'}
+            disabled={blocked || !canManageCurrent || shellTier || head.childComposition !== 'tier3'}
+            title="开放 bash 与 Skill；allowlist 成员共享本机命令、飞书凭据、读取与网络能力。出站 guard 仅防误操作，不是安全边界。"
             onClick={run('tools-shell', () => petApi.locusTools({ action: 'tools', tier: 'shell', ...fence }))}
           >
             shell
@@ -2301,7 +2299,7 @@ function requireLocusSnapshot(value: unknown): PetLocusManagementView {
     if (!isRecord(item.toolTier) || !['safe', 'shell'].includes(String(item.toolTier.desired)) || !['safe', 'shell'].includes(String(item.toolTier.effective)) ||
         (item.toolTier.verifiedAt !== undefined && !isFiniteNonNegative(item.toolTier.verifiedAt)) ||
         (item.toolTier.grantedBy !== undefined && !isNonEmptyString(item.toolTier.grantedBy)) ||
-        (item.childComposition !== undefined && !['safe-v1', 'safe-v2'].includes(String(item.childComposition)))) return false
+        (item.childComposition !== undefined && item.childComposition !== 'tier3')) return false
     if (!isRecord(item.permission) || !['read', 'write'].includes(String(item.permission.desired)) || !['read', 'write'].includes(String(item.permission.effective)) ||
         (item.permission.verifiedAt !== undefined && !isFiniteNonNegative(item.permission.verifiedAt)) ||
         (item.permission.grantedBy !== undefined && !isNonEmptyString(item.permission.grantedBy)) ||

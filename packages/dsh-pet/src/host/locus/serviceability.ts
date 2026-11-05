@@ -31,7 +31,7 @@
  * from the panel.
  *
  * `invalid` records a HOST judgement — a child that failed to re-attach after
- * a restart, or a generation with no safe-v1 composition proof. The owner
+ * a restart, or a generation with no tier3 composition proof. The owner
  * decided nothing, so there is no intent to preserve and no exit to honour.
  * Requiring an explicit rebuild here is what stranded endpoints: the panel
  * offers that rebuild only against the generation's own recorded parent,
@@ -76,8 +76,6 @@ export type LocusDisposition =
 
 /** Why a generation is replaceable, so the replacement can be the right one. */
 export type LocusReplaceWhy =
-  /** A row of the previous two-tier model (no locus main pairing). */
-  | 'previous-model'
   /** The locus main it hangs under is retired, archived, deleted or mis-composed. */
   | 'locus-main-unavailable'
   /** The Host judged this generation's child unusable. */
@@ -106,12 +104,6 @@ export interface ServiceabilitySubject {
    * restoring the session restores service with no rebuild in between.
    */
   readonly parentArchived?: boolean
-  /**
-   * The row belongs to the previous two-tier model: its parent session has no
-   * `locus_mains` pairing. Read-time interpretation only; the row is not
-   * rewritten. Such a row never serves and its child is never adopted.
-   */
-  readonly legacy?: boolean
   /** The locus main this row hangs under cannot serve (retired/archived/gone). */
   readonly mainUnavailable?: boolean
 }
@@ -146,7 +138,7 @@ export function mayReplaceWithoutOwner(subject: Pick<ServiceabilitySubject, 'sta
  * Decide what may be done with one generation.
  *
  * A generation serves work only when it is `active`, has a child session, and
- * carries a recognized durable composition proof (`safe-v1` or `safe-v2`). Anything else is classified
+ * carries the durable `tier3` composition proof. Anything else is classified
  * by WHO made it unavailable, never by which layer happens to be asking.
  * @param subject - the generation's state and composition facts.
  * @returns the disposition every delivery-path layer must agree on.
@@ -163,17 +155,10 @@ export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition 
         + 'restore that session, or /bind the endpoint to a new one',
     }
   }
-  // The owner's own exit is honoured before any "previous model" reading: an
-  // explicitly stopped/retired row is never revived just because it is old.
+  // The owner's own exit is honoured first: an explicitly stopped/retired row
+  // is never revived just because it is old.
   if (isOwnerExit(subject.state)) {
     return { kind: 'terminal', reason: `endpoint was explicitly ${subject.state} by its owner` }
-  }
-  if (subject.legacy === true) {
-    return {
-      kind: 'replace',
-      why: 'previous-model',
-      reason: 'row belongs to the previous two-tier model and is retired',
-    }
   }
   if (subject.mainUnavailable === true) {
     return {

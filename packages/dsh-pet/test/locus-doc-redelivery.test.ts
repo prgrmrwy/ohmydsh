@@ -28,12 +28,12 @@ function messageId(replyId: string): string {
 async function seed(repository: DurableLocusRepository) {
   const root = await repository.putLocus(buildLocusRecord({
     id: 'locus-doc-root', endpoint: { chatId: ROOT },
-    parentSessionId: 'session-main', childSessionId: 'child-doc-root', workspaceId: 'workspace-main',
+    parentSessionId: 'session-main', childSessionId: 'child-doc-root', childComposition: 'tier3', workspaceId: 'workspace-main',
     source: 'auto', createdAt: 1, updatedAt: 1,
   }))
   const comment = await repository.putLocus(buildLocusRecord({
     id: 'locus-doc-comment', endpoint: ENDPOINT, parentLocusId: root.id,
-    parentSessionId: 'session-main', childSessionId: 'child-doc-comment', workspaceId: 'workspace-main',
+    parentSessionId: 'session-main', childSessionId: 'child-doc-comment', childComposition: 'tier3', workspaceId: 'workspace-main',
     source: 'inherited', createdAt: 1, updatedAt: 1,
   }))
   return comment

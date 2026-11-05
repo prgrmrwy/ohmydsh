@@ -432,11 +432,23 @@ describe('unified locus child publication', () => {
       expect((error as LocusCompositionError).reason).toBe('preset-mismatch')
     }
     expect(drifted.surface?.install).not.toHaveBeenCalled()
+
+    // The child's own persisted preset is what cold resume re-mounts; one that
+    // fell back to the parent's composition is refused before anything installs.
+    const fellBack = ports({ lookup: { find: vi.fn(() => persisted) }, childPreset: vi.fn(() => LOCUS_BASE_PRESET) })
+    try {
+      composeLocusChild(agent(), fellBack)
+      expect.unreachable('a resumed child must not serve on the parent composition')
+    } catch (error) {
+      expect((error as LocusCompositionError).reason).toBe('preset-mismatch')
+    }
+    expect(fellBack.surface?.install).not.toHaveBeenCalled()
   })
 
-  it('safe-v1 行继续服务', () => {
-    // Per the spec this row belongs to the retired model: it is NOT served, and
-    // not composed, adopted or resumed. (The scenario title predates the rule.)
+  it('defence in depth: a row marked with anything but tier3 is never composed', () => {
+    // v19 persistence cannot hold such a row (the Domain refuses to open it), so
+    // this is the last gate: a marker that is not `tier3` is neither served,
+    // composed, adopted nor resumed.
     for (const childComposition of ['safe-v1', 'safe-v2'] as const) {
       const deps = ports({ lookup: { find: vi.fn(() => composition({ childComposition })) } })
       try {
@@ -450,7 +462,7 @@ describe('unified locus child publication', () => {
     }
   })
 
-  it('升级前的 legacy child 不可恢复服务', () => {
+  it('defence in depth: a row with no marker is never composed or resumed', () => {
     const { childComposition: _marker, ...unmarked } = composition()
     const deps = ports({ lookup: { find: vi.fn(() => unmarked) } })
     try {

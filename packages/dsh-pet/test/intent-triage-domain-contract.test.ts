@@ -11,13 +11,13 @@
 import { describe, expect, it } from 'vitest'
 
 describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 2.1)', () => {
-  it('PET_DOMAIN_VERSION is 18 while retaining the v15 ledger, v16 answer, v17 inquiry and v18 locus_mains rationale', async () => {
+  it('PET_DOMAIN_VERSION is 19 while retaining the v15 ledger, v16 answer, v17 inquiry, v18 locus_mains and v19 purge rationale', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
       new URL('../src/host/spec.ts', import.meta.url),
       'utf8',
     )
-    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 18')
+    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 19')
     expect(specSource).toContain('Bumped to 18 for the three-tier locus structure')
     expect(specSource).toContain('Bumped to 15 for the shared-fact ledger')
     expect(specSource).toContain('Bumped to 16 for inquiry_answers')

@@ -351,6 +351,10 @@ async function initialize(
   // The additive locus store is a separate source of truth. It is opened on
   // the same durable domain but never falls back to legacy chat bindings.
   const locusRepository = new LocusRepository(domain)
+  // A migrated database can still hold indexes that name deleted rows. Derived
+  // data, so repair it now, before any callback below can read an index (an
+  // early `agent/created` cold resume does); a failure aborts initialization.
+  if (await lifecycle.contain('Locus index repair', () => locusRepository.repairDerivedIndexes()) === undefined) return
   // Startup recovery is deliberately deferred until the exact child runtime,
   // turn observer and operation-owned compensation ports have been composed.
   // Running it here with no options would persist manual debt before the Host
@@ -1240,7 +1244,7 @@ async function initialize(
           'dsh-pet: locus Lark CLI outbound mistake-prevention guard',
         )
       },
-      // `safe-v1` claims this child cannot reach an execution or delegation
+      // The `tier3` composition claims this child cannot reach an execution or delegation
       // route, and only a read of what it can actually call supports that claim:
       // the tool filter restricts the inherited plane, so an own-plane
       // registration like the standard preset's `subagent` survives it.
@@ -2051,14 +2055,15 @@ async function initialize(
     getLatestLocusByEndpoint: endpoint => {
       const record = locusRepository.getLatestLocusByEndpoint(endpoint)
       if (record === undefined) return undefined
-      // A row whose parent is a recorded locus main is three-tier and is judged
-      // by its WORK session; any other row is the previous model, read as such.
+      // A row is judged by the WORK session behind its locus main. Persistence
+      // holds only paired rows, so a missing pairing is invalid data.
       const pairing = locusRepository.getLocusMain(record.parentSessionId)
+      if (pairing === undefined) throw new Error(`Locus ${record.id} has no locus_mains pairing for its parent session`)
       return {
         id: record.id,
         state: record.state,
         parentSessionId: record.parentSessionId,
-        ...(pairing === undefined ? { legacy: true } : { workSessionId: pairing.workSessionId }),
+        workSessionId: pairing.workSessionId,
         ...(record.toolTier === undefined ? {} : { toolTier: record.toolTier }),
         ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
       }
@@ -2108,7 +2113,7 @@ async function initialize(
               chatName = undefined
             }
             // ONE repair entry point decides what this entry needs: first
-            // establishment, replacing a previous-model row, moving onto a new
+            // establishment, moving onto a new
             // locus main, or a new generation for an unusable child. It never
             // creates a child session; the first deliverable message does.
             const ensured = await locusProvisioningController.ensureEntry({
@@ -2300,7 +2305,7 @@ async function initialize(
       exit: {
         unbindCurrent: async ({ endpoint }) => {
           const current = locusRepository.getCurrentLocus(endpoint)
-          if (current === undefined) throw new Error('Current locus does not exist')
+          if (current === undefined) throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
           const stopped = await locusRepository.stopLocus(current.id)
           if (stopped.state !== 'stopped') throw new Error('Locus did not reach stopped state')
           return { state: 'stopped' as const, busy: false as const }
@@ -2309,7 +2314,7 @@ async function initialize(
       toolTierMutation: {
         setCurrentTier: async ({ endpoint, actorId, tier }) => {
           const current = locusRepository.getCurrentLocus(endpoint)
-          if (current === undefined) throw new Error('Current locus does not exist')
+          if (current === undefined) throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
           const updated = await locusToolTierMutation.set({
             locusId: current.id,
             endpoint: current.endpoint,
@@ -2326,8 +2331,7 @@ async function initialize(
             const error = new Error(`Tool tier change refused: ${updated.reason}`) as Error & { code?: string }
             error.code = updated.reason === 'busy' ? 'LOCUS_BUSY'
               : updated.reason === 'not-found' ? 'LOCUS_NOT_CURRENT'
-                : updated.reason === 'legacy-composition' ? 'LOCUS_LEGACY_V1_SHELL'
-                  : 'POLICY_VERIFY_FAILED'
+                : 'POLICY_VERIFY_FAILED'
             throw error
           }
           return {
@@ -2340,7 +2344,7 @@ async function initialize(
       scope: {
         setCurrentMode: async ({ endpoint, actorId, mode }) => {
           const current = locusRepository.getCurrentLocus(endpoint)
-          if (current === undefined) throw new Error('Current locus does not exist')
+          if (current === undefined) throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
           const updated = await locusPermissionMutation.mutate({
             locusId: current.id,
             actorId,

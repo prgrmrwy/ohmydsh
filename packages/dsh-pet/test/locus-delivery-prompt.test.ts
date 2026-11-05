@@ -40,7 +40,7 @@ function record(overrides: Partial<LocusPromptRecordFacts> = {}): LocusPromptRec
     childSessionId: CHILD,
     workspaceId: 'workspace-1',
     state: 'active',
-    childComposition: 'safe-v2',
+    childComposition: 'tier3',
     toolTier: { effective: 'safe' },
     permission: { effective: 'read' },
     ...overrides,
@@ -179,7 +179,7 @@ describe('delivery prompt fact assembly', () => {
     })
 
     expect(context.locus.toolTier).toBe('shell')
-    expect(context.locus.childComposition).toBe('safe-v2')
+    expect(context.locus.childComposition).toBe('tier3')
     expect(context.locus.generation).toBe(2)
     expect(context.request.messageId).toBe('om_request-1')
   })

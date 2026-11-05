@@ -51,7 +51,7 @@ export interface LocusFacts {
   readonly locusId: string
   readonly generation: number
   readonly state?: 'provisioning' | 'not-created' | 'active' | 'switching' | 'invalid' | 'stopped' | 'retired'
-  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
+  readonly childComposition?: 'tier3'
   readonly toolTier?: 'safe' | 'shell'
   readonly pendingToolTier?: boolean
 }
@@ -542,7 +542,7 @@ export interface LocusPromptRecordFacts {
   readonly childSessionId: string
   readonly workspaceId: string
   readonly state?: LocusFacts['state']
-  readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
+  readonly childComposition?: 'tier3'
   /** Persisted effective tier; absent means the safe composition. */
   readonly toolTier?: { readonly desired?: 'safe' | 'shell'; readonly effective?: 'safe' | 'shell' } | undefined
   readonly permission: LocusPermissionFacts

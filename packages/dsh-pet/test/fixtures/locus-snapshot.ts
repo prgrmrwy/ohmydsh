@@ -68,7 +68,7 @@ export function locusFixture(input: LocusInput): PetLocusView {
     },
     permission: input.permission ?? { desired: 'read', effective: 'read' },
      toolTier: input.toolTier ?? { desired: 'safe', effective: 'safe' },
-     childComposition: input.childComposition ?? 'safe-v2',
+     childComposition: input.childComposition ?? 'tier3',
     state: { state: input.state ?? 'active', busy: false, createdAt: 1, updatedAt: 2 },
     source,
     ...(input.contextAnchor === undefined ? {} : { contextAnchor: input.contextAnchor }),

@@ -91,7 +91,7 @@ export class ControllerLocusRepositoryAdapter implements ControllerLocusReposito
 
   async findGroup(chatId: string): Promise<ControllerLocusGroupRecord | undefined> {
     const record = this.findLatestMarker({ chatId })
-    return record === undefined ? undefined : projectGroupRecord(record, this.durable.getLocusMain(record.parentSessionId))
+    return record === undefined ? undefined : projectGroupRecord(record, this.pairingOf(record))
   }
 
   /**
@@ -101,17 +101,20 @@ export class ControllerLocusRepositoryAdapter implements ControllerLocusReposito
    */
   async findActive(endpoint: ControllerLocusEndpoint): Promise<ControllerLocusRecord | undefined> {
     const record = this.findLatestMarker(endpoint)
-    return record === undefined ? undefined : projectLocusRecord(record, this.durable.getLocusMain(record.parentSessionId))
+    return record === undefined ? undefined : projectLocusRecord(record, this.pairingOf(record))
   }
 
   /**
    * The default Q&A pointer hangs from a LOCUS MAIN (the session the entry's
    * row is indexed under), while callers ask by the work session they opened.
+   * A work session that never had a locus main has not established a Q&A yet:
+   * that is "not established", not an error — the caller creates the main next.
    */
   async findDefaultQa(workSessionId: string): Promise<ControllerLocusRecord | undefined> {
     const main = this.durable.getActiveLocusMainForWork(workSessionId)
-    const record = this.durable.getDefaultQaLocus(main?.locusMainSessionId ?? workSessionId)
-    return record === undefined ? undefined : projectLocusRecord(record, this.durable.getLocusMain(record.parentSessionId))
+    if (main === undefined) return undefined
+    const record = this.durable.getDefaultQaLocus(main.locusMainSessionId)
+    return record === undefined ? undefined : projectLocusRecord(record, this.pairingOf(record))
   }
 
   async findActiveMain(workSessionId: string): Promise<ControllerLocusMainRecord | undefined> {
@@ -136,7 +139,7 @@ export class ControllerLocusRepositoryAdapter implements ControllerLocusReposito
     // row may already live under a newer locus main.
     return [...latest.values()]
       .filter(record => this.findLatestMarker(record.endpoint)?.id === record.id)
-      .map(record => projectLocusRecord(record, main))
+      .map(record => projectLocusRecord(record, this.pairingOf(record)))
   }
 
   async commitRegeneration(input: LocusRegenerationCommit): Promise<void> {
@@ -195,6 +198,18 @@ export class ControllerLocusRepositoryAdapter implements ControllerLocusReposito
 
   async acknowledgeSwitchNotice(locusId: string, generation: number): Promise<void> {
     await this.durable.acknowledgeSwitchNotice(locusId, generation)
+  }
+
+  /**
+   * The pairing of a row that was already read. Persistence only holds paired
+   * rows, so a missing one is invalid data and fails closed.
+   */
+  private pairingOf(record: DurableLocusRecord): PetLocusMainRecord {
+    const main = this.durable.getLocusMain(record.parentSessionId)
+    if (main === undefined) {
+      throw unrepresentable(record, `its parent session ${record.parentSessionId} has no locus_mains pairing`)
+    }
+    return main
   }
 
   private findLatestMarker(
@@ -311,7 +326,7 @@ export function projectProvisioningCommit(
 /** Explicitly project the durable aggregate into the controller's record. */
 export function projectLocusRecord(
   record: DurableLocusRecord,
-  main?: PetLocusMainRecord,
+  main: PetLocusMainRecord,
 ): ControllerLocusRecord {
   if (record.childSessionId === undefined && record.state === 'active') {
     throw unrepresentable(record, 'an active controller record requires a childSessionId')
@@ -323,7 +338,7 @@ export function projectLocusRecord(
     endpoint: { ...record.endpoint },
     workspaceId: record.workspaceId,
     parentSessionId: record.parentSessionId,
-    ...(main === undefined ? {} : { workSessionId: main.workSessionId }),
+    workSessionId: main.workSessionId,
     ...(record.childSessionId === undefined ? {} : { childSessionId: record.childSessionId }),
     ...(record.reservedChildSessionId === undefined ? {} : { reservedChildSessionId: record.reservedChildSessionId }),
     ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
@@ -343,7 +358,7 @@ export function projectLocusRecord(
 /** Project the chat-level locus itself as the controller's group structure. */
 export function projectGroupRecord(
   record: DurableLocusRecord,
-  main?: PetLocusMainRecord,
+  main: PetLocusMainRecord,
 ): ControllerLocusGroupRecord {
   if (record.endpoint.threadId !== undefined) {
     throw unrepresentable(record, 'a topic locus cannot be projected as a group')
@@ -351,9 +366,8 @@ export function projectGroupRecord(
   return {
     chatId: record.endpoint.chatId,
     workspaceId: record.workspaceId,
-    // The group's "main" is the WORK session; a row without a locus-main
-    // pairing is a previous-model row whose parent was that session itself.
-    mainSessionId: main?.workSessionId ?? record.parentSessionId,
+    // The group's "main" is the WORK session behind the row's locus main.
+    mainSessionId: main.workSessionId,
     mainSource: projectMainSource(record),
     state: projectGroupState(record),
     createdAt: record.createdAt,
@@ -417,7 +431,6 @@ export function projectRegenerationCommit(input: LocusRegenerationCommit): Durab
     entries: input.entries.map(entry => ({
       oldLocusId: entry.oldLocusId,
       reason: entry.reason,
-      ...(entry.previousModel === true ? { previousModel: true as const } : {}),
       locus: projectProvisioningCommit({ provisioningId: input.provisioningId, locus: entry.locus }).locus,
     })),
     ...(input.main === undefined ? {} : { main: projectMainToDurable(input.main) }),

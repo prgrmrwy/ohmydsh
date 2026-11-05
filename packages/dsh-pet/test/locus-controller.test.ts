@@ -42,7 +42,8 @@ class MemoryLocusRepository implements LocusRepository {
     if (input.main) this.mains.set(input.main.locusMainSessionId, input.main)
     if (input.retireMain) { const old = this.mains.get(input.retireMain.locusMainSessionId)!; this.mains.set(old.locusMainSessionId, { ...old, status: 'retired' }) }
     for (const entry of input.entries) {
-      if (!entry.previousModel) { const old = this.loci.get(entry.oldLocusId)!; this.loci.set(old.locusId, { ...old, state: 'invalid' }) }
+      const old = this.loci.get(entry.oldLocusId)!
+      this.loci.set(old.locusId, { ...old, state: 'invalid' })
       this.loci.set(entry.locus.locusId, entry.locus)
     }
   }
@@ -1032,6 +1033,29 @@ describe('explicit rebuild', () => {
     // left in place as durable history rather than being revived or erased.
     expect(host.repository.loci.get(rebuilt.locus.locusId)?.state).toBe('not-created')
     expect(host.repository.loci.get(first.locus.locusId)).toBeDefined()
+  })
+
+  it('spec Scenario "重建不继承 shell"', async () => {
+    const host = fakeHost()
+    const controller = new LocusController(host.deps)
+    const first = await controller.ensureGroup({ chatId: 'oc-shell-rebuild' })
+    // The previous generation was an owner-granted shell entry, then the Host invalidated it.
+    host.repository.loci.set(first.locus.locusId, {
+      ...first.locus, state: 'invalid', toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'ou-owner' },
+    })
+    host.repository.groups.set('oc-shell-rebuild', { ...first.group, state: 'invalid' })
+
+    const rebuilt = await controller.rebuildExplicit({
+      endpoint: { chatId: 'oc-shell-rebuild' },
+      previousLocusId: first.locus.locusId,
+      parentSessionId: first.locus.workSessionId ?? 'source-1',
+    })
+
+    expect(rebuilt.locus.generation).toBe(2)
+    expect(rebuilt.locus.toolTier?.effective ?? 'safe').toBe('safe')
+    expect(rebuilt.locus.toolTier?.desired ?? 'safe').toBe('safe')
+    // The old generation keeps its history; only the new one starts safe.
+    expect(host.repository.loci.get(first.locus.locusId)?.toolTier).toMatchObject({ effective: 'shell' })
   })
 
   // The owner-driven path is unchanged: the panel must still be able to say

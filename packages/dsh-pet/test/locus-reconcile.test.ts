@@ -58,19 +58,6 @@ describe('startup reconciliation', () => {
     expect(h.invalidated).toEqual([])
   })
 
-  it('leaves retired legacy rows unchanged before any child liveness probe', async () => {
-    const check = vi.fn(async () => ({ kind: 'usable' as const }))
-    const h = harness(() => ({ kind: 'usable' }))
-
-    const report = await reconcileLocusChildren([
-      locus({ childComposition: undefined }),
-    ], { ...h.ports, probe: { check } })
-
-    expect(report.invalidated).toEqual([])
-    expect(h.invalidated).toEqual([])
-    expect(check).not.toHaveBeenCalled()
-  })
-
   it('marks a definitively gone child invalid instead of re-creating it', async () => {
     const h = harness(() => ({ kind: 'unusable', reason: '子会话已归档' }))
 
