@@ -113,4 +113,6 @@ dsh plugin --profile web remove dsh-magpie-connector
 
 本插件在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh)（`packages/dsh-magpie-connector`）中持续开发，[本仓库](https://github.com/prgrmrwy/dsh-magpie-connector)是发布镜像，自动发布到 [npm](https://www.npmjs.com/package/dsh-magpie-connector) 与 [GitHub Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases)。当前行为见规范 [`openspec/specs/dsh-magpie-connector`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-magpie-connector/spec.md)。
 
-采用 [MIT](LICENSE) 许可。`@earendil-works/pi-ai` 与 `undici` 是分别以 MIT 许可分发的依赖；鸟形图标来源与许可见 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)。欢迎到 [prgrmrwy/dsh-magpie-connector](https://github.com/prgrmrwy/dsh-magpie-connector/issues) 提 issue 和 PR。
+采用 [MIT](LICENSE) 许可。`@earendil-works/pi-ai` 与 `undici` 是分别以 MIT 许可分发的依赖；鸟形图标来源与许可见 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES)。欢迎到 [prgrmrwy/dsh-magpie-connector](https://github.com/prgrmrwy/dsh-magpie-connector/issues) 提 issue 和 PR；使用问题与配置经验欢迎发到 [Discussions](https://github.com/prgrmrwy/dsh-magpie-connector/discussions)。
+
+如果这个插件对你有帮助，欢迎在 [GitHub](https://github.com/prgrmrwy/dsh-magpie-connector) 点个 ⭐，让更多 DSH + Magpie 用户发现它。

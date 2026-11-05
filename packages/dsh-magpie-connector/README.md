@@ -113,4 +113,6 @@ Inside [ohmydsh](https://github.com/prgrmrwy/ohmydsh), set the manifest entry to
 
 This plugin is developed in [ohmydsh](https://github.com/prgrmrwy/ohmydsh) (`packages/dsh-magpie-connector`); [this repository](https://github.com/prgrmrwy/dsh-magpie-connector) is its release mirror, published automatically to [npm](https://www.npmjs.com/package/dsh-magpie-connector) and [GitHub Releases](https://github.com/prgrmrwy/dsh-magpie-connector/releases). Current behavior is specified in [`openspec/specs/dsh-magpie-connector`](https://github.com/prgrmrwy/ohmydsh/blob/main/openspec/specs/dsh-magpie-connector/spec.md).
 
-[MIT](LICENSE). `@earendil-works/pi-ai` and `undici` are separate MIT-licensed dependencies; the bird artwork follows the notice in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES). Issues and pull requests are welcome at [prgrmrwy/dsh-magpie-connector](https://github.com/prgrmrwy/dsh-magpie-connector/issues).
+[MIT](LICENSE). `@earendil-works/pi-ai` and `undici` are separate MIT-licensed dependencies; the bird artwork follows the notice in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES). Issues and pull requests are welcome at [prgrmrwy/dsh-magpie-connector](https://github.com/prgrmrwy/dsh-magpie-connector/issues); questions and setup tips go to [Discussions](https://github.com/prgrmrwy/dsh-magpie-connector/discussions).
+
+If this plugin is useful to you, a ⭐ on [GitHub](https://github.com/prgrmrwy/dsh-magpie-connector) helps other DSH + Magpie users find it.
