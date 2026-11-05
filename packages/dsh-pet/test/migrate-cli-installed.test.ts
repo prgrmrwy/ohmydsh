@@ -60,6 +60,19 @@ describe('the installed migration command', () => {
     expect(source).not.toMatch(/from '@deepseek-ai\//)
   })
 
+  it('--self-check loads the migration modules without Host peers or a database', () => {
+    const { bin, cwd } = installFromTarball()
+    const result = spawnSync(process.execPath, [bin, '--self-check'], { cwd, encoding: 'utf8' })
+    expect(result.stderr).not.toMatch(/ERR_MODULE_NOT_FOUND|Cannot find (package|module)/)
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout).toContain('self-check')
+  })
+
+  it('declares the self-check as a deploy check for dsh build', () => {
+    const manifest = JSON.parse(readFileSync(path.join(PACKAGE_DIR, 'package.json'), 'utf8')) as Manifest & { ohmydsh?: { deployChecks?: unknown } }
+    expect(manifest.ohmydsh?.deployChecks).toEqual([{ bin: 'dsh-pet-migrate-state', args: ['--self-check'] }])
+  })
+
   it('declares zod as a runtime dependency', () => {
     const manifest = JSON.parse(readFileSync(path.join(PACKAGE_DIR, 'package.json'), 'utf8')) as Manifest
     expect(manifest.dependencies?.zod).toBeDefined()

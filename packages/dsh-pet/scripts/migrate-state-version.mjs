@@ -84,6 +84,7 @@ function parseArgs(argv) {
       args.db = value
       i += 1
     } else if (arg === '--help' || arg === '-h') args.help = true
+    else if (arg === '--self-check') args.selfCheck = true
     else throw new Error(`Unknown argument: ${arg}`)
   }
   if (args.dryRun && args.yes) {
@@ -118,8 +119,22 @@ if (args.help) {
     'Usage: dsh-pet-migrate-state [--db <path>] [--dry-run] [--yes]\n' +
     '  Purges previous-model locus rows and stamps state version 19. Run with DSH stopped.\n' +
     '  --dry-run  read-only: list the rows that would be deleted, or why the migration is refused\n' +
-    '  --yes      take the exclusive lock, write a backup, then migrate',
+    '  --yes      take the exclusive lock, write a backup, then migrate\n' +
+    '  --self-check  only load the migration modules (no database); used by dsh build',
   )
+  process.exit(0)
+}
+
+// Deploy-time smoke check: load exactly what a real migration loads, without
+// touching any database, so a package that cannot load standalone is caught
+// by `dsh build` instead of after the owner has stopped DSH.
+if (args.selfCheck) {
+  try {
+    await import(new URL('../lib/host/locus/persistence.js', import.meta.url).href)
+  } catch (error) {
+    fail(`self-check: cannot load the Host's row validation from this package's lib/: ${error.message}`)
+  }
+  console.log('✓ self-check: migration modules load standalone')
   process.exit(0)
 }
 

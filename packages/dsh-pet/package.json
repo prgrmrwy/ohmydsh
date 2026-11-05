@@ -144,6 +144,14 @@
     "vitest": "^5.0.5"
   },
   "ohmydsh": {
-    "docTier": "A"
+    "docTier": "A",
+    "deployChecks": [
+      {
+        "bin": "dsh-pet-migrate-state",
+        "args": [
+          "--self-check"
+        ]
+      }
+    ]
   }
 }
