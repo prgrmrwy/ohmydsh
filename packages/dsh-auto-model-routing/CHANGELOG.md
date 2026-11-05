@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.7 — 2026-11-05
+
+- **Fixed the AUTO chip, settings section and reply label all vanishing after a client hot reload.** `apply()` registered the zh/en dictionaries with `ctx.effect(() => { ctx.locale.register(NS, { zh, en }); return () => {} })`; the empty cleanup never released the namespace, and `@deepseek-ai/dsh-client-locale`'s `register` throws when the namespace is already held (`locale namespace "settings.autoModelRouting" already has locale "zh"`). A client bundle rebuilt while the page is open (`dsh build` / HMR) tears the old entry down and re-applies the new module, so the second `register` threw, the entry import failed, and every slot this plugin registered disappeared until a page reload. The effect now returns `locale.register`'s own disposer; `test/client-hot-reload.test.ts` covers "apply again after teardown" and "namespace released after teardown" with a locale service matching the real contract (duplicate registration throws, the disposer removes the namespace).
+- Routing logic, settings fields and host behavior are unchanged; this is a client entry lifecycle fix.
+- Package vitest, both tsconfig typechecks, build, `check:artifacts` and the repo docs governance tests pass.
+
 ## 0.6.6 — 2026-11-04
 
 - **UI and docs decoupled from Magpie.** The settings strategy copy now describes AUTO's provider behavior instead of one gateway (`Magpie` → `AUTO` in the EN/ZH dictionaries), and the READMEs no longer contain a Magpie transport section or Magpie-specific acceptance links. Routing logic never referenced Magpie — a package test enforces that model-family knowledge lives only in `src/strategies/` and that nothing else repeats family ids or prefix matching — so this is a copy/documentation release, not a routing change.
