@@ -250,7 +250,7 @@ lines 元素的凭据字段语义 SHALL 为：省略 = 保持该线路现有值�
 
 同步失败时，设置响应 SHALL 给出 `lastSyncError` 和错误分类：`unauthorized`（401）、`forbidden`（403）、`http`（其它非 2xx，附状态码）、`unreachable`（网络错误或超时）。同时 SHALL 保留当前代已有的目录，SHALL NOT 用空目录替换。生效线路切换后的第一次同步成功前，目录以继承缓存展示（见「连接身份与代际隔离」），继承缓存 SHALL NOT 计为一次成功同步。
 
-目录、可见性或默认 effort 任一项生效变化后，插件 SHALL 通过 adapter 注册句柄的 `replace` 发布更新，使 DSH 发出 `llm/adapters-updated`。这样已打开的官方模型选择器无需重启或刷新页面就能拿到新状态。
+目录、可见性或默认 effort 任一项生效变化后，插件 SHALL 通过 adapter 注册句柄的 `replace` 发布更新，使 DSH 发出 `llm/adapters-updated`。这样已打开的官方模型选择器无需重启或刷新页面就能拿到新状态。DSH 0.2.1 起宿主 SHALL 自行包含 `llm/adapters-updated` 监听器的异常（只记录告警、不让监听器否决提交）；插件按提交结果处理，SHALL NOT 把这类监听器异常当成注册失败。
 
 设置写入带 `resync: true` 时 SHALL 在提交后强制同步一次（即使生效线路未变）；仅提交 `{resync:true}` 亦合法。
 
