@@ -28,3 +28,18 @@ DSH_TEST_OFFICIAL_RUNTIME=/absolute/path/to/built/launcher \
 ```
 
 Coverage includes the full shipped base+Web profile and presets stopping without legacy, successful expanded group/include trees, failed Pet imports, disabled Pet declarations, active unknown carriers, retained old preset revisions, cookie/Host/Origin/nonce/PID/boot rejection, resume invalidation, and topology changes. This does not replace live H2 drain acceptance of the Pet producer or Windows runtime verification.
+
+## Managed non-web profile Hosts
+
+`DSH_PROFILE=<profile> dsh -p <port>` starts a managed Host for a profile other than `web` (for example `DSH_PROFILE=superagent dsh -p 3082 --foreground`). It uses the same exact pin, Host runtime resolution, ownership probe, and startup history as `dsh web`. The Host argv is `<profile> --port <port> --no-open …`, and ownership is matched against that exact profile, so a web probe never adopts a non-web listener and vice versa. Unset `DSH_PROFILE` keeps the existing `web` behavior unchanged.
+
+Limits:
+
+- `-p/--port` is mandatory; the default port belongs to the web Host. `$DSH_HOME/profiles/<profile>/cordis.yml` must already exist.
+- Only start is managed. The no-pet-stop patch is not loaded (a custom profile bundle cannot pass its static-module attestation), so no stop descriptor is published, and `dsh stop/restart` refuses before any signal. Stop the Host through its own management script. Explicit manual maintenance can use `--allow-legacy-restart`, which skips Pet drain.
+- `build`, `-b`, `reset`, `plugin-update`, and `doctor` are refused, and the start path skips `autoUpdate`. All of these would run sync or plugin maintenance against `DSH_PROFILE` and write the ohmydsh customizations into the other profile. Worktree previews support only `web`. `history` is still allowed; each record carries `profile=<profile>`.
+- Process scope isolation is the caller's job: the launcher adds no detach logic. A Host started from inside a DSH session belongs to that Host's subprocess scope unless the caller wraps the launcher, for example `systemd-run --user --scope … dsh -p 3082 --foreground`. Background mode shares `$DSH_HOME/dsh.log` with the web Host.
+
+```sh
+node --test tests/launcher-managed-profile.test.mjs
+```

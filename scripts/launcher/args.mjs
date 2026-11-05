@@ -63,6 +63,7 @@ Usage: dsh [web] [options]
   --open | --no-open         override manifest UI opening
   --host <host> --trusted-host <host>
   plugin / --profile / --patch / --dump-config are forwarded to the pinned official CLI
+  DSH_PROFILE=<name> -p <port> managed start of a non-web profile Host (start only; no stop/restart/build)
 
 Initialize: node scripts/bootstrap.mjs; then npm link (no forced bin overwrite).
 `
