@@ -11,6 +11,8 @@
 
 飞书侧的变更命令 SHALL 统一为 `/access read|full`（短参 `-a`），只受理 allowlist 的发送者；非 allowlist 发送者按既有控制命令规则拒绝。原 `/scope`、`/tools`、`-s`、`-t` MUST NOT 再改变任何状态，回执 SHALL 提示改用 `/access`。管理面经 `access` 动作变更。
 
+变更 SHALL 只对 `state` 为 `not-created` 或 `active` 的行受理；`stopped` 与 `invalid` 的行 SHALL 以 `INVALID_REQUEST` 拒绝，入口行与 `revision` 不变（这两种行的重新启用或原地重建本来就会把 `accessMode` 重置为 `read-only`）。
+
 变更 SHALL 按下列步骤执行，MUST NOT 写任何持久的操作记录：
 1. `acquireAccessChange(locusId)`：作为仓储写队列里的一个短操作，在队列内复查没有任何未终态的 Delivery、且入口不在 `accessChanging` 集合中，然后把 `locusId` 加入集合并返回当时的 `{locusId, revision}`；任一条件不满足则确定性拒绝并说明入口忙。`acceptDelivery`、停止、改绑、迁移与原地重建的提交 SHALL 在各自的队列回调内检查该集合，命中即拒绝（原因：入口正在变更访问模式）。`agent/created` 的发布边界（见「已退役的 locus 子会话不能再运行」第 0 条）同样 SHALL 检查该集合，命中即拒绝本次发布；因此父 M 经 `locus_reply_child` 触发的冷恢复，在 drain→CAS 窗口内不能按旧值发布。MUST NOT 在整个外部操作期间占用写队列。
 2. 证明入口 live 空闲：无未终态投递 + turn 边界空闲（沿用现有检查，含 GUI 与 inquiry 的 turn）+ 该子会话 inbox 无待处理输入；任一不满足则以 `LOCUS_BUSY` 拒绝。
@@ -139,6 +141,11 @@
 #### Scenario: 变更不写审计行
 - **WHEN** 一次访问模式变更成功
 - **THEN** `locus_permission_audit` 的行数不变；入口行的 `grantedBy` 反映本次变更
+
+#### Scenario: stopped 与 invalid 的行不受理访问模式变更
+- **GIVEN** 入口行 `state = stopped`（或 `state = invalid`），`accessMode = read-only`，`revision = r`
+- **WHEN** allowlist 发送 `/access full`，或管理面提交 `access` 动作
+- **THEN** 以 `INVALID_REQUEST` 拒绝；入口行的 `state`、`accessMode`、`revision` 不变（仍为 `r`）；`acquireAccessChange` 与 `drainChildren` 调用均为 0 次，`accessChanging` 不含该 `locusId`
 
 ### Requirement: 完全访问由 allowlist 显式授予且如实说明
 

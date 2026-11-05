@@ -1,6 +1,6 @@
 ## Test Plan
 
-<!-- 333 scenarios: 287 in specs/pet-locus-collaboration/spec.md, 46 in specs/pet-locus-doc-comments/spec.md. One row per scenario. -->
+<!-- 334 scenarios: 288 in specs/pet-locus-collaboration/spec.md, 46 in specs/pet-locus-doc-comments/spec.md. One row per scenario. -->
 <!-- LIVE LEDGER: flip 🔴 red → 🟢 green as each test passes. ⚪ rows are carried forward and stay ⚪ until their file is ported (then re-run; they must pass). -->
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
@@ -28,6 +28,7 @@
 | specs/pet-locus-collaboration/spec.md → Locus 访问模式 | 完全访问入口拒绝非 allowlist 成员 | packages/dsh-pet/test/locus-admission.test.ts | spec Scenario "完全访问入口拒绝非 allowlist 成员" | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → Locus 访问模式 | 旧命令不再改变状态 | packages/dsh-pet/test/locus-control.test.ts | spec Scenario "旧命令不再改变状态" | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → Locus 访问模式 | 变更不写审计行 | packages/dsh-pet/test/locus-access-mode.test.ts | spec Scenario "变更不写审计行" | 🔴 red |
+| specs/pet-locus-collaboration/spec.md → Locus 访问模式 | stopped 与 invalid 的行不受理访问模式变更 | packages/dsh-pet/test/locus-access-mode.test.ts | spec Scenario "stopped 与 invalid 的行不受理访问模式变更" | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 完全访问由 allowlist 显式授予且如实说明 | 授予完全访问 | packages/dsh-pet/test/locus-access-mode.test.ts | spec Scenario "授予完全访问" | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 完全访问由 allowlist 显式授予且如实说明 | 下次组装回读不符时拒绝发布 | packages/dsh-pet/test/locus-access-mode.test.ts | spec Scenario "下次组装回读不符时拒绝发布" | 🔴 red |
 | specs/pet-locus-collaboration/spec.md → 完全访问由 allowlist 显式授予且如实说明 | 授予不依赖上下文确认 | packages/dsh-pet/test/locus-access-mode.test.ts | spec Scenario "授予不依赖上下文确认" | 🔴 red |
@@ -341,8 +342,8 @@
 
 ## Coverage Notes
 
-- Rows: 333 (🔴 red 240, ⚪ existing carried forward 93). 🟢 green: 0 at planning time.
-- By capability: collaboration 287 (🔴 224, ⚪ 63); doc-comments 46 (🔴 16, ⚪ 30).
+- Rows: 334 (🔴 red 241, ⚪ existing carried forward 93). 🟢 green: 0 at planning time.
+- By capability: collaboration 288 (🔴 225, ⚪ 63); doc-comments 46 (🔴 16, ⚪ 30).
 - ⚪ rule applied: the scenario text is byte-identical to the current spec (compared by requirement + name, plus five migration-gate scenarios identical under their old requirement) AND an existing test title carries the scenario name (or, for 12 scenarios, is the one existing test that asserts it; those titles are quoted exactly). Everything else is 🔴, including every scenario whose text changed and every unchanged scenario for which no existing test could be named. A ⚪ row still needs its owner to port that test's fixtures to the v20 row shape (see "Fixture port" below); it must pass after the contract freeze, it is not new work.
 - New test files are marked (new); a path under packages/dsh-pet/test/ that does not exist yet is created by its owner.
 
@@ -392,7 +393,7 @@
 **Owner C = access-mutation / composition / policy / admission / lazy-child / child-delivery / first-delivery / staging / first-delivery preamble**
 
 - C: `packages/dsh-pet/test/doc-comment-admission.test.ts` (existing) — 🔴 3, ⚪ 5
-- C: `packages/dsh-pet/test/locus-access-mode.test.ts` (new) — 🔴 20, ⚪ 0
+- C: `packages/dsh-pet/test/locus-access-mode.test.ts` (new) — 🔴 21, ⚪ 0
 - C: `packages/dsh-pet/test/locus-admission.test.ts` (existing) — 🔴 1, ⚪ 0
 - C: `packages/dsh-pet/test/locus-child-context.test.ts` (existing) — 🔴 3, ⚪ 2
 - C: `packages/dsh-pet/test/locus-child-preset-runtime.test.ts` (existing) — 🔴 0, ⚪ 1
