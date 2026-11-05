@@ -3,6 +3,25 @@
   "version": "0.2.0",
   "description": "Deployment-local adapter from dsh-cockpit-bridge port publishing to the dsh-memex browse-address registry",
   "license": "MIT",
+  "author": "prgrmrwy",
+  "homepage": "https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh-cockpit",
+    "shim",
+    "memex",
+    "port-forward",
+    "browse"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -18,6 +37,8 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "dsh": {
@@ -36,6 +57,7 @@
     "build": "npm run clean && npm run build:host && npm run build:client",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
+    "prepare": "npm run build",
     "prepack": "npm run build"
   },
   "engines": {

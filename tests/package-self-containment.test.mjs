@@ -56,6 +56,18 @@ function mirrorPublishedPackages() {
   })
 }
 
+// A mirror-published package may test against another package's real code only
+// through a byte-identical vendored copy; this keeps the copy from drifting.
+const VENDORED_COPIES = [
+  ['packages/cockpit-memex-browse-shim/test/fixtures/memex-browse-address.ts', 'packages/dsh-memex/src/client/browse-address.ts'],
+]
+
+test('vendored test fixtures match their source package byte for byte', () => {
+  for (const [copy, source] of VENDORED_COPIES) {
+    assert.equal(readFileSync(path.join(REPO, copy), 'utf8'), readFileSync(path.join(REPO, source), 'utf8'), `${copy} drifted from ${source}; recopy it`)
+  }
+})
+
 test('mirror-published packages are buildable and testable from their own directory', () => {
   const packages = mirrorPublishedPackages()
   assert.ok(packages.length > 0, 'expected at least one package that declares a standalone repository')
