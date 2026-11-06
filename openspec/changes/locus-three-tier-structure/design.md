@@ -45,7 +45,7 @@
 
 停机先经既有 Connection signed-cookie/Origin 保护的精确 `/dsh-pet/api/prepare-stop`。请求只含版本、action、nonce、目标 PID/bootId 和期限，不接受 Agent ID、prompt、发送目标或调用者声明的身份。Host 统一冻结 controller、所有者管理 mutation、Locus 官方消息投递及 caller-bound finish/wait 等受管操作；已进入的操作先到接受/持久绑定安全点，再以持久 main 配对与官方 catalog 核验、捕获真正 live parent，对精确自有 children await 官方 drain。排空任务须全部 settle 后才能判断失败，不能让一个失败提前开放其它仍在排空的入口。随后等待 Pet 观察者提交，对仍 current 的已运行执行经官方冷读与完整 CAS 补充结算，全部完成才给 prepared；不等模型自然完成，也不清除未知旧记录。
 
-私有发现文件为 `$DSH_HOME/run/dsh-pet-stop/<port>.json`，目录 0700、文件 0600、原子发布，含本进程身份及官方 authenticatedUrl。launcher 仅在内存交换 cookie，复核 nonce、PID、bootId、期限与同一完整 OS 进程身份，发信号前重新验证 prepared 状态；日志与回执不得带 token/cookie/认证 URL。发现文件只是缓存，不能授权停止。普通无 Pet 组合由独立于 Pet 的标准 profile 控制插件观察真实 Loader/onReady 并提供同协议；失败、未展开或未知载体不推断无 Pet，不能以当前 manifest、404 或两次磁盘 dump 相等绕过。
+私有发现文件为 `$DSH_HOME/run/dsh-pet-stop/<port>.json`，目录 0700、文件 0600、原子发布，含本进程身份及官方 authenticatedUrl。launcher 仅在内存交换 cookie，复核 nonce、PID、bootId、期限与同一完整 OS 进程身份，发信号前重新验证 prepared 状态；日志与回执不得带 token/cookie/认证 URL。发现文件只是缓存，不能授权停止。（2026-11-06 所有者决定：发现文件缺失时启动器警告后不经 drain 直接停止，残留投递交由启动恢复保守处理；无效发现文件仍拒绝。）普通无 Pet 组合由独立于 Pet 的标准 profile 控制插件观察真实 Loader/onReady 并提供同协议；失败、未展开或未知载体不推断无 Pet，不能以当前 manifest、404 或两次磁盘 dump 相等绕过。
 
 一个停机操作拥有 preparing/prepared/failed/resuming 状态。超时不回 prepared、不自动解除冻结；只有后台排空确实 settle 后，显式 resume 才可恢复；任何经 Connection 鉴权的调用方都可恢复已 settle 的操作（launcher 丢失 nonce 也不会让 Host 永久冻结），未 settle 时任何人都不能恢复，恢复过程中旧 prepared 不能复用。prepared 票据只约束第一次 SIGTERM；升级到 SIGKILL 前只复核完整进程身份，因为此时 Pet 路由已在卸载。排空后仍无中断证明的 current（空闲待续接、未开始或证据不足）保持 durable current，交给原有启动恢复或租约处理，不阻止停机也不伪造终态。Host 退出时只删除本 boot 的 descriptor；其它 PID 的残留 descriptor 不授予任何权限，默认路径按缺失拒绝。旧 Host 首次加载走所有者已批准的显式维护分支，绑定旧完整进程身份并记 drained=false；新版载入后须验到新发现文件及鉴权状态，这次维护不当 H2 中断恢复证据。H1 只保留实际观察结果，H2 用原话题新请求重测，后继与 safe 通知另以真实事件证明。
 

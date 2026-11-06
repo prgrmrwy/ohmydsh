@@ -12,6 +12,9 @@
 
 [pet-stop.mjs](./pet-stop.mjs) 用私有 URL 换取 cookie，执行 prepare，并在每次发信号前立即重新鉴权查询 `status`。status 必须仍为 `prepared`，且操作 nonce、PID、boot 身份、prepared 时间与过期时间全部一致；HTTP 前后都复核完整 OS 进程身份。旧的未生产的 `dsh-host-launch` 快照读取器已删除。显式 legacy 参数只在协议 descriptor 不存在时允许维护；descriptor 格式错误或鉴权交换失败绝不回退到 legacy。带该参数重启后，必须成功读到新 descriptor 并通过鉴权的 `active` status，才报告协议已加载；这次维护停止不算排空证据。
 
+
+**2026-11-06 更新**：descriptor 不存在时（旧 Host，或 Pet 未发布凭据），启动器不再拒绝，而是打一行警告后跳过 Pet 收尾直接停止；处理中的投递交由 Pet 启动恢复保守处理（发送中的记为未知终态且不重发，无法证明的转人工），代价是那条消息可能需要重新 @。descriptor 存在但无效（权限、符号链接、身份不符）仍拒绝。`--allow-legacy-restart` 保留为兼容参数。
+
 ## 验证
 
 常规源码回归包括私有 overlay 检查与带鉴权的消费者测试：

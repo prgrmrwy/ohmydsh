@@ -133,11 +133,14 @@ export async function preparePetStop({ home, port, initial, probe, env, profile 
   initial = structuredClone(initial)
   const descriptor = readDescriptor(home, port, initial, profile)
   if (!descriptor) {
-    if (allowLegacyRestart) {
-      warn('显式 legacy 维护停止：此旧 Host 无 Pet descriptor，无法保证 Pet drain。')
-      return { beforeSignal() {}, resume: async () => 'not-needed' }
-    }
-    throw fail('authenticated stop descriptor missing; Host 未停止；旧 Host 维护请显式使用 --allow-legacy-restart')
+    // No descriptor: an old Host, or a Pet that never published one. Stopping
+    // without drain is safe because Pet startup recovery settles leftovers
+    // conservatively (finishing → unknown-terminal, no resend; unprovable →
+    // manual). The only cost is that an in-flight reply may need a fresh @.
+    // An INVALID descriptor still refuses (readDescriptor throws): a suspicious
+    // file is not an absent one. `allowLegacyRestart` stays accepted for scripts.
+    warn('此 Host 无 Pet 停止凭据，跳过 Pet 收尾直接停止；处理中的投递交由下次启动恢复处理（不会重发，可能需要重新 @）。')
+    return { beforeSignal() {}, resume: async () => 'not-needed' }
   }
   const expected = { nonce: randomBytes(16).toString('hex'), hostPid: descriptor.pid, bootId: descriptor.bootId }
   let cookie, attempted = false

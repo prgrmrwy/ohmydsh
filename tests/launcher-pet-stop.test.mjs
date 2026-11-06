@@ -24,18 +24,20 @@ function fixture(t) {
   } }
 }
 
-test('stop without a Pet descriptor or exact no-Pet startup snapshot refuses before stopping', async t => {
+test('stop without a Pet descriptor proceeds without drain and never provisions', async t => {
   const f = fixture(t)
-  await assert.rejects(runLauncher(['stop'], f.options), /Pet|descriptor|握手/)
-  assert.equal(f.calls.some(([name]) => name === 'stop'), false)
+  assert.equal(await runLauncher(['stop'], f.options), 0)
+  assert.equal(f.calls.some(([name]) => name === 'stop'), true)
   assert.equal(f.calls.some(([name]) => name === 'run'), false, 'stop does not provision or inspect mutable plugins')
 })
 
-test('restart without authenticated prepared preserves the healthy Host after runtime preparation', async t => {
+test('restart without a Pet descriptor stops the old Host after runtime preparation', async t => {
   const f = fixture(t)
-  await assert.rejects(runLauncher(['restart', '--no-open'], f.options), /Pet|descriptor|握手/)
-  assert.equal(f.calls.some(([name]) => name === 'stop'), false)
+  await runLauncher(['restart', '--no-open'], f.options).catch(() => {})
   assert.equal(f.calls.some(([name, args]) => name === 'run' && args[0]?.endsWith('dsh-server-bin.mjs')), true)
+  const prepared = f.calls.findIndex(([name, args]) => name === 'run' && args[0]?.endsWith('dsh-server-bin.mjs'))
+  const stopped = f.calls.findIndex(([name]) => name === 'stop')
+  assert.ok(stopped > prepared, 'the old Host is stopped only after the new runtime is prepared')
 })
 
 async function petFixture(t, change = {}) {
@@ -130,12 +132,12 @@ test('authentication requires 303 with a cookie and an exact same-loopback-origi
 
 test('descriptor PID/profile/origin mismatch and unsafe files refuse before HTTP, including legacy mode', async t => {
   await t.test('stale descriptor of another PID grants nothing', async t => {
-    // A crashed boot's leftover describes no live Host: the default path still
-    // refuses as missing, and only explicit legacy maintenance may proceed.
+    // A crashed boot's leftover describes no live Host: treated as missing, so
+    // the stop proceeds without drain, warns, and never sends HTTP.
     const f = await petFixture(t, { descriptor: { pid: 1 } })
-    await assert.rejects(runLauncher(['stop'], f.options), /descriptor missing.*Host 未停止/)
+    assert.equal(await runLauncher(['stop'], f.options), 0)
     assert.deepEqual(f.requests, [])
-    assert.equal(f.calls.some(([name]) => name === 'stop'), false)
+    assert.equal(f.calls.some(([name]) => name === 'stop'), true)
   })
   for (const delta of [{ profile: 'other' }, { bootId: '' }, { origin: 'http://evil.invalid:40001' }, { authenticatedUrl: 'http://evil.invalid/?token=fake-launch-secret' }]) await t.test(JSON.stringify(delta), async t => {
     const f = await petFixture(t, { descriptor: delta })
@@ -225,10 +227,14 @@ test('missing/incomplete pre-handshake identity and an initially empty port neve
   }
 })
 
-test('legacy maintenance requires an explicit flag and always passes complete identity to stop', async t => {
-  const f = fixture(t)
-  assert.equal(await runLauncher(['stop', '--allow-legacy-restart'], f.options), 0)
-  assert.deepEqual(f.calls.find(([name]) => name === 'stop')[1].expectedIdentity, owned(identity()))
+test('a Host without a stop descriptor is stopped without drain, with a warning, flag or not', async t => {
+  for (const args of [['stop'], ['stop', '--allow-legacy-restart']]) {
+    const f = fixture(t)
+    const warnings = []
+    assert.equal(await runLauncher(args, { ...f.options, warn: message => warnings.push(String(message)) }), 0)
+    assert.deepEqual(f.calls.find(([name]) => name === 'stop')[1].expectedIdentity, owned(identity()))
+    assert.ok(warnings.some(line => /无 Pet 停止凭据.*启动恢复/.test(line)), warnings.join('\n'))
+  }
 })
 
 test('an old noPet snapshot and mutable manifest never replace authenticated status', async t => {
@@ -236,8 +242,9 @@ test('an old noPet snapshot and mutable manifest never replace authenticated sta
   const dir = path.join(f.home, 'run/dsh-host-launch')
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   fs.writeFileSync(path.join(dir, '40001.json'), JSON.stringify({ v: 1, source: 'host-runtime', port: 40001, profile: 'web', pet: false, bootId: 'fake-runtime-boot', identity: identity() }), { mode: 0o600 })
-  await assert.rejects(runLauncher(['stop'], f.options), /descriptor/)
-  assert.equal(f.calls.some(([name]) => name === 'stop'), false)
+  // The snapshot authorizes nothing; with no descriptor the stop proceeds without drain.
+  assert.equal(await runLauncher(['stop'], f.options), 0)
+  assert.equal(f.calls.some(([name]) => name === 'prepare'), false)
 })
 
 test('every signal rechecks authenticated prepared and operationNonce', async t => {

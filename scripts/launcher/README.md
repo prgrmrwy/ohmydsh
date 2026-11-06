@@ -12,6 +12,9 @@ A certifiable noPet Host owns no Pet resources, so preparation records its curre
 
 [pet-stop.mjs](./pet-stop.mjs) exchanges the private URL for a cookie, prepares, then authenticates `status` immediately before each signal. Status must still be `prepared` with the exact operation nonce, PID, boot identity, prepared time, and expiry. Full OS process identity is checked before and after HTTP. The old unproduced `dsh-host-launch` snapshot reader is removed. An explicit legacy flag permits maintenance only when the protocol descriptor is absent; a malformed descriptor or failed authenticated exchange never falls back to legacy. After a flagged restart, a new descriptor and authenticated `active` status must succeed before reporting protocol load. That maintenance stop is not drain evidence.
 
+
+**Update 2026-11-06**: when no stop descriptor exists (an old Host, or a Pet that never published one), the launcher no longer refuses; it warns and stops without Pet drain, leaving in-flight Deliveries to Pet startup recovery (finishing → unknown-terminal without resend; unprovable → manual). An existing but invalid descriptor still refuses. `--allow-legacy-restart` remains accepted for compatibility.
+
 ## Verification
 
 The ordinary source regression lane includes private overlay checks and the authenticated consumer tests:
