@@ -225,10 +225,13 @@ export function parseConfig(raw: unknown): Config {
  * running references (last-good) when this throws.
  */
 export function guardConfigCandidates(ctx: Context): void {
-  ctx.on('internal/config', function (this: Fiber, _raw: unknown, next: () => unknown) {
-    const raw = next()
-    if (this === ctx.fiber) parseConfig(raw)
-    return raw
+  // 0.2.2 dispatches `internal/config` as (fiber, next); 0.2.1 passed the receiver as `this`
+  // and the raw candidate as the first argument, which made this guard a silent no-op once the
+  // shape changed (invalid scope tables were then accepted by the loader).
+  ctx.on('internal/config', (fiber: Fiber, next: () => unknown) => {
+    const candidate = next()
+    if (fiber === ctx.fiber) parseConfig(candidate)
+    return candidate
   })
 }
 

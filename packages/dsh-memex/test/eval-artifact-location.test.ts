@@ -8,3 +8,10 @@ it('refuses unsupported backend, version and unsafe identity rather than scannin
   for (const patch of [{ name: 'sqlite' }, { version: 'future' }, { root: 'relative' }, { compression: 'unknown' }]) expect(() => locateRegisteredArtifact({ ...config, ...patch }, { id: 'session-123', cwd: '/tmp/repo' })).toThrow()
   expect(() => locateRegisteredArtifact(config, { id: '../daily', cwd: '/tmp/repo' })).toThrow()
 })
+it('accepts the audited 0.2.2-rc.1 layout and still refuses unaudited versions', () => {
+  const config = { name: 'session-persistence-jsonl', version: '0.2.2-rc.1', root: '/state/sessions', compression: 'zstd' }
+  const session = { id: 'session-123', cwd: '/tmp/eval run/repo' }
+  expect(locateRegisteredArtifact(config, session)).toEqual({ path: '/state/sessions/--tmp-eval~0020run-repo--/session-123/session.v4.jsonl.zstd', encoding: 'zstd' })
+  expect(locateRegisteredArtifact({ ...config, compression: 'none' }, session).path).toBe('/state/sessions/--tmp-eval~0020run-repo--/session-123/session.v4.jsonl')
+  for (const version of ['0.2.3-rc.1', '0.2.2-rc.2', '0.2.2', '0.2.2-rc.1-x']) expect(() => locateRegisteredArtifact({ ...config, version }, session)).toThrow(/Unsupported evidence backend/)
+})

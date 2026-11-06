@@ -1,4 +1,4 @@
-import { hostTestRequire } from './host-runtime.js'
+import { expectedDshVersion, hostTestRequire } from './host-runtime.js'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -59,10 +59,10 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     for (const name of ['@deepseek-ai/dsh-api-session-controller', '@deepseek-ai/dsh-agent-loop', '@deepseek-ai/dsh-subagent', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-experimental-agent-team']) {
       const manifest = JSON.parse(readFileSync(graph.resolve(`${name}/package.json`), 'utf8'))
       if (process.env.MEMEX_TEST_HOST_PACKAGE === undefined) {
-        expect(manifest.version).toBe('0.2.1-rc.5')
+        expect(manifest.version).toBe(expectedDshVersion())
         expect(manifest.dsh_compat).toBeUndefined()
       } else {
-        expect(manifest.version).toMatch(/^0\.2\.1-rc\.5(?:-|$)/)
+        expect(manifest.version === expectedDshVersion() || manifest.version.startsWith(`${expectedDshVersion()}-`)).toBe(true)
       }
     }
     await install(llm); await install(storage); await install(sqlite, { path: ':memory:' }); await install(domain, { backend: 'sqlite' })
@@ -113,6 +113,9 @@ it('production Host dispatch runs six real top-level conditions, eight turns and
     ctx.systemPrompt.section({ name: 'offline-host-global', order: 50, text: 'GLOBAL HOST: MCP, GUI and model identity instructions' })
     ctx.systemPrompt.context({ name: 'offline-host-runtime', order: 50, text: 'GLOBAL HOST sandbox policy' })
     await install(await load('@deepseek-ai/dsh-time-context'), { timeZone: 'UTC', refreshIntervalMs: 600000 })
+    // 0.2.2 SessionController injects typertGateway only to replay pending remote events
+    // (dsh-api-session-controller lib/index.js:2363); this offline Host has no remote peers.
+    ctx.provide('typertGateway', { getPendingRemoteEvents: () => [] } as never)
     await install(controller, { nativeOpen: false })
     expect(ctx.sessionController).toBeInstanceOf(controller.SessionController)
     const modes = new Map<string, string>(), routingCalls: [string, any][] = []

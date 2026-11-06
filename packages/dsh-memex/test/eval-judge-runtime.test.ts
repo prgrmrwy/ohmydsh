@@ -86,6 +86,10 @@ async function runCase(injection?: 'bridge-scored' | 'contaminated-next' | 'tool
     await ctx.agentPresets.register({ id: 'memex-eval-judge', plugins: [{ name: 'cordis:eval-native', config: { mode: 'native' } }] })
     if (withTeam) { await ctx.plugin(Team); await ctx.plugin(TeamTools) }
     const adapter = new MockJudge(); ctx.llm.registerAdapter(['mock'], adapter)
+    // Zero adapter calls alone cannot tell a gate refusal from an unrelated crash (0.2.2 once threw a TypeError
+    // from the old assemble projection and every rejection case passed for the wrong reason), so record why.
+    const agentErrors: string[] = []
+    ctx.on('agent/error', ({ error }) => { agentErrors.push(String((error as Error | undefined)?.message ?? error)); return undefined })
     const parent = await createJudgeParent(ctx, { id: `judge-${randomUUID()}`, cwd: judgeCwd, preset: 'eval-minimal' }, {
       resolve: () => ({ memory: false, fallback: false, personal: { read: false, write: false } }),
     } as never)
@@ -242,7 +246,9 @@ async function runCase(injection?: 'bridge-scored' | 'contaminated-next' | 'tool
           execute: async () => { dangerousExecuted++; return {} },
         })
         try {
-          const result = await agent.ctx.tools.execute({ name: 'bash', callId: ToolCallId('forbidden'), arguments: {}, agent, signal: new AbortController().signal })
+          // 0.2.2 tools.execute takes a raw call batch and returns model-ordered { results }
+          const batch = await agent.ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId('forbidden'), name: 'bash', arguments: '{}' }], agent, signal: new AbortController().signal })
+          const result = batch.results[0]!.result
           executionBlocked = result.isError && result.content.some(block => block.type === 'text' && block.text.includes('Judge may only'))
         } finally { remove() }
         return undefined
@@ -281,9 +287,12 @@ async function runCase(injection?: 'bridge-scored' | 'contaminated-next' | 'tool
           expect(adapter.calls).toHaveLength(1)
           expect(boundary.checked()).toBe(disableBoundary ? 0 : 1)
           expect(ctx.agentDefaultModel.currentSelection()).toEqual(defaultBefore)
+          expect(agentErrors).toEqual([])
         } else {
           expect(result.stopReason).toBe('error')
           expect(adapter.calls).toHaveLength(0)
+          const reason = { tokens: /output token limit mismatch/, tool: /tool surface mismatch/, agents: /multiple complete prompt sections/, owner: /exact live identity mismatch/ }[injection as 'tokens' | 'tool' | 'agents' | 'owner']
+          expect(agentErrors.join('\n')).toMatch(reason)
         }
       } finally { await run.dispose() }
     } finally { await parent.dispose() }

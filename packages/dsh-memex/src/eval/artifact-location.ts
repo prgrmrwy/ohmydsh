@@ -6,8 +6,15 @@ import { isAbsolute, join } from 'node:path'
  * match this copy (the official helper is not exported). 0.2.1-rc.5 was re-read on
  * 2026-11-05 (dsh-session-persistence-jsonl lib/index.js projectKey/sessionDir/logPath,
  * SESSION_FORMAT_VERSION 4). Any other version is refused rather than guessed.
+ *
+ * 0.2.2-rc.1 was re-read on 2026-11-07 against the installed release (all line numbers are
+ * node_modules/@deepseek-ai/*): dsh-session-persistence-jsonl/lib/index.js projectKey :880-899
+ * (unchanged `--<readable>--` layout, `~XXXX` escapes, 251-char cap), encodeSegment :858 (identity
+ * for the `session-[A-Za-z0-9-]+` ids admitted below), sessionDir :919, generationLogFilename :766
+ * (`session.v4.jsonl` + `.zstd` for zstd) via dsh-session-format/lib/index.js sessionFormatLogFilename :472,
+ * and dsh-session/lib/index.js SESSION_FORMAT_VERSION = 4 :56. Re-audit these before adding any later version.
  */
-const AUDITED_JSONL_VERSIONS: ReadonlySet<string> = new Set(['0.2.0-rc.2', '0.2.1-rc.5'])
+const AUDITED_JSONL_VERSIONS: ReadonlySet<string> = new Set(['0.2.0-rc.2', '0.2.1-rc.5', '0.2.2-rc.1'])
 
 /** Pinned JSONL projectKey layout. */
 export function locateRegisteredArtifact(config: EvidenceBackend, session: { id: string; cwd: string }): { path: string; encoding: 'zstd' | 'jsonl' } {

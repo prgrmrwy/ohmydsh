@@ -1,3 +1,4 @@
+import * as Presentation from '@deepseek-ai/dsh-agent-tool-presentation'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -25,7 +26,9 @@ it('EVAL-017: 六条件无标题辅助调用', async () => {
   const ctx = new Context()
   try {
     await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore); await ctx.plugin(SystemPrompt, { persona: '' })
-    await ctx.plugin(ToolRuntime); await ctx.plugin(AgentRegistry); await ctx.plugin(SessionProjection)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(Presentation, { mode: 'native' }) // 0.2.2 loads no tool executor by default
+    await ctx.plugin(SessionProjection); await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(SessionTitle, { fallbackMaxWords: 8, fallbackMaxBytes: 80, maxTitleBytes: 200 })
     const provider = ctx.plugin(TitleProvider, { provider: 'mock', model: 'title', targetWords: 4, targetCjkCharacters: 8, maxInputBytes: 4000, maxOutputTokens: 100, timeoutMs: 1000 }); await provider

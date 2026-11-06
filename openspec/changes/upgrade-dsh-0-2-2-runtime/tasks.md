@@ -34,9 +34,9 @@
 
 ## 6. memex 裁判工具投影（D4）
 
-- [ ] 6.1 编写失败测试：`eval-judge-runtime.test.ts` 在目标运行体上启用 Team 时裁判成功路径（现有 `assembly.tools.filter` 抛 TypeError 而失败），并保留污染注入时首请求零调用断言
-- [ ] 6.2 实现：删除 `judge-boundary.ts:22-25` 的 `system-prompt/assemble` 监听，使 6.1 通过
-- [ ] 6.3 重构；dsh-memex 全量测试通过；成功路径不通过时停在未通过，不以全部拒绝或全部 unknown 收尾
+- [x] 6.1 编写失败测试：`eval-judge-runtime.test.ts` 在目标运行体上启用 Team 时裁判成功路径（现有 `assembly.tools.filter` 抛 TypeError 而失败），并保留污染注入时首请求零调用断言
+- [x] 6.2 实现：删除 `judge-boundary.ts:22-25` 的 `system-prompt/assemble` 监听，使 6.1 通过
+- [x] 6.3 重构；dsh-memex 全量测试通过；成功路径不通过时停在未通过，不以全部拒绝或全部 unknown 收尾
 
 ## 7. 文件观察策略（D5）
 
