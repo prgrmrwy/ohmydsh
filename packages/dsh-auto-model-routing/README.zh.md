@@ -77,6 +77,17 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 **判定确定度不等于选中概率**：Choice 公式为 `(pmax − 1/n) / (1 − 1/n)`，三个候选中最高概率 70% 对应确定度 55%。面板分别显示服务返回的确定度和完整分布，保留返回的 0%，缺值标未提供。两者都不是任务成功率。
 
+### 判档预设
+
+AUTO 向 Jev 提的问题来自一个包内置、有名字、有来源的**判档预设**，在「设置 → 自动模型路由 → 判档预设」里选择。预设只改变 Jev 如何选 `lower` / `baseline` / `higher`（子任务还有 `capability`）；effort 序列、单档偏移、上限、不自动选 `max` 以及子模型能力槽都不变。
+
+| 预设 | depth 衡量什么 | 来源 |
+|---|---|---|
+| `reasoning-depth`（缺省） | 推理难度；即 0.6.6 及以前的规则文件，逐字节相同 | 本项目的合成核对 |
+| `effort-as-verification` | 下一步需要多少验证、边界情况测试与自主判断；加一行固定的 `Execution:` 调用路径 | Anthropic《[Spending your effort](https://claude.dev/blog/spending-your-effort/)》（厂商内部数据；用于 GPT 属于未经验证的外推） |
+
+已发布的预设不会原地修改：新的思路会作为新的预设 id 加入，所以升级后所选预设的判断方式不变。每条反馈绑定的快照都记录作出决策的预设。详见 [docs/presets](docs/presets/README.zh.md)。降级到 0.6.6 时，`preset` 设置会被忽略；带 `snapshot.preset` 的绑定会被旧版跳过，账本不被改写，重新升级后恢复显示。
+
 ### 自定义模型家族
 
 AUTO 关于一个模型家族的全部知识都是 [`src/strategies/`](src/strategies/index.ts) 中的数据：每个家族一个文件，加一张 `BUILTIN_STRATEGIES` 列表。接入 DeepSeek、Qwen、Gemini 或自研家族，就是新增一个策略文件并注册；引擎本身不认识任何家族，provider 也从不写进策略。AUTO 也没有任何网关专属代码或配置，会话当前使用哪个 provider 就在哪个 provider 上工作。
@@ -126,7 +137,7 @@ export const deepseek = {
 
 顶部的架构图为 AUTO 路径。主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
-入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[宿主能力核验](docs/host-capability-report.md)。
+入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/presets/reasoning-depth/rubric.json)。家族策略（支持的模型、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[宿主能力核验](docs/host-capability-report.md)。
 
 ## 开发验证
 

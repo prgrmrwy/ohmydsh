@@ -77,6 +77,17 @@ Preset model menus expose documented versions, not live availability guarantees.
 
 **Certainty is not the selected probability.** Choice certainty is `(pmax − 1/n) / (1 − 1/n)`: with three candidates, a 70% top probability gives 55% certainty. The panel shows the service's returned certainty and full candidate distribution separately, including returned zeroes; missing values are marked unavailable. Neither number is task success rate.
 
+### Judgement presets
+
+The questions AUTO asks Jev come from a built-in, named and sourced **judgement preset**; pick one under Settings → Auto model routing → Judgement preset. A preset only changes how Jev chooses `lower` / `baseline` / `higher` (and `capability` for subtasks); the effort ladder, the one-step offset, the cap, the never-`max` rule and the sub-model slots stay the same.
+
+| Preset | Depth means | Source |
+|---|---|---|
+| `reasoning-depth` (default) | reasoning difficulty; the rule file used up to 0.6.6, byte for byte | this project's synthetic check |
+| `effort-as-verification` | how much verification, edge-case testing and independent judgement the next work needs; adds a fixed `Execution:` call-path line | Anthropic, [Spending your effort](https://claude.dev/blog/spending-your-effort/) (vendor-internal numbers; GPT use is an unverified extrapolation) |
+
+Published presets never change in place: a new idea becomes a new preset id, so a selected preset keeps judging the same way after an upgrade. Each binding snapshot records which preset made the decision. Details: [docs/presets](docs/presets/README.md). Downgrading to 0.6.6 ignores the `preset` setting, and bindings that carry `snapshot.preset` are skipped by the older reader; the ledger is not rewritten and upgrading again makes them visible.
+
 ### Custom model families
 
 Everything AUTO knows about a model family is data in [`src/strategies/`](src/strategies/index.ts): one file per family plus the `BUILTIN_STRATEGIES` list. Adding DeepSeek, Qwen, Gemini or an in-house family means adding a strategy file and registering it; the engine has no family knowledge of its own and provider is never part of a strategy. AUTO also has no gateway-specific code or configuration, so it works on whatever provider the session already uses.
@@ -126,7 +137,7 @@ A new family changes which main models AUTO manages and which slot models child 
 
 The diagram at the top shows the AUTO paths. Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
-Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [host capability report](docs/host-capability-report.md).
+Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/presets/reasoning-depth/rubric.json). Family strategies (supported models, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [host capability report](docs/host-capability-report.md).
 
 ## Development
 

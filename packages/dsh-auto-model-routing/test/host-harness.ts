@@ -22,7 +22,7 @@ export const SECRET = 'sk-or-test-SECRET'
 export let cleanup: (() => Promise<void>) | undefined
 export async function closeHarness() { await cleanup?.(); cleanup = undefined }
 
-export async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: []; config?: Record<string, unknown>; model?: string; toolCalls?: () => number } = {}) {
+export async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: []; config?: Record<string, unknown>; model?: string; toolCalls?: () => number; streamGate?: () => Promise<void> | undefined } = {}) {
  const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
  mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true }); writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), JSON.stringify(options.config ?? (options.defaultAuto ? { defaultMode: 'AUTO' } : {})))
@@ -36,6 +36,7 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
   async resolveModel(provider: string, model: string) { return { provider, id: model, name: model, reasoning: { efforts: ['low', 'medium', 'high', 'xhigh', 'max'].map(id => ({ id: ReasoningEffortId(id), name: id })) } } }
   async *stream(request: GenerateOptions): AsyncIterable<StreamChunk> {
    calls.push(request)
+   await options.streamGate?.()
    // A request may ask for tool calls first, so one turn issues several requests.
    if ((options.toolCalls?.() ?? 0) > 0) {
     const id = ToolCallId(`call-${calls.length}`)
@@ -55,9 +56,14 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
  }
  ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: options.storedKey === undefined ? { OPENROUTER_API_KEY: SECRET } : {} }]) as never)
  let storedKey = options.storedKey
+ // Optional test seam (storedKey path only): hold credential resolution mid-judgement.
+ let credentialGate: Promise<void> | undefined
+ let reachedGate: (() => void) | undefined
+ /** Holds credential resolution; `reached` resolves once a judgement is waiting on it. */
+ const holdCredentials = () => { let release!: () => void; const reached = new Promise<void>(done => { reachedGate = done }); credentialGate = new Promise<void>(done => { release = () => { credentialGate = undefined; done() } }); return Object.assign(() => release(), { reached }) }
  if (options.storedKey !== undefined) ctx.provide('credentials', {
   describe: async () => ({ configured: Boolean(storedKey), source: 'file', writable: true }),
-  resolve: async () => storedKey ? { value: storedKey, source: 'file' } : undefined,
+  resolve: async () => { if (credentialGate) { reachedGate?.(); reachedGate = undefined } await credentialGate; return storedKey ? { value: storedKey, source: 'file' } : undefined },
   set: async (_ref: unknown, value: string) => { storedKey = value },
   unset: async () => { storedKey = undefined },
  } as never)
@@ -72,7 +78,7 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
  ] }) } as never)
  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (r: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
  ctx.provide('sessionController', {
-  resolveAgent: async (id: string) => agent?.id === id ? { agent } : { error: new Error('unknown') },
+  resolveAgent: async (id: string) => { const found = agent?.id === id ? agent : ctx.agents.get(SessionId(id)); return found ? { agent: found } : { error: new Error('unknown') } },
   selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
@@ -87,14 +93,24 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
   },
  })
  agent = handle.agent
+ const extra: { dispose(): unknown }[] = []
+ /** A second main session in the same Host (test-only), starting from the same picker selection. */
+ const createAgent = async (id: string) => {
+  const sel: ModelSelectionRef = { current: { provider: 'test', model: options.model ?? 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
+  const other = await ctx.agents.create({ sessionId: SessionId(id), agentOptions: { provider: 'test', model: options.model ?? 'claude-opus-5-5' }, setup(c) { installModelSelection(c, sel) } })
+  extra.push(other)
+  const { FileStateStore } = await import('../src/state.js')
+  new FileStateStore(join(home, 'state/auto-model-routing/sessions')).set(other.agent.id, { mode: 'AUTO' })
+  return { agent: other.agent, selection: sel, dispose: async () => { extra.splice(extra.indexOf(other), 1); await other.dispose() }, run: async (text: string) => { other.agent.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await other.agent.whenIdle() } }
+ }
  const invoke = async (op: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${op}`)!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }))).json()
  const configure = (value: unknown) => writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), typeof value === 'string' ? value : JSON.stringify(value))
  const run = async (text: string) => { agent!.followup(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })); await agent!.whenIdle() }
- cleanup = async () => { await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
+ cleanup = async () => { for (const e of extra.reverse()) await e.dispose(); await handle.dispose(); await routing.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
  // Simulate a Host restart for this plugin: all its memory is dropped, only the state directory remains.
  const restart = async () => { await routing.dispose(); routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 }); await expect.poll(() => routes.size).toBe(9) }
  const toast = (on: boolean) => { const dir = join(home, 'plugins/dsh-auto-model-routing'); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, 'config.json'), JSON.stringify({ decisionToast: on })) }
- return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, configure, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
+ return { ctx, jev, calls, agent, selection, invoke, routes, run, home, toast, selections, restart, configure, holdCredentials, createAgent, setMode: (mode: string) => invoke('setMode', { sessionId: agent!.id, mode }) }
 }
 
 export const lastAssistantId = (h: { agent: { session: { deriveMessages(): readonly { role: string; id: string }[] } } }) => h.agent.session.deriveMessages().findLast(m => m.role === 'assistant')!.id

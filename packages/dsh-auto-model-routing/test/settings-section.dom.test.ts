@@ -4,7 +4,8 @@ import { createElement as h, act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { RoutingSettings } from '../src/client/settings-section.js'
 import { ui, view } from './gui-fixture.js'
-import questions from '../src/rubric.json' with { type: 'json' }
+import { resolvePreset } from '../src/presets/index.js'
+const questions = resolvePreset('reasoning-depth').rubric
 import { registry } from '../src/strategies/index.js'
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root, host: HTMLElement
@@ -66,14 +67,38 @@ it('spec Scenario "旧映射配置不影响路由并在保存时移除" (setting
   await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async()=>({ok:true,value:{...view(),deprecated:[]}})},ui})))
   expect(host.querySelector('[data-deprecated]')).toBeNull()
 })
+it('spec Scenario "选择并保存判档预设"',async()=>{
+  const calls:{endpoint:string;payload:any}[]=[]
+  const data={...view(),settings:{...view().settings,decisionToast:false}}
+  await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async(_:string,endpoint:string,payload:any)=>{calls.push({endpoint,payload});return {ok:true,value:data}}},ui})))
+  const eav=resolvePreset('effort-as-verification'),rd=resolvePreset('reasoning-depth')
+  expect(host.querySelector('[aria-label="判档预设"]')?.textContent).toContain(rd.title.zh)
+  await clickLabel('判档预设')
+  const items=Array.from(document.querySelectorAll('[role=menu] button')).map(b=>b.textContent)
+  expect(items).toEqual([`${rd.title.zh} · 默认`,eav.title.zh])
+  await click(eav.title.zh)
+  expect(host.querySelector('[aria-label="判档预设"]')?.textContent).toContain(eav.title.zh)
+  expect(host.textContent).toContain(eav.summary.zh)
+  await click('保存')
+  expect(calls.find(c=>c.endpoint.endsWith('saveSettings'))?.payload).toEqual({preset:'effort-as-verification'})
+})
 it('spec Scenario "策略说明来自规则文件与注册表"',async()=>{
   const calls:string[]=[]
-  const data=view()
+  const data={...view(),settings:{...view().settings,preset:'effort-as-verification'}}
+  const eav=resolvePreset('effort-as-verification')
+  const presetRubric=eav.rubric
   await act(async()=>root.render(h(RoutingSettings,{rpc:{call:async(_,endpoint)=>{calls.push(endpoint);return {ok:true,value:data}}},ui})))
   const details=host.querySelector('details')!
   expect(details.open).toBe(false)
   expect(details.querySelector('summary')?.textContent).toBe('查看决策策略')
-  for(const q of Object.values(questions)){
+  expect(details.textContent).toContain(eav.title.zh)
+  expect(details.textContent).toContain(eav.evidence.zh)
+  const link=details.querySelector(`a[href="${eav.sources[0]!.url}"]`) as HTMLAnchorElement
+  expect(link).not.toBeNull()
+  expect(link.target).toBe('_blank')
+  expect(link.rel).toBe('noopener noreferrer')
+  expect(details.textContent).not.toContain(questions.depth.criteria.higher)
+  for(const q of Object.values(presetRubric)){
     expect(details.textContent).toContain(q.instructions)
     for(const text of Object.values(q.criteria))expect(details.textContent).toContain(text)
   }

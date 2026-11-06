@@ -13,6 +13,11 @@ it('spec Scenario "设置文件损坏"',()=>{
  writeFileSync(path,JSON.stringify({effortCap:'max',jevTimeoutMs:2000,decisionToast:false}))
  expect(store.read().settings).toMatchObject({effortCap:'xhigh',jevTimeoutMs:2000,decisionToast:false})
  expect(store.read().issues[0]?.path).toBe('effortCap')
+ writeFileSync(path,JSON.stringify({preset:'does-not-exist',jevTimeoutMs:2000}))
+ expect(store.read()).toMatchObject({status:'invalid',settings:{preset:'reasoning-depth',jevTimeoutMs:2000}})
+ expect(store.read().issues.map(i=>i.path)).toContain('preset')
+ writeFileSync(path,JSON.stringify({preset:'effort-as-verification'}))
+ expect(store.read()).toMatchObject({status:'ok',settings:{preset:'effort-as-verification'}})
 })
 it('spec Scenario "保存普通设置"',()=>{
  const {path,dir,store}=fixture(); writeFileSync(path,'{"decisionToast":false}')
@@ -24,10 +29,15 @@ it('spec Scenario "保存普通设置"',()=>{
  // The next read (what the next request or new session uses) reflects the saved values without a restart.
  expect(store.read().settings).toMatchObject({defaultMode:'AUTO',jevTimeoutMs:2500,decisionToast:false})
 })
-it.each([{jevTimeoutMs:9000},{jevTimeoutMs:999},{jevTimeoutMs:1000.5},{effortCap:'max'},{defaultMode:'auto'},{foo:1},{apiKey:'do-not-copy'},{mainEfforts:{}}])('spec Scenario "非法设置整体拒绝": %j',patch=>{
+it.each([{jevTimeoutMs:9000},{jevTimeoutMs:999},{jevTimeoutMs:8001},{jevTimeoutMs:1500.5},{jevTimeoutMs:1000.5},{preset:'does-not-exist'},{effortCap:'max'},{defaultMode:'auto'},{foo:1},{apiKey:'do-not-copy'},{mainEfforts:{}}])('spec Scenario "非法设置整体拒绝": %j',patch=>{
  const {path,store}=fixture(); writeFileSync(path,'{"decisionToast":false}')
  expect(()=>store.save(patch)).toThrow(SettingsValidationError)
  expect(readFileSync(path,'utf8')).toBe('{"decisionToast":false}')
+})
+it.each([1000,6000,8000])('spec Scenario "非法设置整体拒绝": valid deadline %i is saved',value=>{
+ const {path,store}=fixture(); writeFileSync(path,'{"decisionToast":false}')
+ store.save({jevTimeoutMs:value})
+ expect(JSON.parse(readFileSync(path,'utf8'))).toEqual({decisionToast:false,jevTimeoutMs:value})
 })
 it('spec Scenario "提交旧映射字段被拒"',()=>{
  const {path,store}=fixture(); writeFileSync(path,'{"defaultMode":"AUTO"}')

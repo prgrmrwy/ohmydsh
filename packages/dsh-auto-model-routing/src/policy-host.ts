@@ -14,6 +14,7 @@ import { userInput } from './input.js'
 import { buildState, previousTurn } from './context.js'
 import { isRecord } from './settings-validation.js'
 import { autoSupportedModel, currentMainSelection, mainSupported } from './support.js'
+import { resolvePreset } from './presets/index.js'
 
 export function policyHost(ctx: Context, deps: { selectModel: (request: { sessionId: string; provider: string; model: string; reasoningEffort: string }) => Promise<unknown>; feedback: FeedbackBook; jev: JevClient; state: RoutingState; store: PolicyStore; settings: () => Settings; catalog: (provider?: string) => Promise<RoutingCatalog>; registry?: Registry }) {
   const registry = deps.registry ?? builtin
@@ -35,7 +36,8 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   const mainStatus = new Map<string, { depth: Depth; effort?: string; reason: string; decision?: NonNullable<ChildDecision['decision']> }>()
   let decisionId = Date.now()
   const requestMetadata = new Map<string, { requestSeq: number; appliedAt: number; requestTurn?: number }>()
-  const decidedAt = new Map<number, number>()
+  /** Each main session's current decision: time and the preset captured for it. Lives until replaced, voided or disposed — never evicted by other sessions' traffic. */
+  const mainDecided = new Map<string, { id: number; decidedAt: number; preset: string }>()
   const applied = new Map<string, NonNullable<ChildDecision['decision']>>()
   const latest = new Map<string, NonNullable<ChildDecision['decision']>>()
   /** Fall back to MANUAL when the main model left AUTO's registered families. */
@@ -103,7 +105,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   const requireBindingRecord = (agent: Agent, record: ChildDecision | undefined) => {
     if (deps.store.wasBound(agent.id) && !record) throw new Error('已绑定子会话的决策记录缺失，无法恢复；停止请求，不恢复继承配置')
   }
-  ctx.on('agent/disposed', ({ agent }) => { pending.delete(agent.id); mainStatus.delete(agent.id); return undefined })
+  ctx.on('agent/disposed', ({ agent }) => { pending.delete(agent.id); mainStatus.delete(agent.id); mainDecided.delete(agent.id); return undefined })
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter' || payload.step !== 1) return decision
@@ -119,16 +121,17 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       mainStatus.delete(agent.id)
       const startedEpoch = epoch(agent.id)
       const prior = previousTurn(agent.session.deriveMessages())
-      const result = await deps.jev.judgePolicy(buildState({ text: input.text, prevUser: prior.user, prevAssistant: prior.assistant }), payload.signal, 'main')
+      // Captured once: state, questions, choice checks and attribution all use this preset.
+      const preset = resolvePreset(deps.settings().preset)
+      const result = await deps.jev.judgePolicy(buildState({ text: input.text, prevUser: prior.user, prevAssistant: prior.assistant, execution: preset.context.includes('execution') ? 'main' : undefined }), payload.signal, 'main', 'depth', preset)
       if (!enabled(agent.id) || epoch(agent.id) !== startedEpoch) return decision
-      if (result.kind === 'failed') { deps.state.disable(agent.id, result.category); mainStatus.delete(agent.id); latest.delete(agent.id); main.set(agent, { turn: payload.turn, depth: 'baseline', active: false, epoch: startedEpoch }); return decision }
-      if (result.kind === 'cancelled') { main.set(agent, { turn: payload.turn, depth: 'baseline', active: false, epoch: startedEpoch }); return decision }
+      if (result.kind === 'failed') { mainDecided.delete(agent.id); deps.state.disable(agent.id, result.category); mainStatus.delete(agent.id); latest.delete(agent.id); main.set(agent, { turn: payload.turn, depth: 'baseline', active: false, epoch: startedEpoch }); return decision }
+      if (result.kind === 'cancelled') { mainDecided.delete(agent.id); main.set(agent, { turn: payload.turn, depth: 'baseline', active: false, epoch: startedEpoch }); return decision }
       main.set(agent, { turn: payload.turn, depth: result.depth, active: true, epoch: startedEpoch })
       const { kind: _kind, ...measurement } = result
       latest.delete(agent.id)
       mainStatus.set(agent.id, { depth: result.depth, reason: 'jev', decision: { ...measurement, id: ++decisionId, source: 'main', tier: result.depth, effort: '待应用', status: 'recommended' } })
-      decidedAt.set(decisionId, Date.now())
-      if (decidedAt.size > 200) decidedAt.delete(decidedAt.keys().next().value!)
+      mainDecided.set(agent.id, { id: decisionId, decidedAt: Date.now(), preset: preset.id })
       if (mainStatus.size > 200) mainStatus.delete(mainStatus.keys().next().value!)
       return decision
     }
@@ -148,7 +151,9 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     if (!explicit.model || !explicit.reasoningEffort) {
       // This is the exact child's entering message, not a parent-history/prompt similarity match.
       const text = userInput(decision.messages).text
-      const result = await deps.jev.judgePolicy(buildState({ text }), payload.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
+      // Captured at the child's first judgement, not at creation.
+      const preset = resolvePreset(deps.settings().preset)
+      const result = await deps.jev.judgePolicy(buildState({ text, execution: preset.context.includes('execution') ? 'delegated' : undefined }), payload.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both', preset)
       if (!current()) { fallback(record, 'mode-changed'); return decision }
       if (result.kind === 'cancelled') { fallback(record, 'jev-cancelled'); return decision }
       if (result.kind === 'failed') { fallback(record, `jev-${result.category}`); return decision }
@@ -229,8 +234,8 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const data = event.data as { message?: { id?: string } }
       if (d?.status === 'applied' && enabled(session.id) && data.message?.id && d.model) {
         try { deps.feedback.bind({ sessionId: session.id, messageId: data.message.id, decisionId: d.id, depth: d.depth, model: d.model, effort: d.effort,
-          ...(requestMetadata.has(session.id) && d.provider && decidedAt.has(d.id) ? { snapshot: {
-            ...requestMetadata.get(session.id)!, decidedAt: decidedAt.get(d.id)!, ...(familyOf(d.model) ? { strategy: familyOf(d.model)! } : {}),
+          ...(requestMetadata.has(session.id) && d.provider && mainDecided.get(session.id)?.id === d.id ? { snapshot: {
+            ...requestMetadata.get(session.id)!, decidedAt: mainDecided.get(session.id)!.decidedAt, preset: mainDecided.get(session.id)!.preset, ...(familyOf(d.model) ? { strategy: familyOf(d.model)! } : {}),
             decisionProvider: d.decisionProvider, decisionModel: d.decisionModel, ms: d.ms, provider: d.provider,
             ...(d.confidence !== undefined ? { confidence: d.confidence } : {}), ...(d.probabilities ? { probabilities: d.probabilities } : {}),
           } } : {}),
@@ -256,7 +261,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   })
   return {
     appliedDecision: (id: string) => enabled(id) ? applied.get(id)?.id : undefined,
-    invalidate: (id: string) => { epochs.set(id, epoch(id) + 1); mainStatus.delete(id); latest.delete(id); applied.delete(id) },
+    invalidate: (id: string) => { epochs.set(id, epoch(id) + 1); mainStatus.delete(id); latest.delete(id); applied.delete(id); mainDecided.delete(id) },
     childNotice: (rootId: string) => notices.get(rootId),
     status: (id: string) => deps.store.get(id), mainStatus: (id: string) => enabled(id) ? { ...mainStatus.get(id), ...(latest.get(id) ? { decision: latest.get(id) } : {}) } : undefined,
   }

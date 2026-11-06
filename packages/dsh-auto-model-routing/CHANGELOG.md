@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 — 2026-11-06
+
+- **Judgement presets.** The Jev questions now come from built-in, named, sourced presets under `src/presets/<id>/rubric.json`, selectable in settings (`preset`, default `reasoning-depth`). `reasoning-depth` is the former `src/rubric.json`, byte for byte, so the default questions and state are unchanged. New opt-in `effort-as-verification` follows Anthropic's "Spending your effort": depth measures the verification, edge-case testing and independent judgement the next work needs, and its state carries a fixed call-path line (`Execution: main conversation.` / `Execution: delegated subtask; …`) that never claims whether anyone reviews. Presets cannot change the effort ladder, offset, cap or sub-model slots; published presets are never edited in place (see [docs/presets](docs/presets/README.md)).
+- **One preset per judgement.** Main turns, managed subtasks, `route_subagent` and the settings connection test each capture the preset once when the judgement starts; a settings change mid-judgement only affects later judgements. Bound subtasks and same-turn requests are never re-judged.
+- **Binding snapshots record the preset, and no longer vanish under load.** New snapshots carry `preset`. The decision time and preset now live with each session's current main decision instead of a global 200-entry FIFO, which used to drop the whole snapshot for a still-active decision (non-user turns, delayed replies) once other sessions had made 200 judgements.
+- **Eval per preset.** `eval/live.mjs --preset <id>` (after `npm run build`) builds the state with the runtime `buildState`, rejects unknown ids before any network call, and records `preset`, `execution` and the resolved `expected` sets; 8 new synthetic cases (18 total, still ≤ 20 calls / $0.10 per run).
+- **Settings copy is preset-neutral** ("investment level" instead of "reasoning investment") and the strategy details show the selected preset's title, evidence, source links and rubric.
+- **BREAKING (package layout and downgrade visibility).** `src/rubric.json` moved to `src/presets/reasoning-depth/rubric.json`; no migration is needed to upgrade. Downgrading to 0.6.6 ignores `preset` and drops it on the next save; bindings with `snapshot.preset` are skipped by the 0.6.6 strict reader until you upgrade again (the ledger is not rewritten).
+
 ## 0.6.6 — 2026-11-04
 
 - **UI and docs decoupled from Magpie.** The settings strategy copy now describes AUTO's provider behavior instead of one gateway (`Magpie` → `AUTO` in the EN/ZH dictionaries), and the READMEs no longer contain a Magpie transport section or Magpie-specific acceptance links. Routing logic never referenced Magpie — a package test enforces that model-family knowledge lives only in `src/strategies/` and that nothing else repeats family ids or prefix matching — so this is a copy/documentation release, not a routing change.

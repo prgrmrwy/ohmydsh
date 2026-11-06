@@ -366,9 +366,10 @@ it('spec Scenario "请求内容受限"', async () => {
  const body = h.jev.bodies[1] as { model: string; state: string; questions: Record<string, unknown> }
  expect(Object.keys(body).sort()).toEqual(['model', 'questions', 'state'])
  expect(body.model).toBe('typesafe/jev-1.13')
- const rubric = (await import('../src/rubric.json', { with: { type: 'json' } })).default as Record<string, unknown>
+ const rubric = (await import('../src/presets/index.js')).resolvePreset('reasoning-depth').rubric
  expect(body.questions).toEqual({ depth: rubric.depth })
  expect(body.state.split('\n')[0]).toBe('Previous user-turn tier: none')
+ expect(body.state).not.toContain('Execution:')
  const at = (needle: string) => body.state.indexOf(needle)
  expect(at('修一下登录')).toBeGreaterThan(0)
  expect(at('要我开始实施吗？')).toBeGreaterThan(at('修一下登录'))
