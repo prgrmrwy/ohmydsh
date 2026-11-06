@@ -63,5 +63,16 @@
 
 ## 9. 收尾
 
-- [ ] 9.1 `openspec validate upgrade-dsh-0-2-1-runtime --strict`，同步 delta 到 current specs
-- [ ] 9.2 更新记忆卡 `dsh-021-upgrade-2026-11-verified-blockers`，归档 change
+- [x] 9.1 `openspec validate upgrade-dsh-0-2-1-runtime --strict`，同步 delta 到 current specs
+- [x] 9.2 更新记忆卡 `dsh-021-upgrade-2026-11-verified-blockers`，归档 change
+
+## 收尾说明（2026-11-06，用户决定先归档本 change，再开 0.2.2 升级 change）
+
+未勾选的任务按实际情况结案，没有补做，也没有改勾为完成：
+
+- 1.3、2.4：没有单独执行。W1 与运行体批次在同一个隔离候选里验收，并一起由 774ed60c 合入。
+- 7.1 备份：没有执行记录。`checking/` 目录被 gitignore，原 worktree 已清理；`~` 下只有早于升级的 2026-10-09 备份。
+- 7.2 主 checkout 二次 build 幂等：没有留下记录。
+- 7.3 切换：生产 3080 自 2026-11-05T02:35Z 起以 `dshVersion=0.2.1-rc.5` 持续运行（`dsh history`），但没有留下完整验收记录。
+- 8.1/8.2：npm 上 `dsh-auto-model-routing@0.7.0`、`dsh-magpie-connector@0.6.10` 已带 `engines.dsh >=0.2.0-rc.2 <0.3.0-0` 发版；`dsh-session-id-copy@0.2.2`、`dsh-sidebar-session-provider-icon@0.1.13` 的 npm 版本早于切换，缺少 `engines.dsh`。8.3 商店 PR、8.4 note 同步：没有证据。商店发版已转到单独的 publish 流程（后置），不放进 0.2.2 change。
+- `checking/*.md`（candidate、store-packages、devbox-gate 等）没有进入版本控制，已丢失；归档里只剩 tasks 勾选状态作为历史。
