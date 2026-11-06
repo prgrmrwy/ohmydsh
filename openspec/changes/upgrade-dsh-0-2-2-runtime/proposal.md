@@ -21,7 +21,7 @@ DSH 的 latest/next 频道已经到 `0.2.2-rc.1`（npm，2026-11-04 发布），
 - `fs-observation-policy`：部署面显式组合官方文件观察策略，使「改前先读」和外部修改防护不随运行体默认值变化而静默消失。
 
 ### Modified Capabilities
-- `auto-model-routing`：主会话 effort 改为在每步 pre-step 中设定（改写本步选择），子会话 route 改为在 `agent/created` 中判断并写入，`agent/request` 只核验。修订「AUTO 主 effort 同步官方选择」「模式与改写规则」「用户回合与 Jev 输入」「AUTO 决策与执行」「子任务路由退化链」「Jev 判断请求与脱敏」「判档预设的采样与归属」七条要求，新增「本步选择改写依赖运行体核验」。
+- `auto-model-routing`：主会话 effort 改为在每步 pre-step 中设定（改写本步选择），子会话 route 改为在 `agent/created` 中判断并写入，`agent/request` 只核验。修订「AUTO 主 effort 同步官方选择」「模式与改写规则」「用户回合与 Jev 输入」「AUTO 决策与执行」「子任务路由退化链」「Jev 判断请求与脱敏」「判档预设的采样与归属」「决策提示」八条要求，新增「本步选择改写依赖运行体核验」。
 
 ## Impact
 

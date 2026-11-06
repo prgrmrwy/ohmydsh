@@ -341,6 +341,57 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **WHEN** 调用设置页测试连接端点，挂起期间保存 `preset: "reasoning-depth"`，再释放；之后再调用一次测试连接
 - **THEN** 第一次假 Jev 服务收到的 `questions` 等于 `effort-as-verification` 的 rubric，`state` 等于固定测试文本，请求恰 1 次；第二次收到 `reasoning-depth` 的 rubric
 
+### Requirement: 决策提示
+系统 SHALL 提供默认开启的开关：`$DSH_HOME/plugins/dsh-auto-model-routing/config.json` 中 `decisionToast: false` 时关闭；文件缺失、不可解析或值非 `false` 时视为开启，不得影响路由。开关每次读取状态时生效，无需重启。
+
+系统 SHALL 为每个主会话保留最近一次决策（仅内存，不落盘），字段与本变更前相同：`{id, source, tier, depth, capability?, effort, provider?, model?, status, confidence?, probabilities?, capabilityConfidence?, capabilityProbabilities?, preset?, decisionProvider, decisionModel, ms}`，其中 `tier` 等于 depth（子任务为 capability），为既有非版本字段，保留；`preset` 为作出该次 Jev 判断时按「判档预设的采样与归属」捕获的预设 id，仅经 Jev 判断的决策含有，只存于内存，MUST NOT 写入子会话决策记录。主会话：Jev 成功判断后记录，`effort` 为 `待应用`、`status` 为 `recommended`；该回合请求按实际模型得出 effort 后更新 `effort`、`provider`、`model`；无法得出 effort 时 `status` 为 `unsupported`；实际请求头与决策一致时为 `applied`，否则为 `failed`。子任务（记录到其根会话）：判断完成或显式指定两个维度时记录，后者 `decisionProvider` 为 `explicit`、`decisionModel` 为 `未调用`、`ms` 为 0；实际请求匹配时为 `applied`。判断失败、取消或被丢弃时 MUST NOT 记录新决策。以下场景中的决策对象均为部分匹配。
+
+状态接口 SHALL 始终返回 `decision`（如有）。开关开启时状态接口同时返回 `decisionToast: true`；client SHALL 仅在 `decisionToast` 为 true 且发现新的决策 `id` 时于芯片上方显示提示，3 秒后自动消失，不拦截指针；提示 MUST 在 Agent 运行、官方隐藏右侧控件期间仍可见。提示与面板共用同一文本：
+1. `<主会话|子任务> · <已应用|未应用|不支持调整|已判断/待应用>`
+2. 有 `preset` 时：`判档预设 <所选预设的本地化标题>`（id 未注册时原样显示 id）；无 `preset` 时省略此行。
+3. 有 capability 时：`能力 <capability> · 判定确定度 <百分比|未提供>` 与 `能力分布：<…>`
+4. `投入 <depth> · 判定确定度 <百分比|未提供>`
+5. `投入分布：<按 lower/baseline/higher 顺序列出存在的值，以 " / " 分隔，无则“未提供”>`
+6. `<provider> / <model|待确定> · <effort>`
+7. `<decisionProvider> / <decisionModel> · <秒，两位小数>s`
+8. 固定说明：确定度的计算方式，且不是任务成功率。
+两次状态读取之间若有多次决策，只显示最新一次。开关关闭时 client MUST NOT 弹出提示。
+
+#### Scenario: 主会话判断提示
+- **GIVEN** 开关开启，会话为 `AUTO`，Jev 返回 depth `higher`、confidence 0.4，决策服务 `openrouter` / `typesafe/jev-1.13` 耗时 820ms，实际请求 `claude` / `claude-opus-5-5` / `high`
+- **WHEN** 该回合首个请求完成后读取状态并渲染提示
+- **THEN** 状态含 `decision = {source: main, depth: higher, effort: high, status: applied}`；提示第一行为 `主会话 · 已应用`，并含 `投入 higher · 判定确定度 40%`、`claude / claude-opus-5-5 · high`、`openrouter / typesafe/jev-1.13 · 0.82s`
+
+#### Scenario: 决策提示标记所用判档预设
+- **GIVEN** 设置 `preset` 为 `effort-as-verification`，AUTO 主会话本回合 Jev 判断完成；另有按 `reasoning-depth` 判断的受管子任务，以及一个显式给出模型与 effort 的子任务
+- **WHEN** 分别读取根会话状态并渲染提示
+- **THEN** 主决策 `preset` 为 `effort-as-verification`，提示第二行为 `判档预设 Effort 管验证与边界情况`；已判断子任务决策 `preset` 为 `reasoning-depth`，第二行为 `判档预设 推理深度`，其决策记录文件不含 `preset`；显式子任务决策不含 `preset`，提示无 `判档预设` 行
+
+#### Scenario: 子任务判断提示
+- **GIVEN** 开关开启，会话 S1 为 `AUTO`，其子任务判断为 capability `analytical`、capabilityConfidence 0.8
+- **WHEN** 读取 S1 状态并渲染提示
+- **THEN** 提示第一行以 `子任务 · ` 开头，含 `能力 analytical · 判定确定度 80%`
+
+#### Scenario: 主决策在请求前后的状态
+- **GIVEN** AUTO 主会话本回合 Jev 返回 depth `higher`，主模型为 `claude-opus-5-5`，官方当前选择为 `max`，目录只支持 `max`，自动 effort 上限为 `xhigh`
+- **WHEN** 分别在 step 1 的 pre-step 完成后与该步请求发出后读取状态
+- **THEN** 两次状态的 `decision` 均部分匹配 `{source: main, tier: higher, depth: higher, status: unsupported}`，`reason` 均为 `no-effort-support`；实际请求配置与本步原官方选择深度相等；`selectModel` 与全局 defaults 保存次数均为 0；本回合 Jev 请求次数为 1；会话仍为 AUTO 且没有 disabled
+
+#### Scenario: 完全显式的子任务决策可见
+- **GIVEN** AUTO 根会话经官方 fresh 子会话工具创建子任务，显式给出模型与 effort
+- **WHEN** 子任务首次请求完成后读取根会话状态
+- **THEN** `decision` 部分匹配 `{source: subagent, decisionProvider: explicit, decisionModel: 未调用, ms: 0, status: applied}`；Jev 请求数为 0
+
+#### Scenario: 开关关闭或判断失败不提示
+- **GIVEN** 开关显式关闭（`decisionToast: false`），或开关开启但 Jev 返回 402
+- **WHEN** 读取状态
+- **THEN** 关闭时状态不含 `decisionToast`、client 不弹出提示（面板仍可显示最近决策）；失败时不产生新的 `decision`
+
+#### Scenario: 提示只显示一次且 3 秒消失
+- **GIVEN** client 已显示 id 为 7 的决策提示
+- **WHEN** 后续状态读取仍返回 id 7，或经过 3 秒
+- **THEN** 不重复显示 id 7；3 秒后提示被移除；官方隐藏右侧控件时提示仍可见
+
 ## ADDED Requirements
 
 ### Requirement: 本步选择改写依赖运行体核验

@@ -132,3 +132,5 @@ CHANGES_APPLIED: no
 本轮新 finding 的作者回应（留空）：
 
 - **M11：**
+
+作者回应（2026-11-07）：Required Changes 1、2 已按原文应用（delta 新增整条 MODIFIED「决策提示」，只替换「主决策在请求前后的状态」场景；proposal 改为八条）。实施时同步调整 `test/policy-host.integration.test.ts:401-409` 的阶段断言。待评审者定向复核后再把 CHANGES_APPLIED 置为 yes。
