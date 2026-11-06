@@ -43,6 +43,10 @@ prepare-preview 只修改隔离 home 中已存在的 profile 文件，MUST NOT �
 - **WHEN** 新 worktree 从未执行过 `dsh build`，用户调用 `ws prepare-preview`
 - **THEN** 脚本 SHALL 失败并提示先执行 `dsh build`，隔离 home MUST 保持不变
 
+#### Scenario: First build stopped before the patch region exists
+- **WHEN** 隔离 home 已有 `profiles/web/package.json`，但 `cordis.patch.yml` 缺失或不含生成区锚点（例如首次隔离 build 因私有 npm scope 预检停止），用户调用 `ws prepare-preview`
+- **THEN** 脚本 SHALL 照常复制白名单中的其它项（含 `.npmrc` 的 registry 行），在 skipped 中列出 `patch:pending-build` 并提示再执行 `dsh build` 后重跑 prepare-preview；`cordis.patch.yml` MUST NOT 被创建或改写
+
 #### Scenario: Browser session of the preview Host is preserved
 - **WHEN** 真实 home 与隔离 home 的 `.credentials.yaml` 都含有 `client-connection/browser-session`，且值不同
 - **THEN** 合并后，隔离 home 中该 record SHALL 仍为隔离 home 原有的值，真实 home 的值 MUST NOT 出现在隔离 home 中
