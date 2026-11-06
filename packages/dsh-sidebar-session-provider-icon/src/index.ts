@@ -19,8 +19,17 @@ export const name = 'sidebar-session-provider-icon'
 /** The projection registry is this plugin's whole purpose; without it the fiber stays pending. */
 export const inject = ['sessionProjections']
 
-export function apply(ctx: Context): void {
-  ctx.sessionProjections.register(providerProjectionDefinition)
+/**
+ * DSH 0.2.2: `register()` installs the definition synchronously but resolves its
+ * `ProjectionHandle` asynchronously, and rejects on a key/`stateVersion` conflict.
+ * Awaiting it makes this fiber's start wait for (and fail with) the registration
+ * instead of leaving a fire-and-forget promise whose rejection is only logged.
+ * The registration belongs to this fiber: unloading releases it, so the handle
+ * is awaited but not returned (an async plugin must resolve to `void`).
+ * Older 0.2.x runtimes return a plain disposer; awaiting a non-thenable is a no-op.
+ */
+export async function apply(ctx: Context): Promise<void> {
+  await ctx.sessionProjections.register(providerProjectionDefinition)
 }
 
 export * from './types.js'

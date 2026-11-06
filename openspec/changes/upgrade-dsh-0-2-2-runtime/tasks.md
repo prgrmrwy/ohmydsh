@@ -48,7 +48,7 @@
 
 - [x] 8.1 `dsh.yaml` 写明 Web Fetch 可访问非公网地址的信任面变化（2026-11-06 由用户接受）
 - [ ] 8.2 dsh-pet：核对按步骤启用工具后 `ctx.tools.schemas(scope)` 的读回结果，Locus 工具上限等价性测试在目标运行体上通过
-- [ ] 8.3 sidebar-session-provider-icon：`sessionProjections.register` 改为在启动时持有其异步返回值，测试通过
+- [x] 8.3 sidebar-session-provider-icon：`sessionProjections.register` 改为在启动时持有其异步返回值，测试通过
 - [ ] 8.4 检查官方 connection 行的 `inject` 是否已含 `webServer`：已含则删除 fragment 与 patch，否则在 note 记录复核结论
 - [ ] 8.5 按 0.2.2-rc.1 重新生成 noPet 官方模块名册
 - [ ] 8.6 全仓 `npm test`、`npm run check:artifacts` 与各 local package 的 build/typecheck/test 通过；结论写入 `checking/summary.md`
