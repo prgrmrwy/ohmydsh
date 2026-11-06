@@ -2,7 +2,7 @@
 
 ## 1. 基线（现役 0.2.1-rc.5）
 
-- [ ] 1.1 在现役运行体上跑 `npm test`、`npm run check:artifacts` 和各 local package 的 build/typecheck/test，结果记入 `checking/summary.md`
+- [x] 1.1 在现役运行体上跑 `npm test`、`npm run check:artifacts` 和各 local package 的 build/typecheck/test，结果记入 `checking/summary.md`
 - [ ] 1.2 列出没有自动化覆盖的人工验收项及步骤，并记录它们在现役上的结果：AUTO 主/子路由（含状态面板）、Pet Locus 子任务回传、memex 召回/写卡/eval 自检、Automation 任务列表、btw、better-sidebar 各 tab、cockpit-bridge 上报、四个商店包的可见功能
 
 ## 2. pin、依赖与 Node（D7）
