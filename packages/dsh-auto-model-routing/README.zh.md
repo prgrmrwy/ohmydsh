@@ -86,6 +86,8 @@ AUTO 向 Jev 提的问题来自一个包内置、有名字、有来源的**判�
 | `reasoning-depth`（缺省） | 推理难度；即 0.6.6 及以前的规则文件，逐字节相同 | 本项目的合成核对 |
 | `effort-as-verification` | 下一步需要多少验证、边界情况测试与自主判断；加一行固定的 `Execution:` 调用路径 | Anthropic《[Spending your effort](https://claude.dev/blog/spending-your-effort/)》（厂商内部数据；用于 GPT 属于未经验证的外推） |
 
+**新增自己的预设。** 预设是包内置的，新增一个只需在本包里做一次小改动：新建 `src/presets/<id>/rubric.json`（标签与现有预设一致），在 `src/presets/index.ts` 的 `PRESETS` 末尾追加元数据（标题、摘要、证据、来源、`context`），在 `test/presets.test.ts` 的锁定表追加哈希，写 `docs/presets/<id>.md`，然后 `npm test`、构建并重启。新预设会自动出现在设置页选择器和决策提示里；effort 序列、上限和模型槽不受预设影响。详细步骤见 [docs/presets](docs/presets/README.zh.md#新增一个预设)。
+
 已发布的预设不会原地修改：新的思路会作为新的预设 id 加入，所以升级后所选预设的判断方式不变。每条反馈绑定的快照都记录作出决策的预设。详见 [docs/presets](docs/presets/README.zh.md)。降级到 0.6.6 时，`preset` 设置会被忽略；带 `snapshot.preset` 的绑定会被旧版跳过，账本不被改写，重新升级后恢复显示。
 
 ### 自定义模型家族

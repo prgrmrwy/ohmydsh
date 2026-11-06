@@ -86,6 +86,8 @@ The questions AUTO asks Jev come from a built-in, named and sourced **judgement 
 | `reasoning-depth` (default) | reasoning difficulty; the rule file used up to 0.6.6, byte for byte | this project's synthetic check |
 | `effort-as-verification` | how much verification, edge-case testing and independent judgement the next work needs; adds a fixed `Execution:` call-path line | Anthropic, [Spending your effort](https://claude.dev/blog/spending-your-effort/) (vendor-internal numbers; GPT use is an unverified extrapolation) |
 
+**Adding your own preset.** Presets are built in, so a new one is a small source change in this package: add `src/presets/<id>/rubric.json` (same labels as the existing presets), append its metadata (title, summary, evidence, sources, `context`) to `PRESETS` in `src/presets/index.ts`, append its hash to the lock table in `test/presets.test.ts`, write `docs/presets/<id>.md`, then `npm test`, build and restart. It shows up in the settings picker and decision hints automatically; the effort ladder, cap and model slots stay out of reach. Step-by-step: [docs/presets](docs/presets/README.md#adding-a-preset).
+
 Published presets never change in place: a new idea becomes a new preset id, so a selected preset keeps judging the same way after an upgrade. Each binding snapshot records which preset made the decision. Details: [docs/presets](docs/presets/README.md). Downgrading to 0.6.6 ignores the `preset` setting, and bindings that carry `snapshot.preset` are skipped by the older reader; the ledger is not rewritten and upgrading again makes them visible.
 
 ### Custom model families
