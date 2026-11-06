@@ -34,6 +34,15 @@ test('test_missing_toolchain_is_actionable', async () => {
   assert.match(result.message, /npm/)
 })
 
+// DSH 0.2.2 raised its minimum Node to 24.9; the repository floor must not admit older runtimes.
+test('test_root_engines_node_meets_dsh_minimum', async () => {
+  const { checkToolchain } = await bootstrap()
+  const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+  const check = (nodeVersion) => checkToolchain({ nodeVersion, npmVersion: '11.6.2', engines: pkg.engines, recommended: '24.20.0' })
+  assert.equal(check('24.8.0').ok, false, `engines.node ${pkg.engines.node} must reject Node 24.8.0`)
+  assert.equal(check('24.9.0').ok, true)
+})
+
 test('test_engines_recommendation_and_docs_agree', async () => {
   const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
   assert.equal(pkg.packageManager, undefined)

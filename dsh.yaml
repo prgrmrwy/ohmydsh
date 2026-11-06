@@ -2,7 +2,9 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.2.1-rc.5     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.2.2-rc.1     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+# 0.2.2 行为变化(change upgrade-dsh-0-2-2-runtime):Web Fetch 不再拒绝非公网地址,可访问代理、内网与本机,
+# 信任面扩大;2026-11-06 由用户接受,不另加限制。文件先读后改/外部修改防护由 fs-observation-policy 条目显式恢复。
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
@@ -26,9 +28,9 @@ thirdPartyResources:
     version: 2.0.1
     integrity: sha512-G5P8ossz5R7lDuUWAO1v5aVG93qVjk3D85+tF2gkPGVhnVgdfEZ+pqllsAo+IEMsKa7/KE52ohbAhb9m+r0XtQ==
     provider:
-      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.1-rc.5'
-      version: 0.2.1-rc.5
-      integrity: sha512-KrCbl/NZXtTuO5MrzJWZkCj5jWZ9lZRMJQ9F2W/8POpQKG7TsZTYmdrC4X1oBGXqwjVeMWl/a6MBNP4TmR2BIg==
+      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.2-rc.1'
+      version: 0.2.2-rc.1
+      integrity: sha512-L9iizLHhKbjx5ipHuCzhzgvLaUFyGPK9zv9yildV62BZADSBTdxcX4JO0hopJigHZtsdJp1qAw34e4R0hQrdoA==
     providerName: spec-superflow-upstream
     skills: [bug-investigator, build-executor, code-reviewer, contract-builder, need-explorer, release-archivist, spec-merger, spec-writer, workflow-start]
   - id: jev
@@ -38,9 +40,9 @@ thirdPartyResources:
     version: 0.14.5
     integrity: sha512-Imqfmx3wfA64MRqjOs6ZJYJYJz/v6qMxS+RPggDQYyjpbbe9LWvpYd/zamZ2RDv6m2p6qJdQeCS10DvkH4A+WA==
     bridge:
-      spec: '@deepseek-ai/dsh-mcp-client@0.2.1-rc.5'
-      version: 0.2.1-rc.5
-      integrity: sha512-E4ZsTZ0MPpT2njtl8dh7lTKyvsDoGG97FxmXzuVolcDPU0OqTxe0I/NXH58Z17/b+Saq7G0cGe1H/vVlEsR1rQ==
+      spec: '@deepseek-ai/dsh-mcp-client@0.2.2-rc.1'
+      version: 0.2.2-rc.1
+      integrity: sha512-hPyBjoKNDMdTyM7PYNkcacMwJ7hpb/QMoIv3tnCgymvVghqdh/0SzHVd3koev8SIg79SKfPR4DPgGuar3zDzKA==
     serverName: jev
     jevProvider: openrouter          # 闭集 typesafe|openrouter;TypeSafe 直连对本机出口返回 451(change configurable-jev-provider)
     credentialEnv: OPENROUTER_API_KEY  # 必须与 jevProvider 的固定映射一致;回滚:改回 typesafe / TYPESAFE_API_KEY

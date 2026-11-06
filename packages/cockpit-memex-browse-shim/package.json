@@ -67,7 +67,7 @@
     "@deepseek-ai/cordis": "^4.0.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis": "^4.1.0",
     "@types/node": "^24.19.2",
     "tsdown": "^0.23.1",
     "typescript": "^5.9.3",
