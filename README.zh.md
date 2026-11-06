@@ -62,7 +62,7 @@ POSIX start/stop/restart 要求 `lsof`、`ps`（用系统包管理器安装 lsof
 
 <!-- fixture: minimal-manifest -->
 ```yaml
-dshVersion: 0.2.1-rc.5
+dshVersion: 0.2.2-rc.1
 autoUpdate:
   enabled: false
 customizations: []
@@ -230,6 +230,7 @@ tests/                   仓库级测试
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
 - [memex-eval-config](patches/memex-eval-config.yml) — 添加固定自检目录的关闭声明，保留用户 scope 与工作区设置。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
+- [fs-observation-policy](patches/fs-observation-policy.yml) — 恢复官方默认关闭的先读后改与外部修改防护的 composition patch。
 - [dsh-collab-config](patches/dsh-collab-config.yml) — dsh-collab 配置补丁：邀请即授权，并声明 `pet-locus` 托管 channel，供 Pet Locus 以代理成员接入。
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 逐个列出 Magpie 各归属 route（`dsh-magpie-connector-<owner>`），使其不受本机出口门禁约束。
 - [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。

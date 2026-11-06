@@ -388,7 +388,14 @@ customizations:
     type: patch
     enabled: true
     brief: 让 connection provider 自身等待 webServer,恢复全部 Connection RPC 通道注册
-    note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webStartup, webServer](0.2.1 删除 webRuntime,官方行仍缺 webServer);整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。'
+    note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webStartup, webServer](0.2.1 删除 webRuntime,官方行仍缺 webServer);整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。0.2.2 复核:仍需保留(见 patch 注释)。'
+
+  # 组合补丁(非包):恢复 0.2.2 起默认关闭的官方文件观察策略
+  - id: fs-observation-policy
+    type: patch
+    enabled: true
+    brief: 恢复官方先读后改与外部修改防护(整行覆盖官方行为启用,不新增包行)
+    note: '组合补丁(patches/fs-observation-policy.yml;change upgrade-dsh-0-2-2-runtime D5):0.2.2 起官方 fs-observation-policy 行默认 disabled:true,本补丁以同 id/name 整行覆盖为 false,恢复未读先改 FS_NOT_OBSERVED、读后被外部改写再编辑 FS_STALE_VERSION。其 intent slot 只有一个决策者,禁止新增第二条加载该包的行;有效配置须恰一条且未禁用。仅作用于 sync 物化的 web profile。升级复核:重跑 DSH_TEST_OFFICIAL_RUNTIME=<官方运行体目录> node --test tests/fs-observation-policy.official.mjs(--dump-config 断言恰一条启用行);官方改名/移除/默认启用时删除本 fragment。移除:enabled:false → dsh build。'
 
   # 第三方纯提示词 skill(无 dsh.bundle):remote 精确 pin + 专属 skill-filesystem provider。
   - id: ponytail

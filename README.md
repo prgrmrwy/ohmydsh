@@ -62,7 +62,7 @@ Replace `dsh.yaml` with the minimal manifest below and run `dsh build`. No new c
 
 <!-- fixture: minimal-manifest -->
 ```yaml
-dshVersion: 0.2.1-rc.5
+dshVersion: 0.2.2-rc.1
 autoUpdate:
   enabled: false
 customizations: []
@@ -230,6 +230,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [memex-eval-judge](presets/memex-eval-judge) — Minimal native-only preset for the memex selftest judge, with no coding tools.
 - [memex-eval-config](patches/memex-eval-config.yml) — Adds fixed selftest workspace closures without replacing user scope or workspace settings.
 - [connection-webserver](patches/connection-webserver.yml) — Composition patch that restores Connection RPC channel registration.
+- [fs-observation-policy](patches/fs-observation-policy.yml) — Composition patch that re-enables the official read-before-edit and external-modification guard that the official bundle ships disabled.
 - [dsh-collab-config](patches/dsh-collab-config.yml) — Config patch for dsh-collab: invite-based admission and the `pet-locus` managed channel that lets Pet Locus join as a proxy member.
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — Config patch that exempts each Magpie owner route (`dsh-magpie-connector-<owner>`) from the host egress gate, listed one by one by exact provider id.
 - [websocket-heartbeat](patches/websocket-heartbeat.yml) — Config patch that relaxes the official gateway's WebSocket heartbeat to 5 seconds so large histories survive short network hiccups.

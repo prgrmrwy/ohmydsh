@@ -6,7 +6,7 @@
 
 官方 `appReady` 之后，插件等待 Loader 收敛，再对真实完整树出具证明。它检查每个条目，包括 disabled、failed 和无 fiber 的条目；展开后的 group/include 必须与实际条目一一对应。固定版本官方 preset registry 的公开 `livePresetMounts(rootFiber)` 会补上不出现在 `loader.entries()` 下的常驻与保留 revision；同时检查当前 preset 声明，preset 清单损坏即拒绝证明。官方 Host runner 可在 Loader 之外挂载原始子 fiber，其公开 `dynamicCordisRunner.inventory()` 中的任何条目都视为未知载体，其 package/retract 事件阻止之后降级。只接受已识别的静态官方模块和上述已理解的载体；任何已配置的 Pet、未解析载体、失败的启用条目、未知模块或不支持的 DSH 版本，都会阻止发布 descriptor 和注册路由。
 
-[no-pet-known-modules.json](./no-pet-known-modules.json) 记录 0.2.1-rc.5 的精确模块清单：来自官方 base/Web bundle patch、其四个 preset patch，以及 directory-picker-auto 固定的 native/browse 对。这是兼容名册，不是按包名前缀推断。更换 DSH pin 时须对照官方源码重新审查并重跑完整 profile 验收。任意第三方插件和未知载体在完整性可证明之前，有意要求显式 legacy 维护。
+[no-pet-known-modules.json](./no-pet-known-modules.json) 记录 0.2.2-rc.1 的精确模块清单：来自官方 base/Web bundle patch、其四个 preset patch，以及 directory-picker-auto 固定的 native/browse 对。这是兼容名册，不是按包名前缀推断。更换 DSH pin 时须对照官方源码重新审查并重跑完整 profile 验收。任意第三方插件和未知载体在完整性可证明之前，有意要求显式 legacy 维护。
 
 可证明无 Pet 的 Host 不拥有 Pet 资源，因此准备阶段记录的是“当前确实不存在”，而不是声称排空了资源。它发布同样的私有 descriptor `run/dsh-pet-stop/<port>.json`（目录 0700、文件 0600），使用 `connection.authenticatedUrl()` 与新的 boot 身份。精确路由 `/dsh-pet/api/prepare-stop` 使用 Connection 的签名 cookie 围栏，并精确校验回环 Host 与 Origin。`prepare`、`status`、`resume` 使用共享的 v1 nonce/PID/boot/deadline 协议，每次请求都重新读取真实树。Loader 拓扑变化会在 Pet 认领前撤下 noPet 路由；fiber phase、插件和 volatile 更新会使旧票据失效。dispose 只删除本 producer 的 descriptor inode 与路由。只有当前 Host 从未暴露过 Pet 或未知模块时，重新加载 producer 才能证明新的完整树；一旦观察到，该状态在 Host 生命周期内保持：Cordis 先从 registry 移除正在 dispose 的 fiber、再等待卸载，所以删除 Loader 行不能证明其资源已释放。这样的 Host 需要重新启动或显式 legacy 维护；旧票据不会跨越 producer 的 boot 身份。
 
@@ -23,7 +23,7 @@
 node --test tests/launcher-no-pet-profile.test.mjs tests/launcher-pet-stop.test.mjs
 ```
 
-真实 profile 验收是独立的构建产物通道 [launcher-no-pet.official.mjs](../../tests/launcher-no-pet.official.mjs)。它需要一个完整构建的官方 0.2.1-rc.5 运行体目录，其包解析须包含 `@deepseek-ai/dsh`。缺少依赖图会明确失败，所有负对照都不跳过。它使用真实官方 `runProfile`、profile patch、Loader、appReady、WebServer、Connection 与 preset 代际，只替换进程探测与信号；不停止真实 Host，不发模型请求或飞书消息。
+真实 profile 验收是独立的构建产物通道 [launcher-no-pet.official.mjs](../../tests/launcher-no-pet.official.mjs)。它需要一个完整构建的官方 0.2.2-rc.1 运行体目录，其包解析须包含 `@deepseek-ai/dsh`。缺少依赖图会明确失败，所有负对照都不跳过。它使用真实官方 `runProfile`、profile patch、Loader、appReady、WebServer、Connection 与 preset 代际，只替换进程探测与信号；不停止真实 Host，不发模型请求或飞书消息。
 
 ```sh
 DSH_TEST_OFFICIAL_RUNTIME=/absolute/path/to/built/launcher \

@@ -28,6 +28,11 @@
 # 所以本 fragment 继续保留,并随官方改为注入 webStartup。注入已删除的 webRuntime 会让
 # Connection 永远等待、整个 Web 起不来。
 #
+# 0.2.2 复核(2026-11-07):官方 connection 行(dsh-web-app 0.2.2-rc.1 cordis.patch.yml:230-237)
+# 仍为 `inject: [webStartup]`,config.trustedHosts 仍是 `!!js ctx.webStartup.trustedHosts`;
+# dsh-client-connection 0.2.2-rc.1 lib/index.js:871 的 register() 仍走 `owner.webServer.register`,
+# 本 fragment 继续保留,inject 与 config 来源和官方行匹配。
+#
 # 退休条件:官方 connection 行的 `inject` 自己带上 `webServer` 时,本 fragment 必须删除。
 # 上游讨论:https://github.com/deepseek-ai/deepseek-harness/discussions/5926
 # 社区同款做法:https://github.com/ysr666/dsh-vision-router/pull/481
