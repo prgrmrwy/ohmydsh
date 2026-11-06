@@ -96,7 +96,18 @@
     "tsdown": "^0.23.1",
     "typescript": "^5.9.3",
     "vitest": "^5.0.5",
-    "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1"
+    "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-tool-executor-native": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-sqlite": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-fs-local": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-working-directory": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-subagent": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-subagent-spawn-in-process": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-tool-subagent": "^0.2.2-rc.1"
   },
   "dependencies": {
     "zod": "^4.6.5"
