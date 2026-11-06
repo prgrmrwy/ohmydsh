@@ -84,6 +84,7 @@ import {
 } from './host/locus/delivery.js'
 import { createExpiryScheduler } from './host/locus/expiry-scheduler.js'
 import { createRefusedReplyTracker } from './host/locus/refused-reply.js'
+import { createDisplayCache } from './host/locus/display-cache.js'
 import { StopPreparation, PET_PREPARE_STOP_ROUTE, publishStopDescriptor, releaseStopDescriptor } from './host/locus/stop-preparation.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { petRoute } from './host/http.js'
@@ -1859,19 +1860,9 @@ async function initialize(
   const imLocusLarkPort = createLocusLarkPort()
   // Display-only doc metadata, cached: the management panel refreshes often,
   // and a failed read is retried after a shorter delay than a successful one.
-  const docMetaCache = (() => {
-    const entries = new Map<string, { at: number; ok: boolean; value?: { title?: string; url?: string } }>()
-    return {
-      get: async (token: string): Promise<{ title?: string; url?: string } | undefined> => {
-        const now = Date.now()
-        const hit = entries.get(token)
-        if (hit !== undefined && now - hit.at < (hit.ok ? 10 * 60_000 : 60_000)) return hit.value
-        const value = await larkClient.inspectDoc?.(token).catch(() => undefined)
-        entries.set(token, { at: now, ok: value !== undefined, ...(value === undefined ? {} : { value }) })
-        return value
-      },
-    }
-  })()
+  const docMetaCache = createDisplayCache(async (token: string) => larkClient.inspectDoc?.(token))
+  // IM group names: v20 rows no longer store a chat name, so the panel reads it live.
+  const chatNameCache = createDisplayCache(async (chatId: string) => larkClient.chatName(chatId))
   // A document has no "post to the root" call. Its control messages (the
   // /bind source-switch warning) follow the business-answer routing: under the
   // anchoring comment for a comment-level entry, or a new full comment that
@@ -3092,12 +3083,16 @@ async function initialize(
     },
     resolvers: {
       session: describeSession,
-      // Document entries only (D14): title/url via drive +inspect, cached so the
-      // panel does not re-inspect every refresh; a comment's summary is the
-      // earliest persisted anchored quote. IM entries keep their existing names.
+      // Group rows: live chat name (cached). Document entries: title/url via drive
+      // +inspect (cached); a comment's summary is the earliest persisted quote.
       endpoint: async endpoint => {
         const token = parseDocChatId(endpoint.chatId)
-        if (token === undefined) return undefined
+        if (token === undefined) {
+          // A topic has no name of its own; only the group row shows the chat name.
+          if (endpoint.threadId !== undefined) return undefined
+          const chatName = await chatNameCache.get(endpoint.chatId)
+          return chatName === undefined || chatName.trim() === '' ? undefined : { chatName }
+        }
         const meta = await docMetaCache.get(token)
         const quote = endpoint.threadId === undefined
           ? undefined
