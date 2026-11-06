@@ -80,16 +80,16 @@ Files: `management.ts`, `routes.ts`, `client/*`. Depends on: 1 (wire), plus the 
 
 ## 3. Integration (lead)
 
-- [ ] 3.1 Review the diff owner by owner against `design.md` D1–D17 and the delta specs; no change outside the D14 write scopes without a note.
-- [ ] 3.2 `cd packages/dsh-pet && npm run typecheck` (host + client) green.
-- [ ] 3.3 `cd packages/dsh-pet && npx vitest run` green; compare counts with the 0.2 baseline and explain every file that disappeared (each in `deleted-tests.md`).
-- [ ] 3.4 Root `npm test` and `npm run check:artifacts` green.
-- [ ] 3.5 `node scripts/sync.mjs` run **twice**; the second run produces no change.
-- [ ] 3.6 Deploy check: run the migration script from the installed package layout (`dsh-pet-migrate-state --dry-run --db <fixture>`) to prove every transform module is importable.
-- [ ] 3.7 Write `deleted-tests.md` (every deleted / rewritten-wholesale test with the reason and the replacing test or "subject removed").
-- [ ] 3.8 Flip every `test-plan.md` row 🔴 → 🟢 (⚪ rows → 🟢 after their ported test passes); no red row remains.
-- [ ] 3.9 Write `verify.md`; run `openspec validate pet-locus-isomorphic-entries --strict`.
-- [ ] 3.10 Hand the real-machine acceptance list (design "Migration Plan" step 4) to the owner. Do not push, deploy, or migrate the live DB.
+- [ ] 3.1 Review the diff owner by owner against `design.md` D1–D17 and the delta specs; no change outside the D14 write scopes without a note. — 未执行：实现阶段没有独立跨模型评审（见 verify.md）。
+- [x] 3.2 `cd packages/dsh-pet && npm run typecheck` (host + client) green.
+- [x] 3.3 `cd packages/dsh-pet && npx vitest run` green; compare counts with the 0.2 baseline and explain every file that disappeared (each in `deleted-tests.md`).
+- [x] 3.4 Root `npm test` and `npm run check:artifacts` green.
+- [x] 3.5 `node scripts/sync.mjs` run **twice**; the second run produces no change.
+- [x] 3.6 Deploy check: run the migration script from the installed package layout (`dsh-pet-migrate-state --dry-run --db <fixture>`) to prove every transform module is importable.
+- [x] 3.7 Write `deleted-tests.md` (every deleted / rewritten-wholesale test with the reason and the replacing test or "subject removed").
+- [x] 3.8 Flip every `test-plan.md` row 🔴 → 🟢 (⚪ rows → 🟢 after their ported test passes); no red row remains.
+- [x] 3.9 Write `verify.md`; run `openspec validate pet-locus-isomorphic-entries --strict`.
+- [x] 3.10 Hand the real-machine acceptance list (design "Migration Plan" step 4) to the owner. Do not push, deploy, or migrate the live DB. — 所有者已在真机执行迁移、管理面筛选与改绑验收（2026-11-06）。
 
 ## Dependencies (summary)
 

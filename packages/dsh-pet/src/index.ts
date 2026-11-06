@@ -255,13 +255,42 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // Fire-and-forget by design: a rejected initialization degrades Pet through
   // the lifecycle machine instead of rejecting the Host's plugin apply.
-  void initialize(ctx, lifecycle, paths, config).catch((error: unknown) => {
+  const progress = { liveWorkStarted: false }
+  const initialization = initialize(ctx, lifecycle, paths, config, progress).catch((error: unknown) => {
     const reason = error instanceof Error ? error.message : String(error)
     // `markDegraded` now reports through the sink above, so logging here too
     // would duplicate the line for this one path while leaving every contained
     // step unlogged.
     lifecycle.markDegraded(`Pet initialization failed: ${reason}`)
   })
+  // A degraded start that ended BEFORE anything could own live work still
+  // answers the launcher's safe-stop protocol (otherwise the next restart
+  // treats the Host as legacy). Past that point the honest answer is legacy.
+  void initialization.then(async () => {
+    if (lifecycle.state.phase !== 'degraded' || progress.liveWorkStarted) return
+    await publishDegradedStopper(ctx, paths)
+  }).catch((error: unknown) => petWarn(`degraded stop discovery unavailable: ${error instanceof Error ? error.message : String(error)}`))
+}
+
+/** No-op stop preparation for a degraded Pet that has no intake, dispatch or owned children. */
+async function publishDegradedStopper(ctx: Context, paths: PetPaths): Promise<void> {
+  const controlPort = ctx.webServer.port
+  const profileName = ctx.get('profileContext')?.name
+  if (!(typeof controlPort === 'number' && Number.isInteger(controlPort) && controlPort > 0 && typeof profileName === 'string' && typeof ctx.connection.authenticatedUrl === 'function')) return
+  const identity = { hostPid: process.pid, bootId: randomUUID() }
+  const preparation = new StopPreparation(identity, { freeze: async () => {}, drain: async () => {}, resume: async () => {} })
+  ctx.effect(() => () => preparation.dispose(), 'dsh-pet: degraded shutdown preparation')
+  const origin = `http://127.0.0.1:${controlPort}`
+  await publishStopDescriptor(paths.dshHome, controlPort, {
+    v: 1, pid: identity.hostPid, bootId: identity.bootId, profile: profileName,
+    origin, authenticatedUrl: ctx.connection.authenticatedUrl(origin),
+  })
+  ctx.effect(() => () => releaseStopDescriptor(paths.dshHome, controlPort, identity.bootId), 'dsh-pet: release degraded shutdown discovery')
+  const route = petRoute(PET_PREPARE_STOP_ROUTE, ({ body }) => preparation.request(body))
+  ctx.effect(() => {
+    const protectedRoute = withBrowserAuth(route, ctx.connection)
+    return ctx.webServer.register({ kind: 'exact', path: protectedRoute.path, handler: protectedRoute.handler })
+  }, `dsh-pet: ${route.path}`)
 }
 
 /**
@@ -281,6 +310,7 @@ async function initialize(
   lifecycle: PetLifecycleMachine,
   paths: PetPaths,
   config: Config,
+  progress: { liveWorkStarted: boolean } = { liveWorkStarted: false },
 ): Promise<void> {
   const directories = await lifecycle.contain('Pet state directories', async () => {
     await ensurePetDirectories(paths)
@@ -533,6 +563,9 @@ async function initialize(
     ),
   )
 
+  // From here Tasks may resume and dispatch can exist: a degraded exit after
+  // this point must not claim a no-op stop is safe.
+  progress.liveWorkStarted = true
   // Prove uncertain Tasks before accepting new work.
   await lifecycle.contain('Pet restart reconciliation', () =>
     reconcileCreatingExecutors(

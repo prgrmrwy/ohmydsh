@@ -41,7 +41,7 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
-async function host(options: { readonly seedBeforeStart?: (domain: { table(name: string): { put(key: string, value: unknown): Promise<void> } }) => Promise<void> } = {}) {
+async function host(options: { readonly degradeLate?: boolean; readonly seedBeforeStart?: (domain: { table(name: string): { put(key: string, value: unknown): Promise<void> } }) => Promise<void> } = {}) {
   const home = await mkdtemp(path.join(tmpdir(), 'pet-host-wiring-'))
   const project = await mkdtemp(path.join(tmpdir(), 'pet-host-project-'))
   temporaryRoots.push(home, project)
@@ -169,15 +169,16 @@ async function host(options: { readonly seedBeforeStart?: (domain: { table(name:
   let capability: channelCapability.LocusChannelCapability | undefined
   const createCapability = channelCapability.createLocusChannelCapability
   vi.spyOn(channelCapability, 'createLocusChannelCapability').mockImplementation(deps => {
+    if (options.degradeLate === true) throw new Error('injected late initialization failure')
     capability = createCapability(deps)
     return capability
   })
-  if (options.seedBeforeStart !== undefined) {
+  if (options.seedBeforeStart !== undefined || options.degradeLate === true) {
     // A stored set that violates the v20 invariants: Pet must not become ready.
     const { openMigratedDomain } = await import('./support/pet-domain-open.js')
     await mkdir(path.join(home, 'plugins', 'dsh-pet'), { recursive: true })
     const seeding = await openMigratedDomain(path.join(home, 'plugins', 'dsh-pet', 'state.sqlite'))
-    try { await options.seedBeforeStart(seeding.domain as never) } finally { await seeding.close() }
+    try { await options.seedBeforeStart?.(seeding.domain as never) } finally { await seeding.close() }
     await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
     await ctx.plugin(StorageDomain, { backend: PET_BACKEND_NAME })
     const warnings: string[] = []
@@ -185,7 +186,7 @@ async function host(options: { readonly seedBeforeStart?: (domain: { table(name:
     await ctx.plugin(petPlugin, { home, version: 'test' })
     await vi.waitFor(() => expect(warnings.some(line => line.includes('degraded'))).toBe(true), { timeout: 5_000 })
     warn.mockRestore()
-    return { degraded: warnings, routes, ctx }
+    return { degraded: warnings, routes, ctx, home }
   }
   await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
   await ctx.plugin(StorageDomain, { backend: PET_BACKEND_NAME })
@@ -221,7 +222,7 @@ function admit(h: Awaited<ReturnType<typeof host>>, endpoint: { chatId: string; 
   })
 }
 
-async function ownerRoute(h: Awaited<ReturnType<typeof host>>, route: string, body: Record<string, unknown>) {
+async function ownerRoute(h: { readonly ctx: Context }, route: string, body: Record<string, unknown>) {
   const origin = `http://127.0.0.1:${h.ctx.webServer.port}`
   const response = await fetch(`${origin}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify(body) })
   const text = await response.text()
@@ -229,7 +230,7 @@ async function ownerRoute(h: Awaited<ReturnType<typeof host>>, route: string, bo
   try { result = JSON.parse(text) } catch { result = text }
   return { status: response.status, body: result }
 }
-async function stopRequest(h: Awaited<ReturnType<typeof host>>, action = 'prepare', extra: Record<string, unknown> = {}) {
+async function stopRequest(h: { readonly ctx: Context; readonly home: string }, action = 'prepare', extra: Record<string, unknown> = {}) {
   const filename = path.join(h.home, 'run', 'dsh-pet-stop', `${h.ctx.webServer.port}.json`)
   const descriptor = JSON.parse(await readFile(filename, 'utf8'))
   expect((await stat(filename)).mode & 0o777).toBe(0o600)
@@ -309,7 +310,30 @@ describe('actual Host three-tier assembly', () => {
     const h: any = await host({ seedBeforeStart: seed })
     const line = h.degraded.find((entry: string) => entry.includes('degraded'))
     expect(line).toContain(key.replace('\u0000', '\u0000'))
-    expect(h.routes).toEqual([])
+    // No Pet routes except the safe-stop route a degraded start still serves.
+    await vi.waitFor(() => expect(h.routes.map((route: any) => route.path)).toEqual([PET_PREPARE_STOP_ROUTE]))
+  })
+
+  it('a degraded start (before any live work) still publishes the stop descriptor and serves prepare-stop with no-op freeze/drain', async () => {
+    const orphanTopic = async (domain: any) => {
+      await domain.table('loci').put('chat\u0000omt', { endpoint: { chatId: 'chat', threadId: 'omt' }, locusId: 'orphan-topic', sessionId: 's1', state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 })
+    }
+    const h: any = await host({ seedBeforeStart: orphanTopic })
+    const descriptor = JSON.parse(await readFile(path.join(h.home, 'run', 'dsh-pet-stop', `${h.ctx.webServer.port}.json`), 'utf8'))
+    expect(descriptor).toMatchObject({ v: 1, pid: process.pid })
+    expect(await stopRequest(h, 'prepare')).toMatchObject({ body: { ok: true, data: { phase: 'prepared', bootId: descriptor.bootId, hostPid: process.pid } } })
+    expect(await stopRequest(h, 'status')).toMatchObject({ body: { data: { phase: 'prepared' } } })
+    expect(await stopRequest(h, 'resume')).toMatchObject({ body: { ok: true, data: { phase: 'active' } } })
+    // Only the stop route: a degraded Pet still has no other routes.
+    await vi.waitFor(() => expect(h.routes.map((route: any) => route.path)).toEqual([PET_PREPARE_STOP_ROUTE]))
+  })
+
+  it('degradation AFTER live work could exist publishes no no-op stopper (the legacy path stays honest)', async () => {
+    const h: any = await host({ degradeLate: true })
+    expect(h.degraded.some((line: string) => line.includes('injected late initialization failure'))).toBe(true)
+    // Publication (if any) happens right after initialization settles; give it time.
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await expect(readFile(path.join(h.home, 'run', 'dsh-pet-stop', `${h.ctx.webServer.port}.json`), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('cold-restores a locked main with its own tools, preserving collab and ordinary sessions', async () => {
