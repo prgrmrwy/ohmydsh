@@ -66,8 +66,8 @@
 
 ## 11. 上游反馈（D9）
 
-- [ ] 11.1 重新搜索 deepseek-harness discussions（上游已关闭 issues），选定已有热度的相关帖（当前首选 #7179），找不到时才准备在 Ideas 新建
-- [ ] 11.2 起草留言：插件需要在本步选择固定前可等待地设定模型/effort（或把 pre-step 的 `modelSelection` 正式定为可写），以及 `agent/request` 弃用后缺少逐次请求核验点；不含本机路径、会话数据或凭据
+- [x] 11.1 重新搜索 deepseek-harness discussions（上游已关闭 issues），选定已有热度的相关帖（当前首选 #7179），找不到时才准备在 Ideas 新建
+- [x] 11.2 起草留言：插件需要在本步选择固定前可等待地设定模型/effort（或把 pre-step 的 `modelSelection` 正式定为可写），以及 `agent/request` 弃用后缺少逐次请求核验点；不含本机路径、会话数据或凭据
 - [ ] 11.3 经用户确认后发布，链接与后续回应记入 `checking/summary.md`；上游回应不阻断合入
 
 ## 12. 切换与收尾（需用户批准）
