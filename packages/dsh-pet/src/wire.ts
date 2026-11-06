@@ -128,24 +128,12 @@ export const MAX_EXPRESSION_DIMENSION = 2048
  * Task/Invocation routes remain unchanged until channel cutover.
  */
 export const LOCUS_ROUTES = {
-  /** Complete owner-facing locus management snapshot. */
+  /** Complete owner-facing v20 locus management snapshot. */
   view: '/dsh-pet/api/locus',
-  /** Endpoint/parent/child reverse-discovery projection. */
-  discovery: '/dsh-pet/api/locus-discovery',
-  /** One mutation endpoint accepting the discriminated action request below. */
+  /** The one mutation endpoint: `stop` / `access` / `rebind` (design D10). */
   action: '/dsh-pet/api/locus-action',
-  /** Explicit default-Q&A create/open operation. */
+  /** Explicit default-Q&A create/open operation (Pet wheel). */
   defaultQa: '/dsh-pet/api/locus-default-qa',
-  /** Optional per-action endpoints for a staged Host cutover. */
-  bind: '/dsh-pet/api/locus-bind',
-  unbind: '/dsh-pet/api/locus-unbind',
-  /** Archive/retire a locus while preserving its history and resources. */
-  archive: '/dsh-pet/api/locus-archive',
-  /** Stop a locus while retaining its endpoint stop marker. */
-  stop: '/dsh-pet/api/locus-stop',
-  scope: '/dsh-pet/api/locus-scope',
-  tools: '/dsh-pet/api/locus-tools',
-  rebuild: '/dsh-pet/api/locus-rebuild',
   // NOTE: the optional owner view/correction surface for shared facts is
   // deliberately NOT declared here yet. A declared route must be registered
   // exactly once, and shared facts are now written by in-scope agents, so this
@@ -192,35 +180,6 @@ export type PetLocusEndpointInput = Pick<PetLocusEndpointView, 'chatId' | 'threa
 /** Alias used by Host adapters that refer to this as an endpoint value. */
 export type PetLocusEndpoint = PetLocusEndpointView
 
-/** Where a locus generation obtained its main-session association. */
-export type PetLocusSource = 'auto' | 'inherited' | 'explicit' | 'qa-created'
-
-/** Durable lifecycle of one locus generation. */
-export type PetLocusState =
-  | 'provisioning'
-  /** Published; the child session is created by the first deliverable message. */
-  | 'not-created'
-  | 'active'
-  | 'switching'
-  | 'invalid'
-  | 'stopped'
-  | 'retired'
-
-/** Main/parent session facts shown by the management surface. */
-export interface PetLocusMainSessionView {
-  readonly sessionId: string
-  readonly title?: string
-  readonly source?: PetLocusSource
-  readonly availability?: 'available' | 'archived' | 'missing'
-}
-
-/** Dedicated child session facts; provisioning generations may not have one. */
-export interface PetLocusChildSessionView {
-  readonly sessionId?: string
-  readonly title?: string
-  readonly availability?: 'available' | 'archived' | 'missing'
-}
-
 /** Workspace ownership derived from the main session. */
 export interface PetLocusWorkspaceView {
   readonly workspaceId: string
@@ -229,47 +188,6 @@ export interface PetLocusWorkspaceView {
   readonly path?: string
   /** Confirmed execution-root anchor, not a sandbox authorization claim. */
   readonly executionRoot?: string
-}
-
-/** Caller-bound execution-root facts; never infer authorization from its presence. */
-export interface PetLocusContextAnchorView {
-  readonly status: 'confirmed' | 'missing' | 'unknown'
-  readonly existence?: 'exists' | 'missing' | 'unknown'
-  readonly authorization?: 'authorized' | 'unauthorized' | 'unknown'
-  readonly executionRoot?: string
-  readonly projectResources?: readonly string[]
-  readonly constraints?: readonly string[]
-  readonly provenance?: string
-  readonly confirmedAt?: number
-}
-
-export type PetLocusPermissionMode = 'read' | 'write'
-
-/** Desired and Host-verified effective permission for one locus generation. */
-export interface PetLocusPermissionView {
-  readonly desired: PetLocusPermissionMode
-  readonly effective: PetLocusPermissionMode
-  readonly verifiedAt?: number
-  readonly grantedBy?: string
-}
-
-/** State metadata kept separate from the permission axes. */
-export interface PetLocusStateView {
-  readonly state: PetLocusState
-  /** Accepted/running work fences source switching and scope changes. */
-  readonly busy: boolean
-  readonly invalidReason?: string
-  readonly createdAt: number
-  readonly updatedAt: number
-  readonly stoppedAt?: number
-  readonly retiredAt?: number
-}
-
-/** Generation identity and replacement provenance for one locus view. */
-export interface PetLocusGenerationView {
-  readonly locusId: string
-  readonly generation: number
-  readonly replacesLocusId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -356,100 +274,6 @@ export interface PetLocusOwnerProjection {
   readonly publicContext?: PetLocusPublicContextView
 }
 
-/**
- * Complete owner-facing projection of one locus generation.
- *
- * The nested objects intentionally mirror the domain aggregate's endpoint,
- * parent/child session, workspace, permission and state concepts.  This is a
- * projection, not a second persistence schema: Task/Invocation records remain
- * the ordinary Pet API and are not embedded or renamed here.
- */
-export interface PetLocusView {
-  readonly locusId: string
-  readonly generation: number
-  readonly endpoint: PetLocusEndpointView
-  readonly main: PetLocusMainSessionView
-  readonly child: PetLocusChildSessionView
-  readonly workspace: PetLocusWorkspaceView
-  readonly contextAnchor?: PetLocusContextAnchorView
-  readonly permission: PetLocusPermissionView
-  readonly toolTier: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell'; readonly verifiedAt?: number; readonly grantedBy?: string }
-  readonly childComposition?: 'tier3'
-  readonly state: PetLocusStateView
-  readonly source: PetLocusSource
-  /** Chat-level locus that structurally owns this topic, when applicable. */
-  readonly parentLocusId?: string
-  /** Derived from the parent-session default-Q&A index. */
-  readonly isDefaultQa: boolean
-  /** Compatibility spelling retained for early staged consumers. */
-  readonly defaultQa?: boolean
-  /** Optional B035 owner facts; absent means the capability was not composed. */
-  readonly owner?: PetLocusOwnerProjection
-}
-
-/** Stable endpoint-index projection: current generation plus immutable history. */
-export interface PetLocusEndpointDiscoveryView {
-  readonly endpoint: PetLocusEndpointView
-  readonly current?: PetLocusView
-  readonly history: readonly PetLocusView[]
-}
-
-/** Parent-session reverse index, including the independent default-Q&A pointer. */
-export interface PetLocusParentDiscoveryView {
-  readonly parentSessionId: string
-  readonly defaultQa?: PetLocusView
-  readonly loci: readonly PetLocusView[]
-}
-
-/** Child-session reverse lookup.  It never enumerates sibling loci. */
-export interface PetLocusChildDiscoveryView {
-  readonly childSessionId: string
-  /** Current reverse-index match; absent when the child has no active locus. */
-  readonly locus?: PetLocusView
-  /** Historical matches are owner-visible and may be empty. */
-  readonly history?: readonly PetLocusView[]
-}
-
-/**
- * Bidirectional discovery projection used by the owner-facing management view.
- * Individual branches may be omitted when a query was scoped to another index.
- */
-export interface PetLocusDiscoveryView {
-  readonly byEndpoint: readonly PetLocusEndpointDiscoveryView[]
-  readonly byParent: readonly PetLocusParentDiscoveryView[]
-  readonly byChild: readonly PetLocusChildDiscoveryView[]
-}
-
-/** A scoped discovery result keeps the owner snapshot shape unambiguous. */
-export interface PetLocusDiscoveryResult {
-  readonly discovery: PetLocusDiscoveryView
-}
-
-/** Independent default-Q&A pointer for one main session. */
-export interface PetLocusDefaultQaView {
-  readonly parentSessionId: string
-  readonly locus?: PetLocusView
-}
-
-/** Complete locus management snapshot returned by the new view route. */
-export interface PetLocusOwnerManagementView {
-  /** One optional owner projection per durable main-session scope. */
-  readonly byParent: readonly {
-    readonly parentSessionId: string
-    readonly projection: PetLocusOwnerProjection
-  }[]
-}
-
-export interface PetLocusManagementView {
-  /** Monotonic snapshot generation, separate from each locus's generation. */
-  readonly generation: number
-  readonly loci: readonly PetLocusView[]
-  readonly defaultQa: readonly PetLocusDefaultQaView[]
-  readonly discovery: PetLocusDiscoveryView
-  /** Optional aggregate owner facts grouped by main session. */
-  readonly owner?: PetLocusOwnerManagementView
-}
-
 // ---------------------------------------------------------------------------
 // Shared-fact ledger: owner-facing todo surface (`pet-locus-intent-triage`)
 // ---------------------------------------------------------------------------
@@ -470,8 +294,8 @@ export type PetTodoAction = 'accept' | 'done' | 'drop'
 export interface PetTodoView {
   readonly itemId: string
   readonly locusId: string
-  /** Generation at registration time. Audit fact only; never used to address. */
-  readonly generation: number
+  /** Generation at registration time on pre-v20 rows; absent on newer ones. Audit fact only; never used to address. */
+  readonly generation?: number
   readonly endpoint: PetLocusEndpointView
   readonly triggerMessageId: string
   readonly requestedBy: string
@@ -547,54 +371,6 @@ export interface PetTodoActionResult {
   readonly dispatch?: PetTodoDispatchReceipt
 }
 
-/**
- * Storage-aligned locus projection for Host adapters and persistence tooling.
- *
- * Unlike `PetLocusView`, this shape keeps the aggregate's stable field names
- * verbatim (`id`, `parentSessionId`, `childSessionId`, `workspaceId`, scalar
- * `state`, etc.). It is additive so a staged client can use the richer nested
- * view without forcing a legacy adapter to rename its records.
- */
-export interface PetLocusRecordView {
-  readonly id: string
-  readonly generation: number
-  readonly endpoint: PetLocusEndpointView
-  readonly parentSessionId: string
-  readonly childSessionId?: string
-  readonly workspaceId: string
-  readonly parentLocusId?: string
-  readonly source: PetLocusSource
-  readonly state: PetLocusState
-  readonly permission: PetLocusPermissionView
-  readonly busy: boolean
-  readonly createdAt: number
-  readonly updatedAt: number
-  readonly retiredAt?: number
-  readonly stoppedAt?: number
-  readonly invalidReason?: string
-  readonly replacesLocusId?: string
-  /** Optional optimistic fence supported by the durable locus schema. */
-  readonly revision?: number
-  /** Confirmed caller-bound anchor; presence never implies write permission. */
-  readonly contextAnchor?: {
-    readonly status: 'confirmed' | 'missing' | 'unknown'
-    readonly existence?: 'exists' | 'missing' | 'unknown'
-    readonly authorization?: 'authorized' | 'unauthorized' | 'unknown'
-    readonly executionRoot?: string
-    readonly projectResources?: readonly string[]
-    readonly constraints?: readonly string[]
-    readonly provenance?: string
-    readonly confirmedAt?: number
-  }
-}
-
-/** Query selectors for the discovery route; at least one selector is expected. */
-export interface PetLocusDiscoveryRequest {
-  readonly endpoint?: PetLocusEndpointInput
-  readonly parentSessionId?: string
-  readonly childSessionId?: string
-}
-
 /** Browser-safe body for creating/opening a main session's stable default Q&A locus. */
 export interface PetLocusDefaultQaRequest {
   readonly parentSessionId: string
@@ -607,216 +383,11 @@ export interface PetLocusDefaultQaHostRequest extends PetLocusDefaultQaRequest {
   readonly actorId: string
 }
 
-/** Explicit default-Q&A route result. */
-export interface PetLocusDefaultQaResult {
-  readonly action: 'default-qa'
-  readonly locus: PetLocusView
-  readonly created?: boolean
-  readonly reused?: boolean
-}
-
-/** Optional optimistic-concurrency fence shared by locus mutations. */
-export interface PetLocusMutationFence {
-  /** Endpoint generation observed by the caller. */
-  readonly expectedGeneration?: number
-  /** Current locus id observed by the caller, for replacement/retire races. */
-  readonly expectedLocusId?: string
-  /** Last update timestamp observed by the caller. */
-  readonly expectedUpdatedAt?: number
-}
-
-/** Bind an endpoint to a main session, creating a fresh read child. */
-export interface PetLocusBindAction extends PetLocusMutationFence {
-  readonly action: 'bind'
-  readonly endpoint: PetLocusEndpointInput
-  readonly parentSessionId: string
-  /** Workspace is normally derived from the parent and is revalidated Host-side. */
-  readonly workspaceId?: string
-  readonly parentLocusId?: string
-}
-
-/** Stop the exact current endpoint association while retaining its history. */
-export interface PetLocusUnbindAction extends PetLocusMutationFence {
-  readonly action: 'unbind'
-  readonly locusId: string
-  /** Required so Host can prove this id is still the endpoint's current generation. */
-  readonly endpoint: PetLocusEndpointInput
-}
-
-/** Archive the exact current entry while preserving an anti-revival stop marker. */
-export interface PetLocusArchiveAction extends PetLocusMutationFence {
-  readonly action: 'archive'
-  readonly locusId: string
-  /** Required so a stale panel row cannot archive a replacement generation. */
-  readonly endpoint: PetLocusEndpointInput
-}
-
-/** Stop the exact current locus while keeping the durable endpoint stop marker. */
-export interface PetLocusStopAction extends PetLocusMutationFence {
-  readonly action: 'stop'
-  readonly locusId: string
-  readonly endpoint: PetLocusEndpointInput
-}
-
-/** Change the shared read/write permission of the current locus. */
-export interface PetLocusScopeAction extends PetLocusMutationFence {
-  readonly action: 'scope'
-  readonly locusId: string
-  readonly mode: PetLocusPermissionMode
-  /**
-   * The Host derives the audit actor from the authenticated request. This
-   * action intentionally carries no client-supplied identity field.
-   */
-}
-
-/** Change the owner-granted tool tier without changing file permission or child identity. */
-export interface PetLocusToolsAction extends PetLocusMutationFence {
-  readonly action: 'tools'
-  readonly locusId: string
-  readonly tier: 'safe' | 'shell'
-}
-
-/** Explicit owner confirmation of context facts for the exact current locus. */
-export interface PetLocusConfirmAnchorAction extends PetLocusMutationFence {
-  readonly action: 'confirm-anchor'
-  readonly locusId: string
-  readonly endpoint: PetLocusEndpointInput
-  readonly executionRoot?: string
-  readonly projectResources?: readonly string[]
-  readonly constraints?: readonly string[]
-  /** Owner observation only; never authorizes the path or changes scope. */
-  readonly existence?: 'exists' | 'missing' | 'unknown'
-}
-
-/** Explicitly rebuild a stopped/invalid endpoint as a new read generation. */
-export interface PetLocusRebuildAction extends PetLocusMutationFence {
-  readonly action: 'rebuild'
-  readonly endpoint: PetLocusEndpointInput
-  readonly parentSessionId: string
-  readonly workspaceId?: string
-  readonly parentLocusId?: string
-  /** Rebuilt endpoint may claim the parent's default-Q&A slot only explicitly. */
-  readonly asDefaultQa?: boolean
-}
-
-/**
- * Move every entry of one archived main session onto ONE newly created one.
- *
- * A session-level action, not a per-entry one: the entries under an archived
- * session all went out of service for the same reason, and the repair is one
- * decision, so it must produce one replacement session. (The per-entry rebuild
- * creates a main session per call, which would split a shared session into as
- * many sessions as there are entries.)
- *
- * The client sends the entries it is rendering; the Host re-proves each one
- * against its own rows, so a stale list moves nothing it should not.
- */
-export interface PetLocusReplaceParentAction {
-  readonly action: 'replace-parent'
-  /** The archived main session whose entries are being moved. */
-  readonly parentSessionId: string
-  readonly entries: readonly {
-    readonly endpoint: PetLocusEndpointInput
-    readonly locusId: string
-  }[]
-}
-
-/** Discriminated mutation request accepted by the staged locus action route. */
-export type PetLocusActionRequest =
-  | PetLocusBindAction
-  | PetLocusUnbindAction
-  | PetLocusArchiveAction
-  | PetLocusStopAction
-  | PetLocusScopeAction
-  | PetLocusToolsAction
-  | PetLocusConfirmAnchorAction
-  | PetLocusRebuildAction
-  | PetLocusReplaceParentAction
-
-/** Result shared by all explicit locus actions. */
-export interface PetLocusActionResult {
-  readonly action: PetLocusActionRequest['action']
-  readonly locus: PetLocusView
-  readonly previousLocus?: PetLocusView
-  readonly created?: boolean
-  readonly reused?: boolean
-  readonly warningText?: string
-}
-
-/** Dedicated route response for an explicit bind operation. */
-export interface PetLocusBindResult extends PetLocusActionResult {
-  readonly action: 'bind'
-}
-
-/** Dedicated route response for an explicit unbind operation. */
-export interface PetLocusUnbindResult extends PetLocusActionResult {
-  readonly action: 'unbind'
-}
-
-/** Dedicated route response for a scope operation. */
-export interface PetLocusScopeResult extends PetLocusActionResult {
-  readonly action: 'scope'
-}
-
-/** Dedicated route response for a rebuild operation. */
-export interface PetLocusRebuildResult extends PetLocusActionResult {
-  readonly action: 'rebuild'
-}
-
-/**
- * Result of moving an archived session's entries onto a new main session.
- *
- * Deliberately NOT a {@link PetLocusActionResult}: there is no single `locus`
- * for a session-level operation, and pretending otherwise would make the
- * client read one entry's outcome as the whole operation's.
- */
-export interface PetLocusReplaceParentResult {
-  readonly action: 'replace-parent'
-  /** The newly created main session the entries were moved onto. */
-  readonly parentSessionId: string
-  /** Generations that were replaced, in request order. */
-  readonly replaced: readonly string[]
-  /** Entries the Host refused to move, with the reason it refused. */
-  readonly skipped: readonly { readonly locusId: string; readonly reason: string }[]
-}
-
-/** Dedicated route response for archive/retire. */
-export interface PetLocusArchiveResult extends PetLocusActionResult {
-  readonly action: 'archive'
-}
-
-/** Dedicated route response for stop. */
-export interface PetLocusStopResult extends PetLocusActionResult {
-  readonly action: 'stop'
-}
-
-/** Compatibility aliases for integrations that omit the `Pet` prefix. */
-export type PetLocusBindRequest = PetLocusBindAction
-export type PetLocusUnbindRequest = PetLocusUnbindAction
-export type PetLocusScopeRequest = PetLocusScopeAction
-export type PetLocusRebuildRequest = PetLocusRebuildAction
-export type PetLocusReplaceParentRequest = PetLocusReplaceParentAction
-export type PetLocusArchiveRequest = PetLocusArchiveAction
-export type PetLocusStopRequest = PetLocusStopAction
-export type LocusEndpointView = PetLocusEndpointView
-export type LocusMainSessionView = PetLocusMainSessionView
-export type LocusChildSessionView = PetLocusChildSessionView
-export type LocusWorkspaceView = PetLocusWorkspaceView
-export type LocusPermissionView = PetLocusPermissionView
-export type LocusStateView = PetLocusStateView
-export type LocusGenerationView = PetLocusGenerationView
-export type LocusView = PetLocusView
-export type LocusDiscoveryView = PetLocusDiscoveryView
-export type LocusManagementView = PetLocusManagementView
-export type LocusActionRequest = PetLocusActionRequest
-export type LocusRecordView = PetLocusRecordView
-
 /**
  * Stable scalar route constants for integrations that import one path rather
  * than the complete route map.
  */
 export const LOCUS_VIEW_ROUTE = LOCUS_ROUTES.view
-export const LOCUS_DISCOVERY_ROUTE = LOCUS_ROUTES.discovery
 export const LOCUS_ACTION_ROUTE = LOCUS_ROUTES.action
 
 // ---------------------------------------------------------------------------
@@ -883,6 +454,15 @@ export interface PetLocusEntryViewV20 {
   readonly endpoint: PetLocusEndpointView
   /** Reserved-or-created session id; `state` says whether it exists yet. */
   readonly sessionId: string
+  /**
+   * Cold-read facts of the entry's child session. Omitted on `not-created`
+   * rows: the reserved id names no session yet and is never cold-read.
+   * `unknown` = the read could not prove it; it fails closed like W's.
+   */
+  readonly session?: {
+    readonly title?: string
+    readonly availability?: 'available' | 'archived' | 'missing' | 'unknown'
+  }
   readonly state: PetLocusStateV20
   readonly invalidReason?: string
   readonly accessMode: PetLocusAccessModeV20
@@ -903,8 +483,8 @@ export interface PetLocusChatViewV20 {
   readonly topics: readonly PetLocusEntryViewV20[]
   readonly locusMain: PetLocusMainViewV20
   readonly workspace: PetLocusWorkspaceView
-  /** The archived W this chat was rebound from, when it was rebound. */
-  readonly reboundFrom?: string
+  /** The archived W this chat was rebound from, when it was rebound; title when cold-readable. */
+  readonly reboundFrom?: { readonly sessionId: string; readonly title?: string }
   /** This group is its M's default Q&A group. Group rows only. */
   readonly defaultQa?: boolean
 }
@@ -940,7 +520,7 @@ export interface PetLocusStopActionV20 extends PetLocusFenceV20 {
 export interface PetLocusAccessActionV20 extends PetLocusFenceV20 {
   readonly action: 'access'
   readonly endpoint: PetLocusEndpointInput
-  readonly mode: PetLocusAccessModeV20
+  readonly accessMode: PetLocusAccessModeV20
 }
 
 /** Rebind a chat whose W is archived to another W (design D6). The fence is the group row's. */
@@ -982,13 +562,15 @@ export interface PetLocusActionResultV20 {
   /** Honest receipt text; an access change never claims it was applied (design D8). */
   readonly receipt?: string
 }
+
+/** Result of the `defaultQa` create/open operation (Pet wheel): the Q&A chat as it is now. */
+export interface PetLocusDefaultQaResultV20 {
+  readonly action: 'default-qa'
+  readonly chat: PetLocusChatViewV20
+  readonly created?: boolean
+  readonly reused?: boolean
+}
 export const LOCUS_DEFAULT_QA_ROUTE = LOCUS_ROUTES.defaultQa
-export const LOCUS_BIND_ROUTE = LOCUS_ROUTES.bind
-export const LOCUS_UNBIND_ROUTE = LOCUS_ROUTES.unbind
-export const LOCUS_ARCHIVE_ROUTE = LOCUS_ROUTES.archive
-export const LOCUS_STOP_ROUTE = LOCUS_ROUTES.stop
-export const LOCUS_SCOPE_ROUTE = LOCUS_ROUTES.scope
-export const LOCUS_REBUILD_ROUTE = LOCUS_ROUTES.rebuild
 
 /**
  * Wheel id of the built-in Q&A action.

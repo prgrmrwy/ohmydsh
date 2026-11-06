@@ -132,7 +132,11 @@ export const PET_DOMAIN_NAME = 'dsh_pet'
 // `locus_mains` record) with the rows that reference them, and the row schema
 // now admits only the three-tier model — `childComposition` may only be
 // `tier3` and an `active` row must carry it. No row is rewritten.
-export const PET_DOMAIN_VERSION = 19
+// Bumped to 20 by openspec pet-locus-isomorphic-entries: `loci` holds one row
+// per entry keyed by endpointKey (group rows carry M / workspace; topic rows
+// carry none), `locus_indexes` is derived and dropped, and the offline
+// migration `dsh-pet-migrate-state` reshapes v2..v19 data. Schemas: contract-v20.ts.
+export const PET_DOMAIN_VERSION = 20
 
 // `chat` joins the original three for Tasks created by an inbound Lark
 // message. It is a distinct scope kind rather than a flavour of `workspace`
@@ -568,92 +572,6 @@ export const petLocusEndpoint = z.object({
     .optional(),
 })
 
-export const petLocusPermission = z
-  .object({
-    desired: z.enum(['read', 'write']),
-    effective: z.enum(['read', 'write']),
-    verifiedAt: z.number().int().nonnegative().optional(),
-    grantedBy: z.string().min(1).optional(),
-  })
-  .superRefine((permission, issueCtx) => {
-    if (permission.effective === 'write' && permission.verifiedAt === undefined) {
-      issueCtx.addIssue({ code: 'custom', message: 'effective write requires verifiedAt' })
-    }
-  })
-
-/** One immutable-or-transitioned generation of a unified locus association. */
-export const petLocusRecord = z.object({
-  id: z.string().min(1),
-  generation: z.number().int().positive(),
-  endpoint: petLocusEndpoint,
-  parentSessionId: z.string().min(1),
-  childSessionId: z.string().min(1).optional(),
-  /**
-   * Three-tier: the child session id reserved for a `not-created` generation.
-   * Stable for the generation's whole life: Deliveries accepted before the
-   * child exists correlate on it, and the lazily created child must BE it.
-   */
-  reservedChildSessionId: z.string().min(1).optional(),
-  /**
-   * Host attestation of the child's composition. Only `tier3` exists; a row that
-   * never created a child (not-created, or stopped/invalid/retired before one)
-   * has none, and an `active` row must have it.
-   */
-  childComposition: z.enum(['tier3']).optional(),
-  /** Additive per-locus tool tier; absent legacy rows are treated as safe. */
-  toolTier: z.object({
-    desired: z.enum(['safe', 'shell']),
-    effective: z.enum(['safe', 'shell']),
-    verifiedAt: z.number().int().nonnegative().optional(),
-    grantedBy: z.string().min(1).optional(),
-  }).optional(),
-
-  workspaceId: z.string().min(1),
-  parentLocusId: z.string().min(1).optional(),
-  source: z.enum(['auto', 'inherited', 'explicit', 'qa-created']),
-  state: z.enum(['provisioning', 'not-created', 'active', 'switching', 'invalid', 'stopped', 'retired']),
-  permission: petLocusPermission,
-  /** Optional optimistic fence; old/new pure locus records may omit it. */
-  revision: z.number().int().nonnegative().optional(),
-  /** Confirmed caller-bound execution anchor, never inferred from cwd. */
-  contextAnchor: z
-    .object({
-      status: z.enum(['confirmed', 'missing', 'unknown']),
-      existence: z.enum(['exists', 'missing', 'unknown']).optional(),
-      authorization: z.enum(['authorized', 'unauthorized', 'unknown']).optional(),
-      executionRoot: z.string().min(1).optional(),
-      projectResources: z.array(z.string().min(1)).optional(),
-      constraints: z.array(z.string()).optional(),
-      provenance: z.string().min(1).optional(),
-      confirmedAt: z.number().int().nonnegative().optional(),
-    })
-    .optional(),
-  busy: z.boolean(),
-  createdAt: z.number().int().nonnegative(),
-  updatedAt: z.number().int().nonnegative(),
-  retiredAt: z.number().int().nonnegative().optional(),
-  stoppedAt: z.number().int().nonnegative().optional(),
-  invalidReason: z.string().optional(),
-  replacesLocusId: z.string().min(1).optional(),
-}).superRefine((record, issueCtx) => {
-  if (record.state === 'active' && record.childComposition === undefined) {
-    issueCtx.addIssue({ code: 'custom', message: 'an active locus requires the tier3 childComposition marker' })
-  }
-  // Only a child that exists (tier3) has the pending revoke protocol.
-  if (record.permission.effective === 'write' && record.permission.desired !== 'write' && record.childComposition !== 'tier3') {
-    issueCtx.addIssue({ code: 'custom', message: 'effective write requires desired write outside tier3' })
-  }
-  if (record.toolTier?.effective === 'shell' && record.childComposition !== 'tier3') {
-    issueCtx.addIssue({ code: 'custom', message: 'only tier3 children may use shell tier' })
-  }
-  if (record.endpoint.threadId !== undefined && record.parentLocusId === undefined) {
-    issueCtx.addIssue({ code: 'custom', message: 'topic locus requires parentLocusId' })
-  }
-  if (record.endpoint.threadId === undefined && record.parentLocusId !== undefined) {
-    issueCtx.addIssue({ code: 'custom', message: 'chat-level locus cannot carry parentLocusId' })
-  }
-})
-
 /**
  * The 1:1 pairing of a work session (the owner's ordinary top-level session)
  * and the locus main session Pet creates for it. Keyed by `locusMainSessionId`;
@@ -676,17 +594,6 @@ export const petLocusMainRecord = z.object({
   retiredReason: z.string().optional(),
 })
 
-/**
- * A materialized reverse/current index. The repository treats `loci` as the
- * source of truth and rebuilds these records on every locus mutation.
- */
-export const petLocusIndex = z.object({
-  kind: z.enum(['endpoint-current', 'parent-loci', 'child-locus', 'default-qa']),
-  key: z.string().min(1),
-  locusIds: z.array(z.string().min(1)).min(1),
-  updatedAt: z.number().int().nonnegative(),
-})
-
 /** Upper bound (UTF-16 units) of a persisted anchored-comment quote. */
 export const DOC_COMMENT_QUOTE_MAX = 2_000
 
@@ -696,8 +603,6 @@ export const petLocusDeliveryBase = z.object({
   messageId: z.string().min(1),
   endpoint: petLocusEndpoint,
   locusId: z.string().min(1),
-  generation: z.number().int().positive(),
-  childSessionId: z.string().min(1),
   senderOpenId: z.string().min(1),
   senderName: z.string().optional(),
   text: z.string().min(1).optional(),
@@ -777,12 +682,12 @@ export const petLocusDeliveryBase = z.object({
 })
 
 /**
- * The fields {@link refineLocusDelivery} reads. It never touches `generation`
- * or `childSessionId`, so the v20 Delivery row (contract-v20.ts) shares it.
+ * The fields {@link refineLocusDelivery} reads. The v20 Delivery row
+ * (contract-v20.ts) extends this base with `sessionId`.
  */
-export type LocusDeliveryRefinable = Omit<z.infer<typeof petLocusDeliveryBase>, 'generation' | 'childSessionId'>
+export type LocusDeliveryRefinable = z.infer<typeof petLocusDeliveryBase>
 
-/** Cross-field Delivery invariants, shared by the v19 and v20 Delivery schemas. */
+/** Cross-field Delivery invariants of the v20 Delivery schema (contract-v20.ts). */
 export function refineLocusDelivery(delivery: LocusDeliveryRefinable, issueCtx: z.core.$RefinementCtx<unknown>): void {
   const hasExecution = delivery.executionId !== undefined
   const hasTurn = delivery.turnId !== undefined
@@ -946,27 +851,6 @@ export function refineLocusDelivery(delivery: LocusDeliveryRefinable, issueCtx: 
   }
 }
 
-export const petLocusDelivery = petLocusDeliveryBase.superRefine(refineLocusDelivery)
-
-/**
- * One source-switch notice an endpoint is still owed.
- *
- * Keyed by locus generation, because a later switch supersedes an earlier
- * one's debt rather than merging with it. While a row exists the generation
- * must not dispatch ordinary work: answering before the entry has been told
- * would present a different source as if nothing had changed.
- */
-export const petLocusSwitchNotice = z.object({
-  locusId: z.string().min(1),
-  generation: z.number().int().positive(),
-  endpoint: petLocusEndpoint,
-  /** Rendered once at switch time so a retry cannot reword it. */
-  text: z.string().min(1),
-  createdAt: z.number().int().nonnegative(),
-  attempts: z.number().int().nonnegative(),
-  lastError: z.string().optional(),
-})
-
 /**
  * One append-only permission-grant record.
  *
@@ -1023,6 +907,8 @@ export const petLocusOperation = z.object({
     'tool-tier',
     'anchor',
     'delivery',
+    'rebind',
+    'migrate',
   ]),
   phase: z.enum([
     'prepared',
@@ -1258,13 +1144,8 @@ export type PetInvocationChannel = z.infer<typeof petInvocationChannel>
 
 /** Unified locus records and persistence payloads. */
 export type PetLocusEndpoint = z.infer<typeof petLocusEndpoint>
-export type PetLocusPermission = z.infer<typeof petLocusPermission>
-export type PetLocusRecord = z.infer<typeof petLocusRecord>
-export type PetLocusIndex = z.infer<typeof petLocusIndex>
 export type PetLocusMainRecord = z.infer<typeof petLocusMainRecord>
-export type PetLocusDelivery = z.infer<typeof petLocusDelivery>
 export type PetLocusOperation = z.infer<typeof petLocusOperation>
-export type PetLocusSwitchNotice = z.infer<typeof petLocusSwitchNotice>
 export type PetLocusPermissionAudit = z.infer<typeof petLocusPermissionAudit>
 export type PetCollaborationContextRecord = z.infer<typeof petCollaborationContextRecord>
 

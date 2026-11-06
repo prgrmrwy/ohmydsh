@@ -54,9 +54,9 @@ describe('待办由 Host 以 locus 主会话身份代写', () => {
     expect(created.actor).toBe('locus')
     expect(created.item).toMatchObject({
       id: 'todo-a', kind: 'request', author: 'locus', assignee: 'work', requiredAcks: [],
-      ext: { pet: { entry: identityOf(ALPHA), generation: 2, endpoint: ALPHA, messageId: 'om-rec-alpha-g2', requester: 'ou_requester' } },
+      ext: { pet: { entry: identityOf(ALPHA), endpoint: ALPHA, messageId: 'om-rec-alpha-g2', requester: 'ou_requester' } },
     })
-    expect(Object.keys(created.item.ext.pet).sort()).toEqual(['endpoint', 'entry', 'generation', 'messageId', 'requester'])
+    expect(Object.keys(created.item.ext.pet).sort()).toEqual(['endpoint', 'entry', 'messageId', 'requester']) // v20: no generation (D13 step 8)
   })
 
   it('工具不接受目标参数', async () => {

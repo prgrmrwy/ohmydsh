@@ -50,19 +50,17 @@ export function identityOf(endpoint: LocusEndpoint): string {
 export function authorizedFor(row: TestLocusRow, messageId = `om-${row.id}`): LocusContextRecord {
   return {
     endpoint: row.endpoint,
-    locus: { locusId: row.id, generation: row.generation, state: 'active' },
+    locus: { locusId: row.id, state: 'active' },
     main: { sessionId: row.locusMainSessionId },
     child: { sessionId: row.childSessionId },
     workspace: { workspaceId: 'ws-todo' },
-    permission: { effective: 'read' },
-    contextAnchor: { status: 'unknown' },
+    accessMode: 'read-only',
     currentDelivery: {
       deliveryId: `delivery-${messageId}`,
       messageId,
       endpoint: row.endpoint,
       locusId: row.id,
-      generation: row.generation,
-      childSessionId: row.childSessionId,
+      sessionId: row.childSessionId,
       status: 'current',
       queueState: 'current',
       senderOpenId: 'ou_requester',

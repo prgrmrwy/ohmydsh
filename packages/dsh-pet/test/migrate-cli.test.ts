@@ -1,11 +1,12 @@
 /**
- * `dsh-pet-migrate-state` v2..v18 -> v19: purge previous-model locus rows.
+ * `dsh-pet-migrate-state` CLI contract and refusal gates, target v20.
  *
- * Databases are real SQLite files laid out by Pet's own backend and seeded with
- * raw rows (support/pet-sqlite.ts), always in a temp directory: the live
- * `~/.dsh/plugins/dsh-pet/state.sqlite` is never an input. The script loads the
- * Host's validation from `lib/`, so these tests need a built package
- * (`npm run build:host`; `npm test` does it).
+ * Arguments, locking, unsupported versions, confirmation, and the preflight /
+ * locked re-check refusals. The v20 shaping itself is covered by
+ * migrate-cli-v20.test.ts. Databases are real SQLite files in temp
+ * directories, seeded with raw v19 bytes (support/v19-seed.ts); the live state
+ * file is never an input. The script loads the v20 validator from `lib/`, so
+ * these tests need a built package (`npm run build:host`).
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
@@ -13,86 +14,44 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildLocusRecord, type LocusRecord } from '../src/host/locus/aggregate.js'
 import { isTerminalDeliveryStatus } from '../src/host/locus/delivery.js'
-import { STORAGE_KEY_SEPARATOR } from '../src/host/locus/storage-key.js'
-import { PET_DOMAIN_VERSION, petLocusDelivery, petLocusOperation, type PetLocusMainRecord } from '../src/host/spec.js'
-import { openDomainOnly, openPetDomain } from './support/pet-host-fixture.js'
-import { seedPetState, snapshotPetTables, stampedVersion, tempPetHome, type RawRows } from './support/pet-sqlite.js'
+import { PET_DOMAIN_VERSION, petLocusDeliveryBase, petLocusOperation } from '../src/host/spec.js'
+import { openMigratedDomain } from './support/pet-domain-open.js'
+import { snapshotPetTables, stampedVersion, tempPetHome } from './support/pet-sqlite.js'
+import { seedV19State, v19Delivery, v19Generations, v19Main, v19Row, type V19Rows } from './support/v19-seed.js'
 
 const SCRIPT = new URL('../scripts/migrate-state-version.mjs', import.meta.url).pathname
 
-// -- fixtures -------------------------------------------------------------------
-
-function main(overrides: Partial<PetLocusMainRecord> = {}): PetLocusMainRecord {
-  return {
-    locusMainSessionId: 'main-1', workSessionId: 'work-1', generation: 1, status: 'active',
-    spaceId: 'space-1', workspaceId: 'ws-pet', createdAt: 1, updatedAt: 1, ...overrides,
-  }
-}
-
-/** A three-tier row as SQLite holds it. */
-function tier3(overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {}): Record<string, unknown> {
-  const record: LocusRecord = buildLocusRecord({
-    id: 'keep-1', endpoint: { chatId: 'oc_keep1' }, parentSessionId: 'main-1', childSessionId: 'child-keep-1',
-    childComposition: 'tier3', workspaceId: 'ws-1', source: 'auto', createdAt: 1, updatedAt: 1, ...overrides,
-  })
-  return JSON.parse(JSON.stringify(record)) as Record<string, unknown>
-}
-
 /** A previous-model row: its parent is the owner's own session, which has no locus_mains record. */
-function previousModel(id: string, chatId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    id, generation: 1, endpoint: { chatId }, parentSessionId: 'user-session', childSessionId: `child-${id}`,
-    childComposition: 'safe-v2', workspaceId: 'ws-1', source: 'explicit', state: 'active',
-    permission: { desired: 'read', effective: 'read' }, busy: false, createdAt: 1, updatedAt: 1, ...extra,
-  }
+function previousModel(id: string, chatId: string): Record<string, unknown> {
+  return { ...v19Row({ id, chatId, main: 'user-session', source: 'explicit' }), childComposition: 'safe-v2' }
 }
-
-const delivery = (id: string, locusId: string, status = 'replied'): Record<string, unknown> => ({ deliveryId: id, locusId, status })
-const operation = (id: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ id, phase: 'committed', ...extra })
 
 /** v18: three previous-model rows, four terminal Deliveries on them, two three-tier rows. */
-function worldRows(): RawRows {
+function worldRows(): V19Rows {
   return {
-    locus_mains: { 'main-1': main() },
+    locus_mains: { 'main-1': v19Main({ id: 'main-1' }) },
     loci: {
       'old-1': previousModel('old-1', 'oc_old1'),
       'old-2': previousModel('old-2', 'oc_old2'),
       'old-3': previousModel('old-3', 'oc_old3'),
-      'keep-1': tier3(),
-      'keep-2': tier3({ id: 'keep-2', endpoint: { chatId: 'oc_keep2' }, childSessionId: 'child-keep-2' }),
-    },
-    locus_indexes: {
-      'endpoint:oc_old1': { kind: 'endpoint-current', key: 'endpoint:oc_old1', locusIds: ['old-1'], updatedAt: 1 },
-      'default-qa:user-session': { kind: 'default-qa', key: 'default-qa:user-session', locusIds: ['old-1'], updatedAt: 1 },
-      'endpoint:oc_keep1': { kind: 'endpoint-current', key: 'endpoint:oc_keep1', locusIds: ['keep-1'], updatedAt: 1 },
+      'keep-1': v19Row({ id: 'keep-1', chatId: 'oc_keep1' }),
+      'keep-2': v19Row({ id: 'keep-2', chatId: 'oc_keep2' }),
     },
     locus_deliveries: {
-      'd-1': delivery('d-1', 'old-1', 'settled'),
-      'd-2': delivery('d-2', 'old-1', 'replied'),
-      'd-3': delivery('d-3', 'old-2', 'failed'),
-      'd-4': delivery('d-4', 'old-3', 'expired'),
-      'd-keep': delivery('d-keep', 'keep-1'),
+      'd-1': v19Delivery('d-1', 'old-1', 'child-old-1'),
+      'd-2': v19Delivery('d-2', 'old-1', 'child-old-1'),
+      'd-3': v19Delivery('d-3', 'old-2', 'child-old-2'),
+      'd-4': v19Delivery('d-4', 'old-3', 'child-old-3'),
+      'd-keep': v19Delivery('d-keep', 'keep-1', 'child-keep-1'),
     },
-    locus_permission_audit: { 'old-1': { locusId: 'old-1' }, 'keep-1': { locusId: 'keep-1' } },
-    locus_operations: {
-      'op-old': operation('op-old', { locusId: 'old-1' }),
-      'op-replace': operation('op-replace', { oldLocusId: 'old-2', newLocusId: 'keep-2' }),
-      'op-new': operation('op-new', { newLocusId: 'old-3' }),
-      'op-keep': operation('op-keep', { locusId: 'keep-1' }),
-      'op-bare': operation('op-bare', { phase: 'compensated' }),
-    },
-    chat_bindings: { 'oc_legacy': { opaque: 'legacy chat binding naming old-1', locusId: 'old-1' } },
-    invocation_channel: { 'inv-1': { opaque: true } },
-    ledger_item: { 'item-1': { opaque: 'todo on old-1', locusId: 'old-1' } },
-    inquiries: { 'inq-1': { opaque: 'inquiry on old-1' } },
+    chat_bindings: { oc_legacy: { opaque: 'legacy chat binding naming old-1', locusId: 'old-1' } },
   }
 }
 
-async function plant(version: number, rows: RawRows) {
+async function plant(version: number, rows: V19Rows) {
   const { home, file } = tempPetHome('pet-migrate-cli-')
-  await seedPetState(file, version, rows)
+  await seedV19State(file, version, rows)
   return { dir: path.dirname(file), home, file }
 }
 
@@ -114,9 +73,7 @@ function expectUntouched(file: string, dir: string, before: Buffer[]): void {
 
 /**
  * Run `--yes` while another writer holds the database, and let that writer
- * commit `inject` only AFTER the script has finished its read-only pre-flight
- * (it announces that before blocking on the lock). This is the window between
- * "pre-flight passed" and "lock acquired".
+ * commit `inject` only AFTER the script has finished its read-only pre-flight.
  */
 async function runWithWriterInWindow(file: string, inject: (holder: DatabaseSync) => void) {
   const holder = new DatabaseSync(file, { timeout: 3000 })
@@ -140,14 +97,13 @@ async function runWithWriterInWindow(file: string, inject: (holder: DatabaseSync
   } finally {
     holder.close()
   }
-  const status = await closed
-  return { status, stdout, stderr }
+  return { status: await closed, stdout, stderr }
 }
 
-// -- unchanged contract: arguments, locking, unsupported versions ---------------
+// -- arguments, locking, unsupported versions ------------------------------------
 
 describe('dsh-pet-migrate-state CLI', () => {
-  it.each([5, 14, 15, 17])('checks an additive v%s migration without writing in --dry-run mode', async version => {
+  it.each([5, 14, 15, 17, 19])('checks a v%s migration without writing in --dry-run mode', async version => {
     const { dir, file } = await plant(version, {})
     const before = bytesOf(file)
     const output = execFileSync(process.execPath, [SCRIPT, '--db', file, '--dry-run'], { encoding: 'utf8' })
@@ -158,16 +114,8 @@ describe('dsh-pet-migrate-state CLI', () => {
     expectUntouched(file, dir, before)
   })
 
-  it('refuses an unconfirmed write', async () => {
-    const { dir, file } = await plant(5, {})
-    const before = bytesOf(file)
-    const result = run(file)
-
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('not confirmed')
-    expect(result.stderr).toContain('No write was performed')
-    expect(stampedVersion(file)).toBe(5)
-    expectUntouched(file, dir, before)
+  it('targets domain version 20', () => {
+    expect(PET_DOMAIN_VERSION).toBe(20)
   })
 
   it.each([
@@ -181,7 +129,7 @@ describe('dsh-pet-migrate-state CLI', () => {
   })
 
   it('fails closed while a Host-like owner holds the database lock', async () => {
-    const { dir, file } = await plant(5, {})
+    const { dir, file } = await plant(19, {})
     const owner = new DatabaseSync(file)
     owner.exec('PRAGMA locking_mode = EXCLUSIVE')
     owner.exec('BEGIN IMMEDIATE')
@@ -195,7 +143,7 @@ describe('dsh-pet-migrate-state CLI', () => {
       owner.exec('ROLLBACK')
       owner.close()
     }
-    expect(stampedVersion(file)).toBe(5)
+    expect(stampedVersion(file)).toBe(19)
   })
 
   it.each([1, 0, -1, PET_DOMAIN_VERSION + 1, 999])('refuses unsupported v%s without backup or mutation', async version => {
@@ -216,7 +164,7 @@ describe('dsh-pet-migrate-state CLI', () => {
   })
 
   it('backs up each older version, stamps it, keeps non-locus history byte for byte, and is idempotent', async () => {
-    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]) {
+    for (const version of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]) {
       const { dir, file } = await plant(version, {
         chat_bindings: { retained: { parentSessionId: 'parent', contextAnchor: { projectResources: ['local-only'] } } },
         invocation_channel: { retained: { opaque: true } },
@@ -256,10 +204,10 @@ describe('dsh-pet-migrate-state CLI', () => {
   })
 })
 
-// -- spec scenarios: 旧模型 locus 数据经离线迁移清除 -----------------------------
+// -- the v19 purge below 19, then the refusal gates ------------------------------
 
-describe('legacy locus data is purged by the offline migration', () => {
-  it('spec Scenario "dry-run 列出将删除的行且不写入"', async () => {
+describe('the offline migration purges previous-model rows and refuses unfinished work', () => {
+  it('lists the previous-model rows a v18 purge deletes in --dry-run, and writes nothing', async () => {
     const { dir, file } = await plant(18, worldRows())
     const before = bytesOf(file)
 
@@ -267,7 +215,7 @@ describe('legacy locus data is purged by the offline migration', () => {
 
     expect(result.status, result.stderr).toBe(0)
     for (const id of ['old-1', 'old-2', 'old-3']) expect(result.stdout).toContain(id)
-    expect(result.stdout).not.toContain('keep-1')
+    expect(result.stdout).not.toMatch(/^\s+- keep-1 /m)
     expect(result.stdout).toMatch(/^\s+loci: 3$/m)
     expect(result.stdout).toMatch(/^\s+locus_deliveries: 4$/m)
     expect(result.stdout).toContain('oc_old1')
@@ -275,13 +223,12 @@ describe('legacy locus data is purged by the offline migration', () => {
     expect(existsSync(`${file}-wal`)).toBe(false)
   })
 
-  it('spec Scenario "dry-run 列出将删除的行且不写入": a WAL with committed frames stays byte-identical', async () => {
-    const { dir, file } = await plant(18, worldRows())
+  it('--dry-run keeps a WAL with committed frames byte-identical', async () => {
+    const { file } = await plant(18, worldRows())
     const wal = new DatabaseSync(file)
     wal.exec('PRAGMA journal_mode = WAL')
     wal.exec('PRAGMA wal_autocheckpoint = 0')
     wal.prepare("INSERT OR REPLACE INTO u_dsh_pet_loci (key, value) VALUES ('old-9', ?)").run(JSON.stringify(previousModel('old-9', 'oc_old9')))
-    // Snapshot main+WAL while the frames are still un-checkpointed, then release the original.
     const copyDir = mkdtempSync(path.join(tmpdir(), 'pet-migrate-wal-'))
     const copy = path.join(copyDir, 'state.sqlite')
     writeFileSync(copy, readFileSync(file))
@@ -296,61 +243,29 @@ describe('legacy locus data is purged by the offline migration', () => {
     expect(result.stdout).toContain('old-9')
     expect(bytesOf(copy)).toEqual(before)
     expect(backupsOf(copyDir)).toEqual([])
-    void dir
-  })
-
-  it('spec Scenario "确认后清除旧模型数据"', async () => {
-    const { dir, file } = await plant(18, worldRows())
-    const before = snapshotPetTables(file)
-
-    const result = run(file, '--yes')
-
-    expect(result.status, result.stderr).toBe(0)
-    expect(stampedVersion(file)).toBe(19)
-    const after = snapshotPetTables(file)
-    const keys = (rows: { key: string }[]) => rows.map(row => row.key)
-    expect(keys(after.loci!)).toEqual(['keep-1', 'keep-2'])
-    expect(keys(after.locus_deliveries!)).toEqual(['d-keep'])
-    expect(keys(after.locus_permission_audit!)).toEqual(['keep-1'])
-    expect(keys(after.locus_operations!)).toEqual(['op-bare', 'op-keep']) // op-replace named old-2 as oldLocusId
-    // Retained rows and the index table are byte-identical.
-    expect(after.loci).toEqual(before.loci!.filter(row => row.key.startsWith('keep')))
-    expect(after.locus_indexes).toEqual(before.locus_indexes)
-    // Everything outside the locus tables is untouched, including rows that name an old locus.
-    for (const table of ['locus_mains', 'chat_bindings', 'invocation_channel', 'ledger_item', 'inquiries']) {
-      expect(after[table]).toEqual(before[table])
-    }
-    // The backup is the complete pre-migration state.
-    const backups = backupsOf(dir)
-    expect(backups).toHaveLength(1)
-    expect(backups[0]).toMatch(/^state\.sqlite\.v18\.bak-\d+$/)
-    expect(stampedVersion(path.join(dir, backups[0]!))).toBe(18)
-    expect(snapshotPetTables(path.join(dir, backups[0]!))).toEqual(before)
   })
 
   it('leaves a database the real Domain opens', async () => {
-    // Only schema-valid rows: the other fixtures use opaque stand-ins on purpose.
     const { file } = await plant(18, {
-      locus_mains: { 'main-1': main() },
-      loci: { 'old-1': previousModel('old-1', 'oc_old1'), 'keep-1': tier3() },
-      locus_indexes: { 'endpoint:oc_keep1': { kind: 'endpoint-current', key: 'endpoint:oc_keep1', locusIds: ['keep-1'], updatedAt: 1 } },
+      locus_mains: { 'main-1': v19Main({ id: 'main-1' }) },
+      loci: { 'old-1': previousModel('old-1', 'oc_old1'), ...v19Generations({ id: 'keep', chatId: 'oc_keep1' }, 2) },
+      locus_deliveries: { 'd-keep': v19Delivery('d-keep', 'keep-g2', 'child-keep-g2') },
+      locus_indexes: { 'endpoint:oc_keep1': { kind: 'endpoint-current', key: 'endpoint:oc_keep1', locusIds: ['keep-g2'], updatedAt: 1 } },
     })
-    expect(run(file, '--yes').status).toBe(0)
+    const result = run(file, '--yes')
+    expect(result.status, result.stderr).toBe(0)
 
-    const ctx = await openDomainOnly(file)
-    try {
-      const domain = await openPetDomain(ctx) as unknown as { close(): Promise<void> }
-      await domain.close()
-    } finally { await ctx.fiber.dispose() }
+    const opened = await openMigratedDomain(file)
+    await opened.close()
   })
 
-  it('spec Scenario "删除中间代际造成断档时拒绝"', async () => {
+  it('refuses a generation gap left by the purge', async () => {
     const { dir, file } = await plant(18, {
-      locus_mains: { 'main-1': main() },
+      locus_mains: { 'main-1': v19Main({ id: 'main-1' }) },
       loci: {
-        g1: tier3({ id: 'g1', endpoint: { chatId: 'oc_e' }, generation: 1, state: 'invalid', childSessionId: undefined, childComposition: undefined, updatedAt: 2 }),
-        g2: previousModel('g2', 'oc_e', { generation: 2, state: 'invalid' }),
-        g3: tier3({ id: 'g3', endpoint: { chatId: 'oc_e' }, generation: 3, state: 'not-created', childSessionId: undefined, childComposition: undefined, replacesLocusId: 'g2' }),
+        g1: v19Row({ id: 'g1', chatId: 'oc_e', generation: 1, state: 'invalid', child: null }),
+        g2: { ...previousModel('g2', 'oc_e'), generation: 2, state: 'invalid' },
+        g3: v19Row({ id: 'g3', chatId: 'oc_e', generation: 3, state: 'not-created', child: null, replacesLocusId: 'g2' }),
       },
     })
     const before = bytesOf(file)
@@ -363,51 +278,47 @@ describe('legacy locus data is purged by the offline migration', () => {
     expectUntouched(file, dir, before)
   })
 
-  it('spec Scenario "未创建 child 的历史行可以没有 marker": the script keeps them byte for byte', async () => {
-    const stopped = tier3({ id: 'stopped-1', endpoint: { chatId: 'oc_s' }, state: 'stopped', childSessionId: undefined, childComposition: undefined, updatedAt: 2 })
-    const invalid = tier3({ id: 'invalid-1', endpoint: { chatId: 'oc_i' }, state: 'invalid', childSessionId: undefined, childComposition: undefined, updatedAt: 2 })
-    const { file } = await plant(18, {
-      locus_mains: { 'main-1': main() },
-      loci: { 'stopped-1': stopped, 'invalid-1': invalid, 'old-1': previousModel('old-1', 'oc_old1') },
-    })
-    const before = snapshotPetTables(file)
+  it.each([
+    ['a paired row marked safe-v2', (row: Record<string, unknown>) => { row.childComposition = 'safe-v2' }],
+    ['a paired active row without a marker', (row: Record<string, unknown>) => { delete row.childComposition }],
+    ['a v19 row whose parent has no pairing', (row: Record<string, unknown>) => { row.parentSessionId = 'user-session' }],
+  ] as const)('refuses retained rows that do not satisfy the v19 load conditions: %s', async (_name, damage) => {
+    const bad = v19Row({ id: 'bad-1', chatId: 'oc_bad' })
+    damage(bad)
+    const { dir, file } = await plant(19, { locus_mains: { 'main-1': v19Main({ id: 'main-1' }) }, loci: { 'bad-1': bad } })
+    const before = bytesOf(file)
 
     const result = run(file, '--yes')
 
-    expect(result.status, result.stderr).toBe(0)
-    expect(snapshotPetTables(file).loci).toEqual(before.loci!.filter(row => row.key !== 'old-1'))
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('bad-1')
+    expectUntouched(file, dir, before)
   })
 
-  it('spec Scenario "切换通知按 locusId 精确删除"', async () => {
-    const notice = (locusId: string) => ({ locusId, generation: 1 })
-    const { file } = await plant(18, {
-      locus_mains: { 'main-1': main() },
+  it('refuses a retained topic whose parentLocusId is purged', async () => {
+    const { dir, file } = await plant(18, {
+      locus_mains: { 'main-1': v19Main({ id: 'main-1' }) },
       loci: {
-        'locus-a': previousModel('locus-a', 'oc_a'),
-        'locus-a2': tier3({ id: 'locus-a2', endpoint: { chatId: 'oc_a2' }, childSessionId: 'child-a2' }),
-      },
-      locus_switch_notices: {
-        [`locus-a${STORAGE_KEY_SEPARATOR}1`]: notice('locus-a'),
-        [`locus-a2${STORAGE_KEY_SEPARATOR}1`]: notice('locus-a2'),
+        'old-group': previousModel('old-group', 'oc_g'),
+        'topic-1': v19Row({ id: 'topic-1', chatId: 'oc_g', threadId: 'omt_1', parentLocusId: 'old-group' }),
       },
     })
-    const before = snapshotPetTables(file)
+    const before = bytesOf(file)
 
     const result = run(file, '--yes')
 
-    expect(result.status, result.stderr).toBe(0)
-    expect(snapshotPetTables(file).locus_switch_notices).toEqual(
-      before.locus_switch_notices!.filter(row => row.key.startsWith(`locus-a2${STORAGE_KEY_SEPARATOR}`)),
-    )
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('old-group')
+    expectUntouched(file, dir, before)
   })
 
   it('spec Scenario "预检通过后出现非终态投递时锁内拒绝"', async () => {
     const { dir, file } = await plant(18, worldRows())
     const before = snapshotPetTables(file)
+    const late = v19Delivery('d-late', 'keep-1', 'child-keep-1', { status: 'queued' })
 
     const result = await runWithWriterInWindow(file, holder => {
-      holder.prepare("INSERT INTO u_dsh_pet_locus_deliveries (key, value) VALUES ('d-late', ?)")
-        .run(JSON.stringify(delivery('d-late', 'keep-1', 'queued')))
+      holder.prepare("INSERT INTO u_dsh_pet_locus_deliveries (key, value) VALUES ('d-late', ?)").run(JSON.stringify(late))
     })
 
     expect(result.status).toBe(1)
@@ -417,27 +328,12 @@ describe('legacy locus data is purged by the offline migration', () => {
     expect(stampedVersion(file)).toBe(18)
     const after = snapshotPetTables(file)
     expect(after.loci).toEqual(before.loci)
-    expect(after.locus_deliveries).toEqual([...before.locus_deliveries!, { key: 'd-late', value: JSON.stringify(delivery('d-late', 'keep-1', 'queued')) }].sort((a, b) => a.key.localeCompare(b.key)))
-  })
-
-  it('spec Scenario "预检后版本已变化"', async () => {
-    const { dir, file } = await plant(18, worldRows())
-    const before = snapshotPetTables(file)
-
-    const result = await runWithWriterInWindow(file, holder => {
-      holder.prepare('UPDATE units SET version = 19 WHERE name = ?').run('dsh_pet')
-    })
-
-    expect(result.status).toBe(0)
-    expect(result.stdout).toContain('Already at the target version')
-    expect(backupsOf(dir)).toEqual([])
-    expect(stampedVersion(file)).toBe(19)
-    expect(snapshotPetTables(file)).toEqual(before) // not one row deleted
+    expect(after.locus_deliveries).toEqual([...before.locus_deliveries!, { key: 'd-late', value: JSON.stringify(late) }].sort((a, b) => a.key.localeCompare(b.key)))
   })
 
   it('spec Scenario "存在非终态投递时拒绝"', async () => {
     const rows = worldRows()
-    rows.locus_deliveries = { ...rows.locus_deliveries, 'd-queued': delivery('d-queued', 'keep-2', 'queued') }
+    rows.locus_deliveries = { ...rows.locus_deliveries, 'd-queued': v19Delivery('d-queued', 'keep-2', 'child-keep-2', { status: 'queued' }) }
     const { dir, file } = await plant(18, rows)
     const before = bytesOf(file)
 
@@ -453,7 +349,7 @@ describe('legacy locus data is purged by the offline migration', () => {
 
   it('refuses a non-terminal Delivery on --dry-run too, and writes nothing', async () => {
     const rows = worldRows()
-    rows.locus_deliveries = { ...rows.locus_deliveries, 'd-queued': delivery('d-queued', 'old-1', 'queued') }
+    rows.locus_deliveries = { ...rows.locus_deliveries, 'd-queued': v19Delivery('d-queued', 'old-1', 'child-old-1', { status: 'queued' }) }
     const { dir, file } = await plant(18, rows)
     const before = bytesOf(file)
     const result = run(file, '--dry-run')
@@ -463,10 +359,14 @@ describe('legacy locus data is purged by the offline migration', () => {
   })
 
   it('treats exactly the Host\'s terminal Delivery statuses as finished', async () => {
-    const statuses = petLocusDelivery.shape.status.options
+    const statuses = petLocusDeliveryBase.shape.status.options
     expect(statuses.length).toBeGreaterThan(6)
     for (const status of statuses) {
-      const { file } = await plant(18, { locus_mains: { 'main-1': main() }, loci: { 'keep-1': tier3() }, locus_deliveries: { 'd-x': delivery('d-x', 'keep-1', status) } })
+      const { file } = await plant(19, {
+        locus_mains: { 'main-1': v19Main({ id: 'main-1' }) },
+        loci: { 'keep-1': v19Row({ id: 'keep-1', chatId: 'oc_keep1' }) },
+        locus_deliveries: { 'd-x': { deliveryId: 'd-x', locusId: 'keep-1', status } },
+      })
       const result = run(file, '--dry-run')
       expect(result.status === 0, `${status}: ${result.stderr}`).toBe(isTerminalDeliveryStatus(status))
     }
@@ -475,7 +375,7 @@ describe('legacy locus data is purged by the offline migration', () => {
   it('spec Scenario "存在未完成的操作时拒绝"', async () => {
     const rows = worldRows()
     // A provisioning operation carries no locus id at all, so nothing ties it to an entry.
-    rows.locus_operations = { ...rows.locus_operations, 'op-wip': { id: 'op-wip', phase: 'provisioning', endpointKey: 'oc_x' } }
+    rows.locus_operations = { 'op-wip': { id: 'op-wip', phase: 'provisioning', endpointKey: 'oc_x' } }
     const { dir, file } = await plant(18, rows)
     const before = bytesOf(file)
 
@@ -489,43 +389,14 @@ describe('legacy locus data is purged by the offline migration', () => {
 
   it('accepts only committed and compensated operations', async () => {
     for (const phase of petLocusOperation.shape.phase.options) {
-      const { file } = await plant(18, { locus_mains: { 'main-1': main() }, loci: { 'keep-1': tier3() }, locus_operations: { 'op-x': operation('op-x', { phase }) } })
+      const { file } = await plant(19, {
+        locus_mains: { 'main-1': v19Main({ id: 'main-1' }) },
+        loci: { 'keep-1': v19Row({ id: 'keep-1', chatId: 'oc_keep1' }) },
+        locus_operations: { 'op-x': { id: 'op-x', phase } },
+      })
       const result = run(file, '--dry-run')
       expect(result.status === 0, `${phase}: ${result.stderr}`).toBe(phase === 'committed' || phase === 'compensated')
     }
-  })
-
-  it.each([
-    ['a paired row marked safe-v2', { loci: { 'bad-1': tier3({ id: 'bad-1', endpoint: { chatId: 'oc_bad' } }) } }, (row: Record<string, unknown>) => { row.childComposition = 'safe-v2' }],
-    ['a paired active row without a marker', { loci: { 'bad-1': tier3({ id: 'bad-1', endpoint: { chatId: 'oc_bad' } }) } }, (row: Record<string, unknown>) => { delete row.childComposition }],
-  ] as const)('spec Scenario "保留行不满足 v19 条件时拒绝": %s', async (_name, base, damage) => {
-    const rows: RawRows = { locus_mains: { 'main-1': main() }, loci: { ...base.loci } as Record<string, unknown> }
-    damage((rows.loci as Record<string, Record<string, unknown>>)['bad-1']!)
-    const { dir, file } = await plant(18, rows)
-    const before = bytesOf(file)
-
-    const result = run(file, '--yes')
-
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('bad-1')
-    expectUntouched(file, dir, before)
-  })
-
-  it('spec Scenario "保留行不满足 v19 条件时拒绝": a retained topic whose parentLocusId is purged', async () => {
-    const { dir, file } = await plant(18, {
-      locus_mains: { 'main-1': main() },
-      loci: {
-        'old-group': previousModel('old-group', 'oc_g'),
-        'topic-1': tier3({ id: 'topic-1', endpoint: { chatId: 'oc_g', threadId: 'omt_1' }, parentLocusId: 'old-group', childSessionId: 'child-topic' }),
-      },
-    })
-    const before = bytesOf(file)
-
-    const result = run(file, '--yes')
-
-    expect(result.status).toBe(1)
-    expect(result.stderr).toContain('old-group')
-    expectUntouched(file, dir, before)
   })
 
   it('spec Scenario "未确认时不写入"', async () => {
@@ -538,68 +409,5 @@ describe('legacy locus data is purged by the offline migration', () => {
     expect(result.stderr).toContain('not confirmed')
     expect(result.stderr).toContain('No write was performed')
     expectUntouched(file, dir, before)
-  })
-
-  it('spec Scenario "已是目标版本时无操作"', async () => {
-    const { dir, file } = await plant(19, worldRows())
-    const before = bytesOf(file)
-
-    const result = run(file, '--yes')
-
-    expect(result.status).toBe(0)
-    expect(result.stdout).toContain('Already at the target version')
-    expectUntouched(file, dir, before)
-  })
-
-  it('spec Scenario "从更早版本迁移时全部 locus 行都是旧模型"', async () => {
-    const { dir, file } = await plant(17, {
-      loci: { 'old-1': previousModel('old-1', 'oc_old1'), 'old-2': previousModel('old-2', 'oc_old2') },
-      locus_deliveries: { 'd-1': delivery('d-1', 'old-1') },
-      chat_bindings: { 'oc_legacy': { opaque: true } },
-    })
-    // A v17 database has no pairing table at all.
-    const seed = new DatabaseSync(file)
-    seed.exec('DROP TABLE u_dsh_pet_locus_mains')
-    seed.close()
-    const before = snapshotPetTables(file)
-    expect(before.locus_mains).toBeUndefined()
-
-    const result = run(file, '--yes')
-
-    expect(result.status, result.stderr).toBe(0)
-    const [backup] = backupsOf(dir)
-    expect(backup).toMatch(/\.v17\.bak-\d+$/)
-    // The backup was taken before any change, DDL included.
-    expect(snapshotPetTables(path.join(dir, backup!))).toEqual(before)
-    expect(stampedVersion(file)).toBe(19)
-    const after = snapshotPetTables(file)
-    expect(after.locus_mains).toEqual([])
-    expect(after.loci).toEqual([])
-    expect(after.locus_deliveries).toEqual([])
-    expect(after.chat_bindings).toEqual(before.chat_bindings)
-  })
-
-  it('spec Scenario "升级需离线迁移并先备份": v15 → current takes a snapshot first and purges the v15 locus rows', async () => {
-    const { dir, file } = await plant(15, {
-      loci: { 'old-1': previousModel('old-1', 'oc_old1') },
-      locus_deliveries: { 'd-1': delivery('d-1', 'old-1') },
-    })
-    const seed = new DatabaseSync(file)
-    seed.exec('DROP TABLE u_dsh_pet_locus_mains')
-    seed.close()
-    const bytesBefore = readFileSync(file)
-    const rowsBefore = snapshotPetTables(file)
-
-    const out = run(file, '--yes')
-
-    expect(out.status, out.stderr).toBe(0)
-    expect(out.stdout).toContain(`Migrated 15 → ${PET_DOMAIN_VERSION}`)
-    expect(stampedVersion(file)).toBe(PET_DOMAIN_VERSION)
-    const backups = backupsOf(dir).filter(name => /\.v15\.bak-\d+$/.test(name))
-    expect(backups).toHaveLength(1)
-    // Without a WAL the snapshot is also byte-identical to the main file before the run.
-    expect(readFileSync(path.join(dir, backups[0]!))).toEqual(bytesBefore)
-    expect(snapshotPetTables(path.join(dir, backups[0]!))).toEqual(rowsBefore)
-    expect(snapshotPetTables(file).loci).toEqual([])
   })
 })

@@ -8,8 +8,9 @@
  */
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { z } from 'zod'
+import { petLocusDeliveryV20, petLocusRowV20, type LocusRowV20 } from './locus/contract-v20.js'
 import {
-  PET_DOMAIN_NAME, PET_DOMAIN_VERSION, petChannelConfig, petChatBinding, petCollaborationContextRecord, petEnvEntry, petGlobalState, petInquiryAnswerRecord, petInquiryHandoffRecord, petInquiryRecord, petInquiryResultRecord, petInquiryWorkRecord, petInvocationChannel, petInvocationRecord, petLedgerItemRecord, petLocusDelivery, petLocusIndex, petLocusMainRecord, petLocusOperation, petLocusPermissionAudit, petLocusRecord, petLocusSwitchNotice, petRunRecord, petSharedFactLedgerRecord, petSkillRevision, petSkillSelection, petSourceSnapshot, petTaskRecord,
+  PET_DOMAIN_NAME, PET_DOMAIN_VERSION, petChannelConfig, petChatBinding, petCollaborationContextRecord, petEnvEntry, petGlobalState, petInquiryAnswerRecord, petInquiryHandoffRecord, petInquiryRecord, petInquiryResultRecord, petInquiryWorkRecord, petInvocationChannel, petInvocationRecord, petLedgerItemRecord, petLocusMainRecord, petLocusOperation, petLocusPermissionAudit, petRunRecord, petSharedFactLedgerRecord, petSkillRevision, petSkillSelection, petSourceSnapshot, petTaskRecord,
 } from './spec.js'
 
 /** The complete `dsh-pet` domain declaration. */
@@ -39,11 +40,9 @@ export const petDomainSpec = defineDomain({
     // Unified locus storage is deliberately additive. The legacy channel tables
     // above remain declared so existing rows can be opened and preserved; the
     // locus adapter below never reads or mutates them.
-    loci: domainTable<string, z.infer<typeof petLocusRecord>>(petLocusRecord),
-    locus_indexes: domainTable<string, z.infer<typeof petLocusIndex>>(petLocusIndex),
-    locus_deliveries: domainTable<string, z.infer<typeof petLocusDelivery>>(petLocusDelivery),
+    loci: domainTable<string, z.infer<typeof petLocusRowV20>>(petLocusRowV20),
+    locus_deliveries: domainTable<string, z.infer<typeof petLocusDeliveryV20>>(petLocusDeliveryV20),
     locus_operations: domainTable<string, z.infer<typeof petLocusOperation>>(petLocusOperation),
-    locus_switch_notices: domainTable<string, z.infer<typeof petLocusSwitchNotice>>(petLocusSwitchNotice),
     locus_permission_audit: domainTable<string, z.infer<typeof petLocusPermissionAudit>>(petLocusPermissionAudit),
     // Retired two-tier collaboration and inquiry tables are read-only history.
     // Keep the original parsers and keys; no runtime store writes or replays them.

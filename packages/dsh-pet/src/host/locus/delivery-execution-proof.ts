@@ -5,7 +5,7 @@ import type { LocusClaimedDelivery } from './turn-observer.js'
 export interface RefusedReplyExecutionProof {
   readonly sessionId: string
   readonly turn: number
-  readonly scope: { readonly kind: 'child'; readonly locusId: string; readonly generation: number }
+  readonly scope: { readonly kind: 'child'; readonly locusId: string; readonly sessionId: string }
 }
 
 export interface DeliveryExecutionProofPorts {
@@ -38,19 +38,19 @@ export function createDeliveryExecutionProof(ports: DeliveryExecutionProofPorts)
       const currents = ports.currentForChild(agent.id).filter(record => record.status === 'current' && record.queueState === 'current')
       if (currents.length !== 1) return undefined
       const current = currents[0]!
-      if (current.childSessionId !== agent.id || !current.executionId || !current.inboxMessageId || !ports.isActive(current)) return undefined
+      if (current.sessionId !== agent.id || !current.executionId || !current.inboxMessageId || !ports.isActive(current)) return undefined
       const bound = ports.findByInboxMessageId(current.inboxMessageId)
       const observed = ports.deliveryForTurn(agent.id, turn)
       if (bound?.deliveryId !== current.deliveryId || bound.executionId !== current.executionId ||
           bound.status !== 'current' || bound.queueState !== 'current' || bound.inboxMessageId !== current.inboxMessageId ||
-          bound.locusId !== current.locusId || bound.generation !== current.generation ||
+          bound.locusId !== current.locusId || bound.sessionId !== current.sessionId ||
           bound.endpoint.chatId !== current.endpoint.chatId || bound.endpoint.threadId !== current.endpoint.threadId ||
-          bound.childSessionId !== agent.id || observed?.deliveryId !== current.deliveryId ||
-          observed.executionId !== current.executionId || observed.correlation.childSessionId !== agent.id ||
-          observed.correlation.locusId !== current.locusId || observed.correlation.generation !== current.generation ||
+          bound.sessionId !== agent.id || observed?.deliveryId !== current.deliveryId ||
+          observed.executionId !== current.executionId || observed.correlation.sessionId !== agent.id ||
+          observed.correlation.locusId !== current.locusId ||
           observed.correlation.endpoint.chatId !== current.endpoint.chatId ||
           observed.correlation.endpoint.threadId !== current.endpoint.threadId) return undefined
-      return { sessionId: agent.id, turn, scope: { kind: 'child', locusId: current.locusId, generation: current.generation } }
+      return { sessionId: agent.id, turn, scope: { kind: 'child', locusId: current.locusId, sessionId: current.sessionId } }
     } catch {
       return undefined
     }

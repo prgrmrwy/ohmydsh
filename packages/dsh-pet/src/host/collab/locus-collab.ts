@@ -1,7 +1,7 @@
 /**
  * Pet's side of the Locus collaboration space
  * (`locus-three-tier-structure` design D8; spec `pet-locus-intent-triage`
- * "协作空间由干活主会话与 locus 主会话两个普通成员组成").
+ * "协作空间由工作主会话与 locus 主会话两个普通成员组成").
  *
  * Owns: the dsh-collab integrator adapter (only `owns` is meaningful), the
  * attach lifecycle, and space establishment. A space has exactly two ordinary
@@ -179,6 +179,23 @@ export class LocusCollab {
     })
     this.inFlight.set(ref.locusMainSessionId, attempt)
     return attempt
+  }
+
+  /**
+   * Compensation for an operation that created this M and then failed before
+   * committing the pairing (design D4/D6/D7). dsh-collab's `actAs` offers no
+   * close operation, so the space itself cannot be closed from here: it is
+   * inert (its id derives from the M id, which is never reused, and the M
+   * session is rolled back) and is logged for operators. What this does is
+   * forget Pet's in-memory view so nothing keeps vouching for the M. Never
+   * throws, so compensation is never blocked on it.
+   */
+  async releaseSpace(ref: LocusMainRef): Promise<void> {
+    const main = ref.locusMainSessionId
+    this.established.delete(main)
+    this.inFlight.delete(main)
+    this.establishing.delete(main)
+    this.deps.log?.(`dsh-pet collab: releaseSpace ${main} (space ${locusSpaceId(main)}) could not be closed (no close operation); left inert`)
   }
 
   private async establish(ref: LocusMainRef): Promise<EnsureSpaceOutcome> {

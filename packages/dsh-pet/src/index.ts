@@ -76,10 +76,6 @@ import type {
   PetLocusWaitResult,
 } from './host/tools.js'
 import {
-  LocusRepository,
-  type LocusStartupCompensators,
-} from './host/locus/persistence.js'
-import {
   DEFAULT_DELIVERY_LEASE_MS,
   MAX_DELIVERY_LEASE_MS,
   type DeliveryCorrelation,
@@ -106,9 +102,7 @@ import { createLocusChildDelivery } from './host/locus/child-delivery.js'
 import { createLocusLazyChildCreator } from './host/locus/lazy-child.js'
 import { createFirstPromptRegistry } from './host/locus/first-prompt.js'
 import { createFirstDeliveryPublication } from './host/locus/first-delivery-publication.js'
-import { createDeliveryExecutionProof } from './host/locus/delivery-execution-proof.js'
-import { resolveLocusPendingApplication } from './host/locus/pending-application.js'
-import { retiredInquiryOwnerProjection } from './host/inquiry/retired-history.js'
+import { createDeliveryExecutionProof, type RefusedReplyExecutionProof } from './host/locus/delivery-execution-proof.js'
 import { areLocusPresetsDeclared, LOCUS_BASE_PRESET } from './host/locus/preset.js'
 import {
   createLocusChannelCapability,
@@ -121,33 +115,30 @@ import {
 } from './host/channel/entrance-capability.js'
 import { createLocusManagementPort, createLocusSessionDescriber, type LocusSessionPeek } from './host/locus/management.js'
 import { createLocusResolution } from './host/locus/resolution.js'
+import { peekTitleFromProjection } from './host/locus/session-peek.js'
 import { attestLocusMainSurface, foldLocusMainSettings, isUsableLocusMainSession, LOCUS_MAIN_DENIED_TOOLS } from './host/locus/locus-main.js'
-import { createLocusController } from './host/locus/controller.js'
-import { ControllerLocusRepositoryAdapter } from './host/locus/controller-persistence-adapter.js'
+import { createLocusController, type EnsureGroupResult, type EnsureTopicResult } from './host/locus/controller.js'
 import { createProductionLocusDshPort } from './host/locus/dsh-port.js'
 import { buildLocusDiagnostics } from './host/locus/diagnostics.js'
-import { reconcileLocusChildren } from './host/locus/reconcile.js'
+import { reconcileLocusChildren, recoverLocusStartupV20, type ReconcileRow, type StartupCompensatorsV20 } from './host/locus/reconcile.js'
 import {
   createPrepublicationCompositionLookup,
   LocusPrepublicationStagingRegistry,
 } from './host/locus/prepublication-staging.js'
-import { asRetiredAssociationStore } from './host/locus/retirement.js'
 import { createDurableLocusAuthorizationResolver, type LocusAuthorizationStore } from './host/locus/admission.js'
 import { createLocusControlDispatcher, locusSessionIdMatchesPrefix } from './host/locus/control.js'
-import { createLocusPermissionMutation } from './host/locus/permission-mutation.js'
-import { createLocusToolTierMutation, type LocusLiveToolTierSurface } from './host/locus/tool-tier-mutation.js'
-import type { LocusToolTierName } from './host/locus/aggregate.js'
+import { createLocusAccessMutation } from './host/locus/access-mutation.js'
+import type { LocusAccessModeV20 } from './host/locus/contract-v20.js'
+import { handleLocusAgentCreated } from './host/locus/agent-created.js'
+import { LocusRepositoryV20 } from './host/locus/persistence-v20.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
-import { carryArchivedTopics, type CarriedTopics } from './host/locus/carry-topics.js'
 import { createDocControlMessenger, DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
 import {
-  attestLocusComposition,
   composeLocusChild,
-  LOCUS_SHELL_TIER_TOOL_NAMES,
-  type LocusChildPermission,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
   type LocusCandidateAgent,
   type LocusCompositionPorts,
 } from './host/locus/composition.js'
@@ -351,11 +342,15 @@ async function initialize(
   const repository = new PetRepository(domain)
   // The additive locus store is a separate source of truth. It is opened on
   // the same durable domain but never falls back to legacy chat bindings.
-  const locusRepository = new LocusRepository(domain)
-  // A migrated database can still hold indexes that name deleted rows. Derived
-  // data, so repair it now, before any callback below can read an index (an
-  // early `agent/created` cold resume does); a failure aborts initialization.
-  if (await lifecycle.contain('Locus index repair', () => locusRepository.repairDerivedIndexes()) === undefined) return
+  const locusRepository = new LocusRepositoryV20(domain, { now: () => Date.now() })
+  // ONE allocator of reserved child session ids: the controller, every reset /
+  // rotation and the first-creation publication share it (ids are never reused).
+  const reserveLocusChildSessionId = (): string => `session-${randomUUID()}`
+  // Startup gate (v20 set invariants): a stored set with a topic row lacking its
+  // group row, a duplicate sessionId, or more than one default Q&A per M must
+  // not become ready. Degrading here registers no routes and opens no intake;
+  // the diagnostic names every offending key.
+  if (await lifecycle.contain('Locus set invariants', async () => { locusRepository.assertLocusSetValid(); return true }) === undefined) return
   // Startup recovery is deliberately deferred until the exact child runtime,
   // turn observer and operation-owned compensation ports have been composed.
   // Running it here with no options would persist manual debt before the Host
@@ -395,7 +390,7 @@ async function initialize(
     readonly turnId: string
     readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
-    readonly generation?: number
+    readonly sessionId?: string
   }
   let currentLocusCapability: (childSessionId: string) => CurrentLocusCapabilityProjection | undefined = () => undefined
   let inspectCurrentLocusCapability: (childSessionId: string) =>
@@ -405,8 +400,7 @@ async function initialize(
   const locusDispatchLanes = new Map<string, Promise<void>>()
   const locusDispatchKey = (correlation: DeliveryCorrelation): string => [
     correlation.locusId,
-    String(correlation.generation),
-    correlation.childSessionId,
+    correlation.sessionId,
     correlation.endpoint.chatId,
     correlation.endpoint.threadId ?? '',
   ].join('\u0000')
@@ -496,19 +490,14 @@ async function initialize(
    *
    */
   const intentTriageDeps = {
-    // Returns EVERY durable generation for the child identity; rejecting
-    // ambiguity is the caller's job — exactly `resolveLedgerCaller`'s contract.
-    loci: { findByChildSessionId: (id: string) => locusRepository.findByChildSessionId(id) },
+    // The row whose `sessionId` is this child (unique across the table, D12),
+    // with the M resolved. An ambiguous index throws; the resolver refuses it.
+    loci: { findBySessionId: (id: string) => locusRepository.findBySessionId(id) },
     track: {
       store: todoBackend,
       now: () => Date.now(),
       newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
     },
-  }
-  type RefusedReplyExecutionProof = {
-    readonly sessionId: string
-    readonly turn: number
-    readonly scope: { readonly kind: 'child'; readonly locusId: string; readonly generation: number }
   }
   let refusedReplies: ReturnType<typeof createRefusedReplyTracker> | undefined
   let deliveryExecutionProof = (_execution: ToolRunContext): RefusedReplyExecutionProof | undefined => undefined
@@ -659,7 +648,7 @@ async function initialize(
   // without it. The space has exactly two ordinary members (work main and
   // locus main); Pet writes AS the locus main session through `actAs`.
   // Nothing here opens a turn or sends to Feishu.
-  const locusMainDirectory = { list: (): readonly LocusMainRef[] => locusRepository.listLocusMains() }
+  const locusMainDirectory = { list: (): readonly LocusMainRef[] => locusRepository.listMains() }
   const locusCollab = new LocusCollab({
     directory: locusMainDirectory,
     log: message => petLog(message),
@@ -684,7 +673,11 @@ async function initialize(
   }
   /** Dependencies of the locus MAIN session's own tools (`locus_note`, `locus_reply_child`). */
   const locusMainToolsDeps: LocusMainToolsDeps = {
-    loci: locusRepository,
+    loci: {
+      findBySessionId: (id: string) => locusRepository.findBySessionId(id),
+      listEntryEndpointsOfMain: (locusMainSessionId: string) =>
+        locusReconcileRows().filter(item => item.locusMainSessionId === locusMainSessionId).map(item => item.row.endpoint),
+    },
     collab: locusCollab,
     subagents: officialSubagentMessenger,
   }
@@ -993,83 +986,25 @@ async function initialize(
     bindQueued: async (delivery, inboxMessageId) => {
       const bound = await locusRepository.bindQueued({
         deliveryId: delivery.deliveryId,
-        correlation: delivery.correlation,
+        ...delivery.correlation,
         executionId: delivery.executionId,
         inboxMessageId,
       })
-      if (bound === undefined) throw new Error('First Delivery inbox binding was rejected')
+      if (!bound.changed) throw new Error('First Delivery inbox binding was rejected')
     },
   })
   ctx.effect(
     () => () => { locusPrepublication.dispose() },
     'dsh-pet: dispose locus pre-publication staging',
   )
-  const durableLocusCompositionLookup = {
-    find: (sessionId: string) => {
-      const matches = locusRepository.findByChildSessionId(sessionId)
-      // Exactly one active generation may own a child. Anything else is
-      // unproven identity, and the composer refuses rather than guessing.
-      if (matches.length === 0) return undefined
-      if (matches.length !== 1) throw new PetError('INTERNAL', 'Locus child ownership is ambiguous')
-      const record = matches[0]!
-      if (record.state !== 'active' || locusRepository.hasFirstDeliveryRecoveryDebt(record.id)) {
-        throw new PetError('INTERNAL', 'Locus child is retired or has unresolved creation recovery debt')
-      }
-      if (record.childSessionId !== sessionId) throw new PetError('INTERNAL', 'Locus child identity changed')
-      return {
-        parentSessionId: record.parentSessionId,
-        childSessionId: sessionId,
-        locusId: record.id,
-        generation: record.generation,
-        revision: record.revision ?? 0,
-        endpoint: record.endpoint,
-        permission: record.permission.effective,
-        ...(record.permission.desired === record.permission.effective ? {} : { pendingPermission: record.permission.desired }),
-        ...(record.childComposition !== undefined ? { childComposition: record.childComposition } : {}),
-        ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
-      }
-    },
-  }
-  const locusToolTierRestrictions = new WeakMap<object, () => void>()
-  const liveLocusToolTierSurface = (childSessionId: string): LocusLiveToolTierSurface | undefined => {
-    const agent = ctx.agents.get(childSessionId as never)
-    if (agent === undefined) return undefined
-    return {
-      isIdle: () => {
-        const session = ctx.sessions.get(childSessionId as never)
-        if (session === undefined) return false
-        // Read the ordinary durable turn boundaries; do not rely on AgentHandle
-        // status (registry.get returns a bare Agent). An open non-Delivery GUI
-        // or inquiry turn must also block switching.
-        let open: number | undefined
-        for (const event of session.snapshotEvents()) {
-          if (event.type === 'turn/start') {
-            if (open !== undefined) return false
-            open = event.data.turn
-          } else if (event.type === 'turn/end') {
-            if (open === undefined || open !== event.data.turn) return false
-            open = undefined
-          }
-        }
-        return open === undefined
-      },
-      setToolTier: (tier: LocusToolTierName) => {
-        const candidate = { id: childSessionId, scope: agent.ctx as never } as LocusCandidateAgent
-        locusCompositionPorts.surface?.setToolTier?.(candidate, tier)
-      },
-      visibleTools: () => ctx.tools.schemas(agent).map(schema => schema.name),
-    }
-  }
-  let locusCompositionPorts!: LocusCompositionPorts
+  // The lookup is the ONE D15 repository lookup `handleLocusAgentCreated` does;
+  // it injects the answered composition per call.
+  let locusCompositionPorts!: Omit<LocusCompositionPorts, 'lookup'>
   locusCompositionPorts = {
     // Durable rows serve restores; the one-shot staging fallback serves the
     // fresh `agent/created` emitted before active publication.
     parentPreset: livePresetFor,
     childPreset: livePresetFor,
-    lookup: createPrepublicationCompositionLookup({
-      durable: durableLocusCompositionLookup,
-      staging: locusPrepublication,
-    }),
     // The scoped surface is registered on the CHILD's own scope: resolving
     // `tools` from the Host scope would publish `pet_context` globally.
     surface: {
@@ -1096,7 +1031,7 @@ async function initialize(
         // half of the ceiling is the child preset itself (`locus-child`).
         applyLocusInheritedToolCeiling(tools)
         const childSession = ctx.sessions.get(agent.id as never)
-        const parentSession = ctx.sessions.get(composition.parentSessionId as never)
+        const parentSession = ctx.sessions.get(composition.locusMainSessionId as never)
         const sandboxPolicy = ctx.get('sandboxPolicy') as
           | { resolve?: (input: { session: unknown }) => { workspaceRoot?: string } | undefined }
           | undefined
@@ -1112,8 +1047,12 @@ async function initialize(
         ) {
           throw new PetError('INTERNAL', 'Exact child project-read roots are unavailable')
         }
+        // A topic row stores no workspace: the project is the group row's.
         const entry = locusRepository.getLocus(composition.locusId)
-        const project = entry === undefined ? undefined : ctx.workspaceRegistry.get(entry.workspaceId as never)
+        const groupRow = entry === undefined ? undefined : locusRepository.getRow({ chatId: entry.endpoint.chatId })
+        const project = groupRow === undefined || !('workspaceId' in groupRow)
+          ? undefined
+          : ctx.workspaceRegistry.get(groupRow.workspaceId as never)
         if (project === undefined) throw new PetError('INTERNAL', 'Bound locus project workspace is unavailable')
         installLocusProjectReadGuard(scope, {
           childCwd,
@@ -1139,9 +1078,9 @@ async function initialize(
               const proof = deliveryExecutionProof(execution)
               if (!proof || proof.scope.kind !== 'child') return
               const associated = locusTurnObserver?.deliveryForTurn?.(proof.sessionId, proof.turn)
-              if (!associated || associated.correlation.locusId !== proof.scope.locusId || associated.correlation.generation !== proof.scope.generation) return
+              if (!associated || associated.correlation.locusId !== proof.scope.locusId || associated.correlation.sessionId !== proof.scope.sessionId) return
               const current = locusRepository.getDelivery(associated.deliveryId)
-              if (current?.status !== 'current' || current.childSessionId !== proof.sessionId || current.executionId !== associated.executionId || current.locusId !== proof.scope.locusId || current.generation !== proof.scope.generation) return
+              if (current?.status !== 'current' || current.sessionId !== proof.sessionId || current.executionId !== associated.executionId || current.locusId !== proof.scope.locusId || current.sessionId !== proof.scope.sessionId) return
               refusedReplies?.refused(current, proof.turn)
             },
             onDeliveryContinued: execution => {
@@ -1181,7 +1120,7 @@ async function initialize(
               locusDocContext: {
                 loci: intentTriageDeps.loci,
                 currentMessageId: caller => locusRepository.listDeliveries(caller.locusId)
-                  .find(record => record.generation === caller.generation &&
+                  .find(record => record.sessionId === caller.childSessionId &&
                     (record.status === 'current' || record.status === 'finishing') &&
                     record.queueState === 'current')?.messageId,
                 client: larkClient,
@@ -1196,7 +1135,10 @@ async function initialize(
             })),
         })
       },
-      setToolTier: (agent, tier) => {
+      // D8: read-only denies the full-access tools; danger-full-access leaves the
+      // surface unrestricted. Applied on EVERY assembly; there is no live switch
+      // (the child is released before a change, so the next wake re-applies).
+      applyAccessMode: (agent, mode) => {
         const scope = agent.scope as unknown as Context
         const tools = scope.get('tools') as {
           restrict?: (restriction: { deny: readonly string[] }) => () => void
@@ -1204,30 +1146,7 @@ async function initialize(
         if (typeof tools?.restrict !== 'function') {
           throw new PetError('INTERNAL', 'Agent-scoped tools.restrict is unavailable')
         }
-        const live = ctx.agents.get(agent.id as never)
-        if (live === undefined) {
-          throw new PetError('INTERNAL', `Live Agent ${agent.id} is unavailable for tier attestation`)
-        }
-        const priorRestriction = locusToolTierRestrictions.get(live)
-        let installedRestriction = priorRestriction
-        if (tier === 'safe' && installedRestriction === undefined) {
-          installedRestriction = tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES })
-          locusToolTierRestrictions.set(live, installedRestriction)
-        } else if (tier === 'shell' && installedRestriction !== undefined) {
-          installedRestriction()
-          locusToolTierRestrictions.delete(live)
-          installedRestriction = undefined
-        }
-        const names = ctx.tools.schemas(live).map(schema => schema.name)
-        const attestation = attestLocusComposition(names, tier)
-        if (!attestation.ok) {
-          // A failed shell expansion must not leave an agent wider than safe.
-          if (tier === 'shell' && priorRestriction !== undefined) {
-            const restored = tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES })
-            locusToolTierRestrictions.set(live, restored)
-          }
-          throw new PetError('INTERNAL', `Tool tier ${tier} failed live attestation: ${attestation.leaks.join(', ')}`)
-        }
+        if (mode === 'read-only') tools.restrict({ deny: LOCUS_FULL_ACCESS_TOOL_NAMES })
       },
       // This guard is intentionally a mistake-prevention measure only. Shell
       // scripts, HTTP clients, copied binaries, and alternate spellings remain
@@ -1273,31 +1192,25 @@ async function initialize(
         // publishing one whose file access was never verified.
         return {}
       }
-      // `write` means FULL access by explicit owner decision (ADR-0005): a
-      // locus child's cwd is its parent's cwd, so `workspace-write` could never
-      // cover the sibling worktrees the owner actually works in.
-      const modeOf = (permission: LocusChildPermission): string =>
-        permission === 'write' ? 'danger-full-access' : 'read-only'
+      // `danger-full-access` is FULL access by explicit owner decision
+      // (ADR-0005): a locus child's cwd is its parent's cwd, so
+      // `workspace-write` could never cover the sibling worktrees.
       return {
         policy: {
-          apply: (sessionId: string, permission: LocusChildPermission) => {
+          apply: (sessionId: string, mode: LocusAccessModeV20) => {
             const session = sessions.get?.(sessionId as never)
             if (session === undefined) {
               throw new PetError('INTERNAL', `Session ${sessionId} is not resolvable`)
             }
             // The official write seam is a free function exported by
-            // dsh-sandbox-policy. The service itself only resolves policy;
-            // inventing `service.setMode` type-checks against a test double but
-            // is absent in the real Host and leaves every locus child
-            // uncomposed.
-            setSandboxMode(session as never, modeOf(permission) as never)
+            // dsh-sandbox-policy; the service itself only resolves policy.
+            setSandboxMode(session as never, mode as never)
           },
-          resolve: (sessionId: string): LocusChildPermission | undefined => {
+          resolve: (sessionId: string): LocusAccessModeV20 | undefined => {
             const session = sessions.get?.(sessionId as never)
             if (session === undefined) return undefined
             const resolved = policy.resolve?.({ session })?.mode
-            if (resolved === 'read-only') return 'read'
-            return resolved === 'danger-full-access' ? 'write' : undefined
+            return resolved === 'read-only' || resolved === 'danger-full-access' ? resolved : undefined
           },
         },
       }
@@ -1317,7 +1230,7 @@ async function initialize(
         // composition fail as a duplicate publication. `composed:false` is
         // the ordinary-session answer and falls through unchanged.
         if (typeof sessionId === 'string' && agent?.ctx !== undefined) {
-          const main = locusRepository.getLocusMain(sessionId)
+          const main = locusRepository.findMain(sessionId)
           if (main !== undefined || locusMainScopes.has(agent.ctx as object)) {
             if ((main !== undefined && main.status !== 'active') || livePresetFor(sessionId) !== LOCUS_BASE_PRESET) {
               throw new PetError('INTERNAL', 'Locus main is retired or its preset changed')
@@ -1339,19 +1252,39 @@ async function initialize(
             return undefined
           }
           const candidate: LocusCandidateAgent = { id: sessionId, scope: agent.ctx as never }
-          // Rethrown deliberately: only a candidate that matched durable or
-          // staged locus identity may veto publication. Logged first because the
-          // veto travels out through agent creation and provisioning, which
-          // collapse it into one generic `locus-unavailable` refusal — without
-          // this line an operator cannot tell a leaked tool from an unverified
-          // policy or an unreadable surface, and the child simply stops being
-          // published.
-          let result: ReturnType<typeof composeLocusChild>
+          // One D15 lookup in order, compose once, `recordAccessVerified` BEFORE
+          // publication (agent-created.ts). Rethrown deliberately: only a
+          // candidate that matched a durable or staged row may veto publication.
+          // Logged first because the veto travels out through agent creation and
+          // provisioning, which collapse it into one generic `locus-unavailable`.
+          let outcome: 'ordinary' | 'composed'
           try {
-            result = composeLocusChild(candidate, locusCompositionPorts)
+            outcome = await handleLocusAgentCreated({
+              repository: locusRepository,
+              agentPreset: livePresetFor,
+              staged: id => locusPrepublication.inspect(id)?.composition,
+              claimStaged: id => { locusPrepublication.claim(id) },
+              compose: (agentCandidate, composition) =>
+                composeLocusChild(agentCandidate, {
+                  ...locusCompositionPorts,
+                  lookup: { find: () => composition },
+                }),
+              publishClaimed: id => locusPrepublication.publishClaimed(id),
+              // Class `main-unavailable`: migrate the whole W; the refused delivery
+              // stays in backlog and the dispatcher re-reads the new sessionId.
+              migrateMain: async composition => {
+                const pairing = locusRepository.findMain(composition.locusMainSessionId)
+                if (pairing === undefined || locusProvisioningController === undefined) return
+                await locusProvisioningController.migrateWholeW(
+                  pairing.workSessionId,
+                  composition.endpoint.chatId,
+                  composition.endpoint.threadId,
+                )
+              },
+              now: Date.now,
+              log: message => petLog(`dsh-pet: ${message}`),
+            }, candidate)
           } catch (error) {
-            // Include the cause chain: the outer composition message names
-            // only the stage, while the cause names the failing Host seam.
             const describe = (value: unknown): string => {
               const parts: string[] = []
               let current: unknown = value
@@ -1364,27 +1297,7 @@ async function initialize(
             petLog(`dsh-pet: locus composition refused ${sessionId} (${describe(error)})`)
             throw error
           }
-          if (result.composed) {
-            if (result.pending !== undefined) {
-              await resolveLocusPendingApplication({
-                repository: locusRepository,
-                notify: async input => {
-                  if (input.endpoint.threadId === undefined || isDocEndpoint(input.endpoint)) {
-                    await locusLarkPort.sendControlMessage(input)
-                    return
-                  }
-                  const delivery = locusRepository.findCurrentSerializedDelivery(result.composition)
-                  const target = delivery?.replyTarget
-                  if (target === undefined || target.chatId !== input.endpoint.chatId ||
-                      target.threadId !== input.endpoint.threadId || typeof larkClient.replyToTarget !== 'function') {
-                    throw new Error('Pending topic notice has no current matching reply target')
-                  }
-                  await larkClient.replyToTarget(target, input.text)
-                },
-                log: message => petLog(`dsh-pet locus permission: ${message}`),
-              }, result.composition, result.pending)
-            }
-            await locusPrepublication.publishClaimed(sessionId)
+          if (outcome === 'composed') {
             if (payload.source === 'resume') {
               // Repair missing workspace accounting from an earlier creation.
               void attachSessionToWorkspace(sessionId).catch(error => {
@@ -1758,7 +1671,7 @@ async function initialize(
     settled: executorSessionId => projectionSettled(executorSessionId),
     isLocusChild: executorSessionId => {
       try {
-        return locusContextRepository.findByChildSessionId(executorSessionId).length > 0
+        return locusContextRepository.findBySessionId(executorSessionId) !== undefined
       } catch {
         // An unreadable locus index is not proof either way; the ordinary Task
         // lookup still gates registration, and a locus child has no Task.
@@ -1832,7 +1745,7 @@ async function initialize(
           },
           log: message => petLog(`dsh-pet locus child: ${message}`),
         }),
-        publication: createFirstDeliveryPublication({ repository: locusRepository, firstPrompts }),
+        publication: createFirstDeliveryPublication({ repository: locusRepository, firstPrompts, reserveChildSessionId: reserveLocusChildSessionId }),
       },
       // Without this port every child-delivery refusal (safe-composition-unproven,
       // child-not-found, parent-unavailable, ...) is discarded: the controller's
@@ -1862,24 +1775,22 @@ async function initialize(
     () => () => { locusReconcileAbort.abort() },
     'dsh-pet: cancel locus startup reconciliation',
   )
+  // Rows with the M their group row names (a topic row stores none).
+  const locusReconcileRows = (): ReconcileRow[] => locusRepository.listRows().flatMap(row => {
+    const group = 'threadId' in row.endpoint ? locusRepository.getRow({ chatId: row.endpoint.chatId }) : row
+    return group !== undefined && 'locusMainSessionId' in group
+      ? [{ row, locusMainSessionId: group.locusMainSessionId }]
+      : []
+  })
   const locusReconciled = await lifecycle.contain('Locus child reconciliation', async () => {
     const proof = locusChildProbe.available ? locusChildProbe.ports.proof : undefined
     const report = await reconcileLocusChildren(
-      locusRepository.listLoci(),
+      locusReconcileRows(),
       {
         store: {
-          invalidate: async (locusId, reason, at) => {
-            // The child is proven gone, so its pending Deliveries can never
-            // complete. Honouring the pending-work guard here would leave the
-            // endpoint permanently stuck with no diagnosis.
-            await locusRepository.invalidateLocus(locusId, reason, at, undefined, {
-              evenWithPendingWork: true,
-            })
-          },
-          hasPendingDelivery: locusId => locusRepository.listPendingDeliveries(locusId).length > 0,
-          clearBusy: async (locusId, at) => {
-            await locusRepository.setLocusBusy(locusId, false, at)
-          },
+          // The child is proven gone: mark that ONE row invalid (D7 class A); the
+          // next authorized @ rebuilds it in place.
+          invalidate: async (fence, reason, at) => { await locusRepository.markInvalid(fence, reason, at) },
         },
         ...(proof === undefined
           ? {}
@@ -1890,7 +1801,7 @@ async function initialize(
                 // An explicit absence from the runtime's own child listing is
                 // evidence; anything else must stay unproven.
                 return found === undefined
-                  ? { kind: 'unusable', reason: '子会话在运行时中已不存在，需要所有者重新建立。' }
+                  ? { kind: 'unusable', reason: '子会话在运行时中已不存在，下一条授权 @ 将原地重建。' }
                   : { kind: 'usable' }
               },
             },
@@ -1899,11 +1810,8 @@ async function initialize(
       },
       locusReconcileAbort.signal,
     )
-    if (report.invalidated.length > 0 || report.busyCleared.length > 0) {
-      petLog(
-        `dsh-pet: locus reconciliation invalidated ${String(report.invalidated.length)}`
-        + `, cleared ${String(report.busyCleared.length)} stale busy fence(s)`,
-      )
+    if (report.invalidated.length > 0) {
+      petLog(`dsh-pet: locus reconciliation invalidated ${String(report.invalidated.length)}`)
     }
     return report
   })
@@ -1952,11 +1860,8 @@ async function initialize(
     },
   }
   const locusProvisioning = (() => {
-    // No child is created by provisioning any more (the first deliverable
-    // message creates it), so the idle-child runtime capability is not needed here.
-    if (!locusRepository.supportsAtomicProvisioning()) {
-      return undefined
-    }
+    // No child is created by provisioning (the first deliverable message
+    // creates it), so the idle-child runtime capability is not needed here.
     const sessionController = ctx.get('sessionController') as
       | { inspect?: (sessionId: unknown) => Promise<unknown> }
       | undefined
@@ -2017,12 +1922,15 @@ async function initialize(
         },
       })
       const controller = createLocusController({
-        repository: new ControllerLocusRepositoryAdapter(locusRepository),
+        repository: locusRepository,
         dsh,
         lark: locusLarkPort,
+        reserveChildSessionId: reserveLocusChildSessionId,
         // The dsh-collab space of a work/locus-main pair; owned by the collab
         // side, this is only the seam the establishment path calls.
         establishSpace: input => locusCollab.ensureSpace(input),
+        // Compensation of an M this operation created: best-effort, logged leak.
+        releaseSpace: input => locusCollab.releaseSpace(input),
         log: message => petLog(`dsh-pet locus provisioning: ${message}`),
       })
       return { controller, dsh }
@@ -2038,9 +1946,6 @@ async function initialize(
   const locusProvisioningController = locusProvisioning?.controller
   const locusDshPort = locusProvisioning?.dsh
 
-  // Legacy rows participate only as a terminal retirement marker. They never
-  // supply routing, session identity, workspace or permission to the new path.
-  const retiredAssociations = asRetiredAssociationStore(repository)
   /**
    * One reader for the owner's archive set, shared by every layer that must
    * agree on it: admission (does this endpoint still answer at all?) and
@@ -2052,37 +1957,14 @@ async function initialize(
     ((ctx.workspaceRegistry.archivedSessionIds ?? []) as readonly unknown[])
       .some(id => String(id) === sessionId)
 
-  const locusAuthorizationStore: LocusAuthorizationStore = {
-    getLatestLocusByEndpoint: endpoint => {
-      const record = locusRepository.getLatestLocusByEndpoint(endpoint)
-      if (record === undefined) return undefined
-      // A row is judged by the WORK session behind its locus main. Persistence
-      // holds only paired rows, so a missing pairing is invalid data.
-      const pairing = locusRepository.getLocusMain(record.parentSessionId)
-      if (pairing === undefined) throw new Error(`Locus ${record.id} has no locus_mains pairing for its parent session`)
-      return {
-        id: record.id,
-        state: record.state,
-        parentSessionId: record.parentSessionId,
-        workSessionId: pairing.workSessionId,
-        ...(record.toolTier === undefined ? {} : { toolTier: record.toolTier }),
-        ...(record.childComposition === undefined ? {} : { childComposition: record.childComposition }),
-      }
-    },
-  }
-  const locusAuthorization = createDurableLocusAuthorizationResolver(
-    locusAuthorizationStore,
-    retiredAssociations,
-    isSessionArchived,
-  )
-  locusAuthorization.toolTier = endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe'
+  // Admission reads the exact row in any state and judges it by the W behind its M.
+  const locusAuthorization = createDurableLocusAuthorizationResolver(locusRepository, isSessionArchived)
   const locusResolution = createLocusResolution({
     store: locusRepository,
-    retired: retiredAssociations,
     isSessionArchived,
     mains: {
       find: parentSessionId => {
-        const pairing = locusRepository.getLocusMain(parentSessionId)
+        const pairing = locusRepository.findMain(parentSessionId)
         return pairing === undefined ? undefined : { workSessionId: pairing.workSessionId, status: pairing.status }
       },
     },
@@ -2123,33 +2005,25 @@ async function initialize(
               ...(chatName === undefined ? {} : { chatName }),
             })
             const record = ensured.locus
-            const base = {
-              id: record.locusId,
-              endpoint: record.endpoint,
-              generation: record.generation,
-              parentSessionId: record.parentSessionId,
-              ...(record.workSessionId === undefined ? {} : { workSessionId: record.workSessionId }),
-              ...(record.reservedChildSessionId === undefined ? {} : { reservedChildSessionId: record.reservedChildSessionId }),
-              ...(record.toolTier !== undefined ? { toolTier: record.toolTier } : {}),
-              workspaceId: record.workspaceId,
-              permission: {
-                desired: record.permission,
-                effective: record.permission,
-                // Controller generations are published only after Host policy
-                // verification; write still needs a separate authorized root.
-                verifiedAt: Date.now(),
-              },
-              ...(ensured.notice === undefined ? {} : { notice: ensured.notice }),
+            if (record.state !== 'active' && record.state !== 'not-created') {
+              throw new Error('Provisioned locus is neither a not-created nor an active entry')
             }
-            if (record.state === 'not-created') return { ...base, state: 'not-created' as const }
-            if (record.state !== 'active' || record.childSessionId === undefined || record.childComposition !== 'tier3') {
-              throw new Error('Provisioned locus is neither a not-created entry nor an active tier3 generation')
+            const group = ensured.group ?? locusRepository.getRow({ chatId: record.endpoint.chatId })
+            if (group === undefined || !('locusMainSessionId' in group)) {
+              throw new Error('Provisioned locus has no group row')
             }
+            const pairing = locusRepository.findMain(group.locusMainSessionId)
+            if (pairing === undefined) throw new Error('Provisioned locus has no locus_mains pairing')
             return {
-              ...base,
-              childSessionId: record.childSessionId,
-              childComposition: record.childComposition,
-              state: 'active' as const,
+              locusId: record.locusId,
+              endpoint: record.endpoint,
+              sessionId: record.sessionId,
+              state: record.state,
+              accessMode: record.accessMode,
+              revision: record.revision,
+              locusMainSessionId: group.locusMainSessionId,
+              workSessionId: pairing.workSessionId,
+              workspaceId: group.workspaceId,
             }
           },
         },
@@ -2157,69 +2031,52 @@ async function initialize(
     log: reason => petLog(`dsh-pet locus resolve: ${reason}`),
   })
 
-  const locusToolTierMutation = createLocusToolTierMutation({
-    repository: {
-      findLocus: locusId => locusRepository.getLocus(locusId),
-      findCurrentLocus: endpoint => locusRepository.getCurrentLocus(endpoint),
-      getLocusByChild: childSessionId => locusRepository.getLocusByChild(childSessionId),
-      hasPendingDeliveries: locusId => locusRepository.hasPendingDeliveries(locusId),
-      beginToolTierMutation: (locusId, now, fence) => locusRepository.beginToolTierMutation(locusId, now, fence),
-      commitToolTierMutation: (locusId, tier, now, fence) => locusRepository.commitToolTierMutation(locusId, {
-        desired: tier.desired,
-        effective: tier.effective,
-        verifiedAt: tier.verifiedAt ?? now,
-        grantedBy: tier.grantedBy ?? 'unknown',
-      }, now, fence),
-      abortToolTierMutation: (locusId, now, fence) => locusRepository.abortToolTierMutation(locusId, now, fence),
-      invalidateToolTierMutation: (locusId, reason, now, fence) => locusRepository.invalidateToolTierMutation(locusId, reason, now, fence),
+  // Open turn at the durable boundaries (GUI and inquiry turns included).
+  const isLocusChildTurnIdle = (sessionId: string): boolean => {
+    const session = ctx.sessions.get(sessionId as never)
+    if (session === undefined) return false
+    let open: number | undefined
+    for (const event of session.snapshotEvents()) {
+      if (event.type === 'turn/start') {
+        if (open !== undefined) return false
+        open = event.data.turn
+      } else if (event.type === 'turn/end') {
+        if (open === undefined || open !== event.data.turn) return false
+        open = undefined
+      }
+    }
+    return open === undefined
+  }
+  const hasPendingLocusChildInput = (sessionId: string): boolean => {
+    type InboxLike = { readonly nextTurn?: readonly unknown[]; readonly nextStep?: readonly unknown[] }
+    const handle = ctx.agents.get(sessionId as never) as { agent?: { inbox?: InboxLike }; inbox?: InboxLike } | undefined
+    const inbox = ((handle?.agent ?? handle) as { inbox?: InboxLike } | undefined)?.inbox
+    return inbox !== undefined && ((inbox.nextTurn?.length ?? 0) + (inbox.nextStep?.length ?? 0)) > 0
+  }
+  // D8: one operation for `/access` and the management surface. A resident child
+  // is released with the real `drainChildren(exactLiveParent, [id])`, never
+  // `adapter.dispose`.
+  const locusAccessMutation = createLocusAccessMutation({
+    repository: locusRepository,
+    live: {
+      isLive: sessionId => ctx.agents.get(sessionId as never) !== undefined,
+      liveParent: locusMainSessionId => ctx.agents.get(locusMainSessionId as never),
+      isTurnIdle: isLocusChildTurnIdle,
+      hasPendingInput: hasPendingLocusChildInput,
+      drainChildren: async (parent, sessionIds) => {
+        const subagents = ctx.get('subagents') as
+          | { drainChildren?: (parent: unknown, ids: readonly unknown[]) => Promise<void> }
+          | undefined
+        if (typeof subagents?.drainChildren !== 'function') {
+          throw new PetError('INTERNAL', 'The official subagents.drainChildren is unavailable')
+        }
+        await subagents.drainChildren(parent, sessionIds.map(id => SessionId(id)))
+      },
     },
-    live: { find: liveLocusToolTierSurface },
-    attest: (visible, tier) => attestLocusComposition(visible, tier).ok,
+    log: message => petLog(`dsh-pet locus access: ${message}`),
   })
 
-  const locusPermissionMutation = (() => {
-    const policy = ctx.get('sandboxPolicy') as
-      | { resolve?: (input: { session: unknown }) => { mode?: string; workspaceRoot?: string } | undefined }
-      | undefined
-    if (policy?.resolve === undefined || locusChildDelivery === undefined) return undefined
-    return createLocusPermissionMutation({
-      repository: locusRepository,
-      sessions: {
-        resolve: childSessionId => {
-          const agent = ctx.agents.get(childSessionId as never)
-          if (agent === undefined) return undefined
-          return {
-            id: String(agent.id),
-            handle: agent.session,
-            isIdle: () => liveLocusToolTierSurface(childSessionId)?.isIdle() === true,
-          }
-        },
-      },
-      policy: {
-        apply: (resolved, mode) => { setSandboxMode(resolved.handle as never, mode) },
-        resolve: resolved => policy.resolve!({ session: resolved.handle }),
-      },
-    })
-  })()
-
-  /** See carry-topics.ts: move this group's old topics off an archived main. */
-  const moveArchivedTopics = (
-    endpoint: { readonly chatId: string; readonly threadId?: string },
-    parentSessionId: string,
-  ): Promise<CarriedTopics> => locusProvisioningController === undefined
-    ? Promise.resolve({ movedTopics: 0, skippedTopics: [] })
-    : carryArchivedTopics({
-      // Archive is judged on the WORK session behind each topic's locus main.
-      listLoci: () => locusRepository.listLoci().map(row => ({
-        ...row,
-        parentSessionId: locusRepository.getLocusMain(row.parentSessionId)?.workSessionId ?? row.parentSessionId,
-      })),
-      latestIdOf: topic => locusRepository.getLatestLocusByEndpoint(topic)?.id,
-      isArchived: isSessionArchived,
-      rebuild: input => locusProvisioningController.rebuildExplicit(input),
-    }, endpoint, parentSessionId)
-
-  const locusControlDispatch = locusProvisioningController === undefined || locusDshPort === undefined || locusPermissionMutation === undefined || locusToolTierMutation === undefined
+  const locusControlDispatch = locusProvisioningController === undefined || locusDshPort === undefined
     ? undefined
     : createLocusControlDispatcher({
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
@@ -2243,120 +2100,38 @@ async function initialize(
       },
       bind: {
         bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
-          const run = async () => endpoint.threadId === undefined
-            ? await (async () => {
-              const result = await locusProvisioningController.ensureGroup({
-                chatId: endpoint.chatId,
-                parentSessionId,
-                ...(chatName === undefined ? {} : { chatName }),
-              })
-              // A same-source retry in a group whose old topics were left on an
-              // archived main (e.g. the group was moved before topics were
-              // carried along) is the owner's repair path for those topics.
-              if (!result.reused || result.group.mainSessionId !== parentSessionId) return result
-              const carried = await moveArchivedTopics(endpoint, parentSessionId)
-              return carried.movedTopics === 0 && carried.skippedTopics.length === 0
-                ? result
-                : { ...result, ...carried }
-            })()
+          const run = (): Promise<EnsureGroupResult | EnsureTopicResult> => endpoint.threadId === undefined
+            ? locusProvisioningController.ensureGroup({
+              chatId: endpoint.chatId,
+              parentSessionId,
+              ...(chatName === undefined ? {} : { chatName }),
+            })
             : locusProvisioningController.ensureTopic({
               chatId: endpoint.chatId,
               threadId: endpoint.threadId,
               parentSessionId,
               ...(chatName === undefined ? {} : { chatName }),
             })
-          // A whole-doc /bind switch warning is a NEW full comment that
-          // @-mentions someone (full comments cannot be replied to). It must
-          // name this /bind's issuer, not whoever asked last (round-7 M2).
-          return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
-        },
-        rebuildProtected: ({ endpoint, parentSessionId, chatName, marker, actorId }) => {
-          const run = async () => {
-            if (marker === 'legacy') {
-              return locusProvisioningController.rebuildLegacyEndpoint({
-                endpoint,
-                parentSessionId,
-                ...(chatName === undefined ? {} : { chatName }),
-              })
-            }
-            const previous = locusRepository.getLatestLocusByEndpoint(endpoint)
-            if (previous === undefined) {
-              throw new Error('Protected unified generation is unavailable for explicit rebuild')
-            }
-            // An `active` row reaches here only because admission saw its main
-            // session archived. That is the one case where `/bind` may move the
-            // entry to another session: the owner already gave up the old one.
-            // rebuildExplicit re-proves the archive fact; a serving main still
-            // refuses, so binding drift stays blocked.
-            const archivedParent = previous.state === 'active' || previous.state === 'not-created'
-              ? previous.parentSessionId
-              : undefined
-            const rebuilt = await locusProvisioningController.rebuildExplicit({
-              endpoint,
-              previousLocusId: previous.id,
-              parentSessionId,
-              ...(archivedParent === undefined ? {} : { replaceArchivedParent: true }),
-            })
-            if (archivedParent === undefined) return rebuilt
-            return { ...rebuilt, ...await moveArchivedTopics(endpoint, parentSessionId) }
-          }
           return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
       },
       exit: {
         unbindCurrent: async ({ endpoint }) => {
-          const current = locusRepository.getCurrentLocus(endpoint)
+          const current = locusRepository.getRow(endpoint)
           if (current === undefined) throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
-          const stopped = await locusRepository.stopLocus(current.id)
+          const stopped = await locusProvisioningController.stopEntry({
+            expectedLocusId: current.locusId,
+            expectedRevision: current.revision,
+          })
           if (stopped.state !== 'stopped') throw new Error('Locus did not reach stopped state')
-          return { state: 'stopped' as const, busy: false as const }
+          return { state: 'stopped' as const }
         },
       },
-      toolTierMutation: {
-        setCurrentTier: async ({ endpoint, actorId, tier }) => {
-          const current = locusRepository.getCurrentLocus(endpoint)
+      access: {
+        setAccessMode: async ({ endpoint, actorId, mode }) => {
+          const current = locusRepository.getRow(endpoint)
           if (current === undefined) throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
-          const updated = await locusToolTierMutation.set({
-            locusId: current.id,
-            endpoint: current.endpoint,
-            actor: actorId,
-            tier,
-            fence: {
-              expectedLocusId: current.id,
-              expectedGeneration: current.generation,
-              expectedUpdatedAt: current.updatedAt,
-              ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
-            },
-          })
-          if (!updated.ok) {
-            const error = new Error(`Tool tier change refused: ${updated.reason}`) as Error & { code?: string }
-            error.code = updated.reason === 'busy' ? 'LOCUS_BUSY'
-              : updated.reason === 'not-found' ? 'LOCUS_NOT_CURRENT'
-                : 'POLICY_VERIFY_FAILED'
-            throw error
-          }
-          return {
-            tier: updated.effective,
-            ...(updated.pending === true ? { pending: true } : {}),
-            ...(updated.locus.childComposition === undefined ? {} : { childComposition: updated.locus.childComposition }),
-          }
-        },
-      },
-      scope: {
-        setCurrentMode: async ({ endpoint, actorId, mode }) => {
-          const current = locusRepository.getCurrentLocus(endpoint)
-          if (current === undefined) throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
-          const updated = await locusPermissionMutation.mutate({
-            locusId: current.id,
-            actorId,
-            mode,
-            fence: {
-              expectedLocusId: current.id,
-              expectedGeneration: current.generation,
-              expectedUpdatedAt: current.updatedAt,
-            },
-          })
-          return { mode: updated.permission.effective }
+          return locusAccessMutation.set({ locusId: current.locusId, mode, actorId })
         },
       },
       // A document's "name" is its title (D14); never call an IM API with a doc id.
@@ -2433,7 +2208,7 @@ async function initialize(
             // Child identity AND an execution binding are both required: a
             // claim for another child, or for a Delivery that was never
             // queued, must not become a settlement proof.
-            if (record === undefined || record.childSessionId !== childSessionId) return undefined
+            if (record === undefined || record.sessionId !== childSessionId) return undefined
             if (record.executionId === undefined) return undefined
             return {
               deliveryId: record.deliveryId,
@@ -2441,8 +2216,7 @@ async function initialize(
               correlation: {
                 endpoint: record.endpoint,
                 locusId: record.locusId,
-                generation: record.generation,
-                childSessionId: record.childSessionId,
+                sessionId: record.sessionId,
               },
             }
           },
@@ -2466,7 +2240,7 @@ async function initialize(
       turnId: capability.turnId,
       source: capability.source,
       locusId: capability.correlation.locusId,
-      generation: capability.correlation.generation,
+      sessionId: capability.correlation.sessionId,
     })
     currentLocusCapability = childSessionId => {
       const capability = locusTurnObserver.currentCapabilityForChild?.(childSessionId)
@@ -2483,12 +2257,12 @@ async function initialize(
   }
 
   deliveryExecutionProof = createDeliveryExecutionProof({
-    currentForChild: childSessionId => locusRepository.listDeliveries().filter(row => row.childSessionId === childSessionId),
+    currentForChild: childSessionId => locusRepository.listDeliveries().filter(row => row.sessionId === childSessionId),
     findByInboxMessageId: messageId => locusRepository.findDeliveryByInboxMessageId(messageId),
     deliveryForTurn: (childSessionId, turn) => locusTurnObserver?.deliveryForTurn?.(childSessionId, turn),
     isActive: delivery => {
       const row = locusRepository.getLocus(delivery.locusId)
-      return row?.state === 'active' && !locusRepository.hasFirstDeliveryRecoveryDebt(row.id) && row.childSessionId === delivery.childSessionId && row.generation === delivery.generation
+      return row?.state === 'active' && !locusRepository.hasFirstDeliveryRecoveryDebt(row.locusId) && row.sessionId === delivery.sessionId
     },
   })
 
@@ -2502,8 +2276,7 @@ async function initialize(
       ...(input.delivery.endpoint.threadId === undefined ? {} : { threadId: input.delivery.endpoint.threadId }),
     },
     locusId: input.locus.locus.locusId,
-    generation: input.locus.locus.generation,
-    childSessionId: input.childSessionId,
+    sessionId: input.childSessionId,
   })
 
   const loadCurrentDelivery = (correlation: DeliveryCorrelation, deliveryId: string): DeliveryRecord => {
@@ -2514,8 +2287,7 @@ async function initialize(
       record.status !== 'current' ||
       record.queueState !== 'current' ||
       record.locusId !== correlation.locusId ||
-      record.generation !== correlation.generation ||
-      record.childSessionId !== correlation.childSessionId ||
+      record.sessionId !== correlation.sessionId ||
       record.endpoint.chatId !== correlation.endpoint.chatId ||
       (record.endpoint.threadId ?? undefined) !== (correlation.endpoint.threadId ?? undefined)
     ) {
@@ -2530,7 +2302,7 @@ async function initialize(
     outcome: 'settled' | 'failed',
   ): Promise<void> => {
     locusTurnObserver?.revokeCurrentCapability?.({
-      childSessionId: correlation.childSessionId,
+      childSessionId: correlation.sessionId,
       deliveryId: record.deliveryId,
     })
     locusChannelController?.currentFinished?.({
@@ -2545,10 +2317,9 @@ async function initialize(
     getDelivery: id => locusRepository.getDelivery(id),
     abandonRefusedDelivery: input => locusRepository.abandonRefusedDelivery(input),
     isActive: record => {
-      const rows = locusRepository.findByChildSessionId(record.childSessionId)
-      const locus = rows.length === 1 ? rows[0] : undefined
-      const current = locusRepository.listDeliveries(record.locusId).filter(row => row.childSessionId === record.childSessionId && row.generation === record.generation && (row.status === 'current' || row.status === 'finishing'))
-      return locus?.state === 'active' && locus.id === record.locusId && locus.generation === record.generation && current.length === 1 && current[0]?.deliveryId === record.deliveryId
+      const found = locusRepository.findBySessionId(record.sessionId)
+      const current = locusRepository.listDeliveries(record.locusId).filter(row => row.sessionId === record.sessionId && (row.status === 'current' || row.status === 'finishing'))
+      return found?.row.state === 'active' && found.row.locusId === record.locusId && current.length === 1 && current[0]?.deliveryId === record.deliveryId
     },
     withDispatchLane: withLocusDispatchLane,
     finishAndAdvance: async (record, correlation, outcome) => {
@@ -2724,7 +2495,7 @@ async function initialize(
       }
     }
     : undefined
-  const startupCompensators: LocusStartupCompensators = {
+  const startupCompensators: StartupCompensatorsV20 = {
     ...(compensateDurableChild === undefined
       ? {}
       : {
@@ -2763,15 +2534,10 @@ async function initialize(
         },
       }),
   }
-  // The same compensators also serve the RUNTIME retry of a stale failed
-  // creation (B040): without them a failure would stay blocking until a
-  // restart. Installed before intake starts, used by a later request.
-  locusRepository.setProvisioningCompensators(startupCompensators)
-  locusRepository.setDiagnosticSink(message => petLog(`dsh-pet locus provisioning: ${message}`))
   const locusStartup = await lifecycle.contain('Locus startup reconciliation', () =>
-    locusRepository.reconcileStartup({
+    recoverLocusStartupV20(locusRepository, {
       deliveryProof: async (delivery: DeliveryRecord) => {
-        const observed = locusTurnObserver?.currentForChild?.(delivery.childSessionId)
+        const observed = locusTurnObserver?.currentForChild?.(delivery.sessionId)
         if (observed !== undefined && observed.executionId === delivery.executionId) {
           return {
             deliveryId: delivery.deliveryId,
@@ -2780,26 +2546,27 @@ async function initialize(
             state: 'running' as const,
           }
         }
-        const locus = locusRepository.getLocus(delivery.locusId)
-        if (
-          locus === undefined || locus.generation !== delivery.generation ||
-          locus.childSessionId !== delivery.childSessionId
-        ) return undefined
+        // Matched by (locusId, sessionId): a replaced session proves nothing.
+        const found = locusRepository.findBySessionId(delivery.sessionId)
+        if (found === undefined || found.row.locusId !== delivery.locusId) return undefined
         return proveStartupDeliveryFromColdRead({
           delivery,
-          parentSessionId: locus.parentSessionId,
+          parentSessionId: found.locusMainSessionId,
           query: ctx.get('sessionQuery') as LocusSessionQueryLike | undefined,
           log: reason => petLog(`dsh-pet locus recovery: ${reason}`),
         })
       },
       compensators: startupCompensators,
+      reserveChildSessionId: reserveLocusChildSessionId,
     }),
   )
   if (locusStartup === undefined) return
-  if (locusStartup.pendingDeliveries.length > 0 || locusStartup.recoverableOperations.length > 0) {
+  const startupPending = locusStartup.retainedDeliveries.length + locusStartup.replayableDeliveries.length + locusStartup.manualDeliveries.length
+  const startupOperations = locusStartup.compensatedOperations.length + locusStartup.manualOperations.length
+  if (startupPending > 0 || startupOperations > 0) {
     petLog(
-      `dsh-pet locus recovery: ${String(locusStartup.pendingDeliveries.length)} pending Deliveries, ` +
-      `${String(locusStartup.recoverableOperations.length)} recoverable operations; no side effect replayed`,
+      `dsh-pet locus recovery: ${String(startupPending)} pending Deliveries, ` +
+      `${String(startupOperations)} recoverable operations; no side effect replayed`,
     )
   }
   const interruptedSettlements = locusStartup.failedDeliveries.filter(
@@ -2822,12 +2589,9 @@ async function initialize(
    */
   const locusChannelGaps: string[] = []
   if (!locusRepository.supportsAtomicProvisioning()) {
-    // Delivery acceptance, queue proof, settlement, and the locus busy fence
-    // are one cross-table lifecycle. The compatibility fallback is useful for
-    // offline inspection, but a rollback failure could otherwise publish a
-    // half mutation that startup recovery cannot safely infer. Production
-    // intake therefore requires the same atomic Domain capability as locus
-    // provisioning rather than exposing a weaker Delivery-only path.
+    // Delivery acceptance, queue proof and settlement are one cross-table
+    // lifecycle; without the atomic Domain capability a rollback failure could
+    // publish a half mutation recovery cannot infer. Production intake needs it.
     locusChannelGaps.push('atomic locus storage unavailable')
   }
   if (!locusChildProbe.available) {
@@ -2878,23 +2642,27 @@ async function initialize(
         findByMessageId: messageId => locusRepository.findDeliveryByMessageId(messageId),
         getById: deliveryId => locusRepository.getDelivery(deliveryId),
         accept: input => locusRepository.acceptDelivery(input),
-        bindQueued: async input => {
-          const bound = await locusRepository.bindQueued(input)
-          if (bound !== undefined) {
-            await firstPrompts.whenBound(input.correlation.childSessionId)
-            firstPrompts.retire(input.correlation.childSessionId)
-          }
-          return bound
+        // The channel's ledger port keeps its `correlation` wrapper; the v20
+        // repository is keyed by the flattened {endpoint, locusId, sessionId}.
+        bindQueued: async ({ correlation, ...rest }) => {
+          const bound = await locusRepository.bindQueued({ ...correlation, ...rest })
+          if (!bound.changed) return undefined
+          await firstPrompts.whenBound(correlation.sessionId)
+          firstPrompts.retire(correlation.sessionId)
+          return bound.record
         },
-        bindTurn: input => locusRepository.bindTurn(input),
-        settleByTurn: input => locusRepository.settleByTurn(input),
+        bindTurn: async ({ correlation, ...rest }) => (await locusRepository.bindTurn({ ...correlation, ...rest })).record,
+        settleByTurn: input => locusRepository.settleByTurn({ ...input, turnId: input.correlation.turnId }),
         failBeforeDispatch: input => locusRepository.failBeforeDispatch(input),
         fail: input => locusRepository.fail(input),
       },
       deliveryDispatch: {
-        claimCurrent: input => locusRepository.claimCurrentDelivery(input),
+        claimCurrent: async ({ correlation, ...rest }) => {
+          const claimed = await locusRepository.claimCurrentDelivery({ ...correlation, ...rest })
+          return claimed.changed ? claimed.record : undefined
+        },
         pendingForLocus: correlation => locusRepository.listDeliveries(correlation.locusId)
-          .filter(record => record.generation === correlation.generation && record.childSessionId === correlation.childSessionId),
+          .filter(record => record.sessionId === correlation.sessionId),
         currentFinished: input => locusChannelController?.currentFinished?.(input),
         dispatchNext: input => locusChannelController?.dispatchNext?.(input),
         scheduleCurrent: input => scheduleCurrentDelivery(input),
@@ -2910,25 +2678,6 @@ async function initialize(
         const resolved = policy?.resolve?.({ session: agent.session })
         return { resident: true, ...(resolved === undefined ? {} : { policy: resolved }) }
       },
-      invalidatePolicyDrift: async ({ locus, reason }) => {
-        const current = locusRepository.getLocus(locus.id ?? locus.locusId ?? '')
-        if (
-          current === undefined || current.state !== 'active' ||
-          current.generation !== locus.generation ||
-          current.childSessionId !== locus.childSessionId
-        ) return
-        await locusRepository.invalidateLocus(
-          current.id,
-          reason,
-          Date.now(),
-          {
-            expectedLocusId: current.id,
-            expectedGeneration: current.generation,
-            expectedUpdatedAt: current.updatedAt,
-            ...(current.revision === undefined ? {} : { expectedRevision: current.revision }),
-          },
-        )
-      },
       addressing: {
         listChatBots: chatId => larkClient.listChatBots(chatId),
         // Names the asker in the delivery prompt, so the agent addresses a
@@ -2942,7 +2691,7 @@ async function initialize(
       },
       // Disclose ask-scope on a document's FIRST entry only (D7), proven from
       // durable loci of that document root, so no flag is stored.
-      docHasEntries: chatId => locusRepository.listLoci().some(record => record.endpoint.chatId === chatId),
+      docHasEntries: chatId => locusRepository.listRows().some(row => row.endpoint.chatId === chatId),
       docDisclosureText: DOC_DISCLOSURE_TEXT,
       receipts: (() => {
         const inProgressReactions = new Map<string, string>()
@@ -2983,14 +2732,12 @@ async function initialize(
         }
       })(),
       renderPrompt: async ({ locus, message, signal }) => {
-        const locusId = locus.id ?? locus.locusId
-        if (locusId === undefined) throw new Error('Active locus is missing its durable id')
+        const locusId = locus.locusId
+        // The row, re-read: it must still be this exact (locusId, sessionId).
+        const sameEntry = (row: ReturnType<typeof locusRepository.getLocus>): row is NonNullable<typeof row> =>
+          row !== undefined && (row.state === 'active' || row.state === 'not-created') && row.sessionId === locus.sessionId
         const record = locusRepository.getLocus(locusId)
-        if (
-          record === undefined || (record.state !== 'active' && record.state !== 'not-created') ||
-          (record.childSessionId ?? record.reservedChildSessionId) !== locus.childSessionId ||
-          record.generation !== locus.generation
-        ) {
+        if (!sameEntry(record)) {
           throw new Error('Active locus changed before delivery prompt rendering')
         }
         // Measured before the prompt may claim it, within a bounded deadline and
@@ -3001,7 +2748,7 @@ async function initialize(
         const readability = isDocEndpoint(record.endpoint) ? 'unconfirmed' as const : await measureEntranceReadability(
           {
             chatId: record.endpoint.chatId,
-            ...(record.endpoint.threadId === undefined ? {} : { threadId: record.endpoint.threadId }),
+            ...('threadId' in record.endpoint ? { threadId: record.endpoint.threadId } : {}),
             signal,
           },
           { probe: entranceReadProbeFor(larkClient) },
@@ -3010,11 +2757,7 @@ async function initialize(
         // disabled, or re-bound while the probe was in flight must not get a
         // prompt rendered from the record we just measured.
         const revalidated = locusRepository.getLocus(locusId)
-        if (
-          revalidated === undefined || (revalidated.state !== 'active' && revalidated.state !== 'not-created') ||
-          (revalidated.childSessionId ?? revalidated.reservedChildSessionId) !== locus.childSessionId ||
-          revalidated.generation !== locus.generation
-        ) {
+        if (!sameEntry(revalidated)) {
           throw new Error('Active locus changed while measuring entrance readability')
         }
         // Send the routing preamble only while the Host cannot PROVE this child
@@ -3024,21 +2767,22 @@ async function initialize(
         // runtime counter would reset across restarts. The Delivery being
         // rendered is excluded, so rendering never consumes the first delivery.
         const current = locusRepository.findDeliveryByMessageId(message.messageId)
-        const project = ctx.workspaceRegistry.get(revalidated.workspaceId as never)
+        // The project is the GROUP row's workspace (a topic row stores none), and
+        // `reboundFrom` (D9) is the group row's too.
+        const groupRow = locusRepository.getRow({ chatId: revalidated.endpoint.chatId })
+        if (groupRow === undefined || !('workspaceId' in groupRow)) throw new Error('Locus entry has no group row')
+        const project = ctx.workspaceRegistry.get(groupRow.workspaceId as never)
         if (project === undefined || await project.status() !== 'ok') throw new Error('Bound locus project workspace is unavailable')
         const prompt = renderLocusDeliveryFor({
           record: {
-            id: revalidated.id,
-            generation: revalidated.generation,
+            locusId: revalidated.locusId,
             endpoint: revalidated.endpoint,
-            parentSessionId: revalidated.parentSessionId,
-            childSessionId: locus.childSessionId,
-            workspaceId: revalidated.workspaceId,
+            locusMainSessionId: groupRow.locusMainSessionId,
+            sessionId: locus.sessionId,
+            workspaceId: groupRow.workspaceId,
             state: revalidated.state,
-            ...(revalidated.childComposition === undefined ? {} : { childComposition: revalidated.childComposition }),
-            ...(revalidated.toolTier === undefined ? {} : { toolTier: revalidated.toolTier }),
-            permission: revalidated.permission,
-            contextAnchor: revalidated.contextAnchor ?? { status: 'unknown' },
+            accessMode: revalidated.accessMode,
+            ...(groupRow.reboundFrom === undefined ? {} : { reboundFrom: groupRow.reboundFrom }),
           },
           readability,
           message: {
@@ -3057,14 +2801,13 @@ async function initialize(
             // Recomputed at render against the CURRENT allowlist (D5/D12).
             senderAllowlisted: repository.getChannelConfig().allowOpenIds.includes(message.senderOpenId),
           },
-          deliveries: locusRepository.listDeliveries(record.id),
+          deliveries: locusRepository.listDeliveries(record.locusId),
           ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),
         })
         return `Host 确认的绑定项目根：${JSON.stringify(project.path)}。文件读取与搜索使用该项目的绝对路径；运行 cwd 不代表项目授权，DSH/Pet 状态目录不可读取。\n\n${prompt}`
       },
       turns: locusTurnObserver,
       allowOpenIds: () => repository.getChannelConfig().allowOpenIds,
-      currentToolTier: endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
       ...(locusControlDispatch === undefined ? {} : { controlDispatch: locusControlDispatch }),
       // Admission is supplied by InboundPipeline for every event so its
       // watermark belongs to the currently connected subscription generation.
@@ -3099,8 +2842,7 @@ async function initialize(
               correlation: {
                 endpoint: { ...delivery.endpoint },
                 locusId: delivery.locusId,
-                generation: delivery.generation,
-                childSessionId: delivery.childSessionId,
+                sessionId: delivery.sessionId,
               },
               status: delivery.status,
             },
@@ -3117,8 +2859,7 @@ async function initialize(
         await locusChannelController?.dispatchNext?.({
           endpoint: { ...delivery.endpoint },
           locusId: delivery.locusId,
-          generation: delivery.generation,
-          childSessionId: delivery.childSessionId,
+          sessionId: delivery.sessionId,
         })
       }
       for (const delivery of locusRepository.listDeliveries()) {
@@ -3127,8 +2868,7 @@ async function initialize(
         const correlation: DeliveryCorrelation = {
           endpoint: { ...delivery.endpoint },
           locusId: delivery.locusId,
-          generation: delivery.generation,
-          childSessionId: delivery.childSessionId,
+          sessionId: delivery.sessionId,
         }
         pendingByLocus.set(locusDispatchKey(correlation), correlation)
       }
@@ -3211,8 +2951,7 @@ async function initialize(
         } catch {
           values = undefined
         }
-        const titleKnown = values !== undefined && Object.hasOwn(values, 'title')
-        const title = titleKnown && typeof values!['title'] === 'string' ? values!['title'] as string : undefined
+        const { titleKnown, title } = peekTitleFromProjection(values)
         return {
           exists: true,
           cwd: snapshot.header.cwd,
@@ -3307,19 +3046,19 @@ async function initialize(
     log: reason => petWarn(`dsh-pet ledger: ${reason}`),
   })
 
-  let locusManagement!: ReturnType<typeof createLocusManagementPort>
-  locusManagement = createLocusManagementPort({
-    ownerProjection: ({ locus }) => retiredInquiryOwnerProjection(
-      [...domain.table('inquiries').entries()].map(([, row]) => row), locus,
-    ),
-    repository: locusRepository as never,
-    // The same live reader admission and resolution already share: the panel
-    // must agree with the channel about whether this entry can still serve,
-    // otherwise one of them offers a repair while the other refuses it.
-    isSessionArchived,
+  const locusManagement = createLocusManagementPort({
+    repository: {
+      listRows: () => locusRepository.listRows(),
+      findMain: id => locusRepository.findMain(id),
+      hasNonTerminalDelivery: locusId => locusRepository.hasNonTerminalDelivery(locusId),
+      // A current Delivery (queued / running / finishing included) in the entry's chat.
+      hasCurrentDelivery: locusId => {
+        const row = locusRepository.getLocus(locusId)
+        return row !== undefined && locusRepository.hasCurrentDeliveryInChat(row.endpoint.chatId)
+      },
+    },
     resolvers: {
-      main: describeSession,
-      child: describeSession,
+      session: describeSession,
       // Document entries only (D14): title/url via drive +inspect, cached so the
       // panel does not re-inspect every refresh; a comment's summary is the
       // earliest persisted anchored quote. IM entries keep their existing names.
@@ -3345,70 +3084,21 @@ async function initialize(
         if (workspace === undefined) return undefined
         return {
           ...(typeof workspace.title === 'string' ? { title: workspace.title } : {}),
-          // Display-only. It is never an execution-root authorization: a
-          // confirmed anchor is a separate, independently proven fact.
+          // Display-only. It is never an execution-root authorization.
           ...(typeof workspace.path === 'string' ? { path: workspace.path } : {}),
         }
-      },
-    },
-    ...(locusPermissionMutation === undefined ? {} : { permissionMutation: locusPermissionMutation }),
-    toolTierMutation: {
-      set: async input => {
-        const before = locusRepository.getLocus(input.locusId)
-        if (before === undefined) return { ok: false as const, reason: 'not-found' as const }
-        const result = await locusToolTierMutation.set({
-          locusId: input.locusId,
-          endpoint: before.endpoint,
-          tier: input.tier,
-          actor: input.actor,
-          fence: input.fence,
-        })
-        if (!result.ok) return result
-        const persisted = locusRepository.getLocus(input.locusId)
-        return persisted === undefined
-          ? { ok: false as const, reason: 'not-found' as const }
-          : { ok: true as const, locus: persisted }
       },
     },
     ...(locusProvisioningController === undefined
       ? {}
       : {
         actions: {
-          bind: async (request) => {
-            const endpoint = request.endpoint.threadId === undefined
-              ? { chatId: request.endpoint.chatId }
-              : { chatId: request.endpoint.chatId, threadId: request.endpoint.threadId }
-            const before = locusRepository.getLatestLocusByEndpoint(endpoint)
-            const result = endpoint.threadId === undefined
-              ? await locusProvisioningController.ensureGroup({
-                chatId: endpoint.chatId,
-                parentSessionId: request.parentSessionId,
-              })
-              : await locusProvisioningController.ensureTopic({
-                chatId: endpoint.chatId,
-                threadId: endpoint.threadId,
-                parentSessionId: request.parentSessionId,
-              })
-            const view = await locusManagement.view()
-            const locus = view.loci.find(item => item.locusId === result.locus.locusId)
-            const previousLocus = before === undefined
-              ? undefined
-              : view.loci.find(item => item.locusId === before.id)
-            if (locus === undefined) {
-              throw new PetError('INTERNAL', 'Bound locus is absent from the durable view')
-            }
-            return {
-              action: 'bind' as const,
-              locus,
-              ...(previousLocus === undefined ? {} : { previousLocus }),
-              created: result.created,
-              reused: result.reused,
-              ...('warningText' in result && typeof result.warningText === 'string'
-                ? { warningText: result.warningText }
-                : {}),
-            }
-          },
-          defaultQa: async (request) => {
+          // Controller / access-mutation errors are thrown as they are: the
+          // management port maps their `.code` itself.
+          stop: fence => locusProvisioningController.stopEntry(fence),
+          access: ({ locusId, mode, actorId }) => locusAccessMutation.set({ locusId, mode, actorId }),
+          rebind: request => locusProvisioningController.rebindChat(request),
+          defaultQa: async request => {
             const config = repository.getChannelConfig()
             if (config.botAppId === undefined || larkClient.defaultQaOwner === undefined) {
               throw new PetError('BINDING_INVALID', '无法核验当前飞书用户身份，不能创建默认 Q&A 群。')
@@ -3425,66 +3115,10 @@ async function initialize(
               ownerId: owner.ownerId,
               ...(request.groupName === undefined ? {} : { groupName: request.groupName }),
             })
-            const view = await locusManagement.view()
-            const locus = view.loci.find(item => item.locusId === result.locus.locusId)
-            if (locus === undefined) {
-              throw new PetError('INTERNAL', 'Default Q&A locus is absent from the durable view')
-            }
-            return {
-              action: 'default-qa' as const,
-              locus,
-              created: result.created,
-              reused: result.reused,
-            }
-          },
-          rebuild: async (request) => {
-            const rebuilt = await locusProvisioningController.rebuildExplicit({
-              endpoint: request.endpoint,
-              previousLocusId: request.expectedLocusId!,
-              parentSessionId: request.parentSessionId,
-              ...(request.asDefaultQa === undefined ? {} : { asDefaultQa: request.asDefaultQa }),
-            })
-            const view = await locusManagement.view()
-            const locus = view.loci.find(item => item.locusId === rebuilt.locus.locusId)
-            const previousLocus = view.loci.find(item => item.locusId === rebuilt.previousLocus.locusId)
-            if (locus === undefined || previousLocus === undefined) {
-              throw new PetError('INTERNAL', 'Rebuilt locus generations are absent from the durable view')
-            }
-            return {
-              action: 'rebuild' as const,
-              locus,
-              previousLocus,
-              created: true,
-              reused: false,
-            }
-          },
-          replaceParent: async (request) => {
-            // Session-level repair for an archived main session: the
-            // controller creates ONE replacement session and moves each
-            // requested entry onto it, re-proving the archived parent and the
-            // exact generation per entry.
-            const result = await locusProvisioningController.replaceArchivedParent({
-              parentSessionId: request.parentSessionId,
-              entries: request.entries.map(entry => ({
-                endpoint: entry.endpoint.threadId === undefined
-                  ? { chatId: entry.endpoint.chatId }
-                  : { chatId: entry.endpoint.chatId, threadId: entry.endpoint.threadId },
-                locusId: entry.locusId,
-              })),
-            })
-            return {
-              action: 'replace-parent' as const,
-              parentSessionId: result.parentSessionId,
-              replaced: result.replaced,
-              skipped: result.skipped,
-            }
+            return { chatId: result.group.endpoint.chatId, created: result.created, reused: result.reused }
           },
         },
       }),
-    // Host service identity authorizes this loopback/same-origin management
-    // surface. Q&A resource ownership is resolved separately from verified
-    // lark-cli user auth and never from the browser or an allowlist position.
-    identity: () => ({ actorId: 'host:dsh-pet' }),
   })
 
   // Q&A ownership is re-probed from the fixed profile's verified current-user
@@ -3533,7 +3167,7 @@ async function initialize(
             },
           }),
         locusAuthorization,
-        locusToolTier: endpoint => locusRepository.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
+        locusAccessMode: endpoint => locusRepository.getRow(endpoint)?.accessMode,
         // Bot-added produces no locus of its own: the whole tree is built on
         // demand by the first qualifying @ message, the same seam a group and
         // a topic both already use. `botLifecycleInitializer` stays
@@ -3745,32 +3379,34 @@ async function initialize(
       const interrupted: Array<{ childSessionId: string; parentSessionId: string; deliveryId: string }> = []
       // Include cold catalog records: an activation admitted before freezing
       // may not yet have published an Agent in the live registry.
-      for (const row of locusRepository.listLoci()) {
-        if (row.childComposition !== 'tier3' || row.childSessionId === undefined) continue
-        const liveChild = ctx.agents.get(row.childSessionId as never)
-        const pair = locusRepository.getLocusMain(row.parentSessionId)
-        const current = locusRepository.getCurrentLocus(row.endpoint)
-        if (pair?.status !== 'active' || current?.id !== row.id || current.generation !== row.generation) {
+      for (const row of locusReconcileRows()) {
+        // Only an active row has a created child (a `not-created` one has none).
+        if (row.row.state !== 'active') continue
+        const childSessionId = row.row.sessionId
+        const parentSessionId = row.locusMainSessionId
+        const liveChild = ctx.agents.get(childSessionId as never)
+        const pair = locusRepository.findMain(parentSessionId)
+        if (pair?.status !== 'active') {
           if (liveChild !== undefined) throw new PetError('LOCUS_CONFLICT', 'A live Pet child has no current owning generation.')
           continue
         }
-        const parent = ports.parent.get(row.parentSessionId as never)
+        const parent = ports.parent.get(parentSessionId as never)
         if (parent === undefined) {
           if (liveChild !== undefined) throw new PetError('LOCUS_CONFLICT', 'A live Pet child has no live owner.')
           continue
         }
-        const proof = await ports.proof!.findChild(row.parentSessionId, row.childSessionId, new AbortController().signal)
-        if (proof?.parentSessionId !== row.parentSessionId || proof.childSessionId !== row.childSessionId) {
+        const proof = await ports.proof!.findChild(parentSessionId, childSessionId, new AbortController().signal)
+        if (proof?.parentSessionId !== parentSessionId || proof.childSessionId !== childSessionId) {
           throw new PetError('LOCUS_CONFLICT', 'Owned child catalog identity could not be proven.')
         }
         if (liveChild !== undefined) {
-          for (const delivery of locusRepository.listDeliveries(row.id)) {
-            if ((delivery.status === 'current' || delivery.status === 'running') && delivery.childSessionId === row.childSessionId && delivery.generation === row.generation) {
-              interrupted.push({ childSessionId: row.childSessionId, parentSessionId: row.parentSessionId, deliveryId: delivery.deliveryId })
+          for (const delivery of locusRepository.listDeliveries(row.row.locusId)) {
+            if ((delivery.status === 'current' || delivery.status === 'running') && delivery.sessionId === childSessionId) {
+              interrupted.push({ childSessionId, parentSessionId, deliveryId: delivery.deliveryId })
             }
           }
         }
-        tasks.push(() => drainChild(parent, [row.childSessionId!]))
+        tasks.push(() => drainChild(parent, [childSessionId]))
       }
       const results = await Promise.allSettled(tasks.map(task => task()))
       const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
@@ -3793,9 +3429,9 @@ async function initialize(
           continue
         }
         const result = await locusRepository.settleByTurn({
-          deliveryId: delivery.deliveryId, executionId: delivery.executionId,
+          deliveryId: delivery.deliveryId, executionId: delivery.executionId, turnId: delivery.turnId,
           inboxMessageId: delivery.inboxMessageId, expectedRevision: delivery.revision,
-          correlation: { endpoint: delivery.endpoint, locusId: delivery.locusId, generation: delivery.generation, childSessionId: target.childSessionId, turnId: delivery.turnId },
+          correlation: { endpoint: delivery.endpoint, locusId: delivery.locusId, sessionId: target.childSessionId, turnId: delivery.turnId },
           outcome: 'failed', failureReason: 'turn-interrupted', settledAt: Date.now(),
         })
         if (!result.changed) throw new PetError('LOCUS_CONFLICT', 'Interrupted execution could not be durably settled.')
@@ -3877,15 +3513,13 @@ async function initialize(
       // than from ledger rows: a main session whose ledger exists but is
       // currently empty must still appear, so the panel shows a real empty
       // state instead of omitting the session entirely.
-      parents: () => [...new Set(locusRepository.listLoci().map(record => record.parentSessionId))],
+      parents: () => [...new Set(locusReconcileRows().map(item => item.locusMainSessionId))],
     },
-    // One chain per current generation, assembled from durable records only.
-    // Retired generations are omitted: the owner is diagnosing what an entry
-    // does now, and listing superseded rows would obscure that.
+    // One chain per entry (its current sessionId), assembled from durable records only.
     locusDiagnostics: () => locusRepository
-      .listLoci()
-      .filter(record => record.state === 'active' || record.state === 'invalid')
-      .map(record => buildLocusDiagnostics(record, locusRepository.listDeliveries(record.id))),
+      .listRows()
+      .filter(row => row.state === 'active' || row.state === 'invalid')
+      .map(row => buildLocusDiagnostics(row, locusRepository.listDeliveries(row.locusId))),
     listPresets: async () => {
       // Enumerate what this Host actually offers; a free-text preset name
       // could name a composition that does not exist.

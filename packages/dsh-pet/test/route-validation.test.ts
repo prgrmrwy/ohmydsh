@@ -137,8 +137,8 @@ describe('unified locus routes fail closed without the optional capability', () 
     expect(status.ok).toBe(true)
   })
 
-  it('rejects malformed discovery selectors before invoking the capability', async () => {
-    const reply = await call(LOCUS_ROUTES.discovery, { parentSessionId: 'main', childSessionId: 'child' })
+  it('rejects a removed v20 action before invoking the capability', async () => {
+    const reply = await call(LOCUS_ROUTES.action, { action: 'rebuild', expectedLocusId: 'L1', expectedRevision: 1 })
     expect(reply.ok).toBe(false)
     expect(reply.error).toBe('INVALID_REQUEST')
   })

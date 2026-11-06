@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createRefusedReplyTracker } from '../src/host/locus/refused-reply.js'
 import { abandonRefusedDelivery, acceptDelivery, claimCurrentDelivery, createDeliveryLedger, expireDelivery, completeDelivery } from '../src/host/locus/delivery.js'
-const scope = { endpoint: { chatId: 'chat' }, locusId: 'locus', generation: 1, childSessionId: 'child' }
+const scope = { endpoint: { chatId: 'chat' }, locusId: 'locus', sessionId: 'child' }
 function fixture() {
   const a = acceptDelivery(createDeliveryLedger(), { ...scope, messageId: 'a', acceptedAt: 1 })
   const current = claimCurrentDelivery(a.state, { ...scope, now: 2 })

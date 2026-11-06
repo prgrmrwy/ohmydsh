@@ -20,14 +20,12 @@ const CHILD = 'child-1'
 const GROUP = { chatId: 'oc_group' }
 const TOPIC = { chatId: 'oc_group', threadId: 'omt_topic' }
 
-function row(endpoint: { chatId: string; threadId?: string }, generation = 1) {
+/** A v20 resolved row, as `findBySessionId` returns it (the topic's M comes from its group). */
+function row(endpoint: { chatId: string; threadId?: string }, locusId = 'locus-1') {
   return {
-    id: 'locus-1',
-    generation,
-    state: 'active',
-    parentSessionId: 'main-1',
-    childSessionId: CHILD,
-    endpoint,
+    row: { locusId, sessionId: CHILD, state: 'active', endpoint },
+    locusMainSessionId: 'main-1',
+    workspaceId: 'ws-1',
   }
 }
 
@@ -45,7 +43,13 @@ function deps(
   }))
   return {
     callerSessionId: CHILD,
-    loci: { findByChildSessionId: (id: string) => (id === CHILD ? rows : []) },
+    loci: {
+      findBySessionId: (id: string) => {
+        const matches = id === CHILD ? rows : []
+        if (matches.length > 1) throw new Error('ambiguous')
+        return matches[0] as never
+      },
+    },
     cursor: createLocusHistoryCursor(Buffer.alloc(32, 7)),
     read: (overrides.read as never) ?? (read as never),
   } as LocusHistoryToolDeps & { readonly read: ReturnType<typeof vi.fn> }
@@ -96,22 +100,22 @@ describe('caller-bound entrance read', () => {
     expect(read).not.toHaveBeenCalled()
   })
 
-  it('rejects a cursor issued for another locus generation or entrance', async () => {
+  it('rejects a cursor issued for another session or entrance', async () => {
     const cursor = createLocusHistoryCursor(Buffer.alloc(32, 7))
-    const foreignGeneration = cursor.issue({
+    const foreignSession = cursor.issue({
       locusId: 'locus-1',
-      generation: 9,
+      sessionId: 'session-9',
       chatId: 'oc_group',
       direction: 'older',
     })
     const foreignEntrance = cursor.issue({
       locusId: 'locus-1',
-      generation: 1,
+      sessionId: 'child-1',
       chatId: 'oc_other',
       direction: 'older',
     })
 
-    for (const token of [foreignGeneration, foreignEntrance]) {
+    for (const token of [foreignSession, foreignEntrance]) {
       const read = vi.fn(async () => ({ messages: [], hasMore: false }))
       const result = await executeLocusChatHistory({ cursor: token }, {
         ...deps(),
@@ -127,12 +131,18 @@ describe('caller-bound entrance read', () => {
     let rows = [row(GROUP)]
     const read = vi.fn(async () => {
       // The locus is replaced while the platform is answering.
-      rows = [row(GROUP, 2)]
+      rows = [row(GROUP, 'locus-2')]
       return { messages: [message('om_1', '2026-10-12T10:00:00+08:00')], hasMore: false }
     })
     const result = await executeLocusChatHistory({}, {
       ...deps(),
-      loci: { findByChildSessionId: (id: string) => (id === CHILD ? rows : []) },
+      loci: {
+      findBySessionId: (id: string) => {
+        const matches = id === CHILD ? rows : []
+        if (matches.length > 1) throw new Error('ambiguous')
+        return matches[0] as never
+      },
+    },
       read: read as never,
     })
 
@@ -199,7 +209,7 @@ describe('caller-bound entrance read', () => {
   it('rejects a cursor combined with window arguments', async () => {
     const cursor = deps().cursor.issue({
       locusId: 'locus-1',
-      generation: 1,
+      sessionId: 'child-1',
       chatId: 'oc_group',
       direction: 'older',
     })

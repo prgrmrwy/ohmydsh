@@ -1,6 +1,6 @@
 /**
- * A three-tier locus world for tests: the real durable repository behind the
- * real controller adapter, with fake Host ports that record what they created.
+ * A three-tier locus world for tests: the real LocusRepositoryV20 passed straight
+ * to the controller, with fake Host ports that record what they created.
  *
  * Only the Host is faked (sessions, workspaces, the collaboration space, Lark).
  * Persistence, the controller and its invariants are the production ones, so a
@@ -9,8 +9,7 @@
 
 import { LocusController, type LocusParentSession, type LocusSpaceEstablishment } from '../../src/host/locus/controller.js'
 import { LOCUS_MAIN_PRESET } from '../../src/host/locus/aggregate.js'
-import { ControllerLocusRepositoryAdapter } from '../../src/host/locus/controller-persistence-adapter.js'
-import { LocusRepository as DurableLocusRepository } from '../../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../../src/host/locus/persistence-v20.js'
 import { openPetHarness } from '../harness.js'
 
 /** Same atomic-write shim the other durable-repository tests use. */
@@ -49,8 +48,7 @@ export interface ThreeTierOptions {
 export async function openThreeTier(options: ThreeTierOptions = {}) {
   const harness = await openPetHarness()
   enableAtomicTransactions(harness)
-  const durable = new DurableLocusRepository(harness.domain)
-  const adapter = new ControllerLocusRepositoryAdapter(durable)
+  const durable = new LocusRepositoryV20(harness.domain, { now: () => 0 })
 
   const sessions = new Map<string, LocusParentSession>([
     ['work-1', { id: 'work-1', workspaceId: 'ws-1', title: '研发工作会话', state: 'active' }],
@@ -75,7 +73,7 @@ export async function openThreeTier(options: ThreeTierOptions = {}) {
   let clock = 100
 
   const controller = new LocusController({
-    repository: adapter,
+    repository: durable,
     dsh: {
       locusMainWorkspaceId: 'ws-pet',
       resolveSession: async id => {
@@ -133,7 +131,6 @@ export async function openThreeTier(options: ThreeTierOptions = {}) {
   return {
     harness,
     durable,
-    adapter,
     controller,
     world,
     sessions,

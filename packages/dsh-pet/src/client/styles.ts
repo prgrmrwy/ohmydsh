@@ -880,8 +880,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-row{position:relative;display:grid;
   grid-template-columns:minmax(0,1fr) auto;column-gap:10px;padding:7px 0 7px 16px}
 .dshpet-settings .dshpet-locus-row + .dshpet-locus-row,
-.dshpet-settings .dshpet-locus-row + .dshpet-locus-generations,
-.dshpet-settings .dshpet-locus-generations + .dshpet-locus-row{
+.dshpet-settings .dshpet-locus-chat + .dshpet-locus-chat{
   border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
 .dshpet-settings .dshpet-locus-row:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
 .dshpet-settings .dshpet-locus-row[data-nested="true"]{padding-left:32px}
@@ -893,11 +892,6 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-node[data-tone="warn"]{background:var(--dsw-alias-state-warn-label,#dd8629)}
 .dshpet-settings .dshpet-locus-node[data-tone="off"]{background:var(--dsw-alias-state-error-primary,#ec1313)}
 .dshpet-settings .dshpet-locus-node[data-tone="gone"]{background:#c3c8cf}
-/* A current generation gets a ring, and default Q&A additionally a word: colour
-   alone never carries either fact. The inner colour reuses the panel-surface
-   token this sheet already proved, so no new token is introduced here. */
-.dshpet-settings .dshpet-locus-node[data-current="true"]{
-  box-shadow:0 0 0 2px var(--dsw-specific-menu,#fff)}
 .dshpet-settings .dshpet-locus-row-body{display:flex;flex-direction:column;gap:1px;min-width:0}
 .dshpet-settings .dshpet-locus-row-line{display:flex;align-items:baseline;gap:8px;
   min-width:0;flex-wrap:wrap}
@@ -931,7 +925,6 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-details dd{margin:0;min-width:0;
   color:var(--dsw-alias-label-primary,#0f1115);overflow-wrap:anywhere;
   display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
-.dshpet-settings .dshpet-locus-owner-facts{display:inline-flex;flex-wrap:wrap;gap:6px 12px}
 .dshpet-settings .dshpet-locus-ops{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .dshpet-settings .dshpet-locus-perm{display:inline-flex;align-items:center;gap:2px;padding:1px;
   border-radius:10px;background:var(--dsw-alias-bg-module-platform,#0000000a)}
@@ -945,21 +938,16 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-perm button:focus-visible{
   outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
 
-/* Historical generations: disclosed, countable, never a second card. */
-.dshpet-settings .dshpet-locus-generations{margin:0 0 8px 32px;padding:2px 0 2px 12px;
-  border-left:1px dashed var(--dsw-alias-border-l4,#00000029);
-  display:flex;flex-direction:column;gap:6px}
-.dshpet-settings .dshpet-locus-history-toggle{align-self:flex-start;padding:0;border:0;
-  background:0 0;cursor:pointer;font:400 11px/18px var(--dsw-font-family,inherit);
-  color:var(--dsw-alias-label-secondary,#61666b)}
-.dshpet-settings .dshpet-locus-history-toggle:hover{color:var(--dsw-alias-label-primary,#0f1115);
-  text-decoration:underline}
-.dshpet-settings .dshpet-locus-generation{display:flex;align-items:center;gap:8px;
-  flex-wrap:wrap;font:var(--dsw-font-xs-13,400 12px/18px inherit);
-  color:var(--dsw-alias-label-secondary,#61666b)}
-.dshpet-settings .dshpet-locus-generation .dshpet-locus-node{position:static;flex:none}
-.dshpet-settings .dshpet-locus-generation-no{flex:none;font-variant-numeric:tabular-nums;
-  color:var(--dsw-alias-label-tertiary,#81858c)}
+/* One chat: its group row with the topic rows nested under it. A group row kept
+   only as the container of visible topics reads quieter than a full row. */
+.dshpet-settings .dshpet-locus-chat{display:flex;flex-direction:column}
+.dshpet-settings .dshpet-locus-row[data-container="true"]{opacity:.8}
+/* 「改绑到其他会话」 sits on the row itself; its dialog wraps below the button. */
+.dshpet-settings .dshpet-locus-rebind{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dshpet-settings .dshpet-locus-rebind-dialog{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  flex-basis:100%;padding:6px 8px;border-radius:8px;
+  background:var(--dsw-alias-bg-module-platform,#0000000a)}
+.dshpet-settings .dshpet-locus-rebind-dialog .dshpet-input{min-width:18em}
 
 .dshpet-settings .dshpet-locus-nodelete{margin-top:12px;max-width:620px}
 
@@ -973,9 +961,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-filter-anchor{position:relative;display:inline-flex}
 .dshpet-settings .dshpet-locus-filter{position:absolute;right:0;top:calc(100% + 3px);z-index:2;
   width:236px;padding:10px 12px 12px;border-radius:12px;
-  background:var(--dsw-specific-menu,#fff);
-  border:.5px solid var(--dsw-alias-border-l4,#00000029);
-  box-shadow:0 6px 20px #0000001f;
+  /* Opaque on purpose: the menu token is translucent in some themes, and the
+     rows underneath bled through the checkboxes. */
+  background:var(--dsw-alias-bg-layer-1,#ffffff);opacity:1;backdrop-filter:none;
+  border:1px solid var(--dsw-alias-border-l4,#00000029);
+  box-shadow:0 8px 24px #00000029;
   display:flex;flex-direction:column;gap:6px}
 .dshpet-settings .dshpet-locus-filter-cap{font-size:11px;line-height:16px;
   color:var(--dsw-alias-label-tertiary,#81858c);letter-spacing:.02em}

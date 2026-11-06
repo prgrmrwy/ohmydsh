@@ -7,8 +7,8 @@ import { expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { buildLocusRecord, type LocusRecord } from '../../src/host/locus/aggregate.js'
-import { LocusRepository } from '../../src/host/locus/persistence.js'
+import type { LocusRowV20 } from '../../src/host/locus/contract-v20.js'
+import { endpointKeyV20 } from '../../src/host/locus/locus-set-v20.js'
 import * as petStoragePlugin from '../../src/host/storage/plugin.js'
 import { PET_BACKEND_NAME } from '../../src/host/storage/backend.js'
 import { withAtomicWrites } from '../../src/host/storage/atomic-domain.js'
@@ -46,23 +46,25 @@ export async function agentScope(
   }
 }
 
+/** A v20 group row of an active entry under MAIN (the group's M). */
 export function locus(
   id: string,
   child: string,
-  overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {},
-): LocusRecord {
-  return buildLocusRecord({
-    id,
-    generation: 1,
-    parentSessionId: MAIN,
-    childSessionId: child,
+  overrides: Partial<LocusRowV20> = {},
+): LocusRowV20 {
+  return {
     endpoint: { chatId: `chat-${id}` },
-    workspaceId: 'workspace',
-    source: 'explicit',
+    locusId: id,
+    sessionId: child,
     state: 'active',
-    childComposition: 'tier3',
+    accessMode: 'read-only',
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    locusMainSessionId: MAIN,
+    workspaceId: 'workspace',
     ...overrides,
-  })
+  } as LocusRowV20
 }
 
 export async function composePetStorage(ctx: Context, statePath: string): Promise<void> {
@@ -121,7 +123,7 @@ export interface LoadedHost {
 }
 
 export async function loadPetHost(
-  seed: readonly LocusRecord[] = [],
+  seed: readonly LocusRowV20[] = [],
   existingHome?: string,
   seedDomain?: (domain: Awaited<ReturnType<typeof openPetDomain>>) => Promise<void>,
   beforePet?: (ctx: Context) => Promise<void>,
@@ -216,8 +218,7 @@ export async function loadPetHost(
 
   if (seed.length > 0) {
     const seeded = await openPetDomain(ctx)
-    const repository = new LocusRepository(seeded)
-    for (const row of seed) await repository.putLocus(row)
+    for (const row of seed) await seeded.table('loci').put(endpointKeyV20(row.endpoint), row)
     await seedDomain?.(seeded)
     await seeded.close()
   }

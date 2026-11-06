@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { DeliveryRecord } from '../src/host/locus/delivery.js'
 import { proveStartupDeliveryFromColdRead } from '../src/host/locus/startup-recovery.js'
+import { recoverLocusStartupV20 } from '../src/host/locus/reconcile.js'
 import { FakeSessionQuery, type FakeSessionEvent } from './support/official-subagent.js'
 import { openThreeTier } from './support/three-tier.js'
 
@@ -13,7 +14,7 @@ function delivery(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
     deliveryId: 'delivery-1',
     executionId: 'execution-1',
     inboxMessageId: INBOX,
-    childSessionId: CHILD,
+    sessionId: CHILD,
     status: 'current',
     ...overrides,
   } as DeliveryRecord
@@ -66,44 +67,46 @@ describe('冷读证据与真实持久 current/backlog 的接缝', () => {
   ])('$name', async ({ live, endTime, interrupted, reason, inboxId, boundTurn, proofExecutionId }) => {
     const world = await openThreeTier()
     try {
-      const established = await world.controller.ensureGroup({ chatId: 'cold-read-chat', parentSessionId: 'work-1' })
-      const row = world.durable.getLocus(established.locus.locusId)!
-      const childSessionId = row.reservedChildSessionId!
-      await world.durable.publishCreatedChild({ locusId: row.id, generation: row.generation, childSessionId, now: 999 })
-      const correlation = { endpoint: row.endpoint, locusId: row.id, generation: row.generation, childSessionId }
-      const a = await world.durable.acceptDelivery({ ...correlation, messageId: 'A', senderOpenId: 'owner', text: 'original A', acceptedAt: 1000 })
-      const b = await world.durable.acceptDelivery({ ...correlation, messageId: 'B', senderOpenId: 'owner', text: 'backlog B', acceptedAt: 1001 })
-      await world.durable.claimCurrentDelivery({ correlation, now: 1002 })
-      await world.durable.bindQueued({ deliveryId: a.record.deliveryId, correlation, executionId: 'exec-A', inboxMessageId: INBOX, queuedAt: 1003 })
-      await world.durable.bindTurn({ deliveryId: a.record.deliveryId, correlation, executionId: 'exec-A', turnId: `${childSessionId}#${boundTurn ?? 1}`, startedAt: 1004 })
+      await world.controller.ensureGroup({ chatId: 'cold-read-chat', parentSessionId: 'work-1' })
+      const row = world.durable.getRow({ chatId: 'cold-read-chat' })!
+      const childSessionId = row.sessionId
+      const parent = (row as unknown as { readonly locusMainSessionId: string }).locusMainSessionId
+      const correlation = { endpoint: row.endpoint, locusId: row.locusId, sessionId: childSessionId }
+      const a = await world.durable.acceptDelivery({ ...correlation, messageId: 'A', senderOpenId: 'owner', text: 'original A', acceptedAt: 1000 } as never)
+      const b = await world.durable.acceptDelivery({ ...correlation, messageId: 'B', senderOpenId: 'owner', text: 'backlog B', acceptedAt: 1001 } as never)
+      await world.durable.claimCurrentDelivery({ ...correlation, now: 1002 } as never)
+      await world.durable.publishFirstDelivery({ locusId: row.locusId, sessionId: childSessionId, revision: row.revision, deliveryId: a.record.deliveryId, now: 1002, executionId: 'exec-A' })
+      await world.durable.commitFirstDelivery({ executionId: 'exec-A', now: 1002 })
+      await world.durable.bindQueued({ deliveryId: a.record.deliveryId, ...correlation, executionId: 'exec-A', inboxMessageId: INBOX, queuedAt: 1003 } as never)
+      await world.durable.bindTurn({ deliveryId: a.record.deliveryId, ...correlation, executionId: 'exec-A', turnId: `${childSessionId}#${boundTurn ?? 1}`, startedAt: 1004 } as never)
       const before = world.durable.getDelivery(a.record.deliveryId)!
       const query = new FakeSessionQuery()
-      query.add(childSessionId, row.parentSessionId, [
+      query.add(childSessionId, parent, [
         ...OPEN_TURN.map(entry => entry.type === 'user/message' ? { ...entry, data: { id: inboxId ?? INBOX } } : entry),
         ...(endTime === undefined ? [] : [event('turn/end', 3, endTime, { turn: 1, reason })]),
       ], live)
-      const report = await world.durable.reconcileStartup({
+      const report = await recoverLocusStartupV20(world.durable, {
         now: 2000,
         deliveryProof: async record => {
-          const proof = await proveStartupDeliveryFromColdRead({ delivery: record, parentSessionId: row.parentSessionId, query, log: noop })
+          const proof = await proveStartupDeliveryFromColdRead({ delivery: record as unknown as DeliveryRecord, parentSessionId: parent, query, log: noop })
           return proof === undefined || proofExecutionId === undefined ? proof : { ...proof, executionId: proofExecutionId }
         },
       })
       // Evidence never authorizes resending A, even when it cannot close A yet.
       expect(report.replayableDeliveries.some(record => record.deliveryId === a.record.deliveryId)).toBe(false)
-      const next = await world.durable.claimCurrentDelivery({ correlation, now: 2001 })
+      const next = await world.durable.claimCurrentDelivery({ ...correlation, now: 2001 } as never)
       if (interrupted) {
         expect(world.durable.getDelivery(a.record.deliveryId)).toMatchObject({ status: 'failed', startupDisposition: 'turn-interrupted' })
-        expect(next?.deliveryId).toBe(b.record.deliveryId)
+        expect(next.record?.deliveryId).toBe(b.record.deliveryId)
       } else {
         expect(world.durable.getDelivery(a.record.deliveryId)).toMatchObject({
           status: 'current', inboxMessageId: INBOX, executionId: before.executionId,
           turnId: before.turnId, deadlineAt: before.deadlineAt,
         })
         expect(report.failedDeliveries).toEqual([])
-        expect(next).toBeUndefined()
+        expect(next.changed).toBe(false)
       }
-      expect(world.durable.getLocus(row.id)?.generation).toBe(row.generation)
+      expect(world.durable.getRow({ chatId: 'cold-read-chat' })?.revision).toBe(row.revision)
       expect(query.leases.every(lease => lease.disposed)).toBe(true)
     } finally { await world.close() }
   })

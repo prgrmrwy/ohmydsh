@@ -48,7 +48,7 @@
 
 **是什么。** [图片例外](../../../openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#L40-L45)与[设计决策 3](../../../openspec/changes/locus-three-tier-structure/design.md#L26)正确要求原 Delivery 不失败、同代换新 child、文本仅重试一次。它不是普通的“再调一次 queue”：旧 child 已创建，回调可能已发布 current/执行身份，且相应恢复日志已经存在。
 
-**具体问题。** 当前规划只说明“补偿 child、原子更新新预留与 backlog”，没有交代原 current 的已发布执行身份、旧 first-prompt 桥及旧 WAL 如何退出，新尝试如何取得一致快照，以及降级资格/次数跨恢复如何保持。[发布实现](../../../packages/dsh-pet/src/host/locus/persistence.ts#L2462-L2509)在回调中给 current 写入 executionId，并以 `first-child:${executionId}` 写 WAL；[一般回滚](../../../packages/dsh-pet/src/host/locus/persistence.ts#L2564-L2610)保留失败 current 的旧身份、将它终结，仅重定向其它未注入 backlog。[启动恢复](../../../packages/dsh-pet/src/host/locus/persistence.ts#L3236-L3254)又会按未完成旧 WAL 补偿其对应 current。不能直接复用这条“结算原请求”的路径来实现“保留原请求”的例外。
+**具体问题。** 当前规划只说明“补偿 child、原子更新新预留与 backlog”，没有交代原 current 的已发布执行身份、旧 first-prompt 桥及旧 WAL 如何退出，新尝试如何取得一致快照，以及降级资格/次数跨恢复如何保持。发布实现（已删除：`../../../packages/dsh-pet/src/host/locus/persistence.ts#L2462-L2509`）在回调中给 current 写入 executionId，并以 `first-child:${executionId}` 写 WAL；一般回滚（已删除：`../../../packages/dsh-pet/src/host/locus/persistence.ts#L2564-L2610`）保留失败 current 的旧身份、将它终结，仅重定向其它未注入 backlog。启动恢复（已删除：`../../../packages/dsh-pet/src/host/locus/persistence.ts#L3236-L3254`）又会按未完成旧 WAL 补偿其对应 current。不能直接复用这条“结算原请求”的路径来实现“保留原请求”的例外。
 
 此外，[控制器降级](../../../packages/dsh-pet/src/host/channel/locus-controller.ts#L1896-L1923)第二次 queue 仍闭包捕获旧 locus/child/pending；其[exact-current 检查](../../../packages/dsh-pet/src/host/channel/locus-controller.ts#L1876-L1894)包含旧 child 身份。仅原子换 reservation/backlog 而不交接原 current 与调用方快照，会在文本尝试前被正确地判为 stale；绕过此检查则破坏精确 Delivery 授权。若先迁移 current、后处理旧 WAL，中间崩溃还会让恢复面对不匹配的旧操作，不能把它猜成可重试。
 

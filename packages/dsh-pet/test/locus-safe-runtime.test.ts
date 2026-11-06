@@ -8,7 +8,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { LOCUS_BASE_TOOL_FILTER, LOCUS_SAFE_TOOL_FILTER } from '../src/host/locus/child.js'
-import { attestLocusComposition, LOCUS_SHELL_TIER_TOOL_NAMES } from '../src/host/locus/composition.js'
+import { attestLocusComposition, LOCUS_FULL_ACCESS_TOOL_NAMES } from '../src/host/locus/composition.js'
 
 const forbidden = [
   'bash', 'pwsh', 'write', 'edit', 'skill', 'job_output', 'job_kill',
@@ -98,7 +98,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
-    for (const name of [...allowed, ...LOCUS_SHELL_TIER_TOOL_NAMES, 'subagent']) {
+    for (const name of [...allowed, ...LOCUS_FULL_ACCESS_TOOL_NAMES, 'subagent']) {
       ctx.tools.register(tool(name, () => undefined))
     }
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -112,7 +112,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
       inject: ['tools', 'systemPrompt'],
     }))
     scope.ctx.tools.restrict(LOCUS_BASE_TOOL_FILTER)
-    scope.ctx.tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES })
+    scope.ctx.tools.restrict({ deny: LOCUS_FULL_ACCESS_TOOL_NAMES })
     scope.ctx.tools.register(tool('pet_locus_finish', () => undefined))
     const names = ctx.tools.schemas(agent).map(schema => schema.name)
     expect(names).toEqual([...allowed, 'pet_locus_finish'])

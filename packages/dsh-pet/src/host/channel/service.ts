@@ -52,7 +52,7 @@ export interface ChannelServiceDeps {
   readonly locusController?: LocusChannelControllerPort
   /** Durable unified/legacy-retirement authorization for exact endpoints. */
   readonly locusAuthorization?: LocusAuthorizationResolver
-  readonly locusToolTier?: (endpoint: import('../locus/admission.js').LocusEndpoint) => 'safe' | 'shell' | undefined
+  readonly locusAccessMode?: (endpoint: import('../locus/admission.js').LocusEndpoint) => import('../locus/contract-v20.js').LocusAccessModeV20 | undefined
   /**
    * Optional diagnostic for a Host that knows unified locus was requested but
    * could not compose its durable/observer/child capability. It is surfaced
@@ -164,9 +164,9 @@ export class ChannelService implements ChannelControl {
             watermark: this.subscription.watermark,
             isDuplicate: messageId => this.commentDedup.check(messageId),
             authorization,
-            ...(deps.locusToolTier === undefined && authorization.toolTier === undefined
+            ...(deps.locusAccessMode === undefined && authorization.accessMode === undefined
               ? {}
-              : { toolTier: deps.locusToolTier ?? authorization.toolTier }),
+              : { accessMode: deps.locusAccessMode ?? authorization.accessMode }),
           }
         },
         handleAdmission: admission => commentLocus.handleAdmission(admission),
@@ -185,7 +185,7 @@ export class ChannelService implements ChannelControl {
       // root/Invocation/QA branches below the pipeline boundary.
       requireLocus: true,
       ...(deps.locusAuthorization !== undefined ? { locusAuthorization: deps.locusAuthorization } : {}),
-      ...(deps.locusToolTier !== undefined ? { locusToolTier: deps.locusToolTier } : {}),
+      ...(deps.locusAccessMode !== undefined ? { locusAccessMode: deps.locusAccessMode } : {}),
       watermark: () => this.subscription.watermark,
       onOutcome: outcome => this.onOutcome(outcome),
     })

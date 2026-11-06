@@ -34,7 +34,7 @@
 - **THEN** 一次提交建立文档专属的自动 W、其 M 与文档根行 `chatId=doc:docx:D`；随后创建子会话，根行 `state` 为 `active`；Delivery 的 `messageId` 为 `doc:docx:D/c1/r1`
 
 #### Scenario: 划词评论进入评论级入口
-- **GIVEN** 文档 `D` 已有文档级 locus，其干活主会话为 W0、locus 主会话为 M0（W0 ≠ M0）；成员在划词评论 `c2` 中 @bot；查询得到 `is_whole=false`、`quote="接口已有"`
+- **GIVEN** 文档 `D` 已有文档级 locus，其工作主会话为 W0、locus 主会话为 M0（W0 ≠ M0）；成员在划词评论 `c2` 中 @bot；查询得到 `is_whole=false`、`quote="接口已有"`
 - **WHEN** 系统处理该事件
 - **THEN** 在文档根行的 M 下追加评论行 `(doc:docx:D, c2)`（其 W 仍为 W0，M 为 M0）并创建其子会话，与文档级子会话为兄弟；`ensureLocusMain` 调用 0 次；投递 prompt 中包含标注为不可信的划词原文 `接口已有`
 
@@ -115,7 +115,7 @@
 #### Scenario: shell 档文档拒绝他人
 - **GIVEN** 文档级入口的 `accessMode` 为 `danger-full-access`
 - **WHEN** 非 allowlist 成员在全文评论里 @bot
-- **THEN** Delivery 数为 0，不回复，不打表情，诊断记 `not-allowed-sender`
+- **THEN** Delivery 数为 0，不回复，不打表情，诊断记 `owner-only-tier`（与群的完全访问入口同一准入规则；`not-allowed-sender` 只用于未初始化文档）
 
 #### Scenario: 划词评论先建立时也披露
 - **GIVEN** 文档 `D` 尚无任何入口

@@ -3,10 +3,10 @@
  *
  * The read tool must never hand the model a third-party pagination token: the
  * platform token is opaque but not bound to anything the Host cares about, so
- * replaying it across children, generations or entrances would reopen the
+ * replaying it across children, sessions or entrances would reopen the
  * target-selection interface the tool deliberately removed. The Host therefore
  * issues its own cursor: the platform token travels INSIDE a signed envelope
- * that names the exact locus generation, entrance and window it belongs to.
+ * that names the exact locus session, entrance and window it belongs to.
  *
  * Verification is fail-closed: a malformed, truncated, foreign-signed or
  * mutated cursor reads as `undefined`, and the caller reports a deterministic
@@ -19,7 +19,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 /** The exact read window a cursor was issued for. */
 export interface LocusHistoryCursorPayload {
   readonly locusId: string
-  readonly generation: number
+  /** The entry's child `sessionId` the cursor was issued for; a replaced session cannot reuse it. */
+  readonly sessionId: string
   readonly chatId: string
   /** Present when the locus is bound to a topic; the read is scoped to it. */
   readonly threadId?: string
@@ -67,7 +68,7 @@ function isPayload(value: unknown): value is LocusHistoryCursorPayload {
   const record = value as Record<string, unknown>
   const direction = record['direction']
   return typeof record['locusId'] === 'string' && record['locusId'] !== ''
-    && typeof record['generation'] === 'number' && Number.isSafeInteger(record['generation'])
+    && typeof record['sessionId'] === 'string' && record['sessionId'] !== ''
     && typeof record['chatId'] === 'string' && record['chatId'] !== ''
     && (direction === 'older' || direction === 'newer')
     && (record['threadId'] === undefined || typeof record['threadId'] === 'string')

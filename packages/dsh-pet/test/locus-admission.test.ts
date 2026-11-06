@@ -59,117 +59,90 @@ function context(overrides: Partial<LocusAdmissionContext> = {}): LocusAdmission
   }
 }
 
+/** A v20 store: rows by endpoint key, and the W behind each M. */
+function v20Store(rows: Record<string, Record<string, unknown>>, mains: Record<string, string> = { M1: 'W1' }) {
+  return {
+    getRow: (endpoint: { chatId: string; threadId?: string }) =>
+      rows[endpoint.threadId === undefined ? endpoint.chatId : `${endpoint.chatId}#${endpoint.threadId}`] as never,
+    findMain: (id: string) => (mains[id] === undefined ? undefined : { workSessionId: mains[id] }) as never,
+  }
+}
+
+function groupRow(state: string, extra: Record<string, unknown> = {}) {
+  return { endpoint: { chatId: GROUP }, locusId: 'locus-group', sessionId: 's-g', state, accessMode: 'read-only', revision: 1, locusMainSessionId: 'M1', workspaceId: 'ws', ...extra }
+}
+
 describe('durable production authorization resolver', () => {
-  it('maps only an active current generation to authorized, and separates owner exits from Host judgements', () => {
-    const byState = (state: 'active' | 'switching' | 'invalid' | 'retired' | 'stopped') =>
-      createDurableLocusAuthorizationResolver(
-        { getLatestLocusByEndpoint: () => ({ state }) },
-        { find: () => undefined },
-      )({ chatId: GROUP, key: GROUP })
+  it('maps only a serving row to authorized, and separates owner exits from Host judgements', () => {
+    const byState = (state: 'not-created' | 'active' | 'invalid' | 'stopped') =>
+      createDurableLocusAuthorizationResolver(v20Store({ [GROUP]: groupRow(state) }))({ chatId: GROUP, key: GROUP })
 
-    expect(byState('active')).toMatchObject({ state: 'authorized' })
-
-    // Owner decisions. The spec's "明确退出的入口 … 普通 at MUST NOT 自动复活"
-    // applies to exactly these two, so they stay terminal for ordinary work.
+    expect(byState('active')).toMatchObject({ state: 'authorized', locusId: 'locus-group' })
+    expect(byState('not-created')).toMatchObject({ state: 'authorized' })
+    // Owner decision: stays terminal for ordinary work.
     expect(byState('stopped')).toBe('retired')
-    expect(byState('retired')).toBe('retired')
-
-    // Host judgements, not owner decisions: an invalidated generation (failed
-    // child re-attach, missing composition proof) and a transient in-flight
-    // state. Collapsing these into `retired` forced an explicit rebuild that
-    // could itself be impossible — the recorded parent may have been archived
-    // — which left the endpoint permanently unreachable.
+    // Host judgement: the next authorized @ rebuilds in place (D7).
     expect(byState('invalid')).toBe('unusable')
-    expect(byState('switching')).toBe('unusable')
   })
 
   it('spec Scenario "文档与群标识不串键": key, authorization lookup and correlation never cross categories', () => {
     const token = 'Dx0000000000000000000000001'
     const docRoot = `doc:docx:${token}`
     const seen: string[] = []
-    const resolver = createDurableLocusAuthorizationResolver(
-      {
-        getLatestLocusByEndpoint: (endpoint: { chatId: string; threadId?: string }) => {
-          seen.push(endpoint.chatId)
-          return endpoint.chatId === docRoot ? { state: 'active' as const } : undefined
-        },
-      } as never,
-      { find: () => undefined },
-    )
+    const resolver = createDurableLocusAuthorizationResolver({
+      getRow: (endpoint: { chatId: string; threadId?: string }) => {
+        seen.push(endpoint.chatId)
+        return (endpoint.chatId === docRoot ? { ...groupRow('active'), endpoint: { chatId: docRoot } } : undefined) as never
+      },
+      findMain: () => ({ workSessionId: 'W1' }) as never,
+    })
 
     expect(resolver({ chatId: docRoot, key: docRoot })).toMatchObject({ state: 'authorized' })
-    // A chat that happens to share the token's literal is never the document.
     expect(resolver({ chatId: token, key: token })).toBe('uninitialized')
     expect(seen).toEqual([docRoot, token])
   })
 
-  // Archiving the main session is an OWNER action that is NOT an owner exit:
-  // the owner decided about the SESSION, never about this endpoint. Nothing in
-  // the runtime enforces it — both `dsh-agent` and the session controller
-  // resume an archived session without complaint — so without this fact the
-  // entry kept answering and the archival had no effect at all.
-  it('treats an archived main session as needing an explicit rebuild, never as Host-replaceable', () => {
-    const byState = (state: 'active' | 'invalid', parentArchived: boolean) =>
+  // D7: an archived W takes the entry out of service without rewriting `state`.
+  it('treats an archived work session as an owner action, never as Host-replaceable', () => {
+    const byState = (state: 'active' | 'invalid', archived: boolean) =>
       createDurableLocusAuthorizationResolver(
-        { getLatestLocusByEndpoint: () => ({ state, parentSessionId: 'session-parent' }) },
-        { find: () => undefined },
-        id => parentArchived && id === 'session-parent',
+        v20Store({ [GROUP]: groupRow(state, state === 'invalid' ? { invalidReason: 'lost' } : {}) }),
+        id => archived && id === 'W1',
       )({ chatId: GROUP, key: GROUP })
 
-    // `retired` is what produces the "needs an explicit rebuild" notice and
-    // suppresses auto-provisioning. `unusable` would let an ordinary mention
-    // establish a generation on a main session the owner never chose.
     expect(byState('active', true)).toMatchObject({ state: 'retired', reason: 'source-archived' })
     expect(byState('invalid', true)).toMatchObject({ state: 'retired', reason: 'source-archived' })
-
-    // Unarchived behaviour, including the Host-judged replacement, is untouched.
     expect(byState('active', false)).toMatchObject({ state: 'authorized' })
     expect(byState('invalid', false)).toBe('unusable')
 
-    // The fact is about THIS generation's recorded parent, not about the endpoint.
-    expect(
-      createDurableLocusAuthorizationResolver(
-        { getLatestLocusByEndpoint: () => ({ state: 'active', parentSessionId: 'session-other' }) },
-        { find: () => undefined },
-        id => id === 'session-parent',
-      )({ chatId: GROUP, key: GROUP }),
-    ).toMatchObject({ state: 'authorized' })
+    // A topic row reads its W through the GROUP row's M.
+    const topic = createDurableLocusAuthorizationResolver(
+      v20Store({
+        [GROUP]: groupRow('active'),
+        [`${GROUP}#${THREAD}`]: { endpoint: { chatId: GROUP, threadId: THREAD }, locusId: 'locus-t', sessionId: 's-t', state: 'active', accessMode: 'read-only', revision: 1 },
+      }),
+      id => id === 'W1',
+    )
+    expect(topic({ chatId: GROUP, threadId: THREAD, key: locusEndpointKey(GROUP, THREAD) }))
+      .toMatchObject({ state: 'retired', reason: 'source-archived' })
 
     // A probe that cannot answer must never take a working endpoint down.
-    expect(
-      createDurableLocusAuthorizationResolver(
-        { getLatestLocusByEndpoint: () => ({ state: 'active', parentSessionId: 'session-parent' }) },
-        { find: () => undefined },
-        () => { throw new Error('registry unavailable') },
-      )({ chatId: GROUP, key: GROUP }),
-    ).toMatchObject({ state: 'authorized' })
+    expect(createDurableLocusAuthorizationResolver(
+      v20Store({ [GROUP]: groupRow('active') }),
+      () => { throw new Error('registry unavailable') },
+    )({ chatId: GROUP, key: GROUP })).toMatchObject({ state: 'authorized' })
   })
 
-  it('distinguishes never-created from legacy and propagates lookup failures', () => {
-    const fresh = createDurableLocusAuthorizationResolver(
-      { getLatestLocusByEndpoint: () => undefined },
-      { find: () => undefined },
-    )
-    const legacy = createDurableLocusAuthorizationResolver(
-      { getLatestLocusByEndpoint: () => undefined },
-      { find: () => ({ historical: true }) },
-    )
-    const unresolved = createDurableLocusAuthorizationResolver(
-      { getLatestLocusByEndpoint: () => { throw new Error('storage unavailable') } },
-      { find: () => undefined },
-    )
+  it('distinguishes never-created entries and propagates lookup failures', () => {
+    const fresh = createDurableLocusAuthorizationResolver(v20Store({}))
+    const unresolved = createDurableLocusAuthorizationResolver({
+      getRow: () => { throw new Error('storage unavailable') },
+      findMain: () => undefined,
+    })
 
     expect(fresh({ chatId: GROUP, key: GROUP })).toBe('uninitialized')
-    expect(legacy({ chatId: GROUP, key: GROUP })).toBe('legacy')
     expect(() => unresolved({ chatId: GROUP, key: GROUP })).toThrow('storage unavailable')
-    const topicFromActiveGroup = createDurableLocusAuthorizationResolver(
-      {
-        getLatestLocusByEndpoint: endpoint => endpoint.threadId === undefined
-          ? { id: 'locus-group', state: 'active' }
-          : undefined,
-      },
-      { find: () => undefined },
-    )
+    const topicFromActiveGroup = createDurableLocusAuthorizationResolver(v20Store({ [GROUP]: groupRow('active') }))
     expect(topicFromActiveGroup({ chatId: GROUP, threadId: THREAD, key: locusEndpointKey(GROUP, THREAD) }))
       .toEqual({ state: 'authorized', locusId: 'locus-group', needsInitialization: true })
     expect(admitLocusEvent(groupEvent({ thread_id: THREAD }), context({
@@ -261,9 +234,8 @@ describe('normalized channel admission outcome', () => {
     })
   })
 
-  it('still refuses an owner-exited endpoint and a legacy association', () => {
+  it('still refuses an owner-exited endpoint', () => {
     expect(outcome(() => 'retired')).toMatchObject({ kind: 'rejected', reason: 'retired-endpoint' })
-    expect(outcome(() => 'legacy')).toMatchObject({ kind: 'rejected', reason: 'legacy-endpoint' })
   })
 })
 
@@ -338,27 +310,38 @@ describe('control command parsing', () => {
     ['@Pet -b abc123', { kind: 'bind', prefix: 'abc123' }],
     ['@Pet --bind abc123', { kind: 'bind', prefix: 'abc123' }],
     ['@Pet --bind=abc123', { kind: 'bind', prefix: 'abc123' }],
-    ['@Pet -s read', { kind: 'scope', mode: 'read' }],
-    ['@Pet --scope write', { kind: 'scope', mode: 'write' }],
-    ['@Pet --scope=read', { kind: 'scope', mode: 'read' }],
-    ['@Pet -t safe', { kind: 'tools', tier: 'safe' }],
-    ['@Pet --tools shell', { kind: 'tools', tier: 'shell' }],
-    ['@Pet --tools=safe', { kind: 'tools', tier: 'safe' }],
+    ['@Pet /access read', { kind: 'access', mode: 'read-only' }],
+    ['@Pet /access full', { kind: 'access', mode: 'danger-full-access' }],
+    ['@Pet -a FULL', { kind: 'access', mode: 'danger-full-access' }],
+    ['@Pet --access read', { kind: 'access', mode: 'read-only' }],
+    ['@Pet --access=full', { kind: 'access', mode: 'danger-full-access' }],
     ['@Pet /unbind', { kind: 'unbind' }],
   ] as const)('recognizes %s', (text, expected) => {
     expect(parseLocusControlCommand(text)).toEqual(expected)
   })
 
+  // spec Scenario "旧命令不再改变状态" (parser half; the receipt is control.ts, owner B):
+  // the old tier verbs stay on the control surface, so they never reach the
+  // work path, but parse to a kind that carries no mode at all.
+  it.each([
+    ['@Pet /scope write', '/scope write'],
+    ['@Pet -s write', '-s write'],
+    ['@Pet --scope=read', '--scope=read'],
+    ['@Pet /tools shell', '/tools shell'],
+    ['@Pet -t shell', '-t shell'],
+    ['@Pet --tools=safe', '--tools=safe'],
+    ['@Pet -s', '-s'],
+    ['@Pet -t admin', '-t admin'],
+  ] as const)('parses the removed tier command %s as deprecated-tier', (text, original) => {
+    expect(parseLocusControlCommand(text)).toEqual({ kind: 'deprecated-tier', original })
+  })
+
   it('keeps malformed control verbs on the control surface', () => {
     expect(parseLocusControlCommand('@Pet /bind')).toEqual({ kind: 'bind-missing-prefix' })
-    expect(parseLocusControlCommand('@Pet -s')).toEqual({ kind: 'scope-missing-mode' })
-    expect(parseLocusControlCommand('@Pet -t')).toEqual({ kind: 'tools-missing-tier' })
-    expect(parseLocusControlCommand('@Pet --tools=')).toEqual({ kind: 'tools-invalid', value: '' })
-    expect(parseLocusControlCommand('@Pet --tools admin')).toEqual({ kind: 'tools-invalid', value: 'admin' })
-    expect(parseLocusControlCommand('@Pet --scope execute')).toEqual({
-      kind: 'scope-invalid',
-      value: 'execute',
-    })
+    expect(parseLocusControlCommand('@Pet /access')).toEqual({ kind: 'access-missing-mode' })
+    expect(parseLocusControlCommand('@Pet -a write')).toEqual({ kind: 'access-invalid', value: 'write' })
+    expect(parseLocusControlCommand('@Pet /access full now')).toEqual({ kind: 'access-invalid', value: 'full now' })
+    expect(parseLocusControlCommand('@Pet --access=')).toEqual({ kind: 'access-invalid', value: '' })
     expect(parseLocusControlCommand('@Pet /unbind now')).toEqual({ kind: 'unbind-invalid' })
     expect(parseLocusControlCommand('@Pet /bind abc123 extra')).toEqual({ kind: 'bind-invalid' })
   })
@@ -399,18 +382,37 @@ describe('unified Locus admission', () => {
     expect(result).toMatchObject({ admit: true, authorization: 'authorized' })
   })
 
-  it('enforces owner-only admission for shell-tier groups and leaves allowlisted senders admitted', () => {
+  it('enforces owner-only admission for full-access entries and leaves allowlisted senders admitted', () => {
     expect(admitLocusEvent(groupEvent(), context({
       authorizedChats: [GROUP],
-      toolTier: endpoint => endpoint.chatId === GROUP ? 'shell' : 'safe',
+      accessMode: endpoint => endpoint.chatId === GROUP ? 'danger-full-access' : 'read-only',
     }))).toMatchObject({ admit: false, reason: 'owner-only-tier', authorization: 'authorized' })
     expect(admitLocusEvent(groupEvent({ sender_id: OWNER }), context({
       authorizedChats: [GROUP],
-      toolTier: () => 'shell',
+      accessMode: () => 'danger-full-access',
     }))).toMatchObject({ admit: true, authorization: 'authorized' })
   })
 
-  it('does not let a non-allowlisted sender run tool-tier control commands', () => {
+  it.each(['not-created', 'active'] as const)('spec Scenario "完全访问入口拒绝非 allowlist 成员" (%s)', state => {
+    // The production resolver answers accessMode from the row in EVERY state.
+    const rows: Record<string, Record<string, unknown>> = { [GROUP]: groupRow(state, { accessMode: 'danger-full-access' }) }
+    const resolver = createDurableLocusAuthorizationResolver(v20Store(rows))
+    expect(resolver.accessMode?.({ chatId: GROUP, key: GROUP })).toBe('danger-full-access')
+    const member = () => admitLocusEvent(groupEvent({ content: '@Pet 帮我看看' }), context({
+      authorization: resolver,
+      accessMode: resolver.accessMode,
+      allowOpenIds: [OWNER],
+    }))
+    // No Delivery is created: admission refuses with the owner-only reason.
+    expect(member()).toMatchObject({ admit: false, reason: 'owner-only-tier' })
+    // Back to read-only: the same member's at is admitted again.
+    rows[GROUP] = groupRow(state, { accessMode: 'read-only' })
+    expect(member()).toMatchObject({ admit: true, authorization: 'authorized' })
+  })
+
+  it('does not let a non-allowlisted sender run access or deprecated tier control commands', () => {
+    expect(admitLocusEvent(groupEvent({ content: '@Pet /access full' }), context({ authorizedChats: [GROUP] })))
+      .toMatchObject({ admit: false, reason: 'control-not-allowed' })
     expect(admitLocusEvent(groupEvent({ content: '@Pet -t shell' }), context({ authorizedChats: [GROUP] })))
       .toMatchObject({ admit: false, reason: 'control-not-allowed' })
   })
@@ -433,14 +435,13 @@ describe('unified Locus admission', () => {
 
   it.each([
     ['retired', 'retired-endpoint'],
-    ['legacy', 'legacy-endpoint'],
   ] as const)('does not fall through a %s endpoint', (state, reason) => {
     expect(
       admitLocusEvent(groupEvent({ sender_id: OWNER }), context({ authorizationState: state })),
     ).toMatchObject({ admit: false, reason, authorization: state })
   })
 
-  it.each(['legacy', 'retired'] as const)(
+  it.each(['retired'] as const)(
     'allows only an allowlisted explicit bind through a protected %s marker',
     state => {
       expect(admitLocusEvent(
@@ -540,32 +541,5 @@ describe('authorization snapshot lookup', () => {
         }),
       ),
     ).toBe('retired')
-  })
-})
-
-describe('v19: the chat_bindings retirement marker is the only legacy path left', () => {
-  const authorization = (marker: unknown) => createDurableLocusAuthorizationResolver(
-    { getLatestLocusByEndpoint: () => undefined },
-    { find: () => marker },
-  )
-
-  it('spec Scenario "chat_bindings 退休标记仍然生效"', () => {
-    // No locus row at all, but the older chat_bindings table still names this group.
-    const withMarker = authorization({ chatId: GROUP })
-    expect(withMarker({ chatId: GROUP, key: GROUP })).toBe('legacy')
-
-    const owner = groupEvent({ sender_id: OWNER, content: '@Pet ordinary work' })
-    expect(admitLocusEvent(owner, context({ authorization: withMarker }))).toMatchObject({
-      admit: false, reason: 'legacy-endpoint', authorization: 'legacy',
-    })
-    // Only the owner's explicit rebuild goes through, never an automatic build.
-    expect(admitLocusEvent(
-      groupEvent({ sender_id: OWNER, content: '@Pet /bind abc123' }),
-      context({ authorization: withMarker }),
-    )).toMatchObject({ admit: true, authorization: 'legacy', command: { kind: 'bind', prefix: 'abc123' } })
-
-    // The same group without the marker is simply a new entry: the owner's at builds it.
-    expect(admitLocusEvent(owner, context({ authorization: authorization(undefined) })))
-      .toMatchObject({ admit: true, needsInitialization: true, authorization: 'uninitialized' })
   })
 })

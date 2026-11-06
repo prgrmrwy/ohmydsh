@@ -51,52 +51,63 @@ import {
 } from './ledger-view.js'
 import {
   DEFAULT_LOCUS_FILTER,
-  ENTRY_STATE_OPTIONS,
-  PARENT_AVAILABILITY_LABELS,
+  ENTRY_BUCKET_OPTIONS,
+  LOCUS_ACCESS_LABELS,
+  LOCUS_DEFAULT_QA_MISSING_NOTE,
+  LOCUS_FENCE_STALE_TEXT,
+  LOCUS_FULL_ACCESS_NOTE,
+  LOCUS_NOT_CREATED_SESSION,
+  LOCUS_REBIND_CONSEQUENCES,
   SHOW_ALL_LOCUS_FILTER,
+  accessBlock,
   applyLocusFilter,
   applyQuery,
+  archivedWorkNote,
+  childJumpBlock,
   collectHandleCodes,
   countLocusFilterOptions,
+  emptyListText,
   endpointHandleId,
+  endpointHandleLabel,
   endpointKey,
   entryDisplayName,
-  endpointHandleLabel,
-  isDocEndpointView,
+  entryFeishuTarget,
   entryStateFilterLabel,
-  familyHead,
+  entryStateNote,
+  fullAccessBlock,
+  groupByEntry,
   handleCode,
   handleLabel,
-  isHostCurrent,
-  locusSourceLabel,
+  isDocEndpointView,
+  locusAccessRequest,
+  locusRebindRequest,
   locusStateLabel,
   locusStateTone,
+  locusStopRequest,
+  rebindBlock,
   sessionAvailabilityLabel,
+  sessionJumpBlock,
+  stopBlock,
   summarizeLocusView,
+  type ChatSection,
+  type EntryBucketId,
   type HandleCodes,
-  type LocusFamily,
-  type LocusFamilyNode,
   type LocusFilter,
-  type ParentAvailability,
-  type WorkGroup,
+  type WorkSectionView,
 } from './locus-view.js'
 import { PET_EXECUTOR_PRESET, chatAppLink } from '../wire.js'
-import { LOCUS_WRITE_ENABLED } from '../host/locus/policy-verification.js'
 import { WHEEL_CAPACITY } from './wheel.js'
 import type {
   PetEnvRecord,
+  PetLocusChatViewV20,
+  PetLocusEntryViewV20,
+  PetLocusManagementViewV20,
+  PetLocusWorkViewV20,
   PetProjectionEntry,
   PetSkillRevision,
   PetChannelPhase,
   PetChannelView,
   PetExpressionView,
-  PetLocusDiscoveryRequest,
-  PetLocusDiscoveryView,
-  PetLocusEndpointView,
-  PetLocusManagementView,
-  PetLocusPermissionMode,
-  PetLocusState,
-  PetLocusView,
   PetSkillSelection,
   PetTodoAction,
   PetTodoDispatchReceipt,
@@ -1124,16 +1135,14 @@ export function ExpressionSection(): JSX.Element {
   )
 }
 // ---------------------------------------------------------------------------
-// Owner-facing locus management surface.
+// Owner-facing locus management surface (v20, pet-locus-isomorphic-entries D10).
 //
-// One screen answers three questions: is this entry live, which work does it
-// belong to, and may it write. Identifiers, provenance and lifecycle actions
-// are one disclosure away — printing everything at equal weight is what made
-// the previous layout four screens tall without answering any of them.
-//
-// Two rules this surface must not break:
-//   - it invents nothing. Grouping and labels are derived here; current-ness,
-//     session availability and permission all come from the Host snapshot.
+// Grouped by the work session W; one row per entry, topics nested under their
+// group row by chatId. Three mutations only — stop, access, rebind — each
+// fenced by {expectedLocusId, expectedRevision} and greyed with a stated
+// reason before the click. Two rules this surface must not break:
+//   - it invents nothing: states, availability, in-flight and the write switch
+//     all come from the Host snapshot; labels and groupings are derived here;
 //   - a rejected Host action never changes what is shown: the snapshot is
 //     re-read after a successful call, never patched optimistically.
 // ---------------------------------------------------------------------------
@@ -1141,36 +1150,12 @@ export function ExpressionSection(): JSX.Element {
 /** Which reading of the same associations is on screen. */
 type LocusReading = 'work' | 'entry'
 
-/**
- * Owner-facing label for one permission mode.
- *
- * `write` says what it grants rather than "writable": it is complete file
- * access, unbounded and shared by every member of the entry (ADR-0005). A label
- * that hid that would be the kind of quiet widening this panel exists to make
- * visible.
- */
-const LOCUS_PERMISSION_LABELS: Record<PetLocusPermissionMode, string> = {
-  read: '只读',
-  write: '可写（完全访问）',
-}
-
-/** The endpoint fields an action may carry; display facts are excluded. */
-function locusEndpointInput(endpoint: PetLocusEndpointView): { chatId: string; threadId?: string } {
-  return endpoint.threadId === undefined
-    ? { chatId: endpoint.chatId }
-    : { chatId: endpoint.chatId, threadId: endpoint.threadId }
-}
+/** Runs one Host action; resolves true when it succeeded. */
+type LocusActionRunner = (key: string, operation: () => Promise<unknown>) => Promise<boolean>
 
 /** Copy a value, tolerating every way a browser can refuse the clipboard. */
 function copyValue(value: string): void {
   void globalThis.navigator?.clipboard?.writeText(value).catch(() => undefined)
-}
-
-/** `YYYY-MM-DD HH:mm` in the viewer's own timezone. */
-function formatAbsolute(at: number): string {
-  const date = new Date(at)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 /** A short "how long ago", for facts whose freshness matters more than the date. */
@@ -1183,20 +1168,7 @@ function formatRelative(at: number, now: number): string {
   return `${Math.round(hours / 24)} 天前`
 }
 
-/** `第 N 代` when an entry has been rebuilt, otherwise nothing to say. */
-function generationLabel(family: LocusFamily): string | undefined {
-  const head = familyHead(family)
-  if (head === undefined) return undefined
-  if (family.history.length === 0 && head.generation <= 1) return undefined
-  return `第 ${head.generation} 代`
-}
-
-/**
- * A display alias that copies its full identifier.
- *
- * The code is what a human reads; the identifier is what every request needs,
- * so it travels with the code rather than replacing it.
- */
+/** A display alias that copies its full identifier. */
 function HandleChip(props: {
   readonly value: string
   readonly code: string
@@ -1230,11 +1202,10 @@ function Jump(props: {
       </a>
     )
   }
-  const className = 'dshpet-jump'
   return (
     <button
       type="button"
-      className={className}
+      className="dshpet-jump"
       data-disabled={disabled}
       title={props.title}
       disabled={disabled}
@@ -1245,856 +1216,362 @@ function Jump(props: {
   )
 }
 
-/** Why a session jump is unavailable, or undefined when it is available. */
-function sessionJumpBlock(
-  availability: 'available' | 'archived' | 'missing' | undefined,
-): string | undefined {
-  if (availability === 'archived') return '会话已归档，无法打开'
-  if (availability === 'missing') return '会话不可用，无法打开'
-  return undefined
-}
-
-/** How one generation obtained its context, and its inquiry ledger. */
-function ownerModeLabel(mode: string | undefined): string {
-  if (mode === 'fork-prefix-v1') return '旧 fork 上下文'
-  if (mode === 'independent-v1') return '独立上下文'
-  return '未知'
-}
-
-/** Human label for one inquiry ledger status. */
-function ownerInquiryStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    queued: '排队中', executing: '执行中', answered: '已回答', 'result-delivered': '结果已续进',
-    rejected: '已拒绝', unavailable: '不可用', cancelled: '已取消', 'needs-review': '待核查', unknown: '未知',
-  }
-  return labels[status] ?? '未知'
+/** `S·xxxx` for a session id, from the snapshot-wide codes. */
+function sessionCode(codes: HandleCodes, sessionId: string): string {
+  return handleLabel('session', codes.session.get(sessionId) ?? handleCode(sessionId, 'session'))
 }
 
 /**
- * Owner facts, shown exactly as far as the Host proved them.
+ * One entry's disclosure: identifiers and its two per-entry mutations.
  *
- * A projected owner whose inquiry ledger is absent is stated as absent.
- * Rendering an empty ledger as "no inquiries" would invent a fact the Host
- * never asserted. Whether anything was projected AT ALL is decided by the
- * caller, which is why `owner` is required here.
- */
-function OwnerProjectionFacts(props: {
-  // Required, not optional: the caller renders this only when the Host
-  // actually projected owner facts, so a missing-projection branch here would
-  // be unreachable. "Is it projected at all" is the row's question, not this
-  // component's.
-  readonly owner: NonNullable<PetLocusView['owner']>
-}): JSX.Element {
-  const owner = props.owner
-  const inquiry = owner.inquiry
-  return (
-    <span className="dshpet-owner-facts">
-      <span className="dshpet-meta">上下文模式 {ownerModeLabel(owner.mode)}</span>
-      {owner.publicContext === undefined ? null : (
-        <span className="dshpet-meta">
-          公共事实{' '}
-          {owner.publicContext.status === 'authored'
-            ? `r${owner.publicContext.revision ?? '?'} · ${owner.publicContext.writer ?? '来源未知'}`
-            : '未知 / 未确认'}
-        </span>
-      )}
-      <span className="dshpet-meta">询问已退役：仅保留只读历史，不再续进</span>
-      {inquiry?.snapshotStatus === 'available' && inquiry.inquiries !== undefined
-        ? inquiry.inquiries.length === 0
-          ? <span className="dshpet-meta">没有历史询问记录</span>
-          : inquiry.inquiries.map(row => (
-            <span className="dshpet-meta" key={row.inquiryId ?? `${row.createdAt}:${row.status}`}>
-              已退役 · 原状态 {ownerInquiryStatusLabel(row.status)} · {row.reason ?? '无诊断'}
-            </span>
-          ))
-        : <span className="dshpet-meta">历史询问：快照不可用，不能推断为空</span>}
-
-    </span>
-  )
-}
-
-/**
- * Whether a generation can still serve work.
- *
- * The unavailable trio is exactly the set the Host refuses
- * (`repository.ts`: *explicitly rebuild it before accepting work*), and the set
- * this surface hides by default — so the row shortcut below is what keeps a
- * hidden entry from becoming an unreachable one.
- */
-/**
- * Describe what a completed action actually did, when its own row cannot.
- *
- * Only the session-level replacement needs this today, and it needs it badly:
- * the entries it moves leave this session's group, the action's own button
- * stops rendering (there is nothing left to move), and the default filter hides
- * the retired generations it left behind. All three are correct, and together
- * they make a SUCCESSFUL replacement look like one that silently did nothing.
- *
- * Returns undefined for every ordinary per-entry action, whose result is
- * already visible as the row it rewrote.
- * Exported for its own test: this is the only place a session-level outcome is
- * ever stated, so a silent regression here is invisible in the markup.
- * @param result - the Host's action result.
- * @returns a short receipt, or undefined when the surface speaks for itself.
- */
-export function describeActionReceipt(result: object): string | undefined {
-  const action = (result as { action?: unknown }).action
-  if (action !== 'replace-parent') return undefined
-  const replaced = (result as { replaced?: unknown }).replaced
-  const skipped = (result as { skipped?: unknown }).skipped
-  const parentSessionId = (result as { parentSessionId?: unknown }).parentSessionId
-  if (!Array.isArray(replaced) || typeof parentSessionId !== 'string') return undefined
-  const target = shortHandle(parentSessionId)
-  const moved = `已把 ${String(replaced.length)} 个入口迁到新主会话${target === undefined ? '' : ` ${target}`}`
-  if (!Array.isArray(skipped) || skipped.length === 0) {
-    return `${moved}；原主会话保持归档不动，旧代际作为历史保留。`
-  }
-  // Naming each refusal matters more than the count: the owner has to decide
-  // what to do about them, and "N 个被跳过" is not something anyone can act on.
-  const reasons = skipped
-    .map(item => {
-      const entry = item as { locusId?: unknown; reason?: unknown }
-      const id = typeof entry.locusId === 'string' ? shortHandle(entry.locusId) ?? entry.locusId : '未知入口'
-      return `${id}：${typeof entry.reason === 'string' ? entry.reason : '未说明原因'}`
-    })
-    .join('；')
-  return `${moved}。未迁移 ${String(skipped.length)} 个 —— ${reasons}`
-}
-
-/** Last six characters of an identifier, matching the panel's handle chips. */
-function shortHandle(value: string): string | undefined {
-  const trimmed = value.trim()
-  return trimmed.length < 6 ? undefined : `…${trimmed.slice(-6)}`
-}
-
-/**
- * Why this entry is out of service, and the repair that actually applies to it.
- *
- * Two independent facts meet here, and only their COMBINATION picks a repair:
- *
- * - the main session is archived — an owner action on the SESSION, repaired at
- *   the session level (restore it, or let a new session take over);
- * - the entry itself was stopped/retired — an owner action on THIS ENTRY, which
- *   the session-level replacement deliberately never moves.
- *
- * When both hold, neither session-level repair reaches this row: restoring the
- * session does not revive a stopped entry, and the replacement skips it. Saying
- * so is the whole point — the earlier text named both repairs unconditionally
- * and pointed the owner at a dead end.
- * @param head - the entry's current generation.
- * @returns the note to render, or undefined when the entry is unaffected.
- */
-function archivedParentNote(head: PetLocusView): string | undefined {
-  if (head.main.availability !== 'archived') return undefined
-  if (!isTerminalLocusState(head.state.state)) {
-    return '主会话已归档 · 恢复该主会话后本入口即恢复服务，或在上面把它迁到新主会话'
-  }
-  return '主会话已归档，且本入口已由你停止 —— 迁移不会搬走它（那等于复活一次主动退出），'
-    + '恢复主会话也不会自动复活它；需要恢复该主会话后再显式重建本入口'
-}
-
-/**
- * Why an archived session offers no replacement action right now.
- *
- * Distinguishes the two ways `movableEntries` can be empty, because they need
- * opposite things from the owner: entries that were deliberately stopped need
- * an explicit per-entry rebuild, while a group whose entries already left needs
- * nothing at all — it is finished work, not a pending problem.
- * @param work - the session group being rendered.
- * @returns the note explaining the absent action.
- */
-function replacementUnavailableNote(work: WorkGroup): string {
-  const hasHistory = work.families.some(family => familyHead(family) !== undefined)
-  if (!hasHistory) return '本会话名下没有入口'
-  const allTerminal = work.families.every(family => {
-    const head = familyHead(family)
-    return head === undefined || isTerminalLocusState(head.state.state)
-  })
-  if (!allTerminal) return '本会话名下暂无可迁移的入口'
-  return '本会话名下已无在服务的入口 —— 已停止/已失效的入口不会被迁走，'
-    + '它们作为历史保留（在上方筛选里勾选「已停止 / 已失效」可见）'
-}
-
-function isTerminalLocusState(state: PetLocusState): boolean {
-  return state === 'invalid' || state === 'stopped' || state === 'retired'
-}
-
-/** The optimistic fence every mutation of one generation carries. */
-function locusFence(head: PetLocusView): {
-  readonly locusId: string
-  readonly expectedGeneration: number
-  readonly expectedLocusId: string
-  readonly expectedUpdatedAt: number
-} {
-  return {
-    locusId: head.locusId,
-    expectedGeneration: head.generation,
-    expectedLocusId: head.locusId,
-    expectedUpdatedAt: head.state.updatedAt,
-  }
-}
-
-/**
- * The one rebuild payload, shared by the row shortcut and the 更多 disclosure.
- *
- * It deliberately does NOT spread {@link locusFence}: rebuild addresses a
- * generation through `endpoint` + `expectedLocusId`, and its action schema has
- * no `locusId` field. Spreading the whole fence compiled — TypeScript does not
- * excess-check spread properties — and the Host's `strictBody` answered
- * `Unknown request field 'locusId'` the moment an owner clicked 重建.
- */
-function locusRebuildRequest(head: PetLocusView): Parameters<typeof petApi.locusRebuild>[0] {
-  return {
-    action: 'rebuild',
-    endpoint: locusEndpointInput(head.endpoint),
-    parentSessionId: head.main.sessionId,
-    ...(head.workspace.workspaceId === '' ? {} : { workspaceId: head.workspace.workspaceId }),
-    ...(head.parentLocusId === undefined ? {} : { parentLocusId: head.parentLocusId }),
-    ...(head.isDefaultQa ? { asDefaultQa: true } : {}),
-    expectedGeneration: head.generation,
-    expectedLocusId: head.locusId,
-    expectedUpdatedAt: head.state.updatedAt,
-  }
-}
-
-/**
- * One entry's disclosure: identifiers, provenance, permission and actions.
- *
- * Exported for the rendering test: the disclosure is collapsed until the owner
- * opens it, so a surface-level snapshot cannot see the permission controls at
- * all. Rendering this block directly is the only way to assert what the owner
- * is offered there.
+ * Exported for the rendering tests: the disclosure is collapsed until opened,
+ * so a surface-level snapshot cannot see these controls.
  */
 export function LocusDetails(props: {
-  readonly family: LocusFamily
+  readonly entry: PetLocusEntryViewV20
+  readonly chat: PetLocusChatViewV20
+  readonly writeEnabled: boolean
   readonly codes: HandleCodes
-  readonly busy: boolean
   readonly busyKey: string | undefined
-  readonly onAction: (key: string, operation: () => Promise<unknown>) => void
-}): JSX.Element | null {
-  const head = familyHead(props.family)
-  if (head === undefined) return null
-  const locusCode = handleLabel('locus', props.codes.locus.get(head.locusId) ?? handleCode(head.locusId, 'locus'))
-  const chatCode = endpointHandleLabel({ chatId: head.endpoint.chatId }, props.codes.endpoint.get(head.endpoint.chatId) ?? '')
-  const parentCode = handleLabel('session', props.codes.session.get(head.main.sessionId) ?? '')
-  const workspaceCode = handleLabel('workspace', props.codes.workspace.get(head.workspace.workspaceId) ?? '')
-  const threadId = head.endpoint.threadId
-  const threadCode = threadId === undefined
-    ? undefined
-    : endpointHandleLabel({ chatId: head.endpoint.chatId, threadId }, props.codes.endpoint.get(threadId) ?? '')
-  const childSessionId = head.child.sessionId
-  const childCode = childSessionId === undefined
-    ? undefined
-    : handleLabel('session', props.codes.session.get(childSessionId) ?? '')
-
-  const endpoint = locusEndpointInput(head.endpoint)
-  const fence = locusFence(head)
-  const run = (name: string, operation: () => Promise<unknown>): (() => void) => () =>
-    props.onAction(`${head.locusId}:${name}`, operation)
-
-  const blocked = props.busyKey !== undefined || props.busy
-  const canManageCurrent = head.state.state === 'active'
-  const canStop =
-    head.state.state === 'provisioning' || head.state.state === 'active' || head.state.state === 'switching'
-  const writable = head.permission.effective === 'write'
-  const permissionDrift = head.permission.desired !== head.permission.effective
-  const shellTier = head.toolTier.effective === 'shell'
+  readonly onAction: LocusActionRunner
+}): JSX.Element {
+  const { entry, chat } = props
+  const blocked = props.busyKey !== undefined
+  const access = accessBlock(entry)
+  const full = fullAccessBlock({ writeEnabled: props.writeEnabled })
+  const stop = stopBlock(entry)
+  const isFull = entry.accessMode === 'danger-full-access'
+  const threadId = entry.endpoint.threadId
+  const run = (name: string, operation: () => Promise<unknown>): (() => void) => () => {
+    void props.onAction(`${entry.locusId}:${name}`, operation)
+  }
 
   return (
     <dl className="dshpet-locus-details">
       <dt>标识符</dt>
       <dd>
-        <HandleChip value={head.locusId} code={locusCode} />
-        <HandleChip value={head.endpoint.chatId} code={chatCode} />
-        {threadId === undefined || threadCode === undefined ? null : (
-          <HandleChip value={threadId} code={threadCode} />
+        <HandleChip value={entry.locusId} code={handleLabel('locus', props.codes.locus.get(entry.locusId) ?? handleCode(entry.locusId, 'locus'))} />
+        <HandleChip
+          value={entry.endpoint.chatId}
+          code={endpointHandleLabel({ chatId: entry.endpoint.chatId }, props.codes.endpoint.get(endpointHandleId({ chatId: entry.endpoint.chatId })) ?? '')}
+        />
+        {threadId === undefined ? null : (
+          <HandleChip
+            value={threadId}
+            code={endpointHandleLabel(entry.endpoint, props.codes.endpoint.get(endpointHandleId(entry.endpoint)) ?? '')}
+          />
         )}
-        <HandleChip value={head.main.sessionId} code={parentCode} label="父" />
-        {childSessionId === undefined || childCode === undefined ? null : (
-          <HandleChip value={childSessionId} code={childCode} label="会话" />
-        )}
-        <HandleChip value={head.workspace.workspaceId} code={workspaceCode} />
+        <HandleChip value={entry.sessionId} code={sessionCode(props.codes, entry.sessionId)} label="子会话" />
+        <HandleChip value={chat.locusMain.sessionId} code={sessionCode(props.codes, chat.locusMain.sessionId)} label="M" />
+        <HandleChip
+          value={chat.workspace.workspaceId}
+          code={handleLabel('workspace', props.codes.workspace.get(chat.workspace.workspaceId) ?? '')}
+        />
       </dd>
 
-      <dt>来源</dt>
-      <dd>{locusSourceLabel(head.source)} · {formatAbsolute(head.state.createdAt)}</dd>
-
-      <dt>权限</dt>
+      <dt>访问模式</dt>
       <dd>
-        {LOCUS_PERMISSION_LABELS[head.permission.effective]}
-        {permissionDrift
-          ? ` · 期望${LOCUS_PERMISSION_LABELS[head.permission.desired]}，实际${LOCUS_PERMISSION_LABELS[head.permission.effective]}，未生效`
-          : ''}
-        {/* The verification timestamp is deliberately not shown. It is written
-            ONLY by an owner permission change, and with the write switch off
-            and the permission control retired there is no longer any path that
-            sets it — so the suffix read 「未核验」 on every entry. The date
-            branch would be worse than redundant: a locus whose write grant was
-            demoted still carries the timestamp from THAT grant, so showing it
-            beside 「只读」 would claim the current mode had been verified when a
-            different one was. */}
-        {writable
-          ? ' · 该入口成员共享整机写权限（含仓库之外的任何文件），不再受目录范围限制'
-          : ''}
-      </dd>
-
-      {/* Only rendered when the Host actually projects owner facts. The
-          projection is an optional dependency that is not composed today, so
-          an unconditional row printed the same 「no data」 sentence on every
-          entry — an absence dressed up as content. It returns by itself the
-          moment the projection is wired. */}
-      {head.owner === undefined ? null : (
-        <>
-          <dt>询问</dt>
-          <dd>
-            <OwnerProjectionFacts owner={head.owner} />
-          </dd>
-        </>
-      )}
-
-      <dt>工具档位</dt>
-      <dd>
-        {head.toolTier.effective}
-        {head.toolTier.desired !== head.toolTier.effective
-          ? ` · 期望${head.toolTier.desired}，实际${head.toolTier.effective}，未生效`
-          : ''}
-        {shellTier
-          ? ' · allowlist 成员共享本机命令执行与飞书凭据能力；文件写权限仍是独立档位，读取与网络不受其约束。出站 guard 仅防误操作，不是安全边界。'
-          : ''}
+        {LOCUS_ACCESS_LABELS[entry.accessMode]}
+        {isFull ? ` · ${LOCUS_FULL_ACCESS_NOTE}` : ''}
       </dd>
 
       <dt>操作</dt>
       <dd className="dshpet-locus-ops">
-        {/* The permission control exists only while more than one mode does.
-            With the write switch off, `read` is the only reachable mode, so a
-            permanently-inert button would be the same noise this row is being
-            cleared of; the current mode stays visible in the 权限 row above,
-            and reappears here the moment the switch is turned back on. */}
-        <span className="dshpet-locus-perm" role="group" aria-label="工具档位">
+        <span className="dshpet-locus-perm" role="group" aria-label="访问模式">
           <button
             type="button"
-            aria-pressed={!shellTier}
-            disabled={blocked || !canManageCurrent || !shellTier}
-            onClick={run('tools-safe', () => petApi.locusTools({ action: 'tools', tier: 'safe', ...fence }))}
+            aria-pressed={!isFull}
+            disabled={blocked || access !== undefined || !isFull}
+            onClick={run('access-read-only', () => petApi.locusAction(locusAccessRequest(entry, 'read-only')))}
           >
-            safe
+            只读
           </button>
           <button
             type="button"
-            aria-pressed={shellTier}
-            disabled={blocked || !canManageCurrent || shellTier || head.childComposition !== 'tier3'}
-            title="开放 bash 与 Skill；allowlist 成员共享本机命令、飞书凭据、读取与网络能力。出站 guard 仅防误操作，不是安全边界。"
-            onClick={run('tools-shell', () => petApi.locusTools({ action: 'tools', tier: 'shell', ...fence }))}
+            aria-pressed={isFull}
+            disabled={blocked || access !== undefined || full !== undefined || isFull}
+            title={full ?? `完全访问：${LOCUS_FULL_ACCESS_NOTE}`}
+            onClick={run('access-full', () => petApi.locusAction(locusAccessRequest(entry, 'danger-full-access')))}
           >
-            shell
+            完全访问
           </button>
         </span>
-        {LOCUS_WRITE_ENABLED ? (
-          <span className="dshpet-locus-perm" role="group" aria-label="文件权限">
-            <button
-              type="button"
-              aria-pressed={!writable}
-              disabled={blocked || !canManageCurrent || !writable}
-              onClick={run('scope-read', () => petApi.locusScope({ action: 'scope', mode: 'read', ...fence }))}
-            >
-              只读
-            </button>
-            <button
-              type="button"
-              aria-pressed={writable}
-              disabled={blocked || !canManageCurrent || writable}
-              title={'完全访问：该入口成员可在本机任意位置读写文件（不受目录范围限制）。'
-                + '宿主必须回读为完全访问才生效；核验失败会保持只读。'}
-              onClick={run('scope-write', () => petApi.locusScope({ action: 'scope', mode: 'write', ...fence }))}
-            >
-              可写
-            </button>
-          </span>
-        ) : null}
+        {access === undefined ? null : <span className="dshpet-meta" data-reason="access">{access}</span>}
+        {access !== undefined || full === undefined ? null : <span className="dshpet-meta" data-reason="full-access">{full}</span>}
         <button
           type="button"
           className="dshpet-action dshpet-action-sm dshpet-action-danger"
-          disabled={blocked || !canStop}
-          title="停止服务并保留入口停止标记；历史与飞书资源保留，恢复用重建"
-          onClick={run('stop', () => petApi.locusStop({ action: 'stop', endpoint, ...fence }))}
+          disabled={blocked || stop !== undefined}
+          title={stop ?? '停止服务；会话与飞书资源保留'}
+          onClick={run('stop', () => petApi.locusAction(locusStopRequest(entry)))}
         >
-          停止关联
+          停止
         </button>
+        {stop === undefined || entry.state === 'stopped' ? null : <span className="dshpet-meta" data-reason="stop">{stop}</span>}
       </dd>
     </dl>
   )
 }
 
-/** The generations other than the current one, disclosed on demand. */
-function GenerationRows(props: {
-  readonly family: LocusFamily
-  readonly codes: HandleCodes
-  readonly open: boolean
-  readonly onToggle: () => void
-}): JSX.Element | null {
-  const { family } = props
-  if (family.history.length === 0) return null
+/**
+ * 「改绑到其他会话」, directly on the group / doc-root row.
+ *
+ * The input is sent as typed (trimmed): a short code is never resolved. The
+ * input is kept when the Host refuses, and cleared only after success.
+ */
+export function RebindControl(props: {
+  readonly chat: PetLocusChatViewV20
+  readonly work: PetLocusWorkViewV20
+  readonly busyKey: string | undefined
+  readonly onAction: LocusActionRunner
+  /** Test seam: start with the dialog open and this input. */
+  readonly initialInput?: string
+}): JSX.Element {
+  const [open, setOpen] = useState(props.initialInput !== undefined)
+  const [input, setInput] = useState(props.initialInput ?? '')
+  const block = rebindBlock(props.chat, props.work)
+  const disabled = props.busyKey !== undefined || block !== undefined
+  const submit = (): void => {
+    if (input.trim() === '') return
+    void props.onAction(
+      `${props.chat.group.locusId}:rebind`,
+      () => petApi.locusAction(locusRebindRequest(props.chat, input)),
+    ).then(ok => {
+      if (!ok) return
+      setOpen(false)
+      setInput('')
+    })
+  }
   return (
-    <div className="dshpet-locus-generations">
+    <span className="dshpet-locus-rebind">
       <button
         type="button"
-        className="dshpet-locus-history-toggle"
-        aria-expanded={props.open}
-        onClick={props.onToggle}
+        className="dshpet-action dshpet-action-sm"
+        disabled={disabled}
+        title={block ?? '把整个群改绑到另一个工作会话'}
+        onClick={() => { if (!disabled) setOpen(true) }}
       >
-        历史 {family.history.length} 代 {props.open ? '▾' : '▸'}
+        改绑到其他会话
       </button>
-      {props.open
-        ? family.history.map(locus => {
-          const code = handleLabel('locus', props.codes.locus.get(locus.locusId) ?? handleCode(locus.locusId, 'locus'))
-          const childSessionId = locus.child.sessionId
-          const childCode = childSessionId === undefined
-            ? undefined
-            : handleLabel('session', props.codes.session.get(childSessionId) ?? '')
-          const stateAt = locus.state.retiredAt ?? locus.state.stoppedAt ?? locus.state.updatedAt
-          return (
-            <div className="dshpet-locus-generation" key={locus.locusId}>
-              <span className="dshpet-locus-generation-no">第 {locus.generation} 代</span>
-              <span className="dshpet-locus-node" data-tone={locusStateTone(locus.state.state)} aria-hidden="true" />
-              <span className="dshpet-meta">{locusStateLabel(locus.state.state)}</span>
-              <span className="dshpet-meta">{formatAbsolute(stateAt)}</span>
-              {childSessionId === undefined || childCode === undefined
-                ? <span className="dshpet-meta">会话 —</span>
-                : <HandleChip value={childSessionId} code={childCode} label="会话" />}
-              <HandleChip value={locus.locusId} code={code} />
-              <Jump
-                label="会话"
-                title={sessionJumpBlock(locus.child.availability) ?? '打开这一代的会话'}
-                disabled={sessionOpener === undefined || childSessionId === undefined
-                  || sessionJumpBlock(locus.child.availability) !== undefined}
-                onClick={() => {
-                  if (childSessionId === undefined) return
-                  sessionOpener?.({ kind: 'subagent', parentSessionId: locus.main.sessionId, childSessionId })
-                  closeSettings?.()
-                }}
-              />
-            </div>
-          )
-        })
-        : null}
-    </div>
+      {block === undefined ? null : <span className="dshpet-meta" data-reason="rebind">{block}</span>}
+      {!open || block !== undefined ? null : (
+        <span className="dshpet-locus-rebind-dialog" role="dialog" aria-label="改绑到其他会话">
+          <input
+            className="dshpet-input"
+            value={input}
+            placeholder="目标工作会话的完整 sessionId（session-…）"
+            aria-label="目标工作会话 sessionId"
+            onChange={event => setInput(event.target.value)}
+          />
+          <span className="dshpet-meta">{LOCUS_REBIND_CONSEQUENCES}</span>
+          <button
+            type="button"
+            className="dshpet-action dshpet-action-sm dshpet-action-primary"
+            disabled={props.busyKey !== undefined || input.trim() === ''}
+            onClick={submit}
+          >
+            确认
+          </button>
+          <button type="button" className="dshpet-jump" onClick={() => setOpen(false)}>取消</button>
+        </span>
+      )}
+    </span>
   )
 }
 
-/** One entry row: identity, state, the sessions behind it, and its exits. */
+/** One entry row (group row, doc root, topic or comment). */
 function LocusRow(props: {
-  readonly family: LocusFamily
+  readonly entry: PetLocusEntryViewV20
+  readonly chat: PetLocusChatViewV20
+  readonly work: PetLocusWorkViewV20
   readonly reading: LocusReading
+  readonly writeEnabled: boolean
   readonly codes: HandleCodes
   readonly busyKey: string | undefined
-  readonly onAction: (key: string, operation: () => Promise<unknown>) => void
+  readonly onAction: LocusActionRunner
   readonly open: boolean
   readonly onToggle: () => void
-  readonly historyOpen: boolean
-  readonly onToggleHistory: () => void
   readonly nested: boolean
-  /** The entry this one inherits its source from, when it is nested. */
-  readonly inheritedFrom?: string
-  /** How many entries share this row's parent session (reading B only). */
-  readonly sharedEntryCount: number
-}): JSX.Element | null {
-  const head = familyHead(props.family)
-  if (head === undefined) return null
-  const endpoint = head.endpoint
-  const endpointCode = props.codes.endpoint.get(endpointHandleId(endpoint)) ?? ''
-  const display = entryDisplayName(endpoint, endpointCode)
-  const current = isHostCurrent(props.family, head)
-  const chatLink = chatAppLink(endpoint.chatId)
-  const threadLink = endpoint.threadId === undefined
-    ? undefined
-    : `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(endpoint.threadId)}`
-  // A document entry opens the document (inspected URL); never an IM applink.
-  const isDoc = isDocEndpointView(endpoint)
-  const feishuLink = isDoc ? endpoint.docUrl : threadLink ?? chatLink
-  const childSessionId = head.child.sessionId
-  const childCode = childSessionId === undefined
-    ? undefined
-    : handleLabel('session', props.codes.session.get(childSessionId) ?? '')
-  const parentCode = handleLabel('session', props.codes.session.get(head.main.sessionId) ?? '')
-  const parentBlock = sessionJumpBlock(head.main.availability)
-  const childBlock = sessionJumpBlock(head.child.availability)
-  // A subagent child is only addressable through its durable parent. With no
-  // parent id there is nothing to address, and falling back to the child's bare
-  // id would just reproduce the Host refusal as a confusing runtime error.
-  const childAddressable = childSessionId !== undefined && head.main.sessionId.trim() !== ''
-  const generation = generationLabel(props.family)
-  const stateLine = `${locusStateLabel(head.state.state)} · ${LOCUS_PERMISSION_LABELS[head.permission.effective]}`
+}): JSX.Element {
+  const { entry, chat, work } = props
+  const isGroup = entry.endpoint.threadId === undefined
+  const endpointCode = props.codes.endpoint.get(endpointHandleId(entry.endpoint)) ?? ''
+  const display = entryDisplayName(entry.endpoint, endpointCode)
+  const isDoc = isDocEndpointView(entry.endpoint)
+  const feishu = entryFeishuTarget(entry.endpoint, chatAppLink)
+  const childBlock = childJumpBlock(entry)
+  const stateNote = entryStateNote(entry)
+  const archivedNote = isGroup ? archivedWorkNote(work) : undefined
+  const mainBlock = sessionJumpBlock(chat.locusMain.availability ?? 'unknown')
+  const workBlock = sessionJumpBlock(work.availability)
 
   return (
     <>
       <div className="dshpet-locus-row" data-nested={props.nested} data-open={props.open}>
-        <span
-          className="dshpet-locus-node"
-          data-tone={locusStateTone(head.state.state)}
-          data-current={current}
-          aria-hidden="true"
-        />
+        <span className="dshpet-locus-node" data-tone={locusStateTone(entry.state)} aria-hidden="true" />
         <div className="dshpet-locus-row-body">
           <div className="dshpet-locus-row-line">
-            {props.reading === 'entry'
-              ? <HandleChip value={head.locusId} code={handleLabel('locus', props.codes.locus.get(head.locusId) ?? head.locusId)} />
-              : (
-                <span className="dshpet-locus-name" data-placeholder={display.isPlaceholder}>
-                  {display.name}
-                </span>
-              )}
-            {head.isDefaultQa ? <span className="dshpet-chip" data-tone="qa">默认 Q&amp;A</span> : null}
-            {isDoc && endpoint.threadId === undefined
-              ? <span className="dshpet-meta">本文档的评论者均可提问</span>
-              : null}
-            {display.isPlaceholder && isDoc ? <span className="dshpet-meta">（兜底显示）</span> : null}
-            {head.state.busy ? <span className="dshpet-chip" data-tone="busy">有在途工作</span> : null}
-            {generation === undefined ? null : <span className="dshpet-meta">{generation}</span>}
-            {props.inheritedFrom === undefined ? null : (
-              <span className="dshpet-meta">继承自 {props.inheritedFrom}</span>
+            <span className="dshpet-locus-name" data-placeholder={display.isPlaceholder}>{display.name}</span>
+            {endpointCode === '' ? null : (
+              <HandleChip value={endpointHandleId(entry.endpoint)} code={endpointHandleLabel(entry.endpoint, endpointCode)} />
             )}
-            {props.reading === 'entry' ? (
-              <span className="dshpet-meta">
-                {stateLine} · {locusSourceLabel(head.source)}
-              </span>
-            ) : null}
+            {display.isPlaceholder ? <span className="dshpet-meta">（兜底显示）</span> : null}
+            {isGroup && chat.defaultQa === true ? <span className="dshpet-chip" data-tone="qa">默认 Q&amp;A</span> : null}
+            {isDoc && isGroup ? <span className="dshpet-meta">本文档的评论者均可提问</span> : null}
+            {entry.inFlight ? <span className="dshpet-chip" data-tone="busy">投递中</span> : null}
           </div>
-
-          {props.reading === 'work' ? (
+          <div className="dshpet-locus-row-line">
+            <span className="dshpet-meta" data-state={entry.state}>
+              {locusStateLabel(entry.state)} · {LOCUS_ACCESS_LABELS[entry.accessMode]}
+            </span>
+            {entry.accessMode === 'danger-full-access'
+              ? <span className="dshpet-meta">{LOCUS_FULL_ACCESS_NOTE}</span>
+              : null}
+            {stateNote === undefined ? null : <span className="dshpet-meta">{stateNote}</span>}
+            <span className="dshpet-meta dshpet-locus-session-title" title={entry.session?.title}>
+              子会话 {entry.state === 'not-created' ? LOCUS_NOT_CREATED_SESSION : entry.session?.title ?? '未命名'}
+            </span>
+          </div>
+          {!isGroup || (chat.reboundFrom === undefined && archivedNote === undefined) ? null : (
             <div className="dshpet-locus-row-line">
-              <span className="dshpet-meta">{stateLine}</span>
-              {/* The repair for this state is on the session block, so the row
-                  states why it is down and where to act — otherwise hiding the
-                  rebuild button would read as "nothing can be done".
-
-                  Which repair depends on the ENTRY's own state, not only on the
-                  archived session: an entry the owner stopped is not moved by
-                  the session-level replacement (that would revive an exit they
-                  made on purpose) and is not revived by restoring the session
-                  either. Naming the general two repairs there sent the owner
-                  down a path that could not work for this row. */}
-              {archivedParentNote(head) === undefined ? null : (
-                // No `data-tone`: the stylesheet has no variant for one, so it
-                // only looked meaningful in the markup while rendering nothing.
-                <span className="dshpet-meta">{archivedParentNote(head)}</span>
-              )}
-              <span className="dshpet-meta dshpet-locus-session-title" title={head.child.title ?? undefined}>
-                会话 {childSessionId === undefined ? '—' : head.child.title ?? '未命名'}
-              </span>
-              {childSessionId === undefined || childCode === undefined ? null : (
-                <HandleChip value={childSessionId} code={childCode} />
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="dshpet-locus-row-line">
-                <span className="dshpet-meta dshpet-locus-session-title" title={head.child.title ?? undefined}>
-                  会话 {childSessionId === undefined ? '—' : head.child.title ?? '未命名'}
-                </span>
-                {childSessionId === undefined || childCode === undefined ? null : (
-                  <HandleChip value={childSessionId} code={childCode} />
-                )}
-                {childSessionId === undefined
-                  ? null
-                  : <span className="dshpet-meta">{sessionAvailabilityLabel(head.child.availability)}</span>}
-              </div>
-              <div className="dshpet-locus-row-line">
-                <span className="dshpet-meta">父会话 {head.main.title ?? '未命名会话'}</span>
-                <HandleChip value={head.main.sessionId} code={parentCode} />
+              {chat.reboundFrom === undefined ? null : (
                 <span className="dshpet-meta">
-                  {sessionAvailabilityLabel(head.main.availability)} · 共享 {props.sharedEntryCount} 个入口
+                  改绑自 {chat.reboundFrom.title ?? '未命名会话'}{' '}
+                  <HandleChip value={chat.reboundFrom.sessionId} code={sessionCode(props.codes, chat.reboundFrom.sessionId)} />
                 </span>
-              </div>
-            </>
+              )}
+              {archivedNote === undefined ? null : <span className="dshpet-meta" data-note="archived-w">{archivedNote}</span>}
+            </div>
+          )}
+          {props.reading !== 'entry' ? null : (
+            <div className="dshpet-locus-row-line">
+              <span className="dshpet-meta">工作会话 {work.title ?? '未命名会话'}</span>
+              <HandleChip value={work.sessionId} code={sessionCode(props.codes, work.sessionId)} />
+              <span className="dshpet-meta">{sessionAvailabilityLabel(work.availability)}</span>
+              <span className="dshpet-meta">locus 主会话 {chat.locusMain.title ?? '未命名'}</span>
+              <HandleChip value={chat.locusMain.sessionId} code={sessionCode(props.codes, chat.locusMain.sessionId)} />
+            </div>
           )}
         </div>
-
         <div className="dshpet-locus-row-tail">
-          {props.reading === 'entry' ? (
-            <Jump
-              label="父会话"
-              title={parentBlock ?? '打开这份工作的父会话（可能被多个入口共享）'}
-              disabled={sessionOpener === undefined || parentBlock !== undefined}
-              onClick={() => {
-                sessionOpener?.({ kind: 'session', sessionId: head.main.sessionId })
-                closeSettings?.()
-              }}
-            />
+          {isGroup ? (
+            <RebindControl chat={chat} work={work} busyKey={props.busyKey} onAction={props.onAction} />
           ) : null}
+          {props.reading !== 'entry' ? null : (
+            <>
+              <Jump
+                label="工作会话"
+                title={workBlock ?? '打开工作会话'}
+                disabled={sessionOpener === undefined || workBlock !== undefined}
+                onClick={() => {
+                  sessionOpener?.({ kind: 'session', sessionId: work.sessionId })
+                  closeSettings?.()
+                }}
+              />
+              <Jump
+                label="主会话"
+                title={mainBlock ?? '打开 locus 主会话'}
+                disabled={sessionOpener === undefined || mainBlock !== undefined}
+                onClick={() => {
+                  sessionOpener?.({ kind: 'session', sessionId: chat.locusMain.sessionId })
+                  closeSettings?.()
+                }}
+              />
+            </>
+          )}
           <Jump
-            label="会话"
-            title={head.main.sessionId.trim() === ''
-              ? '父会话标识缺失，无法定位这个子会话'
-              : childBlock ?? '打开这个入口的会话'}
-            disabled={sessionOpener === undefined || !childAddressable || childBlock !== undefined}
+            label="子会话"
+            title={childBlock ?? '打开这个入口的子会话'}
+            disabled={sessionOpener === undefined || childBlock !== undefined}
             onClick={() => {
-              if (childSessionId === undefined) return
-              sessionOpener?.({
-                kind: 'subagent',
-                parentSessionId: head.main.sessionId,
-                childSessionId,
-              })
+              sessionOpener?.({ kind: 'subagent', parentSessionId: chat.locusMain.sessionId, childSessionId: entry.sessionId })
               closeSettings?.()
             }}
           />
           <Jump
-            label={isDoc ? '文档' : endpoint.threadId === undefined ? '飞书' : '话题'}
-            title={feishuLink === undefined
-              ? (isDoc ? '文档元数据暂不可读，无法提供链接' : '这个入口没有可用的飞书链接')
-              : isDoc
-                ? (endpoint.threadId === undefined ? '在飞书中打开这个文档' : `在飞书中打开该文档（评论 ${endpoint.threadId}）`)
-                : endpoint.threadId === undefined ? '在飞书中打开这个入口' : '在飞书中打开这个话题'}
-            disabled={feishuLink === undefined}
-            {...(feishuLink === undefined ? {} : { href: feishuLink })}
+            label={isDoc ? '文档' : feishu.kind === 'thread' ? '话题' : '飞书'}
+            title={feishu.reason ?? (isDoc ? '在飞书中打开这个文档' : feishu.kind === 'thread' ? '在飞书中打开这个话题' : '在飞书中打开这个入口')}
+            disabled={feishu.url === undefined}
+            {...(feishu.url === undefined ? {} : { href: feishu.url })}
           />
-          {/*
-            Rebuild is the only action left on a tombstone, so it lives on the
-            row rather than inside 更多: the default filter hides terminal
-            entries, and burying their one way back two disclosures deep would
-            make the default a dead end.
-
-            An ARCHIVED main session is deliberately NOT rebuilt from here. The
-            rebuild reuses the recorded main session — exactly the session that
-            cannot serve — so this button could never succeed, and pointing the
-            entry at a DIFFERENT session is a decision about the session, not
-            about this row. That repair lives on the session block above; all
-            this row owes the owner is the reason, which the row already states.
-          */}
-          {isTerminalLocusState(head.state.state) && head.main.availability !== 'archived' ? (
-            <button
-              type="button"
-              className="dshpet-action dshpet-action-sm"
-              disabled={props.busyKey !== undefined || head.state.busy}
-              title="重建为新一代，新代默认只读"
-              onClick={() => props.onAction(`${head.locusId}:rebuild`, () => petApi.locusRebuild(locusRebuildRequest(head)))}
-            >
-              重建
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="dshpet-locus-more"
-            aria-expanded={props.open}
-            onClick={props.onToggle}
-          >
+          <button type="button" className="dshpet-locus-more" aria-expanded={props.open} onClick={props.onToggle}>
             {props.open ? '收起 ▾' : '更多 ▸'}
           </button>
         </div>
       </div>
       {props.open ? (
         <LocusDetails
-          family={props.family}
+          entry={entry}
+          chat={chat}
+          writeEnabled={props.writeEnabled}
           codes={props.codes}
-          busy={head.state.busy}
           busyKey={props.busyKey}
           onAction={props.onAction}
         />
       ) : null}
-      <GenerationRows
-        family={props.family}
-        codes={props.codes}
-        open={props.historyOpen}
-        onToggle={props.onToggleHistory}
-      />
     </>
   )
 }
 
-/**
- * One parent session and the entries that belong to it.
- *
- * Exported for the rendering tests: the surface's default filter hides an
- * archived parent entirely, so the notes this block owes an owner about an
- * archived session can only be asserted by rendering the block itself.
- */
-export function WorkSection(props: {
-  readonly work: WorkGroup
-  readonly reading: LocusReading
-  readonly codes: HandleCodes
-  readonly busyKey: string | undefined
-  readonly onAction: (key: string, operation: () => Promise<unknown>) => void
-  readonly openKeys: readonly string[]
-  readonly onToggle: (key: string) => void
-  readonly historyKeys: readonly string[]
-  readonly onToggleHistory: (key: string) => void
-  readonly sharedEntryCount: (parentSessionId: string) => number
-  readonly hasDefaultQa: boolean
-  /** Todos filed against this parent session; empty in the by-entry reading. */
-  readonly todos?: readonly PetTodoView[]
-  readonly todoMeta?: PetTodoLedgerMeta | undefined
-  readonly todoBusyId?: string | undefined
-  readonly onTodoDispatch?: (itemId: string, action: PetTodoAction) => void
-  readonly initialTodosOpen?: boolean
-  /** Whether this session's entries are shown. Undefined keeps them always on
-   * (the by-entry reading, where the group IS the entry list). */
-  readonly expanded?: boolean
-  readonly onToggleExpanded?: () => void
-}): JSX.Element {
-  const { work } = props
-  // Entries this session-level repair may move: their own generations, and
-  // never one the owner explicitly stopped/retired — moving it would revive an
-  // exit the owner made on purpose. The Host re-proves both facts per entry.
-  const movableEntries = work.families.flatMap(family => {
-    const head = familyHead(family)
-    if (head === undefined || isTerminalLocusState(head.state.state)) return []
-    return [{
-      endpoint: { chatId: family.endpoint.chatId, ...(family.endpoint.threadId === undefined ? {} : { threadId: family.endpoint.threadId }) },
-      locusId: head.locusId,
-    }]
-  })
-  const collapsible = props.onToggleExpanded !== undefined
-  const showEntries = !collapsible || props.expanded === true
-  const sessionId = work.parentSessionId
-  const sessionCode = handleLabel('session', props.codes.session.get(sessionId) ?? '')
-  const workspaceTitle = work.workspace?.title ?? work.workspace?.workspaceId ?? '未知工作区'
-  const path = work.workspace?.path
-  const parentBlock = sessionJumpBlock(work.session?.availability)
-  const title = work.session?.title ?? '未命名会话'
-
-  const labelOf = (family: LocusFamily): string => {
-    const code = props.codes.endpoint.get(endpointHandleId(family.endpoint)) ?? ''
-    return entryDisplayName(family.endpoint, code).name
-  }
-
-  const renderNode = (node: LocusFamilyNode, nested: boolean, parentLabel?: string): JSX.Element => (
-    <Fragment key={node.family.key}>
-      <LocusRow
-        family={node.family}
-        reading={props.reading}
-        codes={props.codes}
-        busyKey={props.busyKey}
-        onAction={props.onAction}
-        open={props.openKeys.includes(node.family.key)}
-        onToggle={() => props.onToggle(node.family.key)}
-        historyOpen={props.historyKeys.includes(node.family.key)}
-        onToggleHistory={() => props.onToggleHistory(node.family.key)}
-        nested={nested}
-        {...(parentLabel === undefined ? {} : { inheritedFrom: parentLabel })}
-        sharedEntryCount={props.sharedEntryCount(sessionId)}
-      />
-      {node.children.map(child => renderNode(child, true, labelOf(node.family)))}
-    </Fragment>
-  )
-
+/** A group row kept only as the container of visible topics: name and state in words. */
+function ChatContainerRow(props: { readonly chat: PetLocusChatViewV20; readonly codes: HandleCodes }): JSX.Element {
+  const group = props.chat.group
+  const code = props.codes.endpoint.get(endpointHandleId(group.endpoint)) ?? ''
+  const display = entryDisplayName(group.endpoint, code)
+  const note = entryStateNote(group)
   return (
-    <section className="dshpet-work">
-      <div className="dshpet-work-head">
-        <span className="dshpet-work-mark" aria-hidden="true" />
-        {parentBlock === undefined && sessionOpener !== undefined ? (
-          <button
-            type="button"
-            className="dshpet-work-name"
-            title="打开父会话"
-            onClick={() => {
-              sessionOpener?.({ kind: 'session', sessionId })
-              closeSettings?.()
-            }}
-          >
-            {title} <span aria-hidden="true">↗</span>
-          </button>
-        ) : (
-          <span className="dshpet-work-name" data-static="true" title={parentBlock ?? title}>{title}</span>
-        )}
-        <span className="dshpet-work-tail">
-          <HandleChip value={sessionId} code={sessionCode} />
-          <span className="dshpet-meta">{sessionAvailabilityLabel(work.session?.availability)}</span>
-          {/*
-            The session-level repair, and the ONLY place the owner may decide to
-            abandon an archived main session.
-
-            It is not a per-entry action because it is not a per-entry decision:
-            every entry under this session went down for the same reason, and
-            they must all land on ONE replacement session — the per-entry
-            rebuild creates a main session per call, which would split what used
-            to be one shared session into as many sessions as there are entries.
-          */}
-          {work.availability !== 'archived' || movableEntries.length === 0 ? null : (
-            <button
-              type="button"
-              className="dshpet-action dshpet-action-sm"
-              disabled={props.busyKey !== undefined}
-              title="新建一个主会话，把本会话名下的入口一起迁移过去；原主会话保持归档不动"
-              onClick={() => props.onAction(
-                `session:${sessionId}:replace-parent`,
-                () => petApi.locusReplaceParent({
-                  action: 'replace-parent',
-                  parentSessionId: sessionId,
-                  entries: movableEntries,
-                }),
-              )}
-            >
-              用新的主会话接替
-            </button>
-          )}
-          {!collapsible ? null : (
-            <button
-              type="button"
-              className="dshpet-work-expand"
-              aria-expanded={showEntries}
-              // The count is what makes a collapsed row informative: it says
-              // how much is hidden without the owner having to open it.
-              title={showEntries ? '收起这个会话的入口' : '展开这个会话的入口'}
-              onClick={props.onToggleExpanded}
-            >
-              <span aria-hidden="true" className="dshpet-work-expand-mark">▸</span>
-              {work.families.length} 个入口
-            </button>
-          )}
-        </span>
+    <div className="dshpet-locus-row" data-container="true">
+      <span className="dshpet-locus-node" data-tone={locusStateTone(group.state)} aria-hidden="true" />
+      <div className="dshpet-locus-row-body">
+        <div className="dshpet-locus-row-line">
+          <span className="dshpet-locus-name" data-placeholder={display.isPlaceholder}>{display.name}</span>
+          <span className="dshpet-meta" data-state={group.state}>{locusStateLabel(group.state)}</span>
+          {note === undefined ? null : <span className="dshpet-meta">{note}</span>}
+        </div>
       </div>
-      <div className="dshpet-work-sub">
-        <span>父会话 · 工作区 {workspaceTitle}</span>
-        {path === undefined ? null : <code className="dshpet-code">{path}</code>}
-      </div>
-      {/*
-        An archived session with nothing to move must SAY so. Rendering nothing
-        is ambiguous in both directions: before a replacement it hides that
-        stopped entries are deliberately not moved, and after one it makes a
-        completed migration look like it never ran (the entries left this group,
-        and the default filter hides the retired generations they left behind).
-
-        It belongs HERE rather than in the header row: `dshpet-work-tail` is a
-        `flex:none` single-line strip sized for chips and one button, so a
-        sentence placed there stretched the title line and was clipped at the
-        panel's edge. `dshpet-work-note` is the block the session already uses
-        for exactly this kind of prose.
-      */}
-      {work.availability !== 'archived' || movableEntries.length > 0 ? null : (
-        <p className="dshpet-work-note">{replacementUnavailableNote(work)}</p>
-      )}
-      {props.hasDefaultQa ? null : (
-        <p className="dshpet-work-note">
-          默认 Q&amp;A 尚未创建 —— 请在目标会话里用 Pet 轮盘的「答疑群」创建；设置页只做展示与导航，不提供创建入口。
-        </p>
-      )}
-      {!showEntries ? null : (
-        <div className="dshpet-rail">{work.nodes.map(node => renderNode(node, false))}</div>
-      )}
-      {/* Filed work closes the session block: the entries above are what this
-          session serves, and these are the requests it could not serve. Shown
-          even while the entries are collapsed — an outstanding request is the
-          reason to look at this session at all. */}
-      {props.todos === undefined || props.onTodoDispatch === undefined ? null : (
-        <WorkTodos
-          items={props.todos}
-          parentSessionId={sessionId}
-          // This session's own generations — the session jump resolves the
-          // CURRENT child through them, never a generation recorded on the
-          // todo itself (design D6: identity, not instance).
-          loci={work.families.map(family => familyHead(family)).filter(isPresent)}
-          busyId={props.todoBusyId}
-          disabled={props.busyKey !== undefined}
-          onDispatch={props.onTodoDispatch}
-          {...(props.todoMeta === undefined ? {} : { meta: props.todoMeta })}
-          {...(props.initialTodosOpen === true ? { initialOpen: true } : {})}
-        />
-      )}
-    </section>
+    </div>
   )
 }
 
-/** Stable empty reference so a session with no todos does not re-render. */
-const EMPTY_TODOS: readonly PetTodoView[] = Object.freeze([])
+/** One chat: the group row (or its container) with its topic rows nested under it. */
+function ChatBlock(props: {
+  readonly section: ChatSection
+  readonly work: PetLocusWorkViewV20
+  readonly reading: LocusReading
+  readonly writeEnabled: boolean
+  readonly codes: HandleCodes
+  readonly busyKey: string | undefined
+  readonly onAction: LocusActionRunner
+  readonly openKeys: readonly string[]
+  readonly onToggle: (key: string) => void
+}): JSX.Element {
+  const { section } = props
+  const row = (entry: PetLocusEntryViewV20, nested: boolean): JSX.Element => {
+    const key = endpointKey(entry.endpoint)
+    return (
+      <LocusRow
+        key={key}
+        entry={entry}
+        chat={section.chat}
+        work={props.work}
+        reading={props.reading}
+        writeEnabled={props.writeEnabled}
+        codes={props.codes}
+        busyKey={props.busyKey}
+        onAction={props.onAction}
+        open={props.openKeys.includes(key)}
+        onToggle={() => props.onToggle(key)}
+        nested={nested}
+      />
+    )
+  }
+  return (
+    <div className="dshpet-locus-chat">
+      {section.groupVisible ? row(section.chat.group, false) : <ChatContainerRow chat={section.chat} codes={props.codes} />}
+      {section.topics.map(topic => row(topic, true))}
+    </div>
+  )
+}
 
 /** What the panel knows about one ledger besides its rows (D10). */
 interface PetTodoLedgerMeta {
@@ -2102,62 +1579,156 @@ interface PetTodoLedgerMeta {
   readonly unroutable: readonly PetUnroutableView[]
 }
 
-/** Narrowing helper for `.filter()`, since TS does not infer it from a predicate. */
-function isPresent<T>(value: T | undefined): value is T {
-  return value !== undefined
-}
+/** Stable empty reference so a session with no todos does not re-render. */
+const EMPTY_TODOS: readonly PetTodoView[] = Object.freeze([])
 
-/** The filter panel. Every group states the condition it is applying. */
-function LocusFilterPanel(props: {
-  readonly filter: LocusFilter
-  readonly parentCounts: ReadonlyMap<ParentAvailability, number>
-  readonly entryCounts: ReadonlyMap<string, number>
-  readonly onChange: (next: LocusFilter) => void
+/**
+ * One work session W and the chats that serve it.
+ *
+ * Exported for the rendering tests: an archived W's notes and the rebind
+ * control can be asserted by rendering the block itself.
+ */
+export function WorkSection(props: {
+  readonly section: WorkSectionView
+  readonly writeEnabled: boolean
+  readonly codes: HandleCodes
+  readonly busyKey: string | undefined
+  readonly onAction: LocusActionRunner
+  readonly openKeys: readonly string[]
+  readonly onToggle: (key: string) => void
+  /** Todos per locus main session (the ledger key). */
+  readonly todosByMain?: ReadonlyMap<string, readonly PetTodoView[]>
+  readonly todoMeta?: ReadonlyMap<string, PetTodoLedgerMeta>
+  readonly todoBusyId?: string | undefined
+  readonly onTodoDispatch?: (itemId: string, action: PetTodoAction) => void
+  readonly initialTodosOpen?: boolean
+  /** Undefined keeps the entries always shown. */
+  readonly expanded?: boolean
+  readonly onToggleExpanded?: () => void
 }): JSX.Element {
-  const parentOptions: readonly ParentAvailability[] = ['available', 'archived', 'unverified']
-  const toggleParent = (value: ParentAvailability): void => {
-    const next = props.filter.parentAvailability.includes(value)
-      ? props.filter.parentAvailability.filter(item => item !== value)
-      : [...props.filter.parentAvailability, value]
-    props.onChange({ ...props.filter, parentAvailability: next })
-  }
-  const toggleState = (states: readonly PetLocusState[]): void => {
-    const on = states.every(state => props.filter.entryStates.includes(state))
-    const next = on
-      ? props.filter.entryStates.filter(state => !states.includes(state))
-      : [...new Set([...props.filter.entryStates, ...states])]
-    props.onChange({ ...props.filter, entryStates: next })
-  }
+  const { section } = props
+  const work = section.work
+  const collapsible = props.onToggleExpanded !== undefined
+  const showEntries = !collapsible || props.expanded === true
+  const workBlock = sessionJumpBlock(work.availability)
+  const title = work.title ?? '未命名会话'
+  const mains = [...new Map(section.chats.map(item => [item.chat.locusMain.sessionId, item.chat.locusMain])).values()]
+  const workspaces = [...new Map(section.chats.map(item => [item.chat.workspace.workspaceId, item.chat.workspace])).values()]
+  const entryCount = section.chats.reduce((total, item) => total + item.topics.length + (item.groupVisible ? 1 : 0), 0)
 
   return (
-    <div className="dshpet-locus-filter" role="dialog" aria-label="筛选">
-      <span className="dshpet-locus-filter-cap">父会话状态</span>
-      {parentOptions.map(option => {
-        const count = props.parentCounts.get(option) ?? 0
-        return (
-          <label className="dshpet-locus-filter-row" key={option} data-empty={count === 0}>
-            <input
-              className="dshpet-input"
-              type="checkbox"
-              checked={props.filter.parentAvailability.includes(option)}
-              onChange={() => toggleParent(option)}
+    <section className="dshpet-work">
+      <div className="dshpet-work-head">
+        <span className="dshpet-work-mark" aria-hidden="true" />
+        {workBlock === undefined && sessionOpener !== undefined ? (
+          <button
+            type="button"
+            className="dshpet-work-name"
+            title="打开工作会话"
+            onClick={() => {
+              sessionOpener?.({ kind: 'session', sessionId: work.sessionId })
+              closeSettings?.()
+            }}
+          >
+            {title} <span aria-hidden="true">↗</span>
+          </button>
+        ) : (
+          <span className="dshpet-work-name" data-static="true" title={workBlock ?? title}>{title}</span>
+        )}
+        <span className="dshpet-work-tail">
+          <HandleChip value={work.sessionId} code={sessionCode(props.codes, work.sessionId)} />
+          <span className="dshpet-meta" data-availability={work.availability}>{sessionAvailabilityLabel(work.availability)}</span>
+          {!collapsible ? null : (
+            <button
+              type="button"
+              className="dshpet-work-expand"
+              aria-expanded={showEntries}
+              title={showEntries ? '收起这个会话的入口' : '展开这个会话的入口'}
+              onClick={props.onToggleExpanded}
+            >
+              <span aria-hidden="true" className="dshpet-work-expand-mark">▸</span>
+              {entryCount} 个入口
+            </button>
+          )}
+        </span>
+      </div>
+      <div className="dshpet-work-sub">
+        <span>工作会话</span>
+        {mains.map(main => (
+          <span key={main.sessionId} className="dshpet-meta">
+            · locus 主会话 {main.title ?? '未命名'}{' '}
+            <HandleChip value={main.sessionId} code={sessionCode(props.codes, main.sessionId)} />
+          </span>
+        ))}
+        {workspaces.map(workspace => (
+          <span key={workspace.workspaceId} className="dshpet-meta">
+            · 工作区 {workspace.title ?? workspace.workspaceId}
+            {workspace.path === undefined ? null : <code className="dshpet-code">{workspace.path}</code>}
+          </span>
+        ))}
+      </div>
+      {section.hasDefaultQa ? null : <p className="dshpet-work-note">{LOCUS_DEFAULT_QA_MISSING_NOTE}</p>}
+      {!showEntries ? null : (
+        <div className="dshpet-rail">
+          {section.chats.map(item => (
+            <ChatBlock
+              key={item.key}
+              section={item}
+              work={work}
+              reading="work"
+              writeEnabled={props.writeEnabled}
+              codes={props.codes}
+              busyKey={props.busyKey}
+              onAction={props.onAction}
+              openKeys={props.openKeys}
+              onToggle={props.onToggle}
             />
-            {PARENT_AVAILABILITY_LABELS[option]}
-            <span className="dshpet-locus-filter-count">{count}</span>
-          </label>
-        )
-      })}
-      <div className="dshpet-locus-filter-hr" aria-hidden="true" />
+          ))}
+        </div>
+      )}
+      {props.todosByMain === undefined || props.onTodoDispatch === undefined ? null : mains.map(main => props.onTodoDispatch === undefined ? null : (
+        <WorkTodos
+          key={main.sessionId}
+          items={props.todosByMain?.get(main.sessionId) ?? EMPTY_TODOS}
+          parentSessionId={main.sessionId}
+          loci={section.chats
+            .filter(item => item.chat.locusMain.sessionId === main.sessionId)
+            .flatMap(item => [item.chat.group, ...item.chat.topics])}
+          busyId={props.todoBusyId}
+          disabled={props.busyKey !== undefined}
+          onDispatch={props.onTodoDispatch}
+          {...(props.todoMeta?.get(main.sessionId) === undefined ? {} : { meta: props.todoMeta.get(main.sessionId)! })}
+          {...(props.initialTodosOpen === true ? { initialOpen: true } : {})}
+        />
+      ))}
+    </section>
+  )
+}
+
+/** The filter panel. Every bucket states its count over the whole snapshot. */
+function LocusFilterPanel(props: {
+  readonly filter: LocusFilter
+  readonly counts: ReadonlyMap<EntryBucketId, number>
+  readonly onChange: (next: LocusFilter) => void
+}): JSX.Element {
+  const toggle = (id: EntryBucketId): void => {
+    const next = props.filter.buckets.includes(id)
+      ? props.filter.buckets.filter(item => item !== id)
+      : [...props.filter.buckets, id]
+    props.onChange({ buckets: next })
+  }
+  return (
+    <div className="dshpet-locus-filter" role="dialog" aria-label="筛选">
       <span className="dshpet-locus-filter-cap">入口状态</span>
-      {ENTRY_STATE_OPTIONS.map(option => {
-        const count = props.entryCounts.get(option.id) ?? 0
+      {ENTRY_BUCKET_OPTIONS.map(option => {
+        const count = props.counts.get(option.id) ?? 0
         return (
           <label className="dshpet-locus-filter-row" key={option.id} data-empty={count === 0}>
             <input
               className="dshpet-input"
               type="checkbox"
-              checked={option.states.every(state => props.filter.entryStates.includes(state))}
-              onChange={() => toggleState(option.states)}
+              checked={props.filter.buckets.includes(option.id)}
+              onChange={() => toggle(option.id)}
             />
             {option.label}
             <span className="dshpet-locus-filter-count">{count}</span>
@@ -2166,11 +1737,7 @@ function LocusFilterPanel(props: {
       })}
       <div className="dshpet-locus-filter-hr" aria-hidden="true" />
       <div className="dshpet-locus-filter-foot">
-        <button
-          type="button"
-          className="dshpet-action dshpet-action-sm"
-          onClick={() => props.onChange(DEFAULT_LOCUS_FILTER)}
-        >
+        <button type="button" className="dshpet-action dshpet-action-sm" onClick={() => props.onChange(DEFAULT_LOCUS_FILTER)}>
           重置默认
         </button>
         <span className="dshpet-meta">只影响显示</span>
@@ -2179,192 +1746,66 @@ function LocusFilterPanel(props: {
   )
 }
 
-/** One discovery result, rendered with the same information rules as a row. */
-function DiscoveryCard(props: {
-  readonly locus: PetLocusView
-  readonly codes: HandleCodes
-  readonly note?: string
-}): JSX.Element {
-  const { locus } = props
-  const family: LocusFamily = {
-    key: endpointKey(locus.endpoint),
-    endpoint: locus.endpoint,
-    current: locus,
-    generations: [locus],
-    history: [],
-  }
-  const rawCode = props.codes.endpoint.get(endpointHandleId(locus.endpoint)) ?? ''
-  const code = endpointHandleLabel(locus.endpoint, rawCode)
-  const display = entryDisplayName(locus.endpoint, rawCode)
-  const childSessionId = locus.child.sessionId
-  const childCode = childSessionId === undefined
-    ? undefined
-    : handleLabel('session', props.codes.session.get(childSessionId) ?? '')
-  const parentCode = handleLabel('session', props.codes.session.get(locus.main.sessionId) ?? '')
-  const isDoc = isDocEndpointView(locus.endpoint)
-  const chatLink = isDoc ? locus.endpoint.docUrl : chatAppLink(locus.endpoint.chatId)
-  const threadLink = isDoc || locus.endpoint.threadId === undefined
-    ? undefined
-    : `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(locus.endpoint.threadId)}`
-  return (
-    <div className="dshpet-locus-discovery-card">
-      <div className="dshpet-locus-row-line">
-        <span className="dshpet-locus-name" data-placeholder={display.isPlaceholder}>{display.name}</span>
-        <span className="dshpet-meta">{display.role.label}级入口</span>
-        {locus.isDefaultQa ? <span className="dshpet-chip" data-tone="qa">默认 Q&amp;A</span> : null}
-        {props.note === undefined ? null : <span className="dshpet-meta">{props.note}</span>}
-      </div>
-      <div className="dshpet-locus-row-line">
-        <span className="dshpet-meta">
-          第 {locus.generation} 代 · {locusStateLabel(locus.state.state)} ·{' '}
-          {LOCUS_PERMISSION_LABELS[locus.permission.effective]} · {locusSourceLabel(locus.source)}
-        </span>
-      </div>
-      <div className="dshpet-locus-row-line">
-        <span className="dshpet-meta">父会话 {locus.main.title ?? '未命名会话'}</span>
-        <HandleChip value={locus.main.sessionId} code={parentCode} />
-        <span className="dshpet-meta">{sessionAvailabilityLabel(locus.main.availability)}</span>
-        <span className="dshpet-meta dshpet-locus-session-title" title={locus.child.title ?? undefined}>
-          会话 {childSessionId === undefined ? '—' : locus.child.title ?? '未命名'}
-        </span>
-        {childSessionId === undefined || childCode === undefined ? null : (
-          <HandleChip value={childSessionId} code={childCode} />
-        )}
-      </div>
-      <div className="dshpet-locus-row-line">
-        <Jump
-          label={locus.endpoint.threadId === undefined ? '飞书' : '话题'}
-          title="在飞书中打开这个入口"
-          disabled={(threadLink ?? chatLink) === undefined}
-          {...((threadLink ?? chatLink) === undefined ? {} : { href: (threadLink ?? chatLink) as string })}
-        />
-        <Jump
-          label="会话"
-          title={sessionJumpBlock(locus.child.availability) ?? '打开这个入口的会话'}
-          disabled={sessionOpener === undefined || childSessionId === undefined
-            || sessionJumpBlock(locus.child.availability) !== undefined}
-          onClick={() => {
-            if (childSessionId === undefined) return
-            sessionOpener?.({ kind: 'subagent', parentSessionId: locus.main.sessionId, childSessionId })
-            closeSettings?.()
-          }}
-        />
-        <Jump
-          label="父会话"
-          title={sessionJumpBlock(locus.main.availability) ?? '打开父会话'}
-          disabled={sessionOpener === undefined || sessionJumpBlock(locus.main.availability) !== undefined}
-          onClick={() => {
-            sessionOpener?.({ kind: 'session', sessionId: locus.main.sessionId })
-            closeSettings?.()
-          }}
-        />
-      </div>
-      <span className="dshpet-meta">{family.key}</span>
-    </div>
-  )
-}
-function requireLocusSnapshot(value: unknown): PetLocusManagementView {
-  if (typeof value !== 'object' || value === null) {
-    throw new Error('Host 返回的 locus 快照格式无效，已拒绝显示。')
-  }
+/**
+ * Validate the Host snapshot before showing it.
+ *
+ * Accepts every state string: a value outside the four v20 states renders as
+ * 「未知状态」 instead of failing the panel (and `not-created` is one of the four,
+ * so a snapshot with it always loads).
+ * Exported for its test.
+ */
+export function requireLocusSnapshot(value: unknown): PetLocusManagementViewV20 {
   const isRecord = (item: unknown): item is Record<string, unknown> =>
     typeof item === 'object' && item !== null && !Array.isArray(item)
   const isNonEmptyString = (item: unknown): item is string => typeof item === 'string' && item.trim() !== ''
-  const isFiniteNonNegative = (item: unknown): item is number =>
-    typeof item === 'number' && Number.isSafeInteger(item) && item >= 0
-  const isEndpoint = (item: unknown): boolean =>
-    isRecord(item) && isNonEmptyString(item.chatId) &&
-    (item.threadId === undefined || isNonEmptyString(item.threadId)) &&
-    (item.chatType === undefined || item.chatType === 'p2p' || item.chatType === 'group') &&
-    (item.chatName === undefined || typeof item.chatName === 'string')
-  const isLocus = (item: unknown): item is PetLocusView => {
-    if (!isRecord(item) || !isNonEmptyString(item.locusId) || typeof item.generation !== 'number' || !Number.isSafeInteger(item.generation) || item.generation < 1 || !isEndpoint(item.endpoint)) return false
-    if (!isRecord(item.main) || !isNonEmptyString(item.main.sessionId) ||
-        (item.main.title !== undefined && typeof item.main.title !== 'string') ||
-        (item.main.source !== undefined && !['auto', 'inherited', 'explicit', 'qa-created'].includes(String(item.main.source))) ||
-        (item.main.availability !== undefined && !['available', 'archived', 'missing'].includes(String(item.main.availability)))) return false
-    if (!isRecord(item.child) || (item.child.sessionId !== undefined && !isNonEmptyString(item.child.sessionId)) ||
-        (item.child.title !== undefined && typeof item.child.title !== 'string') ||
-        (item.child.availability !== undefined && !['available', 'archived', 'missing'].includes(String(item.child.availability)))) return false
-    if (!isRecord(item.workspace) || !isNonEmptyString(item.workspace.workspaceId) ||
-        (item.workspace.title !== undefined && typeof item.workspace.title !== 'string') ||
-        (item.workspace.path !== undefined && typeof item.workspace.path !== 'string') ||
-        (item.workspace.executionRoot !== undefined && typeof item.workspace.executionRoot !== 'string')) return false
-    if (item.contextAnchor !== undefined && (!isRecord(item.contextAnchor) ||
-        !['confirmed', 'missing', 'unknown'].includes(String(item.contextAnchor.status)) ||
-        (item.contextAnchor.executionRoot !== undefined && typeof item.contextAnchor.executionRoot !== 'string') ||
-        (item.contextAnchor.constraints !== undefined && (!Array.isArray(item.contextAnchor.constraints) || !item.contextAnchor.constraints.every(value => typeof value === 'string'))) ||
-        (item.contextAnchor.provenance !== undefined && typeof item.contextAnchor.provenance !== 'string') ||
-        (item.contextAnchor.confirmedAt !== undefined && !isFiniteNonNegative(item.contextAnchor.confirmedAt)))) return false
-    if (!isRecord(item.toolTier) || !['safe', 'shell'].includes(String(item.toolTier.desired)) || !['safe', 'shell'].includes(String(item.toolTier.effective)) ||
-        (item.toolTier.verifiedAt !== undefined && !isFiniteNonNegative(item.toolTier.verifiedAt)) ||
-        (item.toolTier.grantedBy !== undefined && !isNonEmptyString(item.toolTier.grantedBy)) ||
-        (item.childComposition !== undefined && item.childComposition !== 'tier3')) return false
-    if (!isRecord(item.permission) || !['read', 'write'].includes(String(item.permission.desired)) || !['read', 'write'].includes(String(item.permission.effective)) ||
-        (item.permission.verifiedAt !== undefined && !isFiniteNonNegative(item.permission.verifiedAt)) ||
-        (item.permission.grantedBy !== undefined && !isNonEmptyString(item.permission.grantedBy)) ||
-        (item.permission.effective === 'write' && (item.permission.desired !== 'write' || item.permission.verifiedAt === undefined))) return false
-    if (!isRecord(item.state) || !['provisioning', 'active', 'switching', 'invalid', 'stopped', 'retired'].includes(String(item.state.state)) || typeof item.state.busy !== 'boolean') return false
-    if (!isFiniteNonNegative(item.state.createdAt) || !isFiniteNonNegative(item.state.updatedAt) || item.state.updatedAt < item.state.createdAt ||
-        (item.state.stoppedAt !== undefined && (!isFiniteNonNegative(item.state.stoppedAt) || item.state.stoppedAt > item.state.updatedAt)) ||
-        (item.state.retiredAt !== undefined && (!isFiniteNonNegative(item.state.retiredAt) || item.state.retiredAt > item.state.updatedAt)) ||
-        (['invalid', 'stopped', 'retired'].includes(String(item.state.state)) && item.state.busy)) return false
-    return ['auto', 'inherited', 'explicit', 'qa-created'].includes(String(item.source)) &&
-      (item.parentLocusId === undefined || isNonEmptyString(item.parentLocusId)) &&
-      typeof item.isDefaultQa === 'boolean' && (item.defaultQa === undefined || item.defaultQa === item.isDefaultQa)
+  const isCount = (item: unknown): boolean => typeof item === 'number' && Number.isSafeInteger(item) && item >= 0
+  const optionalString = (item: unknown): boolean => item === undefined || typeof item === 'string'
+  const isAvailability = (item: unknown, allowUnknown: boolean): boolean =>
+    ['available', 'archived', 'missing', ...(allowUnknown ? ['unknown'] : [])].includes(String(item))
+  const isEndpoint = (item: unknown): item is Record<string, unknown> =>
+    isRecord(item) && isNonEmptyString(item['chatId']) &&
+    (item['threadId'] === undefined || isNonEmptyString(item['threadId'])) &&
+    optionalString(item['chatName']) && optionalString(item['quote']) && optionalString(item['docUrl'])
+  const isEntry = (item: unknown): boolean => {
+    if (!isRecord(item) || !isNonEmptyString(item['locusId']) || !isCount(item['revision']) || !isEndpoint(item['endpoint'])) return false
+    if (!isNonEmptyString(item['sessionId']) || !isNonEmptyString(item['state'])) return false
+    if (!['read-only', 'danger-full-access'].includes(String(item['accessMode']))) return false
+    if (typeof item['inFlight'] !== 'boolean' || typeof item['hasCurrentDelivery'] !== 'boolean') return false
+    if (!isCount(item['createdAt']) || !isCount(item['updatedAt'])) return false
+    const session = item['session']
+    return session === undefined || (isRecord(session) && optionalString(session['title']) &&
+      (session['availability'] === undefined || isAvailability(session['availability'], true)))
   }
-  const candidate = value as Partial<PetLocusManagementView>
-  const discovery = candidate.discovery
-  if (!Array.isArray(candidate.loci) || !candidate.loci.every(isLocus) ||
-      !Array.isArray(candidate.defaultQa) || !candidate.defaultQa.every(item =>
-        isRecord(item) && isNonEmptyString(item.parentSessionId) &&
-        (item.locus === undefined || (isLocus(item.locus) && item.locus.main.sessionId === item.parentSessionId))) ||
-      !isFiniteNonNegative(candidate.generation) || !isRecord(discovery) ||
-      !Array.isArray(discovery.byEndpoint) || !discovery.byEndpoint.every(item =>
-        isRecord(item) && isEndpoint(item.endpoint) && Array.isArray(item.history) && item.history.every(isLocus) &&
-        (item.current === undefined || (isLocus(item.current) && item.history.some(history => history.locusId === (item.current as { locusId: string }).locusId)))) ||
-      !Array.isArray(discovery.byParent) || !discovery.byParent.every(item =>
-        isRecord(item) && isNonEmptyString(item.parentSessionId) && Array.isArray(item.loci) && item.loci.every(isLocus) &&
-        (item.defaultQa === undefined || isLocus(item.defaultQa))) ||
-      !Array.isArray(discovery.byChild) || !discovery.byChild.every(item =>
-        isRecord(item) && isNonEmptyString(item.childSessionId) && Array.isArray(item.history) && item.history.every(isLocus) &&
-        item.history.every(history => history.child.sessionId === item.childSessionId) &&
-        (item.locus === undefined || (isLocus(item.locus) && item.locus.child.sessionId === item.childSessionId)))) {
+  const isChat = (item: unknown): boolean => {
+    if (!isRecord(item) || !isEntry(item['group']) || !Array.isArray(item['topics']) || !item['topics'].every(isEntry)) return false
+    const group = item['group'] as { endpoint: { chatId: string; threadId?: string } }
+    if (group.endpoint.threadId !== undefined) return false
+    const topics = item['topics'] as { endpoint: { chatId: string; threadId?: string } }[]
+    if (!topics.every(topic => topic.endpoint.threadId !== undefined && topic.endpoint.chatId === group.endpoint.chatId)) return false
+    const main = item['locusMain']
+    const workspace = item['workspace']
+    const rebound = item['reboundFrom']
+    return isRecord(main) && isNonEmptyString(main['sessionId']) &&
+      (main['availability'] === undefined || isAvailability(main['availability'], false)) &&
+      isRecord(workspace) && isNonEmptyString(workspace['workspaceId']) &&
+      (rebound === undefined || (isRecord(rebound) && isNonEmptyString(rebound['sessionId']))) &&
+      (item['defaultQa'] === undefined || typeof item['defaultQa'] === 'boolean')
+  }
+  const candidate = value as Record<string, unknown>
+  if (!isRecord(value) || !isCount(candidate['generation']) || typeof candidate['writeEnabled'] !== 'boolean' ||
+      !Array.isArray(candidate['works']) || !candidate['works'].every(item =>
+        isRecord(item) && isRecord(item['work']) && isNonEmptyString(item['work']['sessionId']) &&
+        isAvailability(item['work']['availability'], true) &&
+        Array.isArray(item['chats']) && item['chats'].every(isChat))) {
     throw new Error('Host 返回的 locus 快照不完整或字段无效，已拒绝显示。')
   }
-  return value as PetLocusManagementView
+  return value as unknown as PetLocusManagementViewV20
 }
 
-/**
- * Whether the reverse-lookup fold is offered.
- *
- * Off by owner decision (2026-09-15): it answers exactly one question the rest
- * of the surface cannot — "what does this ID belong to" for an ID that is not in
- * the snapshot at all — and that question has no owner right now. The search box
- * already matches raw ids, display codes and titles across the visible entries,
- * so reverse lookup of anything on screen still works without it.
- *
- * Disabled, not deleted, on the same rule as `enabled: false` in `dsh.yaml`:
- * the source stays compiled and type-checked so it cannot rot silently. Flip
- * this to true to bring it back; the Host route behind it is untouched.
- */
-const DISCOVERY_FOLD_ENABLED: boolean = false
-
-/**
- * Parent sessions per page.
- *
- * Eight keeps a page roughly one screen tall when every session is collapsed,
- * which is the state the list now opens in — enough to scan without paging,
- * few enough that expanding two or three still fits.
- */
+/** Work sessions per page. */
 const WORKS_PER_PAGE = 8
 
-/**
- * Page control, rendered both above and below the list.
- *
- * Renders nothing for a single page: a pager that can only say "1 / 1" is
- * chrome that never helps.
- */
+/** Page control, rendered both above and below the list; nothing for one page. */
 function LocusPager(props: {
   readonly page: number
   readonly pageCount: number
@@ -2376,19 +1817,12 @@ function LocusPager(props: {
   const first = props.page * WORKS_PER_PAGE + 1
   const last = Math.min((props.page + 1) * WORKS_PER_PAGE, props.total)
   return (
-    <nav className="dshpet-pager" data-position={props.position} aria-label="父会话分页">
-      <button
-        type="button"
-        className="dshpet-jump"
-        disabled={props.page === 0}
-        onClick={() => props.onGo(props.page - 1)}
-      >
+    <nav className="dshpet-pager" data-position={props.position} aria-label="工作会话分页">
+      <button type="button" className="dshpet-jump" disabled={props.page === 0} onClick={() => props.onGo(props.page - 1)}>
         上一页
       </button>
-      {/* States the slice, not just the page number: "第 2 页" alone does not
-          tell the owner how much of the list they have seen. */}
       <span className="dshpet-pager-state">
-        {first}–{last} / {props.total} 个父会话
+        {first}–{last} / {props.total} 个工作会话
       </span>
       <button
         type="button"
@@ -2399,170 +1833,6 @@ function LocusPager(props: {
         下一页
       </button>
     </nav>
-  )
-}
-
-/**
- * The folded manual lookup.
- *
- * Kept because the Host contract it exercises — one explicit index selector,
- * never a sibling enumeration — has to stay reachable. It is demoted to a
- * disclosure and takes a pasted identifier rather than asking the owner to
- * compose one from memory.
- */
-function DiscoveryFold(props: {
-  readonly codes: HandleCodes
-  readonly disabled: boolean
-  readonly run: (request: PetLocusDiscoveryRequest) => Promise<PetLocusDiscoveryView | undefined>
-}): JSX.Element {
-  const [selector, setSelector] = useState<'endpoint' | 'parent' | 'child'>('endpoint')
-  const [chatId, setChatId] = useState('')
-  const [threadId, setThreadId] = useState('')
-  const [parentId, setParentId] = useState('')
-  const [childId, setChildId] = useState('')
-  const [result, setResult] = useState<PetLocusDiscoveryView | undefined>(undefined)
-  const [hint, setHint] = useState<string | undefined>(undefined)
-
-  const submit = (): void => {
-    setHint(undefined)
-    const request: PetLocusDiscoveryRequest | undefined =
-      selector === 'endpoint'
-        ? chatId.trim() === '' ? undefined : {
-          endpoint: { chatId: chatId.trim(), ...(threadId.trim() === '' ? {} : { threadId: threadId.trim() }) },
-        }
-        : selector === 'parent'
-          ? parentId.trim() === '' ? undefined : { parentSessionId: parentId.trim() }
-          : childId.trim() === '' ? undefined : { childSessionId: childId.trim() }
-    if (request === undefined) {
-      setHint('先粘贴一个完整 ID；空查询不会发送。')
-      return
-    }
-    void props.run(request).then(value => {
-      if (value !== undefined) setResult(value)
-    })
-  }
-
-  return (
-    <details className="dshpet-locus-discovery">
-      <summary className="dshpet-locus-discovery-head">
-        <span className="dshpet-locus-discovery-mark" aria-hidden="true">›</span>
-        <span>反查关联</span>
-        <span className="dshpet-meta">入口 / 父会话 / 会话</span>
-      </summary>
-      <div className="dshpet-locus-discovery-body">
-        {/* This is the owner's only way in when all they hold is an ID: the
-            list above is organised by entry and by work, so an ID copied from
-            elsewhere has nowhere to be pasted. The wording defines 入口 — the
-            owner-facing word for what the code calls an endpoint — instead of
-            assuming it, and states that matching is exact. */}
-        <p className="dshpet-item-hint">
-          入口 = 飞书里的一个群，或群里的一个话题。只知道 ID 时用它反查归属：粘贴完整 ID，
-          精确匹配（短码和模糊搜索都不行）。
-        </p>
-        <div className="dshpet-locus-discovery-controls">
-          <div className="dshpet-subtabs" role="tablist" aria-label="反查依据">
-            {(['endpoint', 'parent', 'child'] as const).map(value => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={selector === value}
-                className="dshpet-subtab"
-                onClick={() => setSelector(value)}
-              >
-                {value === 'endpoint' ? '入口' : value === 'parent' ? '父会话' : '会话'}
-              </button>
-            ))}
-          </div>
-          {selector === 'endpoint' ? (
-            <>
-              <input
-                className="dshpet-input"
-                value={chatId}
-                placeholder="群 ID（oc_…）"
-                onChange={event => setChatId(event.target.value)}
-              />
-              <input
-                className="dshpet-input"
-                value={threadId}
-                placeholder="话题 ID（omt_…，可选）"
-                onChange={event => setThreadId(event.target.value)}
-              />
-            </>
-          ) : selector === 'parent' ? (
-            <input
-              className="dshpet-input"
-              value={parentId}
-              placeholder="父会话 ID（session-…）"
-              onChange={event => setParentId(event.target.value)}
-            />
-          ) : (
-            <input
-              className="dshpet-input"
-              value={childId}
-              placeholder="会话 ID（session-…）"
-              onChange={event => setChildId(event.target.value)}
-            />
-          )}
-          <button
-            type="button"
-            className="dshpet-action dshpet-action-sm dshpet-action-primary"
-            disabled={props.disabled}
-            onClick={submit}
-          >
-            查询
-          </button>
-        </div>
-        {hint === undefined ? null : <p className="dshpet-item-hint">{hint}</p>}
-        {result === undefined ? null : (
-          <div className="dshpet-locus-discovery-results">
-            {result.byEndpoint.map(item => (
-              <div className="dshpet-locus-discovery-group" key={`endpoint:${endpointKey(item.endpoint)}`}>
-                {item.current === undefined
-                  ? <p className="dshpet-item-hint">该 endpoint 没有当前代；历史仍列在下方。</p>
-                  : <DiscoveryCard locus={item.current} codes={props.codes} note={`历史 ${item.history.length} 代`} />}
-              </div>
-            ))}
-            {result.byParent.map(item => (
-              <div className="dshpet-locus-discovery-group" key={`parent:${item.parentSessionId}`}>
-                <div className="dshpet-locus-row-line">
-                  <span className="dshpet-meta">父会话</span>
-                  <HandleChip
-                    value={item.parentSessionId}
-                    code={props.codes.session.get(item.parentSessionId) ?? item.parentSessionId}
-                  />
-                  <span className="dshpet-meta">
-                    关联 {item.loci.length} 个入口 · 默认 Q&amp;A{' '}
-                    {item.defaultQa === undefined ? '未设置' : '已设置'}
-                  </span>
-                </div>
-                {item.loci.map(locus => (
-                  <DiscoveryCard key={locus.locusId} locus={locus} codes={props.codes} />
-                ))}
-              </div>
-            ))}
-            {result.byChild.map(item => (
-              <div className="dshpet-locus-discovery-group" key={`child:${item.childSessionId}`}>
-                <div className="dshpet-locus-row-line">
-                  <span className="dshpet-meta">会话</span>
-                  <HandleChip
-                    value={item.childSessionId}
-                    code={props.codes.session.get(item.childSessionId) ?? item.childSessionId}
-                  />
-                  <span className="dshpet-meta">
-                    {item.locus === undefined ? '没有活跃关联' : '唯一关联见下方'}
-                  </span>
-                </div>
-                {item.locus === undefined ? null : <DiscoveryCard locus={item.locus} codes={props.codes} />}
-              </div>
-            ))}
-            {result.byEndpoint.length === 0 && result.byParent.length === 0 && result.byChild.length === 0 ? (
-              <p className="dshpet-empty">没有匹配的关联。这个 ID 不在当前 Host 的关联里，或粘贴得不完整。</p>
-            ) : null}
-          </div>
-        )}
-      </div>
-    </details>
   )
 }
 
@@ -2643,36 +1913,35 @@ export function planAcceptFollowThrough(input: {
  * against a fixture snapshot, with no Host, no fetch and no effects.
  */
 export function LocusSurface(props: {
-  readonly snapshot: PetLocusManagementView
+  readonly snapshot: PetLocusManagementViewV20
   readonly busyKey?: string
   readonly error?: string
   readonly warning?: string
-  /** What a completed action did, when the surface itself cannot show it. */
+  /** What a completed action did (the Host receipt). */
   readonly notice?: string
-  readonly onAction: (key: string, operation: () => Promise<unknown>) => void
-  readonly runQuery: (request: PetLocusDiscoveryRequest) => Promise<PetLocusDiscoveryView | undefined>
+  readonly onAction: LocusActionRunner
   /** Test seam: pre-seeded ledger groups render without a Host round-trip. */
   readonly initialTodoGroups?: readonly PetTodoLedgerGroup[]
   /** Test seam: start each session's todo block expanded. */
   readonly initialTodosOpen?: boolean
   /** Test seam: start every session's entries expanded. */
   readonly initialWorksExpanded?: boolean
+  /** Test seam: start with this filter. */
+  readonly initialFilter?: LocusFilter
+  /** Test seam: start with these entry disclosures open (endpoint keys). */
+  readonly initialOpenKeys?: readonly string[]
 }): JSX.Element {
   const [reading, setReading] = useState<LocusReading>('work')
-  const [filter, setFilter] = useState<LocusFilter>(DEFAULT_LOCUS_FILTER)
+  const [filter, setFilter] = useState<LocusFilter>(props.initialFilter ?? DEFAULT_LOCUS_FILTER)
   const [filterOpen, setFilterOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [openKeys, setOpenKeys] = useState<readonly string[]>([])
-  const [historyKeys, setHistoryKeys] = useState<readonly string[]>([])
-
-  const toggle = useCallback((setter: typeof setOpenKeys) => (key: string) => {
-    setter(current => (current.includes(key) ? current.filter(item => item !== key) : [...current, key]))
+  const [openKeys, setOpenKeys] = useState<readonly string[]>(props.initialOpenKeys ?? [])
+  const toggleOpen = useCallback((key: string) => {
+    setOpenKeys(current => (current.includes(key) ? current.filter(item => item !== key) : [...current, key]))
   }, [])
   const filterRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!filterOpen) return undefined
-    // Closing is by clicking anywhere else — the panel owns no dismiss button
-    // and no key binding, so there is exactly one way to put it away.
     const onPointer = (event: MouseEvent): void => {
       const target = event.target
       if (!(target instanceof Node)) return
@@ -2685,93 +1954,43 @@ export function LocusSurface(props: {
     }
   }, [filterOpen])
 
-  // One ledger read for the whole panel, redistributed per parent session.
   const todos = useTodoLedger(props.initialTodoGroups)
 
-  // Parent sessions are the unit of navigation, so the page is paged by them
-  // rather than by entries: a session with twelve topics and one with a single
-  // chat must still count as one row each, or a page size would mean nothing.
   const [page, setPage] = useState(0)
-  // Collapsed by default: a session's entries are detail, and showing every
-  // one of them for every session is what made this list unreadable.
   const [expandedWorks, setExpandedWorks] = useState<readonly string[]>([])
-  const toggleWork = useCallback((parentSessionId: string) => {
-    setExpandedWorks(current => (current.includes(parentSessionId)
-      ? current.filter(id => id !== parentSessionId)
-      : [...current, parentSessionId]))
+  const toggleWork = useCallback((workSessionId: string) => {
+    setExpandedWorks(current => (current.includes(workSessionId)
+      ? current.filter(id => id !== workSessionId)
+      : [...current, workSessionId]))
   }, [])
   const listTopRef = useRef<HTMLDivElement | null>(null)
 
-  const toggleOpen = useMemo(() => toggle(setOpenKeys), [toggle])
-  const toggleHistory = useMemo(() => toggle(setHistoryKeys), [toggle])
+  const codes = useMemo(() => collectHandleCodes(props.snapshot), [props.snapshot])
+  const filtered = useMemo(() => applyLocusFilter(props.snapshot, filter), [props.snapshot, filter])
+  const visible = useMemo(() => applyQuery(filtered, codes, query), [filtered, codes, query])
+  const counts = useMemo(() => countLocusFilterOptions(props.snapshot), [props.snapshot])
+  const totals = useMemo(() => summarizeLocusView(applyLocusFilter(props.snapshot, SHOW_ALL_LOCUS_FILTER)), [props.snapshot])
 
-  const codes = useMemo(
-    () => (props.snapshot === undefined ? undefined : collectHandleCodes(props.snapshot)),
-    [props.snapshot],
-  )
-  const filtered = useMemo(
-    () => (props.snapshot === undefined ? undefined : applyLocusFilter(props.snapshot, filter)),
-    [props.snapshot, filter],
-  )
-  const visible = useMemo(
-    () => (filtered === undefined || codes === undefined ? undefined : applyQuery(filtered, codes, query)),
-    [filtered, codes, query],
-  )
-  const pageCount = Math.max(1, Math.ceil((visible?.works.length ?? 0) / WORKS_PER_PAGE))
-  // A filter or search that shrinks the list can strand the viewer on a page
-  // that no longer exists; clamping keeps the view on real content instead of
-  // rendering an empty page with no way back.
+  const pageCount = Math.max(1, Math.ceil(visible.works.length / WORKS_PER_PAGE))
   const safePage = Math.min(page, pageCount - 1)
   useEffect(() => {
     if (safePage !== page) setPage(safePage)
   }, [safePage, page])
-  const pagedWorks = useMemo(
-    () => (visible?.works ?? []).slice(safePage * WORKS_PER_PAGE, (safePage + 1) * WORKS_PER_PAGE),
-    [visible, safePage],
-  )
+  const pagedWorks = visible.works.slice(safePage * WORKS_PER_PAGE, (safePage + 1) * WORKS_PER_PAGE)
   const goToPage = useCallback((next: number) => {
     setPage(next)
-    // Land at the top of the list, not wherever the previous page left the
-    // scroll: paging is a jump, and keeping the offset makes it read as if
-    // nothing happened.
     listTopRef.current?.scrollIntoView({ block: 'start', behavior: 'auto' })
   }, [])
 
-  const counts = useMemo(
-    () => (props.snapshot === undefined ? undefined : countLocusFilterOptions(props.snapshot)),
-    [props.snapshot],
-  )
-  // What EXISTS, as opposed to what this filter and search currently show. The
-  // headline states the first: "关联 0 个入口" over an association the filter
-  // hid would read as "it is gone", which is the one reading this surface must
-  // never produce for a stopped entry that still owns its 重建 button.
-  const totals = useMemo(
-    () => (props.snapshot === undefined ? undefined : summarizeLocusView(applyLocusFilter(props.snapshot, SHOW_ALL_LOCUS_FILTER))),
-    [props.snapshot],
-  )
-
-  if (codes === undefined || visible === undefined || counts === undefined || totals === undefined) {
-    return <div className="dshpet-settings" />
-  }
-
-  const defaultQaParents = new Set(
-    props.snapshot.loci.filter(locus => locus.isDefaultQa).map(locus => locus.main.sessionId),
-  )
-  const sharedEntryCount = (parentSessionId: string): number =>
-    visible.works.find(work => work.parentSessionId === parentSessionId)?.families.length ?? 0
-  const updatedAt = props.snapshot.loci.reduce(
-    (latest, locus) => (locus.state.updatedAt > latest ? locus.state.updatedAt : latest),
-    0,
-  )
+  const updatedAt = props.snapshot.works
+    .flatMap(work => work.chats.flatMap(chat => [chat.group, ...chat.topics]))
+    .reduce((latest, entry) => (entry.updatedAt > latest ? entry.updatedAt : latest), 0)
   const now = Date.now()
-  const empty = visible.works.length === 0 && visible.entries.length === 0
+  const empty = visible.works.length === 0
 
   return (
     <div className="dshpet-settings">
       <section className="dshpet-locus-head">
-        {/* Title row: the title, and the filter at the far end — the control
-            that changes the reading belongs with the heading, not with the
-            description of what is currently counted. */}
         <div className="dshpet-locus-lead">
           <div className="dshpet-locus-headline">
             <span className="dshpet-locus-title">关联</span>
@@ -2781,7 +2000,7 @@ export function LocusSurface(props: {
                 className="dshpet-jump"
                 aria-pressed={filterOpen}
                 aria-expanded={filterOpen}
-                title="按父会话状态与入口状态筛选"
+                title="按入口状态筛选"
                 onClick={() => setFilterOpen(current => !current)}
               >
                 <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
@@ -2793,47 +2012,22 @@ export function LocusSurface(props: {
                     strokeLinejoin="round"
                   />
                 </svg>
-                父会话：
-                {filter.parentAvailability.length === 1 && filter.parentAvailability[0] !== undefined
-                  ? PARENT_AVAILABILITY_LABELS[filter.parentAvailability[0]]
-                  : `已选 ${filter.parentAvailability.length} 类`}
-                {` · 入口：${entryStateFilterLabel(filter.entryStates)}`}
+                {`入口：${entryStateFilterLabel(filter)}`}
               </button>
-              {filterOpen ? (
-                <LocusFilterPanel
-                  filter={filter}
-                  parentCounts={counts.parent}
-                  entryCounts={counts.entry}
-                  onChange={setFilter}
-                />
-              ) : null}
+              {filterOpen ? <LocusFilterPanel filter={filter} counts={counts} onChange={setFilter} /> : null}
             </span>
           </div>
-          {/* The counts describe the snapshot, so they sit under the title on
-              their own line and wrap there instead of squeezing it. */}
           <span className="dshpet-meta">
-            {totals.entries} 个入口 · {totals.chats} 个飞书入口 · {totals.works} 个父会话
+            {totals.entries} 个入口 · {totals.chats} 个飞书入口 · {totals.works} 个工作会话
             {updatedAt === 0 ? '' : ` · 状态更新 ${formatRelative(updatedAt, now)}`}
           </span>
         </div>
         <div className="dshpet-locus-tools">
           <div className="dshpet-subtabs" role="tablist" aria-label="读法">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={reading === 'work'}
-              className="dshpet-subtab"
-              onClick={() => setReading('work')}
-            >
-              按工作
+            <button type="button" role="tab" aria-selected={reading === 'work'} className="dshpet-subtab" onClick={() => setReading('work')}>
+              按工作会话
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={reading === 'entry'}
-              className="dshpet-subtab"
-              onClick={() => setReading('entry')}
-            >
+            <button type="button" role="tab" aria-selected={reading === 'entry'} className="dshpet-subtab" onClick={() => setReading('entry')}>
               按入口
             </button>
           </div>
@@ -2847,109 +2041,60 @@ export function LocusSurface(props: {
         </div>
       </section>
 
-      {/* Scroll anchor for paging. Sits above the top pager so a page change
-          lands on the controls, not on the first row under them. */}
       <div ref={listTopRef} aria-hidden="true" />
 
       {reading === 'work' ? (
-        <LocusPager
-          page={safePage}
-          pageCount={pageCount}
-          total={visible.works.length}
-          onGo={goToPage}
-          position="top"
-        />
+        <LocusPager page={safePage} pageCount={pageCount} total={visible.works.length} onGo={goToPage} position="top" />
       ) : null}
 
       {reading === 'work'
-        ? pagedWorks.map(work => (
+        ? pagedWorks.map(section => (
           <WorkSection
-            key={work.parentSessionId}
-            work={work}
-            reading={reading}
+            key={section.work.sessionId}
+            section={section}
+            writeEnabled={props.snapshot.writeEnabled}
             codes={codes}
             busyKey={props.busyKey}
             onAction={props.onAction}
             openKeys={openKeys}
             onToggle={toggleOpen}
-            historyKeys={historyKeys}
-            onToggleHistory={toggleHistory}
-            sharedEntryCount={sharedEntryCount}
-            hasDefaultQa={defaultQaParents.has(work.parentSessionId)}
-            todos={todos.byParent.get(work.parentSessionId) ?? EMPTY_TODOS}
-            todoMeta={todos.meta.get(work.parentSessionId)}
+            todosByMain={todos.byParent}
+            todoMeta={todos.meta}
             todoBusyId={todos.busyId}
             onTodoDispatch={todos.dispatch}
-            expanded={props.initialWorksExpanded === true || expandedWorks.includes(work.parentSessionId)}
-            onToggleExpanded={() => toggleWork(work.parentSessionId)}
+            expanded={props.initialWorksExpanded === true || expandedWorks.includes(section.work.sessionId)}
+            onToggleExpanded={() => toggleWork(section.work.sessionId)}
             {...(props.initialTodosOpen === true ? { initialTodosOpen: true } : {})}
           />
         ))
-        : visible.entries.map(group => {
-          const head = group.chatFamily ?? group.families[0]
-          const sessionId = head === undefined ? undefined : familyHead(head)?.main.sessionId
-          return (
-            <WorkSection
-              key={group.key}
-              work={{
-                parentSessionId: group.key,
-                ...(sessionId === undefined ? {} : { session: { sessionId } }),
-                availability: 'available',
-                nodes: group.families.map(family => ({ family, children: [] })),
-                families: group.families,
-              }}
-              reading={reading}
-              codes={codes}
-              busyKey={props.busyKey}
-              onAction={props.onAction}
-              openKeys={openKeys}
-              onToggle={toggleOpen}
-              historyKeys={historyKeys}
-              onToggleHistory={toggleHistory}
-              sharedEntryCount={sharedEntryCount}
-              hasDefaultQa
-            />
-          )
-        })}
+        : groupByEntry(visible).map(item => (
+          <ChatBlock
+            key={item.section.key}
+            section={item.section}
+            work={item.work}
+            reading="entry"
+            writeEnabled={props.snapshot.writeEnabled}
+            codes={codes}
+            busyKey={props.busyKey}
+            onAction={props.onAction}
+            openKeys={openKeys}
+            onToggle={toggleOpen}
+          />
+        ))}
 
       {reading === 'work' ? (
-        <LocusPager
-          page={safePage}
-          pageCount={pageCount}
-          total={visible.works.length}
-          onGo={goToPage}
-          position="bottom"
-        />
+        <LocusPager page={safePage} pageCount={pageCount} total={visible.works.length} onGo={goToPage} position="bottom" />
       ) : null}
 
-      {empty ? (
-        <p className="dshpet-empty">
-          {query.trim() !== ''
-            ? '没有匹配的关联。清空搜索，或放宽上面的筛选。'
-            : '当前筛选下没有关联。可以放宽上面的筛选（已停止的入口要在入口状态里勾上）。'}
-        </p>
-      ) : null}
+      {empty ? <p className="dshpet-empty">{emptyListText(query)}</p> : null}
 
       <p className="dshpet-item-hint dshpet-locus-nodelete">
-        这里没有「删除」，是刻意的：停止关联只停止服务，保留主/子会话历史与飞书资源 ——
-        消息 → 代际 → 会话 → 轮次的诊断链必须可追溯，所以历史只会被聚合和折叠，不会被清掉。
-        停止后的入口默认不在列表里（筛选默认只看在服务的），在筛选里勾上「已停止 / 已失效」即可直接「重建」。
+        这里没有「删除」，是刻意的：停止只停止服务，保留会话与飞书资源。已停止或已失效的入口默认不在列表里，
+        在筛选里勾上「已停止 / 已失效」即可看到；已失效的入口在下一条授权 @ 时自动重建，
+        已停止的入口在飞书内对同一来源会话重新 /bind 即可重新启用。
       </p>
 
-      {DISCOVERY_FOLD_ENABLED
-        ? <DiscoveryFold codes={codes} disabled={props.busyKey !== undefined} run={props.runQuery} />
-        : null}
-
-      {/* Todos are not a section of their own: each one belongs to a parent
-          session, which already has a block above. Only a ledger-wide read
-          failure surfaces here, because it belongs to no single session. */}
-      {todos.error === undefined ? null : (
-        <p className="dshpet-error">读取待办失败：{todos.error}</p>
-      )}
-      {/* The disposition outcome, shown here whenever the panel stays open:
-          a failed accept, or a shell that cannot navigate. The navigating
-          case announces through the shell instead, so the dispatched/queued
-          distinction survives this panel closing (design D11). */}
+      {todos.error === undefined ? null : <p className="dshpet-error">读取待办失败：{todos.error}</p>}
       {todos.notice === undefined ? null : (
         <p
           className="dshpet-callout"
@@ -3077,7 +2222,7 @@ function useTodoLedger(seed?: readonly PetTodoLedgerGroup[]): {
 function WorkTodos(props: {
   readonly items: readonly PetTodoView[]
   readonly parentSessionId: string
-  readonly loci: readonly PetLocusView[]
+  readonly loci: readonly PetLocusEntryViewV20[]
   readonly busyId: string | undefined
   readonly disabled: boolean
   readonly onDispatch: (itemId: string, action: PetTodoAction) => void
@@ -3138,8 +2283,8 @@ function WorkTodos(props: {
           {[...byLocus.entries()].flatMap(([locusId, items]) => {
             const locus = props.loci.find(row => row.locusId === locusId)
             const session = resolveSessionJumpTarget(
-              locus?.child.sessionId,
-              locus?.child.availability,
+              locus === undefined || locus.state === 'not-created' ? undefined : locus.sessionId,
+              locus?.session?.availability ?? 'unknown',
             )
             return items.map(item => {
               // Doc todos jump to the inspected document URL carried on the loci.
@@ -3321,21 +2466,17 @@ function formatTodoTime(at: number): string {
 /**
  * Unified locus management.
  *
- * Deliberately separate from the ordinary Task/Invocation and legacy channel
- * tabs: an unavailable locus Host seam renders as an error, never silently
- * backed by legacy data. Owns the Host conversation only, so the surface
- * itself stays renderable without one.
+ * Owns the Host conversation only, so the surface itself stays renderable
+ * without one. An unavailable locus Host seam renders as an error, never
+ * silently backed by legacy data.
  */
 function LocusTab(): JSX.Element {
-  const [snapshot, setSnapshot] = useState<PetLocusManagementView | undefined>(undefined)
+  const [snapshot, setSnapshot] = useState<PetLocusManagementViewV20 | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
-  const [warning, setWarning] = useState<string | undefined>(undefined)
   const [notice, setNotice] = useState<string | undefined>(undefined)
   const [busyKey, setBusyKey] = useState<string | undefined>(undefined)
   const actionInFlight = useRef(false)
-  const load = useCallback(async (): Promise<PetLocusManagementView> => {
-    return requireLocusSnapshot(await petApi.locus())
-  }, [])
+  const load = useCallback(async (): Promise<PetLocusManagementViewV20> => requireLocusSnapshot(await petApi.locus()), [])
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -3350,31 +2491,25 @@ function LocusTab(): JSX.Element {
     void refresh()
   }, [refresh])
 
-  const runAction = useCallback(
-    async (key: string, operation: () => Promise<unknown>): Promise<void> => {
-      if (actionInFlight.current) return
+  const runAction = useCallback<LocusActionRunner>(
+    async (key, operation) => {
+      if (actionInFlight.current) return false
       actionInFlight.current = true
       setBusyKey(key)
       setError(undefined)
-      setWarning(undefined)
       setNotice(undefined)
       try {
         const result = await operation()
-        if (typeof result === 'object' && result !== null) {
-          const warningText = (result as { warningText?: unknown }).warningText
-          if (typeof warningText === 'string' && warningText.trim() !== '') setWarning(warningText)
-          // A session-level action has no row to speak for it: the entries it
-          // moved leave this session's group entirely, so without a receipt a
-          // completed replacement looks exactly like one that did nothing —
-          // the button disappears, the group empties, and nothing says why.
-          const receipt = describeActionReceipt(result)
-          if (receipt !== undefined) setNotice(receipt)
-        }
+        const receipt = (result as { receipt?: unknown } | undefined)?.receipt
+        if (typeof receipt === 'string' && receipt.trim() !== '') setNotice(receipt)
         setSnapshot(await load())
+        return true
       } catch (cause) {
-        // A rejected Host action never changes the displayed snapshot: no
-        // optimistic permission, binding or lifecycle state.
-        setError(cause instanceof Error ? cause.message : String(cause))
+        // A rejected Host action never changes the displayed snapshot. A stale
+        // fence says so in the owner's terms; every other refusal shows the
+        // Host's own deterministic reason.
+        setError(locusActionErrorText(cause))
+        return false
       } finally {
         actionInFlight.current = false
         setBusyKey(undefined)
@@ -3382,26 +2517,6 @@ function LocusTab(): JSX.Element {
     },
     [load],
   )
-
-  const runQuery = useCallback(
-    async (request: PetLocusDiscoveryRequest): Promise<PetLocusDiscoveryView | undefined> => {
-      if (actionInFlight.current) return undefined
-      actionInFlight.current = true
-      setBusyKey('discovery')
-      setError(undefined)
-      try {
-        return await petApi.locusDiscovery(request)
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause))
-        return undefined
-      } finally {
-        actionInFlight.current = false
-        setBusyKey(undefined)
-      }
-    },
-    [],
-  )
-
 
   if (snapshot === undefined) {
     return (
@@ -3421,13 +2536,17 @@ function LocusTab(): JSX.Element {
     <LocusSurface
       snapshot={snapshot}
       onAction={runAction}
-      runQuery={runQuery}
       {...(busyKey === undefined ? {} : { busyKey })}
       {...(error === undefined ? {} : { error })}
-      {...(warning === undefined ? {} : { warning })}
       {...(notice === undefined ? {} : { notice })}
     />
   )
+}
+
+/** The owner-facing text of one refused locus action. Exported for its test. */
+export function locusActionErrorText(cause: unknown): string {
+  if ((cause as { code?: unknown } | undefined)?.code === 'LOCUS_CONFLICT') return LOCUS_FENCE_STALE_TEXT
+  return cause instanceof Error ? cause.message : String(cause)
 }
 /**
  * Host directory picker, published by the client entry when the deployment

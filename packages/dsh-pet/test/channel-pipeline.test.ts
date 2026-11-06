@@ -276,7 +276,6 @@ describe('unified locus precedence', () => {
       deliveryId: 'delivery-1',
       executionId: 'execution-1',
       locusId: 'locus-1',
-      generation: 1,
     }))
     const pipeline = new InboundPipeline({
       repository: f.harness.repository,
@@ -296,7 +295,6 @@ describe('unified locus precedence', () => {
       deliveryId: 'delivery-1',
       executionId: 'execution-1',
       locusId: 'locus-1',
-      generation: 1,
     })
     expect(handle).toHaveBeenCalledTimes(1)
     const productionAdmission = handle.mock.calls[0]?.[1]
@@ -309,39 +307,7 @@ describe('unified locus precedence', () => {
     expect(f.harness.repository.getChatBinding(P2P)).toBeUndefined()
   })
 
-  it('sends one bounded rebuild notice for an explicitly retired legacy endpoint', async () => {
-    const f = await fixture()
-    harness = f.harness
-    const handle = vi.fn(async () => ({ kind: 'ignored' as const, reason: 'legacy-endpoint' }))
-    const pipeline = new InboundPipeline({
-      repository: f.harness.repository,
-      coordinator: f.coordinator,
-      client: f.client,
-      locator: { locate: () => '/should-not-be-read' },
-      watermark: () => 1000,
-      locusController: { handle },
-      locusAuthorization: () => 'legacy',
-    })
-
-    await expect(pipeline.handleLine(p2pLine())).resolves.toEqual({
-      kind: 'ignored', reason: 'legacy-endpoint',
-    })
-    // An endpoint that exists only in the old model has nothing to rebuild in
-    // the owner surface, so the notice names the repair that actually works —
-    // and stays out of our bookkeeping ("which model the row came from").
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('发送 /bind'))
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('只读（read）权限'))
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.not.stringContaining('旧飞书模型'))
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.not.stringContaining('未接管也未迁移历史'))
-    expect(f.dispatched).toEqual([])
-    expect(f.harness.repository.listTasks()).toHaveLength(0)
-
-    f.client.reply.mockClear()
-    await pipeline.handleLine(p2pLine({ message_id: 'om_non_owner', sender_id: 'ou_not_allowed' }))
-    expect(f.client.reply).not.toHaveBeenCalled()
-  })
-
-  it('points a stopped entry at the owner surface instead of the chat command', async () => {
+  it('points a stopped entry at the same-W /bind that re-enables it', async () => {
     const f = await fixture()
     harness = f.harness
     // `retired-endpoint` means a unified generation exists but is not active, so
@@ -363,13 +329,8 @@ describe('unified locus precedence', () => {
     await expect(pipeline.handleLine(p2pLine())).resolves.toEqual({
       kind: 'ignored', reason: 'retired-endpoint',
     })
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('Pet 设置页'))
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('用新的主会话接替'))
-    // Restoring the archived session has to be offered too: an owner who still
-    // wants that session must not be pushed into creating another one. It is
-    // also the only repair that needs no rebuild at all.
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('会话归档管理'))
-    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('自动恢复服务'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('/bind'))
+    expect(f.client.reply).toHaveBeenCalledWith('om_1', expect.stringContaining('重新启用'))
     expect(f.dispatched).toEqual([])
   })
 

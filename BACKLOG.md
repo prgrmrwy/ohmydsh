@@ -245,7 +245,7 @@
 - **状态**: 实现完成、隔离/真实网络验收未执行
 - **优先级**: P1
 - **背景 / 动机**: 2026-09-15 的旧实现把建树失败记为 `failed`，却只在 startup reconcile 中补偿到 `compensated`，同一 endpoint 在 Host 运行期因此永久阻塞。群首次 @、话题、改绑和 Q&A 共用此机制，不是单个入口的重试问题。
-- **当前实现（2026-11-03 源码核对）**: [persistence](packages/dsh-pet/src/host/locus/persistence.ts) 的 `beginProvisioning` 在同 endpoint 建立前检查旧操作，`FAILED_PROVISIONING_BLOCK_MS = 10 * 60 * 1000`；`failed` 满 10 分钟时先调用 `clearStaleFailedProvisioning`，使用与启动对账相同的 `compensateOperation`。**不是超时后忽略资源、直接覆盖建新**。
+- **当前实现（2026-11-03 源码核对）**: persistence（已删除：`packages/dsh-pet/src/host/locus/persistence.ts`） 的 `beginProvisioning` 在同 endpoint 建立前检查旧操作，`FAILED_PROVISIONING_BLOCK_MS = 10 * 60 * 1000`；`failed` 满 10 分钟时先调用 `clearStaleFailedProvisioning`，使用与启动对账相同的 `compensateOperation`。**不是超时后忽略资源、直接覆盖建新**。
   - 根据 durable `resourceRefs` 与资源归属，依次补偿本次创建的 Q&A chat、child、locus main 与自动工作会话；不删除本来就存在的群。全部 provisioning kind 共享同一路径。
   - 补偿成功才标 `compensated` 并解除阻塞，然后正常建立；补偿失败继续阻塞并诊断，保留原失败时间，下一次请求可立即重试补偿，不再重新等待 10 分钟。部分已完成补偿持久记录，避免重做。
   - 未满 10 分钟仍阻塞；`needs-recovery`、正在补偿或首条创建债务不因这个 failed 超时规则被无条件放行。

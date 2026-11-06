@@ -137,8 +137,7 @@ export interface DocFinishRepository {
   markDeliveryFinishing(input: {
     readonly endpoint: { readonly chatId: string; readonly threadId?: string }
     readonly locusId: string
-    readonly generation: number
-    readonly childSessionId: string
+    readonly sessionId: string
     readonly deliveryId: string
     readonly now: number
     readonly expectedRevision?: number
@@ -164,7 +163,7 @@ export interface DocFinishCurrent {
 export async function finishDocReply(input: {
   readonly repository: DocFinishRepository
   readonly client: DriveClient
-  readonly correlation: { readonly endpoint: { readonly chatId: string; readonly threadId?: string }; readonly locusId: string; readonly generation: number; readonly childSessionId: string }
+  readonly correlation: { readonly endpoint: { readonly chatId: string; readonly threadId?: string }; readonly locusId: string; readonly sessionId: string }
   readonly current: DocFinishCurrent
   readonly text: string
   readonly now: () => number

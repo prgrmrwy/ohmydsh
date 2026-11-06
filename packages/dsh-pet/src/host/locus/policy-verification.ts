@@ -1,16 +1,14 @@
 /**
- * Pure verification of one locus generation against the live Host sandbox.
+ * Pure verification of one locus entry's `accessMode` (design D8).
  *
- * A `write` grant is valid only when the live Host reports FULL access for the
- * exact child session. The execution root is deliberately NOT part of this
- * decision: a locus child's cwd is fixed at creation to its parent's cwd, so a
- * directory-equality rule could never cover the sibling worktrees an owner
- * works in, and requiring it made escalation unreachable
- * (`docs/adr/ADR-0005-locus-write-grants-full-access.md`). Context anchors stay
- * context facts, never grants.
+ * v20 has one value per row. A child serves only when the live sandbox mode
+ * equals that value exactly; there is no demotion, fallback or stored intent
+ * that differs from what is in force. The execution root is not part of the
+ * decision (ADR-0005): full access has no directory boundary, and a context
+ * fact is never a grant.
  */
 
-import type { LocusPermissionMode, LocusRecord } from './aggregate.js'
+import type { LocusAccessModeV20 } from './contract-v20.js'
 
 export interface LocusLiveSandboxPolicy {
   readonly mode?: string
@@ -18,34 +16,24 @@ export interface LocusLiveSandboxPolicy {
 }
 
 /**
- * Master switch for the `write` grant.
+ * Master switch for `danger-full-access`.
  *
- * `false` means no locus may hold write authority, whatever a durable record
- * says and whatever the live sandbox reports. Turned OFF while there is no
- * agreed protocol for CONCURRENT WRITES: several locus children share one
- * checkout and `write` is full access (ADR-0005), so two children acting at
- * once can destroy each other's work with nothing to arbitrate between them.
- * A read-only locus cannot have that problem, so closed is the safe state
- * until that protocol exists.
+ * Turned OFF while there is no agreed protocol for CONCURRENT WRITES: several
+ * locus children share one checkout and full access lets two of them destroy
+ * each other's work with nothing to arbitrate. Deliberately a constant, not
+ * configuration: re-enabling is a one-line change plus a rebuild, together
+ * with the concurrency protocol it is waiting on.
  *
- * Deliberately a constant rather than configuration: this is a temporary
- * safety stance, not a per-deployment knob. Re-enabling is a one-line change
- * plus a rebuild, and should happen only together with the concurrency
- * protocol it is waiting on.
- *
- * Enforced HERE because this derivation is the single funnel every path goes
- * through — Feishu `/scope`, the management panel and startup re-verification
- * alike — so no caller can route around it. Existing grants are demoted at
- * their next verification rather than rewritten in storage: the durable record
- * keeps the owner's original intent, so flipping this back restores it without
- * re-granting anything.
+ * While off (D8): granting full access is refused; changing back to
+ * `read-only` is allowed; an entry that already holds full access is refused
+ * at its next assembly and its row is NOT rewritten — never silently demoted.
  */
 export const LOCUS_WRITE_ENABLED: boolean = false
 
-/** Stated whenever a stored write grant is demoted by {@link LOCUS_WRITE_ENABLED}. */
+/** Stated wherever full access is refused because of {@link LOCUS_WRITE_ENABLED}. */
 export const LOCUS_WRITE_DISABLED_DIAGNOSTIC =
-  '写档已全局停用：多个 locus 子会话共享同一份代码目录，而 write 即完全访问，' +
-  '并发写入尚无协商机制。该入口按只读服务；恢复写档需要先定下并发写协议。'
+  '写档已全局停用：多个 locus 子会话共享同一份代码目录，而完全访问下的并发写入尚无协商机制。' +
+  '完全访问的入口暂不服务（入口设置保持不变），可改回只读；恢复写档需要先定下并发写协议。'
 
 export type LocusPolicyVerificationFailure =
   | 'policy-unavailable'
@@ -53,100 +41,57 @@ export type LocusPolicyVerificationFailure =
   | 'write-disabled'
 
 export type LocusPolicyVerification =
-  | { readonly ok: true; readonly effective: LocusPermissionMode }
+  | { readonly ok: true; readonly effective: LocusAccessModeV20 }
   | {
       readonly ok: false
       readonly reason: LocusPolicyVerificationFailure
       readonly diagnostic: string
     }
 
+const WRITE_DISABLED: LocusPolicyVerification = {
+  ok: false,
+  reason: 'write-disabled',
+  diagnostic: LOCUS_WRITE_DISABLED_DIAGNOSTIC,
+}
+
 /**
- * Verify the durable permission against a policy read from the live child.
- *
- * Write authority is DERIVED here, never stored: the fact that must hold is
- * "the live sandbox reports FULL access for this exact child session". A stored
- * grant could go stale, and a persisted "yes" would then outrank the live truth.
- *
- * The execution root is not consulted. It is a CONTEXT fact — where the work
- * belongs, injected into the child — not a boundary: `write` grants full access
- * by explicit owner decision, because a locus child's cwd is fixed to its
- * parent's cwd and `workspace-write` could therefore never cover the sibling
- * worktrees the owner works in
- * (`docs/adr/ADR-0005-locus-write-grants-full-access.md`).
- *
- * @param locus - The durable locus record whose permission is being checked.
- * @param policy - The policy read back from the live child session.
- * @param writeEnabled - Whether write grants are honoured at all. Defaults to
- *   {@link LOCUS_WRITE_ENABLED}; every production caller takes that default.
- *   Injectable ONLY so the ADR-0005 write semantics keep their own test
- *   coverage while the switch is off — otherwise turning it back on would mean
- *   trusting a mechanism nothing has exercised since the day it was disabled.
- * @returns verified effective mode, or the reason the locus must not serve.
+ * Verify a row against the policy read from its live child.
+ * @param row - the entry row (only `accessMode` is read).
+ * @param policy - the policy read back from the exact live child session.
+ * @param writeEnabled - defaults to {@link LOCUS_WRITE_ENABLED}; injectable for tests.
  */
 export function verifyLocusLivePolicy(
-  locus: Pick<LocusRecord, 'permission' | 'contextAnchor'>,
+  row: { readonly accessMode: LocusAccessModeV20 },
   policy: LocusLiveSandboxPolicy | undefined,
   writeEnabled: boolean = LOCUS_WRITE_ENABLED,
 ): LocusPolicyVerification {
+  if (row.accessMode === 'danger-full-access' && !writeEnabled) return WRITE_DISABLED
   if (policy === undefined || typeof policy.mode !== 'string') {
     return {
       ok: false,
       reason: 'policy-unavailable',
-      diagnostic: '无法从 continuation owner 读取 live sandbox policy；locus 已暂停。',
+      diagnostic: '无法从 continuation owner 读取 live sandbox policy；该入口暂不服务。',
     }
   }
-
-  // The write switch is checked BEFORE the mode comparison, so a stored write
-  // grant is demoted rather than failing as a mismatch: the entry keeps
-  // serving read-only work instead of being suspended for holding a grant the
-  // build no longer honours.
-  const requested = writeEnabled ? locus.permission.effective : 'read'
-
-  // `write` means full access (ADR-0005): it is the only mode under which a
-  // locus child can touch the sibling worktrees its owner actually works in.
-  const expectedMode = requested === 'write' ? 'danger-full-access' : 'read-only'
-  if (policy.mode !== expectedMode) {
-    // A demoted grant whose child is still sitting in full access is NOT a
-    // mismatch to report as such — it is the switch doing its job, and the
-    // caller must be told the real reason so the panel does not read as a
-    // host fault.
-    if (!writeEnabled && locus.permission.effective === 'write') {
-      return { ok: false, reason: 'write-disabled', diagnostic: LOCUS_WRITE_DISABLED_DIAGNOSTIC }
-    }
+  if (policy.mode !== row.accessMode) {
     return {
       ok: false,
       reason: 'mode-mismatch',
-      diagnostic: locus.permission.effective === 'write'
-        ? '宿主回读的文件策略不是完全访问；该入口已暂停，请重新提权或降权为只读。'
-        : 'live sandbox mode 与 durable permission effective 不一致；locus 已暂停。',
+      diagnostic: `宿主回读的沙箱为 ${policy.mode}，与入口的访问模式 ${row.accessMode} 不一致；该入口暂不服务。`,
     }
   }
-  // Report the mode that is actually in force, not the stored intent: a
-  // demoted locus serves as `read`, and saying otherwise would make every
-  // downstream display and authorization claim something untrue.
-  return { ok: true, effective: requested }
+  return { ok: true, effective: row.accessMode }
 }
 
 /**
- * Verify a durable permission without reading any live Session.
- *
- * The sandbox is applied and read back when a child is created or republished,
- * and the child is published only if the read matched (see
- * `composeLocusChild`). So at delivery time the recorded grant is the proof, and
- * the one thing left to check is whether this build still honours it.
- *
- * @param locus - The durable record whose permission is being checked.
- * @param writeEnabled - Whether write grants are honoured; defaults to {@link LOCUS_WRITE_ENABLED}.
- * @returns the permission in force, or why the generation must not serve.
+ * Verify a row without a live session (the child is not resident). Its
+ * sandbox is applied and read back at the next assembly (`composeLocusChild`),
+ * so the only thing left to check here is whether this build honours the value.
  */
 export function verifyLocusPersistedPolicy(
-  locus: Pick<LocusRecord, 'permission' | 'contextAnchor'>,
+  row: { readonly accessMode: LocusAccessModeV20 },
   writeEnabled: boolean = LOCUS_WRITE_ENABLED,
-):
-  | { readonly ok: true; readonly effective: LocusPermissionMode }
-  | { readonly ok: false; readonly reason: 'write-disabled' | 'permission-unverified'; readonly diagnostic: string } {
-  if (locus.permission.effective === 'write' && locus.permission.verifiedAt === undefined) {
-    return { ok: false, reason: 'permission-unverified', diagnostic: '原写权限缺少 Host 核验证明；该入口已暂停。' }
-  }
-  return { ok: true, effective: !writeEnabled && locus.permission.effective === 'write' ? 'read' : locus.permission.effective }
+): LocusPolicyVerification {
+  if (row.accessMode === 'danger-full-access' && !writeEnabled) return WRITE_DISABLED
+  return { ok: true, effective: row.accessMode }
 }

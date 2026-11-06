@@ -30,7 +30,7 @@ import {
   LOCUS_CALLER_BOUND_TOOLS,
   LOCUS_DELEGATION_DENYLIST,
   LOCUS_SAFE_TOOL_NAMES,
-  LOCUS_SHELL_TIER_TOOL_NAMES,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
 import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
 import { PET_DOMAIN_NAME } from '../src/host/spec.js'
@@ -849,7 +849,7 @@ describe('a locus child is composed at the real creation boundary', () => {
     const modes = new Map<string, string>()
     const visibleToolNames = new Set([
       ...LOCUS_SAFE_TOOL_NAMES,
-      ...LOCUS_SHELL_TIER_TOOL_NAMES,
+      ...LOCUS_FULL_ACCESS_TOOL_NAMES,
       ...LOCUS_CALLER_BOUND_TOOLS,
       // Tools a DSH 0.2.1 child would see without the request-level tool filter
       // (which is gone): other plugins' GLOBAL registrations. Publication must
@@ -953,28 +953,22 @@ describe('a locus child is composed at the real creation boundary', () => {
     return { ctx, home, applied }
   }
 
-  /** Insert one active three-tier generation and its work/main pairing. */
-  async function seedLocus(ctx: Context, permission: 'read' | 'write', composition: 'tier3' | 'safe-v1' | 'safe-v2' = 'tier3'): Promise<void> {
-    const { LocusRepository } = await import('../src/host/locus/persistence.js')
+  /** Insert one active v20 group row (one row per entry) and its work/main pairing. */
+  async function seedLocus(ctx: Context, permission: 'read' | 'write'): Promise<void> {
     const domain = ctx.storage.domain.get(PET_DOMAIN_NAME)
     expect(domain).toBeDefined()
-    const repository = new LocusRepository(domain as never)
     await seedMainPairing(ctx)
-    await repository.putLocus({
-      id: 'locus-live',
-      generation: 1,
+    await domain!.table('loci').put('oc-live', {
       endpoint: { chatId: 'oc-live' },
-      parentSessionId: 'main-live',
-      childSessionId: 'child-live',
-      workspaceId: 'ws-live',
-      source: 'auto',
+      locusId: 'locus-live',
+      sessionId: 'child-live',
       state: 'active',
-      childComposition: composition,
-      toolTier: { desired: 'safe', effective: 'safe' },
-      permission: { desired: permission, effective: permission, verifiedAt: 1 },
-      busy: false,
+      accessMode: permission === 'write' ? 'danger-full-access' : 'read-only',
+      revision: 0,
       createdAt: 1,
       updatedAt: 1,
+      locusMainSessionId: 'main-live',
+      workspaceId: 'ws-live',
     })
   }
 
@@ -1079,13 +1073,6 @@ describe('a locus child is composed at the real creation boundary', () => {
     await expect(publish(ctx, 'child-live', options)).rejects.toThrow()
   })
 
-  it.each(['safe-v1', 'safe-v2'] as const)('does not resume retired %s children', async composition => {
-    const { ctx, applied } = await hostWithLocusChild()
-    await seedLocus(ctx, 'read', composition)
-    await expect(publish(ctx, 'child-live')).rejects.toThrow(/tier3/)
-    expect(applied).toEqual([])
-  })
-
   it('leaves ordinary sessions untouched', async () => {
     const { ctx, applied } = await hostWithLocusChild()
     await seedLocus(ctx, 'read')
@@ -1147,38 +1134,25 @@ describe('the per-turn correlation observer is wired to real runtime events', ()
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
-    const { LocusRepository } = await import('../src/host/locus/persistence.js')
-    const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    const { LocusRepositoryV20 } = await import('../src/host/locus/persistence-v20.js')
+    const repository = new LocusRepositoryV20(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
     const endpoint = { chatId: 'oc-live' }
     await seedMainPairing(ctx)
-    await repository.putLocus({
-      id: 'locus-live',
-      generation: 1,
-      endpoint,
-      parentSessionId: 'main-live',
-      childSessionId: 'child-live',
-      workspaceId: 'ws-live',
-      source: 'auto',
-      state: 'active',
-      childComposition: 'tier3',
-      toolTier: { desired: 'safe', effective: 'safe' },
-      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-      busy: false,
-      createdAt: 1,
-      updatedAt: 1,
+    await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('loci').put('oc-live', {
+      endpoint, locusId: 'locus-live', sessionId: 'child-live', state: 'active', accessMode: 'read-only',
+      revision: 0, createdAt: 1, updatedAt: 1, locusMainSessionId: 'main-live', workspaceId: 'ws-live',
     })
     const accepted = await repository.acceptDelivery({
       endpoint,
       locusId: 'locus-live',
-      generation: 1,
-      childSessionId: 'child-live',
+      sessionId: 'child-live',
       messageId: 'om-live',
       senderOpenId: 'ou_owner',
       acceptedAt: 2,
     })
     await repository.bindQueued({
       deliveryId: accepted.record.deliveryId,
-      correlation: { endpoint, locusId: 'locus-live', generation: 1, childSessionId: 'child-live' },
+      endpoint, locusId: 'locus-live', sessionId: 'child-live',
       executionId: 'execution-live', inboxMessageId: 'inbox-execution-live',
       queuedAt: 3,
     })
@@ -1332,106 +1306,86 @@ describe('owner-facing locus management is served by the real routes', () => {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
-    const { LocusRepository } = await import('../src/host/locus/persistence.js')
-    const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    const { LocusRepositoryV20 } = await import('../src/host/locus/persistence-v20.js')
+    const repository = new LocusRepositoryV20(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
     const endpoint = { chatId: 'oc-live' }
     await seedMainPairing(ctx)
-    await repository.putLocus({
-      id: 'locus-live',
-      generation: 1,
-      endpoint,
-      parentSessionId: 'main-live',
-      childSessionId: 'child-live',
-      workspaceId: 'ws-pet',
-      source: 'auto',
-      state: 'active',
-      childComposition: 'tier3',
-      toolTier: { desired: 'safe', effective: 'safe' },
-      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-      busy: false,
-      createdAt: 1,
-      updatedAt: 1,
+    await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('loci').put('oc-live', {
+      endpoint, locusId: 'locus-live', sessionId: 'child-live', state: 'active', accessMode: 'read-only',
+      revision: 0, createdAt: 1, updatedAt: 1, locusMainSessionId: 'main-live', workspaceId: 'ws-pet',
     })
     const route = (target: string) => routes.find(r => r.path === target)!
     return { ctx, repository, route, endpoint, modes }
   }
 
-  it('projects the owner view with resolved session and workspace facts', async () => {
+  type ViewData = {
+    works: { work: { sessionId: string }; chats: { group: { locusId: string; state: string; accessMode: string; revision: number; session?: { title?: string } }; locusMain: { title?: string } }[] }[]
+    writeEnabled: boolean
+  }
+  const groupsOf = (data: unknown) => (data as ViewData).works.flatMap(work => work.chats.map(chat => chat.group))
+
+  it('projects the owner view with resolved session and workspace facts (grouped by W, one row per entry)', async () => {
     const host = await hostWithLoci()
 
     const result = await callRoute(host.route(LOCUS_ROUTES.view), {})
 
     expect(result.ok).toBe(true)
-    const view = result.data as {
-      loci: { locusId: string; main: { title?: string }; child: { title?: string }; state: { state: string } }[]
-    }
-    expect(view.loci.map(item => item.locusId)).toEqual(['locus-live'])
+    const view = result.data as ViewData
+    expect(view.works.map(work => work.work.sessionId)).toEqual(['work-main-live'])
+    expect(groupsOf(view).map(item => item.locusId)).toEqual(['locus-live'])
     // Resolved from the Host registries, not guessed from ids.
-    expect(view.loci[0]?.main.title).toBe('研发主会话')
-    expect(view.loci[0]?.child.title).toBe('项目子会话')
-    expect(view.loci[0]?.state.state).toBe('active')
+    expect(view.works[0]?.chats[0]?.locusMain.title).toBe('研发主会话')
+    expect(view.works[0]?.chats[0]?.group.session?.title).toBe('项目子会话')
+    expect(view.works[0]?.chats[0]?.group.state).toBe('active')
+    expect(view.works[0]?.chats[0]?.group.accessMode).toBe('read-only')
+    expect(view.writeEnabled).toBe(false)
   })
 
-  it('answers all three reverse-discovery directions from one durable truth', async () => {
+  it('stops a locus durably (fenced) and the view keeps showing it with its state', async () => {
     const host = await hostWithLoci()
+    const before = host.repository.getLocus('locus-live')!
 
-    const byEndpoint = await callRoute(host.route(LOCUS_ROUTES.discovery), { endpoint: host.endpoint })
-    const byParent = await callRoute(host.route(LOCUS_ROUTES.discovery), { parentSessionId: 'main-live' })
-    const byChild = await callRoute(host.route(LOCUS_ROUTES.discovery), { childSessionId: 'child-live' })
-
-    // Entry -> locus, main session -> its loci, child -> its own locus.
-    expect((byEndpoint.data as { byEndpoint: { current?: { locusId: string } }[] })
-      .byEndpoint[0]?.current?.locusId).toBe('locus-live')
-    expect((byParent.data as { byParent: { loci: { locusId: string }[] }[] })
-      .byParent[0]?.loci.map(item => item.locusId)).toEqual(['locus-live'])
-    expect((byChild.data as { byChild: { locus?: { locusId: string } }[] })
-      .byChild[0]?.locus?.locusId).toBe('locus-live')
-  })
-
-  it('stops a locus durably and keeps its history addressable', async () => {
-    const host = await hostWithLoci()
-
-    const stopped = await callRoute(host.route(LOCUS_ROUTES.stop), {
+    const stopped = await callRoute(host.route(LOCUS_ROUTES.action), {
       action: 'stop',
-      locusId: 'locus-live',
       endpoint: host.endpoint,
+      expectedLocusId: 'locus-live',
+      expectedRevision: before.revision,
     })
 
-    expect(stopped.ok).toBe(true)
-    // Stopped is a durable marker, deliberately still addressable from the
-    // endpoint: that is what lets an ordinary message be refused with an
-    // explicit "rebuild required" instead of silently auto-creating a new
-    // generation. What must be gone is its ROUTABILITY, not its history.
-    expect(host.repository.getLocus('locus-live')?.state).toBe('stopped')
-    expect(host.repository.getCurrentLocus(host.endpoint)?.state).toBe('stopped')
-    expect(host.repository.findByChildSessionId('child-live')).toHaveLength(1)
-
-    // The owner view keeps showing it, with its state, rather than hiding a
-    // stopped entry the owner still has to act on.
+    expect(stopped, JSON.stringify(stopped)).toMatchObject({ ok: true })
+    // Stopped is a durable marker; an ordinary @ is refused until a same-W /bind.
+    const after = host.repository.getLocus('locus-live')!
+    expect(after.state).toBe('stopped')
+    expect(after.revision).toBe(before.revision + 1)
+    expect(host.repository.findBySessionId('child-live')?.row.locusId).toBe('locus-live')
     const view = await callRoute(host.route(LOCUS_ROUTES.view), {})
-    expect((view.data as { loci: { locusId: string; state: { state: string } }[] }).loci)
-      .toEqual([expect.objectContaining({ locusId: 'locus-live', state: expect.objectContaining({ state: 'stopped' }) })])
+    expect(groupsOf(view.data)).toEqual([expect.objectContaining({ locusId: 'locus-live', state: 'stopped' })])
+  })
+
+  it('a stale fence is refused and nothing changes', async () => {
+    const host = await hostWithLoci()
+    const refused = await callRoute(host.route(LOCUS_ROUTES.action), {
+      action: 'stop', endpoint: host.endpoint, expectedLocusId: 'locus-live', expectedRevision: 99,
+    })
+    expect(refused.ok).toBe(false)
+    expect(refused.error).toBe('LOCUS_CONFLICT')
+    expect(host.repository.getLocus('locus-live')?.state).toBe('active')
   })
 
   it('serves the message-to-execution diagnostic chain from the real route', async () => {
     const host = await hostWithLoci()
-    const { LocusRepository } = await import('../src/host/locus/persistence.js')
-    const repository = new LocusRepository(host.ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
-    const accepted = await repository.acceptDelivery({
+    const accepted = await host.repository.acceptDelivery({
       endpoint: host.endpoint,
       locusId: 'locus-live',
-      generation: 1,
-      childSessionId: 'child-live',
+      sessionId: 'child-live',
       messageId: 'om_diag_message_000001',
       senderOpenId: 'ou_sender_private',
       text: '这段正文不应出现在诊断里',
       acceptedAt: 5,
     })
-    await repository.bindQueued({
+    await host.repository.bindQueued({
       deliveryId: accepted.record.deliveryId,
-      correlation: {
-        endpoint: host.endpoint, locusId: 'locus-live', generation: 1, childSessionId: 'child-live',
-      },
+      endpoint: host.endpoint, locusId: 'locus-live', sessionId: 'child-live',
       executionId: 'execution-private', inboxMessageId: 'inbox-execution-private',
       queuedAt: 6,
     })
@@ -1441,82 +1395,57 @@ describe('owner-facing locus management is served by the real routes', () => {
     expect(result.ok).toBe(true)
     const chains = (result.data as { locus?: { deliveries: { stage: string; nextCheck: string }[] }[] }).locus
     expect(chains?.[0]?.deliveries[0]).toMatchObject({ stage: 'queued', executionBound: true, turnBound: false })
-    // The chain names what to check next, which is the difference between a
-    // status and something an owner can act on.
     expect(chains?.[0]?.deliveries[0]?.nextCheck).toContain('没有轮次认领')
-    // And it never carries the conversation or the settlement tokens.
     const serialized = JSON.stringify(chains)
     expect(serialized).not.toContain('这段正文')
     expect(serialized).not.toContain('ou_sender_private')
     expect(serialized).not.toContain('execution-private')
   })
 
-  it('refuses actions that would create an external resource', async () => {
+  it('the action route accepts nothing that creates, binds or rebuilds: only stop / access / rebind', async () => {
     const host = await hostWithLoci()
-
-    // These need a real group/child provisioning adapter, which this Host does
-    // not compose. Reporting unavailable is required: half-creating a Feishu
-    // group and then failing would leave a resource nobody owns.
-    for (const [target, action] of [
-      [LOCUS_ROUTES.bind, 'bind'],
-      [LOCUS_ROUTES.rebuild, 'rebuild'],
-    ] as const) {
-      const refused = await callRoute(host.route(target), {
-        action,
-        endpoint: host.endpoint,
-        parentSessionId: 'main-live',
-        ...(action === 'rebuild'
-          ? {
-              expectedGeneration: 1,
-              expectedLocusId: 'locus-live',
-              expectedUpdatedAt: 1,
-            }
-          : {}),
+    for (const action of ['bind', 'unbind', 'rebuild', 'archive', 'scope', 'tools', 'confirm-anchor', 'replace-parent']) {
+      const refused = await callRoute(host.route(LOCUS_ROUTES.action), {
+        action, endpoint: host.endpoint, parentSessionId: 'main-live', expectedLocusId: 'locus-live', expectedRevision: 0,
       })
-      expect(refused.ok).toBe(false)
-      expect(refused.error).not.toBe('INVALID_REQUEST')
+      expect(refused.ok, action).toBe(false)
     }
-    const refusedQa = await callRoute(host.route(LOCUS_ROUTES.defaultQa), {
-      parentSessionId: 'main-live',
-    })
-    expect(refusedQa.ok).toBe(false)
+    expect(host.repository.getLocus('locus-live')?.state).toBe('active')
   })
 
-  it('uses the exact continuation-owned child but rejects write while the global write gate is disabled', async () => {
+  it('rejects granting full access while the global write gate is disabled, and changes nothing', async () => {
     const host = await hostWithLoci({ scopeRuntime: true })
 
-    const result = await callRoute(host.route(LOCUS_ROUTES.scope), {
-      action: 'scope',
-      locusId: 'locus-live',
-      mode: 'write',
+    const result = await callRoute(host.route(LOCUS_ROUTES.action), {
+      action: 'access',
+      endpoint: host.endpoint,
+      accessMode: 'danger-full-access',
+      expectedLocusId: 'locus-live',
+      expectedRevision: 0,
     })
 
     expect(result, JSON.stringify(result)).toMatchObject({ ok: false })
     expect(result.error).toBe('INVALID_REQUEST')
-    // The global write gate is the earlier authoritative refusal. It must not
-    // apply a wider live mode and only then fail on an unrelated anchor fact.
-    expect(result.message).toContain('写档已全局停用')
     expect(host.modes.get('child-live')).toBeUndefined()
-    expect(host.repository.getLocus('locus-live')?.permission).toMatchObject({
-      desired: 'read', effective: 'read',
-    })
+    expect(host.repository.getLocus('locus-live')).toMatchObject({ accessMode: 'read-only', revision: 0 })
     expect((host.ctx.sessionController as { resolveAgent: ReturnType<typeof vi.fn> }).resolveAgent).not.toHaveBeenCalled()
   })
 
   it('never accepts an operator identity from the request body', async () => {
     const host = await hostWithLoci()
 
-    const result = await callRoute(host.route(LOCUS_ROUTES.scope), {
-      action: 'scope',
-      locusId: 'locus-live',
-      mode: 'write',
+    const result = await callRoute(host.route(LOCUS_ROUTES.action), {
+      action: 'access',
+      endpoint: host.endpoint,
+      accessMode: 'read-only',
+      expectedLocusId: 'locus-live',
+      expectedRevision: 0,
       actorId: 'ou_attacker',
     })
 
-    // An unknown field is rejected outright: the actor is Host-derived, so a
-    // body that tries to supply one must never be partially honored.
+    // An unknown field is rejected outright: the actor is Host-derived.
     expect(result.ok).toBe(false)
-    expect(host.repository.getLocus('locus-live')?.permission.effective).toBe('read')
+    expect(host.repository.getLocus('locus-live')?.grantedBy).toBeUndefined()
   })
 })
 
@@ -1566,24 +1495,12 @@ describe('startup reconciliation runs against the real runtime', () => {
     while (Date.now() < ready && routes.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
-    const { LocusRepository } = await import('../src/host/locus/persistence.js')
-    const seeded = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    const { LocusRepositoryV20 } = await import('../src/host/locus/persistence-v20.js')
     await seedMainPairing(ctx, 'main-gone', 'ws-1')
-    await seeded.putLocus({
-      id: 'locus-stale',
-      generation: 1,
-      endpoint: { chatId: 'oc-stale' },
-      parentSessionId: 'main-gone',
-      childSessionId: 'child-gone',
-      workspaceId: 'ws-1',
-      source: 'auto',
-      state: 'active',
-      childComposition: 'tier3',
-      toolTier: { desired: 'safe', effective: 'safe' },
-      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-      busy: true,
-      createdAt: 1,
-      updatedAt: 1,
+    await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('loci').put('oc-stale', {
+      endpoint: { chatId: 'oc-stale' }, locusId: 'locus-stale', sessionId: 'child-gone', state: 'active',
+      accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1,
+      locusMainSessionId: 'main-gone', workspaceId: 'ws-1',
     })
 
     // The restart this pass exists for, driven against the SAME durable
@@ -1591,15 +1508,13 @@ describe('startup reconciliation runs against the real runtime', () => {
     const { reconcileLocusChildren } = await import('../src/host/locus/reconcile.js')
     const { probeLocusChildPorts } = await import('../src/host/locus/child.js')
     const probe = probeLocusChildPorts(ctx as never)
-    const repository = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    const repository = new LocusRepositoryV20(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
     const proof = probe.available ? probe.ports.proof : undefined
     expect(proof).toBeDefined()
-    const report = await reconcileLocusChildren(repository.listLoci(), {
+    const rowsWithM = repository.listRows().map(row => ({ row, locusMainSessionId: 'main-gone' }))
+    const report = await reconcileLocusChildren(rowsWithM, {
       store: {
-        invalidate: async (id, reason, at) => {
-          await repository.invalidateLocus(id, reason, at, undefined, { evenWithPendingWork: true })
-        },
-        clearBusy: async (id, at) => { await repository.setLocusBusy(id, false, at) },
+        invalidate: async (fence, reason, at) => { await repository.markInvalid(fence, reason, at) },
       },
       probe: {
         check: async ({ parentSessionId, childSessionId, signal }) => (
@@ -1615,6 +1530,8 @@ describe('startup reconciliation runs against the real runtime', () => {
     // Recorded with a reason, never silently replaced by a fresh child: a
     // re-created child would discard the conversation this entry had.
     expect(repository.getLocus('locus-stale')?.invalidReason).toContain('重新建立')
+    // In-place rebuild keeps the SAME locusId and revision moves on (D7).
+    expect(repository.getLocus('locus-stale')?.revision).toBe(1)
   })
 
   it('leaves rows untouched when the runtime cannot enumerate children', async () => {
@@ -1654,26 +1571,13 @@ describe('startup reconciliation runs against the real runtime', () => {
     while (Date.now() < ready && routes.length === 0) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
-    const { LocusRepository } = await import('../src/host/locus/persistence.js')
-    const seeded = new LocusRepository(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
+    const { LocusRepositoryV20 } = await import('../src/host/locus/persistence-v20.js')
+    const seeded = new LocusRepositoryV20(ctx.storage.domain.get(PET_DOMAIN_NAME) as never)
     await seedMainPairing(ctx, 'main-1', 'ws-1')
-    await seeded.putLocus({
-      id: 'locus-kept',
-      generation: 1,
-      endpoint: { chatId: 'oc-kept' },
-      parentSessionId: 'main-1',
-      childSessionId: 'child-1',
-      workspaceId: 'ws-1',
-      source: 'auto',
-      state: 'active',
-      // A legacy marker is deliberately skipped, not probed. Use a serviceable
-      // three-tier row so this checks missing liveness evidence, not retirement.
-      childComposition: 'tier3',
-      toolTier: { desired: 'safe', effective: 'safe' },
-      permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-      busy: false,
-      createdAt: 1,
-      updatedAt: 1,
+    await ctx.storage.domain.get(PET_DOMAIN_NAME)!.table('loci').put('oc-kept', {
+      endpoint: { chatId: 'oc-kept' }, locusId: 'locus-kept', sessionId: 'child-1', state: 'active',
+      accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1,
+      locusMainSessionId: 'main-1', workspaceId: 'ws-1',
     })
 
     // Re-run the actual reconciliation over this loader's durable domain.
@@ -1683,8 +1587,8 @@ describe('startup reconciliation runs against the real runtime', () => {
     const { probeLocusChildPorts } = await import('../src/host/locus/child.js')
     expect(probeLocusChildPorts(ctx as never).available).toBe(false)
     const invalidate = vi.fn()
-    const report = await reconcileLocusChildren(seeded.listLoci(), {
-      store: { invalidate, clearBusy: vi.fn() },
+    const report = await reconcileLocusChildren(seeded.listRows().map(row => ({ row, locusMainSessionId: 'main-1' })), {
+      store: { invalidate },
     })
     expect(report.unproven).toEqual(['locus-kept'])
     expect(invalidate).not.toHaveBeenCalled()
@@ -1998,12 +1902,12 @@ describe('the Pet executor preset omits local-root Skill discovery', () => {
       if (!disabled) names.forEach(name => mounted.add(name))
     }
 
-    const intended = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]
+    const intended = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_FULL_ACCESS_TOOL_NAMES]
     expect(intended.every(name => mounted.has(name))).toBe(true)
     expect(intended.some(name => (LOCUS_DELEGATION_DENYLIST as readonly string[]).includes(name))).toBe(false)
     // The shell tier intentionally excludes these features: dsh-pet-executor
     // does not expose job control and disables web_fetch.
-    expect(LOCUS_SHELL_TIER_TOOL_NAMES).toEqual(['bash', 'skill'])
+    expect(LOCUS_FULL_ACCESS_TOOL_NAMES).toEqual(['bash', 'skill'])
   })
 
   it('registers its delegation rows outside the per-agent plane', async () => {

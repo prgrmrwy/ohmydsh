@@ -17,7 +17,7 @@ export function projectTodoForOwner(record: TodoRecord): PetTodoView {
   return {
     itemId: record.itemId,
     locusId: record.locusId,
-    generation: record.generation,
+    ...(record.generation === undefined ? {} : { generation: record.generation }),
     endpoint: record.endpoint,
     triggerMessageId: record.triggerMessageId,
     requestedBy: record.requestedBy,

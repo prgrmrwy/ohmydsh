@@ -85,7 +85,7 @@
 
 ### D6 改绑：仅在原 W 已归档时，由管理面操作
 
-- 入口：管理面上群行或文档根那一行，按钮**直接放在行上**，名为「改绑到其他会话」，输入干活会话 sessionId。走通用 `locus-action` 路由，请求为 `{action:'rebind', chatId, workSessionId, expectedLocusId, expectedRevision}`，围栏用群行的值。
+- 入口：管理面上群行或文档根那一行，按钮**直接放在行上**，名为「改绑到其他会话」，输入工作会话 sessionId。走通用 `locus-action` 路由，请求为 `{action:'rebind', chatId, workSessionId, expectedLocusId, expectedRevision}`，围栏用群行的值。
 - Host 依次检查，首个不满足即拒绝：群行存在（`LOCUS_NOT_FOUND`）；围栏匹配（`LOCUS_CONFLICT`）；当前 W 已归档（`INVALID_REQUEST`）；目标是普通一级会话，未归档、不是子会话、不是任何 locus 主会话（`INVALID_REQUEST`）；同 `chatId` 下没有 current 投递（`LOCUS_BUSY`）。
 - 执行：`beginProvisioning(kind:'rebind')`，持 W1 的 main lease；`ensureLocusMain(W1)`（没有就新建，资源记入该操作）；然后调用 D17 的 `resetChat`，参数 `{toM: M1, workspaceId: W1 的工作区, reboundFrom: 原 W, clearDefaultQa: true}`。提交前任何失败只补偿本操作新建的 M1/空间。
 - 不做的事：不换 `locusId`；不归档旧子会话（D15 保证它们不能再运行）；不动旧 M 和旧协作空间；不迁移协作条目；不发群消息，回执只出现在管理面；不占用 W1 的默认 Q&A。
@@ -128,7 +128,7 @@
   - 回执统一为"已更新，下次唤醒时应用并核验；核验失败将拒绝服务"。授予时不再当场核验，核验发生在下一次组装。
 - 下次组装（冷恢复或首次创建，`agent/created`）按行上的值应用并回读，一致则写 `verifiedAt`；不符就拒绝发布（D7 B 类），**不回退到旧值**。首次创建也按行上的值组装（替换 `lazy-child.ts` / `child-delivery.ts` 里写死的 read/safe）。
 - 全局写开关 `LOCUS_WRITE_ENABLED` 关闭时：拒绝把 `accessMode` 设为 `danger-full-access`；**允许改回 `read-only`**；已经是 `danger-full-access` 的入口，唤醒组装时拒绝发布（B 类）。管理面只禁用"完全访问"选项。
-- 准入：完全访问只允许 allowlist 成员，按 `accessMode` 判断，对所有状态生效。
+- 准入：完全访问只允许 allowlist 成员，按 `accessMode` 判断，对所有状态生效。文档入口与群共用这一规则，拒绝诊断同为 `owner-only-tier`（实现阶段补充，2026-11-06：原 doc spec 写的 `not-allowed-sender` 是沿用旧文本，与“规则与群相同”矛盾）。
 - 删除 `pending-application.ts`、`resolvePendingApplication`、`switching` 状态、permission/tool-tier 两套 mutation，合并为 `access-mutation.ts`。不再写权限审计行；`locus_permission_audit` 表声明保留，旧行冻结。
 - **评审 R3-C3 / R3-M1 补充**：
   - `agent/created` 发布边界（D15 的单次查找）同样检查 `accessChanging`，命中即拒绝本次发布。父 M 的 `locus_reply_child` 触发的冷恢复因此不能在 drain→CAS 窗口里按旧值发布。
@@ -155,7 +155,7 @@
 - 「改绑到其他会话」按钮只在群行或文档根上出现，直接放在行上。原 W 未归档时置灰并写明原因；有入口在投递时置灰。
 - 投递中：「投递中」徽标与访问模式、停止的置灰都按"有未终态投递"判断（停止与访问变更只在完全空闲时受理）；「改绑到其他会话」只在有 current 投递时置灰（backlog 会被 resetChat 改指）。两个口径不同是有意的。
 - 写开关关闭时只禁用"完全访问"选项，"只读"仍可选。
-- 筛选：可服务为 `not-created` / `active`；默认只隐藏 `stopped` / `invalid`。W 已归档的组**默认显示**，群行写明「来源会话已归档，可改绑」；所有者不想看到时停止群行即可隐藏（其下仍在服务的话题行存在时，群行作为容器保留）。可用性徽标描述的是 W。
+- 筛选：恰有三个平铺选项——「在服务」（`not-created` / `active`，默认勾选）、「已停止 / 已失效」（默认不勾选）、「已归档」（默认不勾选）。工作会话 W 已归档的入口无论自身状态只计入「已归档」，所以 W 已归档的组默认隐藏，勾选「已归档」后才显示，群行写明「来源会话已归档，可改绑」，「改绑到其他会话」按钮随之出现；已归档的 W 仍显示标题。状态不在四值集合内的入口始终显示为「未知状态」，不计入任何选项（位于已归档 W 之下时计入「已归档」）。各选项计数之和等于入口总数。
 - 修复快照校验不认 `not-created` 的问题（新状态集合天然包含它）。
 
 ### D11 删除的路径

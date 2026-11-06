@@ -91,7 +91,7 @@ describe.skipIf(!inboxExported)('fixed-runtime Inbox × locus turn observer repl
     const childSessionId = LOCUS_FINISH_HISTORY.claimBeforeBind.childSessionId
     const correlation = {
       endpoint: { chatId: 'fixture-chat', threadId: 'fixture-thread' },
-      locusId: 'fixture-locus', generation: 1, childSessionId,
+      locusId: 'fixture-locus', sessionId: childSessionId,
     }
     const observer = createLocusTurnObserver({
       onClaimed: listener => { claimListeners.push(listener); return () => {} },

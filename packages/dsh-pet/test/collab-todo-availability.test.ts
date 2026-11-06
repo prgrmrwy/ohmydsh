@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { trackFailureText, trackTodo } from '../src/host/ledger/track.js'
 import { LocusCollab, type LocusMainRef } from '../src/host/collab/locus-collab.js'
 import { CollabTodoBackend } from '../src/host/collab/todo-backend.js'
-import { LocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
 import type { DeliveryCorrelation } from '../src/host/locus/delivery.js'
 import { authorizedFor, identityOf, openTodoWorld, type TestLocusRow } from './support/collab-todo.js'
 import { legacyTodoBackend } from '../src/host/ledger/backend.js'
@@ -42,15 +42,15 @@ describe('协作层不可用时台账与待办 fail closed', () => {
     const backend = unattachedBackend()
 
     harness = await openPetHarness(emptyMedium())
-    const repository = new LocusRepository(harness.domain)
-    await repository.putLocus({
-      id: LOCUS.id, generation: 1, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: LOCUS.childSessionId,
-      workspaceId: 'ws-avail', source: 'auto', state: 'active', childComposition: 'tier3',
-      permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, busy: false, createdAt: 1, updatedAt: 1,
-    })
-    const correlation: DeliveryCorrelation = { endpoint: ALPHA, locusId: LOCUS.id, generation: 1, childSessionId: LOCUS.childSessionId }
+    await harness.domain.table('locus_mains').put(MAIN, { locusMainSessionId: MAIN, workSessionId: WORK, generation: 1, status: 'active', spaceId: locusSpaceId(MAIN), workspaceId: 'ws-pet', createdAt: 1, updatedAt: 1 } as never)
+    await harness.domain.table('loci').put(ALPHA.chatId, {
+      endpoint: ALPHA, locusId: LOCUS.id, sessionId: LOCUS.childSessionId, state: 'active', accessMode: 'read-only',
+      revision: 1, createdAt: 1, updatedAt: 1, locusMainSessionId: MAIN, workspaceId: 'ws-avail',
+    } as never)
+    const repository = new LocusRepositoryV20(harness.domain as never)
+    const correlation: DeliveryCorrelation = { endpoint: ALPHA, locusId: LOCUS.id, sessionId: LOCUS.childSessionId }
     await repository.acceptDelivery({ ...correlation, messageId: 'om-avail', senderOpenId: 'ou_requester', acceptedAt: 2 } as never)
-    const current = (await repository.claimCurrentDelivery({ correlation, now: 3 }))!
+    const current = (await repository.claimCurrentDelivery({ ...correlation, now: 3 })).record!
 
     const registered = await trackTodo(authorizedFor(LOCUS), { summary: '要改', detail: '' }, {
       store: backend, now: () => 4, newItemId: () => 'todo-avail',
@@ -138,7 +138,7 @@ describe('协作层不可用时台账与待办 fail closed', () => {
       const records = await t.records(MAIN)
       const created = records.flatMap((r: any) => r.events).filter((e: any) => e.type === 'item/created').map((e: any) => e.item)
       const g3 = created.find((item: any) => item.id === 'todo-avail-g3')
-      expect(g3).toMatchObject({ author: 'locus', ext: { pet: { entry: identityOf(ALPHA), generation: 3 } } })
+      expect(g3).toMatchObject({ author: 'locus', ext: { pet: { entry: identityOf(ALPHA) } } })
       expect(created.some((item: any) => item.id === 'todo-avail-down')).toBe(false)
       expect(membersOf(records)).toEqual(membersBefore)
       expect(locusSpaceId(MAIN)).toBe(records[0].events[0].spaceId)

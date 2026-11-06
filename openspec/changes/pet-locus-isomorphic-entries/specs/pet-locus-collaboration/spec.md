@@ -7,7 +7,7 @@
 - `danger-full-access`：沙箱 `danger-full-access`，工具面在 `read-only` 之上加 `bash`、`skill`。
 - 任何取值 MUST NOT 开放委派工具（见「Locus 业务出站只能经受管 finish」）。
 
-新建、原地重建、改绑或迁移后重置以及 `stopped` 重新启用的入口行，`accessMode` 一律为 `read-only`，MUST NOT 继承旧值；来源干活主会话当前允许写文件也不改变这一点。
+新建、原地重建、改绑或迁移后重置以及 `stopped` 重新启用的入口行，`accessMode` 一律为 `read-only`，MUST NOT 继承旧值；来源工作主会话当前允许写文件也不改变这一点。
 
 飞书侧的变更命令 SHALL 统一为 `/access read|full`（短参 `-a`），只受理 allowlist 的发送者；非 allowlist 发送者按既有控制命令规则拒绝。原 `/scope`、`/tools`、`-s`、`-t` MUST NOT 再改变任何状态，回执 SHALL 提示改用 `/access`。管理面经 `access` 动作变更。
 
@@ -35,7 +35,7 @@
 - **THEN** 受影响的每一行 `accessMode = read-only`，不继承重建前的 `danger-full-access`
 
 #### Scenario: 来源会话可写时新建入口仍为只读
-- **GIVEN** 干活主会话 W 当前允许文件写入
+- **GIVEN** 工作主会话 W 当前允许文件写入
 - **WHEN** 以 W 新建入口并创建子会话
 - **THEN** 子会话在工作前经回读确认沙箱为 `read-only`，不静默继承 W 的写能力
 
@@ -229,7 +229,7 @@
 
 ### Requirement: 改绑到其他会话
 
-Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活主会话 W 已归档时，把该群的全部入口在一个事务内改挂到新的 W1，各入口在新 M 下按首条消息重新创建子会话，**不保留上下文**。本要求只规定 Host 语义；管理面入口见管理面的要求。
+Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前工作主会话 W 已归档时，把该群的全部入口在一个事务内改挂到新的 W1，各入口在新 M 下按首条消息重新创建子会话，**不保留上下文**。本要求只规定 Host 语义；管理面入口见管理面的要求。
 
 请求 SHALL 经通用 `locus-action` 路由发出：`{action: 'rebind', chatId, workSessionId, expectedLocusId, expectedRevision}`，围栏取群行的值。Host SHALL 依次检查，首个不满足者拒绝；拒绝时 MUST NOT 写入任何东西、MUST NOT 调用 `ensureLocusMain`：
 1. 群行存在，否则 `LOCUS_NOT_FOUND`；
@@ -340,7 +340,7 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 
 `generation`、`replacesLocusId`、`parentSessionId`、`parentLocusId`、`source`、`childSessionId`、`reservedChildSessionId`、`childComposition`、`busy`、`contextAnchor`、`permission`、`toolTier`、`retiredAt` 不再存在，MUST NOT 被读取或写入；`revision` MUST NOT 有 optional 回退。
 
-集合 SHALL 满足：每个话题行有同 `chatId` 的群行；`locusId` 唯一；`sessionId` 在全部行中唯一；话题行不含群行专属字段；同一 M 下至多一个群行带 `defaultQa`。该约束由 `validateLocusSetForStorage` 与每个写入口检查，行 schema 不满足时 Domain 打开失败。另外每条群行的 `locusMainSessionId` SHALL 在 `locus_mains` 中有记录，由 Host 启动对账在接收任何飞书消息之前检查。任一条件不满足时，Pet SHALL 保持未就绪，诊断中包含违规记录的 key 或 id，MUST NOT 跳过违规行继续服务。某个干活主会话从未建立 locus 主会话时，按它查找入口（如默认 Q&A）SHALL 返回“未建立”而不是报错；只有已读到群行而其 M 缺少配对时才是非法数据。
+集合 SHALL 满足：每个话题行有同 `chatId` 的群行；`locusId` 唯一；`sessionId` 在全部行中唯一；话题行不含群行专属字段；同一 M 下至多一个群行带 `defaultQa`。该约束由 `validateLocusSetForStorage` 与每个写入口检查，行 schema 不满足时 Domain 打开失败。另外每条群行的 `locusMainSessionId` SHALL 在 `locus_mains` 中有记录，由 Host 启动对账在接收任何飞书消息之前检查。任一条件不满足时，Pet SHALL 保持未就绪，诊断中包含违规记录的 key 或 id，MUST NOT 跳过违规行继续服务。某个工作主会话从未建立 locus 主会话时，按它查找入口（如默认 Q&A）SHALL 返回“未建立”而不是报错；只有已读到群行而其 M 缺少配对时才是非法数据。
 
 索引 SHALL 只有：`child-locus`（键为 `sessionId`，用于按 caller 查找）与 `parent-loci`（M → 群行的入口键）。不再有 `endpoint-current` 与持久的 `default-qa` 索引，也 MUST NOT 新增 `locus-id` 索引：按 `locusId` 查找 SHALL 直接扫表。所有索引都由 `repairDerivedIndexes` 按行推导，且在注册任何读取索引的回调（agent 创建、工具、飞书接收）之前完成。默认 Q&A 的查找路径 SHALL 为：W 的 active M → `parent-loci` → 带 `defaultQa` 的群行。locus 侧 MUST NOT 读取 `chat_bindings` 与 `invocation_channel`（两表的声明保留只读，供 Pet 其它旧子系统使用）。
 
@@ -380,7 +380,7 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 - **THEN** `validateLocusSetForStorage` 拒绝，写入不生效或 Pet 保持未就绪，诊断包含两个违规行的 key
 
 #### Scenario: 从未建立 locus 主会话的会话首次打开 Q&A
-- **GIVEN** 干活主会话 W 没有任何 locus 主会话
+- **GIVEN** 工作主会话 W 没有任何 locus 主会话
 - **WHEN** 所有者为 W 打开默认 Q&A
 - **THEN** 查找默认 Q&A 返回未建立，随后正常新建 locus 主会话与只含群行的 Q&A 群，该群行带 `defaultQa`
 
@@ -564,13 +564,13 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 - **WHEN** 它加载迁移脚本依赖的 v20 整形模块与旧形状预检模块
 - **THEN** 每个模块都被实际导入；任一模块缺失或无法导入时自检以非零码失败
 
-### Requirement: 管理面按干活会话分组且每个入口一行
+### Requirement: 管理面按工作会话分组且每个入口一行
 
-所有者管理面 SHALL 按**干活会话 W** 分组呈现，MUST NOT 以单条 locus 记录平铺，也 MUST NOT 按 locus 主会话 M 分组。每个 W 组 SHALL 只渲染一次 W 的标题、短码、工作区与可用性（`work`），并带出与之一一对应的 M（`locusMain`）；同一 W MUST NOT 被重复渲染为多份。W 下的群行或文档根行（无 `threadId` 的入口）是入口主行；话题行或评论行（带 `threadId` 的入口）SHALL 按 `chatId` 嵌套在同 `chatId` 的群行之下。
+所有者管理面 SHALL 按**工作会话 W** 分组呈现，MUST NOT 以单条 locus 记录平铺，也 MUST NOT 按 locus 主会话 M 分组。每个 W 组 SHALL 只渲染一次 W 的标题、短码、工作区与可用性（`work`），并带出与之一一对应的 M（`locusMain`）；同一 W MUST NOT 被重复渲染为多份。W 下的群行或文档根行（无 `threadId` 的入口）是入口主行；话题行或评论行（带 `threadId` 的入口）SHALL 按 `chatId` 嵌套在同 `chatId` 的群行之下。
 
 **每个入口恰好一行**：入口原地重建或改绑后 `locusId` 不变而 `revision` 递增，仍是同一行；管理面 MUST NOT 出现「历史 N 代」或任何折叠的历史行，MUST NOT 呈现 `generation`、`contextAnchor`、`permission`、`toolTier`、`childComposition`。每行 SHALL 以文字呈现状态，并把 `accessMode` 作为**单一值**呈现（「只读」或「完全访问」）：管理面 MUST NOT 把它拆成两个读数，也 MUST NOT 另显示「待应用」或与存储值不同的「生效值」。`danger-full-access` 的说明 SHALL 沿用既有披露：整机无边界、入口成员共享。「投递中」标记 SHALL 由投递表（该入口是否存在非终态的 current Delivery）推出，MUST NOT 依赖行上的 `busy` 字段。群行带 `reboundFrom` 时 SHALL 显示「改绑自」及原 W 的名称与短码。`revision` 仅作为变更请求的围栏，MUST NOT 呈现为所有者可见读数；用于客户端变更检测的快照 generation 同样 MUST NOT 呈现。
 
-#### Scenario: 同一干活会话的多个群只出现一次 W
+#### Scenario: 同一工作会话的多个群只出现一次 W
 - **WHEN** 一个 W 下有群 `oc_A` 与文档根 `doc:docx:D`
 - **THEN** 该 W 的标题、工作区与可用性只渲染一次，两个入口作为其下的群行呈现；其 M 作为该 W 的 locus 主会话只出现一次
 
@@ -598,20 +598,21 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 - **WHEN** 管理面呈现该群行
 - **THEN** 该行显示「改绑自」及原 W 的名称与短码；没有 `reboundFrom` 的群行不显示此项
 
-### Requirement: 管理面按干活会话与入口状态筛选，条件由筛选控件自述
+### Requirement: 管理面按工作会话与入口状态筛选，条件由筛选控件自述
 
-管理面 SHALL 默认只呈现入口仍可被服务（`not-created` / `active`）的关联；默认 MUST 只隐藏 `stopped` 与 `invalid` 入口。`not-created` 入口 MUST 在默认视图中可见。W 已归档的组 MUST NOT 被默认隐藏：它需要所有者处理（改绑），因此默认显示，并在其群行或文档根行上写明「来源会话已归档，可改绑」；所有者不想保留该群时，对群行执行「停止」即可使其被默认筛选隐藏。W 的可用性 MUST NOT 作为筛选维度。披露 SHALL 由筛选控件独自承担，MUST NOT 在列表内另加"隐藏出口"行：该行只是重复控件已经表达的条件，且把入口整体下推。筛选控件在收起状态 SHALL 表达当前生效的条件，MUST NOT 仅以一个无语义的图标表示；其浮层 SHALL 按桶给出**全量快照**的计数（含当前未勾选的桶），并 SHALL 允许逐桶勾选与一键重置。列表为空时 SHALL 说明可放宽的条件，MUST NOT 让入口读起来像已被删除。筛选 SHALL 只影响呈现，MUST NOT 改变任何持久化状态，也 MUST NOT 被表述为已修改数据。
+管理面的状态筛选 SHALL 恰有三个平铺选项：「在服务」（默认勾选）、「已停止 / 已失效」（默认不勾选）、「已归档」（默认不勾选）。「在服务」对应 `not-created` 与 `active` 入口，`not-created` 入口 MUST 在默认视图中可见；「已停止 / 已失效」对应 `stopped` 与 `invalid` 入口。工作会话 W 已归档的入口，无论其自身状态，SHALL 只计入「已归档」，不计入其它两个选项；因此 W 已归档的组默认隐藏，勾选「已归档」后才显示，并在其群行或文档根行上写明「来源会话已归档，可改绑」，「改绑到其他会话」按钮随之出现。已归档的 W 仍 SHALL 显示其标题。`state` 不在四值集合内的入口（显示为「未知状态」）SHALL 在任何筛选下都显示，且不计入任何选项；唯一例外是它位于已归档 W 之下时，计入「已归档」。各选项的计数之和 SHALL 等于入口总数（不含上述未知状态例外）。披露 SHALL 由筛选控件独自承担，MUST NOT 在列表内另加"隐藏出口"行：该行只是重复控件已经表达的条件，且把入口整体下推。筛选控件在收起状态 SHALL 表达当前生效的条件，MUST NOT 仅以一个无语义的图标表示；其浮层 SHALL 按桶给出**全量快照**的计数（含当前未勾选的桶），并 SHALL 允许逐桶勾选与一键重置。列表为空时 SHALL 说明可放宽的条件，MUST NOT 让入口读起来像已被删除。筛选 SHALL 只影响呈现，MUST NOT 改变任何持久化状态，也 MUST NOT 被表述为已修改数据。
 
 管理面不提供「重建」或「重新启用」动作：被显示出来的 `invalid` 行 SHALL 就地写明「下一条授权 @ 时自动重建」，`stopped` 行 SHALL 就地写明「在该入口对同一来源会话重新 `/bind` 可重新启用」。群行因状态被隐藏、其下仍有可见的话题行时，该群行 SHALL 作为容器保留并以文字标明其状态，MUST NOT 让可见话题行失去所属群。群行或文档根行上的「改绑到其他会话」 SHALL 直接位于该行上，MUST NOT 要求先展开折叠区或打开菜单。
 
-#### Scenario: W 已归档的组默认显示并提示可改绑
-- **WHEN** 某 W 已归档，其下群行为 `active` 或 `not-created`
-- **THEN** 默认视图显示该 W 组及其群行，群行上写明「来源会话已归档，可改绑」，并直接带有「改绑到其他会话」按钮；筛选浮层没有 W 可用性相关的桶
+#### Scenario: W 已归档的组默认隐藏，勾选「已归档」后显示并提示可改绑
+- **GIVEN** 某 W 已归档，其下群行为 `active` 或 `not-created`；筛选浮层恰有「在服务」「已停止 / 已失效」「已归档」三个选项，默认只勾选「在服务」
+- **WHEN** 所有者以默认筛选打开管理面，随后勾选「已归档」
+- **THEN** 默认视图不显示该 W 组；勾选后显示该 W 组，仍带有该 W 的标题，群行上写明「来源会话已归档，可改绑」，并直接带有「改绑到其他会话」按钮；该组入口只计入「已归档」，三个选项的计数之和等于入口总数
 
 #### Scenario: 停止已归档 W 的群行后被默认隐藏
-- **GIVEN** 某 W 已归档，其群行下没有其它仍在服务的话题行
-- **WHEN** 所有者对该群行执行「停止」并重新加载快照
-- **THEN** 该群行状态为「已停止」，被默认筛选隐藏；勾选「已停止 / 已失效」桶后重新出现
+- **GIVEN** 某 W 已归档，其群行为 `stopped`，群行下没有其它仍在服务的话题行
+- **WHEN** 所有者以默认筛选，或勾选「已停止 / 已失效」后，打开管理面
+- **THEN** 两种筛选下都不显示该组；只勾选「已归档」时显示，群行状态为「已停止」
 
 #### Scenario: 默认隐藏已停止与已失效的入口
 - **WHEN** 某入口为 `stopped` 或 `invalid`
@@ -674,7 +675,7 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 
 ### Requirement: 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用
 
-管理面 SHALL 在群行或文档根行上直接提供「改绑到其他会话」（不在折叠区或菜单内）；W 已归档时该行同时写明「来源会话已归档，可改绑」。控件 MUST NOT 在话题行或评论行提供。所有者 SHALL 输入目标干活会话的完整 sessionId；提交的请求体 SHALL 为 `{action: 'rebind', chatId, workSessionId, expectedLocusId, expectedRevision}`，其中 `expectedLocusId` 与 `expectedRevision` 取自该**群行**。
+管理面 SHALL 在群行或文档根行上直接提供「改绑到其他会话」（不在折叠区或菜单内）；W 已归档时该行同时写明「来源会话已归档，可改绑」。控件 MUST NOT 在话题行或评论行提供。所有者 SHALL 输入目标工作会话的完整 sessionId；提交的请求体 SHALL 为 `{action: 'rebind', chatId, workSessionId, expectedLocusId, expectedRevision}`，其中 `expectedLocusId` 与 `expectedRevision` 取自该**群行**。
 
 控件 SHALL 在下列任一情形置灰，并就地写明原因，点击置灰控件 MUST NOT 产生请求：
 1. 该群行所属 W 未归档，或其可用性无法证明已归档（含无冷读能力）——原因为「当前来源会话未归档，仅在其归档后可改绑」；
@@ -685,7 +686,7 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 提交前的确认 SHALL 说明后果：各入口在新会话下按首条消息重新创建子会话，**不保留上下文**；不迁移协作条目，不归档旧子会话，不向群里发通知。输入为空时提交 SHALL 不可用；输入原样（去除首尾空白）作为 `workSessionId` 提交。置灰只是便利，Host 的检查才是权威：Host 拒绝（具体情形与错误码见「改绑到其他会话」）时，管理面 SHALL 显示其确定性原因，保留输入，MUST NOT 乐观改写显示。成功后回执 SHALL 只出现在管理面，并标明新 W；重新加载的快照中，该群所有非 `stopped` 入口显示为「未创建」与「只读」，`stopped` 入口保持「已停止」，群行显示「改绑自」原 W。
 
 #### Scenario: 原 W 已归档时提交改绑
-- **GIVEN** 群行 `chatId = oc_A`、`locusId = L1`、`revision = 4`，其 W 已归档，该群下没有 current 投递
+- **GIVEN** 已勾选「已归档」；群行 `chatId = oc_A`、`locusId = L1`、`revision = 4`，其 W 已归档，该群下没有 current 投递
 - **WHEN** 所有者在群行上点击「改绑到其他会话」，输入 `S_NEW` 并确认
 - **THEN** 提交的请求体为 `{action: 'rebind', chatId: 'oc_A', workSessionId: 'S_NEW', expectedLocusId: 'L1', expectedRevision: 4}`；成功后管理面显示回执并标明新 W，且刷新后该群出现在新 W 组下，群行显示「改绑自」原 W
 
@@ -705,7 +706,7 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 - **THEN** 「改绑到其他会话」置灰并显示同一原因文字，不显示「来源会话已归档，可改绑」，不因无法证明而放行
 
 #### Scenario: 有入口在投递时置灰
-- **GIVEN** 其 W 已归档，但同 `chatId` 下某话题行存在 current 投递
+- **GIVEN** 已勾选「已归档」；其 W 已归档，但同 `chatId` 下某话题行存在 current 投递
 - **WHEN** 所有者查看群行
 - **THEN** 「改绑到其他会话」置灰并显示「该群有入口正在投递，待其结束后再改绑」；群行仍显示「来源会话已归档，可改绑」
 
@@ -765,13 +766,13 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前干活�
 
 系统 SHALL 在创建前核验所用 provider 确实不继承父上下文；无法证明时 SHALL 拒绝创建并如实报告，MUST NOT 静默退回复制父历史的 provider，也 MUST NOT 把拒绝表述为已建立独立 child。原地重建与改绑后新建的子会话 MUST NOT 继承旧子会话的历史，也不迁移协作条目；Host 只在首投前言中说明情况（见「投递 prompt 的首投前言与逐次档位声明」），不提供任何新的读取能力。已有 fork child 不受本条影响：它们不会被本 change 的创建路径重新创建，其历史 MUST NOT 被裁剪或静默改造。
 
-初始化任务书 SHALL 告知子会话在工作根、约束或相关事实不足时，可通过宿主原生消息能力询问 caller-bound 父会话即 locus 主会话，MUST NOT 允许指定其它 parent 或 locus。locus 主会话不知道干活现场的事实时 SHALL 经 dsh-collab 向干活主会话提问，再以 `locus_reply_child` 回复子会话。父会话回复只是对话事实，SHALL NOT 因此成为持久授权。答复只提供上下文事实；路径存在性不等于写授权。
+初始化任务书 SHALL 告知子会话在工作根、约束或相关事实不足时，可通过宿主原生消息能力询问 caller-bound 父会话即 locus 主会话，MUST NOT 允许指定其它 parent 或 locus。locus 主会话不知道干活现场的事实时 SHALL 经 dsh-collab 向工作主会话提问，再以 `locus_reply_child` 回复子会话。父会话回复只是对话事实，SHALL NOT 因此成为持久授权。答复只提供上下文事实；路径存在性不等于写授权。
 
 父子或 agent 间的 `agent-message` SHALL 只作为子会话上下文通信，不参与 Delivery 路由选择：它 MUST NOT 建立、修改、替换或撤销 current Delivery 已由 Host 绑定的回复目标。current Delivery 存续时，原始飞书投递 turn 结束后的 `agent-message` SHALL 可唤醒同一 child 继续处理该 current；没有唯一 current 时，`agent-message` MUST NOT 自行产生飞书 finish/wait 能力。GUI/user steer、来源不明的参与者消息与第二个已投递 Delivery仍 SHALL fail closed。
 
-caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、所属工作区、`accessMode` 与 Host 确认的 current Delivery 状态，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。无法确定的事实（如执行根）SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传干活主会话；官方结算通知送达 locus 主会话是明确例外，且收到通知不等于结论已被采纳为 agreed charter 或已被干活主会话知晓；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
+caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、所属工作区、`accessMode` 与 Host 确认的 current Delivery 状态，不允许模型指定其它目标。后续投递只带必要请求事实和查询引导，MUST NOT 每次重复全部说明。无法确定的事实（如执行根）SHALL 如实报告。系统 MUST NOT 自动汇总或把子会话结论回传工作主会话；官方结算通知送达 locus 主会话是明确例外，且收到通知不等于结论已被采纳为 agreed charter 或已被工作主会话知晓；对实际询问的定向答复不属于自动结算回报。所有者可主动查阅，项目资料 SHALL 按需读取，不自动共享兄弟子会话历史。
 
-干活主会话 SHALL 被表述为工作归属，locus 主会话为可询问的上下文来源，MUST NOT 因其父节点身份宣称已统合所有协作现场的最新认知。用户显式发起的查阅与汇总不属于自动回传；系统 SHALL 区分可发现、可读取与已采纳，缺少历史读取能力或权限时如实说明。当前模型 MUST NOT 宣称已提供 project 级自动知识同步或多人分布式协同。`chat_bindings` 的退休标记路径已删除：带旧标记的群在授权 at 时按 auto 规则从零创建。
+工作主会话 SHALL 被表述为工作归属，locus 主会话为可询问的上下文来源，MUST NOT 因其父节点身份宣称已统合所有协作现场的最新认知。用户显式发起的查阅与汇总不属于自动回传；系统 SHALL 区分可发现、可读取与已采纳，缺少历史读取能力或权限时如实说明。当前模型 MUST NOT 宣称已提供 project 级自动知识同步或多人分布式协同。`chat_bindings` 的退休标记路径已删除：带旧标记的群在授权 at 时按 auto 规则从零创建。
 
 #### Scenario: 长父历史不能冒充子身份
 - **WHEN** 活跃主会话已有大量 GUI 验收对话并创建新 Q&A child
@@ -811,7 +812,7 @@ caller-bound `pet_context` SHALL 提供当前 locus、局部项目入口、所�
 
 #### Scenario: 子会话发现不自动成为主会话认知
 - **WHEN** QA 子会话产生新发现，而用户未发起主会话查阅或采纳，也没有关联询问
-- **THEN** 系统不自动更新干活主会话，不将该发现呈现为干活主会话已知的项目决策；locus 主会话可能收到官方结算通知，但这不构成采纳
+- **THEN** 系统不自动更新工作主会话，不将该发现呈现为工作主会话已知的项目决策；locus 主会话可能收到官方结算通知，但这不构成采纳
 
 #### Scenario: 用户主动查阅受实际能力约束
 - **WHEN** 用户要求查阅一个可通过索引发现、但当前无权读取或缺少宿主读取能力的子会话历史
@@ -1342,8 +1343,8 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startActivation` 创建
 - **THEN** 存储以 `version-mismatch` 拒绝打开，Pet 保持未就绪，诊断给出可直接复制的离线迁移命令；没有任何入口被路由或投递
 
 #### Scenario: 主会话 preset 不影响子会话工具面
-- **WHEN** 用户的干活主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
-- **THEN** 子会话的父是 locus 主会话而非干活主会话，其已发布工具面只由 `locus-child` preset、Host 安装的作用域上限与 `accessMode` 收紧层决定，不含委派工具
+- **WHEN** 用户的工作主会话运行一个把委派工具注册进 agent 自有层的 preset（如 `standard`）
+- **THEN** 子会话的父是 locus 主会话而非工作主会话，其已发布工具面只由 `locus-child` preset、Host 安装的作用域上限与 `accessMode` 收紧层决定，不含委派工具
 
 #### Scenario: 冷恢复不回落到父组合
 - **WHEN** Host 重启后首次向一个 `active` 入口的子会话投递
@@ -1356,7 +1357,7 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startActivation` 创建
 
 ### Requirement: Locus 三层实体
 
-系统 SHALL 以三层表达一段协作：用户的**干活主会话**（W，普通一级会话，承担工作归属）←dsh-collab→ Pet 创建的一级 **locus 主会话**（M，与 W 1:1）→ 每个入口一个 **locus 子会话**（父为 M）。`loci` SHALL 一个入口一行，主键为入口身份 `endpointKey(chatId, threadId?)`；入口寻址（`chatId`/`threadId`、文档入口前缀规则）与本变更前相同。
+系统 SHALL 以三层表达一段协作：用户的**工作主会话**（W，普通一级会话，承担工作归属）←dsh-collab→ Pet 创建的一级 **locus 主会话**（M，与 W 1:1）→ 每个入口一个 **locus 子会话**（父为 M）。`loci` SHALL 一个入口一行，主键为入口身份 `endpointKey(chatId, threadId?)`；入口寻址（`chatId`/`threadId`、文档入口前缀规则）与本变更前相同。
 
 - **群行**（没有 `threadId`）独占 `locusMainSessionId`（M）、`workspaceId`（W 的项目工作区，即项目读取的允许根，不得以 Pet 运行目录替代）以及可选的 `reboundFrom`（改绑前已归档的 W）。
 - **话题行**不存这三个字段，需要时按 `chatId` 去群行读取。
@@ -1365,8 +1366,8 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startActivation` 创建
 W 与 M 的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSessionId, generation, status, spaceId}`），同一 W 任一时刻至多一个 active 的 M；`locus_mains.generation` 在 W 换 M 时递增。W SHALL 留在来源 workspace；M 及其官方子会话 SHALL 建在专用 `DSH Pet` workspace。`locus_mains.workspaceId` 记录 M 的工作区。位于来源工作区（不在 DSH Pet 工作区）的 M 视为不可用，SHALL 在下一条授权消息到来且其下各群都没有 current 投递时，走“换绑与归档按层处理”中的整 W 迁移，不改写旧会话 header、不搬移或删除历史。M SHALL 由 Host 设审批 `never`、沙箱 `read-only`，并以 deny 式 `tools.restrict` 挡掉 `bash`、`write`、`edit` 与委派类工具，保留 Host 层的 `collab_*` 工具；Pet 只对自己创建的 M 向 dsh-collab 声明 `owns`。
 
 #### Scenario: 同一干活主会话服务多个入口
-- **WHEN** 同一干活主会话分别关联开发群与该群的一个话题
-- **THEN** 两个入口的子会话都以同一个 M 为父；群行持有 `locusMainSessionId`，话题行不含该字段，按 `chatId` 解析得到同一个 M；`locus_mains` 中该干活主会话只有一条 active 记录
+- **WHEN** 同一工作主会话分别关联开发群与该群的一个话题
+- **THEN** 两个入口的子会话都以同一个 M 为父；群行持有 `locusMainSessionId`，话题行不含该字段，按 `chatId` 解析得到同一个 M；`locus_mains` 中该工作主会话只有一条 active 记录
 
 #### Scenario: 群行独占 M 与工作区
 - **GIVEN** 群 G 有群行与一条话题行
@@ -1379,8 +1380,8 @@ W 与 M 的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSess
 - **THEN** `validateLocusSetForStorage` 拒绝，写入不生效或 Pet 保持未就绪，诊断包含该话题行的 key
 
 #### Scenario: locus 主会话归 DSH Pet，入口仍关联干活项目
-- **WHEN** 为 nexus 等来源工作区的干活主会话建立或替换 locus 主会话
-- **THEN** 干活主会话留在来源工作区，locus 主会话运行且归属 DSH Pet，标题为 `[locus] <干活主会话名>`（无标题时用干活会话短码），群行 `workspaceId` 仍为来源项目；旧工作区中的 locus 主会话经既有空闲迁移协议替换，历史保留
+- **WHEN** 为 nexus 等来源工作区的工作主会话建立或替换 locus 主会话
+- **THEN** 工作主会话留在来源工作区，locus 主会话运行且归属 DSH Pet，标题为 `[locus] <工作主会话名>`（无标题时用工作会话短码），群行 `workspaceId` 仍为来源项目；旧工作区中的 locus 主会话经既有空闲迁移协议替换，历史保留
 
 #### Scenario: locus 主会话工具面锁死
 - **WHEN** 读取 locus 主会话的已发布工具面与会话设置
@@ -1397,7 +1398,7 @@ W 与 M 的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSess
 
 ### Requirement: 入口建立统一为一条路径
 
-auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionChatLocked`，只在“干活主会话从哪来”上不同：auto（未绑定入口首个授权 at）由 Pet 在 default workspace 新建 W；Q&A 以所有者打开的会话为 W；`/bind` 以所有者指定的普通一级会话为 W。显式 W SHALL 在任何外部创建之前解析。
+auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionChatLocked`，只在“工作主会话从哪来”上不同：auto（未绑定入口首个授权 at）由 Pet 在 default workspace 新建 W；Q&A 以所有者打开的会话为 W；`/bind` 以所有者指定的普通一级会话为 W。显式 W SHALL 在任何外部创建之前解析。
 
 **从零创建**（该 `chatId` 下没有任何行）无论由哪个入口触发——群首次 at、话题首次 at、群 `/bind`、话题 `/bind`、文档评论——SHALL 得到同一结构：W → M → {群行, 触发入口的话题行（若触发入口是话题）}。建立 SHALL 先复用 W 的 active M，没有则新建 M 并按“协作空间由干活主会话与 locus 主会话两个普通成员组成”建立空间，然后在**一次** `commitProvisioning` 中写入全部行，MUST NOT 分两次提交，MUST NOT 为同一次触发创建第二个 W 或 M。每一行 SHALL 为 `state = not-created`、持有预留的 `sessionId`、`accessMode = read-only`；建立 MUST NOT 预先创建子会话。Q&A 只建群行，且该群行带 `defaultQa`。
 
@@ -1409,7 +1410,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 #### Scenario: auto 建立
 - **WHEN** 一个从未关联的群收到所有者的首个 at
-- **THEN** Pet 新建干活主会话与 locus 主会话，建立协作空间，群行为 `not-created`，随后按首条消息创建子会话并处理该消息
+- **THEN** Pet 新建工作主会话与 locus 主会话，建立协作空间，群行为 `not-created`，随后按首条消息创建子会话并处理该消息
 
 #### Scenario: 话题内首次 bind 一次建出群行和话题行
 - **GIVEN** 话题群 C 从未建立过任何行；会话 W1 未归档、不是子会话
@@ -1427,7 +1428,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 - **THEN** 在 M1 下追加话题行 `(C, T)`；`ensureLocusMain`、`createAutoWorkSession` 调用 0 次，没有新的 provisioning 操作
 
 #### Scenario: 绑定到已有干活主会话复用 locus 主会话
-- **GIVEN** 干活主会话 W 已有 active locus 主会话 M
+- **GIVEN** 工作主会话 W 已有 active locus 主会话 M
 - **WHEN** 所有者把另一个群 `/bind` 到 W
 - **THEN** 不新建 locus 主会话，新群行的 `locusMainSessionId` 为 M
 
@@ -1457,7 +1458,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 - **THEN** `/bind W1`（W1 ≠ W0）以 `EXPLICIT_PARENT_CONFLICT` 拒绝，不触碰 Host；最终只有 W0 → M0 下的群行，没有 W1 的 M，没有孤立话题行
 
 #### Scenario: 同一 W 的 Q&A 与首次 bind 并发
-- **GIVEN** 干活主会话 W 尚无 locus 主会话
+- **GIVEN** 工作主会话 W 尚无 locus 主会话
 - **WHEN** 为 W 打开 Q&A 与把另一个群 `/bind` 到 W 同时发生
 - **THEN** main lease 保证二者串行：恰新建 1 个 M 和 1 个协作空间，两个群行都在该 M 下；后到者复用 M，`ensureLocusMain` 对外部的创建合计 1 次
 
@@ -1479,7 +1480,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 不可用状态 SHALL 按层、按下列规则处理；所有写当前行的操作 SHALL 以 `{expectedLocusId, expectedRevision}` 做 CAS。
 
-- 干活主会话（W）被归档时，其全部入口 SHALL 停止服务，MUST NOT 改写行的 `state`；授权 at SHALL 得到有限次回执，说明来源会话已归档并提示所有者在管理面改绑；MUST NOT 自动复活或自动换来源。
+- 工作主会话（W）被归档时，其全部入口 SHALL 停止服务，MUST NOT 改写行的 `state`；授权 at SHALL 得到有限次回执，说明来源会话已归档并提示所有者在管理面改绑；MUST NOT 自动复活或自动换来源。
 - 子会话组合失败 SHALL 只分两类：
   - **A 类**：子会话丢失，或身份无法证明 → 入口行置为 `invalid`，下一条授权 at SHALL **原地重建**：同一行预留新的 `sessionId`、`state = not-created`、`revision + 1`，`locusId` 不变，未注入的 backlog 改指新 `sessionId`（与创建失败轮换同一机制）；不影响同一 M 下的其它入口。
   - **B 类**：其它任何 `composeLocusChild`、访问策略（含 `accessMode` 回读不符、写开关关闭时遇到 `danger-full-access`）或 runtime 能力失败 → 拒绝发布，本次投递以确定性诊断失败结算，**入口行不改写**；首次创建时的失败按“子会话在首条消息到达时创建”轮换 `sessionId`，`accessMode` 与 `state` 不变。
@@ -1494,7 +1495,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 - 改绑要求 W 已归档、迁移要求 W 未归档，二者互斥。所有者停止的入口 MUST NOT 被上述任一路径复活。
 
 #### Scenario: 干活主会话归档
-- **WHEN** 干活主会话 W 被归档后，W 名下某群收到所有者 at
+- **WHEN** 工作主会话 W 被归档后，W 名下某群收到所有者 at
 - **THEN** 不投递给子会话，入口行 `state` 不被改写，群内收到“来源会话已归档，请在管理面改绑”回执；同一入口的后续 at 在达到次数上限后不再回执
 
 #### Scenario: 子会话不可用只换该入口一代
@@ -1605,7 +1606,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 ### Requirement: 管理面的会话可用性以持久证据判定
 
-管理面展示干活会话 W、locus 主会话 M 与子会话的可用性时 SHALL 以持久化日志的冷读结果为证据，MUST NOT 以会话当前是否已加载到内存作为存在性判据。已归档 SHALL 优先于可读性判定。宿主不具备冷读能力时 SHALL 省略该事实，MUST NOT 以宿主自身限制推断会话缺失。`not-created` 入口的 `sessionId` 只是预留值，对应会话尚不存在：管理面 MUST NOT 对其冷读，MUST NOT 把它报为「不可用」，SHALL 就地显示「尚未创建」。
+管理面展示工作会话 W、locus 主会话 M 与子会话的可用性时 SHALL 以持久化日志的冷读结果为证据，MUST NOT 以会话当前是否已加载到内存作为存在性判据。已归档 SHALL 优先于可读性判定。宿主不具备冷读能力时 SHALL 省略该事实，MUST NOT 以宿主自身限制推断会话缺失。`not-created` 入口的 `sessionId` 只是预留值，对应会话尚不存在：管理面 MUST NOT 对其冷读，MUST NOT 把它报为「不可用」，SHALL 就地显示「尚未创建」。
 
 同一会话在未发生任何状态变化时，其可用性读数 MUST NOT 因加载与卸载而改变。
 
@@ -1628,15 +1629,15 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 ### Requirement: 管理面的标识以确定性短码表达且名称与短码成对
 
-管理面 SHALL 为每类对象提供由真实标识**确定性派生**的短码，并以该短码作为线索即可复制完整标识。以下每类对象各有一条明确规则：locus、干活会话 W 与 locus 主会话 M 与子会话（同属会话类，靠角色词区分）、群与会话入口、话题、文档入口、评论入口、工作区。文档入口与评论入口的规则：
+管理面 SHALL 为每类对象提供由真实标识**确定性派生**的短码，并以该短码作为线索即可复制完整标识。以下每类对象各有一条明确规则：locus、工作会话 W 与 locus 主会话 M 与子会话（同属会话类，靠角色词区分）、群与会话入口、话题、文档入口、评论入口、工作区。文档入口与评论入口的规则：
 - 文档入口：源子串取 `chatId` 中 `doc:docx:` 之后的 token，显示标签为 `doc·`，兜底名为 `文档 · <短码>`，名称取 `drive +inspect` 返回的文档标题。
 - 评论入口：`comment_id` 是按时间递增的数字，前缀相同的情况很常见，因此源子串取 `threadId`（`comment_id`）的**逆序**字符串，使截取的前缀落在末尾数字上。显示标签为 `cmt·`，兜底名为 `评论 · <短码>`。
 - 碰撞时按类别加长，沿用现有规则。
-- 不同类别靠显示标签区分，不依赖源子串不同。短码 MUST NOT 被用作任何请求的输入或身份来源，包括「改绑到其他会话」中输入的目标干活会话：该输入 SHALL 是完整 sessionId，管理面 MUST NOT 把短码解析为 sessionId。当平台提供可辨识名称时，管理面 SHALL 优先呈现名称，且名称 SHALL 与短码成对出现——名称单独 MUST NOT 构成身份。平台未提供名称时，管理面 SHALL 呈现由角色词与短码构成的兜底名，MUST NOT 猜测平台事实（例如在 chat 类型未知时写成「群」）。原始标识 MUST NOT 作为入口行的主要标识，SHALL 收在可展开的标识区并可复制。
+- 不同类别靠显示标签区分，不依赖源子串不同。短码 MUST NOT 被用作任何请求的输入或身份来源，包括「改绑到其他会话」中输入的目标工作会话：该输入 SHALL 是完整 sessionId，管理面 MUST NOT 把短码解析为 sessionId。当平台提供可辨识名称时，管理面 SHALL 优先呈现名称，且名称 SHALL 与短码成对出现——名称单独 MUST NOT 构成身份。平台未提供名称时，管理面 SHALL 呈现由角色词与短码构成的兜底名，MUST NOT 猜测平台事实（例如在 chat 类型未知时写成「群」）。原始标识 MUST NOT 作为入口行的主要标识，SHALL 收在可展开的标识区并可复制。
 
 #### Scenario: 同名入口仍可区分
 
-- **WHEN** 同一干活会话下两个入口的平台名称同为「答疑 · DSH」
+- **WHEN** 同一工作会话下两个入口的平台名称同为「答疑 · DSH」
 - **THEN** 两行分别显示名称并各自附带不同的短码，所有者可区分二者
 
 #### Scenario: 名称不可得时不猜测
@@ -1671,11 +1672,11 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 ### Requirement: 管理面提供双向可达且目标不可达时 fail closed
 
-管理面 SHALL 提供两种读法：按干活会话（列出该 W 的全部入口）与按入口（列出该入口及其 W、M 与子会话）。两种读法 SHALL 由同一份管理快照的同源索引产生，同一对象的呈现 MUST NOT 相互矛盾。每个入口行 SHALL 提供跳转到该入口子会话与对应飞书入口的控件；按入口读法 SHALL additionally 提供跳转到 W 与 M 的控件。目标已归档、已失效、尚未创建或不可达时，管理面 MUST NOT 提供可用的跳转，SHALL 就地说明原因。话题入口的跳转 SHALL 指向该话题，无法证明话题身份时 SHALL 退化为所属群并如实说明，MUST NOT 伪造目标。
+管理面 SHALL 提供两种读法：按工作会话（列出该 W 的全部入口）与按入口（列出该入口及其 W、M 与子会话）。两种读法 SHALL 由同一份管理快照的同源索引产生，同一对象的呈现 MUST NOT 相互矛盾。每个入口行 SHALL 提供跳转到该入口子会话与对应飞书入口的控件；按入口读法 SHALL additionally 提供跳转到 W 与 M 的控件。目标已归档、已失效、尚未创建或不可达时，管理面 MUST NOT 提供可用的跳转，SHALL 就地说明原因。话题入口的跳转 SHALL 指向该话题，无法证明话题身份时 SHALL 退化为所属群并如实说明，MUST NOT 伪造目标。
 
 #### Scenario: 两种读法同源一致
 
-- **WHEN** 所有者先在按干活会话读法查看某 W 的入口，再切到按入口读法查看该入口
+- **WHEN** 所有者先在按工作会话读法查看某 W 的入口，再切到按入口读法查看该入口
 - **THEN** 两个方向指向同一个 `locusId`，同一个 W、同一个 M 与同一个子会话 `sessionId`
 
 #### Scenario: 父会话已归档时不可跳转
@@ -1695,7 +1696,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 ### Requirement: 默认 Q&A 在管理面只读呈现
 
-管理面 SHALL 以与其它 locus 相同的行渲染并额外标记默认 Q&A 入口，SHALL NOT 将其单独列举为一组重复条目。默认 Q&A 由群行上的 `defaultQa` 标记表达，因此该标记 SHALL 只出现在群行上，MUST NOT 出现在话题行。管理面 MUST NOT 提供创建默认答疑群的入口；当某干活会话 W 尚无默认 Q&A 时，管理面 SHALL 说明其创建路径位于 Pet 轮盘，MUST NOT 就地提供创建控件。
+管理面 SHALL 以与其它 locus 相同的行渲染并额外标记默认 Q&A 入口，SHALL NOT 将其单独列举为一组重复条目。默认 Q&A 由群行上的 `defaultQa` 标记表达，因此该标记 SHALL 只出现在群行上，MUST NOT 出现在话题行。管理面 MUST NOT 提供创建默认答疑群的入口；当某工作会话 W 尚无默认 Q&A 时，管理面 SHALL 说明其创建路径位于 Pet 轮盘，MUST NOT 就地提供创建控件。
 
 #### Scenario: 默认 Q&A 只做标记
 
@@ -1709,7 +1710,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 ### Requirement: 管理面不提供新建外部资源的入口
 
-管理面 MUST NOT 提供需要手工输入 endpoint 或会话标识的绑定控件，MUST NOT 以裸标识列表作为可执行的创建入口。关联的建立 SHALL 由飞书入站消息（含 allowlist 的 `/bind` 命令）完成。**唯一例外**是群行或文档根行上的「改绑到其他会话」：它 MAY 要求输入目标干活会话的完整 sessionId，且该输入 MUST NOT 出现在话题行、评论行或任何其它控件中；它不创建新的入口或目标 W，目标必须是已存在的普通一级会话，由 Host 校验；Host MAY 为目标 W 建所需的 M 与协作空间。
+管理面 MUST NOT 提供需要手工输入 endpoint 或会话标识的绑定控件，MUST NOT 以裸标识列表作为可执行的创建入口。关联的建立 SHALL 由飞书入站消息（含 allowlist 的 `/bind` 命令）完成。**唯一例外**是群行或文档根行上的「改绑到其他会话」：它 MAY 要求输入目标工作会话的完整 sessionId，且该输入 MUST NOT 出现在话题行、评论行或任何其它控件中；它不创建新的入口或目标 W，目标必须是已存在的普通一级会话，由 Host 校验；Host MAY 为目标 W 建所需的 M 与协作空间。
 
 管理面 SHALL 对既有入口只提供展示、导航，以及三个变更动作：**停止**、**访问模式**、**改绑到其他会话**；MUST NOT 提供绑定、解绑、归档、重建、替换父会话、权限或工具档位分别设置、执行根确认等动作。落到同一持久结果的近义动作 MUST NOT 以多个并列控件呈现：所有者无法据名字区分它们，只会承担误操作风险；若将来某个动作确有不同后果，SHALL 以该后果命名而不是以同义词命名。
 
@@ -1750,7 +1751,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 #### Scenario: 未知状态值不伪装成活跃
 - **GIVEN** 快照中某入口的 `state` 为 `retired`
 - **WHEN** 管理面呈现该入口
-- **THEN** 该行显示「未知状态」，不显示为「活跃」，也不提供「停止」以外会改变其状态的动作
+- **THEN** 该行显示「未知状态」，不显示为「活跃」，也不提供「停止」以外会改变其状态的动作；在默认筛选以及取消勾选任一选项后该行仍然显示，且不计入任何选项的计数（位于已归档 W 之下时计入「已归档」）
 
 ## REMOVED Requirements
 
@@ -1785,9 +1786,9 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 **Migration**: 见「持久层 v20 只承载同构的 locus 入口行」。`chat_bindings` 退休标记路径随之删除，locus 侧不再读取 `chat_bindings`。
 
 ### Requirement: 管理面按入口聚合且区分代际
-**Reason**: 入口重整为一行一入口，没有代际：`generation`、`replacesLocusId` 与「历史 N 代」整体删除，话题的嵌套关系也不再依赖 `parentLocusId`；同时分组的单位从 locus 主会话 M 改为干活会话 W。原要求的名称与全部场景（「同一入口的多代聚合为一行」等）都以代际为前提，无法在保留场景名的前提下改写。
-**Migration**: 由新增要求「管理面按干活会话分组且每个入口一行」取代。
+**Reason**: 入口重整为一行一入口，没有代际：`generation`、`replacesLocusId` 与「历史 N 代」整体删除，话题的嵌套关系也不再依赖 `parentLocusId`；同时分组的单位从 locus 主会话 M 改为工作会话 W。原要求的名称与全部场景（「同一入口的多代聚合为一行」等）都以代际为前提，无法在保留场景名的前提下改写。
+**Migration**: 由新增要求「管理面按工作会话分组且每个入口一行」取代。
 
 ### Requirement: 管理面按父会话与入口状态筛选，条件由筛选控件自述
 **Reason**: 「父会话」在旧面板里实际指 M，而归档判断看的是 W；新的筛选维度是 W 的可用性。入口状态集合也由六值收敛为四值，且 `stopped` / `invalid` 的恢复路径不再是管理面的「重建」按钮（`invalid` 在下一条授权 @ 时原地重建，`stopped` 在飞书内对同一 W 重新 `/bind`），原要求中「恢复路径位于该行本身」的约束已不适用。
-**Migration**: 由新增要求「管理面按干活会话与入口状态筛选，条件由筛选控件自述」取代。
+**Migration**: 由新增要求「管理面按工作会话与入口状态筛选，条件由筛选控件自述」取代。

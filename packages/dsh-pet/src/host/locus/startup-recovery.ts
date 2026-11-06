@@ -12,7 +12,19 @@
 
 import { interruptedTurnClosers } from '@deepseek-ai/dsh-session'
 import type { DeliveryRecord } from './delivery.js'
-import type { LocusStartupDeliveryProof } from './persistence.js'
+
+/**
+ * Proof supplied by the live Host for one interrupted Delivery, keyed by the
+ * Delivery's own `(locusId, sessionId)` identity (the proof never names a
+ * generation). `running`: the exact child turn is still open. `unconsumed`:
+ * a `current` row whose message never entered a turn and is no longer queued.
+ * `interrupted`: the turn that entered the message ended `interrupted`, so
+ * nothing will ever settle it.
+ */
+export type LocusStartupDeliveryProof =
+  | { readonly deliveryId: string; readonly executionId: string; readonly turnId: string; readonly state: 'running' }
+  | { readonly deliveryId: string; readonly executionId: string; readonly state: 'unconsumed' }
+  | { readonly deliveryId: string; readonly executionId: string; readonly turnId: string; readonly state: 'interrupted' }
 
 interface SessionEventLike {
   readonly type?: unknown
@@ -84,7 +96,7 @@ export function proveLiveStartupDelivery(
   }
   if (openTurn === undefined || exactMessages !== 1) return undefined
 
-  const turnId = `${delivery.childSessionId}#${String(openTurn)}`
+  const turnId = `${delivery.sessionId}#${String(openTurn)}`
   if (delivery.turnId !== undefined && delivery.turnId !== turnId) return undefined
   return {
     deliveryId: delivery.deliveryId,
@@ -261,7 +273,7 @@ export function proveInterruptedStartupDelivery(
   if (openTurn !== undefined) return undefined
   if (entries !== 1 || enteredTurn === undefined || interruptedTurn === undefined) return undefined
 
-  const turnId = `${delivery.childSessionId}#${String(interruptedTurn)}`
+  const turnId = `${delivery.sessionId}#${String(interruptedTurn)}`
   if (delivery.turnId !== undefined && delivery.turnId !== turnId) return undefined
   return {
     deliveryId: delivery.deliveryId,
@@ -404,7 +416,7 @@ export async function proveStartupDeliveryFromColdRead(input: {
 }): Promise<LocusStartupDeliveryProof | undefined> {
   const read = await readChildLog(
     input.query,
-    { parentSessionId: input.parentSessionId, childSessionId: input.delivery.childSessionId },
+    { parentSessionId: input.parentSessionId, childSessionId: input.delivery.sessionId },
     input.signal,
   )
   if (!read.ok) {

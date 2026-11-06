@@ -1,39 +1,25 @@
 /**
- * Pure presentation model for the locus management surface.
+ * Pure presentation model for the v20 locus management surface
+ * (pet-locus-isomorphic-entries D10).
  *
  * Everything here is a function of the Host snapshot
- * (`PetLocusManagementView`) and nothing else: no fetch, no React, no storage.
- * Two reasons that separation is worth a module of its own.
- *
- * First, the decision rules are the part worth testing. The previous surface
- * pinned itself with `readFileSync`-style source checks, which can only prove
- * that a string was written — never that the right locus was grouped under the
- * right session for a snapshot containing a topic, a retired generation or an
- * archived parent.
- *
- * Second, every fact shown must come from the Host. This module therefore
- * derives *labels and groupings* only:
- *
- *  - it never decides which generation is current; the Host's
- *    `discovery.byEndpoint[].current` does (aggregate.ts treats
- *    provisioning|active|switching as current and invalid|stopped|retired as
- *    unavailable), and re-deriving that here would create a second truth;
- *  - it never guesses a platform fact the Host did not provide — a chat whose
- *    `chatType` is unknown is an 「入口」, never a 「群」;
- *  - it never turns a display alias into an identity: short codes are derived
- *    for display and are not accepted as input anywhere.
+ * (`PetLocusManagementViewV20`): no fetch, no React, no storage. It derives
+ * labels, groupings, filter buckets, gating reasons and request bodies only;
+ * every fact (state, availability, in-flight, the write switch) comes from the
+ * Host, and short codes are display aliases never accepted as input.
  */
 
 import type {
-  PetLocusConfirmAnchorAction,
-  PetLocusChildSessionView,
+  PetLocusAccessActionV20,
+  PetLocusAccessModeV20,
+  PetLocusChatViewV20,
   PetLocusEndpointView,
-  PetLocusMainSessionView,
-  PetLocusManagementView,
-  PetLocusSource,
-  PetLocusState,
-  PetLocusView,
-  PetLocusWorkspaceView,
+  PetLocusEntryViewV20,
+  PetLocusManagementViewV20,
+  PetLocusRebindActionV20,
+  PetLocusStateV20,
+  PetLocusStopActionV20,
+  PetLocusWorkViewV20,
 } from '../wire.js'
 
 // ---------------------------------------------------------------------------
@@ -172,7 +158,7 @@ export function endpointHandleLabel(endpoint: PetLocusEndpointView, code: string
 }
 
 /** The identifier a locus's short code is derived from. */
-export function locusHandleId(locus: PetLocusView): string {
+export function locusHandleId(locus: Pick<PetLocusEntryViewV20, 'locusId'>): string {
   return locus.locusId
 }
 
@@ -199,137 +185,6 @@ const COMMENT_HANDLE_PREFIX = 'cmt:'
 /** Whether an endpoint is a document entry (root or comment). */
 export function isDocEndpointView(endpoint: Pick<PetLocusEndpointView, 'chatId'>): boolean {
   return endpoint.chatId.startsWith('doc:')
-}
-
-// ---------------------------------------------------------------------------
-// Vocabulary
-// ---------------------------------------------------------------------------
-
-/**
- * Owner-facing names for the six lifecycle states.
- *
- * All six are listed on purpose. `provisioning` is a real transient state since
- * the tree is built on demand by the first qualifying message, and it can
- * persist when provisioning fails — a surface that skips it would show an entry
- * under construction as blank.
- */
-export const LOCUS_STATE_LABELS: Record<PetLocusState, string> = {
-  provisioning: '准备中',
-  'not-created': '待首条消息',
-  active: '活跃',
-  switching: '切换中',
-  invalid: '已失效',
-  stopped: '已停止',
-  retired: '已退役',
-}
-
-/** Colours are a second channel only: every state also has a word. */
-export type LocusTone = 'on' | 'warn' | 'off' | 'gone'
-
-const LOCUS_STATE_TONES: Record<PetLocusState, LocusTone> = {
-  active: 'on',
-  'not-created': 'on',
-  provisioning: 'warn',
-  switching: 'warn',
-  stopped: 'warn',
-  invalid: 'off',
-  retired: 'gone',
-}
-
-/**
- * The label for one lifecycle state.
- *
- * Unknown input degrades to an explicit word rather than an empty cell: the
- * union is closed today, but a Host that starts reporting a new state must be
- * visible on screen instead of silently blank.
- * @param state - State reported by the Host.
- * @returns the owner-facing label.
- */
-export function locusStateLabel(state: PetLocusState | string): string {
-  return LOCUS_STATE_LABELS[state as PetLocusState] ?? '未知状态'
-}
-
-/** The tone for one lifecycle state, defaulting to the neutral "retired" grey. */
-export function locusStateTone(state: PetLocusState | string): LocusTone {
-  return LOCUS_STATE_TONES[state as PetLocusState] ?? 'gone'
-}
-
-/**
- * Where an association came from.
- *
- * `qa-created` reads as 「答疑群建立」, NOT 「默认 Q&A」. The two are different
- * facts: this field records which action created the association, while
- * `isDefaultQa` records whether it is the session's default entry. Conflating
- * them labelled非默认 loci as 「默认 Q&A」.
- */
-export const LOCUS_SOURCE_LABELS: Record<PetLocusSource, string> = {
-  auto: '自动建立',
-  inherited: '继承群级来源',
-  explicit: '显式绑定',
-  'qa-created': '答疑群建立',
-}
-
-/** The label for one association source. */
-export function locusSourceLabel(source: PetLocusSource | string): string {
-  return LOCUS_SOURCE_LABELS[source as PetLocusSource] ?? '未知来源'
-}
-
-/**
- * How the entry-state half of the filter reads on the collapsed filter button.
- *
- * A filter that hides terminal entries by default must say so in its closed
- * state too: the button is the only thing on screen while the popover is shut,
- * and an owner whose stopped entry is missing needs to see that entry states —
- * not only parent states — are part of the condition.
- * @param states - Entry states currently selected.
- * @returns the short owner-facing condition label.
- */
-export function entryStateFilterLabel(states: readonly PetLocusState[]): string {
-  const selected = new Set(states)
-  if (ALL_ENTRY_STATES.every(state => selected.has(state))) return '全部'
-  if (
-    selected.size === SERVABLE_ENTRY_STATES.length &&
-    SERVABLE_ENTRY_STATES.every(state => selected.has(state))
-  ) {
-    return '在服务'
-  }
-  return `${selected.size}/${ALL_ENTRY_STATES.length} 类`
-}
-
-/** Parent-session availability collapsed into the filter's three buckets. */
-export type ParentAvailability = 'available' | 'archived' | 'unverified'
-
-export const PARENT_AVAILABILITY_LABELS: Record<ParentAvailability, string> = {
-  available: '可用',
-  archived: '已归档',
-  // `missing` (the session cannot be opened) and an omitted fact (the Host
-  // could not resolve one) are both "not proven usable", which is what this
-  // bucket means; they are not the same evidence, so the label names both.
-  unverified: '未核验 / 不可用',
-}
-
-/**
- * Collapse a session's reported availability into a filter bucket.
- * @param session - Main session facts, when the Host provided them.
- * @returns the bucket used by the parent-state filter.
- */
-export function parentAvailabilityOf(session: PetLocusMainSessionView | undefined): ParentAvailability {
-  if (session?.availability === 'available') return 'available'
-  if (session?.availability === 'archived') return 'archived'
-  return 'unverified'
-}
-
-/** Owner-facing label for a session availability value. */
-export function sessionAvailabilityLabel(availability: 'available' | 'archived' | 'missing' | undefined): string {
-  if (availability === 'available') return '可用'
-  if (availability === 'archived') return '已归档'
-  if (availability === 'missing') return '不可用'
-  return '未核验'
-}
-
-/** Whether a session reported by the Host can be navigated to. */
-export function isSessionOpenable(availability: 'available' | 'archived' | 'missing' | undefined): boolean {
-  return availability !== 'archived' && availability !== 'missing'
 }
 
 // ---------------------------------------------------------------------------
@@ -413,595 +268,324 @@ export function chatKey(endpoint: PetLocusEndpointView): string {
   return `chat:${endpoint.chatId}`
 }
 
-/** One entry's full generation history, newest first. */
-export interface LocusFamily {
+// ---------------------------------------------------------------------------
+// Vocabulary
+// ---------------------------------------------------------------------------
+
+/** Owner-facing names for exactly the four v20 states. */
+export const LOCUS_STATE_LABELS: Record<PetLocusStateV20, string> = {
+  'not-created': '未创建',
+  active: '活跃',
+  invalid: '已失效',
+  stopped: '已停止',
+}
+
+/** Whether a Host-reported state is one of the four v20 values. */
+export function isKnownLocusState(state: string): state is PetLocusStateV20 {
+  return Object.prototype.hasOwnProperty.call(LOCUS_STATE_LABELS, state)
+}
+
+/**
+ * The label for one state. A value outside the four (a removed `retired` or
+ * `provisioning`, or anything new) reads 「未知状态」, never blank and never
+ * active.
+ */
+export function locusStateLabel(state: string): string {
+  return isKnownLocusState(state) ? LOCUS_STATE_LABELS[state] : '未知状态'
+}
+
+/** Colours are a second channel only: every state also has a word. */
+export type LocusTone = 'on' | 'warn' | 'off' | 'gone'
+
+const LOCUS_STATE_TONES: Record<PetLocusStateV20, LocusTone> = {
+  active: 'on',
+  'not-created': 'on',
+  stopped: 'warn',
+  invalid: 'off',
+}
+
+export function locusStateTone(state: string): LocusTone {
+  return isKnownLocusState(state) ? LOCUS_STATE_TONES[state] : 'gone'
+}
+
+/** The one access value, as the owner reads it. */
+export const LOCUS_ACCESS_LABELS: Record<PetLocusAccessModeV20, string> = {
+  'read-only': '只读',
+  'danger-full-access': '完全访问',
+}
+
+/** Shown wherever full access is in effect (spec 访问模式以单值呈现). */
+export const LOCUS_FULL_ACCESS_NOTE =
+  '整机无边界、入口成员共享：可在本机执行命令、使用本机飞书凭据；出站 guard 仅防误操作，不是安全边界'
+
+type SessionAvailability = 'available' | 'archived' | 'missing' | 'unknown' | undefined
+
+/** Owner-facing label for a session availability value. */
+export function sessionAvailabilityLabel(availability: SessionAvailability): string {
+  if (availability === 'available') return '可用'
+  if (availability === 'archived') return '已归档'
+  if (availability === 'missing') return '不可用'
+  return '未核验'
+}
+
+/**
+ * Why a session jump is unavailable, or undefined when it is available.
+ * `unknown` is a cold read that proved nothing: it fails closed.
+ */
+export function sessionJumpBlock(availability: SessionAvailability): string | undefined {
+  if (availability === 'archived') return '会话已归档，无法打开'
+  if (availability === 'missing') return '会话不可用，无法打开'
+  if (availability === 'unknown') return '会话可用性未核验，无法打开'
+  return undefined
+}
+
+/** The text that stands for the child session of a not-created entry. */
+export const LOCUS_NOT_CREATED_SESSION = '尚未创建'
+
+/** The child-session jump: a not-created entry has no session yet. */
+export function childJumpBlock(entry: PetLocusEntryViewV20): string | undefined {
+  if (entry.state === 'not-created') return LOCUS_NOT_CREATED_SESSION
+  return sessionJumpBlock(entry.session?.availability ?? 'unknown')
+}
+
+// ---------------------------------------------------------------------------
+// Owner notes and gating (design D10)
+// ---------------------------------------------------------------------------
+
+export const LOCUS_INVALID_NOTE = '下一条授权 @ 时自动重建'
+export const LOCUS_STOPPED_NOTE = '在该入口对同一来源会话重新 /bind 可重新启用'
+export const LOCUS_ARCHIVED_W_NOTE = '来源会话已归档，可改绑'
+export const LOCUS_DEFAULT_QA_MISSING_NOTE =
+  '默认 Q&A 尚未创建，请在目标会话中通过 Pet 轮盘的「答疑群」创建；管理面只做展示与导航，不提供创建入口。'
+/** What a stale fence refusal reads as (spec 围栏过期时拒绝而不乐观改写). */
+export const LOCUS_FENCE_STALE_TEXT = '入口已变化，请刷新后重试'
+
+export const LOCUS_REBIND_UNARCHIVED_REASON = '当前来源会话未归档，仅在其归档后可改绑'
+export const LOCUS_REBIND_BUSY_REASON = '该群有入口正在投递，待其结束后再改绑'
+export const LOCUS_STOP_BUSY_REASON = '该入口正在投递，待其结束后再停止'
+export const LOCUS_ACCESS_BUSY_REASON = '该入口正在投递，待其结束后再修改访问模式'
+export const LOCUS_ACCESS_STATE_REASON = '只有未创建或活跃的入口可以修改访问模式'
+export const LOCUS_WRITE_DISABLED_REASON = '写档已全局停用（全局写开关已关闭）'
+export const LOCUS_REBIND_CONSEQUENCES =
+  '改绑后各入口在新会话下按首条消息重新创建子会话，不保留上下文；不迁移协作条目，不归档旧子会话，不向群里发通知。已停止的入口保持停止。'
+
+/** The in-place note an entry row carries for its own state. */
+export function entryStateNote(entry: PetLocusEntryViewV20): string | undefined {
+  if (entry.state === 'invalid') return LOCUS_INVALID_NOTE
+  if (entry.state === 'stopped') return LOCUS_STOPPED_NOTE
+  return undefined
+}
+
+/** A group row of an archived W asks for a rebind; nothing else does. */
+export function archivedWorkNote(work: PetLocusWorkViewV20): string | undefined {
+  return work.availability === 'archived' ? LOCUS_ARCHIVED_W_NOTE : undefined
+}
+
+/**
+ * Why 「改绑到其他会话」 is greyed, or undefined when it may be clicked. Only an
+ * archived W enables it (an unprovable one does not), and only a CURRENT
+ * delivery greys it: backlog is retargeted by the reset, unlike stop / access.
+ */
+export function rebindBlock(chat: PetLocusChatViewV20, work: PetLocusWorkViewV20): string | undefined {
+  if (work.availability !== 'archived') return LOCUS_REBIND_UNARCHIVED_REASON
+  if ([chat.group, ...chat.topics].some(entry => entry.hasCurrentDelivery)) return LOCUS_REBIND_BUSY_REASON
+  return undefined
+}
+
+/** Why 「停止」 is greyed for this entry, or undefined. */
+export function stopBlock(entry: PetLocusEntryViewV20): string | undefined {
+  if (entry.state === 'stopped') return '入口已停止'
+  if (entry.inFlight) return LOCUS_STOP_BUSY_REASON
+  return undefined
+}
+
+/** Why the access toggle is greyed as a whole for this entry, or undefined. */
+export function accessBlock(entry: PetLocusEntryViewV20): string | undefined {
+  if (entry.state !== 'not-created' && entry.state !== 'active') return LOCUS_ACCESS_STATE_REASON
+  if (entry.inFlight) return LOCUS_ACCESS_BUSY_REASON
+  return undefined
+}
+
+/** Why 「完全访问」 specifically is greyed: the global write switch. 「只读」 stays selectable. */
+export function fullAccessBlock(snapshot: Pick<PetLocusManagementViewV20, 'writeEnabled'>): string | undefined {
+  return snapshot.writeEnabled ? undefined : LOCUS_WRITE_DISABLED_REASON
+}
+
+// ---------------------------------------------------------------------------
+// Request bodies: the fence is {expectedLocusId, expectedRevision}, nothing else
+// ---------------------------------------------------------------------------
+
+function endpointInputOf(endpoint: PetLocusEndpointView): { chatId: string; threadId?: string } {
+  return endpoint.threadId === undefined ? { chatId: endpoint.chatId } : { chatId: endpoint.chatId, threadId: endpoint.threadId }
+}
+
+export function locusStopRequest(entry: PetLocusEntryViewV20): PetLocusStopActionV20 {
+  return {
+    action: 'stop',
+    endpoint: endpointInputOf(entry.endpoint),
+    expectedLocusId: entry.locusId,
+    expectedRevision: entry.revision,
+  }
+}
+
+export function locusAccessRequest(entry: PetLocusEntryViewV20, accessMode: PetLocusAccessModeV20): PetLocusAccessActionV20 {
+  return {
+    action: 'access',
+    endpoint: endpointInputOf(entry.endpoint),
+    accessMode,
+    expectedLocusId: entry.locusId,
+    expectedRevision: entry.revision,
+  }
+}
+
+/** The input is sent as typed (trimmed): a short code is never resolved. The fence is the GROUP row's. */
+export function locusRebindRequest(chat: PetLocusChatViewV20, input: string): PetLocusRebindActionV20 {
+  return {
+    action: 'rebind',
+    chatId: chat.group.endpoint.chatId,
+    workSessionId: input.trim(),
+    expectedLocusId: chat.group.locusId,
+    expectedRevision: chat.group.revision,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Filtering (spec 管理面按工作会话与入口状态筛选)
+// ---------------------------------------------------------------------------
+
+export type EntryBucketId = 'serving' | 'down' | 'archived'
+
+export interface EntryBucketOption {
+  readonly id: EntryBucketId
+  readonly label: string
+}
+
+/** Exactly three flat buckets; every recognised entry lands in exactly one. */
+export const ENTRY_BUCKET_OPTIONS: readonly EntryBucketOption[] = [
+  { id: 'serving', label: '在服务' },
+  { id: 'down', label: '已停止 / 已失效' },
+  { id: 'archived', label: '已归档' },
+]
+
+/**
+ * The bucket of one entry. An archived work session wins over the entry's own
+ * state: the whole group is the owner's to rebind or leave. `undefined` is an
+ * unrecognised state outside an archived W: never filtered, shown as 「未知状态」.
+ */
+export function entryBucketOf(state: string, work: Pick<PetLocusWorkViewV20, 'availability'>): EntryBucketId | undefined {
+  if (work.availability === 'archived') return 'archived'
+  if (state === 'not-created' || state === 'active') return 'serving'
+  if (state === 'stopped' || state === 'invalid') return 'down'
+  return undefined
+}
+
+export interface LocusFilter {
+  readonly buckets: readonly EntryBucketId[]
+}
+
+/** Default: only entries still served by a live work session. */
+export const DEFAULT_LOCUS_FILTER: LocusFilter = { buckets: ['serving'] }
+export const SHOW_ALL_LOCUS_FILTER: LocusFilter = { buckets: ['serving', 'down', 'archived'] }
+
+/** How the filter reads on its collapsed face: the ticked buckets, in order. */
+export function entryStateFilterLabel(filter: LocusFilter): string {
+  const selected = new Set(filter.buckets)
+  if (ENTRY_BUCKET_OPTIONS.every(option => selected.has(option.id))) return '全部'
+  if (selected.size === 0) return '无'
+  return ENTRY_BUCKET_OPTIONS.filter(option => selected.has(option.id)).map(option => option.label).join('、')
+}
+
+/** One chat as shown: the group row, or only its container when it is filtered out. */
+export interface ChatSection {
   readonly key: string
-  readonly endpoint: PetLocusEndpointView
-  /** The generation the Host designates as current, when it designates one. */
-  readonly current?: PetLocusView
-  /** Every generation of this endpoint, newest first. */
-  readonly generations: readonly PetLocusView[]
-  /** The generations other than {@link current}: what 「历史 N 代」 discloses. */
-  readonly history: readonly PetLocusView[]
+  readonly chat: PetLocusChatViewV20
+  /** False: the group row is kept only as the container of visible topics. */
+  readonly groupVisible: boolean
+  readonly topics: readonly PetLocusEntryViewV20[]
 }
 
-function byGenerationDesc(left: PetLocusView, right: PetLocusView): number {
-  if (left.generation !== right.generation) return right.generation - left.generation
-  return left.locusId.localeCompare(right.locusId)
+export interface WorkSectionView {
+  readonly work: PetLocusWorkViewV20
+  readonly chats: readonly ChatSection[]
+  /** Whether any chat of this W is its default Q&A group (over the whole snapshot). */
+  readonly hasDefaultQa: boolean
 }
 
-/** The generation a family presents on its main row. */
-export function familyHead(family: LocusFamily): PetLocusView | undefined {
-  return family.current ?? family.generations[0]
+export interface FilteredLocusView {
+  readonly works: readonly WorkSectionView[]
 }
 
-/**
- * Whether the Host designated this generation as the entry's current one.
- *
- * Callers must gate the 「当前代」 marker on THIS, never on "it is the newest
- * generation". The Host deliberately reports no current generation when its
- * index has nothing to say, because a missing index is not proof of
- * routability; presenting the newest record as current would revive an endpoint
- * the Host refuses to route.
- * @param family - The entry.
- * @param locus - One of its generations.
- * @returns true only when the snapshot's index names this exact generation.
- */
-export function isHostCurrent(family: LocusFamily, locus: PetLocusView): boolean {
-  return family.current?.locusId === locus.locusId
-}
-
-/**
- * Aggregate records into one family per endpoint.
- *
- * The snapshot's `loci` is every generation ever recorded, including stopped and
- * retired ones, which is why the previous surface rendered a rebuilt entry as
- * several cards. Current-ness is read from the Host index, never re-derived.
- * @param snapshot - Complete management snapshot.
- * @returns families in a deterministic order.
- */
-export function groupLociByEndpoint(snapshot: PetLocusManagementView): readonly LocusFamily[] {
-  const byEndpoint = new Map<string, PetLocusView[]>()
-  for (const locus of snapshot.loci) {
-    const key = endpointKey(locus.endpoint)
-    const list = byEndpoint.get(key)
-    if (list === undefined) byEndpoint.set(key, [locus])
-    else list.push(locus)
-  }
-
-  const currentByEndpoint = new Map<string, PetLocusView>()
-  for (const entry of snapshot.discovery.byEndpoint) {
-    if (entry.current !== undefined) currentByEndpoint.set(endpointKey(entry.endpoint), entry.current)
-  }
-
-  const families: LocusFamily[] = []
-  for (const [key, records] of byEndpoint) {
-    const generations = [...records].sort(byGenerationDesc)
-    const head = generations[0]
-    // Unreachable: a key exists only because a record created it. The guard
-    // keeps the module honest under `noUncheckedIndexedAccess` rather than
-    // asserting with `!`.
-    if (head === undefined) continue
-    const current = currentByEndpoint.get(key)
-    families.push({
-      key,
-      endpoint: (current ?? head).endpoint,
-      ...(current === undefined ? {} : { current }),
-      generations,
-      history: generations.filter(locus => locus.locusId !== current?.locusId),
-    })
-  }
-  return families.sort((left, right) => left.key.localeCompare(right.key))
-}
-
-// ---------------------------------------------------------------------------
-// Reading A: by work (parent session) (design D3)
-// ---------------------------------------------------------------------------
-
-/** One entry plus the topic entries that inherit from it. */
-export interface LocusFamilyNode {
-  readonly family: LocusFamily
-  readonly children: readonly LocusFamilyNode[]
-}
-
-/** One parent session and the entries that belong to it. */
-export interface WorkGroup {
-  readonly parentSessionId: string
-  /** Parent-session facts exactly as the Host reported them. */
-  readonly session?: PetLocusMainSessionView
-  readonly availability: ParentAvailability
-  readonly workspace?: PetLocusWorkspaceView
-  /** Entry roots; topic entries hang off the chat-level entry they inherit. */
-  readonly nodes: readonly LocusFamilyNode[]
-  /** The same families, flat, for counting and filtering. */
-  readonly families: readonly LocusFamily[]
-}
-
-const STATE_RANK: Record<PetLocusState, number> = {
-  active: 0,
-  'not-created': 1,
-  provisioning: 1,
-  switching: 2,
-  stopped: 3,
-  invalid: 4,
-  retired: 5,
-}
-
-function stateRankOf(family: LocusFamily): number {
-  const head = familyHead(family)
-  return head === undefined ? 9 : STATE_RANK[head.state.state] ?? 9
-}
-
-function familySortKey(family: LocusFamily): string {
-  const name = family.endpoint.chatName?.trim()
-  return name === undefined || name === '' ? family.key : name
-}
-
-/**
- * Group families under the parent session that owns them.
- *
- * A parent session is rendered once: its title, workspace and availability are
- * facts about the work, not about each entry, and repeating them was what made
- * the old surface scroll for four screens.
- *
- * Topic nesting follows `parentLocusId`, but only inside the same work group —
- * a topic whose chat-level entry belongs to a different parent session is
- * rendered as a root, because nesting it elsewhere would put a row under a
- * session it does not belong to.
- * @param snapshot - Complete management snapshot.
- * @returns work groups, live work first.
- */
-export function groupByWork(snapshot: PetLocusManagementView): readonly WorkGroup[] {
-  const families = groupLociByEndpoint(snapshot)
-  const groups = new Map<string, LocusFamily[]>()
-  for (const family of families) {
-    const head = familyHead(family)
-    if (head === undefined) continue
-    const list = groups.get(head.main.sessionId)
-    if (list === undefined) groups.set(head.main.sessionId, [family])
-    else list.push(family)
-  }
-
-  const works: WorkGroup[] = []
-  for (const [parentSessionId, members] of groups) {
-    const head = members[0]
-    const firstHead = head === undefined ? undefined : familyHead(head)
-    const ordered = [...members].sort((left, right) => {
-      const rank = stateRankOf(left) - stateRankOf(right)
-      if (rank !== 0) return rank
-      const byName = familySortKey(left).localeCompare(familySortKey(right))
-      return byName !== 0 ? byName : left.key.localeCompare(right.key)
-    })
-
-    const byLocusId = new Map<string, LocusFamily>()
-    for (const family of ordered) {
-      for (const generation of family.generations) {
-        // First write wins: the highest generation of an endpoint owns the id.
-        if (!byLocusId.has(generation.locusId)) byLocusId.set(generation.locusId, family)
-      }
+function narrow(
+  snapshot: PetLocusManagementViewV20,
+  keep: (entry: PetLocusEntryViewV20, work: PetLocusWorkViewV20) => boolean,
+): FilteredLocusView {
+  const works: WorkSectionView[] = []
+  for (const group of snapshot.works) {
+    const chats: ChatSection[] = []
+    for (const chat of group.chats) {
+      const topics = chat.topics.filter(topic => keep(topic, group.work))
+      const groupVisible = keep(chat.group, group.work)
+      if (!groupVisible && topics.length === 0) continue
+      chats.push({ key: chatKey(chat.group.endpoint), chat, groupVisible, topics })
     }
-
-    const children = new Map<string, LocusFamily[]>()
-    const roots: LocusFamily[] = []
-    for (const family of ordered) {
-      const familyHeadLocus = familyHead(family)
-      const parentLocusId = familyHeadLocus?.parentLocusId
-      const parentFamily = parentLocusId === undefined ? undefined : byLocusId.get(parentLocusId)
-      if (parentFamily === undefined || parentFamily === family) {
-        roots.push(family)
-        continue
-      }
-      const list = children.get(parentFamily.key)
-      if (list === undefined) children.set(parentFamily.key, [family])
-      else list.push(family)
-    }
-
-    const toNode = (family: LocusFamily): LocusFamilyNode => ({
-      family,
-      children: (children.get(family.key) ?? []).map(toNode),
-    })
-
-    works.push({
-      parentSessionId,
-      ...(firstHead === undefined ? {} : { session: firstHead.main }),
-      availability: parentAvailabilityOf(firstHead?.main),
-      ...(firstHead === undefined || firstHead.workspace === undefined
-        ? {}
-        : { workspace: firstHead.workspace }),
-      nodes: roots.map(toNode),
-      families: ordered,
-    })
+    if (chats.length === 0) continue
+    works.push({ work: group.work, chats, hasDefaultQa: group.chats.some(chat => chat.defaultQa === true) })
   }
+  return { works }
+}
 
-  return works.sort((left, right) => {
-    const rank = availabilityRank(left.availability) - availabilityRank(right.availability)
-    if (rank !== 0) return rank
-    const byName = (left.session?.title ?? '').localeCompare(right.session?.title ?? '')
-    return byName !== 0 ? byName : left.parentSessionId.localeCompare(right.parentSessionId)
+/** Apply the filter. Pure: the snapshot is never touched. */
+export function applyLocusFilter(
+  snapshot: PetLocusManagementViewV20,
+  filter: LocusFilter = DEFAULT_LOCUS_FILTER,
+): FilteredLocusView {
+  const buckets = new Set(filter.buckets)
+  return narrow(snapshot, (entry, work) => {
+    const bucket = entryBucketOf(entry.state, work)
+    return bucket === undefined || buckets.has(bucket)
   })
 }
 
-function availabilityRank(availability: ParentAvailability): number {
-  if (availability === 'available') return 0
-  if (availability === 'archived') return 1
-  return 2
-}
-
-// ---------------------------------------------------------------------------
-// Reading B: by entry (design D3)
-// ---------------------------------------------------------------------------
-
-/** One chat and the entries addressed through it (itself plus its topics). */
-export interface EntryGroup {
-  readonly chatId: string
-  readonly key: string
-  /** Chat-level endpoint; topic endpoints are the family's own. */
-  readonly endpoint: PetLocusEndpointView
-  readonly chatFamily?: LocusFamily
-  readonly topicFamilies: readonly LocusFamily[]
-  /** Chat-level entry first, then topics. */
-  readonly families: readonly LocusFamily[]
-}
-
 /**
- * Group families by chat so the reverse reading answers "what is this door
- * connected to" without leaving the snapshot.
- * @param snapshot - Complete management snapshot.
- * @returns entry groups in a deterministic order.
+ * Counts per bucket over the WHOLE snapshot, including unchecked buckets.
+ * An unrecognised state outside an archived W is in no bucket (it is always
+ * shown), so it is the only thing the three counts do not add up to.
  */
-export function groupByEntry(snapshot: PetLocusManagementView): readonly EntryGroup[] {
-  const families = groupLociByEndpoint(snapshot)
-  const groups = new Map<string, LocusFamily[]>()
-  for (const family of families) {
-    const key = chatKey(family.endpoint)
-    const list = groups.get(key)
-    if (list === undefined) groups.set(key, [family])
-    else list.push(family)
-  }
-
-  const result: EntryGroup[] = []
-  for (const [key, members] of groups) {
-    const ordered = [...members].sort((left, right) => {
-      const rank = stateRankOf(left) - stateRankOf(right)
-      return rank !== 0 ? rank : left.key.localeCompare(right.key)
-    })
-    const chatFamily = ordered.find(family => family.endpoint.threadId === undefined)
-    const topicFamilies = ordered.filter(family => family.endpoint.threadId !== undefined)
-    const head = chatFamily ?? ordered[0]
-    if (head === undefined) continue
-    result.push({
-      chatId: head.endpoint.chatId,
-      key,
-      endpoint: chatFamily?.endpoint ?? { chatId: head.endpoint.chatId },
-      ...(chatFamily === undefined ? {} : { chatFamily }),
-      topicFamilies,
-      families: ordered,
-    })
-  }
-  return result.sort((left, right) => left.key.localeCompare(right.key))
-}
-
-// ---------------------------------------------------------------------------
-// Filtering (design D5)
-// ---------------------------------------------------------------------------
-
-/** Options for one entry-state bucket in the filter popover. */
-export interface EntryStateOption {
-  readonly id: string
-  readonly label: string
-  readonly states: readonly PetLocusState[]
-}
-
-/**
- * Entry states grouped for filtering.
- *
- * Grouped rather than listed one state per row because the owner's question is
- * "is this door working", not "which of six states is it" — but every state
- * appears in exactly one bucket, so no state can become unfilterable.
- */
-export const ENTRY_STATE_OPTIONS: readonly EntryStateOption[] = [
-  { id: 'active', label: '活跃', states: ['active'] },
-  { id: 'in-flight', label: '准备中 / 切换中', states: ['provisioning', 'switching'] },
-  { id: 'stopped', label: '已停止 / 已失效', states: ['stopped', 'invalid'] },
-  { id: 'retired', label: '已退役', states: ['retired'] },
-]
-
-/** The filter's current condition. */
-export interface LocusFilter {
-  readonly parentAvailability: readonly ParentAvailability[]
-  readonly entryStates: readonly PetLocusState[]
-}
-
-/** Every lifecycle state, in the order this surface ranks them. */
-export const ALL_ENTRY_STATES: readonly PetLocusState[] = [
-  'active',
-  'provisioning',
-  'switching',
-  'stopped',
-  'invalid',
-  'retired',
-]
-
-/**
- * The states whose entries are still being served.
- *
- * The complement is exactly the unavailable trio (`stopped` / `invalid` /
- * `retired`): the Host refuses work for those endpoints and the only way
- * forward is an explicit rebuild (`repository.ts`: *explicitly rebuild it
- * before accepting work*).
- */
-export const SERVABLE_ENTRY_STATES: readonly PetLocusState[] = ['active', 'provisioning', 'switching']
-
-/** The unfiltered condition: every parent state and every entry state. */
-export const SHOW_ALL_LOCUS_FILTER: LocusFilter = {
-  parentAvailability: ['available', 'archived', 'unverified'],
-  entryStates: [...ALL_ENTRY_STATES],
-}
-
-/**
- * The default condition: usable work, and entries that are still being served.
- *
- * Both halves hide something. The disclosure is the filter control itself — it
- * states the current condition on its own face and its popover counts every
- * bucket over the whole snapshot — so the list adds no separate "hidden" row:
- * an inline exit for something the filter already names was noise, and the row
- * it occupied pushed the entries down.
- */
-export const DEFAULT_LOCUS_FILTER: LocusFilter = {
-  parentAvailability: ['available'],
-  entryStates: [...SERVABLE_ENTRY_STATES],
-}
-
-/** A snapshot narrowed to what the current condition shows. */
-export interface FilteredLocusView {
-  readonly works: readonly WorkGroup[]
-  readonly entries: readonly EntryGroup[]
-}
-
-function keepFamily(family: LocusFamily, states: ReadonlySet<PetLocusState>): boolean {
-  const head = familyHead(family)
-  return head !== undefined && states.has(head.state.state)
-}
-
-function filterNodes(
-  nodes: readonly LocusFamilyNode[],
-  states: ReadonlySet<PetLocusState>,
-): readonly LocusFamilyNode[] {
-  const result: LocusFamilyNode[] = []
-  for (const node of nodes) {
-    const children = filterNodes(node.children, states)
-    if (keepFamily(node.family, states)) result.push({ family: node.family, children })
-    // A filtered-out parent must not take its children down with it: the child
-    // is an independent entry with its own state and its own row.
-    else result.push(...children)
-  }
-  return result
-}
-
-/**
- * Apply the filter to a snapshot.
- *
- * Pure: the returned groups are new objects and the snapshot is untouched, so
- * nothing about filtering can be mistaken for a data change.
- * @param snapshot - Complete management snapshot.
- * @param filter - The condition to apply.
- * @returns the readings the condition keeps.
- */
-export function applyLocusFilter(
-  snapshot: PetLocusManagementView,
-  filter: LocusFilter = DEFAULT_LOCUS_FILTER,
-): FilteredLocusView {
-  const availability = new Set(filter.parentAvailability)
-  const states = new Set(filter.entryStates)
-  const allWorks = groupByWork(snapshot)
-
-  const works: WorkGroup[] = []
-
-  for (const work of allWorks) {
-    if (!availability.has(work.availability)) continue
-    const nodes = filterNodes(work.nodes, states)
-    const families = flattenNodes(nodes)
-    // A work section with nothing under it is not a reading: an empty header
-    // would push the owner to hunt for what is missing instead of reading the
-    // condition stated on the filter control.
-    if (families.length === 0) continue
-    works.push({ ...work, nodes, families })
-  }
-
-  const visibleKeys = new Set(works.flatMap(work => work.families).map(family => family.key))
-
-  const allEntries = groupByEntry(snapshot)
-  const entries = allEntries
-    .map(group => ({
-      ...group,
-      topicFamilies: group.topicFamilies.filter(family => visibleKeys.has(family.key)),
-      families: group.families.filter(family => visibleKeys.has(family.key)),
-    }))
-    .filter(group => group.families.length > 0)
-
-  return { works, entries }
-}
-
-function flattenNodes(nodes: readonly LocusFamilyNode[]): readonly LocusFamily[] {
-  const result: LocusFamily[] = []
-  for (const node of nodes) {
-    result.push(node.family, ...flattenNodes(node.children))
-  }
-  return result
-}
-
-// ---------------------------------------------------------------------------
-// Search
-// ---------------------------------------------------------------------------
-
-/**
- * Narrow a filtered view to the entries matching the search text.
- *
- * Search never resurrects what the filter hid: it narrows an already-filtered
- * view, so "hidden" stays a property of the filter and the hidden note keeps
- * meaning the same thing whether or not a query is active.
- * @param view - An already filtered view.
- * @param codes - Display codes for the snapshot.
- * @param query - Raw search text; blank keeps everything.
- * @returns a view with only matching entries, plus the same hidden summary.
- */
-export function applyQuery(view: FilteredLocusView, codes: HandleCodes, query: string): FilteredLocusView {
-  if (query.trim() === '') return view
-  const keep = (nodes: readonly LocusFamilyNode[]): readonly LocusFamilyNode[] => {
-    const result: LocusFamilyNode[] = []
-    for (const node of nodes) {
-      const children = keep(node.children)
-      if (entryMatchesQuery(node.family, codes, query)) result.push({ family: node.family, children })
-      else result.push(...children)
-    }
-    return result
-  }
-  const keepFamilies = (families: readonly LocusFamily[]): readonly LocusFamily[] =>
-    families.filter(family => entryMatchesQuery(family, codes, query))
-
-  const works = view.works
-    .map(work => {
-      const nodes = keep(work.nodes)
-      return { ...work, nodes, families: flattenNodes(nodes) }
-    })
-    .filter(work => work.families.length > 0)
-
-  const entries = view.entries
-    .map(group => {
-      const families = keepFamilies(group.families)
-      return {
-        ...group,
-        chatFamily: group.chatFamily === undefined || !families.includes(group.chatFamily)
-          ? undefined
-          : group.chatFamily,
-        topicFamilies: group.topicFamilies.filter(family => families.includes(family)),
-        families,
+export function countLocusFilterOptions(snapshot: PetLocusManagementViewV20): ReadonlyMap<EntryBucketId, number> {
+  const counts = new Map<EntryBucketId, number>()
+  for (const work of snapshot.works) {
+    for (const chat of work.chats) {
+      for (const entry of [chat.group, ...chat.topics]) {
+        const bucket = entryBucketOf(entry.state, work.work)
+        if (bucket !== undefined) counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
       }
-    })
-    .map(group => {
-      const { chatFamily, ...rest } = group
-      return chatFamily === undefined ? rest : { ...rest, chatFamily }
-    })
-    .filter(group => group.families.length > 0)
-
-  return { works, entries }
-}
-
-// ---------------------------------------------------------------------------
-// Header summary
-// ---------------------------------------------------------------------------
-
-/**
- * Counts for the filter panel.
- *
- * Counts come from the unfiltered snapshot: a checkbox that showed the number
- * of rows it currently leaves visible would always read 0 for the thing the
- * owner is trying to find.
- */
-export interface LocusFilterCounts {
-  readonly parent: ReadonlyMap<ParentAvailability, number>
-  readonly entry: ReadonlyMap<string, number>
-}
-
-/**
- * Count what each filter option would reveal.
- * @param snapshot - Complete management snapshot.
- * @returns parent buckets by availability and entries per state option.
- */
-export function countLocusFilterOptions(snapshot: PetLocusManagementView): LocusFilterCounts {
-  const parent = new Map<ParentAvailability, number>()
-  for (const work of groupByWork(snapshot)) {
-    parent.set(work.availability, (parent.get(work.availability) ?? 0) + 1)
-  }
-  const entry = new Map<string, number>()
-  for (const family of groupLociByEndpoint(snapshot)) {
-    const head = familyHead(family)
-    if (head === undefined) continue
-    for (const option of ENTRY_STATE_OPTIONS) {
-      if (!option.states.includes(head.state.state)) continue
-      entry.set(option.id, (entry.get(option.id) ?? 0) + 1)
     }
   }
-  return { parent, entry }
+  return counts
 }
 
-/** The one-line reading above the list. */
 export interface LocusSummary {
   readonly entries: number
   readonly chats: number
   readonly works: number
-  readonly currentGenerations: number
-  readonly historyGenerations: number
 }
 
-/**
- * Count what the visible surface currently shows.
- * @param view - A filtered view.
- * @returns the counts used by the header line.
- */
+/** What a view shows; a container group row is not counted as an entry. */
 export function summarizeLocusView(view: FilteredLocusView): LocusSummary {
-  const families = view.works.flatMap(work => work.families)
-  const chats = new Set(families.map(family => family.endpoint.chatId))
-  return {
-    entries: families.length,
-    chats: chats.size,
-    works: view.works.length,
-    currentGenerations: families.filter(family => family.current !== undefined).length,
-    historyGenerations: families.reduce((total, family) => total + family.history.length, 0),
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Session references
-// ---------------------------------------------------------------------------
-
-/** The child session of a generation, when provisioning produced one. */
-export function childOf(locus: PetLocusView): PetLocusChildSessionView {
-  return locus.child
-}
-
-/**
- * Whether an entry matches the owner's search text.
- *
- * Matching is deliberately literal — names, the display codes and the real
- * identifiers are all searched, and nothing is fuzzy-matched. A search that
- * silently returned near-misses would be worse than no search here, because the
- * surface is used to decide which entry to stop or rebuild.
- *
- * @param family - The entry to test.
- * @param codes - Display codes for the snapshot, so a code typed by the owner matches.
- * @param query - Raw search text; blank matches everything.
- * @returns true when the entry should stay visible.
- */
-export function entryMatchesQuery(
-  family: LocusFamily,
-  codes: HandleCodes,
-  query: string,
-): boolean {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return true
-  const haystack: string[] = [family.endpoint.chatId]
-  if (family.endpoint.threadId !== undefined) haystack.push(family.endpoint.threadId)
-  if (family.endpoint.chatName !== undefined) haystack.push(family.endpoint.chatName)
-  const endpointCode = codes.endpoint.get(endpointHandleId(family.endpoint))
-  if (endpointCode !== undefined) haystack.push(endpointCode)
-  for (const generation of family.generations) {
-    haystack.push(generation.locusId)
-    const locusCode = codes.locus.get(generation.locusId)
-    if (locusCode !== undefined) haystack.push(locusCode)
-    haystack.push(generation.main.sessionId, generation.main.title ?? '')
-    if (generation.child.sessionId !== undefined) haystack.push(generation.child.sessionId)
-    if (generation.child.title !== undefined) haystack.push(generation.child.title)
-    const parentCode = codes.session.get(generation.main.sessionId)
-    if (parentCode !== undefined) haystack.push(parentCode)
-    const childSessionId = generation.child.sessionId
-    if (childSessionId !== undefined) {
-      const childCode = codes.session.get(childSessionId)
-      if (childCode !== undefined) haystack.push(childCode)
+  let entries = 0
+  let chats = 0
+  for (const work of view.works) {
+    for (const chat of work.chats) {
+      chats += 1
+      entries += chat.topics.length + (chat.groupVisible ? 1 : 0)
     }
   }
-  return haystack.some(value => value.toLowerCase().includes(needle))
+  return { entries, chats, works: view.works.length }
 }
+
+// ---------------------------------------------------------------------------
+// Display codes and search
+// ---------------------------------------------------------------------------
 
 /** Display codes for everything one snapshot can show, resolved once per render. */
 export interface HandleCodes {
@@ -1011,26 +595,24 @@ export interface HandleCodes {
   readonly workspace: ReadonlyMap<string, string>
 }
 
-/**
- * Resolve every display code the surface needs from one snapshot.
- *
- * One pass over the whole snapshot matters: codes are collision-resolved across
- * the set that is actually on screen, so computing them per row would let two
- * rows pick the same alias.
- * @param snapshot - Complete management snapshot.
- * @returns the codes, keyed by the identifier each was derived from.
- */
-export function collectHandleCodes(snapshot: PetLocusManagementView): HandleCodes {
+/** Resolve every display code in one pass, so collisions resolve across the whole set. */
+export function collectHandleCodes(snapshot: PetLocusManagementViewV20): HandleCodes {
   const locusIds: string[] = []
   const sessionIds: string[] = []
   const endpointIds: string[] = []
   const workspaceIds: string[] = []
-  for (const record of snapshot.loci) {
-    locusIds.push(record.locusId)
-    sessionIds.push(record.main.sessionId)
-    if (record.child.sessionId !== undefined) sessionIds.push(record.child.sessionId)
-    endpointIds.push(endpointHandleId(record.endpoint))
-    workspaceIds.push(record.workspace.workspaceId)
+  for (const group of snapshot.works) {
+    sessionIds.push(group.work.sessionId)
+    for (const chat of group.chats) {
+      sessionIds.push(chat.locusMain.sessionId)
+      if (chat.reboundFrom !== undefined) sessionIds.push(chat.reboundFrom.sessionId)
+      workspaceIds.push(chat.workspace.workspaceId)
+      for (const entry of [chat.group, ...chat.topics]) {
+        locusIds.push(entry.locusId)
+        sessionIds.push(entry.sessionId)
+        endpointIds.push(endpointHandleId(entry.endpoint))
+      }
+    }
   }
   return {
     locus: assignHandleCodes(locusIds, 'locus'),
@@ -1040,68 +622,89 @@ export function collectHandleCodes(snapshot: PetLocusManagementView): HandleCode
   }
 }
 
-// ---------------------------------------------------------------------------
-// Execution-root confirmation
-// ---------------------------------------------------------------------------
-
-/**
- * Whether the owner still has to confirm an execution root for this locus.
- *
- * Keyed on the ROOT, not on the anchor's status. An anchor can be `confirmed`
- * while carrying no `executionRoot` (confirming context facts is a separate
- * act), and the write gate needs the root specifically — so hiding the action
- * on `status === 'confirmed'` removed the only way to ever supply it.
- *
- * @param locus - One locus view from the Host snapshot.
- * @returns true while a root still has to be confirmed.
- */
-export function locusNeedsExecutionRoot(locus: PetLocusView): boolean {
-  const confirmed = locus.contextAnchor?.executionRoot?.trim()
-  return confirmed === undefined || confirmed === ''
+/** Literal match over names, display codes and real ids; nothing fuzzy. */
+export function entryMatchesQuery(
+  entry: PetLocusEntryViewV20,
+  chat: PetLocusChatViewV20,
+  work: PetLocusWorkViewV20,
+  codes: HandleCodes,
+  query: string,
+): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  const haystack: string[] = [
+    entry.endpoint.chatId, entry.endpoint.threadId ?? '', entry.endpoint.chatName ?? '', entry.endpoint.quote ?? '',
+    entry.locusId, entry.sessionId, entry.session?.title ?? '',
+    work.sessionId, work.title ?? '', chat.locusMain.sessionId, chat.locusMain.title ?? '',
+    codes.endpoint.get(endpointHandleId(entry.endpoint)) ?? '',
+    codes.locus.get(entry.locusId) ?? '',
+    codes.session.get(entry.sessionId) ?? '',
+    codes.session.get(work.sessionId) ?? '',
+    codes.session.get(chat.locusMain.sessionId) ?? '',
+  ]
+  return haystack.some(value => value !== '' && value.toLowerCase().includes(needle))
 }
 
-/**
- * The execution root the owner may confirm: the Host's own resolved candidate.
- *
- * Never invented here. An absent candidate means the action is unavailable and
- * says why, rather than recording a path nobody proved.
- *
- * @param locus - One locus view from the Host snapshot.
- * @returns the candidate path, or `undefined` when the Host resolved none.
- */
-export function locusConfirmCandidate(locus: PetLocusView): string | undefined {
-  const candidate = locus.workspace.executionRoot?.trim()
-  return candidate === undefined || candidate === '' ? undefined : candidate
-}
-
-/**
- * The one anchor-confirmation payload for a locus.
- *
- * Built here, as a pure function of the view, so the execution root cannot be
- * dropped by a component edit without failing a test: the previous inline
- * literal in the surface sent the fence plus two empty arrays and no root at
- * all, which marked the anchor confirmed while satisfying neither half of the
- * write gate. The candidate is carried as INTENT only — authority is still
- * derived per verification against the live sandbox root.
- *
- * @param locus - One locus view from the Host snapshot.
- * @returns the `confirm-anchor` request body.
- */
-export function locusAnchorConfirmRequest(locus: PetLocusView): PetLocusConfirmAnchorAction {
-  const candidate = locusConfirmCandidate(locus)
-  return {
-    action: 'confirm-anchor',
-    locusId: locus.locusId,
-    expectedGeneration: locus.generation,
-    expectedLocusId: locus.locusId,
-    expectedUpdatedAt: locus.state.updatedAt,
-    endpoint: {
-      chatId: locus.endpoint.chatId,
-      ...(locus.endpoint.threadId === undefined ? {} : { threadId: locus.endpoint.threadId }),
-    },
-    projectResources: [],
-    constraints: [],
-    existence: 'unknown',
-    ...(candidate === undefined ? {} : { executionRoot: candidate }),
+/** Narrow an already filtered view; search never resurrects what the filter hid. */
+export function applyQuery(view: FilteredLocusView, codes: HandleCodes, query: string): FilteredLocusView {
+  if (query.trim() === '') return view
+  const works: WorkSectionView[] = []
+  for (const section of view.works) {
+    const chats: ChatSection[] = []
+    for (const item of section.chats) {
+      const topics = item.topics.filter(topic => entryMatchesQuery(topic, item.chat, section.work, codes, query))
+      const groupVisible = item.groupVisible && entryMatchesQuery(item.chat.group, item.chat, section.work, codes, query)
+      if (!groupVisible && topics.length === 0) continue
+      chats.push({ ...item, groupVisible, topics })
+    }
+    if (chats.length > 0) works.push({ ...section, chats })
   }
+  return { works }
+}
+
+// ---------------------------------------------------------------------------
+// Reading B: by entry
+// ---------------------------------------------------------------------------
+
+/** Every chat with the W it serves, from the same view as reading A. */
+export function groupByEntry(
+  view: FilteredLocusView,
+): readonly { readonly work: PetLocusWorkViewV20; readonly section: ChatSection }[] {
+  return view.works
+    .flatMap(work => work.chats.map(section => ({ work: work.work, section })))
+    .sort((left, right) => left.section.key.localeCompare(right.section.key))
+}
+
+// ---------------------------------------------------------------------------
+// Feishu jumps and empty states
+// ---------------------------------------------------------------------------
+
+export type EntryFeishuTarget =
+  | { readonly kind: 'thread'; readonly url: string; readonly reason?: undefined }
+  | { readonly kind: 'chat'; readonly url?: string; readonly reason?: string }
+  | { readonly kind: 'doc'; readonly url?: string; readonly reason?: string }
+
+/**
+ * Where an entry's Feishu jump lands. A topic opens its thread; a thread id
+ * that is not a proven `omt_` topic id degrades to the chat and says so — the
+ * panel never fabricates a topic target. Documents open the inspected URL only.
+ */
+export function entryFeishuTarget(endpoint: PetLocusEndpointView, chatLink: (chatId: string) => string | undefined): EntryFeishuTarget {
+  if (isDocEndpointView(endpoint)) {
+    return endpoint.docUrl === undefined ? { kind: 'doc', reason: '文档元数据暂不可读，无法提供链接' } : { kind: 'doc', url: endpoint.docUrl }
+  }
+  const threadId = endpoint.threadId?.trim()
+  const chat = chatLink(endpoint.chatId)
+  if (threadId === undefined) return chat === undefined ? { kind: 'chat', reason: '这个入口没有可用的飞书链接' } : { kind: 'chat', url: chat }
+  if (threadId.startsWith('omt_')) {
+    return { kind: 'thread', url: `https://applink.feishu.cn/client/thread/open?threadId=${encodeURIComponent(threadId)}` }
+  }
+  return { kind: 'chat', ...(chat === undefined ? {} : { url: chat }), reason: '无法证明话题标识，已退化为所属群' }
+}
+
+/** The empty list states the conditions that could be relaxed; it never reads as deleted. */
+export function emptyListText(query: string): string {
+  return query.trim() !== ''
+    ? '没有匹配的关联。清空搜索，或放宽上面的筛选。'
+    : '当前筛选下没有关联。可以放宽上面的筛选：勾选「已停止 / 已失效」可看到已停止或已失效的入口，勾选「已归档」可看到来源会话已归档、待改绑的入口。'
 }

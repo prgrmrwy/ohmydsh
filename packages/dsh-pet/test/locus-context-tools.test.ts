@@ -45,6 +45,19 @@ async function agreedCharter(t: TodoWorld, itemId: string, entry: string | undef
 
 interface SendCall { readonly sender: any; readonly target: string; readonly content: any[] }
 
+/** The v20 reverse lookup: one row per sessionId, the M resolved. */
+const lookupOf = (t: TodoWorld) => ({
+  findBySessionId: (id: string) => {
+    const item = t.loci.find(candidate => candidate.childSessionId === id)
+    return item === undefined ? undefined : {
+      row: { locusId: item.id, sessionId: item.childSessionId, state: item.state, endpoint: item.endpoint },
+      locusMainSessionId: item.locusMainSessionId,
+      workspaceId: 'ws',
+    } as never
+  },
+  listEntryEndpointsOfMain: (m: string) => t.loci.filter(item => item.locusMainSessionId === m).map(item => item.endpoint),
+})
+
 function fixture(t: TodoWorld) {
   const sends: SendCall[] = []
   const subagents = {
@@ -54,14 +67,14 @@ function fixture(t: TodoWorld) {
   registerPetTools({ tools: { register: (definition: any) => { childTools.set(definition.name, definition); return () => {} } } } as never, {
     repository: {} as never,
     locusChildTools: {
-      loci: { findByChildSessionId: id => t.loci.filter(item => item.childSessionId === id).map(item => ({ ...item, parentSessionId: item.locusMainSessionId, workspaceId: 'ws' })) as never },
+      loci: lookupOf(t),
       collab: t.collab,
       subagents: () => subagents,
     },
   } as never)
   const mainTools = new Map<string, any>()
   registerPetLocusMainTools({ tools: { register: (definition: any) => { mainTools.set(definition.name, definition); return () => {} } } } as never, {
-    loci: { listLociByParent: id => t.loci.filter(item => item.locusMainSessionId === id).map(item => ({ ...item, parentSessionId: item.locusMainSessionId, workspaceId: 'ws' })) as never },
+    loci: lookupOf(t),
     collab: t.collab,
     subagents: () => subagents,
   })

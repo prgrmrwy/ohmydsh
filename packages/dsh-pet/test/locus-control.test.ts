@@ -7,7 +7,6 @@ import {
   resolveLocusBindPrefix,
   type LocusBindableSession,
 } from '../src/host/locus/control.js'
-import { LocusPermissionMutationError } from '../src/host/locus/permission-mutation.js'
 
 const ENDPOINT = { chatId: 'oc-project', key: 'oc-project' } as const
 const OWNER = 'ou-owner'
@@ -99,45 +98,43 @@ describe('unified locus bind prefix resolution', () => {
   })
 })
 
+
+function dispatcherWith(overrides: Record<string, unknown> = {}) {
+  const bind = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId))
+  const unbindCurrent = vi.fn(async () => ({ state: 'stopped' as const }))
+  const setAccessMode = vi.fn(async (input: { mode: 'read-only' | 'danger-full-access' }) => ({ accessMode: input.mode }))
+  const dispatcher = createLocusControlDispatcher({
+    allowOpenIds: () => [OWNER],
+    listSessions: () => [session('session-abcdef123456')],
+    bind: { bind: bind as never },
+    exit: { unbindCurrent },
+    access: { setAccessMode },
+    ...overrides,
+  })
+  return { dispatcher, bind, unbindCurrent, setAccessMode }
+}
+const send = (d: ReturnType<typeof dispatcherWith>['dispatcher'], command: Record<string, unknown>, senderId = OWNER) =>
+  d.dispatch({ command: command as never, endpoint: ENDPOINT, senderId })
+
 describe('unified locus command dispatcher', () => {
   it('passes the prefix to enumeration and never enumerates for a too-short prefix', async () => {
     const listSessions = vi.fn((_prefix: string) => [session('session-abcdef123456')])
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions,
-      bind: { bind: (async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId)) as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-    })
-
-    await expect(dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abc' },
-      endpoint: ENDPOINT,
-      senderId: OWNER,
-    })).resolves.toMatchObject({ ok: false, reason: 'prefix-too-short' })
+    const { dispatcher } = dispatcherWith({ listSessions })
+    await expect(send(dispatcher, { kind: 'bind', prefix: 'abc' })).resolves.toMatchObject({ ok: false, reason: 'prefix-too-short' })
     expect(listSessions).not.toHaveBeenCalled()
-
-    await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER })
+    await send(dispatcher, { kind: 'bind', prefix: 'abcdef' })
     expect(listSessions).toHaveBeenCalledWith('abcdef')
   })
 
-  it('spec Scenario "全文评论绑定已知会话": a document /bind names the doc title and restates who may ask (delivered as a mentioning full comment by the egress)', async () => {
-    const docEndpoint = { chatId: 'doc:docx:Dx1', key: 'doc:docx:Dx1' }
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: {
-        bind: (async ({ parentSessionId }: { parentSessionId: string }) => {
-          const result = bindResult(parentSessionId)
-          return { ...result, locus: { ...result.locus, endpoint: { chatId: 'doc:docx:Dx1' } } }
-        }) as never,
-      },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
+  it('spec Scenario "全文评论绑定已知会话": a document /bind names the doc title and restates who may ask', async () => {
+    const { dispatcher } = dispatcherWith({
+      bind: { bind: (async ({ parentSessionId }: { parentSessionId: string }) => {
+        const result = bindResult(parentSessionId)
+        return { ...result, locus: { ...result.locus, endpoint: { chatId: 'doc:docx:Dx1' } } }
+      }) as never },
       chatName: () => '技术方案',
     })
-
-    const result = await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: docEndpoint, senderId: OWNER })
-
-    expect(result).toMatchObject({ ok: true })
+    const result = await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: { chatId: 'doc:docx:Dx1', key: 'doc:docx:Dx1' } as never, senderId: OWNER })
     const text = 'text' in result ? result.text ?? '' : ''
     expect(text).toContain('文档「技术方案」')
     expect(text).not.toContain('群「')
@@ -152,363 +149,170 @@ describe('unified locus command dispatcher', () => {
   })
 
   it('reads the real chat name and returns a title plus short-id bind receipt', async () => {
-    const bind = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind: bind as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-      chatName: async () => '真实项目群',
-    })
-
-    await expect(dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' },
-      endpoint: ENDPOINT,
-      senderId: OWNER,
-    })).resolves.toEqual({
+    const { dispatcher, bind } = dispatcherWith({ chatName: async () => '真实项目群' })
+    await expect(send(dispatcher, { kind: 'bind', prefix: 'abcdef' })).resolves.toEqual({
       ok: true,
       text: '群「真实项目群」已绑定主会话 「研发会话」（abcdef）；已创建新的只读子会话。',
     })
     expect(bind).toHaveBeenCalledWith({
-      endpoint: { chatId: ENDPOINT.chatId },
-      parentSessionId: 'session-abcdef123456',
-      chatName: '真实项目群',
-      actorId: OWNER,
+      endpoint: { chatId: ENDPOINT.chatId }, parentSessionId: 'session-abcdef123456', chatName: '真实项目群', actorId: OWNER,
     })
   })
 
   it('leaves an unreadable real chat name absent instead of inventing one', async () => {
-    const bind = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
+    const { dispatcher, bind } = dispatcherWith({
       listSessions: () => [session('session-abcdef123456', { title: undefined })],
-      bind: { bind: bind as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
       chatName: async () => { throw new Error('not readable') },
     })
-
-    await expect(dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER,
-    })).resolves.toEqual({
-      ok: true,
-      text: '当前入口已绑定主会话 abcdef；已创建新的只读子会话。',
+    await expect(send(dispatcher, { kind: 'bind', prefix: 'abcdef' })).resolves.toEqual({
+      ok: true, text: '当前入口已绑定主会话 abcdef；已创建新的只读子会话。',
     })
-    expect(bind).toHaveBeenCalledWith({
-      endpoint: { chatId: ENDPOINT.chatId },
-      parentSessionId: 'session-abcdef123456',
-      actorId: OWNER,
-    })
+    expect(bind).toHaveBeenCalledWith({ endpoint: { chatId: ENDPOINT.chatId }, parentSessionId: 'session-abcdef123456', actorId: OWNER })
   })
 
   it('keeps absent and ambiguous prefixes on the exact same receipt', async () => {
-    const sessions = [session('session-abcdef111111'), session('session-abcdef222222')]
     const bind = vi.fn()
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => sessions,
+    const { dispatcher } = dispatcherWith({
+      listSessions: () => [session('session-abcdef111111'), session('session-abcdef222222')],
       bind: { bind },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
     })
-    const noMatch = await dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'zzzzzz' }, endpoint: ENDPOINT, senderId: OWNER,
-    })
-    const ambiguous = await dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER,
-    })
+    const noMatch = await send(dispatcher, { kind: 'bind', prefix: 'zzzzzz' })
+    const ambiguous = await send(dispatcher, { kind: 'bind', prefix: 'abcdef' })
     expect(noMatch).toEqual({ ok: false, reason: 'prefix-unresolved', text: LOCUS_BIND_UNRESOLVED_TEXT })
     expect(ambiguous).toEqual(noMatch)
     expect(bind).not.toHaveBeenCalled()
   })
 
-  it('uses the dedicated protected rebuild port and never the ordinary ensure bind', async () => {
-    const bind = vi.fn()
-    const rebuildProtected = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => bindResult(parentSessionId))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind, rebuildProtected: rebuildProtected as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-    })
-
-    await expect(dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER, authorization: 'legacy',
-    })).resolves.toMatchObject({ ok: true })
-    expect(bind).not.toHaveBeenCalled()
-    expect(rebuildProtected).toHaveBeenCalledWith({
-      endpoint: { chatId: ENDPOINT.chatId },
-      parentSessionId: 'session-abcdef123456',
-      actorId: OWNER,
-      marker: 'legacy',
-    })
-  })
-
-  it('a /bind that moved the entry off an archived main says the source changed', async () => {
-    const rebuildProtected = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => ({
-      ...bindResult(parentSessionId),
-      previousLocus: { ...bindResult('session-old999999').locus, parentSessionTitle: '旧会话' },
-    }))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind: vi.fn(), rebuildProtected: rebuildProtected as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-    })
-
-    const result = await dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER, authorization: 'retired',
-    })
-
-    expect(rebuildProtected).toHaveBeenCalledWith(expect.objectContaining({ marker: 'retired', parentSessionId: 'session-abcdef123456' }))
-    expect(result).toMatchObject({ ok: true })
-    const text = 'text' in result ? result.text ?? '' : ''
-    expect(text).toContain('原主会话 「旧会话」（old999）')
-    expect(text).toContain('已改挂到新主会话')
-    expect(text).not.toContain('话题')
-  })
-
-  it('reports topics carried along with a group move, including skipped ones', async () => {
-    const rebuildProtected = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => ({
-      ...bindResult(parentSessionId),
-      previousLocus: bindResult('session-old999999').locus,
-      movedTopics: 2,
-      skippedTopics: ['入口仍有执行中或排队消息，请空闲后再重建。'],
-    }))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind: vi.fn(), rebuildProtected: rebuildProtected as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-    })
-
-    const result = await dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER, authorization: 'retired',
-    })
-    const text = 'text' in result ? result.text ?? '' : ''
-    expect(text).toContain('同群原主会话下的话题已一起改挂 2 个，1 个未改挂（入口仍有执行中或排队消息')
-    expect(text).toContain('再发一次 /bind')
-  })
-
-  it('a same-source group /bind that only carried old topics does not claim a new child', async () => {
-    const bind = vi.fn(async ({ parentSessionId }: { parentSessionId: string }) => ({
-      ...bindResult(parentSessionId), created: false, reused: true, movedTopics: 3, skippedTopics: [],
-    }))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind: bind as never },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-    })
-    const result = await dispatcher.dispatch({ command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER })
-    const text = 'text' in result ? result.text ?? '' : ''
-    expect(text).toBe('当前入口已绑定主会话 「研发会话」（abcdef）。同群原主会话下的话题已一起改挂 3 个。')
-  })
-
-  it('fails closed when a protected endpoint has no explicit rebuild adapter', async () => {
-    const bind = vi.fn()
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind },
-      exit: { unbindCurrent: async () => ({ state: 'stopped' }) },
-    })
-    await expect(dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: OWNER, authorization: 'legacy',
-    })).resolves.toMatchObject({ ok: false, reason: 'rebuild-unavailable' })
-    expect(bind).not.toHaveBeenCalled()
-  })
-
   it('rechecks allowlist and never invokes a mutation for an unauthorized direct call', async () => {
-    const bind = vi.fn()
-    const unbindCurrent = vi.fn()
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [session('session-abcdef123456')],
-      bind: { bind },
-      exit: { unbindCurrent },
-    })
-    await expect(dispatcher.dispatch({
-      command: { kind: 'bind', prefix: 'abcdef' }, endpoint: ENDPOINT, senderId: 'ou-stranger',
-    })).resolves.toEqual({ ok: false, reason: 'not-allowed', silent: true })
+    const { dispatcher, bind, unbindCurrent, setAccessMode } = dispatcherWith()
+    for (const command of [{ kind: 'bind', prefix: 'abcdef' }, { kind: 'unbind' }, { kind: 'access', mode: 'danger-full-access' }]) {
+      await expect(send(dispatcher, command, 'ou-stranger')).resolves.toEqual({ ok: false, reason: 'not-allowed', silent: true })
+    }
     expect(bind).not.toHaveBeenCalled()
     expect(unbindCurrent).not.toHaveBeenCalled()
+    expect(setAccessMode).not.toHaveBeenCalled()
   })
 
-  it('unbinds the exact endpoint only after a stopped marker is confirmed', async () => {
-    const unbindCurrent = vi.fn(async () => ({ state: 'stopped' as const }))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind: vi.fn() },
-      exit: { unbindCurrent },
-    })
-    const result = await dispatcher.dispatch({ command: { kind: 'unbind' }, endpoint: ENDPOINT, senderId: OWNER })
+  it('unbinds the exact endpoint and says a same-W /bind re-enables it', async () => {
+    const { dispatcher, unbindCurrent } = dispatcherWith()
+    const result = await send(dispatcher, { kind: 'unbind' })
     expect(result).toMatchObject({ ok: true })
-    expect(result.text).toContain('显式重建')
+    expect(result.text).toContain('/bind')
+    expect(result.text).not.toContain('显式重建')
     expect(unbindCurrent).toHaveBeenCalledWith({ endpoint: { chatId: ENDPOINT.chatId }, actorId: OWNER })
   })
 
-  it('dispatches tool-tier changes through the owner mutation seam with truthful receipts', async () => {
-    const setCurrentTier = vi.fn(async ({ tier }: { tier: 'safe' | 'shell' }) => ({ tier }))
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind: vi.fn() },
-      exit: { unbindCurrent: vi.fn() },
-      toolTierMutation: { setCurrentTier },
-    })
-    const result = await dispatcher.dispatch({
-      command: { kind: 'tools', tier: 'shell' },
-      endpoint: ENDPOINT,
-      senderId: OWNER,
-    })
-    expect(setCurrentTier).toHaveBeenCalledWith({ endpoint: { chatId: ENDPOINT.chatId }, actorId: OWNER, tier: 'shell' })
-    expect(result).toMatchObject({ ok: true, text: expect.stringContaining('当前入口转为所有者专用') })
-    expect(result.ok === true && result.text).toContain('不是安全边界')
-
-    setCurrentTier.mockResolvedValueOnce({ tier: 'safe' })
-    await expect(dispatcher.dispatch({
-      command: { kind: 'tools', tier: 'safe' }, endpoint: ENDPOINT, senderId: OWNER,
-    })).resolves.toMatchObject({ ok: true, text: expect.stringContaining('bash 与 Skill 已收紧') })
-  })
-
-  it('reports a change recorded for a released child as pending, never as in force', async () => {
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind: vi.fn() },
-      exit: { unbindCurrent: vi.fn() },
-      toolTierMutation: { setCurrentTier: async () => ({ tier: 'safe' as const, pending: true }) },
-      scope: { setCurrentMode: async () => ({ mode: 'read' as const, pending: true }) },
-    })
-    const tier = await dispatcher.dispatch({ command: { kind: 'tools', tier: 'shell' }, endpoint: ENDPOINT, senderId: OWNER })
-    expect(tier).toMatchObject({ ok: true, text: expect.stringContaining('已记录，将在子会话下次唤醒时应用并核验') })
-    expect(tier.ok === true && tier.text).toContain('按原档位 safe 服务')
-    expect(tier.ok === true && tier.text).not.toContain('已核验为 shell')
-  })
-
-  it('rejects a busy tool-tier change with a deterministic wait receipt', async () => {
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind: vi.fn() },
-      exit: { unbindCurrent: vi.fn() },
-      toolTierMutation: {
-        setCurrentTier: async () => { throw Object.assign(new Error('busy'), { code: 'LOCUS_BUSY' }) },
-      },
-    })
-    await expect(dispatcher.dispatch({
-      command: { kind: 'tools', tier: 'shell' }, endpoint: ENDPOINT, senderId: OWNER,
-    })).resolves.toEqual({
-      ok: false, reason: 'busy', text: '当前入口仍有执行中或排队消息，请稍后重试。',
-    })
-  })
-
-  it('spec Scenario "safe-v1 入口请求 shell"', async () => {
-    // The group was a previous-model entry; the migration deleted its row, so
-    // there is no locus at all. The owner's tier command is refused as an
-    // entry that does not exist, and nothing is built or switched.
-    const bind = vi.fn()
-    const setCurrentTier = vi.fn(async () => {
-      throw Object.assign(new Error('Current locus does not exist'), { code: 'LOCUS_NOT_FOUND' })
-    })
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind },
-      exit: { unbindCurrent: vi.fn() },
-      toolTierMutation: { setCurrentTier },
-    })
-    await expect(dispatcher.dispatch({
-      command: { kind: 'tools', tier: 'shell' }, endpoint: ENDPOINT, senderId: OWNER,
-    })).resolves.toEqual({ ok: false, reason: 'not-found', text: '当前入口不存在或已失效。' })
-    expect(setCurrentTier).toHaveBeenCalledOnce()
-    expect(bind).not.toHaveBeenCalled()
-  })
-
   it('maps busy control mutations to a deterministic retry receipt', async () => {
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind: vi.fn() },
-      exit: {
-        unbindCurrent: async () => {
-          throw Object.assign(new Error('busy'), { code: 'LOCUS_BUSY' })
-        },
-      },
+    const { dispatcher } = dispatcherWith({
+      exit: { unbindCurrent: async () => { throw Object.assign(new Error('busy'), { code: 'LOCUS_BUSY' }) } },
     })
-    await expect(dispatcher.dispatch({ command: { kind: 'unbind' }, endpoint: ENDPOINT, senderId: OWNER }))
+    await expect(send(dispatcher, { kind: 'unbind' }))
       .resolves.toEqual({ ok: false, reason: 'busy', text: '当前入口仍有执行中或排队消息，请稍后重试。' })
   })
 
-  it('reports the real reason a write grant was refused, not a retry hint', async () => {
-    // The live failure: the owner got 「控制命令执行失败，请稍后重试。」 for a
-    // deterministic refusal (no owner-confirmed execution root), so retrying
-    // could never help and the reason stayed hidden in another surface.
-    const dispatcher = createLocusControlDispatcher({
-      allowOpenIds: () => [OWNER],
-      listSessions: () => [],
-      bind: { bind: vi.fn() },
-      exit: { unbindCurrent: vi.fn() },
-      scope: {
-        setCurrentMode: async () => {
-          throw new LocusPermissionMutationError(
-            'WRITE_UNSUPPORTED',
-            '缺少所有者已确认的 execution root；请先确认上下文锚点再提权。 已维持原 effective/read，未扩大权限。',
-          )
-        },
-      },
+  describe('/bind refusals and re-enable', () => {
+    it('跨 W 的 bind 回执指向管理面改绑，不再要求先解除', async () => {
+      const { dispatcher } = dispatcherWith({
+        bind: { bind: async () => { throw Object.assign(new Error('x'), { code: 'EXPLICIT_PARENT_CONFLICT' }) } },
+      })
+      const result = await send(dispatcher, { kind: 'bind', prefix: 'abcdef' })
+      expect(result).toMatchObject({ ok: false, reason: 'explicit-source-locked' })
+      expect(result.text).toBe('该群已由其它会话跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」。')
     })
 
-    const result = await dispatcher.dispatch({
-      command: { kind: 'scope', mode: 'write' },
-      endpoint: ENDPOINT,
-      senderId: OWNER,
+    it('停止的入口重新绑定同一 W: receipt says re-enabled, read-only', async () => {
+      const { dispatcher } = dispatcherWith({
+        bind: { bind: async ({ parentSessionId }: { parentSessionId: string }) => ({ ...bindResult(parentSessionId), created: false, reused: false, reenabled: true }) },
+      })
+      const result = await send(dispatcher, { kind: 'bind', prefix: 'abcdef' })
+      expect(result.text).toContain('已重新启用')
+      expect(result.text).toContain('只读')
     })
 
-    // The write master switch now refuses at the door, BEFORE the anchor
-    // check this case was originally written against, so the real reason is
-    // the switch. The invariant under test is unchanged: state the actual
-    // cause, never a misleading retry hint.
-    expect(result).toMatchObject({ ok: false, reason: 'scope-write-disabled' })
-    expect(result.ok === false && result.text).toContain('写档已全局停用')
-    expect(result.ok === false && result.text).toContain('并发写')
-    expect(result.ok === false && result.text).not.toContain('请稍后重试')
+    it('reused bind reports the access mode as read-only wording, not a permission', async () => {
+      const { dispatcher } = dispatcherWith({
+        bind: { bind: async ({ parentSessionId }: { parentSessionId: string }) => ({ ...bindResult(parentSessionId), created: false, reused: true }) },
+      })
+      const result = await send(dispatcher, { kind: 'bind', prefix: 'abcdef' })
+      expect(result.text).toContain('本次未重复创建')
+      expect(result.text).not.toContain('共享权限')
+    })
   })
 
-  it('keeps per-code permission failures distinguishable and secret-free', async () => {
-    const dispatchWith = async (error: unknown) => {
-      const dispatcher = createLocusControlDispatcher({
-        allowOpenIds: () => [OWNER],
-        listSessions: () => [],
-        bind: { bind: vi.fn() },
-        exit: { unbindCurrent: vi.fn() },
-        scope: { setCurrentMode: async () => { throw error } },
-      })
-      return dispatcher.dispatch({
-        // `read`, not `write`: this case is about ERROR-CODE MAPPING and
-        // secret-free receipts, not about the write grant. A write request is
-        // now refused at the door, which would short-circuit every branch
-        // below and silently stop testing what this case exists to test.
-        command: { kind: 'scope', mode: 'read' },
-        endpoint: ENDPOINT,
-        senderId: OWNER,
-      })
-    }
+  describe('/access', () => {
+    it('full dispatches danger-full-access and replies "下次唤醒时应用并核验" without claiming it is in force', async () => {
+      const { dispatcher, setAccessMode } = dispatcherWith({ writeEnabled: () => true })
+      const result = await send(dispatcher, { kind: 'access', mode: 'danger-full-access' })
+      expect(setAccessMode).toHaveBeenCalledWith({ endpoint: { chatId: ENDPOINT.chatId }, actorId: OWNER, mode: 'danger-full-access' })
+      expect(result).toMatchObject({ ok: true })
+      expect(result.text).toContain('下次唤醒时应用并核验')
+      expect(result.text).toContain('核验失败将拒绝服务')
+    })
 
-    await expect(dispatchWith(new LocusPermissionMutationError(
-      'CHILD_SESSION_UNAVAILABLE',
-      '无法解析当前 locus 的 exact child session，权限未修改。',
-    ))).resolves.toMatchObject({ ok: false, reason: 'child-unavailable' })
-    await expect(dispatchWith(new LocusPermissionMutationError(
-      'POLICY_ROLLBACK_FAILED',
-      '权限变更失败且无法恢复原 sandbox；该 locus 保持暂停，必须人工核验。',
-    ))).resolves.toMatchObject({ ok: false, reason: 'rollback-failed' })
-    // An unknown failure still degrades to the generic receipt rather than
-    // leaking an arbitrary message into a group chat.
-    await expect(dispatchWith(new Error('boom /Users/owner/private'))).resolves.toEqual({
-      ok: false,
-      reason: 'control-failed',
-      text: '控制命令执行失败，请稍后重试。',
+    it('uses the mutation receipt verbatim when it supplies one (full-access disclosure)', async () => {
+      const { dispatcher } = dispatcherWith({
+        writeEnabled: () => true,
+        access: { setAccessMode: async () => ({ receipt: '已更新。完全访问披露。' }) },
+      })
+      const result = await send(dispatcher, { kind: 'access', mode: 'danger-full-access' })
+      expect(result).toEqual({ ok: true, text: '已更新。完全访问披露。' })
+    })
+
+    it('read dispatches read-only with the same receipt', async () => {
+      const { dispatcher, setAccessMode } = dispatcherWith()
+      const result = await send(dispatcher, { kind: 'access', mode: 'read-only' })
+      expect(setAccessMode).toHaveBeenCalledWith(expect.objectContaining({ mode: 'read-only' }))
+      expect(result.text).toContain('下次唤醒时应用并核验')
+    })
+
+    it('write switch off: full is refused before the mutation, read is still accepted', async () => {
+      const { dispatcher, setAccessMode } = dispatcherWith({ writeEnabled: () => false })
+      const refused = await send(dispatcher, { kind: 'access', mode: 'danger-full-access' })
+      expect(refused).toMatchObject({ ok: false, reason: 'access-full-disabled' })
+      expect(setAccessMode).not.toHaveBeenCalled()
+      await expect(send(dispatcher, { kind: 'access', mode: 'read-only' })).resolves.toMatchObject({ ok: true })
+      expect(setAccessMode).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([
+      ['LOCUS_BUSY', 'busy'],
+      ['INVALID_REQUEST', 'access-invalid-state'],
+      ['LOCUS_NOT_FOUND', 'not-found'],
+      ['LOCUS_CONFLICT', 'conflict'],
+    ])('maps refusal %s to a distinct receipt', async (code, reason) => {
+      const { dispatcher } = dispatcherWith({
+        access: { setAccessMode: async () => { throw Object.assign(new Error('x'), { code }) } },
+      })
+      await expect(send(dispatcher, { kind: 'access', mode: 'read-only' })).resolves.toMatchObject({ ok: false, reason })
+    })
+
+    it('without the access seam: unavailable, never a silent success', async () => {
+      const { dispatcher } = dispatcherWith({ access: undefined })
+      await expect(send(dispatcher, { kind: 'access', mode: 'read-only' })).resolves.toMatchObject({ ok: false, reason: 'access-unavailable' })
+    })
+
+    it('missing or invalid mode is an invalid command and mutates nothing', async () => {
+      const { dispatcher, setAccessMode } = dispatcherWith()
+      await expect(send(dispatcher, { kind: 'access-missing-mode' })).resolves.toMatchObject({ ok: false, reason: 'invalid-command' })
+      await expect(send(dispatcher, { kind: 'access-invalid', value: 'x' })).resolves.toMatchObject({ ok: false, reason: 'invalid-command' })
+      expect(setAccessMode).not.toHaveBeenCalled()
+    })
+
+    it('旧命令不再改变状态: /scope /tools -s -t answer "改用 /access" and mutate nothing', async () => {
+      const { dispatcher, setAccessMode, bind, unbindCurrent } = dispatcherWith()
+      const result = await send(dispatcher, { kind: 'deprecated-tier', original: '-s write' })
+      expect(result).toMatchObject({ ok: false, reason: 'deprecated-command' })
+      expect(result.text).toContain('/access read|full')
+      expect(setAccessMode).not.toHaveBeenCalled()
+      expect(bind).not.toHaveBeenCalled()
+      expect(unbindCurrent).not.toHaveBeenCalled()
+    })
+
+    it('非 allowlist 变更被拒', async () => {
+      const { dispatcher, setAccessMode } = dispatcherWith()
+      await expect(send(dispatcher, { kind: 'access', mode: 'danger-full-access' }, 'ou-stranger'))
+        .resolves.toEqual({ ok: false, reason: 'not-allowed', silent: true })
+      expect(setAccessMode).not.toHaveBeenCalled()
     })
   })
 })

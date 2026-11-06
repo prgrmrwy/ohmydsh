@@ -132,7 +132,7 @@ describe('admitDocCommentEvent', () => {
   })
 
   it('spec Scenario "非 allowlist 成员在已授权文档提问"', () => {
-    const decision = admitDocCommentEvent(event({ fromOpenId: DOC_IDS.otherUserOpenId }), whole, context())
+    const decision = admitDocCommentEvent(event({ fromOpenId: DOC_IDS.otherUserOpenId }), whole, context({ accessMode: () => 'read-only' }))
     expect(decision.kind).toBe('accepted')
   })
 
@@ -149,7 +149,7 @@ describe('admitDocCommentEvent', () => {
     const decision = admitDocCommentEvent(
       event({ fromOpenId: DOC_IDS.otherUserOpenId }),
       whole,
-      context({ toolTier: () => 'shell' }),
+      context({ accessMode: () => 'danger-full-access' }),
     )
     expect(decision).toMatchObject({ kind: 'rejected', reason: 'owner-only-tier' })
   })

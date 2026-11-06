@@ -51,7 +51,7 @@ import {
 import {
   attestLocusComposition,
   LOCUS_SAFE_TOOL_NAMES,
-  LOCUS_SHELL_TIER_TOOL_NAMES,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
 import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
 
@@ -59,7 +59,7 @@ const REPO = nodePath.resolve(import.meta.dirname, '../../..')
 
 /** What the pre-0.2.1 runtime exposed to a child before the tier layer: filter ∩ preset. */
 const OLD_SAFE = [...LOCUS_SAFE_TOOL_NAMES].sort()
-const OLD_SHELL = [...OLD_SAFE, ...LOCUS_SHELL_TIER_TOOL_NAMES].sort()
+const OLD_SHELL = [...OLD_SAFE, ...LOCUS_FULL_ACCESS_TOOL_NAMES].sort()
 
 /** The `tool-fs` row config of a real preset file (the only part of it this graph can load). */
 async function presetFsConfig(presetId: string): Promise<Record<string, unknown>> {
@@ -180,7 +180,7 @@ describe('locus child tool ceiling on the official 0.2.1 runtime', () => {
       if (!children.has(agent.id)) return
       if (options.hostCeiling) applyLocusInheritedToolCeiling(agent.ctx.tools as never)
       const tools = agent.ctx.tools as unknown as { restrict(filter: { deny: readonly string[] }): () => void }
-      if (options.tier() === 'safe') tierLayers.set(agent, tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES }))
+      if (options.tier() === 'safe') tierLayers.set(agent, tools.restrict({ deny: LOCUS_FULL_ACCESS_TOOL_NAMES }))
       // What Pet's publication readback sees at this exact boundary.
       published.push({
         id: agent.id,

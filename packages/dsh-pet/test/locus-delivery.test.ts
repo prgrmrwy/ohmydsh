@@ -41,8 +41,7 @@ function correlation(
   return {
     endpoint: ENDPOINT,
     locusId: LOCUS,
-    generation: 1,
-    childSessionId: CHILD,
+    sessionId: CHILD,
     ...overrides,
   }
 }
@@ -72,8 +71,7 @@ describe('unified locus Delivery correlation', () => {
     expect(first.record.messageId).toBe('message-1')
     expect(first.record.endpoint).toEqual(ENDPOINT)
     expect(first.record.locusId).toBe(LOCUS)
-    expect(first.record.generation).toBe(1)
-    expect(first.record.childSessionId).toBe(CHILD)
+    expect(first.record.sessionId).toBe(CHILD)
     expect(getDeliveryByMessageId(first.state, 'message-1')).toBe(first.record)
     expect(getDelivery(first.state, first.record.deliveryId)).toBe(first.record)
     expect(first.record.feedbackTarget).toEqual({ ...ENDPOINT, messageId: 'message-1' })
@@ -88,8 +86,7 @@ describe('unified locus Delivery correlation', () => {
     const replay = acceptDelivery(first.state, {
       endpoint: { chatId: 'another-chat', threadId: 'another-thread' },
       locusId: 'another-locus',
-      generation: 99,
-      childSessionId: 'another-child',
+      sessionId: 'another-child',
       messageId: 'message-duplicate',
       deliveryId: 'delivery-attacker-chosen',
     })
@@ -249,15 +246,14 @@ describe('unified locus Delivery correlation', () => {
     const threadB = accept(state, 'message-thread-b', {
       endpoint: { chatId: ENDPOINT.chatId, threadId: 'thread-b' },
       locusId: 'locus-project-thread-b',
-      childSessionId: 'child-project-thread-b',
+      sessionId: 'child-project-thread-b',
     })
     state = threadB.state
 
     const threadBBound = bindDeliveryTurn(state, {
       endpoint: { chatId: ENDPOINT.chatId, threadId: 'thread-b' },
       locusId: 'locus-project-thread-b',
-      generation: 1,
-      childSessionId: 'child-project-thread-b',
+      sessionId: 'child-project-thread-b',
       deliveryId: threadB.record.deliveryId,
       turnId: TURN,
       executionId: EXECUTION,
@@ -266,8 +262,7 @@ describe('unified locus Delivery correlation', () => {
     const settledB = settleNextDelivery(threadBBound.state, {
       endpoint: { chatId: ENDPOINT.chatId, threadId: 'thread-b' },
       locusId: 'locus-project-thread-b',
-      generation: 1,
-      childSessionId: 'child-project-thread-b',
+      sessionId: 'child-project-thread-b',
       turnId: TURN,
       executionId: EXECUTION,
       outcome: 'settled',
@@ -327,28 +322,26 @@ describe('unified locus Delivery correlation', () => {
     expect(repeated.state.byMessageId['message-explicit-first']?.status).toBe('accepted')
   })
 
-  it('spec Scenario "旧代际迟到结算": does not let a late old-generation settlement consume a replacement delivery', () => {
+  it('spec Scenario \"旧代际迟到结算\"', () => {
     let state = createDeliveryLedger()
     const old = accept(state, 'message-old', {
-      generation: 1,
-      childSessionId: 'child-old',
+      sessionId: 'child-old',
     })
     state = old.state
     const replacement = accept(state, 'message-new', {
-      generation: 2,
-      childSessionId: 'child-new',
+      sessionId: 'child-new',
     })
     state = replacement.state
 
     const oldBound = bindDeliveryTurn(state, {
-      ...correlation({ generation: 1, childSessionId: 'child-old' }),
+      ...correlation({ sessionId: 'child-old' }),
       deliveryId: old.record.deliveryId,
       executionId: 'execution-old', inboxMessageId: 'inbox-execution-old',
       turnId: 'turn-old',
     })
     state = oldBound.state
     const newBound = bindDeliveryTurn(state, {
-      ...correlation({ generation: 2, childSessionId: 'child-new' }),
+      ...correlation({ sessionId: 'child-new' }),
       deliveryId: replacement.record.deliveryId,
       executionId: 'execution-new', inboxMessageId: 'inbox-execution-new',
       turnId: 'turn-new',
@@ -358,7 +351,7 @@ describe('unified locus Delivery correlation', () => {
     // This event is from the old child and old locus generation. FIFO lookup is
     // exact, so it settles only the old request and cannot consume the new one.
     const oldSettlement = settleNextDelivery(state, {
-      ...correlation({ generation: 1, childSessionId: 'child-old' }),
+      ...correlation({ sessionId: 'child-old' }),
       executionId: 'execution-old', inboxMessageId: 'inbox-execution-old',
       turnId: 'turn-old',
       outcome: 'settled',
@@ -367,27 +360,27 @@ describe('unified locus Delivery correlation', () => {
     expect(oldSettlement.state.byMessageId['message-new']?.status).toBe('running')
 
     // An explicit id cannot be used with a mismatched generation either.
-    const wrongGeneration = settleDelivery(oldSettlement.state, {
+    const wrongSession = settleDelivery(oldSettlement.state, {
       deliveryId: replacement.record.deliveryId,
       outcome: 'settled',
       executionId: 'execution-new', inboxMessageId: 'inbox-execution-new',
       turnId: 'turn-new',
-      correlation: { ...correlation({ generation: 1, childSessionId: 'child-old' }), turnId: 'turn-new' },
+      correlation: { ...correlation({ sessionId: 'child-old' }), turnId: 'turn-new' },
       settledAt: 40,
     })
-    expect(wrongGeneration.changed).toBe(false)
-    expect(wrongGeneration.reason).toBe('correlation-mismatch')
-    expect(wrongGeneration.state.byMessageId['message-new']?.status).toBe('running')
+    expect(wrongSession.changed).toBe(false)
+    expect(wrongSession.reason).toBe('correlation-mismatch')
+    expect(wrongSession.state.byMessageId['message-new']?.status).toBe('running')
   })
 
   it('returns no pending delivery when an old generation has no matching record', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
-      ...correlation({ generation: 2, childSessionId: 'child-new' }),
+      ...correlation({ sessionId: 'child-new' }),
       messageId: 'message-new-only',
     })
 
     const late = settleNextDelivery(accepted.state, {
-      ...correlation({ generation: 1, childSessionId: 'child-old' }),
+      ...correlation({ sessionId: 'child-old' }),
       executionId: 'execution-old', inboxMessageId: 'inbox-execution-old',
       turnId: 'turn-old',
       outcome: 'settled',
@@ -506,7 +499,7 @@ describe('unified locus Delivery correlation', () => {
     expect(duplicateClaim.record?.messageId).toBe('message-current-a')
   })
 
-  it('spec Scenario "相对等待受绝对上限约束": uses the fixed acceptance deadline and hard 24-hour cap for repeated waits', () => {
+  it('spec Scenario \"相对等待受绝对上限约束\"', () => {
     const accepted = acceptDelivery(createDeliveryLedger(), {
       ...correlation(), messageId: 'message-deadline', acceptedAt: 10_000,
     })

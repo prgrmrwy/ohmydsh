@@ -1,1101 +1,143 @@
-/** Focused control-plane tests for the standalone unified locus controller. */
-
-import { describe, expect, it, vi } from 'vitest'
-import {
-  LocusController,
-  LocusControllerError,
-  locusEndpointKey,
-  renderAutomaticReplacementWarning,
-  type LocusControllerDeps,
-  type LocusGroupRecord,
-  type LocusRecord,
-  type LocusRepository,
-  type LocusMainRecord,
-  type LocusProvisioningCommit,
-  type LocusRegenerationCommit,
-  type ProvisionedSession,
-} from '../src/host/locus/controller.js'
-import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
-
 /**
- * A main session as the real Host reports it, including its `agentPreset`.
- * The preset is carried for realism only; the controller does not read it.
+ * Controller behaviour on v20 rows (spec "换绑与归档按层处理", "Locus 三层实体",
+ * "入口建立统一为一条路径"). Runs on owner B's recording Topology fake; the
+ * creation / bind / rebind / migrate rows themselves live in
+ * locus-dual-creation, locus-rebind and locus-migrate-whole-w.
  */
-function parent(
-  id: string,
-  workspaceId = 'ws-default',
-  title = id,
-  agentPreset: string | undefined = LOCUS_MAIN_PRESET,
-): ProvisionedSession & {
-  readonly workspaceId: string
-  readonly title: string
-} {
-  return { id, workspaceId, title, ...(agentPreset === undefined ? {} : { agentPreset }) }
+import { describe, expect, it } from 'vitest'
+import { LocusController, LocusControllerError } from '../src/host/locus/controller.js'
+import { Refusal, Topology } from './support/w-topology.js'
+
+const make = (options?: ConstructorParameters<typeof Topology>[0]) => {
+  const t = new Topology(options)
+  return { t, controller: new LocusController(t.deps()) }
 }
 
-class MemoryLocusRepository implements LocusRepository {
-  readonly mains = new Map<string, LocusMainRecord>()
-  async findMain(id: string) { return this.mains.get(id) }
-  async findActiveMain(work: string) { return [...this.mains.values()].find(m => m.workSessionId === work && m.status === 'active') }
-  async listEntriesOfMain(id: string) { return [...this.loci.values()].filter(l => l.parentSessionId === id) }
-  async commitRegeneration(input: LocusRegenerationCommit) {
-    if (input.main) this.mains.set(input.main.locusMainSessionId, input.main)
-    if (input.retireMain) { const old = this.mains.get(input.retireMain.locusMainSessionId)!; this.mains.set(old.locusMainSessionId, { ...old, status: 'retired' }) }
-    for (const entry of input.entries) {
-      const old = this.loci.get(entry.oldLocusId)!
-      this.loci.set(old.locusId, { ...old, state: 'invalid' })
-      this.loci.set(entry.locus.locusId, entry.locus)
-    }
-  }
-  readonly groups = new Map<string, LocusGroupRecord>()
-  readonly loci = new Map<string, LocusRecord>()
-  readonly defaults = new Map<string, string>()
-  readonly provisioning: string[] = []
-  readonly committed: string[] = []
-  readonly failed: string[] = []
-  readonly resources: { provisioningId: string; resource: Record<string, string> }[] = []
-  readonly notices = new Map<string, { endpoint: { chatId: string; threadId?: string }; text: string }>()
-  idle = true
+const fenceOf = (row: { locusId: string; revision: number }) => ({ expectedLocusId: row.locusId, expectedRevision: row.revision })
 
-  async findGroup(chatId: string): Promise<LocusGroupRecord | undefined> {
-    return this.groups.get(chatId)
-  }
-
-  async findActive(endpoint: { chatId: string; threadId?: string }): Promise<LocusRecord | undefined> {
-    const key = locusEndpointKey(endpoint)
-    return [...this.loci.values()]
-      .filter(locus => locusEndpointKey(locus.endpoint) === key)
-      .sort((left, right) => right.generation - left.generation)[0]
-  }
-
-  async findDefaultQa(parentSessionId: string): Promise<LocusRecord | undefined> {
-    const main = await this.findActiveMain(parentSessionId)
-    const locusId = this.defaults.get(main?.locusMainSessionId ?? parentSessionId)
-    return locusId === undefined ? undefined : this.loci.get(locusId)
-  }
-
-  async isLocusIdle(): Promise<boolean> {
-    return this.idle
-  }
-
-  async beginProvisioning(input: { provisioningId: string }): Promise<void> {
-    this.provisioning.push(input.provisioningId)
-  }
-
-  async recordProvisioningResource(
-    provisioningId: string,
-    resource: { readonly mainSessionId?: string; readonly childSessionId?: string; readonly chatId?: string },
-  ): Promise<void> {
-    this.resources.push({ provisioningId, resource: { ...resource } })
-  }
-
-  async completeProvisioning(): Promise<void> {}
-
-  async failProvisioning(provisioningId: string): Promise<void> {
-    this.failed.push(provisioningId)
-  }
-
-  async findSwitchNotice(locusId: string, generation: number) {
-    return this.notices.get(`${locusId}\u0000${String(generation)}`)
-  }
-
-  async acknowledgeSwitchNotice(locusId: string, generation: number): Promise<void> {
-    this.notices.delete(`${locusId}\u0000${String(generation)}`)
-  }
-
-  async commitProvisioning(input: LocusProvisioningCommit): Promise<void> {
-    if (input.main) this.mains.set(input.main.locusMainSessionId, input.main)
-    this.committed.push(input.provisioningId)
-    if (input.rebuild !== undefined) {
-      // Mirrors the durable guard, because a fixture that does not enforce it
-      // cannot catch a controller that stops proving what the guard requires:
-      // every controller test passed while the real rebuild failed on exactly
-      // this rule ("predecessor … is not unavailable"), and only production
-      // showed it.
-      const predecessor = this.loci.get(input.rebuild.oldLocusId)
-      const unavailable = predecessor !== undefined &&
-        (predecessor.state === 'stopped' || predecessor.state === 'invalid' || predecessor.state === 'retired')
-      if (!unavailable && input.rebuild.predecessorDisposition !== 'archived-parent') {
-        throw new Error(`Rebuild predecessor ${String(input.rebuild.oldLocusId)} is not unavailable`)
-      }
-    }
-    if (input.replace !== undefined) {
-      const old = this.loci.get(input.replace.oldLocusId)
-      if (old !== undefined) this.loci.set(old.locusId, { ...old, state: 'retired', retiredAt: 99 })
-      this.notices.set(`${input.locus.locusId}\u0000${String(input.locus.generation)}`, {
-        endpoint: input.locus.endpoint,
-        text: input.replace.noticeText,
-      })
-    }
-    if (input.rebuild !== undefined) {
-      const old = this.loci.get(input.rebuild.oldLocusId)
-      if (old !== undefined && old.state !== 'retired') this.loci.set(old.locusId, old)
-    }
-    if (input.group !== undefined) this.groups.set(input.group.chatId, input.group)
-    this.loci.set(input.locus.locusId, input.locus)
-    if (input.defaultQaForParentSessionId !== undefined) {
-      this.defaults.set(input.defaultQaForParentSessionId, input.locus.locusId)
-    }
-  }
-}
-
-interface FakeHost {
-  readonly deps: LocusControllerDeps
-  readonly repository: MemoryLocusRepository
-  readonly createdMains: { workspaceId: string; chatId: string; label: string }[]
-  readonly createdChildren: { parentSessionId: string; endpoint: { chatId: string; threadId?: string } }[]
-  readonly released: string[]
-  readonly sentWarnings: string[]
-  failCommit?: boolean
-  failGroup?: boolean
-  failChildCommit?: boolean
-  failNotification?: boolean
-}
-
-function fakeHost(options: {
-  defaultWorkspace?: string
-  /**
-   * Session ids the Host reports as archived.
-   *
-   * Modelled on the harness rather than on a mutable probe so a test states the
-   * archive fact once and every reader — the parent resolver, the rebuild gate,
-   * the session-level replacement — sees the same answer, which is the whole
-   * point of the gate.
-   */
-  readonly archived?: readonly string[]
-  /** Extra sessions the Host reports, beside the built-in fixtures. */
-  readonly sessions?: readonly (ProvisionedSession & { workspaceId: string; title: string })[]
-} = {}): FakeHost {
-  const repository = new MemoryLocusRepository()
-  const createdMains: { workspaceId: string; chatId: string }[] = []
-  const createdChildren: { parentSessionId: string; endpoint: { chatId: string; threadId?: string } }[] = []
-  const released: string[] = []
-  const sentWarnings: string[] = []
-  let sequence = 0
-  let failGroup = false
-  let failChildCommit = false
-  let failNotification = false
-  const sessions = new Map<string, ProvisionedSession & { workspaceId: string; title: string }>([
-    ['source-1', parent('source-1', 'ws-source', '研发主会话')],
-    ['source-2', parent('source-2', 'ws-other', '另一个主会话')],
-    ['child-only', { ...parent('child-only'), parentSessionId: 'source-1' }],
-    ...(options.sessions ?? []).map(session => [session.id, session] as const),
-  ])
-  const deps: LocusControllerDeps = {
-    repository,
-    dsh: {
-      resolveSession: async id => {
-        const session = sessions.get(id)
-        if (session === undefined) return undefined
-        return options.archived?.includes(id) === true
-          ? { ...session, state: 'archived' as const }
-          : session
-      },
-      resolveDefaultWorkspace: async () =>
-        options.defaultWorkspace === undefined
-          ? { id: 'ws-default', title: '默认工作区' }
-          : options.defaultWorkspace === ''
-            ? undefined
-            : { id: options.defaultWorkspace },
-      createMainSession: async input => {
-        if (options.defaultWorkspace === 'fail-main') throw new Error('main failed')
-        const session = parent(`main-${++sequence}`, input.workspaceId, `群主会话 ${input.chatId}`)
-        sessions.set(session.id, session)
-        createdMains.push({ workspaceId: input.workspaceId, chatId: input.chatId, label: input.label })
-        return {
-          ...session,
-          rollback: async () => {
-            released.push(session.id)
-            sessions.delete(session.id)
-          },
-        }
-      },
-      createLocusMainSession: async input => {
-        const session = {
-          id: `locus-main-${++sequence}`,
-          agentPreset: LOCUS_MAIN_PRESET,
-          workspaceId: input.workspaceId,
-          title: input.label,
-
-          commit: async () => {
-            if (failChildCommit) throw new Error('child finalize failed')
-          },
-        }
-        sessions.set(session.id, session)
-        return { ...session, rollback: async () => { released.push(session.id); sessions.delete(session.id) } }
-      },
-      // Production provides this, and it only DETACHES: the session leaves its
-      // workspace and reappears in the ungrouped bucket, which is exactly the
-      // stray the owner saw after a failed replacement. `rollback` (below) is
-      // the creator-held hook that also disposes the agent, so a caller must
-      // prefer it.
-      releaseSession: async id => {
-        released.push(id)
-      },
-    },
-    lark: {
-      createGroup: async input => {
-        if (failGroup) throw new Error('lark refused')
-        return { chatId: `oc-${++sequence}`, chatName: input.name }
-      },
-      sendControlMessage: async input => {
-        if (failNotification) throw new Error('notification failed')
-        sentWarnings.push(input.text)
-      },
-      deleteGroup: async id => {
-        released.push(`chat:${id}`)
-      },
-    },
-    establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
-    id: () => `id-${++sequence}`,
-    now: () => 100,
-  }
-  return {
-    deps,
-    repository,
-    createdMains,
-    createdChildren,
-    released,
-    sentWarnings,
-    get failCommit() {
-      return false
-    },
-    set failCommit(value: boolean) {
-      if (value) {
-        vi.spyOn(repository, 'commitProvisioning').mockRejectedValueOnce(new Error('commit failed'))
-      }
-    },
-    get failGroup() {
-      return failGroup
-    },
-    set failGroup(value: boolean) {
-      failGroup = value
-    },
-    get failChildCommit() {
-      return failChildCommit
-    },
-    set failChildCommit(value: boolean) {
-      failChildCommit = value
-    },
-    get failNotification() {
-      return failNotification
-    },
-    set failNotification(value: boolean) {
-      failNotification = value
-    },
-  }
-}
-
-function mainOf(host: FakeHost, work: string): string {
-  return [...host.repository.mains.values()].find(m => m.workSessionId === work && m.status === 'active')!.locusMainSessionId
-}
-
-function controller(host: FakeHost): LocusController {
-  return new LocusController(host.deps)
-}
-
-describe('unified locus hierarchy', () => {
-  it('creates one automatic main per group in the default workspace', async () => {
-    const host = fakeHost()
-    const first = await controller(host).ensureGroup({ chatId: 'oc-project', chatName: 'Project' })
-    const second = await controller(host).ensureGroup({ chatId: 'oc-other', chatName: 'Other' })
-
-    expect(host.createdMains.map(entry => ({ workspaceId: entry.workspaceId, chatId: entry.chatId }))).toEqual([
-      { workspaceId: 'ws-default', chatId: 'oc-project' },
-      { workspaceId: 'ws-default', chatId: 'oc-other' },
-    ])
-    expect(first.group.mainSessionId).not.toBe(second.group.mainSessionId)
-    expect(first.locus.permission).toBe('read')
-    expect(first.locus.source).toBe('auto')
+describe('automatic source', () => {
+  it('creates one automatic work session and M per group, in the default workspace', async () => {
+    const { t, controller } = make({ defaultWorkspace: 'default-ws' })
+    const first = await controller.ensureGroup({ chatId: 'oc_a' })
+    const second = await controller.ensureGroup({ chatId: 'oc_b' })
+    expect(t.created.filter(c => c.kind === 'work')).toHaveLength(2)
+    expect(first.group.workspaceId).toBe('default-ws')
+    expect(second.group.locusMainSessionId).not.toBe(first.group.locusMainSessionId)
   })
 
-  it('fails closed when automatic main creation has no default workspace', async () => {
-    const host = fakeHost({ defaultWorkspace: '' })
-    await expect(controller(host).ensureGroup({ chatId: 'oc-no-default' })).rejects.toMatchObject({
-      code: 'DEFAULT_WORKSPACE_UNAVAILABLE',
-    })
-    expect(host.createdMains).toHaveLength(0)
-    expect(host.repository.loci).toHaveLength(0)
-  })
-
-  it('ensures a group before a topic and uses explicit topic parent precedence', async () => {
-    const host = fakeHost()
-    const result = await controller(host).ensureTopic({
-      chatId: 'oc-project',
-      threadId: 'omt-topic',
-      parentSessionId: 'source-1',
-    })
-
-    expect(result.groupCreated).toBe(true)
-    expect(result.group.mainSource).toBe('auto')
-    expect(result.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
-    expect(result.locus.source).toBe('explicit')
-    expect(host.createdChildren).toEqual([])
-    expect(result.locus.workSessionId).toBe('source-1')
-  })
-
-  it('spec Scenario "同群话题关联不同主会话": two topics of one chat bound to different mains stay independent', async () => {
-    const host = fakeHost()
-    const ctl = controller(host)
-    const a = await ctl.ensureTopic({ chatId: 'oc-project', threadId: 'omt-a', parentSessionId: 'source-1' })
-    const b = await ctl.ensureTopic({ chatId: 'oc-project', threadId: 'omt-b', parentSessionId: 'source-2' })
-
-    expect(a.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
-    expect(b.locus.parentSessionId).toBe(mainOf(host, 'source-2'))
-    expect(a.locus.reservedChildSessionId).not.toBe(b.locus.reservedChildSessionId)
-    expect(a.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-a' })
-    expect(b.locus.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-b' })
-  })
-
-  it('spec Scenario "重复初始化": keeps concurrent first topics on one automatic group main', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const [left, right] = await Promise.all([
-      locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-a' }),
-      locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-b' }),
-    ])
-
-    expect(left.group.mainSessionId).toBe(right.group.mainSessionId)
-    expect(host.createdMains).toHaveLength(1)
-    expect(host.createdChildren).toHaveLength(0)
-  })
-
-  it('rejects a child session as an explicit parent', async () => {
-    const host = fakeHost()
-    await expect(
-      controller(host).ensureGroup({ chatId: 'oc-project', parentSessionId: 'child-only' }),
-    ).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
-  })
-
-  it.each([
-    ['standard', 'standard'],
-    ['a header that records no preset', undefined],
-  ])('binds an unarchived main running %s — the child preset is not the main\'s', async (_label, agentPreset) => {
-    // An owner's ordinary work session. The locus child composes from Pet's
-    // own LOCUS_CHILD_PRESET, so the main's preset is not a bind condition
-    // (spec: `/bind` matches any unarchived main session).
-    // Built literally: `parent()` defaults an undefined preset to Pet's own.
-    const host = fakeHost({
-      sessions: [{
-        id: 'user-work',
-        workspaceId: 'ws-source',
-        title: '用户工作会话',
-        ...(agentPreset === undefined ? {} : { agentPreset }),
-      }],
-    })
-
-    const bound = await controller(host).ensureGroup({ chatId: 'oc-project', parentSessionId: 'user-work' })
-
-    expect(bound.group.mainSessionId).toBe('user-work')
-    expect(host.createdMains).toHaveLength(0)
-    expect(host.createdChildren).toEqual([])
-    expect(bound.locus.parentSessionId).toBe(mainOf(host, 'user-work'))
-  })
-
-  it('does not cascade a stopped group to an existing topic and blocks new topics', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const existing = await locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-existing' })
-    const group = host.repository.groups.get('oc-project')
-    const groupLocus = [...host.repository.loci.values()].find(item => item.endpoint.threadId === undefined)
-    if (group === undefined || groupLocus === undefined) throw new Error('group fixture missing')
-    host.repository.groups.set('oc-project', { ...group, state: 'stopped', updatedAt: 200 })
-    host.repository.loci.set(groupLocus.locusId, { ...groupLocus, state: 'stopped' })
-
-    await expect(locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-existing' }))
-      .resolves.toMatchObject({ reused: true, locus: { locusId: existing.locus.locusId, state: 'not-created' } })
-    await expect(locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-new' }))
-      .rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
-    expect(host.createdChildren.filter(item => item.endpoint.threadId === 'omt-new')).toHaveLength(0)
-  })
-})
-
-describe('existing topic explicit bind', () => {
-  it('replaces an idle inherited topic with a fresh explicit read generation without changing the group', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const first = await locus.ensureTopic({ chatId: 'oc-topic-bind', threadId: 'omt-review' })
-    const groupBefore = { ...first.group }
-
-    const replaced = await locus.ensureTopic({
-      chatId: 'oc-topic-bind',
-      threadId: 'omt-review',
-      parentSessionId: 'source-1',
-    })
-
-    expect(replaced).toMatchObject({ created: true, reused: false, groupCreated: false })
-    expect(replaced.locus).toMatchObject({
-      generation: first.locus.generation + 1,
-      parentSessionId: mainOf(host, 'source-1'),
-      source: 'explicit',
-      permission: 'read',
-      replacesLocusId: first.locus.locusId,
-      parentLocusId: first.locus.parentLocusId,
-    })
-    expect(host.repository.loci.get(first.locus.locusId)?.state).toBe('retired')
-    expect(host.repository.groups.get('oc-topic-bind')).toEqual(groupBefore)
-    expect(host.sentWarnings.at(-1)).toContain('上下文来源发生变化')
-  })
-
-  it('reuses an inherited topic when the explicit target is already its parent', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const first = await locus.ensureTopic({ chatId: 'oc-topic-same', threadId: 'omt-review' })
-    const childCount = host.createdChildren.length
-
-    const retried = await locus.ensureTopic({
-      chatId: 'oc-topic-same',
-      threadId: 'omt-review',
-      parentSessionId: first.locus.workSessionId!,
-    })
-
-    expect(retried).toMatchObject({ created: false, reused: true })
-    expect(retried.locus.locusId).toBe(first.locus.locusId)
-    expect(host.createdChildren).toHaveLength(childCount)
-  })
-
-  it('rejects replacing an existing explicit topic with a different explicit parent', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    await locus.ensureTopic({
-      chatId: 'oc-topic-conflict', threadId: 'omt-review', parentSessionId: 'source-1',
-    })
-    const childCount = host.createdChildren.length
-
-    await expect(locus.ensureTopic({
-      chatId: 'oc-topic-conflict', threadId: 'omt-review', parentSessionId: 'source-2',
-    })).rejects.toMatchObject({ code: 'EXPLICIT_PARENT_CONFLICT' })
-    expect(host.createdChildren).toHaveLength(childCount)
-  })
-
-  it('rejects replacing an inherited topic while it has accepted or running work', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const first = await locus.ensureTopic({ chatId: 'oc-topic-busy', threadId: 'omt-review' })
-    host.repository.idle = false
-
-    await expect(locus.ensureTopic({
-      chatId: 'oc-topic-busy', threadId: 'omt-review', parentSessionId: 'source-1',
-    })).rejects.toMatchObject({ code: 'BUSY' })
-    expect((await host.repository.findActive(first.locus.endpoint))?.locusId).toBe(first.locus.locusId)
-  })
-
-  it('keeps the committed topic replacement paused on notification failure and retries without a child', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const first = await locus.ensureTopic({ chatId: 'oc-topic-notice', threadId: 'omt-review' })
-    host.failNotification = true
-
-    await expect(locus.ensureTopic({
-      chatId: 'oc-topic-notice', threadId: 'omt-review', parentSessionId: 'source-1',
-    })).rejects.toMatchObject({ code: 'NOTIFICATION_FAILED' })
-    const current = await host.repository.findActive(first.locus.endpoint)
-    expect(current).toMatchObject({ generation: 2, source: 'explicit', parentSessionId: mainOf(host, 'source-1') })
-    expect(host.repository.notices.size).toBe(1)
-    const childCount = host.createdChildren.length
-
-    host.failNotification = false
-    const retried = await locus.ensureTopic({
-      chatId: 'oc-topic-notice', threadId: 'omt-review', parentSessionId: 'source-1',
-    })
-    expect(retried).toMatchObject({ created: false, reused: true })
-    expect(retried.locus.locusId).toBe(current?.locusId)
-    expect(host.createdChildren).toHaveLength(childCount)
-    expect(host.repository.notices.size).toBe(0)
+  it('fails closed when automatic work-session creation has no default workspace', async () => {
+    const t = new Topology()
+    const deps = t.deps()
+    const controller = new LocusController({ ...deps, dsh: { ...deps.dsh, resolveDefaultWorkspace: async () => undefined } })
+    await expect(controller.ensureGroup({ chatId: 'oc_a' })).rejects.toMatchObject({ code: 'DEFAULT_WORKSPACE_UNAVAILABLE' })
+    expect(t.repository.rows.size).toBe(0)
+    expect(t.created).toEqual([])
   })
 })
 
 describe('default Q&A', () => {
   it('creates once, then opens the same default group', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const first = await locus.createOrOpenDefaultQa({ parentSessionId: 'source-1', ownerId: 'ou-owner' })
-    const second = await locus.createOrOpenDefaultQa({ parentSessionId: 'source-1', ownerId: 'ou-owner' })
-
-    expect(first.created).toBe(true)
-    expect(second.reused).toBe(true)
-    expect(second.locus.locusId).toBe(first.locus.locusId)
-    expect(host.createdChildren).toHaveLength(0)
+    const { t, controller } = make()
+    const first = await controller.createOrOpenDefaultQa({ parentSessionId: 'W1', ownerId: 'ou_1' })
+    const again = await controller.createOrOpenDefaultQa({ parentSessionId: 'W1', ownerId: 'ou_1' })
+    expect(first).toMatchObject({ created: true, reused: false })
+    expect(again).toMatchObject({ created: false, reused: true })
+    expect(again.group.locusId).toBe(first.group.locusId)
+    expect(first.group.defaultQa).toBe(true)
+    expect(t.created.filter(c => c.kind === 'locus-main')).toHaveLength(1)
   })
 
-  it('reuses Q&A while issue entries remain independent children of the same main', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const defaultQa = await locus.createOrOpenDefaultQa({ parentSessionId: 'source-1', ownerId: 'ou-owner' })
-    const issueA = await locus.ensureTopic({ chatId: 'oc-issue-a', threadId: 'omt-1', parentSessionId: 'source-1' })
-    const issueB = await locus.ensureGroup({ chatId: 'oc-issue-b', parentSessionId: 'source-1' })
-    const opened = await locus.createOrOpenDefaultQa({ parentSessionId: 'source-1', ownerId: 'ou-owner' })
-
-    expect(opened.locus.locusId).toBe(defaultQa.locus.locusId)
-    expect([defaultQa.locus, issueA.locus, issueB.locus].map(item => item.parentSessionId))
-      .toEqual(Array(3).fill(mainOf(host, 'source-1')))
-    expect(new Set([defaultQa.locus, issueA.locus, issueB.locus].map(item => item.reservedChildSessionId)).size).toBe(3)
+  it('shares the work session\'s M with issue entries of the same W', async () => {
+    const { controller } = make()
+    const qa = await controller.createOrOpenDefaultQa({ parentSessionId: 'W1', ownerId: 'ou_1' })
+    const issue = await controller.ensureGroup({ chatId: 'oc_issue', parentSessionId: 'W1' })
+    expect(issue.group.locusMainSessionId).toBe(qa.group.locusMainSessionId)
+    expect(issue.group.defaultQa).toBeUndefined()
   })
 })
 
-describe('provisioning rollback', () => {
-  it('releases created sessions when repository publication fails', async () => {
-    const host = fakeHost()
-    host.failCommit = true
+describe('换绑与归档按层处理: stop', () => {
+  it('忙时拒绝停止: LOCUS_BUSY, state and revision unchanged; idle then accepted', async () => {
+    const { t, controller } = make()
+    t.seedMain('W1', 'M1')
+    const row = t.seedGroup('oc_1', 'M1', 'proj-1', { state: 'active', revision: 4 })
+    t.repository.currentChats.add('oc_1')
+    await expect(controller.stopEntry(fenceOf(row))).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
+    expect(t.repository.getRow({ chatId: 'oc_1' })).toMatchObject({ state: 'active', revision: 4 })
 
-    await expect(controller(host).ensureGroup({ chatId: 'oc-rollback' })).rejects.toMatchObject({
-      code: 'PROVISIONING_FAILED',
-    })
-    expect(host.released.filter(id => id.startsWith('locus-main-'))).toHaveLength(1)
-    expect(host.released.filter(id => id.startsWith('main-'))).toHaveLength(1)
-    expect(host.repository.loci).toHaveLength(0)
-    expect(host.repository.failed).toHaveLength(1)
+    t.repository.currentChats.delete('oc_1')
+    const stopped = await controller.stopEntry(fenceOf(row))
+    expect(stopped).toMatchObject({ state: 'stopped', revision: 5 })
   })
 
-  it('releases the locus main when Q&A group creation fails', async () => {
-    const host = fakeHost()
-    host.failGroup = true
-
-    await expect(
-      controller(host).createOrOpenDefaultQa({ parentSessionId: 'source-1', ownerId: 'ou-owner' }),
-    ).rejects.toMatchObject({ code: 'PROVISIONING_FAILED' })
-    expect(host.released.some(id => id.startsWith('locus-main-'))).toBe(true)
-    expect(host.repository.loci).toHaveLength(0)
+  it('refuses a stale fence with LOCUS_CONFLICT and an unknown entry with LOCUS_NOT_FOUND', async () => {
+    const { t, controller } = make()
+    t.seedMain('W1', 'M1')
+    const row = t.seedGroup('oc_1', 'M1', 'proj-1', { state: 'active', revision: 4 })
+    await expect(controller.stopEntry({ expectedLocusId: row.locusId, expectedRevision: 3 })).rejects.toMatchObject({ code: 'LOCUS_CONFLICT' })
+    await expect(controller.stopEntry({ expectedLocusId: 'nope', expectedRevision: 0 })).rejects.toBeInstanceOf(Refusal)
   })
 
-  it('keeps a published group and committed operation when locus main finalize fails', async () => {
-    const host = fakeHost()
-    host.failChildCommit = true
-
-    await expect(controller(host).ensureGroup({ chatId: 'oc-published-group' })).rejects.toMatchObject({
-      code: 'PROVISIONING_FAILED',
-      message: expect.stringContaining('已持久化发布'),
+  it('停止群行不连带停止话题行: the topic keeps state, sessionId and revision', async () => {
+    const { t, controller } = make()
+    t.seedMain('W1', 'M1')
+    const group = t.seedGroup('oc_1', 'M1', 'proj-1', { state: 'active', revision: 2 })
+    const topic = t.seedTopic('oc_1', 't1', { state: 'active', revision: 7 })
+    await controller.stopEntry(fenceOf(group))
+    expect(t.repository.getRow({ chatId: 'oc_1' })).toMatchObject({ state: 'stopped' })
+    expect(t.repository.getRow({ chatId: 'oc_1', threadId: 't1' })).toMatchObject({
+      state: 'active', sessionId: topic.sessionId, revision: 7,
     })
-
-    expect(host.repository.groups.get('oc-published-group')?.state).toBe('not-created')
-    expect([...host.repository.loci.values()]).toContainEqual(expect.objectContaining({
-      endpoint: { chatId: 'oc-published-group' },
-      state: 'not-created',
-    }))
-    expect(host.repository.committed).toHaveLength(1)
-    expect(host.repository.failed).toHaveLength(0)
-    expect(host.released).toHaveLength(0)
   })
 
-  it('keeps a published topic child and committed operation when locus main finalize fails', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    await locus.ensureGroup({ chatId: 'oc-published-topic' })
-    host.repository.committed.splice(0)
-    host.released.splice(0)
-    host.failChildCommit = true
-
-    await expect(locus.ensureTopic({
-      chatId: 'oc-published-topic',
-      threadId: 'omt-finalize-failure',
-      parentSessionId: 'source-1',
-    })).rejects.toMatchObject({
-      code: 'PROVISIONING_FAILED',
-      message: expect.stringContaining('已持久化发布'),
-    })
-
-    expect([...host.repository.loci.values()]).toContainEqual(expect.objectContaining({
-      endpoint: { chatId: 'oc-published-topic', threadId: 'omt-finalize-failure' },
-      state: 'not-created',
-    }))
-    expect(host.repository.committed).toHaveLength(1)
-    expect(host.repository.failed).toHaveLength(0)
-    expect(host.released).toHaveLength(0)
-  })
-
-  it('keeps a published Q&A group, entry, default pointer and committed operation when locus main finalize fails', async () => {
-    const host = fakeHost()
-    host.failChildCommit = true
-
-    await expect(controller(host).createOrOpenDefaultQa({
-      parentSessionId: 'source-1',
-      ownerId: 'ou-owner',
-    })).rejects.toMatchObject({
-      code: 'PROVISIONING_FAILED',
-      message: expect.stringContaining('已持久化发布'),
-    })
-
-    const defaultLocusId = host.repository.defaults.get(mainOf(host, 'source-1'))
-    expect(defaultLocusId).toBeDefined()
-    expect(host.repository.loci.get(defaultLocusId!)?.state).toBe('not-created')
-    expect(host.repository.groups.size).toBe(1)
-    expect(host.repository.committed).toHaveLength(1)
-    expect(host.repository.failed).toHaveLength(0)
-    expect(host.released).toHaveLength(0)
+  it('a stopped group does not revive on an ordinary @: ensureEntry refuses, rows unchanged', async () => {
+    const { t, controller } = make()
+    t.seedMain('W1', 'M1')
+    t.seedGroup('oc_1', 'M1', 'proj-1', { state: 'stopped', stoppedAt: 5, revision: 3 })
+    await expect(controller.ensureEntry({ chatId: 'oc_1' })).rejects.toBeInstanceOf(LocusControllerError)
+    expect(t.repository.getRow({ chatId: 'oc_1' })).toMatchObject({ state: 'stopped', revision: 3 })
   })
 })
 
-describe('automatic to explicit replacement', () => {
-  it('creates a read child, sends warning, and retires only the old group locus', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const old = await locus.ensureGroup({ chatId: 'oc-project' })
-    const replacement = await locus.replaceAutomaticGroupParent({
-      chatId: 'oc-project',
-      parentSessionId: 'source-1',
-    })
+describe('换绑与归档按层处理: child unavailable', () => {
+  it('子会话不可用只换该入口一代: A rebuilds in place, B is untouched', async () => {
+    const { t, controller } = make()
+    t.seedMain('W1', 'M1')
+    t.seedGroup('oc_A', 'M1', 'proj-1', { state: 'active', sessionId: 'sess-A', revision: 1 })
+    t.seedGroup('oc_B', 'M1', 'proj-1', { state: 'active', sessionId: 'sess-B', revision: 1 })
+    const a = t.repository.getRow({ chatId: 'oc_A' })!
+    const b = t.repository.getRow({ chatId: 'oc_B' })!
+    await t.repository.markInvalid(fenceOf(a), 'child lost', 10)
 
-    expect(replacement.created).toBe(true)
-    expect(replacement.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
-    expect(replacement.locus.permission).toBe('read')
-    expect(replacement.previousLocus.locusId).toBe(old.locus.locusId)
-    expect(host.repository.loci.get(old.locus.locusId)?.state).toBe('retired')
-    expect(host.sentWarnings[0]).toContain('上下文来源发生变化')
-    expect(host.sentWarnings[0]).toContain('旧对话历史未自动合并')
+    const result = await controller.ensureEntry({ chatId: 'oc_A' })
+    expect(result.created).toBe(true)
+    const rebuilt = t.repository.getRow({ chatId: 'oc_A' })!
+    expect(rebuilt).toMatchObject({ state: 'not-created', accessMode: 'read-only', locusId: a.locusId, revision: 3 })
+    expect(rebuilt.sessionId).not.toBe('sess-A')
+    expect(rebuilt.invalidReason).toBeUndefined()
+    expect(t.repository.getRow({ chatId: 'oc_B' })).toEqual(b)
+    // No external creation: in-place rebuild is a single row write.
+    expect(t.created).toEqual([])
+    expect(t.calls.filter(c => c === 'rebuildRowInPlace')).toHaveLength(1)
   })
 
-  it('keeps existing topics on S0 while new topics inherit S1, all new generations read', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const group = await locus.ensureGroup({ chatId: 'oc-project' })
-    const oldTopic = await locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-old' })
-    const replacement = await locus.replaceAutomaticGroupParent({
-      chatId: 'oc-project',
-      parentSessionId: 'source-1',
-    })
-    const newTopic = await locus.ensureTopic({ chatId: 'oc-project', threadId: 'omt-new' })
-
-    expect(oldTopic.locus.parentSessionId).toBe(group.locus.parentSessionId)
-    expect(newTopic.locus.parentSessionId).toBe(mainOf(host, 'source-1'))
-    expect(replacement.locus.permission).toBe('read')
-    expect(newTopic.locus.permission).toBe('read')
-    expect(oldTopic.locus.locusId).not.toBe(newTopic.locus.locusId)
-  })
-
-  it('refuses replacement while the old locus is busy', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    await locus.ensureGroup({ chatId: 'oc-project' })
-    host.repository.idle = false
-
-    await expect(
-      locus.replaceAutomaticGroupParent({ chatId: 'oc-project', parentSessionId: 'source-1' }),
-    ).rejects.toMatchObject({ code: 'BUSY' })
-  })
-
-  it('keeps the committed replacement and notice debt when the warning cannot be sent', async () => {
-    const host = fakeHost()
-    const locus = controller(host)
-    const old = await locus.ensureGroup({ chatId: 'oc-project' })
-    const send = host.deps.lark?.sendControlMessage
-    if (send === undefined) throw new Error('test seam missing')
-    host.deps.lark!.sendControlMessage = async () => {
-      throw new Error('not connected')
-    }
-
-    await expect(
-      locus.replaceAutomaticGroupParent({ chatId: 'oc-project', parentSessionId: 'source-1' }),
-    ).rejects.toMatchObject({ code: 'NOTIFICATION_FAILED' })
-    expect(host.repository.loci.get(old.locus.locusId)?.state).toBe('retired')
-    expect(host.released.some(id => id.startsWith('child-'))).toBe(false)
-    const current = [...host.repository.loci.values()].find(item => item.state === 'not-created')
-    expect(current).toBeDefined()
-    expect(host.repository.notices.size).toBe(1)
-
-    // An identical bind retries the exact durable debt instead of returning a
-    // false success or creating another generation.
-    host.deps.lark!.sendControlMessage = send
-    const retried = await locus.replaceAutomaticGroupParent({
-      chatId: 'oc-project',
-      parentSessionId: 'source-1',
-    })
-    expect(retried.created).toBe(false)
-    expect(retried.locus.locusId).toBe(current?.locusId)
-    expect(retried.warningText).toContain('上下文来源发生变化')
-    expect(host.repository.notices.size).toBe(0)
-    expect(host.createdChildren).toHaveLength(0)
+  it('a healthy active or not-created entry is served as is', async () => {
+    const { t, controller } = make()
+    t.seedMain('W1', 'M1')
+    const active = t.seedGroup('oc_1', 'M1', 'proj-1', { state: 'active', revision: 2 })
+    const result = await controller.ensureEntry({ chatId: 'oc_1' })
+    expect(result).toMatchObject({ created: false })
+    expect(t.repository.getRow({ chatId: 'oc_1' })).toEqual(active)
   })
 })
 
-describe('explicit rebuild', () => {
-  it('rebuilds an opaque legacy endpoint from the explicit parent only as a fresh read locus', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-
-    const rebuilt = await controller.rebuildLegacyEndpoint({
-      endpoint: { chatId: 'oc-legacy-marker-only' },
-      parentSessionId: 'source-1',
-      chatName: '旧入口',
-    })
-
-    expect(rebuilt.locus).toMatchObject({
-      endpoint: { chatId: 'oc-legacy-marker-only' },
-      generation: 1,
-      parentSessionId: mainOf(host, 'source-1'),
-      workspaceId: 'ws-source',
-      permission: 'read',
-      source: 'explicit',
-      state: 'not-created',
-    })
-    expect(rebuilt.group).toMatchObject({ mainSessionId: 'source-1', workspaceId: 'ws-source' })
-    expect(host.createdMains).toHaveLength(0)
-  })
-
-  it('publishes no child proof before the first Delivery creates its child', async () => {
-    const host = fakeHost()
-    const created = await controller(host).ensureGroup({ chatId: 'oc-safe-marker' })
-    expect(created.locus).toMatchObject({ state: 'not-created' })
-    expect(created.locus.childComposition).toBeUndefined()
-    expect(created.locus.childSessionId).toBeUndefined()
-    expect(host.createdChildren).toEqual([])
-  })
-
-  it('refuses a legacy-marker rebuild when unified state already exists', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    await controller.ensureGroup({ chatId: 'oc-unified-exists' })
-    const count = host.createdChildren.length
-
-    await expect(controller.rebuildLegacyEndpoint({
-      endpoint: { chatId: 'oc-unified-exists' },
-      parentSessionId: 'source-1',
-    })).rejects.toMatchObject({ code: 'REPOSITORY_INCONSISTENT' })
-    expect(host.createdChildren).toHaveLength(count)
-  })
-
-  it('rebuilds a stopped group as a fresh read generation and preserves history', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-rebuild' })
-    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'stopped' })
-    host.repository.groups.set('oc-rebuild', { ...first.group, state: 'stopped' })
-
-    const rebuilt = await controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-rebuild' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: 'source-1',
-    })
-
-    expect(rebuilt.locus).toMatchObject({
-      generation: 2,
-      parentSessionId: mainOf(host, 'source-1'),
-      permission: 'read',
-      source: 'explicit',
-      replacesLocusId: first.locus.locusId,
-    })
-    expect(host.repository.loci.get(first.locus.locusId)?.state).toBe('stopped')
-    expect(host.repository.groups.get('oc-rebuild')).toMatchObject({ state: 'not-created', mainSessionId: 'source-1' })
-  })
-
-  /**
-   * The session-level repair. It exists because the per-entry rebuild reuses
-   * the recorded main session — exactly the session that cannot serve — so an
-   * archived session left every entry under it with no working repair, and the
-   * per-entry path cannot replace the session for all of them at once.
-   */
-  describe('session-level replacement of an archived main session', () => {
-    /**
-     * The real sequence, which matters: entries are created on a LIVE session
-     * and the owner archives it afterwards. Creating one directly on an
-     * archived session is refused by design, so a fixture that started
-     * archived could not exist.
-     */
-    const archivedHost = async (chatIds: readonly string[]) => {
-      const archived: string[] = []
-      const host = fakeHost({ archived })
-      const controller = new LocusController(host.deps)
-      const created: { endpoint: { chatId: string }; locusId: string }[] = []
-      for (const chatId of chatIds) {
-        const group = await controller.ensureGroup({ chatId, parentSessionId: 'source-1' })
-        created.push({ endpoint: { chatId }, locusId: group.locus.locusId })
-      }
-      archived.push('source-1')
-      return { host, controller, created }
-    }
-
-    it('moves every entry onto ONE newly created session', async () => {
-      const { host, controller, created } = await archivedHost(['oc-a', 'oc-b'])
-      const before = host.createdMains.length
-
-      const result = await controller.replaceArchivedParent({
-        parentSessionId: 'source-1',
-        entries: created,
-      })
-
-      // ONE replacement for the whole session: the entries shared a session
-      // before, and they must still share one after.
-      expect(host.createdMains).toHaveLength(before + 1)
-      expect(host.createdMains.at(-1)).toMatchObject({ workspaceId: 'ws-source', chatId: 'oc-a' })
-      // The replacement CONTINUES the archived session's job, so it inherits
-      // that session's title rather than stacking another 「Locus 主会话 ·」
-      // prefix onto it — the doubled label read as a stray session.
-      expect(host.createdMains.at(-1)?.label).not.toContain('Locus 主会话 · Locus 主会话')
-      expect(result.parentSessionId).not.toBe('source-1')
-      expect(result.skipped).toEqual([])
-      expect(result.replaced).toEqual(created.map(entry => entry.locusId))
-
-      const rebuilt = [...host.repository.loci.values()]
-        .filter(record => record.workSessionId === result.parentSessionId)
-      expect(rebuilt).toHaveLength(2)
-      // Each entry's NEWEST generation is the one on the replacement session;
-      // the old rows stay as durable history and are never resumed.
-      for (const entry of created) {
-        const newest = [...host.repository.loci.values()]
-          .filter(record => record.endpoint.chatId === entry.endpoint.chatId)
-          .sort((left, right) => left.generation - right.generation)
-          .at(-1)
-        expect(newest).toMatchObject({
-          workSessionId: result.parentSessionId,
-          replacesLocusId: entry.locusId,
-        })
-      }
-    })
-
-    it('refuses a session that is not archived instead of moving anything', async () => {
-      const host = fakeHost()
-      const controller = new LocusController(host.deps)
-      const group = await controller.ensureGroup({ chatId: 'oc-not-archived', parentSessionId: 'source-1' })
-      const before = host.createdMains.length
-
-      await expect(controller.replaceArchivedParent({
-        parentSessionId: 'source-1',
-        entries: [{ endpoint: { chatId: 'oc-not-archived' }, locusId: group.locus.locusId }],
-      })).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
-      expect(host.createdMains).toHaveLength(before)
-    })
-
-    it('creates NOTHING when no entry could be moved', async () => {
-      const { host, controller } = await archivedHost(['oc-c'])
-      const before = host.createdMains.length
-
-      // Every entry is proved movable BEFORE the replacement session exists.
-      // Finding out afterwards is what left a freshly created, unused main
-      // session behind — and cleaning that up only detaches it, which puts the
-      // stray in the owner's ungrouped bucket.
-      await expect(controller.replaceArchivedParent({
-        parentSessionId: 'source-1',
-        entries: [{ endpoint: { chatId: 'oc-c' }, locusId: 'stale-locus-id' }],
-      })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
-      expect(host.createdMains).toHaveLength(before)
-      expect(host.released).toEqual([])
-    })
-
-    it('moves the entries it can and reports the ones it cannot', async () => {
-      const { host, controller, created } = await archivedHost(['oc-e'])
-      const stale = { endpoint: { chatId: 'oc-e' }, locusId: 'stale-locus-id' }
-
-      const result = await controller.replaceArchivedParent({
-        parentSessionId: 'source-1',
-        entries: [...created, stale],
-      })
-
-      expect(result.replaced).toEqual([created[0]!.locusId])
-      expect(result.skipped).toEqual([
-        { locusId: 'stale-locus-id', reason: expect.stringContaining('代际已变化') },
-      ])
-      // The replacement survived because something moved onto it.
-      expect(host.released).toEqual([])
-    })
-
-    it('replaces a non-terminal generation ONLY when its parent is archived', async () => {
-      const { host, controller, created } = await archivedHost(['oc-d'])
-      const entry = created[0]!
-      const record = host.repository.loci.get(entry.locusId)!
-      expect(record.state).toBe('not-created')
-
-      // Without the owner-facing flag the generic rebuild still refuses an
-      // active generation — the guard that keeps a healthy row from being
-      // replaced by mistake is unchanged.
-      await expect(controller.rebuildExplicit({
-        endpoint: entry.endpoint,
-        previousLocusId: entry.locusId,
-        parentSessionId: 'source-1',
-      })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
-
-      // With it, and with the archived fact re-proved by the controller.
-      const rebuilt = await controller.rebuildExplicit({
-        endpoint: entry.endpoint,
-        previousLocusId: entry.locusId,
-        parentSessionId: 'source-2',
-        replaceArchivedParent: true,
-      })
-      expect(rebuilt.locus).toMatchObject({ workSessionId: 'source-2', generation: record.generation + 1 })
-    })
-
-    it('refuses the flag when the recorded parent is NOT archived', async () => {
-      const host = fakeHost()
-      const controller = new LocusController(host.deps)
-      const group = await controller.ensureGroup({ chatId: 'oc-flag', parentSessionId: 'source-1' })
-
-      // The flag alone authorizes nothing: the archived fact is re-proved here.
-      await expect(controller.rebuildExplicit({
-        endpoint: { chatId: 'oc-flag' },
-        previousLocusId: group.locus.locusId,
-        parentSessionId: 'source-2',
-        replaceArchivedParent: true,
-      })).rejects.toMatchObject({ code: 'GROUP_UNAVAILABLE' })
-    })
-  })
-
-  it('refuses stale or busy explicit rebuild without creating another child', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-rebuild-busy' })
-    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'invalid' })
-    host.repository.groups.set('oc-rebuild-busy', { ...first.group, state: 'invalid' })
-    host.repository.idle = false
-    const count = host.createdChildren.length
-
-    await expect(controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-rebuild-busy' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: 'source-1',
-    })).rejects.toMatchObject({ code: 'BUSY' })
-    await expect(controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-rebuild-busy' },
-      previousLocusId: 'stale-id',
-      parentSessionId: 'source-1',
-    })).rejects.toMatchObject({ code: 'REPOSITORY_INCONSISTENT' })
-    expect(host.createdChildren).toHaveLength(count)
-  })
-
-  // Regression for the dead end an owner used to hit: `rebuild`'s
-  // parentSessionId always comes from the stopped/invalid locus record (the
-  // only session that was ever this endpoint's main session — see
-  // `locusRebuildRequest` in `client/settings.tsx`), so there was no way to
-  // retry with a different id. Archiving that session is reversible — the
-  // bytes and workspace-registry membership are just hidden — unlike a
-  // genuinely missing one, so the error must say so and name the one action
-  // that actually unblocks it, instead of reading identically to "gone".
-  it('names the archived parent and points at recovery when rebuild targets it', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-rebuild-archived' })
-    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'stopped' })
-    host.repository.groups.set('oc-rebuild-archived', { ...first.group, state: 'stopped' })
-
-    const resolveSession = host.deps.dsh.resolveSession
-    host.deps.dsh.resolveSession = async id =>
-      id === 'source-archived'
-        ? { id: 'source-archived', workspaceId: 'ws-source', title: '已归档的研发主会话', state: 'archived' }
-        : resolveSession(id)
-
-    await expect(controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-rebuild-archived' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: 'source-archived',
-    })).rejects.toMatchObject({
-      code: 'PARENT_NOT_FOUND',
-      message: expect.stringMatching(/已归档的研发主会话.*已被归档.*会话归档管理.*恢复/u),
-    })
-  })
-
-  it('keeps the plain "unavailable" wording for a parent that is missing outright, not archived', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-rebuild-missing' })
-    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'stopped' })
-    host.repository.groups.set('oc-rebuild-missing', { ...first.group, state: 'stopped' })
-
-    await expect(controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-rebuild-missing' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: 'session-truly-gone',
-    })).rejects.toMatchObject({
-      code: 'PARENT_NOT_FOUND',
-      message: expect.not.stringContaining('归档'),
-    })
-  })
-
-  // Automatic recovery of a generation the HOST invalidated. The recorded
-  // parent is the only session a rebuild is ever offered, so when it is
-  // unusable the endpoint had no reachable repair at all — the deadlock the
-  // owner hit on devbox. `allowFreshParent` lets recovery establish a new main
-  // session the same way first-time provisioning does.
-  it('establishes a fresh main session when recovery is allowed and the recorded parent is archived', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-recover-archived' })
-    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'invalid' })
-    host.repository.groups.set('oc-recover-archived', { ...first.group, state: 'invalid' })
-
-    const resolveSession = host.deps.dsh.resolveSession
-    host.deps.dsh.resolveSession = async id =>
-      id === 'source-archived'
-        ? { id: 'source-archived', workspaceId: 'ws-source', title: '已归档主会话', state: 'archived' }
-        : resolveSession(id)
-
-    // `ensureGroup` above already created the group's own main session, so
-    // compare against that baseline rather than an absolute zero.
-    const mainsBefore = host.createdMains.length
-    const rebuilt = await controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-recover-archived' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: 'source-archived',
-      allowFreshParent: true,
-    })
-
-    // A genuinely new main session, not a revived reference to the archived one.
-    expect(rebuilt.locus).toMatchObject({ generation: 2, state: 'not-created', permission: 'read' })
-    expect(rebuilt.locus.parentSessionId).not.toBe('source-archived')
-    expect(host.createdMains).toHaveLength(mainsBefore + 1)
-    // The replacement is published as its own generation; the invalid row is
-    // left in place as durable history rather than being revived or erased.
-    expect(host.repository.loci.get(rebuilt.locus.locusId)?.state).toBe('not-created')
-    expect(host.repository.loci.get(first.locus.locusId)).toBeDefined()
-  })
-
-  it('spec Scenario "重建不继承 shell"', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-shell-rebuild' })
-    // The previous generation was an owner-granted shell entry, then the Host invalidated it.
-    host.repository.loci.set(first.locus.locusId, {
-      ...first.locus, state: 'invalid', toolTier: { desired: 'shell', effective: 'shell', verifiedAt: 5, grantedBy: 'ou-owner' },
-    })
-    host.repository.groups.set('oc-shell-rebuild', { ...first.group, state: 'invalid' })
-
-    const rebuilt = await controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-shell-rebuild' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: first.locus.workSessionId ?? 'source-1',
-    })
-
-    expect(rebuilt.locus.generation).toBe(2)
-    expect(rebuilt.locus.toolTier?.effective ?? 'safe').toBe('safe')
-    expect(rebuilt.locus.toolTier?.desired ?? 'safe').toBe('safe')
-    // The old generation keeps its history; only the new one starts safe.
-    expect(host.repository.loci.get(first.locus.locusId)?.toolTier).toMatchObject({ effective: 'shell' })
-  })
-
-  // The owner-driven path is unchanged: the panel must still be able to say
-  // which session to restore rather than silently fabricating a new one.
-  it('keeps refusing an archived parent when recovery is not allowed', async () => {
-    const host = fakeHost()
-    const controller = new LocusController(host.deps)
-    const first = await controller.ensureGroup({ chatId: 'oc-recover-refused' })
-    host.repository.loci.set(first.locus.locusId, { ...first.locus, state: 'invalid' })
-    host.repository.groups.set('oc-recover-refused', { ...first.group, state: 'invalid' })
-
-    const resolveSession = host.deps.dsh.resolveSession
-    host.deps.dsh.resolveSession = async id =>
-      id === 'source-archived'
-        ? { id: 'source-archived', workspaceId: 'ws-source', title: '已归档主会话', state: 'archived' }
-        : resolveSession(id)
-
-    const mainsBefore = host.createdMains.length
-    await expect(controller.rebuildExplicit({
-      endpoint: { chatId: 'oc-recover-refused' },
-      previousLocusId: first.locus.locusId,
-      parentSessionId: 'source-archived',
-    })).rejects.toMatchObject({ code: 'PARENT_NOT_FOUND' })
-    // Refusing must not have fabricated a replacement session.
-    expect(host.createdMains).toHaveLength(mainsBefore)
-  })
-})
-
-describe('warning text', () => {
-  it('states source change and does not expose full session ids', () => {
-    const text = renderAutomaticReplacementWarning({
-      fromSessionId: 'session-1234567890',
-      fromTitle: '自动主会话',
-      toSessionId: 'session-abcdefghij',
-      toTitle: '显式主会话',
-    })
-    expect(text).toContain('自动主会话')
-    expect(text).toContain('显式主会话')
-    expect(text).toContain('上下文来源发生变化')
-    expect(text).toContain('旧对话历史未自动合并')
-    expect(text).not.toContain('session-1234567890')
+describe('工作主会话归档', () => {
+  it('refuses with SOURCE_ARCHIVED and never rewrites the row', async () => {
+    const { t, controller } = make({ archived: ['W1'] })
+    t.seedMain('W1', 'M1')
+    const row = t.seedGroup('oc_1', 'M1', 'proj-1', { state: 'active', revision: 6 })
+    await expect(controller.ensureEntry({ chatId: 'oc_1' })).rejects.toMatchObject({ code: 'SOURCE_ARCHIVED' })
+    expect(t.repository.getRow({ chatId: 'oc_1' })).toEqual(row)
+    expect(t.calls).not.toContain('commitWholeWMigration')
   })
 })

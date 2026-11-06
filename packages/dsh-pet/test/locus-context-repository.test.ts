@@ -1,69 +1,60 @@
 import { describe, expect, it, vi } from 'vitest'
-import { asLocusContextRepository } from '../src/host/locus/context-repository.js'
+import { asLocusContextRepository, type LocusContextLookup } from '../src/host/locus/context-repository.js'
 import {
   createLocusTurnObserver,
   type LocusInboxClaim,
   type LocusTurnEnd,
 } from '../src/host/locus/turn-observer.js'
 
-const record = {
-  id: 'locus-1',
-  generation: 2,
+/** The v20 entry row of the topic under test, and its group's M and workspace. */
+const row = {
   endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
-  parentSessionId: 'session-parent',
-  childSessionId: 'session-child',
-  workspaceId: 'workspace-1',
-  source: 'explicit' as const,
+  locusId: 'locus-1',
+  sessionId: 'session-child',
   state: 'active' as const,
-  busy: true,
-  permission: {
-    desired: 'read' as const,
-    effective: 'read' as const,
-    verifiedAt: 10,
-  },
+  accessMode: 'read-only' as const,
+  revision: 3,
   createdAt: 1,
   updatedAt: 2,
 }
 
-function aggregate() {
+const current = {
+  deliveryId: 'delivery-1',
+  messageId: 'om-1',
+  endpoint: row.endpoint,
+  locusId: row.locusId,
+  sessionId: row.sessionId,
+  status: 'current' as const,
+  queueState: 'current' as const,
+  senderOpenId: 'ou-user',
+  text: 'request',
+  replyToMessageId: 'om-question',
+  replyTarget: { chatId: 'oc-1', threadId: 'omt-1', messageId: 'om-1' },
+}
+
+function lookup(overrides: Partial<LocusContextLookup> = {}): LocusContextLookup {
   return {
-    findByChildSession: (id: string) => id === 'session-child' ? record : undefined,
-    findCurrentDelivery: (input: {
-      childSessionId: string
-      locusId: string
-      generation: number
-      executionId?: string
-      turnId?: string
-    }) => input.executionId === 'execution-1' && input.turnId === 'session-child#3'
-      ? {
-          deliveryId: 'delivery-1',
-          messageId: 'om-1',
-          endpoint: record.endpoint,
-          locusId: record.id,
-          generation: record.generation,
-          childSessionId: record.childSessionId,
-          senderOpenId: 'ou-user',
-          text: 'request',
-          replyToMessageId: 'om-question',
-          replyTarget: {
-            chatId: 'oc-1',
-            threadId: 'omt-1',
-            messageId: 'om-1',
-          },
-        }
+    findBySessionId: (id: string) => id === 'session-child'
+      ? { row, locusMainSessionId: 'session-parent', workspaceId: 'workspace-1' } as never
       : undefined,
-  }
+    hasFirstDeliveryRecoveryDebt: () => false,
+    findCurrentSerializedDelivery: () => undefined,
+    findCurrentDelivery: input => input.executionId === 'execution-1' && input.turnId === 'session-child#3'
+      ? current as never
+      : undefined,
+    ...overrides,
+  } as LocusContextLookup
 }
 
 describe('caller-bound locus context repository', () => {
   it('projects the current Delivery only with an exact active turn proof', () => {
     const repository = asLocusContextRepository(
-      aggregate(),
+      lookup({ findCurrentSerializedDelivery: () => current as never }),
       child => child === 'session-child'
         ? { executionId: 'execution-1', turnId: 'session-child#3' }
         : undefined,
     )
-    expect(repository.findByChildSessionId('session-child')[0]?.currentDelivery).toMatchObject({
+    expect(repository.findBySessionId('session-child')?.currentDelivery).toMatchObject({
       deliveryId: 'delivery-1',
       messageId: 'om-1',
       replyToMessageId: 'om-question',
@@ -71,46 +62,34 @@ describe('caller-bound locus context repository', () => {
     })
   })
 
-  it('inspects durable mismatches without inventing observer-only reasons', async () => {
+  it('inspects durable mismatches without inventing observer-only reasons', () => {
     const proof = {
       deliveryId: 'delivery-1', executionId: 'execution-1', turnId: 'session-child#3',
-      source: 'delivery' as const, locusId: 'locus-1', generation: 2,
+      source: 'delivery' as const, locusId: 'locus-1',
     }
-    const base = aggregate()
-    const current = {
-      deliveryId: 'delivery-1', messageId: 'om-1', endpoint: record.endpoint,
-      locusId: record.id, generation: record.generation, childSessionId: record.childSessionId,
-      status: 'current' as const, queueState: 'current' as const,
-    }
-    const repository = asLocusContextRepository({
-      ...base,
-      findCurrentSerializedDelivery: () => current,
-    }, () => ({ executionId: proof.executionId, turnId: proof.turnId }))
+    const turnProof = () => ({ executionId: proof.executionId, turnId: proof.turnId })
+    const repository = asLocusContextRepository(lookup({ findCurrentSerializedDelivery: () => current as never }), turnProof)
 
     expect(repository.inspectCurrentDeliveryAuthorization?.({
-      childSessionId: record.childSessionId, operation: 'finish', proof,
+      childSessionId: row.sessionId, operation: 'finish', proof,
     })).toMatchObject({ ok: true, locus: { currentDelivery: current } })
 
-    const generationMismatch = asLocusContextRepository({
-      ...base,
-      findCurrentSerializedDelivery: () => ({ ...current, generation: 3 }),
-    }, () => ({ executionId: proof.executionId, turnId: proof.turnId }))
-    expect(generationMismatch.inspectCurrentDeliveryAuthorization?.({
-      childSessionId: record.childSessionId, operation: 'wait', proof,
+    const sessionMismatch = asLocusContextRepository(lookup({ findCurrentSerializedDelivery: () => current as never }), turnProof)
+    expect(sessionMismatch.inspectCurrentDeliveryAuthorization?.({
+      childSessionId: row.sessionId, operation: 'wait', proof: { ...proof, sessionId: 'session-other' },
     })).toEqual({ ok: false, reason: 'generation-mismatch' })
 
-    const stale = asLocusContextRepository({
-      ...base,
-      findCurrentSerializedDelivery: () => ({ ...current, deliveryId: 'delivery-2' }),
-    }, () => ({ executionId: proof.executionId, turnId: proof.turnId }))
+    const stale = asLocusContextRepository(lookup({
+      findCurrentSerializedDelivery: () => ({ ...current, deliveryId: 'delivery-2' }) as never,
+    }), turnProof)
     expect(stale.inspectCurrentDeliveryAuthorization?.({
-      childSessionId: record.childSessionId, operation: 'track', proof,
+      childSessionId: row.sessionId, operation: 'track', proof,
     })).toEqual({ ok: false, reason: 'stale-delivery' })
   })
 
   it('never exposes a prior reply target to a GUI or initialization turn', () => {
-    const repository = asLocusContextRepository(aggregate(), () => undefined)
-    expect(repository.findByChildSessionId('session-child')[0]).not.toHaveProperty('currentDelivery')
+    const repository = asLocusContextRepository(lookup({ findCurrentSerializedDelivery: () => current as never }), () => undefined)
+    expect(repository.findBySessionId('session-child')).not.toHaveProperty('currentDelivery')
   })
 
   it('never projects a Delivery after the current turn also claims a GUI steer', async () => {
@@ -127,45 +106,35 @@ describe('caller-bound locus context repository', () => {
                 deliveryId: 'delivery-1',
                 executionId: 'execution-1',
                 correlation: {
-                  endpoint: record.endpoint,
-                  locusId: record.id,
-                  generation: record.generation,
-                  childSessionId: record.childSessionId,
+                  endpoint: row.endpoint,
+                  locusId: row.locusId,
+                  sessionId: row.sessionId,
                 },
               }
             : undefined,
         },
-      })
-      const backing = aggregate()
+      } as never)
       const repository = asLocusContextRepository(
-        {
-          ...backing,
-          findCurrentDelivery: input => input.executionId === 'execution-1' &&
-            input.turnId === `${record.childSessionId}#4`
-            ? backing.findCurrentDelivery({ ...input, turnId: `${record.childSessionId}#3` })
+        lookup({
+          findCurrentSerializedDelivery: () => current as never,
+          findCurrentDelivery: input => input.executionId === 'execution-1' && input.turnId === 'session-child#4'
+            ? current as never
             : undefined,
-        },
+        }),
         childSessionId => observer.currentForChild?.(childSessionId),
       )
       const claim = (value: LocusInboxClaim) => claimListeners.forEach(listener => listener(value))
 
-      claim({ childSessionId: record.childSessionId, messageId: 'delivery-message', turn: 4, sourceKind: 'user' })
-      expect(repository.findByChildSessionId(record.childSessionId)[0]).toHaveProperty(
-        'currentDelivery.deliveryId',
-        'delivery-1',
-      )
+      claim({ childSessionId: row.sessionId, messageId: 'delivery-message', turn: 4, sourceKind: 'user' } as never)
+      expect(repository.findBySessionId(row.sessionId)).toHaveProperty('currentDelivery.deliveryId', 'delivery-1')
 
-      claim({ childSessionId: record.childSessionId, messageId: 'gui-steer', turn: 4, sourceKind: 'gui' })
-      expect(repository.findByChildSessionId(record.childSessionId)[0]).not.toHaveProperty('currentDelivery')
+      claim({ childSessionId: row.sessionId, messageId: 'gui-steer', turn: 4, sourceKind: 'gui' } as never)
+      expect(repository.findBySessionId(row.sessionId)).not.toHaveProperty('currentDelivery')
       await vi.runAllTimersAsync()
-      expect(repository.findByChildSessionId(record.childSessionId)[0]).not.toHaveProperty('currentDelivery')
+      expect(repository.findBySessionId(row.sessionId)).not.toHaveProperty('currentDelivery')
 
-      endListeners.forEach(listener => listener({
-        childSessionId: record.childSessionId,
-        turn: 4,
-        outcome: 'completed',
-      }))
-      expect(repository.findByChildSessionId(record.childSessionId)[0]).not.toHaveProperty('currentDelivery')
+      endListeners.forEach(listener => listener({ childSessionId: row.sessionId, turn: 4, outcome: 'completed' } as never))
+      expect(repository.findBySessionId(row.sessionId)).not.toHaveProperty('currentDelivery')
       observer.dispose()
     } finally {
       vi.useRealTimers()

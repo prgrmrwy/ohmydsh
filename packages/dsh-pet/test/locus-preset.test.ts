@@ -7,7 +7,7 @@ import {
   LOCUS_CALLER_BOUND_TOOLS,
   LOCUS_DELEGATION_DENYLIST,
   LOCUS_SAFE_TOOL_NAMES,
-  LOCUS_SHELL_TIER_TOOL_NAMES,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
 import {
   areLocusPresetsDeclared,
@@ -102,7 +102,7 @@ describe('locus-base 不含委派', () => {
     const tools = mountedToolNames(rows)
     for (const name of LOCUS_DELEGATION_DENYLIST) expect(tools).not.toContain(name)
     // The reviewed tiers must all be mountable, so the preset is a true ceiling.
-    for (const name of [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]) {
+    for (const name of [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_FULL_ACCESS_TOOL_NAMES]) {
       expect(tools, `tool ${name}`).toContain(name)
     }
   })
@@ -201,29 +201,29 @@ describe('运行体只接受声明式 preset 时冷恢复 locus child', () => {
         childPreset: () => 'locus-child',
         lookup: {
           find: () => ({
-            parentSessionId: 'main-1',
-            childSessionId: 'child-1',
+            locusMainSessionId: 'main-1',
+            sessionId: 'child-1',
             locusId: 'locus-1',
-            generation: 1,
-            permission: 'read',
-            childComposition: 'tier3',
-            toolTier: { desired: 'safe', effective: 'safe' },
+            revision: 1,
+            accessMode: 'read-only',
+            endpoint: { chatId: 'oc_1' },
           }),
         },
+        writeEnabled: true,
         surface: {
           install: vi.fn(),
-          setToolTier: vi.fn(),
+          applyAccessMode: vi.fn(),
           installOutboundGuard: vi.fn(),
-          visibleTools: () => surface.filter(name => !LOCUS_SHELL_TIER_TOOL_NAMES.includes(name)),
+          visibleTools: () => surface.filter(name => !LOCUS_FULL_ACCESS_TOOL_NAMES.includes(name)),
         },
-        policy: { apply: vi.fn(), resolve: () => 'read' },
+        policy: { apply: vi.fn(), resolve: () => 'read-only' },
       },
     )
     const before = compose()
     const after = compose()
     expect(before.composed).toBe(true)
     expect(after).toEqual(before)
-    expect(attestLocusComposition(surface.filter(name => !LOCUS_SHELL_TIER_TOOL_NAMES.includes(name))).ok)
+    expect(attestLocusComposition(surface.filter(name => !LOCUS_FULL_ACCESS_TOOL_NAMES.includes(name))).ok)
       .toBe(true)
   })
 })

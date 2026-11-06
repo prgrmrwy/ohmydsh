@@ -11,7 +11,7 @@
  * `tools.ts`), rather than this change's own `resolveLedgerCaller` — a
  * `LocusCurrentDelivery` already proves the stronger invariant this tool
  * actually needs ("no唯一 current Delivery 时拒绝登记"), and its
- * `messageId`/`endpoint`/`locusId`/`generation`/`senderOpenId` are EXACTLY
+ * `messageId`/`endpoint`/`locusId`/`senderOpenId` are EXACTLY
  * the facts spec requires the registration to fix. Re-deriving them through
  * a second, weaker resolver would duplicate — and could drift from — an
  * invariant `pet_locus_finish` already enforces.
@@ -66,7 +66,6 @@ export async function trackTodo(
     itemId: deps.newItemId(),
     parentSessionId: authorized.main.sessionId,
     locusId: locusIdentity(endpointKeyOf(delivery.endpoint)),
-    generation: authorized.locus.generation,
     endpoint: delivery.endpoint.threadId === undefined
       ? { chatId: delivery.endpoint.chatId }
       : { chatId: delivery.endpoint.chatId, threadId: delivery.endpoint.threadId },

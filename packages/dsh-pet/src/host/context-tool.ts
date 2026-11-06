@@ -60,8 +60,8 @@ export interface PetLocusContextResult {
   readonly main: LocusContextRecord['main']
   readonly child: LocusContextRecord['child']
   readonly workspace: LocusContextRecord['workspace']
-  readonly permission: LocusContextRecord['permission']
-  readonly contextAnchor: LocusContextRecord['contextAnchor']
+  /** The row's one access value (v20, D8); replaces permission and the context anchor. */
+  readonly accessMode: LocusContextRecord['accessMode']
   /** Omitted when this turn has no accepted Feishu Delivery (for example GUI). */
   readonly currentDelivery?: LocusCurrentDelivery
 }
@@ -181,9 +181,10 @@ function resolveCallerLocus(
   repository: LocusContextRepository,
   childSessionId: string,
 ): PetLocusContextResult | undefined {
-  let matches: readonly LocusContextRecord[]
+  let match: LocusContextRecord | undefined
   try {
-    matches = repository.findByChildSessionId(childSessionId)
+    // sessionId is unique across the table (D12): one row or none.
+    match = repository.findBySessionId(childSessionId)
   } catch (error) {
     throw new PetError(
       'INTERNAL',
@@ -192,53 +193,18 @@ function resolveCallerLocus(
       }`,
     )
   }
-
-  if (!Array.isArray(matches)) {
-    throw new PetError(
-      'INTERNAL',
-      `Locus reverse lookup for child ${childSessionId} returned an invalid result.`,
-    )
-  }
-  if (matches.length === 0) return undefined
-  if (matches.length !== 1) {
-    throw new PetError(
-      'NOT_A_PET_SESSION',
-      `Child session ${childSessionId} has an ambiguous locus association; refusing context lookup.`,
-    )
-  }
-
-  const match = matches[0]
+  // No row means an ordinary session: Pet Task/Invocation resolution is unchanged.
   if (match === undefined) return undefined
-  if (match.legacy === true || match.source === 'legacy') {
-    throw new PetError(
-      'NOT_A_PET_SESSION',
-      `Child session ${childSessionId} belongs to a legacy locus association; refusing context lookup.`,
-    )
-  }
   if (match.locus.state !== 'active') {
     const state = match.locus.state ?? 'unknown'
-    // Preserve the durable stop marker at the tool boundary. A stopped locus
-    // requires explicit rebuild; it is not the same diagnosis as an invalid,
-    // retired, legacy, or otherwise unproven child identity.
+    // A stopped entry is re-enabled by a same-W /bind; it is not the same
+    // diagnosis as an invalid or otherwise unproven child identity.
     const code = state === 'stopped' ? 'LOCUS_STOPPED' : 'LOCUS_INVALID'
     const reason = match.invalidReason === undefined ? '' : ` (${match.invalidReason})`
     throw new PetError(
       code,
       `Child session ${childSessionId} is associated with a ${state} locus${reason}; refusing context lookup.`,
     )
-  }
-  // Context discovery is not execution authorization. An otherwise valid
-  // child must be able to discover that its anchor is missing/unknown and ask
-  // its parent for confirmation. Preserve negative existence/authorization
-  // facts; dispatch and policy adapters must independently gate execution.
-  if (
-    !['confirmed', 'missing', 'unknown'].includes(match.contextAnchor.status) ||
-    (match.contextAnchor.existence !== undefined &&
-      !['exists', 'missing', 'unknown'].includes(match.contextAnchor.existence)) ||
-    (match.contextAnchor.authorization !== undefined &&
-      !['authorized', 'unauthorized', 'unknown'].includes(match.contextAnchor.authorization))
-  ) {
-    throw new PetError('NOT_A_PET_SESSION', 'Invalid execution anchor facts; refusing context lookup.')
   }
   if (match.child.sessionId !== childSessionId) {
     throw new PetError(
@@ -255,16 +221,7 @@ function resolveCallerLocus(
     main: { ...match.main },
     child: { ...match.child },
     workspace: { ...match.workspace },
-    permission: { ...match.permission },
-    contextAnchor: {
-      ...match.contextAnchor,
-      ...(match.contextAnchor.projectResources !== undefined
-        ? { projectResources: [...match.contextAnchor.projectResources] }
-        : {}),
-      ...(match.contextAnchor.constraints !== undefined
-        ? { constraints: [...match.contextAnchor.constraints] }
-        : {}),
-    },
+    accessMode: match.accessMode,
     ...(match.currentDelivery !== undefined
       ? { currentDelivery: cloneCurrentDelivery(match.currentDelivery) }
       : {}),
@@ -284,25 +241,24 @@ function validateLocusContextRecord(
       `Locus for child ${childSessionId} is missing its main session or workspace identity.`,
     )
   }
-  if (match.permission.effective !== 'read' && match.permission.effective !== 'write') {
+  if (match.accessMode !== 'read-only' && match.accessMode !== 'danger-full-access') {
     throw new PetError(
       'NOT_A_PET_SESSION',
-      `Locus for child ${childSessionId} has an unverified permission mode.`,
+      `Locus for child ${childSessionId} has an unknown access mode.`,
     )
   }
 
   const delivery = match.currentDelivery
   if (delivery === undefined) return
   if (
-    delivery.childSessionId !== childSessionId ||
+    delivery.sessionId !== childSessionId ||
     delivery.locusId !== match.locus.locusId ||
-    delivery.generation !== match.locus.generation ||
     delivery.endpoint.chatId !== match.endpoint.chatId ||
     (delivery.endpoint.threadId ?? undefined) !== (match.endpoint.threadId ?? undefined)
   ) {
     throw new PetError(
       'NOT_A_PET_SESSION',
-      `Current Delivery for child ${childSessionId} does not match its active locus generation.`,
+      `Current Delivery for child ${childSessionId} does not match its active locus session.`,
     )
   }
   if (delivery.status !== undefined && ['accepted', 'queued', 'running', 'current', 'finishing'].includes(delivery.status) === false) {

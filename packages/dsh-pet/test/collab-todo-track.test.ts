@@ -1,7 +1,7 @@
 /**
  * `pet-locus-intent-triage` → 待办登记的稳定性质 on the collab `TodoBackend`,
  * over the REAL dsh-collab plugin: 代际更替后仍可解析、入口退役不使待办消失、
- * 登记不唤醒、干活主会话修订不改变登记证据、时间在重启后保持不变.
+ * 登记不唤醒、工作主会话修订不改变登记证据、时间在重启后保持不变.
  * (The caller-bound registration scenarios live in collab-todo-actas.test.ts.)
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -50,10 +50,12 @@ describe('待办登记固定来源与回复去向且关联标识而非实例（c
     t.addLocus(gen(3, 'child-g3'))
 
     const record = await t.backend.getTodoItem('todo-g2')
-    expect(record).toMatchObject({ itemId: 'todo-g2', parentSessionId: MAIN, workSessionId: WORK, generation: 2, endpoint: ALPHA, status: 'open' })
-    // The ext keeps the entry identity and the registering generation as audit facts.
+    expect(record).toMatchObject({ itemId: 'todo-g2', parentSessionId: MAIN, workSessionId: WORK, endpoint: ALPHA, status: 'open' })
+    expect(record).not.toHaveProperty('generation') // v20: writers omit it (D13 step 8)
+    // The ext keeps the entry identity; v20 no longer records a generation.
     const item = (await readOverview(t.world, t.world.live.get(WORK), MAIN)).items['todo-g2']
-    expect(item.ext.pet).toMatchObject({ entry: identityOf(ALPHA), generation: 2 })
+    expect(item.ext.pet).toMatchObject({ entry: identityOf(ALPHA) })
+    expect(item.ext.pet).not.toHaveProperty('generation')
   })
 
   it('track-03：入口退役不使待办消失', async () => {
@@ -77,7 +79,7 @@ describe('待办登记固定来源与回复去向且关联标识而非实例（c
     expect(item).toMatchObject({ kind: 'request', author: 'locus', assignee: 'work', requiredAcks: [], ext: { pet: { entry: identityOf(ALPHA) } } })
   })
 
-  it('track-05：干活主会话修订条目不改变登记证据', async () => {
+  it('track-05：工作主会话修订条目不改变登记证据', async () => {
     const t = await ready()
     expect((await t.register('rec-alpha-g2', { summary: '错误位于 A', detail: '栈在 a.ts' }, 'todo-e')).ok).toBe(true)
     const work = t.world.live.get(WORK)

@@ -115,7 +115,6 @@ export interface LocusResolvedRowV20<R extends LocusRowV20 = LocusRowV20> {
 // ---------------------------------------------------------------------------
 
 export const petLocusDeliveryV20 = petLocusDeliveryBase
-  .omit({ generation: true, childSessionId: true })
   .extend({ sessionId: z.string().min(1) })
   .superRefine(refineLocusDelivery)
 
@@ -493,6 +492,21 @@ export interface LocusRepositoryPortV20 {
     grantedBy: string,
     now: number,
   ): Promise<LocusRowV20>
+  /**
+   * D8 assembly: record that `composeLocusChild` applied the row's
+   * `accessMode` and read it back. Writes `verifiedAt = now`. CAS on the fence
+   * AND `accessMode` (a change that landed after this assembly read the row
+   * must not be stamped verified). Does NOT bump `revision`: a wake must not
+   * stale a fence the management panel holds. Called by the `agent/created`
+   * wiring after a composed result and BEFORE publication; any refusal refuses
+   * publication (class B). `LOCUS_NOT_FOUND`, `LOCUS_CONFLICT` (revision moved
+   * or `accessMode` differs). Added 2026-11-06 with lead approval.
+   */
+  recordAccessVerified(
+    fence: LocusRowFenceV20,
+    accessMode: LocusAccessModeV20,
+    now: number,
+  ): Promise<LocusRowV20>
 
   // ---- first creation (D15, D16) --------------------------------------------
 
@@ -506,6 +520,74 @@ export interface LocusRepositoryPortV20 {
    * `failedSessionId` is no longer the row's `sessionId`).
    */
   rotateReservation(input: LocusRotateReservationInputV20): Promise<LocusRotateReservationResultV20>
+
+  // ---- first-child publication (D15, D16; added 2026-11-06 with lead approval) ----
+
+  /**
+   * Inside `agent/created`, after a composed result. The row must be
+   * `not-created` with this `sessionId` and `revision`; the Delivery must be the
+   * exact unissued current of this entry. Atomically: row → `active`
+   * (`accessMode` unchanged, `revision` KEPT so the staged tuple and management
+   * fence stay valid), Delivery gains `executionId`, and the first-publication
+   * operation `first-child:<executionId>` is written in phase `publishing` with
+   * `expectedRevision = revision` and `resourceRefs {parentSessionId: group M,
+   * childSessionId: sessionId}` (read by startup recovery). A throw leaves
+   * nothing published and vetoes creation. `LOCUS_NOT_FOUND`, `LOCUS_CONFLICT`,
+   * `LOCUS_BUSY` (entry in `accessChanging`).
+   */
+  publishFirstDelivery(input: LocusFirstDeliveryIdentityV20 & {
+    readonly executionId: string
+  }): Promise<void>
+  /**
+   * After `startActivation` returned and the first prompt is bound: close the
+   * publication operation. `LOCUS_NOT_FOUND`, `LOCUS_CONFLICT`.
+   */
+  commitFirstDelivery(input: { readonly executionId: string; readonly now: number }): Promise<void>
+  /**
+   * Undo a completed `publishFirstDelivery` (also the startup-recovery path for a
+   * `publishing` operation, after the child compensator succeeded). One write:
+   * - default: row back to `not-created` with a NEW `sessionId`, `revision + 1`,
+   *   `accessMode` and `grantedBy` kept, `verifiedAt` cleared; this Delivery is
+   *   settled `failed` on its OLD `sessionId`; uninjected backlog retargeted;
+   *   operation `compensated`.
+   * - `retryText: true` — the D16 pre-prompt image exception: same rotation, but
+   *   THIS Delivery is retargeted to the new reservation unsettled and marked
+   *   image-route-rejected, and becomes an UNISSUED current again: `executionId`
+   *   (and any inbox/turn binding) is cleared; status and queue state stay
+   *   `current`; deadline and sequence are kept. The channel's text retry
+   *   requires exactly that state (locus-controller.ts text-fallback path).
+   * - `recoveryDebt: true` — release is unprovable: no rotation; the live
+   *   publication is revoked and debt is left that `hasFirstDeliveryRecoveryDebt`
+   *   reports, so D15 step 0 vetoes any later publication.
+   * `LOCUS_NOT_FOUND`, `LOCUS_CONFLICT`.
+   */
+  revertFirstDelivery(input: LocusFirstDeliveryIdentityV20 & {
+    readonly executionId?: string
+    readonly retryText?: true
+    readonly recoveryDebt?: true
+    /** Required unless `recoveryDebt`; the allocator of the new reservation. */
+    readonly reserveChildSessionId?: () => string
+  }): Promise<void>
+  /**
+   * D16 non-capacity failure BEFORE publication: settle this Delivery `failed`
+   * on the old `sessionId`, then rotate exactly as {@link rotateReservation}
+   * (`revision + 1`, `accessMode`, `grantedBy`, `state` kept). A capacity refusal
+   * calls nothing. `LOCUS_NOT_FOUND`, `LOCUS_CONFLICT`.
+   */
+  failFirstDeliveryCreation(input: LocusFirstDeliveryIdentityV20 & {
+    readonly reserveChildSessionId: () => string
+  }): Promise<void>
+}
+
+/** The exact first-creation identity every first-publication write is fenced on. */
+export interface LocusFirstDeliveryIdentityV20 {
+  readonly locusId: string
+  /** The row's reserved (then published) `sessionId`. */
+  readonly sessionId: string
+  /** The row revision read before publication. */
+  readonly revision: number
+  readonly deliveryId: string
+  readonly now: number
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import type { LocusHistoryCursorPayload } from '../src/host/locus/history-cursor
 
 const payload: LocusHistoryCursorPayload = {
   locusId: 'locus-1',
-  generation: 3,
+  sessionId: 'session-3',
   chatId: 'oc_group',
   direction: 'older',
   since: '2026-10-01T00:00:00+08:00',
@@ -61,7 +61,7 @@ describe('locus history cursor', () => {
   it('refuses to issue a payload that is missing its binding facts', () => {
     const cursors = createLocusHistoryCursor()
 
-    expect(() => cursors.issue({ ...payload, generation: undefined as never }))
+    expect(() => cursors.issue({ ...payload, sessionId: undefined as never }))
       .toThrow('cursor payload is invalid')
   })
 
