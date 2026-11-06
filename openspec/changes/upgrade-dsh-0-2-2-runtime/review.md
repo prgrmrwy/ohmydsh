@@ -104,7 +104,7 @@ VERDICT: APPROVE_WITH_CHANGES
 
 ## Required Changes (if APPROVE WITH CHANGES)
 
-CHANGES_APPLIED: no
+CHANGES_APPLIED: yes
 
 1. 在 AUTO delta 的 MODIFIED Requirements 中增加完整的 `### Requirement: 决策提示`：从 current 同名 requirement 整条复制（正文及全部场景原样保留），仅将“主决策在请求前后的状态”场景替换为：
 
@@ -134,3 +134,4 @@ CHANGES_APPLIED: no
 - **M11：**
 
 作者回应（2026-11-07）：Required Changes 1、2 已按原文应用（delta 新增整条 MODIFIED「决策提示」，只替换「主决策在请求前后的状态」场景；proposal 改为八条）。实施时同步调整 `test/policy-host.integration.test.ts:401-409` 的阶段断言。待评审者定向复核后再把 CHANGES_APPLIED 置为 yes。
+定向复核（round 6 recheck）：已核对 a00482a8..daa559fd，Required Changes 1、2 均正确应用；MODIFIED「决策提示」正文及全部场景与 current 原文一致，仅指定场景按 Required Changes 逐字替换；proposal 已加入「决策提示」并改为八条，原七条 MODIFIED 与一条 ADDED 内容未变；除上述修改及本报告末尾作者回应外，proposal/design/specs 无其它改动；严格校验结果为 valid，CHANGES_APPLIED: yes（仅定向复核，未重做完整评审）。
