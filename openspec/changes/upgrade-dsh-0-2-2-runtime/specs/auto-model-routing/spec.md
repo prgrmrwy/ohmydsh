@@ -113,7 +113,7 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **THEN** 发往 Jev 的子任务 `state` 只含“整理日志”，不含注入指令文本；父会话本回合的决定与 Jev 请求次数不变
 
 ### Requirement: AUTO 决策与执行
-主会话 SHALL 仅判断 depth=lower/baseline/higher，并在模型支持序列中以所属家族策略的推荐起点最多移动一档，不修改 provider/model；选定 effort 与官方合成值不同时，按「AUTO 主 effort 同步官方选择」经官方 selectModel 同步。子任务 SHALL 只在「AUTO 受管子会话范围」内路由：独立判断 capability=bounded/analytical/frontier 或 insufficient_context，按「子任务路由退化链」确定 route，保留显式模型/effort，完全显式时不调用 Jev。受管子会话的判断 SHALL 在其 `agent/created`（`source = "startup"`）中完成：按「AUTO 受管子会话范围」绑定并采样父配置后，以该事件的 signal 等待 Jev，按退化链确定 route，然后同步以子会话自身的 `agent.model.select(route)` 写入，使其 step 1 即用该 route；MUST NOT 保存全局默认。官方工具在创建子会话前完成的参数与允许列表校验失败时，不产生子会话，也 MUST NOT 请求 Jev。受管子会话 SHALL 按精确 child ID 绑定、持久化，实际请求匹配后标 applied；恢复不重判。恢复（`agent/created`，`source = "resume"`）一个记录完整、parent 一致、状态不是 `failed` 且已有 route 的受管子会话时，若 `agent.model.current()` 与 route 不一致，系统 SHALL 同步 `agent.model.select(route)`，不请求 Jev、不保存全局默认；记录缺失或损坏、parent 不符、`failed` 时仍按现有规则 fail closed。已有 route 的子会话 SHALL 在每次请求的 `agent/request` 中只核验、不改写：返回值 MUST 等于 `await next()` 的结果。fork 不属于受管范围，SHALL 与父会话保持一致、原样放行，MUST NOT 报错或悄悄改为 fresh。Agent 保留编排和验收权，不实现自主重试升级。
+主会话 SHALL 仅判断 depth=lower/baseline/higher，并在模型支持序列中以所属家族策略的推荐起点最多移动一档，不修改 provider/model；选定 effort 与官方合成值不同时，按「AUTO 主 effort 同步官方选择」经官方 selectModel 同步。子任务 SHALL 只在「AUTO 受管子会话范围」内路由：独立判断 capability=bounded/analytical/frontier 或 insufficient_context，按「子任务路由退化链」确定 route，保留显式模型/effort，完全显式时不调用 Jev。受管子会话的判断 SHALL 在其 `agent/created`（`source = "startup"`）中完成：按「AUTO 受管子会话范围」绑定并采样父配置后，以该事件的 signal 等待 Jev，按退化链确定 route，然后同步以子会话自身的 `agent.model.select(route)` 写入，使其 step 1 即用该 route；MUST NOT 保存全局默认。官方工具在创建子会话前完成的参数与允许列表校验失败时，不产生子会话，也 MUST NOT 请求 Jev。受管子会话 SHALL 按精确 child ID 绑定、持久化，实际请求匹配后标 applied；恢复不重判。恢复（`agent/created`，`source = "resume"`）一个记录完整、parent 一致、状态不是 `failed` 且已有 route 的受管子会话时，若 `agent.model.current()` 与 route 不一致，系统 SHALL 同步 `agent.model.select(route)`，不请求 Jev、不保存全局默认；记录缺失或损坏、parent 不符，或状态为 `failed` 且有 route 时，仍按现有规则 fail closed；旧的 `failed` 且无 route 的记录按「旧配置与旧记录只读兼容」原样放行。创建在 `agent/created` 等待 Jev 期间被取消时，按退化链记 `unsupported` / `jev-cancelled` 并保留该持久记录，与 0.2.1 相同（0.2.1 同样在 created 时写记录与绑定标记）；系统 MUST NOT 调用 `agent.model.select`，MUST NOT 删除官方 Session 或任何已有记录。已有 route 的子会话 SHALL 在每次请求的 `agent/request` 中只核验、不改写：返回值 MUST 等于 `await next()` 的结果。fork 不属于受管范围，SHALL 与父会话保持一致、原样放行，MUST NOT 报错或悄悄改为 fresh。Agent 保留编排和验收权，不实现自主重试升级。
 
 #### Scenario: Magpie 自动子路由
 - **WHEN** Magpie GPT 主会话为 AUTO 且创建 bounded 子任务
@@ -133,6 +133,11 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **GIVEN** AUTO 根会话调用官方 `subagent`，只传 `model` 未传 `provider`（官方会以配对错误拒绝）
 - **WHEN** 工具执行
 - **THEN** 工具返回官方错误；未创建子会话；Jev 请求次数为 0；无绑定记录
+
+#### Scenario: created 等待 Jev 期间取消创建
+- **GIVEN** AUTO 根会话经官方 fresh 子会话工具创建 C，C 已在 `agent/created` 中绑定并正在等待 Jev
+- **WHEN** 创建的 signal 被中止
+- **THEN** `agent.model.select`、领取、`agent/request`、adapter 调用与 `saveSelection` 次数均为 0，无未处理异常，live registry 中无 C；C 的 AUTO 记录为 `unsupported` / `jev-cancelled`，绑定标记保留
 
 #### Scenario: 从 0.2.1 中断状态恢复的子会话补写 route
 - **GIVEN** 0.2.1 写下的受管子会话记录为 `recommended` 且含 route `P` / `CHILD` / `low`，会话中没有 `model/selection` 与 `request/header`（首个请求前中断），`current()` 为父快照 `P` / `M` / `medium`

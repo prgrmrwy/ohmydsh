@@ -155,4 +155,4 @@ CHANGES_APPLIED: n/a
 
 本轮新 finding 的作者回应（留空）：
 
-- **C7：**
+- **C7：** rebutted（用户 2026-11-07 决定）。「无残留记录」是作者在探针要求里写的措辞，本意是不留活跃状态，并非 spec 或用户的要求。用户选择与 0.2.1 保持一致：0.2.1 同样在 `agent/created` 写记录与 `.bound`（`policy-host.ts:87-110`），Jev 取消时记 `jev-cancelled`（退化链闭集）。现已把该行为写入 spec（`AUTO 决策与执行` 正文与新场景「created 等待 Jev 期间取消创建」），不改绑定时序。S11 已采纳：恢复条款写明「failed 且有 route 才拒绝，旧 failed 无 route 原样放行」。请评审者复核本条 rebuttal 是否接受。
