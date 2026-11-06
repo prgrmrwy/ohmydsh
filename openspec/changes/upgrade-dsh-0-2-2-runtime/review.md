@@ -113,7 +113,15 @@ CHANGES_APPLIED: n/a
 
 本轮新 finding 的作者回应（留空）：
 
-- **C4**：
-- **C5**：
-- **M4**：
-- **M5**：
+作者回应（2026-11-06，第 3 轮前）。用户在连续两轮 REVISE 后选择维持原范围继续修。以下各条都按 fixed 处理，交第 3 轮完整核对：
+
+- **C4 fixed**：逐请求门禁改为 `llm/stream` 监听（async generator，在 `yield* next()` 前核验，不通过就抛错，不改写请求）。依据：每次 attempt（含重试）都经 `agent-loop:877` 进入 `llm/stream`（`dsh-llm:2254-2262、2402`），请求带 `sessionId` 与 effort（`agent-loop:1085-1090`）。删去 pre-step 门禁；原 `agent/request` 中的 fail closed 检查一并迁入。新增场景「同一步重试前门禁失效」。
+- **C5 fixed**：维护被官方取消时，把预测批次标为「已取消」；AUTO 以 prepend 注册的 `agent/pre-step` 对该批返回 `reject`，不调用下游。依据：`turn()` 直接 `return false`（`:746-748`），`kick` 只在 `wakeRequested` 时重开回合，而 `wakeDriver` 开始时会重置它（`:624-630、651-664`）。所以被取消的批次不进入模型，其余排队消息保留且不被自动执行，与 0.2.1 取消判断中回合的结果一致。停止边界入口使用回合 signal；晚到入口自持中止控制；在领取、丢弃或 dispose 之后才返回的结果一律丢弃，不写 disabled。新增场景「取消正在判断的空闲回合」「取消运行中回合不影响排队消息的后续判断」「迟到结果被丢弃」。
+- **M1 fixed**：「手动隔离与失败可见」「模式与改写规则」「Jev 判断请求与脱敏」「决策提示」「判档预设的采样与归属」五条也改为 MODIFIED，原有场景全部保留，只替换冲突的句子；现行 spec 中其余提到 selectModel 的只有 :593 的禁止条款，仍然成立。
+- **M4 fixed**：空闲入口的触发条件改为「任一插入后，队列中存在尚无有效缓存的用户消息」，判断按领取顺序预测的下一批次。恢复后残留的消息因此会在下一次唤醒时补判；恢复本身不调用 Jev（design D1 列出被否决的「created 中 await」方案及理由）。新增场景「恢复后的待处理消息在下一次唤醒时判断」。
+- **M5 fixed**：缓存只存 depth 与模型能力，effort 在提交时按同步读取的 cap 用同步的 `policyEffort` 计算；子会话提交时同步核对 route 是否超过 cap。新增场景「判断后降低 cap 在提交时生效」「提交时 route 已超过 cap」。
+- **S4 adopted**：预先校验写明包含目录成员身份，与 `requireModel` 等价；design D2 写入图像准入的论证与子会话带图首消息的验收项。
+- **S5 adopted**：判断与提交的单位从单条消息改为「批次」（next-step 全部加 next-turn 队首），恢复 0.2.1 的整批用户文本输入；队列归属按消息 id 查询 `inbox.nextStep/nextTurn`；新增「维护被其它插件占用」场景；两条 followup 场景补齐 GIVEN 前提。
+- **S6 adopted**：Migration Plan 的恢复演练逐项引用 runtime-api-migration `:96-107` 的断言，数据根以 `--dump-config` 为准，并加入 attachments。
+
+作者另做的设计调整：运行中排队消息的判断从「插入时」移到当前回合的 `agent/turn-stopping`（只计算并 await，不提交），使「上一轮」上下文取到完整回复，与 0.2.1 一致；续步后按上下文指纹重判。停止边界之后才插入、判断来不及的消息沿用当前选择并记 `judgment-late`。这一项作为显式行为变化写入 spec，因为 0.2.2 在这段时间没有可等待的接缝。

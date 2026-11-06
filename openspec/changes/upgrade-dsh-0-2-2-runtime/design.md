@@ -14,6 +14,13 @@
   - `dsh-system-prompt/lib/types/index.d.ts:114-122`：`system-prompt/assemble` 改为不含 `tools` 的 `PromptPresentation`。`dsh-subagent/lib:1806` 在 setup 中先写 `subagent/descriptor`，`experimental-agent-team/lib:873-896、1185-1187` 据此不接纳普通子会话，所以 fresh 裁判子会话不会注册 Team 工具。
   - `dsh-base/cordis.patch.yml:292-294`：顶层 insert 中的官方行 `id: fs-observation-policy` 为 `disabled: true`。评审者用目标 `cordis-plugin-include@1.1.0` 的 `applyPatches` 实测：同 id/name 加 `disabled: false` 的整行覆盖后恰有一条启用行；`scripts/sync.mjs:1863-1874` 对 plain fragment 原样拼接。
   - 根 `package.json:25` 的 `engines.node` 为 `>=22.0.0`，`scripts/bootstrap.mjs:21,60` 据此检查；0.2.2 要求 Node ≥ 24.9。
+- 第 3 轮补充核对（0.2.2-rc.1）：
+  - 重试：`agent-loop:841-842` 每次 attempt 重新 `prepareRequest`；`:929-939` request-error 返回 retry 后直接 continue，不再经过 preStep。每次 attempt 都经 `:877` 的 `preparedCall.stream` 或 `llm.stream`，两者都进入 `llm/stream` waterfall（`dsh-llm/lib/index.js:2254-2262、2402`）。loop 请求带 `sessionId` 与 provider/model/reasoningEffort（`agent-loop:1085-1090`），且带 `markAgentLoopRequest` 标记。listener 抛错原样抛出，不转为 finish chunk（`dsh-llm:2387-2395` 注释）。
+  - 取消：`dsh-api-session-controller:955-965` 的普通取消为 `agent.cancel({kind:"user"}, {keepInbox:true})`；`agent-loop:579-585` 在 keepInbox 时既不清 inbox，也不清 `wakeRequested`；维护结束后 `:605` 仍会唤醒。pre-step `reject` 让 `turn()` 直接 `return false`（`:746-748`）；`kick` 结束时只有 `wakeRequested` 才重新唤醒（`:651-664`），而 `wakeDriver` 开始时会把它重置为 false（`:624-630`）。
+  - 恢复：`agent-loop:1733-1767` 以持久事件为 seed 恢复，不派发 `agent/inbox/inserted`，也不自动唤醒待处理消息；之后由新的插入唤醒。
+  - `agent/turn-stopping` 是 serial、会被 await，带当前回合 signal（`dsh-agent/runtime-types.d.ts:422-426`）；`Inbox.nextStep/nextTurn` 为只读公开属性（`:68-70`）。
+  - 插件 cap 由 `SettingsStore.read()` 同步读文件（`packages/dsh-auto-model-routing/src/settings.ts:39-41`）；`policyEffort` 是同步函数（`src/routing.ts:20`）。
+  - 官方 `requireModel` 检查目录成员身份（`controller:529-540`）；`resolveModelInfo` 与 `resolveCallConfig` 不检查（`dsh-llm:2079-2087、2107-2117`）。
 - 约束：`staged-upgrade-execution`（基线、devbox 清洁候选、备份恢复次序 `:113-122`）、`runtime-api-migration`（真实历史备份副本 `:96-107`）、`repo-layout`（运行体 peer/engines 区间）；`docs/architecture/dsh-plugin-integration-pitfalls.md`；Worktree Session 的依赖修改须先 `ws promote`。
 
 ## Goals / Non-Goals
@@ -30,26 +37,42 @@
 
 ## Decisions
 
-### D1 AUTO：判断在消息入队时，提交在该消息被领取时
-- **触发**：`agent/inbox/inserted`，只看 `source.kind === "user"` 的实时插入。
-- **空闲**：在同步回调里调 `agent.runMaintenance(signal => judge(message, signal))`。driver 会等维护结束才开始回合，所以首个回合一定能拿到结果。主会话和子会话的首条消息都走这里（子会话首条消息在工厂维护结束后才投递，见 Context）。
-- **运行中**：`runMaintenance` 同步抛错，表示已有活动工作。只有 next-turn 消息启动后台判断，不阻塞当前回合；next-step 消息属于当前回合，不判断。
-- **提交**：在 `agent/inbox/claimed` 的同步回调里，领取到有就绪结果的消息时，调用 `agent.model.select(target)`。这时 `:671` 还没读取 selection，所以本步一定生效。因为只在消息真被领取时提交，A/B 两条 followup 各自对应自己的回合（C1）；续步只领取 next-step 消息，不会触发下一回合的提交（C2）。结果没就绪就不改选择，迟到的结果丢弃。
-- **校验前移**：判断阶段就算好目标 effort（需要异步 `resolveModelInfo`），并做与 `selectModel` 相同的 `resolveCallConfig` 校验。提交时只同步核对模式、世代和当前 provider/model 是否与判断时一致，不一致就丢弃。
-- **取消**：`agent/inbox/discarded` 或会话 cancel 时中止判断，不停用 AUTO（M2）。
+### D1 AUTO：判断在入口计算并缓存，提交在批次被领取时
+「批次」是运行体开启新回合时一次领取的消息，即 next-step 全部加 next-turn 队首一条；其用户消息 id 列表就是缓存键的主体（spec「用户回合与 Jev 输入」）。
+
+- **三个判断入口**（只计算，不写选择）：
+  1. **空闲入口**：任一插入后，队列里只要还有没判断的用户消息，就在同步回调中 `runMaintenance`，判断预测批次。driver 等维护结束才开始回合，所以首个回合一定有结果。这个入口同时覆盖三种情况：恢复后残留的消息（M4，不必在每个恢复的会话上调 Jev）、取消后残留的消息，以及子会话首条消息（创建返回后以 followup 投递，此时子会话空闲）。Jev 返回后重新预测，批次变了就在同一期限预算内重判。
+  2. **停止边界入口**：运行中回合 T 的 `agent/turn-stopping` 中，为 next-turn 队首 await 判断。这里只计算，所以 T 被续步也不会提前切换（C2）。T 续步后再次停止时上下文已变，按指纹重判。之所以在这里而不是插入时判断 B，是为了让「上一轮」上下文取到 T 的完整回复，与 0.2.1 在 B 的 step 1 取上下文一致。这里的等待与 0.2.1 在 B 的 pre-step 等待 Jev 的延迟相同。
+  3. **晚到入口**：在停止边界监听返回后才插入、或维护被其它插件占用时，启动后台判断，来得及就用。
+- **提交**：在每个回合第一次 `agent/inbox/claimed` 的同步回调里，用「回调前记录的待处理 id − 回调时队列」求出整个批次。领取会先把整批消息移出队列，然后才逐条派发 claimed（`:103-110`），所以第一次回调时批次已确定。用户消息键与上下文指纹完全匹配就同步调用 `agent.model.select`；这时 `:671` 还没读 selection，本步一定生效。续步的领取不提交。A、B 两条 followup 各自对应自己的回合（C1）。
+- **effort 在提交时计算**：缓存 depth 和模型能力，提交时按当时同步读取的 cap 用 `policyEffort` 计算（M5）。预先校验与官方 `selectModel` 等价，包含目录成员身份（S4）。
+- **取消**（C5）：
+  - 维护被官方取消时，把预测批次标为「已取消」。维护结束、运行体照常唤醒并领取后，AUTO 最外层的 `agent/pre-step` 直接返回 `reject`：这批消息不进模型，回合以 blocked 结束。`turn()` 直接返回 false，`kick` 不会因为 `wakeRequested` 再开回合，其余排队消息保留且不被自动执行。这与 0.2.1 取消「在 pre-step 等 Jev 的回合」的结果一致：那时该批消息已被领取，随回合中止；可见差别只是回合结束原因从 aborted 变为 blocked。
+  - 停止边界入口用 T 的 signal，T 被取消时随之中止。
+  - 晚到入口自持中止控制，在消息被丢弃、会话 dispose 或模式切换时中止。
+  - 批次已被领取、丢弃或会话 dispose 后才返回的结果，不论成败一律丢弃，不写 disabled。
+
+**显式行为变化**（两项，都写进 spec）：
+1. 回合中途手动切换的 effort 保持到本回合结束（M1，用户已于 2026-11-06 确认）。
+2. 停止边界监听返回之后、新回合开始之前插入的用户消息，若后台判断来不及，就沿用当前选择，记 `judgment-late`。0.2.2 在这段时间没有可等待的接缝；要消除这个缺口，需要上游提供「回合开始前可等待」的钩子，这条记入 Open Questions。
 
 被否决的方案：
 - 在 `agent/pre-step` 里 select：selection 已经固定，本步赶不上。
-- pre-step `reject` 后再重排 inbox：会留下 blocked 空回合，消息也被消费。
 - 继续在 `agent/request` 里改写：会抛错，而且已弃用。
-- 在 `agent/turn-stopping` 里提交下一回合：当前回合可能继续，也可能漏掉晚到的消息（C2）。
-- 在 `agent/created` 里开维护：它本身已在工厂维护内，嵌套必抛（M3）。
+- 在 `agent/turn-stopping` 里提交下一回合：当前回合可能继续（C2）；本方案在那里只计算。
+- 在 `agent/created` 里开维护：它本身就在工厂维护内，嵌套必抛（M3）。
+- 恢复时在 `agent/created` 里 await Jev：Host 启动时会给每个有残留消息的恢复会话都调一次 Jev，而这些消息未必会再执行；改由下一次唤醒时的空闲入口处理。
 - 在 `claimed` 里调官方 `selectModel`：它要先 await 三次，真正写入时本步 selection 早已读完。
+- 取消时清空整个队列：会丢掉用户排队的其它消息，与官方 keepInbox 语义冲突。
 
-### D2 写入方式：主会话 `agent.model.select` 加后台保存默认，子会话只 `select`
-`selectModel` 的有效动作就是「`agent.model.select` 加后台 `saveSelection`」。主会话在 `claimed` 里同步做前者，再调用公开服务 `ctx.agentDefaultModel.saveSelection` 做后者，失败只告警。子会话只 `select`，不写默认。插件不再注册 `agent/request` 监听；子会话实时门禁移到 `agent/pre-step`：它每步都执行、在请求之前、可以抛错，并且带 `modelSelection`。这样上游删除已弃用钩子时，门禁也不会静默消失。applied 判定沿用 `request/header` 与 `session.requestHeader()` 比对。
+### D2 写入方式与逐请求门禁
+主会话：在 `claimed` 中同步 `agent.model.select`，再在后台调用公开服务 `ctx.agentDefaultModel.saveSelection`；保存失败只告警。前置校验（目录成员、`resolveCallConfig`）在判断阶段完成。主会话 provider/model 不变，图像准入查询的目标不变（`controller:844-848`），所以省略 `serializeImageAdmission` 不引入新缺口。
 
-**行为变化（M1）**：0.2.2 在 step 2 及以后没有可在本步生效的接缝，所以 effort 每个用户回合设定一次。用户在回合中途手动切换，会保持到本回合结束；下一个用户回合按当时的模型重算。用户已于 2026-11-06 确认可以接受（旧版也是「谁最后设置以谁为准」，差别只在 AUTO 重设的间隔从每步变为每回合）。
+子会话：只 `select` route，不写默认；提交时同步核对 cap。
+
+逐请求门禁（C4）：插件不再注册 `agent/request`，改为注册 `llm/stream` 监听，用 async generator 在 `yield* next()` 之前完成核验。核验对象是 loop 请求且 `sessionId` 为已有 route 的受管子会话，内容为：精确绑定记录完整、parent 一致、请求 provider/model/effort 等于 route，以及当前目录、允许列表、captured allowlist 与 cap。不通过就抛错，adapter 不被调用。每次 attempt（含重试）都经过这里，而且它不是弃用接口。这个监听同时接管原来 `agent/request` 中的 fail closed 检查（`requireBindingRecord`、parent 不匹配、`status === 'failed'`）。子会话图像首消息的准入与 0.2.1 相同（当时同样是创建后再改路由），隔离验收中用一条带图首消息的 fresh 子任务确认。
+
+applied 判定沿用 `request/header` 与 `session.requestHeader()` 比对。
 
 ### D3 auto-model-routing 兼容下界抬到 `0.2.2-rc.1`
 `agent.model.select` 只在 0.2.2 存在。保留双路径会让旧路径在 0.2.2 上出错，测试也翻倍。只改该包的 `engines.dsh` 与 dsh peer 下界，理由按 repo-layout 记录在 package README/CHANGELOG。商店 0.7.0 在 0.2.2 Host 上会失效；本 change 不发版，收尾时明确提示。其它 local package 的下界不变，除非审计发现它们用了 0.2.2 才有的 API。
@@ -76,10 +99,12 @@
 
 ## Risks / Trade-offs
 
-- [运行中排队的 followup 判断来不及] → 本回合沿用当前选择，迟到结果丢弃，不应用到别的回合。当前回合通常远长于 Jev 期限（≤ 8000 ms），实际很少发生。
-- [空闲时用户回合最多推迟一个 Jev 期限] → 与 0.2.1 在 pre-step 中等待的延迟相同；超时按失败类别处理。
-- [其它插件在用户消息入队时已占用维护阶段，`runMaintenance` 抛错] → 该消息走运行中路径（若在 next-turn），否则本回合不判断。隔离验收中记录是否出现。
-- [子会话首条消息以 steer 投递（next-step）] → 空闲入口不区分队列，只要子会话空闲就进入维护判断；隔离验收以真实 fresh 子会话确认首条消息投递时子会话空闲。
+- [停止边界之后才插入的用户消息] → 后台判断来得及就用，否则沿用当前选择并记 `judgment-late`（显式行为变化）。隔离验收记录实际出现频率。
+- [停止边界入口 await Jev 会推迟当前回合的结束与下一回合的开始，最多一个 Jev 期限（≤ 8000 ms）] → 与 0.2.1 在下一回合 pre-step 中等待的总延迟相同，只是等待的位置前移了。
+- [空闲时用户回合最多推迟一个 Jev 期限] → 与 0.2.1 相同；超时按失败类别处理。
+- [维护被其它插件占用] → 走晚到入口；spec 有对应场景。
+- [被取消的批次在历史中显示为 blocked 回合，而不是 aborted] → 不进模型、不留 user/message，与 0.2.1 的用户可见结果一致；验收时截图确认 UI 无异常提示。
+- [批次求差依赖「领取先整体移出、再逐条派发」的运行体实现] → 用真实 `ReactLoopInbox` 的测试锁定；升级复核清单加入这一项。
 - [`select` 会持久化，并延续到之后的回合] → 非用户回合沿用当前选择，与持久化语义一致；子会话 route 本就固定。
 - [商店 0.7.0 在 0.2.2 Host 上失效] → 收尾时提示用户尽快走 publish 流程。
 - [0.2.2 单向存储格式迁移] → 按 Migration Plan 离线快照与恢复演练；恢复快照会丢失切换后的新数据，切换前须告知用户。
@@ -92,8 +117,8 @@
 3. **隔离候选**：`dsh build` → `ws prepare-preview` → `dsh`，按分组（裸运行体 → local package → remote 插件）验收，复跑基线人工项（AUTO 主/子路由、Pet Locus、memex 召回与 eval、观察策略、btw、better-sidebar 各 tab 等）。再按精确 commit 在 devbox 跑清洁构建 gate。
 4. **备份与恢复演练**（生产切换的准入条件）：
    1. 由用户执行 `dsh stop`，停止日常 Host 及其内的 Pet SQLite 写入方，并确认没有残留 Host 进程。
-   2. 离线复制 `~/.dsh/sessions`、`~/.dsh/plugins/dsh-pet/sqlite`、`~/.dsh/profiles/web`、`~/.dsh/state`、`~/.dsh/storages`，生成 sha256 清单，路径写入 tasks。
-   3. 在隔离 `DSH_HOME` 中，用这份副本以 0.2.2 打开、继续写入、重启；再停止全部写入方，恢复快照，以 0.2.1 启动，确认读回正常。
+   2. 先用目标运行体 `--dump-config` 列出实际数据根（session-persistence-jsonl 的 `root`、attachment-local、各插件存储），再离线复制这些根，至少包括 `~/.dsh/sessions`、`~/.dsh/attachments`、`~/.dsh/plugins/dsh-pet/sqlite`、`~/.dsh/profiles/web`、`~/.dsh/state`、`~/.dsh/storages`；生成 sha256 清单，路径写入 tasks。
+   3. 在隔离 `DSH_HOME` 中用这份副本以 0.2.2 打开、继续写入、重启，按 runtime-api-migration `:96-107` 逐项断言：generation 保留与原子发布、lease 排他、中断后的 generation 选择，以及 Session 身份与标题、workspace/cwd、父子 lineage、模型/provider、assistant 内容、tool call/result、带图片附件的消息、继续提交。之后停止全部写入方，恢复快照，以 0.2.1 启动，按同一组断言确认读回。
    4. 结果写入 `checking/summary.md`。
 5. **切换**：经用户批准后合入；从主 checkout `dsh build`，连续第二次无变更；由用户决定启动或重启，之后用 `dsh history` 核验。
 6. **回滚**：
@@ -105,4 +130,5 @@
 
 ## Open Questions
 
-- 官方 Web UI 发送用户消息时，空闲是 followup（next-turn），运行中是哪种（followup 或 steer）。只影响运行中路径是否判断；隔离验收中用真实 UI 记录。
+- 官方 Web UI 在运行中发送用户消息走 followup 还是 steer：前者由停止边界入口判断，后者属于当前回合、不判断，两者都已有规定行为。隔离验收中用真实 UI 记录实际分布。
+- 上游是否愿意提供「回合开始前可等待」的钩子，以消除 `judgment-late` 缺口；不阻断本 change。
