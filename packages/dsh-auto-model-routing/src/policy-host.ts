@@ -33,13 +33,17 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   const pending = new Map<string, ChildDecision>()
   const main = new WeakMap<Agent, { turn: number; depth: Depth; active: boolean; epoch: number }>()
   ctx.effect(() => () => { pending.clear(); delegation.disable() })
-  const mainStatus = new Map<string, { depth: Depth; effort?: string; reason: string; decision?: NonNullable<ChildDecision['decision']> }>()
+  /** In-memory decision view: the persisted child record shape plus the preset that made the judgement (never persisted in child records). */
+  type Decision = NonNullable<ChildDecision['decision']> & { preset?: string }
+  const mainStatus = new Map<string, { depth: Depth; effort?: string; reason: string; decision?: Decision }>()
   let decisionId = Date.now()
   const requestMetadata = new Map<string, { requestSeq: number; appliedAt: number; requestTurn?: number }>()
   /** Each main session's current decision: time and the preset captured for it. Lives until replaced, voided or disposed — never evicted by other sessions' traffic. */
   const mainDecided = new Map<string, { id: number; decidedAt: number; preset: string }>()
-  const applied = new Map<string, NonNullable<ChildDecision['decision']>>()
-  const latest = new Map<string, NonNullable<ChildDecision['decision']>>()
+  const applied = new Map<string, Decision>()
+  const latest = new Map<string, Decision>()
+  /** Preset captured at each managed child's judgement, keyed by child id (memory only). */
+  const childPreset = new Map<string, string>()
   /** Fall back to MANUAL when the main model left AUTO's registered families. */
   const lockUnsupportedMain = (agent: Agent) => {
     deps.state.setMode(agent.id, 'MANUAL')
@@ -105,7 +109,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
   const requireBindingRecord = (agent: Agent, record: ChildDecision | undefined) => {
     if (deps.store.wasBound(agent.id) && !record) throw new Error('已绑定子会话的决策记录缺失，无法恢复；停止请求，不恢复继承配置')
   }
-  ctx.on('agent/disposed', ({ agent }) => { pending.delete(agent.id); mainStatus.delete(agent.id); mainDecided.delete(agent.id); return undefined })
+  ctx.on('agent/disposed', ({ agent }) => { pending.delete(agent.id); childPreset.delete(agent.id); mainStatus.delete(agent.id); mainDecided.delete(agent.id); return undefined })
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision.kind !== 'enter' || payload.step !== 1) return decision
@@ -130,7 +134,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       main.set(agent, { turn: payload.turn, depth: result.depth, active: true, epoch: startedEpoch })
       const { kind: _kind, ...measurement } = result
       latest.delete(agent.id)
-      mainStatus.set(agent.id, { depth: result.depth, reason: 'jev', decision: { ...measurement, id: ++decisionId, source: 'main', tier: result.depth, effort: '待应用', status: 'recommended' } })
+      mainStatus.set(agent.id, { depth: result.depth, reason: 'jev', decision: { ...measurement, id: ++decisionId, source: 'main', tier: result.depth, effort: '待应用', status: 'recommended', preset: preset.id } })
       mainDecided.set(agent.id, { id: decisionId, decidedAt: Date.now(), preset: preset.id })
       if (mainStatus.size > 200) mainStatus.delete(mainStatus.keys().next().value!)
       return decision
@@ -153,6 +157,7 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
       const text = userInput(decision.messages).text
       // Captured at the child's first judgement, not at creation.
       const preset = resolvePreset(deps.settings().preset)
+      childPreset.set(agent.id, preset.id)
       const result = await deps.jev.judgePolicy(buildState({ text, execution: preset.context.includes('execution') ? 'delegated' : undefined }), payload.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both', preset)
       if (!current()) { fallback(record, 'mode-changed'); return decision }
       if (result.kind === 'cancelled') { fallback(record, 'jev-cancelled'); return decision }
@@ -255,7 +260,8 @@ export function policyHost(ctx: Context, deps: { selectModel: (request: { sessio
     const actual = (event.data as { header?: { config?: { provider?: string; model?: string; reasoningEffort?: string } } }).header?.config
     if (!actual) return
     const matches = actual.provider === record.route.provider && actual.model === record.route.model && actual.reasoningEffort === record.route.reasoningEffort
-    if (record.decision) latest.set(record.rootId, { ...record.decision, status: matches ? 'applied' : 'failed' })
+    const preset = childPreset.get(session.id)
+    if (record.decision) latest.set(record.rootId, { ...record.decision, status: matches ? 'applied' : 'failed', ...(preset && record.decision.decisionProvider !== 'explicit' ? { preset } : {}) })
     deps.store.set({ ...record, ...(record.decision ? { decision: { ...record.decision, status: matches ? 'applied' : 'failed' } } : {}), status: matches ? 'applied' : 'failed', ...(matches ? { actual: record.route } : { reason: '实际请求配置不匹配' }) })
     if (!matches) throw new Error('实际请求配置不匹配')
   })

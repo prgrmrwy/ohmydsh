@@ -243,3 +243,32 @@ it('spec Scenario "切换预设不改变已绑定子任务与已作出的决定"
   await c.run(c.parent, '下一个主任务')
   expect((c.jev.bodies.at(-1) as Body).questions).toEqual({ depth: EAV.depth })
 })
+
+it('spec Scenario "决策提示标记所用判档预设"', async () => {
+  const { toastText } = await import('../src/client/control.js')
+  const m = await mainHarness(depth('higher', { confidence: 0.4 }), { config: { preset: 'effort-as-verification', decisionToast: true } })
+  await m.setMode('AUTO'); await m.run('排查多个模块')
+  const state = await m.invoke('state', { sessionId: m.agent.id }) as { decision: Parameters<typeof toastText>[0] & { preset?: string } }
+  expect(state.decision.preset).toBe('effort-as-verification')
+  const lines = toastText(state.decision)
+  expect(lines[0]).toBe('主会话 · 已应用')
+  expect(lines[1]).toBe('判档预设 Effort 管验证与边界情况')
+  for (const key of ['version', 'policyVersion', 'mappingVersion', 'rubricVersion']) expect(JSON.stringify(state)).not.toContain(`"${key}"`)
+  await closeHarness()
+
+  // Judged subtask: attributed to the preset captured at its first judgement; the persisted record stays unchanged.
+  const c = await childHarness()
+  c.configure({ preset: 'reasoning-depth' })
+  await c.invoke()
+  const child = c.handles.at(-1)!.agent
+  const root = await c.callEndpoint('state', { sessionId: c.parent.id }) as { decision?: { source: string; preset?: string } }
+  expect(root.decision).toMatchObject({ source: 'subagent', preset: 'reasoning-depth' })
+  expect(toastText(root.decision as never)[1]).toBe('判档预设 推理深度')
+  expect(JSON.stringify(c.store.get(child.id))).not.toContain('preset')
+  // Fully explicit subtask: no judgement, so no preset line.
+  await c.invoke({ model: 'claude-haiku-5-5', reasoning_effort: 'low' })
+  const explicit = await c.callEndpoint('state', { sessionId: c.parent.id }) as { decision?: { decisionProvider?: string; preset?: string } }
+  expect(explicit.decision).toMatchObject({ decisionProvider: 'explicit' })
+  expect(explicit.decision).not.toHaveProperty('preset')
+  expect(toastText(explicit.decision as never).some(l => l.startsWith('判档预设'))).toBe(false)
+})

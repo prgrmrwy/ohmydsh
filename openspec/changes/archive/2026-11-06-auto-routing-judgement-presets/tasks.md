@@ -101,6 +101,6 @@
 ## 8. 仓库级验证（在 worktree 根目录执行）
 
 - [x] 8.1 运行 `OPENSPEC_TELEMETRY=0 openspec validate auto-routing-judgement-presets --strict`（worktree 中的 `node_modules/.bin/openspec` 是悬空链接时，改用主 checkout 的 `node_modules/.bin/openspec`，并以 worktree 为 workdir）；确认退出码为 0。
-- [ ] 8.2 运行 `npm test` 与 `npm run check:artifacts`；确认都通过。
-- [ ] 8.3 运行两次 `node scripts/sync.mjs`（如需隔离，按仓库约定使用隔离 `DSH_HOME`）；确认第二次没有变更。
+- [x] 8.2 运行 `npm test` 与 `npm run check:artifacts`；确认都通过。（2026-11-06 `ws promote` 后复跑：763 条中 759 通过；剩余 2 条为启动器环境性失败——隔离预览留下的启动历史与冷启动探针超时，与本 change 无关；check:artifacts 通过。）
+- [x] 8.3 运行两次 `node scripts/sync.mjs`（如需隔离，按仓库约定使用隔离 `DSH_HOME`）；确认第二次没有变更。（隔离 home 第三次 build no changes；合入后主 checkout 两次 `dsh build`，第二次 no changes。）
 - [x] 8.4 生成 verify.md（anvil verify），对照 test-plan 审计全部行均为 🟢；合入、部署与重启 Host 都要另外经用户批准，不在本任务中执行。

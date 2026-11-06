@@ -50,3 +50,10 @@
 DECISION: PASS_WITH_WARNINGS
 
 ⚠️ 本 change 的规格、实现与包内测试已经闭环（Node 24.21 下 312/312）。警告项：仓库根测试受 Lean Worktree 依赖缓存影响有 18 条环境性失败（未在主 checkout 复跑确认）；隔离 sync 被私有 npm scope 拦下，两次 sync 的幂等需要合入后在主 checkout 补验；本机 Node 24.12 存在 2 条已知的基线失败。
+
+## 补验（2026-11-06，合入后）
+
+- `ws promote` 后仓库根 `npm test`：763 条 759 通过，2 条启动器环境性失败（与 AUTO 无关），此前 18 条依赖缓存失败消失。
+- 隔离 home：`./bin/dsh build` 第三次 no changes；`ws prepare-preview` + 预览 Host 界面验收通过（预设选择器、保存写入 `preset`、策略说明与来源链接）。
+- 合入 main `e10a7bea` 后主 checkout 两次 `dsh build`，第二次 no changes；日常 Host 重启后加载 AUTO 0.7.0，用户验收通过。
+- 据此 8.2、8.3 已勾选。
