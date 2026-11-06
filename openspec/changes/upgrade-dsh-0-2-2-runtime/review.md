@@ -112,6 +112,24 @@ CHANGES_APPLIED: n/a
 
 本轮新 finding 的作者回应（留空）：
 
-- **M6：**
-- **M7：**
-- **M8：**
+- **M6：**见下方「方案替换说明」
+- **M7：**见下方「方案替换说明」
+- **M8：**见下方「方案替换说明」
+
+方案替换说明（作者，2026-11-07，第 4 轮前）：
+
+连续三轮 REVISE 之后，用户要求停止逐轮打补丁，改为直接对照「升级前后 AUTO 的实际变化」重新分析。结论如下。0.2.2 只破坏了一点：本步模型选择在 pre-step 之前就已固定，`agent/request` 不能再改写它（`dsh-agent-loop:671、1000-1001`）。第 1–3 轮为了绕开这一点，新造了一套机制：入队时判断、claimed 时领取并提交、维护窗口、停止边界预判、取消后 reject。本轮的 C4、C5、M6、M7、M8 都出在这套机制上。
+
+用户于 2026-11-06 批准改用最小方案。第 1–3 轮的 AUTO 机制已从 proposal、design、spec 中全部删除。新方案：
+
+- **主会话**：判断位置与 0.2.1 相同，仍在 step 1 的 pre-step 中等待 Jev。每一步在 pre-step 中先 await 官方 `selectModel`，再改写 `payload.modelSelection.reasoningEffort`。运行体要等 pre-step waterfall 全部结束才准备请求，而准备请求时用的就是同一个对象（`:685、742、842`，`model-selection.js:82-85`）。这一点依赖新增的 ADDED requirement「本步选择改写依赖运行体核验」：用集成测试锁定该行为；若对象被冻结，退回为下一步生效。
+- **子会话**：在创建它的工具调用（`tools/execute`，读取 `args.prompt`）中判断，在 `agent/created` 中用 `agent.model.select(route)` 写入 route。`agent/request` 只做核验，原样返回；它在每次 attempt（含重试）都会派发。
+
+本轮各条的去向：
+
+- **C4** 不再适用：门禁回到 `agent/request`，覆盖面与 0.2.1 相同（0.2.1 的压缩请求同样不经过这道门禁）。
+- **C5、M6、M8** 不再适用：相关机制与 `judgment-late` 已删除，取消、排队、恢复的行为都与 0.2.1 相同。
+- **M7** 不再适用：该场景随旧机制一起删除；新增的子会话场景只断言 select 调用和请求头。
+- **S7、S8** 不再适用。
+
+此前已接受的部分保留不变：C3（Migration Plan）、D4 memex、D5 观察策略、D7 Node、D3 抬下界。另新增 D9 上游反馈，列为 task，发布前须经用户确认。第 4 轮须做完整评审，不能只看增量。
