@@ -298,6 +298,8 @@ export interface LocusMigrateWholeWInputV20 {
   /** Every chat of every pairing of W, with the per-row revisions the caller read. */
   readonly chats: readonly {
     readonly chatId: string
+    /** The M the group row belonged to when read; the commit refuses if it moved (rebind). */
+    readonly expectedMain?: string
     readonly expectedRevisions: Readonly<Record<string, number>>
   }[]
   readonly now: number
@@ -394,7 +396,13 @@ export interface LocusRepositoryPortV20 {
   beginProvisioning(input: LocusProvisioningBeginV20): Promise<void>
   recordProvisioningResource(provisioningId: string, resource: LocusProvisioningResourceV20): Promise<void>
   completeProvisioning(provisioningId: string): Promise<void>
-  failProvisioning(provisioningId: string, reason: string): Promise<void>
+  /**
+   * `reclaimed: true` records that the caller's rollback already released every
+   * resource the operation created: the operation is `compensated`, so the
+   * endpoint is not blocked. Otherwise it stays `failed` with its refs for the
+   * window-then-compensate path.
+   */
+  failProvisioning(provisioningId: string, reason: string, options?: { readonly reclaimed?: true }): Promise<void>
 
   /**
    * D4. ONE transaction publishes the group row and the optional topic row
@@ -471,8 +479,11 @@ export interface LocusRepositoryPortV20 {
    * the entry has no non-terminal Delivery and is not already in the
    * `accessChanging` set, add it, and return `{locusId, revision}`. Not held
    * across external work. Refuses with `LOCUS_NOT_FOUND`, `INVALID_REQUEST` (row is `stopped` or `invalid`: only `not-created` and `active` rows accept an access change) and `LOCUS_BUSY`.
+   * With `expectedRevision` (the management client's fence), the row's revision
+   * is compared INSIDE the queue and a mismatch refuses with `LOCUS_CONFLICT`
+   * before anything is drained; IM `/access` has no client fence and omits it.
    */
-  acquireAccessChange(locusId: string): Promise<{ readonly locusId: string; readonly revision: number }>
+  acquireAccessChange(locusId: string, expectedRevision?: number): Promise<{ readonly locusId: string; readonly revision: number }>
   /** D8 step 5 (`finally`). Idempotent; never refuses. */
   releaseAccessChange(locusId: string): void
   /**

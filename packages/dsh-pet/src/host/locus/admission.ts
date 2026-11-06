@@ -178,6 +178,8 @@ export type LocusControlCommand =
   /** `/scope`, `/tools`, `-s`, `-t` (D8): change nothing; the receipt points to `/access`. */
   | { readonly kind: 'deprecated-tier'; readonly original: string }
   | { readonly kind: 'unbind' }
+  /** `-h`, `--help`, `/help`: a pure information receipt; never creates anything. */
+  | { readonly kind: 'help' }
   | { readonly kind: 'unbind-invalid' }
 
 /** Input passed to an already-authorized control dispatcher. */
@@ -348,6 +350,29 @@ const ACCESS_COMMAND_MODES: Readonly<Record<string, LocusAccessModeV20>> = {
   full: 'danger-full-access',
 }
 
+/**
+ * The ONE table of commands the parser accepts and the help receipt lists.
+ * Deprecated tier verbs are accepted by the parser but deliberately absent.
+ */
+export interface LocusCommandTableEntry {
+  readonly id: 'bind' | 'unbind' | 'access' | 'help'
+  readonly verbs: readonly string[]
+  readonly usage: string
+  readonly description: string
+  /** Every control command is gated by the allowlist (see admitCommon). */
+  readonly allowlistOnly: boolean
+}
+
+export const LOCUS_COMMAND_TABLE: readonly LocusCommandTableEntry[] = [
+  { id: 'bind', verbs: ['/bind', '-b', '--bind'], usage: '/bind <工作会话 id>', description: '把本入口绑定到工作会话（id 前缀至少 6 位）；已停止的入口对同一会话重新 /bind 即可启用', allowlistOnly: true },
+  { id: 'unbind', verbs: ['/unbind', '-u', '--unbind'], usage: '/unbind', description: '停止本入口，会话与历史保留', allowlistOnly: true },
+  { id: 'access', verbs: ['/access', '-a', '--access'], usage: '/access read|full', description: '设置本入口的访问模式：read 只读，full 完全访问（仅 allowlist 成员可再提问）', allowlistOnly: true },
+  { id: 'help', verbs: ['/help', '-h', '--help'], usage: '/help', description: '显示本帮助', allowlistOnly: true },
+]
+
+const verbsOf = (id: LocusCommandTableEntry['id']): readonly string[] =>
+  LOCUS_COMMAND_TABLE.find(entry => entry.id === id)!.verbs
+
 const DEPRECATED_TIER_VERBS = new Set(['/scope', '-s', '--scope', '/tools', '-t', '--tools'])
 
 /** Strip one or more leading @mention tokens from message text. */
@@ -368,17 +393,19 @@ export function parseLocusControlCommand(text: string): LocusCommandParse {
   const [verb = '', ...args] = cleaned.split(/\s+/)
   const lower = verb.toLowerCase()
 
-  if (lower === '/unbind' || lower === '-u' || lower === '--unbind') {
+  if (verbsOf('help').includes(lower)) return { kind: 'help' }
+
+  if (verbsOf('unbind').includes(lower)) {
     return args.length === 0 ? { kind: 'unbind' } : { kind: 'unbind-invalid' }
   }
 
-  if (lower === '/bind' || lower === '-b' || lower === '--bind') {
+  if (verbsOf('bind').includes(lower)) {
     const prefix = args[0] ?? ''
     if (prefix === '') return { kind: 'bind-missing-prefix' }
     return args.length === 1 ? { kind: 'bind', prefix } : { kind: 'bind-invalid' }
   }
 
-  if (lower === '/access' || lower === '-a' || lower === '--access') {
+  if (verbsOf('access').includes(lower)) {
     const value = args[0]?.toLowerCase()
     if (value === undefined) return { kind: 'access-missing-mode' }
     const mode = args.length === 1 ? ACCESS_COMMAND_MODES[value] : undefined
@@ -588,7 +615,7 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
   // A protected endpoint remains unavailable for ordinary work. The sole
   // exception is an allowlisted, well-formed explicit bind: it enters the
   // control plane, where a same-W `/bind` re-enables a stopped entry (D7).
-  const explicitRebuild = allowlisted && parsed.kind === 'bind'
+  const explicitRebuild = allowlisted && (parsed.kind === 'bind' || parsed.kind === 'help')
   if (authorization === 'retired' && !explicitRebuild) {
     return { admit: false, reason: 'retired-endpoint', endpoint, authorization }
   }

@@ -7,6 +7,7 @@ import {
   extractLocusEndpoint,
   locusEndpointKey,
   LocusMessageDedup,
+  LOCUS_COMMAND_TABLE,
   parseLocusControlCommand,
   resolveLocusAuthorization,
   type LocusAdmissionContext,
@@ -334,6 +335,38 @@ describe('control command parsing', () => {
     ['@Pet -t admin', '-t admin'],
   ] as const)('parses the removed tier command %s as deprecated-tier', (text, original) => {
     expect(parseLocusControlCommand(text)).toEqual({ kind: 'deprecated-tier', original })
+  })
+
+  it.each(['@Pet -h', '@Pet --help', '@Pet /help', '/help', '@Pet /HELP'])('recognizes %s as help', text => {
+    expect(parseLocusControlCommand(text)).toEqual({ kind: 'help' })
+  })
+
+  it('help takes no arguments: extra text stays on the control surface as help too', () => {
+    expect(parseLocusControlCommand('@Pet /help bind')).toEqual({ kind: 'help' })
+  })
+
+  it('every verb in the command table parses to its own command (help cannot drift from the parser)', () => {
+    for (const entry of LOCUS_COMMAND_TABLE) {
+      expect(entry.verbs.length).toBeGreaterThan(0)
+      for (const verb of entry.verbs) {
+        expect(parseLocusControlCommand(`@Pet ${verb}`).kind, verb).not.toBe('none')
+      }
+    }
+    // The deprecated tier verbs are accepted but never listed.
+    const listed = LOCUS_COMMAND_TABLE.flatMap(entry => entry.verbs)
+    expect(listed).not.toContain('/scope')
+    expect(listed).not.toContain('/tools')
+  })
+
+  it('help is admitted for an allowlisted sender even on a stopped (retired) entry, and refused for others', () => {
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: OWNER, content: '@Pet /help' }),
+      context({ authorizationState: 'retired' }),
+    )).toMatchObject({ admit: true, command: { kind: 'help' } })
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: STRANGER, content: '@Pet -h' }),
+      context({ authorizationState: 'retired' }),
+    )).toMatchObject({ admit: false, reason: 'control-not-allowed' })
   })
 
   it('keeps malformed control verbs on the control surface', () => {

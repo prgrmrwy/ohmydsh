@@ -521,6 +521,8 @@ export interface LocusControllerDeps {
 export type LocusControllerDiagnostic =
   /** The backlog dispatcher could not verify (or migrate) M before claiming; the message stays in backlog. */
   | 'dispatch-main-unverified'
+  /** A message was accepted into backlog while the whole-W migration is deferred by a current elsewhere. */
+  | 'migration-deferred'
   | 'turn-correlation-unavailable'
   | 'invalid-event'
   | 'admission-rejected'
@@ -920,6 +922,8 @@ export class LocusChannelController {
   private readonly pending = new Map<string, PendingTurn>()
   /** Serialize acceptance and physical dispatch for one exact locus locally. */
   private readonly dispatchTails = new Map<string, Promise<void>>()
+  /** Lanes holding a message accepted while a whole-W migration was deferred (D7); retried on any settlement. */
+  private readonly deferredLanes = new Map<string, DeliveryCorrelation>()
   /** Retry timers for Deliveries waiting on a free child slot, by Delivery id. */
   private readonly capacityRetries = new Map<string, ReturnType<typeof setTimeout>>()
   /** Deliveries whose owner was already told the request is being kept. */
@@ -1021,6 +1025,14 @@ export class LocusChannelController {
       return
     }
     await this.trackOperation(() => this.dispatchNextActive(correlation))
+    // A settlement may have unblocked a deferred migration elsewhere in the W.
+    // Wake through the inner method so a wake never triggers another wake.
+    const key = dispatchLaneKey(correlation)
+    for (const [laneKey, lane] of [...this.deferredLanes]) {
+      if (laneKey === key) continue
+      this.deferredLanes.delete(laneKey)
+      await this.trackOperation(() => this.dispatchNextActive(lane))
+    }
   }
 
   private async dispatchNextActive(correlation: DeliveryCorrelation): Promise<void> {
@@ -1040,6 +1052,8 @@ export class LocusChannelController {
           // whole-W migration did not happen (a current Delivery elsewhere, or
           // the W is archived): leave the message in backlog, but say so.
           this.logReason('dispatch-main-unverified', error)
+          const deferred = (error as { deferred?: { locusId: string; sessionId: string } } | null)?.deferred
+          if (deferred !== undefined) this.deferredLanes.set(dispatchLaneKey(correlation), correlation)
           return
         }
         const currentLocus = normalizeActiveLocus(refreshedLocus, correlation.endpoint)
@@ -1372,7 +1386,11 @@ export class LocusChannelController {
     const owesDisclosure = admission.needsInitialization && messageSource(message) === 'doc-comment'
       ? await this.firstDocEntry(endpoint.chatId)
       : false
-    let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
+    const deferredSink: { value?: { locusId: string; sessionId: string } } = {}
+    let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal, deferredSink)
+    if (locus === undefined && deferredSink.value !== undefined) {
+      return this.acceptIntoBacklog(endpoint, message, { endpoint, ...deferredSink.value })
+    }
     if (locus === undefined) return this.refuse('locus-unavailable')
     if (owesDisclosure && this.deps.docDisclosureText !== undefined) {
       // A Host control receipt, routed like the business answer; never business
@@ -2126,11 +2144,53 @@ export class LocusChannelController {
     }
   }
 
+  /**
+   * Durable acceptance only: no child, no policy check, no claim. Used when the
+   * entry's M is unavailable and its whole-W migration is deferred (D7).
+   */
+  private async acceptIntoBacklog(
+    endpoint: LocusEndpoint,
+    message: NormalizedLocusMessage,
+    lane: { endpoint: LocusEndpoint; locusId: string; sessionId: string },
+  ): Promise<LocusControllerResult> {
+    const correlation: DeliveryCorrelation = { endpoint, locusId: lane.locusId, sessionId: lane.sessionId }
+    const input: LocusDeliveryInput = {
+      ...correlation,
+      messageId: message.messageId,
+      acceptedAt: this.now(),
+      senderOpenId: message.senderOpenId,
+      ...(message.senderName !== undefined ? { senderName: message.senderName } : {}),
+      text: message.text,
+      ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
+      ...(message.source === 'doc-comment' && message.docComment !== undefined ? { docComment: message.docComment } : {}),
+      ...(message.replyTarget.rootMessageId !== undefined ? { rootMessageId: message.replyTarget.rootMessageId } : {}),
+      replyTarget: message.replyTarget,
+      ...(message.replyToMessageId !== undefined ? { replyToMessageId: message.replyToMessageId } : {}),
+    }
+    return this.enqueueDispatchLane(correlation, async () => {
+      let accepted: LocusDeliveryAcceptance
+      try {
+        accepted = await this.deps.deliveries.accept(input)
+      } catch {
+        return this.refuse('delivery-persistence-failed')
+      }
+      if (accepted.conflict) return this.refuse('delivery-conflict')
+      if (accepted.duplicate) {
+        return { kind: 'duplicate', deliveryId: accepted.record.deliveryId, locusId: accepted.record.locusId }
+      }
+      this.deferredLanes.set(dispatchLaneKey(correlation), correlation)
+      this.log('migration-deferred')
+      await this.receiptAccepted(accepted.record.feedbackTarget)
+      return { kind: 'accepted', deliveryId: accepted.record.deliveryId, executionId: '', locusId: accepted.record.locusId }
+    })
+  }
+
   private async resolveLocus(
     endpoint: LocusEndpoint,
     message: NormalizedLocusMessage,
     needsInitialization: boolean,
     signal: AbortSignal,
+    deferredSink?: { value?: { locusId: string; sessionId: string } },
   ): Promise<ActiveLocus | undefined> {
     let raw: unknown
     let mayEnsure = needsInitialization
@@ -2163,6 +2223,14 @@ export class LocusChannelController {
       })
     } catch (error: unknown) {
       this.logReason('locus-bootstrap-failed', error)
+      // D7: M is unavailable but the whole-W migration is deferred by a current
+      // Delivery elsewhere. The message is not dropped; the caller accepts it
+      // into this entry's durable backlog and the dispatcher retries.
+      const deferred = (error as { deferred?: { locusId: string; sessionId: string } } | null)?.deferred
+      if (deferredSink !== undefined && deferred !== undefined) {
+        deferredSink.value = deferred
+        return undefined
+      }
       // A failed readiness check or replacement must not disappear silently.
       // The provisioning controller supplies the mechanical refusal text.
       const reason = error instanceof Error && error.message.trim() !== '' ? error.message : '原因未知'

@@ -2,7 +2,9 @@
 
 ## Purpose
 定义 ohmydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制和环境级指令物化到 DSH 部署环境的 sync 行为。
+
 ## Requirements
+
 ### Requirement: 总配置 manifest 声明 DSH 版本与定制列表
 仓库根必须(SHALL)包含 `dsh.yaml` manifest。manifest 必须声明锁定的 DSH 版本与定制列表,其中每项必须包含 `id`、`type`、`enabled`,且 `package` 与 `preset` 类型必须包含 `version`。manifest 可(MAY)声明顶层 `dependencies` 列表:无 bundle 的支撑包(如 remote 定制缺失的 peer),每项为含精确版本的 npm spec;定制条目可(MAY)通过 `deps` 引用其中的包名声明归属,被引用的包名必须存在于顶层 `dependencies`,否则 sync 报错。
 
@@ -224,9 +226,9 @@ overlay 根与公开仓库根具有**同等信任**:两者都由本机使用者�
 
 sync 必须(SHALL)在对 `$DSH_HOME` 做任何写入(含创建 profile 目录与 profile 骨架、迁移状态账本)之前,对所有启用的定制完成源码预检:local package 的 `package.json`、其每个 `compatDependencies[].path` 下的 `package.json`、preset 的 `agent.cordis.yml`、skill 的 `SKILL.md`、patch 的 `<id>.yml`、每个 `buildInputs` 条目必须存在、类型为普通文件或目录(见「local package 的构建输入可声明文件或目录」)且满足上述越界约束。预检失败时 sync 必须(SHALL)报错并以非零退出码结束,错误信息包含缺失或越界的绝对路径,且 `$DSH_HOME` 下的文件树不发生任何变化(不存在的 profile 目录仍不存在)。
 
-加载 manifest(含 overlay 合并、逐字段校验、保留字段与 npm spec 包名一致性检查)必须(SHALL)不读取任何定制源码。需要读取源码的步骤(local package 包名解析、npm 包名唯一性检查)必须(SHALL)在源码预检通过之后、`$DSH_HOME` 写入之前执行。禁用的 local package 若其 `package.json` 不存在,sync 不得(SHALL NOT)因此报错,该条目视为不在 manifest 中:若此前已部署,按「从 manifest 删除」的既有逻辑移除;若其 `package.json` 存在,sync 必须(SHALL)先确认该文件解析符号链接后位于所属根之内再读取,越界时在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束。`hostRuntimeCompatibility` 的声明校验(归属、kind、版本与 `dshVersion` 一致)属于加载阶段且不读取源码;运行体构建器等源码文件的存在性检查属于常规 sync 的源码预检。`--reset` 只依据部署状态与 profile 现状移除受管部署,必须(SHALL)不执行源码预检、不解析 local 包名,定制源码缺失不得(SHALL NOT)阻止 reset。
+加载 manifest(含 overlay 合并、逐字段校验、保留字段与 npm spec 包名一致性检查)必须(SHALL)不读取任何定制源码。需要读取源码的步骤(local package 包名解析、npm 包名唯一性检查)必须(SHALL)在源码预检通过之后、`$DSH_HOME` 写入之前执行。禁用的 local package 若其 `package.json` 不存在,sync 不得(SHALL NOT)因此报错,该条目视为不在 manifest 中:若此前已部署,按「从 manifest 删除」的既有逻辑移除;若其 `package.json` 存在,sync 必须(SHALL)先确认该文件解析符号链接后位于所属根之内再读取,越界时在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束。已退役的 `hostRuntimeCompatibility` 字段在加载阶段被拒绝(报告该机制已退役),该拒绝不读取源码。`--reset` 只依据部署状态与 profile 现状移除受管部署,必须(SHALL)不执行源码预检、不解析 local 包名,定制源码缺失不得(SHALL NOT)阻止 reset。
 
-overlay 的内容结构必须(SHALL)与 `dsh.yaml` 的 `customizations` **同构**:顶层为映射,其 `customizations` 为定制条目列表,每个条目的字段语义、校验规则与公开 manifest 完全一致(含 `note`、`brief`、`enabledEnv`、`npmScopes`、`hostRuntimeCompatibility` 等)。overlay 条目的审查记录随条目留在该文件内,公开 manifest 不得(SHALL NOT)为其保留任何占位、计数或存在性声明。
+overlay 的内容结构必须(SHALL)与 `dsh.yaml` 的 `customizations` **同构**:顶层为映射,其 `customizations` 为定制条目列表,每个条目的字段语义、校验规则与公开 manifest 完全一致(含 `note`、`brief`、`enabledEnv`、`npmScopes` 等)。overlay 条目的审查记录随条目留在该文件内,公开 manifest 不得(SHALL NOT)为其保留任何占位、计数或存在性声明。
 
 overlay 的权限边界必须(SHALL)是**只追加定制条目**:
 
@@ -237,11 +239,11 @@ overlay 的权限边界必须(SHALL)是**只追加定制条目**:
 - remote package 的 `spec` 是 npm registry spec(`<name>@<version>`)且同时声明 `name` 时,`name` 必须(SHALL)等于从 `spec` 解析出的包名,否则 sync 在加载阶段报错并以非零退出码结束;包名唯一性检查使用安装时实际生效的包名。
 - 合并后任意两个 package 条目(含可解析包名的禁用条目)解析出相同的 npm 包名,或某个 package 条目的 npm 包名、顶层 `dependencies` 中的包名与任一 local package 的 `compatDependencies[].name` 三者之间出现重复时,sync 必须(SHALL)在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束,指明冲突的包名与涉及的条目 id、`dependencies` 或 `compatDependencies`;overlay 不得(SHALL NOT)以不同 id、相同包名的方式替换公开 package 或受管支撑依赖。
 
-overlay 条目必须(SHALL)走与公开条目**完全相同**的校验与安全路径,不得(SHALL NOT)因来源是本地文件而放宽:逐字段类型与命名校验、`source: remote` 的精确版本 pin 要求、`deps` 引用完整性,以及 `hostRuntimeCompatibility` 的运行体版本围栏。该围栏必须(SHALL)在任何 profile 或部署面操作之前完成校验。
+overlay 条目必须(SHALL)走与公开条目**完全相同**的校验与安全路径,不得(SHALL NOT)因来源是本地文件而放宽:逐字段类型与命名校验、`source: remote` 的精确版本 pin 要求、`deps` 引用完整性,以及对已退役 `hostRuntimeCompatibility` 字段的拒绝。这些校验必须(SHALL)在任何 profile 或部署面操作之前完成。
 
 overlay 根下 local package 的构建必须(SHALL)以 overlay 根为工作目录,按 overlay 根自己的 npm workspaces 执行;构建失败时的行为与公开 local package 相同(在替换已部署 package 前报错停止)。公开仓库的根 `package.json`、`package-lock.json` 与 `.npmrc` 不得(SHALL NOT)因 overlay 根的存在或其构建而改变。
 
-合并结果必须(SHALL)是所有消费方的唯一事实来源:物化(sync)、启动清单、插件升级检查与运行体版本围栏必须(SHALL)看到同一份合并后的定制列表,并按同一所属根解析 local 条目,不得(SHALL)出现「已物化但清单不可见」或「已物化但升级检查不覆盖」的分裂状态。
+合并结果必须(SHALL)是所有消费方的唯一事实来源:物化(sync)、启动清单与插件升级检查必须(SHALL)看到同一份合并后的定制列表,并按同一所属根解析 local 条目,不得(SHALL)出现「已物化但清单不可见」或「已物化但升级检查不覆盖」的分裂状态。
 
 插件升级检查对 scoped 包:若该 scope 在 profile 目录的 npm 配置中配置了 registry,元数据查询必须(SHALL)经由以 profile 目录为工作目录的 npm 客户端完成,从而使用与安装相同的 registry 与认证配置;否则沿用默认 registry 查询。升级检查输出的每一行(含 skipped 行)必须(SHALL)携带该条目是否来自 overlay 的来源标记。插件自动升级(改写 manifest 并提交)只改写公开 `dsh.yaml`,因此必须(SHALL)依据该来源标记把 overlay 条目排除在自动改写之外,在输出中标明该条目需在 overlay 中手动升级,且不得(SHALL NOT)因 overlay 条目 upgrade-ready 而改写公开 `dsh.yaml` 或报错退出。
 
@@ -268,7 +270,7 @@ overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静
 - **THEN** sync 在加载阶段报错并以非零退出码结束,指明越权字段,不物化任何变更
 
 #### Scenario: overlay 条目不因来源而放宽校验
-- **WHEN** overlay 条目缺少必填字段、`source: remote` 缺少精确版本 pin,或其 `hostRuntimeCompatibility` 与当前 `dshVersion` 不符
+- **WHEN** overlay 条目缺少必填字段、`source: remote` 缺少精确版本 pin,或声明了已退役的 `hostRuntimeCompatibility`
 - **THEN** sync 以与公开 manifest 中同类错误相同的方式报错并以非零退出码结束,且在任何 profile 操作之前发生
 
 #### Scenario: overlay 存在但不可解析时拒绝运行
@@ -392,11 +394,6 @@ overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静
 - **WHEN** 运行 `sync --reset`
 - **THEN** 命令以退出码 0 结束,profile `package.json` 的 `dependencies` 中不再含 `q` 的包名,`cordis.patch.yml` 不含 `fragment: p`
 
-#### Scenario: 运行体兼容源码缺失不阻止 reset
-- **GIVEN** 公开 manifest 中启用的 `dsh-pet` 声明 `hostRuntimeCompatibility`,其运行体构建器文件不存在,profile 已部署受管 package
-- **WHEN** 运行 `sync --reset`
-- **THEN** 命令以退出码 0 结束,profile `package.json` 的 `dependencies` 中不再含受管 package;同样条件下运行常规 sync 则以非零退出码结束且 `$DSH_HOME` 不变
-
 #### Scenario: 禁用 local package 的 package.json 越出所属根时拒绝运行
 - **GIVEN** overlay 中 local package `q` 为 `enabled: false`,`<R>/packages/q/package.json` 是指向 `<R>` 之外文件的符号链接
 - **WHEN** 运行 sync
@@ -411,6 +408,11 @@ overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静
 - **GIVEN** 外部 overlay 根 `<R>` 中启用的 local package `q` 的 `package.json` 名为 `@example/q`,且 profile 中已安装该包
 - **WHEN** 运行启动清单
 - **THEN** 清单中 `@example/q` 一行带有来自 manifest 的说明,而非仅有包自身 `description`
+
+#### Scenario: 运行体兼容源码缺失不阻止 reset
+- **GIVEN** profile 曾部署受管 package,仓库已删除 `packages/dsh-pet/compat/`,公开 manifest 不再声明 `hostRuntimeCompatibility`
+- **WHEN** 运行 `sync --reset` 或常规 sync
+- **THEN** 两者均不因缺少兼容运行体源码而失败;若 manifest 或 overlay 重新声明该字段,常规 sync 在加载阶段报告该机制已退役并以非零退出码结束,`$DSH_HOME` 不变
 
 ### Requirement: 生成文件带标记且按序合并
 sync 生成的文件（含 patch 层）必须（SHALL）带有生成标记头，声明仓库为真相源。多个启用定制贡献的 patch 行必须按 manifest 顺序合并。

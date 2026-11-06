@@ -76,9 +76,9 @@ import {
   type DeliveryTurnBindingInput,
   type DeliveryWaitInput,
 } from './delivery.js'
-import { petLocusDeliveryV20, type LocusDeliveryRowV20 } from './contract-v20.js'
+import { petLocusDeliveryV20, petLocusRowV20, type LocusDeliveryRowV20 } from './contract-v20.js'
 import type { PetLocusErrorCodeV20 } from '../../wire.js'
-import type { PetLocusMainRecord, PetLocusOperation } from '../spec.js'
+import { petLocusMainRecord, petLocusOperation, type PetLocusMainRecord, type PetLocusOperation } from '../spec.js'
 
 /** A refusal carries one of the five v20 codes (contract-v20.ts header). */
 export class LocusRefusalError extends Error {
@@ -168,6 +168,14 @@ type TableName = 'loci' | 'locus_mains' | 'locus_deliveries' | 'locus_operations
 const DELETED = Symbol('deleted')
 
 /** Read-your-writes overlay used while one write callback runs. */
+/** Schema each table's records must satisfy at write time (the Domain only checks them at open). */
+const WRITE_SCHEMAS: Partial<Record<TableName, { safeParse(value: unknown): { success: boolean; error?: { issues: Array<{ message: string }> } } }>> = {
+  loci: petLocusRowV20,
+  locus_deliveries: petLocusDeliveryV20,
+  locus_operations: petLocusOperation,
+  locus_mains: petLocusMainRecord,
+}
+
 class Staged {
   private readonly writes = new Map<TableName, Map<string, unknown>>()
   constructor(private readonly domain: LocusDomain) {}
@@ -194,6 +202,15 @@ class Staged {
   }
 
   put(name: TableName, key: string, value: unknown): void {
+    // Every write is checked against its table schema before it is staged, so no
+    // record the Domain would reject at its next open can be committed.
+    const schema = WRITE_SCHEMAS[name]
+    if (schema !== undefined && value !== DELETED) {
+      const parsed = schema.safeParse(value)
+      if (!parsed.success) {
+        refuse('INVALID_REQUEST', `${name} ${key} does not match its schema: ${(parsed.error?.issues ?? []).map(issue => issue.message).join('; ')}`)
+      }
+    }
     const map = this.writes.get(name) ?? new Map<string, unknown>()
     map.set(key, value)
     this.writes.set(name, map)
@@ -444,8 +461,13 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
     await this.mutate(staged => this.setOperationPhase(staged, provisioningId, 'committed'))
   }
 
-  async failProvisioning(provisioningId: string, reason: string): Promise<void> {
-    await this.mutate(staged => this.setOperationPhase(staged, provisioningId, 'failed', reason))
+  async failProvisioning(provisioningId: string, reason: string, options?: { readonly reclaimed?: true }): Promise<void> {
+    await this.mutate(staged => this.setOperationPhase(
+      staged,
+      provisioningId,
+      options?.reclaimed === true ? 'compensated' : 'failed',
+      reason,
+    ))
   }
 
   private setOperationPhase(staged: Staged, id: string, phase: PetLocusOperation['phase'], lastError?: string): void {
@@ -575,7 +597,9 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
       const current = staged.get<LocusDeliveryRowV20>('locus_deliveries', prev.deliveryId)
       if (current === undefined) refuse('LOCUS_NOT_FOUND', `delivery ${prev.deliveryId} is unknown`)
       if ((current.revision ?? 0) !== (prev.revision ?? 0)) refuse('LOCUS_CONFLICT', 'the delivery revision moved')
-      staged.put('locus_deliveries', next.deliveryId, { ...next, revision: (prev.revision ?? 0) + 1 })
+      // revision and stateRevision move together: the schema requires them equal, and the Domain rejects a row where they differ at the next open.
+      const revision = (prev.revision ?? 0) + 1
+      staged.put('locus_deliveries', next.deliveryId, { ...next, revision, stateRevision: revision })
     })
   }
 
@@ -1019,10 +1043,12 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
   // ---- access change fence (D8) ---------------------------------------------
 
   /** D8 step 1: a short check-and-add inside the queue; never held across external work. */
-  acquireAccessChange(locusId: string): Promise<{ readonly locusId: string; readonly revision: number }> {
+  acquireAccessChange(locusId: string, expectedRevision?: number): Promise<{ readonly locusId: string; readonly revision: number }> {
     return this.enqueue(() => {
       const row = this.getLocus(locusId)
       if (row === undefined) refuse('LOCUS_NOT_FOUND', `locus ${locusId} is unknown`)
+      // The client fence is checked here, after every commit queued before it.
+      if (expectedRevision !== undefined && row.revision !== expectedRevision) refuse('LOCUS_CONFLICT', 'the entry revision moved')
       if (row.state === 'stopped' || row.state === 'invalid') {
         refuse('INVALID_REQUEST', `access changes need a not-created or active entry, not ${row.state}`)
       }
@@ -1173,7 +1199,7 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
     return this.mutate(staged => {
       const row = fencedRow(this.loci(staged), fence)
       if (row.state !== 'invalid') refuse('INVALID_REQUEST', `only an invalid entry rebuilds in place, not ${row.state}`)
-      this.assertIdle(staged, row)
+      this.assertRebuildable(staged, row)
       const next = resetLifecycle({ ...row }, now, reserveChildSessionId) as LocusRowV20
       staged.put('loci', endpointKeyV20(next.endpoint), next)
       for (const delivery of this.deliveries(staged).values()) {
@@ -1182,6 +1208,20 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
       }
       return next
     })
+  }
+
+  /**
+   * Rebuild refuses only what is in flight (an access change, or a Delivery the
+   * runtime has issued). An uninjected accepted backlog has no execution evidence and
+   * is retargeted to the new reservation by the caller, so it does not block the rebuild.
+   */
+  private assertRebuildable(staged: Staged, row: LocusRowV20): void {
+    if (this.accessChanging.has(row.locusId)) refuse('LOCUS_BUSY', 'the entry is changing access')
+    for (const delivery of this.deliveries(staged).values()) {
+      if (delivery.locusId === row.locusId && NON_TERMINAL_DELIVERY.has(delivery.status) && !isUninjected(delivery)) {
+        refuse('LOCUS_BUSY', 'the entry has an in-flight delivery')
+      }
+    }
   }
 
   /** D7/D8: lifecycle changes wait for an idle entry: no current delivery, not changing access. */
@@ -1251,6 +1291,10 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
       addPairing(staged, newMain)
       const results: LocusResetChatResultV20[] = []
       for (const chat of input.chats) {
+        const group = this.loci(staged).get(chat.chatId)
+        if (chat.expectedMain !== undefined && (group === undefined || isTopicRowV20(group) || group.locusMainSessionId !== chat.expectedMain)) {
+          refuse('LOCUS_CONFLICT', `chat ${chat.chatId} moved to another locus main since it was read`)
+        }
         results.push(this.resetChatIn(staged, chat.chatId, {
           toM: newMain.locusMainSessionId,
           expectedRevisions: chat.expectedRevisions,

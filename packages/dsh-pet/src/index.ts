@@ -2558,6 +2558,11 @@ async function initialize(
         },
       }),
   }
+  // Live provisioning past its block window is compensated with these same hooks
+  // (persistence-v20 beginProvisioning). Without this line the repository kept the
+  // empty default and an endpoint whose live failure left a locus main behind stayed
+  // LOCUS_CONFLICT until the Host restarted.
+  locusRepository.setProvisioningCompensators(startupCompensators)
   const locusStartup = await lifecycle.contain('Locus startup reconciliation', () =>
     recoverLocusStartupV20(locusRepository, {
       deliveryProof: async (delivery: DeliveryRecord) => {
@@ -3124,7 +3129,7 @@ async function initialize(
           // Controller / access-mutation errors are thrown as they are: the
           // management port maps their `.code` itself.
           stop: fence => locusProvisioningController.stopEntry(fence),
-          access: ({ locusId, mode, actorId }) => locusAccessMutation.set({ locusId, mode, actorId }),
+          access: ({ locusId, mode, actorId, expectedRevision }) => locusAccessMutation.set({ locusId, mode, actorId, expectedRevision }),
           rebind: request => locusProvisioningController.rebindChat(request),
           defaultQa: async request => {
             const config = repository.getChannelConfig()

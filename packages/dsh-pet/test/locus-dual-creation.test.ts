@@ -162,7 +162,8 @@ describe.each(BACKENDS)('入口建立统一为一条路径 [%s]', which => {
     expect(t.released.sort()).toEqual(t.created.map(c => c.id).sort())
     expect(t.spacesReleased).toEqual(t.created.filter(c => c.kind === 'locus-main').map(c => c.id))
     expect(t.rowCount()).toBe(0)
-    expect(t.opStates()).toEqual(['failed'])
+    // Every created resource was released by the rollback, so nothing is left to compensate.
+    expect(t.opStates()).toEqual(['compensated'])
   })
 
   it('提交前失败不触碰复用的 M 及其空间', async () => {

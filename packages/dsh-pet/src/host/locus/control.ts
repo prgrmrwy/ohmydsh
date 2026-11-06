@@ -21,6 +21,7 @@ import {
   type EnsureTopicResult,
   type LocusEndpoint,
 } from './controller.js'
+import { LOCUS_COMMAND_TABLE } from './admission.js'
 import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './policy-verification.js'
 import type { LocusAccessModeV20 } from './contract-v20.js'
 
@@ -287,6 +288,8 @@ export function createLocusControlDispatcher(
             const receipt = (changed as { receipt?: unknown } | undefined)?.receipt
             return { ok: true, text: typeof receipt === 'string' && receipt !== '' ? receipt : LOCUS_ACCESS_APPLIED_TEXT }
           }
+          case 'help':
+            return { ok: true, text: locusHelpText() }
           case 'deprecated-tier':
             return failure('deprecated-command', LOCUS_DEPRECATED_COMMAND_TEXT)
           case 'bind-missing-prefix':
@@ -302,4 +305,11 @@ export function createLocusControlDispatcher(
       return failure('invalid-command', '控制命令格式无效。')
     },
   }
+}
+
+/** The help receipt, generated from the parser's own command table. */
+export function locusHelpText(): string {
+  const lines = LOCUS_COMMAND_TABLE.map(entry => `${entry.usage} — ${entry.description}`)
+  const aliases = LOCUS_COMMAND_TABLE.map(entry => entry.verbs.join(' ')).join(' | ')
+  return ['可用命令（@我 后发送；仅 allowlist 成员可用）：', ...lines, `写法：${aliases}`].join('\n')
 }

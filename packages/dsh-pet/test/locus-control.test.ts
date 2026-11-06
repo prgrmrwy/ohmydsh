@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { LOCUS_COMMAND_TABLE } from '../src/host/locus/admission.js'
 import {
   createLocusControlDispatcher,
   LOCUS_BIND_UNRESOLVED_TEXT,
@@ -314,5 +315,40 @@ describe('unified locus command dispatcher', () => {
         .resolves.toEqual({ ok: false, reason: 'not-allowed', silent: true })
       expect(setAccessMode).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('help command receipt', () => {
+  function dispatcher() {
+    const bind = vi.fn(); const unbindCurrent = vi.fn(); const setAccessMode = vi.fn(); const listSessions = vi.fn(() => [])
+    const port = createLocusControlDispatcher({
+      allowOpenIds: () => [OWNER], listSessions, bind: { bind }, exit: { unbindCurrent }, access: { setAccessMode },
+    } as never)
+    return { port, bind, unbindCurrent, setAccessMode, listSessions }
+  }
+
+  it('lists every command in the table with its usage, mentions the allowlist, and nothing deprecated', async () => {
+    const t = dispatcher()
+    const result = await t.port.dispatch({ command: { kind: 'help' }, endpoint: ENDPOINT, senderId: OWNER } as never)
+    expect(result.ok).toBe(true)
+    const text = (result as { text: string }).text
+    for (const entry of LOCUS_COMMAND_TABLE) {
+      expect(text, entry.usage).toContain(entry.usage)
+      expect(text, entry.description).toContain(entry.description)
+    }
+    expect(text).toContain('/bind <工作会话 id>')
+    expect(text).toContain('allowlist')
+    expect(text).not.toContain('/scope')
+    expect(text).not.toContain('/tools')
+    expect(text).not.toContain('干活')
+  })
+
+  it('is pure information: no bind, unbind, access change or session listing', async () => {
+    const t = dispatcher()
+    await t.port.dispatch({ command: { kind: 'help' }, endpoint: ENDPOINT, senderId: OWNER } as never)
+    expect(t.bind).not.toHaveBeenCalled()
+    expect(t.unbindCurrent).not.toHaveBeenCalled()
+    expect(t.setAccessMode).not.toHaveBeenCalled()
+    expect(t.listSessions).not.toHaveBeenCalled()
   })
 })

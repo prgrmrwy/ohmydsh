@@ -229,9 +229,11 @@ export async function recoverLocusStartupV20(
   const compensatedOperations: PetLocusOperation[] = []
   const manualOperations: PetLocusOperation[] = []
 
-  const rows = port.listRows()
-  const rowOf = (locusId: string) => rows.find(row => row.locusId === locusId)
-  const groupOf = (chatId: string) => rows.find(row => row.endpoint.chatId === chatId && !('threadId' in row.endpoint && row.endpoint.threadId !== undefined))
+  // Read dynamically: a combined recovery write (revertFirstDelivery) rotates a
+  // row's sessionId, so a snapshot taken up front would judge retargeted backlog
+  // against the old identity.
+  const rowOf = (locusId: string) => port.listRows().find(row => row.locusId === locusId)
+  const groupOf = (chatId: string) => port.listRows().find(row => row.endpoint.chatId === chatId && !('threadId' in row.endpoint && row.endpoint.threadId !== undefined))
 
   const invalidateIfActive = async (locusId: string): Promise<void> => {
     const row = rowOf(locusId)
@@ -321,6 +323,9 @@ export async function recoverLocusStartupV20(
       row.sessionId === current.sessionId &&
       (row.state === 'active' || (row.state === 'not-created' && unissued))
     if (!identityProven) {
+      // An accepted backlog row has no execution evidence to protect, and debt is only
+      // valid on an in-flight Delivery (the schema refuses it elsewhere): it stays pending.
+      if (current.status === 'accepted') { retainedDeliveries.push(current); continue }
       const debt = Object.freeze({
         ...current,
         startupRecoveryDebt: 'Locus, session, or endpoint identity could not be proven during startup; manual recovery is required.',

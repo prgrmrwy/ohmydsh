@@ -63,15 +63,28 @@ const topic = (threadId: string, overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 })
 
+/** A schema-complete Delivery row (the Domain rejects partial rows at write time). */
 const delivery = (id: string, overrides: Record<string, unknown> = {}) => ({
   deliveryId: id,
+  messageId: `m-${id}`,
   locusId: `locus-${id}`,
   endpoint: { chatId: 'oc_1' },
   sessionId: `session-${id}`,
+  senderOpenId: 'ou_1',
+  sequence: 1,
   status: 'accepted',
   queueState: 'backlog',
+  acceptedAt: 1,
+  deadlineAt: 3_600_001,
+  hardDeadlineAt: 86_400_001,
+  revision: 0,
+  stateRevision: 0,
+  outboundResult: 'none',
+  feedbackTarget: { chatId: 'oc_1', messageId: `m-${id}` },
   ...overrides,
 })
+/** A running Delivery: in flight, so it carries its execution proof and no queue position. */
+const running = { status: 'running', queueState: undefined, executionId: 'exec-run', inboxMessageId: 'inbox-run', turnId: 'turn-run', startedAt: 2 }
 
 async function seeded(extra: Array<[string, string, Record<string, unknown>]> = []) {
   const domain = memoryDomain()
@@ -102,14 +115,14 @@ describe('resetChat (D17)', () => {
   })
 
   it('spec Scenario "backlog 按事务内的投递表改指"', async () => {
-    const { repo, domain, reserve } = await seeded([['locus_deliveries', 'd-backlog', delivery('d-backlog', { locusId: 'locus-t1', endpoint: { chatId: 'oc_1', threadId: 't1' } })]])
+    const { repo, domain, reserve } = await seeded([['locus_deliveries', 'd-backlog', delivery('d-backlog', { locusId: 'locus-t1', endpoint: { chatId: 'oc_1', threadId: 't1' }, feedbackTarget: { chatId: 'oc_1', threadId: 't1', messageId: 'm-d-backlog' } })]])
     const result = await repo.write(tx => tx.resetChat('oc_1', { toM: 'M2', workspaceId: 'W2', now: 100, reserveChildSessionId: reserve }))
     expect(result.retargetedDeliveryIds).toEqual(['d-backlog'])
     expect((domain.table('locus_deliveries').get('d-backlog') as { sessionId: string }).sessionId).toBe('session-new-2')
   })
 
   it('spec Scenario "已交给 runtime 的投递不被改指"', async () => {
-    const { repo, domain, reserve } = await seeded([['locus_deliveries', 'd-run', delivery('d-run', { status: 'running', queueState: 'current', locusId: 'locus-t1', endpoint: { chatId: 'oc_1', threadId: 't1' } })]])
+    const { repo, domain, reserve } = await seeded([['locus_deliveries', 'd-run', delivery('d-run', { ...running, locusId: 'locus-t1', endpoint: { chatId: 'oc_1', threadId: 't1' } })]])
     const error = await repo.write(tx => tx.resetChat('oc_1', { toM: 'M2', workspaceId: 'W2', now: 100, reserveChildSessionId: reserve })).catch(e => e)
     expect((error as LocusRefusalError).code).toBe('LOCUS_BUSY')
     expect(repo.getRow({ chatId: 'oc_1' })).toMatchObject({ locusMainSessionId: 'M1', revision: 4, sessionId: 'session-g' })
@@ -143,8 +156,8 @@ describe('resetChat (D17)', () => {
 
   it('spec Scenario \"事务内发现 current 则整体回滚\"', async () => {
     const { repo, domain, reserve } = await seeded([
-      ['locus_deliveries', 'd-run', delivery('d-run', { status: 'running', queueState: 'current', locusId: 'locus-t1', endpoint: { chatId: 'oc_1' } })],
-      ['locus_deliveries', 'd-backlog', delivery('d-backlog', { locusId: 'locus-t1', endpoint: { chatId: 'oc_1', threadId: 't1' } })],
+      ['locus_deliveries', 'd-run', delivery('d-run', { ...running, locusId: 'locus-t1', endpoint: { chatId: 'oc_1' } })],
+      ['locus_deliveries', 'd-backlog', delivery('d-backlog', { locusId: 'locus-t1', endpoint: { chatId: 'oc_1', threadId: 't1' }, feedbackTarget: { chatId: 'oc_1', threadId: 't1', messageId: 'm-d-backlog' } })],
     ])
     const before = JSON.stringify([...domain.table('loci').entries()])
     const error = await repo.write(tx => tx.resetChat('oc_1', { toM: 'M2', workspaceId: 'W2', now: 100, reserveChildSessionId: reserve })).catch(e => e)

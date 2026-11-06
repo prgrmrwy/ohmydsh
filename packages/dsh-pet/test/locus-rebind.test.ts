@@ -122,7 +122,8 @@ describe.each(BACKENDS)('改绑到其他会话 [%s]', which => {
     expect(t.released).toEqual(t.created.map(c => c.id))
     expect(t.spacesReleased).toEqual(t.created.map(c => c.id))
     expect(t.repository.findMain('M-old')!.status).toBe('active')
-    expect(t.opStates()).toEqual(['failed'])
+    // Fully reclaimed by the rollback: nothing is left to compensate.
+    expect(t.opStates()).toEqual(['compensated'])
   })
 
   describe('目标 W 的 M 不可用：管理面改绑先整 W 迁移 (D7)', () => {

@@ -84,7 +84,10 @@ export class FakeRepository implements Pick<LocusRepositoryPortV20, never> {
   }
   async recordProvisioningResource() { this.calls.push('record') }
   async completeProvisioning(id: string) { this.calls.push('complete'); this.operations.get(id)!.state = 'completed' }
-  async failProvisioning(id: string) { this.calls.push('fail'); this.operations.get(id)!.state = 'failed' }
+  async failProvisioning(id: string, _reason?: string, options?: { readonly reclaimed?: true }) {
+    this.calls.push('fail')
+    this.operations.get(id)!.state = options?.reclaimed === true ? 'compensated' : 'failed'
+  }
 
   listRows(): LocusRowV20[] { return [...this.rows.values()] }
   listMains(): PetLocusMainRecord[] { return [...this.mains.values()] }
@@ -147,6 +150,10 @@ export class FakeRepository implements Pick<LocusRepositoryPortV20, never> {
   async commitWholeWMigration(input: LocusMigrateWholeWInputV20) {
     this.calls.push('commitWholeWMigration')
     for (const chat of input.chats) if (this.currentChats.has(chat.chatId)) throw new Refusal('LOCUS_BUSY')
+    for (const chat of input.chats) {
+      const group = this.rows.get(chat.chatId)
+      if (chat.expectedMain !== undefined && (group === undefined || !('locusMainSessionId' in group) || group.locusMainSessionId !== chat.expectedMain)) throw new Refusal('LOCUS_CONFLICT')
+    }
     if (input.retireMain !== undefined) {
       const old = this.mains.get(input.retireMain.locusMainSessionId)!
       this.mains.set(old.locusMainSessionId, { ...old, status: 'retired' })
@@ -216,6 +223,8 @@ export class Topology {
   readonly unusableMains = new Set<string>()
   private readonly sessions = new Map<string, FakeSession>()
   failSpace = false
+  /** Pause every createLocusMainSession until this resolves (race tests). */
+  holdLocusMain: Promise<void> | undefined
   /** Make commitProvisioning throw before anything is written (both backends). */
   get failCommit(): boolean { return this.failCommitFlag }
   set failCommit(value: boolean) { this.failCommitFlag = value; if (!this.isReal) this.fakeRepo().failCommit = value }
@@ -316,6 +325,8 @@ export class Topology {
         return { id, workspaceId: input.workspaceId, title: input.label, rollback: async () => { this.released.push(id) } }
       },
       createLocusMainSession: async input => {
+        this.calls.push('createLocusMain:start')
+        await this.holdLocusMain
         const id = `M${++this.seq}`
         this.created.push({ kind: 'locus-main', id })
         this.calls.push('createLocusMain')

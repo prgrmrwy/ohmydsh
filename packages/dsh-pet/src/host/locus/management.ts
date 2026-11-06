@@ -262,6 +262,8 @@ export interface LocusManagementActions {
     readonly locusId: string
     readonly mode: LocusAccessModeV20
     readonly actorId: string
+    /** The client's fence; re-checked inside the repository write queue. */
+    readonly expectedRevision: number
   }) => Promise<{ readonly receipt?: string } | unknown>
   readonly rebind?: (request: {
     readonly chatId: string
@@ -533,7 +535,7 @@ export function createLocusManagementPort(options: CreateLocusManagementPortOpti
     }
     let receipt: string | undefined
     try {
-      const result = await actions.access({ locusId: row.locusId, mode: request.accessMode, actorId })
+      const result = await actions.access({ locusId: row.locusId, mode: request.accessMode, actorId, expectedRevision: request.expectedRevision })
       const text = (result as { receipt?: unknown } | undefined)?.receipt
       receipt = typeof text === 'string' && text.trim() !== '' ? text : undefined
     } catch (error) {

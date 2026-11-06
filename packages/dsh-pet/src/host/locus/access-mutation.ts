@@ -78,6 +78,12 @@ export interface LocusAccessChangeRequest {
   readonly mode: LocusAccessModeV20
   /** Recorded as `grantedBy`: an allowlisted open id, or the management identity. */
   readonly actorId: string
+  /**
+   * The management client's fenced revision. Checked inside the repository
+   * write queue, so a commit enqueued before this request cannot be overtaken.
+   * IM `/access` has no client fence and omits it.
+   */
+  readonly expectedRevision?: number
 }
 
 export interface LocusAccessChangeResult {
@@ -150,7 +156,7 @@ export function createLocusAccessMutation<Parent>(ports: LocusAccessMutationPort
 
       let acquired: { readonly locusId: string; readonly revision: number }
       try {
-        acquired = await repository.acquireAccessChange(request.locusId)
+        acquired = await repository.acquireAccessChange(request.locusId, request.expectedRevision)
       } catch (error) {
         throw fromPort(error)
       }

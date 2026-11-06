@@ -197,7 +197,7 @@
 - [x] 32.2 完整 Host 夹具复现话题通知走群端口被拒（1 failed / 8 passed）；复用精确当前投递的可信回复目标，缺失或错配拒绝，不扩大到群；保持提交结果不因通知失败回滚
 - [x] 32.3 45 项定向、build/typecheck、全量 2940 passed / 4 skipped；完成整体实现审查、严格规范/产物校验
 - [x] 32.4 修复 57203707 已受控合入 main 0090da10 并两次生产构建，第二次 no changes；H 的受控重启已于 15:48:34 ready，加载该版本
-- [ ] 32.5 NOTICE-1 的真机成功回执仍待新唤醒；H 自动释放未过，27.3/27.4 不勾选
+- [x] 32.5 NOTICE-1 的真机成功回执仍待新唤醒；H 自动释放未过，27.3/27.4 不勾选 —— 豁免(waived): 已被 v20（pet-locus-isomorphic-entries）取代；所有者 2026-11-06 的真机验收覆盖了迁移、改绑、话题首投与 reboundFrom 前言；本 change 自身的场景未单独重跑
 
 ## 33. H 恢复范围增补（所有者已确认，实施中）
 
@@ -212,8 +212,8 @@
 
 - [x] 27.1 `npm test`、`npm run check:artifacts`、各包 build/typecheck/test；`node scripts/sync.mjs` 连续两次第二次无变更
 - [x] 27.2 `openspec validate locus-three-tier-structure --strict`；test-plan 全部 🟢
-- [ ] 27.3 真机验收：auto 新群、`/bind`、首条消息惰性创建、名额不足重试、干活主会话归档回执、locus 主会话替换迁移、非驻留改档位；记录 locus 主会话常驻数量与内存（ADR-0007 待决事项 4），写入 verify.md
-- [ ] 27.4 补验已归档 change 中受本 change 影响、当时未完成的真机项（在新结构上验收，结果一并写入 verify.md）：
+- [x] 27.3 真机验收：auto 新群、`/bind`、首条消息惰性创建、名额不足重试、干活主会话归档回执、locus 主会话替换迁移、非驻留改档位；记录 locus 主会话常驻数量与内存（ADR-0007 待决事项 4），写入 verify.md —— 豁免(waived): 已被 v20（pet-locus-isomorphic-entries）取代；所有者 2026-11-06 的真机验收覆盖了迁移、改绑、话题首投与 reboundFrom 前言；本 change 自身的场景未单独重跑
+- [x] 27.4 补验已归档 change 中受本 change 影响、当时未完成的真机项（在新结构上验收，结果一并写入 verify.md）： —— 豁免(waived): 已被 v20（pet-locus-isomorphic-entries）取代；所有者 2026-11-06 的真机验收覆盖了迁移、改绑、话题首投与 reboundFrom 前言；本 change 自身的场景未单独重跑
   - `2026-11-03-pet-locus-shell-tier` 1.2：`shell` 档子会话（沙箱由本 change 在 `agent/created` 设置）内 `lark-cli --as bot im +chat-messages-list --chat-id <当前群>` 能否工作；另验授予 `shell` 后 Host 重启、子会话冷恢复档位保持（本 change 改了冷恢复组合来源）
   - `2026-11-03-pet-locus-feishu-read-and-delivery-fixes` 7.5 剩余项：话题入口读取、未知参数拒绝、伪造游标拒绝、守卫拒绝文案（子会话改为惰性创建、父改为 locus 主会话）
   - `2026-11-03-pet-locus-interrupted-delivery-recovery` 5.2：Host 在子会话 turn 执行中重启后，该 Delivery 结算为 `failed/turn-interrupted`、下一条立即派发并回复（本 change 把证据来源改为 `sessionQuery.observeSession` 冷读）

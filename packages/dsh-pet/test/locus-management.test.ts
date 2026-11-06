@@ -260,7 +260,8 @@ describe('management mutations: stop, access, rebind fenced by locusId + revisio
       writeEnabled: true,
     })
     const result = await port.access({ endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1, accessMode: 'danger-full-access' }, OWNER)
-    expect(access).toHaveBeenCalledWith({ locusId: 'locus-oc_A', mode: 'danger-full-access', actorId: 'host:dsh-pet' })
+    // The client fence is forwarded so the repository re-checks it inside the write queue.
+    expect(access).toHaveBeenCalledWith({ locusId: 'locus-oc_A', mode: 'danger-full-access', actorId: 'host:dsh-pet', expectedRevision: 1 })
     expect(result.receipt).toBe(LOCUS_ACCESS_RECEIPT)
   })
 

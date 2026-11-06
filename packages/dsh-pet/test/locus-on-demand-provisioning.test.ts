@@ -401,18 +401,18 @@ describe('locus tree is built on demand by the first qualifying @ message', () =
     } finally { await host.close() }
   })
 
-  it('a failed establishment still blocks the same endpoint before its ten-minute recovery window', async () => {
-    // B040 now recovers stale failures in-process. An immediate retry must still
-    // refuse without creating more external resources or bypassing compensation.
+  it('a failed establishment whose rollback fully reclaimed its resources does not block the endpoint', async () => {
+    // The controller's rollback released everything the failed attempt created, so
+    // nothing is left to compensate: the retry is served at once (the ten-minute
+    // block is pinned down in locus-provisioning-rollback-v20 for a partial rollback).
     const host = await composeOnDemandHost({ failFirstEstablishment: true })
     try {
       const first = await host.controller.handle(inbound('om-fails', '@Pet hello'))
       expect(first).not.toMatchObject({ kind: 'accepted' })
 
       const retried = await host.controller.handle(inbound('om-retry', '@Pet hello again'))
-      expect(retried).not.toMatchObject({ kind: 'accepted' })
-      expect(await host.adapter.findGroup(CHAT_ID)).toBeUndefined()
-      expect(host.queued).toEqual([])
+      expect(retried).toMatchObject({ kind: 'accepted' })
+      expect(host.queued).toHaveLength(1)
     } finally {
       await host.close()
     }

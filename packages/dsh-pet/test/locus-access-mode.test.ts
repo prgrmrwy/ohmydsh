@@ -544,6 +544,38 @@ describe('access-mutation over the real v20 repository', () => {
     expect(verified).toMatchObject({ verifiedAt: 120, revision: 4 })
   })
 
+  it('refuses a stale client fence with LOCUS_CONFLICT when a rebind commit was already enqueued (CAS inside the queue)', async () => {
+    const domain = memoryDomain()
+    await domain.table('loci').put('oc-a', groupRow())
+    for (const [id, work] of [[M, 'W0'], ['M2', 'W2']] as const) {
+      await domain.table('locus_mains').put(id, {
+        locusMainSessionId: id, workSessionId: work, generation: 1, status: 'active', spaceId: `space-${id}`, workspaceId: `ws-${work}`, createdAt: 1, updatedAt: 1,
+      })
+    }
+    await domain.table('locus_operations').put('op-rebind', { id: 'op-rebind', kind: 'rebind', phase: 'provisioning', step: 0, attempts: 0, createdAt: 1, updatedAt: 1 })
+    const repository = new LocusRepositoryV20(domain, { now: () => 50 })
+    // The rebound child is resident under the NEW M: a stale request must not drain it.
+    const world = siblingChildren({ parentId: 'M2', children: ['session-a', 'session-rebound'] })
+    const mutation = createLocusAccessMutation({ repository, live: livePort(world), now: () => 100, writeEnabled: true })
+
+    // The rebind commit is enqueued while the management view still shows revision 3.
+    const rebind = repository.rebindChat({
+      provisioningId: 'op-rebind', chatId: 'oc-a', expectedLocusId: 'locus-a', expectedRevision: 3, toM: 'M2',
+      workspaceId: 'ws-W2', reboundFrom: 'W0', now: 60, reserveChildSessionId: () => 'session-rebound',
+    })
+    const stale = mutation.set({ locusId: 'locus-a', mode: 'danger-full-access', actorId: 'ou-owner', expectedRevision: 3 })
+    const rebound = await rebind
+    expect(rebound).toBeDefined()
+    const afterRebind = structuredClone(repository.getLocus('locus-a'))
+    expect(afterRebind).toMatchObject({ sessionId: 'session-rebound', locusMainSessionId: 'M2' })
+
+    expect((await refusal(stale)).code).toBe('LOCUS_CONFLICT')
+    expect(world.drainCalls).toEqual([])
+    expect(world.live.has('session-rebound')).toBe(true)
+    expect(repository.getLocus('locus-a')).toEqual(afterRebind)
+    expect(repository.isAccessChanging('locus-a')).toBe(false)
+  })
+
   it('refuses a stopped row with INVALID_REQUEST before acquiring', async () => {
     const domain = memoryDomain()
     await domain.table('loci').put('oc-a', groupRow({ state: 'stopped', stoppedAt: 4 }))

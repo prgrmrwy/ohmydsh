@@ -103,3 +103,29 @@ describe('markInvalid and rebuildRowInPlace (D7)', () => {
     expect((error as LocusRefusalError).code).toBe('INVALID_REQUEST')
   })
 })
+
+describe('rebuildRowInPlace with deliveries (D7): uninjected backlog moves, runtime-issued refuses', () => {
+  const backlog = {
+    deliveryId: 'dB', messageId: 'mB', locusId: 'locus-1', endpoint: { chatId: 'oc_1' }, sessionId: 'child-1',
+    senderOpenId: 'ou', sequence: 1, status: 'accepted', queueState: 'backlog', acceptedAt: 1,
+    deadlineAt: 3_600_001, hardDeadlineAt: 86_400_001, revision: 0, stateRevision: 0,
+    outboundResult: 'none', feedbackTarget: { chatId: 'oc_1', messageId: 'mB' },
+  }
+
+  it('rebuilds an invalid row and retargets its uninjected accepted backlog to the new reservation', async () => {
+    const { repo, domain, reserve } = await seeded({}, [backlog])
+    await repo.markInvalid({ expectedLocusId: 'locus-1', expectedRevision: 3 }, 'child lost', 9)
+    const rebuilt = await repo.rebuildRowInPlace({ expectedLocusId: 'locus-1', expectedRevision: 4 }, 9, reserve)
+    expect(rebuilt).toMatchObject({ state: 'not-created', sessionId: 'session-fresh-1', revision: 5 })
+    expect(domain.table('locus_deliveries').get('dB')).toMatchObject({ status: 'accepted', sessionId: 'session-fresh-1' })
+  })
+
+  it('still refuses to rebuild while a runtime-issued delivery is in flight', async () => {
+    const running = { ...backlog, deliveryId: 'dR', messageId: 'mR', status: 'running', queueState: undefined, executionId: 'exec-r', inboxMessageId: 'inbox-r', turnId: 'turn-r', startedAt: 2, feedbackTarget: { chatId: 'oc_1', messageId: 'mR' } }
+    const { repo, reserve } = await seeded({}, [running])
+    await repo.markInvalid({ expectedLocusId: 'locus-1', expectedRevision: 3 }, 'child lost', 9)
+    const error = await repo.rebuildRowInPlace({ expectedLocusId: 'locus-1', expectedRevision: 4 }, 9, reserve).catch(e => e)
+    expect((error as LocusRefusalError).code).toBe('LOCUS_BUSY')
+  })
+})
+

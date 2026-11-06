@@ -46,8 +46,8 @@ async function seeded() {
   await domain.table('locus_operations').put('op-live', { id: 'op-live', kind: 'rebind', phase: 'provisioning', step: 0, attempts: 0, createdAt: 1, updatedAt: 1 })
   await domain.table('locus_operations').put('op-done', { id: 'op-done', kind: 'ensure', phase: 'committed', step: 0, attempts: 0, createdAt: 1, updatedAt: 1 })
   await domain.table('locus_operations').put('op-failed', { id: 'op-failed', kind: 'rebind', phase: 'failed', step: 0, attempts: 0, createdAt: 1, updatedAt: 1 })
-  await domain.table('locus_deliveries').put('d-run', { deliveryId: 'd-run', locusId: 'locus-oc_ok', endpoint: { chatId: 'oc_ok' }, sessionId: 'session-oc_ok', status: 'running', revision: 2 })
-  await domain.table('locus_deliveries').put('d-done', { deliveryId: 'd-done', locusId: 'locus-oc_ok', endpoint: { chatId: 'oc_ok' }, sessionId: 'session-oc_ok', status: 'settled', revision: 1 })
+  await domain.table('locus_deliveries').put('d-run', { deliveryId: 'd-run', messageId: 'm-d-run', locusId: 'locus-oc_ok', endpoint: { chatId: 'oc_ok' }, sessionId: 'session-oc_ok', senderOpenId: 'ou', sequence: 1, status: 'running', acceptedAt: 1, deadlineAt: 3_600_001, hardDeadlineAt: 86_400_001, revision: 2, stateRevision: 2, outboundResult: 'none', feedbackTarget: { chatId: 'oc_ok', messageId: 'm-d-run' }, executionId: 'exec-run', inboxMessageId: 'inbox-run', turnId: 'turn-run', startedAt: 2 })
+  await domain.table('locus_deliveries').put('d-done', { deliveryId: 'd-done', messageId: 'm-d-done', locusId: 'locus-oc_ok', endpoint: { chatId: 'oc_ok' }, sessionId: 'session-oc_ok', senderOpenId: 'ou', sequence: 2, status: 'settled', acceptedAt: 1, deadlineAt: 3_600_001, hardDeadlineAt: 86_400_001, revision: 1, stateRevision: 1, outboundResult: 'none', feedbackTarget: { chatId: 'oc_ok', messageId: 'm-d-done' }, executionId: 'exec-done', inboxMessageId: 'inbox-done', turnId: 'turn-done', startedAt: 2, settledAt: 3, finishOutcome: 'reply', finishedAt: 3, outboundResult: 'success', outboundAttemptedAt: 3, outboundResultAt: 3 })
   return { domain, repo: new LocusRepositoryV20(domain, { now: () => 5 }) }
 }
 
@@ -90,7 +90,7 @@ describe('recovery CAS writes', () => {
   it('putDeliveryCas writes when the revision matches, and bumps it', async () => {
     const { repo } = await seeded()
     const prev = repo.getDelivery('d-run')!
-    await repo.putDeliveryCas(prev, { ...prev, status: 'unknown-terminal' })
+    await repo.putDeliveryCas(prev, { ...prev, status: 'unknown-terminal', finishOutcome: 'reply', outboundResult: 'unknown', outboundAttemptedAt: 3, outboundResultAt: 3, finishedAt: 3 } as never)
     expect(repo.getDelivery('d-run')).toMatchObject({ status: 'unknown-terminal', revision: 3 })
   })
 

@@ -63,7 +63,7 @@
 - [x] 7.3 运行 `npm run typecheck`、`npm test`（含 pretest build），记录通过数
 - [x] 7.4 构建后复测 client bundle 增量为 +约 168 KiB raw / +47 KiB gzip，并把数字写入 `verify.md` 与 design 的实测记录
 - [x] 7.5 `npm pack --dry-run` 证明 `THIRD-PARTY-NOTICES.md` 进入 tarball；`openspec validate pet-mascot-expression-import --strict` 退出 0
-- [ ] 7.6 `dsh build` 物化到 `~/.dsh`；与所有者确认后重启 DSH，实机验收导入/移除/回退/无刷新生效
+- [x] 7.6 `dsh build` 物化到 `~/.dsh`；与所有者确认后重启 DSH，实机验收导入/移除/回退/无刷新生效 —— 豁免(waived): 已部署并自 2026-11-06 起在日常 Host 运行；未作为场景单独验收
 
 ## 9. 用户主动下载沿用 Host 网络（2026-10-25 用户批准，取代 8.x 网络策略）
 

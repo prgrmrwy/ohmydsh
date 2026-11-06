@@ -42,7 +42,9 @@ describe('Delivery association uses sessionId (D3)', () => {
     })
     await domain.table('locus_mains').put('M2', { locusMainSessionId: 'M2', workSessionId: 'W2', generation: 1, status: 'active', spaceId: 's', workspaceId: 'ws2', createdAt: 1, updatedAt: 1 })
     await domain.table('locus_deliveries').put('d1', {
-      deliveryId: 'd1', locusId: 'locus-g', endpoint: { chatId: 'oc_1' }, sessionId: 'session-g', status: 'accepted', queueState: 'backlog',
+      deliveryId: 'd1', messageId: 'm1', locusId: 'locus-g', endpoint: { chatId: 'oc_1' }, sessionId: 'session-g', senderOpenId: 'ou_1', sequence: 1,
+      status: 'accepted', queueState: 'backlog', acceptedAt: 1, deadlineAt: 3_600_001, hardDeadlineAt: 86_400_001, revision: 0, stateRevision: 0,
+      outboundResult: 'none', feedbackTarget: { chatId: 'oc_1', messageId: 'm1' },
     })
     const repo = new LocusRepositoryV20(domain, { now: () => 1 })
     await repo.write(tx => tx.resetChat('oc_1', { toM: 'M2', workspaceId: 'ws2', now: 2, reserveChildSessionId: () => 'session-new' }))

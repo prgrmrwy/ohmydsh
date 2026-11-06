@@ -1,6 +1,7 @@
 /** Spec: pet-locus-collaboration "换绑与归档按层处理" whole-W migration rows (D7), controller half. */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { LocusController } from '../src/host/locus/controller.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { LocusResolutionError } from '../src/host/locus/resolution.js'
+import { LocusController, LocusControllerError } from '../src/host/locus/controller.js'
 import { Topology, closeAllTopologies, type TopologyBackend } from './support/w-topology.js'
 
 /** Each scenario runs on the recording fake AND on the real LocusRepositoryV20 over temp SQLite. */
@@ -122,6 +123,57 @@ describe.each(BACKENDS)('整 W 迁移 [%s]', which => {
     expect(t.spacesReleased).toEqual(t.created.map(c => c.id))
   })
 
+  describe('迁移等待新 M 创建期间，同 W 的群被管理面改绑走', () => {
+    /** Start the migration, let it pause inside M-new creation, then rebind oc_b to W2. */
+    async function interleave(unarchiveBeforeResume: boolean) {
+      const { t, controller } = await setup()
+      await t.seedMain('W2', 'M-w2')
+      t.addSession({ id: 'W2', workspaceId: 'proj-2', title: 'W2' })
+      let release!: () => void
+      t.holdLocusMain = new Promise<void>(resolve => { release = resolve })
+      const migration = controller.migrateWholeW('W1', 'oc_a').then(() => undefined, (e: unknown) => e as { code?: string })
+      await vi.waitFor(() => expect(t.calls).toContain('createLocusMain:start'))
+      t.archived.add('W1')
+      const b = t.repository.getRow({ chatId: 'oc_b' })!
+      await controller.rebindChat({ chatId: 'oc_b', workSessionId: 'W2', expectedLocusId: b.locusId, expectedRevision: b.revision })
+      if (unarchiveBeforeResume) t.archived.delete('W1')
+      release()
+      return { t, error: await migration }
+    }
+    const expectRebindSurvived = (t: Topology) => {
+      const b = t.repository.getRow({ chatId: 'oc_b' }) as { locusMainSessionId: string; workspaceId: string; revision: number }
+      expect(b.locusMainSessionId).toBe('M-w2')
+      expect(b.workspaceId).toBe('proj-2')
+      expect(b.revision).toBe(1)
+      expect(t.repository.findMain('M-old')!.status).toBe('active')
+      expect(groupM(t, 'oc_a')).toBe('M-old')
+    }
+
+    it('W 在等待期间被归档：不迁移，改绑结果保持，M-new 被补偿', async () => {
+      const { t, error } = await interleave(false)
+      expect(error).toMatchObject({ code: 'SOURCE_ARCHIVED' })
+      expectRebindSurvived(t)
+      expect(t.released).toEqual(t.created.map(c => c.id))
+    })
+
+    it('即使 W 又恢复：用等待前捕获的版本提交，b 已变则整体回滚，不改回 b', async () => {
+      const { t, error } = await interleave(true)
+      expect(error).toMatchObject({ code: 'LOCUS_CONFLICT' })
+      expectRebindSurvived(t)
+      expect(t.released).toEqual(t.created.map(c => c.id))
+    })
+  })
+
+  it('另一个群有 current 时 ensureEntry 拒绝 LOCUS_BUSY，并带上该入口行的身份供消息进入 backlog', async () => {
+    const { t, controller } = await setup()
+    await t.setCurrent('oc_b')
+    const row = t.repository.getRow({ chatId: 'oc_a' })!
+    const error = await controller.ensureEntry({ chatId: 'oc_a' }).then(() => undefined, e => e as LocusControllerError)
+    expect(error?.code).toBe('LOCUS_BUSY')
+    expect(error?.deferred).toEqual({ locusId: row.locusId, sessionId: row.sessionId })
+    expect(t.created).toEqual([])
+  })
+
   it('W 已归档时不迁移（改绑与迁移互斥）', async () => {
     const { t, controller } = await setup()
     t.archived.add('W1')
@@ -200,5 +252,64 @@ describe('backlog 派发器在 claim 之前核验 M', () => {
     await settle()
     expect(h.claims).toEqual([])
     expect(h.logs.some(code => code.startsWith('dispatch-main-unverified'))).toBe(true)
+  })
+})
+
+describe('M 不可用且同 W 另一个群有 current 时，新的授权 @ 进入 backlog 而不是被丢弃', () => {
+  const endpoint = { chatId: 'oc_a' }
+  const row = { locusId: 'locus-a', sessionId: 'session-a' }
+  const message = {
+    kind: 'message' as const, messageId: 'om-new', endpoint, text: 'hi', senderOpenId: 'ou-owner', chatType: 'group' as const,
+    replyTarget: { ...endpoint, messageId: 'om-new' },
+  }
+
+  function harness(options: { deferred: boolean }) {
+    const accepted: unknown[] = []
+    const claims: unknown[] = []
+    const receipts: string[] = []
+    const ensured: string[] = []
+    const busy = new LocusControllerError('LOCUS_BUSY', '同一来源会话下有处理中的投递', undefined, options.deferred ? row : undefined)
+    const controller = createLocusChannelController({
+      locus: {
+        resolveCurrent: async () => { throw new LocusResolutionError('locus-unusable', 'main unavailable') },
+        ensureForDelivery: async (input: { messageId: string }) => { ensured.push(input.messageId); throw busy },
+      } as never,
+      deliveries: {
+        accept: async (input: unknown) => { accepted.push(input); return { record: { deliveryId: 'd1', locusId: row.locusId, sessionId: row.sessionId, feedbackTarget: undefined }, duplicate: false } },
+      } as never,
+      deliveryDispatch: { claimCurrent: async (input: unknown) => { claims.push(input); return undefined }, pendingForLocus: async () => [] } as never,
+      child: { ensureChild: async () => { throw new Error('must not create a child') } } as never,
+      turns: { perTurnCorrelation: true, subscribe: () => () => {} } as never,
+      receipts: { markAccepted: async () => {}, markSettled: async () => {}, sendControl: async (_t: unknown, text: string) => { receipts.push(text) } } as never,
+    } as never)
+    return { controller, accepted, claims, receipts, ensured }
+  }
+  const admit = (c: ReturnType<typeof harness>['controller']) =>
+    c.handleAdmission({ kind: 'accepted', authorization: 'authorized', needsInitialization: false, message } as never)
+  const settle = () => new Promise(resolve => setTimeout(resolve, 20))
+
+  it('deferred migration: the message is accepted durably on the current row, nothing claimed, no failure receipt', async () => {
+    const h = harness({ deferred: true })
+    expect(await admit(h.controller)).toMatchObject({ kind: 'accepted', executionId: '' })
+    expect(h.accepted).toHaveLength(1)
+    expect(h.accepted[0]).toMatchObject({ messageId: 'om-new', locusId: 'locus-a', sessionId: 'session-a' })
+    expect(h.claims).toEqual([])
+    expect(h.receipts.filter(text => text.includes('入口建立失败'))).toEqual([])
+  })
+
+  it('a LOCUS_BUSY that is not a deferred migration still refuses with the failure receipt', async () => {
+    const h = harness({ deferred: false })
+    expect(await admit(h.controller)).toMatchObject({ kind: 'refused' })
+    expect(h.accepted).toEqual([])
+    expect(h.receipts.some(text => text.includes('入口建立失败'))).toBe(true)
+  })
+
+  it('when another lane settles, deferred lanes are re-dispatched (verify/migrate is retried)', async () => {
+    const h = harness({ deferred: true })
+    await admit(h.controller)
+    h.ensured.length = 0
+    await h.controller.dispatchNext({ endpoint: { chatId: 'oc_b' }, locusId: 'locus-b', sessionId: 'session-b' })
+    await settle()
+    expect(h.ensured).toContain('dispatch:locus-a')
   })
 })

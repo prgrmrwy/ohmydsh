@@ -247,9 +247,15 @@ export type LocusControllerErrorCode =
 export class LocusControllerError extends Error {
   readonly code: LocusControllerErrorCode
   readonly cause?: unknown
+  /**
+   * Set when an authorized message may still be accepted into the durable
+   * backlog of this existing entry (a whole-W migration is deferred, D7).
+   */
+  readonly deferred?: { readonly locusId: string; readonly sessionId: string }
 
-  constructor(code: LocusControllerErrorCode, message: string, cause?: unknown) {
+  constructor(code: LocusControllerErrorCode, message: string, cause?: unknown, deferred?: { readonly locusId: string; readonly sessionId: string }) {
     super(message)
+    if (deferred !== undefined) this.deferred = deferred
     this.name = 'LocusControllerError'
     this.code = code
     if (cause !== undefined) this.cause = cause
@@ -720,7 +726,7 @@ export class LocusController {
         if (disposition.why === 'locus-main-unavailable') {
           const migrated = await this.migrateWholeW(workSessionId, endpoint.chatId, endpoint.threadId)
           if (!migrated.migrated && migrated.reason === 'current-delivery') {
-            throw new LocusControllerError('LOCUS_BUSY', '同一来源会话下有处理中的投递，暂不迁移；消息保留在队列。')
+            throw new LocusControllerError('LOCUS_BUSY', '同一来源会话下有处理中的投递，暂不迁移；消息保留在队列。', undefined, { locusId: row.locusId, sessionId: row.sessionId })
           }
           const next = this.repo.getRow(endpoint)
           if (next === undefined) {
@@ -782,6 +788,18 @@ export class LocusController {
           return { migrated: false, reason: 'current-delivery', chatId }
         }
       }
+      // Capture each chat's revisions AND owning M now, before any external
+      // await: a management rebind can move a chat while M-new is being made.
+      const chats = [...chatIds].map(chatId => {
+        const group = this.repo.getRow({ chatId })
+        return {
+          chatId,
+          ...(group !== undefined && isGroupRow(group) ? { expectedMain: group.locusMainSessionId } : {}),
+          expectedRevisions: Object.fromEntries(
+            this.repo.listRowsOfChat(chatId).map(row => [locusEndpointKey(row.endpoint), row.revision]),
+          ),
+        }
+      })
       await this.beginProvisioning({
         provisioningId,
         kind: 'migrate',
@@ -792,12 +810,10 @@ export class LocusController {
       begun = true
       const generation = pairings.reduce((max, pairing) => Math.max(max, pairing.generation), 0) + 1
       const { main } = await this.ensureLocusMain(work, provisioningId, resources, { forceNew: true, generation })
-      const chats = [...chatIds].map(chatId => ({
-        chatId,
-        expectedRevisions: Object.fromEntries(
-          this.repo.listRowsOfChat(chatId).map(row => [locusEndpointKey(row.endpoint), row.revision]),
-        ),
-      }))
+      // An archived W is not migrated: rebind owns it.
+      if (await this.isArchivedSession(work.id)) {
+        throw new LocusControllerError('SOURCE_ARCHIVED', `来源会话 ${work.id} 已归档，不再整体迁移；请改绑。`)
+      }
       await this.repo.commitWholeWMigration({
         provisioningId,
         workSessionId: work.id,
@@ -1124,7 +1140,12 @@ export class LocusController {
     const cleanup = await this.rollbackResources(resources)
     this.releaseMainLease(provisioningId)
     try {
-      await this.repo.failProvisioning(provisioningId, safeErrorMessage(error).slice(0, 500))
+      // Fully reclaimed by this rollback: nothing is left to compensate, so the endpoint is not blocked.
+      await this.repo.failProvisioning(
+        provisioningId,
+        safeErrorMessage(error).slice(0, 500),
+        cleanup.complete ? { reclaimed: true } : undefined,
+      )
     } catch (failure) {
       this.deps.log?.(`locus provisioning ${provisioningId} failure marker failed: ${safeErrorMessage(failure)}`)
     }
@@ -1139,21 +1160,26 @@ export class LocusController {
     readonly work: boolean
     readonly locusMain: boolean
     readonly chat: boolean
+    /** Every resource this operation created was released. */
+    readonly complete: boolean
   }> {
     // Space first (it hangs off the M id), then M, then the W Pet itself created, then the chat.
-    await this.releaseSpace(resources.space)
+    const space = await this.releaseSpace(resources.space)
     const locusMain = await this.rollbackSession(resources.locusMain)
     const work = await this.rollbackSession(resources.work)
     const chat = await this.rollbackChat(resources.chat)
-    return { work, locusMain, chat }
+    return { work, locusMain, chat, complete: space && locusMain && work && chat }
   }
 
-  private async releaseSpace(space: ProvisionedResources['space']): Promise<void> {
-    if (space === undefined || this.deps.releaseSpace === undefined) return
+  private async releaseSpace(space: ProvisionedResources['space']): Promise<boolean> {
+    if (space === undefined) return true
+    if (this.deps.releaseSpace === undefined) return false
     try {
       await this.deps.releaseSpace(space)
+      return true
     } catch (error) {
       this.deps.log?.(`locus rollback could not release space of ${space.locusMainSessionId}: ${safeErrorMessage(error)}`)
+      return false
     }
   }
 

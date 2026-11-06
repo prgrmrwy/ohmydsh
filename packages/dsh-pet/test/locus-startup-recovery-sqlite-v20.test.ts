@@ -113,3 +113,89 @@ describe('recoverLocusStartupV20 on the real repository (temp SQLite)', () => {
     })
   })
 })
+
+/** Reopen the same medium: the Host's next boot parses every stored row at open. */
+async function openRepoAt(file: string) {
+  const { ctx, domain } = await openStack(file)
+  return {
+    repo: new LocusRepositoryV20(domain as never, { now: () => NOW }),
+    close: async () => {
+      await (domain as unknown as { close(): Promise<void> }).close()
+      await ctx.fiber.dispose()
+    },
+  }
+}
+
+describe('startup recovery writes reopen cleanly (stateRevision agrees with revision)', () => {
+  const base = (d: Record<string, unknown>): RawRows => ({
+    locus_mains: { M1: main('M1', 'W1') },
+    loci: { oc_1: groupRow('M1') },
+    locus_deliveries: { d1: delivery(d) },
+  })
+
+  it('a manual-debt write for a current row bound to another session reopens', async () => {
+    const { file } = tempPetHome('pet-reopen-session-')
+    await seedPetState(file, PET_DOMAIN_VERSION, base({
+      sessionId: 'someone-else', status: 'current', queueState: 'current',
+      deadlineAt: NOW + 5000, hardDeadlineAt: NOW - 1000 + 86_400_000, revision: 1, stateRevision: 1,
+    }))
+    const first = await openRepoAt(file)
+    try {
+      expect((await recoverLocusStartupV20(first.repo, { now: NOW })).manualDeliveries.map(d => d.deliveryId)).toEqual(['d1'])
+    } finally { await first.close() }
+
+    const second = await openRepoAt(file) // throws 'revision and stateRevision must agree' on the bug
+    try {
+      expect(second.repo.getDelivery('d1')).toMatchObject({ startupRecoveryDebt: expect.any(String), revision: 2, stateRevision: 2 })
+    } finally { await second.close() }
+  })
+
+  it('a manual-debt write for a live turn with no provable proof reopens', async () => {
+    const { file } = tempPetHome('pet-reopen-proof-')
+    await seedPetState(file, PET_DOMAIN_VERSION, base({
+      status: 'running', executionId: 'exec-1', inboxMessageId: 'inbox-1', turnId: 'child-1#1',
+      startedAt: NOW - 500, deadlineAt: NOW + 5000, hardDeadlineAt: NOW - 1000 + 86_400_000, revision: 1, stateRevision: 1,
+    }))
+    const first = await openRepoAt(file)
+    try {
+      expect((await recoverLocusStartupV20(first.repo, { now: NOW })).manualDeliveries.map(d => d.deliveryId)).toEqual(['d1'])
+    } finally { await first.close() }
+
+    const second = await openRepoAt(file)
+    try {
+      expect(second.repo.getDelivery('d1')).toMatchObject({ startupRecoveryDebt: expect.any(String), revision: 2, stateRevision: 2 })
+    } finally { await second.close() }
+  })
+
+  it('after reverting a crashed first-child publication the uninjected backlog B stays clean on its retargeted session (no debt)', async () => {
+    const accepted = {
+      deliveryId: 'dA', messageId: 'omA', sequence: 1, endpoint: { chatId: 'oc_1' }, locusId: 'locus-1', sessionId: 'session-old',
+      senderOpenId: 'ou1', feedbackTarget: { chatId: 'oc_1', messageId: 'omA' }, acceptedAt: NOW - 2000,
+      status: 'current', queueState: 'current', deadlineAt: NOW + 60_000, hardDeadlineAt: NOW - 2000 + 86_400_000, revision: 1, stateRevision: 1,
+    }
+    const rows: RawRows = {
+      locus_mains: { M1: main('M1', 'W1') },
+      loci: { oc_1: { ...groupRow('M1'), sessionId: 'session-old', state: 'not-created', revision: 3 } },
+      locus_deliveries: {
+        dA: accepted,
+        dB: { ...accepted, deliveryId: 'dB', messageId: 'omB', sequence: 2, status: 'accepted', queueState: 'backlog', feedbackTarget: { chatId: 'oc_1', messageId: 'omB' }, revision: undefined, stateRevision: undefined, deadlineAt: undefined, hardDeadlineAt: undefined },
+      },
+    }
+    await withRepo(rows, async repo => {
+      await repo.publishFirstDelivery({ locusId: 'locus-1', sessionId: 'session-old', revision: 3, deliveryId: 'dA', now: NOW, executionId: 'exec-1' })
+      const terminated: string[] = []
+      const report = await recoverLocusStartupV20(repo, {
+        now: NOW, reserveChildSessionId: () => 'session-new',
+        compensators: { childSession: async i => { terminated.push(i.childSessionId) } },
+      })
+      expect(terminated).toEqual(['session-old'])
+      expect(repo.getLocus('locus-1')).toMatchObject({ sessionId: 'session-new', state: 'not-created' })
+      expect(report.manualDeliveries).toEqual([])
+      const b = repo.getDelivery('dB')!
+      expect(b).toMatchObject({ status: 'accepted', sessionId: 'session-new' })
+      expect(b.startupRecoveryDebt).toBeUndefined()
+      expect(report.retainedDeliveries.map(d => d.deliveryId)).toContain('dB')
+    })
+  })
+})
+

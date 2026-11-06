@@ -139,7 +139,9 @@ test('descriptor PID/profile/origin mismatch and unsafe files refuse before HTTP
     assert.deepEqual(f.requests, [])
     assert.equal(f.calls.some(([name]) => name === 'stop'), true)
   })
-  for (const delta of [{ profile: 'other' }, { bootId: '' }, { origin: 'http://evil.invalid:40001' }, { authenticatedUrl: 'http://evil.invalid/?token=fake-launch-secret' }]) await t.test(JSON.stringify(delta), async t => {
+  // A malformed descriptor refuses even when it names another PID: only a
+  // well-formed stale one counts as absent.
+  for (const delta of [{ profile: 'other' }, { bootId: '' }, { origin: 'http://evil.invalid:40001' }, { authenticatedUrl: 'http://evil.invalid/?token=fake-launch-secret' }, { pid: 1, origin: 'http://evil.invalid:40001' }, { pid: 1, bootId: '' }]) await t.test(JSON.stringify(delta), async t => {
     const f = await petFixture(t, { descriptor: delta })
     await assert.rejects(runLauncher(['stop', '--allow-legacy-restart'], f.options), /Pet/)
     assert.deepEqual(f.requests, [])

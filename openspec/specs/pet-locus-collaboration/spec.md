@@ -1169,6 +1169,41 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 - **WHEN** locus 主会话以 `locus_reply_child` 回复一个 `sessionId` 已被替换的入口旧子会话
 - **THEN** 返回拒绝，未调用 `subagents.sendMessage`
 
+### Requirement: 受控停机在原生信号前排空自有执行
+
+受控 stop/restart SHALL 在 SIGTERM 前经既有官方 Connection 鉴权的精确准备接口冻结 Pet 新派发、新建及受管 mutation，等待已进入操作到安全点，再以真实 live locus 主会话身份 await 官方精确自有 children drain 和领域提交。请求 MUST NOT 接受任意 Agent ID 或模型声明的身份；只有持久的 W↔M 配对、入口行当前的 `sessionId` 和官方 catalog 能决定排空对象。只有全部排空与提交完成才 SHALL 返回绑定同 Host PID、bootId、请求 nonce 和期限的 prepared；端口消失、cancel accepted 或 best-effort flush 不构成成功。
+
+#### Scenario: 完成排空和领域提交后才允许停机
+- **GIVEN** 原 child 正在执行，下一条消息已为 backlog
+- **WHEN** 停机准备冻结入口并排空自有 child
+- **THEN** 原生严格关闭和领域提交均完成才应答 prepared；原请求按真实终止结算，后继直到新 Host 或显式 resume 才可派发
+
+#### Scenario: 冻结同时覆盖管理和主子消息
+- **WHEN** 停机准备已冻结，新入站、管理 mutation 或主子投递试图开始
+- **THEN** 不发生新建或物理派发；已进入操作被等待，读取管理状态仍可用
+
+#### Scenario: 未鉴权或错宿主不能排空
+- **WHEN** cookie/Origin 不成立、PID/bootId/nonce 不符，或请求携带 Agent ID 等额外字段
+- **THEN** 排空未被调用，无业务或访问模式变更
+
+#### Scenario: 排空失败与超时保留明确维护状态
+- **WHEN** 任一关闭/持久化失败或请求超时
+- **THEN** 不应答 prepared，不发送停机信号；后台操作未全部 settle 时不得 resume，settle 后只有经鉴权的显式 resume 可恢复派发（不要求原 nonce，避免调用方丢失 nonce 后永久冻结），恢复中旧票据不可复用
+
+#### Scenario: 过期票据与替换宿主不发送信号
+- **WHEN** launcher 将要发信号而应答过期、状态不再 prepared、bootId 变化，或完整 pid/created/argv/executable 与握手前不符
+- **THEN** 拒绝停止，不能重新采纳替换宿主作为目标
+
+#### Scenario: 无 Pet 组合仍有真实宿主证明
+- **GIVEN** 目标实际 Loader 已 ready，完整观察证明不存在 Pet，且没有失败/未展开或未知动态载体
+- **WHEN** launcher 准备停止该 Host
+- **THEN** 独立 profile 控制插件按同协议证明无自有执行；缺接口、当前 manifest 或磁盘 dump 相等不能代替该证明
+
+#### Scenario: 旧 Host 首次维护不计排空成功
+- **GIVEN** 旧 Host 缺少协议且所有者明确使用首次维护分支
+- **WHEN** 按完整旧进程身份维护加载新版本
+- **THEN** 回执明确 drained=false，新 Host 验证新鉴权协议；该次不计作中断恢复验收
+
 ### Requirement: 启动恢复证据经官方冷读获取
 
 启动恢复需要子会话日志证据时 SHALL 经 `sessionQuery.observeSession` 读取；冷读在日志末尾补出的合成 `turn/end interrupted` MUST NOT 作为"已中断"证据，只有日志中实际写入的事件才算。`sessionQuery` 不可用或读取失败时 SHALL 视为证据不足，按既有规则保持等待。
@@ -1923,3 +1958,28 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前工作�
 #### Scenario: 空输入不可提交
 - **WHEN** 改绑对话框的输入为空或只有空白
 - **THEN** 「确认」按钮置灰，点击不产生请求
+
+### Requirement: 控制命令帮助
+
+`@bot -h`、`@bot --help`、`@bot /help`（及裸 `/help`）SHALL 在 IM 群、话题或文档评论中回复一条控制回执，列出当前可用的控制命令、参数形式与一句话说明，并注明哪些命令仅 allowlist 成员可用。帮助 SHALL 是纯控制命令：不得创建入口、子会话或业务 Delivery，且在已停止的入口上同样可用。回执文本 SHALL 由解析器所用的同一张命令表生成；已弃用的 `/scope`、`/tools` SHALL NOT 出现在其中。帮助与其他控制命令一样仅对 allowlist 发送者可用。
+
+#### Scenario: 查看帮助
+
+- **WHEN** allowlist 成员在入口发送 `@bot -h`
+- **THEN** 入口收到一条回执，列出 `/bind`、`/unbind`、`/access` 的参数形式与说明，不含 `/scope`、`/tools`
+- **AND** 没有任何入口、子会话或 Delivery 被创建
+
+#### Scenario: 帮助与解析器一致
+
+- **WHEN** 解析器的命令表新增或移除一个命令
+- **THEN** 帮助回执随之变化，无需另行修改文本
+
+#### Scenario: 已停止的入口仍可查看帮助
+
+- **WHEN** allowlist 成员在已停止的入口发送 `@bot /help`
+- **THEN** 回复帮助回执，而不是被当作停止入口拒绝
+
+#### Scenario: 非 allowlist 发送者
+
+- **WHEN** 非 allowlist 成员发送 `@bot -h`
+- **THEN** 与其他控制命令一致，被静默拒绝（`control-not-allowed`）

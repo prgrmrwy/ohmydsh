@@ -118,6 +118,8 @@ export async function openThreeTier(options: ThreeTierOptions = {}) {
       sendControlMessage: async input => { world.sent.push(input.text) },
       deleteGroup: async id => { world.released.push(`chat:${id}`) },
     },
+    // Production wires releaseSpace (index.ts): the rollback must be able to prove the space is gone.
+    releaseSpace: async input => { world.released.push(`space:${input.locusMainSessionId}`) },
     establishSpace: async input => {
       if (world.spaceError !== undefined) throw world.spaceError
       if (world.spaceResult !== undefined && !world.spaceResult.ok) return world.spaceResult

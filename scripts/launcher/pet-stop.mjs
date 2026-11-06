@@ -41,15 +41,17 @@ function readDescriptor(home, port, initial, profile) {
   let doc
   try { doc = readPrivateJson(runDirectory(home, 'dsh-pet-stop'), `${port}.json`) }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw fail('unreadable or unsafe descriptor') }
-  // A descriptor left by another (crashed) boot describes no live Host here and
-  // grants nothing; treat it as absent so the default path still refuses.
-  if (doc?.v === 1 && Number.isSafeInteger(doc.pid) && doc.pid !== initial.processes[0].pid) return undefined
+  // Validate the whole document first: a present-but-malformed descriptor
+  // always refuses, whatever PID it names.
   try {
-    if (doc?.v !== 1 || doc.pid !== initial.processes[0].pid || typeof doc.bootId !== 'string' || !doc.bootId.trim() || doc.profile !== profile) throw fail('descriptor Host mismatch')
+    if (doc?.v !== 1 || !Number.isSafeInteger(doc.pid) || doc.pid <= 0 || typeof doc.bootId !== 'string' || !doc.bootId.trim() || doc.profile !== profile) throw fail('descriptor Host mismatch')
     originUrl(doc.origin, port)
     const url = new URL(doc.authenticatedUrl)
     if (url.origin !== doc.origin || url.username || url.password || url.hash) throw fail('invalid authenticated URL')
   } catch { throw fail('invalid descriptor or Host mismatch') }
+  // A well-formed descriptor left by another (crashed) boot describes no live
+  // Host here and grants nothing; treat it as absent (stop proceeds without drain).
+  if (doc.pid !== initial.processes[0].pid) return undefined
   return doc
 }
 
