@@ -70,7 +70,9 @@ it('unchanged requests bind the new main decision to the effective header', asyn
 it('a request changed after routing never binds the recommended decision', async () => {
  const h=await harness(json(200,{answers:{depth:{choice:'baseline'}}}),{answer:()=> 'reply'})
  await h.setMode('AUTO');await h.run('first')
- h.ctx.on('agent/request',async (_payload,next)=>({...await next(),reasoningEffort:ReasoningEffortId('high')}),{prepend:true})
+ // 0.2.2 rejects any `agent/request` result that differs from the step's pinned selection, so a third party can only change
+ // the request after routing by editing the pinned selection in an outer pre-step listener (runs once the plugin finished).
+ h.ctx.on('agent/pre-step',async (payload,next)=>{const decision=await next();if(decision.kind==='enter')(payload.modelSelection as {reasoningEffort?:string}).reasoningEffort=ReasoningEffortId('high');return decision},{prepend:true})
  await h.run('second')
  expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  expect(await h.invoke('label',{sessionId:h.agent.id,messageId:lastAssistantId(h)})).toEqual({})
@@ -135,8 +137,9 @@ it('spec Scenario "停用后不再调用 Jev 且不改写"', async () => {
  expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  h.jev.set(json(402, {}))
  await h.run('下一个任务')
- // No rewrite after the failure: the request carries whatever the official selection assembled.
- expect(h.calls.at(-1)?.reasoningEffort).toBe('medium')
+ // No rewrite after the failure: the request carries whatever the official selection assembled. Since the previous AUTO
+ // turn synced `high` to the official selection (0.2.2: selectModel records it on the agent), that is `high`, not the initial `medium`.
+ expect(h.calls.at(-1)?.reasoningEffort).toBe('high')
  const state = await h.invoke('state', { sessionId: h.agent.id })
  expect(state).toMatchObject({ mode: 'MANUAL', disabled: { category: 'insufficient-credits' } })
  expect(state).not.toHaveProperty('restore')

@@ -15,22 +15,22 @@
 
 ## 3. AUTO 主会话：pre-step 中设定本步 effort（D1）
 
-- [ ] 3.1 编写失败测试：`runtime-selection.e2e.test.ts` 中「本步选择改写依赖运行体核验」三个场景，使用 `dshVersion` 精确版本的真实 agent loop（确认在现有实现下因 `agent/request` 改写抛错而失败）
-- [ ] 3.2 编写失败测试：test-plan 中「AUTO 主 effort 同步官方选择」「模式与改写规则」「决策提示」各行，以及「用户回合与 Jev 输入」中的主会话行（调整 `policy-host.integration.test.ts:401-409` 等旧时序断言）
-- [ ] 3.3 实现：主会话 `agent/pre-step` 每一步按 depth、`modelSelection` 的模型和实时 cap 计算 effort；不同时先 await 官方 `selectModel`，再改写 `payload.modelSelection.reasoningEffort`；赋值抛错时捕获、告警并退回下一步生效；删除主会话的 `agent/request` 改写，使 3.1、3.2 通过
-- [ ] 3.4 重构；包内全量测试通过
+- [x] 3.1 编写失败测试：`runtime-selection.e2e.test.ts` 中「本步选择改写依赖运行体核验」三个场景，使用 `dshVersion` 精确版本的真实 agent loop（确认在现有实现下因 `agent/request` 改写抛错而失败）
+- [x] 3.2 编写失败测试：test-plan 中「AUTO 主 effort 同步官方选择」「模式与改写规则」「决策提示」各行，以及「用户回合与 Jev 输入」中的主会话行（调整 `policy-host.integration.test.ts:401-409` 等旧时序断言）
+- [x] 3.3 实现：主会话 `agent/pre-step` 每一步按 depth、`modelSelection` 的模型和实时 cap 计算 effort；不同时先 await 官方 `selectModel`，再改写 `payload.modelSelection.reasoningEffort`；赋值抛错时捕获、告警并退回下一步生效；删除主会话的 `agent/request` 改写，使 3.1、3.2 通过
+- [x] 3.4 重构；包内全量测试通过
 
 ## 4. AUTO 子会话：created 中判断并写入 route，request 只核验（D2）
 
-- [ ] 4.1 编写失败测试：test-plan 中「AUTO 决策与执行」「子任务路由退化链」各行，以及「用户回合与 Jev 输入」的子会话行、「Jev 判断请求与脱敏」「判档预设的采样与归属」中涉及子任务时机的行；created/resume/取消/重试/参数校验失败场景使用真实 loop + subagent 链路夹具
-- [ ] 4.2 实现：`tools/execute` 绑定窗口记下 `args.prompt`；`agent/created`（startup）绑定后用该事件的 signal await Jev，按退化链得出 route 并同步 `agent.model.select(route)`；取消时记 `unsupported/jev-cancelled`；`agent/created`（resume）对合法已有 route 且 `current()` 不一致的子会话同步补写 route；`agent/request` 只做核验并返回 `await next()`，保留全部 fail closed 检查；使 4.1 通过
-- [ ] 4.3 重构；同时断言目标运行体在重试时仍派发 `agent/request`；包内全量测试通过
+- [x] 4.1 编写失败测试：test-plan 中「AUTO 决策与执行」「子任务路由退化链」各行，以及「用户回合与 Jev 输入」的子会话行、「Jev 判断请求与脱敏」「判档预设的采样与归属」中涉及子任务时机的行；created/resume/取消/重试/参数校验失败场景使用真实 loop + subagent 链路夹具
+- [x] 4.2 实现：`tools/execute` 绑定窗口记下 `args.prompt`；`agent/created`（startup）绑定后用该事件的 signal await Jev，按退化链得出 route 并同步 `agent.model.select(route)`；取消时记 `unsupported/jev-cancelled`；`agent/created`（resume）对合法已有 route 且 `current()` 不一致的子会话同步补写 route；`agent/request` 只做核验并返回 `await next()`，保留全部 fail closed 检查；使 4.1 通过
+- [x] 4.3 重构；同时断言目标运行体在重试时仍派发 `agent/request`；包内全量测试通过
 
 ## 5. auto-model-routing 兼容声明与文档（D3）
 
-- [ ] 5.1 编写失败测试：`tests/local-package-peers.test.mjs` 断言 auto-model-routing 的 `engines.dsh` 与 dsh peer 下界为 `0.2.2-rc.1`，其它 local package 保持 `0.2.0-rc.2`
-- [ ] 5.2 实现：改写该包的 `engines.dsh`、peer；README/CHANGELOG 写明版本线（0.2.0–0.2.1 用已发布的 0.7.x/0.6.x，0.2.2 起用新的 minor，版本号发版时确定，不复用 0.7.0）与抬下界的理由
-- [ ] 5.3 重构；全量测试通过；`docs/` 中描述 `agent/request` 改写的内容与 policy-v2 说明同步更新
+- [x] 5.1 编写失败测试：`tests/local-package-peers.test.mjs` 断言 auto-model-routing 的 `engines.dsh` 与 dsh peer 下界为 `0.2.2-rc.1`，其它 local package 保持 `0.2.0-rc.2`
+- [x] 5.2 实现：改写该包的 `engines.dsh`、peer；README/CHANGELOG 写明版本线（0.2.0–0.2.1 用已发布的 0.7.x/0.6.x，0.2.2 起用新的 minor，版本号发版时确定，不复用 0.7.0）与抬下界的理由
+- [x] 5.3 重构；全量测试通过；`docs/` 中描述 `agent/request` 改写的内容与 policy-v2 说明同步更新
 
 ## 6. memex 裁判工具投影（D4）
 

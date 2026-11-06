@@ -8,13 +8,14 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import Agents, { installModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import Agents, { installModelSelection } from '@deepseek-ai/dsh-agent'
 import Sessions from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
 import Llm, { LlmAdapter, ToolCallId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Loop from '@deepseek-ai/dsh-agent-loop'
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import * as plugin from '../src/index.js'
 import { fakeJev, type Reply } from './fake-jev.js'
 
@@ -22,7 +23,7 @@ export const SECRET = 'sk-or-test-SECRET'
 export let cleanup: (() => Promise<void>) | undefined
 export async function closeHarness() { await cleanup?.(); cleanup = undefined }
 
-export async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: []; config?: Record<string, unknown>; model?: string; toolCalls?: () => number; streamGate?: () => Promise<void> | undefined } = {}) {
+export async function harness(reply: Reply, options: { reject?: () => boolean; selectFails?: boolean; answer?: () => string; defaultAuto?: boolean; storedKey?: string; seed?: []; config?: Record<string, unknown>; model?: string; toolCalls?: () => number; streamGate?: () => Promise<void> | undefined; failRequest?: (callIndex: number) => boolean } = {}) {
  const selections: unknown[] = []
  const home = mkdtempSync(join(tmpdir(), 'router-host-'))
  mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true }); writeFileSync(join(home, 'plugins/dsh-auto-model-routing/config.json'), JSON.stringify(options.config ?? (options.defaultAuto ? { defaultMode: 'AUTO' } : {})))
@@ -37,6 +38,7 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
   async *stream(request: GenerateOptions): AsyncIterable<StreamChunk> {
    calls.push(request)
    await options.streamGate?.()
+   if (options.failRequest?.(calls.length)) { yield { type: 'finish', reason: { kind: 'error', failure: { message: 'temporary', code: 'TEMP' } } } as never; return }
    // A request may ask for tool calls first, so one turn issues several requests.
    if ((options.toolCalls?.() ?? 0) > 0) {
     const id = ToolCallId(`call-${calls.length}`)
@@ -69,6 +71,7 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
  } as never)
  const forks: { dispose(): unknown }[] = []
  for (const p of [Projections, Sessions, Agents, Prompt, Tools, Llm]) forks.push(await ctx.plugin(p))
+ forks.push(await ctx.plugin(NativeExecutor)) // 0.2.2: the loop needs a tool executor in the composition
  forks.push(await ctx.plugin(Loop, { agents: [] }))
  ctx.llm.registerAdapter(['test','claude','codex'], new Adapter())
  ctx.tools.register(defineTool({ name: 'noop', description: 'Test tool used to make a turn issue several requests', parameters: {}, output: { schema: { type: 'object', additionalProperties: false, properties: {} }, render: () => [{ type: 'text', text: 'ok' }] }, execute: async () => ({}) }))
@@ -79,25 +82,35 @@ export async function harness(reply: Reply, options: { reject?: () => boolean; s
  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (r: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
  ctx.provide('sessionController', {
   resolveAgent: async (id: string) => { const found = agent?.id === id ? agent : ctx.agents.get(SessionId(id)); return found ? { agent: found } : { error: new Error('unknown') } },
-  selectModel: async (request: unknown) => { selections.push(request); if (options.selectFails) throw new Error('model unavailable'); return { selected: request } },
+  selectModel: async (request: { sessionId: string; provider: string; model: string; reasoningEffort?: string }) => {
+    selections.push(request); if (options.selectFails) throw new Error('model unavailable')
+    // 0.2.2 official behaviour: the selection is recorded through the agent's own model (see SessionCommandController.selectModel).
+    const target = agent?.id === request.sessionId ? agent : ctx.agents.get(SessionId(request.sessionId))
+    const selected = { provider: request.provider, model: request.model, ...(request.reasoningEffort ? { reasoningEffort: ReasoningEffortId(request.reasoningEffort) } : {}) }
+    target?.model.select(selected)
+    return { selected }
+  },
  } as never)
  let routing = await ctx.plugin(plugin, { home, jevBase: jev.base, jevTimeoutMs: 300 })
  await expect.poll(() => routes.size).toBe(9)
- const selection: ModelSelectionRef = { current: { provider: 'test', model: options.model ?? 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
+ const initial = { provider: 'test', model: options.model ?? 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }
  const handle = await ctx.agents.create({
   ...(options.seed ? { seed: options.seed } : {}),
-  sessionId: SessionId(`host-${Math.random()}`), agentOptions: { provider: 'test', model: options.model ?? 'claude-opus-5-5' },
+  sessionId: SessionId(`host-${Math.random()}`), agentOptions: initial,
   setup(c) {
-   installModelSelection(c, selection)
+   installModelSelection(c)
    if (options.reject) c.on('agent/pre-step', async (_p, next) => options.reject!() ? { kind: 'reject' } : next())
   },
  })
  agent = handle.agent
+ /** The official selection of a session: 0.2.2 keeps it on the agent's own model (test shim for the former `ModelSelectionRef`). */
+ const selectionOf = (target: typeof handle.agent) => ({ get current() { return target.model.current() }, set current(next) { if (next) target.model.select(next) } })
+ const selection = selectionOf(agent)
  const extra: { dispose(): unknown }[] = []
  /** A second main session in the same Host (test-only), starting from the same picker selection. */
  const createAgent = async (id: string) => {
-  const sel: ModelSelectionRef = { current: { provider: 'test', model: options.model ?? 'claude-opus-5-5', reasoningEffort: ReasoningEffortId('medium') }, assembled: undefined }
-  const other = await ctx.agents.create({ sessionId: SessionId(id), agentOptions: { provider: 'test', model: options.model ?? 'claude-opus-5-5' }, setup(c) { installModelSelection(c, sel) } })
+  const other = await ctx.agents.create({ sessionId: SessionId(id), agentOptions: initial, setup(c) { installModelSelection(c) } })
+  const sel = selectionOf(other.agent)
   extra.push(other)
   const { FileStateStore } = await import('../src/state.js')
   new FileStateStore(join(home, 'state/auto-model-routing/sessions')).set(other.agent.id, { mode: 'AUTO' })

@@ -3,11 +3,24 @@ import { expect, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Agents from '@deepseek-ai/dsh-agent'
 import Loop from '@deepseek-ai/dsh-agent-loop'
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native'
+// Real subagent stack (extra.real): official runtime, spawn provider, `subagent` tool and jsonl persistence; only the adapter and Jev are fakes.
+import Storage from '@deepseek-ai/dsh-storage'
+import * as Sqlite from '@deepseek-ai/dsh-storage-sqlite'
+import * as Domain from '@deepseek-ai/dsh-storage-domain'
+import * as Persistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import SessionQuery from '@deepseek-ai/dsh-session-query'
+import FsLocal from '@deepseek-ai/dsh-fs-local'
+import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import * as SpawnProvider from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
+import { realpathSync } from 'node:fs'
 import Sessions, { SessionId } from '@deepseek-ai/dsh-session'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
-import Llm, { LlmAdapter, ReasoningEffortId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import Llm, { LlmAdapter, ReasoningEffortId, ToolCallId, createUserMessage, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, unlinkSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -19,15 +32,18 @@ import * as Plugin from '../src/index.js'
 import { fakeJev, json } from './fake-jev.js'
 import { PolicyStore } from '../src/policy-store.js'
 import { BUILTIN_STRATEGIES, createRegistry, type FamilyStrategy } from '../src/strategies/index.js'
-// Test the installed SDK's real fold, not a local reimplementation of picker semantics.
+// Test the installed SDK's real selectModel (DSH 0.2.2: it records through agent.model.select; the projection is registered by the agent loop).
 const controllerEntry = pathToFileURL(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-api-session-controller'))
-const { installModelSelectionProjection } = await import(new URL('./types/model-selection-projection.js', controllerEntry).href)
 const { SessionCommandController } = await import(new URL('./types/commands.js', controllerEntry).href)
 const { ApiSessionAgentController } = await import(new URL('./types/agent.js', controllerEntry).href)
+/** 0.2.2: tools.execute takes a raw call batch; this returns the single settled outcome (the shape the former single-call API returned). */
+export async function callTool(ctx: Context, agent: Parameters<Context['tools']['execute']>[0]['agent'], name: string, args: unknown = {}, signal: AbortSignal = new AbortController().signal) {
+  return (await ctx.tools.execute({ calls: [{ type: 'tool-call', id: ToolCallId(`call-${Math.random()}`), name, arguments: JSON.stringify(args) }], ...(agent ? { agent } : {}), signal })).results[0]!.result
+}
 let close: (() => Promise<void>) | undefined
 /** Disposes the harness created last; call from `afterEach`. */
 export async function closePolicyHarness() { await close?.(); close = undefined }
-export async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' | 'deepseek' = 'claude', selectFails: boolean | 'missing' = false, main: { provider?: string; model?: string; efforts?: string[]; defaultEffort?: string } = {}, strategies?: readonly FamilyStrategy[], extra: { gatedCredentials?: boolean } = {}) {
+export async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' | 'deepseek' = 'claude', selectFails: boolean | 'missing' = false, main: { provider?: string; model?: string; efforts?: string[]; defaultEffort?: string } = {}, strategies?: readonly FamilyStrategy[], extra: { gatedCredentials?: boolean; real?: boolean; adapter?: (request: GenerateOptions, attempt: number) => AsyncIterable<StreamChunk> | undefined } = {}) {
   const provider = magpie || (family === 'deepseek' ? 'opencode-go' : family)
   const modelId = (id: string) => magpie ? `${family}/${id}` : id
   const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : family === 'deepseek' ? ['deepseek-v5'] : ['gpt-6.1-sol','gpt-6-luna']
@@ -58,13 +74,25 @@ export async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie
     }
     async *stream(r: GenerateOptions): AsyncIterable<StreamChunk> {
       calls.push(r); timeline.push('adapter')
+      const scripted = extra.adapter?.(r, calls.length)
+      if (scripted) { yield* scripted; return }
       if (answer) { yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text: answer }; yield { type: 'block-end', index: 0, block: { type: 'text', text: answer } } }
       yield { type: 'finish', reason: { kind: 'stop' } }
     }
   }
+  if (extra.real) {
+    forks.push(await ctx.plugin(Storage)); forks.push(await ctx.plugin(Sqlite, { path: ':memory:' })); forks.push(await ctx.plugin(Domain, { backend: 'sqlite' }))
+    forks.push(await ctx.plugin(Persistence, { root: mkdtempSync(join(realpathSync(tmpdir()), 'policy-real-')), compression: 'zstd' }))
+  }
   for (const p of [Projections,Sessions,Agents,Prompt,Tools,Llm]) forks.push(await ctx.plugin(p))
-  installModelSelectionProjection(ctx)
+  forks.push(await ctx.plugin(NativeExecutor)) // 0.2.2: the loop needs a tool executor in the composition
   forks.push(await ctx.plugin(Loop,{ agents: [] }))
+  if (extra.real) {
+    forks.push(await ctx.plugin(FsLocal, { cwd: realpathSync(tmpdir()) })); forks.push(await ctx.plugin(WorkingDirectory, { defaultDirectory: realpathSync(tmpdir()) }))
+    forks.push(await (ctx.plugin as unknown as (plugin: unknown) => PromiseLike<{ dispose(): unknown }>)(SessionQuery)) // its config type is mandatory in this composition; the default config applies
+    forks.push(await ctx.plugin(SubagentRuntime)); forks.push(await ctx.plugin(SpawnProvider, { providerName: 'spawn' }))
+    forks.push(await ctx.plugin(ToolSubagent, { provider: 'spawn', modelSelection: true }))
+  }
   for (const transport of new Set([provider, mainProvider])) ctx.llm.registerAdapter([transport], new Adapter())
   ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: 'synthetic-key' } }]) as never)
   // Optional test seam: credential resolution can be held to observe settings changes mid-judgement.
@@ -88,9 +116,9 @@ export async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie
     currentSelection: () => defaults.at(-1) ?? picked,
     saveSelection: async (selection: unknown) => { defaults.push(selection); timeline.push('defaults') },
   } as never)
-  // Real official selection/cache/consume methods; only live-agent lookup and defaults storage are inert ports.
+  // Real official selectModel; only live-agent lookup and defaults storage are inert ports.
   const owner = Object.assign(Object.create(ApiSessionAgentController.prototype), {
-    ctx, selections: new WeakMap(), imageAdmissionChains: new WeakMap(),
+    ctx, imageAdmissionChains: new WeakMap(),
     resolveAgent: async (id: string) => ({ agent: ctx.agents.get(SessionId(id))! }),
   })
   const commands = new SessionCommandController(ctx, owner, home)
@@ -107,40 +135,38 @@ export async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie
   } as never)
   const routes = new Map<string, { fetch: (request: Request) => Promise<Response> }>()
   ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (request: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
-  ctx.on('session/event', (session, event) => {
-    if (event.type === 'request/header') {
-      const config = session.requestHeader()!.config
-      const agent = ctx.agents.get(session.id)
-      if (agent) owner.consumeSelection(agent, config.provider, config.model, config.reasoningEffort)
-    }
-  })
   let pluginConfig: Plugin.Config = { home, jevBase: jev.base, ...(strategies ? { strategies } : {}) }
   let plugin = await ctx.plugin(Plugin, pluginConfig)
   // The Host routes need both the connection and the session controller; the "missing controller" case mounts neither.
   if (selectFails !== 'missing') await expect.poll(() => routes.size).toBe(9)
   const parent = await ctx.agents.create({ sessionId: SessionId('parent'), agentOptions: picked }); handles.push(parent)
-  if (pendingPick) owner.selectForNextRequest(parent.agent, picked)
-  else owner.selectionFor(parent.agent)
-  const pickMain = (nextProvider: string, nextModel: string) => owner.selectForNextRequest(parent.agent, { provider: nextProvider, model: nextModel })
+  // 0.2.2: the official selection is the agent's own `model` (no controller-side pending pick / consume).
+  if (pendingPick) parent.agent.model.select(picked)
+  const pickMain = (nextProvider: string, nextModel: string) => parent.agent.model.select({ provider: nextProvider, model: nextModel })
   const callEndpoint = async (operation: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${operation}`)!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }))).json()
   const run = async (agent: typeof parent.agent, text: string) => { agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })); await agent.whenIdle() }
   let n = 0
   let beforeChildRun: (() => unknown) | undefined
   let childTask = 'Apply the exact supplied mechanical transformation'
-  ctx.tools.register(defineTool({ name: 'subagent', description: 'Test official tool-dispatch boundary; not a real provider test', output: { schema: { type: 'object', additionalProperties: false, properties: { childId: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: value.childId ?? '' }] }, parameters: { model: { type: 'string' }, reasoning_effort: { type: 'string' } }, execute: async (args, exec) => {
+  if (!extra.real) ctx.tools.register(defineTool({ name: 'subagent', description: 'Test official tool-dispatch boundary; not a real provider test', output: { schema: { type: 'object', additionalProperties: false, properties: { childId: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: value.childId ?? '' }] }, parameters: { prompt: { type: 'string' }, model: { type: 'string' }, reasoning_effort: { type: 'string' } }, execute: async (args, exec) => {
     const child = await ctx.agents.create({ sessionId: SessionId(`child-${++n}`), parentAgent: exec.agent!, meta: { origin: 'subagent', parentSession: parent.agent.id }, agentOptions: { provider, model: args.model ?? modelId(modelIds[0]!) } }); handles.push(child)
     await beforeChildRun?.()
-    await run(child.agent, childTask)
+    await run(child.agent, typeof args.prompt === 'string' ? args.prompt : childTask)
     return { childId: child.agent.id }
   } }))
-  const invoke = (args = {}) => ctx.tools.execute({ name: 'subagent', arguments: args, agent: parent.agent, callId: `call-${++n}` as never, signal: new AbortController().signal })
+  // 0.2.2: tools.execute takes a raw call batch; return the single settled outcome (same shape the old single-call API returned).
+  // The official tool's task text is its `prompt` argument (the child's first user message), as in the real `subagent` tool.
+  const invoke = (args: Record<string, unknown> = {}, signal?: AbortSignal) => callTool(ctx, parent.agent, 'subagent', { ...(extra.real ? { description: 'task' } : {}), prompt: childTask, ...args }, signal)
+  /** Real stack only: the live managed child (the official runtime owns its lifetime) and its settled state. */
+  const liveChild = () => ctx.agents.list().find(agent => agent.session.header.origin === 'subagent')
+  const settle = async () => { await expect.poll(() => liveChild()).toBeDefined(); await liveChild()!.whenIdle() }
   const store = new PolicyStore(join(home, 'state/auto-model-routing/policy-v2'), strategies ? createRegistry(strategies) : undefined)
   // Set the mode through the same persisted store used by production (no controller dependency).
   const { FileStateStore } = await import('../src/state.js')
   const modes = new FileStateStore(join(home, 'state/auto-model-routing/sessions'))
   modes.set(parent.agent.id, { mode: 'AUTO' })
   close = async () => { for (const h of handles.reverse()) await h.dispose(); await plugin.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
-  return { ctx, parent: parent.agent, handles, calls, invoke, callEndpoint, pickMain, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
+  return { ctx, parent: parent.agent, handles, calls, invoke, liveChild, settle, callEndpoint, pickMain, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
     tools: () => ctx.tools, setAnswer: (text: string) => { answer = text }, holdCredentials,
     beforeChildRun: (fn: (() => unknown) | undefined) => { beforeChildRun = fn }, setChildTask: (text: string) => { childTask = text },
     restart: async (next?: readonly FamilyStrategy[]) => { await plugin.dispose(); if (next) pluginConfig = { home, jevBase: jev.base, strategies: next }; plugin = await ctx.plugin(Plugin, pluginConfig) } }

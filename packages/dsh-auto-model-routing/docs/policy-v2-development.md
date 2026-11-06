@@ -10,7 +10,7 @@
 
 - [Jev 契约](../src/jev.ts)：复用认证、deadline、body 上限、错误分类；原 tier 问题不变。新主请求只问 depth；子请求一次问 capability/depth，显式约束只问未指定维度。
 - [独立映射](../src/routing.ts)（当时为 `src/policy-v2.ts`）：版本化能力槽，effort 推荐起点按受支持序列最多移动一档，受 cap 限制，不自动使用 max。映射是初始基线，Codex analytical/frontier 都是 Sol，未虚构第三模型。
-- [宿主接入](../src/policy-host.ts)：官方 `tools/execute` → AsyncLocalStorage → `agent/created` 绑定精确 child ID 和 parent/root；不依赖 prompt 相似度。`agent/pre-step` 获取首次任务并决策，`agent/request` 应用；`request/header` 记录匹配证据。
+- [宿主接入](../src/policy-host.ts)：官方 `tools/execute` → AsyncLocalStorage → `agent/created` 绑定精确 child ID 和 parent/root；不依赖 prompt 相似度。主会话在每一步的 `agent/pre-step` 中算 effort，先 `selectModel` 同步再写入本步固定的选择（DSH 0.2.2 起 `agent/request` 不能再改写，与本步选择不一致会抛错）；受管子会话在其 `agent/created` 中用创建工具的 `prompt` 判断，并用 `agent.model.select(route)` 写入子会话自己的选择；`agent/request` 只核验；`request/header` 记录匹配证据。
 - [持久化](../src/policy-store.ts)：每 child 哈希路径、严格 schema、owner-only 原子替换，只有身份/版本/约束/路由/状态，不含任务原文。缺失、损坏、未完成恢复不默默继承；未完成决策不能用后续消息重新分类。
 - [工具](../src/subagent-tool.ts)：policy-v2 下 optional preview，仅 recommended；普通创建工具负责精确应用，不把预览冒充 applied。
 - [设置](../src/client/settings-section.ts)：无用户版本开关；省略即新策略，旧四档表仅在显式 legacy 回滚时显示。当前能力槽是版本化代码，不新增另一套可编辑映射表。
@@ -24,11 +24,11 @@
 | 官方 fresh teammate 工具与服务 | 同上 | 创建、后续消息和全宿主恢复通过，不重选 |
 | 并发创建与显式模型/effort | [宿主测试](../test/policy-host.integration.test.ts)官方 Tools/Agents，测试创建工具 | 并发精确身份隔离；两者指定零判断；普通/teammate 官方 provider 的并发压力未测 |
 | fork / teammate fork | tools wrapper 可提前拒绝 | unsupported，真实历史兼容未验证，不擅自转 fresh |
-| 未绑定 service API、别名工具、远端 ACP | 进入子 pre-step 时若发现启用 v2 而无绑定则停止 | 不宣称支持；根链不可达时不作自动决策。未宣称能阻止进程外原生创建 |
+| 未绑定 service API、别名工具、远端 ACP | 子会话请求时若发现启用 v2 而无绑定则停止 | 不宣称支持；根链不可达时不作自动决策。未宣称能阻止进程外原生创建 |
 | MANUAL / 切回原策略 | unit + host tests | 不做新判断；已绑定实例保留创建初始路线，不因后续消息换模 |
 | needs-context / Jev 402 / 配置失效 | host tests | 子请求停止，根仍 AUTO，不静默替代或自治重试 |
 | 恢复损坏 / 身份不匹配 | store tests | fail closed；单进程按 child 写，无跨进程争用/崩溃注入证明 |
-| 实际请求被其它 middleware 改写 | host mismatch test | 记录 failed，不标 applied；header observer 抛错为尽力阻断，不将配置匹配等同调用成功 |
+| 实际请求与路线不一致 | host mismatch test | 记录 failed，不标 applied；`agent/request` 核验与 header observer 抛错为尽力阻断（0.2.2 起运行体自身也拒绝与本步选择不一致的 `agent/request` 结果），不将配置匹配等同调用成功 |
 | 当前允许列表与父快照 | 新鲜 catalog 校验 + 父 `subagent/model-selection-policy`（存在时） | 不用较新全局列表扩大父快照；整链脚本的 allowlist 是合成 service seam，未验证真实 GUI 设置装配 |
 
 适配器/Jev 都为 fake 的宿主测试不证明真实 provider 兼容、真实工具 schema 部署或网络效果。实际 `applied` 只代表 request/header 配置匹配，不代表任务验收、模型成功或底层 provider 尊重 effort。

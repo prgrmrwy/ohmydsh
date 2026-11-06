@@ -5,7 +5,7 @@ import { closeHarness, depth, harness as mainHarness, lastAssistantId } from './
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { closePolicyHarness, harness as childHarness } from './policy-harness.js'
+import { callTool, closePolicyHarness, harness as childHarness } from './policy-harness.js'
 
 afterEach(async () => { await closeHarness(); await closePolicyHarness() })
 
@@ -16,7 +16,7 @@ const CHILD_LINE = 'Execution: delegated subtask; the result returns to an orche
 type Body = { state: string; questions: Record<string, unknown> }
 const bodies = (h: { jev: { bodies: unknown[] } }) => h.jev.bodies as Body[]
 const preview = (h: Awaited<ReturnType<typeof childHarness>>, task: string) =>
-  h.ctx.tools.execute({ name: 'route_subagent', arguments: { task, provider: 'claude' }, agent: h.parent, callId: `preview-${Math.random()}` as never, signal: new AbortController().signal })
+  callTool(h.ctx, h.parent, 'route_subagent', { task, provider: 'claude' })
 
 it('spec Scenario "启用 execution 的预设加入固定行"', async () => {
   const m = await mainHarness(depth('baseline'), { config: { preset: 'effort-as-verification' } })
@@ -83,18 +83,21 @@ it('spec Scenario "主判断进行中切换预设"', async () => {
 })
 
 it('spec Scenario "子任务在创建后、首次判断前切换预设"', async () => {
+  // DSH 0.2.2: the child's judgement runs in its `agent/created` (the credential gate holds it in flight); the preset is
+  // captured when it starts. A change while it is in flight, and another after creation and before the first request, change nothing.
   const c = await childHarness(false, false, 'claude', false, {}, undefined, { gatedCredentials: true })
-  c.configure({ preset: 'reasoning-depth' })
-  c.beforeChildRun(() => {
-    c.configure({ preset: 'effort-as-verification' })
-    const release = c.holdCredentials()
-    void release.reached.then(() => { c.configure({ preset: 'reasoning-depth' }); release() })
-  })
+  c.configure({ preset: 'effort-as-verification' })
+  const release = c.holdCredentials()
+  void release.reached.then(() => { c.configure({ preset: 'reasoning-depth' }); release() })
+  c.beforeChildRun(() => { c.configure({ preset: 'effort-as-verification' }) })
   await c.invoke()
   const sent = bodies(c)
   expect(sent).toHaveLength(1)
   expect(sent[0]!.questions).toEqual(EAV)
   expect(sent[0]!.state).toContain(CHILD_LINE)
+  const child = c.handles[1]!.agent
+  const route = c.store.get(child.id)!.route!
+  expect(c.calls.at(-1)).toMatchObject({ provider: route.provider, model: route.model, reasoningEffort: route.reasoningEffort })
 })
 
 it('spec Scenario "预览进行中切换预设"', async () => {

@@ -36,7 +36,9 @@
 
 **未来方向：** 增加基于本机反馈与执行结果的学习、评估和策略调整，让 AUTO 更贴合你的任务。**尚未实现自动学习或反馈驱动调参**，目前记录用于后续评估，不承诺已证明的质量提升或成本节省。
 
-**安装**：已验证 DSH `0.2.0-rc.2`、Web UI，Node.js `>=22.19`。
+**安装**：本版本线要求 DSH `>=0.2.2-rc.1 <0.3.0`（已验证 `0.2.2-rc.1`）、Web UI，Node.js `>=22.19`。
+
+**版本线**：DSH 0.2.0–0.2.1 继续使用已发布的 0.7.x / 0.6.x；DSH 0.2.2 起使用本插件新的 minor 版本（版本号发版时确定，不复用已发布的 0.7.0）。兼容下界抬到 `0.2.2-rc.1`，是因为 AUTO 现在依赖 `agent.model.select` 和 0.2.2 的“每步固定选择”，0.2.0/0.2.1 都没有，详见 [Changelog](CHANGELOG.md)。
 
 ```sh
 dsh plugin --profile web add dsh-auto-model-routing
@@ -57,12 +59,12 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 ### 主模型不换，子任务独立选配
 
-- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；通过官方 `selectModel` 同步选定 effort，同时保存全局默认值。同步失败会记录告警，本次请求保留官方原有 effort；MANUAL 请求原样通过，已绑定子会话不写主选择。
+- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；在每一步的 `agent/pre-step`（DSH 0.2.2 已固定本步选择、尚未生成请求）先通过官方 `selectModel` 同步选定 effort（同时保存全局默认值），再写入本步固定的选择，所以回合的第一个请求就已带上它。同步失败或运行体传来冻结的选择时记录告警，本步保留官方原有 effort（冻结时从下一步起生效）；这依赖运行体的实现细节，由 `test/runtime-selection.e2e.test.ts` 锁定；MANUAL 请求原样通过，已绑定子会话不写主选择。
 - **只管理已注册家族**：主模型的家族有注册策略时 AUTO 才接管；内置 `claude-` 与 `gpt-` 两个家族，id 在去掉 transport 前缀后匹配。切换到其他主模型（DeepSeek、GLM、Grok、Gemini、Kimi、Qwen 等）会自动落为 MANUAL 并锁定芯片：芯片显示描边 info 图标，悬停整个按钮说明支持范围并提供仓库的 issue/PR 链接。切回受支持模型后芯片恢复可点击且保持 MANUAL，不会自动重新启用 AUTO。新增家族属于数据变更而非引擎变更，见[自定义模型家族](#自定义模型家族)。
 - **fresh 子任务**：能力需求为 `bounded / analytical / frontier`，推理投入独立判断。Claude 能力槽为 Haiku / Sonnet / Opus 5.5；GPT 为 Luna / Sol / Sol。实际路由必须同时满足当前目录、支持的 effort 和官方子智能体允许列表。路由保留父会话精确 provider 与完整 model ID（含 transport 前缀），不回退到其它 provider。
 - **尊重显式选择**：只指定模型或投入时，仅判断另一维；两者都指定则不请求 Jev，只校验路由。缺少任务目标或范围时停止委派，不猜。
-- **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在子任务首次请求前绑定精确身份。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束；根会话为 MANUAL 时它直接返回 `routed: false`，不判断、不写状态。fork 和未绑定创建路径暂不支持，不静默替换。
-- **恢复保持初始路线**：根会话改为 MANUAL 后停止新判断，已有绑定子实例维持原路线。`applied` 只证明实际请求配置匹配，**不代表任务成功**。Claude/GPT 普通子调用已在真实模型上验证；fresh teammate 路由及冷恢复有 mock 宿主覆盖，不等于真实模型 teammate 已验收。
+- **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在创建子任务时绑定精确身份：判断在子会话的 `agent/created` 中完成（首条消息投递之前等待，可随创建一起取消），路线写入子会话自己的选择，不写全局默认；`agent/request` 在每次请求（含重试）只核验。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束；根会话为 MANUAL 时它直接返回 `routed: false`，不判断、不写状态。fork 和未绑定创建路径暂不支持，不静默替换。
+- **恢复保持初始路线**：根会话改为 MANUAL 后停止新判断，已有绑定子实例维持原路线（0.2.1 记录、首个请求前中断的子会话，恢复时补写其路线，不重新判断）。`applied` 只证明实际请求配置匹配，**不代表任务成功**。Claude/GPT 普通子调用已在真实模型上验证；fresh teammate 路由及冷恢复有 mock 宿主覆盖，不等于真实模型 teammate 已验收。
 
 ### 选择决策服务
 
