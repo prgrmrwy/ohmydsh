@@ -168,7 +168,7 @@ customizations:
     version: 0.7.0
     enabled: true
     brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
-    note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识在src/strategies注册表,与网关解耦。判档问题来自内置不可变预设(src/presets,缺省reasoning-depth=旧rubric逐字节,可选effort-as-verification),设置preset选择,快照记preset。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义可选,凭据走credentials或只读启动环境;外发≤8000字当前任务及前轮摘要,形态脱敏尽力。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json;状态与反馈:$DSH_HOME/state/auto-model-routing,反馈仅观察。fork不支持;teammate仅mock覆盖。降级0.6.6:preset被忽略,带preset绑定被旧版跳过(账本不改)。回滚到0.4.2见CHANGELOG。停用:enabled:false→dsh build。'
+    note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识在src/strategies注册表,与网关解耦。判档问题来自内置不可变预设(src/presets,缺省reasoning-depth=旧rubric逐字节,可选effort-as-verification),设置preset选择,快照记preset。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义可选,凭据走credentials或只读启动环境;外发≤8000字当前任务及前轮摘要,形态脱敏尽力。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json;状态与反馈:$DSH_HOME/state/auto-model-routing,反馈仅观察。fork不支持;teammate仅mock覆盖。降级0.6.6:preset被忽略,带preset绑定被旧版跳过(账本不改)。0.6.7修热载后芯片消失。回滚到0.4.2见CHANGELOG。停用:enabled:false→dsh build。'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package
@@ -415,10 +415,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.6.8
+    version: 0.6.10
     enabled: true
     brief: 接入自托管 Magpie 网关；按 owned_by 原生分组，含保存前线路检查、用量卡片、侧栏额度卡与 Access
-    note: '自研 MIT,change:add-dsh-magpie-plugin;0.3.0 BREAKING:按网关 owned_by 注册多 route dsh-magpie-connector-<owner>,旧单 route 无别名,AUTO/guard 需另适配(ROUTE_CHANGED)。信任面:只读线路凭据、不回显、探测仅 TCP、undici 只直连白名单 API 拒重定向。0.6.3 首个写操作:Codex 重置卡(周用量≥80%、只用最早到期那张、两段确认、4xx=未消耗、应答不可解析锁账号到重启);白名单加 POST /magpie/quotas/codex-reset(必须 user+credit)。0.6.6 侧栏额度卡:手风琴、sidebarRefreshMinutes、重置卡折叠列表;收起行显示到期时间(缺失 —);档位 sidebarWindows 多选;正文 320px、隐藏滚动条、双下箭头占位不抖动;样式表 inject document.head(修复重启后裸文字)。0.6.7-8 重截中英 README 演示图、修正 320px 文案;测试兼容宿主 0.2.0/0.2.1 监听器语义。⚠入口(CF+nginx)放行 codex-reset 前会显示403/404;key 需完整权限。移除:enabled:false → dsh build → 重启。'
+    note: '自研 MIT,change:add-dsh-magpie-plugin;0.3.0 BREAKING:按 owned_by 注册多 route dsh-magpie-connector-<owner>,旧单 route 无别名,AUTO/guard 需适配(ROUTE_CHANGED)。信任面:只读线路凭据、不回显、探测仅 TCP、undici 只直连白名单、拒重定向。0.6.3 首个写操作:Codex 重置卡(周用量≥80%、只用最早到期那张、两段确认、4xx=未消耗、应答不可解析锁账号到重启);白名单加 POST /magpie/quotas/codex-reset。0.6.6 侧栏额度卡:手风琴、sidebarRefreshMinutes、重置卡折叠、sidebarWindows 多选、320px 限高。0.6.9 定时刷新改真实刷新(网关 GET cards 只回缓存,改发全量刷新 POST cards {all:true},失败静默旧读数)。0.6.10 修复热载后客户端 UI 全消失:语言字典 effect 未返 disposer,重建 bundle 重新 apply 时 register 重名抛错。⚠入口(CF+nginx)放行 codex-reset 前会显示403/404;key 需完整权限。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。

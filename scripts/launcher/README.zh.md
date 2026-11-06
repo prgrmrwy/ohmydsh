@@ -28,3 +28,19 @@ DSH_TEST_OFFICIAL_RUNTIME=/absolute/path/to/built/launcher \
 ```
 
 覆盖范围包括：完整发行的 base+Web profile 与 presets 无需 legacy 即可停止、成功展开的 group/include 树、Pet 导入失败、Pet 声明被禁用、活跃的未知载体、保留的旧 preset revision、cookie/Host/Origin/nonce/PID/boot 拒绝、resume 使票据失效以及拓扑变化。它不能替代 Pet producer 的 H2 真机排空验收或 Windows 运行体验证。
+
+## 受管非 web profile Host
+
+`DSH_PROFILE=<profile> dsh -p <port>` 受管启动 `web` 以外的 profile Host（例如 `DSH_PROFILE=superagent dsh -p 3082 --foreground`），与 `dsh web` 共用精确 pin、Host 运行体解析、归属探测和启动历史。Host 参数为 `<profile> --port <port> --no-open …`，归属判定按该 profile 精确匹配：web 探测不会认领非 web 监听者，反之亦然。不设置 `DSH_PROFILE` 时，`web` 行为不变。
+
+限制：
+
+- 必须显式 `-p/--port`，默认端口属于 web Host；`$DSH_HOME/profiles/<profile>/cordis.yml` 必须已存在。
+- profile 的 `cordis.patch.yml` 若给 `webserver` 写了 `config`，会整块替换 Web bundle 的端口配置，Host 将忽略 `--port`。要么让其中的 `port` 与 `-p` 一致，要么删掉这条。
+- 只托管启动。不加载 no-pet-stop patch（自定义 profile bundle 过不了其静态模块认证），因此不发布停机 descriptor，`dsh stop/restart` 在发出任何信号前拒绝。请用该 Host 自己的管理脚本停止；明确的人工维护可用 `--allow-legacy-restart`，此时没有 Pet drain 保证。
+- `build`、`-b`、`reset`、`plugin-update`、`doctor` 一律拒绝，启动路径也跳过 `autoUpdate`：它们都会按 `DSH_PROFILE` 运行 sync 或插件维护，把 ohmydsh 定制写进另一个 profile。worktree 预览只支持 `web`。`history` 仍可用，每条记录都带 `profile=<profile>`。
+- 进程 scope 隔离由调用方负责，launcher 不加 detach 逻辑。在 DSH 会话内启动的 Host 属于该会话 Host 的子进程 scope；调用方应以 transient systemd user service 启动，例如 `systemd-run --user --wait --collect --unit=dsh-superagent-superagent -p StandardOutput=append:<log> -p StandardError=append:<log> -- env DSH_PROFILE=superagent dsh --foreground -p 3082 --no-open`。不要用 `--scope`：它的 client 进程就是被执行的命令本身，仍在调用方的 pane 或进程组里，tmux pane 或会话 scope 被清理时 Host 会一起死；service 的父进程是 user manager，不受影响。后台模式与 web Host 共用 `$DSH_HOME/dsh.log`。
+
+```sh
+node --test tests/launcher-managed-profile.test.mjs
+```

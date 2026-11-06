@@ -229,7 +229,12 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
 const labelUi = { Tooltip, Menu, Icon: IconGaugeOutlineRegular } as unknown as LabelUi
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => { ctx.locale.register(NS, { zh, en }); return () => {} }, 'auto-model-routing: dictionaries')
+  // Return the locale disposer: a client bundle rebuilt while the page is open
+  // re-applies this entry against the same long-lived locale service, which
+  // refuses a namespace it already holds ("already has locale"). Leaking the
+  // old dictionaries made every hot reload fail and took the AUTO chip, the
+  // settings section and the label button down until a page reload.
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'auto-model-routing: dictionaries')
   bindLocale(ctx.locale.bind(NS) as unknown as Parameters<typeof bindLocale>[0])
   // Optional acceleration only: the official picker's per-session store triggers an immediate state read.
   // When the service is absent (or appears late) the chip's 3s poll remains the source of truth.

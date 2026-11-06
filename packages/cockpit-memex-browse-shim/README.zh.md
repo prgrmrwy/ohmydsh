@@ -7,6 +7,17 @@ dsh-memex 跑在另一台机器上时，它的「打开卡片」按钮会把浏�
 
 部署侧唯一耦合点：把 bridge 的端口转发注册给 memex 通用浏览地址扩展。两端源码与依赖互不引用，移除 shim 即解耦。
 
+## 安装
+
+与两端一起安装：[dsh-cockpit-bridge](https://github.com/prgrmrwy/dsh-cockpit) >= 0.6.1（以 GitHub Release tarball 分发）和 `dsh-memex`。
+
+```sh
+dsh plugin --profile web add https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz
+dsh plugin --profile web add dsh-cockpit-memex-browse-shim
+```
+
+然后重启 DSH web。卸载：`dsh plugin --profile web remove dsh-cockpit-memex-browse-shim`。
+
 ## 0.2.0 行为与前置
 
 - 要求 bridge 提供 `cockpitBridge.forwards`（正式部署 pin 0.6.4）。不再支持旧 `portForward` / channel register / publish 契约。
@@ -28,3 +39,7 @@ dsh-memex 跑在另一台机器上时，它的「打开卡片」按钮会把浏�
 本 shim 连接两端：`dsh-cockpit-bridge` 的 **`cockpitBridge.forwards` 端口转发服务**，与 `dsh-memex` 的 **`dshMemex.browseAddress` 注册点**。两端源码与依赖互不引用，shim 是两者唯一的交汇点。
 
 当你不再通过 dsh-cockpit 跨机器打开 memex 卡片，或任一端原生提供该集成时即可移除：删除 manifest 条目 → `dsh build` → 重启，两端无需迁移。需要回滚旧 shim 时必须同时回滚 bridge 到提供旧服务的版本；不要把 0.1.1 shim 与 bridge 0.6.x 混用。
+
+## 来源与许可证
+
+源码在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 的 `packages/cockpit-memex-browse-shim` 中持续维护，[dsh-cockpit-memex-browse-shim](https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim) 是发布镜像。以 [MIT 许可证](LICENSE) 发布，欢迎到 https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim/issues 提 issue 或 PR。
