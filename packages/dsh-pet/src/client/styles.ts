@@ -877,8 +877,10 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 /* The rail: a 1px line with a node per row. The node IS the status, so the row
    no longer needs a separate pill to say the same thing twice. */
 .dshpet-settings .dshpet-rail{margin:6px 0 0 6px;border-left:1px solid var(--dsw-alias-border-l2,#0000001a)}
+/* The text column never gives up its width to the tail: it keeps a real
+   minimum and wraps, and the tail wraps its controls instead of growing. */
 .dshpet-settings .dshpet-locus-row{position:relative;display:grid;
-  grid-template-columns:minmax(0,1fr) auto;column-gap:10px;padding:7px 0 7px 16px}
+  grid-template-columns:minmax(12em,1fr) auto;column-gap:10px;padding:7px 0 7px 16px}
 .dshpet-settings .dshpet-locus-row + .dshpet-locus-row,
 .dshpet-settings .dshpet-locus-chat + .dshpet-locus-chat{
   border-top:.5px solid var(--dsw-alias-border-l2,#0000001a)}
@@ -892,12 +894,12 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-node[data-tone="warn"]{background:var(--dsw-alias-state-warn-label,#dd8629)}
 .dshpet-settings .dshpet-locus-node[data-tone="off"]{background:var(--dsw-alias-state-error-primary,#ec1313)}
 .dshpet-settings .dshpet-locus-node[data-tone="gone"]{background:#c3c8cf}
-.dshpet-settings .dshpet-locus-row-body{display:flex;flex-direction:column;gap:1px;min-width:0}
+.dshpet-settings .dshpet-locus-row-body{display:flex;flex-direction:column;gap:1px;min-width:12em}
 .dshpet-settings .dshpet-locus-row-line{display:flex;align-items:baseline;gap:8px;
   min-width:0;flex-wrap:wrap}
 .dshpet-settings .dshpet-locus-name{font:500 14px/22px var(--dsw-font-family,inherit);
   color:var(--dsw-alias-label-primary,#0f1115);
-  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;
   max-width:22em}
 /* A fallback name is not a real name: it reads quieter and says so in the list. */
 .dshpet-settings .dshpet-locus-name[data-placeholder="true"]{
@@ -908,7 +910,7 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-session-title{flex:0 1 auto;min-width:0;max-width:14em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dshpet-settings .dshpet-locus-row-tail{display:inline-flex;align-items:center;gap:6px;
-  flex:none;align-self:start}
+  flex:none;align-self:start;flex-wrap:wrap;justify-content:flex-end;max-width:min(26em,55%)}
 .dshpet-settings .dshpet-locus-more{border:0;background:0 0;padding:0 2px;cursor:pointer;
   font:var(--dsw-font-xs-13,400 12px/18px inherit);
   color:var(--dsw-alias-label-secondary,#61666b);white-space:nowrap}
@@ -942,12 +944,15 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
    only as the container of visible topics reads quieter than a full row. */
 .dshpet-settings .dshpet-locus-chat{display:flex;flex-direction:column}
 .dshpet-settings .dshpet-locus-row[data-container="true"]{opacity:.8}
-/* 「改绑到其他会话」 sits on the row itself; its dialog wraps below the button. */
-.dshpet-settings .dshpet-locus-rebind{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
-.dshpet-settings .dshpet-locus-rebind-dialog{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
-  flex-basis:100%;padding:6px 8px;border-radius:8px;
-  background:var(--dsw-alias-bg-module-platform,#0000000a)}
-.dshpet-settings .dshpet-locus-rebind-dialog .dshpet-input{min-width:18em}
+/* 「改绑到其他会话」: the button sits in the row's tail; the form opens as its
+   own full-width block under the row (a sibling, never a grid child), solid so
+   nothing underneath shows through. */
+.dshpet-settings .dshpet-locus-rebind-form{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  margin:2px 0 8px 16px;padding:8px 10px;border-radius:10px;
+  background:var(--dsw-alias-bg-layer-1,#ffffff);
+  border:1px solid var(--dsw-alias-border-l4,#00000029)}
+.dshpet-settings .dshpet-locus-rebind-form .dshpet-input{flex:1 1 18em;min-width:0;max-width:32em}
+.dshpet-settings .dshpet-locus-rebind-note{flex-basis:100%;white-space:normal}
 
 .dshpet-settings .dshpet-locus-nodelete{margin-top:12px;max-width:620px}
 

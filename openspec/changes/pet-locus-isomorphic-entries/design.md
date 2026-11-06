@@ -87,7 +87,7 @@
 
 - 入口：管理面上群行或文档根那一行，按钮**直接放在行上**，名为「改绑到其他会话」，输入工作会话 sessionId。走通用 `locus-action` 路由，请求为 `{action:'rebind', chatId, workSessionId, expectedLocusId, expectedRevision}`，围栏用群行的值。
 - Host 依次检查，首个不满足即拒绝：群行存在（`LOCUS_NOT_FOUND`）；围栏匹配（`LOCUS_CONFLICT`）；当前 W 已归档（`INVALID_REQUEST`）；目标是普通一级会话，未归档、不是子会话、不是任何 locus 主会话（`INVALID_REQUEST`）；同 `chatId` 下没有 current 投递（`LOCUS_BUSY`）。
-- 执行：`beginProvisioning(kind:'rebind')`，持 W1 的 main lease；`ensureLocusMain(W1)`（没有就新建，资源记入该操作）；然后调用 D17 的 `resetChat`，参数 `{toM: M1, workspaceId: W1 的工作区, reboundFrom: 原 W, clearDefaultQa: true}`。提交前任何失败只补偿本操作新建的 M1/空间。
+- 执行：`beginProvisioning(kind:'rebind')`，持 W1 的 main lease；`ensureLocusMain(W1)`（没有就新建，资源记入该操作）；W1 的 active M 不可用时，先对 W1 执行 D7 的整 W 迁移，W1 其它群有 current 时 `LOCUS_BUSY`（实现阶段补充，2026-11-06）；然后调用 D17 的 `resetChat`，参数 `{toM: M1, workspaceId: W1 的工作区, reboundFrom: 原 W, clearDefaultQa: true}`。提交前任何失败只补偿本操作新建的 M1/空间。
 - 不做的事：不换 `locusId`；不归档旧子会话（D15 保证它们不能再运行）；不动旧 M 和旧协作空间；不迁移协作条目；不发群消息，回执只出现在管理面；不占用 W1 的默认 Q&A。
 - 被否决的备选：允许任意时候改绑；迁移协作条目；归档旧子会话或发切换通知（理由同前）。
 

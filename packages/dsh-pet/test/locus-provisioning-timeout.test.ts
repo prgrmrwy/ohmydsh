@@ -155,3 +155,34 @@ describe('provisioning 失败超时后不再阻塞', () => {
     await harness.close()
   })
 })
+
+describe('失败的 provisioning 只在有资源待回收时才阻塞入口', () => {
+  async function failedWith(refs: boolean) {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    let clock = 1_000_000
+    const repository = new LocusRepositoryV20(harness.domain as never, { now: () => clock })
+    repository.setProvisioningCompensators({ locusMainSession: async () => {} })
+    await repository.beginProvisioning({ provisioningId: 'provisioning-failed', kind: 'rebind', chatId: ENDPOINT.chatId, startedAt: clock - 5 })
+    if (refs) await repository.recordProvisioningResource('provisioning-failed', { locusMainSessionId: 'session-locus-main' })
+    await repository.failProvisioning('provisioning-failed', 'runtime failure')
+    const T0 = (repository.getOperation('provisioning-failed') as { updatedAt: number }).updatedAt
+    return { harness, repository, T0 }
+  }
+
+  it('失败且没有任何 resourceRefs：立刻可重试', async () => {
+    const { harness, repository, T0 } = await failedWith(false)
+    try {
+      await expect(retry(repository, T0 + 1_000)).resolves.toBeUndefined()
+      expect(repository.getOperation('provisioning-failed')?.phase).toBe('compensated')
+    } finally { await harness.close() }
+  })
+
+  it('失败且带 resourceRefs：10 分钟内仍然阻塞 (LOCUS_CONFLICT)', async () => {
+    const { harness, repository, T0 } = await failedWith(true)
+    try {
+      await expect(retry(repository, T0 + 1_000)).rejects.toMatchObject({ code: 'LOCUS_CONFLICT' })
+      expect(repository.getOperation('provisioning-failed')?.phase).toBe('failed')
+    } finally { await harness.close() }
+  })
+})

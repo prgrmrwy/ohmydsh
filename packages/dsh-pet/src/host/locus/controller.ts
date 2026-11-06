@@ -621,6 +621,15 @@ export class LocusController {
       if (this.repo.hasCurrentDeliveryInChat(chatId)) {
         throw new LocusControllerError('LOCUS_BUSY', '该群有处理中的投递，请空闲后再改绑。')
       }
+      // The target W's active M is dead: no @ will ever come on the management
+      // path, so migrate the whole W first (retire it, activate a fresh M1).
+      const targetMain = this.repo.findActiveMain(target.id)
+      if (targetMain !== undefined && !(await this.isMainUsable(targetMain))) {
+        const migrated = await this.migrateWholeW(target.id, chatId)
+        if (!migrated.migrated && migrated.reason === 'current-delivery') {
+          throw new LocusControllerError('LOCUS_BUSY', '目标会话的另一个群有处理中的投递，请稍后再改绑。')
+        }
+      }
       const provisioningId = `provisioning-${this.id()}`
       await this.beginProvisioning({ provisioningId, kind: 'rebind', chatId, workSessionId: target.id })
       const resources: ProvisionedResources = {}
@@ -1054,6 +1063,16 @@ export class LocusController {
     try {
       await this.repo.beginProvisioning({ ...input, startedAt: this.now() })
     } catch (error) {
+      // A repository refusal keeps its code: the owner needs the truthful reason.
+      const code = (error as { code?: unknown } | null)?.code
+      const message = error instanceof Error ? error.message : ''
+      if (code === 'LOCUS_CONFLICT' || code === 'LOCUS_BUSY') {
+        const text = message.includes('failed recently') ? '该群上一次操作刚失败，约 10 分钟后可重试。'
+          : message.includes('compensation failed') ? '该群上一次失败操作的清理未完成，下一次请求会重试。'
+          : message.includes('is still') ? '该群有另一个操作正在进行，请稍后再试。'
+          : message
+        throw new LocusControllerError(code, text, error)
+      }
       throw new LocusControllerError('PROVISIONING_FAILED', `无法登记 ${input.kind} provisioning，已停止外部创建。`, error)
     }
   }

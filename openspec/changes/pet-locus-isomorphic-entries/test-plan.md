@@ -339,6 +339,10 @@
 | specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 标题不可得 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "标题不可得": a failing resolver leaves the facts out instead of failing the view | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 无建立控件 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "无建立控件" | 🟢 green |
 | specs/pet-locus-doc-comments/spec.md → 管理面呈现文档入口且不提供新建入口 | 改绑动作只在文档根行 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "改绑动作只在文档根行" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 改绑到其他会话 | 改绑目标的 locus 主会话已不可用 | packages/dsh-pet/test/locus-rebind.test.ts | 目标 W 的 M 不可用：管理面改绑先整 W 迁移 (D7) — 三个用例（fake + real） | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 超时后重试 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 超时后重试 | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 超时前仍阻塞 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 超时前仍阻塞 | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 未创建任何资源的失败不阻塞 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 失败且没有任何 resourceRefs：立刻可重试 | 🟢 green |
 
 ## Coverage Notes
 

@@ -394,7 +394,10 @@ export class LocusRepositoryV20 implements LocusRepositoryPortV20 {
         if (NON_TERMINAL_PROVISIONING.has(op.phase)) {
           refuse('LOCUS_CONFLICT', `provisioning ${op.id} is still ${op.phase} for this endpoint`)
         }
-        if (op.phase === 'failed' && input.startedAt - op.updatedAt < PROVISIONING_BLOCK_MS) {
+        // The window only protects compensation of created resources: a failed
+        // operation with nothing to reclaim must not hold the endpoint.
+        const hasRefs = Object.values(op.resourceRefs ?? {}).some(value => value !== undefined)
+        if (op.phase === 'failed' && hasRefs && input.startedAt - op.updatedAt < PROVISIONING_BLOCK_MS) {
           refuse('LOCUS_CONFLICT', `provisioning ${op.id} failed recently; retry after the block window`)
         }
       }

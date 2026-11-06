@@ -8,8 +8,8 @@ let backend: TopologyBackend = 'fake'
 const BACKENDS: readonly TopologyBackend[] = ['fake', 'real']
 afterEach(closeAllTopologies)
 
-async function setup() {
-  const t = await Topology.open({ archived: ['W1'] }, backend)
+async function setup(extra: { unusableMains?: string[] } = {}) {
+  const t = await Topology.open({ archived: ['W1'], ...extra }, backend)
   await t.seedMain('W1', 'M-old')
   const group = await t.seedGroup('oc_1', 'M-old', 'proj-1', { defaultQa: true, revision: 4 })
   await t.seedTopic('oc_1', 't1', { revision: 2 })
@@ -123,6 +123,57 @@ describe.each(BACKENDS)('改绑到其他会话 [%s]', which => {
     expect(t.spacesReleased).toEqual(t.created.map(c => c.id))
     expect(t.repository.findMain('M-old')!.status).toBe('active')
     expect(t.opStates()).toEqual(['failed'])
+  })
+
+  describe('目标 W 的 M 不可用：管理面改绑先整 W 迁移 (D7)', () => {
+    it('死 M 下没有任何群：退役它、新建 M1、不迁移任何东西，改绑成功', async () => {
+      const { t, group, controller } = await setup({ unusableMains: ['M-dead'] })
+      await t.seedMain('W2', 'M-dead')
+      const result = await controller.rebindChat(fence(group))
+      const row = t.repository.getRow({ chatId: 'oc_1' })!
+      const m = (row as { locusMainSessionId: string }).locusMainSessionId
+      expect(m).not.toBe('M-dead')
+      expect(t.repository.findMain('M-dead')!.status).toBe('retired')
+      expect(t.repository.findMain(m)).toMatchObject({ workSessionId: 'W2', status: 'active' })
+      expect(t.mainIds().filter(id => id !== 'M-old' && id !== 'M-dead')).toEqual([m])
+      expect(result.group.locusId).toBe(group.locusId)
+    })
+
+    it('死 M 下另有空闲群：那个群也一并迁移到新 M', async () => {
+      const { t, group, controller } = await setup({ unusableMains: ['M-dead'] })
+      await t.seedMain('W2', 'M-dead')
+      await t.seedGroup('oc_other', 'M-dead', 'proj-2')
+      await controller.rebindChat(fence(group))
+      const m1 = (t.repository.getRow({ chatId: 'oc_1' }) as { locusMainSessionId: string }).locusMainSessionId
+      const other = t.repository.getRow({ chatId: 'oc_other' }) as { locusMainSessionId: string; revision: number }
+      expect(other.locusMainSessionId).toBe(m1)
+      expect(other.revision).toBeGreaterThan(0)
+    })
+
+    it('死 M 下另一个群有 current 投递 → LOCUS_BUSY，什么也没建', async () => {
+      const { t, group, controller } = await setup({ unusableMains: ['M-dead'] })
+      await t.seedMain('W2', 'M-dead')
+      await t.seedGroup('oc_other', 'M-dead', 'proj-2')
+      await t.setCurrent('oc_other')
+      const before = t.mainIds().sort()
+      const e = await refusal(controller.rebindChat(fence(group)))
+      expect(e?.code).toBe('LOCUS_BUSY')
+      expect(e?.message).toContain('目标会话的另一个群有处理中的投递')
+      expect(t.created).toEqual([])
+      expect(t.mainIds().sort()).toEqual(before)
+      expect(t.repository.findMain('M-dead')!.status).toBe('active')
+      expect((t.repository.getRow({ chatId: 'oc_1' }) as { locusMainSessionId: string }).locusMainSessionId).toBe('M-old')
+    })
+  })
+
+  it('仓库对 provisioning 的拒绝原样透传 code 与文案，不再包成 PROVISIONING_FAILED', async () => {
+    const { t, group, controller } = await setup()
+    const refused = Object.assign(new Error('provisioning p1 failed recently; retry after the block window'), { code: 'LOCUS_CONFLICT' })
+    t.repository.beginProvisioning = async () => { throw refused }
+    const e = await refusal(controller.rebindChat(fence(group)))
+    expect(e?.code).toBe('LOCUS_CONFLICT')
+    expect(e?.message).toContain('该群上一次操作刚失败')
+    expect(t.created).toEqual([])
   })
 
   it('已有 M1 在失败时不受影响', async () => {

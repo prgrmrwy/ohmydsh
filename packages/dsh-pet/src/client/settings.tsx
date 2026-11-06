@@ -1314,23 +1314,20 @@ export function LocusDetails(props: {
 }
 
 /**
- * 「改绑到其他会话」, directly on the group / doc-root row.
+ * The inline 「改绑到其他会话」 form, rendered as its own full-width block right
+ * after the group / doc-root row — never inside the row's grid, where its width
+ * would grow the auto-sized tail and crush the row text to one glyph per line.
  *
  * The input is sent as typed (trimmed): a short code is never resolved. The
  * input is kept when the Host refuses, and cleared only after success.
  */
-export function RebindControl(props: {
+function RebindForm(props: {
   readonly chat: PetLocusChatViewV20
-  readonly work: PetLocusWorkViewV20
   readonly busyKey: string | undefined
   readonly onAction: LocusActionRunner
-  /** Test seam: start with the dialog open and this input. */
-  readonly initialInput?: string
+  readonly onClose: () => void
 }): JSX.Element {
-  const [open, setOpen] = useState(props.initialInput !== undefined)
-  const [input, setInput] = useState(props.initialInput ?? '')
-  const block = rebindBlock(props.chat, props.work)
-  const disabled = props.busyKey !== undefined || block !== undefined
+  const [input, setInput] = useState('')
   const submit = (): void => {
     if (input.trim() === '') return
     void props.onAction(
@@ -1338,44 +1335,30 @@ export function RebindControl(props: {
       () => petApi.locusAction(locusRebindRequest(props.chat, input)),
     ).then(ok => {
       if (!ok) return
-      setOpen(false)
       setInput('')
+      props.onClose()
     })
   }
   return (
-    <span className="dshpet-locus-rebind">
+    <div className="dshpet-locus-rebind-form" role="dialog" aria-label="改绑到其他会话">
+      <input
+        className="dshpet-input"
+        value={input}
+        placeholder="目标工作会话的完整 sessionId（session-…）"
+        aria-label="目标工作会话 sessionId"
+        onChange={event => setInput(event.target.value)}
+      />
       <button
         type="button"
-        className="dshpet-action dshpet-action-sm"
-        disabled={disabled}
-        title={block ?? '把整个群改绑到另一个工作会话'}
-        onClick={() => { if (!disabled) setOpen(true) }}
+        className="dshpet-action dshpet-action-sm dshpet-action-primary"
+        disabled={props.busyKey !== undefined || input.trim() === ''}
+        onClick={submit}
       >
-        改绑到其他会话
+        确认
       </button>
-      {block === undefined ? null : <span className="dshpet-meta" data-reason="rebind">{block}</span>}
-      {!open || block !== undefined ? null : (
-        <span className="dshpet-locus-rebind-dialog" role="dialog" aria-label="改绑到其他会话">
-          <input
-            className="dshpet-input"
-            value={input}
-            placeholder="目标工作会话的完整 sessionId（session-…）"
-            aria-label="目标工作会话 sessionId"
-            onChange={event => setInput(event.target.value)}
-          />
-          <span className="dshpet-meta">{LOCUS_REBIND_CONSEQUENCES}</span>
-          <button
-            type="button"
-            className="dshpet-action dshpet-action-sm dshpet-action-primary"
-            disabled={props.busyKey !== undefined || input.trim() === ''}
-            onClick={submit}
-          >
-            确认
-          </button>
-          <button type="button" className="dshpet-jump" onClick={() => setOpen(false)}>取消</button>
-        </span>
-      )}
-    </span>
+      <button type="button" className="dshpet-jump" onClick={props.onClose}>取消</button>
+      <span className="dshpet-meta dshpet-locus-rebind-note">{LOCUS_REBIND_CONSEQUENCES}</span>
+    </div>
   )
 }
 
@@ -1404,6 +1387,9 @@ function LocusRow(props: {
   const archivedNote = isGroup ? archivedWorkNote(work) : undefined
   const mainBlock = sessionJumpBlock(chat.locusMain.availability ?? 'unknown')
   const workBlock = sessionJumpBlock(work.availability)
+  const rebind = isGroup ? rebindBlock(chat, work) : undefined
+  const rebindDisabled = props.busyKey !== undefined || rebind !== undefined
+  const [rebindOpen, setRebindOpen] = useState(false)
 
   return (
     <>
@@ -1443,6 +1429,13 @@ function LocusRow(props: {
               {archivedNote === undefined ? null : <span className="dshpet-meta" data-note="archived-w">{archivedNote}</span>}
             </div>
           )}
+          {/* The greyed reason reads in the text column, which wraps; in the
+              auto-sized tail it would widen the tail and squeeze this column. */}
+          {rebind === undefined ? null : (
+            <div className="dshpet-locus-row-line">
+              <span className="dshpet-meta" data-reason="rebind">{rebind}</span>
+            </div>
+          )}
           {props.reading !== 'entry' ? null : (
             <div className="dshpet-locus-row-line">
               <span className="dshpet-meta">工作会话 {work.title ?? '未命名会话'}</span>
@@ -1455,7 +1448,16 @@ function LocusRow(props: {
         </div>
         <div className="dshpet-locus-row-tail">
           {isGroup ? (
-            <RebindControl chat={chat} work={work} busyKey={props.busyKey} onAction={props.onAction} />
+            <button
+              type="button"
+              className="dshpet-action dshpet-action-sm"
+              disabled={rebindDisabled}
+              aria-expanded={rebindOpen && rebind === undefined}
+              title={rebind ?? '把整个群改绑到另一个工作会话'}
+              onClick={() => { if (!rebindDisabled) setRebindOpen(true) }}
+            >
+              改绑到其他会话
+            </button>
           ) : null}
           {props.reading !== 'entry' ? null : (
             <>
@@ -1499,6 +1501,9 @@ function LocusRow(props: {
           </button>
         </div>
       </div>
+      {!isGroup || !rebindOpen || rebind !== undefined ? null : (
+        <RebindForm chat={chat} busyKey={props.busyKey} onAction={props.onAction} onClose={() => setRebindOpen(false)} />
+      )}
       {props.open ? (
         <LocusDetails
           entry={entry}

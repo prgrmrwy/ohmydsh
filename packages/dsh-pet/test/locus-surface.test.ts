@@ -336,7 +336,10 @@ describe('spec Requirement "管理面不提供新建外部资源的入口"', () 
     const inputs = [...root.querySelectorAll('input')].filter(input => input.type !== 'checkbox')
     expect(inputs.map(input => input.getAttribute('aria-label'))).toEqual(['搜索关联'])
     await click(button(root, '改绑到其他会话'))
-    expect(rebindInput(root)?.closest('.dshpet-locus-row')?.getAttribute('data-nested')).toBe('false')
+    // The form is its own block right after the group row, never inside it.
+    const form = rebindInput(root)!.closest('.dshpet-locus-rebind-form')!
+    expect(form.closest('.dshpet-locus-row')).toBeNull()
+    expect(form.previousElementSibling?.getAttribute('data-nested')).toBe('false')
   })
 
   it('spec Scenario "生命周期动作仍可用"', async () => {
@@ -453,6 +456,52 @@ describe('the filter popover (owner-approved v20 UI)', () => {
     expect(rule).toContain('backdrop-filter:none')
     expect(rule).toContain('opacity:1')
     expect(rule).not.toContain('--dsw-specific-menu')
+  })
+})
+
+describe('the rebind form never squeezes the row text (owner acceptance layout bug)', () => {
+  it('renders the open form as a full-width block after the row, outside the text column and the tail', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'not-created' }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    await click(button(root, '改绑到其他会话'))
+    const input = rebindInput(root)!
+    expect(input.closest('.dshpet-locus-row-body')).toBeNull()
+    expect(input.closest('.dshpet-locus-row-tail')).toBeNull()
+    expect(input.closest('.dshpet-locus-row')).toBeNull()
+    const form = input.closest('.dshpet-locus-rebind-form')!
+    expect(form.parentElement?.classList.contains('dshpet-locus-chat')).toBe(true)
+    // The row keeps its own text intact while the form is open.
+    const row = form.previousElementSibling!
+    expect(row.querySelector('.dshpet-locus-row-body')?.textContent).toContain('未创建 · 只读')
+    expect(row.querySelector('.dshpet-locus-row-body')?.textContent).toContain('来源会话已归档，可改绑')
+  })
+
+  it('keeps the long greyed reason out of the auto-sized tail column', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], { availability: 'available' })]))
+    const root = await mount()
+    const reason = root.querySelector('[data-reason="rebind"]')!
+    expect(reason.textContent).toBe('当前来源会话未归档，仅在其归档后可改绑')
+    expect(reason.closest('.dshpet-locus-row-tail')).toBeNull()
+    expect(reason.closest('.dshpet-locus-row-body')).not.toBeNull()
+  })
+
+  it('styles the text column with a real minimum width and lets the tail wrap instead of growing', () => {
+    const rule = (selector: string): string =>
+      PET_CSS.match(new RegExp(`\\.dshpet-settings ${selector.replace(/\./g, '\\.')}\\{[^}]*\\}`))?.[0] ?? ''
+    expect(rule('.dshpet-locus-row')).not.toMatch(/grid-template-columns:minmax\(0,/)
+    expect(rule('.dshpet-locus-row')).toMatch(/grid-template-columns:minmax\(12em,1fr\)/)
+    expect(rule('.dshpet-locus-row-body')).not.toMatch(/min-width:0[;}]/)
+    // A long title ellipsises inside its column instead of running under the tail's buttons.
+    expect(rule('.dshpet-locus-name')).toContain('flex:0 1 auto')
+    const tail = rule('.dshpet-locus-row-tail')
+    expect(tail).toContain('flex-wrap:wrap')
+    expect(tail).toContain('max-width:')
+    // The form is a block with a solid background, not a translucent flex sibling.
+    const form = rule('.dshpet-locus-rebind-form')
+    expect(form).toContain('display:flex')
+    expect(form).toContain('background:var(--dsw-alias-bg-layer-1,#ffffff)')
+    expect(form).not.toContain('flex-basis')
+    expect(PET_CSS).not.toContain('dshpet-locus-rebind-dialog')
   })
 })
 

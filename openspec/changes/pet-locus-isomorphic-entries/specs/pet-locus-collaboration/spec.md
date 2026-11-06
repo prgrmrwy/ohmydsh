@@ -242,6 +242,13 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前工作�
 
 改绑 MUST NOT：更换任何行的 `locusId`；归档旧子会话（旧子会话不再被引用，也因「已退役的 locus 子会话不能再运行」而不能再运行，历史保留）；改动旧 M 与旧协作空间；迁移协作条目；向群里发送任何消息；占用 W1 的默认 Q&A。回执只出现在管理面。首次创建子会话时的来历说明见「投递 prompt 的首投前言与逐次档位声明」。
 
+
+若 W1 已有 active 配对但其 M 不可用（被归档、删除、preset 核验失败或不在 DSH Pet 工作区），Host SHALL 在 `beginProvisioning` 之前先对 W1 执行整 W 迁移（见 M 不可用的迁移要求），再把本群挂到新的 M1 下；W1 的其它群有 current 投递时 SHALL 以 `LOCUS_BUSY` 拒绝改绑且不创建任何资源（实现阶段补充，2026-11-06，真机验收发现）。
+
+#### Scenario: 改绑目标的 locus 主会话已不可用
+- **GIVEN** 群 G 的原 W 已归档；目标 W1 的 active 配对 M 已被归档，M 下没有群
+- **WHEN** 所有者在管理面把 G 改绑到 W1
+- **THEN** W1 先完成整 W 迁移（M 置 retired、新 M1 为 active），G 随后挂到 M1 下，各入口为 `not-created`、`read-only`，`reboundFrom` 为原 W；若 W1 的其它群有 current 投递则以 `LOCUS_BUSY` 拒绝，且不新建 M1
 #### Scenario: 改绑成功
 - **GIVEN** 群 C 的当前 W0 已归档；群行 `active`、话题行 T1 `active`、话题行 T2 `stopped`，均无 current 投递；W1 已有 active M1
 - **WHEN** 以正确的围栏请求 `rebind` 到 W1
@@ -724,6 +731,29 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前工作�
 - **THEN** 「确认」按钮置灰，点击不产生请求
 
 ## MODIFIED Requirements
+
+### Requirement: provisioning 失败超时后不再阻塞
+
+处于 `failed` 的 provisioning 操作超过 10 分钟后 SHALL 不再阻塞同一 endpoint；下一次针对该 endpoint 的建立请求 SHALL 先在运行期调用与启动对账相同的补偿器清理其 `resourceRefs`，补偿成功后再按无存量入口建立。补偿失败时 SHALL 继续阻塞并记录诊断。该规则 SHALL 对全部 provisioning kind 一致适用。`resourceRefs` 为空（没有任何需要回收的资源）的 `failed` 操作 SHALL 从一开始就不阻塞该 endpoint（实现阶段补充，2026-11-06，真机验收发现）。
+
+#### Scenario: 超时后重试
+- **GIVEN** endpoint E 的建立在 t0 失败，已创建的 locus 主会话记在 `resourceRefs`
+- **WHEN** t0 + 11 分钟时 E 收到授权 at
+- **THEN** 补偿器归档该 locus 主会话，随后建立成功；不需要重启 Host
+
+#### Scenario: 超时前仍阻塞
+- **WHEN** t0 + 5 分钟时 E 收到授权 at
+- **THEN** 按既有规则拒绝并说明正在恢复，补偿器未被调用
+
+#### Scenario: 补偿失败继续阻塞
+- **WHEN** 超时后补偿器抛错
+- **THEN** 不建立新入口，诊断记录原始错误，下一次请求再次尝试补偿
+
+#### Scenario: 未创建任何资源的失败不阻塞
+- **GIVEN** endpoint E 的改绑在 t0 失败，失败前没有创建任何资源（`resourceRefs` 为空）
+- **WHEN** t0 + 1 分钟时所有者再次对 E 发起改绑
+- **THEN** 不以 `LOCUS_CONFLICT` 阻塞，旧的 failed 操作被置为 compensated，本次改绑正常进行
+
 
 ### Requirement: 全部飞书工作统一为子会话常规交互
 
