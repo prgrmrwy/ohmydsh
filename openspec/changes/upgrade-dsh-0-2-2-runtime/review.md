@@ -1,158 +1,134 @@
 ## Review Metadata
 
-- **Review round**: 5
-- **Prior round**: round 4 — VERDICT: REVISE（1 Critical：旧子会话恢复缺 route；2 Moderate：受管范围未替换、参数非法时先外发 Jev）；核心主会话探针通过
+- **Review round**: 6
+- **Prior round**: round 5 — VERDICT: REVISE（1 Critical：C7 created 等待期间取消留下 AUTO 持久绑定）；探针全部通过
 - **Reviewer context**: cross-model (Magpie Codex gpt-6.1-sol, fresh context)
 - **Tool restrictions**: read-only inspection; only write is review.md (+ own temp unpack)
-- **Artifacts reviewed**: [proposal.md](proposal.md), [design.md](design.md), [specs/](specs/auto-model-routing/spec.md), relevant source files
+- **Artifacts reviewed**: [proposal.md](proposal.md), [design.md](design.md), [AUTO delta](specs/auto-model-routing/spec.md), [观察策略 delta](specs/fs-observation-policy/spec.md), relevant source files
 
-独立确认评审快照为 `7733fd722cc09892d66931c66841e92a7bf2294a`，初始工作树干净。本轮按 requirement 名称，将七条 MODIFIED 整条替换进 current auto-model-routing，再加入一条 ADDED；没有把尚未实施的源码迁移视为缺陷。第 4 轮作者 rebuttal 只作为待验证的主张。
+独立确认 HEAD 为 `8a963c241bc492700c6656a81e4d9f70f4a7ddd9`，开始时工作树干净。完整阅读 proposal、design、两份 delta，以及 current auto-model-routing；按 requirement 名称将七条 MODIFIED 整条替换、加入一条 ADDED，再检查其余保留条款。另对照 current dsh-memex-evaluation、repo-layout、staged-upgrade-execution、runtime-api-migration 与相关源码。没有把尚未实施的迁移代码当成已实现，也没有把提案阶段缺少迁移实现列为缺陷。
 
-通过 npm registry HTTPS tarball 独立取得 `0.2.2-rc.1` 的 dsh-agent-loop、dsh-agent、dsh-api-session-controller、dsh-subagent、dsh-tool-subagent、dsh-experimental-tool-agent-team、dsh-llm，并补读 dsh-base、dsh-system-prompt、dsh-experimental-agent-team、dsh-agent-default-model、dsh-compaction-basic；另取两个旧版 dsh-agent、`cordis-plugin-include@1.1.0` 及 registry 元数据。下文发布物行号均来自本轮实际读取，未沿用作者声称的核验结果。
-
-在 Node v24.12.0 中，以 VM 装配发布物真实类及方法体，执行了 AgentLoop.initializeAgent、SubagentManager.materializeTracked/setup、applyChildComposition、AgentRegistry.enter/announce、submitAdmitted/deliver，以及 ReactLoopAgent 的完整首步请求链、AgentModel/投影、Inbox/投影、agentEvents 和流累积器。官方 subagent 工具 execute、requestedAgentOptions、允许列表及 preflight helper、官方 selectModel 方法体亦实际执行。持久化、Cordis 装配、工具/提示词、目录/模型 adapter 是测试端口；模型调用与 Jev 均为本地桩，没有付费调用。AUTO 的拟迁移 listener 按设计在探针内实现，**不冒称已经运行了尚不存在的迁移实现**；PolicyStore 则由磁盘真实源码在内存转译，用真实 zod/fs 在我方临时目录写读。
-
-探针及详细结果位于评审者临时目录 `/tmp/dsh-r5-review-7733fd72/`。没有运行 build、sync、install，没有操作日常 Host，没有发帖或联系上游；仓库唯一写入是整体替换本报告。
+通过 npm registry HTTPS tarball 独立取得目标 `0.2.2-rc.1` 的十二个相关包，以及 `0.2.1-rc.5` 的 dsh-agent、dsh-agent-loop。目标十二包的文件名及文件内容与第 5 轮发布物缓存完全一致。阅读第 5 轮探针源码及结果，本轮只复跑创建取消的真实运行体链，并补未改动现状源码的取消/旧记录定点核验；没有重复整套主会话及 startup/resume/M10 探针。下文明确区分本轮执行、既有证据复核和后续实施验收。
 
 ## Findings
 
 ### 🔴 Critical (blocking)
 
-#### C7：created 等待期间取消创建，会保留 AUTO 的持久绑定；本轮要求的“无残留记录”未成立
-
-- **证据：** [design.md:57–59](design.md#L57) 和 [delta auto spec:116](specs/auto-model-routing/spec.md#L116) 规定先在 created 按现行受管范围绑定，再 await Jev；保留的 [current auto spec:641](../../specs/auto-model-routing/spec.md#L641) 在该边界建立初始记录。[delta:147](specs/auto-model-routing/spec.md#L147) 又把 Jev 取消列入持久写入 `unsupported` 的退化分支，没有区分“子会话已运行后的回合取消”与“created 尚未返回、创建本身取消”。现行 [PolicyStore.create:58–61](../../../packages/dsh-auto-model-routing/src/policy-store.ts#L58) 先写决策文件、再写 `.bound`；[policy-host.ts:112](../../../packages/dsh-auto-model-routing/src/policy-host.ts#L112) 的 disposed handler 只清内存，没有回滚独立存储。
-- **具体反例：** AUTO 根会话发起 fresh 子会话 C，created 中已经创建 recommended 记录及 `.bound`，随后在模拟 Jev 的 await 中收到创建 signal 中止。listener 不 select，按退化链记 `unsupported/jev-cancelled` 后返回；真实工厂拒绝创建、撤销 live 注册，SubagentManager 没有发布 activation。但独立 AUTO 记录仍在，`wasBound(C) = true`。这与本轮指定的取消探针“无残留记录”不符；根状态还可能出现“按 DSH 默认运行”的未路由告警，而该创建根本没有投递首消息。
-- **独立运行结果：** 真实 initializeAgent → setup → announce 链中，取消后 `select=0`、`claimed=0`、`agent/request=0`、`prepareCall=0`、`adapter.stream=0`、`saveSelection=0`、未处理 rejection=0、live child=0、resident activation=0；真实 PolicyStore 中却仍有一份 `.json` 和一份 `.json.bound`，记录为 `unsupported`、reason 为 `jev-cancelled`。本轮把该检查记为**部分通过，持久绑定清退失败**，没有用活跃注册表清零替代持久记录清零。
-- **责任边界：** [目标 loop:1448–1450、1475–1507、1586–1596](https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.2-rc.1.tgz) 明确保留失败初始化已写的 Session，只关闭 handle 并 detach live Agent/Session；它没有访问 AUTO 独立决策目录的能力。官方保留 Session 是既有恢复语义，**不列为本 change 的缺陷，也不要求删除官方 Session**。失败是设计没有为新前移的等待阶段规定 AUTO 新绑定的发布/撤销边界。
-- **最小修订：** 区分 startup 创建取消与已发布 child 的后续回合取消。created 等待 Jev/目录时只保留带精确 child 身份、父快照和 epoch 的内存候选；signal 已取消时不 select、不发布本次新 AUTO 决策或绑定、不发布“默认运行”的告警，向工厂正常传播创建取消。若选择先持久绑定，则必须明确仅回滚本次新建、尚未发布的 AUTO 文件/标记，不能删除或洗白已有绑定、恢复记录或官方 Session。补机械场景：挂起 Jev → abort → 释放成功/取消结果，两种结果均无新持久 AUTO 绑定；重复恢复/已有记录不被清除。将此例外写入退化链，避免仍要求对同一取消写 `unsupported`。本条只针对本轮要求的创建等待取消，不扩大成任意创建失败的持久存储清理框架。
+无未关闭的 Critical。C7 rebuttal 接受，理由及证据见 Rebuttals；不再要求清除取消后的持久 AUTO 记录或绑定标记。
 
 ### 🟡 Moderate
 
-未发现新的独立 Moderate 阻断项。第 4 轮 M9、M10 经独立核验关闭，见 Rebuttals。取消持久绑定问题统一列为 C7，不重复计数。
+#### M11：主 effort 应用已前移到 pre-step，保留场景仍要求 pre-step 返回后处于旧的“待应用”阶段
+
+- **证据：** [AUTO delta:4](specs/auto-model-routing/spec.md#L4) 明确每一步在 pre-step 完成 effort 的计算与应用，[design:37–43](design.md#L37) 也要求在该边界解析支持范围、计算目标并同步。未列入 MODIFIED、因此合并后保留的 [current「决策提示」场景:561–564](../../specs/auto-model-routing/spec.md#L561) 却要求：模型只支持 `max`、Jev 已判 `higher` 时，pre-step 完成后的状态仍为 `recommended / 待应用`，到请求发出后才变为 `unsupported / no-effort-support`。这正是把能力映射留在 agent/request 时的旧顺序；[现有集成测试:401–409](../../../packages/dsh-auto-model-routing/test/policy-host.integration.test.ts#L401) 通过外层 pre-step listener 读状态，直接断言了这个旧阶段。
+- **具体反例：** AUTO 的 Claude 主会话当前官方选择为 `max`，目录只提供 `max`，自动 cap 为 `xhigh`，本回合 Jev 返回 `higher`。按新 D1，pre-step 返回前就必须发现没有自动 effort，保持官方选择、记 `no-effort-support` 并把本次决策标为 `unsupported`；此时读取状态无法同时满足保留场景要求的 `recommended / 待应用`。若为通过旧断言而把映射或其可见状态延到 agent/request，又会留下与新应用时序不一致的状态定义。
+- **影响：** 同一个边界有两种验收答案，实施者可能保留失真的状态或改动测试而缺少规范依据。它不推翻 D1 的运行机制，因此列 Moderate，不升级为 Critical。
+- **最小修法：** 增加整条 MODIFIED「决策提示」，其余正文及场景原样保留，仅把上述场景改为 pre-step 完成后已经 `unsupported / no-effort-support`、请求发出后仍保持该状态；同步更新 proposal 的 MODIFIED 计数与列举。完整要求见 Required Changes，不要求新增运行时机制。
 
 ### 📌 Suggestions
 
-#### S11：恢复条款把 failed 的限定写完整，避免实施时误拒绝合法旧无 route 记录
+无新的独立建议。第 5 轮 S11 已在 [AUTO delta:116](specs/auto-model-routing/spec.md#L116) 明写“failed 且有 route 才拒绝；旧 failed 无 route 原样放行”，与 [delta:160、202–205](specs/auto-model-routing/spec.md#L160) 一致，本轮用现状真实 PolicyStore 与 request listener 验证了旧无 route 的 failed 正例。
 
-[delta:116](specs/auto-model-routing/spec.md#L116) 的末句写“failed 时仍按现有规则 fail closed”，而 [delta:155、197–200](specs/auto-model-routing/spec.md#L155) 明确保留旧 `failed` **无 route** 时原样放行。具体样本是旧 `{status: failed, reason: 初始判断已取消}`：不得仅因 status 就在 resume 入口拒绝。本轮按“现有规则”将其解释为 **failed 且有 route 才拒绝**，因此不另立冲突 finding；建议直接写出限定，并在实施测试保留无 route 的旧 failed 正例。
-
-#### S10 复核：请求门禁矩阵的设计已处理，仍须在实施时完整落成测试
-
-[design.md:61](design.md#L61) 已明确完整性、parent、route 一致、目录/allowlist/captured allowlist/cap，以及每次 attempt 的核验；[delta:212–225](specs/auto-model-routing/spec.md#L212) 保留实时撤销和同 step retry。具体反例“bound 存在但文件缺失”“parent 不符但没有 route”要求先校验完整性和身份，再判断 route 是否存在；不能把 `if (!record?.route) return config` 当成整个恢复门禁。必须同时保留 [current:347–350、704–707](../../specs/auto-model-routing/spec.md#L347) 的断言。源码的旧执行顺序尚未迁移，不在提案评审中算实现缺陷；本快照也没有 tasks，不能声称矩阵已经执行完毕。压缩请求仍在门禁之外，设计未夸大覆盖范围。
+逐次请求门禁仍须在实施时覆盖完整性、身份、请求与 route 一致、目录、官方允许列表、父 captured allowlist、cap 和同 step retry；这是 [design:60–61](design.md#L60)、[delta:154、217–230](specs/auto-model-routing/spec.md#L154) 及保留的 [current:347–350、704–707](../../specs/auto-model-routing/spec.md#L347) 已有义务，不另列新的 finding。
 
 ## Probe Results
 
-### 1. 子会话 startup：延迟 Jev 后 select 的完整请求链通过
+### 1. C7 事实核验：0.2.1 已先绑定，Jev 取消后保留持久记录
 
-两例分别使用继承组合和显式 preset；构造参数故意为 `P/OPTIONS/medium`，working-directory/setup 端口另写 `P/SETUP/medium`。真实 SubagentManager 的 setup 完成后，真实 Registry.announce 串行调用 AUTO listener；listener await 可控 promise，等待开始及另过 30ms 两次断言 `stream=0`、`claimed=0`，随后同步 `agent.model.select(P/CHILD/low)`。
+直接阅读并在内存转译执行磁盘未改动的 [policy-host.ts](../../../packages/dsh-auto-model-routing/src/policy-host.ts)、[policy-store.ts](../../../packages/dsh-auto-model-routing/src/policy-store.ts)；上下文注册、Jev、目录为测试端口，PolicyStore 使用真实 zod 与 fs，只写我方临时目录。
 
-| 检查 | 继承组合 | 显式 preset |
-| --- | --- | --- |
-| 等待期间模型请求/首消息领取 | 0 / 0 | 0 / 0 |
-| setup / created route select | 1 / 1 | 1 / 1 |
-| materialize 返回后的 current | P/CHILD/low | P/CHILD/low |
-| step 1 modelSelection/header/stream | 均 P/CHILD/low | 均 P/CHILD/low |
-| agent/request / prepareCall / stream | 1 / 1 / 1 | 1 / 1 / 1 |
-| saveSelection / agent error | 0 / 0 | 0 / 0 |
-| turn/end | completed | completed |
+- [policy-host:87–106](../../../packages/dsh-auto-model-routing/src/policy-host.ts#L87) 在 startup created 中建立初始 recommended 记录；[PolicyStore.create:58–61](../../../packages/dsh-auto-model-routing/src/policy-store.ts#L58) 先写 JSON，再写 `.bound`。实际执行后，尚未进入子 pre-step 就已 `bound=true / recommended`。
+- [policy-host:149–164](../../../packages/dsh-auto-model-routing/src/policy-host.ts#L149) 中根模式 epoch 不变时，Jev 返回 cancelled 直接调用 `fallback(record, 'jev-cancelled')`；[fallback:58–65](../../../packages/dsh-auto-model-routing/src/policy-host.ts#L58) 用 store.set 写 `unsupported / jev-cancelled`，保留标记并设置 childNotice、写 warn。实际执行结果完全一致。
+- [disposed:112](../../../packages/dsh-auto-model-routing/src/policy-host.ts#L112) 只清内存。触发后再次从真实存储读取，绑定仍为 true、记录仍为 unsupported。
+- 旧版是在后续子 pre-step 等待 Jev，新版把等待前移到 created；不能据此声称两个版本的等待位置相同。但“created 已绑定、Jev 取消记持久 unsupported/jev-cancelled”确实是既有行为，支持本轮所评审的持久化取舍。
+- 同一探针直接执行旧 `failed` 无 route 的 request listener，返回对象与 `await next()` 完全相同。对真实 `policyEffort` 配合实际 AUTO_EFFORTS 的定点调用也确认：仅支持 max 时映射不可得；M11 是阶段定义冲突，不是 max 自动路由的新需求。
 
-继承组合顺序：session announce → working-directory/setup → compose → agent enter/created → materialize 返回 → submitAdmitted/deliver。显式 preset 顺序：session announce → preset mount → working-directory/setup → agent enter/created → materialize 返回 → submitAdmitted/deliver。options/setup 不会在 created 之后覆盖 route。
+### 2. 新取消场景：目标运行体真实创建链通过
 
-独立行号：[factory:1574–1580](https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.2-rc.1.tgz)、[Registry:703–718](https://registry.npmjs.org/@deepseek-ai/dsh-agent/-/dsh-agent-0.2.2-rc.1.tgz)、[SubagentManager:1802–1830、2232–2246](https://registry.npmjs.org/@deepseek-ai/dsh-subagent/-/dsh-subagent-0.2.2-rc.1.tgz)。design 的核心发布物引用成立；准确的工厂 await announce 位于 `:1579`。
+本轮使用独立下载的发布物，复用已阅读的第 5 轮 VM 装配方式，实际执行 AgentLoop.initializeAgent、SubagentManager.materializeTracked/setup、AgentRegistry.enter/announce。AUTO listener 按拟迁移设计在探针内实现，真实 PolicyStore 落盘；没有冒称运行了尚未落地的迁移实现。created 先绑定并挂起模拟 Jev，创建 signal 中止后写 unsupported/jev-cancelled、不应用 route，工厂以取消错误结束。
 
-### 2. startup 创建等待取消：运行期清退通过，持久 AUTO 绑定未清退
+| 断言 | 本轮结果 |
+| --- | --- |
+| AUTO route select / 首消息领取 | 0 / 0 |
+| agent/request / prepareCall / adapter.stream | 0 / 0 / 0 |
+| saveSelection / 未处理 rejection | 0 / 0 |
+| live child / manager resident activation | 0 / 0 |
+| AUTO 决策 JSON / 绑定标记 | 均保留 |
+| 持久记录 | unsupported / jev-cancelled |
 
-在上面同一真实链中，created 先用真实 PolicyStore 建立初始记录，再挂起模拟 Jev。调用方 abort 后，listener 观察同一 signal、不执行 route select；工厂以 `cancel-create` 拒绝，错误由调用端 await/catch 处理。
+因此 [delta:137–140](specs/auto-model-routing/spec.md#L137) 的新场景可机械断言且通过；“不 select”指 AUTO 不应用候选 route，不包括官方 setup 自身的初始选择。官方已写 Session 事件保留，新条款没有要求删除它们。真实运行体在 [loop:1574–1596](https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.2-rc.1.tgz) await setup/announce 并清退失败创建，支持零投递和 live registry 清零。
 
-- 首消息领取、请求、prepareCall、stream、AUTO route select、saveSelection 均为 0；没有未处理异常。
-- live registry 查不到 child，manager resident 为 0；没有留下可运行的 activation。
-- PolicyStore 中 `.json` 与 `.json.bound` 仍各一份，`wasBound=true`，内容为 `unsupported/jev-cancelled`。
-- 官方 Session 已写的 descriptor/setup 事件保留，符合工厂自身保留已写事件的恢复语义；不能宣称全部持久记录清零。
+与 [退化链 delta:152、156、160](specs/auto-model-routing/spec.md#L152)、保留的 [未路由告警 current:789–800](../../specs/auto-model-routing/spec.md#L789) 不冲突：取消记录无 route，不会自动发默认请求；signal 中止仍由宿主取消。未路由 warn/childNotice 仍按既有规则产生，“按 DSH 默认运行”说明未应用 AUTO route，不作为已产生模型调用的证据；0.2.1 的同一 fallback 也写该告警。恢复这个完整无 route 记录时原样放行、不重判，与旧记录兼容规则一致。
 
-因此本轮指定的“无残留记录”没有完全通过，列 C7。这里证明的是**设计所规定的先绑定再等待、取消走退化链**的后果，不是声称未来实现已经合入。
+本轮定点证据目录为 `/tmp/dsh-r6-review-8a963c24-q1c4zp3j/`，重点是 `baseline-probe.mjs` / `baseline-result.json`、`cancel-probe.mjs` / `cancel-result.json`。探针准备时修正了测试端等待就绪及重复运行存储隔离，最终断言均通过；这些是探针自身问题，没有归因到被评审设计。
 
-### 3. C6 resume：无原生选择/header 的合法旧 route 恢复通过
+### 3. 第 5 轮核心探针的适用性与未重复执行范围
 
-从真实 PolicyStore 读出 `recommended + route=P/CHILD/low`，恢复的 Session 中没有 `model/selection` 或 `request/header`；真实 AgentModel 在 listener 开始时返回 `P/M/medium`。经真实 manager resume 分支 → initializeAgent(source=resume) → Registry.announce，listener 同步恢复既有 route，再经真实 submitAdmitted/deliver 执行首请求：
+独立下载的十二个目标包逐文件与第 5 轮缓存相同；`daa951f1..8a963c24` 在被评审规范中的实质改动仅为恢复 failed 限定和取消正文/场景，未改变 D1、startup select、resume 补 route、M10 admission、每 attempt 核验的机制。已阅读第 5 轮探针源码与结果，原有结论仍适用：
 
-- `beforeRestore=P/M/medium`；恢复 select=1。
-- step 1 的 current/modelSelection/header/adapter 均为 `P/CHILD/low`。
-- `Jev=0`、`saveSelection=0`、模型请求=1，回合正常完成。
-- 正例没有重新写 AUTO 决策文件；恢复补写的是官方模型选择。
+| 既有证据 | 复核结论 |
+| --- | --- |
+| 主会话 step 1 即 high、等待时零请求、同 step retry | 共享 selection、await 顺序及 retry 复用未变 |
+| 冻结回退与只 select 的负对照 | medium→high；Readonly 依赖仍由集成测试锁定 |
+| startup 继承组合与显式 preset | setup 在 created 之前；created 选 route 后 step 1 使用它，不保存默认 |
+| resume 合法旧 route 及缺失/损坏/parent/failed+route 负样本 | 补写既有 route、不重判；完整性拒绝仍成立 |
+| M10 配对校验、允许列表、preflight 三类拒绝 | 都先于 child factory/created，child/Jev 均零；正对照确实创建 |
+| retry 前门禁失效 | 第二次 agent/request 仍发生，拒绝后无第二次 adapter 调用 |
 
-负样本使用真实存储读取，并在 resume listener 执行拟议完整性/身份检查：绑定标记存在而文件缺失、损坏 JSON、parent 不符、failed+route 四类均在模型请求前拒绝；每例 `Jev=0`、`select=0`、`prepareCall=0`、`stream=0`，live child/activation 无残留。损坏 JSON 的“子任务决策无法恢复”错误来自真实 PolicyStore，身份与 failed 的拒绝来自按设计实现的核验器。此证明了新接缝可承载这些门禁，尚不能代替迁移代码落地后的集成测试。
+本轮未重新执行上述整套用例，未装配候选 Host、完整 Team journal/provisioning、真实 preset loader 或完整 memex eval。当前证明的是接缝及提案可行性，实施后仍须用迁移后的真实插件完成设计要求的集成与候选验收。
 
-另用真实 PolicyStore 读取含 `version:1`、`policyVersion`、`mappingVersion` 的旧 recommended+route，得到原 route 且丢弃三个历史键；多 `task` 键及 `version:2` 均拒绝。没有扩张旧记录的容忍范围。
+### 4. 合并后的完整契约与其余决策复核
 
-### 4. M10：官方准入在 created 前执行，三类拒绝均 Jev=0
-
-实际执行发布物官方 subagent execute 方法体及其真实 helpers，将 startActivation 端口接到上面的真实 materialize/setup/announce 链。结果：
-
-| 调用 | 官方 preflight 次数 | child created | Jev |
-| --- | --- | --- | --- |
-| 只传 model、不传 provider | 0 | 0 | 0 |
-| provider/model 不在允许列表 | 0 | 0 | 0 |
-| 允许列表通过、resolveCallConfig 拒绝 | 1 | 0 | 0 |
-| 全部通过的正对照 | 1 | 1 | 1 |
-
-第一类错误确为 `child LLM provider and model must be supplied together`，第二类为 route 不被本 Session 允许，第三类保留 preflight 的拒绝。失败时没有到达 child factory，也没有绑定窗口中的 child 记录。证据：[tool-subagent:60–95、115–126、431–472](https://registry.npmjs.org/@deepseek-ai/dsh-tool-subagent/-/dsh-tool-subagent-0.2.2-rc.1.tgz)。无需复制官方 admission 逻辑。
-
-### 5. 主会话机制无回归
-
-第 4 轮以来 D1 未改变。本轮仍实际跑了真实 turn → preStep → step → prepareRequest → buildRequest，并在 listener 内执行官方 controller.selectModel 方法体（模型解析、admission/default 存储为端口），再改写共享 modelSelection：
-
-- **step 1 即用目标：** header/stream=P/M/high；selectModel=1、saveSelection=1、Jev=1，回合 completed，未触发 `:1000–1001` 一致性错误。
-- **等待隔离：** await 模拟 Jev 开始及另过 30ms 时，模型请求均为 0。
-- **同 step retry：** 首个 adapter 返回真实 finish-error chunk，request-error 返回 retry；`agent/request=2`、prepare=2、stream=2，两次均 high，Jev/select/save 各 1。
-- **重试前门禁拒绝：** 第二次 agent/request 抛 `cap revoked`；request=2，但 prepare/stream 均为 1，第二次模型调用为 0，回合 error 符合预期。
-- **冻结回退与负对照：** 冻结共享对象后赋值 TypeError 被捕获一次，两步 header/stream 为 medium→high；只 select、不改共享对象时也为 medium→high。两例均 completed，证明正常例的 step 1 high 来自对象改写，而非全局默认副作用。
-
-独立核对 [loop:671、685–707、742、842、990–1001](https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.2-rc.1.tgz)、[agentEvents:358–386 与 AgentModel:181–203](https://registry.npmjs.org/@deepseek-ai/dsh-agent/-/dsh-agent-0.2.2-rc.1.tgz)、[model-selection:81–96](https://registry.npmjs.org/@deepseek-ai/dsh-agent/-/dsh-agent-0.2.2-rc.1.tgz)、[controller:704–728](https://registry.npmjs.org/@deepseek-ai/dsh-api-session-controller/-/dsh-api-session-controller-0.2.2-rc.1.tgz)，支持 design 对共享可写 selection、浅拷贝 dispatch 和 select/default 保存的解释。Readonly 仍是兼容依赖，不因类型本身否决实测机制。
-
-### 6. 合并后的规范、版本分线及其它回归
-
-- **受管范围与判断边界：** 保留的 [current:639–707](../../specs/auto-model-routing/spec.md#L639) 与新 [delta:83、116、143–155、307](specs/auto-model-routing/spec.md#L83) 现在一致：官方工具 ALS + startup + 同父；created 时采样父配置/判根模式；此后捕获 epoch，在 Jev/目录异步返回后及保存前检查；resume 不重新判断。created 前切 MANUAL 是不绑定、Jev=0；created 内等待中模式变化则 mode-changed。二者有不同时间条件，不再相互矛盾。取消的持久发布边界另见 C7。
-- **输入与已接受限制：** 正式子判断统一使用 ALS 中的 `args.prompt`，各次独立捕获 preset，不使用预览结果；运行体注入不贡献输入。新 delta 已明确同窗口同父插件旁支无法区分，旁支会沿用外层 prompt。这是写明的绑定限制，不再要求同时保证旁支按自身首消息判断；不能对用户宣称能区分旁支。
-- **显式维度、退化与恢复：** 完全显式零 Jev，只显式一个维度只判断另一个；P 不变，显式 effort 不走父 effort 回退，候选均查目录/官方允许列表/captured allowlist/cap。有 route 的每次 attempt 核验、恢复不重判及旧记录严格读取保持；无 route 的历史状态和 interrupted 分支也保留。没有重新引入 judgment-late、维护窗口、claimed 集合求差或自主重试升级。
-- **teammate 范围：** [官方 Team 工具:264–289](https://registry.npmjs.org/@deepseek-ai/dsh-experimental-tool-agent-team/-/dsh-experimental-tool-agent-team-0.2.2-rc.1.tgz) 的字段确为 prompt、fresh/fork 两分支，符合 ALS 的 fresh 入口；fork 原样放行。**没有完整装配 Team journal/provisioning、真实 preset loader、全工具 catalog 或候选 Host。** 本轮证明到了本地 subagent 工厂/setup/announcement/首消息/首请求，以及 Team 工具字段与调用路径的源码边界，未冒称真实 teammate 全链已通过。
-- **D3 版本分线：** [design:66–67](design.md#L66) 的单路径、新 minor 及不复用 0.7.0，与 [repo-layout:517–534](../../specs/repo-layout/spec.md#L517) 一致。AUTO 新线应使用 `engines.dsh >=0.2.2-rc.1 <0.3.0-0`、每个 dsh peer 为该区间加 `|| ^0.2.2-rc.1`、devDependency 为 `^0.2.2-rc.1`；其它包下界由实测决定。独立 registry 确认 0.7.0 已发布，两个旧版 dsh-agent 均无 AgentModel.select。旧发布物的宽 engines 不会因 README 自动缩窄，分线说明须写清其在新 Host 上不可用；本 change 没有获得发版授权，也无需加入双路径。
-- **C3 无回归：** [design:113–132](design.md#L113) 保留停止全部 writer、按有效配置找数据根、离线副本/sha256、真实历史迁移/重启、停止 writer 后恢复快照到旧 runtime 的次序，与 [staged-upgrade:113–122](../../specs/staged-upgrade-execution/spec.md#L113) 和 [runtime-api-migration:96–107](../../specs/runtime-api-migration/spec.md#L96) 一致。未执行生产备份或恢复演练。
-- **D4 无回归：** 独立读取 [system-prompt 类型:114–122](https://registry.npmjs.org/@deepseek-ai/dsh-system-prompt/-/dsh-system-prompt-0.2.2-rc.1.tgz) 的 PromptPresentation/PromptAssembly 区别，以及 [subagent setup:1802–1813](https://registry.npmjs.org/@deepseek-ai/dsh-subagent/-/dsh-subagent-0.2.2-rc.1.tgz) 先写 descriptor、[Team.tryMembership:873–896、subagentDescriptor:1185–1187](https://registry.npmjs.org/@deepseek-ai/dsh-experimental-agent-team/-/dsh-experimental-agent-team-0.2.2-rc.1.tgz) 排除普通 subagent。支持移除 [judge-boundary:22–25](../../../packages/dsh-memex/src/eval/judge-boundary.ts#L22) 的旧工具投影；最终 llm/stream 精确身份与工具面门禁、启用 Team 的成功/污染拒绝要求仍在 [design:69–70](design.md#L69) 和 [current eval:192–220](../../specs/dsh-memex-evaluation/spec.md#L192)。本轮未运行完整 memex 自检。
-- **D5 无回归：** 独立确认 [dsh-base patch:292–294](https://registry.npmjs.org/@deepseek-ai/dsh-base/-/dsh-base-0.2.2-rc.1.tgz) 原行 disabled=true。执行 [include.applyPatches:218–268](https://registry.npmjs.org/@deepseek-ai/cordis-plugin-include/-/cordis-plugin-include-1.1.0.tgz) 真实函数，同 id/name 覆盖 disabled=false 得策略行=1、启用=1、warn=0，输入原默认未被改动；与 [sync:1863–1874](../../../scripts/sync.mjs#L1863) plain fragment 拼接相符。[fs delta:4–26](specs/fs-observation-policy/spec.md#L4) 范围、可逆开关、dump-config、未读/过期版本拒绝均可机械验收。未执行 sync/dump-config。
-- **D7 无回归：** 独立 [目标 dsh registry 元数据](https://registry.npmjs.org/@deepseek-ai/dsh/0.2.2-rc.1) 的 Node 要求为 `>=24.9.0`；[根 manifest:25](../../../package.json#L25) 当前仍为 >=22，[bootstrap:18–31、55–60](../../../scripts/bootstrap.mjs#L18) 按根 engines 检查，故抬下界及 Node24.8 拒绝测试有依据。pin、同族 provider integrity、peer/devDependency、lock 更新及先 promote 的设计未丢失。
-- **范围与更便宜方案：** 当前 created 内 await 已采用 S9 的更小接缝；不需要工具前预判、复制 admission、额外维护窗口或双路径。D9 仍为先草拟、用户确认后才发布，不阻断合入。未发现新的功能范围蔓延或嵌入式授权；唯一新增机制缺口为 C7 的取消发布边界。
+- **判断时机、范围、输入：** [保留的受管范围:639–647](../../specs/auto-model-routing/spec.md#L639) 与 [delta:83、116、233、312](specs/auto-model-routing/spec.md#L83) 一致：官方工具 ALS、startup、同父，在 created 采样直接父配置并判根 AUTO；输入统一取该工具 prompt，非 user 注入不贡献。created 前 MANUAL 不绑定且 Jev=0；同窗口同父旁支使用外层 prompt 的已接受限制仍如实保留。
+- **父快照、epoch、取消、恢复：** 父配置只在绑定边界采样，不混工具入口旧值；判断捕获根 epoch，每次 Jev/目录异步返回及保存前检查；AUTO→MANUAL→AUTO 也废止旧结果。既有 route 在 resume 补官方选择，failed+route 拒绝；旧无 route 状态按兼容规则放行；recommended 无 route 的冷恢复走 interrupted。新取消场景不要求删除 Session 或旧记录，未引入撤销/重建绑定框架。
+- **显式维度、teammate、每请求核验：** 完全显式零 Jev、部分显式只判缺失维度；显式 effort 不走父 effort 回退，provider 不变，所有候选均校验目录/官方允许列表/captured allowlist/cap。独立阅读 [Team 工具:264–289](https://registry.npmjs.org/@deepseek-ai/dsh-experimental-tool-agent-team/-/dsh-experimental-tool-agent-team-0.2.2-rc.1.tgz) 确认 prompt 及 fresh/fork 分支。已有 route 每 attempt 在 agent/request 只核验、原样返回；[loop:842、929–939、994–1001](https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.2-rc.1.tgz) 支持重试核验，不夸称覆盖压缩请求。
+- **主机制：** 独立核对 [loop:671、685–707、842](https://registry.npmjs.org/@deepseek-ai/dsh-agent-loop/-/dsh-agent-loop-0.2.2-rc.1.tgz)、[AgentModel.current/select:81–95](https://registry.npmjs.org/@deepseek-ai/dsh-agent/-/dsh-agent-0.2.2-rc.1.tgz)、[controller:704–728](https://registry.npmjs.org/@deepseek-ai/dsh-api-session-controller/-/dsh-api-session-controller-0.2.2-rc.1.tgz)，共享可写 selection、同步会话选择和后台默认保存的解释成立。每步计算、同 step retry 复用、MANUAL/失败处理、冻结回退均未回归；可见状态阶段仅有 M11 需修订。
+- **C3 迁移次序：** [design:110–132](design.md#L110) 保留现役基线、隔离候选/devbox、停止全部 writer、按有效配置定位数据根、离线备份/sha256、真实历史迁移/重启、停止 writer 后恢复快照到旧 runtime 的次序，与 [staged-upgrade:113–122](../../specs/staged-upgrade-execution/spec.md#L113)、[runtime-api-migration:96–107](../../specs/runtime-api-migration/spec.md#L96) 一致。本轮没有执行生产演练。
+- **D4 memex：** 独立核对 [PromptPresentation:114–122](https://registry.npmjs.org/@deepseek-ai/dsh-system-prompt/-/dsh-system-prompt-0.2.2-rc.1.tgz) 无 tools、[subagent setup:1802–1813](https://registry.npmjs.org/@deepseek-ai/dsh-subagent/-/dsh-subagent-0.2.2-rc.1.tgz) 先写 descriptor、[Team:873–896、1185–1187](https://registry.npmjs.org/@deepseek-ai/dsh-experimental-agent-team/-/dsh-experimental-agent-team-0.2.2-rc.1.tgz) 排除普通子会话，支持 [design:69–70](design.md#L69) 删除旧投影；最终冻结请求/精确身份/工具面门禁与启用 Team 的成功和污染拒绝测试仍保持 [current eval:192–220](../../specs/dsh-memex-evaluation/spec.md#L192) 的义务。
+- **D5 观察策略：** [目标 base patch:292–294](https://registry.npmjs.org/@deepseek-ai/dsh-base/-/dsh-base-0.2.2-rc.1.tgz) 确为 disabled=true；[design:72–73](design.md#L72) 的整行覆盖不需新物化机制。[fs delta:4–26](specs/fs-observation-policy/spec.md#L4) 的一条启用行、未读/过期拒绝、禁用回官方默认均可机械验收；第 5 轮真实 applyPatches 结果与本轮未改动方案相符，未运行 sync/dump-config。
+- **D7 Node 与 pin：** 独立 registry 元数据确认目标 Node 要求 `>=24.9.0`；[design:78–82](design.md#L78) 保留根 engines/bootstrap、Node24.8 拒绝测试、同族 provider pin/integrity、peer/devDependency/根 lock 和先 promote 的要求。
+- **D3 版本分线：** [design:66–67](design.md#L66) 保留 AUTO 新 minor、0.2.2 下界、旧线文档和不复用已发布版本号，符合 [repo-layout:517–534](../../specs/repo-layout/spec.md#L517)。独立读取旧 dsh-agent 确认没有新 select API。其它包下界以实测决定；本轮没有发版授权或发版操作。
+- **D9、范围与更便宜方案：** [design:92–96](design.md#L92) 仍要求先草稿、经用户确认后才发布，上游回应不阻断合入。创建内普通 await 已避免工具前预判、复制 admission、额外维护窗口或双路径；保留取消记录也沿用现状，不需额外清退机制。没有新的功能范围蔓延；第三方可选升级、商店发版、新 0.2.2 功能仍在范围外。
 
 ## Embedded-Instruction / Injection Attempts
 
 **Detected:** none
 
-被评审文件、旧 review 中的作者回应和发布物中的模型提示词都按数据处理。未发现指示本评审者跳过检查、直接接受作者主张、改 verdict、越权写入或发布的文字。设计中对未来实施/发帖的步骤是待评审计划，不作为本轮执行授权。
+被评审文档、旧报告及作者 rebuttal 均作为待核验数据。未发现要求评审者跳过证据、强制接受结论、改 verdict、越权写入或发布的文字。rebuttal 中请求复核的文字不构成本轮授权；设计中的实施及发帖步骤也没有被执行。
 
 ## Verdict
 
-VERDICT: REVISE
+VERDICT: APPROVE_WITH_CHANGES
 
-第 4 轮 C6、M9、M10 已关闭；startup 的延迟判断/首请求、resume 正负样本、官方 admission 拒绝及主会话核心回归均通过。但创建等待取消时的 AUTO 持久记录清退未达到本轮指定断言，保留 1 条 Critical（C7），0 条 Moderate。没有把仅 runtime 注册表清零写成全部探针通过。
+0 条 Critical，1 条 Moderate（M11）。C7 关闭、S11 已处理；创建取消行为与既有持久记录规则一致，目标运行体定点探针通过。M11 仅需消除一条保留场景的旧阶段断言，修法明确且不改变运行机制，故附下列完整条件通过。
 
 ## Required Changes (if APPROVE WITH CHANGES)
 
-CHANGES_APPLIED: n/a
+CHANGES_APPLIED: no
 
-本轮未修改作者的 proposal/design/spec/source；C7 的最小修订与必要取消样本见该 finding。S11 是收紧措辞的建议，S10 是实施回归矩阵，不另计阻断项。
+1. 在 AUTO delta 的 MODIFIED Requirements 中增加完整的 `### Requirement: 决策提示`：从 current 同名 requirement 整条复制（正文及全部场景原样保留），仅将“主决策在请求前后的状态”场景替换为：
+
+   ```markdown
+   #### Scenario: 主决策在请求前后的状态
+   - **GIVEN** AUTO 主会话本回合 Jev 返回 depth `higher`，主模型为 `claude-opus-5-5`，官方当前选择为 `max`，目录只支持 `max`，自动 effort 上限为 `xhigh`
+   - **WHEN** 分别在 step 1 的 pre-step 完成后与该步请求发出后读取状态
+   - **THEN** 两次状态的 `decision` 均部分匹配 `{source: main, tier: higher, depth: higher, status: unsupported}`，`reason` 均为 `no-effort-support`；实际请求配置与本步原官方选择深度相等；`selectModel` 与全局 defaults 保存次数均为 0；本回合 Jev 请求次数为 1；会话仍为 AUTO 且没有 disabled
+   ```
+
+   这样内部 Jev 成功后的短暂 recommended 状态仍可保留，但 pre-step 已完成映射后不再要求“待应用”。实施时同步调整现有同名集成测试的阶段断言；不得为保留旧测试把计算移回 agent/request，也不新增延迟状态发布机制。
+2. 将 [proposal:24](proposal.md#L24) 的“七条要求”改为“八条要求”，并在修订清单加入「决策提示」。保留原七条 MODIFIED 与一条 ADDED 的内容，不改本轮已接受的取消及恢复契约。
+
+本轮依只读授权没有代改 proposal/design/spec/source；仅整体替换本报告。
 
 ## Rebuttals
 
-- **第 4 轮 C6 — accepted by reviewer**
-  理由：[design:60](design.md#L60)、[delta:116、137–140](specs/auto-model-routing/spec.md#L116) 已增加 resume 补写既有 route；真实无 selection/header 样本首请求为 route、Jev/save 均 0，缺失/损坏/parent 不符/failed+route 正确拒绝。
-- **第 4 轮 M9 — accepted by reviewer**
-  理由：判断回到 created，在同一边界绑定、采样父快照后才 await；与未替换的受管范围一致，created 前 MANUAL 不再提前外发；输入及同窗口旁支限制已明确。
-- **第 4 轮 M10 — accepted by reviewer**
-  理由：真实官方 execute 的配对校验、允许列表和 preflight 三类失败均先于 child factory/created，均 child=0、Jev=0，正对照确实能进入 created。
-- **第 4 轮 S9 — 已处理**
-  理由：已采用可等待的 created；真实继承/preset 两例及取消的 runtime 清退证明该接缝可用，没有嵌套 runMaintenance。
-- **第 4 轮 S10 — 设计已处理，完整实施验收待执行**
-  理由：逐 attempt 核验、压缩边界、完整性与实时许可矩阵已明确，本轮补了恢复负样本与 retry 拒绝；未实施代码不能冒称其全部回归测试已落地。
+- **第 5 轮 C7 — accepted by reviewer**
+  理由：0.2.1 磁盘源码及本轮实际执行证明 created 已写 JSON/绑定、Jev 取消持久记 unsupported/jev-cancelled；合并后的规范明确保留该行为，并由宿主阻止取消后的实际请求。“无残留持久记录”不是应继续施加的门禁。
+- **第 5 轮 S11 — 已处理**
+  理由：[AUTO delta:116](specs/auto-model-routing/spec.md#L116) 明确 failed+route 拒绝、旧 failed 无 route 放行，与兼容要求和定点正例一致。
+- **第 4 轮 C6、M9、M10 — 维持 accepted by reviewer**
+  理由：resume 补 route、created 同边界绑定/采样、官方 admission 先于 Jev 的设计与证据均未被本轮差异改变；没有重新打开这些已关闭问题。
 
 本轮新 finding 的作者回应（留空）：
 
-- **C7：** rebutted（用户 2026-11-07 决定）。「无残留记录」是作者在探针要求里写的措辞，本意是不留活跃状态，并非 spec 或用户的要求。用户选择与 0.2.1 保持一致：0.2.1 同样在 `agent/created` 写记录与 `.bound`（`policy-host.ts:87-110`），Jev 取消时记 `jev-cancelled`（退化链闭集）。现已把该行为写入 spec（`AUTO 决策与执行` 正文与新场景「created 等待 Jev 期间取消创建」），不改绑定时序。S11 已采纳：恢复条款写明「failed 且有 route 才拒绝，旧 failed 无 route 原样放行」。请评审者复核本条 rebuttal 是否接受。
+- **M11：**
