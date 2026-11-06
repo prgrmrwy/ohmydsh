@@ -80,7 +80,7 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **THEN** S1 始终为 `MANUAL`；改回后新建的会话 S2 为 `AUTO`
 
 ### Requirement: 用户回合与 Jev 输入
-系统 SHALL 只在 step 1 的 `agent/pre-step` 中、先执行 `await next()` 得到 `PreStepDecision` 后判定主会话用户回合并请求 Jev：结果为 `reject` 时 MUST NOT 请求 Jev、MUST NOT 记录本回合决定；结果为 `enter` 时只使用其 `messages`。**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的 depth 且不请求 Jev；首个用户回合之前无 depth 时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接，经 `redact` 后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 走主会话判断；其路由只按「AUTO 决策与执行」处理；判断输入为创建它的官方工具调用（`subagent`、`spawn_teammate`）参数中的任务文本 `prompt`，即子会话首条 user 消息的内容，运行体为子会话注入的非 user 消息不贡献输入。
+系统 SHALL 只在 step 1 的 `agent/pre-step` 中、先执行 `await next()` 得到 `PreStepDecision` 后判定主会话用户回合并请求 Jev：结果为 `reject` 时 MUST NOT 请求 Jev、MUST NOT 记录本回合决定；结果为 `enter` 时只使用其 `messages`。**合格消息**为该次领取消息中 `source.kind` 严格等于 `"user"` 的消息；其它来源（含 `agent-instructions`、`plugin`、`plugin:<id>`、`runtime-context`、`time-context`、`skill-catalog`）与缺失 `source` 的消息 MUST NOT 贡献输入。合格消息数为 0 的回合不是用户回合，沿用上一用户回合的 depth 且不请求 Jev；首个用户回合之前无 depth 时不改写。分类输入为合格消息按领取顺序、消息内按块顺序的 `text` 块文本，以 `"\n"` 连接，经 `redact` 后取 `.slice(0, 8000)`；非文本块不贡献。决定 SHALL 按 (agent, turn) 保存，同回合后续请求（含同 turn/step 的错误重试）复用该决定。`origin = "subagent"` 会话 MUST NOT 走主会话判断；其路由只按「AUTO 决策与执行」处理；判断输入为绑定窗口中创建它的官方工具调用（`subagent`、`spawn_teammate`）参数里的任务文本 `prompt`，即子会话首条 user 消息的内容，运行体为子会话注入的非 user 消息不贡献输入。同一绑定窗口内由插件另建的子会话无法与工具调用区分，沿用已接受的绑定限制。
 
 #### Scenario: 步骤被拒时不请求 Jev
 - **GIVEN** 会话为 `AUTO`，下游 pre-step listener 对 step 1 返回 `{kind: reject}`
@@ -109,11 +109,11 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 
 #### Scenario: 子会话不走主会话判断
 - **GIVEN** 父会话为 `AUTO`，经官方 fresh 子会话工具创建子会话，工具参数 `prompt` 为“整理日志”；子会话首条进入消息另含运行体注入的非 user 指令
-- **WHEN** 创建该子会话的工具调用进行判断
+- **WHEN** 子会话 `agent/created` 中进行判断
 - **THEN** 发往 Jev 的子任务 `state` 只含“整理日志”，不含注入指令文本；父会话本回合的决定与 Jev 请求次数不变
 
 ### Requirement: AUTO 决策与执行
-主会话 SHALL 仅判断 depth=lower/baseline/higher，并在模型支持序列中以所属家族策略的推荐起点最多移动一档，不修改 provider/model；选定 effort 与官方合成值不同时，按「AUTO 主 effort 同步官方选择」经官方 selectModel 同步。子任务 SHALL 只在「AUTO 受管子会话范围」内路由：独立判断 capability=bounded/analytical/frontier 或 insufficient_context，按「子任务路由退化链」确定 route，保留显式模型/effort，完全显式时不调用 Jev。受管子会话的判断 SHALL 在创建它的官方工具调用中完成（`tools/execute` 调用 `next()` 之前，使用该调用的 signal）；子会话在 `agent/created` 中绑定后，系统 SHALL 同步以子会话自身的 `agent.model.select(route)` 写入 route，使其 step 1 即用该 route，MUST NOT 保存全局默认。受管子会话 SHALL 按精确 child ID 绑定、持久化，实际请求匹配后标 applied；恢复不重判，已持久的选择即为 route。已有 route 的子会话 SHALL 在每次请求的 `agent/request` 中只核验、不改写：返回值 MUST 等于 `await next()` 的结果。fork 不属于受管范围，SHALL 与父会话保持一致、原样放行，MUST NOT 报错或悄悄改为 fresh。Agent 保留编排和验收权，不实现自主重试升级。
+主会话 SHALL 仅判断 depth=lower/baseline/higher，并在模型支持序列中以所属家族策略的推荐起点最多移动一档，不修改 provider/model；选定 effort 与官方合成值不同时，按「AUTO 主 effort 同步官方选择」经官方 selectModel 同步。子任务 SHALL 只在「AUTO 受管子会话范围」内路由：独立判断 capability=bounded/analytical/frontier 或 insufficient_context，按「子任务路由退化链」确定 route，保留显式模型/effort，完全显式时不调用 Jev。受管子会话的判断 SHALL 在其 `agent/created`（`source = "startup"`）中完成：按「AUTO 受管子会话范围」绑定并采样父配置后，以该事件的 signal 等待 Jev，按退化链确定 route，然后同步以子会话自身的 `agent.model.select(route)` 写入，使其 step 1 即用该 route；MUST NOT 保存全局默认。官方工具在创建子会话前完成的参数与允许列表校验失败时，不产生子会话，也 MUST NOT 请求 Jev。受管子会话 SHALL 按精确 child ID 绑定、持久化，实际请求匹配后标 applied；恢复不重判。恢复（`agent/created`，`source = "resume"`）一个记录完整、parent 一致、状态不是 `failed` 且已有 route 的受管子会话时，若 `agent.model.current()` 与 route 不一致，系统 SHALL 同步 `agent.model.select(route)`，不请求 Jev、不保存全局默认；记录缺失或损坏、parent 不符、`failed` 时仍按现有规则 fail closed。已有 route 的子会话 SHALL 在每次请求的 `agent/request` 中只核验、不改写：返回值 MUST 等于 `await next()` 的结果。fork 不属于受管范围，SHALL 与父会话保持一致、原样放行，MUST NOT 报错或悄悄改为 fresh。Agent 保留编排和验收权，不实现自主重试升级。
 
 #### Scenario: Magpie 自动子路由
 - **WHEN** Magpie GPT 主会话为 AUTO 且创建 bounded 子任务
@@ -128,6 +128,16 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **GIVEN** AUTO 根会话经官方 fresh 子会话工具创建受管子任务，判出 route `claude` / `claude-haiku-5-5` / `medium`
 - **WHEN** 子会话开始 step 1
 - **THEN** `agent.model.select` 在该子会话 `agent/created` 中恰被调用一次，参数为该 route；step 1 的 `modelSelection` 与请求头均为该 route；`saveSelection` 调用次数为 0；`agent/request` 返回值等于 `await next()`，运行体未抛错
+
+#### Scenario: 官方参数校验失败的创建不请求 Jev
+- **GIVEN** AUTO 根会话调用官方 `subagent`，只传 `model` 未传 `provider`（官方会以配对错误拒绝）
+- **WHEN** 工具执行
+- **THEN** 工具返回官方错误；未创建子会话；Jev 请求次数为 0；无绑定记录
+
+#### Scenario: 从 0.2.1 中断状态恢复的子会话补写 route
+- **GIVEN** 0.2.1 写下的受管子会话记录为 `recommended` 且含 route `P` / `CHILD` / `low`，会话中没有 `model/selection` 与 `request/header`（首个请求前中断），`current()` 为父快照 `P` / `M` / `medium`
+- **WHEN** 0.2.2 恢复该子会话并继续执行
+- **THEN** `agent/created`（resume）中 `agent.model.select` 恰被调用一次，参数为该 route；首个请求头与 adapter 调用均为 `P` / `CHILD` / `low`；Jev 请求次数为 0；`saveSelection` 调用次数为 0
 
 ### Requirement: 子任务路由退化链
 受管子会话首次请求前，系统 SHALL 按以下顺序确定 route。记 P 为 provider（显式指定值，否则为创建快照中的父 provider），M0、E0 为创建快照中的父模型与 effort，“目录”指 P 的实时目录，“可用”指：该 provider/model 在目录中、在官方子会话允许列表中（状态须为 enabled）、在父会话 captured allowlist（存在时）中，且 effort 属于该模型支持序列并不超过 effort 上限。允许列表 MUST 对每个候选校验，包括 M0；系统 MUST NOT 为任何模型豁免允许列表。
@@ -215,7 +225,7 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **THEN** 重试那次的 `agent/request` 核验抛出可诊断错误，第二次 adapter 调用次数为 0；route 与 C 的选择不变
 
 ### Requirement: Jev 判断请求与脱敏
-系统 SHALL 在 AUTO 主会话用户回合 step 1 的 `agent/pre-step` 与受管子任务创建时（创建它的官方工具调用中，子会话首个请求之前），各以一次 Jev 决策请求得出判断：请求发往设置中所选决策服务的端点与模型（见 auto-decision-services-feedback），凭据按该服务的固定引用在每次调用时经官方 credentials 服务解析（credentials 服务不存在时经官方 launch environment 读取），未解析到值时为 `missing-credential`；单次期限取设置项「Jev 期限」（整数毫秒，范围 1000–8000，缺省 8000，每次请求时读取），`redirect: 'error'`，MUST NOT 重试。请求 body 为 `{model, state, questions}`；`questions` SHALL 取自按「判档预设的采样与归属」为该次判断捕获的预设的 `rubric.json`：主会话只含 `depth`，子任务按显式维度含 `capability`、`depth` 或两者；`route_subagent` 同样使用所选预设。返回的 choice SHALL 按该捕获预设的 criteria 键校验。Jev 返回后 SHALL 重新读取会话模式，等待期间模式已变或回合决定已被废止时丢弃结果（不写决定、不写 `disabled`）。系统 MUST NOT 包含本地规则、关键词或通用对话模型的判断路径。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为所选决策服务的端点主机。
+系统 SHALL 在 AUTO 主会话用户回合 step 1 的 `agent/pre-step` 与受管子任务的 `agent/created`（子会话首条消息投递之前），各以一次 Jev 决策请求得出判断：请求发往设置中所选决策服务的端点与模型（见 auto-decision-services-feedback），凭据按该服务的固定引用在每次调用时经官方 credentials 服务解析（credentials 服务不存在时经官方 launch environment 读取），未解析到值时为 `missing-credential`；单次期限取设置项「Jev 期限」（整数毫秒，范围 1000–8000，缺省 8000，每次请求时读取），`redirect: 'error'`，MUST NOT 重试。请求 body 为 `{model, state, questions}`；`questions` SHALL 取自按「判档预设的采样与归属」为该次判断捕获的预设的 `rubric.json`：主会话只含 `depth`，子任务按显式维度含 `capability`、`depth` 或两者；`route_subagent` 同样使用所选预设。返回的 choice SHALL 按该捕获预设的 criteria 键校验。Jev 返回后 SHALL 重新读取会话模式，等待期间模式已变或回合决定已被废止时丢弃结果（不写决定、不写 `disabled`）。系统 MUST NOT 包含本地规则、关键词或通用对话模型的判断路径。请求 MUST NOT 携带会话状态、其它会话内容或凭据以外的鉴权信息；出站主机 SHALL 仅为所选决策服务的端点主机。
 
 主会话请求的 `state` SHALL 依次包含：
 1. 固定首行 `Previous user-turn tier: none`。
@@ -294,7 +304,7 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **THEN** 约 1500ms 时以 `timeout` 停用；把期限改为 2500 后，下一次判断成功
 
 ### Requirement: 判档预设的采样与归属
-每次 Jev 判断 SHALL 在判断开始时（主会话 step 1 的 pre-step、创建受管子任务的官方工具调用、`route_subagent` 调用、设置页测试连接）从当次设置读取一次 `preset` 并解析为预设对象（未注册的 id 解析为缺省预设）；该次判断的 `state`（是否含 `Execution` 行）、`questions`、choice 校验与主会话决策的预设归属 SHALL 都使用这个捕获值。判断进行中设置变更 MUST NOT 影响该次判断，也 MUST NOT 触发重判或重试；只影响之后开始的判断。受管子任务的预设在创建它的工具调用开始判断时捕获。非用户回合不重新判断，沿用上一用户回合的 depth 与预设归属。`route_subagent` 与随后 fresh 创建的子任务各自独立捕获，预览结果不约束后者。设置页测试连接 SHALL 使用所选预设的 questions，`state` 保持固定测试文本。
+每次 Jev 判断 SHALL 在判断开始时（主会话 step 1 的 pre-step、受管子任务的 `agent/created`、`route_subagent` 调用、设置页测试连接）从当次设置读取一次 `preset` 并解析为预设对象（未注册的 id 解析为缺省预设）；该次判断的 `state`（是否含 `Execution` 行）、`questions`、choice 校验与主会话决策的预设归属 SHALL 都使用这个捕获值。判断进行中设置变更 MUST NOT 影响该次判断，也 MUST NOT 触发重判或重试；只影响之后开始的判断。受管子任务的预设在其 `agent/created` 开始判断时捕获。非用户回合不重新判断，沿用上一用户回合的 depth 与预设归属。`route_subagent` 与随后 fresh 创建的子任务各自独立捕获，预览结果不约束后者。设置页测试连接 SHALL 使用所选预设的 questions，`state` 保持固定测试文本。
 
 #### Scenario: 主判断进行中切换预设
 - **GIVEN** 设置 `preset` 为 `reasoning-depth`，AUTO 主会话用户回合的 Jev 请求已发出、尚未返回
@@ -302,7 +312,7 @@ AUTO 主会话 SHALL 保持本步选择的 provider/model，按 depth 算法、�
 - **THEN** 第一次请求的 `questions` 等于 `reasoning-depth` 的 depth、`state` 不含 `Execution:`；该回合 Jev 请求数为 1；绑定快照 `preset` 为 `reasoning-depth`；下一回合请求的 `questions` 取自 `effort-as-verification`，`state` 含 `Execution: main conversation.`
 
 #### Scenario: 子任务在创建后、首次判断前切换预设
-- **GIVEN** 设置为 `effort-as-verification`，AUTO 主会话调用官方 fresh 子会话工具创建受管子任务，判断在该工具调用中进行
+- **GIVEN** 设置为 `effort-as-verification`，AUTO 主会话调用官方 fresh 子会话工具创建受管子任务，判断在子会话 `agent/created` 中进行
 - **WHEN** 判断进行中把设置改为 `reasoning-depth`；子任务创建后、首个请求前再改回 `effort-as-verification`
 - **THEN** 子任务的 Jev 请求恰 1 次，`questions` 取自 `effort-as-verification`，`state` 含 `Execution: delegated subtask; the result returns to an orchestrating agent.`；两次设置修改都不触发第二次请求，子会话 step 1 的 route 不变
 

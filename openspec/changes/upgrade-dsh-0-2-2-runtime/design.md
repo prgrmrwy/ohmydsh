@@ -53,16 +53,18 @@ AUTO 主会话的 `agent/pre-step` 监听保持现有结构：先 `await next()`
 - **在 `llm/stream` 中拦截，自行用新 effort 重发请求**：会话日志中记录的请求头会与实际发出的请求不一致。
 - **继续在 `agent/request` 里改写**：会抛错。
 
-### D2 子会话：在创建工具调用中判断，在 `agent/created` 中写入 route；门禁留在 `agent/request`，只核验
-- **判断**：现有 `tools/execute` 绑定窗口在调用 `next()` 之前，用 `args.prompt` 和该调用的 signal 等待 Jev，并按退化链确定 route。总等待时长与现状相同，只是从子会话 step 1 前移到了创建前。`args.prompt` 就是子会话首条 user 消息的内容。
-- **写入**：`agent/created` 绑定 child 时同步调用子会话的 `agent.model.select(route)`。此时首条消息还没有投递，所以 step 1 读到的就是 route。不写全局默认。
+### D2 子会话：在 `agent/created` 中判断并写入 route；门禁留在 `agent/request`，只核验
+- **判断与写入**：`tools/execute` 绑定窗口额外记下 `args.prompt`。`agent/created`（`source = "startup"`）是 serial、被 await 的钩子，并带 signal（`dsh-agent/lib/index.js:703-714`）：它在官方完成参数/允许列表校验、工厂完成 setup 之后、首条消息投递之前触发。AUTO 在这里按现行「AUTO 受管子会话范围」绑定并采样父配置，用该 signal await Jev、按退化链得到 route，再同步 `agent.model.select(route)`。不写全局默认。这里只是普通 await，不开维护窗口（嵌套 `runMaintenance` 才会抛错）。
+- 这样父快照、「创建前切 MANUAL 时 Jev=0」都与现行受管范围 spec 一致（第 4 轮 M9），参数非法、未创建子会话的调用也不会外发 Jev（M10）。等待时长与 0.2.1 在子会话 step 1 前等待相同，只是位置前移到首条消息投递之前；期间工具调用阻塞。
+- **输入**：用绑定窗口记下的 `args.prompt`，即子会话首条 user 消息的内容。同一绑定窗口内插件另建的子会话无法区分，沿用 `policy-host.ts:89` 已接受的 `shortcut:` 限制。
+- **恢复**（第 4 轮 C6）：0.2.1 的 route 只在请求时改写，从不写进会话选择；记录已写 route、首个请求前中断的旧子会话，恢复后 `current()` 是父快照，只核验的门禁会一直拒绝。因此 `agent/created`（`source = "resume"`）对记录完整、parent 一致、非 `failed` 且已有 route 的子会话，若 `current()` 不等于 route，就同步 `select(route)`，不重判、不写默认；其余 fail closed 规则不变。正常的旧子会话已发过请求，`current()` 本来就等于 route，这一步是 no-op。
 - **门禁**：`agent/request` listener 只核验（绑定记录完整、parent 一致、请求等于 route、目录/允许列表/captured allowlist/cap），然后返回 `await next()`，不改写。它在每次 attempt（含重试）都会派发，覆盖面与现状相同。压缩请求现状本来就不经过这道门禁，所以不算回退。listener 已标为 deprecated，集成测试同时断言「目标运行体在重试时仍派发 `agent/request`」，一旦上游移除它，测试会失败。
 - 不能在子会话上用 D1 的对象改写：route 通常会换模型，而本步的工具集和提示词已经按旧模型生成。
 
 applied 判定沿用 `request/header` 与 `session.requestHeader()` 的比对。
 
 ### D3 auto-model-routing 兼容下界抬到 `0.2.2-rc.1`
-`agent.model.select` 只在 0.2.2 中存在，而且 D1 依赖 0.2.2 的选择固定流程。保留双路径会让测试翻倍。因此只改该包的 `engines.dsh` 与 dsh peer 下界，理由按 repo-layout 的要求记录在 package README/CHANGELOG 中。商店上的 0.7.0 在 0.2.2 Host 上会失效；本 change 不发版，收尾时明确提示用户。其它 local package 的下界不变，除非审计发现它们用了只有 0.2.2 才有的 API。
+`agent.model.select` 只在 0.2.2 中存在，而且 D1 依赖 0.2.2 的选择固定流程。保留双路径会让测试翻倍。因此只改该包的 `engines.dsh` 与 dsh peer 下界，理由按 repo-layout 的要求记录在 package README/CHANGELOG 中。商店上的 0.7.0 在 0.2.2 Host 上会失效；本 change 不发版，收尾时明确提示用户。不做双路径兼容（用户 2026-11-07 决定）：发版时按 DSH 版本分线，0.2.0–0.2.1 停在已发布的 0.7.x/0.6.x，0.2.2 起用新的 minor 版本（建议 0.8.0；0.7.0 已发布，npm 不允许复用版本号），README/CHANGELOG 写清每条版本线依赖的 DSH 范围。其它 local package 的下界不变，除非审计发现它们用了只有 0.2.2 才有的 API。
 
 ### D4 memex 裁判：删除过期的工具投影
 删掉 `judge-boundary.ts:22-25` 中的 `system-prompt/assemble` 监听。0.2.2 的 fresh 裁判子会话不会注册 Team 工具（见 Context）。精确身份、冻结请求、`tools.guard` 和 `verifyJudgeRequest` 照旧是权威门禁，`dsh-memex-evaluation:198` 不受影响。用目标版本的真实组合复跑 `test/eval-judge-runtime.test.ts` 中启用 Team 时的成功路径，并保留「污染注入时首请求零调用」的断言。成功路径不通过就停在「未通过」，不能以全部拒绝或全部 unknown 收尾。
@@ -97,8 +99,8 @@ applied 判定沿用 `request/header` 与 `session.requestHeader()` 的比对。
 
 - [D1 依赖 `modelSelection` 是本步实际使用的可写对象] → 用真实 loop 的集成测试锁定；冻结时捕获并退回为下一步生效；改为副本时由测试发现；D9 推动上游给出正式接缝。
 - [`agent/request` 已弃用，未来可能被移除] → 集成测试断言它在重试时仍会派发；一旦被移除，子会话门禁需要改挂其它逐次请求接缝（D9 一并反馈）。
-- [子会话判断前移到创建工具调用，Jev 等待期间该工具调用会阻塞] → 总延迟与现状在子会话 step 1 前的等待相同，并使用工具调用的 signal，可被取消。
-- [根会话在子会话 `agent/created` 写入 route 之后、首个请求之前离开 AUTO] → 退化链改为以写入 route 的时刻为准；这个窗口只覆盖首条消息投递前的同步过程。
+- [子会话判断在 `agent/created` 中等待 Jev，期间创建它的工具调用阻塞] → 总延迟与现状在子会话 step 1 前的等待相同，使用该事件的 signal，可被取消；隔离验收用真实 fresh 子任务确认。
+- [根会话在子会话 `agent/created` 写入 route 之后、首个请求之前离开 AUTO] → 退化链以写入 route 的时刻为准；这个窗口只覆盖首条消息投递前的同步过程。
 - [商店 0.7.0 在 0.2.2 Host 上失效] → 收尾时提示用户尽快走 publish 流程。
 - [0.2.2 单向存储格式迁移] → 按 Migration Plan 做离线快照与恢复演练；恢复快照会丢失切换后的新数据，切换前须告知用户。
 - [checking 证据再次丢失] → 合入前把结论汇总进会被版本控制的 `checking/summary.md`。

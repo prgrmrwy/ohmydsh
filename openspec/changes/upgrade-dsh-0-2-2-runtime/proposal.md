@@ -5,7 +5,7 @@ DSH 的 latest/next 频道已经到 `0.2.2-rc.1`（npm，2026-11-04 发布），
 ## What Changes
 
 - **pin 升级**：`dshVersion` 及同族的 skill-filesystem、mcp-client provider pin 改为 `0.2.2-rc.1`；local package 的 `@deepseek-ai/dsh-*` devDependencies 改为 `^0.2.2-rc.1`，`engines.dsh` 区间 `>=0.2.0-rc.2 <0.3.0-0` 已包含目标版本，只有 auto-model-routing 因用到 0.2.2 才有的 `agent.model.select` 而抬下界；根 `package.json` 的 `engines.node` 改为 `>=24.9.0`（bootstrap 据此检查）；更新根 lockfile。
-- **BREAKING（运行体）AUTO 应用方式迁移**：0.2.2 在每一步开头就固定本步的 provider/model/effort（`dsh-agent-loop/lib/index.js:671`，早于 `agent/pre-step`），之后 `agent/request` 返回的值只要与这个选择不一致就直接抛错（`:1000-1001`）。`dsh-auto-model-routing` 主会话改 effort（`src/policy-host.ts:209`）和子会话覆盖 route（`:218`）在 0.2.2 上都会失败。迁移按「可见行为与 0.2.1 相同」来做：主会话的判断仍在 step 1 的 `agent/pre-step` 等待 Jev；每一步在 pre-step 中先 await 官方 `selectModel`，再改写本步 `modelSelection` 的 effort，使 step 1 就生效（依赖本步选择对象可写，用目标运行体上的集成测试锁定，冻结时退回为下一步生效）。子会话在创建它的工具调用中判断，在 `agent/created` 中用 `agent.model.select(route)` 写入；`agent/request` 只做逐次请求核验、不改写。
+- **BREAKING（运行体）AUTO 应用方式迁移**：0.2.2 在每一步开头就固定本步的 provider/model/effort（`dsh-agent-loop/lib/index.js:671`，早于 `agent/pre-step`），之后 `agent/request` 返回的值只要与这个选择不一致就直接抛错（`:1000-1001`）。`dsh-auto-model-routing` 主会话改 effort（`src/policy-host.ts:209`）和子会话覆盖 route（`:218`）在 0.2.2 上都会失败。迁移按「可见行为与 0.2.1 相同」来做：主会话的判断仍在 step 1 的 `agent/pre-step` 等待 Jev；每一步在 pre-step 中先 await 官方 `selectModel`，再改写本步 `modelSelection` 的 effort，使 step 1 就生效（依赖本步选择对象可写，用目标运行体上的集成测试锁定，冻结时退回为下一步生效）。子会话在其 `agent/created` 中等待 Jev 判断并用 `agent.model.select(route)` 写入（恢复的旧子会话按记录补写 route）；`agent/request` 只做逐次请求核验、不改写。
 - **BREAKING（运行体）memex 裁判工具投影迁移**：`system-prompt/assemble` 的 payload 改成了 `PromptPresentation`，不再带 `tools`（`dsh-system-prompt/lib/types/index.d.ts:114-122`）。`packages/dsh-memex/src/eval/judge-boundary.ts:22-25` 读 `assembly.tools` 会抛错。0.2.2 的 fresh 裁判子会话本就不会注册 Team 工具，所以删除这段投影，保留最终门禁，并补启用 Team 时的成功测试。裁判工具面的要求（`dsh-memex-evaluation` spec:198）不变。
 - **恢复文件观察策略**：0.2.2 默认关闭「改文件前先读」和外部修改防护。用户决定显式恢复：官方 `dsh-base` 已带该行（`disabled: true`），用一个整行覆盖 patch 把它改为启用，不新增包行；范围是 sync 物化的 web profile。与环境级指令里「先读后改」的约定保持一致。
 - **接受 Web Fetch 新行为**：0.2.2 不再拒绝非公网地址。用户决定接受，不额外加限制；在 manifest note 或 release 记录里写明这一信任面变化。
@@ -21,7 +21,7 @@ DSH 的 latest/next 频道已经到 `0.2.2-rc.1`（npm，2026-11-04 发布），
 - `fs-observation-policy`：部署面显式组合官方文件观察策略，使「改前先读」和外部修改防护不随运行体默认值变化而静默消失。
 
 ### Modified Capabilities
-- `auto-model-routing`：主会话 effort 改为在每步 pre-step 中设定（改写本步选择），子会话 route 改为在创建时判断、在 `agent/created` 中写入，`agent/request` 只核验。修订「AUTO 主 effort 同步官方选择」「模式与改写规则」「用户回合与 Jev 输入」「AUTO 决策与执行」「子任务路由退化链」「Jev 判断请求与脱敏」「判档预设的采样与归属」七条要求，新增「本步选择改写依赖运行体核验」。
+- `auto-model-routing`：主会话 effort 改为在每步 pre-step 中设定（改写本步选择），子会话 route 改为在 `agent/created` 中判断并写入，`agent/request` 只核验。修订「AUTO 主 effort 同步官方选择」「模式与改写规则」「用户回合与 Jev 输入」「AUTO 决策与执行」「子任务路由退化链」「Jev 判断请求与脱敏」「判档预设的采样与归属」七条要求，新增「本步选择改写依赖运行体核验」。
 
 ## Impact
 

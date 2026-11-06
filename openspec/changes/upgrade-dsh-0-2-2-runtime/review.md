@@ -149,6 +149,7 @@ CHANGES_APPLIED: n/a
 
 本轮新 finding 的作者回应（留空）：
 
-- **C6：**
-- **M9：**
-- **M10：**
+- **C6：** fixed。`agent/created`（`source = "resume"`）对记录完整、parent 一致、非 failed 且已有 route 的子会话，若 `current()` 不等于 route，就同步 `select(route)`，不重判、不写默认；其余 fail closed 不变。新增场景「从 0.2.1 中断状态恢复的子会话补写 route」。
+- **M9：** fixed（采纳 S9）。子会话判断改回 `agent/created`（startup），在那里 await Jev 后同步 select；父快照与「创建前切 MANUAL 时 Jev=0」与现行受管范围一致，因此无需修改该 requirement。输入为绑定窗口记下的 `args.prompt`，同窗口插件子会话沿用已接受的 `shortcut:` 限制（design D2）。
+- **M10：** fixed。判断发生在官方完成参数与允许列表校验、子会话创建之后；新增场景「官方参数校验失败的创建不请求 Jev」。
+另：用户 2026-11-07 决定不做双路径兼容，发版按 DSH 版本分线（design D3）。第 5 轮须为完整评审，并对 `agent/created` 内 await Jev 再同步 select 的路径补真实类探针。
