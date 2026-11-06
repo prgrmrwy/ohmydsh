@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
+import { buildModelCatalog } from './support/model-catalog.js'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mountRealHost, until } from './support/host.js'
@@ -105,8 +106,7 @@ test('test_owner_persistence_06 spec Scenario "保存 knownOwners 失败时仍�
   catalog.value = { data: [{ id: 'claude/a', owned_by: 'claude' }, { id: 'claude/b', owned_by: 'claude' }, { id: 'deepseek/x', owned_by: 'deepseek' }] }
   await host.call('settings', { resync: true })
   expect(events).toBeGreaterThan(0)
-  const { buildModelCatalog } = await import('@deepseek-ai/dsh-api-session-controller')
-  const built = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const built = await buildModelCatalog(host.llm)
   expect(built.groups.find(g => g.name === 'Magpie (Claude)')?.models.map(m => m.id)).toEqual(['claude/a', 'claude/b'])
   expect(host.ownRoutes()).not.toContain(route('deepseek'))
   expect((await view(host)).lastSyncErrorKind).toBe('settings')
@@ -235,8 +235,7 @@ test('test_owner_persistence_12 spec Scenario "归属下架后 route 保留"', a
   expect(host.llm.listProviders().find(p => p.id === route('deepseek'))?.name).toBe('Magpie (Deepseek)')
   expect(await host.llm.listModels(route('deepseek'))).toEqual([])
   expect(readJson(host.home).knownOwners ?? ['claude', 'deepseek']).toEqual(['claude', 'deepseek'])
-  const { buildModelCatalog } = await import('@deepseek-ai/dsh-api-session-controller')
-  const built = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const built = await buildModelCatalog(host.llm)
   expect(built.groups.map(g => g.name)).toEqual(['Magpie (Claude)'])
 })
 
