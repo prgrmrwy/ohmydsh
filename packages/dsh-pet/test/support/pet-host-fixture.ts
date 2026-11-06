@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import type { LocusRowV20 } from '../../src/host/locus/contract-v20.js'
 import { endpointKeyV20 } from '../../src/host/locus/locus-set-v20.js'
@@ -136,6 +137,7 @@ export async function loadPetHost(
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   // The storage hub is composed by `composePetStorage` below, together with
   // Pet's backend and the domain layer, in the order the real Host uses.
   ctx.provide('webServer', {

@@ -74,7 +74,7 @@ function stubServices(
     archivedSessionIds: [],
   })
   ctx.provide('sessions', overrides.sessions ?? { list: () => [], get: () => undefined })
-  ctx.provide('sessionController', overrides.sessionController ?? {
+  const sessionControllerFixture = overrides.sessionController ?? {
     // The real `inspect` cold-reads a durable log and returns its events —
     // which is where `session/title` lives — and REJECTS for a session that
     // does not exist. The known locus sessions resolve with their titles;
@@ -87,6 +87,17 @@ function stubServices(
       return { meta: { id }, events: [{ type: 'session/title', data: { title } }] }
     },
     resolveAgent: async () => undefined,
+  }
+  ctx.provide('sessionController', sessionControllerFixture)
+  // DSH 0.2.2 removed `sessionController.inspect`; Pet cold-inspects through
+  // `sessionQuery.observeSession`. Serve the same fixture sessions through it:
+  // a session the fixture cannot inspect rejects, as the real service does.
+  ctx.provide('sessionQuery', {
+    observeSession: async (id: string) => {
+      const inspected = await (sessionControllerFixture as { inspect?: (id: string) => Promise<{ meta?: Record<string, unknown>; events?: unknown[] } | undefined> }).inspect?.(id)
+      if (inspected?.meta === undefined) throw new Error(`session "${id}" not found`)
+      return { header: { cwd: '/fixture', ...inspected.meta }, inheritedEventCount: 0, events: inspected.events ?? [], source: 'prepared', [Symbol.dispose]() {} }
+    },
   })
   // `resume` mirrors the real registry. Omitting it made the locus child
   // probe stop at parent resolution, masking every later capability gate.

@@ -10,6 +10,8 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { runTool } from './support/tool-call.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
   LOCUS_ASK_PARENT_TOOL,
@@ -45,6 +47,7 @@ async function hostContext(): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   return ctx
 }
 
@@ -141,7 +144,7 @@ describe('the caller-bound entrance read is published only when assembled', () =
       }),
     })
 
-    const ok = await ctx.tools.execute({
+    const ok = await runTool(ctx, {
       agent: key,
       name: PET_LOCUS_CHAT_HISTORY_TOOL,
       callId: 'history-ok' as never,
@@ -155,7 +158,7 @@ describe('the caller-bound entrance read is published only when assembled', () =
     expect(okText).toContain('我们在讨论验收')
 
     // And the failure path is schema-valid too: never an empty history.
-    const failing = await ctx.tools.execute({
+    const failing = await runTool(ctx, {
       agent: key,
       name: PET_LOCUS_CHAT_HISTORY_TOOL,
       callId: 'history-fail' as never,
@@ -313,7 +316,7 @@ describe('track tool feedback is actionable and never leaks ids', () => {
     const key = { id: CHILD } as never
     const scope = createScope(ctx, key)
     await installOnScope(scope.ctx, harness.repository, intentTriage)
-    const result = await ctx.tools.execute({
+    const result = await runTool(ctx, {
       agent: key,
       name,
       callId: `${name}-1` as never,

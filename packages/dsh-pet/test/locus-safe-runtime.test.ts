@@ -3,6 +3,8 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { runTool } from './support/tool-call.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -43,6 +45,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let effects = 0
     for (const name of [...forbidden, ...allowed]) ctx.tools.register(tool(name, () => { effects += 1 }))
 
@@ -64,7 +67,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
 
     expect(ctx.tools.schemas(agent).map(schema => schema.name)).toEqual([...allowed, 'pet_locus_finish'])
     for (const name of forbidden) {
-      const result = await ctx.tools.execute({
+      const result = await runTool(ctx, {
         agent,
         name,
         callId: `deny-${name}` as ToolCallId,
@@ -73,7 +76,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
       })
       expect(result.isError, name).toBe(true)
     }
-    expect((await ctx.tools.execute({
+    expect((await runTool(ctx, {
       agent,
       name: 'run_code',
       callId: 'deny-run-code' as ToolCallId,
@@ -82,7 +85,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     })).isError).toBe(true)
     expect(effects).toBe(0)
 
-    expect((await ctx.tools.execute({
+    expect((await runTool(ctx, {
       agent,
       name: 'pet_locus_finish',
       callId: 'managed-finish' as ToolCallId,
@@ -98,6 +101,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     for (const name of [...allowed, ...LOCUS_FULL_ACCESS_TOOL_NAMES, 'subagent']) {
       ctx.tools.register(tool(name, () => undefined))
     }
@@ -131,6 +135,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let effects = 0
     for (const name of allowed) ctx.tools.register(tool(name, () => { effects += 1 }))
 
@@ -163,7 +168,7 @@ describe('Locus safe composition on the loaded ToolRuntime', () => {
     expect(names).toContain('pet_locus_finish')
     // Own plane: still visible AND callable. A filter cannot change this.
     expect(names).toContain('subagent')
-    expect((await ctx.tools.execute({
+    expect((await runTool(ctx, {
       agent: childKey,
       name: 'subagent',
       callId: 'own-plane-subagent' as ToolCallId,

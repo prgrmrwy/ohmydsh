@@ -28,6 +28,7 @@ import Query from '@deepseek-ai/dsh-session-query'
 import Agents from '@deepseek-ai/dsh-agent'
 import Llm, { LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Loop from '@deepseek-ai/dsh-agent-loop'
@@ -128,6 +129,7 @@ describe('locus child tool ceiling on the official 0.2.1 runtime', () => {
     await ctx.plugin(Query)
     await ctx.plugin(Prompt, { persona: '' })
     await ctx.plugin(Tools)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(Agents)
     await ctx.plugin(Projections)
     await ctx.plugin(Loop, { agents: [], maxParallelToolCalls: 1 })

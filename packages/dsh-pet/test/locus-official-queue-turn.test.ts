@@ -5,6 +5,7 @@ import Query from '@deepseek-ai/dsh-session-query'
 import Agents from '@deepseek-ai/dsh-agent'
 import Llm, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import Tools from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Loop from '@deepseek-ai/dsh-agent-loop'
@@ -43,6 +44,7 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
     await ctx.plugin(Persistence, { root })
     await ctx.plugin(Query)
     for (const plugin of [Agents, Llm, Tools, Prompt, Projections]) await ctx.plugin(plugin)
+    await ctx.plugin(NativeToolExecutor)
     let requests = 0
     ctx.llm.registerAdapter(['fake'], new class extends LlmAdapter {
       override async *stream() {

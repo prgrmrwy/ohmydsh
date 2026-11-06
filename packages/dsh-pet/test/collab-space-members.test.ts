@@ -7,6 +7,8 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { runTool } from './support/tool-call.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { LocusCollab, type LocusMainRef } from '../src/host/collab/locus-collab.js'
 import { locusSpaceId } from '../src/host/collab/naming.js'
@@ -94,6 +96,7 @@ describe('协作空间由工作主会话与 locus 主会话两个普通成员组
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     const key = { id: 'child-no-collab' } as never
     const scope = createScope(ctx, key)
     await new Promise<void>((resolve, reject) => {
@@ -113,7 +116,7 @@ describe('协作空间由工作主会话与 locus 主会话两个普通成员组
     expect(names.some(name => name.startsWith('collab_'))).toBe(false)
 
     // (3) A forged collab_read from the child finds no such tool.
-    const forged = await ctx.tools.execute({
+    const forged = await runTool(ctx, {
       agent: key, name: 'collab_read', callId: 'forged-1' as never, arguments: { view: 'overview', spaceId: 'x' }, signal: new AbortController().signal,
     }) as unknown as { isError?: boolean; content?: readonly { text?: string }[] }
     expect(forged.isError).toBe(true)

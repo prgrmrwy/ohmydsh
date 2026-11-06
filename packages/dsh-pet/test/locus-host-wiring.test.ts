@@ -8,6 +8,8 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { runTool } from './support/tool-call.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { createScope, scopeTarget } from '@deepseek-ai/dsh-scope'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +43,7 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
-async function host(options: { readonly degradeLate?: boolean; readonly seedBeforeStart?: (domain: { table(name: string): { put(key: string, value: unknown): Promise<void> } }) => Promise<void> } = {}) {
+async function host(options: { readonly degradeLate?: boolean; readonly withoutObserveSession?: boolean; readonly seedBeforeStart?: (domain: { table(name: string): { put(key: string, value: unknown): Promise<void> } }) => Promise<void> } = {}) {
   const home = await mkdtemp(path.join(tmpdir(), 'pet-host-wiring-'))
   const project = await mkdtemp(path.join(tmpdir(), 'pet-host-project-'))
   temporaryRoots.push(home, project)
@@ -50,6 +52,7 @@ async function host(options: { readonly degradeLate?: boolean; readonly seedBefo
   await ctx.plugin(Storage)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   // AgentLoop mints its agent scopes from an injected runtime context. A scope
   // minted under a bare test root has no declared tools API in Cordis.
   let agentFactoryContext!: Context
@@ -101,8 +104,12 @@ async function host(options: { readonly degradeLate?: boolean; readonly seedBefo
     }), detachSession: async () => {},
   }
   await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
-  const registerRoute = ctx.webServer.register.bind(ctx.webServer)
-  vi.spyOn(ctx.webServer, 'register').mockImplementation(route => { routes.push(route); return registerRoute(route) })
+  // Cordis 4.1 hands out a per-caller traceable proxy for `ctx.webServer`; a spy installed on that
+  // proxy is not seen by the child fibers that call `register` through their own proxy. Spy on the
+  // underlying service object, which every caller reaches.
+  const webServerService = (ctx.webServer as unknown as Record<symbol, unknown>)[Symbol.for('cordis.original')] as typeof ctx.webServer
+  const registerRoute = webServerService.register.bind(webServerService)
+  vi.spyOn(webServerService, 'register').mockImplementation(route => { routes.push(route); return registerRoute(route) })
   const authentication = { requestRejection: vi.fn((_request: unknown): 401 | 403 | undefined => undefined), authenticatedUrl: (origin: string) => `${origin}/?token=fixture-only` }
   ctx.provide('connection', authentication)
   ctx.provide('profileContext', { name: 'web', dir: home })
@@ -110,10 +117,10 @@ async function host(options: { readonly degradeLate?: boolean; readonly seedBefo
   ctx.provide('sessions', { list: () => [...sessions.values()], get: (id: string) => sessions.get(id), flush: async () => true })
   ctx.provide('agents', { list: () => [...agents.values()], get: (id: string) => agents.get(id), resume: async () => undefined, create: async () => { throw new Error('unexpected main creation') } })
   ctx.provide('sessionController', {
-    inspect: async (id: string) => { const session = sessions.get(id); if (!session) throw new Error('missing'); return { meta: session.header, events: session.snapshotEvents() } },
+    // DSH 0.2.2 has no `sessionController.inspect`; Pet cold-inspects through `sessionQuery.observeSession`.
     resolveAgent: async (id: string) => ({ agent: agents.get(id) }),
   })
-  ctx.provide('sessionQuery', {
+  ctx.provide('sessionQuery', options.withoutObserveSession === true ? {} : {
     observeSession: async (id: string) => {
       const session = sessions.get(id)
       if (!session) throw new Error('missing durable session')
@@ -190,6 +197,15 @@ async function host(options: { readonly degradeLate?: boolean; readonly seedBefo
   }
   await ctx.plugin(PetStorage as never, { path: path.join(home, 'plugins', 'dsh-pet', 'state.sqlite') })
   await ctx.plugin(StorageDomain, { backend: PET_BACKEND_NAME })
+  if (options.withoutObserveSession === true) {
+    const logs: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => { logs.push(args.map(String).join(' ')) })
+    try {
+      await ctx.plugin(petPlugin, { home, version: 'test' })
+      await vi.waitFor(() => expect(logs.some(line => line.includes('ready'))).toBe(true), { timeout: 5_000 })
+    } finally { log.mockRestore() }
+    return { logs, routes, ctx, home, capability: () => capability }
+  }
   await ctx.plugin(petPlugin, { home, version: 'test' })
   await vi.waitFor(() => expect(routes.length).toBeGreaterThan(0))
   expect(capability).toMatchObject({ status: 'available' })
@@ -198,7 +214,7 @@ async function host(options: { readonly degradeLate?: boolean; readonly seedBefo
     workSessionId: 'ordinary', locusMainSessionId: 'main', workspaceId: 'ws-pet', generation: 1, status: 'active', spaceId: 'space', createdAt: 1, updatedAt: 1,
   })
   const controller = (capability as channelCapability.AvailableLocusChannelCapability).controller
-  const execute = (agent: any, name: string) => ctx.tools.execute({ agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
+  const execute = (agent: any, name: string) => runTool(ctx, { agent, name, callId: `call-${name}` as never, arguments: {}, signal: new AbortController().signal })
   return { ctx, home, project, authentication, workspace, petWorkspace, agentFactoryContext, repository, main, ordinary, agents, sessions, start, queue, sendMessage, drain, controller, replyToTarget, controlMessage, execute, firstTool: (fn: typeof firstTool) => { firstTool = fn }, apiReturned: () => apiReturned }
 }
 
@@ -239,6 +255,19 @@ async function stopRequest(h: { readonly ctx: Context; readonly home: string }, 
 }
 
 describe('actual Host three-tier assembly', () => {
+  it('DSH 0.2.2: Locus provisioning composes through sessionQuery.observeSession alone (no sessionController.inspect)', async () => {
+    const h = await host()
+    expect(h.ctx.sessionController).not.toHaveProperty('inspect')
+    expect(h.controller).toBeDefined()
+  })
+
+  it('without sessionQuery.observeSession Pet says why, keeps the unified channel unavailable, and does not guess a Session', async () => {
+    const h: any = await host({ withoutObserveSession: true })
+    expect(h.logs.some((line: string) => line.includes('Locus provisioning and Session listing unavailable: sessionQuery.observeSession is not provided'))).toBe(true)
+    // The unified channel needs durable provisioning; its capability is never published.
+    expect(h.capability()).toBeUndefined()
+  })
+
   it('prepares only after exact owned native close and Pet commit; backlog waits for resume', async () => {
     const h = await host()
     await seedNotCreated(h); await admit(h); await admit(h, { chatId: 'chat' }, 'successor')
@@ -387,7 +416,7 @@ describe('actual Host three-tier assembly', () => {
     const check = async (child: any) => {
       expect(child.session.header.cwd).toBe(petCwd)
       for (const file of [projectFile, privateFile]) {
-        const result = await h.ctx.tools.execute({ agent: child, name: 'read', callId: `read-${results.length}` as never, arguments: { file_path: file }, signal: new AbortController().signal })
+        const result = await runTool(h.ctx, { agent: child, name: 'read', callId: `read-${results.length}` as never, arguments: { file_path: file }, signal: new AbortController().signal })
         results.push(result.isError)
       }
     }
@@ -430,7 +459,7 @@ describe('actual Host three-tier assembly', () => {
     child.session.append('turn/start', { turn: 1 })
     h.ctx.emit('agent/inbox/claimed' as never, { agent: { id: 'child' }, message: { id: 'first-inbox', source: { kind: 'user' } }, turn: 1 } as never)
     await new Promise(resolve => setTimeout(resolve, 50))
-    const finished = await h.ctx.tools.execute({
+    const finished = await runTool(h.ctx, {
       agent: child, name: 'pet_locus_finish', callId: 'finish-e2e' as never,
       arguments: { outcome: 'no-reply', reason: 'e2e wiring proof' }, signal: new AbortController().signal,
     })

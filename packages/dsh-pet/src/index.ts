@@ -150,6 +150,7 @@ import { PET_DOMAIN_NAME } from './host/spec.js'
 import { petDomainSpec } from './host/domain.js'
 import { withAtomicWrites } from './host/storage/atomic-domain.js'
 import { PET_BACKEND_NAME } from './host/storage/backend.js'
+import { createSessionInspector } from './host/session-inspection.js'
 import {
   isForkChildTaskForm,
   PET_EXECUTOR_PRESET,
@@ -1883,18 +1884,26 @@ async function initialize(
       await docControl.send(input)
     },
   }
+  // DSH 0.2.2 removed `sessionController.inspect`; cold inspection now goes
+  // through `sessionQuery.observeSession`, exactly what the old method wrapped.
+  const inspectSession = createSessionInspector(
+    ctx.get('sessionQuery') as Parameters<typeof createSessionInspector>[0],
+  )
+  if (inspectSession === undefined) {
+    // Without cold inspection neither Locus provisioning nor the Locus list can
+    // prove a Session exists, so both stay unavailable (the channel-gap
+    // diagnostic below also reports it). Say why once, instead of skipping silently.
+    petLog('dsh-pet: Locus provisioning and Session listing unavailable: sessionQuery.observeSession is not provided by this Host')
+  }
   const locusProvisioning = (() => {
     // No child is created by provisioning (the first deliverable message
     // creates it), so the idle-child runtime capability is not needed here.
-    const sessionController = ctx.get('sessionController') as
-      | { inspect?: (sessionId: unknown) => Promise<unknown> }
-      | undefined
-    if (typeof sessionController?.inspect !== 'function') return undefined
+    if (inspectSession === undefined) return undefined
     try {
       const dsh = createProductionLocusDshPort({
         repository,
         locusMainWorkspaceId: workspaceId,
-        sessionController: sessionController as never,
+        sessionController: { inspect: inspectSession } as never,
         workspaceRegistry: ctx.workspaceRegistry as never,
         agents: {
           // Delegate explicitly rather than spreading or inheriting from the
@@ -2990,14 +2999,9 @@ async function initialize(
       }
     })(),
     inspect: (() => {
-      const controller = ctx.get('sessionController') as
-        | { inspect?: (id: unknown, signal?: AbortSignal) => Promise<unknown> }
-        | undefined
-      const inspect = controller?.inspect
-      if (typeof inspect !== 'function') return undefined
-      // Keep the receiver: `inspect` is a service method that uses `this`.
+      if (inspectSession === undefined) return undefined
       return async (sessionId: string) =>
-        await inspect.call(controller, sessionId) as {
+        await inspectSession(sessionId) as {
           readonly events?: readonly unknown[]
           // The immutable header carries `cwd` — the session's workspace-write
           // boundary. It must reach the describer, or the owner has no

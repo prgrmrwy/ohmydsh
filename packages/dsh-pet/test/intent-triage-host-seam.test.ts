@@ -9,8 +9,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-describe('intent-triage host seam: sessionController.inspect shape (task 1.1)', () => {
-  it('the installed @deepseek-ai/dsh-api-session-controller package exists and declares inspect()', async () => {
+describe('intent-triage host seam: cold Session inspection (task 1.1)', () => {
+  it('the installed @deepseek-ai/dsh-api-session-controller package exists and matches the dshVersion pinned in dsh.yaml', async () => {
     // Resolve via the SAME import specifier production code would use if it
     // depended on the package directly (today it only reaches it through
     // `ctx.get('sessionController')`, never a static import — see the gap
@@ -19,11 +19,14 @@ describe('intent-triage host seam: sessionController.inspect shape (task 1.1)', 
       with: { type: 'json' },
     }) as unknown as { default: { name: string; version: string } }
     expect(pkg.default.name).toBe('@deepseek-ai/dsh-api-session-controller')
-    // Target pin check: fail loudly if the reviewed dependency drifts without review.
-    // Re-reviewed for DSH 0.2.1-rc.5 (upgrade-dsh-0-2-1-runtime): `inspect(sessionId,
-    // signal)` and `SessionInspection.events` are unchanged from 0.2.0-rc.2
-    // (the declaration is asserted below).
-    expect(pkg.default.version).toBe('0.2.1-rc.5')
+    // Target pin check: the reviewed dependency must be the runtime dsh.yaml
+    // pins, so a DSH bump cannot slip past this seam review. The pin is read
+    // from the manifest rather than repeated here.
+    const fs = await import('node:fs')
+    const manifest = fs.readFileSync(new URL('../../../dsh.yaml', import.meta.url), 'utf8')
+    const pinned = /^dshVersion:\s*(\S+)/m.exec(manifest)?.[1]
+    expect(pinned, 'dsh.yaml must declare dshVersion').toBeDefined()
+    expect(pkg.default.version).toBe(pinned)
   })
 
   it('GAP: dsh-session-persistence resolves at runtime (transitively) but is not a declared dsh-pet dependency', async () => {
@@ -61,27 +64,29 @@ describe('intent-triage host seam: sessionController.inspect shape (task 1.1)', 
     expect(Object.keys(mod)).toContain('SessionPersistence')
   })
 
-  it('the real inspect() signature returns Promise<SessionInspection>, confirmed from the installed .d.ts, not re-asserted from memory', async () => {
+  it('DSH 0.2.2 removed sessionController.inspect; Pet reads through sessionQuery.observeSession, confirmed from the installed .d.ts', async () => {
     // We cannot `import type` a type we cannot resolve (see the GAP test
-    // above), so this test reads the installed declaration file as TEXT and
-    // asserts on it verbatim. This is the closest a running test can get to
-    // "verified against the real package" without a resolvable type import.
+    // above), so this test reads the installed declaration files as TEXT and
+    // asserts on them verbatim. If a future runtime brings `inspect` back or
+    // changes `observeSession`, this fails and the adapter in
+    // `src/host/session-inspection.ts` must be re-reviewed.
     const fs = await import('node:fs')
     const path = await import('node:path')
     const require = await import('node:module').then(m => m.createRequire(import.meta.url))
-    const pkgJsonPath = require.resolve('@deepseek-ai/dsh-api-session-controller/package.json')
-    const pkgDir = path.dirname(pkgJsonPath)
-    const dtsPath = path.join(pkgDir, 'lib/types/index.d.ts')
-    const dts = fs.readFileSync(dtsPath, 'utf8')
+    const controllerDir = path.dirname(require.resolve('@deepseek-ai/dsh-api-session-controller/package.json'))
+    const controllerDts = fs.readFileSync(path.join(controllerDir, 'lib/types/index.d.ts'), 'utf8')
+    expect(controllerDts).not.toMatch(/\binspect\(/)
 
-    expect(dts).toContain(
-      'inspect(sessionId: SessionId, signal?: AbortSignal): Promise<SessionInspection>;',
-    )
-    // The official doc comment is the FIRST-PARTY evidence for design.md's D3
-    // claim ("reading history must not activate the Agent / consume a turn").
-    // If this string ever changes, D3's core citation has moved and must be
-    // re-verified, not silently kept.
-    expect(dts).toContain('Inspect one attached or persisted Session without activating its Agent')
+    const queryDir = path.dirname(require.resolve('@deepseek-ai/dsh-session-query/package.json'))
+    const queryDts = fs.readFileSync(path.join(queryDir, 'lib/types/index.d.ts'), 'utf8')
+    expect(queryDts).toContain('observeSession(sessionId: SessionId, options?: SessionObservationOptions): Promise<SessionObservation>;')
+    const observationDts = fs.readFileSync(path.join(queryDir, 'lib/types/observation.d.ts'), 'utf8')
+    // The adapter relies on these exact option/field names.
+    expect(observationDts).toContain("readonly projectionMode?: 'all' | 'none';")
+    expect(observationDts).toContain('readonly signal?: AbortSignal;')
+    expect(observationDts).toContain('readonly header: SessionHeader;')
+    expect(observationDts).toContain('readonly inheritedEventCount: SessionLogOffsetType;')
+    expect(observationDts).toContain('readonly events: readonly SessionEvent[];')
   })
 
   it('the real SessionHeader (the type `meta` in SessionInspection actually is) has far more fields than design.md\'s simplified { cwd } sketch', async () => {
