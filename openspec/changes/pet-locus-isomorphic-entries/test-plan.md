@@ -1,6 +1,6 @@
 ## Test Plan
 
-<!-- 334 scenarios: 288 in specs/pet-locus-collaboration/spec.md, 46 in specs/pet-locus-doc-comments/spec.md. One row per scenario. -->
+<!-- 339 scenarios: 293 in specs/pet-locus-collaboration/spec.md, 46 in specs/pet-locus-doc-comments/spec.md. One row per scenario. -->
 <!-- LIVE LEDGER: flip 🔴 red → 🟢 green as each test passes. ⚪ rows are carried forward and stay ⚪ until their file is ported (then re-run; they must pass). -->
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
@@ -113,8 +113,8 @@
 | specs/pet-locus-collaboration/spec.md → 管理面的变更动作只有停止、访问模式与改绑，且以 locusId 加 revision 为围栏 | 围栏过期时拒绝而不乐观改写 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "围栏过期时拒绝而不乐观改写" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 原 W 已归档时提交改绑 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "原 W 已归档时提交改绑" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 改绑后各入口重置而停止的保持停止 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "改绑后各入口重置而停止的保持停止" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 原 W 未归档时置灰 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "原 W 未归档时置灰" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 无法证明归档时同样置灰 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "无法证明归档时同样置灰" | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 原 W 未归档时不显示改绑控件 | packages/dsh-pet/test/locus-surface.test.ts | 原 W 未归档时不显示改绑控件 | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 无法证明归档时同样不显示改绑控件 | packages/dsh-pet/test/locus-surface.test.ts | 无法证明归档时同样不显示改绑控件 | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 有入口在投递时置灰 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "有入口在投递时置灰" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | 话题行与评论行没有改绑控件 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "话题行与评论行没有改绑控件" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用 | Host 拒绝目标时不乐观改写 | packages/dsh-pet/test/locus-surface.test.ts | spec Scenario "Host 拒绝目标时不乐观改写" | 🟢 green |
@@ -274,7 +274,7 @@
 | specs/pet-locus-collaboration/spec.md → 管理面的会话可用性以持久证据判定 | 缺少冷读能力不臆测 | packages/dsh-pet/test/locus-management.test.ts | omits availability when the Host cannot cold-read at all | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的会话可用性以持久证据判定 | 未创建入口的预留会话不报缺失 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "未创建入口的预留会话不报缺失" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 同名入口仍可区分 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "同名入口仍可区分" | 🟢 green |
-| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 名称不可得时不猜测 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "名称不可得时不猜测": never calls an untyped chat a group | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 名称不可得时不猜测 | packages/dsh-pet/test/locus-surface.test.ts | never says 兜底显示: an unnamed entry reads 入口 · <code> / 话题 · <code> | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 短码不是身份 | packages/dsh-pet/test/locus-management.test.ts | spec Scenario "短码不是身份" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 文档入口短码确定且与群可区分 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "文档入口短码确定且与群可区分" | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → 管理面的标识以确定性短码表达且名称与短码成对 | 多个文档入口短码互不相同 | packages/dsh-pet/test/locus-view.test.ts | spec Scenario "多个文档入口短码互不相同" | 🟢 green |
@@ -342,12 +342,13 @@
 | specs/pet-locus-collaboration/spec.md → 改绑到其他会话 | 改绑目标的 locus 主会话已不可用 | packages/dsh-pet/test/locus-rebind.test.ts | 目标 W 的 M 不可用：管理面改绑先整 W 迁移 (D7) — 三个用例（fake + real） | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 超时后重试 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 超时后重试 | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 超时前仍阻塞 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 超时前仍阻塞 | 🟢 green |
+| specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 补偿失败继续阻塞 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 补偿失败继续阻塞 | 🟢 green |
 | specs/pet-locus-collaboration/spec.md → provisioning 失败超时后不再阻塞 | 未创建任何资源的失败不阻塞 | packages/dsh-pet/test/locus-provisioning-timeout.test.ts | 失败且没有任何 resourceRefs：立刻可重试 | 🟢 green |
 
 ## Coverage Notes
 
-- Rows: 334 (🔴 red 241, ⚪ existing carried forward 93). 🟢 green: 0 at planning time.
-- By capability: collaboration 288 (🔴 225, ⚪ 63); doc-comments 46 (🔴 16, ⚪ 30).
+- Rows: 339. At planning time (334 rows) 🔴 red 241, ⚪ existing carried forward 93, 🟢 green 0; the 5 later rows were added during implementation as 🟢.
+- By capability: collaboration 293 (288 at planning time: 🔴 225, ⚪ 63); doc-comments 46 (🔴 16, ⚪ 30).
 - ⚪ rule applied: the scenario text is byte-identical to the current spec (compared by requirement + name, plus five migration-gate scenarios identical under their old requirement) AND an existing test title carries the scenario name (or, for 12 scenarios, is the one existing test that asserts it; those titles are quoted exactly). Everything else is 🔴, including every scenario whose text changed and every unchanged scenario for which no existing test could be named. A ⚪ row still needs its owner to port that test's fixtures to the v20 row shape (see "Fixture port" below); it must pass after the contract freeze, it is not new work.
 - New test files are marked (new); a path under packages/dsh-pet/test/ that does not exist yet is created by its owner.
 

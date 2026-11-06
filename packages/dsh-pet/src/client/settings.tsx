@@ -56,7 +56,6 @@ import {
   LOCUS_DEFAULT_QA_MISSING_NOTE,
   LOCUS_FENCE_STALE_TEXT,
   LOCUS_FULL_ACCESS_NOTE,
-  LOCUS_NOT_CREATED_SESSION,
   LOCUS_REBIND_CONSEQUENCES,
   SHOW_ALL_LOCUS_FILTER,
   accessBlock,
@@ -1387,7 +1386,10 @@ function LocusRow(props: {
   const archivedNote = isGroup ? archivedWorkNote(work) : undefined
   const mainBlock = sessionJumpBlock(chat.locusMain.availability ?? 'unknown')
   const workBlock = sessionJumpBlock(work.availability)
-  const rebind = isGroup ? rebindBlock(chat, work) : undefined
+  // Rebind exists only for an archived W; otherwise nothing is shown (the
+  // archived-W note is what invites it). A busy chat greys it with its reason.
+  const offerRebind = isGroup && work.availability === 'archived'
+  const rebind = offerRebind ? rebindBlock(chat, work) : undefined
   const rebindDisabled = props.busyKey !== undefined || rebind !== undefined
   const [rebindOpen, setRebindOpen] = useState(false)
 
@@ -1401,7 +1403,6 @@ function LocusRow(props: {
             {endpointCode === '' ? null : (
               <HandleChip value={endpointHandleId(entry.endpoint)} code={endpointHandleLabel(entry.endpoint, endpointCode)} />
             )}
-            {display.isPlaceholder ? <span className="dshpet-meta">（兜底显示）</span> : null}
             {isGroup && chat.defaultQa === true ? <span className="dshpet-chip" data-tone="qa">默认 Q&amp;A</span> : null}
             {isDoc && isGroup ? <span className="dshpet-meta">本文档的评论者均可提问</span> : null}
             {entry.inFlight ? <span className="dshpet-chip" data-tone="busy">投递中</span> : null}
@@ -1414,14 +1415,17 @@ function LocusRow(props: {
               ? <span className="dshpet-meta">{LOCUS_FULL_ACCESS_NOTE}</span>
               : null}
             {stateNote === undefined ? null : <span className="dshpet-meta">{stateNote}</span>}
-            <span className="dshpet-meta dshpet-locus-session-title" title={entry.session?.title}>
-              子会话 {entry.state === 'not-created' ? LOCUS_NOT_CREATED_SESSION : entry.session?.title ?? '未命名'}
-            </span>
+            {/* A not-created entry already says 未创建 above; its child jump carries 尚未创建. */}
+            {entry.state === 'not-created' ? null : (
+              <span className="dshpet-meta dshpet-locus-session-title" title={entry.session?.title}>
+                子会话 {entry.session?.title ?? '未命名'}
+              </span>
+            )}
           </div>
           {!isGroup || (chat.reboundFrom === undefined && archivedNote === undefined) ? null : (
             <div className="dshpet-locus-row-line">
               {chat.reboundFrom === undefined ? null : (
-                <span className="dshpet-meta">
+                <span className="dshpet-meta dshpet-locus-rebound">
                   改绑自 {chat.reboundFrom.title ?? '未命名会话'}{' '}
                   <HandleChip value={chat.reboundFrom.sessionId} code={sessionCode(props.codes, chat.reboundFrom.sessionId)} />
                 </span>
@@ -1447,10 +1451,10 @@ function LocusRow(props: {
           )}
         </div>
         <div className="dshpet-locus-row-tail">
-          {isGroup ? (
+          {offerRebind ? (
             <button
               type="button"
-              className="dshpet-action dshpet-action-sm"
+              className="dshpet-jump"
               disabled={rebindDisabled}
               aria-expanded={rebindOpen && rebind === undefined}
               title={rebind ?? '把整个群改绑到另一个工作会话'}
@@ -1496,12 +1500,12 @@ function LocusRow(props: {
             disabled={feishu.url === undefined}
             {...(feishu.url === undefined ? {} : { href: feishu.url })}
           />
-          <button type="button" className="dshpet-locus-more" aria-expanded={props.open} onClick={props.onToggle}>
+          <button type="button" className="dshpet-jump dshpet-locus-more" aria-expanded={props.open} onClick={props.onToggle}>
             {props.open ? '收起 ▾' : '更多 ▸'}
           </button>
         </div>
       </div>
-      {!isGroup || !rebindOpen || rebind !== undefined ? null : (
+      {!offerRebind || !rebindOpen || rebind !== undefined ? null : (
         <RebindForm chat={chat} busyKey={props.busyKey} onAction={props.onAction} onClose={() => setRebindOpen(false)} />
       )}
       {props.open ? (

@@ -845,8 +845,9 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
   font:400 12px/18px var(--dsw-font-family,inherit)}
 .dshpet-settings .dshpet-jump:hover{background:var(--dsw-alias-interactive-bg-hover,#0000000a)}
 .dshpet-settings .dshpet-jump:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
-.dshpet-settings .dshpet-jump[data-disabled="true"]{border-color:transparent;
-  color:var(--dsw-alias-label-tertiary,#81858c);cursor:not-allowed}
+.dshpet-settings .dshpet-jump[data-disabled="true"],
+.dshpet-settings .dshpet-jump:disabled{
+  color:var(--dsw-alias-label-tertiary,#81858c);cursor:not-allowed;opacity:.6}
 .dshpet-settings .dshpet-jump svg{flex:none}
 
 /* One parent session: rendered once, with its entries railed underneath. */
@@ -910,13 +911,11 @@ color:var(--dsw-alias-label-tertiary,#8f959e);opacity:0;transition:opacity .12s}
 .dshpet-settings .dshpet-locus-session-title{flex:0 1 auto;min-width:0;max-width:14em;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dshpet-settings .dshpet-locus-row-tail{display:inline-flex;align-items:center;gap:6px;
-  flex:none;align-self:start;flex-wrap:wrap;justify-content:flex-end;max-width:min(26em,55%)}
-.dshpet-settings .dshpet-locus-more{border:0;background:0 0;padding:0 2px;cursor:pointer;
-  font:var(--dsw-font-xs-13,400 12px/18px inherit);
-  color:var(--dsw-alias-label-secondary,#61666b);white-space:nowrap}
-.dshpet-settings .dshpet-locus-more:hover{color:var(--dsw-alias-label-primary,#0f1115);
-  text-decoration:underline}
-.dshpet-settings .dshpet-locus-more:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6)}
+  flex:none;align-self:start;flex-wrap:nowrap;justify-content:flex-end}
+/* 更多 is a jump like its neighbours; only its colour says it is a disclosure. */
+.dshpet-settings .dshpet-locus-more{color:var(--dsw-alias-label-secondary,#61666b)}
+/* 改绑自 <name> <code>: the chip never wraps away from its text. */
+.dshpet-settings .dshpet-locus-rebound{display:inline-flex;align-items:baseline;gap:4px;white-space:nowrap}
 
 /* Folded facts. Everything the old card printed at full weight lives here. */
 .dshpet-settings .dshpet-locus-details{display:grid;grid-template-columns:60px minmax(0,1fr);

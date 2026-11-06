@@ -251,23 +251,21 @@ describe('spec Requirement "管理面提供「改绑到其他会话」，仅在�
     expect(root.textContent).toContain('改绑自 旧工作')
   })
 
-  it('spec Scenario "原 W 未归档时置灰"', async () => {
+  it('原 W 未归档时不显示改绑控件', async () => {
     const host = stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], { availability: 'available' })]))
     const root = await mount()
-    const rebind = button(root, '改绑到其他会话')
-    expect(rebind.disabled).toBe(true)
-    expect(root.textContent).toContain('当前来源会话未归档，仅在其归档后可改绑')
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
+    expect(root.textContent).not.toContain('当前来源会话未归档，仅在其归档后可改绑')
     expect(root.textContent).not.toContain('来源会话已归档，可改绑')
-    await click(rebind)
     expect(rebindInput(root)).toBeNull()
     expect(host.actions).toEqual([])
   })
 
-  it('spec Scenario "无法证明归档时同样置灰"', async () => {
+  it('无法证明归档时同样不显示改绑控件', async () => {
     stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], { availability: 'unknown' })]))
     const root = await mount()
-    expect(button(root, '改绑到其他会话').disabled).toBe(true)
-    expect(root.textContent).toContain('当前来源会话未归档，仅在其归档后可改绑')
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
+    expect(root.textContent).not.toContain('当前来源会话未归档')
     expect(root.textContent).not.toContain('来源会话已归档，可改绑')
   })
 
@@ -353,7 +351,8 @@ describe('spec Requirement "管理面不提供新建外部资源的入口"', () 
       expect(labels.filter(label => label.includes(removed))).toEqual([])
     }
     expect(root.textContent).not.toContain('文件权限')
-    expect(buttons(root, '改绑到其他会话')).toHaveLength(1)
+    // W is live here: no rebind control at all (it appears only for an archived W).
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
   })
 
   it('spec Scenario "话题行不接受会话标识输入"', async () => {
@@ -378,7 +377,9 @@ describe('spec Requirement "管理面如实呈现全部生命周期状态" (surf
     const root = await mount()
     expect(root.textContent).not.toContain('快照不完整')
     expect(root.textContent?.match(/未创建 · 只读/g)).toHaveLength(2)
-    expect(root.textContent).toContain('子会话 尚未创建')
+    // 未创建 is said once on line 2; the child jump carries 尚未创建 as its reason.
+    expect(root.textContent).not.toContain('子会话 尚未创建')
+    expect(button(root, '子会话 ↗').title).toBe('尚未创建')
     expect(root.textContent).not.toMatch(/会话不可用|缺失/)
   })
 
@@ -477,12 +478,41 @@ describe('the rebind form never squeezes the row text (owner acceptance layout b
   })
 
   it('keeps the long greyed reason out of the auto-sized tail column', async () => {
-    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], { availability: 'available' })]))
-    const root = await mount()
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', inFlight: true, hasCurrentDelivery: true }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
     const reason = root.querySelector('[data-reason="rebind"]')!
-    expect(reason.textContent).toBe('当前来源会话未归档，仅在其归档后可改绑')
+    expect(reason.textContent).toBe('该群有入口正在投递，待其结束后再改绑')
     expect(reason.closest('.dshpet-locus-row-tail')).toBeNull()
     expect(reason.closest('.dshpet-locus-row-body')).not.toBeNull()
+  })
+
+  it('renders every tail control in the one jump style', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'not-created' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })])], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    const tails = [...root.querySelectorAll('.dshpet-locus-row-tail')]
+    expect(tails.length).toBe(2)
+    for (const tail of tails) {
+      const controls = [...tail.children]
+      expect(controls.length).toBeGreaterThan(0)
+      for (const control of controls) expect(control.classList.contains('dshpet-jump'), control.textContent ?? '').toBe(true)
+    }
+    expect(tails[0]!.textContent).toContain('改绑到其他会话')
+  })
+
+  it('keeps the 改绑自 code chip on the same line as its text', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }), [], { reboundFrom: { sessionId: 'session-17bd88a3', title: '旧工作' } })])]))
+    const root = await mount()
+    const line = root.querySelector('.dshpet-locus-rebound')!
+    expect(line.textContent).toContain('改绑自 旧工作')
+    expect(line.querySelector('.dshpet-handle')).not.toBeNull()
+  })
+
+  it('never says 兜底显示: an unnamed entry reads 入口 · <code> / 话题 · <code>', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_bb0e1111' }), [entryView({ chatId: 'oc_bb0e1111', threadId: 'omt_198f2222' })])])]))
+    const root = await mount()
+    expect(root.textContent).not.toContain('兜底')
+    const names = [...root.querySelectorAll('.dshpet-locus-name')].map(item => item.textContent)
+    expect(names).toEqual(['入口 · bb0e', '话题 · 198f'])
   })
 
   it('styles the text column with a real minimum width and lets the tail wrap instead of growing', () => {
@@ -493,9 +523,16 @@ describe('the rebind form never squeezes the row text (owner acceptance layout b
     expect(rule('.dshpet-locus-row-body')).not.toMatch(/min-width:0[;}]/)
     // A long title ellipsises inside its column instead of running under the tail's buttons.
     expect(rule('.dshpet-locus-name')).toContain('flex:0 1 auto')
+    // One right-aligned action row, not a ragged stack.
     const tail = rule('.dshpet-locus-row-tail')
-    expect(tail).toContain('flex-wrap:wrap')
-    expect(tail).toContain('max-width:')
+    expect(tail).toContain('flex-wrap:nowrap')
+    expect(tail).toContain('justify-content:flex-end')
+    // A disabled jump keeps its border: same shape as an enabled one, only dimmer.
+    const disabledJump = PET_CSS.match(/\.dshpet-jump\[data-disabled="true"\][^{]*\{[^}]*\}/)?.[0] ?? ''
+    expect(disabledJump).toContain('cursor:not-allowed')
+    expect(disabledJump).not.toContain('border-color:transparent')
+    // The 改绑自 line keeps its code chip beside the text.
+    expect(rule('.dshpet-locus-rebound')).toContain('white-space:nowrap')
     // The form is a block with a solid background, not a translucent flex sibling.
     const form = rule('.dshpet-locus-rebind-form')
     expect(form).toContain('display:flex')
