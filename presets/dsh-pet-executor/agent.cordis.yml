@@ -191,9 +191,7 @@
   config:
     - id: tool-subagent-control
       name: '@deepseek-ai/dsh-tool-subagent-control'
-
-    - id: tool-subagent-list-agents
-      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+      # 0.2.2 起 list_agents 由主入口注册（lib/index.js:42-47），/list-agents 子路径导出已删除。
 
     - id: tool-subagent
       name: '@deepseek-ai/dsh-tool-subagent'

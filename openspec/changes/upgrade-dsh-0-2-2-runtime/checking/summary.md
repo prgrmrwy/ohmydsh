@@ -76,3 +76,11 @@
 - memex：`memex_recall` 正常返回。
 - traex：`list_subagent_models` 能拉到实时模型目录（provider 已注册、后端可达）；本会话子会话允许列表不含 traex 路由，未能做真实对话。
 - 未测（需 GUI 或外部通道）：traex 真实对话、Pet Locus 端到端、better-sidebar 各 tab、btw。
+
+## 10. 验收中发现：Pet 执行 preset 引用已删除的子路径（2026-11-07）
+
+- 现象：飞书测试群 at Pet，入口建立失败（`locus-bootstrap-failed … 创建失败，未发布任何关联`）。Pet 状态里 operation `lastError`：`tool-subagent-list-agents (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started`，已按 fail closed 回滚为 `compensated`，没有残留。
+- 根因：0.2.2 把 `list_agents` 合并进 `dsh-tool-subagent-control` 主入口（lib/index.js:42-47），删除了 `/list-agents` 子路径导出（package.json exports 只剩 `.`）。`presets/dsh-pet-executor/agent.cordis.yml` 仍加载该子路径。noPet 名册 diff 当时已显示它被删除，但没有回查自研 preset，这是漏项。
+- 修复：删除该行（主入口行已注册 list_agents）。把 4 个自研 preset 引用的全部模块名对 0.2.2 运行体做解析检查：全部可解析。
+- 测试：dsh-pet 3158 通过，仅基线 v20 invariant 1 项失败；根目录 777 项中 1 项失败：`launcher-managed-profile` 的 “non-web history stays read-only”。原因是 worktree 的 ws 绑定会把 launcher 指向隔离预览 home，而预览启动后那里有启动历史。预览启动前终验时该项通过，属于测试对环境的依赖，与本修复无关，记为后续项。
+- 后续项：升级复核清单增加「对所有自研 preset 的模块名做目标运行体解析检查」。
