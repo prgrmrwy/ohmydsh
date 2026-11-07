@@ -64,7 +64,7 @@ AUTO 主会话的 `agent/pre-step` 监听保持现有结构：先 `await next()`
 applied 判定沿用 `request/header` 与 `session.requestHeader()` 的比对。
 
 ### D3 auto-model-routing 兼容下界抬到 `0.2.2-rc.1`
-`agent.model.select` 只在 0.2.2 中存在，而且 D1 依赖 0.2.2 的选择固定流程。保留双路径会让测试翻倍。因此只改该包的 `engines.dsh` 与 dsh peer 下界，理由按 repo-layout 的要求记录在 package README/CHANGELOG 中。商店上的 0.7.0 在 0.2.2 Host 上会失效；本 change 不发版，收尾时明确提示用户。不做双路径兼容（用户 2026-11-07 决定）：发版时按 DSH 版本分线，0.2.0–0.2.1 停在已发布的 0.7.x/0.6.x，0.2.2 起用新的 minor 版本（建议 0.8.0；0.7.0 已发布，npm 不允许复用版本号），README/CHANGELOG 写清每条版本线依赖的 DSH 范围。其它 local package 的下界不变，除非审计发现它们用了只有 0.2.2 才有的 API。
+`agent.model.select` 只在 0.2.2 中存在，而且 D1 依赖 0.2.2 的选择固定流程。保留双路径会让测试翻倍。因此只改该包的 `engines.dsh` 与 dsh peer 下界，理由按 repo-layout 的要求记录在 package README/CHANGELOG 中。商店上的 0.7.0 在 0.2.2 Host 上会失效；本 change 不发版，收尾时明确提示用户。不做双路径兼容（用户 2026-11-07 决定）：发版时按 DSH 版本分线，0.2.0–0.2.1 停在已发布的 0.7.0/0.6.x，0.2.2 起用 0.7.1 及以后（用户 2026-11-07 定版本号；0.2.1 Host 按 engines.dsh 拒绝 0.7.1），README/CHANGELOG 写清每条版本线依赖的 DSH 范围。其它 local package 的下界不变，除非审计发现它们用了只有 0.2.2 才有的 API。
 
 ### D4 memex 裁判：删除过期的工具投影
 删掉 `judge-boundary.ts:22-25` 中的 `system-prompt/assemble` 监听。0.2.2 的 fresh 裁判子会话不会注册 Team 工具（见 Context）。精确身份、冻结请求、`tools.guard` 和 `verifyJudgeRequest` 照旧是权威门禁，`dsh-memex-evaluation:198` 不受影响。用目标版本的真实组合复跑 `test/eval-judge-runtime.test.ts` 中启用 Team 时的成功路径，并保留「污染注入时首请求零调用」的断言。成功路径不通过就停在「未通过」，不能以全部拒绝或全部 unknown 收尾。

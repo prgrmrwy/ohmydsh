@@ -58,7 +58,7 @@
 - `memex-eval-judge` preset 与 memex 测试夹具使用的 `@deepseek-ai/dsh-agent-tool-presentation` 在 0.2.2 已标为弃用，应改为直接挂载 `dsh-tool-executor-native`。
 - 基线就已存在的未声明 devDependencies：dsh-collab（dsh-agent-loop、dsh-session-projection、dsh-session-persistence-jsonl、dsh-system-prompt），dsh-openspec（dsh-scope），dsh-pet（dsh-subagent、dsh-system-prompt、dsh-scope、dsh-session-persistence(-jsonl)、dsh-session-query、dsh-session-projection、dsh-subagent-spawn-in-process、dsh-fs-local、dsh-working-directory、dsh-tool-fs）。
 - `packages/dsh-auto-model-routing/docs/architecture.dual.svg`/`.json`（README 没有引用的 v1 图）里仍写着 “agent/request hook”。
-- 商店上的 AUTO 0.7.0 在 0.2.2 Host 上不可用，需走 publish 流程发布新的 minor 版本（建议 0.8.0）。
+- 商店上的 AUTO 0.7.0 在 0.2.2 Host 上不可用，需走 publish 流程发布 0.7.1（用户 2026-11-07 定版本号）。
 - 已知不稳定：机器高负载时 `locus-host-wiring` 偶尔出现 1s `waitFor` 超时，单独跑该文件稳定。
 
 ## 8. 生产切换（2026-11-07）
@@ -90,3 +90,9 @@
 - 飞书测试群 at Pet：provisioning operation `committed`，日志 `collab: established`；入口行 `active`、`accessMode: read-only`；first-child delivery `committed`，Delivery `status: replied`。
 - 子会话 session-ca5c3915…：`agentPreset: locus-child`、`origin: subagent`；工具调用 `locus_context`、`pet_locus_chat_history`、`pet_locus_finish` 各 1 次，回复经受管 finish 发出；`ToolExecutorUnavailableError` 0 次（全局 native executor 对自研 preset 生效）。
 - 用户确认：traex 对话、better-sidebar 各 tab、btw 正常。9.2 人工项全部完成。
+
+## 12. 收尾（2026-11-07）
+
+- 9.3 devbox gate、10.2 副本迁移演练：用户决定跳过，分别以生产验收与离线备份代替。
+- AUTO 商店版本线：0.2.0–0.2.1 用已发布 0.7.0/0.6.x，0.2.2 起用 0.7.1（用户定）；发版走 publish 流程，不在本 change 内。
+- `launcher-managed-profile` 的 history 用例改用不含 .env.local 的临时 repo：worktree 的 ws 托管块会用 DSH_HOME 覆盖调用方传入值，导致预览启动后该用例读到预览历史。

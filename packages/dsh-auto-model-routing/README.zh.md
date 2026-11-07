@@ -38,7 +38,7 @@
 
 **安装**：本版本线要求 DSH `>=0.2.2-rc.1 <0.3.0`（已验证 `0.2.2-rc.1`）、Web UI，Node.js `>=22.19`。
 
-**版本线**：DSH 0.2.0–0.2.1 继续使用已发布的 0.7.x / 0.6.x；DSH 0.2.2 起使用本插件新的 minor 版本（版本号发版时确定，不复用已发布的 0.7.0）。兼容下界抬到 `0.2.2-rc.1`，是因为 AUTO 现在依赖 `agent.model.select` 和 0.2.2 的“每步固定选择”，0.2.0/0.2.1 都没有，详见 [Changelog](CHANGELOG.md)。
+**版本线**：DSH 0.2.0–0.2.1 继续使用已发布的 0.7.0（或 0.6.x），请精确 pin `0.7.0`；DSH 0.2.2 起使用 0.7.1 及以后版本。0.2.1 的 Host 会按 `engines.dsh` 直接拒绝加载 0.7.1，不会装上但不工作。兼容下界抬到 `0.2.2-rc.1`，是因为 AUTO 现在依赖 `agent.model.select` 和 0.2.2 的“每步固定选择”，0.2.0/0.2.1 都没有，详见 [Changelog](CHANGELOG.md)。
 
 ```sh
 dsh plugin --profile web add dsh-auto-model-routing
