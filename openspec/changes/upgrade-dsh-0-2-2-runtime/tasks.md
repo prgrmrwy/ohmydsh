@@ -61,7 +61,7 @@
 
 ## 10. 备份与恢复演练（生产切换准入）
 
-- [ ] 10.1 由用户执行 `dsh stop` 并确认没有残留 Host 进程；按目标运行体 `--dump-config` 得出数据根并离线复制（sessions、attachments、Pet SQLite、profiles/web、state、storages），生成 sha256 清单，路径写入本 task
+- [x] 10.1 由用户执行 `dsh stop` 并确认没有残留 Host 进程；按目标运行体 `--dump-config` 得出数据根并离线复制（sessions、attachments、Pet SQLite、profiles/web、state、storages），生成 sha256 清单，路径写入本 task
 - [ ] 10.2 在隔离 `DSH_HOME` 中用副本以 0.2.2 打开、继续写入、重启，按 runtime-api-migration `:96-107` 逐项断言；停止全部写入方，恢复快照，以 0.2.1 启动并按同一组断言读回；结果写入 `checking/summary.md`
 
 ## 11. 上游反馈（D9）
@@ -72,7 +72,7 @@
 
 ## 12. 切换与收尾（需用户批准）
 
-- [ ] 12.1 把 `checking/` 中的结论汇总进会被版本控制的 `checking/summary.md`，提交并经用户批准合入
+- [x] 12.1 把 `checking/` 中的结论汇总进会被版本控制的 `checking/summary.md`，提交并经用户批准合入
 - [ ] 12.2 从主 checkout 执行 `dsh build`，连续第二次无变更；由用户决定启动或重启，之后用 `dsh history` 核验，刷新 3080 完成验收
 - [ ] 12.3 提示用户：商店上的 AUTO 0.7.0 在 0.2.2 Host 上不可用，需另走 publish 流程发布新的 minor
 - [ ] 12.4 `openspec validate upgrade-dsh-0-2-2-runtime --strict`，同步 delta 到 current specs；更新记忆卡 `dsh-022-upgrade-blockers-agent-request-and-prompt-tools`；归档 change

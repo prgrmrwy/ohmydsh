@@ -60,3 +60,10 @@
 - `packages/dsh-auto-model-routing/docs/architecture.dual.svg`/`.json`（README 没有引用的 v1 图）里仍写着 “agent/request hook”。
 - 商店上的 AUTO 0.7.0 在 0.2.2 Host 上不可用，需走 publish 流程发布新的 minor 版本（建议 0.8.0）。
 - 已知不稳定：机器高负载时 `locus-host-wiring` 偶尔出现 1s `waitFor` 超时，单独跑该文件稳定。
+
+## 8. 生产切换（2026-11-07）
+
+- 合入：ohmydsh `main` fast-forward 到 1c9fbc39（`scripts/ws-merge.mjs`）；inner-ohmydsh `main` fast-forward 到 1f11f19（traex 0.1.20）。两边均未 push（traex pin 全机共用，其它机器升 0.2.2 时再 push）。
+- 备份：用户在外部终端执行 `~/dsh-backups/switch-0.2.2.sh`（先 `dsh stop` 并确认 3080 不再监听，再离线打包）。归档 `~/dsh-backups/pre-0.2.2-20261107-134040.tar.zst`（sha256 dbf570e5…5157，另有 13:37 的一份较早归档）。用户决定跳过副本迁移/回读演练，回滚靠此备份，切换后新数据会丢失。
+- 启动：`dsh history` 记录 2026-11-07T05:41:28Z `dshVersion=0.2.2-rc.1 port=3080`，插件清单含 `@deepseek-ai/dsh-fs-observation-policy`；运行体 `@deepseek-ai/dsh` 0.2.2-rc.1；traex-bridge 0.1.20；日志 dsh-pet `ready — routes registered`、jev-mcp ready，无 Locus 不可用告警。唯一错误行是 subscriptions 的 Claude CLI 版本探测 ENOENT 回退（本机未装 claude CLI，非本次引入）。
+- 待用户：3080 功能验收（9.2 人工项）。
