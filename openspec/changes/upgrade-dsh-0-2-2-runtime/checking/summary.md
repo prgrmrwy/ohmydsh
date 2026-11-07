@@ -50,7 +50,7 @@
 - 1.2：现役人工项的结果。
 - 9：隔离候选验收（`dsh build` → `ws prepare-preview` → `dsh`），以及 devbox 清洁构建 gate。`tests/launcher-no-pet.official.mjs` 在 :18/:21 写死了 0.2.0-rc.2，需要在候选验收时决定如何处理。
 - 10：备份与恢复演练，需要用户执行 `dsh stop`。
-- 11：上游 discussion 留言，草稿须经用户确认后才能发布。
+- 11：上游留言已于 2026-11-07 经用户确认发布：https://github.com/deepseek-ai/deepseek-harness/discussions/7179#discussioncomment-19453297 （待上游回应，不阻断合入）。
 - 12：合入与生产切换，需要用户批准。
 
 ## 7. 后续项（不在本 change 内）
