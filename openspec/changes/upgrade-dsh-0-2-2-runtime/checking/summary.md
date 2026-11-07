@@ -84,3 +84,9 @@
 - 修复：删除该行（主入口行已注册 list_agents）。把 4 个自研 preset 引用的全部模块名对 0.2.2 运行体做解析检查：全部可解析。
 - 测试：dsh-pet 3158 通过，仅基线 v20 invariant 1 项失败；根目录 777 项中 1 项失败：`launcher-managed-profile` 的 “non-web history stays read-only”。原因是 worktree 的 ws 绑定会把 launcher 指向隔离预览 home，而预览启动后那里有启动历史。预览启动前终验时该项通过，属于测试对环境的依赖，与本修复无关，记为后续项。
 - 后续项：升级复核清单增加「对所有自研 preset 的模块名做目标运行体解析检查」。
+
+## 11. Pet Locus 端到端（修复 c96582ef 部署并重启后，2026-11-07）
+
+- 飞书测试群 at Pet：provisioning operation `committed`，日志 `collab: established`；入口行 `active`、`accessMode: read-only`；first-child delivery `committed`，Delivery `status: replied`。
+- 子会话 session-ca5c3915…：`agentPreset: locus-child`、`origin: subagent`；工具调用 `locus_context`、`pet_locus_chat_history`、`pet_locus_finish` 各 1 次，回复经受管 finish 发出；`ToolExecutorUnavailableError` 0 次（全局 native executor 对自研 preset 生效）。
+- 用户确认：traex 对话、better-sidebar 各 tab、btw 正常。9.2 人工项全部完成。

@@ -3,7 +3,7 @@
 ## 1. 基线（现役 0.2.1-rc.5）
 
 - [x] 1.1 在现役运行体上跑 `npm test`、`npm run check:artifacts` 和各 local package 的 build/typecheck/test，结果记入 `checking/summary.md`
-- [ ] 1.2 列出没有自动化覆盖的人工验收项及步骤，并记录它们在现役上的结果：AUTO 主/子路由（含状态面板）、Pet Locus 子任务回传、memex 召回/写卡/eval 自检、Automation 任务列表、btw、better-sidebar 各 tab、cockpit-bridge 上报、四个商店包的可见功能
+- [x] 1.2 列出没有自动化覆盖的人工验收项及步骤，并记录它们在现役上的结果：AUTO 主/子路由（含状态面板）、Pet Locus 子任务回传、memex 召回/写卡/eval 自检、Automation 任务列表、btw、better-sidebar 各 tab、cockpit-bridge 上报、四个商店包的可见功能
 
 ## 2. pin、依赖与 Node（D7）
 
@@ -55,8 +55,8 @@
 
 ## 9. 隔离候选验收
 
-- [ ] 9.1 `dsh build` → `ws prepare-preview` → `dsh`，按分组（裸运行体 → local package → remote 插件）组合，记录启动清单、loader 结果与基线差异；观察策略重跑 `--dump-config`
-- [ ] 9.2 复跑 1.2 的人工项；重点看 AUTO 主会话 step 1 请求头 effort、带图首消息的 fresh 子任务、状态面板，以及 Locus 子会话写文件受观察策略约束
+- [x] 9.1 `dsh build` → `ws prepare-preview` → `dsh`，按分组（裸运行体 → local package → remote 插件）组合，记录启动清单、loader 结果与基线差异；观察策略重跑 `--dump-config`
+- [x] 9.2 复跑 1.2 的人工项；重点看 AUTO 主会话 step 1 请求头 effort、带图首消息的 fresh 子任务、状态面板，以及 Locus 子会话写文件受观察策略约束
 - [ ] 9.3 按精确 commit 在 devbox 跑清洁构建 gate，结果写入 `checking/summary.md`
 
 ## 10. 备份与恢复演练（生产切换准入）
@@ -73,6 +73,6 @@
 ## 12. 切换与收尾（需用户批准）
 
 - [x] 12.1 把 `checking/` 中的结论汇总进会被版本控制的 `checking/summary.md`，提交并经用户批准合入
-- [ ] 12.2 从主 checkout 执行 `dsh build`，连续第二次无变更；由用户决定启动或重启，之后用 `dsh history` 核验，刷新 3080 完成验收
+- [x] 12.2 从主 checkout 执行 `dsh build`，连续第二次无变更；由用户决定启动或重启，之后用 `dsh history` 核验，刷新 3080 完成验收
 - [ ] 12.3 提示用户：商店上的 AUTO 0.7.0 在 0.2.2 Host 上不可用，需另走 publish 流程发布新的 minor
 - [ ] 12.4 `openspec validate upgrade-dsh-0-2-2-runtime --strict`，同步 delta 到 current specs；更新记忆卡 `dsh-022-upgrade-blockers-agent-request-and-prompt-tools`；归档 change
