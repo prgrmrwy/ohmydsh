@@ -67,3 +67,12 @@
 - 备份：用户在外部终端执行 `~/dsh-backups/switch-0.2.2.sh`（先 `dsh stop` 并确认 3080 不再监听，再离线打包）。归档 `~/dsh-backups/pre-0.2.2-20261107-134040.tar.zst`（sha256 dbf570e5…5157，另有 13:37 的一份较早归档）。用户决定跳过副本迁移/回读演练，回滚靠此备份，切换后新数据会丢失。
 - 启动：`dsh history` 记录 2026-11-07T05:41:28Z `dshVersion=0.2.2-rc.1 port=3080`，插件清单含 `@deepseek-ai/dsh-fs-observation-policy`；运行体 `@deepseek-ai/dsh` 0.2.2-rc.1；traex-bridge 0.1.20；日志 dsh-pet `ready — routes registered`、jev-mcp ready，无 Locus 不可用告警。唯一错误行是 subscriptions 的 Claude CLI 版本探测 ENOENT 回退（本机未装 claude CLI，非本次引入）。
 - 待用户：3080 功能验收（9.2 人工项）。
+
+## 9. 3080 会话内功能验收（2026-11-07，由 lead 在生产 0.2.2 会话中执行）
+
+- 文件观察策略：外部写入的文件未读即 edit → 拒绝（file has not been read）；读后被外部改写再 edit → 拒绝（file changed since it was read）；重读后 edit 成功。0.2.2 默认关闭该防护，此结果证明 patch 生效。
+- AUTO 主会话（session-d9a86ee5…，模式 AUTO）：turn 57 在 step 1 之前写入 `model/selection` effort high，step 1 的 request/header 即为 high（上一回合 medium），运行体无报错。
+- AUTO 子会话：`route_subagent` 预览推荐 claude-haiku-5-5/low；实际 fresh 子会话（730c0045…）在首条消息前写入同一 selection，step 1 请求头 haiku/low，决策记录 `status: applied`、capability bounded，子会话正确完成任务。
+- memex：`memex_recall` 正常返回。
+- traex：`list_subagent_models` 能拉到实时模型目录（provider 已注册、后端可达）；本会话子会话允许列表不含 traex 路由，未能做真实对话。
+- 未测（需 GUI 或外部通道）：traex 真实对话、Pet Locus 端到端、better-sidebar 各 tab、btw。
