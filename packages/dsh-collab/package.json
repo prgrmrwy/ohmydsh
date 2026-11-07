@@ -53,8 +53,8 @@
   "devDependencies": {
     "@types/node": "^24.19.2",
     "collab-kernel": "*",
-    "tsdown": "^0.23.1",
-    "vitest": "^5.0.5",
+    "tsdown": "^0.23.5",
+    "vitest": "^5.1.0",
     "typescript": "^5.9.3",
     "@deepseek-ai/dsh-agent": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",

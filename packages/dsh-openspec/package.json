@@ -51,7 +51,7 @@
     "@deepseek-ai/dsh-commands": "^0.2.2-rc.1",
     "@types/node": "^24.19.2",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "ohmydsh": {
     "docTier": "A"
