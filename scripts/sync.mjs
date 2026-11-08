@@ -10,6 +10,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import { runDshCli } from './lib/dsh-cli.mjs'
+import { runDeployChecks } from './lib/deploy-checks.mjs'
 import { resolveExecutable } from './lib/package-manager.cjs'
 import { assertNoReservedEntryKeys, assertNoRetiredEntryKeys, loadOverlayCustomizations, mergeOverlayCustomizations, OVERLAY_PATH_ENV } from './lib/manifest-overlay.mjs'
 import { applyEnvLocal, enabledEnvNames, isCustomizationEnabled } from './lib/env-local.mjs'
@@ -2052,6 +2053,11 @@ async function main() {
     }) ?? []
     const presetParts = settingsLiveInProfile(manifest.dshVersion) ? presetDeclarationParts(manifest.items) : []
     await syncPatches(manifest.items, manifest, [...presetParts, ...generatedParts])
+    // Run even when nothing changed: a broken standalone CLI must be reported
+    // on every build, not only on the one that deployed it.
+    const checks = runDeployChecks([...packageNames.values()], { profileDir: PROFILE_DIR })
+    for (const label of checks.passed) log(`deploy check ok — ${label}`)
+    for (const failure of checks.failed) failures.push(`deploy check failed — ${failure}`)
   }
   logVersion(manifest)
   console.log('')

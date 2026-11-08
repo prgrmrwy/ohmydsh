@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.10 — 2026-11-05
+
+- **修复热载后整个插件客户端 UI 消失（侧栏额度卡、设置页 Magpie 面板、输入框速度栏）。** `apply()` 注册 zh/en 字典时用了 `ctx.effect(() => { registry.register(...); return () => {} })`，空的清理函数从不释放字典；而 `@deepseek-ai/dsh-client-locale` 的 `register` 在同一命名空间已被占用时直接抛错（`locale namespace "settings.magpie" already has locale "zh"`）。页面开着时客户端 bundle 被重建（`dsh build`/HMR 推送新 bundle）会先卸载旧条目、再对新模块重新执行 `apply`，于是第二次 `register` 抛错、条目导入失败，插件注册的全部 slot 一起消失，直到刷新页面才恢复——表现为「侧栏 Magpie 额卡经常展示不出来」。现在这个 effect 返回 `locale.register` 自己的 disposer；本地用与真实服务同契约的假 locale 加了回归测试（重复注册抛错、disposer 删除命名空间），覆盖「卸载后重新 apply」与「卸载后命名空间已释放」。设置页导航图标的同款写法原本就返回了 disposer，未受影响。
+- 包内 538 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
+## 0.6.9 — 2026-11-05
+
+- **侧栏额度自动刷新改为真实刷新。** 之前每个 `sidebarRefreshMinutes` 只发一次卡片读取（`GET cards`），但网关的卡片接口按当前语义只返回它上次读到的缓存、不会向上游重读：`GET /v1/magpie/quotas/cards`（`quotaCards`）直接取 `provider.CachedCards`，注释写明 “no vendor asked for it”，只有 `POST /v1/magpie/quotas/refresh` 才让网关重读（同一张卡 30 秒内最多一次）。于是定时器虽然按 spec 在跑，读数和卡片头部的「N 分钟前」却一直不变，表现为「5 分钟自动刷新失效」；Claude 的 5 小时窗口也一直停留在上一次真实读取时的 0%（实测本机网关：`GET cards` 的 Claude `readAt` 停在 2026-11-03T21:33-05:00、`5 hours used=0`，强制刷新后变成 `5 hours used=8%`、`7 days` 20%→33%）。现在自动刷新与卡头刷新按钮走同一路径：按间隔静默发一次全量刷新（`POST cards {all:true}`），由网关重读上游；失败时保留旧读数、不显示错误、不影响其它功能，页面隐藏时到期不刷新、恢复可见后补读一次。事件驱动读取（挂载、展开、页面重新可见）仍走 `GET cards` + 60 秒缓存，默认 5 分钟、`0` 关闭不变。
+- 包内 536 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
+## 0.6.8 — 2026-11-05
+
+- **修复独立安装（镜像 CI）下 `owner-persistence` 用例对宿主版本的假设。** `llm/adapters-updated` 监听器异常的处理随 DSH 版本不同：0.2.0 会冒泡成 `INVARIANT`，0.2.1 起宿主自行包含（只 warn、不让监听器否决提交）。用例改为按实际宿主语义分支断言，两种版本下都验证「归属与配置文件不被破坏」，0.6.7 因此在镜像 CI 的 Verify 步失败、npm 未发布；本版只动测试与版本号，用户可见行为与 0.6.7 完全一致。
+- 包内 535 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
+## 0.6.7 — 2026-11-05
+
+- **README 演示图按当前界面重截。** `docs/usage.png`/`usage.en.png`/`settings.png`/`settings.en.png` 换成 0.6.7 构建在隔离 DSH_HOME（`ws prepare-preview`，端口 3228）里、对本地 loopback mock Magpie 网关注入合成数据的真实截图：收起卡展示 Claude 的 5 小时/周/月三行与各自到期时间、Codex 91%、OpenCode Go 三档位、DeepSeek 余额和一条读取失败；设置页展示三个档位 checkbox、自动刷新 5 分钟与连接线路。中英各一套，界面语言与 README 语言一致；`docs/SCREENSHOTS.md` 同步登记（usage 为 deviceScaleFactor 3，settings 为 2）。
+- 顺手修掉开关说明里过期的「最多 5 行」：0.6.11 起收起正文按 320px 限高，中英文案与代码注释一并改成当前行为。
+- **适配上游 DSH 0.2.1 的 `llm/adapters-updated` 语义。** 宿主现在自行包含该事件监听器的异常（只记录告警，不再让监听器否决提交）；旧的「首次注册 INVARIANT 不当作成功」用例改为「注册按提交结果处理」，current spec 同步说明，避免把宿主已包含的监听器异常误判成注册失败。
+- 无用户可见行为变化；包内 535 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.6 — 2026-11-04
 
 **侧栏额度卡：到期时间、窗口档位多选与滚动细节。**

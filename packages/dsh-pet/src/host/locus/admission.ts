@@ -9,7 +9,7 @@
  */
 
 import type { LarkInboundEvent } from '../channel/event.js'
-import { isOwnerExit } from './serviceability.js'
+import type { LocusAccessModeV20, LocusRepositoryPortV20, LocusRowV20 } from './contract-v20.js'
 import { STORAGE_KEY_SEPARATOR, containsStorageKeySeparator } from './storage-key.js'
 
 /** The two possible parts of a Locus address. */
@@ -38,8 +38,8 @@ export type EndpointExtraction =
  * `authorized` is the only state that gives a group the member-at exemption.
  * `uninitialized` is intentionally separate from a missing record: an
  * allowlisted sender may use its first mention to create the new structure.
- * `retired` and `legacy` are terminal protection states and never fall through
- * to a default identity.
+ * `retired` (stopped, or W archived) is a terminal protection state and never
+ * falls through to a default identity.
  */
 export type LocusAuthorizationState =
   | 'authorized'
@@ -51,20 +51,19 @@ export type LocusAuthorizationState =
    */
   | 'retired'
   /**
-   * The Host itself judged the generation unusable (`invalid`) — a failed
-   * child re-attach after a restart, a lost composition proof. The owner
+   * The Host itself judged the entry unusable (`invalid`): the child was
+   * lost or its identity could not be proven (D7 class A). The owner
    * never asked for this, so the "do not auto-resurrect an explicit exit"
    * rule does not apply: treating it like a deliberate exit stranded the
-   * endpoint behind a rebuild that could itself fail, with no way out.
+   * endpoint; the next authorized @ rebuilds it in place instead.
    */
   | 'unusable'
-  | 'legacy'
 
 /**
  * The subset of {@link LocusAuthorizationState} that ordinary work may proceed
  * under: an existing serviceable locus (`authorized`), or an endpoint the
  * channel is allowed to bootstrap itself — `uninitialized` for one it has
- * never seen, `unusable` for a generation the Host invalidated without any
+ * never seen, `unusable` for a row the Host invalidated without any
  * owner decision.
  *
  * Every consumer that gates ordinary work MUST use
@@ -98,153 +97,73 @@ export interface LocusAuthorization {
 
 /** A resolver supplied by the locus controller/repository. */
 export type LocusAuthorizationResolver = ((endpoint: LocusEndpoint) => LocusAuthorizationState | LocusAuthorization) & {
-  toolTier?: (endpoint: LocusEndpoint) => 'safe' | 'shell' | undefined
+  /** The exact entry row's `accessMode`, in every state; `undefined` when no row exists (D8). */
+  accessMode?: (endpoint: LocusEndpoint) => LocusAccessModeV20 | undefined
 }
 
-/** Narrow durable view needed by production admission. */
-export interface LocusAuthorizationStore {
-  getLatestLocusByEndpoint(endpoint: { readonly chatId: string; readonly threadId?: string }):
-    | {
-        readonly id?: string
-        readonly state: 'provisioning' | 'not-created' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped'
-        /** The session this generation hangs under (its locus main, or a previous-model parent). */
-        readonly parentSessionId: string
-        /**
-         * The work session behind the locus main. Archived state is read from
-         * THIS one: archiving the owner's own session is what takes an entry
-         * out of service, not anything about Pet's coordinator.
-         */
-        readonly workSessionId?: string
-        /**
-         * The row belongs to the previous two-tier model (no locus-main
-         * pairing). Such an entry is not "authorized": its next owner @
-         * establishes the three-tier structure, and nobody else's @ does.
-         */
-        readonly legacy?: boolean
-        readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
-        readonly childComposition?: 'safe-v1' | 'safe-v2' | 'tier3'
-      }
-    | undefined
-}
-
-/** Read-only legacy-retirement probe; it never supplies an execution identity. */
-export interface LegacyRetirementProbe {
-  find(endpoint: { readonly chatId: string; readonly threadId?: string }): unknown
-}
+/** Narrow v20 durable view needed by production admission (owner A's repository). */
+export type LocusAuthorizationStore = Pick<LocusRepositoryPortV20, 'getRow' | 'findMain'>
 
 /**
- * Build production authorization from the durable unified generation and the
- * read-only legacy retirement marker. A missing unified row is bootstrap-able
- * only when the legacy probe also proves the endpoint was never associated.
- * Lookup failures throw so admission returns `authorization-unresolved` rather
- * than silently creating a default identity.
+ * Build production authorization from the v20 entry rows. A missing row is
+ * bootstrap-able; lookup failures throw so admission returns
+ * `authorization-unresolved` rather than silently creating a default identity.
+ * `chat_bindings` is not read (D11).
  */
 export function createDurableLocusAuthorizationResolver(
   store: LocusAuthorizationStore,
-  legacy: LegacyRetirementProbe,
   /**
-   * Whether the generation's main session is archived by its owner.
-   *
-   * Archiving the main session is an OWNER action, and nothing in the runtime
-   * enforces it: `dsh-agent` and the session controller both resume an archived
-   * session without complaint, so an endpoint whose parent was archived kept
-   * answering and the archival had no effect at all. Absent means "cannot know",
-   * which keeps the previous behaviour rather than inventing a refusal.
+   * Whether a work session (W) is archived by its owner. An archived W takes
+   * every entry under it out of service without rewriting `state` (D7). Absent
+   * or throwing means "cannot know", which never takes a working entry down.
    */
-  isParentArchived?: (parentSessionId: string) => boolean,
+  isWorkArchived?: (workSessionId: string) => boolean,
 ): LocusAuthorizationResolver {
-  /**
-   * Classify a non-`active` generation by WHO put it in that state.
-   *
-   * `stopped`/`retired` are owner decisions; `invalid` is the Host's own
-   * judgement (failed child re-attach, missing composition proof) and
-   * `provisioning`/`switching` are transient. Collapsing all of them into
-   * `retired` is what made a Host-invalidated endpoint demand an explicit
-   * rebuild — a rebuild that could itself be impossible when the recorded
-   * parent was archived, leaving the endpoint permanently unreachable.
-   */
-  // Derive from the ONE policy module instead of restating the split here:
-  // every layer that decides "may this proceed / may this be replaced" must
-  // agree, and hand-written copies are what let three rounds of fixes each
-  // move the refusal one layer deeper rather than removing it.
-  const unserviceableAuthorization = (
-    state: 'provisioning' | 'not-created' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
-  ): LocusAuthorizationState => (isOwnerExit(state) ? 'retired' : 'unusable')
-
-  /**
-   * An archived main session records an OWNER action, so it must classify as
-   * `retired` — the state that produces "this entry needs an explicit rebuild"
-   * — and never as `unusable`, which would let an ordinary mention establish a
-   * new generation on a main session the owner never chose.
-   *
-   * Applies to `active` (it would otherwise serve) and to `invalid` (it would
-   * otherwise be auto-replaced). Transient states are left alone: provisioning
-   * already in flight is not a decision to reverse here.
-   */
-  const archivedParentOutranks = (
-    state: 'provisioning' | 'not-created' | 'active' | 'switching' | 'invalid' | 'retired' | 'stopped',
-    parentSessionId: string,
-  ): boolean => {
-    if (state !== 'active' && state !== 'not-created' && state !== 'invalid') return false
-    if (isParentArchived === undefined) return false
+  const workArchived = (chatId: string): boolean => {
+    if (isWorkArchived === undefined) return false
+    const group = store.getRow({ chatId })
+    if (group === undefined || !('locusMainSessionId' in group)) return false
+    const work = store.findMain(group.locusMainSessionId)?.workSessionId
+    if (work === undefined) return false
     try {
-      return isParentArchived(parentSessionId) === true
+      return isWorkArchived(work) === true
     } catch {
-      // A probe that cannot answer must not become a refusal: the delivery
-      // path has its own, narrower gate for this fact.
       return false
     }
+  }
+
+  const classify = (row: LocusRowV20, extra: { readonly needsInitialization?: true } = {}): LocusAuthorizationState | LocusAuthorization => {
+    // An archived W outranks `active` / `not-created` / `invalid`: the owner
+    // acted on the session, and an ordinary @ must neither serve nor rebuild.
+    if (row.state !== 'stopped' && workArchived(row.endpoint.chatId)) {
+      return { state: 'retired', reason: 'source-archived' }
+    }
+    if (row.state === 'active' || row.state === 'not-created') {
+      return { state: 'authorized', locusId: row.locusId, ...extra }
+    }
+    // `stopped` is the owner's exit; `invalid` is a Host judgement that the
+    // next authorized @ rebuilds in place.
+    return row.state === 'stopped' ? 'retired' : 'unusable'
   }
 
   const resolve: LocusAuthorizationResolver = endpoint => {
     const exact = endpoint.threadId === undefined
       ? { chatId: endpoint.chatId }
       : { chatId: endpoint.chatId, threadId: endpoint.threadId }
-    const current = store.getLatestLocusByEndpoint(exact)
-    if (current !== undefined) {
-      // A previous-model row is read as "never established under the new
-      // structure": only an allowlisted owner's @ may build it, and that @
-      // retires the old row. An owner's own stop/retire is still honoured.
-      if (current.legacy === true && !isOwnerExit(current.state)) {
-        return { state: 'uninitialized', reason: 'previous-model' }
-      }
-      if (archivedParentOutranks(current.state, current.workSessionId ?? current.parentSessionId)) {
-        return { state: 'retired', reason: 'source-archived' }
-      }
-      if (current.state === 'active' || current.state === 'not-created') {
-        return { state: 'authorized', ...(current.id === undefined ? {} : { locusId: current.id }) }
-      }
-      return unserviceableAuthorization(current.state)
-    }
-    if (legacy.find(exact) !== undefined) return 'legacy'
+    const current = store.getRow(exact)
+    if (current !== undefined) return classify(current)
     if (endpoint.threadId === undefined) return 'uninitialized'
 
-    // A new topic is authorized by the durable chat-level locus. A parent the
-    // owner deliberately exited is terminal and must not be bypassed by topic
-    // auto-provisioning; a parent the Host merely judged unusable is not an
-    // owner decision and keeps that distinction. A missing parent remains
-    // uninitialized for an allowlisted first mention only.
-    const parent = store.getLatestLocusByEndpoint({ chatId: endpoint.chatId })
-    if (parent === undefined) {
-      return legacy.find({ chatId: endpoint.chatId }) === undefined ? 'uninitialized' : 'legacy'
-    }
-    if (parent.legacy === true && !isOwnerExit(parent.state)) {
-      return { state: 'uninitialized', reason: 'previous-model' }
-    }
-    if (archivedParentOutranks(parent.state, parent.workSessionId ?? parent.parentSessionId)) {
-      return { state: 'retired', reason: 'source-archived' }
-    }
-    if (parent.state === 'active' || parent.state === 'not-created') {
-      return { state: 'authorized', ...(parent.id === undefined ? {} : { locusId: parent.id }), needsInitialization: true }
-    }
-    return unserviceableAuthorization(parent.state)
+    // A new topic is authorized by its group row. A group the owner stopped
+    // does not authorize a new topic; a missing group stays uninitialized for
+    // an allowlisted first mention only.
+    const group = store.getRow({ chatId: endpoint.chatId })
+    if (group === undefined) return 'uninitialized'
+    return classify(group, { needsInitialization: true })
   }
-  resolve.toolTier = endpoint => {
-    const current = store.getLatestLocusByEndpoint(endpoint.threadId === undefined
-      ? { chatId: endpoint.chatId }
-      : { chatId: endpoint.chatId, threadId: endpoint.threadId })
-    return current?.state === 'active' && current.legacy !== true ? current.toolTier?.effective ?? 'safe' : undefined
-  }
+  resolve.accessMode = endpoint => store.getRow(endpoint.threadId === undefined
+    ? { chatId: endpoint.chatId }
+    : { chatId: endpoint.chatId, threadId: endpoint.threadId })?.accessMode
   return resolve
 }
 
@@ -253,13 +172,14 @@ export type LocusControlCommand =
   | { readonly kind: 'bind'; readonly prefix: string }
   | { readonly kind: 'bind-missing-prefix' }
   | { readonly kind: 'bind-invalid' }
-  | { readonly kind: 'scope'; readonly mode: 'read' | 'write' }
-  | { readonly kind: 'scope-missing-mode' }
-  | { readonly kind: 'scope-invalid'; readonly value: string }
-  | { readonly kind: 'tools'; readonly tier: 'safe' | 'shell' }
-  | { readonly kind: 'tools-missing-tier' }
-  | { readonly kind: 'tools-invalid'; readonly value: string }
+  | { readonly kind: 'access'; readonly mode: LocusAccessModeV20 }
+  | { readonly kind: 'access-missing-mode' }
+  | { readonly kind: 'access-invalid'; readonly value: string }
+  /** `/scope`, `/tools`, `-s`, `-t` (D8): change nothing; the receipt points to `/access`. */
+  | { readonly kind: 'deprecated-tier'; readonly original: string }
   | { readonly kind: 'unbind' }
+  /** `-h`, `--help`, `/help`: a pure information receipt; never creates anything. */
+  | { readonly kind: 'help' }
   | { readonly kind: 'unbind-invalid' }
 
 /** Input passed to an already-authorized control dispatcher. */
@@ -304,7 +224,6 @@ export type LocusAdmissionRefusal =
   | 'empty-content'
   | 'uninitialized-endpoint'
   | 'retired-endpoint'
-  | 'legacy-endpoint'
   | 'authorization-unresolved'
   | 'control-not-allowed'
   | 'owner-only-tier'
@@ -340,8 +259,8 @@ export interface LocusAdmissionContext {
   readonly authorizedEndpoints?: ReadonlySet<string> | readonly string[]
   /** Explicitly authorized chat ids; useful for group-level member-at policy. */
   readonly authorizedChats?: ReadonlySet<string> | readonly string[]
-  /** Current durable tool tier for a resolved endpoint. */
-  toolTier?: (endpoint: LocusEndpoint) => 'safe' | 'shell' | undefined
+  /** The exact entry row's `accessMode` in any state (D8); `danger-full-access` is owner-only. */
+  accessMode?: (endpoint: LocusEndpoint) => LocusAccessModeV20 | undefined
 }
 
 /** A successful admission, including the exact endpoint the controller must use. */
@@ -424,12 +343,37 @@ export function extractLocusEndpoint(event: LarkInboundEvent): EndpointExtractio
   return { ok: true, endpoint: { chatId, key: locusEndpointKey(chatId) } }
 }
 
-/** Alias with the shorter name used by some controller integrations. */
-export const resolveLocusEndpoint = extractLocusEndpoint
-/** Alias matching the design document's resolver terminology. */
-export const resolveEndpoint = extractLocusEndpoint
-/** Alias for callers that use the noun-first form. */
-export const endpointOf = extractLocusEndpoint
+
+/** `/access read|full` argument → row value (D8). */
+const ACCESS_COMMAND_MODES: Readonly<Record<string, LocusAccessModeV20>> = {
+  read: 'read-only',
+  full: 'danger-full-access',
+}
+
+/**
+ * The ONE table of commands the parser accepts and the help receipt lists.
+ * Deprecated tier verbs are accepted by the parser but deliberately absent.
+ */
+export interface LocusCommandTableEntry {
+  readonly id: 'bind' | 'unbind' | 'access' | 'help'
+  readonly verbs: readonly string[]
+  readonly usage: string
+  readonly description: string
+  /** Every control command is gated by the allowlist (see admitCommon). */
+  readonly allowlistOnly: boolean
+}
+
+export const LOCUS_COMMAND_TABLE: readonly LocusCommandTableEntry[] = [
+  { id: 'bind', verbs: ['/bind', '-b', '--bind'], usage: '/bind <工作会话 id>', description: '把本入口绑定到工作会话（id 前缀至少 6 位）；已停止的入口对同一会话重新 /bind 即可启用', allowlistOnly: true },
+  { id: 'unbind', verbs: ['/unbind', '-u', '--unbind'], usage: '/unbind', description: '停止本入口，会话与历史保留', allowlistOnly: true },
+  { id: 'access', verbs: ['/access', '-a', '--access'], usage: '/access read|full', description: '设置本入口的访问模式：read 只读，full 完全访问（仅 allowlist 成员可再提问）', allowlistOnly: true },
+  { id: 'help', verbs: ['/help', '-h', '--help'], usage: '/help', description: '显示本帮助', allowlistOnly: true },
+]
+
+const verbsOf = (id: LocusCommandTableEntry['id']): readonly string[] =>
+  LOCUS_COMMAND_TABLE.find(entry => entry.id === id)!.verbs
+
+const DEPRECATED_TIER_VERBS = new Set(['/scope', '-s', '--scope', '/tools', '-t', '--tools'])
 
 /** Strip one or more leading @mention tokens from message text. */
 function withoutLeadingMentions(text: string): string {
@@ -449,40 +393,35 @@ export function parseLocusControlCommand(text: string): LocusCommandParse {
   const [verb = '', ...args] = cleaned.split(/\s+/)
   const lower = verb.toLowerCase()
 
-  if (lower === '/unbind' || lower === '-u' || lower === '--unbind') {
+  if (verbsOf('help').includes(lower)) return { kind: 'help' }
+
+  if (verbsOf('unbind').includes(lower)) {
     return args.length === 0 ? { kind: 'unbind' } : { kind: 'unbind-invalid' }
   }
 
-  if (lower === '/bind' || lower === '-b' || lower === '--bind') {
+  if (verbsOf('bind').includes(lower)) {
     const prefix = args[0] ?? ''
     if (prefix === '') return { kind: 'bind-missing-prefix' }
     return args.length === 1 ? { kind: 'bind', prefix } : { kind: 'bind-invalid' }
   }
 
-  if (lower === '/scope' || lower === '-s' || lower === '--scope') {
+  if (verbsOf('access').includes(lower)) {
     const value = args[0]?.toLowerCase()
-    if (value === undefined) return { kind: 'scope-missing-mode' }
-    if (args.length === 1 && (value === 'read' || value === 'write')) return { kind: 'scope', mode: value }
-    return { kind: 'scope-invalid', value: args.join(' ') }
+    if (value === undefined) return { kind: 'access-missing-mode' }
+    const mode = args.length === 1 ? ACCESS_COMMAND_MODES[value] : undefined
+    return mode === undefined ? { kind: 'access-invalid', value: args.join(' ') } : { kind: 'access', mode }
   }
 
-  if (lower.startsWith('--scope=')) {
-    const value = lower.slice('--scope='.length)
-    if (args.length === 0 && (value === 'read' || value === 'write')) return { kind: 'scope', mode: value }
-    return { kind: 'scope-invalid', value: [value, ...args].join(' ') }
+  if (lower.startsWith('--access=')) {
+    const value = lower.slice('--access='.length)
+    const mode = args.length === 0 ? ACCESS_COMMAND_MODES[value] : undefined
+    return mode === undefined ? { kind: 'access-invalid', value: [value, ...args].join(' ') } : { kind: 'access', mode }
   }
 
-  if (lower === '-t' || lower === '--tools') {
-    const value = args[0]?.toLowerCase()
-    if (value === undefined) return { kind: 'tools-missing-tier' }
-    if (args.length === 1 && (value === 'safe' || value === 'shell')) return { kind: 'tools', tier: value }
-    return { kind: 'tools-invalid', value: args.join(' ') }
-  }
-
-  if (lower.startsWith('--tools=')) {
-    const value = lower.slice('--tools='.length)
-    if (args.length === 0 && (value === 'safe' || value === 'shell')) return { kind: 'tools', tier: value }
-    return { kind: 'tools-invalid', value: [value, ...args].join(' ') }
+  // D8: the old tier verbs change nothing. They stay recognised so a sender
+  // cannot smuggle them into the work path, and control answers "use /access".
+  if (DEPRECATED_TIER_VERBS.has(lower) || lower.startsWith('--scope=') || lower.startsWith('--tools=')) {
+    return { kind: 'deprecated-tier', original: cleaned }
   }
 
   if (lower.startsWith('--bind=')) {
@@ -494,10 +433,6 @@ export function parseLocusControlCommand(text: string): LocusCommandParse {
   return { kind: 'none' }
 }
 
-/** Short alias for command parsing. */
-export const parseLocusCommand = parseLocusControlCommand
-/** Compatibility alias for parent integration. */
-export const parseControlCommand = parseLocusControlCommand
 
 /** Whether a collection contains one exact string. */
 function includesValue(values: ReadonlySet<string> | readonly string[] | undefined, value: string): boolean {
@@ -514,7 +449,6 @@ function stateOf(value: LocusAuthorizationState | LocusAuthorization): LocusAuth
   if (state === 'uninitialized') return state
   if (state === 'retired') return state
   if (state === 'unusable') return state
-  if (state === 'legacy') return state
   return 'uninitialized'
 }
 
@@ -582,8 +516,8 @@ export function mentionsLocusBot(event: LarkInboundEvent, botOpenId: string | un
  * All messages, including p2p messages and control commands, must mention the
  * verified bot.  A group in `authorized` state grants ordinary @bot questions
  * to its members; it never grants control authority.  An uninitialized endpoint
- * can be bootstrapped only by a global allowlist sender.  Retired and legacy
- * endpoints never fall through to a new/default locus.
+ * can be bootstrapped only by a global allowlist sender.  Retired endpoints
+ * never fall through to a new/default locus.
  */
 export function admitLocusEvent(
   event: LarkInboundEvent,
@@ -642,8 +576,8 @@ export interface CommonAdmissionInput {
 
 /**
  * The admission rules every source shares: dedup, watermark, empty text,
- * authorization, control-command allowlist, retired/legacy refusal, owner-only
- * tier and the member-question rule. Written once so a group and a document
+ * authorization, control-command allowlist, retired refusal, owner-only
+ * full access and the member-question rule. Written once so a group and a document
  * cannot drift (openspec pet-locus-doc-comments D7).
  */
 export function admitCommon(input: CommonAdmissionInput, context: LocusAdmissionContext): LocusAdmissionDecision {
@@ -680,21 +614,17 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
 
   // A protected endpoint remains unavailable for ordinary work. The sole
   // exception is an allowlisted, well-formed explicit bind: it enters the
-  // control plane so a dedicated rebuild adapter can create a fresh read locus
-  // without consuming any legacy parent/workspace/permission identity.
-  const explicitRebuild = allowlisted && parsed.kind === 'bind'
+  // control plane, where a same-W `/bind` re-enables a stopped entry (D7).
+  const explicitRebuild = allowlisted && (parsed.kind === 'bind' || parsed.kind === 'help')
   if (authorization === 'retired' && !explicitRebuild) {
     return { admit: false, reason: 'retired-endpoint', endpoint, authorization }
-  }
-  if (authorization === 'legacy' && !explicitRebuild) {
-    return { admit: false, reason: 'legacy-endpoint', endpoint, authorization }
   }
 
   // Only a group with an explicitly authorized locus can grant ordinary
   // non-allowlisted member questions.  P2P conversations remain allowlist
   // scoped because there is no group membership authorization to inherit.
-  const currentTier = context.toolTier?.(endpoint)
-  const ownerOnlyTier = currentTier === 'shell'
+  // D8: full access is owner-only in EVERY state of the row, not just `active`.
+  const ownerOnlyTier = context.accessMode?.(endpoint) === 'danger-full-access'
   const canAskAsGroupMember = input.memberQuestions && authorization === 'authorized' && !ownerOnlyTier
   if (!allowlisted && ownerOnlyTier) {
     return { admit: false, reason: 'owner-only-tier', endpoint, authorization }
@@ -709,11 +639,10 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
     text,
     senderId,
     authorization,
-    // `unusable` initializes exactly like a never-seen endpoint: the previous
-    // generation was invalidated by the Host, not exited by the owner, so
-    // there is no owner decision to preserve and nothing to "rebuild" from —
-    // its recorded parent may itself be gone. The allowlist gate above still
-    // applies, so an ordinary member cannot bootstrap one.
+    // `unusable` (an `invalid` row) is rebuilt in place by the next
+    // authorized @ (D7): the Host invalidated it, the owner exited nothing.
+    // The allowlist gate above still applies, so an ordinary member cannot
+    // trigger the rebuild.
     needsInitialization: authorization === 'uninitialized'
       || authorization === 'unusable'
       || authorizationLookup.needsInitialization,
@@ -722,10 +651,6 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
   return admission
 }
 
-/** Alias used by channel adapters that call the operation "inbound". */
-export const admitLocusInboundEvent = admitLocusEvent
-/** Alias used by integrations that call an event a message. */
-export const admitLocusMessage = admitLocusEvent
 
 /** Bounded message-id dedup helper for controllers without a repository. */
 export class LocusMessageDedup {

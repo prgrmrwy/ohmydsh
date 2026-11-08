@@ -19,116 +19,9 @@ import { fakeJev, json } from './fake-jev.js'
 import { PolicyStore } from '../src/policy-store.js'
 import { BUILTIN_STRATEGIES, createRegistry, type FamilyStrategy } from '../src/strategies/index.js'
 // Test the installed SDK's real fold, not a local reimplementation of picker semantics.
-const controllerEntry = pathToFileURL(createRequire(import.meta.url).resolve('@deepseek-ai/dsh-api-session-controller'))
-const { installModelSelectionProjection } = await import(new URL('./types/model-selection-projection.js', controllerEntry).href)
-const { SessionCommandController } = await import(new URL('./types/commands.js', controllerEntry).href)
-const { ApiSessionAgentController } = await import(new URL('./types/agent.js', controllerEntry).href)
-let close: (() => Promise<void>) | undefined
-afterEach(async () => { await close?.(); close = undefined })
-async function harness(magpie: false | 'dsh-magpie-connect' | 'dsh-magpie-connector' = false, pendingPick = false, family: 'claude' | 'codex' | 'deepseek' = 'claude', selectFails: boolean | 'missing' = false, main: { provider?: string; model?: string; efforts?: string[]; defaultEffort?: string } = {}, strategies?: readonly FamilyStrategy[]) {
-  const provider = magpie || (family === 'deepseek' ? 'opencode-go' : family)
-  const modelId = (id: string) => magpie ? `${family}/${id}` : id
-  const modelIds = family === 'claude' ? ['claude-opus-5-5','claude-haiku-5-5','claude-sonnet-5-5'] : family === 'deepseek' ? ['deepseek-v5'] : ['gpt-6.1-sol','gpt-6-luna']
-  const mainProvider = main.provider ?? provider
-  const mainModel = main.model ?? modelId(modelIds[0]!)
-  /** Only an explicit override changes metadata; plain harness use keeps the original fixtures. */
-  const overridden = main.provider !== undefined || main.efforts !== undefined || main.defaultEffort !== undefined
-  const overrideEfforts = () => main.efforts ?? ['low','medium','high','xhigh']
-  const home = mkdtempSync(join(tmpdir(), 'policy-host-'))
-  const config = join(home, 'plugins/dsh-auto-model-routing/config.json')
-  mkdirSync(join(home, 'plugins/dsh-auto-model-routing'), { recursive: true })
-  const configure = (value: Record<string, unknown> = {}) => writeFileSync(config, JSON.stringify(value))
-  configure()
-  const jev = await fakeJev(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }))
-  const ctx = new Context(), forks: { dispose(): unknown }[] = [], handles: Awaited<ReturnType<typeof ctx.agents.create>>[] = []
-  const calls: GenerateOptions[] = [], timeline: string[] = []
-  let answer: string | undefined
-  class Adapter extends LlmAdapter {
-    private described(provider: string) { return overridden && provider === mainProvider }
-    async listModels(provider: string) { return (this.described(provider) ? [mainModel] : modelIds.map(modelId)).map(id => ({ provider, id, name: id })) }
-    async resolveModel(provider: string, id: string) {
-      const override = this.described(provider)
-      const efforts = override ? overrideEfforts() : ['low','medium','high','xhigh']
-      return { provider, id, name: id, reasoning: {
-        efforts: efforts.map(effort => ({ id: ReasoningEffortId(effort), name: effort })),
-        ...(override && main.defaultEffort ? { defaultEffort: ReasoningEffortId(main.defaultEffort) } : {}),
-      } }
-    }
-    async *stream(r: GenerateOptions): AsyncIterable<StreamChunk> {
-      calls.push(r); timeline.push('adapter')
-      if (answer) { yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text: answer }; yield { type: 'block-end', index: 0, block: { type: 'text', text: answer } } }
-      yield { type: 'finish', reason: { kind: 'stop' } }
-    }
-  }
-  for (const p of [Projections,Sessions,Agents,Prompt,Tools,Llm]) forks.push(await ctx.plugin(p))
-  installModelSelectionProjection(ctx)
-  forks.push(await ctx.plugin(Loop,{ agents: [] }))
-  for (const transport of new Set([provider, mainProvider])) ctx.llm.registerAdapter([transport], new Adapter())
-  ctx.provide('launchEnvironment', createLaunchEnvironmentSnapshot([{ source: 'process', values: { OPENROUTER_API_KEY: 'synthetic-key' } }]) as never)
-  ctx.provide('subagentModelSelection' as never, { current: () => ({ enabled: true, allowedModels: modelIds.map(model => ({ provider, model: modelId(model) })) }) } as never)
-  const selections: unknown[] = [], defaults: unknown[] = []
-  // A metadata override describes a model whose effort set may not contain the fixture default.
-  const keepEffort = main.provider === undefined && main.efforts === undefined && main.defaultEffort === undefined
-  const picked = main.provider
-    ? { provider: mainProvider, model: mainModel }
-    : { provider, model: modelId(modelIds[0]!), ...(keepEffort ? { reasoningEffort: ReasoningEffortId('medium') } : {}) }
-  ctx.provide('agentDefaultModel' as never, {
-    currentSelection: () => defaults.at(-1) ?? picked,
-    saveSelection: async (selection: unknown) => { defaults.push(selection); timeline.push('defaults') },
-  } as never)
-  // Real official selection/cache/consume methods; only live-agent lookup and defaults storage are inert ports.
-  const owner = Object.assign(Object.create(ApiSessionAgentController.prototype), {
-    ctx, selections: new WeakMap(), imageAdmissionChains: new WeakMap(),
-    resolveAgent: async (id: string) => ({ agent: ctx.agents.get(SessionId(id))! }),
-  })
-  const commands = new SessionCommandController(ctx, owner, home)
-  const warnings = vi.spyOn(ctx.logger, 'warn')
-  if (selectFails !== 'missing') ctx.provide('sessionController', {
-    resolveAgent: async (id: string) => { const agent = ctx.agents.get(SessionId(id)); return agent ? { agent } : { error: new Error('unknown session') } },
-    selectModel: async (request: unknown) => {
-      selections.push(request)
-      if (selectFails) throw new Error('synthetic selection rejection')
-      const result = await commands.selectModel(request)
-      timeline.push('selected')
-      return result
-    },
-  } as never)
-  const routes = new Map<string, { fetch: (request: Request) => Promise<Response> }>()
-  ctx.provide('connection', { fetch: { register(route: { path: string; fetch: (request: Request) => Promise<Response> }) { routes.set(route.path, route); return async () => { routes.delete(route.path) } } } } as never)
-  ctx.on('session/event', (session, event) => {
-    if (event.type === 'request/header') {
-      const config = session.requestHeader()!.config
-      const agent = ctx.agents.get(session.id)
-      if (agent) owner.consumeSelection(agent, config.provider, config.model, config.reasoningEffort)
-    }
-  })
-  let pluginConfig: Plugin.Config = { home, jevBase: jev.base, ...(strategies ? { strategies } : {}) }
-  let plugin = await ctx.plugin(Plugin, pluginConfig)
-  // The Host routes need both the connection and the session controller; the "missing controller" case mounts neither.
-  if (selectFails !== 'missing') await expect.poll(() => routes.size).toBe(9)
-  const parent = await ctx.agents.create({ sessionId: SessionId('parent'), agentOptions: picked }); handles.push(parent)
-  if (pendingPick) owner.selectForNextRequest(parent.agent, picked)
-  else owner.selectionFor(parent.agent)
-  const pickMain = (nextProvider: string, nextModel: string) => owner.selectForNextRequest(parent.agent, { provider: nextProvider, model: nextModel })
-  const callEndpoint = async (operation: string, body: unknown) => (await routes.get(`/api/auto-model-routing.${operation}`)!.fetch(new Request('http://localhost/api', { method: 'POST', body: JSON.stringify(body) }))).json()
-  const run = async (agent: typeof parent.agent, text: string) => { agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })); await agent.whenIdle() }
-  let n = 0
-  ctx.tools.register(defineTool({ name: 'subagent', description: 'Test official tool-dispatch boundary; not a real provider test', output: { schema: { type: 'object', additionalProperties: false, properties: { childId: { type: 'string' } } }, render: (_args, value) => [{ type: 'text', text: value.childId ?? '' }] }, parameters: { model: { type: 'string' }, reasoning_effort: { type: 'string' } }, execute: async (args, exec) => {
-    const child = await ctx.agents.create({ sessionId: SessionId(`child-${++n}`), parentAgent: exec.agent!, meta: { origin: 'subagent', parentSession: parent.agent.id }, agentOptions: { provider, model: args.model ?? modelId(modelIds[0]!) } }); handles.push(child)
-    await run(child.agent, 'Apply the exact supplied mechanical transformation')
-    return { childId: child.agent.id }
-  } }))
-  const invoke = (args = {}) => ctx.tools.execute({ name: 'subagent', arguments: args, agent: parent.agent, callId: `call-${++n}` as never, signal: new AbortController().signal })
-  const store = new PolicyStore(join(home, 'state/auto-model-routing/policy-v2'), strategies ? createRegistry(strategies) : undefined)
-  // Set the mode through the same persisted store used by production (no controller dependency).
-  const { FileStateStore } = await import('../src/state.js')
-  const modes = new FileStateStore(join(home, 'state/auto-model-routing/sessions'))
-  modes.set(parent.agent.id, { mode: 'AUTO' })
-  close = async () => { for (const h of handles.reverse()) await h.dispose(); await plugin.dispose(); for (const f of forks.reverse()) await f.dispose(); await jev.close() }
-  return { ctx, parent: parent.agent, handles, calls, invoke, callEndpoint, pickMain, store, modes, run, jev, configure, home, selections, defaults, timeline, warnings,
-    tools: () => ctx.tools, setAnswer: (text: string) => { answer = text },
-    restart: async (next?: readonly FamilyStrategy[]) => { await plugin.dispose(); if (next) pluginConfig = { home, jevBase: jev.base, strategies: next }; plugin = await ctx.plugin(Plugin, pluginConfig) } }
-}
+import { callTool, closePolicyHarness, harness } from './policy-harness.js'
+import { existsSync } from 'node:fs'
+afterEach(closePolicyHarness)
 it('child decision persists separate confidences and actual application without task text',async()=>{
  const h=await harness('dsh-magpie-connect')
  h.jev.set(json(200,{answers:{capability:{choice:'bounded',confidence:.71,probabilities:{bounded:.8,analytical:.2}},depth:{choice:'baseline',confidence:.94}}}))
@@ -321,17 +214,21 @@ it.each([false,'dsh-magpie-connect','dsh-magpie-connector'] as const)('spec Scen
 })
 it('actual request mismatch is recorded as failed rather than applied', async () => {
   const h = await harness()
-  h.ctx.on('agent/request', async (payload,next) => {
-    const config = await next()
-    return payload.agent.session.header.origin === 'subagent' ? { ...config, model: 'claude-opus-5-5' } : config
-  },{prepend:true})
-  await h.invoke()
+  // 0.2.2 rejects an `agent/request` result that differs from the step's pinned selection, so the only way for the request to
+  // deviate from the route is a listener editing the child's pinned selection after the plugin's pre-step.
+  h.ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next()
+    if (payload.agent.session.header.origin === 'subagent' && decision.kind === 'enter') (payload.modelSelection as { model: string }).model = 'claude-opus-5-5'
+    return decision
+  }, { prepend: true })
+  await h.invoke().catch(() => undefined)
   expect(h.store.get(h.handles[1]!.agent.id)?.status).toBe('failed')
+  expect(h.calls.filter(c => c.sessionId === h.handles[1]!.agent.id)).toHaveLength(0)
 })
 it('spec Scenario "fork 子会话与父会话一致"', async () => {
   const h = await harness(); let ran = false
   h.ctx.tools.register(defineTool({ name: 'subagent_fork', description: 'offline fork boundary', parameters: {}, output: { schema: { type: 'object', additionalProperties: false, properties: {} }, render: () => [] }, execute: async () => { ran = true; return {} } }))
-  const result = await h.ctx.tools.execute({ name: 'subagent_fork', arguments: {}, agent: h.parent, callId: 'fork' as never, signal: new AbortController().signal })
+  const result = await callTool(h.ctx, h.parent, 'subagent_fork')
   expect(result.isError).not.toBe(true); expect(ran).toBe(true); expect(h.jev.bodies).toHaveLength(0)
 })
 it('spec Scenario "不支持模型的请求不再导致整轮失败"', async () => {
@@ -431,7 +328,7 @@ it('spec Scenario "新写入不含版本字段"', async () => {
  const label = await h.callEndpoint('label', { sessionId: h.parent.id, messageId: reply })
  expect(label).toHaveProperty('depth')
  noVersionKeys('label', label)
- const preview = await h.ctx.tools.execute({ name: 'route_subagent', arguments: { task: 'x', provider: 'claude' }, agent: h.parent, callId: 'preview' as never, signal: new AbortController().signal })
+ const preview = await callTool(h.ctx, h.parent, 'route_subagent', { task: 'x', provider: 'claude' })
  noVersionKeys('route_subagent', preview)
  const dir = join(h.home, 'state/auto-model-routing/policy-v2')
  const record = readdirSync(dir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(join(dir, f), 'utf8')))
@@ -458,6 +355,8 @@ async function legacyChild(h: Awaited<ReturnType<typeof harness>>, id: string, r
  if (marker !== undefined) writeFileSync(`${childFile(h.home, id)}.bound`, marker)
  const child = await h.ctx.agents.create({ sessionId: SessionId(id), parentAgent: h.parent, meta: { origin: 'subagent', parentSession: h.parent.id }, agentOptions: { provider: 'claude', model: 'claude-opus-5-5' } })
  h.handles.push(child)
+ // 0.2.2: a recorded route is restored on resume (`agent/created`, source resume); the test child stands in for a resumed one.
+ await h.ctx.serial('agent/created', { agent: child.agent, source: 'resume' })
  return child.agent
 }
 it('spec Scenario "旧子会话记录恢复不比较版本"', async () => {
@@ -510,11 +409,21 @@ it('spec Scenario "主决策在请求前后的状态"', async () => {
  const h = await harness(false, false, 'claude', false, { efforts: ['max'], defaultEffort: 'max' })
  h.jev.set(json(200, { answers: { depth: { choice: 'higher' } } }))
  const states: unknown[] = []
- // Prepended: this listener runs outermost, so it reads the state after the plugin's pre-step judged.
+ const original = h.parent.model.current()
+ // Prepended: this listener runs outermost, so it reads the state after the plugin's pre-step finished (judged and applied).
  h.ctx.on('agent/pre-step', async (payload, next) => { const decision = await next(); if (payload.agent === h.parent && payload.step === 1) states.push(await h.callEndpoint('state', { sessionId: h.parent.id })); return decision }, { prepend: true })
  await h.run(h.parent, 'only max is available')
- expect(states[0]).toMatchObject({ decision: { source: 'main', tier: 'higher', depth: 'higher', effort: '待应用', status: 'recommended' } })
- expect(await h.callEndpoint('state', { sessionId: h.parent.id })).toMatchObject({ reason: 'no-effort-support', decision: { status: 'unsupported' } })
+ // 0.2.2: effort is computed in the pre-step, so the unsupported outcome is already visible once pre-step completes.
+ expect(states[0]).toMatchObject({ reason: 'no-effort-support', decision: { source: 'main', tier: 'higher', depth: 'higher', status: 'unsupported' } })
+ expect(await h.callEndpoint('state', { sessionId: h.parent.id })).toMatchObject({ reason: 'no-effort-support', decision: { source: 'main', tier: 'higher', depth: 'higher', status: 'unsupported' } })
+ // The request is the step's original official selection, untouched; no sync, no default saved; one judgement; still AUTO.
+ expect(h.calls).toHaveLength(1)
+ expect(h.calls[0]).toMatchObject({ provider: original!.provider, model: original!.model })
+ // The official selection carries no effort (adapter default `max`): the request is that selection, not a rewrite.
+ expect(original!.reasoningEffort).toBeUndefined(); expect(h.calls[0]!.reasoningEffort).toBe('max')
+ expect(h.selections).toHaveLength(0); expect(h.defaults).toHaveLength(0)
+ expect(h.jev.bodies).toHaveLength(1)
+ expect(h.modes.get(h.parent.id)?.mode).toBe('AUTO'); expect(h.modes.get(h.parent.id)?.disabled).toBeUndefined()
 })
 it('spec Scenario "完全显式的子任务决策可见"', async () => {
  const h = await harness()
@@ -580,7 +489,7 @@ function spawner(h: H) {
   await h.run(child.agent, args.prompt ?? 'Apply the exact supplied mechanical transformation')
   return { childId: child.agent.id }
  } }))
- const spawn = (from: H['parent'] = h.parent, args: Record<string, string> = {}) => h.ctx.tools.execute({ name: 'spawn_teammate', arguments: args, agent: from, callId: `mate-call-${++k}` as never, signal: new AbortController().signal })
+ const spawn = (from: H['parent'] = h.parent, args: Record<string, string> = {}) => callTool(h.ctx, from, 'spawn_teammate', args)
  return { ctrl, spawn }
 }
 const pluginChild = async (h: H, id: string) => {
@@ -796,4 +705,180 @@ it('spec Scenario "未登记 provider 的 GPT 主会话可以派子任务"', asy
  const child = h.handles.at(-1)!.agent
  expect(h.store.get(child.id)).toMatchObject({ explicit: { provider: 'traex' }, family: 'codex' })
  expect(h.calls.filter(c => c.sessionId === child.id).at(-1)).toMatchObject({ provider: 'traex', model: 'GPT-5.6-Sol' })
+})
+
+// ---- DSH 0.2.2 child routing on the real chain: official `subagent` tool + SubagentManager + AgentLoop + jsonl persistence.
+// Only the model adapter, the Jev server and the official session-controller port are fakes.
+const realHarness = (adapter?: Parameters<typeof harness>[6] extends infer E ? (E extends { adapter?: infer A } ? A : never) : never) =>
+ harness(false, false, 'claude', false, {}, undefined, { real: true, ...(adapter ? { adapter } : {}) })
+type RealHarness = Awaited<ReturnType<typeof realHarness>>
+const turnEnd = (agent: { session: { snapshotEvents(): readonly { type: string; data: unknown }[] } }) => (agent.session.snapshotEvents().filter(e => e.type === 'turn/end').at(-1)?.data as { reason: { kind: string; error?: { message: string } } } | undefined)?.reason
+/** Counts `agent.model.select` calls on every managed child and whether each ran inside that child's `agent/created`. */
+function watchChildSelect(h: RealHarness) {
+ const calls: { childId: string; selection: unknown; inCreated: boolean }[] = []
+ const inCreated = new Set<string>()
+ h.ctx.on('agent/created', ({ agent, source }) => {
+  if (agent.session.header.origin !== 'subagent' || source !== 'startup') return undefined
+  inCreated.add(agent.id)
+  const original = agent.model.select.bind(agent.model)
+  agent.model.select = (selection) => { calls.push({ childId: agent.id, selection: { ...selection }, inCreated: inCreated.has(agent.id) }); original(selection) }
+  return undefined
+ }, { prepend: true })
+ h.ctx.on('agent/created', ({ agent }) => { inCreated.delete(agent.id); return undefined })
+ return calls
+}
+it('spec Scenario "子路由在 step 1 生效且不写默认"', async () => {
+ const h = await realHarness()
+ const selectCalls = watchChildSelect(h)
+ const step1: unknown[] = []
+ h.ctx.on('agent/pre-step', async (payload, next) => { const d = await next(); if (payload.agent.session.header.origin === 'subagent' && payload.step === 1) step1.push({ ...payload.modelSelection }); return d })
+ let inner: unknown, outer: unknown, requests = 0
+ h.ctx.on('agent/request', async (payload, next) => { const config = await next(); if (payload.agent.session.header.origin === 'subagent') inner = JSON.parse(JSON.stringify(config)); return config })
+ h.ctx.on('agent/request', async (payload, next) => { const config = await next(); if (payload.agent.session.header.origin === 'subagent') { outer = JSON.parse(JSON.stringify(config)); requests++ } return config }, { prepend: true })
+ h.jev.set(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }))
+ expect((await h.invoke()).isError).not.toBe(true)
+ await h.settle()
+ const child = h.liveChild()!
+ const route = { provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'medium' }
+ expect(h.store.get(child.id)).toMatchObject({ status: 'applied', route })
+ expect(selectCalls).toEqual([{ childId: child.id, selection: route, inCreated: true }])
+ expect(step1).toEqual([route])
+ expect(child.session.requestHeader()?.config).toMatchObject(route)
+ expect(h.calls.filter(c => c.sessionId === child.id).map(c => ({ provider: c.provider, model: c.model, reasoningEffort: c.reasoningEffort }))).toEqual([route])
+ expect(h.defaults).toEqual([]); expect(h.selections).toEqual([])
+ expect(requests).toBe(1); expect(outer).toEqual(inner)
+ expect(turnEnd(child)).toEqual({ kind: 'completed' })
+ expect(h.jev.bodies).toHaveLength(1)
+})
+it('spec Scenario "官方参数校验失败的创建不请求 Jev"', async () => {
+ const h = await realHarness()
+ const created: string[] = []
+ h.ctx.on('agent/created', ({ agent }) => { if (agent.session.header.origin === 'subagent') created.push(agent.id); return undefined })
+ // The official tool pairs `provider` with `model` and rejects this call before it creates any child.
+ const result = await h.invoke({ model: 'claude-haiku-5-5' })
+ expect(result.isError).toBe(true)
+ expect(created).toEqual([]); expect(h.liveChild()).toBeUndefined()
+ expect(h.jev.bodies).toHaveLength(0)
+ const dir = join(h.home, 'state/auto-model-routing/policy-v2')
+ expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([])
+})
+it('spec Scenario "created 等待 Jev 期间取消创建"', async () => {
+ const h = await realHarness()
+ const selectCalls = watchChildSelect(h)
+ const unhandled: unknown[] = []; const onUnhandled = (reason: unknown) => unhandled.push(reason); process.on('unhandledRejection', onUnhandled)
+ try {
+  let childId = ''
+  h.ctx.on('agent/created', ({ agent }) => { if (agent.session.header.origin === 'subagent') childId = agent.id; return undefined }, { prepend: true }) // outermost: runs before the plugin starts waiting
+  let requests = 0
+  h.ctx.on('agent/request', async (payload, next) => { if (payload.agent.session.header.origin === 'subagent') requests++; return next() })
+  h.jev.set(() => { /* never answer: the judgement stays in flight inside agent/created */ })
+  const abort = new AbortController()
+  const running = h.invoke({}, abort.signal)
+  await expect.poll(() => h.jev.bodies.length).toBe(1)
+  expect(childId).not.toBe('')
+  expect(h.calls.filter(c => c.sessionId === childId)).toHaveLength(0)
+  abort.abort(new Error('cancel creation'))
+  await running.catch(() => undefined)
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(selectCalls).toEqual([]); expect(requests).toBe(0)
+  expect(h.calls.filter(c => c.sessionId === childId)).toHaveLength(0)
+  expect(h.defaults).toEqual([]); expect(h.selections).toEqual([])
+  expect(h.ctx.agents.get(SessionId(childId))).toBeUndefined(); expect(h.liveChild()).toBeUndefined()
+  // The persistent record survives (as in 0.2.1), degraded to jev-cancelled; the binding marker stays.
+  expect(h.store.get(childId)).toMatchObject({ status: 'unsupported', reason: 'jev-cancelled' })
+  expect(h.store.wasBound(childId)).toBe(true)
+  expect(h.modes.get(h.parent.id)?.mode).toBe('AUTO')
+  expect(unhandled).toEqual([])
+ } finally { process.off('unhandledRejection', onUnhandled) }
+})
+/** A managed-looking child interrupted before its first request (no request/header, no model/selection), released so the next delivery cold-resumes it. */
+async function interruptedChild(h: RealHarness) {
+ const gate = { block: true }
+ h.ctx.on('agent/pre-step', async (payload, next) => { const d = await next(); return gate.block && payload.agent.session.header.origin === 'subagent' ? { kind: 'reject' as const } : d }, { prepend: true })
+ h.modes.set(h.parent.id, { mode: 'MANUAL' }) // created unmanaged; the record 0.2.1 would have left is written by the caller
+ expect((await h.invoke()).isError).not.toBe(true)
+ await h.settle()
+ const childId = h.liveChild()!.id
+ expect(h.liveChild()!.session.snapshotEvents().some(e => e.type === 'model/selection' || e.type === 'request/header')).toBe(false)
+ expect(h.liveChild()!.model.current()).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5', reasoningEffort: 'medium' }) // the parent snapshot
+ h.modes.set(h.parent.id, { mode: 'AUTO' })
+ await h.ctx.subagents.drainChildren(h.parent, [SessionId(childId)])
+ expect(h.ctx.agents.get(SessionId(childId))).toBeUndefined()
+ const resumeSelects: unknown[] = []
+ h.ctx.on('agent/created', ({ agent, source }) => {
+  if (source !== 'resume' || agent.id !== childId) return undefined
+  const original = agent.model.select.bind(agent.model)
+  agent.model.select = (selection) => { resumeSelects.push({ ...selection }); original(selection) }
+  return undefined
+ }, { prepend: true })
+ gate.block = false
+ const resume = async () => { await h.ctx.subagents.sendMessage(h.parent, SessionId(childId), [{ type: 'text', text: 'resume the work' }], { signal: new AbortController().signal }); await h.settle() }
+ return { childId, resumeSelects, resume }
+}
+const interruptedRecord = (h: RealHarness, childId: string, extra: Record<string, unknown> = {}) => ({ childId, parentId: h.parent.id, rootId: h.parent.id, path: 'ordinary', family: 'claude', explicit: { provider: 'claude' }, parentSelection: { provider: 'claude', model: 'claude-opus-5-5', reasoningEffort: 'medium' }, status: 'recommended', route: { provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'low' }, ...extra })
+it('spec Scenario "从 0.2.1 中断状态恢复的子会话补写 route"', async () => {
+ const h = await realHarness()
+ const { childId, resumeSelects, resume } = await interruptedChild(h)
+ const route = { provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'low' }
+ h.store.create(interruptedRecord(h, childId) as never)
+ const judged = h.jev.bodies.length
+ await resume()
+ const child = h.liveChild()!
+ expect(child.id).toBe(childId)
+ expect(resumeSelects).toEqual([route])
+ expect(child.session.requestHeader()?.config).toMatchObject(route)
+ expect(h.calls.filter(c => c.sessionId === childId).map(c => ({ provider: c.provider, model: c.model, reasoningEffort: c.reasoningEffort }))).toEqual([route])
+ expect(h.jev.bodies).toHaveLength(judged); expect(h.defaults).toEqual([]); expect(h.selections).toEqual([])
+ expect(h.store.get(childId)).toMatchObject({ status: 'applied', route })
+})
+it.each(['missing', 'corrupt', 'parent', 'failed'] as const)('resume keeps failing closed on the real chain without writing a route (%s)', async kind => {
+ const h = await realHarness()
+ const { childId, resumeSelects, resume } = await interruptedChild(h)
+ const file = childFile(h.home, childId)
+ mkdirSync(join(h.home, 'state/auto-model-routing/policy-v2'), { recursive: true })
+ writeFileSync(`${file}.bound`, childId)
+ if (kind === 'corrupt') writeFileSync(file, 'BROKEN')
+ if (kind === 'parent') writeFileSync(file, JSON.stringify(interruptedRecord(h, childId, { parentId: 'foreign-parent' })))
+ if (kind === 'failed') writeFileSync(file, JSON.stringify(interruptedRecord(h, childId, { status: 'failed' })))
+ const judged = h.jev.bodies.length
+ await resume()
+ expect(resumeSelects).toEqual([])
+ expect(h.calls.filter(c => c.sessionId === childId)).toHaveLength(0)
+ expect(h.jev.bodies).toHaveLength(judged)
+ const end = turnEnd(h.liveChild()!)
+ expect(end?.kind).toBe('error')
+ expect(end?.error?.message).toContain({ missing: '决策记录缺失', corrupt: '子任务决策无法恢复', parent: '决策身份不匹配', failed: '实际应用失败' }[kind])
+})
+it.each([['cap lowered', (h: RealHarness) => h.configure({ effortCap: 'medium' })], ['catalog unavailable', (h: RealHarness) => { h.ctx.llm.listModels = async () => { throw new Error('offline') } }]] as const)('spec Scenario "同一步重试前门禁失效" (%s)', async (name, revoke) => {
+ let revoked = false, failedOnce = false
+ const h = await realHarness(request => {
+  // The first child attempt fails with a retryable provider error; the retry must then be refused by the live gate.
+  if (request.sessionId === 'parent' || failedOnce) return undefined
+  failedOnce = true
+  return (async function* () { yield { type: 'finish', reason: { kind: 'error', failure: { message: 'temporary', code: 'TEMP' } } } as never })()
+ })
+ let childId = ''
+ const agentRequests: string[] = []
+ h.ctx.on('agent/request', async (payload, next) => { if (payload.agent.session.header.origin === 'subagent') agentRequests.push(`${payload.turn}:${payload.step}`); return next() })
+ h.ctx.on('agent/request-error', async (payload, next) => {
+  await next()
+  if (payload.agent.session.header.origin !== 'subagent') return { kind: 'fail' as const } as never
+  if (!revoked) { revoked = true; revoke(h) }
+  return { kind: 'retry' as const } as never
+ })
+ h.jev.set(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'higher' } } }))
+ expect((await h.invoke()).isError).not.toBe(true)
+ await h.settle()
+ const child = h.liveChild()!; childId = child.id
+ const record = h.store.get(childId)!
+ expect(record.route).toMatchObject({ provider: 'claude', model: 'claude-haiku-5-5', reasoningEffort: 'high' })
+ // Attempt 1 passed verification and reached the adapter; the retry's `agent/request` was dispatched (same step) and refused it.
+ expect(agentRequests).toEqual(['1:1', '1:1'])
+ expect(h.calls.filter(c => c.sessionId === childId)).toHaveLength(1)
+ const end = turnEnd(child)
+ expect(end?.kind, name).toBe('error')
+ expect(end?.error?.message ?? '').toMatch(/effort|catalog|目录|允许|offline|unavailable|不可用|cap/i)
+ // Route, record and the child's selection are untouched.
+ expect(h.store.get(childId)!.route).toEqual(record.route)
+ expect(child.model.current()).toMatchObject(record.route!)
 })

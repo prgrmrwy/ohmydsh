@@ -36,7 +36,9 @@ This describes official integration paths—not acceptance of every DSH entry po
 
 **Planned direction:** add learning, evaluation and policy adjustment based on local feedback and execution outcomes, so AUTO can better fit your tasks. **Automatic learning and feedback-driven tuning are not implemented yet.** Today's records support later evaluation; they are not evidence of measured quality gains or cost savings.
 
-**Install.** Tested with DSH `0.2.0-rc.2`, Web UI, Node.js `>=22.19`.
+**Install.** This version line requires DSH `>=0.2.2-rc.1 <0.3.0` (tested with `0.2.2-rc.1`), Web UI, Node.js `>=22.19`.
+
+**Version lines.** DSH 0.2.0–0.2.1 hosts stay on the published 0.7.0 (or 0.6.x); pin `0.7.0` exactly there. DSH 0.2.2 and later use 0.7.1 and later. A 0.2.1 host refuses to load 0.7.1 through its `engines.dsh` check, so it never half-loads. The floor moved to `0.2.2-rc.1` because AUTO now relies on `agent.model.select` and on 0.2.2's per-step selection pinning, neither of which exists in 0.2.0/0.2.1 — see the [Changelog](CHANGELOG.md).
 
 ```sh
 dsh plugin --profile web add dsh-auto-model-routing
@@ -57,12 +59,12 @@ Restart DSH and refresh the Web page. In **Settings → Auto model routing**, ch
 
 ### Main model stays fixed; children are selected separately
 
-- **Main chat:** `lower / baseline / higher` moves at most one supported effort step below/at/above the model's verified recommended starting point. The cap defaults to `xhigh`; AUTO never selects `max`. It keeps the main provider/model and synchronizes the selected effort through official `selectModel`, which also saves global defaults. If that sync fails, the turn is logged and the request keeps the official effort; MANUAL requests pass through unchanged and bound children never write the main selection.
+- **Main chat:** `lower / baseline / higher` moves at most one supported effort step below/at/above the model's verified recommended starting point. The cap defaults to `xhigh`; AUTO never selects `max`. It keeps the main provider/model and applies the effort at the start of every step (the `agent/pre-step`, where DSH 0.2.2 has fixed the step's selection but not yet built the request): it first syncs the effort through official `selectModel`, which also saves global defaults, then writes it into that step's pinned selection, so the first request of the turn already carries it. If the sync fails, or the runtime hands over a frozen selection, a warning is logged and the step keeps the official effort (a frozen selection takes effect from the next step); MANUAL requests pass through unchanged and bound children never write the main selection. This relies on an implementation detail of the runtime and is pinned by `test/runtime-selection.e2e.test.ts`.
 - **Registered families only:** AUTO manages a main model only when its family has a registered strategy; `claude-` and `gpt-` ship built in, and the id is matched after any transport prefix. Selecting any other main model — DeepSeek, GLM, Grok, Gemini, Kimi, Qwen, … — switches the session to MANUAL and locks the chip: it shows an outlined info icon, and hovering the whole button explains the support scope with an issue/PR link to the repository. Switching back to a supported model restores a clickable MANUAL chip; AUTO is never re-enabled automatically. Adding a family is a data change, not an engine change: see [custom model families](#custom-model-families).
 - **Fresh children:** capability is `bounded / analytical / frontier`; effort is judged separately. Claude slots are Haiku / Sonnet / Opus 5.5; GPT slots are Luna / Sol / Sol. The current catalog, supported efforts and official child allowlist must all permit the route. Routes keep the parent's exact provider and full model ids, including any transport prefix; there is no fallback to another provider.
 - **Explicit choices win:** specifying a model or effort leaves only the other dimension to judge. Specifying both skips Jev and validates the route. Missing task scope stops delegation rather than guessing.
-- **Official creation binds the route:** fresh `subagent` and fresh `spawn_teammate` paths bind an exact child identity before its first request. `route_subagent` is an optional preview—not proof of application and not a user constraint to copy into a subsequent call; a MANUAL root session makes it return `routed: false` without judging or writing state. Fork and unbound creation paths are unsupported; there is no silent substitution.
-- **Resume keeps the initial route.** Switching the root to MANUAL stops new judgments; already bound children retain their initial route. `applied` means the actual request configuration matched, **not** that the task succeeded. Ordinary Claude/GPT child calls were tested against a live provider; fresh teammate routing and cold resume have mock-host coverage, not real-provider teammate acceptance.
+- **Official creation binds the route:** fresh `subagent` and fresh `spawn_teammate` paths bind an exact child identity when the child is created: the judgement runs in the child's `agent/created` (awaited before its first message is delivered, cancellable with the creation) and the route is written into the child's own selection, never into global defaults. `agent/request` only verifies it on every attempt, retries included. `route_subagent` is an optional preview—not proof of application and not a user constraint to copy into a subsequent call; a MANUAL root session makes it return `routed: false` without judging or writing state. Fork and unbound creation paths are unsupported; there is no silent substitution.
+- **Resume keeps the initial route.** Switching the root to MANUAL stops new judgments; already bound children retain their initial route (a child recorded by 0.2.1 but interrupted before its first request gets its route written on resume, without a new judgement). `applied` means the actual request configuration matched, **not** that the task succeeded. Ordinary Claude/GPT child calls were tested against a live provider; fresh teammate routing and cold resume have mock-host coverage, not real-provider teammate acceptance.
 
 ### Choose the decision service
 
@@ -76,6 +78,19 @@ Restart DSH and refresh the Web page. In **Settings → Auto model routing**, ch
 Preset model menus expose documented versions, not live availability guarantees. Custom services keep an editable model ID and must support `state + questions → answers`; an OpenAI chat-completions endpoint alone is not compatible. Custom endpoints require HTTPS (loopback HTTP is allowed), reject URL credentials/query/fragment and redirects. Only configure endpoints you trust with the dedicated key. TypeSafe and Concentrate have contract/mock coverage; their live authentication and regional availability were not verified here. No service failover occurs automatically.
 
 **Certainty is not the selected probability.** Choice certainty is `(pmax − 1/n) / (1 − 1/n)`: with three candidates, a 70% top probability gives 55% certainty. The panel shows the service's returned certainty and full candidate distribution separately, including returned zeroes; missing values are marked unavailable. Neither number is task success rate.
+
+### Judgement presets
+
+The questions AUTO asks Jev come from a built-in, named and sourced **judgement preset**; pick one under Settings → Auto model routing → Judgement preset. A preset only changes how Jev chooses `lower` / `baseline` / `higher` (and `capability` for subtasks); the effort ladder, the one-step offset, the cap, the never-`max` rule and the sub-model slots stay the same.
+
+| Preset | Depth means | Source |
+|---|---|---|
+| `reasoning-depth` (default) | reasoning difficulty; the rule file used up to 0.6.6, byte for byte | this project's synthetic check |
+| `effort-as-verification` | how much verification, edge-case testing and independent judgement the next work needs; adds a fixed `Execution:` call-path line | Anthropic, [Spending your effort](https://claude.dev/blog/spending-your-effort/) (vendor-internal numbers; GPT use is an unverified extrapolation) |
+
+**Adding your own preset.** Presets are built in, so a new one is a small source change in this package: add `src/presets/<id>/rubric.json` (same labels as the existing presets), append its metadata (title, summary, evidence, sources, `context`) to `PRESETS` in `src/presets/index.ts`, append its hash to the lock table in `test/presets.test.ts`, write `docs/presets/<id>.md`, then `npm test`, build and restart. It shows up in the settings picker and decision hints automatically; the effort ladder, cap and model slots stay out of reach. Step-by-step: [docs/presets](docs/presets/README.md#adding-a-preset).
+
+Published presets never change in place: a new idea becomes a new preset id, so a selected preset keeps judging the same way after an upgrade. Each binding snapshot records which preset made the decision. Details: [docs/presets](docs/presets/README.md). Downgrading to 0.6.6 ignores the `preset` setting, and bindings that carry `snapshot.preset` are skipped by the older reader; the ledger is not rewritten and upgrading again makes them visible.
 
 ### Custom model families
 
@@ -126,7 +141,7 @@ A new family changes which main models AUTO manages and which slot models child 
 
 The diagram at the top shows the AUTO paths. Main failures disable AUTO; child failures stop dispatch. Explicit model/effort constraints are preserved. MANUAL makes no new judgments and fork is unsupported. Feedback does not automatically alter routing.
 
-Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/rubric.json). Family strategies (supported models, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [host capability report](docs/host-capability-report.md).
+Entry: [index.ts](src/index.ts). Enforcement: [policy-host.ts](src/policy-host.ts). Actual rubric: [rubric.json](src/presets/reasoning-depth/rubric.json). Family strategies (supported models, effort starting points, capability slots): [strategies](src/strategies/index.ts); routing: [routing.ts](src/routing.ts). UI: [client](src/client/index.ts). Coverage and limitations (historical records): [development verification](docs/policy-v2-development.md), [host capability report](docs/host-capability-report.md).
 
 ## Development
 

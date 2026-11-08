@@ -8,66 +8,45 @@ import {
   type ProductionLocusDshPortDeps,
 } from '../src/host/locus/dsh-port.js'
 import { LOCUS_MAIN_DENIED_TOOLS } from '../src/host/locus/locus-main.js'
-import { openThreeTier } from './support/three-tier.js'
+import { LocusController } from '../src/host/locus/controller.js'
+import { Topology } from './support/w-topology.js'
+
+const make = (options?: ConstructorParameters<typeof Topology>[0]) => {
+  const t = new Topology(options)
+  return { t, controller: new LocusController(t.deps()) }
+}
 
 describe('Locus 三层实体', () => {
-  it('同一干活主会话服务多个入口', async () => {
-    const world = await openThreeTier()
-    try {
-      const group = await world.controller.ensureGroup({ chatId: 'oc_dev', parentSessionId: 'work-1' })
-      const topic = await world.controller.ensureTopic({
-        chatId: 'oc_dev',
-        threadId: 'omt_a',
-        parentSessionId: 'work-1',
-      })
-
-      const active = world.durable.listLocusMains().filter(
-        main => main.workSessionId === 'work-1' && main.status === 'active',
-      )
-      expect(active).toHaveLength(1)
-      const [main] = active
-      // Both entries hang under the ONE locus main; neither under the work session.
-      expect(group.locus.parentSessionId).toBe(main!.locusMainSessionId)
-      expect(topic.locus.parentSessionId).toBe(main!.locusMainSessionId)
-      expect(group.locus.parentSessionId).not.toBe('work-1')
-      expect(world.world.createdMains).toHaveLength(1)
-      expect(world.durable.getLocus(topic.locus.locusId)).toMatchObject({
-        parentSessionId: main!.locusMainSessionId,
-        parentLocusId: group.locus.locusId,
-      })
-    } finally { await world.close() }
-  })
-
   it('concurrent bindings in different groups reuse one work-session coordinator', async () => {
-    const world = await openThreeTier()
-    try {
-      const entries = await Promise.all(['oc_a', 'oc_b'].map(chatId =>
-        world.controller.ensureGroup({ chatId, parentSessionId: 'work-1' })))
-      expect(world.world.createdMains).toHaveLength(1)
-      expect(new Set(entries.map(entry => entry.locus.parentSessionId)).size).toBe(1)
-    } finally { await world.close() }
+    const { t, controller } = make()
+    const entries = await Promise.all(['oc_a', 'oc_b'].map(chatId => controller.ensureGroup({ chatId, parentSessionId: 'W1' })))
+    expect(t.created.filter(c => c.kind === 'locus-main')).toHaveLength(1)
+    const mains = entries.map(entry => (entry.group as { locusMainSessionId: string }).locusMainSessionId)
+    expect(new Set(mains).size).toBe(1)
   })
 
-  it('locus 主会话归 DSH Pet，入口仍关联干活项目', async () => {
-    const world = await openThreeTier()
-    try {
-      const entry = await world.controller.ensureGroup({ chatId: 'oc_project', parentSessionId: 'work-1' })
-      expect(world.sessions.get('work-1')?.workspaceId).toBe('ws-1')
-      expect(world.sessions.get(entry.locus.parentSessionId)).toMatchObject({ workspaceId: 'ws-pet', title: '[locus] 研发工作会话' })
-      expect(world.durable.getLocusMain(entry.locus.parentSessionId)?.workspaceId).toBe('ws-pet')
-      expect(entry.locus.workspaceId).toBe('ws-1')
-      expect(entry.group?.workspaceId).toBe('ws-1')
-      // An already-established coordinator in the source workspace is replaced
-      // through the existing migration path, rather than rewriting its history.
-      const oldMain = world.sessions.get(entry.locus.parentSessionId)!
-      world.sessions.set(oldMain.id, { ...oldMain, workspaceId: 'ws-1' })
-      const migrated = await world.controller.ensureEntry({ chatId: 'oc_project' })
-      expect(migrated.locus.parentSessionId).not.toBe(oldMain.id)
-      expect(world.sessions.get(migrated.locus.parentSessionId)?.workspaceId).toBe('ws-pet')
-      expect(world.durable.getLocusMain(oldMain.id)?.status).toBe('retired')
-      expect(migrated.locus.workspaceId).toBe('ws-1')
-      expect(world.sessions.has(oldMain.id)).toBe(true)
-    } finally { await world.close() }
+  it('locus 主会话归 DSH Pet，入口仍关联工作项目', async () => {
+    const { t, controller } = make()
+    const entry = await controller.ensureGroup({ chatId: 'oc_project', parentSessionId: 'W1' })
+    const group = t.repository.getRow({ chatId: 'oc_project' }) as { locusMainSessionId: string; workspaceId: string }
+    // W stays in the source workspace; M runs in the Pet workspace; the row names the project.
+    expect(t.resolved).toContain('W1')
+    const main = await t.deps().dsh.resolveSession(group.locusMainSessionId)
+    expect(main).toMatchObject({ workspaceId: 'pet-ws', title: '[locus] W1' })
+    expect(t.repository.mains.get(group.locusMainSessionId)).toMatchObject({ workSessionId: 'W1', workspaceId: 'pet-ws', status: 'active' })
+    expect(group.workspaceId).toBe('proj-1')
+    expect(entry.group.workspaceId).toBe('proj-1')
+
+    // An M left in the source workspace is replaced through whole-W migration; history is kept.
+    t.addSession({ id: group.locusMainSessionId, workspaceId: 'proj-1', title: main!.title ?? '', agentPreset: 'locus-base' })
+    const migrated = await controller.ensureEntry({ chatId: 'oc_project' })
+    const after = t.repository.getRow({ chatId: 'oc_project' }) as { locusMainSessionId: string; workspaceId: string }
+    expect(after.locusMainSessionId).not.toBe(group.locusMainSessionId)
+    expect(await t.deps().dsh.resolveSession(after.locusMainSessionId)).toMatchObject({ workspaceId: 'pet-ws' })
+    expect(t.repository.mains.get(group.locusMainSessionId)?.status).toBe('retired')
+    expect(after.workspaceId).toBe('proj-1')
+    expect(migrated.locus.workspaceId ?? after.workspaceId).toBe('proj-1')
+    expect(await t.deps().dsh.resolveSession(group.locusMainSessionId)).toBeDefined()
   })
 
   it('locus 主会话工具面锁死', async () => {
@@ -160,24 +139,19 @@ describe('Locus 三层实体', () => {
     }
   })
 
-  it('干活主会话不得是子会话', async () => {
-    const world = await openThreeTier()
-    try {
-      // `subagent-1` is a subagent child of work-1: not a session the owner works in.
-      await expect(
-        world.controller.ensureGroup({ chatId: 'oc_bind_child', parentSessionId: 'subagent-1' }),
-      ).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
+  it('工作主会话不得是子会话', async () => {
+    const { t, controller } = make({ sessions: [{ id: 'sub-1', workspaceId: 'proj-1', title: 'sub', state: 'active', parentSessionId: 'W1' }] })
+    // `sub-1` is a subagent child of W1: not a session the owner works in.
+    await expect(controller.ensureGroup({ chatId: 'oc_bind_child', parentSessionId: 'sub-1' })).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
 
-      // Nor may Pet's own locus main stand in as someone's work session.
-      const group = await world.controller.ensureGroup({ chatId: 'oc_dev', parentSessionId: 'work-1' })
-      await expect(
-        world.controller.ensureGroup({ chatId: 'oc_bind_main', parentSessionId: group.locus.parentSessionId }),
-      ).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
+    // Nor may Pet's own locus main stand in as someone's work session.
+    await controller.ensureGroup({ chatId: 'oc_dev', parentSessionId: 'W1' })
+    const m = (t.repository.getRow({ chatId: 'oc_dev' }) as { locusMainSessionId: string }).locusMainSessionId
+    await expect(controller.ensureGroup({ chatId: 'oc_bind_main', parentSessionId: m })).rejects.toMatchObject({ code: 'PARENT_NOT_ALLOWED' })
 
-      // Refused means nothing was built for the refused binds.
-      expect(world.durable.listLocusMains()).toHaveLength(1)
-      expect(world.durable.getLatestLocusByEndpoint({ chatId: 'oc_bind_child' })).toBeUndefined()
-      expect(world.durable.getLatestLocusByEndpoint({ chatId: 'oc_bind_main' })).toBeUndefined()
-    } finally { await world.close() }
+    // Refused means nothing was built for the refused binds.
+    expect(t.repository.mains.size).toBe(1)
+    expect(t.repository.getRow({ chatId: 'oc_bind_child' })).toBeUndefined()
+    expect(t.repository.getRow({ chatId: 'oc_bind_main' })).toBeUndefined()
   })
 })

@@ -6,13 +6,15 @@ import { pathToFileURL } from 'node:url'
 import { expect } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { buildLocusRecord, type LocusRecord } from '../../src/host/locus/aggregate.js'
-import { LocusRepository } from '../../src/host/locus/persistence.js'
+import type { LocusRowV20 } from '../../src/host/locus/contract-v20.js'
+import { endpointKeyV20 } from '../../src/host/locus/locus-set-v20.js'
 import * as petStoragePlugin from '../../src/host/storage/plugin.js'
 import { PET_BACKEND_NAME } from '../../src/host/storage/backend.js'
 import { withAtomicWrites } from '../../src/host/storage/atomic-domain.js'
-import { PET_DOMAIN_NAME, petDomainSpec } from '../../src/host/spec.js'
+import { PET_DOMAIN_NAME } from '../../src/host/spec.js'
+import { petDomainSpec } from '../../src/host/domain.js'
 import type { RouteRegistration } from '../../src/host/http.js'
 import * as petPlugin from '../../src/index.js'
 
@@ -45,23 +47,25 @@ export async function agentScope(
   }
 }
 
+/** A v20 group row of an active entry under MAIN (the group's M). */
 export function locus(
   id: string,
   child: string,
-  overrides: Partial<Parameters<typeof buildLocusRecord>[0]> = {},
-): LocusRecord {
-  return buildLocusRecord({
-    id,
-    generation: 1,
-    parentSessionId: MAIN,
-    childSessionId: child,
+  overrides: Partial<LocusRowV20> = {},
+): LocusRowV20 {
+  return {
     endpoint: { chatId: `chat-${id}` },
-    workspaceId: 'workspace',
-    source: 'explicit',
+    locusId: id,
+    sessionId: child,
     state: 'active',
-    childComposition: 'safe-v1',
+    accessMode: 'read-only',
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+    locusMainSessionId: MAIN,
+    workspaceId: 'workspace',
     ...overrides,
-  })
+  } as LocusRowV20
 }
 
 export async function composePetStorage(ctx: Context, statePath: string): Promise<void> {
@@ -110,6 +114,8 @@ export async function openPetDomain(ctx: Context): Promise<never> {
 export interface LoadedHost {
   ctx: Context
   routes: { path: string }[]
+  /** `[dsh-pet]` degradation lines captured while the Host started. */
+  degradedDiagnostics: string[]
   publish(sessionId: string, scope: unknown): void
   toolNames(scope?: unknown): string[]
   route(routePath: string): RouteRegistration | undefined
@@ -118,10 +124,11 @@ export interface LoadedHost {
 }
 
 export async function loadPetHost(
-  seed: readonly LocusRecord[] = [],
+  seed: readonly LocusRowV20[] = [],
   existingHome?: string,
   seedDomain?: (domain: Awaited<ReturnType<typeof openPetDomain>>) => Promise<void>,
   beforePet?: (ctx: Context) => Promise<void>,
+  options: { readonly expectDegraded?: boolean } = {},
 ): Promise<LoadedHost> {
   const home = existingHome ?? await mkdtemp(path.join(tmpdir(), 'pet-assembly-'))
   const routes: { path: string }[] = []
@@ -130,6 +137,7 @@ export async function loadPetHost(
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   // The storage hub is composed by `composePetStorage` below, together with
   // Pet's backend and the domain layer, in the order the real Host uses.
   ctx.provide('webServer', {
@@ -212,26 +220,40 @@ export async function loadPetHost(
 
   if (seed.length > 0) {
     const seeded = await openPetDomain(ctx)
-    const repository = new LocusRepository(seeded)
-    for (const row of seed) await repository.putLocus(row)
+    for (const row of seed) await seeded.table('loci').put(endpointKeyV20(row.endpoint), row)
     await seedDomain?.(seeded)
     await seeded.close()
   }
 
   await beforePet?.(ctx)
-  await ctx.plugin(petPlugin, { home, version: '0.1.0' })
-
-  // Pet's initialization is contained and asynchronous; poll for its observable
-  // end state rather than guessing a delay.
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && routes.length === 0) {
-    await new Promise(resolve => setTimeout(resolve, 25))
+  // Pet reports degradation through `console.warn`; capture it so a test can
+  // assert the diagnostic instead of scraping stderr.
+  const degradedDiagnostics: string[] = []
+  const originalWarn = console.warn
+  console.warn = (...args: unknown[]) => {
+    const line = args.map(String).join(' ')
+    if (line.startsWith('[dsh-pet] degraded:')) degradedDiagnostics.push(line)
+    originalWarn(...args)
   }
-  expect(routes.length).toBeGreaterThan(0)
+  try {
+    await ctx.plugin(petPlugin, { home, version: '0.1.0' })
+
+    // Pet's initialization is contained and asynchronous; poll for its observable
+    // end state rather than guessing a delay.
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline && (options.expectDegraded === true ? degradedDiagnostics.length === 0 : routes.length === 0)) {
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+  } finally {
+    console.warn = originalWarn
+  }
+  if (options.expectDegraded === true) expect(degradedDiagnostics.length).toBeGreaterThan(0)
+  else expect(routes.length).toBeGreaterThan(0)
 
   return {
     ctx,
     routes,
+    degradedDiagnostics,
     publish(sessionId, scope) {
       ctx.emit('agent/created' as never, { agent: { id: sessionId, ctx: scope } } as never)
     },

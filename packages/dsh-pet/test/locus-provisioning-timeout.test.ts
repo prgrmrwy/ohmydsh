@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  LocusRepository as DurableLocusRepository,
-  type LocusStartupCompensators,
-} from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
+import type { LocusProvisioningKindV20 } from '../src/host/locus/contract-v20.js'
 import { openPetHarness } from './harness.js'
 
 const MINUTE = 60_000
+
+/** The compensators a failed provisioning is cleaned with (same set startup recovery uses). */
+interface Compensators {
+  mainSession?: (input: { mainSessionId: string; operationId: string }) => Promise<void>
+  locusMainSession?: (input: { locusMainSessionId: string; operationId: string }) => Promise<void>
+  chat?: (input: { chatId: string; operationId: string }) => Promise<void>
+}
 
 /** Same atomic-write shim the other durable-repository tests use. */
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
@@ -38,21 +43,23 @@ function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarn
 const ENDPOINT = { chatId: 'oc_stuck' }
 
 /** An endpoint whose first creation failed at T0, leaving its locus main behind. */
-async function failedAtT0(compensators: LocusStartupCompensators, kind: 'group' | 'topic' | 'qa' | 'replacement' | 'rebuild' | 'regenerate' = 'group') {
+async function failedAtT0(compensators: Compensators, kind: LocusProvisioningKindV20 = 'chat') {
   const harness = await openPetHarness()
   enableAtomicTransactions(harness)
-  const repository = new DurableLocusRepository(harness.domain)
+  let clock = 1_000_000
+  const repository = new LocusRepositoryV20(harness.domain as never, { now: () => clock })
   repository.setProvisioningCompensators(compensators)
   const diagnostics: string[] = []
   repository.setDiagnosticSink(message => diagnostics.push(message))
   await repository.beginProvisioning({
     provisioningId: 'provisioning-failed',
     kind,
-    parentSessionId: 'work-owner',
-    endpoint: ENDPOINT,
-    startedAt: Date.now() - 5,
+    chatId: ENDPOINT.chatId,
+    workSessionId: 'work-owner',
+    startedAt: clock - 5,
   })
-  await repository.recordProvisioningResource('provisioning-failed', { mainSessionId: 'session-work' })
+  // Only a `chat` operation creates the auto work session; rebind / migrate create just M1.
+  if (kind === 'chat') await repository.recordProvisioningResource('provisioning-failed', { mainSessionId: 'session-work' })
   await repository.recordProvisioningResource('provisioning-failed', { locusMainSessionId: 'session-locus-main' })
   await repository.failProvisioning('provisioning-failed', 'establish space failed')
   // The failure time the 10-minute window is measured from.
@@ -60,11 +67,11 @@ async function failedAtT0(compensators: LocusStartupCompensators, kind: 'group' 
   return { harness, repository, diagnostics, T0 }
 }
 
-function retry(repository: DurableLocusRepository, at: number) {
+function retry(repository: LocusRepositoryV20, at: number) {
   return repository.beginProvisioning({
     provisioningId: `provisioning-retry-${String(at)}`,
-    kind: 'group',
-    endpoint: ENDPOINT,
+    kind: 'chat',
+    chatId: ENDPOINT.chatId,
     startedAt: at,
   })
 }
@@ -86,18 +93,20 @@ describe('provisioning 失败超时后不再阻塞', () => {
       phase: 'compensated',
       compensatedResources: ['locus-main-session', 'main-session'],
     })
-    expect(operation).toMatchObject({ phase: 'provisioning', endpointKey: ENDPOINT.chatId })
+    expect(repository.getOperation('provisioning-retry-' + String(T0 + 11 * MINUTE))).toMatchObject({ phase: 'provisioning', endpointKey: ENDPOINT.chatId })
+    expect(operation).toBeUndefined()
     await harness.close()
   })
 
-  it.each(['group', 'topic', 'qa', 'replacement', 'rebuild', 'regenerate'] as const)('compensates expired %s provisioning before retry', async kind => {
+  it.each(['chat', 'rebind', 'migrate'] as const)('compensates expired %s provisioning before retry', async kind => {
     const mainSession = vi.fn(async () => {})
     const locusMainSession = vi.fn(async () => {})
     const { harness, repository, T0 } = await failedAtT0({ mainSession, locusMainSession }, kind)
     try {
-      await expect(retry(repository, T0 + 11 * MINUTE)).resolves.toMatchObject({ phase: 'provisioning' })
+      await retry(repository, T0 + 11 * MINUTE)
       expect(locusMainSession).toHaveBeenCalledOnce()
-      expect(mainSession).toHaveBeenCalledOnce()
+      // Only a `chat` operation owns an auto work session; rebind / migrate reclaim M1 alone (D6, D7).
+      expect(mainSession).toHaveBeenCalledTimes(kind === 'chat' ? 1 : 0)
       expect(repository.getOperation('provisioning-failed')?.phase).toBe('compensated')
     } finally { await harness.close() }
   })
@@ -107,7 +116,7 @@ describe('provisioning 失败超时后不再阻塞', () => {
     const locusMainSession = vi.fn(async () => {})
     const { harness, repository, T0 } = await failedAtT0({ mainSession, locusMainSession })
 
-    await expect(retry(repository, T0 + 5 * MINUTE)).rejects.toMatchObject({ code: 'PROVISIONING_CONFLICT' })
+    await expect(retry(repository, T0 + 5 * MINUTE)).rejects.toMatchObject({ code: 'LOCUS_CONFLICT' })
 
     expect(mainSession).not.toHaveBeenCalled()
     expect(locusMainSession).not.toHaveBeenCalled()
@@ -125,7 +134,7 @@ describe('provisioning 失败超时后不再阻塞', () => {
       },
     })
 
-    await expect(retry(repository, T0 + 11 * MINUTE)).rejects.toMatchObject({ code: 'PROVISIONING_CONFLICT' })
+    await expect(retry(repository, T0 + 11 * MINUTE)).rejects.toMatchObject({ code: 'LOCUS_CONFLICT' })
 
     // Nothing new was established, the original error is on record, and the
     // operation is still the failed one — not parked as manual debt.
@@ -139,10 +148,41 @@ describe('provisioning 失败超时后不再阻塞', () => {
 
     // The next request tries the compensation again and, now that it works,
     // the endpoint is free.
-    const second = await retry(repository, T0 + 12 * MINUTE)
+    await retry(repository, T0 + 12 * MINUTE)
     expect(attempts).toBe(2)
-    expect(second.phase).toBe('provisioning')
+    expect(repository.getOperation('provisioning-retry-' + String(T0 + 12 * MINUTE))?.phase).toBe('provisioning')
     expect(repository.getOperation('provisioning-failed')?.phase).toBe('compensated')
     await harness.close()
+  })
+})
+
+describe('失败的 provisioning 只在有资源待回收时才阻塞入口', () => {
+  async function failedWith(refs: boolean) {
+    const harness = await openPetHarness()
+    enableAtomicTransactions(harness)
+    let clock = 1_000_000
+    const repository = new LocusRepositoryV20(harness.domain as never, { now: () => clock })
+    repository.setProvisioningCompensators({ locusMainSession: async () => {} })
+    await repository.beginProvisioning({ provisioningId: 'provisioning-failed', kind: 'rebind', chatId: ENDPOINT.chatId, startedAt: clock - 5 })
+    if (refs) await repository.recordProvisioningResource('provisioning-failed', { locusMainSessionId: 'session-locus-main' })
+    await repository.failProvisioning('provisioning-failed', 'runtime failure')
+    const T0 = (repository.getOperation('provisioning-failed') as { updatedAt: number }).updatedAt
+    return { harness, repository, T0 }
+  }
+
+  it('失败且没有任何 resourceRefs：立刻可重试', async () => {
+    const { harness, repository, T0 } = await failedWith(false)
+    try {
+      await expect(retry(repository, T0 + 1_000)).resolves.toBeUndefined()
+      expect(repository.getOperation('provisioning-failed')?.phase).toBe('compensated')
+    } finally { await harness.close() }
+  })
+
+  it('失败且带 resourceRefs：10 分钟内仍然阻塞 (LOCUS_CONFLICT)', async () => {
+    const { harness, repository, T0 } = await failedWith(true)
+    try {
+      await expect(retry(repository, T0 + 1_000)).rejects.toMatchObject({ code: 'LOCUS_CONFLICT' })
+      expect(repository.getOperation('provisioning-failed')?.phase).toBe('failed')
+    } finally { await harness.close() }
   })
 })

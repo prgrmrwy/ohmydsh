@@ -2,7 +2,18 @@
 
 [English](README.md)
 
-`cases.json` 收录 10 条合成任务（分 development 与 holdout），每条都带独立编写的能力与投入预期，用于核对规则文件 `../src/rubric.json`。`live.mjs` 把它们发送到真实的 OpenRouter 决策接口，带硬性预算（最多 20 次调用、$0.10），并在本地写出报告，不含合成用例以外的任务文本。它是手动、付费的核对，不属于 `npm test`。
+`cases.json` 收录 18 条合成任务（分 development 与 holdout），每条都带独立编写的能力与投入预期，用于核对[判档预设](../docs/presets/README.zh.md)。`capability`/`depth` 是所有预设的共同期望；`depthFor` 按预设 id 覆盖 depth 期望；`execution` 取 `main` 或 `delegated`（缺省），决定 state 按主会话首回合还是子任务构造。
+
+`live.mjs` 把它们发送到真实的 OpenRouter 决策接口，带硬性预算（单次运行最多 20 次调用、$0.10），并在本地写出报告，不含合成用例以外的任务文本。它是手动、付费的核对，不属于 `npm test`：
+
+```bash
+npm run build                      # live.mjs 复用 lib/ 里的 buildState，保证与运行时发送的 state 一致
+node eval/live.mjs --preset effort-as-verification <新结果文件>
+```
+
+- `--preset` 缺省为缺省预设 `reasoning-depth`；未知 id 在任何网络请求和创建结果文件之前退出。
+- 报告顶层记录 `preset`，每条结果记录 `execution` 与实际用于判命中的 `expected`。
+- 一次运行只评一个预设。重放多次检验稳定性会超出单次上限，需要另行授权。
 
 早期四档回归集（`run.mjs`、90 条用例与 `baseline.json`）已在 0.5.0 随四档链路删除；如需使用，请安装 0.4.x 版本的包。
 

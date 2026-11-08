@@ -17,7 +17,8 @@
  */
 import { randomUUID } from 'node:crypto'
 import { LedgerCallerUnavailableError, resolveLedgerCaller, type LedgerCaller, type LedgerCallerLocusLookup } from '../ledger/caller.js'
-import { endpointKeyOf, type LocusEndpoint, type LocusRecord } from '../locus/aggregate.js'
+import { endpointKeyOf, type LocusEndpoint } from '../locus/aggregate.js'
+import type { LocusResolvedRowV20 } from '../locus/contract-v20.js'
 import type { LocusCollab } from './locus-collab.js'
 import { WORK_MEMBER, locusIdentity } from './naming.js'
 
@@ -36,7 +37,12 @@ export interface LocusChildToolsDeps {
 }
 
 export interface LocusMainToolsDeps {
-  readonly loci: { listLociByParent(locusMainSessionId: string): readonly LocusRecord[] }
+  readonly loci: {
+    /** The row whose `sessionId` is this child, with its M resolved (one row per sessionId, D12). */
+    findBySessionId(sessionId: string): LocusResolvedRowV20 | undefined
+    /** The endpoints of every entry hanging under this M (group rows and their topics). */
+    listEntryEndpointsOfMain(locusMainSessionId: string): readonly LocusEndpoint[]
+  }
   readonly collab: CollabPort & { refOf?: LocusCollab['refOf'] }
   readonly subagents: () => SubagentMessenger | undefined
 }
@@ -171,7 +177,7 @@ export function askParentFailureText(reason: Exclude<AskParentResult, { ok: true
     case 'invalid-question': return '提问失败：`question` 必须是非空文本（不超过 8000 字符）。补齐后重试。'
     case 'caller-unavailable': return '提问失败：当前会话不是可用的现行 locus 子会话（可能已被换代），没有投递任何内容。'
     case 'delivery-unavailable': return '提问失败：会话投递接口当前不可用，没有投递任何内容。请照常处理当前请求，必要时用 `pet_locus_track` 登记待办。'
-    default: return '提问失败：投递给 locus 主会话时出错，没有确认送达。可稍后重试，或用 `pet_locus_track` 登记待办交给人或干活主会话。'
+    default: return '提问失败：投递给 locus 主会话时出错，没有确认送达。可稍后重试，或用 `pet_locus_track` 登记待办交给人或工作主会话。'
   }
 }
 
@@ -232,8 +238,8 @@ export async function writeLocusNote(
   const title = boundedText(input.title, 200)
   const body = boundedText(input.body)
   if (entry === undefined || title === undefined || body === undefined) return { ok: false, reason: 'invalid-arguments' }
-  const owned = deps.loci.listLociByParent(locusMainSessionId).some(record => {
-    try { return entryIdentityOf(record.endpoint) === entry } catch { return false }
+  const owned = deps.loci.listEntryEndpointsOfMain(locusMainSessionId).some(endpoint => {
+    try { return entryIdentityOf(endpoint) === entry } catch { return false }
   })
   if (!owned) return { ok: false, reason: 'not-owned' }
   if (deps.collab.currentHandle() === undefined) return { ok: false, reason: 'collab-unavailable' }
@@ -259,8 +265,9 @@ export async function replyChild(
   const childSessionId = boundedText(input.childSessionId, 256)
   const text = boundedText(input.text)
   if (childSessionId === undefined || text === undefined) return { ok: false, reason: 'invalid-arguments' }
-  const current = deps.loci.listLociByParent(locusMainSessionId)
-    .some(record => record.state === 'active' && record.childSessionId === childSessionId)
+  let found: LocusResolvedRowV20 | undefined
+  try { found = deps.loci.findBySessionId(childSessionId) } catch { found = undefined }
+  const current = found !== undefined && found.row.state === 'active' && found.locusMainSessionId === locusMainSessionId
   if (!current) return { ok: false, reason: 'not-owned' }
   const messenger = deps.subagents()
   if (messenger === undefined) return { ok: false, reason: 'delivery-unavailable' }

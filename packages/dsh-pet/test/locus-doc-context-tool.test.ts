@@ -8,16 +8,18 @@ import {
   DOC_CONTEXT_UNTRUSTED_LABEL,
   executeLocusDocContext,
 } from '../src/host/locus-doc-context-tool.js'
-import type { LocusRecord } from '../src/host/locus/aggregate.js'
+import type { LocusResolvedRowV20 } from '../src/host/locus/contract-v20.js'
 
 const D = 'Dx0000000000000000000000001'
 const ROOT = `doc:docx:${D}`
 
 function lookup(endpoint: { chatId: string; threadId?: string }) {
-  const row = {
-    id: 'locus-1', generation: 1, state: 'active', parentSessionId: 'main', childSessionId: 'child-1', endpoint,
-  } as unknown as LocusRecord
-  return { findByChildSessionId: (id: string) => (id === 'child-1' ? [row] : []) }
+  const found = {
+    row: { locusId: 'locus-1', sessionId: 'child-1', state: 'active', endpoint },
+    locusMainSessionId: 'main',
+    workspaceId: 'ws-1',
+  } as unknown as LocusResolvedRowV20
+  return { findBySessionId: (id: string) => (id === 'child-1' ? found : undefined) }
 }
 
 function client(input: { thread?: number; body?: string; bodyFails?: string; quote?: string }) {

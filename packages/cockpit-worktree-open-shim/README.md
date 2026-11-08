@@ -12,6 +12,17 @@ dsh-cockpit-bridge ──provide──▶ shim ──register──▶ dsh-workt
   knows nothing about ws                     knows nothing about cockpit
 ```
 
+## Install
+
+Install it next to both ends: [dsh-cockpit-bridge](https://github.com/prgrmrwy/dsh-cockpit) >= 0.4.0 (distributed as a GitHub Release tarball) and `dsh-worktree-session`.
+
+```sh
+dsh plugin --profile web add https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz
+dsh plugin --profile web add dsh-cockpit-worktree-open-shim
+```
+
+Then restart DSH web. Uninstall with `dsh plugin --profile web remove dsh-cockpit-worktree-open-shim`.
+
 ## Why a separate package
 
 Worktree Session is a generic plugin and must not know about dsh-cockpit; dsh-cockpit-bridge must not know its concrete consumers either. All coupling between the two ends lives only in this shim, which keeps independent upgrades and complete removal possible.
@@ -39,3 +50,7 @@ It can be removed at any time, and it should be removed once you stop using dsh-
 - Worktree Session returns to the default `vscode://file/` behaviour;
 - existing dsh-cockpit-bridge features such as session read-confirmation and the pending snapshot are unaffected;
 - neither end needs any source or configuration migration.
+
+## Source and license
+
+Maintained in [ohmydsh](https://github.com/prgrmrwy/ohmydsh) under `packages/cockpit-worktree-open-shim`; [dsh-cockpit-worktree-open-shim](https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim) is the publishing mirror. Released under the [MIT License](LICENSE). Issues and pull requests are welcome at https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim/issues.

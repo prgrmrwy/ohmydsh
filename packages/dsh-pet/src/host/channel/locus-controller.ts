@@ -51,14 +51,8 @@ import {
 
 /** The minimum prefix accepted by the channel control surface. */
 export const MIN_BIND_PREFIX_LENGTH = 6
-import {
-  LOCUS_SAFE_CHILD_COMPOSITION,
-  normalizeLocusEndpoint,
-  type LocusChildComposition,
-  type LocusContextAnchor,
-  type LocusEndpoint,
-  type LocusPermission,
-} from '../locus/aggregate.js'
+import { normalizeLocusEndpoint, type LocusEndpoint } from '../locus/aggregate.js'
+import type { LocusAccessModeV20 } from '../locus/contract-v20.js'
 import {
   isSafeLocusReplyTarget,
   type LocusReplyTarget,
@@ -194,30 +188,23 @@ export type NormalizedLocusAdmission =
 /** Raw or already normalized channel input. */
 export type LocusChannelEvent = LarkInboundEvent | NormalizedLocusEvent
 
-/** A locus row that is safe to publish to the channel. */
+/** A v20 row that is safe to publish to the channel. */
 export interface ActiveLocus {
-  /** Canonical locus id. */
-  readonly id?: string
-  /** Compatibility spelling used by older locus projections. */
-  readonly locusId?: string
+  readonly locusId: string
   readonly endpoint: LocusEndpoint
-  readonly generation: number
-  readonly parentSessionId: string
   /**
-   * The child's id. A `not-created` generation has no child yet: this is then
-   * the id the generation reserved, which its Deliveries already correlate by
-   * and under which the first Delivery's queue creates the child.
+   * The child's id. A `not-created` row has no child yet: this is then the id
+   * it reserved, which its Deliveries already correlate by and under which the
+   * first Delivery's queue creates the child.
    */
-  readonly childSessionId: string
-  /** Missing on legacy callers; child delivery refuses it before adoption. */
-  readonly childComposition?: LocusChildComposition
+  readonly sessionId: string
+  /** The M (locus main session) this entry hangs under. */
+  readonly locusMainSessionId: string
   readonly workspaceId: string
   readonly state: 'active' | 'not-created'
-  /** Durable policy projection that every ordinary Delivery must re-verify. */
-  readonly permission?: LocusPermission
-  readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' } | undefined
-  /** Separately Host-authorized root required by effective write. */
-  readonly contextAnchor?: NonNullable<LocusContextAnchor>
+  /** The one access value every ordinary Delivery must re-verify. */
+  readonly accessMode: LocusAccessModeV20
+  readonly revision: number
 }
 
 /** Request used when ensuring an endpoint's current locus. */
@@ -234,10 +221,7 @@ export interface EnsureLocusForDeliveryInput {
  * workspace validation, child provisioning, and conditional active publish.
  * It must not return an invalid, stopped, retired, legacy, or childless row.
  */
-export type LocusResolutionRecord = Omit<ActiveLocus, 'childSessionId'> & {
-  readonly childSessionId?: string
-  readonly reservedChildSessionId?: string
-}
+export type LocusResolutionRecord = ActiveLocus
 
 export interface LocusResolutionPort {
   resolveCurrent(endpoint: LocusEndpoint): Awaitable<LocusResolutionRecord | undefined>
@@ -385,7 +369,7 @@ export interface LocusDeliveryLedgerPort {
     readonly failureReason?: string
     readonly inboxMessageId?: string
     readonly expectedRevision?: number
-  }): Awaitable<{ readonly changed: boolean; readonly record: DeliveryRecord | undefined; readonly reason?: string }>
+  }): Awaitable<{ readonly changed: boolean; readonly record: DeliveryRecord | undefined; readonly reason?: string | undefined }>
   /** Host-side terminal disposition for a backlog/current item never injected into a child. */
   failBeforeDispatch(input: { readonly deliveryId: string; readonly correlation: DeliveryCorrelation; readonly reason: string; readonly executionId?: string; readonly failedAt?: number }): Awaitable<boolean>
   /** Atomically promote one accepted/backlog Delivery to current. */
@@ -489,11 +473,8 @@ export interface LocusControllerDeps {
   }
   /** Delay before retrying a first-child creation the runtime refused for lack of a free slot. */
   readonly capacityRetryMs?: number
-  /** Persistently pause/invalid the current generation when policy proof drifts. */
-  readonly invalidatePolicyDrift?: (input: {
-    readonly locus: ActiveLocus
-    readonly reason: string
-  }) => Awaitable<void>
+  /** Global write switch for the policy verifier; defaults to the build's `LOCUS_WRITE_ENABLED`. Injectable for tests. */
+  readonly writeEnabled?: boolean
   /**
    * Render the Host-bound per-delivery taskbook. Production supplies this so
    * the child sees the exact immutable reply target and locus facts instead of
@@ -529,7 +510,6 @@ export interface LocusControllerDeps {
   readonly admissionContext?: LocusAdmissionContext | (() => LocusAdmissionContext)
   /** Authoritative allowlist snapshot used again at the durable claim boundary. */
   readonly allowOpenIds?: () => readonly string[]
-  readonly currentToolTier?: (endpoint: LocusEndpoint) => 'safe' | 'shell' | undefined
   /** Receives the same admission allowlist snapshot used for owner-only checks. */
   readonly readAllowOpenIds?: () => readonly string[]
   readonly now?: () => number
@@ -539,6 +519,10 @@ export interface LocusControllerDeps {
 
 /** Stable diagnostics with no message body or external identifier. */
 export type LocusControllerDiagnostic =
+  /** The backlog dispatcher could not verify (or migrate) M before claiming; the message stays in backlog. */
+  | 'dispatch-main-unverified'
+  /** A message was accepted into backlog while the whole-W migration is deferred by a current elsewhere. */
+  | 'migration-deferred'
   | 'turn-correlation-unavailable'
   | 'invalid-event'
   | 'admission-rejected'
@@ -571,7 +555,6 @@ export type LocusControllerDiagnostic =
    */
   | 'policy-unreadable'
   /** The unreadable generation was retired and a fresh one served this delivery. */
-  | 'policy-generation-rebuilt'
   | 'delivery-persistence-failed'
   | 'delivery-conflict'
   | 'duplicate-delivery'
@@ -588,13 +571,11 @@ export type LocusControllerResult =
       readonly deliveryId: string
       readonly executionId: string
       readonly locusId: string
-      readonly generation: number
     }
   | {
       readonly kind: 'duplicate'
       readonly deliveryId: string
       readonly locusId: string
-      readonly generation: number
     }
   | {
       readonly kind: 'control'
@@ -669,14 +650,10 @@ function controlValidationText(command: LocusControlCommand): string {
       return '会话 id 前缀太短，请至少提供 6 位。'
     case 'bind-invalid':
       return '绑定命令只接受一个会话 id 前缀。'
-    case 'scope-missing-mode':
-      return '请指定共享权限：read 或 write。'
-    case 'scope-invalid':
-      return '共享权限只能是 read 或 write。'
-    case 'tools-missing-tier':
-      return '请指定工具档位：safe 或 shell。'
-    case 'tools-invalid':
-      return '工具档位只能是 safe 或 shell。'
+    case 'access-missing-mode':
+      return '请指定访问模式：/access read 或 /access full。'
+    case 'access-invalid':
+      return '访问模式只能是 read 或 full。'
     case 'unbind-invalid':
       return '解绑命令不接受参数。'
     default:
@@ -697,7 +674,7 @@ function sameEndpoint(left: LocusEndpoint, right: LocusEndpoint): boolean {
 }
 
 function locusIdOf(locus: ActiveLocus): string | undefined {
-  return nonEmpty(locus.locusId) ? locus.locusId.trim() : nonEmpty(locus.id) ? locus.id.trim() : undefined
+  return nonEmpty(locus.locusId) ? locus.locusId.trim() : undefined
 }
 
 function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocus | undefined {
@@ -711,50 +688,22 @@ function normalizeActiveLocus(raw: unknown, expected: LocusEndpoint): ActiveLocu
   if (!sameEndpoint(locusEndpoint, expected)) return undefined
   if (raw.state !== 'active' && raw.state !== 'not-created') return undefined
   const state: 'active' | 'not-created' = raw.state
-  const generation = raw.generation
-  if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1) return undefined
-  const id = nonEmpty(raw.id) ? raw.id.trim() : undefined
-  const locusId = nonEmpty(raw.locusId) ? raw.locusId.trim() : undefined
-  if (id === undefined && locusId === undefined) return undefined
-  const childIdentity = state === 'active' ? raw.childSessionId : raw.reservedChildSessionId
-  if (!nonEmpty(raw.parentSessionId) || !nonEmpty(childIdentity) || !nonEmpty(raw.workspaceId)) {
-    return undefined
-  }
-  const permission = raw.permission
+  if (raw.accessMode !== 'read-only' && raw.accessMode !== 'danger-full-access') return undefined
+  const revision = raw.revision
+  if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) return undefined
   if (
-    !isRecord(permission) ||
-    (permission.desired !== 'read' && permission.desired !== 'write') ||
-    (permission.effective !== 'read' && permission.effective !== 'write')
+    !nonEmpty(raw.locusId) || !nonEmpty(raw.sessionId) ||
+    !nonEmpty(raw.locusMainSessionId) || !nonEmpty(raw.workspaceId)
   ) return undefined
-  const contextAnchor = isRecord(raw.contextAnchor)
-    ? raw.contextAnchor as unknown as NonNullable<LocusContextAnchor>
-    : undefined
-  // Carry the durable safe-composition proof through this normalizer. Child
-  // delivery refuses any locus that does not present it, so dropping the field
-  // here (while the record has it) rejects every delivery with a generic
-  // `child-unavailable`. Only the proven value is copied: an unrecognized
-  // composition stays absent and the downstream guard keeps failing closed.
-  const childComposition = state === 'active' && raw.childComposition === LOCUS_SAFE_CHILD_COMPOSITION
-    ? LOCUS_SAFE_CHILD_COMPOSITION
-    : undefined
-  const toolTier = isRecord(raw.toolTier)
-    && (raw.toolTier.effective === 'safe' || raw.toolTier.effective === 'shell')
-    && (raw.toolTier.desired === 'safe' || raw.toolTier.desired === 'shell')
-    ? raw.toolTier as unknown as { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
-    : undefined
   return {
-    ...(id !== undefined ? { id } : {}),
-    ...(locusId !== undefined ? { locusId } : {}),
+    locusId: raw.locusId.trim(),
     endpoint: locusEndpoint,
-    generation,
-    parentSessionId: raw.parentSessionId.trim(),
-    childSessionId: childIdentity.trim(),
+    sessionId: raw.sessionId.trim(),
+    locusMainSessionId: raw.locusMainSessionId.trim(),
     workspaceId: raw.workspaceId.trim(),
     state,
-    permission: permission as unknown as LocusPermission,
-    ...(childComposition === undefined ? {} : { childComposition }),
-    ...(toolTier === undefined ? {} : { toolTier }),
-    ...(contextAnchor === undefined ? {} : { contextAnchor }),
+    accessMode: raw.accessMode,
+    revision,
   }
 }
 
@@ -935,10 +884,7 @@ function isDeliveryCorrelation(value: unknown): value is DeliveryCorrelation {
   if (endpoint.threadId !== undefined && !nonEmpty(endpoint.threadId)) return false
   return (
     nonEmpty(value.locusId) &&
-    nonEmpty(value.childSessionId) &&
-    typeof value.generation === 'number' &&
-    Number.isSafeInteger(value.generation) &&
-    value.generation >= 1
+    nonEmpty(value.sessionId)
   )
 }
 
@@ -947,8 +893,7 @@ function exactCorrelation(left: DeliveryCorrelation, right: DeliveryCorrelation)
     isDeliveryCorrelation(left) &&
     isDeliveryCorrelation(right) &&
     left.locusId === right.locusId &&
-    left.generation === right.generation &&
-    left.childSessionId === right.childSessionId &&
+    left.sessionId === right.sessionId &&
     sameEndpoint(left.endpoint, right.endpoint)
   )
 }
@@ -959,12 +904,11 @@ function deliveryIdOf(locus: ActiveLocus): string {
   return id
 }
 
-/** Stable local lane key; the durable locus/generation/child tuple remains authoritative. */
+/** Stable local lane key; the durable (locusId, sessionId) pair remains authoritative. */
 function dispatchLaneKey(correlation: DeliveryCorrelation): string {
   return [
     correlation.locusId,
-    String(correlation.generation),
-    correlation.childSessionId,
+    correlation.sessionId,
     endpointKey(correlation.endpoint),
   ].join('\u0000')
 }
@@ -978,6 +922,8 @@ export class LocusChannelController {
   private readonly pending = new Map<string, PendingTurn>()
   /** Serialize acceptance and physical dispatch for one exact locus locally. */
   private readonly dispatchTails = new Map<string, Promise<void>>()
+  /** Lanes holding a message accepted while a whole-W migration was deferred (D7); retried on any settlement. */
+  private readonly deferredLanes = new Map<string, DeliveryCorrelation>()
   /** Retry timers for Deliveries waiting on a free child slot, by Delivery id. */
   private readonly capacityRetries = new Map<string, ReturnType<typeof setTimeout>>()
   /** Deliveries whose owner was already told the request is being kept. */
@@ -1079,6 +1025,14 @@ export class LocusChannelController {
       return
     }
     await this.trackOperation(() => this.dispatchNextActive(correlation))
+    // A settlement may have unblocked a deferred migration elsewhere in the W.
+    // Wake through the inner method so a wake never triggers another wake.
+    const key = dispatchLaneKey(correlation)
+    for (const [laneKey, lane] of [...this.deferredLanes]) {
+      if (laneKey === key) continue
+      this.deferredLanes.delete(laneKey)
+      await this.trackOperation(() => this.dispatchNextActive(lane))
+    }
   }
 
   private async dispatchNextActive(correlation: DeliveryCorrelation): Promise<void> {
@@ -1088,25 +1042,35 @@ export class LocusChannelController {
       try {
         let refreshedLocus: unknown
         try {
-          refreshedLocus = await this.deps.locus.resolveCurrent(correlation.endpoint)
-        } catch {
-          this.log('dispatch-state-unknown')
+          refreshedLocus = await this.deps.locus.ensureForDelivery({
+            endpoint: correlation.endpoint,
+            messageId: `dispatch:${correlation.locusId}`,
+            signal: this.signal,
+          })
+        } catch (error) {
+          // M could not be verified (archived / missing / wrong preset) and the
+          // whole-W migration did not happen (a current Delivery elsewhere, or
+          // the W is archived): leave the message in backlog, but say so.
+          this.logReason('dispatch-main-unverified', error)
+          const deferred = (error as { deferred?: { locusId: string; sessionId: string } } | null)?.deferred
+          if (deferred !== undefined) this.deferredLanes.set(dispatchLaneKey(correlation), correlation)
           return
         }
         const currentLocus = normalizeActiveLocus(refreshedLocus, correlation.endpoint)
         if (currentLocus !== undefined && currentLocus.state === 'not-created' && locusIdOf(currentLocus) === correlation.locusId &&
-            currentLocus.generation === correlation.generation && currentLocus.childSessionId !== correlation.childSessionId) {
-          // A failed creation consumed its reserved Session id. Its unissued
-          // backlog was atomically retargeted within the SAME generation.
-          queueMicrotask(() => { void this.dispatchNext({ ...correlation, childSessionId: currentLocus.childSessionId }).catch(() => this.log('dispatch-state-unknown')) })
+            currentLocus.sessionId !== correlation.sessionId) {
+          // The reservation moved (a failed creation consumed it, or a rebuild /
+          // whole-W migration reset the entry). Its uninjected backlog was
+          // atomically retargeted to the new sessionId: re-read and claim there.
+          queueMicrotask(() => { void this.dispatchNext({ ...correlation, sessionId: currentLocus.sessionId }).catch(() => this.log('dispatch-state-unknown')) })
           return
         }
         if (currentLocus === undefined || locusIdOf(currentLocus) !== correlation.locusId
-          || currentLocus.generation !== correlation.generation || currentLocus.childSessionId !== correlation.childSessionId) {
+          || currentLocus.sessionId !== correlation.sessionId) {
           this.log('dispatch-state-unknown')
           return
         }
-        const shellTier = currentLocus.toolTier?.effective === 'shell'
+        const shellTier = currentLocus.accessMode === 'danger-full-access'
         let allowOpenIds: readonly string[] | undefined
         try {
           allowOpenIds = this.deps.readAllowOpenIds?.() ?? this.deps.allowOpenIds?.()
@@ -1145,7 +1109,7 @@ export class LocusChannelController {
             }
             if (settled) {
               await this.receiptSettled(delivery.feedbackTarget, 'failed')
-              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可将工具档位切回 safe。', delivery.senderOpenId)
+              await this.sendControlReceipt(delivery.feedbackTarget, '当前入口为所有者专用，该排队请求未投递；所有者可用 /access read 切回只读。', delivery.senderOpenId)
             } else {
               // The row moved after our snapshot (for example, a durable lease
               // transition). Do not guess at its new sender/status; another
@@ -1200,8 +1164,7 @@ export class LocusChannelController {
     if (this.lifecycle !== 'active') { this.suppressDispatch(correlation, claimed.deliveryId); return }
     if (
       locus === undefined ||
-      locus.childSessionId !== claimed.childSessionId ||
-      locus.generation !== claimed.generation ||
+      locus.sessionId !== claimed.sessionId ||
       locusIdOf(locus) !== claimed.locusId ||
       !nonEmpty(claimed.senderOpenId) ||
       !nonEmpty(claimed.text)
@@ -1217,8 +1180,8 @@ export class LocusChannelController {
       return
     }
     if (
-      child.parentSessionId !== locus.parentSessionId ||
-      child.childSessionId !== claimed.childSessionId
+      child.parentSessionId !== locus.locusMainSessionId ||
+      child.childSessionId !== claimed.sessionId
     ) {
       this.log('child-identity-mismatch')
       return
@@ -1423,7 +1386,11 @@ export class LocusChannelController {
     const owesDisclosure = admission.needsInitialization && messageSource(message) === 'doc-comment'
       ? await this.firstDocEntry(endpoint.chatId)
       : false
-    let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal)
+    const deferredSink: { value?: { locusId: string; sessionId: string } } = {}
+    let locus = await this.resolveLocus(endpoint, message, admission.needsInitialization, signal, deferredSink)
+    if (locus === undefined && deferredSink.value !== undefined) {
+      return this.acceptIntoBacklog(endpoint, message, { endpoint, ...deferredSink.value })
+    }
     if (locus === undefined) return this.refuse('locus-unavailable')
     if (owesDisclosure && this.deps.docDisclosureText !== undefined) {
       // A Host control receipt, routed like the business answer; never business
@@ -1432,77 +1399,33 @@ export class LocusChannelController {
     }
 
     // Adoption proves the exact durable child, but not that its current policy
-    // still matches the database. Resolve through the continuation owner at
-    // this operation boundary, before creating ANY Delivery/reaction/queue.
-    //
-    // A generation whose live policy cannot be READ is repaired here rather
-    // than merely refused. Refusing alone left the locus `active` with no
-    // self-healing exit: every later delivery failed the same way forever, so
-    // one unreadable child silently muted the group until an operator
-    // intervened. Retiring the generation and letting the establishing path
-    // build a fresh one serves THIS message instead of starving it. Bounded to
-    // one rebuild per delivery so a persistently unverifiable composition
-    // cannot churn generations inside a single request.
-    let child: LocusChildIdentity | undefined
-    let policyVerification: ReturnType<LocusChannelController['verifyPersistedPolicy']> | undefined
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (this.lifecycle !== 'active') return this.refuse('shutdown-frozen')
-      let adopted: LocusChildIdentity
-      try {
-        adopted = await this.deps.child.ensureChild(locus, signal)
-      } catch {
-        return this.refuse('child-unavailable')
-      }
-      if (
-        !nonEmpty(adopted.parentSessionId) ||
-        !nonEmpty(adopted.childSessionId) ||
-        adopted.parentSessionId.trim() !== locus.parentSessionId ||
-        adopted.childSessionId.trim() !== locus.childSessionId
-      ) {
-        return this.refuse('child-identity-mismatch')
-      }
-      const identity: LocusChildIdentity = {
-        parentSessionId: adopted.parentSessionId.trim(),
-        childSessionId: adopted.childSessionId.trim(),
-      }
-      policyVerification = this.verifyPersistedPolicy(locus)
-      if (policyVerification.ok) {
-        child = identity
-        break
-      }
-      // A durable disagreement is real drift: retire it and refuse, before any
-      // Delivery side effect (ADR-0005). A generation-scoped read failure is
-      // repairable, so rebuild it once and serve on the fresh generation. An
-      // absent capability belongs to the composition, not to this child, so
-      // rebuilding cannot help it.
-      if (policyVerification.fatal) {
-        try {
-          await this.deps.invalidatePolicyDrift?.({ locus, reason: policyVerification.diagnostic })
-        } catch {
-          // Failure to persist the pause is still fail closed for this request.
-        }
-        break
-      }
-      if (!policyVerification.repairable || attempt > 0) break
-      try {
-        await this.deps.invalidatePolicyDrift?.({
-          locus,
-          reason: `live policy unreadable; rebuilding this generation (${policyVerification.diagnostic})`,
-        })
-      } catch {
-        // Failure to persist the retirement is still fail closed for this
-        // request, so do not fall through to the rebuild.
-        break
-      }
-      const rebuilt = await this.resolveLocus(endpoint, message, true, signal)
-      if (rebuilt === undefined) break
-      this.log('policy-generation-rebuilt')
-      locus = rebuilt
+    // still matches the row. Verify the row's one `accessMode` at this operation
+    // boundary, before creating ANY Delivery/reaction/queue. A composition,
+    // policy or capability failure refuses this delivery and leaves the row
+    // untouched (D7 class B): never demoted, never invalidated.
+    if (this.lifecycle !== 'active') return this.refuse('shutdown-frozen')
+    let adopted: LocusChildIdentity
+    try {
+      adopted = await this.deps.child.ensureChild(locus, signal)
+    } catch {
+      return this.refuse('child-unavailable')
     }
-    if (child === undefined || policyVerification === undefined || !policyVerification.ok) {
-      const failed = policyVerification !== undefined && !policyVerification.ok ? policyVerification : undefined
-      this.logReason('policy-unreadable', failed?.diagnostic ?? 'no verification result')
-      return this.refuse(failed?.fatal === true ? 'policy-drift' : 'policy-unreadable')
+    if (
+      !nonEmpty(adopted.parentSessionId) ||
+      !nonEmpty(adopted.childSessionId) ||
+      adopted.parentSessionId.trim() !== locus.locusMainSessionId ||
+      adopted.childSessionId.trim() !== locus.sessionId
+    ) {
+      return this.refuse('child-identity-mismatch')
+    }
+    const child: LocusChildIdentity = {
+      parentSessionId: adopted.parentSessionId.trim(),
+      childSessionId: adopted.childSessionId.trim(),
+    }
+    const policyVerification = this.verifyPersistedPolicy(locus)
+    if (!policyVerification.ok) {
+      this.logReason('policy-unreadable', policyVerification.diagnostic)
+      return this.refuse('policy-drift')
     }
 
     const locusId = locusIdOf(locus)
@@ -1510,8 +1433,7 @@ export class LocusChannelController {
     const correlation: DeliveryCorrelation = {
       endpoint,
       locusId,
-      generation: locus.generation,
-      childSessionId: child.childSessionId,
+      sessionId: child.childSessionId,
     }
     const input: LocusDeliveryInput = {
       ...correlation,
@@ -1557,7 +1479,6 @@ export class LocusChannelController {
             kind: 'duplicate',
             deliveryId: existing.deliveryId,
             locusId: existing.locusId,
-            generation: existing.generation,
           }
         }
       }
@@ -1578,7 +1499,6 @@ export class LocusChannelController {
         kind: 'duplicate',
         deliveryId: accepted.record.deliveryId,
         locusId: accepted.record.locusId,
-        generation: accepted.record.generation,
       }
     }
 
@@ -1592,7 +1512,7 @@ export class LocusChannelController {
     if (dispatch.claimCurrent !== undefined) {
       let claimed: DeliveryRecord | undefined
       try {
-        if (locus.toolTier?.effective === 'shell') {
+        if (locus.accessMode === 'danger-full-access') {
           const allowOpenIds = this.readAdmissionContext()?.allowOpenIds ?? this.deps.readAllowOpenIds?.() ?? this.deps.allowOpenIds?.()
           if (allowOpenIds === undefined) return this.refuse('admission-unavailable')
           if (!allowOpenIds.includes(message.senderOpenId)) {
@@ -1612,10 +1532,10 @@ export class LocusChannelController {
         const refreshedRaw = await this.deps.locus.resolveCurrent(endpoint)
         const refreshed = normalizeActiveLocus(refreshedRaw, endpoint)
         if (refreshed === undefined || locusIdOf(refreshed) !== correlation.locusId
-          || refreshed.generation !== correlation.generation || refreshed.childSessionId !== correlation.childSessionId) {
+          || refreshed.sessionId !== correlation.sessionId) {
           return this.refuse('dispatch-state-unknown')
         }
-        if (refreshed.toolTier?.effective === 'shell') {
+        if (refreshed.accessMode === 'danger-full-access') {
           const currentAllowOpenIds = this.readAdmissionContext()?.allowOpenIds
             ?? this.deps.readAllowOpenIds?.()
             ?? this.deps.allowOpenIds?.()
@@ -1629,7 +1549,7 @@ export class LocusChannelController {
             })
             if (failed) {
               await this.receiptSettled(accepted.record.feedbackTarget, 'failed')
-              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。', message.senderOpenId)
+              await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。所有者可用 /access read 切回只读。', message.senderOpenId)
             }
             return { kind: 'ignored', reason: 'owner-only-tier' }
           }
@@ -1650,7 +1570,6 @@ export class LocusChannelController {
           deliveryId: accepted.record.deliveryId,
           executionId: '',
           locusId: accepted.record.locusId,
-          generation: accepted.record.generation,
         }
       }
       // A dispatcher result is a physical-dispatch authorization only when it
@@ -1680,7 +1599,6 @@ export class LocusChannelController {
           deliveryId: accepted.record.deliveryId,
           executionId: '',
           locusId: accepted.record.locusId,
-          generation: accepted.record.generation,
         }
       }
       return this.refuse('dispatch-state-unknown')
@@ -1761,7 +1679,7 @@ export class LocusChannelController {
     // durable bind and remained unresolved without a polling deadline.
     try {
       this.deps.turns?.deliveryAvailable?.({
-        childSessionId: bound.childSessionId,
+        childSessionId: bound.sessionId,
         messageId: queued.inboxMessageId.trim(),
       })
     } catch {
@@ -1785,7 +1703,6 @@ export class LocusChannelController {
       deliveryId: bound.deliveryId,
       executionId: pending.executionId,
       locusId: bound.locusId,
-      generation: bound.generation,
     }
     })
   }
@@ -1799,7 +1716,7 @@ export class LocusChannelController {
     this.suppressDispatch(correlation, record.deliveryId)
     return {
       kind: 'accepted', deliveryId: record.deliveryId, executionId: '',
-      locusId: record.locusId, generation: record.generation,
+      locusId: record.locusId,
     }
   }
 
@@ -1815,8 +1732,7 @@ export class LocusChannelController {
     let correlation: DeliveryCorrelation = {
       endpoint: input.record.endpoint,
       locusId: input.record.locusId,
-      generation: input.record.generation,
-      childSessionId: input.record.childSessionId,
+      sessionId: input.record.sessionId,
     }
     const pending: PendingTurn = {
       deliveryId: input.record.deliveryId,
@@ -1868,7 +1784,6 @@ export class LocusChannelController {
           deliveryId: input.record.deliveryId,
           executionId: '',
           locusId: input.record.locusId,
-          generation: input.record.generation,
         }
       }
       return this.definitiveQueueFailure(pending, reason)
@@ -1897,7 +1812,7 @@ export class LocusChannelController {
       // The first turn can finish before startActivation returns. Never revive
       // its queue slot or emit an in-progress receipt after terminal feedback.
       this.pending.delete(pending.deliveryId)
-      return { kind: 'accepted', deliveryId: bound.deliveryId, executionId, locusId: bound.locusId, generation: bound.generation }
+      return { kind: 'accepted', deliveryId: bound.deliveryId, executionId, locusId: bound.locusId }
     }
     if (
       bound === undefined ||
@@ -1911,7 +1826,7 @@ export class LocusChannelController {
     }
     try {
       this.deps.turns?.deliveryAvailable?.({
-        childSessionId: bound.childSessionId,
+        childSessionId: bound.sessionId,
         messageId: queued.inboxMessageId.trim(),
       })
     } catch {
@@ -1932,7 +1847,6 @@ export class LocusChannelController {
       deliveryId: bound.deliveryId,
       executionId,
       locusId: bound.locusId,
-      generation: bound.generation,
     }
   }
 
@@ -2004,12 +1918,10 @@ export class LocusChannelController {
       && exactCorrelation(current, {
         endpoint: input.record.endpoint,
         locusId: input.record.locusId,
-        generation: input.record.generation,
-        childSessionId: input.record.childSessionId,
+        sessionId: input.record.sessionId,
       })
-      && input.locus.generation === current.generation
-      && input.locus.childSessionId === input.child.childSessionId
-      && input.locus.parentSessionId === input.child.parentSessionId
+      && input.locus.sessionId === input.child.childSessionId
+      && input.locus.locusMainSessionId === input.child.parentSessionId
   }
 
   /** Retry only a typed-image route refusal, once, against the same exact current. */
@@ -2050,18 +1962,18 @@ export class LocusChannelController {
           current.deliveryId !== original.deliveryId || current.messageId !== original.messageId ||
           current.status !== 'current' || current.queueState !== 'current' ||
           current.executionId !== undefined || current.inboxMessageId !== undefined || current.turnId !== undefined ||
-          current.locusId !== original.locusId || current.generation !== original.generation ||
+          current.locusId !== original.locusId ||
           locus.state !== 'not-created' || locusIdOf(locus) !== original.locusId ||
-          locus.generation !== original.generation || locus.childSessionId !== current.childSessionId ||
-          locus.parentSessionId !== input.input.locus.parentSessionId ||
+          locus.sessionId !== current.sessionId ||
+          locus.locusMainSessionId !== input.input.locus.locusMainSessionId ||
           (current.deadlineAt !== undefined && this.now() >= current.deadlineAt)) {
         return { accepted: false, reason: 'stale-delivery' }
       }
       input.input.locus = locus
-      input.input.child = { parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }
+      input.input.child = { parentSessionId: locus.locusMainSessionId, childSessionId: locus.sessionId }
       input.input.record = current
       input.pending.executionId = randomUUID()
-      input.pending.correlation = { endpoint: current.endpoint, locusId: current.locusId, generation: current.generation, childSessionId: current.childSessionId }
+      input.pending.correlation = { endpoint: current.endpoint, locusId: current.locusId, sessionId: current.sessionId }
       try { await this.deps.deliveryDispatch.scheduleCurrent?.(current) } catch { this.log('delivery-persistence-failed') }
     }
     if (!await this.isExactCurrent(input.input)) return { accepted: false, reason: 'stale-delivery' }
@@ -2087,58 +1999,24 @@ export class LocusChannelController {
   }
 
   /**
-   * Verify the generation's policy from what Pet itself recorded, never by
-   * reading a live Session.
-   *
-   * The sandbox is applied and read back at the only moments the runtime lets
-   * Pet touch it — child creation and every `agent/created` (see
-   * `composeLocusChild`) — and the child is published only if that read back
-   * matched the durable grant. So the durable record plus the composition
-   * marker IS the proof; a per-delivery live read would need a borrowed Session
-   * the runtime does not offer. What can still disagree with the build is a
-   * stored `write` grant while write grants are switched off.
-   *
-   * `fatal` marks a durable disagreement that justifies refusing outright
-   * (ADR-0005); `repairable` marks a failure a fresh generation could fix.
+   * Verify the row's `accessMode` from what Pet itself recorded, never by
+   * reading a live Session unless the child is resident. The sandbox is applied
+   * and read back at child creation and every `agent/created`
+   * (`composeLocusChild`), so the durable row IS the proof; what can still
+   * disagree with the build is a stored `danger-full-access` while the global
+   * write switch is off.
    */
   private verifyPersistedPolicy(locus: ActiveLocus):
     | { readonly ok: true }
-    | {
-        readonly ok: false
-        readonly diagnostic: string
-        readonly fatal: boolean
-        readonly repairable: boolean
-      } {
-    if (locus.permission === undefined) {
-      return {
-        ok: false,
-        diagnostic: 'the generation carries no recorded permission',
-        fatal: false,
-        repairable: false,
-      }
-    }
-    if (locus.state === 'active' && locus.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-      return {
-        ok: false,
-        diagnostic: 'the generation is not a Host-attested current composition',
-        fatal: false,
-        repairable: false,
-      }
-    }
-    const facts = {
-      permission: locus.permission,
-      ...(locus.contextAnchor === undefined ? {} : { contextAnchor: locus.contextAnchor }),
-    }
+    | { readonly ok: false; readonly diagnostic: string } {
     let resident: ReturnType<NonNullable<LocusControllerDeps['inspectResidentPolicy']>> | undefined
-    try { resident = this.deps.inspectResidentPolicy?.(locus.childSessionId) } catch {
-      return { ok: false, diagnostic: 'Resident child policy is unreadable', fatal: false, repairable: false }
+    try { resident = this.deps.inspectResidentPolicy?.(locus.sessionId) } catch {
+      return { ok: false, diagnostic: 'Resident child policy is unreadable' }
     }
     const verified = resident?.resident === true
-      ? verifyLocusLivePolicy(facts, resident.policy)
-      : verifyLocusPersistedPolicy(facts)
-    return verified.ok
-      ? { ok: true }
-      : { ok: false, diagnostic: verified.diagnostic, fatal: true, repairable: false }
+      ? verifyLocusLivePolicy(locus, resident.policy, this.deps.writeEnabled)
+      : verifyLocusPersistedPolicy(locus, this.deps.writeEnabled)
+    return verified.ok ? { ok: true } : { ok: false, diagnostic: verified.diagnostic }
   }
 
   private async dispatchControl(
@@ -2153,10 +2031,8 @@ export class LocusChannelController {
       command.kind === 'bind-missing-prefix' ||
       command.kind === 'bind-invalid' ||
       (command.kind === 'bind' && command.prefix.trim().length < MIN_BIND_PREFIX_LENGTH) ||
-      command.kind === 'scope-missing-mode' ||
-      command.kind === 'scope-invalid' ||
-      command.kind === 'tools-missing-tier' ||
-      command.kind === 'tools-invalid' ||
+      command.kind === 'access-missing-mode' ||
+      command.kind === 'access-invalid' ||
       command.kind === 'unbind-invalid'
     ) {
       const text = controlValidationText(command)
@@ -2234,7 +2110,7 @@ export class LocusChannelController {
     if (message === undefined) return
     const allow = suppliedContext?.allowOpenIds ?? this.readAdmissionContext()?.allowOpenIds ?? this.deps.allowOpenIds?.() ?? []
     if (allow.includes(message.senderOpenId)) return
-    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。工具档位可由所有者切回 safe。', message.senderOpenId)
+    await this.sendControlReceipt(message.replyTarget, '当前入口为所有者专用，只有 allowlist 成员可以驱动。所有者可用 /access read 切回只读。', message.senderOpenId)
   }
 
   private async firstDocEntry(chatId: string): Promise<boolean> {
@@ -2268,11 +2144,53 @@ export class LocusChannelController {
     }
   }
 
+  /**
+   * Durable acceptance only: no child, no policy check, no claim. Used when the
+   * entry's M is unavailable and its whole-W migration is deferred (D7).
+   */
+  private async acceptIntoBacklog(
+    endpoint: LocusEndpoint,
+    message: NormalizedLocusMessage,
+    lane: { endpoint: LocusEndpoint; locusId: string; sessionId: string },
+  ): Promise<LocusControllerResult> {
+    const correlation: DeliveryCorrelation = { endpoint, locusId: lane.locusId, sessionId: lane.sessionId }
+    const input: LocusDeliveryInput = {
+      ...correlation,
+      messageId: message.messageId,
+      acceptedAt: this.now(),
+      senderOpenId: message.senderOpenId,
+      ...(message.senderName !== undefined ? { senderName: message.senderName } : {}),
+      text: message.text,
+      ...(message.addressing === undefined ? {} : { addressing: message.addressing }),
+      ...(message.source === 'doc-comment' && message.docComment !== undefined ? { docComment: message.docComment } : {}),
+      ...(message.replyTarget.rootMessageId !== undefined ? { rootMessageId: message.replyTarget.rootMessageId } : {}),
+      replyTarget: message.replyTarget,
+      ...(message.replyToMessageId !== undefined ? { replyToMessageId: message.replyToMessageId } : {}),
+    }
+    return this.enqueueDispatchLane(correlation, async () => {
+      let accepted: LocusDeliveryAcceptance
+      try {
+        accepted = await this.deps.deliveries.accept(input)
+      } catch {
+        return this.refuse('delivery-persistence-failed')
+      }
+      if (accepted.conflict) return this.refuse('delivery-conflict')
+      if (accepted.duplicate) {
+        return { kind: 'duplicate', deliveryId: accepted.record.deliveryId, locusId: accepted.record.locusId }
+      }
+      this.deferredLanes.set(dispatchLaneKey(correlation), correlation)
+      this.log('migration-deferred')
+      await this.receiptAccepted(accepted.record.feedbackTarget)
+      return { kind: 'accepted', deliveryId: accepted.record.deliveryId, executionId: '', locusId: accepted.record.locusId }
+    })
+  }
+
   private async resolveLocus(
     endpoint: LocusEndpoint,
     message: NormalizedLocusMessage,
     needsInitialization: boolean,
     signal: AbortSignal,
+    deferredSink?: { value?: { locusId: string; sessionId: string } },
   ): Promise<ActiveLocus | undefined> {
     let raw: unknown
     let mayEnsure = needsInitialization
@@ -2305,6 +2223,14 @@ export class LocusChannelController {
       })
     } catch (error: unknown) {
       this.logReason('locus-bootstrap-failed', error)
+      // D7: M is unavailable but the whole-W migration is deferred by a current
+      // Delivery elsewhere. The message is not dropped; the caller accepts it
+      // into this entry's durable backlog and the dispatcher retries.
+      const deferred = (error as { deferred?: { locusId: string; sessionId: string } } | null)?.deferred
+      if (deferredSink !== undefined && deferred !== undefined) {
+        deferredSink.value = deferred
+        return undefined
+      }
       // A failed readiness check or replacement must not disappear silently.
       // The provisioning controller supplies the mechanical refusal text.
       const reason = error instanceof Error && error.message.trim() !== '' ? error.message : '原因未知'

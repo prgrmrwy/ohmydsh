@@ -85,7 +85,7 @@ describe('resolveSessionJumpTarget (task 8.4)', () => {
   it('spec Scenario "退役 locus 的待办仍在列表中": no current child session at all (retired locus) is unavailable but does not throw', () => {
     expect(resolveSessionJumpTarget(undefined, undefined)).toEqual({
       kind: 'unavailable',
-      reason: '该 locus 当前代无子会话，或来源已失效',
+      reason: '该入口尚未创建子会话，或来源已失效',
     })
   })
 })
@@ -187,12 +187,14 @@ describe('owner-facing todo routes are actually wired (regression guards)', () =
   it('the settings panel renders the fold and dispatches through the pure model', async () => {
     const fs = await import('node:fs')
     const settings = fs.readFileSync(new URL('../src/client/settings.tsx', import.meta.url), 'utf8')
-    // Todos render inside each parent session's block, not as a standalone
-    // section: one ledger read at panel level, redistributed per session.
+    // Todos render inside each work session's block, not as a standalone
+    // section: one ledger read at panel level, redistributed per locus main
+    // session (the ledger key) of that W.
     expect(settings).toContain('<WorkTodos')
     expect(settings).toContain('function WorkTodos')
     expect(settings).toContain('function useTodoLedger')
-    expect(settings).toContain('todos.byParent.get(work.parentSessionId)')
+    expect(settings).toContain('props.todosByMain?.get(main.sessionId)')
+    expect(settings).toContain('todosByMain={todos.byParent}')
     // Display decisions must come from ledger-view.ts, not be re-derived here.
     for (const fn of ['groupTodosByLocus', 'todoStatusLabel', 'availableTodoActions', 'resolveFeishuJumpTarget', 'resolveSessionJumpTarget']) {
       expect(settings).toContain(fn)

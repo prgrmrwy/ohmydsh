@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { LocusChannelController } from '../src/host/channel/locus-controller.js'
 import { createLocusTurnObserver } from '../src/host/locus/turn-observer.js'
 import type { LocusInboxClaim, LocusTurnEnd } from '../src/host/locus/turn-observer.js'
-import { LocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
 import type { LocusReplyTarget } from '../src/host/locus/context.js'
@@ -28,41 +28,49 @@ const ENDPOINT = { chatId: 'oc_settle', threadId: 'omt_settle' } as const
 const PARENT = 'session-main'
 const CHILD = 'session-child'
 
-/** Boot the durable repository with one active locus generation. */
-async function durableLocus(harness: PetHarness): Promise<LocusRepository> {
-  const repository = new LocusRepository(harness.domain)
-  await repository.putLocus({
-    id: 'locus-settle-group',
-    generation: 1,
-    endpoint: GROUP_ENDPOINT,
-    parentSessionId: PARENT,
-    childSessionId: 'session-group-child',
-    workspaceId: 'workspace-settle',
-    source: 'auto',
-    state: 'active',
-    childComposition: 'tier3',
-    permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-    busy: false,
-    createdAt: 1,
-    updatedAt: 1,
-  })
-  await repository.putLocus({
-    id: 'locus-settle',
-    generation: 1,
-    endpoint: ENDPOINT,
-    parentSessionId: PARENT,
-    childSessionId: CHILD,
-    workspaceId: 'workspace-settle',
-    parentLocusId: 'locus-settle-group',
-    source: 'inherited',
-    state: 'active',
-    childComposition: 'tier3',
-    permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-    busy: false,
-    createdAt: 2,
-    updatedAt: 2,
-  })
-  return repository
+/** Boot the durable v20 repository: a group row and a topic row, both `active`, under one M. */
+async function durableLocus(harness: PetHarness): Promise<LocusRepositoryV20> {
+  await harness.domain.table('locus_mains').put(PARENT, {
+    locusMainSessionId: PARENT, workSessionId: 'work', generation: 1, status: 'active',
+    spaceId: 'space-settle', workspaceId: 'ws-pet', createdAt: 1, updatedAt: 1,
+  } as never)
+  await harness.domain.table('loci').put(GROUP_ENDPOINT.chatId, {
+    endpoint: GROUP_ENDPOINT, locusId: 'locus-settle-group', sessionId: 'session-group-child', state: 'active',
+    accessMode: 'read-only', revision: 1, createdAt: 1, updatedAt: 1,
+    locusMainSessionId: PARENT, workspaceId: 'workspace-settle',
+  } as never)
+  await harness.domain.table('loci').put(`${ENDPOINT.chatId}\x1f${ENDPOINT.threadId}`, {
+    endpoint: ENDPOINT, locusId: 'locus-settle', sessionId: CHILD, state: 'active',
+    accessMode: 'read-only', revision: 1, createdAt: 2, updatedAt: 2,
+  } as never)
+  return new LocusRepositoryV20(harness.domain as never)
+}
+
+/** The controller's ledger port over the v20 repository (the production wiring shape). */
+function ledgerPort(repository: LocusRepositoryV20) {
+  return {
+    findByMessageId: (messageId: string) => repository.findDeliveryByMessageId(messageId),
+    getById: (deliveryId: string) => repository.getDelivery(deliveryId),
+    accept: (input: never) => repository.acceptDelivery(input),
+    // The v20 repository returns the pure transition result; the controller's
+    // port wants the record (bind) or the same mutation shape (settle).
+    bindQueued: async (input: { correlation: DeliveryCorrelation }) => (await repository.bindQueued({ ...input.correlation, ...input } as never)).record,
+    bindTurn: async (input: { correlation: DeliveryCorrelation }) => (await repository.bindTurn({ ...input.correlation, ...input } as never)).record,
+    settleByTurn: (input: never) => repository.settleByTurn(input),
+    failBeforeDispatch: (input: never) => repository.failBeforeDispatch(input),
+    fail: (input: never) => repository.fail(input),
+  } as never
+}
+
+/** `claimCurrent` yields the record only when THIS call claimed it (an occupied current is "not claimed"). */
+function claimPort(repository: LocusRepositoryV20) {
+  return async (input: { readonly correlation: DeliveryCorrelation; readonly deliveryId?: string; readonly now: number }) => {
+    const result = await repository.claimCurrentDelivery({
+      ...input.correlation, now: input.now,
+      ...(input.deliveryId === undefined ? {} : { deliveryId: input.deliveryId }),
+    })
+    return result.changed ? result.record : undefined
+  }
 }
 
 /**
@@ -87,7 +95,7 @@ async function composeSettlementHost(options: {
    * current underneath it.
    */
   readonly renderPrompt?: (input: {
-    readonly locus: { readonly id?: string; readonly locusId?: string; readonly generation: number; readonly childSessionId: string; readonly parentSessionId: string }
+    readonly locus: { readonly locusId: string; readonly sessionId: string; readonly locusMainSessionId: string }
     readonly message: { readonly messageId: string }
     readonly signal: AbortSignal
   }) => string | Promise<string>
@@ -105,7 +113,7 @@ async function composeSettlementHost(options: {
     lookup: {
       find: ({ childSessionId, messageId }) => {
         const record = repository.findDeliveryByInboxMessageId(messageId)
-        if (record === undefined || record.childSessionId !== childSessionId) return undefined
+        if (record === undefined || record.sessionId !== childSessionId) return undefined
         if (record.executionId === undefined) return undefined
         return {
           deliveryId: record.deliveryId,
@@ -113,8 +121,7 @@ async function composeSettlementHost(options: {
           correlation: {
             endpoint: record.endpoint,
             locusId: record.locusId,
-            generation: record.generation,
-            childSessionId: record.childSessionId,
+            sessionId: record.sessionId,
           },
         }
       },
@@ -136,20 +143,12 @@ async function composeSettlementHost(options: {
     // uses `accept`/`findByMessageId`, the repository exposes the durable
     // `acceptDelivery`/`findDeliveryByMessageId`. Everything below the names
     // is the real durable implementation.
-    deliveries: {
-      findByMessageId: (messageId: string) => repository.findDeliveryByMessageId(messageId),
-      getById: (deliveryId: string) => repository.getDelivery(deliveryId),
-      accept: (input: never) => repository.acceptDelivery(input),
-      bindQueued: (input: never) => repository.bindQueued(input),
-      bindTurn: (input: never) => repository.bindTurn(input),
-      fail: (input: never) => repository.fail(input),
-    } as never,
+    deliveries: ledgerPort(repository),
     // The REAL durable current/backlog claim seam. Production requires this;
     // this suite is the one place its full lifecycle (claim -> queue -> real
     // observer proof -> durable finish -> successor claim) runs together.
     deliveryDispatch: {
-      claimCurrent: (input: { readonly correlation: DeliveryCorrelation; readonly deliveryId?: string; readonly now: number }) =>
-        repository.claimCurrentDelivery(input),
+      claimCurrent: claimPort(repository),
       currentFinished: () => {},
       dispatchNext: async (correlation: DeliveryCorrelation) => { await controller.dispatchNext(correlation) },
       scheduleCurrent: () => {},
@@ -186,9 +185,6 @@ async function composeSettlementHost(options: {
     ...(options.renderPrompt === undefined
       ? {}
       : { renderPrompt: options.renderPrompt as never }),
-    invalidatePolicyDrift: ({ locus, reason }) => repository.invalidateLocus(
-      locus.id ?? locus.locusId ?? '', reason, Date.now(), undefined,
-    ),
     turns: observer,
     receipts: {
       markAccepted: () => {},
@@ -224,9 +220,8 @@ async function composeSettlementHost(options: {
       options2: { readonly outboundResult?: 'success' | 'failure' | 'unknown'; readonly reason?: string } = {},
     ) => {
       const current = repository.findCurrentSerializedDelivery({
-        childSessionId: correlation.childSessionId,
+        sessionId: correlation.sessionId,
         locusId: correlation.locusId,
-        generation: correlation.generation,
       })
       if (current === undefined) throw new Error('no current Delivery to finish')
       const now = Date.now()
@@ -289,12 +284,34 @@ function admission(messageId: string) {
 const CORRELATION: DeliveryCorrelation = {
   endpoint: ENDPOINT,
   locusId: 'locus-settle',
-  generation: 1,
-  childSessionId: CHILD,
+  sessionId: CHILD,
+}
+
+/** The refused-reply tracker wired to the real repository and controller, as the Host does. */
+function refusedTracker(host: Awaited<ReturnType<typeof composeSettlementHost>>) {
+  return createRefusedReplyTracker({
+    getDelivery: id => host.repository.getDelivery(id),
+    abandonRefusedDelivery: input => host.repository.abandonRefusedDelivery(input),
+    isActive: () => true,
+    withDispatchLane: async (_scope, operation) => operation(),
+    now: Date.now,
+    finishAndAdvance: async (record, correlation) => {
+      host.observer.revokeCurrentCapability?.({ childSessionId: CHILD, deliveryId: record.deliveryId })
+      host.controller.currentFinished({ deliveryId: record.deliveryId, correlation, outcome: 'failed' })
+      await host.controller.dispatchNext(correlation)
+    },
+  })
+}
+
+/** Admit A (current, turn 1 claimed) and return it. */
+async function currentA(host: Awaited<ReturnType<typeof composeSettlementHost>>) {
+  await host.controller.handleAdmission(admission('om_a') as never)
+  host.claim({ childSessionId: CHILD, messageId: host.queued[0]!.messageId, turn: 1, sourceKind: 'user' })
+  return host.repository.findDeliveryByMessageId('om_a')!
 }
 
 describe('durable Delivery lifecycle against its exact child turn', () => {
-  it('advances B after refused A even when the real controller failure receipt throws', async () => {
+  it('spec Scenario "回复被拒后本轮结束": A ends failed/reply-refused without a body, B becomes current, even when the failure receipt throws', async () => {
     const host = await composeSettlementHost({ feedbackFails: true })
     try {
       await host.controller.handleAdmission(admission('om_refused_a') as never)
@@ -350,8 +367,9 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       expect(host.settledReactions).toEqual([
         { target: expect.objectContaining({ messageId: 'om_first' }), outcome: 'settled' },
       ])
-      // Finishing the only pending Delivery releases the locus busy fence.
-      expect(host.repository.getLocus('locus-settle')?.busy).toBe(false)
+      // Nothing non-terminal is left for the entry: there is no busy fence to release,
+      // the in-flight state is derived from the delivery table.
+      expect(host.repository.hasNonTerminalDelivery('locus-settle')).toBe(false)
     } finally {
       await host.close()
     }
@@ -458,7 +476,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       await host.controller.dispatchNext(CORRELATION)
 
       expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('expired')
-      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', childSessionId: CHILD })
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', sessionId: CHILD })
       expect(host.queued).toHaveLength(2)
     } finally {
       await host.close()
@@ -513,7 +531,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       await host.controller.handleAdmission(admission('om_A') as never)
       await host.controller.handleAdmission(admission('om_B') as never)
       const current = host.repository.findCurrentSerializedDelivery({
-        childSessionId: CORRELATION.childSessionId, locusId: CORRELATION.locusId, generation: CORRELATION.generation,
+        sessionId: CORRELATION.sessionId, locusId: CORRELATION.locusId,
       })
       // The finish path replies to `current.replyTarget ?? current.feedbackTarget`:
       // both are fixed to A at acceptance, so B can never be the quoted message.
@@ -586,7 +604,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       await host.controller.handleAdmission(admission('om_clarified_answer') as never)
       const answer = host.repository.findDeliveryByMessageId('om_clarified_answer')
       const clarification = host.repository.findDeliveryByMessageId('om_ambiguous')
-      expect(answer).toMatchObject({ childSessionId: CHILD, status: 'current' })
+      expect(answer).toMatchObject({ sessionId: CHILD, status: 'current' })
       expect(answer?.deliveryId).not.toBe(clarification?.deliveryId)
       expect(host.queued).toHaveLength(2)
       expect(host.queued[1]?.messageId).not.toBe(host.queued[0]?.messageId)
@@ -604,17 +622,8 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
 
       const recovered = new LocusChannelController({
         locus: createLocusResolution({ store: host.repository, mains: { find: () => ({ workSessionId: 'work', status: 'active' }) }, verifyMain: () => true }) as never,
-        deliveries: {
-          findByMessageId: (messageId: string) => host.repository.findDeliveryByMessageId(messageId),
-          getById: (deliveryId: string) => host.repository.getDelivery(deliveryId),
-          accept: (input: never) => host.repository.acceptDelivery(input),
-          bindQueued: (input: never) => host.repository.bindQueued(input),
-          bindTurn: (input: never) => host.repository.bindTurn(input),
-        } as never,
-        deliveryDispatch: {
-          claimCurrent: (input: { readonly correlation: DeliveryCorrelation; readonly deliveryId?: string; readonly now: number }) =>
-            host.repository.claimCurrentDelivery(input),
-        },
+        deliveries: ledgerPort(host.repository),
+        deliveryDispatch: { claimCurrent: claimPort(host.repository) },
         child: { ensureChild: () => undefined, queueChild: async () => ({ accepted: false as const, reason: 'unused' }) },
         turns: host.observer,
         receipts: { markAccepted: () => {}, markSettled: () => {} },
@@ -650,7 +659,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
     }
   })
 
-  it('persists invalid and accepts nothing when live policy drifts between ordinary Deliveries', async () => {
+  it('refuses and accepts nothing when live policy drifts between ordinary Deliveries, leaving the row untouched', async () => {
     const host = await composeSettlementHost()
     try {
       const first = await host.controller.handleAdmission(admission('om_before_drift') as never)
@@ -667,11 +676,8 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
       })
       expect(host.repository.findDeliveryByMessageId('om_after_drift')).toBeUndefined()
       expect(host.queued).toHaveLength(queuedBefore)
-      expect(host.repository.getLocus('locus-settle')).toMatchObject({
-        state: 'invalid',
-        permission: { effective: 'read' },
-        invalidReason: expect.stringContaining('不一致'),
-      })
+      // Class B (D7): the row is neither demoted nor invalidated.
+      expect(host.repository.getLocus('locus-settle')).toMatchObject({ state: 'active', accessMode: 'read-only', revision: 1 })
     } finally {
       await host.close()
     }
@@ -680,7 +686,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
   it('refuses an ordinary message on a stopped endpoint instead of reviving it', async () => {
     const host = await composeSettlementHost()
     try {
-      await host.repository.stopLocus('locus-settle', 20)
+      await host.repository.stopRow({ expectedLocusId: 'locus-settle', expectedRevision: 1 }, 20)
 
       const refused = await host.controller.handleAdmission(admission('om_after_stop') as never)
 
@@ -789,5 +795,195 @@ describe('a prompt rendered while the current changes is never delivered', () =>
     } finally {
       await host.close()
     }
+  })
+})
+
+
+describe('queue ordering and timeout (real repository, controller and observer)', () => {
+  it('spec Scenario "多人连续提问": two qualified messages stay backlog in accept order, then are delivered one by one', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await currentA(host)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      await host.controller.handleAdmission(admission('om_c') as never)
+      const b = host.repository.findDeliveryByMessageId('om_b')!
+      const c = host.repository.findDeliveryByMessageId('om_c')!
+      expect([b.status, c.status]).toEqual(['accepted', 'accepted'])
+      expect(b.sequence).toBeLessThan(c.sequence)
+      expect(host.queued).toHaveLength(1) // neither reached the child inbox
+
+      await host.finish(CORRELATION, 'reply')
+      await vi.waitFor(() => expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('current'))
+      expect(host.repository.findDeliveryByMessageId('om_c')?.status).toBe('accepted')
+      expect(host.queued).toHaveLength(2)
+
+      host.claim({ childSessionId: CHILD, messageId: host.queued[1]!.messageId, turn: 2, sourceKind: 'user' })
+      await vi.waitFor(() => expect(host.repository.findDeliveryByMessageId('om_b')?.turnId).toBe(`${CHILD}#2`))
+      await host.finish(CORRELATION, 'reply')
+      await vi.waitFor(() => expect(host.repository.findDeliveryByMessageId('om_c')?.status).toBe('current'))
+      expect(host.queued).toHaveLength(3)
+      // Each Delivery keeps its own trigger message association.
+      for (const [id, target] of [['om_b', b], ['om_c', c]] as const) {
+        expect(host.repository.findDeliveryByMessageId(id)).toMatchObject({
+          messageId: id, feedbackTarget: expect.objectContaining({ messageId: id }), sessionId: CHILD,
+        })
+        expect(target.messageId).toBe(id)
+      }
+    } finally { await host.close() }
+  })
+
+  it('spec Scenario "父回复与下一条飞书消息不会合批": B stays backlog while A waits for the parent, nothing reaches the inbox before A ends', async () => {
+    const host = await composeSettlementHost()
+    try {
+      const a = await currentA(host)
+      // A declares it is waiting (for the parent's context); B arrives meanwhile.
+      const waited = await host.repository.waitCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: Date.now(), waitMinutes: 120,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      expect(waited.changed).toBe(true)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('current')
+      expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('accepted')
+      expect(host.queued).toHaveLength(1) // B was not batched into the child inbox
+      // Only A's own termination releases B.
+      await host.finish(CORRELATION, 'reply')
+      await vi.waitFor(() => expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('current'))
+      expect(host.queued).toHaveLength(2)
+    } finally { await host.close() }
+  })
+
+  it('spec Scenario "超时不重建会话": a timed-out A is terminated and B runs on the SAME child session; the entry row is not rebuilt', async () => {
+    const host = await composeSettlementHost()
+    try {
+      await currentA(host)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const rowBefore = host.repository.getLocus('locus-settle')
+      const a = host.repository.findDeliveryByMessageId('om_a')!
+      const expired = await host.repository.expireCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 1,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      expect(expired.changed).toBe(true)
+      host.controller.currentFinished({ deliveryId: a.deliveryId, correlation: CORRELATION, outcome: 'failed' })
+      await host.controller.dispatchNext(CORRELATION)
+
+      expect(host.repository.findDeliveryByMessageId('om_a')?.status).toBe('expired')
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', sessionId: CHILD })
+      // No rebuild: same row, same sessionId, same revision, still active.
+      expect(host.repository.getLocus('locus-settle')).toEqual(rowBefore)
+      expect(host.queued).toHaveLength(2)
+    } finally { await host.close() }
+  })
+})
+
+describe('reply refused: end-of-turn settlement (real repository, controller and observer)', () => {
+  it('spec Scenario "被拒后同轮改正": a refused finish followed by a successful finish in the same turn ends A as replied, never reply-refused', async () => {
+    const host = await composeSettlementHost()
+    try {
+      const a = await currentA(host)
+      const tracker = refusedTracker(host)
+      tracker.refused(host.repository.getDelivery(a.deliveryId)!, 1)
+      await host.finish(CORRELATION, 'reply')
+      host.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+      await tracker.end(CHILD, 1)
+      expect(host.repository.getDelivery(a.deliveryId)).toMatchObject({ status: 'replied' })
+      expect(host.repository.getDelivery(a.deliveryId)?.failureReason).not.toBe('reply-refused')
+    } finally { await host.close() }
+  })
+
+  it.each(['before', 'after'] as const)('spec Scenario "被拒后声明继续等待": wait succeeded %s the refusal keeps A current at turn end', async order => {
+    const host = await composeSettlementHost()
+    try {
+      const a = await currentA(host)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const tracker = refusedTracker(host)
+      const record = host.repository.getDelivery(a.deliveryId)!
+      if (order === 'before') tracker.continued(CHILD, 1)
+      tracker.refused(record, 1)
+      if (order === 'after') tracker.continued(CHILD, 1)
+      host.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+      await tracker.end(CHILD, 1)
+      expect(host.repository.getDelivery(a.deliveryId)?.status).toBe('current')
+      expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('accepted')
+      expect(host.queued).toHaveLength(1)
+    } finally { await host.close() }
+  })
+
+  it('spec Scenario "无关联或迟到旧执行不消费新请求": a refusal recorded for an expired A neither ends B nor any other current', async () => {
+    const host = await composeSettlementHost()
+    try {
+      const a = await currentA(host)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const tracker = refusedTracker(host)
+      const staleA = host.repository.getDelivery(a.deliveryId)!
+      await host.repository.expireCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 1,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      host.controller.currentFinished({ deliveryId: a.deliveryId, correlation: CORRELATION, outcome: 'failed' })
+      await host.controller.dispatchNext(CORRELATION)
+      const b = host.repository.findDeliveryByMessageId('om_b')!
+      expect(b.status).toBe('current')
+
+      tracker.refused(staleA, 1) // the old run's refused finish
+      await tracker.end(CHILD, 1)
+      expect(host.repository.getDelivery(a.deliveryId)?.status).toBe('expired')
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', revision: b.revision })
+      // A turn with no recorded refusal at all (a pure GUI turn) settles nothing either.
+      await tracker.end(CHILD, 9)
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: 'current', revision: b.revision })
+    } finally { await host.close() }
+  })
+
+  it('spec Scenario "未调用 finish 的普通结束不受影响": a normal turn end with no refusal leaves A current and B undelivered', async () => {
+    const host = await composeSettlementHost()
+    try {
+      const a = await currentA(host)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const tracker = refusedTracker(host)
+      host.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+      await tracker.end(CHILD, 1)
+      expect(host.repository.getDelivery(a.deliveryId)?.status).toBe('current')
+      expect(host.repository.findDeliveryByMessageId('om_b')?.status).toBe('accepted')
+      expect(host.queued).toHaveLength(1)
+    } finally { await host.close() }
+  })
+
+  it('spec Scenario "收尾与超时竞争": when the refused-finalize and the deadline race, A terminates exactly once and B is consumed only by the winner', async () => {
+    const host = await composeSettlementHost()
+    try {
+      const a = await currentA(host)
+      await host.controller.handleAdmission(admission('om_b') as never)
+      const tracker = refusedTracker(host)
+      tracker.refused(host.repository.getDelivery(a.deliveryId)!, 1)
+      // The deadline wins first.
+      await host.repository.expireCurrentDelivery({
+        ...CORRELATION, deliveryId: a.deliveryId, now: a.deadlineAt! + 1,
+        ...(a.revision === undefined ? {} : { expectedRevision: a.revision }),
+      })
+      // The losing end-of-turn finalize must neither change A nor consume B.
+      const bBefore = host.repository.findDeliveryByMessageId('om_b')!
+      await tracker.end(CHILD, 1)
+      expect(host.repository.getDelivery(a.deliveryId)).toMatchObject({ status: 'expired' })
+      expect(host.repository.getDelivery(a.deliveryId)?.failureReason).not.toBe('reply-refused')
+      expect(host.repository.findDeliveryByMessageId('om_b')).toMatchObject({ status: bBefore.status, revision: bBefore.revision })
+
+      // The other order: the finalize wins, then a late expiry is a no-op.
+      const host2 = await composeSettlementHost()
+      try {
+        const a2 = await currentA(host2)
+        await host2.controller.handleAdmission(admission('om_b') as never)
+        const t2 = refusedTracker(host2)
+        t2.refused(host2.repository.getDelivery(a2.deliveryId)!, 1)
+        await t2.end(CHILD, 1)
+        expect(host2.repository.getDelivery(a2.deliveryId)).toMatchObject({ status: 'failed', failureReason: 'reply-refused' })
+        const late = await host2.repository.expireCurrentDelivery({
+          ...CORRELATION, deliveryId: a2.deliveryId, now: a2.deadlineAt! + 1,
+        })
+        expect(late.changed).toBe(false)
+        expect(host2.repository.getDelivery(a2.deliveryId)?.status).toBe('failed')
+      } finally { await host2.close() }
+    } finally { await host.close() }
   })
 })

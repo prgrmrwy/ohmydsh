@@ -28,7 +28,7 @@
 | hold-constraints | holdout | frontier | higher |
 | hold-unknown | holdout | insufficient_context | baseline |
 
-[测试输入及独立预期](../eval/cases.json)、[问题定义](../src/rubric.json)、[有预算保护的实测脚本](../eval/live.mjs)（当时文件名分别带 `policy-v2-` 前缀）。depth 从同一任务证据独立判断相对适配模型的推荐投入，不引用另一个尚未返回的 capability 答案。两者都指定时不判；只指定一个维度时仅询问另一个。
+[测试输入及独立预期](../eval/cases.json)、[问题定义](../src/presets/reasoning-depth/rubric.json)、[有预算保护的实测脚本](../eval/live.mjs)（当时文件名分别带 `policy-v2-` 前缀）。depth 从同一任务证据独立判断相对适配模型的推荐投入，不引用另一个尚未返回的 capability 答案。两者都指定时不判；只指定一个维度时仅询问另一个。
 
 实测脚本先保留每次费用预算再请求，失败也计一次；预留每次 65536 input tokens 远高于合成输入。未知 usage.cost 停止，不记零。尚有 10 次授权余量，不默认消耗，也不因生成一个新结果文件就获得新预算。跨多次运行的全局预算需由执行者核对，脚本不是账户级额度控制。
 

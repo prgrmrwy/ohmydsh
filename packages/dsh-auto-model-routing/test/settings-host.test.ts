@@ -70,3 +70,26 @@ it('absent_credentials_read_launch_environment_and_failed_models_do_not_hide_hea
  expect(view.key).toMatchObject({configured:true,writable:false,available:false})
  expect(JSON.stringify(view)).not.toContain('test-secret')
 })
+
+it('spec Scenario "测试连接使用所选预设"', async () => {
+  const { harness: mainHarness, closeHarness } = await import('./host-harness.js')
+  const { json } = await import('./fake-jev.js')
+  const { resolvePreset } = await import('../src/presets/index.js')
+  const h = await mainHarness(json(200, { answers: { capability: { choice: 'bounded' }, depth: { choice: 'baseline' } } }), { storedKey: 'k-test' })
+  try {
+    const service = { provider: 'custom', endpoint: `${h.jev.base}/decide` }
+    h.configure({ preset: 'effort-as-verification', decisionService: service })
+    const release = h.holdCredentials()
+    const first = h.invoke('testDecision', {})
+    await release.reached
+    h.configure({ preset: 'reasoning-depth', decisionService: service })
+    release()
+    await first
+    expect(h.jev.bodies).toHaveLength(1)
+    const sent = h.jev.bodies[0] as { state: string; questions: unknown }
+    expect(sent.questions).toEqual(resolvePreset('effort-as-verification').rubric)
+    expect(sent.state).toBe('Public connection test: sort the numbers [3,1,2] in ascending order.')
+    await h.invoke('testDecision', {})
+    expect((h.jev.bodies[1] as { questions: unknown }).questions).toEqual(resolvePreset('reasoning-depth').rubric)
+  } finally { await closeHarness() }
+})

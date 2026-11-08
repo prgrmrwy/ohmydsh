@@ -6,11 +6,14 @@ Managed `dsh web` launches add [no-pet-stop-plugin.mjs](./no-pet-stop-plugin.mjs
 
 After official `appReady`, the plugin waits for the Loader to settle and certifies the real complete trees. It checks every entry, including disabled, failed, and fiberless entries; expanded group/include lists must correspond to their actual entries. The pinned official preset registry's public `livePresetMounts(rootFiber)` adds standing and retained revisions that deliberately do not appear under `loader.entries()`. Current preset declarations are also inspected, and a broken preset inventory refuses certification. The official Host runner can mount raw child fibers outside the Loader; any entry in its public `dynamicCordisRunner.inventory()` is treated as an unknown carrier, and its package/retract events prevent later downgrade. Only recognized static official modules and these understood carriers are accepted. Any configured Pet, unresolved carrier, failed enabled entry, unknown module, or unsupported DSH version prevents publication and route registration.
 
-[no-pet-known-modules.json](./no-pet-known-modules.json) records the exact 0.2.1-rc.5 module vocabulary from the official base/Web bundle patches, their four preset patches, and directory-picker-auto's fixed native/browse pairs. This is a compatibility roster, not a package-prefix heuristic. Re-audit it against official source and rerun complete-profile acceptance when changing the DSH pin. Arbitrary third-party plugins and unknown carriers intentionally require explicit legacy maintenance until their completeness can be established.
+[no-pet-known-modules.json](./no-pet-known-modules.json) records the exact 0.2.2-rc.1 module vocabulary from the official base/Web bundle patches, their four preset patches, and directory-picker-auto's fixed native/browse pairs. This is a compatibility roster, not a package-prefix heuristic. Re-audit it against official source and rerun complete-profile acceptance when changing the DSH pin. Arbitrary third-party plugins and unknown carriers intentionally require explicit legacy maintenance until their completeness can be established.
 
 A certifiable noPet Host owns no Pet resources, so preparation records its current absence instead of claiming to drain resources. It publishes the same private descriptor in `run/dsh-pet-stop/<port>.json` (0700 directory, 0600 file), using `connection.authenticatedUrl()` and a fresh boot identity. The exact `/dsh-pet/api/prepare-stop` route uses Connection's signed-cookie fence, plus exact loopback Host and Origin checks. `prepare`, `status`, and `resume` use the shared v1 nonce/PID/boot/deadline protocol. Each request rereads the real trees. Loader topology changes withdraw the noPet route before Pet can claim it; fiber phase, plugin, and volatile updates invalidate old tickets. Dispose removes only this producer's descriptor inode and route. Reloading the producer can certify a new complete tree only if this Host has never exposed Pet or an unknown module. Once observed, that condition is retained for the lifetime of the Host: Cordis removes a disposing fiber from its registry before awaiting teardown, so deleting its Loader row cannot prove that its resources are gone. Such a Host requires a fresh launch or explicit legacy maintenance; old tickets never cross the producer's boot identity.
 
 [pet-stop.mjs](./pet-stop.mjs) exchanges the private URL for a cookie, prepares, then authenticates `status` immediately before each signal. Status must still be `prepared` with the exact operation nonce, PID, boot identity, prepared time, and expiry. Full OS process identity is checked before and after HTTP. The old unproduced `dsh-host-launch` snapshot reader is removed. An explicit legacy flag permits maintenance only when the protocol descriptor is absent; a malformed descriptor or failed authenticated exchange never falls back to legacy. After a flagged restart, a new descriptor and authenticated `active` status must succeed before reporting protocol load. That maintenance stop is not drain evidence.
+
+
+**Update 2026-11-06**: when no stop descriptor exists (an old Host, or a Pet that never published one), the launcher no longer refuses; it warns and stops without Pet drain, leaving in-flight Deliveries to Pet startup recovery (finishing → unknown-terminal without resend; unprovable → manual). An existing but invalid descriptor still refuses. `--allow-legacy-restart` remains accepted for compatibility.
 
 ## Verification
 
@@ -20,7 +23,7 @@ The ordinary source regression lane includes private overlay checks and the auth
 node --test tests/launcher-no-pet-profile.test.mjs tests/launcher-pet-stop.test.mjs
 ```
 
-The real profile acceptance is a separate built-artifact lane, [launcher-no-pet.official.mjs](../../tests/launcher-no-pet.official.mjs). It requires a complete built official 0.2.1-rc.5 runtime directory whose package resolution includes `@deepseek-ai/dsh`. A missing graph fails explicitly; none of its negative controls skip. It uses real official `runProfile`, profile patching, Loader, appReady, WebServer, Connection, and preset generations. Only process probing/signalling is replaced; no real Host is stopped, and no model request or Feishu message is sent.
+The real profile acceptance is a separate built-artifact lane, [launcher-no-pet.official.mjs](../../tests/launcher-no-pet.official.mjs). It requires a complete built official 0.2.2-rc.1 runtime directory whose package resolution includes `@deepseek-ai/dsh`. A missing graph fails explicitly; none of its negative controls skip. It uses real official `runProfile`, profile patching, Loader, appReady, WebServer, Connection, and preset generations. Only process probing/signalling is replaced; no real Host is stopped, and no model request or Feishu message is sent.
 
 ```sh
 DSH_TEST_OFFICIAL_RUNTIME=/absolute/path/to/built/launcher \
@@ -28,3 +31,19 @@ DSH_TEST_OFFICIAL_RUNTIME=/absolute/path/to/built/launcher \
 ```
 
 Coverage includes the full shipped base+Web profile and presets stopping without legacy, successful expanded group/include trees, failed Pet imports, disabled Pet declarations, active unknown carriers, retained old preset revisions, cookie/Host/Origin/nonce/PID/boot rejection, resume invalidation, and topology changes. This does not replace live H2 drain acceptance of the Pet producer or Windows runtime verification.
+
+## Managed non-web profile Hosts
+
+`DSH_PROFILE=<profile> dsh -p <port>` starts a managed Host for a profile other than `web` (for example `DSH_PROFILE=superagent dsh -p 3082 --foreground`). It uses the same exact pin, Host runtime resolution, ownership probe, and startup history as `dsh web`. The Host argv is `<profile> --port <port> --no-open …`, and ownership is matched against that exact profile, so a web probe never adopts a non-web listener and vice versa. Unset `DSH_PROFILE` keeps the existing `web` behavior unchanged.
+
+Limits:
+
+- `-p/--port` is mandatory; the default port belongs to the web Host. `$DSH_HOME/profiles/<profile>/cordis.yml` must already exist.
+- If the profile's `cordis.patch.yml` sets `webserver` `config`, it replaces the Web bundle's port settings and the Host ignores `--port`. Keep its `port` equal to `-p`, or drop that entry.
+- Only start is managed. The no-pet-stop patch is not loaded (a custom profile bundle cannot pass its static-module attestation), so no stop descriptor is published, and `dsh stop/restart` refuses before any signal. Stop the Host through its own management script. Explicit manual maintenance can use `--allow-legacy-restart`, which skips Pet drain.
+- `build`, `-b`, `reset`, `plugin-update`, and `doctor` are refused, and the start path skips `autoUpdate`. All of these would run sync or plugin maintenance against `DSH_PROFILE` and write the ohmydsh customizations into the other profile. Worktree previews support only `web`. `history` is still allowed; each record carries `profile=<profile>`.
+- Process scope isolation is the caller's job: the launcher adds no detach logic. A Host started from inside a DSH session belongs to that Host's subprocess scope unless the caller runs it as a transient systemd user service, for example `systemd-run --user --wait --collect --unit=dsh-superagent-superagent -p StandardOutput=append:<log> -p StandardError=append:<log> -- env DSH_PROFILE=superagent dsh --foreground -p 3082 --no-open`. Do not use `--scope`: its client process is the launched command itself, still in the caller's pane or process group, so the Host dies when the tmux pane or session scope is cleaned up. A service is parented by the user manager. Background mode shares `$DSH_HOME/dsh.log` with the web Host.
+
+```sh
+node --test tests/launcher-managed-profile.test.mjs
+```

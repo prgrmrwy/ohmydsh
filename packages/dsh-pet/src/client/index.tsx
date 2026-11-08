@@ -37,10 +37,7 @@ import {
   type PetSessionTarget,
   setSettingsCloser,
 } from './settings.js'
-import {
-  PET_SETTINGS_NAV_CSS,
-  registerPetSettingsNavIcon,
-} from './settings-nav-icon.js'
+import { PetSettingsNavIcon } from './settings-nav-icon.js'
 import { PET_CSS } from './styles.js'
 import { mainSessionId } from './main-session.js'
 import { sessionTargetOf } from './session-target.js'
@@ -83,7 +80,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const style = document.createElement('style')
     style.setAttribute('data-plugin', 'dsh-pet')
-    style.textContent = `${PET_CSS}\n${PET_SETTINGS_NAV_CSS}`
+    style.textContent = PET_CSS
     document.head.appendChild(style)
     return () => style.remove()
   }, 'dsh-pet: styles')
@@ -226,13 +223,9 @@ export function apply(ctx: ClientContext): void {
   })
 
 
-  // DSH 0.1.x picks settings-nav icons from a closed list of built-in ids, so
-  // Pet's row would otherwise render the fallback gear. Mark our own row (and
-  // only ours) so the bundled CSS can paint the mascot glyph instead.
-  ctx.effect(
-    () => registerPetSettingsNavIcon(PET_SECTION_LABEL),
-    'dsh-pet: settings nav glyph',
-  )
+  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+    name: 'settings.section.icon', id: 'dsh-pet',
+  }, PetSettingsNavIcon))
 }
 
 /**
@@ -243,7 +236,7 @@ export function apply(ctx: ClientContext): void {
  * remounting would drop drag state and in-flight panel state on every
  * session, Hero or Settings transition.
  */
-/** Display label for the settings section; shared with the nav-glyph marker. */
+/** Display label for the settings section. */
 const PET_SECTION_LABEL = (): string => 'Pet'
 
 let boundContext: ClientContext | undefined

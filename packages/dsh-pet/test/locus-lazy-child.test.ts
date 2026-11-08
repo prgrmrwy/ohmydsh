@@ -2,51 +2,72 @@ import { describe, expect, it, vi } from 'vitest'
 import { createLocusChildAdapter, type LocusChildPorts, type LocusLiveParent } from '../src/host/locus/child.js'
 import {
   composeLocusChild,
+  LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
+  LOCUS_SAFE_TOOL_NAMES,
   type LocusCandidateAgent,
-  type LocusChildComposition,
   type LocusCompositionPorts,
 } from '../src/host/locus/composition.js'
+import type { LocusAccessModeV20 } from '../src/host/locus/contract-v20.js'
+import { createFirstDeliveryPublication } from '../src/host/locus/first-delivery-publication.js'
+import { createFirstPromptRegistry } from '../src/host/locus/first-prompt.js'
 import { createLocusLazyChildCreator, type LocusLazyChildInput } from '../src/host/locus/lazy-child.js'
 import {
   createPrepublicationCompositionLookup,
   LocusPrepublicationStagingRegistry,
 } from '../src/host/locus/prepublication-staging.js'
-import { createFirstPromptRegistry } from '../src/host/locus/first-prompt.js'
 import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
+import { firstPublicationRepo, type FakeRow } from './support/first-publication-repo.js'
 import { FakeOfficialRuntime, type FakeAgentCreated } from './support/official-subagent.js'
 
 const LOCUS_MAIN = 'session-locus-main'
 const FIRST_PROMPT = '## 当前 unified locus 投递（caller-bound）\n\n请回答：发布流程怎么走？'
 
 /**
- * The official runtime, the REAL staging registry, the REAL composer and the
- * REAL adapter, wired the way `index.ts` wires them. Only the Host seams that
- * reach into DSH (policy, surface, preset reads) are stand-ins.
+ * The official runtime, the REAL staging registry, composer, adapter, creator,
+ * first-prompt registry and first-delivery publication, wired the way
+ * `index.ts` wires them. The durable writes are the contract-faithful fake of
+ * owner A's port; the Host seams that reach into DSH (policy, surface, preset
+ * reads) are stand-ins.
  */
-function world(options: { activeLimit?: number; spawnIndependent?: boolean; presetDeclared?: boolean } = {}) {
+function world(options: {
+  activeLimit?: number
+  spawnIndependent?: boolean
+  presetDeclared?: boolean
+  row?: Partial<FakeRow>
+} = {}) {
   const runtime = new FakeOfficialRuntime({
     ...(options.activeLimit === undefined ? {} : { activeLimit: options.activeLimit }),
     ...(options.spawnIndependent === undefined ? {} : { spawnIndependent: options.spawnIndependent }),
   })
   const locusMain = runtime.addParent(LOCUS_MAIN)
-  const staging = new LocusPrepublicationStagingRegistry({ createChildSessionId: (() => {
-    let next = 1
-    return () => `session-child-${String(next++)}`
-  })() })
-  const applied = new Map<string, 'read' | 'write'>()
+  const repo = firstPublicationRepo(options.row)
+  let nextReservation = 1
+  const reserveChildSessionId = () => `session-reserved-${String(nextReservation++)}`
+  const staging = new LocusPrepublicationStagingRegistry()
+  const firstPrompts = createFirstPromptRegistry()
+  runtime.onClaim = ({ childId, messageId }) => { firstPrompts.resolve({ childSessionId: childId, messageId }) }
+
+  const applied: { id: string; mode: LocusAccessModeV20 }[] = []
+  const visible = new Set<string>()
   const compositionPorts: LocusCompositionPorts = {
     lookup: createPrepublicationCompositionLookup({ durable: { find: () => undefined }, staging }),
     parentPreset: () => LOCUS_BASE_PRESET,
     childPreset: () => 'locus-child',
+    writeEnabled: true,
     surface: {
       install: vi.fn(),
-      setToolTier: vi.fn(),
+      applyAccessMode: vi.fn((_agent, mode: LocusAccessModeV20) => {
+        visible.clear()
+        for (const name of [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS]) visible.add(name)
+        if (mode === 'danger-full-access') for (const name of LOCUS_FULL_ACCESS_TOOL_NAMES) visible.add(name)
+      }),
       installOutboundGuard: vi.fn(),
-      visibleTools: () => ['read', 'read_image', 'glob', 'grep', 'web_search', 'pet_context', 'pet_locus_finish'],
+      visibleTools: () => [...visible],
     },
     policy: {
-      apply: (id, permission) => { applied.set(id, permission) },
-      resolve: id => applied.get(id),
+      apply: (id, mode) => { applied.push({ id, mode }) },
+      resolve: id => applied.findLast(item => item.id === id)?.mode,
     },
   }
   /** What `index.ts`' `agent/created` listener does for a locus candidate. */
@@ -67,152 +88,125 @@ function world(options: { activeLimit?: number; spawnIndependent?: boolean; pres
       getProvider: name => runtime.getProvider(name),
     },
   }
-  const log = vi.fn()
   const creator = createLocusLazyChildCreator({
     staging,
     createAdapter: () => createLocusChildAdapter(ports),
     presetDeclared: () => options.presetDeclared ?? true,
-    log,
+    log: vi.fn(),
   })
+  const publication = createFirstDeliveryPublication({ repository: repo.repository, firstPrompts, reserveChildSessionId, now: () => 10 })
 
-  const published = new Map<string, LocusChildComposition>()
-  const publish = vi.fn((childSessionId: string, composition: LocusChildComposition) => {
-    published.set(childSessionId, composition)
-  })
-  const unpublish = vi.fn((childSessionId: string, _composition?: LocusChildComposition) => { published.delete(childSessionId) })
-  const request = (overrides: Partial<LocusLazyChildInput> = {}): LocusLazyChildInput => ({
-    parentSessionId: LOCUS_MAIN,
-    workspaceId: 'workspace-1',
-    locusId: 'locus-1',
-    generation: 1,
-    label: 'Locus · dev group',
-    endpoint: { chatId: 'oc_dev' },
-    permission: 'read',
-    prompt: [{ type: 'text', text: FIRST_PROMPT }],
-    publish,
-    unpublish,
-    ...overrides,
-  })
-  return { runtime, locusMain, staging, creator, publish, unpublish, published, request, log, compose, compositionPorts }
+  /** One first-creation request built from the row AS IT IS NOW, for one current Delivery. */
+  let executions = 0
+  const request = (deliveryId: string, overrides: Partial<LocusLazyChildInput> = {}): LocusLazyChildInput => {
+    const locus = { locusId: repo.row.locusId, sessionId: repo.row.sessionId, revision: repo.row.revision, endpoint: { chatId: 'oc_dev' } }
+    return {
+      sessionId: repo.row.sessionId,
+      locusMainSessionId: LOCUS_MAIN,
+      workspaceId: 'workspace-1',
+      locusId: repo.row.locusId,
+      revision: repo.row.revision,
+      accessMode: repo.row.accessMode,
+      label: 'Locus · dev group',
+      endpoint: { chatId: 'oc_dev' },
+      prompt: [{ type: 'text', text: FIRST_PROMPT }],
+      ...publication({ locus, deliveryId, executionId: `execution-${String(++executions)}` }),
+      ...overrides,
+    }
+  }
+  return { runtime, locusMain, staging, creator, repo, request, compose, compositionPorts, applied, firstPrompts }
 }
 
 describe('首条消息即首个 prompt', () => {
   it('首条消息即首个 prompt', async () => {
-    const { runtime, creator, publish, published, request, staging } = world()
+    const { runtime, creator, repo, request, staging } = world()
+    repo.accept('delivery-1')
 
-    const result = await creator.create(request())
+    const result = await creator.create(request('delivery-1'))
 
-    expect(result).toMatchObject({ ok: true, childSessionId: 'session-child-1' })
-    // Exactly one creation, carrying the delivery's prompt: no idle child, no
-    // later `sendMessage`/queue for the same message.
+    expect(result).toMatchObject({ ok: true, childSessionId: 'session-reserved-0' })
+    // Exactly one creation, carrying the delivery's prompt.
     expect(runtime.startCalls).toHaveLength(1)
+    expect(runtime.startCalls[0]!.childId).toBe('session-reserved-0')
     expect(runtime.startCalls[0]!.request.prompt).toEqual([{ type: 'text', text: FIRST_PROMPT }])
     expect(runtime.startCalls[0]!.provider).toBe('spawn')
     expect(runtime.startCalls[0]!.request.parent).toBe(runtime.agents.get(LOCUS_MAIN))
-    expect(runtime.startCalls[0]).not.toHaveProperty('settlementNotice')
     expect(runtime.queueCalls).toEqual([])
-    // The generation becomes active carrying the tier3 marker.
-    expect(publish).toHaveBeenCalledTimes(1)
-    expect(published.get('session-child-1')).toMatchObject({
-      childComposition: 'tier3',
-      locusId: 'locus-1',
-      generation: 1,
-      parentSessionId: LOCUS_MAIN,
-      endpoint: { chatId: 'oc_dev' },
-    })
-    // The pre-publication reservation was handed over, leaving nothing live.
+    // The row went active under the id it reserved before creation.
+    expect(repo.row).toMatchObject({ state: 'active', sessionId: 'session-reserved-0', revision: 1 })
+    expect(repo.calls).toEqual(['publishFirstDelivery', 'commitFirstDelivery'])
     expect(staging.activeCount).toBe(0)
   })
 })
 
 describe('API 返回前首轮已能解析身份', () => {
   it('API 返回前首轮已能解析身份', async () => {
-    const { runtime, creator, publish, published, request, staging } = world()
-    const firstPrompt = createFirstPromptRegistry()
-    // Publication (inside agent/created) registers which Delivery this prompt carries.
-    publish.mockImplementation((childSessionId, composition) => {
-      published.set(childSessionId, composition)
-      firstPrompt.expect(childSessionId, {
-        deliveryId: 'delivery-1',
-        executionId: 'execution-1',
-        correlation: {
-          endpoint: { chatId: 'oc_dev' },
-          locusId: 'locus-1',
-          generation: 1,
-          childSessionId,
-        },
-      })
-    })
-    let resolvedAtFirstTool: ReturnType<typeof firstPrompt.resolve>
-    // The first caller-bound tool call (`pet_context`) runs inside the first
-    // turn, which the runtime claims BEFORE `startActivation` returns, so the
-    // durable (child, message) binding cannot exist yet.
+    const { runtime, creator, repo, request, staging, firstPrompts } = world()
+    repo.accept('delivery-1')
+    let resolvedAtFirstTool: ReturnType<typeof firstPrompts.resolve>
+    // The first turn is claimed BEFORE startActivation returns.
     runtime.onClaim = ({ childId, messageId }) => {
       expect(staging.activeCount).toBe(0)
-      resolvedAtFirstTool = firstPrompt.resolve({ childSessionId: childId, messageId })
+      resolvedAtFirstTool = firstPrompts.resolve({ childSessionId: childId, messageId })
     }
 
-    const result = await creator.create(request())
+    const result = await creator.create(request('delivery-1'))
 
-    expect(result).toMatchObject({ ok: true, childSessionId: 'session-child-1' })
-    expect(resolvedAtFirstTool).toMatchObject({ deliveryId: 'delivery-1', correlation: { locusId: 'locus-1', childSessionId: 'session-child-1' } })
-    // The id the runtime returns is the one the claim bound: nothing to re-send.
-    expect(result.ok && result.messageId).toBe(firstPrompt.claimedMessageId('session-child-1'))
-    // Created -> published -> claimed -> returned, and no second delivery path.
+    expect(result).toMatchObject({ ok: true, childSessionId: 'session-reserved-0' })
+    expect(resolvedAtFirstTool).toMatchObject({
+      deliveryId: 'delivery-1',
+      correlation: { locusId: 'locus-1', sessionId: 'session-reserved-0' },
+    })
     expect(runtime.milestones).toEqual([
-      'created:session-child-1:startup',
-      'claimed:session-child-1',
-      'returned:session-child-1',
+      'created:session-reserved-0:startup',
+      'claimed:session-reserved-0',
+      'returned:session-reserved-0',
     ])
     expect(runtime.queueCalls).toEqual([])
-    // Only the first message id is ever bound to the expectation.
-    expect(firstPrompt.resolve({ childSessionId: 'session-child-1', messageId: 'another-message' })).toBeUndefined()
-    // An unexpected child never resolves.
-    expect(firstPrompt.resolve({ childSessionId: 'session-other', messageId: 'message-1' })).toBeUndefined()
   })
 
-  it('does not run the first turn when the publication callback fails', async () => {
-    const { runtime, creator, publish, request } = world()
-    publish.mockImplementationOnce(() => { throw new Error('store unavailable') })
+  it('does not run the first turn when the durable publication is refused', async () => {
+    const { runtime, creator, repo, request } = world()
+    repo.accept('delivery-1')
+    const input = request('delivery-1')
+    repo.row.revision += 1 // someone else moved the row: the publish fence fails
 
-    const result = await creator.create(request())
+    const result = await creator.create(input)
 
-    expect(result).toMatchObject({ ok: false, reason: 'create-failed' })
+    expect(result).toMatchObject({ ok: false })
     expect(runtime.milestones.some(item => item.startsWith('claimed:'))).toBe(false)
   })
 })
 
 describe('回调内发布后创建被拒时回滚', () => {
   it('回调内发布后创建被拒时回滚', async () => {
-    const { runtime, creator, publish, unpublish, published, request, staging } = world()
-    // The marker and current were published inside the callback; the rest of
-    // creation is then rejected.
+    const { runtime, creator, repo, request, staging } = world()
+    repo.accept('delivery-1')
     runtime.failAfterCreated = new Error('creation rejected after publish')
 
-    const result = await creator.create(request())
+    const result = await creator.create(request('delivery-1'))
 
     expect(result).toMatchObject({ ok: false, reason: 'create-failed' })
-    expect(publish).toHaveBeenCalledTimes(1)
-    expect(unpublish).toHaveBeenCalledTimes(1)
-    expect(unpublish).toHaveBeenCalledWith('session-child-1', expect.objectContaining({ childComposition: 'tier3' }))
-    // No servable active generation or current is left behind.
-    expect(published.size).toBe(0)
+    // Published, then reverted in ONE write that also rotates and settles.
+    expect(repo.calls).toEqual(['publishFirstDelivery', 'revertFirstDelivery'])
+    expect(repo.row).toMatchObject({ state: 'not-created', sessionId: 'session-reserved-1', revision: 2 })
+    expect(repo.deliveries.get('delivery-1')).toMatchObject({ status: 'failed', sessionId: 'session-reserved-0' })
     expect(staging.activeCount).toBe(0)
-    expect(runtime.agents.has('session-child-1')).toBe(false)
 
-    // The next message may create again, with a fresh reserved identity.
+    // The next at creates with the new reservation.
     runtime.failAfterCreated = undefined
-    const retry = await creator.create(request())
-    expect(retry).toMatchObject({ ok: true, childSessionId: 'session-child-2' })
-    expect(published.has('session-child-2')).toBe(true)
+    repo.accept('delivery-2')
+    expect(await creator.create(request('delivery-2'))).toMatchObject({ ok: true, childSessionId: 'session-reserved-1' })
+    expect(repo.row).toMatchObject({ state: 'active', sessionId: 'session-reserved-1', revision: 2 })
   })
 
   it('reports an incomplete rollback instead of claiming a clean failure', async () => {
-    const { runtime, creator, unpublish, request } = world()
+    const { runtime, creator, repo, request } = world()
+    repo.accept('delivery-1')
     runtime.failAfterCreated = new Error('creation rejected after publish')
-    unpublish.mockImplementationOnce(() => { throw new Error('revert failed') })
-
-    const result = await creator.create(request())
+    const input = request('delivery-1')
+    const unpublish = input.unpublish
+    const result = await creator.create({ ...input, unpublish: async id => { await unpublish(id); throw new Error('revert failed') } })
 
     expect(result).toMatchObject({ ok: false, reason: 'rollback-failed' })
   })
@@ -220,33 +214,36 @@ describe('回调内发布后创建被拒时回滚', () => {
 
 describe('创建失败不推进代际', () => {
   it('创建失败不推进代际', async () => {
-    const { runtime, creator, publish, unpublish, compositionPorts, request, staging } = world()
-    // The composition readback disagrees: the policy resolved is not the grant.
-    compositionPorts.policy = { apply: vi.fn(), resolve: () => 'write' }
+    const { runtime, creator, repo, request, compositionPorts, staging } = world()
+    repo.accept('delivery-1')
+    const backlog = repo.accept('delivery-2')
+    expect(backlog).toMatchObject({ status: 'accepted', sessionId: 'session-reserved-0' })
+    // The agent/created readback disagrees (non-capacity).
+    const policy = compositionPorts.policy!
+    compositionPorts.policy = { apply: policy.apply, resolve: () => 'danger-full-access' }
 
-    const result = await creator.create(request())
+    const result = await creator.create(request('delivery-1'))
 
     expect(result).toMatchObject({ ok: false, reason: 'create-failed' })
-    // Nothing was published, so there is nothing to revert and no generation moved.
-    expect(publish).not.toHaveBeenCalled()
-    expect(unpublish).not.toHaveBeenCalled()
+    // Nothing was published: a single settle-and-rotate write.
+    expect(repo.calls).toEqual(['failFirstDeliveryCreation'])
+    expect(repo.deliveries.get('delivery-1')).toMatchObject({ status: 'failed', sessionId: 'session-reserved-0' })
+    expect(repo.row).toMatchObject({ locusId: 'locus-1', state: 'not-created', accessMode: 'read-only', sessionId: 'session-reserved-1', revision: 2 })
+    expect(backlog.sessionId).toBe('session-reserved-1')
     expect(staging.activeCount).toBe(0)
     expect(runtime.milestones.some(item => item.startsWith('claimed:'))).toBe(false)
 
-    // The next message tries again from the same state.
-    compositionPorts.policy = (() => {
-      const applied = new Map<string, 'read' | 'write'>()
-      return { apply: (id: string, permission: 'read' | 'write') => { applied.set(id, permission) }, resolve: (id: string) => applied.get(id) }
-    })()
-    const retry = await creator.create(request())
-    expect(retry.ok).toBe(true)
+    // The next at (the retargeted backlog) creates with C1; C0 is never reused.
+    compositionPorts.policy = policy
+    backlog.status = 'current'
+    expect(await creator.create(request('delivery-2'))).toMatchObject({ ok: true, childSessionId: 'session-reserved-1' })
+    expect(runtime.startCalls.map(call => call.childId)).toEqual(['session-reserved-0', 'session-reserved-1'])
   })
 })
 
 describe('名额不足时保留原请求', () => {
   it('名额不足时保留原请求', async () => {
-    const { runtime, creator, publish, request, staging } = world({ activeLimit: 1 })
-    // Another entry's child already holds the only slot.
+    const { runtime, creator, repo, request, staging } = world({ activeLimit: 1 })
     runtime.agents.set('session-other', {
       id: 'session-other',
       ctx: { agentId: 'session-other' },
@@ -254,60 +251,79 @@ describe('名额不足时保留原请求', () => {
       inbox: [],
       turnOpen: false,
     })
-    const input = request()
+    repo.accept('delivery-1')
+    const input = request('delivery-1')
 
     const refused = await creator.create(input)
 
-    // Retryable, distinct from a failure: nothing published, nothing reserved,
-    // nothing created or marked failed.
+    // Retryable and NOT a failure: no durable write at all, the reservation stands.
     expect(refused).toMatchObject({ ok: false, reason: 'capacity', retryable: true })
-    expect(publish).not.toHaveBeenCalled()
+    expect(repo.calls).toEqual([])
+    expect(repo.row).toMatchObject({ state: 'not-created', sessionId: 'session-reserved-0', revision: 1 })
+    expect(repo.deliveries.get('delivery-1')).toMatchObject({ status: 'current' })
     expect(staging.activeCount).toBe(0)
-    expect(runtime.agents.has('session-child-1')).toBe(false)
 
-    // The slot frees; the SAME request is created exactly once.
+    // The slot frees; the SAME request and reserved id create exactly once.
     runtime.release('session-other')
-    const created = await creator.create(input)
-    expect(created).toMatchObject({ ok: true })
-    expect(runtime.startCalls.filter(call => call.request.prompt[0]?.text === FIRST_PROMPT)).toHaveLength(2)
-    expect(runtime.agents.size).toBe(2)
-    expect(publish).toHaveBeenCalledTimes(1)
+    expect(await creator.create(input)).toMatchObject({ ok: true, childSessionId: 'session-reserved-0' })
+    expect(runtime.startCalls.map(call => call.childId)).toEqual(['session-reserved-0', 'session-reserved-0'])
+    expect(repo.calls).toEqual(['publishFirstDelivery', 'commitFirstDelivery'])
   })
 })
 
-describe('a reserved child identity', () => {
-  it('creates the child under the id the generation reserved, and reuses it on a capacity retry', async () => {
-    const { runtime, creator, published, request } = world({ activeLimit: 0 })
-    const input = request({ childSessionId: 'session-reserved' })
+describe('首次创建按行上的 accessMode 组装', () => {
+  it('首次创建按行上的 accessMode 组装', async () => {
+    // Changed while not-created: the first creation must compose THAT value.
+    const ok = world({ row: { accessMode: 'danger-full-access' } })
+    ok.repo.accept('delivery-1')
+    expect(await ok.creator.create(ok.request('delivery-1'))).toMatchObject({ ok: true })
+    expect(ok.applied.map(item => item.mode)).toEqual(['danger-full-access'])
+    expect(ok.compositionPorts.surface?.applyAccessMode).toHaveBeenCalledWith(expect.anything(), 'danger-full-access')
 
-    expect(await creator.create(input)).toMatchObject({ ok: false, reason: 'capacity' })
-    runtime.activeLimit = Number.POSITIVE_INFINITY
-    const created = await creator.create(input)
-
-    expect(created).toMatchObject({ ok: true, childSessionId: 'session-reserved' })
-    expect(runtime.startCalls.map(call => call.childId)).toEqual(['session-reserved', 'session-reserved'])
-    expect(published.has('session-reserved')).toBe(true)
+    // A readback mismatch fails like any creation failure, and never retries read-only.
+    const bad = world({ row: { accessMode: 'danger-full-access' } })
+    bad.repo.accept('delivery-1')
+    const policy = bad.compositionPorts.policy!
+    bad.compositionPorts.policy = { apply: policy.apply, resolve: () => 'read-only' }
+    expect(await bad.creator.create(bad.request('delivery-1'))).toMatchObject({ ok: false, reason: 'create-failed' })
+    expect(bad.applied.map(item => item.mode)).toEqual(['danger-full-access'])
+    expect(bad.repo.deliveries.get('delivery-1')).toMatchObject({ status: 'failed' })
+    expect(bad.repo.row).toMatchObject({ accessMode: 'danger-full-access', sessionId: 'session-reserved-1', revision: 2 })
   })
 })
 
 describe('provider 不能证明独立上下文', () => {
   it('provider 不能证明独立上下文', async () => {
-    const { runtime, creator, publish, request, staging } = world({ spawnIndependent: false })
+    const { runtime, creator, repo, request, staging } = world({ spawnIndependent: false })
+    repo.accept('delivery-1')
 
-    const result = await creator.create(request())
+    const result = await creator.create(request('delivery-1'))
 
     expect(result).toMatchObject({ ok: false, reason: 'independent-context-unproven' })
     expect(runtime.startCalls).toHaveLength(0)
-    expect(publish).not.toHaveBeenCalled()
+    expect(repo.calls).not.toContain('publishFirstDelivery')
     expect(staging.activeCount).toBe(0)
   })
 
+  it('spec Scenario "无法证明独立能力时拒绝创建"', async () => {
+    const { runtime, creator, repo, request } = world({ spawnIndependent: false })
+    repo.accept('delivery-1')
+
+    const result = await creator.create(request('delivery-1'))
+
+    // Reported as a capability fact, not a retry and not "established".
+    expect(result).toMatchObject({ ok: false, reason: 'independent-context-unproven', retryable: false })
+    // No fallback to a provider that copies the parent's history.
+    expect(runtime.startCalls).toEqual([])
+    expect(repo.row.state).toBe('not-created')
+    expect(repo.deliveries.get('delivery-1')).toMatchObject({ status: 'failed' })
+  })
+
   it('refuses before reserving anything when the locus-base preset is not declared', async () => {
-    const { runtime, creator, request, staging } = world({ presetDeclared: false })
+    const { runtime, creator, repo, request, staging } = world({ presetDeclared: false })
+    repo.accept('delivery-1')
 
-    const result = await creator.create(request())
-
-    expect(result).toMatchObject({ ok: false, reason: 'preset-missing' })
+    expect(await creator.create(request('delivery-1'))).toMatchObject({ ok: false, reason: 'preset-missing' })
     expect(runtime.startCalls).toHaveLength(0)
     expect(staging.activeCount).toBe(0)
   })

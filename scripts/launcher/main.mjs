@@ -7,7 +7,7 @@ import { parseArgs, isOfficialInvocation, trustedHostArgs, HELP } from './args.m
 import { loadEnvironment } from './environment.mjs'
 import { run as defaultRun } from './runner.mjs'
 import { autoUpdate, appendEvent, ensurePrerequisites } from './maintenance.mjs'
-import { probePort, stopServer } from './process.mjs'
+import { probePort, stopServer, validProfile } from './process.mjs'
 import { preparePetStop, verifyStopProtocol } from './pet-stop.mjs'
 import { noPetStopPatch } from './no-pet-stop-profile.mjs'
 import { isolatedHome, readPreview, writePreview, matchesPreview, stopPreview, previewPorts } from './preview.mjs'
@@ -32,6 +32,22 @@ function manifestAt(repo) {
   return doc
 }
 
+const MAINTENANCE = { buildOnly: 'build', build: '-b/--build', reset: 'reset', pluginUpdate: 'plugin-update', doctor: 'doctor' }
+/**
+ * DSH_PROFILE selects which managed Host profile `dsh` starts; it is not a
+ * deployment target. Every non-web refusal happens before any side effect.
+ */
+function guardManagedProfile({ profile, flags, preview, home }) {
+  if (!validProfile(profile)) throw new Error(`DSH_PROFILE ${JSON.stringify(profile)} is not a valid profile name`)
+  const maintenance = Object.keys(MAINTENANCE).find(key => flags[key])
+  if (maintenance) throw new Error(`DSH_PROFILE=${profile} 只选择受管 Host 的 profile；${MAINTENANCE[maintenance]} 会写入/维护 ${profile} profile，已拒绝。构建与维护请使用默认 web profile（去掉 DSH_PROFILE）`)
+  if (flags.history) return
+  if (!flags.portExplicit) throw new Error(`DSH_PROFILE=${profile} requires an explicit -p/--port; the default port belongs to the web Host`)
+  if (preview) throw new Error(`DSH_PROFILE=${profile}: 隔离预览环境只支持 web profile`)
+  if ((flags.stop || flags.restart) && !flags.allowLegacyRestart) throw new Error(`DSH_PROFILE=${profile} 的 Host 不加载鉴权停机协议，dsh stop/restart 不支持；请由该 Host 的管理脚本启停，人工维护可显式使用 --allow-legacy-restart`)
+  if (!flags.stop && !fs.existsSync(path.join(home, 'profiles', profile, 'cordis.yml'))) throw new Error(`DSH_PROFILE=${profile}: ${path.join(home, 'profiles', profile, 'cordis.yml')} 不存在；请先初始化该 profile`)
+}
+
 export async function runLauncher(argv, options = {}) {
   const caller = options.env ?? process.env
   if (caller.DSH_RESTART_ORCHESTRATED === '1' && !options.orchestrated) {
@@ -48,7 +64,7 @@ async function launch(argv, options) {
   const flags = official ? {} : parseArgs(argv)
   if (flags.help) { log(HELP); return 0 }
   const environment = loadEnvironment(repo, caller, { platform, warn })
-  const { env, npmEnv, hostEnv, home } = environment
+  const { env, npmEnv, hostEnv, home, profile } = environment
   const runScript = (name, args = [], extra = {}) => run(process.execPath, [path.join(repo, 'scripts', name), ...args], { env: npmEnv, ...extra })
   const context = { ...environment, repo, runScript, run, log, warn }
   const getManifest = () => manifestAt(repo)
@@ -57,6 +73,7 @@ async function launch(argv, options) {
     return (await runScript('dsh-cli.mjs', argv, { env: { ...npmEnv, DSH_CLI_VERSION: doc.dshVersion } })).status
   }
   const preview = (options.isolatedHome ?? isolatedHome)(repo, home)
+  if (profile !== 'web') guardManagedProfile({ profile, flags, preview, home })
   if (preview) {
     // OpenSpec schema installation uses XDG rather than DSH_HOME.
     for (const target of [env, npmEnv, hostEnv]) target.XDG_DATA_HOME = path.join(home, 'xdg-data')
@@ -83,15 +100,16 @@ async function launch(argv, options) {
   }
   let current
   const guardedStop = async (port, stopOptions = {}) => {
-    const initial = structuredClone(stopOptions.expectedIdentity ?? current ?? await probe(port, { env }))
+    const initial = structuredClone(stopOptions.expectedIdentity ?? current ?? await probe(port, { env, profile }))
     if (!['owned', 'empty'].includes(initial.state)) throw new Error(initial.error || 'Listener is not provably DSH; refusing to kill')
-    const boundProbe = stopOptions.probe ?? ((_port, options = {}) => probe(port, { env, ...options }))
+    // profile is applied last: stopServer forwards its own default profile option.
+    const boundProbe = stopOptions.probe ?? ((_port, options = {}) => probe(port, { env, ...options, profile }))
     onPhase('preparing-pet')
-    const ticket = await preparePetStop({ home, port, initial, probe: boundProbe, env, allowLegacyRestart: flags.allowLegacyRestart, warn })
+    const ticket = await preparePetStop({ home, port, initial, probe: boundProbe, env, profile, allowLegacyRestart: flags.allowLegacyRestart, warn })
     try {
       await ticket.beforeSignal()
       onPhase('stopping')
-      const result = await stop(port, { ...stopOptions, env, warn, expectedIdentity: initial, probe: boundProbe, beforeSignal: ticket.beforeSignal })
+      const result = await stop(port, { ...stopOptions, env, warn, profile, expectedIdentity: initial, probe: boundProbe, beforeSignal: ticket.beforeSignal })
       if (!result.ok) throw new Error(result.error || 'Failed to stop verified Host')
       return result
     } catch (error) {
@@ -131,7 +149,7 @@ async function launch(argv, options) {
     }
   }
   if (!flags.buildOnly) {
-    current = await probe(flags.port, { env })
+    current = await probe(flags.port, { env, profile })
     if (preview) {
       if (previewRecord && matchesPreview(current, previewRecord)) current = { ...current, state: 'owned' }
       else if (!flags.portExplicit) current = { state: 'empty' }
@@ -140,7 +158,9 @@ async function launch(argv, options) {
     if (!['empty', 'owned'].includes(current.state)) throw new Error(current.error || `port ${flags.port} listener is not provably DSH; refusing start`)
   }
   if (flags.buildOnly || flags.build || flags.restart || current.state === 'empty') {
-    const updated = await autoUpdate(context)
+    // autoUpdate may rewrite dsh.yaml and run sync.mjs, which deploys into the
+    // DSH_PROFILE profile; a non-web managed Host must never do that.
+    const updated = profile === 'web' ? await autoUpdate(context) : false
     await ensurePrerequisites(context)
     if ((flags.buildOnly || flags.build) && !updated) {
       const build = await runScript('sync.mjs')
@@ -175,13 +195,16 @@ async function launch(argv, options) {
     return 0
   }
   prepared ??= await prepare()
-  const protocolPatch = prepared.DSH_RUNTIME_KIND === 'env' ? [] : ['--patch', noPetStopPatch(home, repo, doc.dshVersion)]
+  // Only the web profile loads the authenticated stop protocol. A non-web
+  // profile's own bundle cannot pass the no-pet static-module attestation, so
+  // it publishes no descriptor and its stop/restart stays refused (see guard).
+  const protocolPatch = profile !== 'web' || prepared.DSH_RUNTIME_KIND === 'env' ? [] : ['--patch', noPetStopPatch(home, repo, doc.dshVersion)]
   const ports = preview ? previewPorts(flags.port, flags.portExplicit) : [flags.port]
   for (const port of ports) {
     flags.port = port
     uiOptions.port = port
     if (preview && (await probe(port, { env })).state !== 'empty') continue
-    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, ['web', ...protocolPatch, '--port', String(flags.port), '--no-open', ...hostTrustArgs, ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
+    const resolved = packageManager.resolveDshCommand(prepared.DSH_SERVER_BIN, [profile, ...protocolPatch, '--port', String(flags.port), '--no-open', ...hostTrustArgs, ...flags.passthrough], { platform, nodePath: process.execPath, managed: prepared.DSH_RUNTIME_KIND !== 'env' })
     fs.mkdirSync(home, { recursive: true })
     const fd = flags.foreground ? undefined : fs.openSync(path.join(home, 'dsh.log'), 'a')
     let child
@@ -201,7 +224,7 @@ async function launch(argv, options) {
     while (Date.now() < deadline) {
       if (childError || child.exitCode !== null || child.signalCode !== null) break
       if (await (options.connect ?? canConnect)(flags.port)) {
-        const candidate = await probe(flags.port, { env, deadline })
+        const candidate = await probe(flags.port, { env, deadline, profile })
         ready = candidate.state === 'owned' && candidate.processes.some(record => record.pid === child.pid)
         racedOwner = candidate.state === 'owned' && !ready
         if (ready) readyIdentity = candidate.processes.find(record => record.pid === child.pid)
@@ -231,7 +254,7 @@ async function launch(argv, options) {
       }
       if (preview) continue
       if (racedOwner || child.exitCode !== null) {
-        const winner = await probe(flags.port, { env })
+        const winner = await probe(flags.port, { env, profile })
         if (winner.state === 'owned') {
           await ui(doc)
           log(`dsh 已在运行: http://127.0.0.1:${flags.port} (another verified launcher won startup)`)
@@ -242,7 +265,7 @@ async function launch(argv, options) {
       warn(`error: server ${childError ? 'cannot start' : child.exitCode !== null ? 'exited early' : 'readiness failed (ownership unknown or 30s deadline)'} — see ${path.join(home, 'dsh.log')}`)
       return child.exitCode || 1
     }
-    if (flags.restart && flags.allowLegacyRestart) {
+    if (flags.restart && flags.allowLegacyRestart && profile === 'web') {
       try {
         await verifyStopProtocol({ home, port, initial: { state: 'owned', processes: [readyIdentity] }, probe, env, deadlineAt: Math.max(deadline, Date.now() + 5_000) })
         log('新版 Host descriptor 与受鉴权 status 已确认；首次 legacy 维护停止不计为 drain 验收。')
@@ -257,7 +280,7 @@ async function launch(argv, options) {
       announcePreview()
     }
     const pluginNames = await runScript('plugin-list.mjs', ['--names'], { capture: true })
-    appendEvent(home, `dshVersion=${doc.dshVersion} runtime=${prepared.DSH_RUNTIME_KIND} port=${flags.port} plugins=[${pluginNames.status === 0 ? pluginNames.stdout.trim() : ''}]`)
+    appendEvent(home, `dshVersion=${doc.dshVersion} runtime=${prepared.DSH_RUNTIME_KIND} profile=${profile} port=${flags.port} plugins=[${pluginNames.status === 0 ? pluginNames.stdout.trim() : ''}]`)
     log(`Host runtime: ${prepared.DSH_RUNTIME_KIND}`)
     await ui(doc)
     log(`dsh 已启动: http://127.0.0.1:${flags.port} (dshVersion=${doc.dshVersion};未自动打开 UI 时可 dsh --open)`)

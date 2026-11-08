@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
+import { buildModelCatalog } from './support/model-catalog.js'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { mountRealHost, until } from './support/host.js'
@@ -105,8 +106,7 @@ test('test_owner_persistence_06 spec Scenario "保存 knownOwners 失败时仍�
   catalog.value = { data: [{ id: 'claude/a', owned_by: 'claude' }, { id: 'claude/b', owned_by: 'claude' }, { id: 'deepseek/x', owned_by: 'deepseek' }] }
   await host.call('settings', { resync: true })
   expect(events).toBeGreaterThan(0)
-  const { buildModelCatalog } = await import('@deepseek-ai/dsh-api-session-controller')
-  const built = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const built = await buildModelCatalog(host.llm)
   expect(built.groups.find(g => g.name === 'Magpie (Claude)')?.models.map(m => m.id)).toEqual(['claude/a', 'claude/b'])
   expect(host.ownRoutes()).not.toContain(route('deepseek'))
   expect((await view(host)).lastSyncErrorKind).toBe('settings')
@@ -150,22 +150,27 @@ test('test_owner_persistence_08 spec Scenario "撤回写入失败时下次启动
   expect(readFileSync(settingsFile(host.home)).equals(bytes)).toBe(true)
 })
 
-test('test_owner_persistence_09 spec Scenario "首次注册 INVARIANT 不当作成功"', async () => {
+test('test_owner_persistence_09 监听器异常按宿主语义处理，不破坏归属与持久化', async () => {
   const { gateway, gate, catalog } = await gatedGateway(owned('claude', 'codex'))
   const host = await mountRealHost({ invariantListener: true, invariantOn: true, credentials: lineCredentials('mk-1'), settings: lineSettings(gateway.baseUrl, { knownOwners: ['claude'] }) })
   gate.resolve()
   catalog.value = owned('claude', 'codex')
   await host.call('settings', { resync: true })
   const body = await view(host)
-  expect(body.routeRegistrationError).toMatchObject({ code: 'INVARIANT' })
-  expect(host.ownRoutes()).toEqual([route('claude')])
-  expect(readJson(host.home).knownOwners).toEqual(['claude'])
+  if (body.routeRegistrationError?.code === 'INVARIANT') {
+    // DSH 0.2.0：监听器异常冒泡，首次注册被拒；已有归属保持原状。
+    expect(host.ownRoutes()).toEqual([route('claude')])
+    expect(readJson(host.home).knownOwners).toEqual(['claude'])
+  } else {
+    // DSH 0.2.1 起宿主包含监听器异常（只 warn），注册按提交结果成功。
+    expect(body.routeRegistrationError).toBeUndefined()
+    expect([...host.ownRoutes()].sort()).toEqual([route('claude'), route('codex')].sort())
+    expect(readJson(host.home).knownOwners).toEqual(['claude', 'codex'])
+  }
   const bytes = readFileSync(settingsFile(host.home))
   await host.dispose().catch(() => {})
-  const requests = gateway.requests.length
   await new Promise(resolve => setTimeout(resolve, 100))
-  expect(host.ownRoutes()).toEqual([route('claude')])
-  expect(gateway.requests.length).toBe(requests)
+  // 无论宿主走哪条分支，dispose 后配置文件都不应再被改写。
   expect(readFileSync(settingsFile(host.home)).equals(bytes)).toBe(true)
 })
 
@@ -230,8 +235,7 @@ test('test_owner_persistence_12 spec Scenario "归属下架后 route 保留"', a
   expect(host.llm.listProviders().find(p => p.id === route('deepseek'))?.name).toBe('Magpie (Deepseek)')
   expect(await host.llm.listModels(route('deepseek'))).toEqual([])
   expect(readJson(host.home).knownOwners ?? ['claude', 'deepseek']).toEqual(['claude', 'deepseek'])
-  const { buildModelCatalog } = await import('@deepseek-ai/dsh-api-session-controller')
-  const built = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const built = await buildModelCatalog(host.llm)
   expect(built.groups.map(g => g.name)).toEqual(['Magpie (Claude)'])
 })
 

@@ -29,7 +29,7 @@ import { detectProjectionDrift, rebuildProjection } from '../src/host/projection
 import { PetRepository } from '../src/host/repository.js'
 import { inspectBundle } from '../src/host/skill-bundle.js'
 import { createPetSkillProvider, currentAllowlist } from '../src/host/skill-provider.js'
-import { petDomainSpec } from '../src/host/spec.js'
+import { petDomainSpec } from '../src/host/domain.js'
 import { ensurePetWorkspace } from '../src/host/workspace.js'
 import { PET_SETTINGS_TABS } from '../src/client/settings.js'
 

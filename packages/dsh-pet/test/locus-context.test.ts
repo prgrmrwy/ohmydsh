@@ -22,8 +22,8 @@ function deliveryContext(
     endpoint,
     locus: {
       locusId: 'locus-project-1',
-      generation: 3,
       state: 'active',
+      revision: 3,
     },
     main: {
       sessionId: 'session-main-1',
@@ -37,19 +37,7 @@ function deliveryContext(
       workspaceId: 'workspace-1',
       title: 'repo workspace',
     },
-    permission: {
-      effective: 'read',
-      desired: 'write',
-      verifiedAt: 1_725_000_000_000,
-      grantedBy: 'ou_owner',
-    },
-    contextAnchor: {
-      status: 'confirmed',
-      executionRoot: '/repo/.worktrees/project',
-      constraints: ['只在确认的执行根内工作', '先确认再写入'],
-      provenance: 'main-session-confirmed',
-      confirmedAt: 1_725_000_000_100,
-    },
+    accessMode: 'read-only',
     request: {
       messageId: 'om_request-1',
       senderOpenId: 'ou_requester',
@@ -67,27 +55,21 @@ function deliveryContext(
 }
 
 describe('unified locus delivery context', () => {
-  it('renders shell-tier capabilities and accurately describes the mistake-prevention guard', () => {
-    const prompt = renderLocusDeliveryPrompt(deliveryContext({
-      locus: { locusId: 'locus-project-1', generation: 3, state: 'active', childComposition: 'safe-v2', toolTier: 'shell' },
-    }))
+  it('renders danger-full-access capabilities and accurately describes the mistake-prevention guard', () => {
+    const prompt = renderLocusDeliveryPrompt(deliveryContext({ accessMode: 'danger-full-access' }))
 
     for (const fact of [
-      'shell 档允许以 bot 身份读取当前入口的群消息',
+      '访问模式：danger-full-access',
+      '允许以 bot 身份读取当前入口的群消息',
       'lark-cli 出站 guard 仅防误操作，不是安全边界',
       endpoint.chatId,
       endpoint.threadId,
       'locus-project-1',
-      'generation：`3`',
-      'shell 档可执行本机命令并使用本机飞书凭据',
+      '可执行本机命令并使用本机飞书凭据',
       'MUST NOT 读取无关群、私聊、全局消息或其它 workspace',
       'session-main-1',
       'session-child-1',
       'workspace-1',
-      'effective：read',
-      '存在待应用权限变更',
-      '/repo/.worktrees/project',
-      'main-session-confirmed',
       'om_request-1',
       'ou_requester',
       '请按需看一下这个 topic 的原始资料，并告诉我风险。',
@@ -201,29 +183,53 @@ describe('unified locus delivery context', () => {
     expect(prompt).not.toContain('HISTORY_MESSAGE_SENTINEL')
   })
 
-  it('does not guess an unconfirmed anchor or permission', () => {
-    const prompt = renderLocusDeliveryPrompt(
-      deliveryContext({
-        permission: { effective: 'read' },
-        contextAnchor: { status: 'unknown' },
-      }),
-    )
+  it('states only the row accessMode: no pending value, no anchor, no generation', () => {
+    const prompt = renderLocusDeliveryPrompt(deliveryContext())
 
-    expect(prompt).toContain('effective：read')
-    expect(prompt).not.toContain('desired：')
-    expect(prompt).not.toContain('待应用权限变更')
-    expect(prompt).toContain('status：unknown')
-    expect(prompt).toContain('execution root：未确认')
-    expect(prompt).toContain('constraints：未确认')
-    expect(prompt).toContain('project resources：未确认')
-    expect(prompt).toContain('请所有者在管理面显式确认')
-    expect(prompt).toContain('safe 档不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派')
-    expect(prompt).not.toContain('shell 档允许以 bot 身份读取')
+    expect(prompt).toContain('访问模式：read-only')
+    expect(prompt).toContain('只读模式不得调用 shell、lark-cli、通用 HTTP、send_message 或子委派')
+    expect(prompt).not.toContain('允许以 bot 身份读取')
     expect(prompt).not.toContain('出站 guard 仅防误操作，不是安全边界')
-    expect(prompt).toContain('路径存在性与 sandbox 授权分离')
-    expect(prompt).toContain('不自动运行 ws/sw')
-    expect(prompt).not.toContain('/repo/.worktrees/project')
-    expect(prompt).not.toContain('write 已生效')
+    for (const gone of ['generation', 'Context anchor', 'execution root', '待应用', 'Permission', 'Tool tier']) {
+      expect(prompt).not.toContain(gone)
+    }
+  })
+
+  it('spec Scenario "主会话无法回答"', () => {
+    // The context a child asked its parent for never arrived: it reports the
+    // gap instead of guessing, and receiving material is not adopting it.
+    const prompt = renderLocusDeliveryPrompt(deliveryContext())
+    expect(prompt).toContain('收到资料不等于已采纳')
+    expect(prompt).toContain('不要自动把本 child 的结论、摘要或状态回传 main session')
+    expect(prompt).toContain('访问模式：read-only')
+  })
+
+  it('spec Scenario "历史不含最新目录"', () => {
+    const prompt = renderLocusDeliveryPrompt(deliveryContext())
+    // No execution root is ever stated as a fact, and the child is told how to ask for it.
+    expect(prompt).not.toMatch(/execution root：|cwd：/)
+    expect(prompt).toContain('无法确定当前执行根')
+    expect(prompt).toContain('`locus_ask_parent`')
+    expect(prompt).toContain('请所有者确认')
+    expect(prompt).toContain('不要猜测 cwd')
+    expect(prompt).toContain('不要自行创建其它工作目录')
+  })
+
+  it('spec Scenario "用户主动查阅受实际能力约束"', () => {
+    // Discoverable is not readable: the prompt states what the Host measured for
+    // THIS entrance, and an unreadable one must be reported as such.
+    const unreadable = renderLocusDeliveryPrompt(deliveryContext({ readability: 'unreadable' }))
+    expect(unreadable).toContain('当前不可读')
+    expect(unreadable).toContain('请如实说明该限制，不要假装读过')
+    expect(unreadable).not.toContain('已实测可读')
+
+    const unconfirmed = renderLocusDeliveryPrompt(deliveryContext())
+    expect(unconfirmed).not.toContain('已实测可读')
+
+    const readable = renderLocusDeliveryPrompt(deliveryContext({ readability: 'readable' }))
+    expect(readable).toContain('已实测可读')
+    // Receiving material is still not adopting it, whatever the readability.
+    for (const prompt of [unreadable, unconfirmed, readable]) expect(prompt).toContain('收到资料不等于已采纳')
   })
 
   it('explicitly drops reply authority for a local GUI turn', () => {
@@ -310,7 +316,7 @@ describe('the routing preamble is sent once per child', () => {
     expect(first).toContain('### Endpoint')
     expect(first).toContain('### Locus')
     expect(first).toContain('### Workspace')
-    expect(first).toContain('### Context anchor')
+    expect(first).toContain('### Access mode')
     expect(first).toContain('### 按需读取')
   })
 
@@ -322,7 +328,7 @@ describe('the routing preamble is sent once per child', () => {
   it('drops the durable routing sections on a follow-up delivery', () => {
     const next = renderLocusDeliveryPrompt(deliveryContext(), { position: 'subsequent' })
 
-    for (const section of ['### Endpoint', '### Locus', '### Main / child', '### Workspace', '### Permission', '### Context anchor']) {
+    for (const section of ['### Endpoint', '### Locus', '### Main / child', '### Workspace', '### Access mode']) {
       expect(next).not.toContain(section)
     }
     // Omitted facts stay retrievable from the Host rather than inferred.
@@ -355,37 +361,29 @@ describe('the routing preamble is sent once per child', () => {
   })
 })
 
-describe('every delivery declares the effective tool tier', () => {
-  // The tier is what tells the child whether it can read the entrance itself.
-  // A follow-up that omits it leaves the child guessing, and a renderer that
-  // defaults to `safe` misreports a shell child (the facts come from the
-  // durable record, not from this layer's fallback).
-  function withTier(tier: 'safe' | 'shell'): LocusDeliveryContext {
-    return deliveryContext({ locus: { ...deliveryContext().locus, toolTier: tier } })
+describe('every delivery declares the row accessMode', () => {
+  // The mode is what tells the child whether it can read the entrance itself.
+  // It comes from the durable row (required, no default).
+  function withMode(mode: 'read-only' | 'danger-full-access'): LocusDeliveryContext {
+    return deliveryContext({ accessMode: mode })
   }
 
-  it('states the safe tier and its limit on a follow-up', () => {
-    const next = renderLocusDeliveryPrompt(withTier('safe'), { position: 'subsequent' })
-
-    expect(next).toContain('工具档位：safe')
+  it('states read-only and its limit on a follow-up', () => {
+    const next = renderLocusDeliveryPrompt(withMode('read-only'), { position: 'subsequent' })
+    expect(next).toContain('访问模式：read-only')
     expect(next).toContain('不提供 shell')
   })
 
-  it('states the shell tier and the managed reply rule on a follow-up', () => {
-    const next = renderLocusDeliveryPrompt(withTier('shell'), { position: 'subsequent' })
-
-    expect(next).toContain('工具档位：shell')
+  it('states danger-full-access and the managed reply rule on a follow-up', () => {
+    const next = renderLocusDeliveryPrompt(withMode('danger-full-access'), { position: 'subsequent' })
+    expect(next).toContain('访问模式：danger-full-access')
     expect(next).toContain('pet_locus_finish')
     expect(next).not.toContain('不提供 shell')
   })
 
   it('never instructs the model to quote guard diagnostics into the reply body', () => {
     for (const position of ['first', 'subsequent'] as const) {
-      const prompt = renderLocusDeliveryPrompt(withTier('shell'), { position })
-
-      // The denial text is for the model and local diagnosis. If a prompt ever
-      // asks the model to pass it on, group members start seeing internal
-      // paths; the managed outbound cannot take that back.
+      const prompt = renderLocusDeliveryPrompt(withMode('danger-full-access'), { position })
       expect(prompt, position).not.toContain('把诊断')
       expect(prompt, position).not.toContain('守卫诊断')
       expect(prompt, position).not.toContain('拒绝原因')
@@ -394,10 +392,9 @@ describe('every delivery declares the effective tool tier', () => {
     }
   })
 
-  it('keeps the full tier section on a first delivery', () => {
-    const first = renderLocusDeliveryPrompt(withTier('shell'), { position: 'first' })
-
-    expect(first).toContain('### Tool tier')
-    expect(first).toContain('- effective：shell')
+  it('keeps the full access section on a first delivery', () => {
+    const first = renderLocusDeliveryPrompt(withMode('danger-full-access'), { position: 'first' })
+    expect(first).toContain('### Access mode')
+    expect(first).toContain('访问模式：danger-full-access')
   })
 })

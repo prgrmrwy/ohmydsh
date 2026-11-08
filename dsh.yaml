@@ -2,7 +2,9 @@
 # 修改后运行 `dsh build`(或 `node scripts/sync.mjs`)物化到 ~/.dsh。
 # 约定:禁用(enabled: false)≠删除;手改一律回写本仓库。
 
-dshVersion: 0.2.1-rc.5     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+dshVersion: 0.2.2-rc.1     # 启动脚本 bin/dsh 运行时读取,单一版本来源
+# 0.2.2 行为变化(change upgrade-dsh-0-2-2-runtime):Web Fetch 不再拒绝非公网地址,可访问代理、内网与本机,
+# 信任面扩大;2026-11-06 由用户接受,不另加限制。文件先读后改/外部修改防护由 fs-observation-policy 条目显式恢复。
 
 autoUpdate:                # 启动/构建前自动检测并升级 DSH 版本(channel = registry dist-tag)
   enabled: false           # 关闭:完全跳过检测,钉在 dshVersion(需手动升级时改回 true;env DSH_SKIP_UPDATE=1 等效)
@@ -26,9 +28,9 @@ thirdPartyResources:
     version: 2.0.1
     integrity: sha512-G5P8ossz5R7lDuUWAO1v5aVG93qVjk3D85+tF2gkPGVhnVgdfEZ+pqllsAo+IEMsKa7/KE52ohbAhb9m+r0XtQ==
     provider:
-      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.1-rc.5'
-      version: 0.2.1-rc.5
-      integrity: sha512-KrCbl/NZXtTuO5MrzJWZkCj5jWZ9lZRMJQ9F2W/8POpQKG7TsZTYmdrC4X1oBGXqwjVeMWl/a6MBNP4TmR2BIg==
+      spec: '@deepseek-ai/dsh-skill-filesystem@0.2.2-rc.1'
+      version: 0.2.2-rc.1
+      integrity: sha512-L9iizLHhKbjx5ipHuCzhzgvLaUFyGPK9zv9yildV62BZADSBTdxcX4JO0hopJigHZtsdJp1qAw34e4R0hQrdoA==
     providerName: spec-superflow-upstream
     skills: [bug-investigator, build-executor, code-reviewer, contract-builder, need-explorer, release-archivist, spec-merger, spec-writer, workflow-start]
   - id: jev
@@ -38,9 +40,9 @@ thirdPartyResources:
     version: 0.14.5
     integrity: sha512-Imqfmx3wfA64MRqjOs6ZJYJYJz/v6qMxS+RPggDQYyjpbbe9LWvpYd/zamZ2RDv6m2p6qJdQeCS10DvkH4A+WA==
     bridge:
-      spec: '@deepseek-ai/dsh-mcp-client@0.2.1-rc.5'
-      version: 0.2.1-rc.5
-      integrity: sha512-E4ZsTZ0MPpT2njtl8dh7lTKyvsDoGG97FxmXzuVolcDPU0OqTxe0I/NXH58Z17/b+Saq7G0cGe1H/vVlEsR1rQ==
+      spec: '@deepseek-ai/dsh-mcp-client@0.2.2-rc.1'
+      version: 0.2.2-rc.1
+      integrity: sha512-hPyBjoKNDMdTyM7PYNkcacMwJ7hpb/QMoIv3tnCgymvVghqdh/0SzHVd3koev8SIg79SKfPR4DPgGuar3zDzKA==
     serverName: jev
     jevProvider: openrouter          # 闭集 typesafe|openrouter;TypeSafe 直连对本机出口返回 451(change configurable-jev-provider)
     credentialEnv: OPENROUTER_API_KEY  # 必须与 jevProvider 的固定映射一致;回滚:改回 typesafe / TYPESAFE_API_KEY
@@ -165,18 +167,18 @@ customizations:
   - id: dsh-auto-model-routing
     type: package
     source: local
-    version: 0.6.6
+    version: 0.7.1
     enabled: true
     brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
-    note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识(Claude/GPT)在src/strategies注册表,新家族=加策略文件,与网关解耦。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义System One可选,独立credentials或只读启动环境;AUTO外发≤8000字当前任务及前轮摘要,形态脱敏尽力,服务保留条款自负。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json(旧映射只读忽略,保存时移除);状态与反馈:$DSH_HOME/state/auto-model-routing。反馈仅观察不自动调优。fork不支持;真实普通子任务已验,teammate仅mock覆盖。0.6.6清旧网关文案/引用(路由本无网关知识),补家族文档。0.5.0删除四档链路与版本字段;0.6.0起文案走ctx.locale字典(0.6.1补服务名/分类;无翻译器回退中文);回滚:pinned remote 0.4.2→dsh build→重启(0.5.0记录读不到)。停用:enabled:false → dsh build,撤销路由恢复。'
+    note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识在src/strategies注册表,与网关解耦。判档问题来自内置不可变预设(src/presets,缺省reasoning-depth=旧rubric逐字节,可选effort-as-verification),设置preset选择,快照记preset。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义可选,凭据走credentials或只读启动环境;外发≤8000字当前任务及前轮摘要,形态脱敏尽力。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json;状态与反馈:$DSH_HOME/state/auto-model-routing,反馈仅观察。fork不支持;teammate仅mock覆盖。降级0.6.6:preset被忽略,带preset绑定被旧版跳过(账本不改)。0.6.7修热载后芯片消失。回滚到0.4.2见CHANGELOG。停用:enabled:false→dsh build。'
   # 自研(local):DSH Pet 常驻桌宠 Agent 入口(Host+Web 双半区)
   - id: dsh-pet
     type: package
     source: local
-    version: 0.2.15
+    version: 0.2.16
     enabled: true
     brief: 常驻桌宠 Agent 入口(Pet Task/Invocation/可信来源快照/受管 Skill store)
-    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web,状态在 $DSH_HOME/plugins/dsh-pet/sqlite;凭据留在 lark-cli,不读 provider 凭据。飞书默认关闭,allowlist 为空静默拒绝;lark-cli>=1.0.97,单条 event+subscribe,同应用其它 profile 不可并行订阅。三层 Locus 使用官方子会话/结算/冷读和固定 locus-base;四项历史补丁退役,七个 owner 使用官方包。已无 compat 运行体,Host 使用官方精确运行体(hostRuntimeCompatibility 机制已退役);team-membership 退役,所有者接受 agent-team roster 窗口风险。移除 tools 最终重查扩大 guard 到工具体的时间窗,连同完整 profile 实测的 checkpoint 落盘等待,所有者已接受;见 locus-three-tier-structure/design。管理面限回环或 --trusted-host 同源。移除:enabled:false→dsh build→重启。Lottie 单文件表情;下载沿用 Host 网络/代理。'
+    note: '自研,spec dsh-pet/pet-lark-channel/pet-locus-collaboration/pet-compat-minimization。Host+Web,状态在 $DSH_HOME/plugins/dsh-pet/sqlite;凭据留在 lark-cli,不读 provider 凭据。飞书默认关闭,allowlist 为空静默拒绝;lark-cli>=1.0.97,单条 event+subscribe,同应用其它 profile 不可并行订阅。三层 Locus 使用官方子会话/结算/冷读和固定 locus-base;四项历史补丁退役,七个 owner 使用官方包。已无 compat 运行体,Host 使用官方精确运行体;team-membership 退役,所有者接受 agent-team roster 窗口风险。移除 tools 最终重查扩大 guard 到工具体的时间窗,连同完整 profile 实测的 checkpoint 落盘等待,所有者已接受;见 locus-three-tier-structure/design。管理面限回环或 --trusted-host 同源。移除:enabled:false→dsh build→重启。0.2.16 停止发现文件采用原生 Windows 私有 ACL。Lottie 单文件表情;下载沿用 Host 网络/代理。'
   - id: dsh-pet-executor
     type: preset
     version: 0.1.0
@@ -310,10 +312,10 @@ customizations:
   - id: sidebar-session-resources
     type: package
     source: local
-    version: 0.1.0
+    version: 0.2.0
     enabled: true
-    brief: 文档/资料面板(当前会话 MR/部署/工作项/制品链接分类 + 本次产出文件)
-    note: '自研,spec sidebar-session-resources(2026-10-19 由 session-links 改名,让出名字给团队版飞书 session-links)。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-sidebar-session-resources 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
+    brief: 文档/资料面板(会话链接 + 远端路径/复制/下载 + 文件卡片下载)
+    note: '自研,spec sidebar-session-resources(2026-10-19 由 session-links 改名,让出名字给团队版飞书 session-links)。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-sidebar-session-resources 读完整会话日志作基线,浏览器增量采集。0.2.0 起需 DSH>=0.2.2-rc.1:官方 workspaceFiles 按会话解析远端完整路径,可复制/在编辑器打开;卡片官方 actions 插槽亦提供下载;readBytes 原字节交给官方 fileActions 下载到浏览器设备(默认完整文件上限32MiB,目录/最终符号链接拒绝,切会话取消)。不外发、不读写凭据、不持久化;组织域名走 config(reviewHosts/trackerHosts,私有 overlay 注入)。依赖 dsh-better-sidebar(peer>=0.16.0,缺失不激活)。升级复核:tab API/会话节点/官方文件契约;通道沿用 Connection 围栏。移除:enabled:false → dsh build → 重启。'
   # 第三方(remote):better-sidebar 侧边栏工作台
   - id: better-sidebar
     type: package
@@ -386,7 +388,14 @@ customizations:
     type: patch
     enabled: true
     brief: 让 connection provider 自身等待 webServer,恢复全部 Connection RPC 通道注册
-    note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webStartup, webServer](0.2.1 删除 webRuntime,官方行仍缺 webServer);整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。'
+    note: '组合补丁(patches/connection-webserver.yml),修复 DSH 0.1.5 运行体缺陷(证据 change upgrade-dsh-0-1-5-runtime 的 checking/connection-rpc-devbox.md;上游讨论 deepseek-ai/deepseek-harness#5926):connection 行只声明 webRuntime,致所有 Connection RPC channel 路由静默挂载失败(通用 405,宿主无错误日志)。仅把 connection 行 inject 覆盖为 [webStartup, webServer](0.2.1 删除 webRuntime,官方行仍缺 webServer);整行覆盖必须原样保留 config.trustedHosts,否则丢 Host/Origin fence;不复制 RPC 协议与鉴权。仅适用 web profile(web carrier 成为硬依赖),引入无 web 的 profile 须拆分或移除。升级复核:每次 DSH 升级检查官方 connection 行 inject;官方自带 webServer 时删除本 fragment 与 patch 文件。移除:enabled:false → dsh build。0.2.2 复核:仍需保留(见 patch 注释)。'
+
+  # 组合补丁(非包):恢复 0.2.2 起默认关闭的官方文件观察策略
+  - id: fs-observation-policy
+    type: patch
+    enabled: true
+    brief: 恢复官方先读后改与外部修改防护(整行覆盖官方行为启用,不新增包行)
+    note: '组合补丁(patches/fs-observation-policy.yml;change upgrade-dsh-0-2-2-runtime D5):0.2.2 起官方 fs-observation-policy 行默认 disabled:true,本补丁以同 id/name 整行覆盖为 false,恢复未读先改 FS_NOT_OBSERVED、读后被外部改写再编辑 FS_STALE_VERSION。其 intent slot 只有一个决策者,禁止新增第二条加载该包的行;有效配置须恰一条且未禁用。仅作用于 sync 物化的 web profile。升级复核:重跑 DSH_TEST_OFFICIAL_RUNTIME=<官方运行体目录> node --test tests/fs-observation-policy.official.mjs(--dump-config 断言恰一条启用行);官方改名/移除/默认启用时删除本 fragment。移除:enabled:false → dsh build。'
 
   # 第三方纯提示词 skill(无 dsh.bundle):remote 精确 pin + 专属 skill-filesystem provider。
   - id: ponytail
@@ -415,10 +424,10 @@ customizations:
   - id: dsh-magpie-connector
     type: package
     source: local
-    version: 0.6.6
+    version: 0.6.10
     enabled: true
     brief: 接入自托管 Magpie 网关；按 owned_by 原生分组，含保存前线路检查、用量卡片、侧栏额度卡与 Access
-    note: '自研 MIT,change:add-dsh-magpie-plugin;0.3.0 BREAKING:按网关 owned_by 注册多 route dsh-magpie-connector-<owner>,旧单 route 无别名,AUTO/guard 需另适配(ROUTE_CHANGED)。信任面:只读线路凭据、不回显、探测仅 TCP、undici 只直连白名单 API 拒重定向。0.6.3 首个写操作:Codex 重置卡(周用量≥80%、只用最早到期那张、两段确认+60s票据、全插件单飞、4xx=未消耗、应答不可解析锁账号到重启);白名单加 POST /magpie/quotas/codex-reset(必须 user+credit)。0.6.6 侧栏额度卡:手风琴、sidebarRefreshMinutes、重置卡折叠列表;收起行显示到期时间(缺失 —);档位 sidebarWindows 多选(5h/周/月,默认 weekly,非法 400,缺档回退);正文 320px、隐藏滚动条、双下箭头占位不抖动;样式表 inject document.head(修复重启后裸文字)。⚠入口(CF+nginx)放行 codex-reset 前会显示403/404;key 需完整权限。移除:enabled:false → dsh build → 重启。'
+    note: '自研 MIT,change:add-dsh-magpie-plugin;0.3.0 BREAKING:按 owned_by 注册多 route dsh-magpie-connector-<owner>,旧单 route 无别名,AUTO/guard 需适配(ROUTE_CHANGED)。信任面:只读线路凭据、不回显、探测仅 TCP、undici 只直连白名单、拒重定向。0.6.3 首个写操作:Codex 重置卡(周用量≥80%、只用最早到期那张、两段确认、4xx=未消耗、应答不可解析锁账号到重启);白名单加 POST /magpie/quotas/codex-reset。0.6.6 侧栏额度卡:手风琴、sidebarRefreshMinutes、重置卡折叠、sidebarWindows 多选、320px 限高。0.6.9 定时刷新改真实刷新(网关 GET cards 只回缓存,改发全量刷新 POST cards {all:true},失败静默旧读数)。0.6.10 修复热载后客户端 UI 全消失:语言字典 effect 未返 disposer,重建 bundle 重新 apply 时 register 重名抛错。⚠入口(CF+nginx)放行 codex-reset 前会显示403/404;key 需完整权限。移除:enabled:false → dsh build → 重启。'
 
   # 自研(local):dsh-magpie-connect 选择器显示名桥接,上游 PR bitxeno/dsh-magpie-connect#1 发版后退役
   # 本机出口无法代表 Magpie 网关出口；按真实 route ID 显式豁免。

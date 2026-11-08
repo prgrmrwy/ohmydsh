@@ -17,7 +17,7 @@ import { registry } from '../strategies/index.js'
 import { CATEGORY_HINT_KEYS, NS, bindLocale, en, zh, t } from './locales.js'
 /** Supported families as the user sees them. */
 const FAMILIES = registry.labels().join(' / ')
-import { installRoutingNavIcon } from './nav-icon.js'
+import { RoutingSettingsNavIcon } from './nav-icon.js'
 
 interface AutoSupport { supported: boolean; provider?: string; model?: string }
 interface View { childNotice?: { id: number; childId: string; reason: string; at: number };
@@ -229,7 +229,12 @@ export function RoutingChip({ sessionId, rpc, initialView, initiallyOpen = false
 const labelUi = { Tooltip, Menu, Icon: IconGaugeOutlineRegular } as unknown as LabelUi
 
 export function apply(ctx: Context): void {
-  ctx.effect(() => { ctx.locale.register(NS, { zh, en }); return () => {} }, 'auto-model-routing: dictionaries')
+  // Return the locale disposer: a client bundle rebuilt while the page is open
+  // re-applies this entry against the same long-lived locale service, which
+  // refuses a namespace it already holds ("already has locale"). Leaking the
+  // old dictionaries made every hot reload fail and took the AUTO chip, the
+  // settings section and the label button down until a page reload.
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'auto-model-routing: dictionaries')
   bindLocale(ctx.locale.bind(NS) as unknown as Parameters<typeof bindLocale>[0])
   // Optional acceleration only: the official picker's per-session store triggers an immediate state read.
   // When the service is absent (or appears late) the chip's 3s poll remains the source of truth.
@@ -251,7 +256,9 @@ export function apply(ctx: Context): void {
     label: () => t('navLabel'),
     inject: () => ({ rpc: ctx.connection.rpc as unknown as Rpc, ui: settingsUi }),
   }, RoutingSettings))
-  ctx.effect(() => typeof document === 'undefined' ? () => {} : installRoutingNavIcon(document), 'auto-model-routing: settings navigation icon')
+  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+    name: 'settings.section.icon', id: 'auto-model-routing',
+  }, RoutingSettingsNavIcon))
   // Reply-bar allocation feedback, after the official feedback (order 10); rendered only on bound replies.
   ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
     name: 'conversation.chat.assistant-actions', id: 'auto-model-routing-label', order: 20,

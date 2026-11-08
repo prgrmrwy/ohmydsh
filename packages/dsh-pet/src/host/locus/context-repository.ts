@@ -1,41 +1,39 @@
 /**
  * Narrow seam between the caller-bound pet_context tool and the locus store.
  *
- * The durable locus repository is still being integrated.  It must expose a
- * reverse lookup by the *actual* child session id and return every matching
- * generation, including invalid/retired rows.  Returning all rows is
- * intentional: the tool must distinguish "not a locus child" from a stale or
- * ambiguous identity and fail closed instead of selecting a convenient row.
+ * v20: an entry is identified by its `sessionId` (the child session it reserves
+ * or runs). sessionId is unique across the loci table, so the repository returns
+ * at most one entry for it and the caller-bound check never chooses between
+ * rows. A non-active entry, or one whose first creation still owes recovery,
+ * cannot authorize tools.
  */
 
 import type {
   LocusChildSessionFacts,
-  LocusContextAnchorFacts,
   LocusEndpoint,
   LocusFacts,
   LocusMainSessionFacts,
-  LocusPermissionFacts,
   LocusReplyTarget,
   LocusWorkspaceFacts,
 } from './context.js'
-import type { DeliveryStatus } from './delivery.js'
+import type { DeliveryRecord, DeliveryStatus } from './delivery.js'
 import type { DeliveryAddressingProjection } from './addressing.js'
-import type { LocusRecord } from './aggregate.js'
 import type { LocusCurrentCapabilityReason } from './turn-observer.js'
+import type { LocusRepositoryV20 } from './persistence-v20.js'
 
-/** Aggregate rows may carry a richer anchor once the durable schema is wired. */
-type LocusRecordWithContext = LocusRecord & {
-  readonly contextAnchor?: LocusContextAnchorFacts
-}
+/** The repository operations the caller-bound context check needs. */
+export type LocusContextLookup = Pick<
+  LocusRepositoryV20,
+  'findBySessionId' | 'hasFirstDeliveryRecoveryDebt' | 'findCurrentSerializedDelivery' | 'findCurrentDelivery'
+>
 
-/** The current accepted delivery, when this child is processing one. */
+/** The current accepted delivery of an entry's child (sessionId-keyed). */
 export interface LocusCurrentDelivery {
   readonly deliveryId: string
   readonly messageId: string
   readonly endpoint: LocusEndpoint
   readonly locusId: string
-  readonly generation: number
-  readonly childSessionId: string
+  readonly sessionId: string
   readonly status?: DeliveryStatus
   readonly queueState?: 'backlog' | 'current'
   readonly deadlineAt?: number
@@ -60,256 +58,132 @@ export interface LocusCurrentDelivery {
   readonly replyTarget?: LocusReplyTarget
 }
 
-/** One caller-bound context projection for an active or historical locus. */
+/** One caller-bound projection of an entry: the wire mirror minus generation, permission and contextAnchor. */
 export interface LocusContextRecord {
   readonly endpoint: LocusEndpoint
   readonly locus: LocusFacts
   readonly main: LocusMainSessionFacts
   readonly child: LocusChildSessionFacts
   readonly workspace: LocusWorkspaceFacts
-  readonly permission: LocusPermissionFacts
-  readonly contextAnchor: LocusContextAnchorFacts
+  readonly accessMode: 'read-only' | 'danger-full-access'
+  /** Present only while the entry is invalid. */
+  readonly invalidReason?: string
   /** Omitted for initialization, GUI turns, and idle children. */
   readonly currentDelivery?: LocusCurrentDelivery
-  /** Optional integration marker; legacy rows are never eligible. */
-  readonly legacy?: boolean
-  /** Optional durable diagnostic explaining why an unavailable locus stopped. */
-  readonly invalidReason?: string
-  /** Optional discriminator used by adapters while the durable schema migrates. */
-  readonly source?: 'locus' | 'legacy'
 }
 
-/**
- * The only repository operation needed by the scoped context tool.
- *
- * A repository implementation may return an empty list for an ordinary session,
- * one row for a valid locus child, or multiple rows when corruption/legacy
- * generations make identity ambiguous.  It must not collapse historical and
- * active rows before this caller-bound check runs.
- */
 export type LocusCurrentAuthorizationResult =
   | { readonly ok: true; readonly locus: LocusContextRecord }
   | { readonly ok: false; readonly reason: LocusCurrentCapabilityReason }
 
+/** The turn proof a caller presents for finish, wait or track. */
+export interface LocusTurnProofInput {
+  readonly deliveryId?: string
+  readonly executionId: string
+  readonly turnId: string
+  readonly source: 'delivery' | 'agent-message'
+  readonly locusId?: string
+  /** The entry's sessionId. A mismatch is reported as `generation-mismatch` (the capability reason keeps its name). */
+  readonly sessionId?: string
+}
+
 export interface LocusContextRepository {
-  findByChildSessionId(childSessionId: string): readonly LocusContextRecord[]
-  /**
-   * Project the durable current Delivery independently of an ended model turn.
-   * This is a read projection, not execution authority: callers must not use it
-   * alone to authorize finish/wait from an arbitrary child turn.
-   */
-  findCurrentDelivery?(childSessionId: string): LocusCurrentDelivery | undefined
-  /**
-   * Optional Host-provided source capability. An implementation may expose
-   * this only when it can prove the current execution is the original Delivery
-   * or an allowed `agent-message` continuation. The aggregate adapter below
-   * deliberately does not synthesize this method from the sticky projection.
-   */
-  authorizeCurrentDelivery?(input: {
-    readonly childSessionId: string
-    readonly operation: 'finish' | 'wait' | 'track'
-    readonly proof?: {
-      readonly deliveryId?: string
-      readonly executionId: string
-      readonly turnId: string
-      readonly source: 'delivery' | 'agent-message'
-      readonly locusId?: string
-      readonly generation?: number
-    }
-  }): LocusContextRecord | undefined | Promise<LocusContextRecord | undefined>
-  /** Full repository-side authorization inspection; never guesses unavailable distinctions. */
+  /** The one entry whose sessionId this is, or undefined for an ordinary session. */
+  findBySessionId(sessionId: string): LocusContextRecord | undefined
+  /** Read projection of the current Delivery. Never authority on its own. */
+  findCurrentDelivery?(sessionId: string): LocusCurrentDelivery | undefined
+  /** Full authorization inspection. Never guesses an unavailable distinction. */
   inspectCurrentDeliveryAuthorization?(input: {
     readonly childSessionId: string
     readonly operation: 'finish' | 'wait' | 'track'
-    readonly proof?: {
-      readonly deliveryId?: string
-      readonly executionId: string
-      readonly turnId: string
-      readonly source: 'delivery' | 'agent-message'
-      readonly locusId?: string
-      readonly generation?: number
-    }
+    readonly proof?: LocusTurnProofInput
   }): LocusCurrentAuthorizationResult | Promise<LocusCurrentAuthorizationResult>
 }
 
 /**
- * Minimal shape exposed by the current in-memory/durable locus repository.
- *
- * This adapter is deliberately conservative: aggregate records prove
- * endpoint/main/child/workspace and permission; optional seams provide the
- * independently confirmed anchor and exact current Delivery when available.
- * Missing optional facts remain unknown/absent rather than being guessed.
- */
-export interface LocusAggregateLookup {
-  findByChildSession(childSessionId: string): LocusRecordWithContext | undefined
-  /** A failed first-creation compensation cannot authorize tools while recovery is pending. */
-  hasFirstDeliveryRecoveryDebt?(locusId: string): boolean
-  /** Optional lossless lookup; when absent the adapter uses the single-row API. */
-  findAllByChildSession?(childSessionId: string): readonly LocusRecordWithContext[]
-  /** Optional exact caller-bound lookup; child/generation alone is not proof. */
-  findCurrentDelivery?(input: {
-    readonly childSessionId: string
-    readonly locusId: string
-    readonly generation: number
-    readonly executionId?: string
-    readonly turnId?: string
-  }): LocusCurrentDelivery | undefined
-  findCurrentSerializedDelivery?(input: {
-    readonly childSessionId: string
-    readonly locusId: string
-    readonly generation: number
-  }): LocusCurrentDelivery | undefined
-  /** Resolve the persisted anchor separately from aggregate identity. */
-  findContextAnchor?(input: {
-    readonly childSessionId: string
-    readonly locusId: string
-    readonly generation: number
-  }): LocusContextAnchorFacts | undefined
-}
-
-/**
- * Adapt the current locus repository to the context-tool seam.
- *
- * This is the integration point for `LocusRepository` today.  A future durable
- * implementation should implement `LocusContextRepository` directly so it can
- * provide confirmed anchors and the current Delivery without changing the
- * caller-bound tool API.
+ * Build the caller-bound context seam over the v20 repository. `childSessionId`
+ * in the input keeps its name so context-tool callers do not churn; its value is
+ * the entry's sessionId.
  */
 export function asLocusContextRepository(
-  repository: LocusAggregateLookup,
-  currentTurnProof?: (childSessionId: string) =>
-    | { readonly executionId: string; readonly turnId: string }
-    | undefined,
+  repository: LocusContextLookup,
+  currentTurnProof?: (sessionId: string) => { readonly executionId: string; readonly turnId: string } | undefined,
 ): LocusContextRepository {
-  const recordsForChild = (childSessionId: string): readonly LocusRecordWithContext[] =>
-    repository.findAllByChildSession?.(childSessionId) ?? (() => {
-      const record = repository.findByChildSession(childSessionId)
-      return record === undefined ? [] : [record]
-    })()
   const inspectCurrentDeliveryAuthorization = (input: Parameters<NonNullable<LocusContextRepository['inspectCurrentDeliveryAuthorization']>>[0]): LocusCurrentAuthorizationResult => {
-    if (input.childSessionId.trim() === '') return { ok: false, reason: 'capability-unavailable' }
-    if (input.proof === undefined || input.proof.source !== 'delivery' && input.proof.source !== 'agent-message') {
+    const sessionId = input.childSessionId
+    if (sessionId.trim() === '') return { ok: false, reason: 'capability-unavailable' }
+    const proof = input.proof
+    if (proof === undefined || proof.source !== 'delivery' && proof.source !== 'agent-message') {
       return { ok: false, reason: 'association-unproven' }
     }
-    const currentProof = currentTurnProof?.(input.childSessionId)
-    if (currentProof === undefined || currentProof.executionId !== input.proof.executionId || currentProof.turnId !== input.proof.turnId) {
+    const currentProof = currentTurnProof?.(sessionId)
+    if (currentProof === undefined || currentProof.executionId !== proof.executionId || currentProof.turnId !== proof.turnId) {
       return { ok: false, reason: 'association-unproven' }
     }
-    const records = recordsForChild(input.childSessionId)
-    if (records.length === 0) return { ok: false, reason: 'association-unproven' }
-    if (records.length !== 1) return { ok: false, reason: 'association-unproven' }
-    const record = records[0]!
-    if (record.state !== 'active' || record.childSessionId !== input.childSessionId || repository.hasFirstDeliveryRecoveryDebt?.(record.id) === true) {
-      return { ok: false, reason: 'association-unproven' }
-    }
-    const current = repository.findCurrentSerializedDelivery?.({
-      childSessionId: input.childSessionId,
-      locusId: record.id,
-      generation: record.generation,
-    })
+    const resolved = repository.findBySessionId(sessionId)
+    if (resolved === undefined) return { ok: false, reason: 'association-unproven' }
+    const row = resolved.row
+    if (row.state !== 'active' || row.sessionId !== sessionId) return { ok: false, reason: 'association-unproven' }
+    if (repository.hasFirstDeliveryRecoveryDebt(row.locusId)) return { ok: false, reason: 'association-unproven' }
+    const current = repository.findCurrentSerializedDelivery({ locusId: row.locusId, sessionId })
     if (current === undefined) return { ok: false, reason: 'no-current' }
-    if (current.status !== 'current' && current.status !== 'finishing' || current.queueState !== undefined && current.queueState !== 'current') {
+    if (current.status !== 'current' && current.status !== 'finishing' || current.queueState !== 'current') {
       return { ok: false, reason: 'stale-delivery' }
     }
-    if (current.childSessionId !== input.childSessionId || current.locusId !== record.id) {
+    if (current.sessionId !== sessionId || current.locusId !== row.locusId) {
       return { ok: false, reason: 'association-unproven' }
     }
-    if (current.generation !== record.generation || input.proof.generation !== undefined && input.proof.generation !== current.generation) {
+    if (proof.sessionId !== undefined && proof.sessionId !== sessionId) {
       return { ok: false, reason: 'generation-mismatch' }
     }
-    if (input.proof.locusId !== undefined && input.proof.locusId !== current.locusId) {
+    if (proof.locusId !== undefined && proof.locusId !== row.locusId) {
       return { ok: false, reason: 'association-unproven' }
     }
-    if (input.proof.deliveryId !== undefined && current.deliveryId !== input.proof.deliveryId) {
+    if (proof.deliveryId !== undefined && current.deliveryId !== proof.deliveryId) {
       return { ok: false, reason: 'stale-delivery' }
     }
-    return { ok: true, locus: { ...projectAggregateRecord(record, repository), currentDelivery: current } }
+    return { ok: true, locus: { ...projectRecord(resolved, repository, currentProof), currentDelivery: toCurrentDelivery(current) } }
   }
   return {
-    findByChildSessionId(childSessionId) {
-      return recordsForChild(childSessionId).map(record => projectAggregateRecord(
-        record,
-        repository,
-        currentTurnProof?.(childSessionId),
-      ))
+    findBySessionId(sessionId) {
+      const resolved = repository.findBySessionId(sessionId)
+      return resolved === undefined ? undefined : projectRecord(resolved, repository, currentTurnProof?.(sessionId))
     },
-    authorizeCurrentDelivery(input) {
-      const inspected = inspectCurrentDeliveryAuthorization(input)
-      return inspected.ok ? inspected.locus : undefined
+    findCurrentDelivery(sessionId) {
+      const resolved = repository.findBySessionId(sessionId)
+      if (resolved === undefined) return undefined
+      const current = repository.findCurrentSerializedDelivery({ locusId: resolved.row.locusId, sessionId })
+      return current === undefined ? undefined : toCurrentDelivery(current)
     },
     inspectCurrentDeliveryAuthorization,
   }
 }
 
-function projectAggregateRecord(
-  record: LocusRecordWithContext,
-  repository: LocusAggregateLookup,
+/** Map a ledger record to the caller-bound current Delivery projection. */
+function toCurrentDelivery(record: DeliveryRecord): LocusCurrentDelivery {
+  return { ...record, endpoint: { ...record.endpoint } } as unknown as LocusCurrentDelivery
+}
+
+/** Project one resolved entry into the caller-bound record, with its current Delivery when one applies. */
+function projectRecord(
+  resolved: NonNullable<ReturnType<LocusContextLookup['findBySessionId']>>,
+  repository: LocusContextLookup,
   turnProof?: { readonly executionId: string; readonly turnId: string },
 ): LocusContextRecord {
-  const currentDelivery = record.childSessionId === undefined
+  const row = resolved.row
+  // Without an exact turn proof (initialization, GUI, idle) no current Delivery is projected.
+  const current = turnProof === undefined
     ? undefined
-    : turnProof === undefined
-      ? repository.findCurrentSerializedDelivery?.({
-        childSessionId: record.childSessionId,
-        locusId: record.id,
-        generation: record.generation,
-      })
-      : repository.findCurrentDelivery?.({
-        childSessionId: record.childSessionId,
-        locusId: record.id,
-        generation: record.generation,
-        executionId: turnProof.executionId,
-        turnId: turnProof.turnId,
-      }) ?? repository.findCurrentSerializedDelivery?.({
-        childSessionId: record.childSessionId,
-        locusId: record.id,
-        generation: record.generation,
-      })
-  const state =
-    record.state === 'provisioning' ||
-        record.state === 'active' ||
-        record.state === 'not-created' ||
-        record.state === 'switching' ||
-        record.state === 'invalid' ||
-        record.state === 'stopped' ||
-        record.state === 'retired'
-      ? record.state
-      : undefined
-
+    : repository.findCurrentDelivery({ locusId: row.locusId, sessionId: row.sessionId, executionId: turnProof.executionId, turnId: turnProof.turnId })
+      ?? repository.findCurrentSerializedDelivery({ locusId: row.locusId, sessionId: row.sessionId })
   return {
-    endpoint: { ...record.endpoint },
-    locus: {
-      locusId: record.id,
-      generation: record.generation,
-      ...(state !== undefined ? { state } : {}),
-      ...(record.childComposition !== undefined ? { childComposition: record.childComposition } : {}),
-      toolTier: record.toolTier?.effective ?? 'safe',
-      ...(record.toolTier?.desired !== undefined && record.toolTier.desired !== (record.toolTier.effective ?? 'safe') ? { pendingToolTier: true } : {}),
-    },
-    main: { sessionId: record.parentSessionId },
-    child: {
-      // An active aggregate record always has a child.  If a malformed
-      // historical row reaches this adapter, retain an empty value so the
-      // caller-bound validator rejects it rather than inventing an id.
-      sessionId: record.childSessionId ?? '',
-    },
-    workspace: { workspaceId: record.workspaceId },
-    permission: {
-      effective: record.permission.effective,
-      desired: record.permission.desired,
-      ...(record.permission.verifiedAt !== undefined
-        ? { verifiedAt: record.permission.verifiedAt }
-        : {}),
-      ...(record.permission.grantedBy !== undefined
-        ? { grantedBy: record.permission.grantedBy }
-        : {}),
-    },
-    contextAnchor: record.contextAnchor ?? repository.findContextAnchor?.({
-      childSessionId: record.childSessionId ?? '',
-      locusId: record.id,
-      generation: record.generation,
-    }) ?? { status: 'unknown' },
-    ...(record.invalidReason === undefined ? {} : { invalidReason: record.invalidReason }),
-    ...(currentDelivery === undefined ? {} : { currentDelivery }),
+    endpoint: { ...row.endpoint },
+    locus: { locusId: row.locusId, state: row.state, revision: row.revision },
+    main: { sessionId: resolved.locusMainSessionId },
+    child: { sessionId: row.sessionId },
+    workspace: { workspaceId: resolved.workspaceId },
+    accessMode: row.accessMode,
+    ...(row.invalidReason === undefined ? {} : { invalidReason: row.invalidReason }),
+    ...(current === undefined ? {} : { currentDelivery: toCurrentDelivery(current) }),
   }
 }

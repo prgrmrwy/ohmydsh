@@ -185,3 +185,34 @@ test('scenario: a runtime peer without a matching devDependency fails', () => {
   const pkg = ok({ peerDependencies: { '@deepseek-ai/dsh-llm': P('0.2.1-rc.5'), '@deepseek-ai/dsh-session': P('0.2.1-rc.5') } })
   assert.ok(runtimeContractViolations('x', pkg, '0.2.1-rc.5').some(line => line.includes('peerDependencies.@deepseek-ai/dsh-session') && line.includes('devDependency')))
 })
+
+// AUTO needs 0.2.2 selection pinning; resources 0.2.0 needs the official original-file save service.
+// Other local packages retain their existing 0.2.0-rc.2 floor.
+const RUNTIME_022_PACKAGES = new Set(['dsh-auto-model-routing', 'sidebar-session-resources'])
+const AUTO_FLOOR = '0.2.2-rc.1'
+const DEFAULT_FLOOR = '0.2.0-rc.2'
+test('scenario: only packages requiring 0.2.2 capabilities raise the runtime floor', async () => {
+  const wrong = []
+  const seen = new Set()
+  for (const { id, file } of localPackages()) {
+    const pkg = JSON.parse(await readFile(file, 'utf8'))
+    if (typeof pkg.engines?.dsh !== 'string') continue
+    const floor = RUNTIME_022_PACKAGES.has(id) ? AUTO_FLOOR : DEFAULT_FLOOR
+    if (RUNTIME_022_PACKAGES.has(id)) seen.add(id)
+    const interval = `>=${floor} <0.3.0-0`
+    if (pkg.engines.dsh !== interval) wrong.push(`${id} → engines.dsh = "${pkg.engines.dsh}" (expected "${interval}")`)
+    for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
+      if (!name.startsWith(RUNTIME_SCOPE)) continue
+      if (!range.startsWith(`${interval} || `)) wrong.push(`${id} → peerDependencies.${name} = "${range}" (expected to start with "${interval} || ")`)
+    }
+  }
+  assert.deepEqual(seen, RUNTIME_022_PACKAGES, 'packages requiring 0.2.2 must declare engines.dsh')
+  assert.deepEqual(wrong, [], wrong.join('\n'))
+})
+
+test('scenario: the floor check for 0.2.2 rejects a 0.2.0 floor and admits the pinned runtime', () => {
+  const r = `>=${AUTO_FLOOR} <0.3.0-0`
+  assert.equal(semver.satisfies('0.2.2-rc.1', r, { includePrerelease: true }), true)
+  assert.equal(semver.satisfies('0.2.1-rc.5', r, { includePrerelease: true }), false)
+  assert.equal(semver.satisfies('0.2.0-rc.2', r, { includePrerelease: true }), false)
+})

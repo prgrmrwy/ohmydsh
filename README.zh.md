@@ -33,7 +33,7 @@ ohmydsh 把**一个人的 DSH 配置**收敛成一个可审查、可复现的仓
 ## 快速开始
 <!-- section: quick-start -->
 
-初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**三端隔离的构建与 Host 命令流程已验收，真实终端关闭和桌面 UI 仍待验证**，详见[三端验收记录](openspec/changes/unify-skill-execution/checking/summary.md)；这不等于全部第三方插件的 Windows 功能认证。三条路径任选其一。
+初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**三端隔离的构建与 Host 命令流程已验收，真实终端关闭和桌面 UI 仍待验证**，详见[三端验收记录](openspec/changes/archive/2026-11-08-unify-skill-execution/checking/summary.md)；这不等于全部第三方插件的 Windows 功能认证。三条路径任选其一。
 
 原生 Windows 含中文路径时请使用已验证的 Node.js 24.20.0（当前 `.nvmrc` 推荐版本）。24.12.0 存在同步删除静默失败的问题，可能导致 pnpm 替换插件目录时报 `EPERM`。本轮验收使用 pnpm 11.7.0；首次构建若提示依赖构建脚本策略未决，需逐项明确允许或拒绝，再重跑 `dsh build`。
 
@@ -62,7 +62,7 @@ POSIX start/stop/restart 要求 `lsof`、`ps`（用系统包管理器安装 lsof
 
 <!-- fixture: minimal-manifest -->
 ```yaml
-dshVersion: 0.2.1-rc.5
+dshVersion: 0.2.2-rc.1
 autoUpdate:
   enabled: false
 customizations: []
@@ -230,6 +230,7 @@ tests/                   仓库级测试
 - [memex-eval-judge](presets/memex-eval-judge) — memex 自检裁判专用的最小 preset，只含 native 呈现，不带编码工具。
 - [memex-eval-config](patches/memex-eval-config.yml) — 添加固定自检目录的关闭声明，保留用户 scope 与工作区设置。
 - [connection-webserver](patches/connection-webserver.yml) — 恢复 Connection RPC 通道注册的 composition patch。
+- [fs-observation-policy](patches/fs-observation-policy.yml) — 恢复官方默认关闭的先读后改与外部修改防护的 composition patch。
 - [dsh-collab-config](patches/dsh-collab-config.yml) — dsh-collab 配置补丁：邀请即授权，并声明 `pet-locus` 托管 channel，供 Pet Locus 以代理成员接入。
 - [home-network-model-guard-config](patches/home-network-model-guard-config.yml) — 配置补丁：按真实 provider id 逐个列出 Magpie 各归属 route（`dsh-magpie-connector-<owner>`），使其不受本机出口门禁约束。
 - [ponytail-skills](patches/ponytail-skills.yml) — 只为 ponytail 包挂载专属 skill provider 的 composition patch。

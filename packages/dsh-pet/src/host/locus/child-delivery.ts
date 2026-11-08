@@ -13,44 +13,44 @@
  * could undo that.
  */
 
-import { LOCUS_SAFE_CHILD_COMPOSITION, type LocusChildComposition } from './aggregate.js'
+import type { LocusAccessModeV20 } from './contract-v20.js'
 import type { LocusChildAdapter, LocusChildIdentity, LocusContentBlock } from './child.js'
 import type { LocusReplyTarget } from './context.js'
-import type { LocusLazyChildCreator, LocusLazyChildInput } from './lazy-child.js'
+import type { FirstDeliveryPublicationFactory } from './first-delivery-publication.js'
+import type { LocusLazyChildCreator } from './lazy-child.js'
 import { LOCUS_BASE_PRESET } from './preset.js'
 
 /**
- * The locus facts one delivery is served under.
+ * The v20 row facts one delivery is served under (topic rows carry their
+ * group row's M and workspace, resolved by the caller).
  *
- * A `not-created` generation has no child yet: `childSessionId` is then the id
- * the generation reserved, which every Delivery already correlates by, and the
- * first Delivery's queue creates the child under exactly that id.
+ * A `not-created` row has no child yet: `sessionId` is then the id it
+ * reserved, which every Delivery already correlates by, and the first
+ * Delivery's queue creates the child under exactly that id. There is no
+ * persisted composition marker: an `active` child is proven by composition at
+ * its publication (D7), and refused there, not here.
  */
 export interface LocusDeliveryTarget {
-  readonly id?: string
-  readonly locusId?: string
-  readonly state?: 'active' | 'not-created'
-  readonly parentSessionId: string
-  readonly childSessionId: string
-  readonly childComposition?: LocusChildComposition
-  readonly workspaceId?: string
-  readonly generation?: number
-  readonly endpoint?: { readonly chatId: string; readonly threadId?: string }
+  readonly locusId: string
+  readonly state: 'active' | 'not-created'
+  /** The child's parent: the group row's M. */
+  readonly locusMainSessionId: string
+  readonly sessionId: string
+  readonly revision: number
+  readonly accessMode: LocusAccessModeV20
+  readonly workspaceId: string
+  readonly endpoint: { readonly chatId: string; readonly threadId?: string }
 }
 
-/** Creation of a generation's first child (see `lazy-child.ts`). */
+/** Creation of a row's first child (see `lazy-child.ts`). */
 export interface LocusLazyCreationPorts {
   readonly creator: LocusLazyChildCreator
   /**
    * The durable publication callbacks for one creation: inside `agent/created`,
-   * publish the generation as active (`tier3`) and register the Delivery its
-   * first prompt carries; on a later rejection, revert both.
+   * publish the row active and issue the Delivery its first prompt carries;
+   * on a later rejection, revert both (see `first-delivery-publication.ts`).
    */
-  readonly publication: (input: {
-    readonly locus: LocusDeliveryTarget
-    readonly deliveryId: string
-    readonly executionId: string
-  }) => Pick<LocusLazyChildInput, 'publish' | 'unpublish' | 'commit' | 'failed' | 'retryText' | 'recoveryDebt'>
+  readonly publication: FirstDeliveryPublicationFactory
   /** The session title for the new child. */
   readonly label?: (locus: LocusDeliveryTarget) => string | PromiseLike<string>
 }
@@ -85,7 +85,7 @@ export interface LocusChildDeliveryPorts {
    * composition is not proven and nothing is dispatched.
    */
   readonly parentPreset?: (parentSessionId: string) => string | undefined | PromiseLike<string | undefined>
-  /** Absent means a `not-created` generation cannot get its first child. */
+  /** Absent means a `not-created` row cannot get its first child. */
   readonly lazy?: LocusLazyCreationPorts
   /** Stable diagnostics; never a message body. */
   readonly log?: (reason: string) => void
@@ -140,21 +140,15 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
     return preset === LOCUS_BASE_PRESET ? undefined : 'locus-main-preset-mismatch'
   }
 
-  /** Create the generation's child with this Delivery as its first prompt. */
+  /** Create the row's child with this Delivery as its first prompt. */
   const createFirstChild = async (input: Parameters<ReturnType<typeof createLocusChildDelivery>['queueChild']>[0]): Promise<LocusQueueResult> => {
     const { locus } = input
     const lazy = ports.lazy
-    if (
-      lazy === undefined
-      || locus.workspaceId === undefined
-      || locus.generation === undefined
-      || locus.endpoint === undefined
-      || (locus.id ?? locus.locusId) === undefined
-    ) {
+    if (lazy === undefined) {
       ports.log?.('child-creation-unavailable')
       return { accepted: false, reason: 'child-creation-unavailable' }
     }
-    const presetRefusal = await checkParentPreset(locus.parentSessionId)
+    const presetRefusal = await checkParentPreset(locus.locusMainSessionId)
     if (presetRefusal !== undefined) {
       ports.log?.(presetRefusal)
       return { accepted: false, reason: presetRefusal }
@@ -165,16 +159,21 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
     try { current = (await input.fenceBeforeQueue?.()) !== false } catch { current = false }
     if (!current) return { accepted: false, reason: 'stale-delivery' }
     const label = lazy.label === undefined ? `Locus · ${locus.endpoint.chatId}` : await lazy.label(locus)
-    const publication = lazy.publication({ locus, deliveryId: input.deliveryId, executionId: input.executionId })
+    const publication = lazy.publication({
+      locus: { locusId: locus.locusId, sessionId: locus.sessionId, revision: locus.revision, endpoint: locus.endpoint },
+      deliveryId: input.deliveryId,
+      executionId: input.executionId,
+    })
     const created = await lazy.creator.create({
-      childSessionId: locus.childSessionId,
-      parentSessionId: locus.parentSessionId,
+      sessionId: locus.sessionId,
+      locusMainSessionId: locus.locusMainSessionId,
       workspaceId: locus.workspaceId,
-      locusId: (locus.id ?? locus.locusId)!,
-      generation: locus.generation,
+      locusId: locus.locusId,
+      revision: locus.revision,
+      // The row's value now, not a default (D8): `not-created` rows may have changed.
+      accessMode: locus.accessMode,
       label,
       endpoint: locus.endpoint,
-      permission: 'read',
       prompt: input.content,
       ...publication,
       signal: input.signal,
@@ -195,28 +194,21 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
         // Nothing to adopt: the child does not exist yet. Only the identity it
         // will be created under is returned, after the same preset proof an
         // existing child needs.
-        const refusal = await checkParentPreset(locus.parentSessionId)
+        const refusal = await checkParentPreset(locus.locusMainSessionId)
         if (refusal !== undefined) {
           ports.log?.(refusal)
           throw new Error(`Locus child is unavailable (${refusal})`)
         }
-        return { parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }
+        return { parentSessionId: locus.locusMainSessionId, childSessionId: locus.sessionId }
       }
-      // Refuse before adapter allocation, parent resolution, proof, or cold
-      // resume. Only a row Host-attested as the current composition serves:
-      // rows with an older marker (or none) belong to the retired model.
-      if (locus.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-        ports.log?.('safe-composition-unproven')
-        throw new Error('Locus child is unavailable (safe-composition-unproven)')
-      }
-      const presetRefusal = await checkParentPreset(locus.parentSessionId)
+      const presetRefusal = await checkParentPreset(locus.locusMainSessionId)
       if (presetRefusal !== undefined) {
         ports.log?.(presetRefusal)
         throw new Error(`Locus child is unavailable (${presetRefusal})`)
       }
       const expected: LocusChildIdentity = {
-        parentSessionId: locus.parentSessionId,
-        childSessionId: locus.childSessionId,
+        parentSessionId: locus.locusMainSessionId,
+        childSessionId: locus.sessionId,
       }
       // The locus already names its child, so this is an ADOPTION of a durable
       // identity, never a fresh creation: creating one here would mint a second
@@ -243,8 +235,8 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
 
     async queueChild(input) {
       if (
-        input.child.childSessionId !== input.locus.childSessionId ||
-        input.child.parentSessionId !== input.locus.parentSessionId
+        input.child.childSessionId !== input.locus.sessionId ||
+        input.child.parentSessionId !== input.locus.locusMainSessionId
       ) {
         // Refuse before touching the inbox: a mismatch here would run a
         // group's message inside an unrelated conversation.
@@ -259,7 +251,7 @@ export function createLocusChildDelivery(ports: LocusChildDeliveryPorts): {
       }
       // The parent's preset can change while the child is alive; the child
       // would then serve (or cold-resume) under a composition nobody reviewed.
-      const presetRefusal = await checkParentPreset(input.locus.parentSessionId)
+      const presetRefusal = await checkParentPreset(input.locus.locusMainSessionId)
       if (presetRefusal !== undefined) {
         ports.log?.(presetRefusal)
         return { accepted: false, reason: presetRefusal }

@@ -19,6 +19,8 @@ import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
+import { PET_DOMAIN_NAME, PET_DOMAIN_VERSION } from '../src/host/spec.js'
+import { allPetTables, seedPetState } from './support/pet-sqlite.js'
 
 const SPEC = {
   name: 'dsh_pet_probe',
@@ -534,5 +536,29 @@ describe('isMediumLocked', () => {
     expect(isMediumLocked({ message: 'not an error' })).toBe(true)
     expect(isMediumLocked({ message: 'no such table: tasks' })).toBe(false)
     expect(isMediumLocked(undefined)).toBe(false)
+  })
+})
+
+describe('spec Scenario "safe-v1 行继续服务"', () => {
+  it('a v19 tier3 medium opened by the v20 Host refuses with version-mismatch and stays stamped 19', async () => {
+    expect(PET_DOMAIN_VERSION).toBe(20)
+    const s = scratch()
+    try {
+      await seedPetState(s.file, 19, {})
+      const before = new DatabaseSync(s.file, { readOnly: true })
+      const stampedBefore = before.prepare('SELECT name, version FROM units').all()
+      before.close()
+
+      const host = new PetStorageBackend(s.file)
+      try {
+        await expect(host.kv.open({ name: PET_DOMAIN_NAME, version: PET_DOMAIN_VERSION, tables: allPetTables(), hasGlobal: true }))
+          .rejects.toMatchObject({ name: 'PetStorageError', code: 'version-mismatch' })
+      } finally { await host.close() }
+
+      const after = new DatabaseSync(s.file, { readOnly: true })
+      try {
+        expect(after.prepare('SELECT name, version FROM units').all()).toEqual(stampedBefore)
+      } finally { after.close() }
+    } finally { s.dispose() }
   })
 })

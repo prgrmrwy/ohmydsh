@@ -12,6 +12,17 @@ dsh-cockpit-bridge ──provide──▶ shim ──register──▶ dsh-workt
         不知道 ws                              不知道 cockpit
 ```
 
+## 安装
+
+与两端一起安装：[dsh-cockpit-bridge](https://github.com/prgrmrwy/dsh-cockpit) >= 0.4.0（以 GitHub Release tarball 分发）和 `dsh-worktree-session`。
+
+```sh
+dsh plugin --profile web add https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz
+dsh plugin --profile web add dsh-cockpit-worktree-open-shim
+```
+
+然后重启 DSH web。卸载：`dsh plugin --profile web remove dsh-cockpit-worktree-open-shim`。
+
 ## 为什么独立成包
 
 Worktree Session 是通用插件，不应知道 dsh-cockpit；dsh-cockpit-bridge 也不应知道具体消费方。两端的全部耦合只存在于本 shim，便于独立升级和彻底移除。
@@ -39,3 +50,7 @@ Worktree Session 是通用插件，不应知道 dsh-cockpit；dsh-cockpit-bridge
 - Worktree Session 恢复默认 `vscode://file/` 行为；
 - dsh-cockpit-bridge 的会话已读确认、pending snapshot 等既有功能不受影响；
 - 两端无需任何源码或配置迁移。
+
+## 来源与许可证
+
+源码在 [ohmydsh](https://github.com/prgrmrwy/ohmydsh) 的 `packages/cockpit-worktree-open-shim` 中持续维护，[dsh-cockpit-worktree-open-shim](https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim) 是发布镜像。以 [MIT 许可证](LICENSE) 发布，欢迎到 https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim/issues 提 issue 或 PR。

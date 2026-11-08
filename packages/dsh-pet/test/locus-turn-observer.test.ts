@@ -14,8 +14,7 @@ const CHILD = 'child-1'
 const correlation = {
   endpoint: { chatId: 'oc-project', threadId: 'omt-topic' },
   locusId: 'locus-1',
-  generation: 2,
-  childSessionId: CHILD,
+  sessionId: CHILD,
 }
 
 /** Wire the observer to controllable runtime subscriptions. */

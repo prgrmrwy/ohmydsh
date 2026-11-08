@@ -5,6 +5,7 @@ import Query from '@deepseek-ai/dsh-session-query'
 import Agents from '@deepseek-ai/dsh-agent'
 import Llm, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import Tools from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Loop from '@deepseek-ai/dsh-agent-loop'
@@ -43,6 +44,7 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
     await ctx.plugin(Persistence, { root })
     await ctx.plugin(Query)
     for (const plugin of [Agents, Llm, Tools, Prompt, Projections]) await ctx.plugin(plugin)
+    await ctx.plugin(NativeToolExecutor)
     let requests = 0
     ctx.llm.registerAdapter(['fake'], new class extends LlmAdapter {
       override async *stream() {
@@ -59,11 +61,18 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
     await ctx.plugin(Subagents)
     await ctx.plugin(Spawn)
     const entry = await world.controller.ensureGroup({ chatId: 'queue-chat', parentSessionId: 'work-1' })
-    const row = world.durable.getLocus(entry.locus.locusId)!
-    const childId = row.reservedChildSessionId!
-    await world.durable.publishCreatedChild({ locusId: row.id, generation: row.generation, childSessionId: childId, now: 1000 })
-    const parent = await ctx.agentLoop.create(SessionId(row.parentSessionId), { provider: 'fake', model: 'text' })
-    const correlation = { endpoint: row.endpoint, locusId: row.id, generation: row.generation, childSessionId: childId }
+    const initial = world.durable.getLocus(entry.locus.locusId)!
+    const childId = initial.sessionId
+    const mainId = entry.group.locusMainSessionId
+    const row = { endpoint: initial.endpoint }
+    // The channel's resolution view of the entry, always re-read from the row.
+    const active = () => {
+      const current = world.durable.getLocus(initial.locusId)!
+      return { locusId: current.locusId, endpoint: current.endpoint, sessionId: current.sessionId, state: current.state as 'active' | 'not-created',
+        accessMode: current.accessMode, revision: current.revision, locusMainSessionId: mainId, workSessionId: 'work-1', workspaceId: entry.group.workspaceId }
+    }
+    const parent = await ctx.agentLoop.create(SessionId(mainId), { provider: 'fake', model: 'text' })
+    const correlation = { endpoint: initial.endpoint, locusId: initial.locusId, sessionId: childId }
     const claims: LocusInboxClaim[] = []
     let claim!: (value: LocusInboxClaim) => void
     let ended!: (value: LocusTurnEnd) => void
@@ -71,7 +80,7 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
       onClaimed: listener => { claim = listener; return () => {} }, onTurnEnd: listener => { ended = listener; return () => {} },
       lookup: { find: input => {
         const delivery = world.durable.findDeliveryByInboxMessageId(input.messageId)
-        return delivery?.executionId ? { deliveryId: delivery.deliveryId, executionId: delivery.executionId, correlation: delivery } : undefined
+        return delivery?.executionId ? { deliveryId: delivery.deliveryId, executionId: delivery.executionId, correlation: { endpoint: delivery.endpoint, locusId: delivery.locusId, sessionId: delivery.sessionId } } : undefined
       } },
     })
     ctx.on('agent/inbox/claimed', event => {
@@ -81,9 +90,12 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
     })
     ctx.on('session/event', (session, event) => { if (session.id === childId && event.type === 'turn/end') ended({ childSessionId: childId, turn: event.data.turn, outcome: 'completed' }) })
     const a = await world.durable.acceptDelivery({ ...correlation, messageId: 'A', text: 'A', senderOpenId: 'owner', acceptedAt: 1001 })
-    await world.durable.claimCurrentDelivery({ correlation, now: 1002 })
+    await world.durable.claimCurrentDelivery({ ...correlation, now: 1002 })
+    // First creation (D16): publish the row active on the current trigger, then commit once bound.
+    await world.durable.publishFirstDelivery({ locusId: initial.locusId, sessionId: childId, revision: initial.revision, deliveryId: a.record.deliveryId, executionId: 'execution-A', now: 1002 })
     const start = await ctx.subagents.startActivation({ provider: 'spawn', label: 'queue-child', childId: SessionId(childId), request: { parent, prompt: [{ type: 'text', text: 'A' }] }, signal: new AbortController().signal, delivery: 'parent' })
-    await world.durable.bindQueued({ deliveryId: a.record.deliveryId, correlation, executionId: 'execution-A', inboxMessageId: start.messageId, queuedAt: 1003 })
+    await world.durable.bindQueued({ deliveryId: a.record.deliveryId, ...correlation, executionId: 'execution-A', inboxMessageId: start.messageId, queuedAt: 1003 })
+    await world.durable.commitFirstDelivery({ executionId: 'execution-A', now: 1003 })
     turns.deliveryAvailable!({ childSessionId: childId, messageId: start.messageId })
     await aStarted.promise
     childDelivery = createLocusChildDelivery({ parentPreset: () => 'locus-base', createAdapter: () => createLocusChildAdapter({
@@ -92,13 +104,13 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
       proof: { findChild: async () => ({ parentSessionId: parent.id, childSessionId: childId }) },
     }) })
     controller = new LocusChannelController({
-      locus: { resolveCurrent: () => world.durable.getLocus(row.id), ensureForDelivery: async () => world.durable.getLocus(row.id)! },
+      locus: { resolveCurrent: () => active(), ensureForDelivery: async () => active() },
       child: childDelivery, turns, now: () => 1005, inspectResidentPolicy: () => ({ resident: false }),
-      deliveries: { accept: input => world.durable.acceptDelivery(input), getById: id => world.durable.getDelivery(id), bindQueued: input => world.durable.bindQueued(input), bindTurn: input => world.durable.bindTurn(input), settleByTurn: input => world.durable.settleByTurn(input), failBeforeDispatch: input => world.durable.failBeforeDispatch(input) },
-      deliveryDispatch: { claimCurrent: input => world.durable.claimCurrentDelivery(input), scheduleCurrent: () => {} },
+      deliveries: { accept: input => world.durable.acceptDelivery(input), getById: id => world.durable.getDelivery(id), bindQueued: async ({ correlation: c, ...rest }) => (await world.durable.bindQueued({ ...c, ...rest })).record, bindTurn: async ({ correlation: c, ...rest }) => (await world.durable.bindTurn({ ...c, ...rest })).record, settleByTurn: input => world.durable.settleByTurn({ ...input, turnId: input.correlation.turnId }), failBeforeDispatch: input => world.durable.failBeforeDispatch(input) },
+      deliveryDispatch: { claimCurrent: async ({ correlation: c, ...rest }) => { const r = await world.durable.claimCurrentDelivery({ ...c, ...rest }); return r.changed ? r.record : undefined }, scheduleCurrent: () => {} },
     })
     const send = vi.spyOn(ctx.subagents, 'sendMessage')
-    expect(await replyChild(parent, parent.id, { childSessionId: childId, text: 'parent context for A' }, new AbortController().signal, { loci: world.durable, subagents: () => ctx.subagents as never })).toEqual({ ok: true })
+    expect(await replyChild(parent, parent.id, { childSessionId: childId, text: 'parent context for A' }, new AbortController().signal, { loci: { findBySessionId: id => world.durable.findBySessionId(id), listEntryEndpointsOfMain: () => [initial.endpoint] }, subagents: () => ctx.subagents as never })).toEqual({ ok: true })
     releaseStep.resolve()
     await replyStarted.promise
     expect(turns.currentCapabilityForChild!(childId)).toMatchObject({ deliveryId: a.record.deliveryId })

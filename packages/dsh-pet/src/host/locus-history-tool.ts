@@ -215,7 +215,7 @@ function verifyCursor(cursor: LocusHistoryCursor, token: string, caller: LedgerC
   if (payload === undefined) return { ok: false, reason: 'cursor-invalid' }
   if (
     payload.locusId !== caller.locusId
-    || payload.generation !== caller.generation
+    || payload.sessionId !== caller.childSessionId
     || payload.chatId !== caller.endpoint.chatId
     || payload.threadId !== caller.endpoint.threadId
   ) {
@@ -328,7 +328,7 @@ export async function executeLocusChatHistory(
   const continuation = hasMore
     ? deps.cursor.issue({
       locusId: caller.locusId,
-      generation: caller.generation,
+      sessionId: caller.childSessionId,
       chatId: caller.endpoint.chatId,
       ...(caller.endpoint.threadId === undefined ? {} : { threadId: caller.endpoint.threadId }),
       direction,

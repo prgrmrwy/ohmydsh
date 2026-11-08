@@ -15,7 +15,7 @@ export function createRefusedReplyTracker(ports: RefusedReplyPorts) {
   const key = (child: string, turn: number) => `${child}\u0000${turn}`
   return {
     refused(record: DeliveryRecord, turn: number) {
-      const id = key(record.childSessionId, turn)
+      const id = key(record.sessionId, turn)
       const previous = turns.get(id)
       if (previous?.continued) return
       turns.set(id, { record, continued: false })
@@ -25,16 +25,16 @@ export function createRefusedReplyTracker(ports: RefusedReplyPorts) {
       const entry = turns.get(key(child, turn))
       turns.delete(key(child, turn))
       const captured = entry?.record
-      if (entry?.continued || captured === undefined) return
+      if (captured === undefined) return
       const correlation: DeliveryCorrelation = {
         endpoint: captured.endpoint, locusId: captured.locusId,
-        generation: captured.generation, childSessionId: captured.childSessionId,
+        sessionId: captured.sessionId,
       }
       await ports.withDispatchLane(correlation, async () => {
         const current = ports.getDelivery(captured.deliveryId)
         if (current === undefined || current.status !== 'current' || current.revision === undefined ||
-            current.childSessionId !== child || current.locusId !== captured.locusId ||
-            current.generation !== captured.generation || current.executionId !== captured.executionId ||
+            current.sessionId !== child || current.locusId !== captured.locusId ||
+            current.sessionId !== captured.sessionId || current.executionId !== captured.executionId ||
             !ports.isActive(current)) return
         const result = await ports.abandonRefusedDelivery({ ...correlation, deliveryId: captured.deliveryId, now: ports.now(), expectedRevision: current.revision })
         if (result.changed && result.record !== undefined) await ports.finishAndAdvance(result.record, correlation, 'failed')

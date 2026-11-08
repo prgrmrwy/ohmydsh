@@ -22,7 +22,7 @@
     "dotfiles"
   ],
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=24.9.0",
     "npm": ">=10.0.0"
   },
   "bin": {
@@ -40,7 +40,7 @@
   "devDependencies": {
     "js-yaml": "^4.1.0",
     "jsdom": "^26.1.0",
-    "semver": "^7.8.5",
+    "semver": "^7.8.6",
     "unrun": "^0.3.1",
     "yaml": "^2.8.1",
     "zx": "8.8.5"

@@ -61,7 +61,14 @@ it('a stale descriptor from another boot grants nothing and the release keeps a 
   const h = await hostFixture()
   await releaseStopDescriptor(h.home, h.port, 'some-other-boot')
   const foreign = { ...h.initial, processes: [{ ...h.initial.processes[0]!, pid: process.pid + 100_000 }] }
-  await expect(preparePetStop({ home: h.home, port: h.port, initial: foreign, probe: async () => structuredClone(foreign), env: {}, warn: () => {} })).rejects.toThrow('descriptor missing')
+  // A stale or absent descriptor grants nothing: the launcher stops WITHOUT
+  // Pet drain (warning only) and never prepares through it (2026-11-06).
+  const warnings: string[] = []
+  const stale = await preparePetStop({ home: h.home, port: h.port, initial: foreign, probe: async () => structuredClone(foreign), env: {}, warn: (line: string) => { warnings.push(line) } })
+  expect(await stale.resume()).toBe('not-needed')
   await releaseStopDescriptor(h.home, h.port, h.identity.bootId)
-  await expect(preparePetStop({ home: h.home, port: h.port, initial: h.initial, probe: h.probe, env: {}, warn: () => {} })).rejects.toThrow('descriptor missing')
+  const absent = await preparePetStop({ home: h.home, port: h.port, initial: h.initial, probe: h.probe, env: {}, warn: (line: string) => { warnings.push(line) } })
+  expect(await absent.resume()).toBe('not-needed')
+  expect(warnings).toHaveLength(2)
+  expect(warnings.every(line => /无 Pet 停止凭据/.test(line))).toBe(true)
 })

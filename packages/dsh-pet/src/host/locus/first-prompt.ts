@@ -21,11 +21,11 @@
 export interface FirstPromptDelivery {
   readonly deliveryId: string
   readonly executionId: string
+  /** v20 instance correlation (D3): `(locusId, sessionId)` on its endpoint; no generation. */
   readonly correlation: {
     readonly endpoint: { readonly chatId: string; readonly threadId?: string }
     readonly locusId: string
-    readonly generation: number
-    readonly childSessionId: string
+    readonly sessionId: string
   }
 }
 
@@ -67,7 +67,7 @@ export function createFirstPromptRegistry(ports?: {
       if (expectations.has(childSessionId)) {
         throw new Error(`Child ${childSessionId} already has a first-prompt expectation`)
       }
-      if (delivery.correlation.childSessionId !== childSessionId) {
+      if (delivery.correlation.sessionId !== childSessionId) {
         throw new Error('A first-prompt expectation must name its own child')
       }
       expectations.set(childSessionId, { delivery })

@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   composeLocusChild,
   LOCUS_CALLER_BOUND_TOOLS,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
   LOCUS_SAFE_TOOL_NAMES,
-  LOCUS_SHELL_TIER_TOOL_NAMES,
   type LocusChildComposition,
   type LocusCompositionLookup,
+  type LocusCompositionPorts,
 } from '../src/host/locus/composition.js'
+import type { LocusAccessModeV20 } from '../src/host/locus/contract-v20.js'
 import {
   createPrepublicationCompositionLookup,
   LocusPrepublicationError,
@@ -16,10 +18,11 @@ import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 
 function identity(overrides: Partial<LocusChildComposition> = {}) {
   return {
-    parentSessionId: 'session-parent',
+    locusMainSessionId: 'session-parent',
     locusId: 'locus-fresh',
-    generation: 1,
-    permission: 'read' as const,
+    revision: 1,
+    accessMode: 'read-only' as LocusAccessModeV20,
+    endpoint: { chatId: 'oc-fresh' },
     ...overrides,
   }
 }
@@ -56,127 +59,81 @@ function expectReason(action: () => unknown, reason: LocusPrepublicationError['r
   }
 }
 
+/** Compose ports whose restriction layer really narrows the visible surface. */
+function composePorts(lookup: LocusCompositionLookup, overrides: Partial<NonNullable<LocusCompositionPorts['surface']>> = {}) {
+  const visible = new Set([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_FULL_ACCESS_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS])
+  const applied = new Map<string, LocusAccessModeV20>()
+  const applyAccessMode = vi.fn((_agent: unknown, mode: LocusAccessModeV20) => {
+    if (mode === 'read-only') for (const name of LOCUS_FULL_ACCESS_TOOL_NAMES) visible.delete(name)
+  })
+  const ports: LocusCompositionPorts = {
+    lookup,
+    parentPreset: () => LOCUS_BASE_PRESET,
+    childPreset: () => 'locus-child',
+    writeEnabled: true,
+    surface: { install: vi.fn(), applyAccessMode, installOutboundGuard: vi.fn(), visibleTools: () => [...visible], ...overrides },
+    policy: { apply: (id, mode) => { applied.set(id, mode) }, resolve: id => applied.get(id) },
+  }
+  return { ports, visible, applyAccessMode }
+}
+
 describe('locus child pre-publication staging', () => {
-  it.each([
-    { tier: 'safe' as const, expected: LOCUS_SAFE_TOOL_NAMES },
-    { tier: 'shell' as const, expected: [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES] },
-  ])('composes a fresh staged child with the persisted $tier tier', ({ tier, expected }) => {
+  it.each(['read-only', 'danger-full-access'] as const)('composes a fresh staged child with the row accessMode %s', mode => {
     const staging = registry()
-    const reservation = staging.reserve(identity({ toolTier: { desired: tier, effective: tier } }))
+    const reservation = staging.reserve(identity({ accessMode: mode }))
     const lookup = createPrepublicationCompositionLookup({ durable: durableLookup(), staging })
-    const visible = new Set([...expected, ...LOCUS_CALLER_BOUND_TOOLS])
-    const candidate = { id: reservation.childSessionId, scope: { get: vi.fn() } }
-    const result = composeLocusChild(candidate, {
-      lookup,
-      parentPreset: () => LOCUS_BASE_PRESET,
-      childPreset: () => 'locus-child',
-      surface: {
-        install: vi.fn(),
-        setToolTier: (_agent, target) => {
-          expect(target).toBe(tier)
-          if (target === 'safe') {
-            for (const name of LOCUS_SHELL_TIER_TOOL_NAMES) visible.delete(name)
-          }
-        },
-        installOutboundGuard: vi.fn(),
-        visibleTools: () => [...visible],
-      },
-      policy: { apply: () => {}, resolve: () => 'read' },
-    })
-    expect(result).toMatchObject({ composed: true, composition: { toolTier: { effective: tier } } })
-    expect([...visible].filter(name => [...LOCUS_SHELL_TIER_TOOL_NAMES].includes(name))).toEqual(
-      tier === 'safe' ? [] : [...LOCUS_SHELL_TIER_TOOL_NAMES],
+    const { ports, visible, applyAccessMode } = composePorts(lookup)
+
+    const result = composeLocusChild({ id: reservation.childSessionId, scope: { get: vi.fn() } }, ports)
+
+    expect(result).toMatchObject({ composed: true, accessMode: mode, composition: { accessMode: mode } })
+    expect(applyAccessMode).toHaveBeenCalledWith(expect.anything(), mode)
+    expect([...visible].filter(name => LOCUS_FULL_ACCESS_TOOL_NAMES.includes(name))).toEqual(
+      mode === 'read-only' ? [] : [...LOCUS_FULL_ACCESS_TOOL_NAMES],
     )
   })
 
-  it('fails closed when durable safe-tier restore cannot install restriction', () => {
-    const childSessionId = 'session-durable-fail'
-    const record = identity({
-      childSessionId,
-      childComposition: 'tier3',
-      toolTier: { desired: 'safe', effective: 'safe' },
-    }) as LocusChildComposition
-    const lookup = createPrepublicationCompositionLookup({
-      durable: durableLookup(new Map([[childSessionId, record]])),
-      staging: registry(),
-    })
-    expect(() => composeLocusChild({ id: childSessionId, scope: { get: vi.fn() } }, {
-      lookup,
-      parentPreset: () => LOCUS_BASE_PRESET,
-      childPreset: () => 'locus-child',
-      surface: {
-        install: vi.fn(),
-        setToolTier: () => { throw new Error('restrict failed on cold restore') },
-        installOutboundGuard: vi.fn(),
-        visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS],
-      },
-      policy: { apply: () => {}, resolve: () => 'read' },
-    })).toThrow(/safe tool tier/)
-  })
-
-  it('refuses fresh staging when the restriction seam throws', () => {
+  it.each(['durable', 'staged'] as const)('fails closed when the %s restriction layer cannot be installed', source => {
     const staging = registry()
-    const reservation = staging.reserve(identity({ toolTier: { desired: 'safe', effective: 'safe' } }))
-    const lookup = createPrepublicationCompositionLookup({ durable: durableLookup(), staging })
-    expect(() => composeLocusChild(
-      { id: reservation.childSessionId, scope: { get: vi.fn() } },
-      {
-        lookup,
-        parentPreset: () => LOCUS_BASE_PRESET,
-        childPreset: () => 'locus-child',
-        surface: {
-          install: vi.fn(),
-          setToolTier: () => { throw new Error('restriction unavailable') },
-          installOutboundGuard: vi.fn(),
-          visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS],
-        },
-        policy: { apply: () => {}, resolve: () => 'read' },
-      },
-    )).toThrow(/safe tool tier/)
+    let id = 'session-durable-fail'
+    const durable = new Map<string, LocusChildComposition>()
+    if (source === 'durable') durable.set(id, { ...identity(), sessionId: id })
+    else id = staging.reserve(identity()).childSessionId
+    const lookup = createPrepublicationCompositionLookup({ durable: durableLookup(durable), staging })
+    const { ports } = composePorts(lookup, { applyAccessMode: () => { throw new Error('restrict failed') } })
+    expect(() => composeLocusChild({ id, scope: { get: vi.fn() } }, ports)).toThrow(/read-only restriction layer/)
   })
 
   it('lets the first synchronous agent/created composition claim a fresh child', () => {
     const staging = registry()
     const reservation = staging.reserve(identity())
-    const lookup = createPrepublicationCompositionLookup({
-      durable: durableLookup(),
-      staging,
-    })
-    const applied = new Map<string, 'read' | 'write'>()
-    const install = vi.fn()
+    const lookup = createPrepublicationCompositionLookup({ durable: durableLookup(), staging })
+    const { ports } = composePorts(lookup)
     const agent = { id: reservation.childSessionId, scope: { get: vi.fn() } }
 
-    const result = composeLocusChild(agent, {
-      lookup,
-      parentPreset: () => LOCUS_BASE_PRESET,
-      childPreset: () => 'locus-child',
-      surface: {
-        install,
-        setToolTier: vi.fn(),
-        installOutboundGuard: vi.fn(),
-        visibleTools: () => [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS],
-      },
-      policy: {
-        apply: (sessionId, permission) => { applied.set(sessionId, permission) },
-        resolve: sessionId => applied.get(sessionId),
-      },
-    })
+    const result = composeLocusChild(agent, ports)
 
     expect(result).toEqual({
       composed: true,
       composition: {
-        parentSessionId: 'session-parent',
-        childSessionId: 'session-fresh',
+        locusMainSessionId: 'session-parent',
+        sessionId: 'session-fresh',
         locusId: 'locus-fresh',
-        generation: 1,
-        permission: 'read',
-        childComposition: 'tier3',
-        toolTier: { desired: 'safe', effective: 'safe' },
+        revision: 1,
+        accessMode: 'read-only',
+        endpoint: { chatId: 'oc-fresh' },
       },
-      effectivePermission: 'read',
+      accessMode: 'read-only',
     })
-    expect(install).toHaveBeenCalledWith(agent, reservation.composition)
+    expect(ports.surface?.install).toHaveBeenCalledWith(agent, reservation.composition)
     expect(staging.inspect(reservation.childSessionId)?.state).toBe('claimed')
+  })
+
+  it('stages the reserved sessionId the durable row already carries (D16), never inventing another', () => {
+    const staging = registry()
+    const reservation = staging.reserve({ ...identity(), sessionId: 'session-reserved' })
+    expect(reservation.childSessionId).toBe('session-reserved')
+    expect(reservation.composition.sessionId).toBe('session-reserved')
   })
 
   it('carries the endpoint into the fresh composition, so a doc child is recognisable before its locus row exists', () => {
@@ -186,46 +143,15 @@ describe('locus child pre-publication staging', () => {
     expect(reservation.composition.endpoint).toEqual({ chatId: 'doc:docx:Dx1', threadId: '77' })
   })
 
-  it.each([
-    { tier: 'safe' as const, expectedTools: LOCUS_SAFE_TOOL_NAMES },
-    { tier: 'shell' as const, expectedTools: [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES] },
-  ])('composes durable child with persisted $tier tier', ({ tier, expectedTools }) => {
-    const childSessionId = 'session-durable'
-    const record = identity({
-      childSessionId,
-      childComposition: 'tier3',
-      toolTier: { desired: tier, effective: tier },
-    }) as LocusChildComposition
+  it.each(['read-only', 'danger-full-access'] as const)('composes a durable child with the row accessMode %s', mode => {
+    const id = 'session-durable'
     const lookup = createPrepublicationCompositionLookup({
-      durable: durableLookup(new Map([[childSessionId, record]])),
+      durable: durableLookup(new Map([[id, { ...identity({ accessMode: mode }), sessionId: id }]])),
       staging: registry(),
     })
-    const visible = new Set([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS])
-    const setToolTier = vi.fn((_agent, appliedTier: 'safe' | 'shell') => {
-      expect(appliedTier).toBe(tier)
-      if (appliedTier === 'safe') {
-        for (const name of LOCUS_SHELL_TIER_TOOL_NAMES) visible.delete(name)
-      }
-    })
-    const result = composeLocusChild({ id: childSessionId, scope: { get: vi.fn() } }, {
-      lookup,
-      parentPreset: () => LOCUS_BASE_PRESET,
-      childPreset: () => 'locus-child',
-      surface: {
-        install: vi.fn(),
-        setToolTier,
-        installOutboundGuard: vi.fn(),
-        visibleTools: () => [...visible],
-      },
-      policy: { apply: () => {}, resolve: () => 'read' },
-    })
-
-    expect(result).toMatchObject({ composed: true, composition: { toolTier: { effective: tier } } })
-    expect(setToolTier).toHaveBeenCalledOnce()
-    expect([...visible].filter(name => LOCUS_SHELL_TIER_TOOL_NAMES.includes(name))).toEqual(
-      tier === 'safe' ? [] : [...LOCUS_SHELL_TIER_TOOL_NAMES],
-    )
-    expect(expectedTools.every(name => visible.has(name))).toBe(true)
+    const { ports, applyAccessMode } = composePorts(lookup)
+    expect(composeLocusChild({ id, scope: { get: vi.fn() } }, ports)).toMatchObject({ composed: true, accessMode: mode })
+    expect(applyAccessMode).toHaveBeenCalledOnce()
   })
 
   it('hands lookup to durable identity after durable publish then commit', () => {
@@ -302,7 +228,7 @@ describe('locus child pre-publication staging', () => {
       [reservation.childSessionId, {
         ...reservation.composition,
         locusId: 'locus-old',
-        generation: 9,
+        revision: 9,
       }],
     ])
     const lookup = createPrepublicationCompositionLookup({

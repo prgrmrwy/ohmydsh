@@ -4,7 +4,8 @@ import { AUTO_EFFORTS, type AutomaticEffort, type RoutingCatalog, type Settings,
 import type { SettingsUi } from './settings-ui.js'
 import { DECISION_SERVICES, resolveDecisionService, type DecisionProvider } from '../decision-service.js'
 import type { JevCategory } from '../hints.js'
-import { StrategyDetails } from './strategy-details.js'
+import { StrategyDetails, localized } from './strategy-details.js'
+import { PRESETS, resolvePreset } from '../presets/index.js'
 import { CATEGORY_HINT_KEYS, SERVICE_LABEL_KEYS, t } from './locales.js'
 
 export interface SettingsView extends RoutingCatalog {
@@ -33,6 +34,7 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
   const [patch, setPatch] = useState<SettingsPatch>({})
   const [serviceMenu, setServiceMenu] = useState(false)
   const [modelMenu, setModelMenu] = useState(false)
+  const [presetMenu, setPresetMenu] = useState(false)
   const [key, setKey] = useState('')
   const [removeKey, setRemoveKey] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -49,6 +51,7 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
   if (!view) return h('div', { className: 'amr-settings', role: 'status' }, message || t('readingSettings'))
   const settings = { ...view.settings, ...patch }
   const cap = settings.effortCap
+  const preset = resolvePreset(settings.preset)
   const serviceConfig = settings.decisionService ?? { provider: 'openrouter' as const }
   const serviceProvider = serviceConfig.provider
   const decisionModel = serviceConfig.model ?? DECISION_SERVICES[serviceProvider].model
@@ -131,7 +134,13 @@ export function RoutingSettings({ rpc, ui }: { rpc: Rpc; ui: SettingsUi }) {
         h('div', { className: 'amr-settings-row' }, h('span', null, t('effortCap')), h(ui.SegmentedControl, { id: 'amr-cap', className: 'amr-settings-segments', label: t('effortCap'), value: cap, options: AUTO_EFFORTS.map(value => ({ value, label: value })), onChange: value => setPatch(old => ({ ...old, effortCap: value as AutomaticEffort })) }))),
       h('section', { className: 'amr-settings-section' }, h('h3', null, t('autoSection')),
         h('p', null, t('autoIntro')),
-        h('p', null, t('autoCatalogNote')), h(StrategyDetails)),
+        h('div', { className: 'amr-settings-row' }, h('div', null, t('preset'), h('p', null, t('presetHint'))),
+          h(ui.Menu, { open: presetMenu, portal: true, side: 'bottom', selectedId: preset.id, onClose: () => setPresetMenu(false),
+            items: PRESETS.map((p, i) => ({ id: p.id, label: i === 0 ? `${localized(p.title)} · ${t('presetDefault')}` : localized(p.title) })),
+            onSelect: id => { if (!PRESETS.some(p => p.id === id)) return; setPatch(old => ({ ...old, preset: id })); setPresetMenu(false) },
+            anchor: h('button', { type: 'button', className: 'amr-service-trigger', 'aria-label': t('preset'), 'aria-haspopup': 'menu', 'aria-expanded': presetMenu, onClick: () => setPresetMenu(!presetMenu) }, h('span', null, localized(preset.title)), h(ui.IconChevronDownOutlineRegular, { size: 14 })) })),
+        h('p', null, localized(preset.summary)),
+        h('p', null, t('autoCatalogNote')), h(StrategyDetails, { preset })),
       ...[...conflicts, ...saveIssues].map(issue => h('p', { key: issue.path, role: 'status', className: 'amr-settings-error' }, `${issue.path}: ${issue.message}`)),
     ),
   }))

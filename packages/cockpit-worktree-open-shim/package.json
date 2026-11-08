@@ -3,6 +3,26 @@
   "version": "0.1.0",
   "description": "Deployment-local adapter from dsh-cockpit-bridge remote editor opening to the Worktree Session open-handler registry",
   "license": "MIT",
+  "author": "prgrmrwy",
+  "homepage": "https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim.git"
+  },
+  "bugs": {
+    "url": "https://github.com/prgrmrwy/dsh-cockpit-worktree-open-shim/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh-cockpit",
+    "shim",
+    "worktree",
+    "vscode",
+    "remote-ssh",
+    "editor"
+  ],
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
@@ -18,6 +38,8 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "dsh": {
@@ -36,6 +58,7 @@
     "build": "npm run clean && npm run build:host && npm run build:client",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "test": "vitest run",
+    "prepare": "npm run build",
     "prepack": "npm run build"
   },
   "engines": {
@@ -45,11 +68,11 @@
     "@deepseek-ai/cordis": "^4.0.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis": "^4.1.0",
     "@types/node": "^24.19.2",
-    "tsdown": "^0.23.1",
+    "tsdown": "^0.23.5",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "ohmydsh": {
     "docTier": "C"

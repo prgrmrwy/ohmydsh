@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { acceptTodo } from '../src/host/ledger/dispatch.js'
-import { LocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
 import type { DeliveryCorrelation } from '../src/host/locus/delivery.js'
 import { locusSpaceId } from '../src/host/collab/naming.js'
 import { registerPetTools } from '../src/host/tools.js'
@@ -60,17 +60,17 @@ function acceptDeps(t: TodoWorld, port = fakeDispatchPort({ status: 'idle' })) {
 /** A durable locus with A current and B backlogged, on the real Delivery ledger. */
 async function deliveryQueue() {
   harness = await openPetHarness(emptyMedium())
-  const repository = new LocusRepository(harness.domain)
-  await repository.putLocus({
-    id: LOCUS.id, generation: 1, endpoint: ALPHA, parentSessionId: MAIN, childSessionId: LOCUS.childSessionId,
-    workspaceId: 'ws-life', source: 'auto', state: 'active', childComposition: 'safe-v1',
-    permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, busy: false, createdAt: 1, updatedAt: 1,
-  })
-  const correlation: DeliveryCorrelation = { endpoint: ALPHA, locusId: LOCUS.id, generation: 1, childSessionId: LOCUS.childSessionId }
+  await harness.domain.table('locus_mains').put(MAIN, { locusMainSessionId: MAIN, workSessionId: WORK, generation: 1, status: 'active', spaceId: SPACE, workspaceId: 'ws-pet', createdAt: 1, updatedAt: 1 } as never)
+  await harness.domain.table('loci').put(ALPHA.chatId, {
+    endpoint: ALPHA, locusId: LOCUS.id, sessionId: LOCUS.childSessionId, state: 'active', accessMode: 'read-only',
+    revision: 1, createdAt: 1, updatedAt: 1, locusMainSessionId: MAIN, workspaceId: 'ws-life',
+  } as never)
+  const repository = new LocusRepositoryV20(harness.domain as never)
+  const correlation: DeliveryCorrelation = { endpoint: ALPHA, locusId: LOCUS.id, sessionId: LOCUS.childSessionId }
   for (const messageId of ['om-a', 'om-b']) {
     await repository.acceptDelivery({ ...correlation, messageId, senderOpenId: 'ou_requester', acceptedAt: 2 } as never)
   }
-  const current = await repository.claimCurrentDelivery({ correlation, now: 3 })
+  const current = (await repository.claimCurrentDelivery({ ...correlation, now: 3 })).record
   return { repository, correlation, current: current! }
 }
 
@@ -83,7 +83,7 @@ describe('待办生命周期与 Delivery 结算解耦（collab）', () => {
 
     await repository.markDeliveryFinishing({ ...correlation, deliveryId: current.deliveryId, now: 4 })
     await repository.completeCurrentDelivery({ ...correlation, deliveryId: current.deliveryId, now: 5, outcome: 'reply', outboundResult: 'success' })
-    const next = await repository.claimCurrentDelivery({ correlation, now: 6 })
+    const next = (await repository.claimCurrentDelivery({ ...correlation, now: 6 })).record
     expect(next?.messageId).toBe('om-b')
     expect((await t.backend.getTodoItem('todo-q'))?.status).toBe('open')
   })

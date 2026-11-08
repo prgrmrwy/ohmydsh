@@ -5,7 +5,7 @@
 - **Reviewer context**: cross-model (codex / gpt-6-astra), fresh context
 - **Tool restrictions**: read-only inspection; single write to review.md
 - **范围与方法**：静态审阅 [proposal](<proposal.md>)、[design](<design.md>)、四份 delta（[dsh-collab](<specs/dsh-collab/spec.md>)、[collab-kernel](<specs/collab-kernel/spec.md>)、[intent-triage](<specs/pet-locus-intent-triage/spec.md>)、[collaboration](<specs/pet-locus-collaboration/spec.md>)及原评审；对照相关现行规范、[manifest](<../../../dsh.yaml>)、[跨边界协作标准](<../../../packages/dsh-collab/docs/cross-boundary-collaboration-standard.md>)、[ADR-0006](<../../../docs/adr/ADR-0006-keep-locus-inside-dsh-pet.md>)与扩展点归档设计。
-- **实现／测试覆盖**：检查 Pet 登记、值模型、存储、受理投递、原子事务、工具组合；dsh-collab caller、句柄、工具、status；内核事件模型、reduce、命令守卫与话题限额。静态抽查 [ledger-store 测试](<../../../packages/dsh-pet/test/ledger-store.test.ts>)、[ledger-todo 测试](<../../../packages/dsh-pet/test/ledger-todo.test.ts>)、[managed-caller 测试](<../../../packages/dsh-collab/test/managed-caller.test.ts>)、[status 测试](<../../../packages/dsh-collab/test/status.test.ts>)、[guard 测试](<../../../packages/collab-kernel/test/guard.test.ts>)，并检索相关 dispatch 测试。未运行测试、构建或部署；未把规划中的功能尚未实现视为缺陷。change 当前无 tasks.md；本轮是方案评审，不据此阻断。
+- **实现／测试覆盖**：检查 Pet 登记、值模型、存储、受理投递、原子事务、工具组合；dsh-collab caller、句柄、工具、status；内核事件模型、reduce、命令守卫与话题限额。静态抽查 ledger-store 测试（已删除：`../../../packages/dsh-pet/test/ledger-store.test.ts`）、ledger-todo 测试（已删除：`../../../packages/dsh-pet/test/ledger-todo.test.ts`）、[managed-caller 测试](<../../../packages/dsh-collab/test/managed-caller.test.ts>)、[status 测试](<../../../packages/dsh-collab/test/status.test.ts>)、[guard 测试](<../../../packages/collab-kernel/test/guard.test.ts>)，并检索相关 dispatch 测试。未运行测试、构建或部署；未把规划中的功能尚未实现视为缺陷。change 当前无 tasks.md；本轮是方案评审，不据此阻断。
 
 ## Round 3 Findings Status
 
@@ -23,7 +23,7 @@
 
 **无。** 在本轮明确的正常读取防误泄边界内，未建立新的兄弟正文／状态泄露、越权修改或实质 D9 回归反例。
 
-尤其不保留“旧存储并发受理可能两个都成功”的怀疑：[advanceStatus](<../../../packages/dsh-pet/src/host/ledger/store.ts#L191-L213>)在事务体内重读，且 [serializeDomainTransaction](<../../../packages/dsh-pet/src/host/storage/atomic-domain.ts#L247-L279>)串行化的是整个事务体，不只是持久化；[真实 domain 并发转换测试](<../../../packages/dsh-pet/test/ledger-store.test.ts#L140-L161>)也覆盖单一赢家。因此 [D9 并发受理 oracle](<specs/pet-locus-intent-triage/spec.md#L75-L78>)有实现依据。其余同钟、只归一化 ID、证据无损编码、创建快照与明确例外的约束可作为实施验收基础。
+尤其不保留“旧存储并发受理可能两个都成功”的怀疑：advanceStatus（已删除：`../../../packages/dsh-pet/src/host/ledger/store.ts#L191-L213`）在事务体内重读，且 serializeDomainTransaction（已删除：`../../../packages/dsh-pet/src/host/storage/atomic-domain.ts#L247-L279`）串行化的是整个事务体，不只是持久化；真实 domain 并发转换测试（已删除：`../../../packages/dsh-pet/test/ledger-store.test.ts#L140-L161`）也覆盖单一赢家。因此 [D9 并发受理 oracle](<specs/pet-locus-intent-triage/spec.md#L75-L78>)有实现依据。其余同钟、只归一化 ID、证据无损编码、创建快照与明确例外的约束可作为实施验收基础。
 
 ### 🟡 Moderate
 

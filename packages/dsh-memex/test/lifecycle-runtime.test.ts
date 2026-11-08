@@ -1,3 +1,4 @@
+import * as Presentation from '@deepseek-ai/dsh-agent-tool-presentation'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { emitAgentEvent, type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent'
@@ -74,8 +75,9 @@ async function harness(
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(AgentRegistry)
+  await ctx.plugin(Presentation, { mode: 'native' }) // 0.2.2 loads no tool executor by default
   await ctx.plugin(SessionProjection)
+  await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   const lifecycle = registerMemexLifecycle(ctx, service)
   const written: string[][] = []

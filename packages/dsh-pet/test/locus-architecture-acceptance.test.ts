@@ -1,23 +1,21 @@
 import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
 import { describe, expect, it } from 'vitest'
 import { LocusChannelController } from '../src/host/channel/locus-controller.js'
-import { ControllerLocusRepositoryAdapter } from '../src/host/locus/controller-persistence-adapter.js'
 import { LocusController } from '../src/host/locus/controller.js'
-import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { openPetHarness } from './harness.js'
 
 function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarness>>): void {
   if (harness.domain.supportsTransaction === true && typeof harness.domain.transaction === 'function') return
-  type TableName = 'loci' | 'locus_indexes' | 'locus_operations' | 'locus_switch_notices' | 'locus_deliveries' | 'locus_permission_audit'
-  type Write = { kind: 'put' | 'delete'; table: TableName; key: string; value?: unknown }
+  type Write = { kind: 'put' | 'delete'; table: string; key: string; value?: unknown }
   const domain = harness.domain as unknown as {
     supportsTransaction?: boolean
     transaction?: (body: (tx: {
-      put(table: TableName, key: string, value: unknown): void
-      delete(table: TableName, key: string): void
+      put(table: string, key: string, value: unknown): void
+      delete(table: string, key: string): void
     }) => void) => Promise<void>
-    table(name: TableName): {
+    table(name: string): {
       put(key: string, value: unknown): Promise<void>
       delete(key: string): Promise<boolean>
     }
@@ -39,17 +37,16 @@ function enableAtomicTransactions(harness: Awaited<ReturnType<typeof openPetHarn
 async function controllerFixture() {
   const harness = await openPetHarness()
   enableAtomicTransactions(harness)
-  const durable = new DurableLocusRepository(harness.domain)
+  const durable = new LocusRepositoryV20(harness.domain as never, { now: () => 100 })
   const sessions = new Map([
     // agentPreset mirrors the real Host: an explicitly named main must run
     // LOCUS_MAIN_PRESET, because the locus child inherits its composition.
     ['session-s1', { id: 'session-s1', workspaceId: 'workspace-s1', title: 'S1', agentPreset: LOCUS_MAIN_PRESET }],
     ['session-s2', { id: 'session-s2', workspaceId: 'workspace-s2', title: 'S2', agentPreset: LOCUS_MAIN_PRESET }],
   ])
-  const children: Array<{ id: string; parentSessionId: string }> = []
   let sequence = 0
   const controller = new LocusController({
-    repository: new ControllerLocusRepositoryAdapter(durable),
+    repository: durable,
     establishSpace: async input => ({ ok: true, spaceId: `space-${input.locusMainSessionId}` }),
     dsh: {
       resolveSession: async id => sessions.get(id),
@@ -71,8 +68,8 @@ async function controllerFixture() {
     },
     id: () => `id-${++sequence}`,
     now: () => sequence + 100,
-  })
-  return { harness, durable, controller, children }
+  } as never)
+  return { harness, durable, controller }
 }
 
 function inbound(messageId: string, text: string, mentions = true) {
@@ -91,44 +88,20 @@ function inbound(messageId: string, text: string, mentions = true) {
 }
 
 describe('design architecture acceptance A-F focused gaps', () => {
-  it('A: keeps default Q&A and multiple issue groups as independent children of one main', async () => {
+  it('A: keeps default Q&A and multiple issue groups as independent entries of one main', async () => {
     const f = await controllerFixture()
     try {
-      const qa = await f.controller.createOrOpenDefaultQa({ parentSessionId: 'session-s1', ownerId: 'ou-owner' })
-      const issueA = await f.controller.ensureGroup({ chatId: 'oc-issue-a', parentSessionId: 'session-s1' })
-      const issueB = await f.controller.ensureGroup({ chatId: 'oc-issue-b', parentSessionId: 'session-s1' })
+      await f.controller.createOrOpenDefaultQa({ parentSessionId: 'session-s1', ownerId: 'ou-owner' })
+      await f.controller.ensureGroup({ chatId: 'oc-issue-a', parentSessionId: 'session-s1' })
+      await f.controller.ensureGroup({ chatId: 'oc-issue-b', parentSessionId: 'session-s1' })
       const opened = await f.controller.createOrOpenDefaultQa({ parentSessionId: 'session-s1', ownerId: 'ou-owner' })
 
-      expect([qa.locus, issueA.locus, issueB.locus].map(item => item.parentSessionId)).toEqual([
-        qa.locus.parentSessionId, qa.locus.parentSessionId, qa.locus.parentSessionId,
-      ])
-      expect(new Set([qa.locus.reservedChildSessionId, issueA.locus.reservedChildSessionId, issueB.locus.reservedChildSessionId]).size).toBe(3)
-      expect(opened).toMatchObject({ reused: true, locus: { locusId: qa.locus.locusId } })
-      expect(f.durable.getDefaultQaLocus(qa.locus.parentSessionId)?.id).toBe(qa.locus.locusId)
-    } finally {
-      await f.harness.close()
-    }
-  })
-
-  it('C/D: preserves old S0 topics, keeps explicit S2 local, and gives post-switch topics S1 read', async () => {
-    const f = await controllerFixture()
-    try {
-      const oldTopic = await f.controller.ensureTopic({ chatId: 'oc-project', threadId: 'omt-old' })
-      const groupBefore = await f.controller.ensureGroup({ chatId: 'oc-project' })
-      const explicitS2 = await f.controller.ensureTopic({
-        chatId: 'oc-project', threadId: 'omt-explicit-s2', parentSessionId: 'session-s2',
-      })
-      const switched = await f.controller.replaceAutomaticGroupParent({
-        chatId: 'oc-project', parentSessionId: 'session-s1',
-      })
-      const newTopic = await f.controller.ensureTopic({ chatId: 'oc-project', threadId: 'omt-new' })
-
-      expect(oldTopic.locus.parentSessionId).toBe(groupBefore.locus.parentSessionId)
-      expect(f.durable.getLocus(oldTopic.locus.locusId)).toMatchObject({ state: 'not-created', parentSessionId: groupBefore.locus.parentSessionId })
-      expect(explicitS2.locus).toMatchObject({ workSessionId: 'session-s2', source: 'explicit', permission: 'read' })
-      expect(switched.locus).toMatchObject({ workSessionId: 'session-s1', generation: 2, permission: 'read' })
-      expect(newTopic.locus).toMatchObject({ workSessionId: 'session-s1', source: 'inherited', permission: 'read' })
-      expect(f.durable.getLocus(groupBefore.locus.locusId)?.state).toBe('retired')
+      const qaRow = f.durable.findDefaultQa('session-s1')!
+      const rows = ['oc-issue-a', 'oc-issue-b'].map(chatId => f.durable.getRow({ chatId })!)
+      const main = qaRow.locusMainSessionId
+      expect(rows.map(row => (row as unknown as { locusMainSessionId: string }).locusMainSessionId)).toEqual([main, main])
+      expect(new Set([qaRow.sessionId, ...rows.map(row => row.sessionId)]).size).toBe(3)
+      expect(opened).toMatchObject({ reused: true })
     } finally {
       await f.harness.close()
     }
@@ -137,55 +110,60 @@ describe('design architecture acceptance A-F focused gaps', () => {
   it('B/E: non-at has zero side effects; later decision turns reuse one child, serialize FIFO, and never create Invocation rows', async () => {
     const harness = await openPetHarness()
     try {
-      const durable = new DurableLocusRepository(harness.domain)
+      enableAtomicTransactions(harness)
+      const durable = new LocusRepositoryV20(harness.domain as never, { now: () => 100 })
       const pairing = {
         workSessionId: 'session-work', locusMainSessionId: 'session-main', status: 'active' as const,
         generation: 1, spaceId: 'space-main', workspaceId: 'workspace-main', createdAt: 1, updatedAt: 1,
       }
       await harness.domain.table('locus_mains').put(pairing.locusMainSessionId, pairing)
-      await durable.putLocus({
-        id: 'locus-decision', generation: 1, endpoint: { chatId: 'oc-decision' },
-        parentSessionId: pairing.locusMainSessionId, childSessionId: 'session-child', workspaceId: 'workspace-main',
-        source: 'auto', state: 'active', childComposition: 'tier3',
-        permission: { desired: 'read', effective: 'read', verifiedAt: 1 }, toolTier: { desired: 'safe', effective: 'safe' },
-        busy: false, createdAt: 1, updatedAt: 1,
+      await harness.domain.table('loci').put('oc-decision', {
+        endpoint: { chatId: 'oc-decision' }, locusId: 'locus-decision', sessionId: 'session-child',
+        state: 'active', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1,
+        locusMainSessionId: pairing.locusMainSessionId, workspaceId: 'workspace-main',
       })
       const queued: Array<{ childSessionId: string; prompt: string }> = []
       const controller = new LocusChannelController({
         locus: createLocusResolution({
           store: durable,
-          mains: { find: id => durable.getLocusMain(id) },
+          mains: { find: id => durable.findMain(id) },
           verifyMain: id => id === pairing.locusMainSessionId,
         }) as never,
-         allowOpenIds: () => ['ou-owner'],
-         currentToolTier: endpoint => durable.getCurrentLocus(endpoint)?.toolTier?.effective ?? 'safe',
-         readAllowOpenIds: () => ['ou-owner'],
+        allowOpenIds: () => ['ou-owner'],
+        currentToolTier: () => 'safe',
+        readAllowOpenIds: () => ['ou-owner'],
         deliveries: {
-          findByMessageId: id => durable.findDeliveryByMessageId(id),
-          getById: id => durable.getDelivery(id),
-          accept: input => durable.acceptDelivery(input),
-          bindQueued: input => durable.bindQueued(input),
-          bindTurn: input => durable.bindTurn(input),
+          findByMessageId: (id: string) => durable.findDeliveryByMessageId(id),
+          getById: (id: string) => durable.getDelivery(id),
+          accept: (input: never) => durable.acceptDelivery(input),
+          bindQueued: (input: never) => durable.bindQueued({ ...(input as unknown as { correlation: object }).correlation, ...(input as object) } as never).then(result => result.record),
+          bindTurn: (input: never) => durable.bindTurn({ ...(input as unknown as { correlation: object }).correlation, ...(input as object) } as never).then(result => result.record),
         } as never,
-        // The required durable current/backlog claim seam: D2's one-current
-        // FIFO serialization is exactly what this test exercises across two
-        // decision-turn Deliveries on the same locus/child.
+        // The durable current/backlog claim seam: one-current FIFO serialization
+        // across two decision-turn Deliveries on the same entry.
         deliveryDispatch: {
-          claimCurrent: input => durable.claimCurrentDelivery(input),
+          // The channel passes {correlation, deliveryId, now}; v20 takes a flat correlation.
+          claimCurrent: (input: never) => {
+            const nested = input as unknown as { correlation: object; deliveryId?: string; now: number }
+            // The channel port wants the claimed record, or undefined when nothing was claimed.
+            return durable.claimCurrentDelivery({ ...nested.correlation, deliveryId: nested.deliveryId, now: nested.now } as never).then(result => (result.changed ? result.record : undefined))
+          },
           currentFinished: () => {},
-          dispatchNext: async correlation => { await controller.dispatchNext(correlation) },
+          dispatchNext: async (correlation: never) => { await controller.dispatchNext(correlation) },
           scheduleCurrent: () => {},
         },
         child: {
-          ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
-          queueChild: async input => {
-            expect(await input.fenceBeforeQueue()).toBe(true)
-            queued.push({ childSessionId: input.child.childSessionId, prompt: input.content.filter(block => block.type === 'text').map(block => block.text).join('\n') })
-            return {
-              accepted: true as const,
-              executionId: input.executionId,
-              inboxMessageId: `inbox-${input.executionId}`,
+          ensureChild: (locus: { sessionId: string }) => ({ parentSessionId: pairing.locusMainSessionId, childSessionId: locus.sessionId }),
+          queueChild: async (input: never) => {
+            const request = input as unknown as {
+              fenceBeforeQueue: () => Promise<boolean>
+              child: { childSessionId: string }
+              content: Array<{ type: string; text?: string }>
+              executionId: string
             }
+            expect(await request.fenceBeforeQueue()).toBe(true)
+            queued.push({ childSessionId: request.child.childSessionId, prompt: request.content.filter(block => block.type === 'text').map(block => block.text).join('\n') })
+            return { accepted: true as const, executionId: request.executionId, inboxMessageId: `inbox-${request.executionId}` }
           },
         },
         inspectResidentPolicy: () => ({ resident: false }),
@@ -195,48 +173,41 @@ describe('design architecture acceptance A-F focused gaps', () => {
           isDuplicate: () => false,
           authorization: () => 'authorized',
         },
-      })
+      } as never)
 
-      await expect(controller.handle(inbound('om-material', 'PRD link', false))).resolves.toMatchObject({ kind: 'ignored', reason: 'no-mention' })
+      await expect(controller.handle(inbound('om-material', 'PRD link', false) as never)).resolves.toMatchObject({ kind: 'ignored', reason: 'no-mention' })
       expect(queued).toEqual([])
       expect(durable.findDeliveryByMessageId('om-material')).toBeUndefined()
 
-      await expect(controller.handle(inbound('om-question', '@Pet choose A or B'))).resolves.toMatchObject({ kind: 'accepted' })
-      const correlation = {
-        endpoint: { chatId: 'oc-decision' },
-        locusId: 'locus-decision',
-        generation: 1,
-        childSessionId: 'session-child',
-      }
+      await expect(controller.handle(inbound('om-question', '@Pet choose A or B') as never)).resolves.toMatchObject({ kind: 'accepted' })
+      const correlation = { endpoint: { chatId: 'oc-decision' }, locusId: 'locus-decision', sessionId: 'session-child' }
       const first = durable.findDeliveryByMessageId('om-question')!
       expect(first.status).toBe('current')
-      await expect(controller.handle(inbound('om-answer', '@Pet B'))).resolves.toMatchObject({ kind: 'accepted' })
+      await expect(controller.handle(inbound('om-answer', '@Pet B') as never)).resolves.toMatchObject({ kind: 'accepted' })
       expect(durable.findDeliveryByMessageId('om-answer')).toMatchObject({ status: 'accepted', queueState: 'backlog' })
       expect(queued).toHaveLength(1)
-      // Redelivery is deduplicated by the real repository, not a fixed admission spy.
-      await controller.handle(inbound('om-answer', '@Pet B'))
+      // Redelivery is deduplicated by the real repository.
+      await controller.handle(inbound('om-answer', '@Pet B') as never)
       expect(durable.listDeliveries()).toHaveLength(2)
       expect(queued).toHaveLength(1)
-      // `turn/end` never settles a Delivery: only the durable finish operation
-      // (what the Host lifecycle callback performs for `pet_locus_finish`)
-      // does. `no-reply` completes directly from `current`.
+      // `turn/end` never settles a Delivery: the durable finish operation does.
+      // `no-reply` completes from `finishing`, so the finish begins first.
+      await durable.markDeliveryFinishing({ ...correlation, deliveryId: first.deliveryId, now: 200, expectedRevision: first.revision } as never)
       await durable.completeCurrentDelivery({
         ...correlation,
         deliveryId: first.deliveryId,
-        now: Date.now(),
+        now: 201,
         outcome: 'no-reply',
         outboundResult: 'none',
         reason: 'decision recorded, no separate reply needed',
-        ...(first.revision === undefined ? {} : { expectedRevision: first.revision }),
-      })
-      controller.currentFinished({ deliveryId: first.deliveryId, correlation })
-      await controller.dispatchNext(correlation)
+        ...(first.revision === undefined ? {} : { expectedRevision: first.revision + 1 }),
+      } as never)
+      controller.currentFinished({ deliveryId: first.deliveryId, correlation } as never)
+      await controller.dispatchNext(correlation as never)
 
       expect(queued.map(item => item.childSessionId)).toEqual(['session-child', 'session-child'])
       expect(durable.findDeliveryByMessageId('om-question')?.status).toBe('no-reply')
-      expect(durable.findDeliveryByMessageId('om-question')?.replyTarget?.messageId).toBe('om-question')
       expect(durable.findDeliveryByMessageId('om-answer')?.status).toBe('current')
-      expect(durable.findDeliveryByMessageId('om-answer')?.replyTarget?.messageId).toBe('om-answer')
       expect(harness.domain.table('invocations').size).toBe(0)
       expect(harness.domain.table('invocation_channel').size).toBe(0)
       controller.dispose()

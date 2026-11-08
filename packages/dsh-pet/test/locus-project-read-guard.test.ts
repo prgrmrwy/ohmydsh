@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { runTool } from './support/tool-call.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -51,6 +53,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -65,7 +68,7 @@ describe('Locus canonical project-read guard', () => {
       workspaceRoot: workspace,
       deniedRoots: [dshHome, media],
     })
-    const execute = (name: string, args: unknown) => ctx!.tools.execute({
+    const execute = (name: string, args: unknown) => runTool(ctx!, {
       agent,
       name,
       callId: `${name}-${Math.random()}` as ToolCallId,
@@ -103,6 +106,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies++ }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -111,7 +115,7 @@ describe('Locus canonical project-read guard', () => {
     const scope = createScope(ctx, agent)
     const policy = { childCwd: petCwd, parentCwd: petCwd, workspaceRoot: petCwd, projectRoot: project, deniedRoots: [dshHome] }
     installLocusProjectReadGuard(scope.ctx, policy)
-    const execute = (name: string, args: unknown) => ctx!.tools.execute({ agent, name, callId: `${name}-${Math.random()}` as ToolCallId, arguments: args, signal: new AbortController().signal })
+    const execute = (name: string, args: unknown) => runTool(ctx!, { agent, name, callId: `${name}-${Math.random()}` as ToolCallId, arguments: args, signal: new AbortController().signal })
     expect((await execute('read', { file_path: join(project, 'ok.txt') })).isError).toBe(false)
     expect((await execute('grep', { path: project, pattern: 'ok' })).isError).toBe(false)
     for (const args of [
@@ -140,6 +144,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -155,7 +160,7 @@ describe('Locus canonical project-read guard', () => {
       deniedRoots: [dshHome],
     })
 
-    const result = await ctx.tools.execute({
+    const result = await runTool(ctx, {
       agent,
       name: 'read',
       callId: 'read-outside' as ToolCallId,
@@ -191,6 +196,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -205,7 +211,7 @@ describe('Locus canonical project-read guard', () => {
       workspaceRoot: workspace,
       deniedRoots: [dshHome],
     })
-    const execute = (name: string, args: unknown) => ctx!.tools.execute({
+    const execute = (name: string, args: unknown) => runTool(ctx!, {
       agent,
       name,
       callId: `${name}-${Math.random()}` as ToolCallId,
@@ -238,6 +244,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -255,7 +262,7 @@ describe('Locus canonical project-read guard', () => {
       workspaceRoot: workspace,
       deniedRoots: [dshHome],
     })
-    const execute = (caller: Agent, name: string, args: unknown) => ctx!.tools.execute({
+    const execute = (caller: Agent, name: string, args: unknown) => runTool(ctx!, {
       agent: caller,
       name,
       callId: `${name}-${Math.random()}` as ToolCallId,
@@ -284,6 +291,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -300,7 +308,7 @@ describe('Locus canonical project-read guard', () => {
         deniedRoots: [dshHome],
       })
       for (const name of ['grep', 'glob']) {
-        const result = await ctx.tools.execute({
+        const result = await runTool(ctx, {
           agent, name, callId: `${name}-${Math.random()}` as ToolCallId,
           arguments: { pattern: 'x' }, signal: new AbortController().signal,
         })
@@ -338,6 +346,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -352,7 +361,7 @@ describe('Locus canonical project-read guard', () => {
       workspaceRoot: workspace,
       deniedRoots,
     })
-    const execute = (name: string, args: unknown) => ctx!.tools.execute({
+    const execute = (name: string, args: unknown) => runTool(ctx!, {
       agent,
       name,
       callId: `${name}-${Math.random()}` as ToolCallId,
@@ -381,6 +390,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     expect(() => installLocusProjectReadGuard(ctx, {
       childCwd: project,
       parentCwd: base,
@@ -397,6 +407,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     expect(() => installLocusProjectReadGuard(ctx, {
       childCwd: base,
       parentCwd: base,
@@ -416,6 +427,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     let bodies = 0
     for (const name of ['read', 'read_image', 'glob', 'grep']) ctx.tools.register(probeTool(name, () => { bodies += 1 }))
     const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
@@ -433,7 +445,7 @@ describe('Locus canonical project-read guard', () => {
     // The store appearing later is still refused: it lives under the denied DSH home.
     await mkdir(join(dshHome, 'attachments'))
     await writeFile(join(dshHome, 'attachments', 'a.png'), 'x')
-    const result = await ctx.tools.execute({
+    const result = await runTool(ctx, {
       agent, name: 'read', callId: 'late-store' as ToolCallId,
       arguments: { file_path: join(dshHome, 'attachments', 'a.png') }, signal: new AbortController().signal,
     })
@@ -456,6 +468,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     expect(() => installLocusProjectReadGuard(ctx!, {
       childCwd: workspace,
       parentCwd: workspace,
@@ -474,6 +487,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     expect(() => installLocusProjectReadGuard(ctx!, {
       childCwd: workspace,
       parentCwd: workspace,
@@ -490,6 +504,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     expect(() => installLocusProjectReadGuard(ctx, {
       childCwd: workspace,
       parentCwd: workspace,
@@ -504,6 +519,7 @@ describe('Locus canonical project-read guard', () => {
     ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     expect(() => installLocusProjectReadGuard(ctx, {
       childCwd: join(base, 'missing'),
       parentCwd: base,

@@ -7,6 +7,17 @@ When dsh-memex runs on another machine, its "open cards" button would point your
 
 The only deployment-side coupling point: it registers the bridge's port forwarding into memex's generic browse-address extension. The sources and dependencies of the two ends never reference each other; removing the shim decouples them.
 
+## Install
+
+Install it next to both ends: [dsh-cockpit-bridge](https://github.com/prgrmrwy/dsh-cockpit) >= 0.6.1 (distributed as a GitHub Release tarball) and `dsh-memex`.
+
+```sh
+dsh plugin --profile web add https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz
+dsh plugin --profile web add dsh-cockpit-memex-browse-shim
+```
+
+Then restart DSH web. Uninstall with `dsh plugin --profile web remove dsh-cockpit-memex-browse-shim`.
+
 ## 0.2.0 behaviour and prerequisites
 
 - Requires the bridge to provide `cockpitBridge.forwards` (the production deployment pins 0.6.4). The old `portForward` / channel register / publish contracts are no longer supported.
@@ -28,3 +39,7 @@ Independent package test/typecheck/build. The integration regression uses memex'
 This shim connects two ends: the **`cockpitBridge.forwards` port-forwarding service** of `dsh-cockpit-bridge` and the **`dshMemex.browseAddress` registry** of `dsh-memex`. Their sources and dependencies do not reference each other; the shim is the only place they meet.
 
 Remove it when you no longer open memex cards across machines through dsh-cockpit, or when either end ships the integration natively: delete the manifest entry → `dsh build` → restart; neither end needs any migration. Rolling back to an older shim must also roll the bridge back to a version that provides the old service; never mix the 0.1.1 shim with bridge 0.6.x.
+
+## Source and license
+
+Maintained in [ohmydsh](https://github.com/prgrmrwy/ohmydsh) under `packages/cockpit-memex-browse-shim`; [dsh-cockpit-memex-browse-shim](https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim) is the publishing mirror. Released under the [MIT License](LICENSE). Issues and pull requests are welcome at https://github.com/prgrmrwy/dsh-cockpit-memex-browse-shim/issues.

@@ -21,8 +21,9 @@ import {
   type EnsureTopicResult,
   type LocusEndpoint,
 } from './controller.js'
-import { LocusPermissionMutationError } from './permission-mutation.js'
+import { LOCUS_COMMAND_TABLE } from './admission.js'
 import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './policy-verification.js'
+import type { LocusAccessModeV20 } from './contract-v20.js'
 
 /** Ask-scope disclosure for document entries (D7); kept in sync with doc egress. */
 export const DOC_ASK_SCOPE_DISCLOSURE = '本文档的评论者均可向我提问；只有 allowlist 成员能控制'
@@ -116,59 +117,23 @@ export interface LocusBindMutationPort {
     | PromiseLike<EnsureGroupResult | EnsureTopicResult>
     | EnsureGroupResult
     | EnsureTopicResult
-  /**
-   * Explicit owner rebuild for an endpoint protected by a unified tombstone or
-   * an opaque legacy endpoint marker. It must derive the new identity solely
-   * from `parentSessionId`; legacy rows provide no workspace or permission.
-   */
-  rebuildProtected?(input: LocusBindMutationInput & {
-    readonly marker: 'legacy' | 'retired'
-  }): PromiseLike<EnsureGroupResult | EnsureTopicResult> | EnsureGroupResult | EnsureTopicResult
 }
 
 export interface LocusExitMutationPort {
-  /** Stop the exact current endpoint generation and retain its stop marker. */
+  /** Stop the exact current row (idle only, D7); refuses with `LOCUS_BUSY` otherwise. */
   unbindCurrent(input: {
     readonly endpoint: LocusEndpoint
     readonly actorId: string
-  }): PromiseLike<{
-    readonly state: 'stopped'
-    readonly busy?: false
-  }> | {
-    readonly state: 'stopped'
-    readonly busy?: false
-  }
+  }): PromiseLike<{ readonly state: 'stopped' }> | { readonly state: 'stopped' }
 }
 
-export interface LocusScopeMutationPort {
-  setCurrentMode?(input: {
+/** `/access` (D8): the change applies and is verified on the NEXT assembly, never now. */
+export interface LocusAccessMutationPort {
+  setAccessMode(input: {
     readonly endpoint: LocusEndpoint
     readonly actorId: string
-    readonly mode: 'read' | 'write'
-  }): PromiseLike<LocusScopeMutationResult> | LocusScopeMutationResult
-}
-
-/**
- * `mode` is what the child serves under NOW. `pending` means the request was
- * only recorded (the child is released) and applies, verified, on its next wake.
- */
-export interface LocusScopeMutationResult {
-  readonly mode: 'read' | 'write'
-  readonly pending?: boolean
-}
-
-/** As {@link LocusScopeMutationResult}, for the tool tier. */
-export interface LocusToolTierMutationResult {
-  readonly tier: 'safe' | 'shell'
-  readonly pending?: boolean
-}
-
-export interface LocusToolTierMutationPort {
-  setCurrentTier?(input: {
-    readonly endpoint: LocusEndpoint
-    readonly actorId: string
-    readonly tier: 'safe' | 'shell'
-  }): PromiseLike<LocusToolTierMutationResult> | LocusToolTierMutationResult
+    readonly mode: LocusAccessModeV20
+  }): PromiseLike<unknown> | unknown
 }
 
 export interface CreateLocusControlDispatcherOptions {
@@ -184,12 +149,17 @@ export interface CreateLocusControlDispatcherOptions {
     | readonly LocusBindableSession[]
   readonly bind: LocusBindMutationPort
   readonly exit: LocusExitMutationPort
-  readonly scope?: LocusScopeMutationPort
-  readonly toolTierMutation?: LocusToolTierMutationPort
-  readonly tools?: LocusToolTierMutationPort
+  readonly access?: LocusAccessMutationPort
+  /** Global write switch; full access is refused when it is off, read stays allowed. */
+  readonly writeEnabled?: () => boolean
   /** Reads the real platform chat name. Failure/absence must stay absent. */
   readonly chatName?: (chatId: string) => PromiseLike<string | undefined> | string | undefined
 }
+
+export const LOCUS_EXPLICIT_PARENT_CONFLICT_TEXT =
+  '该群已由其它会话跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」。'
+export const LOCUS_ACCESS_APPLIED_TEXT = '已更新，下次唤醒时应用并核验；核验失败将拒绝服务。'
+export const LOCUS_DEPRECATED_COMMAND_TEXT = '该命令已不再改变状态，请改用 /access read|full。'
 
 function endpointFromRequest(request: LocusControlDispatchRequest): LocusEndpoint {
   return {
@@ -204,71 +174,34 @@ function failure(reason: string, text: string): LocusControlDispatchResult {
 
 function safeControlError(error: unknown): LocusControlDispatchResult {
   const code = (error as { code?: unknown } | undefined)?.code
-  if (code === 'BUSY' || code === 'LOCUS_BUSY') {
+  if (code === 'LOCUS_BUSY') {
     return failure('busy', '当前入口仍有执行中或排队消息，请稍后重试。')
   }
-  if (code === 'EXPLICIT_PARENT_CONFLICT' || code === 'EXPLICIT_SOURCE_LOCKED') {
-    return failure('explicit-source-locked', '当前入口已显式绑定其它主会话，请先解除后再绑定。')
+  if (code === 'EXPLICIT_PARENT_CONFLICT') {
+    return failure('explicit-source-locked', LOCUS_EXPLICIT_PARENT_CONFLICT_TEXT)
   }
-  if (code === 'LOCUS_STOPPED' || code === 'GROUP_UNAVAILABLE') {
-    return failure('stopped', '当前入口已停止，需要所有者显式重建后才能继续。')
+  if (code === 'GROUP_UNAVAILABLE' || code === 'TOPIC_UNAVAILABLE') {
+    return failure('stopped', '当前入口已停止；在该入口内对同一个会话重新 /bind 即可重新启用。')
   }
-  if (code === 'LOCUS_LEGACY_COMPOSITION') {
-    return failure('tools-legacy-composition', '该入口属于旧模型，关联已退休，未切换档位；下一条授权 at 将建立新的三层结构。')
+  if (code === 'SOURCE_ARCHIVED') {
+    return failure('source-archived', '来源会话已归档，请在管理面改绑。')
+  }
+  if (code === 'LOCUS_NOT_FOUND') {
+    return failure('not-found', '当前入口不存在或已失效。')
+  }
+  if (code === 'LOCUS_CONFLICT') {
+    return failure('conflict', '入口已变化，请刷新后重试。')
+  }
+  if (code === 'INVALID_REQUEST') {
+    return failure('access-invalid-state', '当前入口已停止或不可用，无法变更访问模式；重新启用后再试。')
   }
   // The only PARENT_NOT_ALLOWED a control command can reach is "the prefix
   // resolved to a child session", which the spec requires to read exactly like
-  // no match. Any new refusal under this code needs its own honest receipt —
-  // a preset gate once hid here and made a valid `/bind` look like a typo.
+  // no match.
   if (error instanceof LocusControllerError && error.code === 'PARENT_NOT_ALLOWED') {
     return failure('prefix-unresolved', LOCUS_BIND_UNRESOLVED_TEXT)
   }
-  if (error instanceof LocusPermissionMutationError) {
-    return permissionFailure(error)
-  }
   return failure('control-failed', '控制命令执行失败，请稍后重试。')
-}
-
-/**
- * Report WHY a permission change did not take effect.
- *
- * A blanket "try again later" is wrong for every one of these: the refusal is a
- * deterministic fact (the owner never confirmed an execution root, the
- * confirmed root is not the one the live sandbox grants, the child cannot be
- * resolved). The owner retries, nothing changes, and the actual reason stays
- * locked inside the management surface they were not looking at. The
- * verification diagnostics are already owner-facing Chinese sentences and carry
- * no path, session id or credential, so they are passed through verbatim.
- */
-function permissionFailure(error: LocusPermissionMutationError): LocusControlDispatchResult {
-  switch (error.code) {
-    case 'WRITE_UNSUPPORTED':
-      // The diagnostic already distinguishes "no confirmed root" from "the
-      // confirmed root is not what the sandbox grants"; it only lacked the
-      // place to act on it.
-      return failure(
-        'write-unsupported',
-        `${error.message} 可在 Pet 设置页「Locus 管理」里确认执行根后重试。`,
-      )
-    case 'CHILD_SESSION_UNAVAILABLE':
-      return failure('child-unavailable', '无法解析当前入口的子会话，权限未修改。')
-    case 'POLICY_APPLY_FAILED':
-      return failure('policy-apply-failed', '宿主拒绝应用该文件权限，权限未修改。')
-    case 'POLICY_VERIFY_FAILED':
-      return failure('policy-verify-failed', '无法从宿主回读该入口的实际文件策略，权限未修改。')
-    case 'PERSISTENCE_FAILED':
-      return failure('persistence-failed', '权限未持久化，已尝试恢复原策略；请稍后重试。')
-    case 'POLICY_ROLLBACK_FAILED':
-      return failure('rollback-failed', '权限变更失败且原策略无法恢复，该入口已暂停，需要人工核验。')
-    case 'LOCUS_NOT_CURRENT':
-      return failure('not-current', '当前入口的代际已变化，请刷新后重试。')
-    case 'LOCUS_NOT_FOUND':
-      return failure('not-found', '当前入口不存在或已失效。')
-    case 'LOCUS_INVALID':
-      return failure('invalid', '当前入口不可服务或缺少专属子会话，权限未修改。')
-    case 'LOCUS_BUSY':
-      return failure('busy', '当前入口仍有执行中或排队消息，请稍后重试。')
-  }
 }
 
 function bindReceipt(
@@ -282,26 +215,13 @@ function bindReceipt(
   const source = locusSessionReceiptLabel(session)
   // A document's /bind always restates who may ask (pet-locus-doc-comments D7).
   const disclosure = isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : ''
-  // Topics carried along with a group move are reported, including the ones
-  // that could not move: a silently skipped topic keeps answering "stopped".
-  const carried = result as { readonly movedTopics?: number; readonly skippedTopics?: readonly string[] }
-  const skipped = carried.skippedTopics ?? []
-  const topicNote = (carried.movedTopics ?? 0) > 0 || skipped.length > 0
-    ? `同群原主会话下的话题已一起改挂 ${carried.movedTopics ?? 0} 个`
-      + (skipped.length > 0 ? `，${skipped.length} 个未改挂（${skipped[0]}），可在该话题里再发一次 /bind。` : '。')
-    : ''
-  if (result.reused) {
-    return topicNote === ''
-      ? `${place}已绑定主会话 ${source}，本次未重复创建；当前共享权限为 read。${disclosure}`
-      : `${place}已绑定主会话 ${source}。${topicNote}${disclosure}`
+  if (result.reenabled === true) {
+    return `${place}已重新启用，仍绑定主会话 ${source}；下一条消息会创建新的只读子会话。${disclosure}`
   }
-  // A rebuild that moved the entry off another main session must say so: the
-  // owner should never believe the entry is still on the old session.
-  const previous = (result as { readonly previousLocus?: { readonly parentSessionId?: string; readonly parentSessionTitle?: string } }).previousLocus
-  const moved = previous?.parentSessionId !== undefined && previous.parentSessionId !== session.id
-    ? `原主会话 ${locusSessionReceiptLabel({ id: previous.parentSessionId, ...(previous.parentSessionTitle === undefined ? {} : { title: previous.parentSessionTitle }) })} 已归档或停用，本入口已改挂到新主会话，旧对话未自动合并。`
-    : ''
-  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${moved}${topicNote}${disclosure}`
+  if (result.reused) {
+    return `${place}已绑定主会话 ${source}，本次未重复创建；当前访问模式见 /access。${disclosure}`
+  }
+  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${disclosure}`
 }
 
 /**
@@ -312,6 +232,7 @@ function bindReceipt(
 export function createLocusControlDispatcher(
   options: CreateLocusControlDispatcherOptions,
 ): LocusControlDispatchPort {
+  const writeEnabled = options.writeEnabled ?? (() => LOCUS_WRITE_ENABLED)
   return {
     async dispatch(request): Promise<LocusControlDispatchResult> {
       // Defence in depth: admission already checks this, but a directly wired
@@ -324,8 +245,7 @@ export function createLocusControlDispatcher(
       try {
         switch (command.kind) {
           case 'bind': {
-            // Reject a short prefix before enumerating anything: a short
-            // prefix can never resolve, and enumeration may be expensive.
+            // Reject a short prefix before enumerating anything.
             if (command.prefix.trim().length < MIN_LOCUS_BIND_PREFIX_LENGTH) {
               return failure('prefix-too-short', '会话 id 前缀太短，请至少提供 6 位。')
             }
@@ -338,21 +258,12 @@ export function createLocusControlDispatcher(
             }
             const rawName = await Promise.resolve(options.chatName?.(endpoint.chatId)).catch(() => undefined)
             const chatName = typeof rawName === 'string' && rawName.trim() !== '' ? rawName.trim() : undefined
-            const mutation = {
+            const result = await options.bind.bind({
               endpoint,
               parentSessionId: resolution.session.id,
               ...(chatName === undefined ? {} : { chatName }),
               actorId: request.senderId,
-            }
-            const marker = request.authorization === 'legacy' || request.authorization === 'retired'
-              ? request.authorization
-              : undefined
-            if (marker !== undefined && options.bind.rebuildProtected === undefined) {
-              return failure('rebuild-unavailable', '该旧入口需要所有者显式重建，但当前 Host 未提供安全重建能力。')
-            }
-            const result = marker === undefined
-              ? await options.bind.bind(mutation)
-              : await options.bind.rebuildProtected!({ ...mutation, marker })
+            })
             return { ok: true, text: bindReceipt(resolution.session, result, chatName) }
           }
           case 'unbind': {
@@ -360,66 +271,45 @@ export function createLocusControlDispatcher(
             if (result.state !== 'stopped') return failure('control-failed', '解绑未形成停止标记，已拒绝报告成功。')
             return {
               ok: true,
-              text: '已停止当前入口；既有会话与历史保留，普通 @不会自动恢复，需所有者显式重建。',
+              text: '已停止当前入口；既有会话与历史保留，普通 @ 不会自动恢复，在本入口对同一个会话重新 /bind 即可重新启用。',
             }
           }
-          case 'scope': {
-            // Refuse a write request at the door rather than granting it and
-            // letting verification demote it afterwards: the owner asked for a
-            // capability this build does not hand out, and saying so here is
-            // the only answer that is not misleading.
-            if (command.mode === 'write' && !LOCUS_WRITE_ENABLED) {
-              return failure('scope-write-disabled', LOCUS_WRITE_DISABLED_DIAGNOSTIC)
+          case 'access': {
+            // Refuse a grant at the door when the global switch is off; going
+            // back to read-only is always allowed.
+            if (command.mode === 'danger-full-access' && !writeEnabled()) {
+              return failure('access-full-disabled', LOCUS_WRITE_DISABLED_DIAGNOSTIC)
             }
-            if (options.scope?.setCurrentMode === undefined) {
-              return failure('scope-unavailable', '当前入口暂不支持权限变更。')
+            if (options.access === undefined) {
+              return failure('access-unavailable', '当前入口暂不支持访问模式变更。')
             }
-            const result = await options.scope.setCurrentMode({
-              endpoint,
-              actorId: request.senderId,
-              mode: command.mode,
-            })
-            if (result.pending === true) {
-              return {
-                ok: true,
-                text: `权限变更（${command.mode}）已记录，将在子会话下次唤醒时应用并核验；生效前按原权限 ${result.mode} 服务，若唤醒时核验失败会另行告知。`,
-              }
-            }
-            return result.mode === command.mode
-              ? { ok: true, text: `当前入口共享权限已核验为 ${command.mode}。` }
-              : failure('scope-not-applied', '权限变更未核验生效，已拒绝报告成功。')
+            const changed = await options.access.setAccessMode({ endpoint, actorId: request.senderId, mode: command.mode })
+            // The mutation owns the wording (it adds the full-access disclosure); use it verbatim.
+            const receipt = (changed as { receipt?: unknown } | undefined)?.receipt
+            return { ok: true, text: typeof receipt === 'string' && receipt !== '' ? receipt : LOCUS_ACCESS_APPLIED_TEXT }
           }
-          case 'tools': {
-            if ((options.toolTierMutation ?? options.tools)?.setCurrentTier === undefined) {
-              return failure('tools-unavailable', '当前入口暂不支持工具档位变更。')
-            }
-            const result = await (options.toolTierMutation ?? options.tools)!.setCurrentTier!({ endpoint, actorId: request.senderId, tier: command.tier })
-            if (result.pending === true) {
-              return {
-                ok: true,
-                text: `工具档位变更（${command.tier}）已记录，将在子会话下次唤醒时应用并核验；生效前按原档位 ${result.tier} 服务，若唤醒时核验失败会另行告知。`,
-              }
-            }
-            if (result.tier !== command.tier) return failure('tools-not-applied', '工具档位未核验生效，未报告成功。')
-            return {
-              ok: true,
-              text: command.tier === 'shell'
-                ? '工具档位已核验为 shell。当前入口转为所有者专用：仅 allowlist 成员可驱动；子会话可在本机执行命令并使用本机飞书凭据（读取与网络不受文件权限约束）。lark-cli 出站 guard 仅防误操作，不是安全边界；业务回复请用 pet_locus_finish。'
-                : '工具档位已核验恢复为 safe；bash 与 Skill 已收紧，入口恢复既有群成员提问规则。',
-            }
-          }
+          case 'help':
+            return { ok: true, text: locusHelpText() }
+          case 'deprecated-tier':
+            return failure('deprecated-command', LOCUS_DEPRECATED_COMMAND_TEXT)
           case 'bind-missing-prefix':
           case 'bind-invalid':
-          case 'scope-missing-mode':
-          case 'scope-invalid':
-          case 'tools-missing-tier':
-          case 'tools-invalid':
+          case 'access-missing-mode':
+          case 'access-invalid':
           case 'unbind-invalid':
             return failure('invalid-command', '控制命令格式无效。')
         }
       } catch (error) {
         return safeControlError(error)
       }
+      return failure('invalid-command', '控制命令格式无效。')
     },
   }
+}
+
+/** The help receipt, generated from the parser's own command table. */
+export function locusHelpText(): string {
+  const lines = LOCUS_COMMAND_TABLE.map(entry => `${entry.usage} — ${entry.description}`)
+  const aliases = LOCUS_COMMAND_TABLE.map(entry => entry.verbs.join(' ')).join(' | ')
+  return ['可用命令（@我 后发送；仅 allowlist 成员可用）：', ...lines, `写法：${aliases}`].join('\n')
 }

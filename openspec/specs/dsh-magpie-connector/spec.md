@@ -250,7 +250,7 @@ lines 元素的凭据字段语义 SHALL 为：省略 = 保持该线路现有值�
 
 同步失败时，设置响应 SHALL 给出 `lastSyncError` 和错误分类：`unauthorized`（401）、`forbidden`（403）、`http`（其它非 2xx，附状态码）、`unreachable`（网络错误或超时）。同时 SHALL 保留当前代已有的目录，SHALL NOT 用空目录替换。生效线路切换后的第一次同步成功前，目录以继承缓存展示（见「连接身份与代际隔离」），继承缓存 SHALL NOT 计为一次成功同步。
 
-目录、可见性或默认 effort 任一项生效变化后，插件 SHALL 通过 adapter 注册句柄的 `replace` 发布更新，使 DSH 发出 `llm/adapters-updated`。这样已打开的官方模型选择器无需重启或刷新页面就能拿到新状态。
+目录、可见性或默认 effort 任一项生效变化后，插件 SHALL 通过 adapter 注册句柄的 `replace` 发布更新，使 DSH 发出 `llm/adapters-updated`。这样已打开的官方模型选择器无需重启或刷新页面就能拿到新状态。DSH 0.2.1 起宿主 SHALL 自行包含 `llm/adapters-updated` 监听器的异常（只记录告警、不让监听器否决提交）；插件按提交结果处理，SHALL NOT 把这类监听器异常当成注册失败。
 
 设置写入带 `resync: true` 时 SHALL 在提交后强制同步一次（即使生效线路未变）；仅提交 `{resync:true}` 亦合法。
 
@@ -851,7 +851,7 @@ host SHALL 按网关响应分类结果：
 
 ### Requirement: 侧边栏卡片的展开、收起与读取（流内手风琴）
 
-标题行 SHALL 提供一个带 `aria-expanded` 的展开/收起按钮，点击 SHALL 在展开与收起之间切换；标题行其余部分（刷新按钮除外）点击效果相同。常驻卡正文与双下箭头 SHALL NOT 可点击。滚动容器 SHALL 隐藏滚动条（`scrollbar-width:none`、`-ms-overflow-style:none` 且 `::-webkit-scrollbar{display:none}`），滚动能力保留。展开时客户端 SHALL 在同一张卡内以手风琴方式显示每个上游的全部窗口、重置时间、余额、重置机会与错误：明细在流内变高、占掉侧栏列表的可用高度，SHALL NOT 以浮层覆盖列表内容；明细自身 SHALL 限高并内部滚动。收起正文与展开明细 SHALL 共用同一条溢出提示规则：容器溢出时卡片底部 SHALL 始终保留 16px 提示带；只要容器里还有内容在折叠线以下，提示带内 SHALL 显示双下箭头，滚动到底部后箭头 SHALL 隐藏（用 `visibility:hidden`，占位保留）。侧栏收起（`wide === false`）时 SHALL 只渲染一个 Magpie icon 按钮，点击打开 320px 浮层。读取 SHALL 只由用户动作或页面事件触发并以 60 秒 TTL 缓存，SHALL NOT 使用定时器轮询；读取失败 SHALL NOT 影响目录同步、模型选择与生成。
+标题行 SHALL 提供一个带 `aria-expanded` 的展开/收起按钮，点击 SHALL 在展开与收起之间切换；标题行其余部分（刷新按钮除外）点击效果相同。常驻卡正文与双下箭头 SHALL NOT 可点击。滚动容器 SHALL 隐藏滚动条（`scrollbar-width:none`、`-ms-overflow-style:none` 且 `::-webkit-scrollbar{display:none}`），滚动能力保留。展开时客户端 SHALL 在同一张卡内以手风琴方式显示每个上游的全部窗口、重置时间、余额、重置机会与错误：明细在流内变高、占掉侧栏列表的可用高度，SHALL NOT 以浮层覆盖列表内容；明细自身 SHALL 限高并内部滚动。收起正文与展开明细 SHALL 共用同一条溢出提示规则：容器溢出时卡片底部 SHALL 始终保留 16px 提示带；只要容器里还有内容在折叠线以下，提示带内 SHALL 显示双下箭头，滚动到底部后箭头 SHALL 隐藏（用 `visibility:hidden`，占位保留）。侧栏收起（`wide === false`）时 SHALL 只渲染一个 Magpie icon 按钮，点击打开 320px 浮层。读取 SHALL 只由用户动作或页面事件触发并以 60 秒 TTL 缓存，SHALL NOT 使用其它定时器轮询；用户显式开启的 `sidebarRefreshMinutes` 定时刷新是唯一例外，它按间隔发送全量刷新（见「侧边栏额度定时刷新」）。读取失败 SHALL NOT 影响目录同步、模型选择与生成。
 
 #### Scenario: 标题行的开关负责展开与收起
 
@@ -890,51 +890,11 @@ host SHALL 按网关响应分类结果：
 - **WHEN** 渲染 `sidebar.footer.action`
 - **THEN** 只有带 `aria-label`/tooltip「Magpie 额度」的 icon 按钮，没有常驻卡与百分比
 
-### Requirement: 侧边栏额度自动刷新
-
-插件 host 设置 SHALL 提供 `sidebarRefreshMinutes` 整数分钟：缺失时按 `5` 处理，`0` 表示关闭自动刷新，合法范围 `0–1440`，非整数或越界写入 SHALL 返回 400 且设置不变。设置页 SHALL 提供对应的分钟输入（`0` = 关闭）。开启时，侧栏额度卡 SHALL 按该间隔静默重新读取卡片（GET），SHALL NOT 发送 `POST {all:true}`；页面隐藏时到期 SHALL 不读取，恢复可见时 SHALL 补读一次；读取失败 SHALL 保留旧读数且不影响其他功能。
-
-#### Scenario: 默认五分钟
-
-- **GIVEN** 设置中没有 `sidebarRefreshMinutes`
-- **WHEN** 读取设置页
-- **THEN** 返回的 `sidebarRefreshMinutes` 为 `5`；侧栏卡片在 5 分钟后自动读取一次
-
-#### Scenario: 关闭自动刷新
-
-- **GIVEN** `sidebarRefreshMinutes` 为 `0`
-- **WHEN** 等待超过 5 分钟且用户不操作
-- **THEN** 侧栏卡片没有发出额外的 `GET cards`，行为与手动读取一致
-
-#### Scenario: 修改间隔立即生效
-
-- **GIVEN** 当前间隔为 5 分钟
-- **WHEN** 用户把输入改为 `2` 并提交
-- **THEN** 设置写入 `sidebarRefreshMinutes: 2`；侧栏下一个自动读取发生在 2 分钟后
-
-#### Scenario: 非法输入被拒绝
-
-- **GIVEN** 设置页显示自动刷新输入
-- **WHEN** 提交 `1.5`、`-1`、`1441` 或非数字
-- **THEN** host 返回 400 或界面回退到当前值，设置保持不变
-
-#### Scenario: 页面隐藏时不读取
-
-- **GIVEN** 自动刷新间隔为 1 分钟，页面处于隐藏状态
-- **WHEN** 到期
-- **THEN** 客户端不发出 `GET cards`；页面恢复可见后补读一次
-
-#### Scenario: 自动刷新不是强制刷新
-
-- **GIVEN** 自动刷新已开启
-- **WHEN** 定时读取触发
-- **THEN** 只发出 `GET cards`，没有 `POST {all:true}`
-
 ### Requirement: 用量入口与颜色（AMD4）
 
 设置页 SHALL NOT 提供独立的「用量」栏目或常驻「刷新全部」；刷新只在每张卡片上进行，单卡刷新的提示与失败原因显示在该卡片所在分组。没有卡片时，用量状态显示在连接面板，并在空或失败时提供「获取模型与用量」：先重新同步目录，成功后发一次全量刷新（`{all: true}`），同步失败则不刷新并显示原因。窗口用量条 SHALL 按 `used` 着色：≤70 蓝色（business），大于 70 且小于 90 橙色（warn），≥90 红色（error）。窗口用量条的填充段 SHALL 两端为圆角：`settingsCss` 中 `.dmg-fill` 声明的 `border-radius` SHALL 与 `.dmg-track` 相同且非零。
 
-插件 SHALL NOT 使用定时器轮询刷新端点。设置页与侧栏额度卡片的读取 SHALL 只发生在用户动作、页面事件或用户显式开启的自动刷新上：打开设置页、打开侧栏并挂载常驻卡、用户点击刷新、用户展开侧栏卡片、页面重新可见、以及 `sidebarRefreshMinutes` 大于 0 时按该间隔自动读取（客户端 60 秒 TTL 内不重复请求）。侧栏卡片的读取规则见「侧边栏额度卡片」与「侧边栏额度自动刷新」。
+插件 SHALL NOT 使用定时器轮询刷新端点；唯一的定时刷新是用户显式开启的侧栏额度定时刷新（见「侧边栏额度定时刷新」），它按配置间隔发送全量刷新，不属于轮询。设置页与侧栏额度卡片的读取 SHALL 只发生在用户动作、页面事件或用户显式开启的定时刷新上：打开设置页、打开侧栏并挂载常驻卡、用户点击刷新、用户展开侧栏卡片、页面重新可见、以及 `sidebarRefreshMinutes` 大于 0 时按该间隔定时刷新（事件驱动的读取在客户端 60 秒 TTL 内不重复请求）。侧栏卡片的读取规则见「侧边栏额度卡片」与「侧边栏额度定时刷新」。
 
 #### Scenario: 用量条三档颜色（AMD4）
 
@@ -964,7 +924,7 @@ host SHALL 按网关响应分类结果：
 
 - **GIVEN** `sidebarRefreshMinutes` 为 0 且设置页与侧栏卡片已打开
 - **WHEN** 等待超过任何合理轮询间隔
-- **THEN** 客户端没有发出额外 `GET cards`；只有用户显式把 `sidebarRefreshMinutes` 设为正数时，卡片才按该间隔定时读取
+- **THEN** 客户端没有发出额外 `GET cards` 或 `POST cards`；只有用户显式把 `sidebarRefreshMinutes` 设为正数时，卡片才按该间隔定时刷新
 
 ### Requirement: 手动刷新用量
 设置页 SHALL 提供两种刷新，都只由用户点击触发：
@@ -1076,19 +1036,19 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **THEN** 响应状态为 400，S 仍为标准
 
 ### Requirement: 设置导航自身行使用 Magpie 鸟形图标（AMD2）
-插件 SHALL 在自身 Magpie 设置导航行显示本地鸟形品牌图标，随 `currentColor` 适应主题，保留文字、点击和可访问性语义。若宿主没有官方 icon 字段，SHALL 仅对可唯一定位的自身导航行添加私有 marker 并使用限定 CSS；SHALL NOT 修改旧 connect 或其它设置行。重复同名无法唯一定位、唯一行已带 foreign connect marker、缺 document/body/head 时 SHALL 静默保留宿主行为。
+插件 SHALL 通过官方 `settings.section.icon` 槽，以与页面相同的 `dsh-magpie-connector` id 提供本地鸟形品牌图标，使用宿主 size、随 currentColor 适应主题，保留文字、点击和可访问性语义。插件 MUST NOT 按 label 识别导航行或添加私有 marker、MutationObserver、按钮伪元素覆盖。图标槽缺失时 SHALL 保留宿主默认字形且不阻塞页面注册。旧 connect 或其它同名设置行 SHALL 不被改动。
 
-插件 SHALL 管理 observer 和样式的生命周期：支持对话框晚挂载和重建，卸载时断开 observer、清除 marker 和自身样式。来源许可 SHALL 随包保留。
+图标 SHALL 由官方槽注册生命周期管理，支持对话框晚挂载和重建，卸载时释放自身图标注册，不留下专用样式或 marker。来源许可 SHALL 随包保留。
 
 #### Scenario: 鸟形图标只标记自身导航行
-- **GIVEN** 设置导航中同时有本插件 Magpie 行、旧 connect 行和其它行
+- **GIVEN** 设置导航中同时有本插件 Magpie 行、旧 connect 行和其它行，且可能具有相同 label
 - **WHEN** client apply，之后导航重新挂载
-- **THEN** 只有本插件行带私有 marker 和 currentColor 鸟形图标 CSS，旧 connect/其它行及自身原始 SVG/文字/点击行为不被改写
+- **THEN** 只有 id 为 dsh-magpie-connector 的行显示一个 currentColor 鸟形图标，不叠加默认齿轮；旧 connect/其它行及导航文字、点击行为不变
 
 #### Scenario: 卸载清理与缺失入口静默降级
-- **GIVEN** observer 已安装，本插件入口可能不存在或有重复同名行
+- **GIVEN** 本插件已注册图标，或宿主未声明图标槽
 - **WHEN** 导航变化，然后卸载 client，再重新插入导航
-- **THEN** 无法唯一定位时不标记；卸载后无 marker/自身样式且不再标记新行，无 DOM 环境不抛错
+- **THEN** 缺失图标槽不影响页面；卸载后图标注册释放、无 marker 或图标专用样式，默认字形由宿主恢复
 
 ### Requirement: 禁用不删除用户数据
 在 manifest 中把插件设为 `enabled: false` 并重新 build 后，插件 SHALL NOT 删除任何线路凭据（`MAGPIE_LINE_<ID>_*`，以及升级前遗留的 `MAGPIE_API_KEY` / `MAGPIE_ACCESS_*`），也 SHALL NOT 删除插件设置文件。插件的 dispose 路径 SHALL 只释放 route 注册、设置路由、计时器与连接，不执行任何删除操作。
@@ -1257,3 +1217,49 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **GIVEN** settings.json 内容为 S，`activeLineId` 为线路 1
 - **WHEN** 完成一次 `GET latency` 测量，随后发起一次需要选择线路的操作
 - **THEN** settings.json 字节仍为 S、`activeLineId` 不变，且该操作的选择仍按「自动选择规则」重新探测，不复用测速结果
+
+### Requirement: 侧边栏额度定时刷新
+
+插件 host 设置 SHALL 提供 `sidebarRefreshMinutes` 整数分钟：缺失时按 `5` 处理，`0` 表示关闭定时刷新，合法范围 `0–1440`，非整数或越界写入 SHALL 返回 400 且设置不变。设置页 SHALL 提供对应的分钟输入（`0` = 关闭）。开启时，侧栏额度卡 SHALL 按该间隔静默刷新卡片：发送与卡头刷新按钮相同的全量刷新（`POST cards {all:true}`），因为网关的 `GET cards` 只返回它上次读到的缓存、不会向上游重读；定时刷新 SHALL NOT 只发 `GET cards` 当作刷新。刷新失败 SHALL 保留旧读数、不显示错误且不影响其他功能；页面隐藏时到期 SHALL 不刷新，恢复可见时 SHALL 补读一次（`GET cards`）。
+
+#### Scenario: 默认五分钟
+
+- **GIVEN** 设置中没有 `sidebarRefreshMinutes`
+- **WHEN** 读取设置页
+- **THEN** 返回的 `sidebarRefreshMinutes` 为 `5`；侧栏卡片在 5 分钟后定时刷新一次（发出 `POST cards {all:true}`）
+
+#### Scenario: 关闭定时刷新
+
+- **GIVEN** `sidebarRefreshMinutes` 为 `0`
+- **WHEN** 等待超过 5 分钟且用户不操作
+- **THEN** 侧栏卡片没有发出额外的 `GET cards` 或 `POST cards`，行为与手动读取一致
+
+#### Scenario: 修改间隔立即生效
+
+- **GIVEN** 当前间隔为 5 分钟
+- **WHEN** 用户把输入改为 `2` 并提交
+- **THEN** 设置写入 `sidebarRefreshMinutes: 2`；侧栏下一个定时刷新发生在 2 分钟后
+
+#### Scenario: 非法输入被拒绝
+
+- **GIVEN** 设置页显示定时刷新输入
+- **WHEN** 提交 `1.5`、`-1`、`1441` 或非数字
+- **THEN** host 返回 400 或界面回退到当前值，设置保持不变
+
+#### Scenario: 页面隐藏时不刷新
+
+- **GIVEN** 定时刷新间隔为 1 分钟，页面处于隐藏状态
+- **WHEN** 到期
+- **THEN** 客户端不发出 `GET cards` 或 `POST cards`；页面恢复可见后补读一次
+
+#### Scenario: 定时刷新触发全量刷新
+
+- **GIVEN** 定时刷新已开启，当前显示的读取时间为 T
+- **WHEN** 定时触发
+- **THEN** 客户端只发出一次 `POST cards {all:true}`，没有额外 `GET cards`，并显示刷新响应中的读数
+
+#### Scenario: 定时刷新失败保留旧读数
+
+- **GIVEN** 定时刷新已开启，网关 mock 对全量刷新返回 502
+- **WHEN** 定时触发
+- **THEN** 卡片读数与刷新前一致，不显示错误提示，也不影响展开/手动刷新等其它功能

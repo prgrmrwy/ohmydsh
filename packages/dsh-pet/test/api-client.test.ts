@@ -77,29 +77,22 @@ describe('a non-JSON response is reported as what it is', () => {
     await expect(petApi.config()).resolves.toMatchObject({ providerId: 'claude' })
   })
 
-  it('uses dedicated archive/stop locus routes without browser actor identity', async () => {
+  it('sends every v20 mutation through the one action route without browser actor identity', async () => {
     const calls: { path: string; body: Record<string, unknown> }[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: string, init: RequestInit) => {
       calls.push({ path: input, body: JSON.parse(String(init.body)) as Record<string, unknown> })
       return { status: 200, text: async () => JSON.stringify({ ok: true, data: { action: calls.at(-1)?.body.action } }) }
     }))
 
-    const fence = {
-      locusId: 'locus-1',
-      endpoint: { chatId: 'oc-chat' },
-      expectedGeneration: 2,
-      expectedLocusId: 'locus-1',
-      expectedUpdatedAt: 9,
-    } as const
-    await petApi.locusArchive({ action: 'archive', ...fence })
-    await petApi.locusStop({ action: 'stop', ...fence })
+    const fence = { expectedLocusId: 'locus-1', expectedRevision: 9 } as const
+    await petApi.locusAction({ action: 'stop', endpoint: { chatId: 'oc-chat' }, ...fence })
+    await petApi.locusAction({ action: 'access', endpoint: { chatId: 'oc-chat' }, accessMode: 'read-only', ...fence })
+    await petApi.locusAction({ action: 'rebind', chatId: 'oc-chat', workSessionId: 'session-w1', ...fence })
 
-    expect(calls.map(call => call.path)).toEqual([
-      '/dsh-pet/api/locus-archive',
-      '/dsh-pet/api/locus-stop',
-    ])
+    expect(calls.map(call => call.path)).toEqual(['/dsh-pet/api/locus-action', '/dsh-pet/api/locus-action', '/dsh-pet/api/locus-action'])
     expect(calls.every(call => !('actorId' in call.body))).toBe(true)
-    expect(calls.map(call => call.body.expectedUpdatedAt)).toEqual([9, 9])
+    expect(calls.every(call => !('expectedGeneration' in call.body) && !('expectedUpdatedAt' in call.body))).toBe(true)
+    expect(calls.map(call => call.body.expectedRevision)).toEqual([9, 9, 9])
   })
 
   it.each([

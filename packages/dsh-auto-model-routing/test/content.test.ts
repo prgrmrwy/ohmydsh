@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { resolve, dirname, relative, isAbsolute } from 'node:path'
 import { expect, it } from 'vitest'
+import { PRESETS } from '../src/presets/index.js'
 
 const skillPath = resolve(import.meta.dirname, '../skills/subagent-model-routing/SKILL.md')
 const skill = () => existsSync(skillPath) ? readFileSync(skillPath, 'utf8') : ''
@@ -34,6 +35,7 @@ it('runtime_relative_imports_resolve_inside_the_standalone_package', () => {
  }
 })
 it('spec Scenario "源码不含本地分类与其它出站"', () => {
+ expect(PRESETS.flatMap(p=>p.sources.map(x=>new URL(x.url).host))).toContain('claude.dev')
  for(const [file,text] of sources()) {
   expect(text,file).not.toMatch(/export function (classify|resolveLevel)\b/)
   expect(text,file).not.toMatch(/node:https?|node:child_process/)
@@ -41,7 +43,8 @@ it('spec Scenario "源码不含本地分类与其它出站"', () => {
     // SVG namespace identifiers do not initiate network requests.
     if (url === 'http://www.w3.org/2000/svg') continue
     // github.com is a static help link the user opens in a new tab; the code never fetches it.
-    expect(['openrouter.ai','api.typesafe.ai','api.concentrate.ai','example.com','github.com']).toContain(new URL(url).host)
+    // Preset source hosts are documentation links rendered in settings; the code never fetches them.
+    expect(['openrouter.ai','api.typesafe.ai','api.concentrate.ai','example.com','github.com',...PRESETS.flatMap(p=>p.sources.map(x=>new URL(x.url).host))]).toContain(new URL(url).host)
    }
  }
  expect(sources().map(([file])=>file)).not.toContain('classifier.ts')

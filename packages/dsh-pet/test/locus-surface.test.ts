@@ -1,422 +1,571 @@
 /**
- * Rendering tests for the locus surface.
+ * The v20 locus management surface, rendered in a DOM against a fake Host
+ * (pet-locus-isomorphic-entries D10). Every case drives the real
+ * `PetSettingsSection` → `LocusTab` → `petApi` path and asserts on what the
+ * owner sees and what the browser actually sends.
  *
- * These render the real component against a real snapshot shape and assert what
- * the owner would actually see. The previous surface could only be checked by
- * grepping its source for strings, which cannot tell "one row per entry" from
- * "one card per record" — the exact regression this change exists to fix.
+ * @vitest-environment jsdom
  */
 
-import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
-import {
-  describeActionReceipt,
-  LocusDetails,
-  LocusSurface,
-  WorkSection,
-} from '../src/client/settings.js'
-import { collectHandleCodes, groupByWork } from '../src/client/locus-view.js'
-import { LOCUS_WRITE_ENABLED } from '../src/host/locus/policy-verification.js'
-import { locusFixture, snapshotOf, surfaceSnapshot } from './fixtures/locus-snapshot.js'
-import type { PetLocusManagementView } from '../src/wire.js'
+import { act, createElement } from 'react'
+import { createRoot } from 'react-dom/client'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { LOCUS_ACTION_FIELDS } from '../src/host/routes.js'
+import { PetSettingsSection, setSessionOpener } from '../src/client/settings.js'
+import { LOCUS_ACCESS_RECEIPT } from '../src/host/locus/management.js'
+import { PET_CSS } from '../src/client/styles.js'
+import type { PetLocusManagementViewV20 } from '../src/wire.js'
+import { chatView, entryView, snapshotV20, workView } from './support/mgmt-snapshot.js'
 
-function render(snapshot: PetLocusManagementView): string {
-  return renderToStaticMarkup(
-    createElement(LocusSurface, {
-      snapshot,
-      onAction: () => undefined,
-      runQuery: async () => undefined,
-      // These cases assert how ENTRY ROWS render (nesting, naming, state
-      // wording); the list now collapses each session by default, so they
-      // expand it rather than re-testing the collapse behaviour, which
-      // `ledger-panel-render.test.ts` owns.
-      initialWorksExpanded: true,
-    }),
-  )
+;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
+  .IS_REACT_ACT_ENVIRONMENT = true
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  document.body.innerHTML = ''
+})
+
+interface FakeHost {
+  readonly actions: Record<string, unknown>[]
+  snapshot: PetLocusManagementViewV20
 }
 
-const count = (markup: string, needle: string): number => markup.split(needle).length - 1
-
-describe('locus surface', () => {
-  it('renders one row per entry, not one per record', () => {
-    const markup = render(surfaceSnapshot())
-    // Four records across two parents, but only two rows: the chat entry owns
-    // two generations (folded into one row plus a history toggle) and the entry
-    // under the archived parent is filtered out with its parent.
-    expect(count(markup, 'class="dshpet-locus-row"')).toBe(2)
-    expect(count(markup, '历史 1 代')).toBe(1)
-  })
-
-  it('never uses a raw identifier as an entry name', () => {
-    const markup = render(surfaceSnapshot())
-    expect(markup).toContain('入口 · a27b')
-    expect(markup).toContain('话题 · 19cd')
-    // The fallback name must not be, or start with, the platform identifier.
-    expect(markup).not.toMatch(/dshpet-locus-name[^>]*>\s*(oc_|omt_|session-|locus-)/)
-  })
-
-  it('spec Scenario "同名入口仍可区分": two entries with the same platform name carry different codes', () => {
-    const first = locusFixture({
-      locusId: 'locus-runtime-1789394541339-2f853e76111d38',
-      chatId: 'oc_a27b5de7e6a9a57462060eb289ec70ab',
-      chatName: '答疑 · DSH',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      childSessionId: 'session-2',
-    })
-    const second = locusFixture({
-      locusId: 'locus-runtime-1789394541339-9e11aa00b2c3d4',
-      chatId: 'oc_c91f00e7e6a9a57462060eb289ec70ab',
-      chatName: '答疑 · DSH',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      childSessionId: 'session-3',
-    })
-    const markup = render(snapshotOf([first, second], [first.locusId, second.locusId]))
-
-    expect(markup.split('答疑 · DSH').length - 1).toBeGreaterThanOrEqual(2)
-    expect(markup).toContain('a27b')
-    expect(markup).toContain('c91f')
-  })
-
-  it('names a provided platform name and keeps the code beside it', () => {
-    const named = locusFixture({
-      locusId: 'locus-runtime-1789394541339-2f853e76111d38',
-      chatId: 'oc_a27b5de7e6a9a57462060eb289ec70ab',
-      chatName: '答疑 · DSH',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      childSessionId: 'session-2',
-    })
-    const markup = render(snapshotOf([named], [named.locusId]))
-    expect(markup).toContain('答疑 · DSH')
-    expect(markup).toContain('a27b')
-  })
-
-  it('hides an archived parent by default, with the condition on the filter', () => {
-    const markup = render(surfaceSnapshot())
-    // The entry under the archived parent is not rendered, and the list adds no
-    // second "hidden" row for it: the filter control states the condition and
-    // its popover counts every bucket, so one disclosure is enough.
-    expect(markup).not.toContain('oc_b1fa')
-    expect(markup).not.toContain('dshpet-locus-hidden')
-    expect(markup).not.toContain('显示全部')
-    expect(markup).toContain('父会话：可用 · 入口：在服务')
-  })
-
-  it('names the states it shows in words, and keeps the rest out of the list', () => {
-    const markup = render(surfaceSnapshot())
-    expect(markup).toContain('活跃')
-    // States the default condition excludes are named by the filter popover
-    // (asserted where it can actually be opened), not smuggled into the list as
-    // a second disclosure row.
-    expect(markup).not.toContain('已归档')
-    expect(markup).not.toContain('dshpet-locus-hidden')
-  })
-
-  it('names a generation under construction when it is shown', () => {
-    const building = locusFixture({
-      locusId: 'locus-runtime-1-aaaa1111',
-      chatId: 'oc_build',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      childSessionId: 'session-2',
-      state: 'provisioning',
-    })
-    const markup = render(snapshotOf([building], [building.locusId]))
-    // provision(ing) must read as 准备中 rather than blank or 活跃.
-    expect(markup).toContain('准备中')
-    expect(markup).not.toContain('>活跃<')
-  })
-
-  it('marks the default Q&A entry and the current generation', () => {
-    const markup = render(surfaceSnapshot())
-    expect(markup).toContain('默认 Q&amp;A')
-    expect(markup).toContain('第 2 代')
-    expect(markup).toContain('data-current="true"')
-  })
-
-  it('offers no control that creates an external resource', () => {
-    const markup = render(surfaceSnapshot())
-    expect(markup).not.toContain('绑定')
-    expect(markup).not.toContain('创建/打开默认 Q&amp;A')
-    // A parent that already has a default Q&A says nothing about creating one.
-    expect(markup).not.toContain('默认 Q&amp;A 尚未创建')
-  })
-
-  it('keeps lifecycle actions reachable behind the row disclosure', () => {
-    const markup = render(surfaceSnapshot())
-    expect(markup).toContain('更多 ▸')
-    expect(markup).toContain('aria-expanded="false"')
-    // Folded by default: identifiers are not printed on first paint.
-    expect(markup).not.toContain('locus-runtime-1789394541339-2f853e76111d38')
-    // Rebuild is legal only on a tombstone, so a served row never renders the
-    // control — a permanently disabled button is not an action.
-    expect(markup).not.toContain('>重建<')
-  })
-
-  it('nests a topic under the chat entry it inherits from', () => {
-    const markup = render(surfaceSnapshot())
-    expect(markup).toContain('data-nested="true"')
-    // The nesting has to be legible as a fact, not only as indentation.
-    expect(markup).toContain('继承自 入口 · a27b')
-  })
-
-  it('hides a stopped entry by default and points at the filter', () => {
-    const stopped = locusFixture({
-      locusId: 'locus-runtime-7-cccc3333',
-      chatId: 'oc_stopped',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      childSessionId: 'session-2',
-      state: 'stopped',
-    })
-    const markup = render(snapshotOf([stopped], [stopped.locusId]))
-    // The Host refuses this endpoint until an explicit rebuild, so the default
-    // list must not show it as live — and the filter, not an extra row, is what
-    // says where it went.
-    expect(count(markup, 'class="dshpet-locus-row"')).toBe(0)
-    expect(markup).not.toContain('dshpet-locus-hidden')
-    expect(markup).toContain('父会话：可用 · 入口：在服务')
-    // The empty screen names the condition to relax, and no empty work header is
-    // left behind for a session with nothing to show.
-    expect(markup).toContain('当前筛选下没有关联')
-    expect(markup).toContain('已停止的入口要在入口状态里勾上')
-    expect(markup).not.toContain('dshpet-work-name')
-  })
-
-  it('renders an empty state that points at search and filter, with the lookup fold off', () => {
-    const markup = render(snapshotOf([]))
-    expect(markup).toContain('没有关联')
-    // The reverse-lookup fold is disabled by owner decision: an owner with an ID
-    // outside the snapshot has no UI path for now, and nothing claims otherwise.
-    expect(markup).not.toContain('dshpet-locus-discovery')
-    expect(markup).not.toContain('反查关联')
-    expect(markup).not.toContain('Endpoint')
-    // What is left to relax is named: with no search running, that is the filter.
-    expect(markup).toContain('放宽上面的筛选')
-  })
-
-  it('shows a topic-only endpoint without inventing a chat entry', () => {
-    const topicOnly = locusFixture({
-      locusId: 'locus-runtime-1789397609276-f750f727f1988',
-      chatId: 'oc_591324b60afa1d62f3e229104607c586',
-      threadId: 'omt_19cd829b840f5bee',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      childSessionId: 'session-2',
-    })
-    const markup = render(snapshotOf([topicOnly], [topicOnly.locusId]))
-    expect(markup).toContain('话题 · 19cd')
-    // No chat-level entry exists, so nothing is claimed to be inherited.
-    expect(markup).not.toContain('继承自')
-    // A parent without a default Q&A states where creation happens instead of
-    // offering a control that creates a real Feishu group.
-    expect(markup).toContain('请在目标会话里用 Pet 轮盘的「答疑群」创建')
-  })
-})
-
-describe('the execution-root surface is retired from the panel', () => {
-  // ADR-0005 demoted the anchor to a context fact that no longer gates
-  // escalation, and the write switch is off, so the row and the confirm
-  // control are gone. The RULES they enforced are not gone: they live in
-  // `locus-view.ts` and stay covered by `locus-view.test.ts`
-  // (`locusNeedsExecutionRoot`, `locusConfirmCandidate`,
-  // `locusAnchorConfirmRequest`), which is what makes restoring this surface a
-  // rendering change rather than a re-derivation.
-  const ownerMarkup = (input: {
-    readonly executionRoot?: string
-    readonly anchor?: Parameters<typeof locusFixture>[0]['contextAnchor']
-  }): string => {
-    const locus = locusFixture({
-      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
-      chatId: 'oc_3c57889c7808eae69b5ad1dd9ddc8ace',
-      parentSessionId: 'session-85620d77-e1a8-4d80-b5d9-66a481bda3c5',
-      parentAvailability: 'available',
-      childSessionId: 'session-f3b5bd15-9e04-40e5-a515-dbce24c3dff7',
-      ...(input.executionRoot === undefined ? {} : { executionRoot: input.executionRoot }),
-      ...(input.anchor === undefined ? {} : { contextAnchor: input.anchor }),
-    })
-    const snapshot = snapshotOf([locus], [locus.locusId])
-    return renderToStaticMarkup(
-      createElement(LocusDetails, {
-        family: groupByWork(snapshot)[0]!.families[0]!,
-        codes: collectHandleCodes(snapshot),
-        busy: false,
-        busyKey: undefined,
-        onAction: () => undefined,
-      }),
-    )
-  }
-
-  it('renders neither the execution-root row nor a confirm control', () => {
-    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
-
-    expect(markup).not.toContain('确认执行根')
-    expect(markup).not.toContain('<dt>执行根</dt>')
-  })
-
-  it('removing that row leaves its neighbours intact', () => {
-    // A deletion that quietly takes the surrounding facts with it is the
-    // failure mode worth pinning: 权限 and 操作 sat either side of where the
-    // row used to be. 询问 is asserted separately — it is now conditional on
-    // the Host actually projecting owner facts.
-    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
-
-    expect(markup).toContain('<dt>来源</dt>')
-    expect(markup).toContain('<dt>权限</dt>')
-    expect(markup).toContain('<dt>操作</dt>')
-  })
-
-  it('shows the permission mode without a verification suffix', () => {
-    // `verifiedAt` is written ONLY by an owner permission change. With the
-    // write switch off and the permission control retired, nothing can set it,
-    // so the old 「· 未核验」 suffix was true on every single entry and
-    // distinguished nothing.
-    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
-
-    expect(markup).toContain('<dt>权限</dt><dd>只读</dd>')
-    expect(markup).not.toContain('未核验')
-  })
-
-  it('omits the owner-facts row entirely when the Host projects nothing', () => {
-    // The projection is an optional dependency that is not composed today, so
-    // an unconditional row printed the same 「no data」 sentence everywhere —
-    // an absence dressed up as content.
-    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
-
-    expect(markup).not.toContain('<dt>询问</dt>')
-    expect(markup).not.toContain('Host 未提供 owner 投影')
-  })
-
-  it('still shows the effective permission as a fact', () => {
-    // The control is gone; the current mode must remain visible, otherwise the
-    // owner has no way to read what this entry is actually serving as.
-    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
-
-    expect(markup).toContain('只读')
-  })
-
-  it('offers no permission control while the write switch is off', () => {
-    const markup = ownerMarkup({ executionRoot: '/Users/prgrmrwy/corp/acme' })
-
-    expect(LOCUS_WRITE_ENABLED).toBe(false)
-    expect(markup).not.toContain('aria-label="文件权限"')
-    expect(markup).toContain('aria-label="工具档位"')
-  })
-})
+type Reply = { ok: true; data: unknown } | { ok: false; error: string; message: string }
 
 /**
- * What an archived main session tells its owner.
- *
- * All three cases below were reported from the panel as "the button vanished
- * and nothing happened": the action's absence, the row's advice, and a finished
- * migration were each rendered as silence, so a correct outcome and a broken
- * one looked identical.
+ * A fake Host: the view route serves `host.snapshot`; the action route records
+ * the body and answers with `respond` (a refusal leaves the snapshot alone).
  */
-describe('an archived main session explains itself', () => {
-  const archivedGroup = (state: 'active' | 'stopped'): string => {
-    const locus = locusFixture({
-      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
-      chatId: 'oc_7d5a25d55cfc1109fa1facac0a6d8bc9',
-      parentSessionId: 'session-230c15fb-55c3-4e2a-ad47-e4e2bd921ad8',
-      parentAvailability: 'archived',
-      childSessionId: 'session-43a3f4bd-b59c-4369-a997-23b82c774a6a',
-      state,
-    })
-    const snapshot = snapshotOf([locus], [locus.locusId])
-    return renderToStaticMarkup(
-      createElement(WorkSection, {
-        work: groupByWork(snapshot)[0]!,
-        reading: 'work' as const,
-        codes: collectHandleCodes(snapshot),
-        busyKey: undefined,
-        onAction: () => undefined,
-        openKeys: [],
-        onToggle: () => undefined,
-        historyKeys: [],
-        onToggleHistory: () => undefined,
-        sharedEntryCount: () => 1,
-        hasDefaultQa: true,
-      }),
-    )
+function stubHost(
+  initial: PetLocusManagementViewV20,
+  respond: (body: Record<string, unknown>, host: FakeHost) => Reply = () => ({ ok: true, data: { action: 'stop', chat: {} } }),
+): FakeHost {
+  const host: FakeHost = { actions: [], snapshot: initial }
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: { body?: string }) => {
+    const body = init?.body === undefined ? {} : JSON.parse(init.body) as Record<string, unknown>
+    let payload: Reply
+    if (path === '/dsh-pet/api/locus') payload = { ok: true, data: host.snapshot }
+    else if (path === '/dsh-pet/api/locus-todos') payload = { ok: true, data: { ledgers: [] } }
+    else if (path === '/dsh-pet/api/locus-action') {
+      host.actions.push(body)
+      payload = respond(body, host)
+    } else payload = { ok: true, data: {} }
+    return { status: payload.ok ? 200 : 409, text: async () => JSON.stringify(payload) }
+  }))
+  return host
+}
+
+async function expandAll(root: HTMLElement): Promise<void> {
+  for (const toggle of [...root.querySelectorAll('button.dshpet-work-expand[aria-expanded="false"]')] as HTMLButtonElement[]) {
+    await act(async () => { toggle.click() })
   }
+}
 
-  it('offers the replacement, and the matching advice, while an entry can still move', () => {
-    const markup = archivedGroup('active')
-    expect(markup).toContain('用新的主会话接替')
-    expect(markup).toContain('恢复该主会话后本入口即恢复服务')
+/** The filter popover's checkbox for one bucket label. */
+function filterBox(root: ParentNode, label: string): HTMLInputElement {
+  const row = [...root.querySelectorAll('.dshpet-locus-filter-row')].find(item => item.textContent?.startsWith(label))
+  const box = row?.querySelector('input[type="checkbox"]') as HTMLInputElement | null | undefined
+  if (box === undefined || box === null) throw new Error(`no filter box 「${label}」`)
+  return box
+}
+
+async function openFilter(root: HTMLElement): Promise<void> {
+  if (root.querySelector('.dshpet-locus-filter') !== null) return
+  const toggle = root.querySelector('.dshpet-locus-filter-anchor > button') as HTMLButtonElement
+  await act(async () => { toggle.click() })
+}
+
+async function mount(options: { showArchived?: boolean } = {}): Promise<HTMLElement> {
+  const root = document.createElement('div')
+  document.body.appendChild(root)
+  await act(async () => {
+    createRoot(root).render(createElement(PetSettingsSection, { initialTab: 'locus' }))
+  })
+  if (options.showArchived === true) {
+    // Archived work sessions are hidden by default: tick 已归档 as an owner would.
+    await openFilter(root)
+    await act(async () => { filterBox(root, '已归档').click() })
+  }
+  // Sessions open collapsed: expand them as an owner would.
+  await expandAll(root)
+  return root
+}
+
+function buttons(root: ParentNode, text: string): HTMLButtonElement[] {
+  return ([...root.querySelectorAll('button')] as HTMLButtonElement[]).filter(item => item.textContent?.trim() === text)
+}
+
+function button(root: ParentNode, text: string): HTMLButtonElement {
+  const found = buttons(root, text)[0]
+  if (found === undefined) throw new Error(`no button 「${text}」`)
+  return found
+}
+
+async function click(target: HTMLElement): Promise<void> {
+  await act(async () => { target.click() })
+}
+
+/** Open the 更多 disclosure of the n-th row. */
+async function openDetails(root: HTMLElement, index = 0): Promise<void> {
+  const more = buttons(root, '更多 ▸')[index]
+  if (more === undefined) throw new Error('no 更多 toggle')
+  await click(more)
+}
+
+async function type(input: HTMLInputElement, value: string): Promise<void> {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+function rebindInput(root: ParentNode): HTMLInputElement | null {
+  return root.querySelector('input[aria-label="目标工作会话 sessionId"]')
+}
+
+const ARCHIVED = { availability: 'archived' as const, sessionId: 'session-old-w', title: '旧工作' }
+
+describe('spec Requirement "管理面的变更动作只有停止、访问模式与改绑，且以 locusId 加 revision 为围栏"', () => {
+  it('spec Scenario "停止请求以 locusId 与 revision 为围栏"', async () => {
+    const host = stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', locusId: 'L1', revision: 5 }))])]))
+    const root = await mount()
+    await openDetails(root)
+    await click(button(root, '停止'))
+    expect(host.actions).toEqual([{ action: 'stop', endpoint: { chatId: 'oc_A' }, expectedLocusId: 'L1', expectedRevision: 5 }])
   })
 
-  it('does not advertise repairs that cannot reach a stopped entry', () => {
-    // The entry was stopped by its owner: the session-level replacement skips
-    // it on purpose, and restoring the session does not revive it either. The
-    // earlier text named both anyway and sent the owner down a dead end.
-    const markup = archivedGroup('stopped')
-    expect(markup).not.toContain('用新的主会话接替')
-    expect(markup).not.toContain('恢复该主会话后本入口即恢复服务')
-    expect(markup).toContain('迁移不会搬走它')
-    expect(markup).toContain('需要恢复该主会话后再显式重建本入口')
-  })
-
-  it('says why no replacement is offered instead of rendering nothing', () => {
-    const markup = archivedGroup('stopped')
-    expect(markup).toContain('本会话名下已无在服务的入口')
-    // Names where the history went, so a completed migration is distinguishable
-    // from a group that never had anything.
-    expect(markup).toContain('已停止 / 已失效')
-  })
-
-  it('keeps that sentence out of the single-line header', () => {
-    // `dshpet-work-tail` is a `flex:none` strip sized for chips and one button.
-    // A sentence placed there stretched the title line and was clipped at the
-    // panel edge; `dshpet-work-note` is the block this session already uses for
-    // prose, so the note must render there instead.
-    const markup = archivedGroup('stopped')
-    const header = markup.slice(
-      markup.indexOf('dshpet-work-tail'),
-      markup.indexOf('dshpet-work-sub'),
+  it('spec Scenario "修改访问模式提交目标值"', async () => {
+    const host = stubHost(
+      snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', locusId: 'L1', revision: 2 }))])], { writeEnabled: true }),
+      () => ({ ok: true, data: { action: 'access', chat: {}, receipt: LOCUS_ACCESS_RECEIPT } }),
     )
-    expect(header).not.toContain('本会话名下已无在服务的入口')
-    expect(markup).toMatch(/dshpet-work-note[^>]*>本会话名下已无在服务的入口/)
+    const root = await mount()
+    await openDetails(root)
+    await click(button(root, '完全访问'))
+    expect(host.actions).toEqual([{
+      action: 'access', endpoint: { chatId: 'oc_A' }, accessMode: 'danger-full-access', expectedLocusId: 'L1', expectedRevision: 2,
+    }])
+  })
+
+  it('spec Scenario "回执不声称已应用"', async () => {
+    const before = entryView({ chatId: 'oc_A', locusId: 'L1' })
+    stubHost(
+      snapshotV20([workView([chatView(before)])], { writeEnabled: true }),
+      (_body, fake) => {
+        fake.snapshot = snapshotV20([workView([chatView({ ...before, accessMode: 'danger-full-access', revision: 2 })])], { writeEnabled: true })
+        return { ok: true, data: { action: 'access', chat: {}, receipt: LOCUS_ACCESS_RECEIPT } }
+      },
+    )
+    const root = await mount()
+    await openDetails(root)
+    await click(button(root, '完全访问'))
+    expect(root.textContent).toContain('已更新，下次唤醒时应用并核验；核验失败将拒绝服务')
+    expect(root.textContent).toContain('活跃 · 完全访问')
+    expect(root.textContent).not.toContain('待应用')
+  })
+
+  it('spec Scenario "写开关关闭时完全访问不可选"', async () => {
+    const host = stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', accessMode: 'danger-full-access' }))])], { writeEnabled: false }))
+    const root = await mount()
+    await openDetails(root)
+    const full = button(root, '完全访问')
+    expect(full.disabled).toBe(true)
+    expect(root.textContent).toContain('全局写开关已关闭')
+    await click(full)
+    expect(host.actions).toEqual([])
+    const read = button(root, '只读')
+    expect(read.disabled).toBe(false)
+    await click(read)
+    expect(host.actions).toMatchObject([{ action: 'access', accessMode: 'read-only' }])
+  })
+
+  it('spec Scenario "投递中时访问模式与停止都置灰"', async () => {
+    const host = stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', inFlight: true }))])], { writeEnabled: true }))
+    const root = await mount()
+    expect(root.textContent).toContain('投递中')
+    await openDetails(root)
+    for (const label of ['只读', '完全访问', '停止']) expect(button(root, label).disabled).toBe(true)
+    expect(root.textContent).toContain('该入口正在投递，待其结束后再修改访问模式')
+    expect(root.textContent).toContain('该入口正在投递，待其结束后再停止')
+    await click(button(root, '停止'))
+    await click(button(root, '完全访问'))
+    expect(host.actions).toEqual([])
+  })
+
+  it('spec Scenario "围栏过期时拒绝而不乐观改写"', async () => {
+    stubHost(
+      snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', locusId: 'L1', revision: 5 }))])]),
+      () => ({ ok: false, error: 'LOCUS_CONFLICT', message: '执行 locus stop：入口已变化，请刷新后重试' }),
+    )
+    const root = await mount()
+    await openDetails(root)
+    await click(button(root, '停止'))
+    expect(root.textContent).toContain('入口已变化，请刷新后重试')
+    expect(root.textContent).toContain('活跃 · 只读')
+    expect(root.textContent).not.toContain('已停止 ·')
+  })
+
+  it('fits every action payload inside the route field list', async () => {
+    const host = stubHost(
+      snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })])], ARCHIVED)], { writeEnabled: true }),
+    )
+    const root = await mount({ showArchived: true })
+    await openDetails(root)
+    await click(button(root, '完全访问'))
+    await click(button(root, '停止'))
+    await click(button(root, '改绑到其他会话'))
+    await type(rebindInput(root)!, 'session-new')
+    await click(button(root, '确认'))
+    expect(host.actions.map(body => body['action']).sort()).toEqual(['access', 'rebind', 'stop'])
+    for (const body of host.actions) {
+      const allowed = LOCUS_ACTION_FIELDS[body['action'] as keyof typeof LOCUS_ACTION_FIELDS]
+      expect(Object.keys(body).filter(key => !allowed.includes(key))).toEqual([])
+    }
   })
 })
 
-/**
- * The receipt for an action whose effect leaves the surface it was taken on.
- *
- * A session-level replacement moves its entries into a DIFFERENT group, stops
- * rendering its own button (nothing is left to move) and leaves retired
- * generations the default filter hides. Without a receipt, that complete
- * success is indistinguishable from a no-op.
- */
-describe('completed action receipts', () => {
-  it('states how many entries moved and where they went', () => {
-    expect(describeActionReceipt({
-      action: 'replace-parent',
-      parentSessionId: 'session-b843540f-1111-2222-3333-444455556666',
-      replaced: ['locus-a', 'locus-b'],
-      skipped: [],
-    })).toBe('已把 2 个入口迁到新主会话 …556666；原主会话保持归档不动，旧代际作为历史保留。')
+describe('spec Requirement "管理面提供「改绑到其他会话」，仅在原 W 已归档且无 current 投递时可用"', () => {
+  it('spec Scenario "原 W 已归档时提交改绑"', async () => {
+    const host = stubHost(
+      snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', locusId: 'L1', revision: 4 }))], ARCHIVED)]),
+      (_body, fake) => {
+        fake.snapshot = snapshotV20([workView(
+          [chatView(entryView({ chatId: 'oc_A', locusId: 'L1', revision: 5, state: 'not-created' }), [], { reboundFrom: { sessionId: 'session-old-w', title: '旧工作' } })],
+          { sessionId: 'S_NEW', title: '新工作' },
+        )])
+        return { ok: true, data: { action: 'rebind', chat: {}, receipt: '已改绑到 新工作（S_NEW）；各入口将在新会话下按首条消息重新创建子会话，不保留上下文。' } }
+      },
+    )
+    const root = await mount({ showArchived: true })
+    expect(root.textContent).toContain('来源会话已归档，可改绑')
+    // Directly on the row: no 更多 disclosure was opened.
+    await click(button(root, '改绑到其他会话'))
+    expect(root.textContent).toContain('不保留上下文')
+    await type(rebindInput(root)!, 'S_NEW')
+    await click(button(root, '确认'))
+    expect(host.actions).toEqual([{ action: 'rebind', chatId: 'oc_A', workSessionId: 'S_NEW', expectedLocusId: 'L1', expectedRevision: 4 }])
+    expect(root.textContent).toContain('已改绑到 新工作')
+    await expandAll(root)
+    expect(root.querySelector('.dshpet-work-name')?.textContent).toContain('新工作')
+    expect(root.textContent).toContain('改绑自 旧工作')
   })
 
-  it('names every refusal, because the owner has to act on each one', () => {
-    const receipt = describeActionReceipt({
-      action: 'replace-parent',
-      parentSessionId: 'session-b843540f-1111-2222-3333-444455556666',
-      replaced: ['locus-a'],
-      skipped: [{ locusId: 'locus-stale-000042', reason: '入口当前代际已变化，请刷新后重试。' }],
-    })
-    expect(receipt).toContain('已把 1 个入口迁到新主会话')
-    expect(receipt).toContain('未迁移 1 个')
-    expect(receipt).toContain('入口当前代际已变化')
+  it('原 W 未归档时不显示改绑控件', async () => {
+    const host = stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], { availability: 'available' })]))
+    const root = await mount()
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
+    expect(root.textContent).not.toContain('当前来源会话未归档，仅在其归档后可改绑')
+    expect(root.textContent).not.toContain('来源会话已归档，可改绑')
+    expect(rebindInput(root)).toBeNull()
+    expect(host.actions).toEqual([])
   })
 
-  it('stays silent for a per-entry action, whose own row already shows it', () => {
-    expect(describeActionReceipt({ action: 'rebuild', locus: {} })).toBeUndefined()
-    expect(describeActionReceipt({ action: 'stop', locus: {} })).toBeUndefined()
-    // A malformed result must not produce a confident-looking sentence.
-    expect(describeActionReceipt({ action: 'replace-parent' })).toBeUndefined()
+  it('无法证明归档时同样不显示改绑控件', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], { availability: 'unknown' })]))
+    const root = await mount()
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
+    expect(root.textContent).not.toContain('当前来源会话未归档')
+    expect(root.textContent).not.toContain('来源会话已归档，可改绑')
+  })
+
+  it('spec Scenario "有入口在投递时置灰"', async () => {
+    const host = stubHost(snapshotV20([workView([chatView(
+      entryView({ chatId: 'oc_A' }),
+      [entryView({ chatId: 'oc_A', threadId: 'omt_1', inFlight: true, hasCurrentDelivery: true })],
+    )], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    expect(button(root, '改绑到其他会话').disabled).toBe(true)
+    expect(root.textContent).toContain('该群有入口正在投递，待其结束后再改绑')
+    expect(root.textContent).toContain('来源会话已归档，可改绑')
+    expect(host.actions).toEqual([])
+  })
+
+  it('only a current delivery greys rebind; an in-flight backlog does not', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', inFlight: true, hasCurrentDelivery: false }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    expect(button(root, '改绑到其他会话').disabled).toBe(false)
+  })
+
+  it('spec Scenario "话题行与评论行没有改绑控件"', async () => {
+    stubHost(snapshotV20([workView([
+      chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })]),
+      chatView(entryView({ chatId: 'doc:docx:D' }), [entryView({ chatId: 'doc:docx:D', threadId: '11' })]),
+    ], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    const nested = [...root.querySelectorAll('.dshpet-locus-row')].filter(row => row.getAttribute('data-nested') === 'true')
+    expect(nested).toHaveLength(2)
+    for (const row of nested) expect(buttons(row, '改绑到其他会话')).toEqual([])
+    expect(buttons(root, '改绑到其他会话')).toHaveLength(2)
+  })
+
+  it('spec Scenario "Host 拒绝目标时不乐观改写"', async () => {
+    stubHost(
+      snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', locusId: 'L1', revision: 4 }))], ARCHIVED)]),
+      () => ({ ok: false, error: 'INVALID_REQUEST', message: '执行 locus rebind：目标是 locus 主会话，不能作为工作会话' }),
+    )
+    const root = await mount({ showArchived: true })
+    await click(button(root, '改绑到其他会话'))
+    await type(rebindInput(root)!, 'session-some-m')
+    await click(button(root, '确认'))
+    expect(root.textContent).toContain('目标是 locus 主会话，不能作为工作会话')
+    expect(rebindInput(root)?.value).toBe('session-some-m')
+    expect(root.querySelector('.dshpet-work-name')?.textContent).toContain('旧工作')
+    expect(root.textContent).toContain('活跃 · 只读')
+  })
+
+  it('spec Scenario "空输入不可提交"', async () => {
+    const host = stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    await click(button(root, '改绑到其他会话'))
+    expect(button(root, '确认').disabled).toBe(true)
+    await type(rebindInput(root)!, '   ')
+    expect(button(root, '确认').disabled).toBe(true)
+    await click(button(root, '确认'))
+    expect(host.actions).toEqual([])
+  })
+})
+
+describe('spec Requirement "管理面不提供新建外部资源的入口"', () => {
+  it('spec Scenario "管理面无绑定控件"', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })])], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    // With no dialog open, the only text input is the search box.
+    const inputs = [...root.querySelectorAll('input')].filter(input => input.type !== 'checkbox')
+    expect(inputs.map(input => input.getAttribute('aria-label'))).toEqual(['搜索关联'])
+    await click(button(root, '改绑到其他会话'))
+    // The form is its own block right after the group row, never inside it.
+    const form = rebindInput(root)!.closest('.dshpet-locus-rebind-form')!
+    expect(form.closest('.dshpet-locus-row')).toBeNull()
+    expect(form.previousElementSibling?.getAttribute('data-nested')).toBe('false')
+  })
+
+  it('spec Scenario "生命周期动作仍可用"', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))])], { writeEnabled: true }))
+    const root = await mount()
+    await openDetails(root)
+    const ops = root.querySelector('.dshpet-locus-ops')!
+    expect(([...ops.querySelectorAll('button')] as HTMLButtonElement[]).map(item => item.textContent?.trim())).toEqual(['只读', '完全访问', '停止'])
+    const labels = ([...root.querySelectorAll('button')] as HTMLButtonElement[]).map(item => item.textContent?.trim() ?? '')
+    for (const removed of ['解绑', '归档', '重建', '重新启用', '工具档位', '确认执行根', '用新的主会话接替']) {
+      expect(labels.filter(label => label.includes(removed))).toEqual([])
+    }
+    expect(root.textContent).not.toContain('文件权限')
+    // W is live here: no rebind control at all (it appears only for an archived W).
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
+  })
+
+  it('spec Scenario "话题行不接受会话标识输入"', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })])], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    await openDetails(root, 1)
+    const topic = [...root.querySelectorAll('.dshpet-locus-row')].find(row => row.getAttribute('data-nested') === 'true')!
+    expect(buttons(topic, '改绑到其他会话')).toEqual([])
+    expect(topic.querySelectorAll('input')).toHaveLength(0)
+    const details = topic.nextElementSibling
+    expect(details?.classList.contains('dshpet-locus-details')).toBe(true)
+    expect(details?.querySelectorAll('input')).toHaveLength(0)
+  })
+})
+
+describe('spec Requirement "管理面如实呈现全部生命周期状态" (surface half)', () => {
+  it('spec Scenario "含未创建入口的快照可加载"', async () => {
+    stubHost(snapshotV20([workView([chatView(
+      entryView({ chatId: 'oc_A', state: 'not-created' }),
+      [entryView({ chatId: 'oc_A', threadId: 'omt_1', state: 'not-created' })],
+    )])]))
+    const root = await mount()
+    expect(root.textContent).not.toContain('快照不完整')
+    expect(root.textContent?.match(/未创建 · 只读/g)).toHaveLength(2)
+    // 未创建 is said once on line 2; the child jump carries 尚未创建 as its reason.
+    expect(root.textContent).not.toContain('子会话 尚未创建')
+    expect(button(root, '子会话 ↗').title).toBe('尚未创建')
+    expect(root.textContent).not.toMatch(/会话不可用|缺失/)
+  })
+
+  it('spec Scenario "未知状态值不伪装成活跃"', async () => {
+    stubHost(snapshotV20([workView([chatView({ ...entryView({ chatId: 'oc_A' }), state: 'retired' as never })])]))
+    const root = await mount()
+    // Shown, not hidden: the default filter only hides stopped / invalid.
+    expect(root.textContent).toContain('未知状态 · 只读')
+    expect(root.textContent).not.toContain('活跃 ·')
+    await openDetails(root)
+    expect(button(root, '只读').disabled).toBe(true)
+    expect(button(root, '完全访问').disabled).toBe(true)
+  })
+
+  it('refuses a snapshot of the removed pre-v20 shape rather than guessing', async () => {
+    stubHost({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } } as never)
+    const root = await mount()
+    expect(root.textContent).toContain('快照不完整或字段无效')
+  })
+})
+
+describe('the locus surface reads title, condition, description, controls', () => {
+  it('puts the filter condition on the title row and the counts under it', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))])]))
+    const root = await mount()
+    expect(root.querySelector('.dshpet-locus-headline')?.textContent).toContain('入口：在服务')
+    expect(root.querySelector('.dshpet-locus-lead > .dshpet-meta')?.textContent).toContain('1 个入口 · 1 个飞书入口 · 1 个工作会话')
+    expect(root.textContent).not.toMatch(/历史|第 \d+ 代/)
+  })
+})
+
+describe('the filter popover (owner-approved v20 UI)', () => {
+  it('says 工作会话 everywhere the owner reads, never 干活', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    await click(button(root, '改绑到其他会话'))
+    expect(button(root, '按工作会话').getAttribute('role')).toBe('tab')
+    expect(rebindInput(root)?.placeholder).toContain('目标工作会话')
+    expect(root.innerHTML).not.toContain('干活')
+  })
+
+  it('offers exactly three checkboxes with counts over the whole snapshot', async () => {
+    stubHost(snapshotV20([
+      workView([chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1', state: 'stopped' })])]),
+      workView([chatView(entryView({ chatId: 'oc_B', state: 'invalid' }))], ARCHIVED),
+    ]))
+    const root = await mount()
+    await openFilter(root)
+    const rows = [...root.querySelectorAll('.dshpet-locus-filter-row')]
+    expect(rows.map(row => [row.textContent, (row.querySelector('input') as HTMLInputElement).checked])).toEqual([
+      ['在服务1', true], ['已停止 / 已失效1', false], ['已归档1', false],
+    ])
+    expect(root.querySelector('.dshpet-locus-filter')?.textContent).not.toContain('未知状态')
+  })
+
+  it('hides an archived W by default and shows it, with the rebind button, once 已归档 is ticked', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))], ARCHIVED)]))
+    const root = await mount()
+    expect(buttons(root, '改绑到其他会话')).toEqual([])
+    expect(root.textContent).not.toContain('旧工作')
+    expect(root.querySelector('.dshpet-locus-headline')?.textContent).toContain('入口：在服务')
+    await openFilter(root)
+    await act(async () => { filterBox(root, '已归档').click() })
+    await expandAll(root)
+    expect(root.querySelector('.dshpet-locus-headline')?.textContent).toContain('入口：在服务、已归档')
+    expect(button(root, '改绑到其他会话').disabled).toBe(false)
+    expect(root.textContent).toContain('来源会话已归档，可改绑')
+  })
+
+  it('draws the popover opaque: solid background, solid border and a shadow', () => {
+    const rule = PET_CSS.match(/\.dshpet-locus-filter\{[^}]*\}/)?.[0] ?? ''
+    expect(rule).toContain('background:var(--dsw-alias-bg-layer-1,#ffffff)')
+    expect(rule).toMatch(/border:1px solid/)
+    expect(rule).toContain('box-shadow:')
+    expect(rule).toContain('backdrop-filter:none')
+    expect(rule).toContain('opacity:1')
+    expect(rule).not.toContain('--dsw-specific-menu')
+  })
+})
+
+describe('the rebind form never squeezes the row text (owner acceptance layout bug)', () => {
+  it('renders the open form as a full-width block after the row, outside the text column and the tail', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'not-created' }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    await click(button(root, '改绑到其他会话'))
+    const input = rebindInput(root)!
+    expect(input.closest('.dshpet-locus-row-body')).toBeNull()
+    expect(input.closest('.dshpet-locus-row-tail')).toBeNull()
+    expect(input.closest('.dshpet-locus-row')).toBeNull()
+    const form = input.closest('.dshpet-locus-rebind-form')!
+    expect(form.parentElement?.classList.contains('dshpet-locus-chat')).toBe(true)
+    // The row keeps its own text intact while the form is open.
+    const row = form.previousElementSibling!
+    expect(row.querySelector('.dshpet-locus-row-body')?.textContent).toContain('未创建 · 只读')
+    expect(row.querySelector('.dshpet-locus-row-body')?.textContent).toContain('来源会话已归档，可改绑')
+  })
+
+  it('keeps the long greyed reason out of the auto-sized tail column', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', inFlight: true, hasCurrentDelivery: true }))], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    const reason = root.querySelector('[data-reason="rebind"]')!
+    expect(reason.textContent).toBe('该群有入口正在投递，待其结束后再改绑')
+    expect(reason.closest('.dshpet-locus-row-tail')).toBeNull()
+    expect(reason.closest('.dshpet-locus-row-body')).not.toBeNull()
+  })
+
+  it('renders every tail control in the one jump style', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'not-created' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })])], ARCHIVED)]))
+    const root = await mount({ showArchived: true })
+    const tails = [...root.querySelectorAll('.dshpet-locus-row-tail')]
+    expect(tails.length).toBe(2)
+    for (const tail of tails) {
+      const controls = [...tail.children]
+      expect(controls.length).toBeGreaterThan(0)
+      for (const control of controls) expect(control.classList.contains('dshpet-jump'), control.textContent ?? '').toBe(true)
+    }
+    expect(tails[0]!.textContent).toContain('改绑到其他会话')
+  })
+
+  it('keeps the 改绑自 code chip on the same line as its text', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }), [], { reboundFrom: { sessionId: 'session-17bd88a3', title: '旧工作' } })])]))
+    const root = await mount()
+    const line = root.querySelector('.dshpet-locus-rebound')!
+    expect(line.textContent).toContain('改绑自 旧工作')
+    expect(line.querySelector('.dshpet-handle')).not.toBeNull()
+  })
+
+  it('never says 兜底显示: an unnamed entry reads 入口 · <code> / 话题 · <code>', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_bb0e1111' }), [entryView({ chatId: 'oc_bb0e1111', threadId: 'omt_198f2222' })])])]))
+    const root = await mount()
+    expect(root.textContent).not.toContain('兜底')
+    const names = [...root.querySelectorAll('.dshpet-locus-name')].map(item => item.textContent)
+    expect(names).toEqual(['入口 · bb0e', '话题 · 198f'])
+  })
+
+  it('styles the text column with a real minimum width and lets the tail wrap instead of growing', () => {
+    const rule = (selector: string): string =>
+      PET_CSS.match(new RegExp(`\\.dshpet-settings ${selector.replace(/\./g, '\\.')}\\{[^}]*\\}`))?.[0] ?? ''
+    expect(rule('.dshpet-locus-row')).not.toMatch(/grid-template-columns:minmax\(0,/)
+    expect(rule('.dshpet-locus-row')).toMatch(/grid-template-columns:minmax\(12em,1fr\)/)
+    expect(rule('.dshpet-locus-row-body')).not.toMatch(/min-width:0[;}]/)
+    // A long title ellipsises inside its column instead of running under the tail's buttons.
+    expect(rule('.dshpet-locus-name')).toContain('flex:0 1 auto')
+    // One right-aligned action row, not a ragged stack.
+    const tail = rule('.dshpet-locus-row-tail')
+    expect(tail).toContain('flex-wrap:nowrap')
+    expect(tail).toContain('justify-content:flex-end')
+    // A disabled jump keeps its border: same shape as an enabled one, only dimmer.
+    const disabledJump = PET_CSS.match(/\.dshpet-jump\[data-disabled="true"\][^{]*\{[^}]*\}/)?.[0] ?? ''
+    expect(disabledJump).toContain('cursor:not-allowed')
+    expect(disabledJump).not.toContain('border-color:transparent')
+    // The 改绑自 line keeps its code chip beside the text.
+    expect(rule('.dshpet-locus-rebound')).toContain('white-space:nowrap')
+    // The form is a block with a solid background, not a translucent flex sibling.
+    const form = rule('.dshpet-locus-rebind-form')
+    expect(form).toContain('display:flex')
+    expect(form).toContain('background:var(--dsw-alias-bg-layer-1,#ffffff)')
+    expect(form).not.toContain('flex-basis')
+    expect(PET_CSS).not.toContain('dshpet-locus-rebind-dialog')
+  })
+})
+
+describe('a locus child opens through its locus main address', () => {
+  it('addresses the child by its M, never by bare session id', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', sessionId: 'child-1' }))])]))
+    const opened: unknown[] = []
+    setSessionOpener(target => { opened.push(target) })
+    try {
+      const root = await mount()
+      await click(button(root, '子会话 ↗'))
+      expect(opened).toEqual([{ kind: 'subagent', parentSessionId: 'session-main-1', childSessionId: 'child-1' }])
+    } finally {
+      setSessionOpener(undefined)
+    }
+  })
+
+  it('offers no child jump for a not-created entry', async () => {
+    stubHost(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'not-created' }))])]))
+    setSessionOpener(() => undefined)
+    try {
+      const root = await mount()
+      const jump = button(root, '子会话 ↗')
+      expect(jump.disabled).toBe(true)
+      expect(jump.title).toBe('尚未创建')
+    } finally {
+      setSessionOpener(undefined)
+    }
   })
 })

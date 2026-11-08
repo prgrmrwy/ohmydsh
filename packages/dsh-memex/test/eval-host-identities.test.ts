@@ -1,3 +1,4 @@
+import * as Presentation from '@deepseek-ai/dsh-agent-tool-presentation'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -24,8 +25,9 @@ it('records a reserved root on the real registry publication boundary without pr
     await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt, { persona: '' })
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(Presentation, { mode: 'native' }) // 0.2.2 loads no tool executor by default
     await ctx.plugin(SessionProjection)
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     const tracking = registerEvalIdentities(ctx, ledger)
     const handle = await ctx.agents.create({ sessionId: SessionId(id), meta: { cwd: directory } })

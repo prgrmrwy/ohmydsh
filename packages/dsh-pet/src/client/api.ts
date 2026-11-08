@@ -17,14 +17,13 @@ import {
   type PetExpressionView,
   type PetLifecycleState,
   type PetWorkspaceChoice,
-  type PetLocusActionRequest,
-  type PetLocusReplaceParentResult,
-  type PetLocusActionResult,
+  type PetLocusAccessActionV20,
+  type PetLocusActionResultV20,
   type PetLocusDefaultQaRequest,
-  type PetLocusDefaultQaResult,
-  type PetLocusDiscoveryRequest,
-  type PetLocusDiscoveryView,
-  type PetLocusManagementView,
+  type PetLocusDefaultQaResultV20,
+  type PetLocusManagementViewV20,
+  type PetLocusRebindActionV20,
+  type PetLocusStopActionV20,
   type PetTodoActionRequest,
   type PetTodoActionResult,
   type PetTodoView,
@@ -254,40 +253,14 @@ export const petApi = {
   /** Deactivate the current mascot animation (keeps one backup). */
   removeExpression: (): Promise<{ state: 'none' }> => call(EXPRESSION_ROUTES.remove),
 
-  /** Owner-facing unified locus snapshot; this does not read legacy Tasks. */
-  locus: (): Promise<PetLocusManagementView> => call(LOCUS_ROUTES.view),
-  locusDiscovery: (input: PetLocusDiscoveryRequest): Promise<PetLocusDiscoveryView> =>
-    call(LOCUS_ROUTES.discovery, input),
-  locusAction: (input: PetLocusActionRequest): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.action, input),
-  locusDefaultQa: (input: PetLocusDefaultQaRequest): Promise<PetLocusDefaultQaResult> =>
+  /** Owner-facing v20 locus snapshot; this does not read legacy Tasks. */
+  locus: (): Promise<PetLocusManagementViewV20> => call(LOCUS_ROUTES.view),
+  /** The three v20 mutations, fenced by {expectedLocusId, expectedRevision}. */
+  locusAction: (
+    input: PetLocusStopActionV20 | PetLocusAccessActionV20 | PetLocusRebindActionV20,
+  ): Promise<PetLocusActionResultV20> => call(LOCUS_ROUTES.action, input),
+  locusDefaultQa: (input: PetLocusDefaultQaRequest): Promise<PetLocusDefaultQaResultV20> =>
     call(LOCUS_ROUTES.defaultQa, input),
-  locusBind: (input: Extract<PetLocusActionRequest, { action: 'bind' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.bind, input),
-  locusUnbind: (input: Extract<PetLocusActionRequest, { action: 'unbind' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.unbind, input),
-  locusArchive: (input: Extract<PetLocusActionRequest, { action: 'archive' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.archive, input),
-  locusStop: (input: Extract<PetLocusActionRequest, { action: 'stop' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.stop, input),
-  locusScope: (input: Extract<PetLocusActionRequest, { action: 'scope' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.scope, input),
-  locusTools: (input: Extract<PetLocusActionRequest, { action: 'tools' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.tools, input),
-  locusConfirmAnchor: (input: Extract<PetLocusActionRequest, { action: 'confirm-anchor' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.action, input),
-  locusRebuild: (input: Extract<PetLocusActionRequest, { action: 'rebuild' }>): Promise<PetLocusActionResult> =>
-    call(LOCUS_ROUTES.rebuild, input),
-  /**
-   * Move an archived main session's entries onto one newly created session.
-   *
-   * Answers with its own result shape: a session-level operation has no single
-   * `locus`, and several entries may be refused individually.
-   */
-  locusReplaceParent: (
-    input: Extract<PetLocusActionRequest, { action: 'replace-parent' }>,
-  ): Promise<PetLocusReplaceParentResult> =>
-    call(LOCUS_ROUTES.action, input),
   /**
    * Shared-fact ledger todos, grouped by owning main session.
    *

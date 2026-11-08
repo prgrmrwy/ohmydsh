@@ -55,8 +55,12 @@ export function parseWindowsCommandLine(commandLine) {
   return result
 }
 
-export function isDshWebProcess(record, port, { platform = process.platform } = {}) {
-  if (!validPort(port) || !positivePid(record?.pid) || !record.created || !Array.isArray(record.argv)) return false
+// A managed Host is `node <dsh entry> <profile> ... --port <port>`. The profile
+// is compared exactly: a `web` Host is never owned by a non-web probe and vice
+// versa, so one profile's lifecycle cannot adopt or signal another's listener.
+export const validProfile = profile => typeof profile === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(profile)
+export function isDshHostProcess(record, port, { platform = process.platform, profile = 'web' } = {}) {
+  if (!validProfile(profile) || !validPort(port) || !positivePid(record?.pid) || !record.created || !Array.isArray(record.argv)) return false
   const argv = record.argv
   if (argv.length < 4 || !argv.every(value => typeof value === 'string')) return false
   const executable = platform === 'win32' ? path.win32.basename(argv[0]).toLowerCase() : path.basename(argv[0])
@@ -64,10 +68,13 @@ export function isDshWebProcess(record, port, { platform = process.platform } = 
   try { currentNode = realpathSync(record.executable || argv[0]) === realpathSync(process.execPath) } catch {}
   if (!['node', 'node.exe'].includes(executable) && !currentNode) return false
   const entry = platform === 'win32' ? argv[1].replaceAll('\\', '/').toLowerCase() : argv[1]
-  if (!/(?:\/node_modules\/@deepseek-ai\/dsh\/lib\/bin\.js|\/node_modules\/\.bin\/dsh)$/.test(entry) || argv[2] !== 'web') return false
+  if (!/(?:\/node_modules\/@deepseek-ai\/dsh\/lib\/bin\.js|\/node_modules\/\.bin\/dsh)$/.test(entry) || argv[2] !== profile) return false
   const positions = argv.slice(3).flatMap((arg, index) => arg === '--port' ? [argv[index + 4]] : arg.startsWith('--port=') ? [arg.slice(7)] : [])
   return positions.length === 1 && /^\d+$/.test(positions[0] ?? '') && Number(positions[0]) === Number(port)
 }
+
+/** Compatibility alias: the historical predicate is the `web` profile case. */
+export const isDshWebProcess = (record, port, { platform = process.platform } = {}) => isDshHostProcess(record, port, { platform, profile: 'web' })
 
 export function sameProcessIdentity(a, b) {
   return positivePid(a?.pid) && a.pid === b?.pid && typeof a.created === 'string' && a.created.length > 0 && a.created === b.created &&
@@ -78,11 +85,11 @@ export function sameProcessIdentity(a, b) {
 export function classifyPort(records, reachable, port, options = {}) {
   if (!Array.isArray(records)) return { state: 'probe-error', processes: [], error: 'Invalid ownership records' }
   if (!records.length) return { state: reachable ? 'unknown' : 'empty', processes: [] }
-  return { state: records.every(record => isDshWebProcess(record, port, options)) ? 'owned' : 'unknown', processes: records }
+  return { state: records.every(record => isDshHostProcess(record, port, options)) ? 'owned' : 'unknown', processes: records }
 }
 
-async function verifyEntry(record, platform) {
-  if (!isDshWebProcess(record, record.port, { platform })) return false
+async function verifyEntry(record, platform, profile) {
+  if (!isDshHostProcess(record, record.port, { platform, profile })) return false
   const entry = await realpath(record.argv[1])
   const pkg = JSON.parse(await readFile(path.resolve(path.dirname(entry), '../package.json'), 'utf8'))
   if (pkg.name !== '@deepseek-ai/dsh' || path.basename(entry) !== 'bin.js' || path.basename(path.dirname(entry)) !== 'lib') return false
@@ -104,7 +111,7 @@ async function posixRecord(pid, platform, run, options) {
   // ps does not escape argv. Recover only the known Node + DSH entry form;
   // ambiguous quoted/metacharacter command lines are unknown, never guessed.
   const command = match[3]
-  const args = command.match(/^((?:.*\/)?(?:node|node\.exe|nodejs|node\d+))\s+(.+?\/node_modules\/(?:@deepseek-ai\/dsh\/lib\/bin\.js|\.bin\/dsh))\s+(web(?:\s+.*)?)$/)
+  const args = command.match(/^((?:.*\/)?(?:node|node\.exe|nodejs|node\d+))\s+(.+?\/node_modules\/(?:@deepseek-ai\/dsh\/lib\/bin\.js|\.bin\/dsh))\s+([A-Za-z0-9][A-Za-z0-9._-]*(?:\s+.*)?)$/)
   if (!args || /["'\\]/.test(args[3])) return { pid, parentPid: Number(match[1]), created: match[2], argv: [], executable: '' }
   // ps argv[0] may be the bare shebang name. lsof txt identifies the actual
   // process executable independently; never resolve a bare name via caller PATH.
@@ -123,9 +130,10 @@ function windowsQuery(port) {
 // a successful probe returns well under 1s, so this only bounds the failure path.
 export const PROBE_TIMEOUT_MS = 15_000
 
-export async function probePort(port, { platform = process.platform, env = process.env, deadline = Date.now() + PROBE_TIMEOUT_MS, run = runPlatformCommand, connect = portReachable } = {}) {
+export async function probePort(port, { platform = process.platform, env = process.env, deadline = Date.now() + PROBE_TIMEOUT_MS, run = runPlatformCommand, connect = portReachable, profile = 'web' } = {}) {
   const error = message => ({ state: 'probe-error', processes: [], error: message })
   if (!validPort(port)) return error('Port must be an integer in 1..65535')
+  if (!validProfile(profile)) return error('Invalid DSH profile name')
   if (Date.now() >= deadline) return error('Ownership probe deadline expired')
   const options = { env, timeoutMs: Math.min(PROBE_TIMEOUT_MS, Math.max(1, deadline - Date.now())) }
   try {
@@ -148,10 +156,10 @@ export async function probePort(port, { platform = process.platform, env = proce
       }
     }
     const reachable = records.length ? true : await connect(Number(port), { timeoutMs: Math.min(300, Math.max(1, deadline - Date.now())) })
-    const result = classifyPort(records, reachable, port, { platform })
+    const result = classifyPort(records, reachable, port, { platform, profile })
     if (result.state === 'owned') {
       for (const record of records) {
-        try { if (!await verifyEntry({ ...record, port }, platform)) return { state: 'unknown', processes: records, error: 'DSH entry package identity cannot be verified' } }
+        try { if (!await verifyEntry({ ...record, port }, platform, profile)) return { state: 'unknown', processes: records, error: 'DSH entry package identity cannot be verified' } }
         catch { return { state: 'unknown', processes: records, error: 'DSH entry package identity cannot be verified' } }
       }
     }
@@ -163,9 +171,9 @@ export async function probePort(port, { platform = process.platform, env = proce
 }
 
 export async function stopServer(port, options = {}) {
-  const { platform = process.platform, env = process.env, run = runPlatformCommand, connect = portReachable, signal = (pid, kind) => process.kill(pid, kind), warn = message => console.warn(message) } = options
+  const { platform = process.platform, env = process.env, run = runPlatformCommand, connect = portReachable, signal = (pid, kind) => process.kill(pid, kind), warn = message => console.warn(message), profile = 'web' } = options
   const deadline = Math.min(options.deadline ?? Infinity, Date.now() + 20_000)
-  const probe = () => (options.probe ?? probePort)(port, { platform, env, run, connect, deadline: Math.min(deadline, Date.now() + PROBE_TIMEOUT_MS) })
+  const probe = () => (options.probe ?? probePort)(port, { platform, env, run, connect, profile, deadline: Math.min(deadline, Date.now() + PROBE_TIMEOUT_MS) })
   const fail = (state, error) => ({ ok: false, state, error })
   if (!validPort(port)) return fail('probe-error', 'Invalid port')
   const initial = options.expectedIdentity

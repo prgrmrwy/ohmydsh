@@ -17,7 +17,7 @@ export interface RealHostOptions {
   credentials?: ReturnType<typeof credentialsMock>
   /** Route ids that a foreign adapter registers BEFORE the plugin mounts. */
   foreignRoutes?: string[]
-  /** Add an `llm/adapters-updated` listener that throws `{code:'INVARIANT'}` while `invariant.on` is true. */
+  /** Add an `llm/adapters-updated` listener that throws `{code:'INVARIANT'}` while `invariant.on` is true; DSH 0.2.1+ contains that throw and only warns. */
   invariantListener?: boolean
   /** With `invariantListener`: the listener already throws while the plugin mounts (first registration). */
   invariantOn?: boolean

@@ -24,6 +24,8 @@ on:
       - 'packages/dsh-magpie-connector/**'
       - 'packages/dsh-sidebar-session-provider-icon/**'
       - 'packages/dsh-session-id-copy/**'
+      - 'packages/cockpit-worktree-open-shim/**'
+      - 'packages/cockpit-memex-browse-shim/**'
   workflow_dispatch:
     inputs:
       force:
@@ -58,6 +60,12 @@ jobs:
           - dir: dsh-session-id-copy
             repo: dsh-session-id-copy
             secret: MIRROR_KEY_SESSION_ID_COPY
+          - dir: cockpit-worktree-open-shim
+            repo: dsh-cockpit-worktree-open-shim
+            secret: MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM
+          - dir: cockpit-memex-browse-shim
+            repo: dsh-cockpit-memex-browse-shim
+            secret: MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM
     steps:
       - uses: actions/checkout@v4
         with:

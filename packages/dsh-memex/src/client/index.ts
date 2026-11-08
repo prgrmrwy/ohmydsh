@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createBrowseAddressRegistry, MEMEX_BROWSE_ADDRESS_SERVICE } from './browse-address.js'
 import { createBrowseOpenDeps } from './browse-open.js'
 import { NS, en, zh } from './locales.js'
-import { registerMemexSettingsNavIcon } from './nav-icon.js'
+import { MemexSettingsNavIcon } from './nav-icon.js'
 import { MemexSettingsSection, type MemexSectionInjected, type MemexSectionProps } from './page.js'
 import { MEMEX_CSS } from './styles.js'
 import type { MemexSettingsShape } from './settings-model.js'
@@ -81,8 +81,8 @@ export function apply(ctx: ClientContext): void {
     }),
   }, MemexSettingsSection as (props: MemexSectionProps) => JSX.Element | null))
 
-  // Decoration only: if the shell's row cannot be located, the official glyph
-  // stays and the page is unaffected.
-  ctx.effect(() => registerMemexSettingsNavIcon(() => t('nav')), 'dsh-memex: settings nav glyph')
+  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+    name: 'settings.section.icon', id: MEMEX_NAMESPACE,
+  }, MemexSettingsNavIcon))
 
 }

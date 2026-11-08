@@ -1,27 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import { buildLocusDiagnostics } from '../src/host/locus/diagnostics.js'
 import type { DeliveryRecord } from '../src/host/locus/delivery.js'
-import type { LocusRecord } from '../src/host/locus/aggregate.js'
+import type { LocusRowV20 } from '../src/host/locus/contract-v20.js'
 
 const CHAT = 'oc_project_00000000000000000042'
 const CHILD = 'session-child-00000000000000000099'
 
-function locus(overrides: Partial<LocusRecord> = {}): LocusRecord {
+function locus(overrides: Partial<LocusRowV20> = {}): LocusRowV20 {
   return {
-    id: 'locus-1',
-    generation: 2,
+    locusId: 'locus-1',
     endpoint: { chatId: CHAT },
-    parentSessionId: 'session-main',
-    childSessionId: CHILD,
-    workspaceId: 'ws-1',
-    source: 'auto',
+    sessionId: CHILD,
     state: 'active',
-    permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-    busy: false,
+    accessMode: 'read-only',
+    revision: 2,
+    locusMainSessionId: 'session-main',
+    workspaceId: 'ws-1',
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
-  } as LocusRecord
+  } as LocusRowV20
 }
 
 function delivery(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
@@ -30,8 +28,7 @@ function delivery(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
     messageId: 'om_message_0000000000000000001',
     endpoint: { chatId: CHAT },
     locusId: 'locus-1',
-    generation: 2,
-    childSessionId: CHILD,
+    sessionId: CHILD,
     senderOpenId: 'ou_sender_secret',
     text: '这是不应出现在诊断里的消息正文',
     sequence: 1,
@@ -43,7 +40,7 @@ function delivery(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord {
 }
 
 describe('message to execution diagnostic chain', () => {
-  it('reports each stage with the exact locus generation and child', () => {
+  it('reports each stage with the exact locus and child session', () => {
     const report = buildLocusDiagnostics(locus(), [
       delivery({ deliveryId: 'd1', sequence: 1, status: 'accepted' }),
       delivery({
@@ -60,7 +57,7 @@ describe('message to execution diagnostic chain', () => {
     // Newest first, so the freshest problem is at the top.
     expect(report.deliveries.map(row => row.stage)).toEqual(['settled', 'queued', 'accepted'])
     expect(report.stageCounts).toEqual({ accepted: 1, queued: 1, running: 0, settled: 1, failed: 0 })
-    expect(report.locus).toMatchObject({ id: 'locus-1', generation: 2, state: 'active', permission: 'read' })
+    expect(report.locus).toMatchObject({ id: 'locus-1', revision: 2, state: 'active', accessMode: 'read-only' })
     // Proof presence is shown; the tokens themselves are not.
     expect(report.deliveries[0]).toMatchObject({ executionBound: true, turnBound: true })
     expect(report.deliveries[2]).toMatchObject({ executionBound: false, turnBound: false })
@@ -86,12 +83,15 @@ describe('message to execution diagnostic chain', () => {
     expect(report.deliveries[0]?.entry.chat).toBe(`…${CHAT.slice(-8)}`)
   })
 
-  it('distinguishes a busy generation from an unavailable child', () => {
-    const busy = buildLocusDiagnostics(locus({ busy: true }), [delivery()])
+  it('distinguishes a busy entry (a current Delivery exists) from an unavailable child', () => {
+    const current = delivery({ deliveryId: 'cur', sequence: 0, status: 'current', queueState: 'current' } as Partial<DeliveryRecord>)
+    const busy = buildLocusDiagnostics(locus(), [delivery(), current])
     const idle = buildLocusDiagnostics(locus(), [delivery()])
 
     // Same stage, different cause: one waits, the other needs investigation.
-    expect(busy.deliveries[0]?.nextCheck).toContain('正忙')
+    expect(busy.locus.busy).toBe(true)
+    expect(idle.locus.busy).toBe(false)
+    expect(busy.deliveries.find(row => row.stage === 'accepted')?.nextCheck).toContain('正忙')
     expect(idle.deliveries[0]?.nextCheck).toContain('未排队')
   })
 
@@ -135,7 +135,7 @@ describe('message to execution diagnostic chain', () => {
     expect(report.deliveries[0]?.nextCheck).toContain('不会自动重试')
   })
 
-  it('reports an unavailable generation with its stored reason', () => {
+  it('reports an unavailable entry with its stored reason', () => {
     const report = buildLocusDiagnostics(
       locus({ state: 'invalid', invalidReason: '主会话已归档' }),
       [],
@@ -145,12 +145,12 @@ describe('message to execution diagnostic chain', () => {
     expect(report.deliveries).toEqual([])
   })
 
-  it('ignores Deliveries belonging to another generation or locus', () => {
+  it('ignores Deliveries belonging to another session (replaced by a rebuild / rebind / migration) or locus', () => {
     const report = buildLocusDiagnostics(locus(), [
       delivery({ deliveryId: 'mine', sequence: 5 }),
-      // A late row from the generation this one replaced must not be shown as
+      // A late row from the session this one replaced must not be shown as
       // if it belonged to the current entry.
-      delivery({ deliveryId: 'older', sequence: 4, generation: 1 }),
+      delivery({ deliveryId: 'older', sequence: 4, sessionId: 'session-replaced' }),
       delivery({ deliveryId: 'foreign', sequence: 3, locusId: 'locus-other' }),
     ])
 

@@ -5,6 +5,7 @@ import { buildState } from './context.js'
 import type { RoutingState } from './state.js'
 import { chooseChildRoute } from './routing.js'
 import { registry as builtin, type Registry } from './strategies/index.js'
+import { resolvePreset } from './presets/index.js'
 
 interface SessionLike { id: string; session: { header: { origin?: string; parentSession?: string }; requestHeader?: () => { config?: { provider?: string; model?: string; reasoningEffort?: string } } | undefined }; options?: { provider?: string; model?: string; reasoningEffort?: string } }
 export interface ToolDeps {
@@ -72,8 +73,10 @@ export function routeSubagentTool(jev: JevClient, deps: ToolDeps) {
       if (args.path === 'fork') return { routed: false, status: 'unsupported', reason: 'fork' }
       if (!args.provider) throw new Error('provider 为空；暂停委派并询问用户')
       const explicit = { ...(args.model ? { model: args.model } : {}), ...(args.reasoning_effort ? { reasoningEffort: args.reasoning_effort } : {}) }
+      // The preview captures its own preset; a later fresh child captures independently.
+      const preset = resolvePreset(deps.readSettings().preset)
       const result = explicit.model && explicit.reasoningEffort ? { kind: 'ok' as const, depth: 'baseline' as const, capability: 'bounded' as const }
-        : await jev.judgePolicy(buildState({ text: args.task }), exec.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both')
+        : await jev.judgePolicy(buildState({ text: args.task, execution: preset.context.includes('execution') ? 'delegated' : undefined }), exec.signal, 'child', explicit.model ? 'depth' : explicit.reasoningEffort ? 'capability' : 'both', preset)
       if (result.kind === 'cancelled' || exec.signal.aborted) throw new Error('子任务判断已取消；暂停委派并询问用户')
       if (result.kind === 'failed') return { routed: false, status: 'fallback', reason: `jev-${result.category}` }
       if (result.capability === 'insufficient_context') return { routed: false, status: 'needs-context', reason: '请补充任务目标与范围' }

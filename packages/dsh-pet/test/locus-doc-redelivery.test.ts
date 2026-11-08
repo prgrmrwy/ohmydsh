@@ -11,8 +11,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildLocusRecord } from '../src/host/locus/aggregate.js'
-import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
+import { endpointKeyV20 } from '../src/host/locus/locus-set-v20.js'
 import { LocusChannelController, type NormalizedLocusMessage } from '../src/host/channel/locus-controller.js'
 import { emptyMedium, openPetHarness } from './harness.js'
 
@@ -25,29 +25,30 @@ function messageId(replyId: string): string {
   return `${ROOT}/${COMMENT}/${replyId}`
 }
 
-async function seed(repository: DurableLocusRepository) {
-  const root = await repository.putLocus(buildLocusRecord({
-    id: 'locus-doc-root', endpoint: { chatId: ROOT },
-    parentSessionId: 'session-main', childSessionId: 'child-doc-root', workspaceId: 'workspace-main',
-    source: 'auto', createdAt: 1, updatedAt: 1,
-  }))
-  const comment = await repository.putLocus(buildLocusRecord({
-    id: 'locus-doc-comment', endpoint: ENDPOINT, parentLocusId: root.id,
-    parentSessionId: 'session-main', childSessionId: 'child-doc-comment', workspaceId: 'workspace-main',
-    source: 'inherited', createdAt: 1, updatedAt: 1,
-  }))
-  return comment
+type TablePut = { table(name: string): { put(key: string, value: unknown): Promise<void> } }
+
+/** One group row (the doc root) and one topic row (the anchored comment) under the same M. */
+async function seed(domain: unknown) {
+  const base = { state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 } as const
+  await (domain as TablePut).table('loci').put(ROOT, {
+    endpoint: { chatId: ROOT }, locusId: 'locus-doc-root', sessionId: 'child-doc-root', ...base,
+    locusMainSessionId: 'session-main', workspaceId: 'workspace-main',
+  })
+  await (domain as TablePut).table('loci').put(endpointKeyV20(ENDPOINT), {
+    endpoint: ENDPOINT, locusId: 'locus-doc-comment', sessionId: 'child-doc-comment', ...base,
+  })
 }
 
-function controllerFor(repository: DurableLocusRepository, rendered: NormalizedLocusMessage[], commentQueries: { count: number }) {
+function controllerFor(repository: LocusRepositoryV20, rendered: NormalizedLocusMessage[], commentQueries: { count: number }) {
   const read = (endpoint: { chatId: string; threadId?: string }) => {
-    const record = repository.getCurrentLocus(endpoint)
-    return record === undefined ? undefined : {
-      id: record.id, endpoint: record.endpoint, generation: record.generation,
-      parentSessionId: record.parentSessionId, childSessionId: record.childSessionId as string,
-      workspaceId: record.workspaceId, state: 'active' as const,
-      childComposition: 'tier3' as const, toolTier: { desired: 'safe' as const, effective: 'safe' as const },
-      permission: record.permission,
+    const record = repository.getRow(endpoint)
+    if (record === undefined) return undefined
+    const group = repository.getRow({ chatId: endpoint.chatId })
+    if (group === undefined || !('locusMainSessionId' in group)) return undefined
+    return {
+      locusId: record.locusId, endpoint: record.endpoint, sessionId: record.sessionId,
+      locusMainSessionId: group.locusMainSessionId, workSessionId: 'session-main', workspaceId: group.workspaceId,
+      state: 'active' as const, accessMode: record.accessMode, revision: record.revision,
     }
   }
   return new LocusChannelController({
@@ -63,17 +64,20 @@ function controllerFor(repository: DurableLocusRepository, rendered: NormalizedL
       findByMessageId: id => repository.findDeliveryByMessageId(id),
       getById: id => repository.getDelivery(id),
       accept: input => repository.acceptDelivery(input),
-      bindQueued: input => repository.bindQueued(input),
-      bindTurn: input => repository.bindTurn(input),
+      bindQueued: async ({ correlation, ...rest }: { correlation: object }) => (await repository.bindQueued({ ...correlation, ...rest } as never)).record,
+      bindTurn: async ({ correlation, ...rest }: { correlation: object }) => (await repository.bindTurn({ ...correlation, ...rest } as never)).record,
     } as never,
     deliveryDispatch: {
-      claimCurrent: input => repository.claimCurrentDelivery(input),
+      claimCurrent: async ({ correlation, ...rest }) => {
+        const claimed = await repository.claimCurrentDelivery({ ...correlation, ...rest })
+        return claimed.changed ? claimed.record : undefined
+      },
       currentFinished: () => {},
       dispatchNext: async () => {},
       scheduleCurrent: () => {},
     },
     child: {
-      ensureChild: locus => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
+      ensureChild: locus => ({ parentSessionId: locus.locusMainSessionId, childSessionId: locus.sessionId }),
       queueChild: input => ({ accepted: true as const, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }),
     },
     inspectResidentPolicy: () => ({ resident: true, policy: { mode: 'read-only', workspaceRoot: '/repo' } }),
@@ -98,12 +102,9 @@ describe('spec Scenario "重启后再投递排队中的划词评论"', () => {
   it('rebuilds the queued anchored comment from the durable Delivery after a restart', async () => {
     const medium = emptyMedium()
     const first = await openPetHarness(medium)
-    const before = new DurableLocusRepository(first.domain)
-    const locus = await seed(before)
-    const correlation = {
-      endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation,
-      childSessionId: locus.childSessionId as string,
-    }
+    const before = new LocusRepositoryV20(first.domain as never)
+    await seed(first.domain)
+    const correlation = { endpoint: ENDPOINT, locusId: 'locus-doc-comment', sessionId: 'child-doc-comment' }
     // The child is busy with r1; r5 waits in the durable backlog.
     for (const [replyId, quote, text] of [['1', '接口已有', '第一个问题'], ['5', '接口已有', '这里为什么']] as const) {
       await before.acceptDelivery({
@@ -117,7 +118,7 @@ describe('spec Scenario "重启后再投递排队中的划词评论"', () => {
         acceptedAt: 2,
       })
     }
-    const busy = await before.claimCurrentDelivery({ correlation, now: 3 })
+    const busy = (await before.claimCurrentDelivery({ ...correlation, now: 3 })).record
     expect(busy?.messageId).toBe(messageId('1'))
     await before.completeCurrentDelivery({
       ...correlation, deliveryId: busy!.deliveryId, now: 4, outcome: 'no-reply', outboundResult: 'none', reason: 'test',
@@ -127,7 +128,7 @@ describe('spec Scenario "重启后再投递排队中的划词评论"', () => {
 
     // Host restart: a fresh process with only the medium.
     const second = await openPetHarness(medium)
-    const restarted = new DurableLocusRepository(second.domain)
+    const restarted = new LocusRepositoryV20(second.domain as never)
     const rendered: NormalizedLocusMessage[] = []
     const queries = { count: 0 }
     const controller = controllerFor(restarted, rendered, queries)

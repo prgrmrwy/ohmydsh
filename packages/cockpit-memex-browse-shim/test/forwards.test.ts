@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { apply, MEMEX_BROWSE_ADDRESS_SERVICE, FORWARD_READY_TIMEOUT_MS } from '../src/client/index.ts'
-import { createBrowseAddressRegistry } from '../../dsh-memex/src/client/browse-address.ts'
+import { createBrowseAddressRegistry } from './fixtures/memex-browse-address.ts'
 
 function fixture() {
   const services = new Map<string, unknown>()

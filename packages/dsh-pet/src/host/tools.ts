@@ -116,7 +116,7 @@ interface LocusToolCapability {
   readonly turnId: string
   readonly source: 'delivery' | 'agent-message'
   readonly locusId?: string
-  readonly generation?: number
+  readonly sessionId?: string
 }
 
 export interface PetLocusLifecycleDependencies {
@@ -134,7 +134,7 @@ export interface PetLocusLifecycleDependencies {
     readonly turnId: string
     readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
-    readonly generation?: number
+    readonly sessionId?: string
   } | undefined
   readonly inspectCurrentCapability?: (childSessionId: string) =>
     | { readonly ok: true; readonly capability: LocusToolCapability }
@@ -251,28 +251,22 @@ async function resolveAuthorizedCurrent(
     if (!result.ok) rejectAuthorization(deps, operation, result.reason)
     authorized = result.locus
   } else {
-    const authorize = deps.locusRepository?.authorizeCurrentDelivery
-    if (authorize === undefined) rejectAuthorization(deps, operation, 'capability-unavailable')
-    authorized = await authorize({ childSessionId, operation, proof })
-    if (authorized === undefined) rejectAuthorization(deps, operation, 'association-unproven')
+    rejectAuthorization(deps, operation, 'capability-unavailable')
   }
 
   const delivery = authorized.currentDelivery
   if (delivery === undefined) rejectAuthorization(deps, operation, 'no-current')
-  if (authorized.locus.generation !== proof.generation && proof.generation !== undefined) {
+  // 'generation-mismatch' keeps its name: it now means a replaced sessionId.
+  if (authorized.child.sessionId !== proof.sessionId && proof.sessionId !== undefined) {
     rejectAuthorization(deps, operation, 'generation-mismatch')
   }
   if (delivery.deliveryId !== proof.deliveryId || delivery.status !== 'current' ||
       delivery.queueState !== undefined && delivery.queueState !== 'current') {
     rejectAuthorization(deps, operation, 'stale-delivery')
   }
-  if (authorized.legacy === true || authorized.source === 'legacy' ||
-      authorized.locus.state !== 'active' || authorized.child.sessionId !== childSessionId ||
-      authorized.locus.locusId.trim() === '' || !Number.isSafeInteger(authorized.locus.generation) ||
-      authorized.locus.generation < 1 ||
-      authorized.permission.effective !== 'read' && authorized.permission.effective !== 'write' ||
-      delivery.childSessionId !== childSessionId || delivery.locusId !== authorized.locus.locusId ||
-      delivery.generation !== authorized.locus.generation) {
+  if (authorized.locus.state !== 'active' || authorized.child.sessionId !== childSessionId ||
+      authorized.locus.locusId.trim() === '' ||
+      delivery.sessionId !== childSessionId || delivery.locusId !== authorized.locus.locusId) {
     rejectAuthorization(deps, operation, 'association-unproven')
   }
   return authorized
@@ -338,7 +332,7 @@ export interface PetIntentTriageDependencies {
     readonly turnId: string
     readonly source: 'delivery' | 'agent-message'
     readonly locusId?: string
-    readonly generation?: number
+    readonly sessionId?: string
   } | undefined
   readonly inspectCurrentCapability?: (childSessionId: string) =>
     | { readonly ok: true; readonly capability: LocusToolCapability }
@@ -463,7 +457,7 @@ export function registerPetTools(
           // at-most-once semantics during partial composition.
           throw new PetError('INTERNAL', 'The Host has no durable Delivery finish capability.')
         }
-        const result = await lifecycle.finishCurrentDelivery({ childSessionId: delivery.childSessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
+        const result = await lifecycle.finishCurrentDelivery({ childSessionId: delivery.sessionId, locus, delivery, outcome, ...(text === undefined ? {} : { text }), ...(reason === undefined ? {} : { reason }) })
         lifecycle.onDeliveryContinued?.(exec)
         return result
       },
@@ -487,7 +481,7 @@ export function registerPetTools(
         const locus = await resolveAuthorizedCurrent(lifecycle, callerSessionId(exec as ExecutionLike), 'wait')
         if (lifecycle.waitCurrentDelivery === undefined) throw new PetError('INTERNAL', 'The Host has no durable Delivery wait lease.')
         const reason = typeof input.reason === 'string' ? input.reason : undefined
-        const result = await lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.childSessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
+        const result = await lifecycle.waitCurrentDelivery({ childSessionId: locus.currentDelivery!.sessionId, locus, delivery: locus.currentDelivery!, waitMinutes, ...(reason === undefined ? {} : { reason }) })
         if (result.accepted) lifecycle.onDeliveryContinued?.(exec)
         return result
       },
@@ -723,7 +717,7 @@ export function registerPetLocusMainTools(ctx: Context, deps: LocusMainToolsDeps
       },
       render: (_args, value) => [{
         type: 'text',
-        text: value.ok ? `已写入入口级结论（${String(value.itemId)}），待干活主会话确认后入口可见。` : mainToolFailureText(value.reason as never),
+        text: value.ok ? `已写入入口级结论（${String(value.itemId)}），待工作主会话确认后入口可见。` : mainToolFailureText(value.reason as never),
       }],
     },
     async execute(args, exec) {

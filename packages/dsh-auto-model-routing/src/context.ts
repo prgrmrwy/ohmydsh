@@ -26,8 +26,16 @@ export function previousTurn(messages: readonly HistoryMessage[]): { user?: stri
 const EXPLAIN = 'Earlier conversation is shown so you can tell what the new message asks for. Rate the work the assistant must do next in response to the new message, not the earlier work.'
 
 /** The Jev `state`; every section is redacted, then cut. The fixed first line keeps the request bytes stable. */
-export function buildState(input: { prevUser?: string | undefined; prevAssistant?: string | undefined; text: string }): string {
+/** Fixed call-path lines; they state the path only and never claim whether anyone reviews. */
+export const EXECUTION_LINES = {
+  main: 'Execution: main conversation.',
+  delegated: 'Execution: delegated subtask; the result returns to an orchestrating agent.',
+} as const
+export type Execution = keyof typeof EXECUTION_LINES
+
+export function buildState(input: { prevUser?: string | undefined; prevAssistant?: string | undefined; text: string; execution?: Execution | undefined }): string {
   const lines = ['Previous user-turn tier: none']
+  if (input.execution) lines.push(EXECUTION_LINES[input.execution])
   const context = input.prevUser !== undefined || input.prevAssistant !== undefined
   if (context) lines.push(EXPLAIN)
   if (input.prevUser !== undefined) lines.push('Previous user message (truncated):', redact(input.prevUser).slice(0, 500))

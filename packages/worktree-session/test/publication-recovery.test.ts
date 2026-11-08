@@ -12,6 +12,7 @@ import SessionProjection from '@deepseek-ai/dsh-session-projection'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { apply } from '../src/index.js'
 import { bindSource, startOperation } from '../src/host/operation.js'
 import { activeBindingContext } from '../src/host/context.js'
@@ -52,8 +53,9 @@ async function harness(): Promise<{ ctx: Context; adapter: ScriptedAdapter }> {
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor) // 0.2.2 loads no tool executor by default
+  await ctx.plugin(SessionProjection) // AgentRegistry injects it (0.2.2); load first so `agents` is ready
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(SessionProjection)
   await ctx.plugin(AgentLoop, { agents: [] })
   const adapter = new ScriptedAdapter()
   ctx.llm.registerAdapter(['scripted'], adapter)

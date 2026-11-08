@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildLocusRecord } from '../src/host/locus/aggregate.js'
-import { LocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
 import { openPetHarness } from './harness.js'
 import {
   LocusChannelController,
@@ -20,12 +19,12 @@ import {
 
 const correlation: DeliveryCorrelation = {
   endpoint: { chatId: 'oc_shutdown', threadId: 'omt_shutdown' },
-  locusId: 'locus-shutdown', generation: 1, childSessionId: 'child-shutdown',
+  locusId: 'locus-shutdown', sessionId: 'child-shutdown',
 }
 const locus: ActiveLocus = {
-  ...correlation, id: correlation.locusId, parentSessionId: 'main-shutdown',
-  workspaceId: 'project', state: 'active', childComposition: 'tier3',
-  permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
+  locusId: correlation.locusId, endpoint: correlation.endpoint, sessionId: correlation.sessionId,
+  locusMainSessionId: 'main-shutdown', workspaceId: 'project', state: 'active',
+  accessMode: 'read-only', revision: 1,
 }
 function admission(messageId = 'message-a'): Extract<NormalizedLocusAdmission, { kind: 'accepted' }> {
   return {
@@ -54,7 +53,7 @@ function harness(overrides: Partial<LocusControllerDeps> = {}) {
     onTurnEnd: listener => { ended = listener; return () => {} },
     lookup: { find: ({ childSessionId, messageId }) => {
       const row = Object.values(state.byDeliveryId).find(record =>
-        record.childSessionId === childSessionId && record.inboxMessageId === messageId)
+        record.sessionId === childSessionId && record.inboxMessageId === messageId)
       return row?.executionId === undefined ? undefined : {
         deliveryId: row.deliveryId, executionId: row.executionId, correlation, status: row.status,
       }
@@ -63,7 +62,7 @@ function harness(overrides: Partial<LocusControllerDeps> = {}) {
   turns.subscribe(event => events.push(event))
   const queueChild = vi.fn<NonNullable<LocusControllerDeps['child']>['queueChild']>(async input => {
     const messageId = `inbox-${input.deliveryId}`
-    claimed({ childSessionId: locus.childSessionId, messageId, turn: state.nextDeliverySequence, sourceKind: 'user' })
+    claimed({ childSessionId: locus.sessionId, messageId, turn: state.nextDeliverySequence, sourceKind: 'user' })
     return { accepted: true, executionId: input.executionId, inboxMessageId: messageId }
   })
   const resolveCurrent = vi.fn(() => locus)
@@ -108,7 +107,7 @@ function harness(overrides: Partial<LocusControllerDeps> = {}) {
       currentFinished: input => controller.currentFinished(input),
     },
     child: {
-      ensureChild: () => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
+      ensureChild: () => ({ parentSessionId: locus.locusMainSessionId, childSessionId: locus.sessionId }),
       queueChild,
     },
     turns, controlDispatch: { dispatch: control }, now: () => 100,
@@ -127,10 +126,10 @@ function harness(overrides: Partial<LocusControllerDeps> = {}) {
         byDeliveryId: { ...state.byDeliveryId, [current.deliveryId]: next },
       }
     },
-    claim: (messageId: string, turn: number, childSessionId = locus.childSessionId) =>
+    claim: (messageId: string, turn: number, childSessionId = locus.sessionId) =>
       claimed({ childSessionId, messageId, turn, sourceKind: 'user' }),
     end: (end: Omit<LocusTurnEnd, 'childSessionId'> & { childSessionId?: string }) =>
-      ended({ childSessionId: locus.childSessionId, ...end }),
+      ended({ childSessionId: locus.sessionId, ...end }),
     finish: (messageId: string) => {
       const current = state.byMessageId[messageId]!
       const terminal = { ...current, status: 'no-reply' as const, queueState: undefined }
@@ -209,7 +208,7 @@ describe('Locus shutdown freeze', () => {
     const queued = deferred<{ accepted: true; executionId: string; inboxMessageId: string }>()
     const queueEntered = deferred()
     const h = harness({ child: {
-      ensureChild: () => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
+      ensureChild: () => ({ parentSessionId: locus.locusMainSessionId, childSessionId: locus.sessionId }),
       queueChild: input => {
         queueEntered.resolve()
         void queued.promise
@@ -275,13 +274,23 @@ describe('Locus shutdown freeze', () => {
 describe('live cancellation evidence', () => {
   it('persists a real current interruption through the repository CAS and resumes the durable backlog', async () => {
     const storage = await openPetHarness()
-    const repository = new LocusRepository(storage.domain)
+    await storage.domain.table('locus_mains').put('main-live', {
+      locusMainSessionId: 'main-live', workSessionId: 'work-live', generation: 1, status: 'active',
+      spaceId: 'space-live', workspaceId: 'ws-pet', createdAt: 1, updatedAt: 1,
+    } as never)
+    const repository = new LocusRepositoryV20(storage.domain as never)
     const liveEndpoint = { chatId: 'oc_live_cancel' }
-    const row = await repository.putLocus(buildLocusRecord({
-      id: 'locus-live', endpoint: liveEndpoint, parentSessionId: 'main-live',
-      childSessionId: 'child-live', childComposition: 'tier3', workspaceId: 'project',
-      source: 'auto', createdAt: 1, updatedAt: 1,
-    }))
+    const row = {
+      endpoint: liveEndpoint, locusId: 'locus-live', sessionId: 'child-live', state: 'active' as const,
+      accessMode: 'read-only' as const, revision: 1, createdAt: 1, updatedAt: 1,
+      locusMainSessionId: 'main-live', workspaceId: 'project',
+    }
+    await storage.domain.table('loci').put(liveEndpoint.chatId, row as never)
+    const activeLive = (): ActiveLocus => ({
+      locusId: row.locusId, endpoint: liveEndpoint, sessionId: row.sessionId,
+      locusMainSessionId: row.locusMainSessionId, workspaceId: row.workspaceId, state: 'active',
+      accessMode: 'read-only', revision: 1,
+    })
     let claim!: (value: LocusInboxClaim) => void
     let end!: (value: LocusTurnEnd) => void
     const turns = createLocusTurnObserver({
@@ -289,30 +298,35 @@ describe('live cancellation evidence', () => {
       onTurnEnd: listener => { end = listener; return () => {} },
       lookup: { find: ({ childSessionId, messageId }) => {
         const delivery = repository.findDeliveryByInboxMessageId(messageId)
-        return delivery?.executionId !== undefined && delivery.childSessionId === childSessionId ? {
+        return delivery?.executionId !== undefined && delivery.sessionId === childSessionId ? {
           deliveryId: delivery.deliveryId, executionId: delivery.executionId,
-          correlation: { locusId: row.id, generation: row.generation, childSessionId, endpoint: liveEndpoint },
+          correlation: { locusId: row.locusId, sessionId: childSessionId, endpoint: liveEndpoint },
         } : undefined
       } },
     })
     let controller!: LocusChannelController
     const queue = vi.fn<LocusControllerDeps['child']['queueChild']>(async input => {
       const inboxMessageId = `inbox-${input.deliveryId}`
-      claim({ childSessionId: row.childSessionId!, messageId: inboxMessageId, turn: queue.mock.calls.length, sourceKind: 'user' })
+      claim({ childSessionId: row.sessionId, messageId: inboxMessageId, turn: queue.mock.calls.length, sourceKind: 'user' })
       return { accepted: true, executionId: input.executionId, inboxMessageId }
     })
     controller = new LocusChannelController({
-      locus: { resolveCurrent: () => repository.getCurrentLocus(liveEndpoint), ensureForDelivery: () => repository.getLocus(row.id)! },
-      child: { ensureChild: () => ({ parentSessionId: row.parentSessionId, childSessionId: row.childSessionId! }), queueChild: queue },
+      locus: { resolveCurrent: activeLive, ensureForDelivery: activeLive },
+      child: { ensureChild: () => ({ parentSessionId: row.locusMainSessionId, childSessionId: row.sessionId }), queueChild: queue },
       turns, now: () => 100,
       deliveries: {
         getById: id => repository.getDelivery(id), findByMessageId: id => repository.findDeliveryByMessageId(id),
-        accept: input => repository.acceptDelivery(input), bindQueued: input => repository.bindQueued(input),
-        bindTurn: input => repository.bindTurn(input), settleByTurn: input => repository.settleByTurn(input),
-        failBeforeDispatch: input => repository.failBeforeDispatch(input),
+        accept: input => repository.acceptDelivery(input as never),
+        bindQueued: async input => (await repository.bindQueued({ ...input.correlation, ...input } as never)).record,
+        bindTurn: async input => (await repository.bindTurn({ ...input.correlation, ...input } as never)).record,
+        settleByTurn: input => repository.settleByTurn({ ...input, turnId: input.correlation.turnId } as never),
+        failBeforeDispatch: input => repository.failBeforeDispatch(input as never),
       },
       deliveryDispatch: {
-        claimCurrent: input => repository.claimCurrentDelivery(input),
+        claimCurrent: async input => {
+          const result = await repository.claimCurrentDelivery({ ...input.correlation, ...input } as never)
+          return result.changed ? result.record : undefined
+        },
         currentFinished: input => controller.currentFinished(input),
         dispatchNext: input => controller.dispatchNext(input),
       },
@@ -370,7 +384,7 @@ describe('live cancellation evidence', () => {
 
   it('waits for exact inbox binding when a live abort arrives before queue acceptance returns', async () => {
     const h = harness({ child: {
-      ensureChild: () => ({ parentSessionId: locus.parentSessionId, childSessionId: locus.childSessionId }),
+      ensureChild: () => ({ parentSessionId: locus.locusMainSessionId, childSessionId: locus.sessionId }),
       queueChild: async input => {
         h.claim('inbox-before-bind', 7)
         h.end({ turn: 7, outcome: 'aborted', reason: 'parent' })
@@ -380,9 +394,9 @@ describe('live cancellation evidence', () => {
     } })
     try {
       await h.controller.handleAdmission(admission())
-      expect(h.record('message-a')?.turnId).toBe(`${locus.childSessionId}#7`)
+      expect(h.record('message-a')?.turnId).toBe(`${locus.sessionId}#7`)
       expect(h.deliveries.settleByTurn).toHaveBeenCalledWith(expect.objectContaining({
-        correlation: { ...correlation, turnId: `${locus.childSessionId}#7` },
+        correlation: { ...correlation, turnId: `${locus.sessionId}#7` },
         outcome: 'failed', failureReason: 'turn-interrupted',
       }))
     } finally { h.dispose() }
@@ -411,8 +425,7 @@ describe('live cancellation evidence', () => {
 
   it.each([
     { executionId: 'replacement-execution' },
-    { generation: 2 },
-    { childSessionId: 'replacement-child' },
+    { sessionId: 'replacement-child' },
     { endpoint: { chatId: 'replacement-endpoint' } },
     { turnId: 'child-shutdown#999' },
   ])('rejects stale cancellation after durable identity changes: %j', async patch => {

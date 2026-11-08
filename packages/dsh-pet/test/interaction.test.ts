@@ -209,7 +209,7 @@ describe('default Q&A interaction', () => {
                 action: 'default-qa',
                 created: false,
                 reused: true,
-                locus: { endpoint: { chatId: 'oc_qa', chatName: '研发答疑' } },
+                chat: { group: { endpoint: { chatId: 'oc_qa', chatName: '研发答疑' } } },
               },
             }),
           }
@@ -276,7 +276,7 @@ describe('default Q&A interaction', () => {
                 action: 'default-qa',
                 created: true,
                 reused: false,
-                locus: { endpoint: { chatId: 'oc_qa', chatName: '答疑 · DSH' } },
+                chat: { group: { endpoint: { chatId: 'oc_qa', chatName: '答疑 · DSH' } } },
               },
             }),
           }

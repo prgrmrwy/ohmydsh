@@ -28,6 +28,7 @@ import Query from '@deepseek-ai/dsh-session-query'
 import Agents from '@deepseek-ai/dsh-agent'
 import Llm, { LlmAdapter, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import Tools, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import Prompt from '@deepseek-ai/dsh-system-prompt'
 import Projections from '@deepseek-ai/dsh-session-projection'
 import Loop from '@deepseek-ai/dsh-agent-loop'
@@ -51,7 +52,7 @@ import {
 import {
   attestLocusComposition,
   LOCUS_SAFE_TOOL_NAMES,
-  LOCUS_SHELL_TIER_TOOL_NAMES,
+  LOCUS_FULL_ACCESS_TOOL_NAMES,
 } from '../src/host/locus/composition.js'
 import { LOCUS_BASE_PRESET, LOCUS_CHILD_PRESET } from '../src/host/locus/preset.js'
 
@@ -59,7 +60,7 @@ const REPO = nodePath.resolve(import.meta.dirname, '../../..')
 
 /** What the pre-0.2.1 runtime exposed to a child before the tier layer: filter ∩ preset. */
 const OLD_SAFE = [...LOCUS_SAFE_TOOL_NAMES].sort()
-const OLD_SHELL = [...OLD_SAFE, ...LOCUS_SHELL_TIER_TOOL_NAMES].sort()
+const OLD_SHELL = [...OLD_SAFE, ...LOCUS_FULL_ACCESS_TOOL_NAMES].sort()
 
 /** The `tool-fs` row config of a real preset file (the only part of it this graph can load). */
 async function presetFsConfig(presetId: string): Promise<Record<string, unknown>> {
@@ -128,6 +129,7 @@ describe('locus child tool ceiling on the official 0.2.1 runtime', () => {
     await ctx.plugin(Query)
     await ctx.plugin(Prompt, { persona: '' })
     await ctx.plugin(Tools)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(Agents)
     await ctx.plugin(Projections)
     await ctx.plugin(Loop, { agents: [], maxParallelToolCalls: 1 })
@@ -180,7 +182,7 @@ describe('locus child tool ceiling on the official 0.2.1 runtime', () => {
       if (!children.has(agent.id)) return
       if (options.hostCeiling) applyLocusInheritedToolCeiling(agent.ctx.tools as never)
       const tools = agent.ctx.tools as unknown as { restrict(filter: { deny: readonly string[] }): () => void }
-      if (options.tier() === 'safe') tierLayers.set(agent, tools.restrict({ deny: LOCUS_SHELL_TIER_TOOL_NAMES }))
+      if (options.tier() === 'safe') tierLayers.set(agent, tools.restrict({ deny: LOCUS_FULL_ACCESS_TOOL_NAMES }))
       // What Pet's publication readback sees at this exact boundary.
       published.push({
         id: agent.id,
@@ -284,6 +286,39 @@ describe('locus child tool ceiling on the official 0.2.1 runtime', () => {
     expect(resumed.preset).toBe(LOCUS_CHILD_PRESET)
     expect(attestLocusComposition(resumed.names, 'safe')).toMatchObject({ ok: true, leaks: [] })
     expect(w.adapter.forPrompt('second')[0]!.tools).toEqual(OLD_SAFE)
+  })
+
+  it('spec Scenario "冷恢复保留独立历史"', async () => {
+    const w = await world({ hostCeiling: true, tier: () => 'safe' })
+    const childId = 'locus-child-history'
+    w.children.add(childId)
+    await w.adapterPort.createChild({
+      parentSessionId: w.parentId, childId, label: 'entry', prompt: [{ type: 'text', text: 'history-first' }],
+    })
+    await settle(w.adapter, 'history-first')
+    // The parent accumulates history of its own: the settlement notice it was woken with.
+    const deadline = Date.now() + 10_000
+    while (!w.adapter.requests.some(request => request.transcript.includes('Background subagent')) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    expect(w.adapter.requests.some(request => request.transcript.includes('Background subagent'))).toBe(true)
+
+    // Host restart in miniature: release the resident child, then wake it again.
+    await w.ports.compensation!.drainChildren(w.parent, [childId] as never)
+    await w.ports.inbox!.queuePrompt(w.parent, childId, [{ type: 'text', text: 'history-second' }], { kind: 'user' }, new AbortController().signal)
+    const deadlineSecond = Date.now() + 10_000
+    const resumedRequests = () => w.adapter.requests.filter(request => request.transcript.includes('"text":"history-second"'))
+    while (resumedRequests().length < 1 && Date.now() < deadlineSecond) await new Promise(resolve => setTimeout(resolve, 10))
+    const [resumed] = resumedRequests()
+    expect(resumed, 'no model request for the resumed prompt').toBeDefined()
+
+    // The SAME child comes back with its OWN earlier turn ...
+    expect(resumed!.transcript).toContain('"text":"history-first"')
+    // ... and nothing from the parent's history is inserted into it.
+    expect(resumed!.transcript).not.toContain('Background subagent')
+    const publications = w.published.filter(item => item.id === childId)
+    expect(publications).toHaveLength(2)
+    expect(publications.at(-1)!.preset).toBe(LOCUS_CHILD_PRESET)
   })
 
   it('shell tier: the request carries exactly the old shell set (safe + bash + skill)', async () => {

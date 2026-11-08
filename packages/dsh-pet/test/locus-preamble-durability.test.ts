@@ -1,192 +1,184 @@
 /**
- * The preamble decision against the REAL durable Delivery ledger.
+ * The preamble decision against the REAL v20 durable Delivery ledger
+ * (owner A's LocusRepositoryV20).
  *
  * `preamblePosition` is unit-tested in locus-delivery-prompt.test.ts; this file
  * proves the evidence chain it depends on actually exists in the Host: an
  * accepted Delivery is durable WITHOUT an inbox binding (accept precedes
  * rendering), a queued one carries the binding, and a delivery that never
  * bound never counts as proof. That is the whole difference between
- * "rendered" and "delivered" — the regression this change repairs.
+ * "rendered" and "delivered".
  */
 
 import { describe, expect, it } from 'vitest'
-import { renderLocusDeliveryFor } from '../src/host/locus/context.js'
-import type { LocusPromptRecordFacts } from '../src/host/locus/context.js'
-import { LocusRepository } from '../src/host/locus/persistence.js'
-import { emptyMedium, openPetHarness, type PetHarness } from './harness.js'
+import { renderLocusDeliveryFor, type LocusPromptRecordFacts } from '../src/host/locus/context.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
+import type { LocusDomain } from '../src/host/locus/persistence-v20.js'
 
 const ENDPOINT = { chatId: 'oc_preamble' } as const
 const LOCUS = 'locus-preamble'
-const PARENT = 'session-main'
+const MAIN = 'session-main'
 const CHILD = 'session-child'
 
-async function boot(): Promise<{ harness: PetHarness; repository: LocusRepository }> {
-  const harness = await openPetHarness(emptyMedium())
-  const repository = new LocusRepository(harness.domain)
-  await repository.putLocus({
-    id: LOCUS,
-    generation: 1,
-    endpoint: ENDPOINT,
-    parentSessionId: PARENT,
-    childSessionId: CHILD,
-    workspaceId: 'workspace-preamble',
-    source: 'auto',
-    state: 'active',
-    childComposition: 'safe-v2',
-    toolTier: { desired: 'shell', effective: 'shell' },
-    permission: { desired: 'read', effective: 'read', verifiedAt: 1 },
-    busy: false,
-    createdAt: 1,
-    updatedAt: 1,
+/** In-memory domain, same shim as owner A's v20 tests; survives a repository "restart". */
+function memoryDomain(): LocusDomain {
+  const tables = new Map<string, Map<string, unknown>>()
+  const table = (name: string) => {
+    let map = tables.get(name)
+    if (map === undefined) {
+      map = new Map()
+      tables.set(name, map)
+    }
+    return {
+      get: (key: string) => map!.get(key),
+      entries: () => map!.entries(),
+      keys: () => map!.keys(),
+      get size() { return map!.size },
+      put: async (key: string, value: unknown) => { map!.set(key, value) },
+      delete: async (key: string) => map!.delete(key),
+    }
+  }
+  return {
+    table,
+    supportsTransaction: true,
+    transaction: async (body: (tx: { put(t: string, k: string, v: unknown): void; delete(t: string, k: string): void }) => void) => {
+      body({ put: (t, k, v) => { table(t).put(k, v) }, delete: (t, k) => { table(t).delete(k) } })
+    },
+  } as unknown as LocusDomain
+}
+
+async function boot(accessMode: 'read-only' | 'danger-full-access' = 'danger-full-access') {
+  const domain = memoryDomain()
+  await domain.table('loci').put(ENDPOINT.chatId, {
+    endpoint: ENDPOINT, locusId: LOCUS, sessionId: CHILD, state: 'active', accessMode,
+    revision: 1, createdAt: 1, updatedAt: 1, locusMainSessionId: MAIN, workspaceId: 'workspace-preamble',
   })
-  return { harness, repository }
+  return { domain, repository: new LocusRepositoryV20(domain, { now: () => 5 }) }
 }
 
-function correlation() {
-  return { endpoint: ENDPOINT, locusId: LOCUS, generation: 1, childSessionId: CHILD }
-}
+const correlation = { endpoint: ENDPOINT, locusId: LOCUS, sessionId: CHILD }
 
-async function accept(repository: LocusRepository, messageId: string, acceptedAt: number): Promise<string> {
+async function accept(repository: LocusRepositoryV20, messageId: string, acceptedAt: number): Promise<string> {
   const accepted = await repository.acceptDelivery({
-    ...correlation(),
-    messageId,
-    senderOpenId: 'ou_owner',
-    text: `text ${messageId}`,
-    replyTarget: { chatId: ENDPOINT.chatId, messageId },
-    acceptedAt,
-  })
+    ...correlation, messageId, senderOpenId: 'ou_owner', text: `text ${messageId}`,
+    replyTarget: { chatId: ENDPOINT.chatId, messageId }, acceptedAt,
+  } as never)
   return accepted.record.deliveryId
 }
 
-/** Render exactly the way the Host wiring does: durable record + deliveries. */
-function render(repository: LocusRepository, messageId: string): string {
-  const record = repository.getLocus(LOCUS)
-  if (record === undefined) throw new Error('locus missing')
+/** Claim the current Delivery and commit its inbox binding: the durable delivery proof. */
+async function bind(repository: LocusRepositoryV20, deliveryId: string, inboxMessageId: string): Promise<void> {
+  const acceptedAt = repository.getDelivery(deliveryId)!.acceptedAt
+  await repository.claimCurrentDelivery({ ...correlation, now: acceptedAt + 1 } as never)
+  await repository.bindQueued({ ...correlation, deliveryId, executionId: `exec-${deliveryId}`, inboxMessageId, queuedAt: acceptedAt + 2 })
+}
+
+/** Render exactly the way the Host wiring does: durable row + deliveries. */
+function render(repository: LocusRepositoryV20, messageId: string): string {
+  const row = repository.getRow(ENDPOINT)
+  if (row === undefined || !('locusMainSessionId' in row)) throw new Error('group row missing')
   const current = repository.findDeliveryByMessageId(messageId)
   const facts: LocusPromptRecordFacts = {
-    id: record.id,
-    generation: record.generation,
-    endpoint: record.endpoint,
-    parentSessionId: record.parentSessionId,
-    childSessionId: record.childSessionId,
-    workspaceId: record.workspaceId,
-    state: record.state,
-    childComposition: record.childComposition,
-    toolTier: record.toolTier,
-    permission: record.permission,
-    contextAnchor: record.contextAnchor ?? { status: 'unknown' },
+    locusId: row.locusId,
+    endpoint: row.endpoint,
+    locusMainSessionId: row.locusMainSessionId,
+    sessionId: row.sessionId,
+    workspaceId: row.workspaceId,
+    state: row.state,
+    revision: row.revision,
+    accessMode: row.accessMode,
   }
   return renderLocusDeliveryFor({
     record: facts,
-    message: {
-      messageId,
-      senderOpenId: 'ou_owner',
-      text: `text ${messageId}`,
-      replyTarget: { chatId: ENDPOINT.chatId, messageId },
-    },
-    deliveries: repository.listDeliveries(record.id),
+    message: { messageId, senderOpenId: 'ou_owner', text: `text ${messageId}`, replyTarget: { chatId: ENDPOINT.chatId, messageId } },
+    deliveries: repository.listDeliveries(row.locusId),
     ...(current === undefined ? {} : { currentDeliveryId: current.deliveryId }),
   })
 }
 
-describe('preamble position over the durable ledger', () => {
-  it('gives the first accepted Delivery the full preamble before any binding exists', async () => {
-    const { harness, repository } = await boot()
-    try {
-      await accept(repository, 'om_first', 10)
+describe('preamble position over the durable v20 ledger', () => {
+  it('spec Scenario "首次投递收到完整前言"', async () => {
+    const { repository } = await boot()
+    await accept(repository, 'om_first', 10)
+    // Accepted is durable admission without an inbox binding.
+    expect(repository.findDeliveryByMessageId('om_first')?.inboxMessageId).toBeUndefined()
 
-      // Acceptance is durable admission, but the row carries no inbox binding
-      // yet — that binding happens after rendering, so it cannot be required
-      // to decide this same render.
-      const row = repository.findDeliveryByMessageId('om_first')
-      expect(row?.inboxMessageId).toBeUndefined()
-
-      const prompt = render(repository, 'om_first')
-      expect(prompt).toContain('### Endpoint')
-      expect(prompt).toContain('### Tool tier')
-      expect(prompt).toContain('- effective：shell')
-    } finally {
-      await harness.close()
-    }
+    const prompt = render(repository, 'om_first')
+    expect(prompt).toContain('### Endpoint')
+    expect(prompt).toContain('### Access mode')
+    expect(prompt).toContain('访问模式：danger-full-access')
+    expect(prompt).not.toContain('沿用本 child 首次投递')
   })
 
-  it('switches to the compact follow-up once a prior Delivery is bound', async () => {
-    const { harness, repository } = await boot()
-    try {
-      const first = await accept(repository, 'om_first', 10)
-      const bound = await repository.bindQueued({
-        deliveryId: first,
-        correlation: correlation(),
-        executionId: 'exec-1',
-        inboxMessageId: 'inbox-1',
-        queuedAt: 11,
-      })
-      expect(bound?.inboxMessageId).toBe('inbox-1')
+  it('spec Scenario "绑定已提交但控制回执丢失"', async () => {
+    const { repository } = await boot()
+    const first = await accept(repository, 'om_first', 10)
+    await bind(repository, first, 'inbox-1')
+    // The control receipt is lost; the committed binding alone is the proof.
+    await accept(repository, 'om_second', 20)
 
+    const prompt = render(repository, 'om_second')
+    expect(prompt).not.toContain('### Endpoint')
+    expect(prompt).toContain('om_second')
+  })
+
+  it('spec Scenario "队列已接受但持久绑定失败"', async () => {
+    const { repository } = await boot()
+    // The queue may have taken it, but the binding never committed.
+    await accept(repository, 'om_lost', 10)
+    await repository.claimCurrentDelivery({ ...correlation, now: 11 } as never)
+    await accept(repository, 'om_next', 20)
+
+    const prompt = render(repository, 'om_next')
+    expect(prompt).toContain('### Endpoint')
+    expect(prompt).toContain('### Access mode')
+  })
+
+  it('backlog 中已有其它已接受投递: accepted-but-unbound rows never consume the preamble', async () => {
+    const { repository } = await boot()
+    await accept(repository, 'om_queued_a', 10)
+    await accept(repository, 'om_queued_b', 20)
+    expect(render(repository, 'om_queued_b')).toContain('### Endpoint')
+  })
+
+  it('spec Scenario "第二次投递不重复前言但声明档位"', async () => {
+    for (const mode of ['read-only', 'danger-full-access'] as const) {
+      const { repository } = await boot(mode)
+      const first = await accept(repository, 'om_first', 10)
+      await bind(repository, first, 'inbox-1')
       await accept(repository, 'om_second', 20)
+
       const prompt = render(repository, 'om_second')
-
       expect(prompt).not.toContain('### Endpoint')
-      expect(prompt).toContain('工具档位：shell')
+      expect(prompt).toContain(`访问模式：${mode}`)
+      expect(prompt).toContain('### Reply target (current delivery only)')
       expect(prompt).toContain('om_second')
-    } finally {
-      await harness.close()
     }
   })
 
-  it('keeps the full preamble while the previous Delivery never bound', async () => {
-    const { harness, repository } = await boot()
-    try {
-      // The queue accepted nothing (or the process died before binding): the
-      // child may never have seen the first prompt, so the next real delivery
-      // must carry the preamble again. Repeating once is the accepted cost.
-      await accept(repository, 'om_lost', 10)
-      await accept(repository, 'om_next', 20)
+  it('重启后按送达证据决定: the proof survives a repository restart', async () => {
+    const { domain, repository } = await boot()
+    const first = await accept(repository, 'om_first', 10)
+    await bind(repository, first, 'inbox-1')
 
-      const prompt = render(repository, 'om_next')
-      expect(prompt).toContain('### Endpoint')
-      expect(prompt).toContain('### Context anchor')
-    } finally {
-      await harness.close()
-    }
+    const reopened = new LocusRepositoryV20(domain, { now: () => 30 })
+    await accept(reopened, 'om_after_restart', 30)
+    const prompt = render(reopened, 'om_after_restart')
+    expect(prompt).not.toContain('### Endpoint')
+    expect(prompt).toContain('访问模式：danger-full-access')
   })
 
-  it('does not let an accepted-but-unbound backlog row consume the preamble', async () => {
-    const { harness, repository } = await boot()
-    try {
-      await accept(repository, 'om_queued_a', 10)
-      await accept(repository, 'om_queued_b', 20)
-
-      // Two accepted rows, neither bound: still a first-delivery render.
-      expect(render(repository, 'om_queued_b')).toContain('### Endpoint')
-    } finally {
-      await harness.close()
-    }
-  })
-
-  it('decides from durable proof after a restart, not from runtime state', async () => {
-    const { harness, repository } = await boot()
-    try {
-      const first = await accept(repository, 'om_first', 10)
-      await repository.bindQueued({
-        deliveryId: first,
-        correlation: correlation(),
-        executionId: 'exec-1',
-        inboxMessageId: 'inbox-1',
-        queuedAt: 11,
-      })
-
-      // A Host restart re-reads the same durable domain: the proof must survive
-      // it, so the next delivery stays compact instead of re-sending the
-      // preamble.
-      const reopened = new LocusRepository(harness.domain)
-      await accept(reopened, 'om_after_restart', 30)
-      const prompt = render(reopened, 'om_after_restart')
-
+  it('spec Scenario "受既有缺陷影响的 child"', async () => {
+    // A bound Delivery exists although that child never got a full preamble:
+    // nothing re-sends it, but every delivery still states the access mode.
+    const { repository } = await boot('read-only')
+    const first = await accept(repository, 'om_defect', 10)
+    await bind(repository, first, 'inbox-defect')
+    for (const [messageId, at] of [['om_a', 20], ['om_b', 30]] as const) {
+      await accept(repository, messageId, at)
+      const prompt = render(repository, messageId)
       expect(prompt).not.toContain('### Endpoint')
-      expect(prompt).toContain('工具档位：shell')
-    } finally {
-      await harness.close()
+      expect(prompt).toContain('访问模式：read-only')
     }
   })
 })

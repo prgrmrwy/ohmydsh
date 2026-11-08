@@ -737,7 +737,7 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
             // the field rather than sending an empty string.
             ...(effectiveSource.title === undefined ? {} : { groupName: effectiveSource.title }),
           })
-          const chatName = result.locus.endpoint.chatName
+          const chatName = result.chat.group.endpoint.chatName
           const label = chatName === undefined ? '默认答疑入口' : `答疑群「${chatName}」`
           setNotice(result.reused === true ? `已打开本会话的${label}。` : `已创建${label}。`)
           setMode('panel')

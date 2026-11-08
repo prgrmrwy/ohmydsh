@@ -3,6 +3,7 @@ import {
   TODO_LIMITS,
   advanceTodoStatus,
   isTodoTerminal,
+  parseTodoRecord,
   registerTodo,
   type NewTodoInput,
 } from '../src/host/ledger/todo.js'
@@ -168,5 +169,31 @@ describe('advanceTodoStatus (owner-sourced transitions only — spec: 模型不�
     expect(isTodoTerminal('accepted')).toBe(false)
     expect(isTodoTerminal('done')).toBe(true)
     expect(isTodoTerminal('dropped')).toBe(true)
+  })
+})
+
+describe('v20: generation is optional on ledger items (design D13 step 8)', () => {
+  const stored = {
+    itemId: 'todo-1', parentSessionId: 'main-1', kind: 'todo', locusId: 'locus-1',
+    endpoint: { chatId: 'oc-project' }, triggerMessageId: 'om_abc', requestedBy: 'ou_requester',
+    evidence: { summary: 's', detail: '' }, status: 'open', createdAt: 1, statusChangedAt: 1,
+  }
+
+  it('parses a stored ledger_item without generation', () => {
+    const record = parseTodoRecord(stored)
+    expect(record.itemId).toBe('todo-1')
+    expect(record).not.toHaveProperty('generation')
+  })
+
+  it('still parses an existing row that carries generation, unchanged', () => {
+    expect(parseTodoRecord({ ...stored, generation: 2 }).generation).toBe(2)
+    expect(() => parseTodoRecord({ ...stored, generation: 0 })).toThrow()
+  })
+
+  it('registers a todo without generation and writes none', () => {
+    const { generation: _generation, ...input } = validInput()
+    const result = registerTodo(input)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.record).not.toHaveProperty('generation')
   })
 })

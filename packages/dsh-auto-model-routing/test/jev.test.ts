@@ -1,9 +1,13 @@
 import { afterEach, expect, it } from 'vitest'
-import { JevClient, QUESTIONS, type PolicyResult } from '../src/jev.js'
+import { JevClient, type PolicyResult } from '../src/jev.js'
+import { resolvePreset } from '../src/presets/index.js'
+const QUESTIONS = resolvePreset('reasoning-depth').rubric
 import { fakeJev, json, type Reply } from './fake-jev.js'
+import { resolvePreset as resolveTestPreset } from '../src/presets/index.js'
+const DEFAULT_PRESET = resolveTestPreset('reasoning-depth')
 /** A main-session depth answer. */
 const depth = (choice: string, confidence = 1, probabilities: Record<string, unknown> = {}) => json(200, { model: 'typesafe/jev-1.13-20260917', answers: { depth: { type: 'choice', choice, probabilities, confidence } } })
-const judge = (client: JevClient, state: string, signal: AbortSignal) => client.judgePolicy(state, signal, 'main')
+const judge = (client: JevClient, state: string, signal: AbortSignal) => client.judgePolicy(state, signal, 'main', 'depth', DEFAULT_PRESET)
 
 const env = (key?: string) => ({ get: (name: string) => name === 'OPENROUTER_API_KEY' && key !== undefined ? { value: key } : undefined })
 let close: (() => Promise<void>) | undefined

@@ -688,17 +688,13 @@ describe('settings information architecture', () => {
     // Assert the source contract so this test does not pretend useEffect ran on
     // the server or expose ownerId as a browser capability.
     expect(settings).toContain('统一 locus 接口不可用时不会回退')
-    // The reverse-lookup fold is disabled by owner decision, not deleted: the
-    // component and the Host route it calls stay compiled behind one switch, so
-    // re-enabling it is a one-line change instead of a rewrite.
-    expect(settings).toContain('DISCOVERY_FOLD_ENABLED: boolean = false')
-    expect(settings).toContain('反查关联')
-    expect(settings).toContain('petApi.locusDiscovery')
+    // The reverse-lookup fold and its discovery route left with v20: one row per
+    // entry and literal search over ids and codes answer the same question.
+    expect(settings).not.toContain('petApi.locusDiscovery')
     // Our word for an entry is 入口; "endpoint" is bookkeeping, so it must not
     // appear as a label anywhere the owner reads.
     expect(settings).not.toContain("'Endpoint'")
-    expect(settings).toContain('locusStop')
-    expect(settings).toContain('warningText')
+    expect(settings).toContain('locusStopRequest')
     expect(settings).toContain('默认 Q&A 新群的所有者来自 dsh-pet profile 实时核验的当前飞书用户')
     expect(settings).toContain('列表顺序和浏览器输入都不能声明“本人”')
     expect(settings).not.toContain('ownerId:')
@@ -721,19 +717,15 @@ describe('settings information architecture', () => {
     expect(settings).not.toContain('绑定新的 endpoint')
     expect(settings).not.toContain('创建/打开默认 Q&A')
     // The read-only replacement still tells the owner where creation lives.
-    expect(settings).toContain('请在目标会话里用 Pet 轮盘的「答疑群」创建')
-    // Lifecycle actions stay reachable, and the single exit replaces the three
-    // names that used to land in the same state.
-    expect(settings).toContain('locusRebuild')
-    expect(settings).toContain('locusStop')
-    expect(settings).not.toContain('locusUnbind')
-    expect(settings).not.toContain('locusArchive')
-    expect(settings).toContain('locusScope')
-    // `locusConfirmAnchor` joins the absent list for the same reason
-    // `locusUnbind`/`locusArchive` are on it: the control is gone. The
-    // execution-root row and its confirm button were retired once ADR-0005
-    // demoted the anchor to a context fact and the write switch went off, so
-    // absence — not wording — is what this case asserts.
+    expect(settings).toContain('LOCUS_DEFAULT_QA_MISSING_NOTE')
+    // v20: three mutations only — stop, access, rebind — all through the one
+    // generic action route; every removed action name stays absent.
+    expect(settings).toContain('locusStopRequest')
+    expect(settings).toContain('locusAccessRequest')
+    expect(settings).toContain('locusRebindRequest')
+    for (const removed of ['locusRebuild', 'locusUnbind', 'locusArchive', 'locusScope', 'locusTools', 'locusReplaceParent']) {
+      expect(settings).not.toContain(removed)
+    }
     expect(settings).not.toContain('locusConfirmAnchor')
   })
 
@@ -751,8 +743,8 @@ describe('settings information architecture', () => {
     expect(settings).not.toContain('function LocusCard')
     expect(settings).toContain('applyLocusFilter')
     expect(settings).toContain('collectHandleCodes')
-    expect(settings).toContain('entryDisplayName(endpoint, endpointCode)')
-    expect(settings).toContain('familyHead')
+    expect(settings).toContain('entryDisplayName(entry.endpoint, endpointCode)')
+    expect(settings).not.toContain('familyHead')
   })
 
 })
@@ -1234,69 +1226,17 @@ describe('Pet is a top layer that yields to no layout', () => {
   })
 })
 
-describe('settings nav glyph stays scoped to Pet\'s own row', () => {
-  it('paints the mascot emoji and hides the fallback gear', async () => {
-    const { PET_SETTINGS_NAV_CSS, PET_SETTINGS_NAV_MARKER } = await import(
-      '../src/client/settings-nav-icon.js'
-    )
-
-    // DSH 0.1.x has no icon field on `settings.section`, so a third-party row
-    // renders the shell's fallback gear until it marks itself.
-    expect(PET_SETTINGS_NAV_CSS).toContain(`[${PET_SETTINGS_NAV_MARKER}]`)
-    expect(PET_SETTINGS_NAV_CSS).toContain("content:'🐾'")
-    expect(PET_SETTINGS_NAV_CSS).toContain('svg:first-child{display:none}')
-  })
-
-  it('selects nothing beyond its own marker attribute', async () => {
-    const { PET_SETTINGS_NAV_CSS, PET_SETTINGS_NAV_MARKER } = await import(
-      '../src/client/settings-nav-icon.js'
-    )
-
-    // Every selector must be anchored on the owned marker; a bare `nav button`
-    // rule would restyle every other plugin's row too.
-    const selectors = PET_SETTINGS_NAV_CSS.split('}')
-      .map(block => block.split('{')[0]?.trim() ?? '')
-      .filter(selector => selector.length > 0)
-    expect(selectors.length).toBeGreaterThan(0)
-    for (const selector of selectors) {
-      expect(selector.startsWith(`[${PET_SETTINGS_NAV_MARKER}]`)).toBe(true)
-    }
-  })
-
-  it('marks only the button whose text matches the label, and cleans up', async () => {
-    const { registerPetSettingsNavIcon, PET_SETTINGS_NAV_MARKER } = await import(
-      '../src/client/settings-nav-icon.js'
-    )
-    const { JSDOM } = await import('jsdom').catch(() => ({ JSDOM: undefined }) as never)
-    if (JSDOM === undefined) return
-
-    const dom = new JSDOM(
-      '<body><div role="dialog"><nav>' +
-        '<button>General</button><button>Pet</button><button>Plugins</button>' +
-        '</nav></div></body>',
-    )
-    const priorDocument = globalThis.document
-    const priorObserver = globalThis.MutationObserver
-    Object.defineProperty(globalThis, 'document', {
-      value: dom.window.document,
-      configurable: true,
-    })
-    globalThis.MutationObserver = dom.window.MutationObserver
-
-    try {
-      const dispose = registerPetSettingsNavIcon(() => 'Pet')
-      const marked = [...dom.window.document.querySelectorAll(`[${PET_SETTINGS_NAV_MARKER}]`)]
-      expect(marked.map(node => node.textContent)).toEqual(['Pet'])
-
-      dispose()
-      expect(dom.window.document.querySelectorAll(`[${PET_SETTINGS_NAV_MARKER}]`)).toHaveLength(0)
-    } finally {
-      Object.defineProperty(globalThis, 'document', {
-        value: priorDocument,
-        configurable: true,
-      })
-      globalThis.MutationObserver = priorObserver
-    }
+describe('settings nav glyph uses the official icon seat', () => {
+  it('preserves the mascot and uses the shell size without DOM decoration', async () => {
+    const { PetSettingsNavIcon } = await import('../src/client/settings-nav-icon.js')
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const markup = renderToStaticMarkup(createElement(PetSettingsNavIcon, { size: 24 }))
+    expect(markup).toContain('🐾')
+    expect(markup).toContain('width:24px;height:24px')
+    expect(markup).toContain('font-size:21px')
+    expect(markup).toContain('aria-hidden="true"')
+    expect(markup).not.toContain('::before')
   })
 })
 
@@ -2298,7 +2238,10 @@ describe('the delivery preamble position comes from durable history', () => {
     expect(scope).toContain('renderLocusDeliveryFor')
     expect(scope).toContain('listDeliveries')
     expect(scope).toContain('findDeliveryByMessageId')
-    expect(scope).toContain('toolTier: revalidated.toolTier')
+    // v20 (D8): the per-delivery tier declaration comes from the one access
+    // value of the row re-read after the readability probe.
+    expect(scope).toContain('accessMode: revalidated.accessMode')
+    expect(scope).not.toContain('toolTier')
   })
 
   it('measures this entrance before the prompt may claim it is readable', async () => {

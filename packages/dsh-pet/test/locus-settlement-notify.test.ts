@@ -57,8 +57,8 @@ describe('结算通知只到 locus 主会话', () => {
   })
 })
 
-describe('多个入口结算不打断干活主会话', () => {
-  it('多个入口结算不打断干活主会话', async () => {
+describe('多个入口结算不打断工作主会话', () => {
+  it('多个入口结算不打断工作主会话', async () => {
     const { runtime, locusMain, workMain } = setup()
     workMain.turnOpen = true
     const adapters = ['a', 'b', 'c'].map(() => createLocusChildAdapter(portsOver(runtime)))

@@ -49,13 +49,11 @@ export type IntakeOutcome =
       readonly deliveryId: string
       readonly executionId: string
       readonly locusId: string
-      readonly generation: number
     }
   | {
       readonly kind: 'locus-duplicate'
       readonly deliveryId: string
       readonly locusId: string
-      readonly generation: number
     }
   | {
       /** A control command handled without creating a Delivery. */
@@ -122,7 +120,7 @@ export interface PipelineDeps {
   readonly requireLocus?: boolean
   /** Durable authorization lookup for the exact unified endpoint. */
   readonly locusAuthorization?: LocusAuthorizationResolver
-  readonly locusToolTier?: (endpoint: import('../locus/admission.js').LocusEndpoint) => 'safe' | 'shell' | undefined
+  readonly locusAccessMode?: (endpoint: import('../locus/admission.js').LocusEndpoint) => import('../locus/contract-v20.js').LocusAccessModeV20 | undefined
   /** Reports an outcome for diagnostics. */
   readonly onOutcome?: (outcome: IntakeOutcome, event?: LarkInboundEvent) => void
 }
@@ -144,40 +142,12 @@ export interface BindCommandPort {
 }
 
 /**
- * The one reply for an endpoint the unified model refuses to serve.
- *
- * Two admission reasons share this reply site and they have two DIFFERENT
- * repairs, so they must not share one sentence:
- *
- *  - `retired-endpoint` — a unified generation exists but is not active
- *    (`createDurableLocusAuthorizationResolver`), so the entry is already
- *    visible in the owner surface, where 「重建」 is the discoverable way back.
- *  - `legacy-endpoint` — only old-model associations exist, so there is nothing
- *    in that surface to rebuild; the repair is the allowlisted in-chat bind
- *    command (`admission.ts`: *a dedicated rebuild adapter can create a fresh
- *    read locus without consuming any legacy parent/workspace/permission
- *    identity*).
- *
- * Naming the wrong repair is worse than saying nothing: the owner follows it and
- * nothing happens. Both texts stay in the owner's vocabulary — which model or
- * store a row came from is our bookkeeping, not their problem.
+ * The reply for an entry that stopped serving because its owner stopped it
+ * (`retired-endpoint` is the admission reason for a `stopped` row, D7). The one
+ * repair is a same-W `/bind` inside the entry, which re-enables it in place.
  */
-export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired-endpoint'): string {
-  if (reason === 'legacy-endpoint') {
-    return '这个入口还是旧版关联，现在不会应答（历史消息与会话都保留）。'
-      + '请在本入口 @ 机器人并发送 /bind 加目标会话 id 前缀（至少 6 位）重新建立关联；新入口从只读（read）权限开始。'
-  }
-  // Two repairs reach this one sentence now, and naming only one of them makes
-  // the other invisible to the person reading it. An endpoint also lands here
-  // when its main session was ARCHIVED: restoring that session brings the entry
-  // back by itself, while abandoning it is a decision about the SESSION, taken
-  // once for every entry under it — so the text sends the owner to the session,
-  // not to a per-entry button that could never succeed.
-  return '这个入口已停止服务，需要重建后才会继续应答。'
-    + '如果它的主会话已被归档：在「会话归档管理」里恢复该主会话，本入口会自动恢复服务；'
-    + '或在本入口 @ 机器人发送 /bind 加要改用的会话 id 前缀（至少 6 位），把本入口改挂到那个会话上；'
-    + '也可以在 Pet 设置页「Locus 管理」里找到该主会话，点「用新的主会话接替」，'
-    + '它名下的入口会一起迁到新建的主会话上。新入口从只读（read）权限开始。'
+export function renderLocusUnavailableReply(_reason: 'retired-endpoint' = 'retired-endpoint'): string {
+  return '这个入口已停止服务。如需继续，请在本入口 @ 机器人发送 /bind 加原来那个会话的 id 前缀（至少 6 位）重新启用；新启用的入口从只读开始。'
 }
 
 /**
@@ -191,7 +161,7 @@ export function renderLocusUnavailableReply(reason: 'legacy-endpoint' | 'retired
 export function renderSourceArchivedReply(): string {
   return '来源会话已归档，这个入口暂停服务。'
     + '恢复该会话后本入口会自动恢复；或在本入口 @ 机器人发送 /bind 加要改用的会话 id 前缀（至少 6 位），'
-    + '把本入口绑定到新的干活主会话。新入口从只读（read）权限开始。'
+    + '把本入口绑定到新的工作主会话。新入口从只读（read）权限开始。'
 }
 
 /** How many times one entry is told its source is archived before it is left alone. */
@@ -282,13 +252,13 @@ export class InboundPipeline {
           watermark: this.deps.watermark(),
           isDuplicate: messageId => this.dedup.check(messageId),
           authorization,
-          ...(this.deps.locusToolTier === undefined && authorization.toolTier === undefined
+          ...(this.deps.locusAccessMode === undefined && authorization.accessMode === undefined
              ? {}
-             : { toolTier: this.deps.locusToolTier ?? authorization.toolTier }),
+             : { accessMode: this.deps.locusAccessMode ?? authorization.accessMode }),
         }))
         if (
           outcome.kind === 'ignored'
-          && (outcome.reason === 'legacy-endpoint' || outcome.reason === 'retired-endpoint')
+          && outcome.reason === 'retired-endpoint'
           && typeof event.message_id === 'string'
           && event.message_id !== ''
           && typeof event.sender_id === 'string'
@@ -303,9 +273,7 @@ export class InboundPipeline {
               event.message_id,
               archived === 'reply'
                 ? renderSourceArchivedReply()
-                : renderLocusUnavailableReply(
-                  outcome.reason === 'legacy-endpoint' ? 'legacy-endpoint' : 'retired-endpoint',
-                ),
+                : renderLocusUnavailableReply(),
             ).catch(() => undefined)
           }
         }
@@ -554,14 +522,12 @@ function mapLocusOutcome(result: LocusControllerResult): IntakeOutcome {
         deliveryId: result.deliveryId,
         executionId: result.executionId,
         locusId: result.locusId,
-        generation: result.generation,
       }
     case 'duplicate':
       return {
         kind: 'locus-duplicate',
         deliveryId: result.deliveryId,
         locusId: result.locusId,
-        generation: result.generation,
       }
     case 'ignored':
       return { kind: 'ignored', reason: result.reason }

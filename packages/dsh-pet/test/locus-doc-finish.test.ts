@@ -4,8 +4,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildLocusRecord } from '../src/host/locus/aggregate.js'
-import { LocusRepository as DurableLocusRepository } from '../src/host/locus/persistence.js'
+import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
+import { endpointKeyV20 } from '../src/host/locus/locus-set-v20.js'
 import { finishDocReply } from '../src/host/channel/doc-comment-egress.js'
 import { openPetHarness } from './harness.js'
 
@@ -14,21 +14,24 @@ const ROOT = `doc:docx:${D}`
 
 async function currentDoc(input: { threadId?: string; messageId: string }) {
   const harness = await openPetHarness()
-  const repository = new DurableLocusRepository(harness.domain)
-  const root = await repository.putLocus(buildLocusRecord({
-    id: 'root', endpoint: { chatId: ROOT }, parentSessionId: 'main', childSessionId: 'child-root',
-    workspaceId: 'ws', source: 'auto', createdAt: 1, updatedAt: 1,
-  }))
-  const locus = input.threadId === undefined ? root : await repository.putLocus(buildLocusRecord({
-    id: 'comment', endpoint: { chatId: ROOT, threadId: input.threadId }, parentLocusId: root.id,
-    parentSessionId: 'main', childSessionId: 'child-comment', workspaceId: 'ws', source: 'inherited', createdAt: 1, updatedAt: 1,
-  }))
-  const correlation = { endpoint: locus.endpoint, locusId: locus.id, generation: locus.generation, childSessionId: locus.childSessionId as string }
+  const repository = new LocusRepositoryV20(harness.domain as never)
+  const base = { state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 } as const
+  await (harness.domain as never as { table(name: string): { put(key: string, value: unknown): Promise<void> } }).table('loci').put(ROOT, {
+    endpoint: { chatId: ROOT }, locusId: 'root', sessionId: 'child-root', ...base,
+    locusMainSessionId: 'main', workspaceId: 'ws',
+  })
+  const endpoint = input.threadId === undefined ? { chatId: ROOT } : { chatId: ROOT, threadId: input.threadId }
+  if (input.threadId !== undefined) {
+    await (harness.domain as never as { table(name: string): { put(key: string, value: unknown): Promise<void> } }).table('loci').put(endpointKeyV20(endpoint), {
+      endpoint, locusId: 'comment', sessionId: 'child-comment', ...base,
+    })
+  }
+  const correlation = { endpoint, locusId: input.threadId === undefined ? 'root' : 'comment', sessionId: input.threadId === undefined ? 'child-root' : 'child-comment' }
   await repository.acceptDelivery({
     ...correlation, messageId: input.messageId, senderOpenId: 'ou_owner', text: 'q', acceptedAt: 2,
   })
-  const current = await repository.claimCurrentDelivery({ correlation, now: 3 })
-  return { harness, repository, correlation, current: current! }
+  const claimed = await repository.claimCurrentDelivery({ ...correlation, now: 3 })
+  return { harness, repository, correlation, current: claimed.record! }
 }
 
 function client(result: 'success' | 'unknown' | Error = 'success') {
