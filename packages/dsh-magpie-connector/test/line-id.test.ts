@@ -7,9 +7,8 @@ const cleanup: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const entry of cleanup.splice(0).reverse()) await entry() })
 
 test('test_line_id_01 spec Scenario "新线路由 host 分配稳定 id"', async () => {
-  const a = await createGateway(), b = await createGateway(); cleanup.push(a.close, b.close)
-  a.handlers.set('GET /v1/models', json({ data: [] }))
-  b.handlers.set('GET /v1/models', json({ data: [] }))
+  const a = await createGateway(), b = await createGateway(), changed = await createGateway(); cleanup.push(a.close, b.close, changed.close)
+  for (const gateway of [a, b, changed]) gateway.handlers.set('GET /v1/models', json({ data: [] }))
   const credentials = lineCredentials('K1')
   const store = memoryStore([line(a.baseUrl, LINE_ID)])
   const runtime = new MagpieRuntime(credentials.service, store, () => {}, { probe: async () => true, newId: () => LINE_ID_2 })
@@ -29,13 +28,13 @@ test('test_line_id_01 spec Scenario "新线路由 host 分配稳定 id"', async 
   ] })
   expect(reordered.status).toBe(200)
   const edited = await runtime.settings({ lines: [
-    { id: LINE_ID_2, baseUrl: 'http://changed.test/v1', accessMode: 'direct' },
+    { id: LINE_ID_2, baseUrl: changed.baseUrl, accessMode: 'direct' },
     { id: LINE_ID, baseUrl: a.baseUrl, accessMode: 'direct' },
   ] })
   expect(edited.status).toBe(200)
   const restarted = new MagpieRuntime(credentials.service, store, () => {}, { probe: async () => true })
   cleanup.push(() => restarted.dispose())
-  expect((await (await restarted.settings()).json() as { lines: { id: string; baseUrl: string }[] }).lines.map(entry => [entry.id, entry.baseUrl])).toEqual([[LINE_ID_2, 'http://changed.test/v1'], [LINE_ID, a.baseUrl]])
+  expect((await (await restarted.settings()).json() as { lines: { id: string; baseUrl: string }[] }).lines.map(entry => [entry.id, entry.baseUrl])).toEqual([[LINE_ID_2, changed.baseUrl], [LINE_ID, a.baseUrl]])
 })
 
 test('test_line_id_02 spec Scenario "非法 line id 被拒绝"', async () => {
