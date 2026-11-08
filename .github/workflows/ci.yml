@@ -23,7 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: ['22.x', '24.x']
+        # Match package.json's Node floor and also exercise the latest Node 24.
+        node: ['24.9.0', '24.x']
 
     steps:
       - name: Checkout
