@@ -248,9 +248,10 @@ describe('client 注册', () => {
     }
     const fake = fakeApi({ 'GET speed': () => ok({ tier: 'fast', fastModels: FAST }) })
     apply(ctx, fake.api)
-    expect(registered.map(r => `${r.name}#${r.id}`)).toEqual(['settings.section#dsh-magpie-connector', 'sidebar.footer.action#magpie-usage', 'conversation.input.right#dsh-magpie-connector-speed'])
+    expect(registered.map(r => `${r.name}#${r.id}`)).toEqual(['settings.section#dsh-magpie-connector', 'settings.section.icon#dsh-magpie-connector', 'sidebar.footer.action#magpie-usage', 'conversation.input.right#dsh-magpie-connector-speed'])
     // no model-selection service: the control stays hidden
-    const state = await registered[2]!.inject!('S').loadSpeed()
+    const speed = registered.find(r => r.name === 'conversation.input.right' && r.id === 'dsh-magpie-connector-speed')!
+    const state = await speed.inject!('S').loadSpeed()
     expect(state.visible).toBe(false)
   })
 })

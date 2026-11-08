@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { MagpieAdapter } from '../src/host/adapter.js'
 import { MagpieRuntime } from '../src/host/runtime.js'
 import { lineCredentials, memoryStore, line, LINE_ID, refs } from './support/line.js'
@@ -8,6 +8,7 @@ test('prepared old key remains redacted after rotation without a strong active-k
   const runtime = new MagpieRuntime(credentials.service, memoryStore([line('http://example.test/v1')]))
   const adapter = new MagpieAdapter(runtime)
   const signal = new AbortController()
+  const request = vi.spyOn(runtime.transport, 'request').mockImplementation(async () => Response.json({ data: [] }))
   try {
     const prepared = await adapter.prepareCall('dsh-magpie-connector', 'example', signal.signal)
     await runtime.syncCatalog()
@@ -17,7 +18,7 @@ test('prepared old key remains redacted after rotation without a strong active-k
     expect(prepared.model.id).toBe('example')
     signal.abort()
     expect(runtime.redact('old-prepared-key')).toBe('old-prepared-key')
-  } finally { await runtime.dispose() }
+  } finally { request.mockRestore(); await runtime.dispose() }
 })
 
 test('abandoned preparation does not retain a key in runtime active-operation state', async () => {
