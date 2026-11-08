@@ -22,7 +22,16 @@ $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $r = [Console]::In.ReadToEnd() | ConvertFrom-Json
-$a = Get-Acl -LiteralPath $r.path
+$directory = ([System.IO.File]::GetAttributes($r.path) -band [System.IO.FileAttributes]::Directory) -ne 0
+function Read-Acl {
+  if ($directory) { return [System.IO.Directory]::GetAccessControl($r.path) }
+  return [System.IO.File]::GetAccessControl($r.path)
+}
+function Write-Acl($value) {
+  if ($directory) { [System.IO.Directory]::SetAccessControl($r.path, $value) }
+  else { [System.IO.File]::SetAccessControl($r.path, $value) }
+}
+$a = Read-Acl
 if ($r.action -eq 'grant') {
   $sid = [System.Security.Principal.SecurityIdentifier]::new([string]$r.sid)
   $rights = [System.Security.AccessControl.FileSystemRights]$r.rights
@@ -30,14 +39,14 @@ if ($r.action -eq 'grant') {
   if ($r.inherit) { $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit' }
   $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, $rights, $inherit, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
   $a.AddAccessRule($rule)
-  Set-Acl -LiteralPath $r.path -AclObject $a
+  Write-Acl $a
 } elseif ($r.action -eq 'inherit') {
   $a.SetAccessRuleProtection($false, $true)
-  Set-Acl -LiteralPath $r.path -AclObject $a
+  Write-Acl $a
 } elseif ($r.action -ne 'inspect') { throw 'unknown fixture action' }
-$a = Get-Acl -LiteralPath $r.path
+$a = Read-Acl
 $rules = @($a.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-@{ sddl = $a.Sddl; inherited = @($rules | Where-Object { $_.IsInherited }).Count } | ConvertTo-Json -Compress
+@{ sddl = $a.GetSecurityDescriptorSddlForm([System.Security.AccessControl.AccessControlSections]::All); inherited = @($rules | Where-Object { $_.IsInherited }).Count } | ConvertTo-Json -Compress
 `
 function acl(request) {
   const result = spawnSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', aclScript], { input: JSON.stringify(request), encoding: 'utf8', shell: false, windowsHide: true, timeout: 10000 })
@@ -167,8 +176,10 @@ test('safe inherited file ACL is accepted; junction targets are never changed', 
 
 test('missing Windows ACL tool fails closed without creating a directory', t => {
   const directory = home(t), target = path.join(directory, 'uncreated')
-  const code = 'const {ensurePrivateDirectories}=await import(process.argv[1]);try{ensurePrivateDirectories([{path:process.argv[2],exact:true}]);process.exitCode=7}catch{process.exitCode=0}'
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code, pathToFileURL(path.join(root, 'scripts/launcher/private-files.mjs')).href, target], { env: Object.fromEntries([...Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'systemroot'), ['SystemRoot', path.join(directory, 'missing-system')]]), shell: false, windowsHide: true, timeout: 10000 })
-  assert.equal(result.status, 0, result.error?.message)
+  // Node itself needs the real SystemRoot during Windows startup. Change only
+  // the helper lookup after the isolated child has loaded its Node bindings.
+  const code = 'const {ensurePrivateDirectories}=await import(process.argv[1]);const saved=process.env.SystemRoot;process.env.SystemRoot=process.argv[3];try{ensurePrivateDirectories([{path:process.argv[2],exact:true}]);process.exitCode=7}catch{process.exitCode=0}finally{process.env.SystemRoot=saved}'
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code, pathToFileURL(path.join(root, 'scripts/launcher/private-files.mjs')).href, target, path.join(directory, 'missing-system')], { env: { ...process.env }, shell: false, windowsHide: true, encoding: 'utf8', timeout: 10000 })
+  assert.equal(result.status, 0, result.stderr || result.error?.message)
   assert.equal(fs.existsSync(target), false)
 })
