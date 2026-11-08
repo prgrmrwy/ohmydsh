@@ -1,4 +1,10 @@
-## ADDED Requirements
+# launcher-host-lifecycle Specification
+
+## Purpose
+
+定义启动器按显式 profile 托管已有非 web Host 的行为，保证不同 profile 的进程身份、端口归属与部署维护彼此隔离，并保留默认 web profile 的标准启动、版本检测和现行停机流程。
+
+## Requirements
 
 ### Requirement: 受管 Host 按 DSH_PROFILE 选择 profile
 
@@ -39,9 +45,19 @@
 
 ### Requirement: web 受管行为不变
 
-未设置 `DSH_PROFILE` 或其值为 `web` 时，受管启动、停止、重启、descriptor、`autoUpdate` 与预览行为 SHALL 与引入 profile 选择前一致；唯一可见差异是启动记录多出 `profile=web` 字段。
+未设置 `DSH_PROFILE` 或其值为 `web` 时，profile 选择 SHALL 沿用标准 web 受管流程，只在启动记录增加 `profile=web` 字段；本能力 MUST NOT 把历史停机行为固化为回滚要求。web Host 的完整进程归属已核验、但没有停机 descriptor 时，launcher SHALL 告警后跳过 Pet 排空并继续原生停机，MUST NOT 将该次视为排空成功；descriptor 存在但无效、鉴权或排空握手失败时仍 SHALL 拒绝停机。非 web profile 仍先适用本能力的前置维护限制，MUST NOT 因缺 descriptor 而绕过该限制。
 
 #### Scenario: web 启动回归
 - **GIVEN** `DSH_PROFILE=web`，空闲端口
 - **WHEN** 执行 `dsh -p <port> --no-open`
 - **THEN** Host 参数为 `web --patch <no-pet-stop overlay> --port <port> …`，执行了版本检测，启动记录含 `profile=web`
+
+#### Scenario: web Host 缺停机凭据时告警后继续
+- **GIVEN** web Host 的完整进程归属已核验，且没有停机 descriptor
+- **WHEN** launcher 准备停止该 Host
+- **THEN** 明确告警并跳过 Pet 排空，继续按原生进程身份保护停机；不声称已完成排空
+
+#### Scenario: 无效停机凭据仍拒绝
+- **GIVEN** web Host 已有 descriptor，但其内容无效、鉴权失败或排空握手失败
+- **WHEN** launcher 准备停止该 Host
+- **THEN** 拒绝停机，不把无效凭据当作缺失凭据放行

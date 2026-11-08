@@ -33,7 +33,7 @@ ohmydsh 把**一个人的 DSH 配置**收敛成一个可审查、可复现的仓
 ## 快速开始
 <!-- section: quick-start -->
 
-初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**三端隔离的构建与 Host 命令流程已验收，真实终端关闭和桌面 UI 仍待验证**，详见[三端验收记录](openspec/changes/unify-skill-execution/checking/summary.md)；这不等于全部第三方插件的 Windows 功能认证。三条路径任选其一。
+初始化要求 Node.js 22+、npm 10+；`.nvmrc` 是推荐版本，不要求精确相等。启动器在 Windows、macOS、Linux 共用一套 Node 实现，Windows 不要求 Git Bash。**三端隔离的构建与 Host 命令流程已验收，真实终端关闭和桌面 UI 仍待验证**，详见[三端验收记录](openspec/changes/archive/2026-11-08-unify-skill-execution/checking/summary.md)；这不等于全部第三方插件的 Windows 功能认证。三条路径任选其一。
 
 原生 Windows 含中文路径时请使用已验证的 Node.js 24.20.0（当前 `.nvmrc` 推荐版本）。24.12.0 存在同步删除静默失败的问题，可能导致 pnpm 替换插件目录时报 `EPERM`。本轮验收使用 pnpm 11.7.0；首次构建若提示依赖构建脚本策略未决，需逐项明确允许或拒绝，再重跑 `dsh build`。
 

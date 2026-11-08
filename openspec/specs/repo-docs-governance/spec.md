@@ -1,4 +1,10 @@
-## ADDED Requirements
+# repo-docs-governance Specification
+
+## Purpose
+
+定义仓库文档的准入、双语入口、包说明与截图来源规则，使公开材料可维护、可追溯且不暴露日常环境数据；已获准退休的迁移证据按固定历史身份核验，不要求恢复旧副本。
+
+## Requirements
 
 ### Requirement: docs 目录实行准入白名单
 `docs/` 下被 git 跟踪的文件必须(SHALL)只位于 `docs/adr/`、`docs/architecture/`、`docs/assets/` 三个子目录。`docs/adr/` 只收录已接受的长期架构决策；`docs/architecture/` 只收录描述当前系统结构与机制、且被 `README.md`、`CLAUDE.md` 或 `CONTRIBUTING.md` 链接的文档；`docs/assets/` 只收录被仓库内被跟踪 markdown 文件引用的图形资产，或与被引用 SVG 同名（`<name>.json` 对应 `<name>.dual.svg`）的可编辑图源。调研、验收记录、事故复盘、提交归属说明等时间点性材料不得(SHALL NOT)进入 `docs/`，应归入所属 OpenSpec change 目录、所属 package 目录或 BACKLOG。
@@ -8,8 +14,8 @@
 - **WHEN** 测试列出 git 跟踪的 `docs/**` 文件
 - **THEN** 每个文件路径都以 `docs/adr/`、`docs/architecture/` 或 `docs/assets/` 开头，且 `docs/architecture/` 中每个文件都被 `README.md`、`CLAUDE.md` 或 `CONTRIBUTING.md` 至少一处链接
 
-#### Scenario: 新增 docs/notes 文件
-- **GIVEN** 某次提交新增 `docs/notes/2026-10-10-spike.md`
+#### Scenario: 新增历史调研目录文件
+- **GIVEN** 某次提交在 docs 下已迁出的历史 notes 子目录新增调研文件
 - **WHEN** 运行 `npm run check:artifacts`
 - **THEN** 检查失败并点名该文件不在 docs 白名单内
 
@@ -18,18 +24,20 @@
 - **WHEN** 运行仓库测试
 - **THEN** 测试失败并点名该孤立资产
 
-### Requirement: docs/notes 按已批准的处置表迁出并脱敏
-`docs/notes/` 全部 25 个文件必须(SHALL)按 `openspec/changes/github-facade-refresh/notes-disposition.json` 处置（`move`、`move-rewrite`、`delete`、`backlog`），`design.md` 中的处置表是其人类可读呈现。迁移完成后 `docs/notes/` 不得(SHALL NOT)存在任何被跟踪文件。处置为 `move` 的文件，内容只允许三类修改：仓库内相对链接改写、开头增加一行以 `> Migrated from docs/notes/` 开头的归属说明、脱敏替换；处置为 `move-rewrite` 的文件可重写为当前机制说明。
+### Requirement: 历史调研目录按已批准的处置表迁出并脱敏
+docs 下历史 notes 目录的全部 25 个文件必须(SHALL)按 github-facade-refresh 当前所在目录（活跃或归档）中的 `notes-disposition.json` 处置（`move`、`move-rewrite`、`delete`、`backlog`），同目录 `design.md` 中的处置表是其人类可读呈现。迁移完成后，历史源目录不得(SHALL NOT)存在任何被跟踪文件。处置为 `move` 的文件，内容只允许三类修改：仓库内相对链接改写、开头增加以 `> Migrated from ` 加处置表原 source 路径构成的归属说明、脱敏替换；处置为 `move-rewrite` 的文件可重写为当前机制说明。
+
+后续经用户批准的 checking 隐私清理 MAY 退休归档 change 中的迁移证据，但 MUST 仅限处置表中标记为 `move` 或 `move-rewrite` 的归档 checking Markdown，记录固定的完整 commit、blob 与原因 `case-verify-checking-privacy-cleanup`，并校验其历史内容身份；其它文件 MUST NOT 借此例外退休。已退休目标 SHALL 不再存在于当前工作树，迁移与脱敏核验 SHALL 读取该固定历史快照，不恢复副本。
 
 所有非删除的迁移产物（含写入 BACKLOG 的内容）必须(SHALL)脱敏：不得出现 `redactionRules` 能匹配的文本，也不得出现 `manualRedactions` 登记的条目（条目以 `{findSha256, length, replace}` 登记，即字面值的 SHA-256 与 code point 长度，**字面值本身不得提交**，匹配时对每行按该长度逐窗口求哈希）。人工条目在实施期由迁移执行者登记并补全；规划不保证其完整。脱敏完整性的最终判定是人工门禁：Lead 逐份通读全部非删除迁移产物，对照检查清单（真实人名与 bot 显示名、账号、私有仓库名与提交号、组织专属域名或链接、会话与群标识、本机路径与主机名），把每份结论写入本 change 的 `verify.md`。本要求只约束本次迁移产物；仓库其它文件与 git 历史不在范围内。
 
 #### Scenario: 迁移与处置表一致
 - **GIVEN** 处置文件与迁移后的工作树
 - **WHEN** 测试读取每一行的源文件与目标
-- **THEN** 每个 `move`/`move-rewrite` 行的目标被跟踪，`move` 行目标首行为归属说明，`git ls-files docs/notes` 为空，且每个 `move` 源文件的一级标题在被跟踪 markdown 中只作为一级标题出现一次、就在其目标文件里
+- **THEN** 未退休的 `move`/`move-rewrite` 目标被跟踪，已退休目标仅以处置表固定的 commit/blob 核验且不在当前树中；全部原 source 路径不再被跟踪，`move` 内容首行为原 source 的归属说明；未退休目标的一级标题在被跟踪 markdown 中恰出现一次，退休目标只在固定历史快照中核验
 
 #### Scenario: 移动到处置表之外或产生副本
-- **GIVEN** 某个 `docs/notes` 文件被复制到处置表之外的第二个路径
+- **GIVEN** 某个原迁移文件被复制到处置表之外的第二个路径
 - **WHEN** 运行仓库测试
 - **THEN** 测试失败，报告该一级标题出现在多个文件中
 
@@ -40,7 +48,7 @@
 
 #### Scenario: move 文件正文被改写
 - **GIVEN** 某个 `move` 目标文件除脱敏、相对链接与归属说明外还删改了一段正文
-- **WHEN** 执行 `node scripts/maintenance/notes-migration-diff.mjs <base>`（对源文件应用同一脱敏后，与目标逐行比较；只把仓库内相对链接目标规范化为解析后的被跟踪路径，外部 URL 按字节比较）
+- **WHEN** 在迁移完成时的历史快照执行 `node scripts/maintenance/notes-migration-diff.mjs <base>`（对源文件应用同一脱敏后，与目标逐行比较；只规范化仓库内相对链接，外部 URL 按字节比较）；后续已退休内容按处置表的固定历史身份检查，MUST NOT 把今日工作树对旧 base 的差异声称为当年的一次性验收结果
 - **THEN** 命令以非零退出码结束并输出差异行
 
 #### Scenario: 人工门禁发现未登记的可识别信息
@@ -49,7 +57,7 @@
 - **THEN** 该名字被补登记到 `manualRedactions` 并替换，测试重跑通过后该文件结论记为「补登记后通过」；`verify.md` 中任何一份文件缺少结论都视为 P1 未通过
 
 ### Requirement: 仓库内不残留失效的文档路径引用
-git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有指向仓库内路径的相对链接与图片引用必须(SHALL)解析到被跟踪的文件或目录；带 `#L<n>` 行锚的链接只校验文件存在。此外，所有被跟踪的文本文件（排除 `openspec/changes/archive/` 与本 change 目录）中不得(SHALL NOT)出现字面 `docs/notes/`，唯一例外是迁移文件第 1 行的归属说明（`> Migrated from docs/notes/<file>.`，它必须保留旧路径以便追溯来源）。外部 URL 不在此要求范围内。
+git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有指向仓库内路径的相对链接与图片引用必须(SHALL)解析到被跟踪的文件或目录；带 `#L<n>` 行锚的链接只校验文件存在。此外，所有被跟踪的文本文件（排除归档目录与本 change 活跃目录）中不得(SHALL NOT)残留 docs 下已迁出的历史 notes 目录路径；唯一例外是迁移文件第 1 行的原 source 归属说明，它必须保留旧路径以便追溯来源。外部 URL 不在此要求范围内。
 
 #### Scenario: 链接全部可达
 - **GIVEN** 已应用本 change 的仓库
@@ -57,12 +65,12 @@ git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有�
 - **THEN** 每个链接目标都在 git 跟踪列表中，或是被跟踪文件的父目录
 
 #### Scenario: 迁移文档后遗留旧链接
-- **GIVEN** 某 markdown 文件仍链接已删除的 `docs/notes/local-manifest-overlay.md`
+- **GIVEN** 某 markdown 文件仍链接已迁出历史 notes 目录中的 local-manifest-overlay 文档原路径
 - **WHEN** 运行仓库测试
 - **THEN** 测试失败并列出源文件、行号与失效目标
 
 #### Scenario: 源码注释或配置样例残留旧路径
-- **GIVEN** `.env.local.example` 或 `packages/dsh-pet/src/index.ts` 的注释仍写着 `docs/notes/dsh-plugin-integration-pitfalls.md`
+- **GIVEN** 配置样例或源码注释仍写着 dsh-plugin-integration-pitfalls 文档在历史 notes 目录中的旧路径
 - **WHEN** 运行仓库测试
 - **THEN** 测试失败并列出文件与行号
 
@@ -98,7 +106,7 @@ git 跟踪的 markdown 文件（排除 `openspec/changes/archive/`）中所有�
 - **THEN** 测试失败并报告实际链接目标
 
 ### Requirement: 自研 package README 按分级呈现
-每个 `packages/<id>/` 必须(SHALL)在其 `package.json` 中声明 `ohmydsh.docTier`，取值 `A`、`B` 或 `C`；未声明或取值非法时测试失败。每份 package `README.md` 与 `README.zh.md` 在首个二级标题之前必须(SHALL)有一段说明，回答「它为用户解决什么问题」；该段落紧跟 `<!-- problem -->` 注释，且至少 40 个非空白 code point。说明是否真正回答了用户问题由 P3 阶段验收人工判定。A 级与 B 级必须(SHALL)在首个二级标题之前嵌入至少一张位于该 package `docs/` 下的位图（png/jpg/jpeg/webp）。位图的内容类型在 `SCREENSHOTS.md` 的 `kind` 列登记，取值 `screenshot`（隔离实例中的真实界面）或 `illustration`（由受审阅的图源栅格化得到的示意图，图源 JSON/SVG 同目录提交）。`illustration` 只允许用于 `worktree-session`、`dsh-openspec`、`sidebar-session-provider-icon`、`session-title-copy`、`session-links` 这五个 package（理由：隔离实例没有模型凭据，无法产生带标题与消息的会话），且其 `note` 列必须(SHALL)恰好包含短语 `isolated instance has no model credentials`。其余 A/B 级 package（`dsh-pet`、`dsh-memex`、`system-clock`、`home-network-model-guard`）必须(SHALL)使用 `screenshot`。新增或调整 `illustration` 的适用范围属于规范修订，必须经 design 与 spec 评审，不得在执行期改动测试里的允许名单。C 级不得(SHALL NOT)要求图片，但必须(SHALL)有章节锚点为 `removal` 的章节，说明它连接哪两端、何时可以移除。
+每个 `packages/<id>/` 必须(SHALL)在其 `package.json` 中声明 `ohmydsh.docTier`，取值 `A`、`B` 或 `C`；未声明或取值非法时测试失败。每份 package `README.md` 与 `README.zh.md` 在首个二级标题之前必须(SHALL)有一段说明，回答「它为用户解决什么问题」；该段落紧跟 `<!-- problem -->` 注释，且至少 40 个非空白 code point。说明是否真正回答了用户问题由 P3 阶段验收人工判定。A 级与 B 级必须(SHALL)在首个二级标题之前嵌入至少一张位于该 package `docs/` 下的位图（png/jpg/jpeg/webp）。位图的内容类型在 `SCREENSHOTS.md` 的 `kind` 列登记，取值 `screenshot`（隔离实例中的真实界面）或 `illustration`（由受审阅的图源栅格化得到的示意图，图源 JSON/SVG 同目录提交）。`illustration` 只允许用于 `worktree-session`、`dsh-openspec`、`dsh-sidebar-session-provider-icon`、`dsh-session-id-copy`、`sidebar-session-resources` 这五个 package（理由：隔离实例没有模型凭据，无法产生带标题与消息的会话），且其 `note` 列必须(SHALL)恰好包含短语 `isolated instance has no model credentials`。其余 A/B 级 package（`dsh-pet`、`dsh-memex`、`system-clock`、`home-network-model-guard`）必须(SHALL)使用 `screenshot`。新增或调整 `illustration` 的适用范围属于规范修订，必须经 design 与 spec 评审，不得在执行期改动测试里的允许名单。C 级不得(SHALL NOT)要求图片，但必须(SHALL)有章节锚点为 `removal` 的章节，说明它连接哪两端、何时可以移除。
 
 #### Scenario: 各级 README 满足呈现要求
 - **GIVEN** 已应用本 change 的仓库

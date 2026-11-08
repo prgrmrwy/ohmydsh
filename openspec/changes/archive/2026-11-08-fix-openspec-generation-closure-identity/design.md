@@ -20,13 +20,13 @@
 
 ### D8. 闭包命名去路径化 + 闭包身份进入 generation id + 启动失败必须可观测
 
-**命名规则**：每个拷贝出的依赖包以 `key = "<name>@<version>~<ctx8>"` 命名，落在 `<generation>/node_modules/.dsh-closure/<key>/`。`ctx8` = 该包**直接依赖**按依赖名排序后的 `depName->childName@childVersion` 列表的 sha256 前 8 位。key 只由包身份与解析出的子包身份派生，**不含任何宿主路径**；同一批版本无论嵌套还是提升到父级根，key 与链接布局完全一致，因此 `generationHashes` 逐字节一致，`reuse()` 成立。
+**命名规则**：每个拷贝出的依赖包以 `key = "<name>@<version>~<content8>~<ctx8>"` 命名，落在 `<generation>/node_modules/.dsh-closure/<key>/`。`content8` 为该包自身内容哈希的前 8 位，排除嵌套 `node_modules` 并沿用拷贝过滤与链接防环规则；`ctx8` 为该包**直接依赖**按依赖名排序后的 `depName->childName@childVersion` 列表的 sha256 前 8 位。key 只由包身份、包内容与解析出的子包身份派生，**不含任何宿主路径**；同一批版本与内容无论嵌套还是提升到父级根，key 与链接布局完全一致，因此 `generationHashes` 逐字节一致，`reuse()` 成立。同名同版本但内容不同的副本仍分开保存。
 
 - 为什么带 `ctx8` 而不是只用 `name@version`：同一 name@version 的不同物理副本可能处在不同解析上下文（子包版本不同）。带上直接依赖身份后缀后，key 仍与布局无关，但能把上下文不同的副本分开，保持既有"不错误合并"的保真度；上下文相同（实际安装的常态）则合并为一份拷贝。
 - 遍历顺序固定（依赖名排序、深度优先）并在**首次**放置某 key 时写链接，因此重复 key 的后续节点只复用、不重写，产物是解析图的确定性函数。
 - 依赖名合法性校验与 optional 缺失语义保持原样（`dependency-name-invalid` / optional ENOENT 跳过）。
 
-**身份覆盖闭包**：新增 `closureIdentity(sourceRoot)`（只解析、不拷贝，读取各包 `package.json`），返回 `sha256(sorted keys)`；`generationIdentity(...)` 把它并入哈希（原 `openspec-upgrade-v5` salt 与 manage Skill 正文哈希保留）。效果：真实闭包变化（版本或解析结果变化）派生**新** id → 新 generation 被物化并激活，而不是与旧目录撞 `generation-identity-collision`；闭包不变（含重装后仅路径变化）→ 复用既有 generation。
+**身份覆盖闭包**：新增 `closureIdentity(sourceRoot)`（只解析、不拷贝，读取各包 `package.json` 与内容），对去重排序的依赖 key 集合和根包排序后的直接链接签名 `{keys, topLinks}` 一并计算 sha256，取前 16 位；`generationIdentity(...)` 把它并入哈希（原 `openspec-upgrade-v5` salt 与 manage Skill 正文哈希保留）。效果：真实闭包变化（版本或解析结果变化）派生**新** id → 新 generation 被物化并激活，而不是与旧目录撞 `generation-identity-collision`；闭包不变（含重装后仅路径变化）→ 复用既有 generation。
 
 - 替代方案 A：保留 realpath 命名、把 realpath 从"内容"里剔除（只哈希包内容）。同样能修好本次回归，但把"同一版本的两份不同上下文副本"合并掉，且 id 仍不能覆盖真实的依赖变化，仍会撞 collision。否决。
 - 替代方案 B：撞 collision 时原地覆盖（supersede-in-place）。破坏"generation 不可变"这一既有不变量，也失去旧 generation 作为回滚与审计记录的价值。否决。
@@ -41,7 +41,7 @@
 ## Risks / Trade-offs
 
 - [身份输入变化 → 旧 generation 变成孤儿] → 与既有"不删非 staging generation"的保守语义一致；README 的移除说明已覆盖"确认无未完成 journal 后手动删除"。
-- [闭包 key 变化导致同一 id 仍撞 collision] → 只可能发生在"版本相同但内容或上下文不同"的投毒/篡改场景；此时 fail closed 且**现在有日志**，属期望行为。
+- [同名同版本的包内容或依赖上下文变化] → 内容与上下文进入 key，闭包 key 和根直接链接进入 generation 身份，因此派生新 id 而不是与旧 generation 相撞；若实际生成内容仍与同一不可变身份不符，保留 fail-closed 校验并报告日志。
 - [`closureIdentity` 增加一次启动期解析与内容哈希，且物化自身会再规划一次] → 实测本机官方闭包 14 MB / 69 个包：`closureIdentity` 约 220–260 ms，完整物化约 1.2–1.5 s（改动前约 1.1 s），即每次挂载净增约 0.3–0.6 s。启动可接受，未做跨调用缓存：缓存会让"包内容在原地变化"与指纹失配，代价大于收益。受影响的集成用例改为 30 s 预算（`vitest.config.ts`），与 `dsh-memex`/`session-links` 等兄弟包一致——这些用例每个要多次物化真实官方包，默认 5 s 在改动前已贴边（实测 4596 ms / 4492 ms）。
 - [依赖图极端形态（重复 name@version + 不同上下文）] → 由 `ctx8` 分离；若仍出现 key 冲突且链接不同，产物取确定性首放置，`reuse()` 的逐字节校验兜底并显式报错。
 

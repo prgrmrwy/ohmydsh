@@ -30,3 +30,9 @@
 - [x] 5.3 运行 `openspec validate fix-openspec-generation-closure-identity --strict`（passed）
 - [x] 5.4 记录实机取证的只读复现步骤到 `packages/dsh-openspec/docs/generation-identity.md`（不含 token/secrets，只写可复核步骤与结论）
 - [x] 5.5 新增 `packages/dsh-openspec/vitest.config.ts`（`testTimeout/hookTimeout = 30s`，与 `dsh-memex`/`session-links` 等兄弟包一致）：这些用例每个要多次物化真实官方包，vitest 默认 5s 预算在改动前就已贴边（实测 4596ms/4492ms），内容寻址后再超时；这不是放宽断言
+
+## 6. 归档复核（2026-11-08）
+
+5.2 保留当年的 7 项环境性失败原始记录；其“仍需完整依赖环境复核”的未决状态已由后续验证解除：见 [0.2.2 升级验收汇总](../2026-11-07-upgrade-dsh-0-2-2-runtime/checking/summary.md#5-全仓终验86)，daf66a09 上根测试 775 通过 / 0 失败 / 2 跳过，全部包 build/typecheck 通过，dsh-openspec 162 项通过。本次在 83a26b0e 的 DSH 0.2.2-rc.1 依赖下另行执行 `npm run typecheck --workspace dsh-openspec` 与 `npm test --workspace dsh-openspec -- --no-fsModuleCache`，38 文件 / 162 项通过。历史失败没有回写为通过；本次无生产部署或重启。
+
+归档时同步唯一新增的 generation 内容身份要求；设计中的 key 与闭包哈希说明按现行实现补齐 content8 和根直接链接签名，未修改运行时代码。

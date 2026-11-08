@@ -1,3 +1,7 @@
+## Purpose
+
+约束 AUTO 插件独立仓库、可安装包与商店条目的发布身份和版本保持一致，并要求分别报告 npm、GitHub Release 与商店审核的实际状态，使发布失败或外部审核等待不会被误报为交付成功。
+
 ## ADDED Requirements
 ### Requirement: 独立发布与商店身份一致
 独立仓库 SHALL 同步当前默认策略和双语文档，版本 SHALL 与可安装包一致。商店 SHALL 只提交本插件单条准确YAML，未合并不能声称已上架。npm权限失败 MUST NOT 声称已发布；可使用版本钉住的GitHub预构建tgz作为安装入口。

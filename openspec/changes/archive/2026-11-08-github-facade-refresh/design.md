@@ -1,3 +1,9 @@
+## 归档校正（2026-11-08）
+
+以下设计保留最初实施时的背景。归档同步以最终实现和后续已批准的保留策略为准：三个展示插件已更名，允许名单使用 dsh-sidebar-session-provider-icon、dsh-session-id-copy、sidebar-session-resources；启动器合同按 Node 参数解析器验证，不恢复 Bash case。原迁移材料中获准退休的九份 checking 文档只按处置表中的完整 commit/blob 核验，不恢复工作树副本；历史一次性迁移 diff 结果不冒充今日重跑结果。规范以“历史 notes 目录”描述源路径，避免规范正文自身触发已生效的旧路径残留检查。实际代码、隐私门禁与迁移检查未放宽。
+
+本 change 的 `verify.md` 保留原 `PASS_WITH_WARNINGS` 和维护者联系地址待确认等历史事实；此次归档不把这些警告记为已解决，不修改或重新发布联系信息。旧“待合入”描述为当时状态；相关实现与补充截图提交已在同步后的主干历史中。
+
 ## Context
 
 - 根 `README.md`（223 行，中文）与 `README.en.md`（146 行）形成于 2026-08-28 的开源整理。之后仓库新增了私有 overlay、`thirdPartyResources`、DSH 0.2 运行体、四个大型自研插件，README 只做增量追加，出现过时内容（`llm-subscriptions` pin、rc.2 临时策略），且把 UI 打开策略、订阅回滚等运维细节放在首页。

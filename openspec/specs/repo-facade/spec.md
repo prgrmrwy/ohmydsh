@@ -1,4 +1,10 @@
-## ADDED Requirements
+# repo-facade Specification
+
+## Purpose
+
+规定根目录中英双语 README 的章节、安装指引与插件索引，使用户能够理解配置仓库的职责、选择安装路径，并找到与现行 manifest 一致的能力入口和明确的操作边界。
+
+## Requirements
 
 ### Requirement: 根 README 是英文默认、中文对等的双语门面
 仓库根必须(SHALL)同时跟踪 `README.md`（英文）与 `README.zh.md`（简体中文），且不得(SHALL NOT)再跟踪 `README.en.md`。两份文件必须(SHALL)在前 30 行内互相链接对方。每个二级标题（`## `）后必须(SHALL)紧跟一个稳定的章节锚点注释 `<!-- section: <key> -->`，`<key>` 为小写 kebab-case；两份文件的章节锚点序列必须(SHALL)完全相同。章节内容的语义一致性不由测试判定，而由阶段验收与终审的人工检查承担。
@@ -58,7 +64,7 @@
 
 #### Scenario: 引用不存在的 dsh 子命令
 - **GIVEN** 某次修改在 README 中写入 `dsh init`
-- **WHEN** 测试把 README 中所有 `dsh <word>` 形式的子命令与 `bin/dsh` 参数解析 `case` 分支中声明的子命令集合比较
+- **WHEN** 测试把 README 中所有 `dsh <word>` 形式的子命令与当前 Node 启动器参数解析器实际接受的子命令集合比较（启动入口为 `bin/dsh.mjs`，保留的 POSIX wrapper 不另立解析规则）
 - **THEN** 测试失败，报告 README 引用了未实现的子命令 `init`
 
 ### Requirement: 多机器只做路由

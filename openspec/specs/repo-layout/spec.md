@@ -620,7 +620,7 @@ Node 缺失时无法运行 Node 初始化入口，安装文档 SHALL 提供最�
 - **THEN** 对应受管部署入口被可逆移除，标准 OpenSpec、已有 change 和其它定制保持不变
 
 ### Requirement: 长期仓库仅保存必要且可维护的派生资产
-仓库必须(SHALL)忽略可重建构建输出、OpenSpec checking 的 raw session/history baseline 与批量截图，以及同一架构图的重复重量级导出。长期保留的 checking 内容必须是轻量报告、trail、gate 或复现脚本；仓库架构图必须保留一种可直接展示的轻量格式与其可编辑真相源。若原始验收证据仍需审计，报告必须指向 Git 之外的 artifact 位置或说明其留存方式。
+仓库必须(SHALL)忽略可重建构建输出、OpenSpec checking 的 raw session/history baseline 与批量截图，以及同一架构图的重复重量级导出。长期保留的 checking 内容必须是轻量报告、trail、gate 或复现脚本；仓库每张架构图必须保留一种可直接展示的轻量格式与其可编辑真相源。若原始验收证据仍需审计，报告必须指向 Git 之外的 artifact 位置或说明其留存方式。仓库根目录不得(SHALL NOT)跟踪调试截图或生成的架构说明文件（包括 `.cdp-scratch-shot.png` 与 `worktree-session-architecture.md`）。
 
 #### Scenario: 完成 OpenSpec 验收
 - **WHEN** 验收产生 raw JSON、会话历史和一组截图
@@ -629,6 +629,16 @@ Node 缺失时无法运行 Node 初始化入口，安装文档 SHALL 提供最�
 #### Scenario: 更新仓库架构图
 - **WHEN** 架构变化需要重新生成图形
 - **THEN** 开发者更新可编辑图源和唯一的仓库展示格式，不提交同图的 PNG、SVG 与交互 HTML 多套重复导出
+
+#### Scenario: 每张门面图都有图源
+- **GIVEN** README 嵌入了总架构图与生命周期图
+- **WHEN** 运行 `npm run check:artifacts`
+- **THEN** `docs/assets/ohmydsh-architecture.{json,dual.svg}` 与 `docs/assets/ohmydsh-lifecycle.{json,dual.svg}` 均被跟踪，缺任何一个都报告违规
+
+#### Scenario: 根目录遗留产物被重新提交
+- **GIVEN** 某次提交重新加入 `.cdp-scratch-shot.png`
+- **WHEN** 运行 `npm run check:artifacts`
+- **THEN** 检查失败并点名该文件
 
 ### Requirement: 定制可声明所需 npm scope 且 sync 在变更前校验
 package 定制可(MAY)声明 `npmScopes`:npm scope 名(形如 `@example`)的列表,表示安装该定制需要这些 scope 已配置 registry。sync 必须(SHALL)在加载阶段校验该字段为 scope 名列表,且只出现在 `type: package` 的条目上。对每个启用且声明了 `npmScopes` 的 package 条目,sync 必须(SHALL)在确保 profile 骨架存在之后、任何定制物化动作(agent instructions、顶层 dependencies、package、preset、skill、patch)之前,以 profile 目录为工作目录解析 npm 配置中的 `<scope>:registry`;任一 scope 未配置时,sync 必须(SHALL)报错并以非零退出码结束,错误信息指明缺失的 scope、声明它的条目 id 与 profile 目录,且除 profile 目录与 profile 骨架的创建(DSH 自身的初始化,不属于定制物化)之外,`$DSH_HOME` 不发生任何变化(含部署状态账本的迁移)。sync 不得(SHALL NOT)写入或修改任何 npm registry 配置。禁用条目的 `npmScopes` 不参与校验。
@@ -831,3 +841,34 @@ local package 的 `buildInputs` SHALL 是相对其所属根的路径列表，每
 - **GIVEN** 测试中冻结了本 requirement 引入前的构建输入哈希算法，fixture 含多个文件条目、一个重复条目，以及一个同时属于 local package 自身输入的文件条目
 - **WHEN** 在同一 Node 进程中用冻结算法与新算法分别计算
 - **THEN** 两者相等
+
+### Requirement: manifest 条目说明以人读摘要为准
+`dsh.yaml` 的 `note` 字段只承担人读说明，不被任何程序作为数据消费（启动清单优先读 `brief`）。每个 `enabled: true` 的 `customizations` 条目必须(SHALL)声明非空 `brief`，长度不超过 80 个 Unicode code point。每条 `note` 必须(SHALL)不超过 600 个 Unicode code point，内容限于：上游来源与许可（第三方）或对应 OpenSpec change 名（自研）、信任面要点、升级复核点、回滚或移除路径。当其它 current spec 对某条目的 `note` 规定了必须记录的事实类别（例如 `dsh-openspec-session` 对 `dsh-openspec` 条目的要求）时，`note` 必须(SHALL)同时满足该 spec 与本长度上限。审查过程、逐版本历史与实测记录不得(SHALL NOT)写入 `note` 或条目上方的 YAML 注释，应由 git 历史与 OpenSpec change 承载。
+
+#### Scenario: 启用条目都有简短 brief 与受限 note
+- **GIVEN** 已应用本 change 的 `dsh.yaml`
+- **WHEN** 测试加载 manifest 并遍历启用的 `customizations`
+- **THEN** 每个条目的 `brief` 为非空字符串且不超过 80 code point，每个 `note`（若存在）不超过 600 code point
+
+#### Scenario: note 重新膨胀
+- **GIVEN** 某次升级把完整审查过程写回某条目的 `note`，使其超过 600 code point
+- **WHEN** 运行仓库测试
+- **THEN** 测试失败并点名该条目 id 与实际长度
+
+#### Scenario: 其它 spec 要求的事实类别被精简掉
+- **GIVEN** `dsh-openspec` 条目的 `note` 删去了升级复核点
+- **WHEN** 运行仓库测试
+- **THEN** 测试失败，报告该条目缺少 `dsh-openspec-session` 要求的事实类别（测试以固定关键词集合检查 upstream、license、telemetry、credential、upgrade、removal 六类是否各至少出现一次）
+
+### Requirement: note 精简迁移不改变 manifest 的机器可读结构
+对 `dsh.yaml` 进行 note 精简的迁移必须(SHALL)保证：分别解析迁移前（迁移开始时的 git 版本）与迁移后的 manifest，删除每个条目的 `note` 与 `brief` 后两者深度相等。该检查是一次性迁移验收，由可重复执行的命令完成并把结果记入本 change 的 `verify.md`，不作为长期回归测试（后续 pin 与配置更新属于正常演进）。
+
+#### Scenario: 迁移前后结构等价
+- **GIVEN** 迁移开始时的提交 `<base>` 与迁移后的工作树
+- **WHEN** 执行 `node scripts/maintenance/manifest-structure-diff.mjs <base>`
+- **THEN** 命令以退出码 0 结束并输出 `structure unchanged`
+
+#### Scenario: 迁移误改字段
+- **GIVEN** 迁移过程中某条目的 `version` 被误改
+- **WHEN** 执行同一命令
+- **THEN** 命令以非零退出码结束，并输出差异路径（如 `customizations[3].version`）
