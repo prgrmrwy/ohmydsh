@@ -23,8 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        # Match package.json's Node floor and also exercise the latest Node 24.
-        node: ['24.9.0', '24.x']
+        # Exercise the recommended .nvmrc version and the latest supported major.
+        node: ['recommended', '24.x']
 
     steps:
       - name: Checkout
@@ -36,7 +36,8 @@ jobs:
       - name: Setup Node ${{ matrix.node }}
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: ${{ matrix.node == '24.x' && matrix.node || '' }}
+          node-version-file: .nvmrc
           cache: npm
 
       # 根 package-lock.json 是唯一 lock 源;用 ci 保证可复现安装。
