@@ -48,6 +48,7 @@ function generation(locale: ReturnType<typeof strictLocale>) {
 
 const SLOTS = [
   'settings.section#dsh-magpie-connector',
+  'settings.section.icon#dsh-magpie-connector',
   'sidebar.footer.action#magpie-usage',
   'conversation.input.right#dsh-magpie-connector-speed',
 ]

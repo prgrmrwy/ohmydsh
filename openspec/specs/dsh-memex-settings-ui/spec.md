@@ -467,18 +467,17 @@ MUST NOT 沿用任何未声明的取值；页面 MUST NOT 静默忽略这些库�
 
 ### Requirement: 导航图标是可降级的装饰
 
-页面在设置导航中的文案 SHALL 为「记忆」。导航行的图标 MUST NOT 依赖任何新的官方契约；
-实现方式 SHALL 限定为对**自己那一行**的标记与样式覆盖。
+页面在设置导航中的文案 SHALL 为「记忆」。导航行 SHALL 通过官方 `settings.section.icon` 槽、以与页面相同的 `dsh-memex` id 提供书本图标，使用宿主 size 并继承 currentColor。实现 MUST NOT 通过导航行 marker、按文案定位、按钮伪元素或 MutationObserver 替换图标。
 
-图标适配失败时 MUST NOT 影响页面本身可用性，也 MUST NOT 改动其他 section 的导航行。
+图标槽缺失或图标贡献释放时 SHALL 保留宿主默认图标，MUST NOT 影响页面本身可用性，也 MUST NOT 改动其他 section 的导航行。
 
 #### Scenario: 图标适配失败仍可用
-- **WHEN** 导航行的图标适配未生效（例如行结构变化导致定位失败）
+- **WHEN** 宿主未声明图标槽或本插件图标贡献已释放
 - **THEN** 官方默认图标照常显示，页面内容与编辑能力不受影响
 
 #### Scenario: 不污染其他导航行
-- **WHEN** 图标适配生效
-- **THEN** 只有「记忆」这一行被标记，其余导航行的图标与文案不变
+- **WHEN** 图标贡献生效
+- **THEN** 只有 id 为 dsh-memex 的导航行显示一个书本图标，无默认齿轮叠加；其余导航行图标与文案不变
 
 ### Requirement: 入口展开态提供卡片浏览动作
 

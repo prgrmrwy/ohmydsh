@@ -46,12 +46,12 @@ it('重建后的客户端 bundle 可以重新 apply（语言字典随条目释�
   const locale = strictLocale()
   const first = generation(locale)
   first.apply()
-  expect(first.registered).toHaveLength(3)
+  expect(first.registered).toHaveLength(4)
   first.teardown()
 
   const second = generation(locale)
   expect(() => second.apply()).not.toThrow()
-  expect(second.registered).toHaveLength(3)
+  expect(second.registered).toHaveLength(4)
   second.teardown()
 })
 

@@ -1226,69 +1226,17 @@ describe('Pet is a top layer that yields to no layout', () => {
   })
 })
 
-describe('settings nav glyph stays scoped to Pet\'s own row', () => {
-  it('paints the mascot emoji and hides the fallback gear', async () => {
-    const { PET_SETTINGS_NAV_CSS, PET_SETTINGS_NAV_MARKER } = await import(
-      '../src/client/settings-nav-icon.js'
-    )
-
-    // DSH 0.1.x has no icon field on `settings.section`, so a third-party row
-    // renders the shell's fallback gear until it marks itself.
-    expect(PET_SETTINGS_NAV_CSS).toContain(`[${PET_SETTINGS_NAV_MARKER}]`)
-    expect(PET_SETTINGS_NAV_CSS).toContain("content:'🐾'")
-    expect(PET_SETTINGS_NAV_CSS).toContain('svg:first-child{display:none}')
-  })
-
-  it('selects nothing beyond its own marker attribute', async () => {
-    const { PET_SETTINGS_NAV_CSS, PET_SETTINGS_NAV_MARKER } = await import(
-      '../src/client/settings-nav-icon.js'
-    )
-
-    // Every selector must be anchored on the owned marker; a bare `nav button`
-    // rule would restyle every other plugin's row too.
-    const selectors = PET_SETTINGS_NAV_CSS.split('}')
-      .map(block => block.split('{')[0]?.trim() ?? '')
-      .filter(selector => selector.length > 0)
-    expect(selectors.length).toBeGreaterThan(0)
-    for (const selector of selectors) {
-      expect(selector.startsWith(`[${PET_SETTINGS_NAV_MARKER}]`)).toBe(true)
-    }
-  })
-
-  it('marks only the button whose text matches the label, and cleans up', async () => {
-    const { registerPetSettingsNavIcon, PET_SETTINGS_NAV_MARKER } = await import(
-      '../src/client/settings-nav-icon.js'
-    )
-    const { JSDOM } = await import('jsdom').catch(() => ({ JSDOM: undefined }) as never)
-    if (JSDOM === undefined) return
-
-    const dom = new JSDOM(
-      '<body><div role="dialog"><nav>' +
-        '<button>General</button><button>Pet</button><button>Plugins</button>' +
-        '</nav></div></body>',
-    )
-    const priorDocument = globalThis.document
-    const priorObserver = globalThis.MutationObserver
-    Object.defineProperty(globalThis, 'document', {
-      value: dom.window.document,
-      configurable: true,
-    })
-    globalThis.MutationObserver = dom.window.MutationObserver
-
-    try {
-      const dispose = registerPetSettingsNavIcon(() => 'Pet')
-      const marked = [...dom.window.document.querySelectorAll(`[${PET_SETTINGS_NAV_MARKER}]`)]
-      expect(marked.map(node => node.textContent)).toEqual(['Pet'])
-
-      dispose()
-      expect(dom.window.document.querySelectorAll(`[${PET_SETTINGS_NAV_MARKER}]`)).toHaveLength(0)
-    } finally {
-      Object.defineProperty(globalThis, 'document', {
-        value: priorDocument,
-        configurable: true,
-      })
-      globalThis.MutationObserver = priorObserver
-    }
+describe('settings nav glyph uses the official icon seat', () => {
+  it('preserves the mascot and uses the shell size without DOM decoration', async () => {
+    const { PetSettingsNavIcon } = await import('../src/client/settings-nav-icon.js')
+    const { createElement } = await import('react')
+    const { renderToStaticMarkup } = await import('react-dom/server')
+    const markup = renderToStaticMarkup(createElement(PetSettingsNavIcon, { size: 24 }))
+    expect(markup).toContain('🐾')
+    expect(markup).toContain('width:24px;height:24px')
+    expect(markup).toContain('font-size:21px')
+    expect(markup).toContain('aria-hidden="true"')
+    expect(markup).not.toContain('::before')
   })
 })
 

@@ -1036,19 +1036,19 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 - **THEN** 响应状态为 400，S 仍为标准
 
 ### Requirement: 设置导航自身行使用 Magpie 鸟形图标（AMD2）
-插件 SHALL 在自身 Magpie 设置导航行显示本地鸟形品牌图标，随 `currentColor` 适应主题，保留文字、点击和可访问性语义。若宿主没有官方 icon 字段，SHALL 仅对可唯一定位的自身导航行添加私有 marker 并使用限定 CSS；SHALL NOT 修改旧 connect 或其它设置行。重复同名无法唯一定位、唯一行已带 foreign connect marker、缺 document/body/head 时 SHALL 静默保留宿主行为。
+插件 SHALL 通过官方 `settings.section.icon` 槽，以与页面相同的 `dsh-magpie-connector` id 提供本地鸟形品牌图标，使用宿主 size、随 currentColor 适应主题，保留文字、点击和可访问性语义。插件 MUST NOT 按 label 识别导航行或添加私有 marker、MutationObserver、按钮伪元素覆盖。图标槽缺失时 SHALL 保留宿主默认字形且不阻塞页面注册。旧 connect 或其它同名设置行 SHALL 不被改动。
 
-插件 SHALL 管理 observer 和样式的生命周期：支持对话框晚挂载和重建，卸载时断开 observer、清除 marker 和自身样式。来源许可 SHALL 随包保留。
+图标 SHALL 由官方槽注册生命周期管理，支持对话框晚挂载和重建，卸载时释放自身图标注册，不留下专用样式或 marker。来源许可 SHALL 随包保留。
 
 #### Scenario: 鸟形图标只标记自身导航行
-- **GIVEN** 设置导航中同时有本插件 Magpie 行、旧 connect 行和其它行
+- **GIVEN** 设置导航中同时有本插件 Magpie 行、旧 connect 行和其它行，且可能具有相同 label
 - **WHEN** client apply，之后导航重新挂载
-- **THEN** 只有本插件行带私有 marker 和 currentColor 鸟形图标 CSS，旧 connect/其它行及自身原始 SVG/文字/点击行为不被改写
+- **THEN** 只有 id 为 dsh-magpie-connector 的行显示一个 currentColor 鸟形图标，不叠加默认齿轮；旧 connect/其它行及导航文字、点击行为不变
 
 #### Scenario: 卸载清理与缺失入口静默降级
-- **GIVEN** observer 已安装，本插件入口可能不存在或有重复同名行
+- **GIVEN** 本插件已注册图标，或宿主未声明图标槽
 - **WHEN** 导航变化，然后卸载 client，再重新插入导航
-- **THEN** 无法唯一定位时不标记；卸载后无 marker/自身样式且不再标记新行，无 DOM 环境不抛错
+- **THEN** 缺失图标槽不影响页面；卸载后图标注册释放、无 marker 或图标专用样式，默认字形由宿主恢复
 
 ### Requirement: 禁用不删除用户数据
 在 manifest 中把插件设为 `enabled: false` 并重新 build 后，插件 SHALL NOT 删除任何线路凭据（`MAGPIE_LINE_<ID>_*`，以及升级前遗留的 `MAGPIE_API_KEY` / `MAGPIE_ACCESS_*`），也 SHALL NOT 删除插件设置文件。插件的 dispose 路径 SHALL 只释放 route 注册、设置路由、计时器与连接，不执行任何删除操作。
