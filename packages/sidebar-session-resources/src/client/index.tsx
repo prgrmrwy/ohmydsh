@@ -2,10 +2,9 @@
  * Client entry for dsh-sidebar-session-resources: registers the「文档/资料」tab in
  * the dsh-better-sidebar workbench (links + produced files of the session).
  *
- * The plugin is gated on the `betterSidebar` service (hard peer dependency):
- * with dsh-better-sidebar absent or disabled, this fiber stays inactive and
- * nothing renders. Everything observed lives in the browser; there is no
- * host capability and no network egress.
+ * The betterSidebar service gates both the workbench tab and the official
+ * delivery-card download contribution. File operations use the shipped
+ * Session-authorized reader and download owner.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -13,11 +12,12 @@ import type { BetterSidebarService } from './better-sidebar.js'
 import { SessionResourcesStore } from './collector.js'
 import { Panel } from './Panel.jsx'
 import { openProducedInEditor } from './open-produced.js'
+import { registerPresentedDownloads } from './PresentedDownload.jsx'
 
 export const name = 'sidebar-session-resources'
 
 /** Services required before mounting: the workbench host and the sessions runtime. */
-export const inject = ['betterSidebar', 'sessions', 'connection']
+export const inject = ['betterSidebar', 'sessions', 'connection', 'slots', 'uiConversation', 'remote', 'remote.workspaceFiles', 'fileActions', 'contextMenus']
 
 /** A small inline chain-link glyph; no icon library is pulled in. */
 function LinkIcon({ size = 16 }: { size?: number }) {
@@ -34,6 +34,7 @@ function LinkIcon({ size = 16 }: { size?: number }) {
 }
 
 export function apply(ctx: ClientContext & { betterSidebar: BetterSidebarService }): void {
+  registerPresentedDownloads(ctx)
   const store = new SessionResourcesStore()
   ctx.effect(() => () => store.dispose())
 
@@ -43,12 +44,12 @@ export function apply(ctx: ClientContext & { betterSidebar: BetterSidebarService
     icon: (size: number) => <LinkIcon size={size} />,
     order: 45,
     single: true,
-    component: ({ ctx: tabCtx, scope }) => (
+    component: ({ scope }) => (
       <Panel
-        ctx={tabCtx}
+        ctx={ctx}
         store={store}
         sessionId={(scope.sessionId || undefined) as SessionId | undefined}
-        onOpenFile={(path) => openProducedInEditor(tabCtx, scope.sessionId as SessionId, path)}
+        onOpenFile={(path) => openProducedInEditor(ctx, path)}
       />
     ),
   })

@@ -312,10 +312,10 @@ customizations:
   - id: sidebar-session-resources
     type: package
     source: local
-    version: 0.1.0
+    version: 0.2.0
     enabled: true
-    brief: 文档/资料面板(当前会话 MR/部署/工作项/制品链接分类 + 本次产出文件)
-    note: '自研,spec sidebar-session-resources(2026-10-19 由 session-links 改名,让出名字给团队版飞书 session-links)。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-sidebar-session-resources 读完整会话日志作基线,浏览器增量采集。不出网、不读写凭据、不持久化;组织专属评审/工作项域名走插件行 config(reviewHosts/trackerHosts,由私有 overlay 注入)。依赖第三方 dsh-better-sidebar(peer >=0.16.0,缺失则整体不激活)。升级复核:better-sidebar 的 tab API 与会话节点结构;通道仍仅回环。移除:enabled:false → dsh build → 重启。'
+    brief: 文档/资料面板(会话链接 + 远端路径/复制/下载 + 文件卡片下载)
+    note: '自研,spec sidebar-session-resources(2026-10-19 由 session-links 改名,让出名字给团队版飞书 session-links)。better-sidebar 右侧工作台「文档/资料」tab:收集当前会话的 URL 与产出文件并分类(MR/部署/工作项/制品/其他);Host 经只读 Connection RPC /dsh-sidebar-session-resources 读完整会话日志作基线,浏览器增量采集。0.2.0 起需 DSH>=0.2.2-rc.1:官方 workspaceFiles 按会话解析远端完整路径,可复制/在编辑器打开;卡片官方 actions 插槽亦提供下载;readBytes 原字节交给官方 fileActions 下载到浏览器设备(默认完整文件上限32MiB,目录/最终符号链接拒绝,切会话取消)。不外发、不读写凭据、不持久化;组织域名走 config(reviewHosts/trackerHosts,私有 overlay 注入)。依赖 dsh-better-sidebar(peer>=0.16.0,缺失不激活)。升级复核:tab API/会话节点/官方文件契约;通道沿用 Connection 围栏。移除:enabled:false → dsh build → 重启。'
   # 第三方(remote):better-sidebar 侧边栏工作台
   - id: better-sidebar
     type: package
