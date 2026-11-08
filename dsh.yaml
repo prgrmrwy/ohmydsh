@@ -167,7 +167,7 @@ customizations:
   - id: dsh-auto-model-routing
     type: package
     source: local
-    version: 0.7.0
+    version: 0.7.1
     enabled: true
     brief: 主模型保持，独立选配子任务能力与投入，显示决策分布并记录分配反馈
     note: '自研,单一AUTO策略:独立能力/投入判断,官方fresh子身份绑定与恢复;主模型不换,不自动max,新会话默认MANUAL。家族知识在src/strategies注册表,与网关解耦。判档问题来自内置不可变预设(src/presets,缺省reasoning-depth=旧rubric逐字节,可选effort-as-verification),设置preset选择,快照记preset。包内skill同启停。决策服务OpenRouter/TypeSafe/Concentrate/自定义可选,凭据走credentials或只读启动环境;外发≤8000字当前任务及前轮摘要,形态脱敏尽力。无跨服务fallback/自动重试。设置:$DSH_HOME/plugins/dsh-auto-model-routing/config.json;状态与反馈:$DSH_HOME/state/auto-model-routing,反馈仅观察。fork不支持;teammate仅mock覆盖。降级0.6.6:preset被忽略,带preset绑定被旧版跳过(账本不改)。0.6.7修热载后芯片消失。回滚到0.4.2见CHANGELOG。停用:enabled:false→dsh build。'
