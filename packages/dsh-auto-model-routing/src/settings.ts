@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { resolveDecisionService } from './decision-service.js'
 import { AUTO_EFFORTS, DEFAULT_SETTINGS, DEPRECATED_KEYS, type Settings, type SettingsIssue, type SettingsRead } from './settings-contract.js'
 import { isRecord, issue } from './settings-validation.js'
+import { PRESETS } from './presets/index.js'
 export { DEFAULT_SETTINGS } from './settings-contract.js'
 export type { Settings, SettingsPatch, SettingsIssue, SettingsRead, RoutingCatalog } from './settings-contract.js'
 
@@ -12,6 +13,7 @@ const ordinary = {
   decisionService: z.object({ provider: z.enum(['openrouter','typesafe','concentrate','custom']), model: z.string().regex(/^[A-Za-z0-9._:/~-]{1,128}$/).optional(), endpoint: z.string().max(2048).optional() }).strict().refine(value => { try { resolveDecisionService(value); return true } catch { return false } }, 'Invalid decision service'),
   decisionToast: z.boolean(), defaultMode: z.enum(['MANUAL', 'AUTO']),
   effortCap: z.enum(AUTO_EFFORTS), jevTimeoutMs: z.number().int().min(1000).max(8000),
+  preset: z.enum(PRESETS.map(p => p.id) as [string, ...string[]]),
 }
 const patchSchema = z.object(Object.fromEntries(Object.entries(ordinary).map(([key, schema]) => [key, schema.optional()]))).strict()
 export class SettingsValidationError extends Error {

@@ -18,6 +18,8 @@ it('spec Scenario "源码与文案不含版本"', () => {
   for (const entry of readdirSync(pkg)) if (!['lib', 'node_modules'].includes(entry)) cpSync(join(pkg, entry), join(work, entry), { recursive: true })
   mkdirSync(join(work, 'lib'), { recursive: true })
   cpSync(join(pkg, 'test/fixtures/lib-0.4.2'), join(work, 'lib'), { recursive: true })
+  // A stale pre-preset rule file must not survive the build either.
+  cpSync(join(pkg, 'src/presets/reasoning-depth/rubric.json'), join(work, 'lib/rubric.json'))
   // Dependencies resolve through the package's own Node lookup: inside the
   // monorepo they are hoisted to the repository root, while a standalone
   // checkout keeps them in this package. No `../../` monorepo assumption.
@@ -28,8 +30,9 @@ it('spec Scenario "源码与文案不含版本"', () => {
   const [packed] = Array.isArray(output) ? output : Object.values(output)
   if (!packed) throw new Error('npm pack returned no package metadata')
   const paths = packed.files.map(f => f.path)
-  for (const gone of ['lib/router.js', 'lib/judgements.js', 'lib/policy-v2.js', 'lib/policy-v2-rubric.json']) expect(paths, gone).not.toContain(gone)
+  for (const gone of ['lib/router.js', 'lib/judgements.js', 'lib/policy-v2.js', 'lib/policy-v2-rubric.json', 'lib/rubric.json']) expect(paths, gone).not.toContain(gone)
   for (const kept of ['lib/index.js', 'lib/client.js', 'lib/usage-report.js', 'skills/subagent-model-routing/SKILL.md', 'skills/auto-model-routing-report/SKILL.md']) expect(paths, kept).toContain(kept)
+  expect(paths).toContain('lib/presets/reasoning-depth/rubric.json')
  } finally { rmSync(work, { recursive: true, force: true }) }
 
  // 2. Source text.
@@ -48,6 +51,7 @@ it('spec Scenario "源码与文案不含版本"', () => {
  for (const text of [description, params, ...skills]) for (const word of ['policy-v2', 'legacy', '原策略', '旧策略', '回滚']) expect(text, word).not.toContain(word)
 
  // 4. The rule file is byte-identical to the one before the rename.
- expect(createHash('sha256').update(readFileSync(join(pkg, 'src/rubric.json'))).digest('hex')).toBe(oracle.rubricSha256)
+ expect(createHash('sha256').update(readFileSync(join(pkg, 'src/presets/reasoning-depth/rubric.json'))).digest('hex')).toBe(oracle.rubricSha256)
  expect(existsSync(join(pkg, 'src/policy-v2-rubric.json'))).toBe(false)
+ expect(existsSync(join(pkg, 'src/rubric.json'))).toBe(false)
 }, 120_000)

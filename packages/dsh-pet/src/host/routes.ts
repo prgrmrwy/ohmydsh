@@ -29,7 +29,10 @@ import { detectProjectionDrift, rebuildProjection } from './projection.js'
 import type { PetRepository } from './repository.js'
 import {
   LocusManagementError,
+  type LocusAccessRequest,
   type LocusManagementPort,
+  type LocusRebindRequest,
+  type LocusStopRequest,
 } from './locus/management.js'
 import { LOCUS_WRITE_ENABLED, LOCUS_WRITE_DISABLED_DIAGNOSTIC } from './locus/policy-verification.js'
 import { containsStorageKeySeparator } from './locus/storage-key.js'
@@ -50,12 +53,7 @@ import {
   type PetSourceKind,
   type PetWorkspaceChoice,
   LOCUS_ROUTES,
-  type PetLocusActionRequest,
-  type PetLocusDiscoveryRequest,
   type PetLocusEndpointInput,
-  type PetLocusEndpointView,
-  type PetLocusManagementView,
-  type PetLocusView,
   type PetTodoAction,
   type PetTodoDispatchReceipt,
   type PetTodoView,
@@ -393,38 +391,22 @@ function requireReady(lifecycle: PetLifecycleMachine): void {
   }
 }
 
-const LOCUS_FENCE_FIELDS = ['expectedGeneration', 'expectedLocusId', 'expectedUpdatedAt'] as const
-/**
- * Upper bound on one session-level replacement, mirroring the page size the
- * owner surface renders. A body this large is not a realistic click, and
- * bounding it keeps one request from doing unbounded provisioning work.
- */
-const MAX_REPLACE_PARENT_ENTRIES = 64
+const LOCUS_FENCE_FIELDS = ['expectedLocusId', 'expectedRevision'] as const
+
+/** The three v20 management mutations (design D10). */
+export type LocusMutationAction = 'stop' | 'access' | 'rebind'
 
 /**
  * The exact request fields each locus action accepts.
  *
  * Exported so a test can hold the client's payloads against the same list the
- * route enforces. TypeScript cannot: a spread of an object literal is not
- * excess-property-checked, so a client that spreads a shared fence carrying a
- * field this action does not accept still compiles — and then the route answers
- * `Unknown request field 'locusId'` at runtime.
+ * route enforces: a spread of an object literal is not excess-property-checked,
+ * so only this list catches a client that ships a field the route rejects.
  */
-export const LOCUS_ACTION_FIELDS: Readonly<Record<PetLocusActionRequest['action'], readonly string[]>> = {
-  bind: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', ...LOCUS_FENCE_FIELDS],
-  unbind: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
-  scope: ['action', 'locusId', 'mode', ...LOCUS_FENCE_FIELDS],
-  tools: ['action', 'locusId', 'tier', ...LOCUS_FENCE_FIELDS],
-  'confirm-anchor': [
-    'action', 'endpoint', 'locusId', 'executionRoot', 'projectResources', 'constraints', 'existence',
-    ...LOCUS_FENCE_FIELDS,
-  ],
-  rebuild: ['action', 'endpoint', 'parentSessionId', 'workspaceId', 'parentLocusId', 'asDefaultQa', ...LOCUS_FENCE_FIELDS],
-  archive: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
-  stop: ['action', 'endpoint', 'locusId', ...LOCUS_FENCE_FIELDS],
-  // Session-level, so it carries no per-locus fence: the Host re-proves each
-  // entry against its own rows and skips anything that moved on.
-  'replace-parent': ['action', 'parentSessionId', 'entries'],
+export const LOCUS_ACTION_FIELDS: Readonly<Record<LocusMutationAction, readonly string[]>> = {
+  stop: ['action', 'endpoint', ...LOCUS_FENCE_FIELDS],
+  access: ['action', 'endpoint', 'accessMode', ...LOCUS_FENCE_FIELDS],
+  rebind: ['action', 'chatId', 'workSessionId', ...LOCUS_FENCE_FIELDS],
 }
 
 function optionalFiniteInteger(record: Record<string, unknown>, key: string): number | undefined {
@@ -434,22 +416,6 @@ function optionalFiniteInteger(record: Record<string, unknown>, key: string): nu
     throw new PetError('INVALID_REQUEST', `${key} must be a non-negative safe integer`)
   }
   return value
-}
-
-function optionalBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
-  const value = record[key]
-  if (value === undefined) return undefined
-  if (typeof value !== 'boolean') throw new PetError('INVALID_REQUEST', `${key} must be a boolean`)
-  return value
-}
-
-function optionalStringArray(record: Record<string, unknown>, key: string): readonly string[] | undefined {
-  const value = record[key]
-  if (value === undefined) return undefined
-  if (!Array.isArray(value) || value.some(item => typeof item !== 'string' || item.trim() === '')) {
-    throw new PetError('INVALID_REQUEST', `${key} must be an array of non-empty strings`)
-  }
-  return value.map(item => String(item).trim())
 }
 
 function locusEndpointInput(value: unknown): PetLocusEndpointInput {
@@ -474,125 +440,54 @@ function locusEndpointInput(value: unknown): PetLocusEndpointInput {
   }
 }
 
-function parseLocusAction(body: unknown, expectedAction?: PetLocusActionRequest['action']): PetLocusActionRequest {
+type ParsedLocusAction =
+  | ({ readonly action: 'stop' } & LocusStopRequest)
+  | ({ readonly action: 'access' } & LocusAccessRequest)
+  | ({ readonly action: 'rebind' } & LocusRebindRequest)
+
+function locusIdentifier(record: Record<string, unknown>, key: string): string {
+  const value = requireString(record, key).trim()
+  if (value === '') throw new PetError('INVALID_REQUEST', `${key} must be a non-empty string`)
+  if (containsStorageKeySeparator(value)) {
+    throw new PetError('INVALID_REQUEST', `${key} may not contain the storage key separator`)
+  }
+  return value
+}
+
+function parseLocusAction(body: unknown): ParsedLocusAction {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     throw new PetError('INVALID_REQUEST', 'Request body must be a JSON object')
   }
   const action = requireString(body as Record<string, unknown>, 'action')
-  if (action !== 'bind' && action !== 'unbind' && action !== 'scope' && action !== 'tools' && action !== 'confirm-anchor' && action !== 'rebuild' && action !== 'archive' && action !== 'stop' && action !== 'replace-parent') {
+  if (action !== 'stop' && action !== 'access' && action !== 'rebind') {
     throw new PetError('INVALID_REQUEST', `Unknown locus action '${action}'`)
   }
-  if (expectedAction !== undefined && action !== expectedAction) {
-    throw new PetError('INVALID_REQUEST', `Expected locus action '${expectedAction}'`)
-  }
   const record = strictBody(body, LOCUS_ACTION_FIELDS[action])
-  const expectedGeneration = optionalFiniteInteger(record, 'expectedGeneration')
-  const expectedUpdatedAt = optionalFiniteInteger(record, 'expectedUpdatedAt')
-  const expectedLocusId = optionalString(record, 'expectedLocusId')
-  const fence = {
-    ...(expectedGeneration === undefined ? {} : { expectedGeneration }),
-    ...(expectedLocusId === undefined ? {} : { expectedLocusId: expectedLocusId.trim() }),
-    ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }),
-  }
+  const expectedRevision = optionalFiniteInteger(record, 'expectedRevision')
+  if (expectedRevision === undefined) throw new PetError('INVALID_REQUEST', 'expectedRevision is required')
+  const fence = { expectedLocusId: requireString(record, 'expectedLocusId').trim(), expectedRevision }
+  if (fence.expectedLocusId === '') throw new PetError('INVALID_REQUEST', 'expectedLocusId must be a non-empty string')
   switch (action) {
-    case 'bind':
-      return {
-        action,
-        endpoint: locusEndpointInput(record['endpoint']),
-        parentSessionId: requireString(record, 'parentSessionId').trim(),
-        ...(optionalString(record, 'workspaceId') === undefined ? {} : { workspaceId: optionalString(record, 'workspaceId')!.trim() }),
-        ...(optionalString(record, 'parentLocusId') === undefined ? {} : { parentLocusId: optionalString(record, 'parentLocusId')!.trim() }),
-        ...fence,
+    case 'stop':
+      return { action, endpoint: locusEndpointInput(record['endpoint']), ...fence }
+    case 'access': {
+      const accessMode = requireString(record, 'accessMode')
+      if (accessMode !== 'read-only' && accessMode !== 'danger-full-access') {
+        throw new PetError('INVALID_REQUEST', 'accessMode must be read-only or danger-full-access')
       }
-    case 'rebuild': {
-      const asDefaultQa = optionalBoolean(record, 'asDefaultQa')
-      return {
-        action,
-        endpoint: locusEndpointInput(record['endpoint']),
-        parentSessionId: requireString(record, 'parentSessionId').trim(),
-        ...(optionalString(record, 'workspaceId') === undefined ? {} : { workspaceId: optionalString(record, 'workspaceId')!.trim() }),
-        ...(optionalString(record, 'parentLocusId') === undefined ? {} : { parentLocusId: optionalString(record, 'parentLocusId')!.trim() }),
-        ...(asDefaultQa === undefined ? {} : { asDefaultQa }),
-        ...fence,
-      }
-    }
-    case 'replace-parent': {
-      const raw = record['entries']
-      if (!Array.isArray(raw) || raw.length === 0) {
-        throw new PetError('INVALID_REQUEST', 'entries must be a non-empty array')
-      }
-      if (raw.length > MAX_REPLACE_PARENT_ENTRIES) {
-        throw new PetError('INVALID_REQUEST', `entries exceeds ${String(MAX_REPLACE_PARENT_ENTRIES)}`)
-      }
-      return {
-        action,
-        parentSessionId: requireString(record, 'parentSessionId').trim(),
-        entries: raw.map((item) => {
-          if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-            throw new PetError('INVALID_REQUEST', 'each entry must be an object')
-          }
-          const entry = item as Record<string, unknown>
-          for (const key of Object.keys(entry)) {
-            if (key !== 'endpoint' && key !== 'locusId') {
-              throw new PetError('INVALID_REQUEST', `Unknown entry field '${key}'`)
-            }
-          }
-          return {
-            endpoint: locusEndpointInput(entry['endpoint']),
-            locusId: requireString(entry, 'locusId').trim(),
-          }
-        }),
-      }
-    }
-    case 'unbind':
-      return {
-        action,
-        locusId: requireString(record, 'locusId').trim(),
-        endpoint: locusEndpointInput(record['endpoint']),
-        ...fence,
-      }
-    case 'scope': {
-      const mode = requireString(record, 'mode')
-      if (mode !== 'read' && mode !== 'write') throw new PetError('INVALID_REQUEST', 'mode must be read or write')
-      // Both the dedicated `scope` route and the generic `action` route parse
-      // here, so refusing at this single point covers the whole panel surface.
-      if (mode === 'write' && !LOCUS_WRITE_ENABLED) {
+      // Refused at this single parse point for the whole panel surface; going
+      // back to read-only stays allowed while the switch is off (design D8).
+      if (accessMode === 'danger-full-access' && !LOCUS_WRITE_ENABLED) {
         throw new PetError('INVALID_REQUEST', LOCUS_WRITE_DISABLED_DIAGNOSTIC)
       }
-      return { action, locusId: requireString(record, 'locusId').trim(), mode, ...fence }
+      return { action, endpoint: locusEndpointInput(record['endpoint']), accessMode, ...fence }
     }
-    case 'tools': {
-      const tier = requireString(record, 'tier')
-      if (tier !== 'safe' && tier !== 'shell') throw new PetError('INVALID_REQUEST', 'tier must be safe or shell')
-      return { action, locusId: requireString(record, 'locusId').trim(), tier, ...fence }
-    }
-    case 'confirm-anchor': {
-      const existence = optionalString(record, 'existence')
-      if (existence !== undefined && existence !== 'exists' && existence !== 'missing' && existence !== 'unknown') {
-        throw new PetError('INVALID_REQUEST', 'existence must be exists, missing, or unknown')
-      }
-      const executionRoot = optionalString(record, 'executionRoot')?.trim()
+    case 'rebind':
       return {
         action,
-        locusId: requireString(record, 'locusId').trim(),
-        endpoint: locusEndpointInput(record['endpoint']),
-        ...(executionRoot === undefined ? {} : { executionRoot }),
-        ...(optionalStringArray(record, 'projectResources') === undefined
-          ? {}
-          : { projectResources: optionalStringArray(record, 'projectResources')! }),
-        ...(optionalStringArray(record, 'constraints') === undefined
-          ? {}
-          : { constraints: optionalStringArray(record, 'constraints')! }),
-        ...(existence === undefined ? {} : { existence }),
-        ...fence,
-      }
-    }
-    case 'archive':
-    case 'stop':
-      return {
-        action,
-        locusId: requireString(record, 'locusId').trim(),
-        endpoint: locusEndpointInput(record['endpoint']),
+        chatId: locusIdentifier(record, 'chatId'),
+        // Taken verbatim (trimmed): a short code is never resolved to an id.
+        workSessionId: requireString(record, 'workSessionId').trim(),
         ...fence,
       }
   }
@@ -623,21 +518,11 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       if (error instanceof LocusManagementError) {
         const code = error.code === 'CAPABILITY_UNAVAILABLE' || error.code === 'ACTION_UNAVAILABLE'
           ? 'LOCUS_UNAVAILABLE'
-          : error.code === 'LOCUS_NOT_FOUND'
-            ? 'LOCUS_NOT_FOUND'
-            : error.code === 'LOCUS_BUSY'
-              ? 'LOCUS_BUSY'
-              : error.code === 'LOCUS_INVALID'
-                ? 'LOCUS_INVALID'
-                : error.code === 'WRITE_UNSUPPORTED'
-                  ? 'WRITE_UNSUPPORTED'
-                  : error.code === 'LOCUS_STOPPED'
-                  ? 'LOCUS_STOPPED'
-                  : error.code === 'REVISION_CONFLICT'
-                  ? 'LOCUS_CONFLICT'
-                  : error.code === 'INVALID_REQUEST'
-                    ? 'INVALID_REQUEST'
-                    : 'INTERNAL'
+          : error.code === 'REVISION_CONFLICT'
+            ? 'LOCUS_CONFLICT'
+            : error.code === 'LOCUS_NOT_FOUND' || error.code === 'LOCUS_BUSY' || error.code === 'INVALID_REQUEST'
+              ? error.code
+              : 'INTERNAL'
         throw new PetError(code, `${operation}：${error.message}`)
       }
       throw error
@@ -656,45 +541,6 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
       requireLocusActor()
       return invokeLocus('读取 locus', () => requireLocus().view(), false)
     }),
-    petRoute(LOCUS_ROUTES.discovery, async ({ body }) => {
-      const record = strictBody(body, ['endpoint', 'parentSessionId', 'childSessionId'])
-      const endpoint = record['endpoint']
-      const parentSessionId = record['parentSessionId']
-      const childSessionId = record['childSessionId']
-      const selectorCount = [endpoint, parentSessionId, childSessionId].filter(value => value !== undefined).length
-      if (selectorCount !== 1) {
-        throw new PetError('INVALID_REQUEST', 'Exactly one locus discovery selector is required')
-      }
-      requireReady(lifecycle)
-      requireLocusActor()
-      if (endpoint !== undefined) {
-        if (typeof endpoint !== 'object' || endpoint === null || Array.isArray(endpoint)) {
-          throw new PetError('INVALID_REQUEST', 'endpoint must be an object')
-        }
-        const candidate = endpoint as Record<string, unknown>
-        for (const key of Object.keys(candidate)) {
-          if (key !== 'chatId' && key !== 'threadId') {
-            throw new PetError('INVALID_REQUEST', `Unknown endpoint field '${key}'`)
-          }
-        }
-        const threadId = optionalString(candidate, 'threadId')
-        const chatId = requireString(candidate, 'chatId')
-        if (containsStorageKeySeparator(chatId) || (threadId !== undefined && containsStorageKeySeparator(threadId))) {
-          throw new PetError('INVALID_REQUEST', 'endpoint identifiers may not contain the storage key separator')
-        }
-        return invokeLocus('查询 locus endpoint', () => requireLocus().discovery({ endpoint: {
-          chatId,
-          ...(threadId === undefined ? {} : { threadId }),
-        } }), false)
-      }
-      if (typeof parentSessionId === 'string' && parentSessionId.trim() !== '') {
-        return invokeLocus('查询 locus parent', () => requireLocus().discovery({ parentSessionId: parentSessionId.trim() }), false)
-      }
-      if (typeof childSessionId === 'string' && childSessionId.trim() !== '') {
-        return invokeLocus('查询 locus child', () => requireLocus().discovery({ childSessionId: childSessionId.trim() }), false)
-      }
-      throw new PetError('INVALID_REQUEST', 'Discovery selector must be a non-empty string')
-    }),
     petRoute(LOCUS_ROUTES.defaultQa, async ({ body }) => {
       const record = strictBody(body, ['parentSessionId', 'groupName'])
       requireReady(lifecycle)
@@ -705,82 +551,19 @@ export function createPetRoutes(deps: RouteDeps): readonly RouteRegistration[] {
         parentSessionId: requireString(record, 'parentSessionId'),
         actorId,
         ...(typeof record['groupName'] === 'string' ? { groupName: record['groupName'] } : {}),
-      }, { actorId }))
+      }))
     }),
     petRoute(LOCUS_ROUTES.action, async ({ body }) => {
       const request = parseLocusAction(body)
       requireReady(lifecycle)
-      const handler = requireLocus().action
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus(`执行 locus ${request.action}`, () => handler(request, {
-        actorId: requireLocusActor(),
-      }))
-    }),
-    petRoute(LOCUS_ROUTES.bind, async ({ body }) => {
-      const request = parseLocusAction(body, 'bind')
-      requireReady(lifecycle)
-      const handler = requireLocus().bind
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('绑定 locus', () => handler(
-        request as Extract<PetLocusActionRequest, { action: 'bind' }>,
-        { actorId: requireLocusActor() },
-      ))
-    }),
-    petRoute(LOCUS_ROUTES.unbind, async ({ body }) => {
-      const request = parseLocusAction(body, 'unbind')
-      requireReady(lifecycle)
-      const handler = requireLocus().unbind
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('解除 locus', () => handler(
-        request as Extract<PetLocusActionRequest, { action: 'unbind' }>,
-        { actorId: requireLocusActor() },
-      ))
-    }),
-    petRoute(LOCUS_ROUTES.scope, async ({ body }) => {
-      const request = parseLocusAction(body, 'scope')
-      requireReady(lifecycle)
-      const handler = requireLocus().scope
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('修改 locus 权限', () => handler(
-        request as Extract<PetLocusActionRequest, { action: 'scope' }>,
-        { actorId: requireLocusActor() },
-      ))
-    }),
-    petRoute(LOCUS_ROUTES.tools, async ({ body }) => {
-      const request = parseLocusAction(body, 'tools')
-      requireReady(lifecycle)
-      const handler = requireLocus().tools
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('修改 locus 工具档位', () => handler(
-        request as Extract<PetLocusActionRequest, { action: 'tools' }>,
-        { actorId: requireLocusActor() },
-      ))
-    }),
-    petRoute(LOCUS_ROUTES.rebuild, async ({ body }) => {
-      const request = parseLocusAction(body, 'rebuild')
-      requireReady(lifecycle)
-      const handler = requireLocus().rebuild
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('重建 locus', () => handler(
-        request as Extract<PetLocusActionRequest, { action: 'rebuild' }>,
-        { actorId: requireLocusActor() },
-      ))
-    }),
-    petRoute(LOCUS_ROUTES.archive, async ({ body }) => {
-      const request = parseLocusAction(body, 'archive')
-      requireReady(lifecycle)
       const port = requireLocus()
-      const handler = port.archive ?? port.action
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('归档 locus', () => handler(request as never, { actorId: requireLocusActor() }))
-    }),
-    petRoute(LOCUS_ROUTES.stop, async ({ body }) => {
-      const request = parseLocusAction(body, 'stop')
-      requireReady(lifecycle)
-      const port = requireLocus()
-      const handler = port.stop ?? port.action
-      if (handler === undefined) return locusUnavailable()
-      return invokeLocus('停止 locus', () => handler(request as never, { actorId: requireLocusActor() }))
+      const context = { actorId: requireLocusActor() }
+      const { action, ...rest } = request
+      return invokeLocus(`执行 locus ${action}`, () => action === 'stop'
+        ? port.stop(rest as LocusStopRequest, context)
+        : action === 'access'
+          ? port.access(rest as LocusAccessRequest, context)
+          : port.rebind(rest as LocusRebindRequest, context))
     }),
 
     // `pet-locus-intent-triage` owner surface. Both routes require the same

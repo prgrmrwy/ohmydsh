@@ -13,7 +13,9 @@ import LlmRuntime, {
 import SessionProjection from '@deepseek-ai/dsh-session-projection'
 import SessionStore, { SessionId, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { contentToolFixture, executeToolCall } from './support/tool-fixture.js'
 import { activeBindingContext, cleanedBindingContext, installContext } from '../src/host/context.js'
 import { installSubagentInheritance, rememberBind } from '../src/host/policy.js'
 import type { OperationRecord } from '../src/wire.js'
@@ -81,10 +83,12 @@ async function harness(responses: number): Promise<{ ctx: Context; adapter: Scri
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
-  await ctx.plugin(AgentRegistry)
-  // 0.1.2: AgentLoop injects `sessionProjections`; without this plugin the
-  // loop never loads and `agents.create` throws "no agent factory registered".
+  // 0.2.2 loads no tool executor by default; dispatch needs the native one.
+  await ctx.plugin(NativeToolExecutor)
+  // AgentRegistry injects `sessionProjections` (0.2.2): without it ready first,
+  // `agents` is not yet published when `agents.create` runs ("no agent factory registered").
   await ctx.plugin(SessionProjection)
+  await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   const adapter = new ScriptedAdapter(Array.from({ length: responses }, (_, index) => textResponse(`reply-${index + 1}`)))
   ctx.llm.registerAdapter(['scripted'], adapter)
@@ -211,10 +215,9 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     const record = operation()
     const { ctx } = await harness(1)
     let bodyCalls = 0
-    ctx.tools.register(defineContentToolFixture({
+    ctx.tools.register(contentToolFixture({
       name: 'read',
       description: 'test read fixture',
-      parameters: { file_path: { type: 'string', required: true } },
       async execute() { bodyCalls += 1; return [{ type: 'text', text: 'must not execute' }] },
     }))
     const parent = await createBoundAgent(ctx, record)
@@ -227,7 +230,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     })
     // agent/created recovery reconciles the child's own (absent) binding.
     rememberBind(ctx, child.agent.id as string, undefined)
-    const result = await ctx.tools.execute({
+    const result = await executeToolCall(ctx, {
       callId: ToolCallId('child-escape-read'),
       name: 'read',
       arguments: { file_path: record.repoRoot + '/file.txt' },
@@ -245,15 +248,14 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     const cleaned = operation('cleaned')
     const { ctx } = await harness(1)
     let bodyCalls = 0
-    ctx.tools.register(defineContentToolFixture({
+    ctx.tools.register(contentToolFixture({
       name: 'read',
       description: 'test read fixture',
-      parameters: { file_path: { type: 'string', required: true } },
       async execute() { bodyCalls += 1; return [{ type: 'text', text: 'must not execute' }] },
     }))
     const { agent } = await createBoundAgent(ctx, cleaned)
     rememberBind(ctx, agent.session.id as string, cleaned)
-    const result = await ctx.tools.execute({
+    const result = await executeToolCall(ctx, {
       callId: ToolCallId('cleaned-read'),
       name: 'read',
       arguments: { file_path: cleaned.worktreePath + '/file.txt' },
@@ -270,17 +272,16 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     const released = operation('released')
     const { ctx } = await harness(2)
     let bodyCalls = 0
-    ctx.tools.register(defineContentToolFixture({
+    ctx.tools.register(contentToolFixture({
       name: 'read',
       description: 'release fixture',
-      parameters: { file_path: { type: 'string', required: true } },
       async execute() { bodyCalls += 1; return [{ type: 'text', text: 'ordinary' }] },
     }))
     const { agent } = await createBoundAgent(ctx, cleaned)
     rememberBind(ctx, agent.session.id as string, cleaned)
     await step(agent, 'cleaned')
     rememberBind(ctx, agent.session.id as string, released)
-    const result = await ctx.tools.execute({ callId: ToolCallId('released-read'), name: 'read', arguments: { file_path: '/repo/file.txt' }, agent, signal: new AbortController().signal })
+    const result = await executeToolCall(ctx, { callId: ToolCallId('released-read'), name: 'read', arguments: { file_path: '/repo/file.txt' }, agent, signal: new AbortController().signal })
     expect(result.isError).toBe(false)
     expect(bodyCalls).toBe(1)
     await step(agent, 'released')
@@ -290,7 +291,7 @@ describe('Worktree Session AgentLoop runtime-context projection', () => {
     expect(eventText(projections[1]!)).toContain('Current runtime context')
     expect(eventText(projections[1]!)).not.toContain('Worktree Session（已清理）')
     rememberBind(ctx, agent.session.id as string, released)
-    expect(await ctx.tools.execute({ callId: ToolCallId('released-read-again'), name: 'read', arguments: { file_path: '/repo/again.txt' }, agent, signal: new AbortController().signal })).toMatchObject({ isError: false })
+    expect(await executeToolCall(ctx, { callId: ToolCallId('released-read-again'), name: 'read', arguments: { file_path: '/repo/again.txt' }, agent, signal: new AbortController().signal })).toMatchObject({ isError: false })
   })
 
   it('adds one terminal snapshot for active to cleaned and does not repeat it', async () => {

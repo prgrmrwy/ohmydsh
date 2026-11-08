@@ -15,6 +15,7 @@ import {
   type LinkRole,
 } from '../shared/links.js'
 import type { PresentCall, ProducedFile, SessionExtraction } from '../shared/produced.js'
+import { mutationPathOfCall } from '../shared/mutations.js'
 
 /** Is this render intent a mutation whose locations count as produced files? */
 function isMutation(view: NonNullable<ReturnType<PresentCall>>): boolean {
@@ -53,12 +54,14 @@ function toolResultFailed(message: unknown): boolean {
  * Presenter throws soft-fall to no view (the generic-card default).
  */
 export function extractSession(events: readonly SessionEvent[], presentCall: PresentCall, rules: LinkRules = DEFAULT_LINK_RULES): SessionExtraction {
-  // Pass 1: which calls failed (so their provisional mutations are withdrawn).
-  const failedCalls = new Set<string>()
+  // A persisted call without a successful result is not yet an output file.
+  const completedCalls = new Set<string>()
   for (const event of events) {
-    if (event.type === 'tool/result' && (event.data.error !== undefined || toolResultFailed(event.data.message))) {
-      failedCalls.add(event.data.message.source.callId)
-    }
+    if (event.type !== 'tool/result') continue
+    const callId = event.data.message?.source?.callId
+    if (typeof callId !== 'string') continue
+    if (event.data.error !== undefined || toolResultFailed(event.data.message)) completedCalls.delete(callId)
+    else completedCalls.add(callId)
   }
 
   const byUrl = new Map<string, LinkEntry>()
@@ -91,17 +94,18 @@ export function extractSession(events: readonly SessionEvent[], presentCall: Pre
     }
     if (event.type === 'tool/call') {
       const { callId, name, arguments: rawArgs } = event.data
-      if (failedCalls.has(callId)) continue
+      if (!completedCalls.has(callId)) continue
       let view: ReturnType<PresentCall>
       try {
         view = presentCall(name, rawArgs)
       } catch {
         view = undefined
       }
-      if (view !== undefined && isMutation(view)) {
-        for (const path of mutationPaths(view)) {
-          if (!byPath.has(path)) byPath.set(path, { path, time: event.time, seq: event.seq })
-        }
+      // Agent-scoped tools may have no Host presenter; keep the existing first-party vocabulary.
+      const fallback = view === undefined ? mutationPathOfCall(name, rawArgs) : null
+      const paths = view !== undefined && isMutation(view) ? mutationPaths(view) : fallback === null ? [] : [fallback]
+      for (const path of paths) {
+        if (!byPath.has(path)) byPath.set(path, { path, time: event.time, seq: event.seq })
       }
       continue
     }

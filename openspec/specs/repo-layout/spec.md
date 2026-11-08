@@ -2,7 +2,9 @@
 
 ## Purpose
 定义 ohmydsh 仓库的目录结构、总配置 manifest 契约,以及将启用的定制和环境级指令物化到 DSH 部署环境的 sync 行为。
+
 ## Requirements
+
 ### Requirement: 总配置 manifest 声明 DSH 版本与定制列表
 仓库根必须(SHALL)包含 `dsh.yaml` manifest。manifest 必须声明锁定的 DSH 版本与定制列表,其中每项必须包含 `id`、`type`、`enabled`,且 `package` 与 `preset` 类型必须包含 `version`。manifest 可(MAY)声明顶层 `dependencies` 列表:无 bundle 的支撑包(如 remote 定制缺失的 peer),每项为含精确版本的 npm spec;定制条目可(MAY)通过 `deps` 引用其中的包名声明归属,被引用的包名必须存在于顶层 `dependencies`,否则 sync 报错。
 
@@ -224,9 +226,9 @@ overlay 根与公开仓库根具有**同等信任**:两者都由本机使用者�
 
 sync 必须(SHALL)在对 `$DSH_HOME` 做任何写入(含创建 profile 目录与 profile 骨架、迁移状态账本)之前,对所有启用的定制完成源码预检:local package 的 `package.json`、其每个 `compatDependencies[].path` 下的 `package.json`、preset 的 `agent.cordis.yml`、skill 的 `SKILL.md`、patch 的 `<id>.yml`、每个 `buildInputs` 条目必须存在、类型为普通文件或目录(见「local package 的构建输入可声明文件或目录」)且满足上述越界约束。预检失败时 sync 必须(SHALL)报错并以非零退出码结束,错误信息包含缺失或越界的绝对路径,且 `$DSH_HOME` 下的文件树不发生任何变化(不存在的 profile 目录仍不存在)。
 
-加载 manifest(含 overlay 合并、逐字段校验、保留字段与 npm spec 包名一致性检查)必须(SHALL)不读取任何定制源码。需要读取源码的步骤(local package 包名解析、npm 包名唯一性检查)必须(SHALL)在源码预检通过之后、`$DSH_HOME` 写入之前执行。禁用的 local package 若其 `package.json` 不存在,sync 不得(SHALL NOT)因此报错,该条目视为不在 manifest 中:若此前已部署,按「从 manifest 删除」的既有逻辑移除;若其 `package.json` 存在,sync 必须(SHALL)先确认该文件解析符号链接后位于所属根之内再读取,越界时在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束。`hostRuntimeCompatibility` 的声明校验(归属、kind、版本与 `dshVersion` 一致)属于加载阶段且不读取源码;运行体构建器等源码文件的存在性检查属于常规 sync 的源码预检。`--reset` 只依据部署状态与 profile 现状移除受管部署,必须(SHALL)不执行源码预检、不解析 local 包名,定制源码缺失不得(SHALL NOT)阻止 reset。
+加载 manifest(含 overlay 合并、逐字段校验、保留字段与 npm spec 包名一致性检查)必须(SHALL)不读取任何定制源码。需要读取源码的步骤(local package 包名解析、npm 包名唯一性检查)必须(SHALL)在源码预检通过之后、`$DSH_HOME` 写入之前执行。禁用的 local package 若其 `package.json` 不存在,sync 不得(SHALL NOT)因此报错,该条目视为不在 manifest 中:若此前已部署,按「从 manifest 删除」的既有逻辑移除;若其 `package.json` 存在,sync 必须(SHALL)先确认该文件解析符号链接后位于所属根之内再读取,越界时在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束。已退役的 `hostRuntimeCompatibility` 字段在加载阶段被拒绝(报告该机制已退役),该拒绝不读取源码。`--reset` 只依据部署状态与 profile 现状移除受管部署,必须(SHALL)不执行源码预检、不解析 local 包名,定制源码缺失不得(SHALL NOT)阻止 reset。
 
-overlay 的内容结构必须(SHALL)与 `dsh.yaml` 的 `customizations` **同构**:顶层为映射,其 `customizations` 为定制条目列表,每个条目的字段语义、校验规则与公开 manifest 完全一致(含 `note`、`brief`、`enabledEnv`、`npmScopes`、`hostRuntimeCompatibility` 等)。overlay 条目的审查记录随条目留在该文件内,公开 manifest 不得(SHALL NOT)为其保留任何占位、计数或存在性声明。
+overlay 的内容结构必须(SHALL)与 `dsh.yaml` 的 `customizations` **同构**:顶层为映射,其 `customizations` 为定制条目列表,每个条目的字段语义、校验规则与公开 manifest 完全一致(含 `note`、`brief`、`enabledEnv`、`npmScopes` 等)。overlay 条目的审查记录随条目留在该文件内,公开 manifest 不得(SHALL NOT)为其保留任何占位、计数或存在性声明。
 
 overlay 的权限边界必须(SHALL)是**只追加定制条目**:
 
@@ -237,11 +239,11 @@ overlay 的权限边界必须(SHALL)是**只追加定制条目**:
 - remote package 的 `spec` 是 npm registry spec(`<name>@<version>`)且同时声明 `name` 时,`name` 必须(SHALL)等于从 `spec` 解析出的包名,否则 sync 在加载阶段报错并以非零退出码结束;包名唯一性检查使用安装时实际生效的包名。
 - 合并后任意两个 package 条目(含可解析包名的禁用条目)解析出相同的 npm 包名,或某个 package 条目的 npm 包名、顶层 `dependencies` 中的包名与任一 local package 的 `compatDependencies[].name` 三者之间出现重复时,sync 必须(SHALL)在任何 `$DSH_HOME` 写入之前报错并以非零退出码结束,指明冲突的包名与涉及的条目 id、`dependencies` 或 `compatDependencies`;overlay 不得(SHALL NOT)以不同 id、相同包名的方式替换公开 package 或受管支撑依赖。
 
-overlay 条目必须(SHALL)走与公开条目**完全相同**的校验与安全路径,不得(SHALL NOT)因来源是本地文件而放宽:逐字段类型与命名校验、`source: remote` 的精确版本 pin 要求、`deps` 引用完整性,以及 `hostRuntimeCompatibility` 的运行体版本围栏。该围栏必须(SHALL)在任何 profile 或部署面操作之前完成校验。
+overlay 条目必须(SHALL)走与公开条目**完全相同**的校验与安全路径,不得(SHALL NOT)因来源是本地文件而放宽:逐字段类型与命名校验、`source: remote` 的精确版本 pin 要求、`deps` 引用完整性,以及对已退役 `hostRuntimeCompatibility` 字段的拒绝。这些校验必须(SHALL)在任何 profile 或部署面操作之前完成。
 
 overlay 根下 local package 的构建必须(SHALL)以 overlay 根为工作目录,按 overlay 根自己的 npm workspaces 执行;构建失败时的行为与公开 local package 相同(在替换已部署 package 前报错停止)。公开仓库的根 `package.json`、`package-lock.json` 与 `.npmrc` 不得(SHALL NOT)因 overlay 根的存在或其构建而改变。
 
-合并结果必须(SHALL)是所有消费方的唯一事实来源:物化(sync)、启动清单、插件升级检查与运行体版本围栏必须(SHALL)看到同一份合并后的定制列表,并按同一所属根解析 local 条目,不得(SHALL)出现「已物化但清单不可见」或「已物化但升级检查不覆盖」的分裂状态。
+合并结果必须(SHALL)是所有消费方的唯一事实来源:物化(sync)、启动清单与插件升级检查必须(SHALL)看到同一份合并后的定制列表,并按同一所属根解析 local 条目,不得(SHALL)出现「已物化但清单不可见」或「已物化但升级检查不覆盖」的分裂状态。
 
 插件升级检查对 scoped 包:若该 scope 在 profile 目录的 npm 配置中配置了 registry,元数据查询必须(SHALL)经由以 profile 目录为工作目录的 npm 客户端完成,从而使用与安装相同的 registry 与认证配置;否则沿用默认 registry 查询。升级检查输出的每一行(含 skipped 行)必须(SHALL)携带该条目是否来自 overlay 的来源标记。插件自动升级(改写 manifest 并提交)只改写公开 `dsh.yaml`,因此必须(SHALL)依据该来源标记把 overlay 条目排除在自动改写之外,在输出中标明该条目需在 overlay 中手动升级,且不得(SHALL NOT)因 overlay 条目 upgrade-ready 而改写公开 `dsh.yaml` 或报错退出。
 
@@ -268,7 +270,7 @@ overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静
 - **THEN** sync 在加载阶段报错并以非零退出码结束,指明越权字段,不物化任何变更
 
 #### Scenario: overlay 条目不因来源而放宽校验
-- **WHEN** overlay 条目缺少必填字段、`source: remote` 缺少精确版本 pin,或其 `hostRuntimeCompatibility` 与当前 `dshVersion` 不符
+- **WHEN** overlay 条目缺少必填字段、`source: remote` 缺少精确版本 pin,或声明了已退役的 `hostRuntimeCompatibility`
 - **THEN** sync 以与公开 manifest 中同类错误相同的方式报错并以非零退出码结束,且在任何 profile 操作之前发生
 
 #### Scenario: overlay 存在但不可解析时拒绝运行
@@ -392,11 +394,6 @@ overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静
 - **WHEN** 运行 `sync --reset`
 - **THEN** 命令以退出码 0 结束,profile `package.json` 的 `dependencies` 中不再含 `q` 的包名,`cordis.patch.yml` 不含 `fragment: p`
 
-#### Scenario: 运行体兼容源码缺失不阻止 reset
-- **GIVEN** 公开 manifest 中启用的 `dsh-pet` 声明 `hostRuntimeCompatibility`,其运行体构建器文件不存在,profile 已部署受管 package
-- **WHEN** 运行 `sync --reset`
-- **THEN** 命令以退出码 0 结束,profile `package.json` 的 `dependencies` 中不再含受管 package;同样条件下运行常规 sync 则以非零退出码结束且 `$DSH_HOME` 不变
-
 #### Scenario: 禁用 local package 的 package.json 越出所属根时拒绝运行
 - **GIVEN** overlay 中 local package `q` 为 `enabled: false`,`<R>/packages/q/package.json` 是指向 `<R>` 之外文件的符号链接
 - **WHEN** 运行 sync
@@ -411,6 +408,11 @@ overlay 缺失是**常态而非错误**:文件不存在时 sync 必须(SHALL)静
 - **GIVEN** 外部 overlay 根 `<R>` 中启用的 local package `q` 的 `package.json` 名为 `@example/q`,且 profile 中已安装该包
 - **WHEN** 运行启动清单
 - **THEN** 清单中 `@example/q` 一行带有来自 manifest 的说明,而非仅有包自身 `description`
+
+#### Scenario: 运行体兼容源码缺失不阻止 reset
+- **GIVEN** profile 曾部署受管 package,仓库已删除 `packages/dsh-pet/compat/`,公开 manifest 不再声明 `hostRuntimeCompatibility`
+- **WHEN** 运行 `sync --reset` 或常规 sync
+- **THEN** 两者均不因缺少兼容运行体源码而失败;若 manifest 或 overlay 重新声明该字段,常规 sync 在加载阶段报告该机制已退役并以非零退出码结束,`$DSH_HOME` 不变
 
 ### Requirement: 生成文件带标记且按序合并
 sync 生成的文件（含 patch 层）必须（SHALL）带有生成标记头，声明仓库为真相源。多个启用定制贡献的 patch 行必须按 manifest 顺序合并。
@@ -513,27 +515,51 @@ sync 写入 profile 的 `package.json` 时，必须（SHALL）与运行体的插
 - **THEN** 仅根 `package-lock.json` 随之更新，package 目录中不产生需提交的独立 lockfile
 
 ### Requirement: 自研 package 的运行体 peer 声明跟随 manifest 版本族
-仓库内 local package 对运行体包(`@deepseek-ai/dsh-*`)的 `peerDependencies` 声明必须(SHALL)与 `dsh.yaml` 所 pin 的 `dshVersion` 属于同一版本族,并采用与上游自身一致的范围写法。此类 peer 不得(SHALL NOT)使用精确版本 pin:精确 pin 在运行体升级后可能解析出第二份同名包,造成同一模块的双实例。仓库必须(SHALL)提供一项自动检查,在任一 local package 的运行体 peer 声明偏离当前 `dshVersion` 版本族时失败,并指出具体的 package、依赖名与实际声明。非运行体依赖(如 `react`、`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`)不受本要求约束。
+仓库内 local package 的运行体兼容声明必须(SHALL)是一个显式区间,而不是跟随 `dshVersion` 的 caret 范围。凡声明了任一 `@deepseek-ai/dsh-*` peer 的 local package,必须(SHALL)同时声明 `engines.dsh`,形如 `>=<下界> <<major>.<minor+1>.0-0`;它的每个 `@deepseek-ai/dsh-*` peer 必须(SHALL)恰好是 `<engines.dsh> || ^<dshVersion>`,且必须(SHALL)有同名 devDependency。
 
-`dshVersion` 与各 local package 的运行体 peer 声明必须(SHALL)作为**同一批次**变更:二者构成一个必须一致的整体,因此运行体升级不得(SHALL NOT)在未同步更新 peer 声明的情况下被视为完成。该检查在版本族迁移期间失败是**预期的前置门槛**,而非缺陷——它标示本批次尚未完成,不得(SHALL NOT)通过放宽检查、豁免个别 package 或临时跳过来"修复"。
+peer 的 `|| ^<dshVersion>` 尾段是当前 pin 的子集,在 DSH 含预发布的匹配语义下不改变判定结果;它存在只是因为 npm 按标准 semver 校验 workspace peer,否则 npm 会拒绝把预发布运行体 hoist 到仓库根,在各 package 下嵌套重复副本,而嵌套副本会越过 worktree 解析到外层 checkout 的旧版本。缺少同名 devDependency 的 peer 会被 npm 按标准语义自动安装,可能装成旧运行体。区间本身需满足:
+
+- 下界必须(SHALL)是该 package 已有实测证据可运行的最低 DSH 版本,且不高于 `dsh.yaml` 的 `dshVersion`;
+- 上界必须(SHALL)是下一个 minor 的 `-0` 形式(例如 `<0.3.0-0`)。DSH 按含预发布的语义匹配范围,`<0.3.0` 会接纳 `0.3.0-rc.*`,因此不得(SHALL NOT)使用;也不得(SHALL NOT)省略上界;
+- 当前 `dshVersion` 必须(SHALL)在含预发布语义下满足该范围。
+
+两字段必须语义一致,是因为 DSH 0.2.1 起声明了 `engines.dsh` 时只看它,0.2.0 只看 peer;两者不一致会让同一个包在不同运行体上得到不同的兼容结论。
+
+local package 的 `@deepseek-ai/dsh-*` devDependencies 必须(SHALL)等于 `^<dshVersion>`,保证按当前 pin 构建与类型检查。任何运行体依赖都不得(SHALL NOT)使用精确版本 pin:精确 pin 在运行体升级后可能解析出第二份同名包,造成同一模块的双实例。
+
+仓库必须(SHALL)提供一项自动检查,在任一 local package 违反上述任一条时失败,并指出具体的 package、字段、依赖名与实际声明。非运行体依赖(如 `react`、`@deepseek-ai/cordis`、`@deepseek-ai/schemastery`)不受本要求约束。
+
+`dshVersion` 升级与 devDependencies、兼容区间的复核必须(SHALL)作为**同一批次**变更。新 `dshVersion` 超出某 package 的区间时,检查失败是**预期的前置门槛**,不得(SHALL NOT)通过放宽检查、豁免个别 package 或临时跳过来"修复";要么以实测证据扩大区间,要么推迟升级。
 
 当上游在新版本族中**移除或拆分**了某个运行体包时,对该包的 peer 声明不得(SHALL NOT)被机械改写为新版本族的同名声明。此种情形必须(SHALL)被识别为接口面迁移:该 peer 必须(SHALL)改为声明其在新版本族中的实际承接包,或在该 local package 不再依赖该接口面时移除。
 
 #### Scenario: 运行体升级后声明未跟进
-- **WHEN** `dshVersion` 升级到新版本族,而某 local package 的 `@deepseek-ai/dsh-*` peer 仍声明旧版本族
-- **THEN** 仓库检查失败,并指出该 package、依赖名与实际声明
-
-#### Scenario: 拒绝精确 pin
-- **WHEN** 某 local package 以精确版本(而非范围)声明运行体包 peer
-- **THEN** 仓库检查失败,要求改为跟随版本族的范围写法
+- **WHEN** `dshVersion` 升级到某 local package 兼容区间之外的版本
+- **THEN** 仓库检查失败,并指出该 package、字段与实际声明
 
 #### Scenario: 声明已对齐
-- **WHEN** 全部 local package 的运行体 peer 均处于当前 `dshVersion` 版本族且均为范围写法
+- **WHEN** 全部 local package 的 `engines.dsh` 与 dsh peer 同值、区间合法且包含当前 `dshVersion`,devDependencies 等于 `^<dshVersion>`
 - **THEN** 仓库检查通过,且不对非运行体依赖提出要求
 
+#### Scenario: 运行体升级仍在兼容区间内
+- **WHEN** `dshVersion` 从 `0.2.0-rc.2` 升到 `0.2.1-rc.5`,某 package 的 `engines.dsh` 为 `>=0.2.0-rc.2 <0.3.0-0`,devDependencies 与 peer 尾段已随 pin 改为 `^0.2.1-rc.5`
+- **THEN** 该 package 的检查通过,`engines.dsh` 与兼容下界无需改写
+
+#### Scenario: engines.dsh 与 peer 不一致
+- **WHEN** 某 local package 的某个 `@deepseek-ai/dsh-*` peer 不等于 `<engines.dsh> || ^<dshVersion>`,或声明了 dsh peer 却没有 `engines.dsh`,或某个 dsh peer 没有同名 devDependency
+- **THEN** 仓库检查失败
+
+#### Scenario: 上界写成会接纳下一 minor 预发布的形式
+- **WHEN** 某 local package 的区间上界为 `<0.3.0` 或没有上界
+- **THEN** 仓库检查失败,要求改为 `<0.3.0-0`
+
+#### Scenario: 拒绝精确 pin
+- **WHEN** 某 local package 以精确版本声明运行体包的 peer、devDependency 或 dependency
+- **THEN** 仓库检查失败
+
 #### Scenario: 版本族迁移期间的失败不得被绕过
-- **WHEN** `dshVersion` 已升级到新版本族,而部分 local package 的 peer 声明尚未同步,检查因此失败
-- **THEN** 该失败 SHALL 被视为本批次未完成的前置门槛,MUST NOT 通过放宽检查、豁免个别 package 或跳过该检查来消除
+- **WHEN** `dshVersion` 已升级,而某 local package 的 `@deepseek-ai/dsh-*` devDependency 仍为旧的 `^<旧版本>`,或新版本超出其兼容区间,检查因此失败
+- **THEN** 该失败 SHALL 被视为本批次未完成的前置门槛,MUST NOT 通过放宽检查、豁免个别 package 或跳过该检查来消除;扩大区间必须有实测证据
 
 #### Scenario: 上游移除的运行体包不得被机械改写
 - **WHEN** 某运行体包在新版本族中已被移除或拆分,而某 local package 仍对其声明 peer
@@ -594,7 +620,7 @@ Node 缺失时无法运行 Node 初始化入口，安装文档 SHALL 提供最�
 - **THEN** 对应受管部署入口被可逆移除，标准 OpenSpec、已有 change 和其它定制保持不变
 
 ### Requirement: 长期仓库仅保存必要且可维护的派生资产
-仓库必须(SHALL)忽略可重建构建输出、OpenSpec checking 的 raw session/history baseline 与批量截图，以及同一架构图的重复重量级导出。长期保留的 checking 内容必须是轻量报告、trail、gate 或复现脚本；仓库架构图必须保留一种可直接展示的轻量格式与其可编辑真相源。若原始验收证据仍需审计，报告必须指向 Git 之外的 artifact 位置或说明其留存方式。
+仓库必须(SHALL)忽略可重建构建输出、OpenSpec checking 的 raw session/history baseline 与批量截图，以及同一架构图的重复重量级导出。长期保留的 checking 内容必须是轻量报告、trail、gate 或复现脚本；仓库每张架构图必须保留一种可直接展示的轻量格式与其可编辑真相源。若原始验收证据仍需审计，报告必须指向 Git 之外的 artifact 位置或说明其留存方式。仓库根目录不得(SHALL NOT)跟踪调试截图或生成的架构说明文件（包括 `.cdp-scratch-shot.png` 与 `worktree-session-architecture.md`）。
 
 #### Scenario: 完成 OpenSpec 验收
 - **WHEN** 验收产生 raw JSON、会话历史和一组截图
@@ -603,6 +629,16 @@ Node 缺失时无法运行 Node 初始化入口，安装文档 SHALL 提供最�
 #### Scenario: 更新仓库架构图
 - **WHEN** 架构变化需要重新生成图形
 - **THEN** 开发者更新可编辑图源和唯一的仓库展示格式，不提交同图的 PNG、SVG 与交互 HTML 多套重复导出
+
+#### Scenario: 每张门面图都有图源
+- **GIVEN** README 嵌入了总架构图与生命周期图
+- **WHEN** 运行 `npm run check:artifacts`
+- **THEN** `docs/assets/ohmydsh-architecture.{json,dual.svg}` 与 `docs/assets/ohmydsh-lifecycle.{json,dual.svg}` 均被跟踪，缺任何一个都报告违规
+
+#### Scenario: 根目录遗留产物被重新提交
+- **GIVEN** 某次提交重新加入 `.cdp-scratch-shot.png`
+- **WHEN** 运行 `npm run check:artifacts`
+- **THEN** 检查失败并点名该文件
 
 ### Requirement: 定制可声明所需 npm scope 且 sync 在变更前校验
 package 定制可(MAY)声明 `npmScopes`:npm scope 名(形如 `@example`)的列表,表示安装该定制需要这些 scope 已配置 registry。sync 必须(SHALL)在加载阶段校验该字段为 scope 名列表,且只出现在 `type: package` 的条目上。对每个启用且声明了 `npmScopes` 的 package 条目,sync 必须(SHALL)在确保 profile 骨架存在之后、任何定制物化动作(agent instructions、顶层 dependencies、package、preset、skill、patch)之前,以 profile 目录为工作目录解析 npm 配置中的 `<scope>:registry`;任一 scope 未配置时,sync 必须(SHALL)报错并以非零退出码结束,错误信息指明缺失的 scope、声明它的条目 id 与 profile 目录,且除 profile 目录与 profile 骨架的创建(DSH 自身的初始化,不属于定制物化)之外,`$DSH_HOME` 不发生任何变化(含部署状态账本的迁移)。sync 不得(SHALL NOT)写入或修改任何 npm registry 配置。禁用条目的 `npmScopes` 不参与校验。
@@ -805,3 +841,34 @@ local package 的 `buildInputs` SHALL 是相对其所属根的路径列表，每
 - **GIVEN** 测试中冻结了本 requirement 引入前的构建输入哈希算法，fixture 含多个文件条目、一个重复条目，以及一个同时属于 local package 自身输入的文件条目
 - **WHEN** 在同一 Node 进程中用冻结算法与新算法分别计算
 - **THEN** 两者相等
+
+### Requirement: manifest 条目说明以人读摘要为准
+`dsh.yaml` 的 `note` 字段只承担人读说明，不被任何程序作为数据消费（启动清单优先读 `brief`）。每个 `enabled: true` 的 `customizations` 条目必须(SHALL)声明非空 `brief`，长度不超过 80 个 Unicode code point。每条 `note` 必须(SHALL)不超过 600 个 Unicode code point，内容限于：上游来源与许可（第三方）或对应 OpenSpec change 名（自研）、信任面要点、升级复核点、回滚或移除路径。当其它 current spec 对某条目的 `note` 规定了必须记录的事实类别（例如 `dsh-openspec-session` 对 `dsh-openspec` 条目的要求）时，`note` 必须(SHALL)同时满足该 spec 与本长度上限。审查过程、逐版本历史与实测记录不得(SHALL NOT)写入 `note` 或条目上方的 YAML 注释，应由 git 历史与 OpenSpec change 承载。
+
+#### Scenario: 启用条目都有简短 brief 与受限 note
+- **GIVEN** 已应用本 change 的 `dsh.yaml`
+- **WHEN** 测试加载 manifest 并遍历启用的 `customizations`
+- **THEN** 每个条目的 `brief` 为非空字符串且不超过 80 code point，每个 `note`（若存在）不超过 600 code point
+
+#### Scenario: note 重新膨胀
+- **GIVEN** 某次升级把完整审查过程写回某条目的 `note`，使其超过 600 code point
+- **WHEN** 运行仓库测试
+- **THEN** 测试失败并点名该条目 id 与实际长度
+
+#### Scenario: 其它 spec 要求的事实类别被精简掉
+- **GIVEN** `dsh-openspec` 条目的 `note` 删去了升级复核点
+- **WHEN** 运行仓库测试
+- **THEN** 测试失败，报告该条目缺少 `dsh-openspec-session` 要求的事实类别（测试以固定关键词集合检查 upstream、license、telemetry、credential、upgrade、removal 六类是否各至少出现一次）
+
+### Requirement: note 精简迁移不改变 manifest 的机器可读结构
+对 `dsh.yaml` 进行 note 精简的迁移必须(SHALL)保证：分别解析迁移前（迁移开始时的 git 版本）与迁移后的 manifest，删除每个条目的 `note` 与 `brief` 后两者深度相等。该检查是一次性迁移验收，由可重复执行的命令完成并把结果记入本 change 的 `verify.md`，不作为长期回归测试（后续 pin 与配置更新属于正常演进）。
+
+#### Scenario: 迁移前后结构等价
+- **GIVEN** 迁移开始时的提交 `<base>` 与迁移后的工作树
+- **WHEN** 执行 `node scripts/maintenance/manifest-structure-diff.mjs <base>`
+- **THEN** 命令以退出码 0 结束并输出 `structure unchanged`
+
+#### Scenario: 迁移误改字段
+- **GIVEN** 迁移过程中某条目的 `version` 被误改
+- **WHEN** 执行同一命令
+- **THEN** 命令以非零退出码结束，并输出差异路径（如 `customizations[3].version`）

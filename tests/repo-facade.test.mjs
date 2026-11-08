@@ -322,6 +322,7 @@ async function syncFixture(manifestText) {
   await writeFile(path.join(repo, 'scripts', 'sync.mjs'), await readFile(path.join(REPO, 'scripts', 'sync.mjs')))
   await cp(path.join(REPO, 'scripts/lib/package-manager.cjs'), path.join(repo, 'scripts/lib/package-manager.cjs'))
   await cp(path.join(REPO,'scripts/lib/child-process.mjs'),path.join(repo,'scripts/lib/child-process.mjs'))
+  await cp(path.join(REPO,'scripts/lib/deploy-checks.mjs'),path.join(repo,'scripts/lib/deploy-checks.mjs'))
   for (const lib of ['dsh-cli', 'manifest-overlay', 'env-local', 'profile-lock', 'legacy-settings']) {
     await writeFile(path.join(repo, 'scripts', 'lib', `${lib}.mjs`), await readFile(path.join(REPO, 'scripts', 'lib', `${lib}.mjs`)))
   }

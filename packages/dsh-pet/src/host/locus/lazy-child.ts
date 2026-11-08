@@ -20,44 +20,44 @@
  */
 
 import type { LocusChildAdapter, LocusContentBlock } from './child.js'
-import type { LocusChildComposition } from './composition.js'
+import type { LocusAccessModeV20 } from './contract-v20.js'
 import type { LocusPrepublicationStagingRegistry } from './prepublication-staging.js'
 
-/** One creation request: the entry's first message and the facts to publish it under. */
+/** One creation request: the entry's first message and the row it is published under (v20). */
 export interface LocusLazyChildInput {
-  /**
-   * The child id the generation reserved durably before its first Delivery was
-   * accepted. Absent, a fresh id is allocated (only sensible when nothing
-   * correlates to the child before creation).
-   */
-  readonly childSessionId?: string
-  /** The locus main (the child's parent). */
-  readonly parentSessionId: string
+  /** The `sessionId` the `not-created` row reserved; the child is created under exactly this id (D16). */
+  readonly sessionId: string
+  /** The group row's M (the child's parent). */
+  readonly locusMainSessionId: string
   readonly workspaceId: string
   readonly locusId: string
-  readonly generation: number
+  /** The row revision read before creation (the publication fence). */
+  readonly revision: number
+  /**
+   * The row's `accessMode` NOW: it may have changed while `not-created`, and
+   * the first creation composes exactly this value (D8), never a default.
+   */
+  readonly accessMode: LocusAccessModeV20
   readonly label: string
   /** The entry the child serves; decides its read tool before publication. */
   readonly endpoint: { readonly chatId: string; readonly threadId?: string }
-  readonly permission: 'read'
   /** The first Delivery's rendered prompt. */
   readonly prompt: readonly LocusContentBlock[]
   /**
    * Runs inside `agent/created`, after the child is claimed and composed and
-   * before its first turn: durably publish the generation as active with the
-   * `tier3` marker and the first Delivery as current. Atomic — a throw must
-   * leave nothing published, and it vetoes creation.
+   * before its first turn: durably publish the row active and the first
+   * Delivery as issued. Atomic — a throw leaves nothing published and vetoes creation.
    */
-  readonly publish: (childSessionId: string, composition: LocusChildComposition) => void | Promise<void>
-  /** Undo a completed `publish` when creation is rejected afterwards. */
-  readonly unpublish: (childSessionId: string, composition: LocusChildComposition) => void | Promise<void>
+  readonly publish: (childSessionId: string) => void | Promise<void>
+  /** Undo a completed `publish` (one write that also rotates and settles, D16). */
+  readonly unpublish: (childSessionId: string) => void | Promise<void>
   /** Finalize durable creation ownership only after the runtime accepted creation. */
-  readonly commit?: (childSessionId: string, composition: LocusChildComposition) => void | Promise<void>
-  /** Settle a non-capacity failure before publication and retire its possibly persisted id. */
+  readonly commit?: (childSessionId: string) => void | Promise<void>
+  /** Settle a non-capacity failure BEFORE publication and rotate the reservation (D16). */
   readonly failed?: (childSessionId: string) => void | Promise<void>
   /** Only an official pre-prompt image veto may retain this Delivery for one text retry. */
   readonly retryText?: (childSessionId: string) => void | Promise<void>
-  /** Revoke live publication and retain WAL debt when old-child release is uncertain. */
+  /** Leave blocking debt when old-child release is uncertain. */
   readonly recoveryDebt?: (childSessionId: string) => void | Promise<void>
   readonly signal?: AbortSignal
 }
@@ -137,21 +137,23 @@ export function createLocusLazyChildCreator(deps: LocusLazyChildDeps): LocusLazy
       // Keep the completed publication independently of staging: publication
       // commits (and removes) its reservation inside agent/created.
       let published = false
+      // A publish that completed once: from then on its revert is the ONE
+      // durable disposition (it settles and rotates), so `failed` must not run.
+      let everPublished = false
       const reservation = deps.staging.reserve({
-        ...(input.childSessionId === undefined ? {} : { childSessionId: input.childSessionId }),
-        parentSessionId: input.parentSessionId,
+        sessionId: input.sessionId,
+        locusMainSessionId: input.locusMainSessionId,
         locusId: input.locusId,
-        generation: input.generation,
-        permission: input.permission,
-        childComposition: 'tier3',
-        toolTier: { desired: 'safe', effective: 'safe' },
+        revision: input.revision,
+        accessMode: input.accessMode,
         endpoint: input.endpoint,
       }, {
-        publish: async (id, composition) => {
-          await input.publish(id, composition)
+        publish: async id => {
+          await input.publish(id)
           published = true
+          everPublished = true
         },
-        unpublish: input.unpublish,
+        unpublish: id => input.unpublish(id),
       })
       const childSessionId = reservation.childSessionId
       const adapter = deps.createAdapter()
@@ -164,7 +166,7 @@ export function createLocusLazyChildCreator(deps: LocusLazyChildDeps): LocusLazy
             await input.retryText!(childSessionId)
             published = false
           } else if (published) {
-            await input.unpublish(childSessionId, reservation.composition)
+            await input.unpublish(childSessionId)
             published = false
           }
         } catch (error) {
@@ -188,7 +190,7 @@ export function createLocusLazyChildCreator(deps: LocusLazyChildDeps): LocusLazy
       let created: Awaited<ReturnType<typeof adapter.createChild>>
       try {
         created = await adapter.createChild({
-          parentSessionId: input.parentSessionId,
+          parentSessionId: input.locusMainSessionId,
           childId: childSessionId,
           label: input.label,
           prompt: input.prompt,
@@ -210,7 +212,7 @@ export function createLocusLazyChildCreator(deps: LocusLazyChildDeps): LocusLazy
         const retryText = created.reason === 'image-route-unsupported' && input.retryText !== undefined
         const clean = await unwind(false, retryText)
         if (!clean) return { ok: false, reason: 'rollback-failed', retryable: false }
-        if (created.reason !== 'child-capacity-exhausted' && !retryText) {
+        if (created.reason !== 'child-capacity-exhausted' && !retryText && !everPublished) {
           try { await input.failed?.(childSessionId) } catch (error) {
             log(`locus lazy child ${childSessionId}: failed-create disposition failed (${describe(error)})`)
             return { ok: false, reason: 'rollback-failed', retryable: false }
@@ -237,7 +239,7 @@ export function createLocusLazyChildCreator(deps: LocusLazyChildDeps): LocusLazy
       if (!published || deps.staging.inspect(childSessionId) !== undefined) {
         log(`locus lazy child ${childSessionId}: created without synchronous composition`)
         let clean = await unwind(true)
-        if (clean) {
+        if (clean && !everPublished) {
           try { await input.failed?.(childSessionId) } catch { clean = false }
         }
         return {
@@ -247,7 +249,7 @@ export function createLocusLazyChildCreator(deps: LocusLazyChildDeps): LocusLazy
         }
       }
       try {
-        await input.commit?.(childSessionId, reservation.composition)
+        await input.commit?.(childSessionId)
       } catch (error) {
         log(`locus lazy child ${childSessionId}: creation commit failed (${describe(error)})`)
         const clean = await unwind(true)

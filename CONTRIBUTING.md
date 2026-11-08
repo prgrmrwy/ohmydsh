@@ -16,7 +16,7 @@ Understanding this matters, because it drives almost every contribution rule:
 
 ## Setting up
 
-Prerequisites: **Node.js >= 22** and **npm >= 10** (the version in `.nvmrc` is recommended).
+Prerequisites: **Node.js >= 24.9.0** and **npm >= 10** (the version in `.nvmrc` is recommended).
 
 ```bash
 git clone https://github.com/prgrmrwy/ohmydsh.git && cd ohmydsh

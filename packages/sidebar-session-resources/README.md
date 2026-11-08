@@ -14,7 +14,10 @@ In a long agent conversation the merge request, deploy page, ticket or artifact 
 The panel is a `better-sidebar` workbench tab with id `sidebar-session-resources`, shown in the interface as **文档/资料** ("Docs/Resources"). It is single-instance, follows the current session, and groups what it finds into:
 
 - **Links**, in this fixed order: MR, deploy, work items, artifacts, other. Within a group the newest comes first, and at equal time links from the assistant outrank other sources. Each entry shows a readable title (host plus a path summary), a relative time and a repeat count; a click opens the URL in a new tab and injects no script.
-- **Produced files** (本次产出): files the session wrote or edited successfully. Reads, deletes and failed calls do not count, and a file written then edited stays one entry. A click opens it in the sidebar editor; relative paths resolve against the session's working directory.
+- **Produced files** (本次产出): files the session wrote or edited successfully. Reads, deletes and failed calls do not count, and a file written then edited stays one entry. Each row shows the filename and **full remote path**, resolved by the Host for that Session, including its Worktree execution root. Copy path copies that remote path; clicking the filename opens the same file in the sidebar editor.
+- **Download to this device**: click Download (下载) to read the original bytes from the DSH Host and save through the current browser. PDFs, images, archives and text retain their original bytes; paths containing Unicode, spaces, `#` and `%` stay native strings. The browser chooses the destination. The panel reports a download request, never a completed local save or a guessed local destination.
+
+Official file cards declared through `present` also get a **download icon** on their right, with a Download to this device tooltip (下载到本地). Clicking the card body still opens its sidebar preview. The action resolves the exact declaration in its owning Session, works without a Host desktop, and does not depend on the sidebar's historical-output baseline. Refreshing the page loads the new action for existing cards.
 
 What is collected: user, assistant, steering and context messages. From assistant messages only the visible text blocks are scanned, never reasoning or tool-call payloads; tool results, compaction nodes and the rest are skipped. Duplicate URLs are merged, keeping the latest occurrence and a count.
 
@@ -45,7 +48,10 @@ Entries are lower-cased, trimmed and validated as host names, and invalid ones a
 
 ## Boundaries & safety
 
-- Read-only and local. No external network requests, no CDN, no credentials read or written. The only traffic is the browser-to-host Connection RPC, which stays on the loopback-only Connection fence.
+- Version 0.2.0 requires DSH `>=0.2.2-rc.1`. Paths and downloads use the official `workspaceFiles` and `fileActions` services, retaining the authorizing Session and its file access checks; no arbitrary-path Host endpoint is added.
+- Single-file downloads obey the official complete-read cap (**32 MiB** by default). Oversized, missing, unreadable, directory and final-symlink targets report errors instead of downloading partial content. Directory archives and bulk downloads are outside this version's scope.
+- Busy rows block duplicate operations. Switching Sessions or closing the panel cancels unfinished reads. Copy path uses the browser Clipboard API; the displayed path remains selectable when clipboard access is unavailable.
+- No files or Session content are sent to outside services; no CDN or credential access. Traffic stays between the browser and DSH Host under the official Connection authentication and Host/Origin fences.
 - Nothing is persisted. After a refresh the current session's set is rebuilt once. The panel shows what the current snapshot and log contain, not a host-side query history.
 - Fails safe to an empty state when the snapshot structure changes, the host is absent or there is no current session; if the host baseline fails, the panel still shows the links visible in the live snapshot. Other tabs are unaffected.
 - The collector does not modify the official session data and keeps only extracted entries, not message bodies.

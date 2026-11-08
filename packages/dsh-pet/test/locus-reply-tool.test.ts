@@ -14,12 +14,11 @@ import {
 function contextRecord(current = true) {
   return {
     endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
-    locus: { locusId: 'locus-1', generation: 2, source: 'automatic' as const, state: 'active' as const },
+    locus: { locusId: 'locus-1', state: 'active' as const, revision: 2 },
     main: { sessionId: 'parent-1' },
     child: { sessionId: 'child-1' },
     workspace: { workspaceId: 'workspace-1' },
-    permission: { effective: 'read' as const },
-    contextAnchor: { status: 'unknown' as const },
+    accessMode: 'read-only' as const,
     ...(current
       ? {
           currentDelivery: {
@@ -27,8 +26,7 @@ function contextRecord(current = true) {
             messageId: 'om-current',
             endpoint: { chatId: 'oc-1', threadId: 'omt-1' },
             locusId: 'locus-1',
-            generation: 2,
-            childSessionId: 'child-1',
+            sessionId: 'child-1',
             status: 'current' as const,
             queueState: 'current' as const,
             replyTarget: { chatId: 'oc-1', threadId: 'omt-1', messageId: 'om-current' },
@@ -92,6 +90,20 @@ const childExec = {
 }
 
 describe('caller-bound Feishu lifecycle tools', () => {
+  it('fails closed without a turn proof: finish and wait are refused, nothing is sent or finished', async () => {
+    const finishCurrentDelivery = vi.fn()
+    const waitCurrentDelivery = vi.fn()
+    const { finish, wait, replyExact } = lifecycleTools(true, {
+      currentCapability: () => undefined,
+      finishCurrentDelivery, waitCurrentDelivery,
+    })
+    await expect(finish.execute({ outcome: 'reply', text: 'answer' }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(wait.execute({ waitMinutes: 5 }, childExec)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(finishCurrentDelivery).not.toHaveBeenCalled()
+    expect(waitCurrentDelivery).not.toHaveBeenCalled()
+    expect(replyExact).not.toHaveBeenCalled()
+  })
+
   it('reports only authorization-refused finish with its actual execution', async () => {
     const refused = vi.fn()
     const continued = vi.fn()

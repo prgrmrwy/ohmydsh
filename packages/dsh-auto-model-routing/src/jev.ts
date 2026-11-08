@@ -2,7 +2,7 @@ import { resolveDecisionService, type DecisionConfig } from './decision-service.
 export interface PolicyMeasure { ms: number; decisionProvider: string; decisionModel: string; confidence?: number; probabilities?: Record<string, number>; capabilityConfidence?: number; capabilityProbabilities?: Record<string, number> }
 const probability = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
 const distribution = (value: Record<string, unknown> | undefined) => Object.fromEntries(Object.entries(value ?? {}).filter(([,v]) => probability(v))) as Record<string, number>
-import policyQuestions from './rubric.json' with { type: 'json' }
+import type { Preset } from './presets/index.js'
 export type Depth = 'lower' | 'baseline' | 'higher'
 export type Capability = 'bounded' | 'analytical' | 'frontier'
 export type PolicyResult = ({ kind: 'ok'; depth: Depth; capability?: Capability | 'insufficient_context' } & PolicyMeasure) | { kind: 'failed'; category: JevCategory } | { kind: 'cancelled' }
@@ -11,8 +11,6 @@ export { CATEGORY_HINTS, type JevCategory } from './hints.js'
 export interface CredentialSource { get(name: string): { value: string } | undefined | Promise<{ value: string } | undefined> }
 
 const MAX_BODY = 64 * 1024
-/** The only rule file: main and child questions are taken from it verbatim. */
-export const QUESTIONS = policyQuestions
 
 function byStatus(status: number): JevCategory {
   if (status === 402) return 'insufficient-credits'
@@ -30,7 +28,9 @@ export class JevClient {
   }
 
   /** One request, no retry. Never throws; never returns the body or the key. `state` comes from `buildState`. */
-  async judgePolicy(state: string, signal: AbortSignal, scope: 'main' | 'child', dimensions: 'both' | 'capability' | 'depth' = 'both'): Promise<PolicyResult> {
+  async judgePolicy(state: string, signal: AbortSignal, scope: 'main' | 'child', dimensions: 'both' | 'capability' | 'depth', preset: Preset): Promise<PolicyResult> {
+    // The caller captured `preset` once for this judgement; questions and choice checks both use it.
+    const policyQuestions = preset.rubric
     const questions = scope === 'main' || dimensions === 'depth' ? { depth: policyQuestions.depth }
       : dimensions === 'capability' ? { capability: policyQuestions.capability } : policyQuestions
     const result = await this.decide(state, signal, questions)

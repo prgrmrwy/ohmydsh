@@ -18,6 +18,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { PET_CONTEXT_TOOL } from '../src/host/context-tool.js'
 import { PET_LOCUS_FINISH_TOOL, PET_LOCUS_WAIT_TOOL, registerPetTools } from '../src/host/tools.js'
@@ -44,6 +45,7 @@ async function hostContext(): Promise<Context> {
   // publishes and `ctx.tools` reads as undefined.
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   return ctx
 }
 

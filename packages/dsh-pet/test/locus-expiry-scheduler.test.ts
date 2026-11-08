@@ -27,8 +27,7 @@ const HOUR = 60 * 60 * 1000
 const CORRELATION: DeliveryCorrelation = {
   endpoint: { chatId: 'oc_sched' },
   locusId: 'locus-sched',
-  generation: 2,
-  childSessionId: 'child-sched',
+  sessionId: 'child-sched',
 }
 
 /** One current Delivery holding a live lease. */
@@ -38,8 +37,7 @@ function currentRecord(overrides: Partial<DeliveryRecord> = {}): DeliveryRecord 
     messageId: 'om_sched',
     endpoint: CORRELATION.endpoint,
     locusId: CORRELATION.locusId,
-    generation: CORRELATION.generation,
-    childSessionId: CORRELATION.childSessionId,
+    sessionId: CORRELATION.sessionId,
     senderOpenId: 'ou_sender',
     text: 'please answer',
     sequence: 1,
@@ -91,7 +89,7 @@ function harness(initial: DeliveryRecord) {
       },
     },
     withDispatchLane: async (correlation, operation) => {
-      laneCalls.push(`${correlation.locusId}#${correlation.generation}`)
+      laneCalls.push(`${correlation.locusId}#${correlation.sessionId}`)
       return operation()
     },
     finishAndAdvance: async (record, _correlation, outcome) => {
@@ -154,7 +152,7 @@ describe('the Delivery deadline scheduler', () => {
     // Expiry must advance the locus so a waiting backlog Delivery is dispatched.
     expect(host.advanced).toEqual([{ deliveryId: 'delivery-sched', outcome: 'failed' }])
     // The work ran inside the locus dispatch lane, not concurrently with it.
-    expect(host.laneCalls).toEqual(['locus-sched#2'])
+    expect(host.laneCalls).toEqual(['locus-sched#child-sched'])
     expect(host.scheduler.size).toBe(0)
   })
 

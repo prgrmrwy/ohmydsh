@@ -1,3 +1,4 @@
+import * as Presentation from '@deepseek-ai/dsh-agent-tool-presentation'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -46,6 +47,7 @@ async function host(root: string): Promise<Context> {
   await ctx.plugin(SessionProjection)
   await ctx.plugin(SystemPrompt, { persona: '' })
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(Presentation, { mode: 'native' }) // 0.2.2 loads no tool executor by default
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(JsonlSessionPersistence, { root })
   await ctx.plugin(AgentLoop, { agents: [] })

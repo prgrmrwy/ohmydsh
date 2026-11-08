@@ -1,440 +1,358 @@
 import { describe, expect, it, vi } from 'vitest'
-import { buildLocusRecord, type LocusRecord } from '../src/host/locus/aggregate.js'
 import {
+  LOCUS_ACCESS_RECEIPT,
+  LOCUS_FENCE_STALE_MESSAGE,
   createLocusManagementPort,
   createLocusSessionDescriber,
-  LocusManagementError,
-  type LocusManagementRepository,
+  type LocusManagementActions,
 } from '../src/host/locus/management.js'
-import type { PetLocusActionRequest } from '../src/wire.js'
+import type { LocusRowV20 } from '../src/host/locus/contract-v20.js'
+import { collectHandleCodes, endpointHandleId } from '../src/client/locus-view.js'
+import { groupRow, mainRecord, managementRepo, topicRow } from './support/mgmt-snapshot.js'
+import { LocusController } from '../src/host/locus/controller.js'
+import { Topology } from './support/w-topology.js'
 
-function record(overrides: Partial<LocusRecord> = {}): LocusRecord {
-  return buildLocusRecord({
-    id: 'locus-group',
-    endpoint: { chatId: 'oc-project' },
-    parentSessionId: 'main-1',
-    childSessionId: 'child-1',
-    workspaceId: 'workspace-1',
-    source: 'auto',
-    createdAt: 10,
-    updatedAt: 10,
-    ...overrides,
+/**
+ * The management port over the REAL controller, adapted exactly as `index.ts`
+ * wires it (repository reads, chat-level current delivery, stop → stopEntry,
+ * rebind → rebindChat). Only the repository and DSH runtime are fakes.
+ */
+function realHost() {
+  const t = new Topology({ archived: ['W1'] })
+  t.seedMain('W1', 'M-old')
+  const group = t.seedGroup('oc_1', 'M-old', 'proj-1', { defaultQa: true, revision: 4, accessMode: 'danger-full-access' })
+  t.seedTopic('oc_1', 't1', { revision: 2, accessMode: 'danger-full-access' })
+  t.seedTopic('oc_1', 't2', { state: 'stopped', stoppedAt: 9, revision: 1 })
+  const controller = new LocusController(t.deps())
+  const repo = t.repository
+  const port = createLocusManagementPort({
+    repository: {
+      listRows: () => [...repo.rows.values()],
+      findMain: id => repo.findMain(id),
+      hasNonTerminalDelivery: locusId => repo.hasNonTerminalDelivery(),
+      hasCurrentDelivery: locusId => {
+        const row = repo.getLocus(locusId)
+        return row !== undefined && repo.hasCurrentDeliveryInChat(row.endpoint.chatId)
+      },
+    },
+    resolvers: {
+      session: async id => (t.archived.has(id) ? { availability: 'archived' as const } : { availability: 'available' as const, title: id }),
+    },
+    actions: {
+      stop: fence => controller.stopEntry(fence),
+      rebind: request => controller.rebindChat(request),
+    },
   })
+  return { t, group, port }
 }
 
-function memory(initial: readonly LocusRecord[]): LocusManagementRepository & {
-  records: LocusRecord[]
-  stopped: string[]
-  modes: string[]
-  pending: Set<string>
-  anchors: string[]
-} {
-  const state = {
-    records: [...initial], stopped: [] as string[], modes: [] as string[], anchors: [] as string[], pending: new Set<string>(),
-  }
-  return {
-    ...state,
-    listLoci: () => state.records,
-    getCurrent: endpoint => state.records.find(item => item.state !== 'retired' && JSON.stringify(item.endpoint) === JSON.stringify(endpoint)),
-    listByParent: parent => state.records.filter(item => item.parentSessionId === parent),
-    getByChild: child => state.records.find(item => item.childSessionId === child),
-    getDefaultQa: parent => state.records.find(item => item.parentSessionId === parent && item.source === 'qa-created'),
-    hasPendingDeliveries: id => state.pending.has(id),
-    transitionLocus: async (id, stateName, now) => {
-      const previous = state.records.find(item => item.id === id)
-      if (previous === undefined) throw new Error('LOCUS_NOT_FOUND')
-      const next = { ...previous, state: stateName, busy: false, updatedAt: now ?? 0, stoppedAt: stateName === 'stopped' ? now ?? 0 : previous.stoppedAt }
-      state.records = state.records.map(item => item.id === id ? next : item)
-      state.stopped.push(id)
-      return next
-    },
-    confirmContextAnchor: async (id, anchor, actor, now) => {
-      const previous = state.records.find(item => item.id === id)
-      if (previous === undefined) throw new Error('LOCUS_NOT_FOUND')
-      const next = {
-        ...previous,
-        contextAnchor: { ...anchor, authorization: 'unknown' as const, provenance: `owner:${actor}`, confirmedAt: now },
-        updatedAt: now ?? 0,
-      }
-      state.records = state.records.map(item => item.id === id ? next : item)
-      state.anchors.push(id)
-      return next
-    },
-    setLocusMode: async (id, mode, _actor, verifiedAt) => {
-      const previous = state.records.find(item => item.id === id)
-      if (previous === undefined) throw new Error('LOCUS_NOT_FOUND')
-      if (previous.state !== 'active') throw Object.assign(new Error('stopped'), { code: 'LOCUS_INVALID' })
-      const next = { ...previous, permission: { desired: mode, effective: mode, verifiedAt }, updatedAt: verifiedAt ?? 0 }
-      state.records = state.records.map(item => item.id === id ? next : item)
-      state.modes.push(`${id}:${mode}`)
-      return next
-    },
-  }
-}
+describe('2D.5 against the real controller (index.ts wiring)', () => {
+  it('spec Scenario "改绑后各入口重置而停止的保持停止" through the real rebindChat', async () => {
+    const { group, port } = realHost()
+    const before = (await port.view()).works
+    expect(before.map(work => [work.work.sessionId, work.work.availability])).toEqual([['W1', 'archived']])
 
-describe('locus management projection adapter', () => {
-  it('projects owner view and all three reverse discovery indexes', async () => {
-    const repository = memory([
-      record({ contextAnchor: { status: 'confirmed', executionRoot: '/repo', constraints: ['read'], provenance: 'test', confirmedAt: 11 } }),
-      record({
-        id: 'locus-topic',
-        endpoint: { chatId: 'oc-project', threadId: 'omt-topic' },
-        childSessionId: 'child-topic',
-        parentLocusId: 'locus-group',
-        source: 'inherited',
-        generation: 1,
-      }),
-    ])
-    const port = createLocusManagementPort({ repository, generation: () => 7 })
+    const result = await port.rebind(
+      { chatId: 'oc_1', workSessionId: 'W2', expectedLocusId: group.locusId, expectedRevision: 4 },
+      OWNER,
+    )
+    expect(result.receipt).toContain('W2')
+
     const view = await port.view()
-
-    expect(view.generation).toBe(7)
-    expect(view.loci.map(item => item.locusId)).toEqual(['locus-group', 'locus-topic'])
-    expect(view.discovery.byEndpoint).toHaveLength(2)
-    expect(view.discovery.byParent[0]?.loci).toHaveLength(2)
-    expect(view.discovery.byChild.find(item => item.childSessionId === 'child-topic')?.locus?.locusId).toBe('locus-topic')
-    expect(view.loci[0]?.main.sessionId).toBe('main-1')
-    expect(view.loci[0]?.permission.effective).toBe('read')
-    expect(view.loci[0]?.contextAnchor).toEqual({
-      status: 'confirmed',
-      executionRoot: '/repo',
-      constraints: ['read'],
-      provenance: 'test',
-      confirmedAt: 11,
-    })
+    expect(view.works.map(work => work.work.sessionId)).toEqual(['W2'])
+    const chat = view.works[0]!.chats[0]!
+    expect(chat.reboundFrom).toEqual({ sessionId: 'W1' })
+    expect(chat.defaultQa).toBeUndefined()
+    expect(chat.group).toMatchObject({ locusId: group.locusId, state: 'not-created', accessMode: 'read-only', revision: 5 })
+    expect(chat.group).not.toHaveProperty('session')
+    expect(chat.topics.map(topic => [topic.endpoint.threadId, topic.state, topic.accessMode])).toEqual([
+      ['t1', 'not-created', 'read-only'],
+      ['t2', 'stopped', 'read-only'],
+    ])
   })
 
-  it('scopes discovery to exactly the requested reverse index', async () => {
-    const repository = memory([record()])
+  it('maps the real controller refusals: stale fence → REVISION_CONFLICT, current delivery → LOCUS_BUSY', async () => {
+    const { t, group, port } = realHost()
+    await expect(port.rebind({ chatId: 'oc_1', workSessionId: 'W2', expectedLocusId: group.locusId, expectedRevision: 3 }, OWNER))
+      .rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+    t.repository.currentChats.add('oc_1')
+    expect((await port.view()).works[0]!.chats[0]!.topics.every(topic => topic.hasCurrentDelivery)).toBe(true)
+    await expect(port.rebind({ chatId: 'oc_1', workSessionId: 'W2', expectedLocusId: group.locusId, expectedRevision: 4 }, OWNER))
+      .rejects.toMatchObject({ code: 'LOCUS_BUSY' })
+  })
+
+  it('refuses a rebind while W is not archived with the controller reason (INVALID_REQUEST)', async () => {
+    const { t, group, port } = realHost()
+    t.archived.delete('W1')
+    await expect(port.rebind({ chatId: 'oc_1', workSessionId: 'W2', expectedLocusId: group.locusId, expectedRevision: 4 }, OWNER))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+  })
+
+  it('stops a group row through the real stopEntry and leaves the topic untouched', async () => {
+    const { group, port } = realHost()
+    await port.stop({ endpoint: { chatId: 'oc_1' }, expectedLocusId: group.locusId, expectedRevision: 4 }, OWNER)
+    const chat = (await port.view()).works[0]!.chats[0]!
+    expect(chat.group.state).toBe('stopped')
+    // The topic keeps its seeded serving state and revision.
+    expect(chat.topics.find(topic => topic.endpoint.threadId === 't1')).toMatchObject({ state: 'not-created', revision: 2 })
+  })
+})
+
+const OWNER = { actorId: 'host:dsh-pet' }
+
+function describeAll(titles: Record<string, string> = {}) {
+  return vi.fn(async (id: string) => ({ availability: 'available' as const, title: titles[id] ?? `title ${id}` }))
+}
+
+describe('spec Requirement "管理面按工作会话分组且每个入口一行" (view half)', () => {
+  it('groups chats by W, nests topics by chatId and keeps one row per entry', async () => {
+    const repository = managementRepo({
+      rows: [
+        groupRow({ chatId: 'oc_A' }),
+        topicRow({ chatId: 'oc_A', threadId: 'omt_1' }),
+        topicRow({ chatId: 'oc_A', threadId: 'omt_2' }),
+        groupRow({ chatId: 'doc:docx:D' }),
+      ],
+    })
+    const port = createLocusManagementPort({ repository, resolvers: { session: describeAll() } })
+    const view = await port.view()
+    expect(view.works).toHaveLength(1)
+    expect(view.works[0]?.work).toMatchObject({ sessionId: 'session-work-1', availability: 'available' })
+    expect(view.works[0]?.chats.map(chat => chat.group.endpoint.chatId)).toEqual(['doc:docx:D', 'oc_A'])
+    const chat = view.works[0]!.chats.find(item => item.group.endpoint.chatId === 'oc_A')!
+    expect(chat.topics.map(topic => topic.endpoint.threadId)).toEqual(['omt_1', 'omt_2'])
+    expect(chat.locusMain.sessionId).toBe('session-main-1')
+    expect(JSON.stringify(view)).not.toMatch(/generation"?:\s*\d+,\s*"loci|parentLocusId|toolTier|contextAnchor|childComposition|permission/)
+  })
+
+  it('spec Scenario "投递中由投递表推出"', async () => {
+    const repository = managementRepo({
+      rows: [groupRow({ chatId: 'oc_A' }), topicRow({ chatId: 'oc_A', threadId: 'omt_T' })],
+      current: ['locus-oc_A-omt_T'],
+    })
     const port = createLocusManagementPort({ repository })
-    await expect(port.discovery({ parentSessionId: 'main-1' })).resolves.toMatchObject({
-      byEndpoint: [],
-      byParent: [{ parentSessionId: 'main-1' }],
-      byChild: [],
+    const chat = (await port.view()).works[0]!.chats[0]!
+    expect(chat.topics[0]).toMatchObject({ inFlight: true, hasCurrentDelivery: true })
+    expect(chat.group).toMatchObject({ inFlight: false, hasCurrentDelivery: false })
+    repository.current.clear()
+    const after = (await port.view()).works[0]!.chats[0]!
+    expect(after.topics[0]?.inFlight).toBe(false)
+  })
+
+  it('spec Scenario "改绑后的群行显示来源"', async () => {
+    const repository = managementRepo({
+      rows: [
+        groupRow({ chatId: 'oc_A', reboundFrom: 'session-old-w' }),
+        groupRow({ chatId: 'oc_B', locusId: 'locus-b', sessionId: 'session-child-b' }),
+      ],
     })
-    await expect(port.discovery({ endpoint: { chatId: 'oc-project' } })).resolves.toMatchObject({
-      byEndpoint: [{ endpoint: { chatId: 'oc-project' } }],
-      byParent: [],
-      byChild: [],
+    const port = createLocusManagementPort({ repository, resolvers: { session: describeAll({ 'session-old-w': '旧工作' }) } })
+    const chats = (await port.view()).works[0]!.chats
+    expect(chats.find(chat => chat.group.endpoint.chatId === 'oc_A')?.reboundFrom).toEqual({ sessionId: 'session-old-w', title: '旧工作' })
+    expect(chats.find(chat => chat.group.endpoint.chatId === 'oc_B')).not.toHaveProperty('reboundFrom')
+  })
+
+  it('marks default Q&A on the group row only', async () => {
+    const repository = managementRepo({
+      rows: [groupRow({ chatId: 'oc_A', defaultQa: true }), topicRow({ chatId: 'oc_A', threadId: 'omt_1' })],
     })
-    await expect(port.discovery({})).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    const chat = (await createLocusManagementPort({ repository }).view()).works[0]!.chats[0]!
+    expect(chat.defaultQa).toBe(true)
+    expect(chat.topics[0]).not.toHaveProperty('defaultQa')
   })
 
-  it('fails unavailable bind/rebuild/default-Q&A actions without legacy fallback', async () => {
-    const port = createLocusManagementPort({ repository: memory([record()]) })
-    const request = {
-      action: 'bind', endpoint: { chatId: 'oc-other' }, parentSessionId: 'main-1',
-    } as PetLocusActionRequest
-    await expect(port.action?.(request, { actorId: 'owner' })).rejects.toMatchObject({ code: 'ACTION_UNAVAILABLE' })
-    expect(port.defaultQa).toBeUndefined()
+  it('reports W availability as unknown when the Host cannot describe it', async () => {
+    const view = await createLocusManagementPort({ repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })] }) }).view()
+    expect(view.works[0]?.work.availability).toBe('unknown')
+    expect(view.works[0]?.chats[0]?.group.session?.availability).toBe('unknown')
+  })
+})
+
+describe('spec Requirement "管理面的会话可用性以持久证据判定" (management half)', () => {
+  it('spec Scenario "重启后未加载的会话不得报为不可用": W, M and the child are described from cold reads', async () => {
+    const session = describeAll({ 'session-work-1': 'W', 'session-main-1': 'M', 'session-child-oc_A': 'C' })
+    const view = await createLocusManagementPort({
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })] }),
+      resolvers: { session },
+    }).view()
+    const work = view.works[0]!
+    expect(work.work).toMatchObject({ title: 'W', availability: 'available' })
+    expect(work.chats[0]?.locusMain).toMatchObject({ title: 'M', availability: 'available' })
+    expect(work.chats[0]?.group.session).toEqual({ title: 'C', availability: 'available' })
   })
 
-  it('rejects scope changes when Host identity is unavailable', async () => {
-    const repository = memory([record()])
-    const port = createLocusManagementPort({ repository, verifyWrite: () => ({ verifiedAt: 22 }) })
-    await expect(port.scope!({ action: 'scope', locusId: 'locus-group', mode: 'read' }, { actorId: 'owner' }))
-      .rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' })
-    expect(repository.modes).toEqual([])
+  it('spec Scenario "未创建入口的预留会话不报缺失": a reserved sessionId is never cold-read', async () => {
+    const session = describeAll()
+    const view = await createLocusManagementPort({
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A', state: 'not-created', sessionId: 'session-reserved' })] }),
+      resolvers: { session },
+    }).view()
+    expect(view.works[0]?.chats[0]?.group).not.toHaveProperty('session')
+    expect(session).not.toHaveBeenCalledWith('session-reserved')
   })
 
-  it('spec Scenario "短码不是身份": a short code in place of the full ids changes nothing', async () => {
-    const repository = memory([record()])
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
-    const port = createLocusManagementPort({ repository, identity: () => ({ actorId: 'owner' }), now: () => 20 })
+  it('describes a session shared by several chats only once per view', async () => {
+    const session = describeAll()
+    await createLocusManagementPort({
+      repository: managementRepo({ rows: ['a', 'b', 'c'].map(suffix => groupRow({ chatId: `oc_${suffix}` })) }),
+      resolvers: { session },
+    }).view()
+    // 1 W + 1 M + 3 distinct children.
+    expect(session).toHaveBeenCalledTimes(5)
+  })
+})
 
-    // What the panel shows (a 4-char code) is never an address: no record
-    // matches it, so the generation-fenced operation is refused.
-    await expect(port.stop!({
-      action: 'stop',
-      endpoint: { chatId: 'oc-p' },
-      locusId: 'locu',
-      expectedGeneration: 1,
-      expectedUpdatedAt: 10,
-    }, { actorId: 'owner' })).rejects.toThrow()
-    expect((await port.view()).loci[0]?.state.state).toBe('active')
+describe('spec Requirement "管理面的标识以确定性短码表达且名称与短码成对" (management half)', () => {
+  it('spec Scenario "同名入口仍可区分"', async () => {
+    const view = await createLocusManagementPort({
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_1111aaaa' }), groupRow({ chatId: 'oc_1111bbbb' })] }),
+      resolvers: { endpoint: () => ({ chatName: '答疑 · DSH' }) },
+    }).view()
+    const codes = collectHandleCodes(view)
+    const groups = view.works[0]!.chats.map(chat => chat.group)
+    expect(groups.map(group => group.endpoint.chatName)).toEqual(['答疑 · DSH', '答疑 · DSH'])
+    const [left, right] = groups.map(group => codes.endpoint.get(endpointHandleId(group.endpoint)))
+    expect(left).toBeDefined()
+    expect(left).not.toBe(right)
   })
 
-  it('keeps a stop marker for panel archive and explicit stop without external actions', async () => {
-    const repository = memory([record()])
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
+  it('spec Scenario "短码不是身份": a short code fence changes nothing, a short code rebind target is passed verbatim', async () => {
+    const repository = managementRepo({ rows: [groupRow({ chatId: 'oc_A', locusId: 'locus-runtime-1-2f853e76' })] })
+    const stop = vi.fn(async () => undefined)
+    const rebind = vi.fn(async () => undefined)
+    const port = createLocusManagementPort({ repository, actions: { stop, rebind } })
+    await expect(port.stop({ endpoint: { chatId: 'oc_A' }, expectedLocusId: '2f85', expectedRevision: 1 }, OWNER))
+      .rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+    expect(stop).not.toHaveBeenCalled()
+    await port.rebind({ chatId: 'oc_A', workSessionId: ' S·9062 ', expectedLocusId: 'locus-runtime-1-2f853e76', expectedRevision: 1 }, OWNER)
+    expect(rebind).toHaveBeenCalledWith(expect.objectContaining({ workSessionId: 'S·9062' }))
+  })
+})
+
+describe('management mutations: stop, access, rebind fenced by locusId + revision', () => {
+  it('rejects a stale revision without calling the Host', async () => {
+    const stop = vi.fn(async () => undefined)
+    const port = createLocusManagementPort({ repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A', revision: 6 })] }), actions: { stop } })
+    await expect(port.stop({ endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 5 }, OWNER))
+      .rejects.toMatchObject({ code: 'REVISION_CONFLICT', message: LOCUS_FENCE_STALE_MESSAGE })
+    expect(stop).not.toHaveBeenCalled()
+  })
+
+  it('refuses stop and access while the entry is in flight', async () => {
+    const actions: LocusManagementActions = { stop: vi.fn(async () => undefined), access: vi.fn(async () => ({})) }
     const port = createLocusManagementPort({
-      repository,
-      identity: () => ({ actorId: 'owner' }),
-      now: () => 20,
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })], inFlight: ['locus-oc_A'] }),
+      actions,
+      writeEnabled: true,
     })
-    const archived = await port.archive!({
-      action: 'archive',
-      endpoint: { chatId: 'oc-project' },
-      locusId: 'locus-group',
-      expectedGeneration: 1,
-      expectedUpdatedAt: 10,
-    }, { actorId: 'owner' })
-    expect(archived.locus.state.state).toBe('stopped')
-
-    const stoppable = memory([record({ id: 'locus-stop' })])
-    stoppable.stopLocus = async (id, now) => stoppable.transitionLocus!(id, 'stopped', now)
-    const stopPort = createLocusManagementPort({
-      repository: stoppable,
-      identity: () => ({ actorId: 'owner' }),
-      now: () => 20,
-    })
-    const stopped = await stopPort.stop!({
-      action: 'stop',
-      endpoint: { chatId: 'oc-project' },
-      locusId: 'locus-stop',
-      expectedGeneration: 1,
-      expectedUpdatedAt: 10,
-    }, { actorId: 'owner' })
-    expect(stopped.locus.state.state).toBe('stopped')
+    const fence = { endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1 }
+    await expect(port.stop(fence, OWNER)).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
+    await expect(port.access({ ...fence, accessMode: 'danger-full-access' }, OWNER)).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
+    expect(actions.stop).not.toHaveBeenCalled()
+    expect(actions.access).not.toHaveBeenCalled()
   })
 
-  it('confirms anchors only for the caller-bound current locus and never grants authority', async () => {
-    const repository = memory([record()])
+  it('passes the acting identity to access and returns the honest receipt', async () => {
+    const access = vi.fn(async () => ({}))
     const port = createLocusManagementPort({
-      repository,
-      identity: () => ({ actorId: 'owner-1' }),
-      now: () => 30,
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A', state: 'not-created' })] }),
+      actions: { access },
+      writeEnabled: true,
     })
-    const result = await port.action!({
-      action: 'confirm-anchor',
-      locusId: 'locus-group',
-      endpoint: { chatId: 'oc-project' },
-      executionRoot: '/repo/.worktrees/feature',
-      projectResources: ['https://example.test/prd'],
-      constraints: ['no new worktree'],
-      existence: 'exists',
-      expectedGeneration: 1,
-    }, { actorId: 'owner-1' })
-    expect(result.locus.contextAnchor).toEqual({
-      status: 'confirmed', existence: 'exists', authorization: 'unknown',
-      executionRoot: '/repo/.worktrees/feature', projectResources: ['https://example.test/prd'],
-      constraints: ['no new worktree'], provenance: 'owner:owner-1', confirmedAt: 30,
-    })
-    expect(result.locus.permission.effective).toBe('read')
-    expect(repository.anchors).toEqual(['locus-group'])
-
-    await expect(port.action!({
-      action: 'confirm-anchor', locusId: 'locus-group', endpoint: { chatId: 'oc-other' }, executionRoot: '/tmp/attacker',
-    }, { actorId: 'owner-1' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    const result = await port.access({ endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1, accessMode: 'danger-full-access' }, OWNER)
+    // The client fence is forwarded so the repository re-checks it inside the write queue.
+    expect(access).toHaveBeenCalledWith({ locusId: 'locus-oc_A', mode: 'danger-full-access', actorId: 'host:dsh-pet', expectedRevision: 1 })
+    expect(result.receipt).toBe(LOCUS_ACCESS_RECEIPT)
   })
 
-  it('supports durable unbind and host-verified write scope only', async () => {
-    const repository = memory([record()])
+  it('refuses full access while the write switch is off but allows read-only', async () => {
+    const access = vi.fn(async () => ({}))
     const port = createLocusManagementPort({
-      repository,
-      now: () => 20,
-      identity: () => ({ actorId: 'owner' }),
-      verifyWrite: () => ({ verifiedAt: 21 }),
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A', accessMode: 'danger-full-access' })] }),
+      actions: { access },
+      writeEnabled: false,
     })
-    const unbound = await port.unbind!({ action: 'unbind', endpoint: { chatId: 'oc-project' }, locusId: 'locus-group', expectedGeneration: 1 }, { actorId: 'owner' })
-    expect(unbound.locus.state.state).toBe('stopped')
-    await expect(port.scope!({ action: 'scope', locusId: 'locus-group', mode: 'write' }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'LOCUS_INVALID' })
-
-    const activeRepository = memory([record()])
-    const activePort = createLocusManagementPort({
-      repository: activeRepository,
-      identity: () => ({ actorId: 'owner' }),
-      verifyWrite: () => ({ verifiedAt: 22 }),
-    })
-    const scoped = await activePort.scope!({ action: 'scope', locusId: 'locus-group', mode: 'write' }, { actorId: 'owner' })
-    expect(scoped.locus.permission.effective).toBe('write')
+    const fence = { endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1 }
+    await expect(port.access({ ...fence, accessMode: 'danger-full-access' }, OWNER)).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    await expect(port.access({ ...fence, accessMode: 'read-only' }, OWNER)).resolves.toMatchObject({ action: 'access' })
   })
 
-  it('routes both read and write management changes through the shared policy mutation', async () => {
-    const repository = memory([record()])
-    const calls: Array<{ locusId: string; actorId: string; mode: string }> = []
+  it('refuses access changes on stopped and invalid rows', async () => {
+    const access = vi.fn(async () => ({}))
     const port = createLocusManagementPort({
-      repository,
-      identity: () => ({ actorId: 'owner' }),
-      permissionMutation: {
-        mutate: async request => {
-          calls.push(request)
-          const current = repository.records[0]!
-          const next = {
-            ...current,
-            permission: {
-              desired: request.mode,
-              effective: request.mode,
-              verifiedAt: 30,
-              grantedBy: request.actorId,
-            },
-            updatedAt: 30,
-          }
-          repository.records = [next]
-          return next
-        },
-      },
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A', state: 'stopped' })] }),
+      actions: { access },
+      writeEnabled: true,
     })
-
-    await port.scope!({ action: 'scope', locusId: 'locus-group', mode: 'write' }, { actorId: 'owner' })
-    await port.scope!({ action: 'scope', locusId: 'locus-group', mode: 'read' }, { actorId: 'owner' })
-    expect(calls.map(call => call.mode)).toEqual(['write', 'read'])
-    expect(repository.modes).toEqual([])
+    await expect(port.access({ endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1, accessMode: 'read-only' }, OWNER))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(access).not.toHaveBeenCalled()
   })
 
-  it('repeats exit idempotently only for the same current stopped marker', async () => {
-    const stopped = record({ state: 'stopped', stoppedAt: 10 })
-    const repository = memory([stopped])
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
-    const port = createLocusManagementPort({ repository, identity: () => ({ actorId: 'owner' }) })
-
-    await expect(port.unbind!({
-      action: 'unbind', endpoint: stopped.endpoint, locusId: stopped.id,
-      expectedGeneration: stopped.generation, expectedLocusId: stopped.id, expectedUpdatedAt: stopped.updatedAt,
-    }, { actorId: 'owner' })).resolves.toMatchObject({ reused: true, locus: { state: { state: 'stopped' } } })
-    expect(repository.stopped).toEqual([])
-  })
-
-  it('rejects stale historical ids instead of mutating the endpoint replacement', async () => {
-    const old = record({ id: 'locus-old', state: 'retired', generation: 1, updatedAt: 20 })
-    const current = record({ id: 'locus-current', childSessionId: 'child-2', generation: 2, createdAt: 21, updatedAt: 21 })
-    const repository = memory([old, current])
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
+  it('maps Host refusals onto the stable vocabulary', async () => {
+    const refusal = (code: string) => Object.assign(new Error(`refused ${code}`), { code })
     const port = createLocusManagementPort({
-      repository,
-      identity: () => ({ actorId: 'owner' }),
-      now: () => 30,
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })] }),
+      actions: { rebind: vi.fn(async () => { throw refusal('LOCUS_CONFLICT') }), stop: vi.fn(async () => { throw refusal('LOCUS_BUSY') }) },
     })
-
-    await expect(port.archive!({
-      action: 'archive',
-      endpoint: { chatId: 'oc-project' },
-      locusId: old.id,
-      expectedGeneration: 1,
-      expectedLocusId: old.id,
-      expectedUpdatedAt: 20,
-    }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
-    expect(repository.records.find(item => item.id === current.id)?.state).toBe('active')
+    await expect(port.rebind({ chatId: 'oc_A', workSessionId: 'S', expectedLocusId: 'locus-oc_A', expectedRevision: 1 }, OWNER))
+      .rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
+    await expect(port.stop({ endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1 }, OWNER))
+      .rejects.toMatchObject({ code: 'LOCUS_BUSY' })
   })
 
-  it('fails closed when the repository cannot prove the entry is idle', async () => {
-    const repository = memory([record()])
-    delete repository.hasPendingDeliveries
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
-    const port = createLocusManagementPort({ repository, identity: () => ({ actorId: 'owner' }) })
+  it('refuses without a trusted actor or an injected Host action', async () => {
+    const port = createLocusManagementPort({ repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })] }) })
+    const request = { endpoint: { chatId: 'oc_A' }, expectedLocusId: 'locus-oc_A', expectedRevision: 1 }
+    await expect(port.stop(request, { actorId: ' ' })).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' })
+    await expect(port.stop(request, OWNER)).rejects.toMatchObject({ code: 'ACTION_UNAVAILABLE' })
+  })
+})
 
-    await expect(port.archive!({
-      action: 'archive', endpoint: { chatId: 'oc-project' }, locusId: 'locus-group',
-    }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' })
-    expect(repository.stopped).toEqual([])
+describe('spec Requirement "管理面提供「改绑到其他会话」…" (management half)', () => {
+  it('spec Scenario "改绑后各入口重置而停止的保持停止"', async () => {
+    const repository = managementRepo({
+      rows: [
+        groupRow({ chatId: 'oc_A', locusId: 'L1', revision: 4, accessMode: 'danger-full-access' }),
+        topicRow({ chatId: 'oc_A', threadId: 'T1', locusId: 'LT1', accessMode: 'danger-full-access' }),
+        topicRow({ chatId: 'oc_A', threadId: 'T2', locusId: 'LT2', state: 'stopped' }),
+      ],
+      mains: [mainRecord('session-main-1', 'session-work-old'), mainRecord('session-main-new', 'S_NEW')],
+    })
+    // Fake Host: the repository's resetChat semantics (D17).
+    const rebind = vi.fn(async (request: { chatId: string }) => {
+      repository.rows = repository.rows.map((row): LocusRowV20 => {
+        if (row.endpoint.chatId !== request.chatId) return row
+        const isGroup = !('threadId' in row.endpoint)
+        const reset = row.state === 'stopped'
+          ? { ...row, accessMode: 'read-only' as const, revision: row.revision + 1 }
+          : { ...row, state: 'not-created' as const, sessionId: `${row.sessionId}-new`, accessMode: 'read-only' as const, revision: row.revision + 1 }
+        return (isGroup ? { ...reset, locusMainSessionId: 'session-main-new', reboundFrom: 'session-work-old' } : reset) as LocusRowV20
+      })
+    })
+    const port = createLocusManagementPort({ repository, actions: { rebind }, resolvers: { session: describeAll({ S_NEW: '新工作' }) } })
+    const result = await port.rebind({ chatId: 'oc_A', workSessionId: 'S_NEW', expectedLocusId: 'L1', expectedRevision: 4 }, OWNER)
+    expect(rebind).toHaveBeenCalledWith({ chatId: 'oc_A', workSessionId: 'S_NEW', expectedLocusId: 'L1', expectedRevision: 4 })
+    expect(result.receipt).toContain('新工作')
+    const view = await port.view()
+    expect(view.works.map(work => work.work.sessionId)).toEqual(['S_NEW'])
+    const chat = view.works[0]!.chats[0]!
+    expect([chat.group, ...chat.topics].map(entry => [entry.locusId, entry.state, entry.accessMode])).toEqual([
+      ['L1', 'not-created', 'read-only'],
+      ['LT1', 'not-created', 'read-only'],
+      ['LT2', 'stopped', 'read-only'],
+    ])
+    expect(chat.reboundFrom?.sessionId).toBe('session-work-old')
   })
 
-  it('refuses exit for accepted-but-not-running Delivery work', async () => {
-    const repository = memory([record()])
-    repository.pending.add('locus-group')
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
-    const port = createLocusManagementPort({ repository, identity: () => ({ actorId: 'owner' }) })
-
-    await expect(port.unbind!({
-      action: 'unbind',
-      endpoint: { chatId: 'oc-project' },
-      locusId: 'locus-group',
-    }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
-    expect(repository.stopped).toEqual([])
-  })
-
-  it('stops only the group entry and leaves existing topic loci active', async () => {
-    const group = record()
-    const topic = record({
-      id: 'locus-topic',
-      endpoint: { chatId: 'oc-project', threadId: 'omt-existing' },
-      parentLocusId: group.id,
-      childSessionId: 'child-topic',
-      source: 'inherited',
-    })
-    const repository = memory([group, topic])
-    repository.stopLocus = async (id, now) => repository.transitionLocus!(id, 'stopped', now)
-    const port = createLocusManagementPort({ repository, identity: () => ({ actorId: 'owner' }), now: () => 20 })
-
-    await port.archive!({
-      action: 'archive', endpoint: group.endpoint, locusId: group.id,
-    }, { actorId: 'owner' })
-    expect(repository.listLoci().find(item => item.id === group.id)?.state).toBe('stopped')
-    expect(repository.listLoci().find(item => item.id === topic.id)?.state).toBe('active')
-  })
-
-  it('applies current-generation and busy fences before delegating panel bind', async () => {
-    const current = record({ busy: false })
-    const repository = memory([current])
-    const calls: PetLocusActionRequest[] = []
-    const port = createLocusManagementPort({
-      repository,
-      identity: () => ({ actorId: 'owner' }),
-      actions: {
-        bind: async request => {
-          calls.push(request)
-          return { action: 'bind', locus: {} } as never
-        },
-      },
-    })
-
-    await expect(port.bind!({
-      action: 'bind', endpoint: current.endpoint, parentSessionId: 'main-2',
-      expectedLocusId: 'stale', expectedGeneration: current.generation,
-    }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'REVISION_CONFLICT' })
-    repository.pending.add(current.id)
-    await expect(port.bind!({
-      action: 'bind', endpoint: current.endpoint, parentSessionId: 'main-2',
-      expectedLocusId: current.id, expectedGeneration: current.generation,
-    }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
-    expect(calls).toEqual([])
-  })
-
-  it('requires an explicit stopped marker fence before delegating rebuild', async () => {
-    const stopped = record({ state: 'stopped', stoppedAt: 10 })
-    const repository = memory([stopped])
-    const rebuild = async () => ({ action: 'rebuild', locus: {} } as never)
-    const port = createLocusManagementPort({
-      repository,
-      identity: () => ({ actorId: 'owner' }),
-      actions: { rebuild },
-    })
-
-    await expect(port.rebuild!({
-      action: 'rebuild', endpoint: stopped.endpoint, parentSessionId: stopped.parentSessionId,
-    }, { actorId: 'owner' })).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
-    await expect(port.rebuild!({
-      action: 'rebuild', endpoint: stopped.endpoint, parentSessionId: stopped.parentSessionId,
-      expectedLocusId: stopped.id, expectedGeneration: stopped.generation, expectedUpdatedAt: stopped.updatedAt,
-    }, { actorId: 'owner' })).resolves.toMatchObject({ action: 'rebuild' })
-  })
-
-  /**
-   * An archived main session is the one case where an ACTIVE entry may be
-   * rebuilt. The channel refuses to serve such an entry and answers mentions
-   * with "this needs a rebuild", so a panel that offered no rebuild would be
-   * telling the owner to do something it does not let them do.
-   */
-  it('allows rebuilding an active entry whose main session is archived, and nothing else active', async () => {
-    const active = record({ state: 'active' })
-    const rebuild = vi.fn(async () => ({ action: 'rebuild', locus: {} } as never))
-    const request = {
-      action: 'rebuild' as const,
-      endpoint: active.endpoint,
-      parentSessionId: active.parentSessionId,
-      expectedLocusId: active.id,
-      expectedGeneration: active.generation,
-      expectedUpdatedAt: active.updatedAt,
-    }
-    const archivedPort = createLocusManagementPort({
-      repository: memory([active]),
-      identity: () => ({ actorId: 'owner' }),
-      actions: { rebuild },
-      isSessionArchived: id => id === active.parentSessionId,
-    })
-    await expect(archivedPort.rebuild!(request, { actorId: 'owner' }))
-      .resolves.toMatchObject({ action: 'rebuild' })
-    expect(rebuild).toHaveBeenCalledOnce()
-
-    // Same record, no archive: an active generation stays protected.
-    const plainPort = createLocusManagementPort({
-      repository: memory([active]),
-      identity: () => ({ actorId: 'owner' }),
-      actions: { rebuild },
-      isSessionArchived: () => false,
-    })
-    await expect(plainPort.rebuild!(request, { actorId: 'owner' }))
-      .rejects.toMatchObject({ code: 'LOCUS_INVALID' })
+  it('refuses a rebind addressed at a topic row', async () => {
+    const rebind = vi.fn(async () => undefined)
+    const port = createLocusManagementPort({ repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })] }), actions: { rebind } })
+    await expect(port.rebind({ chatId: 'oc_missing', workSessionId: 'S', expectedLocusId: 'x', expectedRevision: 1 }, OWNER))
+      .rejects.toMatchObject({ code: 'LOCUS_NOT_FOUND' })
+    await expect(port.rebind({ chatId: 'oc_A', workSessionId: '  ', expectedLocusId: 'locus-oc_A', expectedRevision: 1 }, OWNER))
+      .rejects.toMatchObject({ code: 'INVALID_REQUEST', message: '请输入目标工作会话的完整 sessionId。' })
+    expect(rebind).not.toHaveBeenCalled()
   })
 })
 
@@ -467,7 +385,7 @@ describe('locus session describer', () => {
     expect(inspect).toHaveBeenCalledWith('session-cold')
   })
 
-  it('reports an archived session as archived without inspecting it', async () => {
+  it('reports an archived session as archived, with the title its log carries', async () => {
     // Archived must outrank readability: its log still inspects fine, so
     // checking readability first would call it ordinarily available.
     const inspect = vi.fn(async () => ({ events: titled('Archived') }))
@@ -477,9 +395,9 @@ describe('locus session describer', () => {
       foldTitle,
     })
 
-    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived' })
-    expect(inspect).not.toHaveBeenCalled()
+    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived', title: 'Archived' })
   })
+
 
   it('reports an unreadable session as missing', async () => {
     const describe = createLocusSessionDescriber({
@@ -636,7 +554,7 @@ describe('locus session describer', () => {
     expect(inspect).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps archived ahead of the fast path', async () => {
+  it('keeps archived ahead of the fast path and still resolves the cached title', async () => {
     const peek = vi.fn(async () => ({ exists: true as const, titleKnown: true, title: 'x' }))
     const describe = createLocusSessionDescriber({
       peek,
@@ -645,135 +563,68 @@ describe('locus session describer', () => {
       foldTitle,
     })
 
-    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived' })
-    expect(peek).not.toHaveBeenCalled()
+    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived', title: 'x' })
   })
 
-  it('describes a parent shared by several loci only once per view', async () => {
-    const base = {
-      generation: 1,
-      parentSessionId: 'session-parent',
-      workspaceId: 'ws-1',
-      state: 'active',
-      source: 'inherited',
-      permission: { desired: 'read', effective: 'read' },
-      updatedAt: 5,
-      createdAt: 1,
-    }
-    const records = ['a', 'b', 'c'].map(suffix => ({
-      ...base,
-      id: `locus-${suffix}`,
-      endpoint: { chatId: `oc-${suffix}` },
-      childSessionId: `session-child-${suffix}`,
-    }))
-    const describeSession = vi.fn(async (id: string) => ({ title: id, availability: 'available' as const }))
-    const port = createLocusManagementPort({
-      repository: memory(records as never),
-      resolvers: { main: describeSession, child: describeSession },
+  it('an archived W with a cached title shows that title', async () => {
+    const describe = createLocusSessionDescriber({
+      peek: async () => ({ exists: true, titleKnown: true, title: '旧工作' }),
+      archivedSessionIds: () => ['session-w'],
+      foldTitle,
     })
-
-    const view = await port.view()
-    expect(view.loci).toHaveLength(3)
-    expect(view.loci.every(item => item.main.title === 'session-parent')).toBe(true)
-    // 1 shared parent + 3 distinct children.
-    expect(describeSession).toHaveBeenCalledTimes(4)
+    const view = await createLocusManagementPort({
+      repository: managementRepo({ rows: [groupRow({ chatId: 'oc_A' })], mains: [mainRecord('session-main-1', 'session-w')] }),
+      resolvers: { session: describe },
+    }).view()
+    expect(view.works[0]?.work).toEqual({ sessionId: 'session-w', title: '旧工作', availability: 'archived' })
   })
 
-  it('projects the child working boundary as the locus confirm candidate', async () => {
-    const record = {
-      id: 'locus-topic',
-      generation: 1,
-      endpoint: { chatId: 'oc-project', threadId: 'omt_review' },
-      parentSessionId: 'session-parent',
-      childSessionId: 'session-child',
-      workspaceId: 'ws-1',
-      state: 'active',
-      source: 'inherited',
-      permission: { desired: 'read', effective: 'read' },
-      updatedAt: 5,
-      createdAt: 1,
-    }
-    const port = createLocusManagementPort({
-      repository: memory([record as never]),
-      resolvers: {
-        main: () => ({ title: 'main', executionRoot: '/parent/root' }),
-        child: () => ({ title: 'child', executionRoot: '/child/root' }),
-      },
+  it('resolves an archived title by full inspection when the cache cannot answer, and stays archived when unreadable', async () => {
+    const inspect = vi.fn(async () => ({ events: titled('Archived') }))
+    const describe = createLocusSessionDescriber({
+      peek: async () => ({ exists: true, titleKnown: false }),
+      inspect,
+      archivedSessionIds: () => ['session-archived'],
+      foldTitle,
     })
-
-    const view = await port.view!()
-    // The child serves the endpoint, so its boundary wins; the workspace entry
-    // carries no root of its own here.
-    expect(view.loci[0]?.workspace.executionRoot).toBe('/child/root')
-    expect(view.loci[0]?.contextAnchor).toBeUndefined()
+    await expect(describe('session-archived')).resolves.toEqual({ availability: 'archived', title: 'Archived' })
+    const unreadable = createLocusSessionDescriber({
+      peek: async () => { throw new Error('corrupt') },
+      inspect: async () => { throw new Error('gone') },
+      archivedSessionIds: () => ['session-archived'],
+      foldTitle,
+    })
+    await expect(unreadable('session-archived')).resolves.toEqual({ availability: 'archived' })
   })
 
-  it('falls back to the main session boundary and omits the candidate when neither resolves', async () => {
-    const record = {
-      id: 'locus-group',
-      generation: 1,
-      endpoint: { chatId: 'oc-project' },
-      parentSessionId: 'session-parent',
-      childSessionId: 'session-child',
-      workspaceId: 'ws-1',
-      state: 'active',
-      source: 'auto',
-      permission: { desired: 'read', effective: 'read' },
-      updatedAt: 5,
-      createdAt: 1,
-    }
-    const fromParent = createLocusManagementPort({
-      repository: memory([record as never]),
-      resolvers: {
-        main: () => ({ executionRoot: '/parent/root' }),
-        child: () => ({ title: 'child' }),
-      },
-    })
-    const fromNothing = createLocusManagementPort({
-      repository: memory([record as never]),
-      resolvers: { main: () => ({}), child: () => ({}) },
-    })
 
-    await expect(fromParent.view!()).resolves.toMatchObject({
-      loci: [{ workspace: { executionRoot: '/parent/root' } }],
-    })
-    const bare = await fromNothing.view!()
-    expect(bare.loci[0]?.workspace).not.toHaveProperty('executionRoot')
-  })
 })
 
 describe('spec Requirement "管理面呈现文档入口且不提供新建入口"', () => {
   const ROOT = 'doc:docx:Dx0000000000000000000000001'
 
-  it('spec Scenario "文档与评论嵌套呈现": the doc root carries title/url, comments nest by parentLocusId with their quote', async () => {
-    const repository = memory([
-      record({ id: 'doc-root', endpoint: { chatId: ROOT }, childSessionId: 'child-root' }),
-      record({ id: 'doc-c1', endpoint: { chatId: ROOT, threadId: '11' }, childSessionId: 'child-c1', parentLocusId: 'doc-root', source: 'inherited' }),
-      record({ id: 'doc-c2', endpoint: { chatId: ROOT, threadId: '22' }, childSessionId: 'child-c2', parentLocusId: 'doc-root', source: 'inherited' }),
-    ])
+  it('spec Scenario "文档与评论嵌套呈现": the doc root carries title/url, comments nest by chatId with their quote', async () => {
     const port = createLocusManagementPort({
-      repository,
+      repository: managementRepo({
+        rows: [groupRow({ chatId: ROOT }), topicRow({ chatId: ROOT, threadId: '11' }), topicRow({ chatId: ROOT, threadId: '22' })],
+      }),
       resolvers: {
         endpoint: endpoint => endpoint.threadId === undefined
           ? { chatName: '技术方案', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' }
-          : { quote: endpoint.threadId === '11' ? '接口已有' : '为什么', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' },
+          : { quote: endpoint.threadId === '11' ? '接口已有' : '为什么' },
       },
     })
-    const view = await port.view()
-
-    const root = view.loci.find(item => item.locusId === 'doc-root')!
-    expect(root.endpoint).toMatchObject({ chatId: ROOT, chatName: '技术方案', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' })
-    const comments = view.loci.filter(item => item.endpoint.threadId !== undefined)
-    expect(comments.map(item => item.endpoint.quote).sort()).toEqual(['为什么', '接口已有'])
+    const chat = (await port.view()).works[0]!.chats[0]!
+    expect(chat.group.endpoint).toMatchObject({ chatId: ROOT, chatName: '技术方案', docUrl: 'https://www.feishu.cn/docx/Dx0000000000000000000000001' })
+    expect(chat.topics.map(item => item.endpoint.quote)).toEqual(['接口已有', '为什么'])
   })
 
   it('spec Scenario "标题不可得": a failing resolver leaves the facts out instead of failing the view', async () => {
     const port = createLocusManagementPort({
-      repository: memory([record({ id: 'doc-root', endpoint: { chatId: ROOT } })]),
+      repository: managementRepo({ rows: [groupRow({ chatId: ROOT })] }),
       resolvers: { endpoint: () => { throw new Error('inspect failed') } },
     })
-    const view = await port.view()
-    expect(view.loci[0]?.endpoint).toEqual({ chatId: ROOT })
+    expect((await port.view()).works[0]?.chats[0]?.group.endpoint).toEqual({ chatId: ROOT })
   })
 
   it('spec Scenario "无建立控件": no management action creates a document entry from input', async () => {
@@ -781,10 +632,10 @@ describe('spec Requirement "管理面呈现文档入口且不提供新建入口"
     const path = await import('node:path')
     const wire = await readFile(path.resolve(__dirname, '..', 'src', 'wire.ts'), 'utf8')
     const settings = await readFile(path.resolve(__dirname, '..', 'src', 'client', 'settings.tsx'), 'utf8')
-    // The action vocabulary has no doc-creating verb, and the panel has no
-    // input that accepts a document link or token.
-    const actions = wire.slice(wire.indexOf('export type PetLocusActionRequest'), wire.indexOf('export type PetLocusActionRequest') + 2_000)
+    const start = wire.indexOf('export type PetLocusActionRequestV20')
+    const actions = wire.slice(start, wire.indexOf('\n\n', start))
     expect(actions).not.toMatch(/doc(Url|Token|Link)|createDoc|addDoc/i)
+    // The only input on the panel is the rebind dialog's sessionId field.
     expect(settings).not.toMatch(/placeholder=["'][^"']*(文档链接|docx|token)/i)
   })
 })

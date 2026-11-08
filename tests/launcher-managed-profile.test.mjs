@@ -83,7 +83,11 @@ test('non-web profile refuses preview, invalid names, missing profile and unauth
 test('non-web history stays read-only and needs no port', async t => {
   const home = await guardHome(t)
   const lines = []
-  const status = await runLauncher(['history'], { repo: ROOT, env: { DSH_HOME: home, DSH_PROFILE: 'superagent' }, isolatedHome: () => false, log: line => lines.push(line), probe: async () => { throw new Error('no probe') }, run: async () => { throw new Error('no run') } })
+  // A repo without .env.local: a worktree's managed DSH_HOME block would otherwise override the caller's home.
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'ohmydsh managed-profile repo '))
+  t.after(() => rm(repo, { recursive: true, force: true }))
+  await cp(path.join(ROOT, 'dsh.yaml'), path.join(repo, 'dsh.yaml'))
+  const status = await runLauncher(['history'], { repo, env: { DSH_HOME: home, DSH_PROFILE: 'superagent' }, isolatedHome: () => false, log: line => lines.push(line), probe: async () => { throw new Error('no probe') }, run: async () => { throw new Error('no run') } })
   assert.equal(status, 0)
   assert.match(lines.join('\n'), /no startup history yet/)
 })

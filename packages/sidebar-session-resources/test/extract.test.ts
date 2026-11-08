@@ -183,6 +183,25 @@ describe('extractSession (produced)', () => {
     expect(produced.map((f) => f.path)).toEqual(['src/ok.ts'])
   })
 
+  it('keeps completed first-party outputs when agent-scoped presenters are unavailable', () => {
+    const events = [
+      toolCall(1, 'write', 'write', JSON.stringify({ file_path: 'report.pdf', content: 'bytes' })),
+      toolResultV4(2, 'write'),
+      toolCall(3, 'edit', 'edit', JSON.stringify({ file_path: 'report.pdf', old_string: 'a', new_string: 'b' })),
+      toolResultV4(4, 'edit'),
+      toolCall(5, 'failed', 'write', JSON.stringify({ file_path: 'failed.pdf', content: 'bytes' })),
+      toolResultV4(6, 'failed', true),
+      toolCall(7, 'pending', 'write', JSON.stringify({ file_path: 'pending.pdf', content: 'bytes' })),
+      toolCall(8, 'read', 'read', JSON.stringify({ file_path: 'read.pdf' })),
+      toolResultV4(9, 'read'),
+      toolCall(10, 'delete', 'str_replace_editor', JSON.stringify({ path: 'deleted.pdf', command: 'delete' })),
+      toolResultV4(11, 'delete'),
+    ]
+    for (const presenter of [noView, () => { throw new Error('presenter unavailable') }]) {
+      expect(extractSession(events, presenter).produced).toEqual([{ path: 'report.pdf', time: 1000, seq: 1 }])
+    }
+  })
+
   it('soft-falls when the presenter throws or the tool is unknown', () => {
     const { produced } = extractSession(
       [toolCall(1, 'c1', 'write', 'not-json'), toolCall(2, 'c2', 'ghost', '{}')],

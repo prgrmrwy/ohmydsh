@@ -13,25 +13,13 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { LocusSurface, planAcceptFollowThrough } from '../src/client/settings.js'
 import { PET_CSS } from '../src/client/styles.js'
-import type { PetLocusManagementView } from '../src/wire.js'
+import { chatView, entryView, snapshotV20, workView } from './support/mgmt-snapshot.js'
 
-const snapshot = {
-  generation: 1,
-  loci: [{
-    locusId: 'locus-1',
-    generation: 1,
-    endpoint: { chatId: 'oc_chat' },
-    main: { sessionId: 'main-1', availability: 'available' as const, title: '主会话' },
-    child: { sessionId: 'child-1', availability: 'available' as const },
-    workspace: { workspaceId: 'ws-1' },
-    permission: { desired: 'read' as const, effective: 'read' as const },
-    state: { state: 'active' as const, busy: false, createdAt: 1, updatedAt: 1 },
-    source: 'auto' as const,
-    isDefaultQa: false,
-  }],
-  defaultQa: [],
-  discovery: { byEndpoint: [], byParent: [], byChild: [] },
-} as unknown as PetLocusManagementView
+const snapshot = snapshotV20([workView([chatView(
+  entryView({ chatId: 'oc_chat', locusId: 'locus-1', sessionId: 'child-1' }),
+  [],
+  { locusMain: { sessionId: 'main-1', availability: 'available', title: '主会话' }, workspace: { workspaceId: 'ws-1' } },
+)], { sessionId: 'work-1', title: '工作会话' })])
 
 const groups = [{
   parentSessionId: 'main-1',
@@ -58,8 +46,7 @@ const groups = [{
 function render(overrides: Record<string, unknown> = {}): string {
   return renderToStaticMarkup(createElement(LocusSurface, {
     snapshot,
-    onAction: () => {},
-    runQuery: async () => undefined,
+    onAction: async () => true,
     initialTodoGroups: groups,
     initialTodosOpen: true,
     ...overrides,
@@ -175,10 +162,11 @@ describe('todo rows actually navigate, not merely describe', () => {
       ...groups[0]!,
       items: [{ ...groups[0]!.items[0]!, endpoint: { chatId: 'oc_chat', threadId: 'omt_x' } }],
     }]
-    const threadedSnapshot = {
-      ...snapshot,
-      loci: [{ ...snapshot.loci[0]!, endpoint: { chatId: 'oc_chat', threadId: 'omt_x' } }],
-    } as unknown as PetLocusManagementView
+    const threadedSnapshot = snapshotV20([workView([chatView(
+      entryView({ chatId: 'oc_chat', locusId: 'locus-0', sessionId: 'child-0' }),
+      [entryView({ chatId: 'oc_chat', threadId: 'omt_x', locusId: 'locus-1', sessionId: 'child-1' })],
+      { locusMain: { sessionId: 'main-1', availability: 'available' }, workspace: { workspaceId: 'ws-1' } },
+    )], { sessionId: 'work-1' })])
     const markup = render({ initialTodoGroups: threaded, snapshot: threadedSnapshot })
     expect(markup).toContain('https://applink.feishu.cn/client/thread/open?threadId=omt_x')
     expect(markup).not.toContain('client/chat/open')
@@ -196,10 +184,11 @@ describe('todo rows actually navigate, not merely describe', () => {
   })
 
   it('disables the session jump and states the reason when the child is archived', () => {
-    const archived = {
-      ...snapshot,
-      loci: [{ ...snapshot.loci[0]!, child: { sessionId: 'child-1', availability: 'archived' as const } }],
-    } as unknown as PetLocusManagementView
+    const archived = snapshotV20([workView([chatView(
+      entryView({ chatId: 'oc_chat', locusId: 'locus-1', sessionId: 'child-1', session: { availability: 'archived' } }),
+      [],
+      { locusMain: { sessionId: 'main-1', availability: 'available' }, workspace: { workspaceId: 'ws-1' } },
+    )], { sessionId: 'work-1' })])
     const markup = render({ snapshot: archived })
     expect(markup).toContain('会话已归档')
     // A disabled Jump renders as a button, never as a live anchor.
@@ -219,19 +208,14 @@ describe('todo rows actually navigate, not merely describe', () => {
   })
 })
 
-describe('parent-session list is paged and collapsible', () => {
+describe('work-session list is paged and collapsible', () => {
   /** N sessions, each with one entry, so page math is by SESSION not entry. */
-  function manySessions(count: number): PetLocusManagementView {
-    return {
-      ...snapshot,
-      loci: Array.from({ length: count }, (_, i) => ({
-        ...snapshot.loci[0]!,
-        locusId: `locus-${i}`,
-        endpoint: { chatId: `oc_chat_${i}` },
-        main: { sessionId: `main-${i}`, availability: 'available' as const, title: `会话 ${i}` },
-        child: { sessionId: `child-${i}`, availability: 'available' as const },
-      })),
-    } as unknown as PetLocusManagementView
+  function manySessions(count: number): ReturnType<typeof snapshotV20> {
+    return snapshotV20(Array.from({ length: count }, (_, i) => workView([chatView(
+      entryView({ chatId: `oc_chat_${i}`, locusId: `locus-${i}`, sessionId: `child-${i}` }),
+      [],
+      { locusMain: { sessionId: `main-${i}`, availability: 'available' }, workspace: { workspaceId: 'ws-1' } },
+    )], { sessionId: `work-${i}`, title: `会话 ${i}` })))
   }
 
   it('renders no pager when everything fits on one page', () => {
@@ -247,7 +231,7 @@ describe('parent-session list is paged and collapsible', () => {
 
   it('states the visible slice rather than only a page number', () => {
     const markup = render({ snapshot: manySessions(20), initialTodoGroups: [] })
-    expect(markup).toContain('1–8 / 20 个父会话')
+    expect(markup).toContain('1–8 / 20 个工作会话')
   })
 
   it('shows only one page of sessions at a time', () => {

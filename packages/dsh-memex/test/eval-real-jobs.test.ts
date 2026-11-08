@@ -1,3 +1,4 @@
+import * as Presentation from '@deepseek-ai/dsh-agent-tool-presentation'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -25,8 +26,9 @@ it('cancels a real owned job, awaits producer release, and leaves unowned work a
     await ctx.plugin(SessionStore)
     await ctx.plugin(SystemPrompt, { persona: '' })
     await ctx.plugin(ToolRuntime)
-    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(Presentation, { mode: 'native' }) // 0.2.2 loads no tool executor by default
     await ctx.plugin(SessionProjection)
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(LocalJobRegistry, {})
     const controller = ctx.jobs.attachController('eval-test')

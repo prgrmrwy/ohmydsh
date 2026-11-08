@@ -3,32 +3,27 @@ import path from 'node:path'
 import http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { sameProcessIdentity } from './process.mjs'
+import { assertPrivatePaths } from './private-files.mjs'
 
 const PREPARE_MS = 30_000
 const RECOVERY_MS = 5_000
 const MAX_BYTES = 64 * 1024
 const fail = code => new Error(`Pet prepare-stop: ${code}`)
 const privateOwner = stat => process.getuid === undefined || stat.uid === process.getuid()
-function privateDirectory(dir) {
-  const stat = fs.lstatSync(dir)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !privateOwner(stat) || (stat.mode & 0o777) !== 0o700) throw fail('unsafe private directory')
-}
-function runDirectory(home, name) {
+function readPrivateJson(home, name) {
   const run = path.join(home, 'run')
-  const stat = fs.lstatSync(run)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !privateOwner(stat) || (stat.mode & 0o022)) throw fail('unsafe run directory')
-  const dir = path.join(run, name)
-  privateDirectory(dir)
-  return dir
-}
-function readPrivateJson(dir, name) {
+  const dir = path.join(run, 'dsh-pet-stop')
   const file = path.join(dir, name)
+  // Ordered, batched validation proves existing boundaries even when a later
+  // path is missing. An unsafe run directory must not become "no descriptor".
+  assertPrivatePaths([{ path: run, type: 'directory', exact: false }, { path: dir, type: 'directory' }, { path: file, type: 'file' }])
   const before = fs.lstatSync(file)
-  if (!before.isFile() || before.isSymbolicLink() || !privateOwner(before) || (before.mode & 0o777) !== 0o600 || before.size > MAX_BYTES) throw fail('unsafe private file')
+  const privateStat = stat => process.platform === 'win32' || (privateOwner(stat) && (stat.mode & 0o777) === 0o600)
+  if (!before.isFile() || before.isSymbolicLink() || !privateStat(before) || before.size > MAX_BYTES) throw fail('unsafe private file')
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0))
   try {
     const stat = fs.fstatSync(fd)
-    if (stat.dev !== before.dev || stat.ino !== before.ino || !privateOwner(stat) || (stat.mode & 0o777) !== 0o600 || stat.size > MAX_BYTES) throw fail('private file changed')
+    if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino || !privateStat(stat) || stat.size > MAX_BYTES) throw fail('private file changed')
     return JSON.parse(fs.readFileSync(fd, 'utf8'))
   } finally { fs.closeSync(fd) }
 }
@@ -39,17 +34,19 @@ function originUrl(origin, port) {
 }
 function readDescriptor(home, port, initial, profile) {
   let doc
-  try { doc = readPrivateJson(runDirectory(home, 'dsh-pet-stop'), `${port}.json`) }
+  try { doc = readPrivateJson(home, `${port}.json`) }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw fail('unreadable or unsafe descriptor') }
-  // A descriptor left by another (crashed) boot describes no live Host here and
-  // grants nothing; treat it as absent so the default path still refuses.
-  if (doc?.v === 1 && Number.isSafeInteger(doc.pid) && doc.pid !== initial.processes[0].pid) return undefined
+  // Validate the whole document first: a present-but-malformed descriptor
+  // always refuses, whatever PID it names.
   try {
-    if (doc?.v !== 1 || doc.pid !== initial.processes[0].pid || typeof doc.bootId !== 'string' || !doc.bootId.trim() || doc.profile !== profile) throw fail('descriptor Host mismatch')
+    if (doc?.v !== 1 || !Number.isSafeInteger(doc.pid) || doc.pid <= 0 || typeof doc.bootId !== 'string' || !doc.bootId.trim() || doc.profile !== profile) throw fail('descriptor Host mismatch')
     originUrl(doc.origin, port)
     const url = new URL(doc.authenticatedUrl)
     if (url.origin !== doc.origin || url.username || url.password || url.hash) throw fail('invalid authenticated URL')
   } catch { throw fail('invalid descriptor or Host mismatch') }
+  // A well-formed descriptor left by another (crashed) boot describes no live
+  // Host here and grants nothing; treat it as absent (stop proceeds without drain).
+  if (doc.pid !== initial.processes[0].pid) return undefined
   return doc
 }
 
@@ -133,11 +130,14 @@ export async function preparePetStop({ home, port, initial, probe, env, profile 
   initial = structuredClone(initial)
   const descriptor = readDescriptor(home, port, initial, profile)
   if (!descriptor) {
-    if (allowLegacyRestart) {
-      warn('显式 legacy 维护停止：此旧 Host 无 Pet descriptor，无法保证 Pet drain。')
-      return { beforeSignal() {}, resume: async () => 'not-needed' }
-    }
-    throw fail('authenticated stop descriptor missing; Host 未停止；旧 Host 维护请显式使用 --allow-legacy-restart')
+    // No descriptor: an old Host, or a Pet that never published one. Stopping
+    // without drain is safe because Pet startup recovery settles leftovers
+    // conservatively (finishing → unknown-terminal, no resend; unprovable →
+    // manual). The only cost is that an in-flight reply may need a fresh @.
+    // An INVALID descriptor still refuses (readDescriptor throws): a suspicious
+    // file is not an absent one. `allowLegacyRestart` stays accepted for scripts.
+    warn('此 Host 无 Pet 停止凭据，跳过 Pet 收尾直接停止；处理中的投递交由下次启动恢复处理（不会重发，可能需要重新 @）。')
+    return { beforeSignal() {}, resume: async () => 'not-needed' }
   }
   const expected = { nonce: randomBytes(16).toString('hex'), hostPid: descriptor.pid, bootId: descriptor.bootId }
   let cookie, attempted = false

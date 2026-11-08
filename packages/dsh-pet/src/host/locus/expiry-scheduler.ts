@@ -107,13 +107,12 @@ export function createExpiryScheduler(deps: ExpirySchedulerDeps): ExpirySchedule
       const correlation: DeliveryCorrelation = {
         endpoint: { ...record.endpoint },
         locusId: record.locusId,
-        generation: record.generation,
-        childSessionId: record.childSessionId,
+        sessionId: record.sessionId,
       }
-      // Keyed by generation as well: a rebuilt locus reuses delivery ids from
-      // its own sequence, and a stale generation's timer must never terminate
-      // the new generation's row.
-      const key = `${record.deliveryId}\u0000${record.generation}`
+      // Keyed by sessionId as well: a rebuilt, rebound or migrated entry gets
+      // a new sessionId, and a stale session's timer must never terminate the
+      // retargeted row.
+      const key = `${record.deliveryId}\u0000${record.sessionId}`
       const previous = timers.get(key)
       if (previous !== undefined) clearTimer(previous)
       // `setTimeout` silently fires immediately past the 32-bit delay ceiling,

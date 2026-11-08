@@ -53,4 +53,35 @@ describe('Pet 的 dsh-collab 适配器', () => {
     )
     expect(disposed).not.toHaveProperty('error')
   })
+
+  describe('releaseSpace (provisioning compensation)', () => {
+    it('forgets the in-memory establishment and logs the leaked, inert space — dsh-collab has no close operation', async () => {
+      world = await openCollabWorld()
+      world.session(CURRENT.locusMainSessionId)
+      world.session(CURRENT.workSessionId)
+      const logs: string[] = []
+      const collab = new LocusCollab({ directory: { list: () => [] }, log: message => logs.push(message) })
+      collab.attach(world.service)
+      expect((await collab.ensureSpace(CURRENT)).ok).toBe(true)
+      expect(collab.isEstablished(CURRENT.locusMainSessionId)).toBe(true)
+
+      await collab.releaseSpace(CURRENT)
+
+      expect(collab.isEstablished(CURRENT.locusMainSessionId)).toBe(false)
+      expect(logs.some(line => line.includes('releaseSpace') && line.includes(CURRENT.locusMainSessionId))).toBe(true)
+    })
+
+    it('never throws, even when dsh-collab is not attached', async () => {
+      const collab = new LocusCollab({ directory: { list: () => [] } })
+      await expect(collab.releaseSpace(CURRENT)).resolves.toBeUndefined()
+    })
+
+    it('stops vouching for the M that was being established (no stale `owns`)', async () => {
+      const collab = new LocusCollab({ directory: { list: () => [] } })
+      ;(collab as unknown as { establishing: Set<string> }).establishing.add(CURRENT.locusMainSessionId)
+      expect(collab.adapter.owns(CURRENT.locusMainSessionId)).toBe(true)
+      await collab.releaseSpace(CURRENT)
+      expect(collab.adapter.owns(CURRENT.locusMainSessionId)).toBe(false)
+    })
+  })
 })

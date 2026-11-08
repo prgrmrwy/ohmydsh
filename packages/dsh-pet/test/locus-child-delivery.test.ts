@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LOCUS_SAFE_CHILD_COMPOSITION } from '../src/host/locus/aggregate.js'
 import { createLocusChildDelivery } from '../src/host/locus/child-delivery.js'
 import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
 
@@ -23,12 +22,17 @@ function adapter(childId: string, calls: string[]) {
 
 const signal = new AbortController().signal
 
+/** A v20 active row as the delivery path sees it (group M resolved onto it). */
 function locus(id: string) {
   return {
-    id: `locus-${id}`,
-    parentSessionId: 'main-shared',
-    childSessionId: `child-${id}`,
-    childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
+    locusId: `locus-${id}`,
+    state: 'active' as const,
+    locusMainSessionId: 'main-shared',
+    sessionId: `child-${id}`,
+    revision: 1,
+    accessMode: 'read-only' as const,
+    workspaceId: 'workspace-1',
+    endpoint: { chatId: `oc_${id}` },
   }
 }
 
@@ -54,17 +58,6 @@ describe('multi-locus child delivery', () => {
     // here made the second sibling fail with active-child-conflict.
     expect(created).toBe(2)
     expect(calls).toEqual(['adopt:1', 'adopt:2', 'queue:1', 'queue:2'])
-  })
-
-  it('refuses legacy rows before allocating an adapter or attempting adoption', async () => {
-    const createAdapter = vi.fn(() => adapter('unused', []) as never)
-    const port = createLocusChildDelivery({ parentPreset: () => LOCUS_BASE_PRESET, createAdapter })
-
-    await expect(port.ensureChild({
-      ...locus('legacy'),
-      childComposition: undefined,
-    }, signal)).rejects.toThrow('safe-composition-unproven')
-    expect(createAdapter).not.toHaveBeenCalled()
   })
 
   it('reuses the same adapter for later turns of one child', async () => {
@@ -116,13 +109,14 @@ describe('multi-locus child delivery', () => {
 
 describe('first-message creation through the delivery port', () => {
   const notCreated = {
-    id: 'locus-new',
+    locusId: 'locus-new',
     state: 'not-created' as const,
-    parentSessionId: 'main-locus',
-    // The id the generation reserved; Deliveries already correlate by it.
-    childSessionId: 'child-reserved',
+    locusMainSessionId: 'main-locus',
+    // The id the row reserved; Deliveries already correlate by it.
+    sessionId: 'child-reserved',
+    revision: 4,
+    accessMode: 'read-only' as const,
     workspaceId: 'workspace-1',
-    generation: 1,
     endpoint: { chatId: 'oc_group' },
   }
 
@@ -166,16 +160,29 @@ describe('first-message creation through the delivery port', () => {
 
     expect(result).toEqual({ accepted: true, executionId: 'execution-1', inboxMessageId: 'message-9' })
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      childSessionId: 'child-reserved',
-      parentSessionId: 'main-locus',
+      sessionId: 'child-reserved',
+      locusMainSessionId: 'main-locus',
       workspaceId: 'workspace-1',
       locusId: 'locus-new',
-      generation: 1,
+      revision: 4,
+      accessMode: 'read-only',
       label: 'Locus · group',
-      permission: 'read',
       prompt: [{ type: 'text', text: 'first message' }],
     }))
-    expect(publication).toHaveBeenCalledWith({ locus: notCreated, deliveryId: 'delivery-1', executionId: 'execution-1' })
+    expect(publication).toHaveBeenCalledWith({
+      locus: { locusId: 'locus-new', sessionId: 'child-reserved', revision: 4, endpoint: { chatId: 'oc_group' } },
+      deliveryId: 'delivery-1',
+      executionId: 'execution-1',
+    })
+  })
+
+  it('spec Scenario "首次创建按行上的 accessMode 组装" (delivery seam): a changed not-created row creates with its value, not a default', async () => {
+    const create = vi.fn(async () => ({ ok: true as const, childSessionId: 'child-reserved', messageId: 'message-9' }))
+    const { port } = lazyPort(create)
+
+    await queueInput(port, { locus: { ...notCreated, accessMode: 'danger-full-access' } })
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ accessMode: 'danger-full-access' }))
   })
 
   it('keeps a capacity refusal distinguishable so the Delivery can wait', async () => {

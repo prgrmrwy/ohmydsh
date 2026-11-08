@@ -92,7 +92,8 @@ function todoFromItem(ref: LocusMainRef, space: FoldedSpace, itemId: string): To
     workSessionId: ref.workSessionId,
     kind: 'todo',
     locusId: pet.entry,
-    generation: pet.generation,
+    // Pre-v20 items carry it as an audit fact; v20 writers omit it.
+    ...(pet.generation === undefined ? {} : { generation: pet.generation }),
     endpoint: pet.endpoint?.threadId === undefined ? { chatId: pet.endpoint?.chatId } : { chatId: pet.endpoint.chatId, threadId: pet.endpoint.threadId },
     triggerMessageId: pet.messageId,
     requestedBy: pet.requester,
@@ -180,7 +181,7 @@ export class CollabTodoBackend implements TodoBackend {
         ext: {
           pet: {
             entry: candidate.locusId,
-            generation: candidate.generation,
+            ...(candidate.generation === undefined ? {} : { generation: candidate.generation }),
             endpoint: candidate.endpoint,
             messageId: candidate.triggerMessageId,
             requester: candidate.requestedBy,

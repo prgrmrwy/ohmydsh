@@ -17,7 +17,7 @@ import { registry } from '../strategies/index.js'
 import { CATEGORY_HINT_KEYS, NS, bindLocale, en, zh, t } from './locales.js'
 /** Supported families as the user sees them. */
 const FAMILIES = registry.labels().join(' / ')
-import { installRoutingNavIcon } from './nav-icon.js'
+import { RoutingSettingsNavIcon } from './nav-icon.js'
 
 interface AutoSupport { supported: boolean; provider?: string; model?: string }
 interface View { childNotice?: { id: number; childId: string; reason: string; at: number };
@@ -256,7 +256,9 @@ export function apply(ctx: Context): void {
     label: () => t('navLabel'),
     inject: () => ({ rpc: ctx.connection.rpc as unknown as Rpc, ui: settingsUi }),
   }, RoutingSettings))
-  ctx.effect(() => typeof document === 'undefined' ? () => {} : installRoutingNavIcon(document), 'auto-model-routing: settings navigation icon')
+  ctx.slots.inject('settings.section.icon', () => ctx.slots.register({
+    name: 'settings.section.icon', id: 'auto-model-routing',
+  }, RoutingSettingsNavIcon))
   // Reply-bar allocation feedback, after the official feedback (order 10); rendered only on bound replies.
   ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
     name: 'conversation.chat.assistant-actions', id: 'auto-model-routing-label', order: 20,

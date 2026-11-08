@@ -1,220 +1,79 @@
 /**
- * The ONE place that answers: may this locus generation serve ordinary work,
- * and if not, may the channel establish a replacement for it?
+ * The ONE place that answers: may this v20 locus row serve ordinary work, and
+ * if not, may the channel repair it without the owner?
  *
- * Why this module exists
- * ----------------------
- * Teaching the channel to recover a generation the HOST invalidated took three
- * rounds and six edits, because that single policy was hand-written in six
- * places using three different vocabularies (`LocusState`,
- * `LocusAuthorizationState`, and per-layer allowlists). Each layer refused
- * independently, so every fix only moved the refusal one layer deeper:
- *
- *   1. `admission.ts`            — authorization state
- *   2. `channel/locus-controller.ts` — the accepted-state allowlist
- *   3. `locus/resolution.ts`     — `toActive()`
- *   4. `locus/controller.ts`     — `ensureGroup()` / `requireActiveLocus()`
- *   5. `locus/controller.ts`     — rebuild had no usable parent
- *   6. `channel/locus-controller.ts` — a read refusal short-circuited the
- *      establishing path entirely
- *
- * The concept being encoded is small and stable; the duplication was the
- * defect. Callers should ask THIS module rather than restating any subset of
- * the rules, so a future policy change is one edit with the compiler pointing
- * at every consumer.
- *
- * The distinction that matters
- * ----------------------------
- * `stopped` / `retired` record an OWNER decision. The spec is explicit:
- * "明确退出的入口 SHALL 保留停止标记，普通 at MUST NOT 自动复活" — an ordinary
- * mention must never resurrect a deliberate exit, and the owner rebuilds it
- * from the panel.
- *
- * `invalid` records a HOST judgement — a child that failed to re-attach after
- * a restart, or a generation with no safe-v1 composition proof. The owner
- * decided nothing, so there is no intent to preserve and no exit to honour.
- * Requiring an explicit rebuild here is what stranded endpoints: the panel
- * offers that rebuild only against the generation's own recorded parent,
- * which may itself be archived, making the repair impossible.
+ * The distinction that matters is WHO made the row unavailable:
+ * - `stopped` is an OWNER decision; an ordinary @ never revives it (only a
+ *   same-W `/bind` does, design D7);
+ * - `invalid` is a HOST judgement (child lost / identity unprovable); the next
+ *   authorized @ rebuilds that one row in place;
+ * - an archived W is the owner acting on the source, not on this row: the row
+ *   keeps its `state` and the entry stops serving until the owner rebinds;
+ * - an unavailable M (W healthy) is repaired by whole-W migration.
  */
 
-import {
-  LOCUS_SAFE_CHILD_COMPOSITION,
-  type LocusChildComposition,
-  type LocusToolTier,
-  type LocusState,
-} from './aggregate.js'
+import type { LocusStateV20 } from './contract-v20.js'
 
-/**
- * What the channel may do with one generation.
- *
- * - `serve`    — it can take ordinary work now.
- * - `replace`  — it cannot, but the channel may establish a NEW generation
- *                without the owner asking. The unavailable generation itself
- *                is still never served or resumed; see `toActive`'s use.
- * - `terminal` — it cannot, and only the owner may act. Ordinary work is
- *                refused with a reason a member can relay.
- * - `create`   — a `not-created` entry: it can take work, but its child
- *                session does not exist yet; the first deliverable message
- *                creates it.
- */
 export type LocusDisposition =
-  /**
-   * Carries the proven facts, so callers never have to re-check invariants
-   * this module already established — re-checking is how the rules got
-   * duplicated in the first place.
-   */
-  | {
-      readonly kind: 'serve'
-      readonly childSessionId: string
-      readonly childComposition: LocusChildComposition
-      readonly toolTier?: LocusToolTier
-    }
+  /** `active`: the child exists and may take work. */
+  | { readonly kind: 'serve' }
+  /** `not-created`: it takes work, the first deliverable message creates the child. */
   | { readonly kind: 'create' }
-  | { readonly kind: 'replace'; readonly reason: string; readonly why?: LocusReplaceWhy }
-  | { readonly kind: 'terminal'; readonly reason: string }
+  | { readonly kind: 'replace'; readonly reason: string; readonly why: LocusReplaceWhy }
+  | { readonly kind: 'terminal'; readonly reason: string; readonly workArchived: boolean }
 
-/** Why a generation is replaceable, so the replacement can be the right one. */
+/** Why a row is replaceable, so the right repair runs. */
 export type LocusReplaceWhy =
-  /** A row of the previous two-tier model (no locus main pairing). */
-  | 'previous-model'
-  /** The locus main it hangs under is retired, archived, deleted or mis-composed. */
+  /** M is archived, deleted, mis-composed or outside the Pet workspace: whole-W migration. */
   | 'locus-main-unavailable'
-  /** The Host judged this generation's child unusable. */
+  /** The Host judged this row's child unusable: in-place rebuild of the one row. */
   | 'child-unusable'
 
-/** The fields any caller can supply; keeps this usable from projections too. */
 export interface ServiceabilitySubject {
-  readonly state: LocusState
-  readonly childSessionId?: string
-  readonly childComposition?: string
-  readonly toolTier?: LocusToolTier
+  readonly state: LocusStateV20 | string
   readonly invalidReason?: string
-  /**
-   * Whether this endpoint's recorded main session is archived.
-   *
-   * Archiving the main session is an OWNER action, and it must not be
-   * silently undone: nothing in the runtime refuses to RESUME an archived
-   * session, so a delivery that only asked "can I reach the parent?" would
-   * revive it and keep serving — the owner's archival would have no effect at
-   * all. It is also not a HOST judgement, so it is not replaceable without the
-   * owner either: an ordinary mention must not quietly re-point the endpoint
-   * at a brand-new main session, which is exactly the "自动换来源" the spec
-   * forbids.
-   *
-   * Read from the live archive set rather than persisted onto the record, so
-   * restoring the session restores service with no rebuild in between.
-   */
-  readonly parentArchived?: boolean
-  /**
-   * The row belongs to the previous two-tier model: its parent session has no
-   * `locus_mains` pairing. Read-time interpretation only; the row is not
-   * rewritten. Such a row never serves and its child is never adopted.
-   */
-  readonly legacy?: boolean
-  /** The locus main this row hangs under cannot serve (retired/archived/gone). */
+  /** The W behind this entry is archived (proved from the Host, never persisted). */
+  readonly workArchived?: boolean
+  /** The M this row hangs under cannot serve. */
   readonly mainUnavailable?: boolean
 }
 
-/**
- * Whether this state records an OWNER decision to take the endpoint out of
- * service. These are terminal for ordinary work by spec.
- */
-export function isOwnerExit(state: LocusState): boolean {
-  return state === 'stopped' || state === 'retired'
+/** Whether this state records an OWNER decision to take the entry out of service. */
+export function isOwnerExit(state: string): boolean {
+  return state === 'stopped'
 }
 
-/**
- * Whether an unavailable generation may be replaced without owner action.
- *
- * Deliberately the exact complement of {@link isOwnerExit} among the
- * unavailable states: `invalid` is the only one that is a Host judgement
- * rather than an owner decision. Transient states (`provisioning`,
- * `switching`) are not "unavailable" and are excluded by the caller.
- *
- * An archived main session is the one case that is unavailable WITHOUT being a
- * Host judgement: the owner acted, just not on this locus. Building a
- * replacement would need a different main session, and choosing one on the
- * owner's behalf is the switch the spec reserves for them.
- */
-export function mayReplaceWithoutOwner(subject: Pick<ServiceabilitySubject, 'state' | 'parentArchived'>): boolean {
-  if (subject.parentArchived === true) return false
-  return subject.state === 'invalid'
-}
-
-/**
- * Decide what may be done with one generation.
- *
- * A generation serves work only when it is `active`, has a child session, and
- * carries a recognized durable composition proof (`safe-v1` or `safe-v2`). Anything else is classified
- * by WHO made it unavailable, never by which layer happens to be asking.
- * @param subject - the generation's state and composition facts.
- * @returns the disposition every delivery-path layer must agree on.
- */
+/** Decide what may be done with one row. */
 export function dispositionOf(subject: ServiceabilitySubject): LocusDisposition {
-  // An archived work session outranks every other classification, including
-  // `active`: the child is intact and reachable, so nothing downstream would
-  // notice on its own that the session this endpoint belongs to was retired
-  // from the owner's view.
-  if (subject.parentArchived === true) {
+  // An archived W outranks every state, including `active`: the child is intact
+  // and reachable, so nothing downstream would notice the owner archived the source.
+  if (subject.workArchived === true) {
     return {
       kind: 'terminal',
-      reason: 'the source (work) session of this endpoint is archived by its owner; '
-        + 'restore that session, or /bind the endpoint to a new one',
+      workArchived: true,
+      reason: 'the source (work) session of this entry is archived; rebind it in the management surface',
     }
   }
-  // The owner's own exit is honoured before any "previous model" reading: an
-  // explicitly stopped/retired row is never revived just because it is old.
   if (isOwnerExit(subject.state)) {
-    return { kind: 'terminal', reason: `endpoint was explicitly ${subject.state} by its owner` }
-  }
-  if (subject.legacy === true) {
-    return {
-      kind: 'replace',
-      why: 'previous-model',
-      reason: 'row belongs to the previous two-tier model and is retired',
-    }
+    return { kind: 'terminal', workArchived: false, reason: 'entry was stopped by its owner' }
   }
   if (subject.mainUnavailable === true) {
     return {
       kind: 'replace',
       why: 'locus-main-unavailable',
-      reason: 'the locus main session of this endpoint is unavailable',
+      reason: 'the locus main session of this entry is unavailable',
     }
   }
   if (subject.state === 'not-created') return { kind: 'create' }
-  if (subject.state === 'active') {
-    const childSessionId = subject.childSessionId?.trim() ?? ''
-    if (childSessionId === '') {
-      return { kind: 'replace', why: 'child-unusable', reason: 'active generation has no child session' }
-    }
-    if (subject.childComposition !== LOCUS_SAFE_CHILD_COMPOSITION) {
-      // Refusing to SERVE this is what keeps a composition nobody proved from
-      // running: only the `tier3` marker is published by the three-tier
-      // structure. Replacing it is safe: the replacement is created fresh WITH
-      // the proof.
-      return {
-        kind: 'replace',
-        why: 'child-unusable',
-        reason: 'no durable tier3 child composition proof',
-      }
-    }
-    return {
-      kind: 'serve',
-      childSessionId,
-      childComposition: subject.childComposition,
-      ...(subject.toolTier !== undefined ? { toolTier: subject.toolTier } : {}),
-    }
-  }
-  if (mayReplaceWithoutOwner(subject)) {
+  if (subject.state === 'active') return { kind: 'serve' }
+  if (subject.state === 'invalid') {
     return {
       kind: 'replace',
       why: 'child-unusable',
       reason: subject.invalidReason === undefined
-        ? 'generation was invalidated by the Host'
-        : `generation was invalidated by the Host (${subject.invalidReason})`,
+        ? 'row was invalidated by the Host'
+        : `row was invalidated by the Host (${subject.invalidReason})`,
     }
   }
-  // `provisioning` / `switching`: in flight, not a decision to act on.
-  return { kind: 'terminal', reason: `generation is ${subject.state}` }
+  return { kind: 'terminal', workArchived: false, reason: `row is ${subject.state}` }
 }

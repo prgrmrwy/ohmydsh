@@ -41,7 +41,7 @@ describe('所有者处置待办经 manager 代为记账', () => {
     expect(t.world.counts.followup).toBe(followups)
   })
 
-  it('干活主会话自行完成', async () => {
+  it('工作主会话自行完成', async () => {
     const t = await ready()
     expect((await t.register('rec-alpha-g1', { summary: '主会话自行完成', detail: '' }, 'todo-self')).ok).toBe(true)
     const work = t.world.live.get(W)

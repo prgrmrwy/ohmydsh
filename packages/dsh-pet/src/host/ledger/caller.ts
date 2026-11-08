@@ -17,20 +17,25 @@
  * 不唤醒主会话", "共享事实台账按主会话归属并对同源只读开放", "待办登记固定来
  * 源与回复去向且关联标识而非实例".
  */
-import type { LocusEndpoint, LocusRecord } from '../locus/aggregate.js'
+import type { LocusEndpoint } from '../locus/aggregate.js'
+import type { LocusResolvedRowV20 } from '../locus/contract-v20.js'
 
 /** Structural subset this module actually needs from the durable locus repository. */
 export interface LedgerCallerLocusLookup {
-  /** Every durable generation for a child session id — never collapsed before the ambiguity check runs. */
-  findByChildSessionId(childSessionId: string): readonly LocusRecord[]
+  /**
+   * The row whose `sessionId` is this (D12 `child-locus` index), with the M
+   * resolved (a topic row has none of its own). `sessionId` is unique across
+   * the table; an ambiguous index throws, which the resolver refuses.
+   */
+  findBySessionId(sessionId: string): LocusResolvedRowV20 | undefined
 }
 
 /** The resolved identity of an ACTIVE locus child calling one of the three tools. */
 export interface LedgerCaller {
   readonly childSessionId: string
+  /** The locus main session (M) the entry hangs under. */
   readonly parentSessionId: string
   readonly locusId: string
-  readonly generation: number
   readonly endpoint: LocusEndpoint
 }
 
@@ -79,23 +84,28 @@ export function resolveLedgerCaller(
   loci: LedgerCallerLocusLookup,
 ): LedgerCaller {
   if (!validId(childSessionId)) reject()
-  const matches = loci.findByChildSessionId(childSessionId)
-  if (matches.length !== 1) reject()
-  const row = matches[0]!
+  let found: LocusResolvedRowV20 | undefined
+  try {
+    found = loci.findBySessionId(childSessionId)
+  } catch {
+    // An ambiguous or unreadable index is refused, never resolved by guessing.
+    reject()
+  }
+  if (found === undefined) reject()
+  const { row, locusMainSessionId } = found
   if (row.state !== 'active') reject()
-  if (!validId(row.parentSessionId)) reject()
-  if (row.childSessionId !== childSessionId) reject()
-  if (!validId(row.id)) reject()
-  if (!Number.isSafeInteger(row.generation) || row.generation < 1) reject()
+  if (!validId(locusMainSessionId)) reject()
+  if (row.sessionId !== childSessionId) reject()
+  if (!validId(row.locusId)) reject()
   if (typeof row.endpoint?.chatId !== 'string' || row.endpoint.chatId.trim() === '') reject()
+  const threadId = 'threadId' in row.endpoint ? row.endpoint.threadId : undefined
   return Object.freeze({
     childSessionId,
-    parentSessionId: row.parentSessionId,
-    locusId: row.id,
-    generation: row.generation,
-    endpoint: row.endpoint.threadId === undefined
+    parentSessionId: locusMainSessionId,
+    locusId: row.locusId,
+    endpoint: threadId === undefined
       ? { chatId: row.endpoint.chatId }
-      : { chatId: row.endpoint.chatId, threadId: row.endpoint.threadId },
+      : { chatId: row.endpoint.chatId, threadId },
   })
 }
 
@@ -112,8 +122,10 @@ export function resolveLedgerCaller(
  * This function re-resolves and compares against the FIRST resolution's
  * identity-defining fields. It does not compare `endpoint` — the endpoint is
  * a platform-addressing fact recorded once at registration time and is not
- * re-derived here — but it DOES compare `parentSessionId`/`locusId`/
- * `generation`, because any of those changing means the write would be
+ * re-derived here — but it DOES compare `parentSessionId` (M) and
+ * `locusId`; a replaced `sessionId` (rebuild, rebind, migration) no longer
+ * resolves at all. `revision` is deliberately not compared: an access change
+ * bumps it without changing who the caller is. Any of those changing means the write would be
  * attributed to a locus association that no longer exists as resolved.
  *
  * Call this AFTER the write's caller-identity-dependent facts have been
@@ -129,8 +141,7 @@ export function reverifyLedgerCaller(
   const second = resolveLedgerCaller(childSessionId, loci)
   if (
     second.parentSessionId !== first.parentSessionId ||
-    second.locusId !== first.locusId ||
-    second.generation !== first.generation
+    second.locusId !== first.locusId
   ) {
     reject()
   }

@@ -79,3 +79,26 @@ test('preview stop checks recorded identity and ports wrap with a bounded limit'
   assert.equal(previewPorts(3279).length, 20)
   assert.deepEqual(previewPorts(3200, true), [3200])
 })
+
+test('profile initialized but patch anchor missing still seeds registries and leaves the patch untouched', async t => {
+  // First isolated build can stop at the private npm scope preflight before the patch region exists;
+  // prepare-preview must still seed the registry lines so the next build can pass.
+  const f = await fixture(t, false)
+  await f.put(f.home, 'profiles/web/package.json', '{}')
+  await f.put(f.home, 'profiles/web/cordis.patch.yml', '- id: other\n  config: keep\n')
+  await f.put(f.source, 'profiles/web/cordis.patch.yml', `${PATCH_ANCHOR}\n- id: agent-default-model\n  config: {model: test}\n`)
+  await f.put(f.source, 'profiles/web/.npmrc', '@scope:registry=https://scope.invalid\n//scope.invalid/:_authToken=do-not-copy\n')
+  const lines = []
+  const result = await seedPreview({ env: f.env, repo: f.repo, log: line => lines.push(line) })
+  const npmrc = await fs.readFile(path.join(f.home, 'profiles/web/.npmrc'), 'utf8')
+  assert.match(npmrc, /^@scope:registry=https:\/\/scope\.invalid$/m)
+  assert(!npmrc.includes('authToken'))
+  assert.equal(await fs.readFile(path.join(f.home, 'profiles/web/cordis.patch.yml'), 'utf8'), '- id: other\n  config: keep\n')
+  assert(result.skipped.includes('patch:pending-build'))
+  assert(lines.some(line => /dsh build/.test(line) && /prepare-preview/.test(line) && /patch/i.test(line)))
+  // Missing patch file entirely: same partial seed, never creates the file.
+  await fs.rm(path.join(f.home, 'profiles/web/cordis.patch.yml'))
+  const again = await seedPreview({ env: f.env, repo: f.repo, log() {} })
+  assert(again.skipped.includes('patch:pending-build'))
+  await assert.rejects(fs.stat(path.join(f.home, 'profiles/web/cordis.patch.yml')))
+})

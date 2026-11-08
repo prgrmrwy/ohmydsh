@@ -4,7 +4,7 @@
  * Adapted from upstream deepseek-harness packages/settings/settings/tests/live-config.ts
  * (tag dsh-v0.2.1-rc.5).
  */
-import { resolveConfig, type Context, type Plugin } from '@deepseek-ai/cordis'
+import type { Context, Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 
 export async function liveConfig(ctx: Context, plugin: Plugin, initial: object = {}) {
@@ -19,7 +19,7 @@ export async function liveConfig(ctx: Context, plugin: Plugin, initial: object =
     /** Replace the raw config; a candidate the plugin rejects throws before the update, like a settings write. */
     async replace(next: Record<string, unknown>): Promise<void> {
       const fiber = entry.fiber!
-      resolveConfig(fiber.runtime!, fiber.ctx.waterfall(fiber, 'internal/config', next, () => next))
+      fiber.resolveConfig(next) // 0.2.2: Fiber.resolveConfig runs the `internal/config` waterfall
       await entry.update({ config: next })
       await entry.fiber!.await()
     },

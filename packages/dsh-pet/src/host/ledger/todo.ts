@@ -92,8 +92,11 @@ export interface TodoRecord {
   readonly kind: 'todo'
   /** Stable entry identity (`ext.pet.entry`). Addressing uses this, never `generation`. */
   readonly locusId: string
-  /** Audit-only fact: which generation existed when this was registered. Never used for lookup. */
-  readonly generation: number
+  /**
+   * Audit-only fact on rows written before v20: which generation existed when
+   * this was registered. Never used for lookup; v20 writers omit it.
+   */
+  readonly generation?: number
   readonly endpoint: TodoEndpoint
   readonly triggerMessageId: string
   readonly requestedBy: string
@@ -108,7 +111,8 @@ export interface NewTodoInput {
   readonly itemId: string
   readonly parentSessionId: string
   readonly locusId: string
-  readonly generation: number
+  /** Legacy audit fact; v20 Host writers no longer supply it. */
+  readonly generation?: number
   readonly endpoint: TodoEndpoint
   readonly triggerMessageId: string
   readonly requestedBy: string
@@ -147,7 +151,7 @@ export function registerTodo(input: NewTodoInput): TodoValidation {
     return { ok: false, reason: 'invalid-parent-session-id' }
   }
   if (!nonEmptyBounded(input.locusId, limits.identifierLength)) return { ok: false, reason: 'invalid-locus-id' }
-  if (!Number.isSafeInteger(input.generation) || input.generation < 1) {
+  if (input.generation !== undefined && (!Number.isSafeInteger(input.generation) || input.generation < 1)) {
     return { ok: false, reason: 'invalid-generation' }
   }
   if (typeof input.endpoint?.chatId !== 'string' || input.endpoint.chatId.trim() === '') {
@@ -179,7 +183,7 @@ export function registerTodo(input: NewTodoInput): TodoValidation {
       parentSessionId: input.parentSessionId.trim(),
       kind: 'todo',
       locusId: input.locusId.trim(),
-      generation: input.generation,
+      ...(input.generation === undefined ? {} : { generation: input.generation }),
       endpoint: input.endpoint.threadId === undefined
         ? { chatId: input.endpoint.chatId.trim() }
         : { chatId: input.endpoint.chatId.trim(), threadId: input.endpoint.threadId.trim() },
@@ -262,8 +266,9 @@ export function parseTodoRecord(input: unknown): TodoRecord {
   const itemId = str(value.itemId)
   const parentSessionId = str(value.parentSessionId)
   const locusId = str(value.locusId)
-  const generation = int(value.generation)
-  if (generation < 1) invalid()
+  // Optional since v20: rows written before it carry it, newer rows do not.
+  const generation = value.generation === undefined ? undefined : int(value.generation)
+  if (generation !== undefined && generation < 1) invalid()
 
   const endpointValue = value.endpoint
   if (endpointValue === null || typeof endpointValue !== 'object' || Array.isArray(endpointValue)) invalid()
@@ -297,7 +302,7 @@ export function parseTodoRecord(input: unknown): TodoRecord {
     parentSessionId,
     kind: 'todo',
     locusId,
-    generation,
+    ...(generation === undefined ? {} : { generation }),
     endpoint: threadIdRaw === undefined
       ? { chatId }
       : { chatId, threadId: threadIdRaw as string },

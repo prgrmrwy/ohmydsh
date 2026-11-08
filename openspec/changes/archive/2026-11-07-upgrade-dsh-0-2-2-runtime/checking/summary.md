@@ -1,0 +1,98 @@
+# upgrade-dsh-0-2-2-runtime 验收汇总
+
+本文件进入版本控制（`.gitignore` 只放行 `checking/summary.md` 与 `report.md`），用于保存各阶段的结论与证据位置。原始日志放在 `/tmp` 下，不入库，重启后会丢失。
+
+## 1. 基线（现役 0.2.1-rc.5，2026-11-07）
+
+- 根目录（worktree，依赖切换前）：`npm test` 771 项，通过 769，跳过 2，失败 0；`npm run check:artifacts` 合规。
+- 各 local package：在隔离目录 `/tmp/ohmydsh-base021-9q2h` 执行（`git archive c38826ae` 后 `npm ci`），workspace 一律按路径传入。worktree 里的第一次运行做到一半时，`npm install` 把依赖换成了 0.2.2，结果作废、不计入基线。
+  - build、typecheck 全部通过。
+  - test 中有 3 项在基线上就已失败，0.2.2 之后不计为回归：
+    - `dsh-auto-model-routing`：`usage-report.test.ts` 的「keeps incomplete ends inconclusive and legacy exposure unknown」「keeps complete frames when only the tail is incomplete」（313/315）。
+    - `dsh-pet`：`locus-host-wiring.test.ts` 的「Pet is NOT ready when the stored loci set violates a v20 invariant: topic row without its group row」（3151/3156，另有 4 项 skip）。
+  - 其余各包测试数：cockpit-memex-browse-shim 20、cockpit-worktree-open-shim 4、collab-kernel 293、dsh-collab 187、dsh-magpie-connector 538、dsh-memex 934（1 项 skip）、dsh-openspec 162、dsh-session-id-copy 27、dsh-sidebar-session-provider-icon 68、home-network-model-guard 96、sidebar-session-resources 59、subscriptions-sandbox-shim 29、system-clock 21、worktree-session 230，全部通过。
+- 1.2 中没有自动化覆盖的人工项：只列出了清单，尚未在现役 3080 上逐项记录结果（见第 6 节）。
+
+## 2. 实施提交（任务分支 ws/dsh-collab-session-88dc3e8d-…）
+
+| 提交 | 内容 |
+|---|---|
+| 71f10f60 | `dshVersion` 与 provider pin/integrity 升到 0.2.2-rc.1；local package 的 dsh devDeps 与 peer 尾段同步；Cordis 4.1.0、Loader 1.1.0 devDeps（0.2.2 peer `~4.1.0` 的要求）；重建 lockfile，运行体包只保留一份并 hoist；`engines.node >=24.9.0`，`bin/dsh` 与 `bootstrap.sh` 的提示同步；Web Fetch 信任面说明 |
+| f6c2dc50 | dsh-memex：删除过期的 tools 投影（D4）；`internal/config` 钩子换成新签名（旧写法在 0.2.2 下守卫会静默失效，变异验证确认现已生效）；`AUDITED_JSONL_VERSIONS` 加入 0.2.2-rc.1（附审计依据，未审计的版本仍被拒）；测试夹具迁移 |
+| 9045d425 | sidebar-session-provider-icon：`await` 异步的 `sessionProjections.register` |
+| 64ea656d | dsh-magpie-connector、worktree-session：测试夹具迁到 0.2.2 API 形状，源码不变 |
+| 7e5d78d5 | fs-observation-policy patch 与 official 测试（D5）；connection-webserver 的 0.2.2 复核（保留）；noPet 名册 203→207；README 最小 manifest 版本号 |
+| 072deaff | dsh-auto-model-routing：主会话在 pre-step 改写本步选择；子会话在 created 时 select、resume 时补写 route；`agent/request` 只核验；`engines.dsh >=0.2.2-rc.1` |
+| 402aadb3 | dsh-pet：用 `sessionQuery.observeSession` 替换已移除的 `sessionController.inspect`，缺失时输出可诊断日志；测试夹具迁移 |
+| daf66a09 | 为 0.2.2 测试夹具新 import 的运行体包补 devDependencies（auto-model-routing 11 个、dsh-pet 与 worktree-session 各 1 个），运行体包仍单实例 |
+
+## 3. 规划之外发现的 0.2.2 破坏面
+
+- **`sessionController.inspect` 被移除**（0.2.1-rc.5 `dsh-api-session-controller` types `index.d.ts:79` 有，0.2.2-rc.1 没有）。dsh-pet 的 Locus 开通与 Session 列表依赖它，缺失时会整体静默不装配。现在新增 `packages/dsh-pet/src/host/session-inspection.ts`，按旧契约复现：`observeSession(id, {projectionMode: 'none'})`，没有 cwd 时视为不存在，读完释放 lease。缺少该能力时启动日志会明确报错；Pet 仍然 ready，Locus 通道沿用原有的 unavailable 降级。全仓只有 dsh-pet 用到 `inspect`。
+- **0.2.2 不再默认挂载工具执行器**：生产组合由 dsh-base 顶层的 `tool-executor-native` 全局提供（cordis.patch.yml:497-505；真实运行体 `--dump-config` :385-390），自研 preset 不用改；只有测试装配需要显式挂载。
+- **`ctx.tools.execute` 改为批量形状**：入参 `{calls, agent, signal}`，返回 `{results}`。另外 `defineContentToolFixture` 和 `buildModelCatalog` 不再导出，`dsh-agent` 现在 `inject: ['sessionProjections']`。这些都只影响测试夹具。
+- **memex 有假通过的测试**：「注入时首请求零调用」之前是因为抛 TypeError 才通过的。现已改成断言具体的拒绝原因。
+
+## 4. 测试结果（0.2.2-rc.1）
+
+- test-plan.md 的 72 行全部转绿。auto-model-routing 在真实 loop 与 subagent 链路上断言；fs-observation-policy 的 official 测试用 `DSH_TEST_OFFICIAL_RUNTIME=/tmp/fsp-runtime-0.2.2` 跑，5/5 通过（运行体重建方法见 dsh.yaml 条目 note 与测试头注释）。
+- 各包结果见第 5 节终验。
+
+## 5. 全仓终验（8.6）
+
+2026-11-07，在 daf66a09 上运行，依赖为 0.2.2-rc.1（日志在 `/tmp/r022-final/`）：
+- 根目录 `npm test`：777 项，通过 775，跳过 2，失败 0；`npm run check:artifacts` 合规。
+- 各包 build 与 typecheck 全部通过。test 结果：cockpit-memex-browse-shim 20、cockpit-worktree-open-shim 4、collab-kernel 293、dsh-collab 187、dsh-magpie-connector 538、dsh-memex 935（跳过 1）、dsh-openspec 162、dsh-session-id-copy 27、dsh-sidebar-session-provider-icon 72、home-network-model-guard 96、sidebar-session-resources 59、subscriptions-sandbox-shim 29、system-clock 21、worktree-session 230，全部通过。
+- 仅有的失败与第 1 节的基线失败完全相同，不是 0.2.2 回归：auto-model-routing usage-report 2 项（327/329），dsh-pet v20 invariant 1 项（3158/3163，跳过 4）。
+
+## 6. 尚未完成
+
+- 1.2：现役人工项的结果。
+- 9：隔离候选验收（`dsh build` → `ws prepare-preview` → `dsh`），以及 devbox 清洁构建 gate。`tests/launcher-no-pet.official.mjs` 在 :18/:21 写死了 0.2.0-rc.2，需要在候选验收时决定如何处理。
+- 10：备份与恢复演练，需要用户执行 `dsh stop`。
+- 11：上游留言已于 2026-11-07 经用户确认发布：https://github.com/deepseek-ai/deepseek-harness/discussions/7179#discussioncomment-19453297 （待上游回应，不阻断合入）。
+- 12：合入与生产切换，需要用户批准。
+
+## 7. 后续项（不在本 change 内）
+
+- `memex-eval-judge` preset 与 memex 测试夹具使用的 `@deepseek-ai/dsh-agent-tool-presentation` 在 0.2.2 已标为弃用，应改为直接挂载 `dsh-tool-executor-native`。
+- 基线就已存在的未声明 devDependencies：dsh-collab（dsh-agent-loop、dsh-session-projection、dsh-session-persistence-jsonl、dsh-system-prompt），dsh-openspec（dsh-scope），dsh-pet（dsh-subagent、dsh-system-prompt、dsh-scope、dsh-session-persistence(-jsonl)、dsh-session-query、dsh-session-projection、dsh-subagent-spawn-in-process、dsh-fs-local、dsh-working-directory、dsh-tool-fs）。
+- `packages/dsh-auto-model-routing/docs/architecture.dual.svg`/`.json`（README 没有引用的 v1 图）里仍写着 “agent/request hook”。
+- 商店上的 AUTO 0.7.0 在 0.2.2 Host 上不可用，需走 publish 流程发布 0.7.1（用户 2026-11-07 定版本号）。
+- 已知不稳定：机器高负载时 `locus-host-wiring` 偶尔出现 1s `waitFor` 超时，单独跑该文件稳定。
+
+## 8. 生产切换（2026-11-07）
+
+- 合入：ohmydsh `main` fast-forward 到 1c9fbc39（`scripts/ws-merge.mjs`）；inner-ohmydsh `main` fast-forward 到 1f11f19（traex 0.1.20）。两边均未 push（traex pin 全机共用，其它机器升 0.2.2 时再 push）。
+- 备份：用户在外部终端执行 `~/dsh-backups/switch-0.2.2.sh`（先 `dsh stop` 并确认 3080 不再监听，再离线打包）。归档 `~/dsh-backups/pre-0.2.2-20261107-134040.tar.zst`（sha256 dbf570e5…5157，另有 13:37 的一份较早归档）。用户决定跳过副本迁移/回读演练，回滚靠此备份，切换后新数据会丢失。
+- 启动：`dsh history` 记录 2026-11-07T05:41:28Z `dshVersion=0.2.2-rc.1 port=3080`，插件清单含 `@deepseek-ai/dsh-fs-observation-policy`；运行体 `@deepseek-ai/dsh` 0.2.2-rc.1；traex-bridge 0.1.20；日志 dsh-pet `ready — routes registered`、jev-mcp ready，无 Locus 不可用告警。唯一错误行是 subscriptions 的 Claude CLI 版本探测 ENOENT 回退（本机未装 claude CLI，非本次引入）。
+- 待用户：3080 功能验收（9.2 人工项）。
+
+## 9. 3080 会话内功能验收（2026-11-07，由 lead 在生产 0.2.2 会话中执行）
+
+- 文件观察策略：外部写入的文件未读即 edit → 拒绝（file has not been read）；读后被外部改写再 edit → 拒绝（file changed since it was read）；重读后 edit 成功。0.2.2 默认关闭该防护，此结果证明 patch 生效。
+- AUTO 主会话（session-d9a86ee5…，模式 AUTO）：turn 57 在 step 1 之前写入 `model/selection` effort high，step 1 的 request/header 即为 high（上一回合 medium），运行体无报错。
+- AUTO 子会话：`route_subagent` 预览推荐 claude-haiku-5-5/low；实际 fresh 子会话（730c0045…）在首条消息前写入同一 selection，step 1 请求头 haiku/low，决策记录 `status: applied`、capability bounded，子会话正确完成任务。
+- memex：`memex_recall` 正常返回。
+- traex：`list_subagent_models` 能拉到实时模型目录（provider 已注册、后端可达）；本会话子会话允许列表不含 traex 路由，未能做真实对话。
+- 未测（需 GUI 或外部通道）：traex 真实对话、Pet Locus 端到端、better-sidebar 各 tab、btw。
+
+## 10. 验收中发现：Pet 执行 preset 引用已删除的子路径（2026-11-07）
+
+- 现象：飞书测试群 at Pet，入口建立失败（`locus-bootstrap-failed … 创建失败，未发布任何关联`）。Pet 状态里 operation `lastError`：`tool-subagent-list-agents (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started`，已按 fail closed 回滚为 `compensated`，没有残留。
+- 根因：0.2.2 把 `list_agents` 合并进 `dsh-tool-subagent-control` 主入口（lib/index.js:42-47），删除了 `/list-agents` 子路径导出（package.json exports 只剩 `.`）。`presets/dsh-pet-executor/agent.cordis.yml` 仍加载该子路径。noPet 名册 diff 当时已显示它被删除，但没有回查自研 preset，这是漏项。
+- 修复：删除该行（主入口行已注册 list_agents）。把 4 个自研 preset 引用的全部模块名对 0.2.2 运行体做解析检查：全部可解析。
+- 测试：dsh-pet 3158 通过，仅基线 v20 invariant 1 项失败；根目录 777 项中 1 项失败：`launcher-managed-profile` 的 “non-web history stays read-only”。原因是 worktree 的 ws 绑定会把 launcher 指向隔离预览 home，而预览启动后那里有启动历史。预览启动前终验时该项通过，属于测试对环境的依赖，与本修复无关，记为后续项。
+- 后续项：升级复核清单增加「对所有自研 preset 的模块名做目标运行体解析检查」。
+
+## 11. Pet Locus 端到端（修复 c96582ef 部署并重启后，2026-11-07）
+
+- 飞书测试群 at Pet：provisioning operation `committed`，日志 `collab: established`；入口行 `active`、`accessMode: read-only`；first-child delivery `committed`，Delivery `status: replied`。
+- 子会话 session-ca5c3915…：`agentPreset: locus-child`、`origin: subagent`；工具调用 `locus_context`、`pet_locus_chat_history`、`pet_locus_finish` 各 1 次，回复经受管 finish 发出；`ToolExecutorUnavailableError` 0 次（全局 native executor 对自研 preset 生效）。
+- 用户确认：traex 对话、better-sidebar 各 tab、btw 正常。9.2 人工项全部完成。
+
+## 12. 收尾（2026-11-07）
+
+- 9.3 devbox gate、10.2 副本迁移演练：用户决定跳过，分别以生产验收与离线备份代替。
+- AUTO 商店版本线：0.2.0–0.2.1 用已发布 0.7.0/0.6.x，0.2.2 起用 0.7.1（用户定）；发版走 publish 流程，不在本 change 内。
+- `launcher-managed-profile` 的 history 用例改用不含 .env.local 的临时 repo：worktree 的 ws 托管块会用 DSH_HOME 覆盖调用方传入值，导致预览启动后该用例读到预览历史。

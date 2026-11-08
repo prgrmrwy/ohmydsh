@@ -3,8 +3,9 @@ import {
   LOCUS_LARK_CLI_OUTBOUND_DENIAL,
   locusLarkCliOutboundGuard,
 } from '../src/host/locus/lark-cli-egress-guard.js'
+import { attestLocusComposition, LOCUS_CALLER_BOUND_TOOLS, LOCUS_SAFE_TOOL_NAMES } from '../src/host/locus/composition.js'
 
-describe('Locus shell-tier Lark CLI mistake-prevention guard', () => {
+describe('Locus danger-full-access Lark CLI mistake-prevention guard', () => {
   it.each([
     'lark-cli im +messages-send --text hi',
     'lark-cli im +messages-reply --text hi',
@@ -62,4 +63,40 @@ describe('Locus shell-tier Lark CLI mistake-prevention guard', () => {
     expect(locusLarkCliOutboundGuard({ name: 'skill', arguments: { command: 'lark-cli im +messages-send' } })).toBeUndefined()
     expect(locusLarkCliOutboundGuard({ name: 'bash', arguments: null })).toBeUndefined()
   })
+
+  it('spec Scenario "shell 档误用 lark-cli 发送被拦截"', () => {
+    for (const command of [
+      'lark-cli im +messages-send --chat-id oc_x --text hi',
+      'lark-cli im +messages-reply --message-id om_x --text hi',
+      'lark-cli im +messages-recall --message-id om_x',
+      'lark-cli im +messages-update --message-id om_x --text hi',
+    ]) {
+      const denial = locusLarkCliOutboundGuard({ name: 'bash', arguments: { command } })
+      expect(denial).toBe(LOCUS_LARK_CLI_OUTBOUND_DENIAL)
+    }
+    // The denial names the managed finish and asks for finish's own refusal reason.
+    expect(LOCUS_LARK_CLI_OUTBOUND_DENIAL).toContain('pet_locus_finish')
+    expect(LOCUS_LARK_CLI_OUTBOUND_DENIAL).toMatch(/拒绝原因/)
+  })
+
+  it('spec Scenario "shell 档读取当前群不被拦截"', () => {
+    for (const command of [
+      'lark-cli im +chat-messages-list --chat-id oc_current',
+      'lark-cli im +messages-list --chat-id oc_current',
+      'lark-cli api GET /open-apis/im/v1/messages --query container_id=oc_current',
+    ]) {
+      expect(locusLarkCliOutboundGuard({ name: 'bash', arguments: { command } })).toBeUndefined()
+    }
+  })
+
+  it('spec Scenario "shell 旁路不可达": a read-only child cannot be published with any shell route', () => {
+    // The guard is not the boundary for read-only; the published surface is.
+    const readOnly = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS]
+    expect(readOnly).not.toContain('bash')
+    expect(readOnly).not.toContain('skill')
+    for (const route of ['bash', 'skill']) {
+      expect(attestLocusComposition([...readOnly, route], 'read-only')).toMatchObject({ ok: false, leaks: [route] })
+    }
+  })
 })
+

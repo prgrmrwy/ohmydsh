@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { apply } from '../src/client/index.js'
 import { fakeLocale } from './fake-locale.js'
 
-it('registers a bounded settings contribution with disposer-owned navigation adapter', () => {
+it('registers the settings page and its matching official icon contribution', () => {
   const registrations: { name: string; id: string; order: number; label?: () => string }[] = []
   const effects: unknown[] = []
   const ctx = {
@@ -15,8 +15,11 @@ it('registers a bounded settings contribution with disposer-owned navigation ada
   apply(ctx as never)
   const settings = registrations.find(item => item.name === 'settings.section')!
   expect({ id: settings.id, label: settings.label?.(), order: settings.order }).toEqual({ id: 'auto-model-routing', label: '自动模型路由', order: 300 })
-  // Two effects: the locale dictionaries and the navigation-icon adapter.
-  expect(effects).toHaveLength(2)
+  expect(registrations.filter(item => item.name === 'settings.section.icon')).toEqual([
+    { name: 'settings.section.icon', id: 'auto-model-routing' },
+  ])
+  // Only dictionaries need an explicit effect; the registry owns the icon lifecycle.
+  expect(effects).toHaveLength(1)
   const source = readFileSync(new URL('../src/client/settings-section.ts', import.meta.url), 'utf8')
   expect(source).not.toContain('selectModel(')
   expect(source).not.toContain('ui-model-selection')

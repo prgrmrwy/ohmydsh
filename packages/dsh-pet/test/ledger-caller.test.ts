@@ -5,102 +5,88 @@ import {
   reverifyLedgerCaller,
   type LedgerCallerLocusLookup,
 } from '../src/host/ledger/caller.js'
-import type { LocusRecord } from '../src/host/locus/aggregate.js'
+import type { LocusResolvedRowV20, LocusRowV20 } from '../src/host/locus/contract-v20.js'
 
-function locus(overrides: Partial<LocusRecord> = {}): LocusRecord {
+type Overrides = Partial<LocusRowV20> & { locusMainSessionId?: string }
+
+/** A resolved v20 row (the shape `findBySessionId` returns): topic rows take M from their group. */
+function resolved(overrides: Overrides = {}): LocusResolvedRowV20 {
+  const { locusMainSessionId = 'main-1', ...row } = overrides
   return {
-    id: 'locus-1',
-    generation: 2,
-    endpoint: { chatId: 'oc-project' },
-    parentSessionId: 'main-1',
-    childSessionId: 'child-1',
+    row: {
+      endpoint: { chatId: 'oc-project' },
+      locusId: 'locus-1',
+      sessionId: 'child-1',
+      state: 'active',
+      accessMode: 'read-only',
+      revision: 2,
+      createdAt: 10,
+      updatedAt: 10,
+      locusMainSessionId,
+      workspaceId: 'workspace-1',
+      ...row,
+    } as LocusRowV20,
+    locusMainSessionId,
     workspaceId: 'workspace-1',
-    source: 'auto',
-    state: 'active',
-    permission: { desired: 'read', effective: 'read' },
-    busy: false,
-    createdAt: 10,
-    updatedAt: 10,
-    ...overrides,
   }
 }
 
-function lookup(rows: readonly LocusRecord[]): LedgerCallerLocusLookup {
+function lookup(rows: readonly LocusResolvedRowV20[]): LedgerCallerLocusLookup {
   return {
-    findByChildSessionId: (childSessionId: string) => rows.filter(r => r.childSessionId === childSessionId),
+    findBySessionId: (sessionId: string) => {
+      const matches = rows.filter(r => r.row.sessionId === sessionId)
+      if (matches.length > 1) throw new Error('ambiguous')
+      return matches[0]
+    },
   }
 }
 
 describe('resolveLedgerCaller', () => {
-  it('resolves a valid active locus child to its identity facts', () => {
-    const caller = resolveLedgerCaller('child-1', lookup([locus()]))
-    expect(caller).toEqual({
+  it('resolves a valid active locus child to its identity facts (no generation)', () => {
+    expect(resolveLedgerCaller('child-1', lookup([resolved()]))).toEqual({
       childSessionId: 'child-1',
       parentSessionId: 'main-1',
       locusId: 'locus-1',
-      generation: 2,
       endpoint: { chatId: 'oc-project' },
     })
   })
 
-  it('preserves threadId when the endpoint has one', () => {
-    const caller = resolveLedgerCaller('child-1', lookup([
-      locus({ endpoint: { chatId: 'oc-project', threadId: 'omt-x' } }),
-    ]))
+  it('preserves threadId and takes the topic row M from its group', () => {
+    const caller = resolveLedgerCaller('child-1', lookup([resolved({ endpoint: { chatId: 'oc-project', threadId: 'omt-x' } })]))
     expect(caller.endpoint).toEqual({ chatId: 'oc-project', threadId: 'omt-x' })
+    expect(caller.parentSessionId).toBe('main-1')
   })
 
-  it('rejects a session with no matching locus row — an ordinary session, not a locus child', () => {
-    expect(() => resolveLedgerCaller('not-a-child', lookup([locus()]))).toThrow(LedgerCallerUnavailableError)
+  it('rejects a session with no matching row — an ordinary session, not a locus child', () => {
+    expect(() => resolveLedgerCaller('not-a-child', lookup([resolved()]))).toThrow(LedgerCallerUnavailableError)
   })
 
-  it('rejects an AMBIGUOUS caller — more than one row for the same child session id — rather than picking one', () => {
-    const rows = [locus({ id: 'locus-1', generation: 1 }), locus({ id: 'locus-2', generation: 1 })]
+  it('rejects an AMBIGUOUS caller rather than picking one', () => {
+    const rows = [resolved({ locusId: 'locus-1' }), resolved({ locusId: 'locus-2' })]
     expect(() => resolveLedgerCaller('child-1', lookup(rows))).toThrow(LedgerCallerUnavailableError)
   })
 
-  it('rejects a RETIRED locus — spec: 已失效关联统一拒绝', () => {
-    expect(() => resolveLedgerCaller('child-1', lookup([locus({ state: 'retired' })])))
+  it.each(['invalid', 'stopped', 'not-created'])('rejects a %s row — only an active child can call', state => {
+    const extra = state === 'invalid' ? { invalidReason: 'x' } : state === 'stopped' ? { stoppedAt: 1 } : {}
+    expect(() => resolveLedgerCaller('child-1', lookup([resolved({ state, ...extra } as Overrides)])))
       .toThrow(LedgerCallerUnavailableError)
   })
 
-  it('rejects an INVALID locus', () => {
-    expect(() => resolveLedgerCaller('child-1', lookup([locus({ state: 'invalid' })])))
+  it('rejects an empty/whitespace childSessionId — the "临时 subagent" no-identity case', () => {
+    expect(() => resolveLedgerCaller('', lookup([resolved()]))).toThrow(LedgerCallerUnavailableError)
+    expect(() => resolveLedgerCaller('   ', lookup([resolved()]))).toThrow(LedgerCallerUnavailableError)
+  })
+
+  it('rejects a row whose M is missing/blank even if otherwise well-formed', () => {
+    expect(() => resolveLedgerCaller('child-1', lookup([resolved({ locusMainSessionId: '' })])))
       .toThrow(LedgerCallerUnavailableError)
   })
 
-  it('rejects a STOPPED locus', () => {
-    expect(() => resolveLedgerCaller('child-1', lookup([locus({ state: 'stopped' })])))
-      .toThrow(LedgerCallerUnavailableError)
-  })
-
-  it('rejects a PROVISIONING locus — not yet an active child', () => {
-    expect(() => resolveLedgerCaller('child-1', lookup([locus({ state: 'provisioning' })])))
-      .toThrow(LedgerCallerUnavailableError)
-  })
-
-  it('rejects an empty/whitespace childSessionId — matches the "临时 subagent" no-identity case', () => {
-    expect(() => resolveLedgerCaller('', lookup([locus()]))).toThrow(LedgerCallerUnavailableError)
-    expect(() => resolveLedgerCaller('   ', lookup([locus()]))).toThrow(LedgerCallerUnavailableError)
-  })
-
-  it('rejects a row whose parentSessionId is missing/blank even if otherwise well-formed', () => {
-    expect(() => resolveLedgerCaller('child-1', lookup([locus({ parentSessionId: '' })])))
-      .toThrow(LedgerCallerUnavailableError)
-  })
-
-  it('rejects a row with an invalid generation (zero, negative, non-integer)', () => {
-    for (const generation of [0, -1, 1.5]) {
-      expect(() => resolveLedgerCaller('child-1', lookup([locus({ generation })])))
-        .toThrow(LedgerCallerUnavailableError)
-    }
-  })
-
-  it('every refusal is the SAME error shape — spec: 不因目标存在与否产生可区分差异', () => {
+  it('every refusal is the SAME error shape — 不因目标存在与否产生可区分差异', () => {
     const cases = [
       () => resolveLedgerCaller('nonexistent', lookup([])),
-      () => resolveLedgerCaller('child-1', lookup([locus({ state: 'retired' })])),
-      () => resolveLedgerCaller('child-1', lookup([locus(), locus({ id: 'locus-2' })])),
+      () => resolveLedgerCaller('child-1', lookup([resolved({ state: 'stopped', stoppedAt: 1 } as Overrides)])),
+      () => resolveLedgerCaller('child-1', lookup([resolved(), resolved({ locusId: 'locus-2' })])),
     ]
     const messages = new Set<string>()
     const codes = new Set<string>()
@@ -114,17 +100,14 @@ describe('resolveLedgerCaller', () => {
         codes.add((error as LedgerCallerUnavailableError).code)
       }
     }
-    // All three structurally different failure causes collapse to ONE
-    // message and ONE code — a caller cannot distinguish "no such session"
-    // from "retired" from "ambiguous" by inspecting the refusal.
     expect(messages.size).toBe(1)
     expect(codes.size).toBe(1)
   })
 
-  it('the refusal message never echoes a locus id, parent session id or generation', () => {
+  it('the refusal message never echoes a locus id or M', () => {
     let thrown: unknown
     try {
-      resolveLedgerCaller('nonexistent-child', lookup([locus({ id: 'secret-locus-id', parentSessionId: 'secret-main' })]))
+      resolveLedgerCaller('nonexistent-child', lookup([resolved({ locusId: 'secret-locus-id', locusMainSessionId: 'secret-main' })]))
     } catch (error) {
       thrown = error
     }
@@ -136,37 +119,37 @@ describe('resolveLedgerCaller', () => {
 
 describe('reverifyLedgerCaller (cross-await re-verification for the write path)', () => {
   it('succeeds when nothing changed between the first resolution and the write', () => {
-    const rows = [locus()]
+    const rows = [resolved()]
     const first = resolveLedgerCaller('child-1', lookup(rows))
-    const second = reverifyLedgerCaller('child-1', lookup(rows), first)
-    expect(second).toEqual(first)
+    expect(reverifyLedgerCaller('child-1', lookup(rows), first)).toEqual(first)
   })
 
-  it('spec 3.3: rejects when the locus retired in the gap between resolution and write', () => {
-    const first = resolveLedgerCaller('child-1', lookup([locus()]))
-    // Simulate the association changing state during the async gap.
-    const retiredNow = lookup([locus({ state: 'retired' })])
-    expect(() => reverifyLedgerCaller('child-1', retiredNow, first)).toThrow(LedgerCallerUnavailableError)
+  it('an access change (revision bump) between resolution and write does not invalidate the caller', () => {
+    const first = resolveLedgerCaller('child-1', lookup([resolved({ revision: 2 })]))
+    expect(reverifyLedgerCaller('child-1', lookup([resolved({ revision: 3 })]), first)).toEqual(first)
   })
 
-  it('spec 3.3: rejects when the generation advanced (source switched / explicit rebuild) in the gap', () => {
-    const first = resolveLedgerCaller('child-1', lookup([locus({ generation: 2 })]))
-    // A rebuild would normally also change childSessionId, but even if this
-    // exact child session id somehow persisted with a bumped generation, the
-    // stale first-resolution generation must not be trusted for the write.
-    const rebuilt = lookup([locus({ generation: 3 })])
-    expect(() => reverifyLedgerCaller('child-1', rebuilt, first)).toThrow(LedgerCallerUnavailableError)
+  it('rejects when the row stopped in the gap', () => {
+    const first = resolveLedgerCaller('child-1', lookup([resolved()]))
+    expect(() => reverifyLedgerCaller('child-1', lookup([resolved({ state: 'stopped', stoppedAt: 1 } as Overrides)]), first))
+      .toThrow(LedgerCallerUnavailableError)
   })
 
-  it('spec 3.3: rejects when the parentSessionId changed in the gap (should not happen for a stable locusId, but must not be trusted if it did)', () => {
-    const first = resolveLedgerCaller('child-1', lookup([locus()]))
-    const switchedParent = lookup([locus({ parentSessionId: 'main-2' })])
-    expect(() => reverifyLedgerCaller('child-1', switchedParent, first)).toThrow(LedgerCallerUnavailableError)
+  it('rejects when the sessionId was replaced (rebuild / rebind / migration): the old child no longer resolves', () => {
+    const first = resolveLedgerCaller('child-1', lookup([resolved()]))
+    expect(() => reverifyLedgerCaller('child-1', lookup([resolved({ sessionId: 'child-2' })]), first))
+      .toThrow(LedgerCallerUnavailableError)
   })
 
-  it('rejects when the child session was replaced by a wholly different locus association in the gap', () => {
-    const first = resolveLedgerCaller('child-1', lookup([locus({ locusId: 'locus-1' } as Partial<LocusRecord>)]))
-    const differentAssociation = lookup([locus({ id: 'locus-9', parentSessionId: 'main-9' })])
-    expect(() => reverifyLedgerCaller('child-1', differentAssociation, first)).toThrow(LedgerCallerUnavailableError)
+  it('rejects when the M changed in the gap (whole-W migration or rebind)', () => {
+    const first = resolveLedgerCaller('child-1', lookup([resolved()]))
+    expect(() => reverifyLedgerCaller('child-1', lookup([resolved({ locusMainSessionId: 'main-2' })]), first))
+      .toThrow(LedgerCallerUnavailableError)
+  })
+
+  it('rejects when the child session was replaced by a wholly different association in the gap', () => {
+    const first = resolveLedgerCaller('child-1', lookup([resolved()]))
+    expect(() => reverifyLedgerCaller('child-1', lookup([resolved({ locusId: 'locus-9', locusMainSessionId: 'main-9' })]), first))
+      .toThrow(LedgerCallerUnavailableError)
   })
 })

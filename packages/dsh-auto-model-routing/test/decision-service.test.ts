@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { JevClient } from '../src/jev.js'
 import { DECISION_SERVICES, resolveDecisionService, validDecisionEndpoint, type DecisionConfig } from '../src/decision-service.js'
 import { toastText } from '../src/client/control.js'
+import { resolvePreset as resolveTestPreset } from '../src/presets/index.js'
+const DEFAULT_PRESET = resolveTestPreset('reasoning-depth')
 afterEach(()=>vi.unstubAllGlobals())
 it('validates exact endpoints and preserves explicit model identity',()=>{
  for(const p of ['openrouter','typesafe','concentrate'] as const) expect(resolveDecisionService({provider:p}).endpoint).toBe(DECISION_SERVICES[p].endpoint)
@@ -14,18 +16,18 @@ it('snapshots provider before async credential resolution and never mixes key or
  const requests:{url:string;init:RequestInit}[]=[];const refs:string[]=[]
  vi.stubGlobal('fetch',async(url:string,init:RequestInit)=>{requests.push({url,init});return Response.json({answers:{depth:{choice:'higher',confidence:.83,probabilities:{higher:.9,baseline:.1,bad:2}},capability:{choice:'analytical',confidence:.61}}})})
  const client=new JevClient({get:async name=>{refs.push(name);config={provider:'concentrate'};return {value:'synthetic-test-key'}}},undefined,3000,()=>config)
- const result=await client.judgePolicy('public synthetic task',new AbortController().signal,'child')
+ const result=await client.judgePolicy('public synthetic task',new AbortController().signal, 'child', 'both', DEFAULT_PRESET)
  expect(result).toMatchObject({decisionProvider:'typesafe',decisionModel:'jev-1.13.0',confidence:.83,capabilityConfidence:.61,probabilities:{higher:.9,baseline:.1}})
  expect((result as {probabilities:object}).probabilities).not.toHaveProperty('bad')
  expect(refs).toEqual(['TYPESAFE_API_KEY']);expect(requests[0]?.url).toBe(DECISION_SERVICES.typesafe.endpoint);expect(requests[0]?.init.redirect).toBe('error')
- await client.judgePolicy('public task',new AbortController().signal,'main');expect(refs[1]).toBe('CONCENTRATE_API_KEY')
+ await client.judgePolicy('public task',new AbortController().signal, 'main', 'depth', DEFAULT_PRESET);expect(refs[1]).toBe('CONCENTRATE_API_KEY')
 })
 it('all presets send their own key and model, errors never fall back',async()=>{
  const urls:string[]=[];const refs:string[]=[]
  vi.stubGlobal('fetch',async(url:string)=>{urls.push(url);return Response.json({}, {status:451})})
  for(const provider of ['openrouter','typesafe','concentrate'] as const){
   const client=new JevClient({get:name=>{refs.push(name);return {value:'synthetic-key'}}},undefined,3000,()=>({provider}))
-  expect(await client.judgePolicy('public task',new AbortController().signal,'main')).toEqual({kind:'failed',category:'region-blocked'})
+  expect(await client.judgePolicy('public task',new AbortController().signal, 'main', 'depth', DEFAULT_PRESET)).toEqual({kind:'failed',category:'region-blocked'})
  }
  expect(refs).toEqual(['OPENROUTER_API_KEY','TYPESAFE_API_KEY','CONCENTRATE_API_KEY']);expect(urls).toHaveLength(3)
 })

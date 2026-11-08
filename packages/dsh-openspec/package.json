@@ -31,27 +31,27 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.1-rc.5",
-    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.1-rc.5",
-    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.1-rc.5",
-    "@deepseek-ai/dsh-skill": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.1-rc.5",
-    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.1-rc.5",
-    "@deepseek-ai/dsh-commands": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.1-rc.5"
+    "@deepseek-ai/dsh-agent": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.2-rc.1",
+    "@deepseek-ai/dsh-settings": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.2-rc.1",
+    "@deepseek-ai/dsh-commands": ">=0.2.0-rc.2 <0.3.0-0 || ^0.2.2-rc.1"
   },
   "dependencies": {
     "@fission-ai/openspec": "1.14.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-agent": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-llm": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-settings": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-skill": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-skill-filesystem": "^0.2.1-rc.5",
-    "@deepseek-ai/dsh-commands": "^0.2.1-rc.5",
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-agent": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-commands": "^0.2.2-rc.1",
     "@types/node": "^24.19.2",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "ohmydsh": {
     "docTier": "A"

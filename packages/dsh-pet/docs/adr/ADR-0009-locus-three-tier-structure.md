@@ -77,7 +77,7 @@ M 是空间 Leader，W 是受邀普通成员，无代理成员 `pet`；child 没
 
 ### B040：运行期补偿而非超时后忽略资源
 
-失败 provisioning 满 10 分钟后，下一次同 endpoint 建立先调用与 startup 相同的补偿器，按 durable resourceRefs 处理本次创建的 chat/child/locus main/自动工作会话。只有补偿成功才释放阻塞；补偿失败继续阻塞、记录原因，保留原失败时间以便下次立即重试，不再等一个新窗口。全部 provisioning kind 适用，不删除原来已存在的群或会话。实现见 [persistence](../../src/host/locus/persistence.ts)；隔离/真实网络故障验收尚未执行。
+失败 provisioning 满 10 分钟后，下一次同 endpoint 建立先调用与 startup 相同的补偿器，按 durable resourceRefs 处理本次创建的 chat/child/locus main/自动工作会话。只有补偿成功才释放阻塞；补偿失败继续阻塞、记录原因，保留原失败时间以便下次立即重试，不再等一个新窗口。全部 provisioning kind 适用，不删除原来已存在的群或会话。实现见 persistence（已删除：`../../src/host/locus/persistence.ts`）；隔离/真实网络故障验收尚未执行。
 
 ### 持久层：v18 只加表，读取即退休旧模型
 

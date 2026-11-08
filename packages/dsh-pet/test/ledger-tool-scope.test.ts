@@ -10,6 +10,8 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { runTool } from './support/tool-call.js'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import {
   LOCUS_ASK_PARENT_TOOL,
@@ -45,6 +47,7 @@ async function hostContext(): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   return ctx
 }
 
@@ -118,21 +121,17 @@ describe('the caller-bound entrance read is published only when assembled', () =
     const ctx = await hostContext()
     const key = { id: CHILD_SESSION } as never
     const scope = createScope(ctx, key)
-    const locus = {
-      id: 'locus-history-1',
-      generation: 1,
-      endpoint: { chatId: 'oc_history' },
-      parentSessionId: 'main-history-1',
-      childSessionId: CHILD_SESSION,
+    const resolved = {
+      row: {
+        endpoint: { chatId: 'oc_history' }, locusId: 'locus-history-1', sessionId: CHILD_SESSION, state: 'active' as const,
+        accessMode: 'read-only' as const, revision: 1, createdAt: 1, updatedAt: 1,
+        locusMainSessionId: 'main-history-1', workspaceId: 'ws-history',
+      },
+      locusMainSessionId: 'main-history-1',
       workspaceId: 'ws-history',
-      source: 'auto' as const,
-      state: 'active' as const,
-      busy: false,
-      createdAt: 1,
-      updatedAt: 1,
     }
     await installOnScope(scope.ctx, harness.repository, { loci: { findByChildSessionId: () => [] } }, {
-      loci: { findByChildSessionId: () => [locus] },
+      loci: { findBySessionId: () => resolved as never },
       cursor: createLocusHistoryCursor(Buffer.alloc(32, 7)),
       read: async () => ({
         messages: [{
@@ -145,7 +144,7 @@ describe('the caller-bound entrance read is published only when assembled', () =
       }),
     })
 
-    const ok = await ctx.tools.execute({
+    const ok = await runTool(ctx, {
       agent: key,
       name: PET_LOCUS_CHAT_HISTORY_TOOL,
       callId: 'history-ok' as never,
@@ -159,7 +158,7 @@ describe('the caller-bound entrance read is published only when assembled', () =
     expect(okText).toContain('我们在讨论验收')
 
     // And the failure path is schema-valid too: never an empty history.
-    const failing = await ctx.tools.execute({
+    const failing = await runTool(ctx, {
       agent: key,
       name: PET_LOCUS_CHAT_HISTORY_TOOL,
       callId: 'history-fail' as never,
@@ -317,7 +316,7 @@ describe('track tool feedback is actionable and never leaks ids', () => {
     const key = { id: CHILD } as never
     const scope = createScope(ctx, key)
     await installOnScope(scope.ctx, harness.repository, intentTriage)
-    const result = await ctx.tools.execute({
+    const result = await runTool(ctx, {
       agent: key,
       name,
       callId: `${name}-1` as never,
@@ -335,19 +334,17 @@ describe('track tool feedback is actionable and never leaks ids', () => {
   // Delivery before they act, so the fixture is shared rather than duplicated.
   const ACTIVE_RECORD = {
     endpoint: { chatId: 'oc_scope' },
-    locus: { locusId: 'locus-scope-1', generation: 1, state: 'active' as const, toolTier: 'safe' as const },
+    locus: { locusId: 'locus-scope-1', state: 'active' as const },
     main: { sessionId: 'main-scope-1' },
     child: { sessionId: CHILD },
     workspace: { workspaceId: 'ws-scope' },
-    permission: { effective: 'read' as const },
-    contextAnchor: { status: 'unknown' as const },
+    accessMode: 'read-only' as const,
     currentDelivery: {
       deliveryId: 'delivery-1',
       messageId: 'om_scope_1',
       endpoint: { chatId: 'oc_scope' },
       locusId: 'locus-scope-1',
-      generation: 1,
-      childSessionId: CHILD,
+      sessionId: CHILD,
       status: 'current' as const,
       queueState: 'current' as const,
       executionId: 'exec-1',

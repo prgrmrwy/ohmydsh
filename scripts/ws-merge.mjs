@@ -17,8 +17,9 @@
 // Gates (all must pass before ANY ref mutation):
 //   1. task branch exists in the repository
 //   2. main checkout is clean (no uncommitted changes)
-//   3. merge is fast-forward OR a clean merge (no conflicts expected); the
-//      script refuses to leave a conflicted tree behind
+//   3. merge is fast-forward OR a clean merge: a non-ff merge is simulated
+//      with `git merge-tree --write-tree` (no index/worktree change) and any
+//      conflict refuses both the dry-run and --yes, listing the paths
 //   4. no worktree-session operation is in-flight (terminal prepared/cleaned are allowed)
 //
 // Exit code 0 on success (or dry-run with a viable plan); 1 on gate failure
@@ -82,6 +83,19 @@ function branchExists(branch) {
   return gitOk(['rev-parse', '--verify', `refs/heads/${branch}`])
 }
 
+/** Conflicted paths of merging BRANCH into main, or undefined when it merges cleanly (git >= 2.38). */
+function mergeConflicts() {
+  try {
+    execFileSync('git', ['merge-tree', '--write-tree', '--name-only', '--no-messages', 'main', BRANCH], { cwd: REPO, stdio: 'pipe' })
+    return undefined
+  } catch (error) {
+    // Exit 1 = conflicts: stdout is the tree id, then the conflicted paths. Anything else is a hard failure.
+    if (error.status !== 1) throw error
+    const files = String(error.stdout).split('\n').slice(1).map((line) => line.trim()).filter(Boolean)
+    return files.length ? [...new Set(files)] : ['(unknown path)']
+  }
+}
+
 function inFlightOperations() {
   const common = git(['rev-parse', '--git-common-dir'])
   const dir = path.join(common, 'ws', 'operations')
@@ -106,6 +120,16 @@ function main() {
 
   // Merge shape: prefer fast-forward; otherwise a real merge commit.
   const canFF = gitOk(['merge-base', '--is-ancestor', 'main', BRANCH])
+  // Gate 3 for real: simulate the merge in-memory (no index/worktree change) so a dry-run
+  // reports conflicts instead of planning a merge that would fail on --yes.
+  if (!canFF) {
+    const conflicts = mergeConflicts()
+    if (conflicts) {
+      console.error('ws-merge REFUSED: merging into main would conflict; resolve on the task branch (e.g. merge main into it) first:')
+      for (const file of conflicts) console.error(`  - conflict: ${file}`)
+      process.exit(1)
+    }
+  }
   const head = git(['rev-parse', '--short', 'HEAD'])
   const tip = git(['rev-parse', '--short', BRANCH])
   console.log(`ws-merge plan (${YES ? 'EXECUTE' : 'dry-run'}):`)

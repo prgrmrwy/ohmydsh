@@ -112,7 +112,7 @@ export type SessionJumpTarget =
 
 /**
  * Decide whether the "跳会话" jump is available for one todo, given the Host's
- * resolution of the todo's `locusId` to its CURRENT-generation child session
+ * resolution of the todo's `locusId` to its entry's current child session
  * (or the absence of one). Reuses the same availability vocabulary
  * `locus-view.ts#isSessionOpenable` already established — archived/missing
  * are not openable, matching the panel's existing session-jump behavior for
@@ -120,13 +120,15 @@ export type SessionJumpTarget =
  */
 export function resolveSessionJumpTarget(
   currentChildSessionId: string | undefined,
-  availability: 'available' | 'archived' | 'missing' | undefined,
+  availability: 'available' | 'archived' | 'missing' | 'unknown' | undefined,
 ): SessionJumpTarget {
   if (currentChildSessionId === undefined) {
-    return { kind: 'unavailable', reason: '该 locus 当前代无子会话，或来源已失效' }
+    return { kind: 'unavailable', reason: '该入口尚未创建子会话，或来源已失效' }
   }
   if (availability === 'archived') return { kind: 'unavailable', reason: '会话已归档' }
   if (availability === 'missing') return { kind: 'unavailable', reason: '会话不可用' }
+  // A cold read that proved nothing fails closed.
+  if (availability === 'unknown') return { kind: 'unavailable', reason: '会话可用性未核验' }
   return { kind: 'available', sessionId: currentChildSessionId }
 }
 

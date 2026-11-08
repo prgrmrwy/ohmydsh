@@ -1,3 +1,4 @@
+import { DEFAULT_PRESET_ID } from './presets/index.js'
 export const AUTO_EFFORTS = ['low', 'medium', 'high', 'xhigh'] as const
 export type AutomaticEffort = typeof AUTO_EFFORTS[number]
 export interface Settings {
@@ -6,6 +7,8 @@ export interface Settings {
   defaultMode: 'MANUAL' | 'AUTO'
   effortCap: AutomaticEffort
   jevTimeoutMs: number
+  /** Judgement preset id; unknown ids resolve to the default preset. */
+  preset: string
 }
 export type SettingsPatch = Partial<Settings>
 /** Retired mapping keys: read and reported, never applied, dropped on the next save. */
@@ -26,4 +29,4 @@ export interface SettingsRead {
   /** Retired keys present in the file, alphabetical. */
   deprecated: string[]
 }
-export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 8000 })
+export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ decisionToast: true, defaultMode: 'MANUAL', effortCap: 'xhigh', jevTimeoutMs: 8000, preset: DEFAULT_PRESET_ID })

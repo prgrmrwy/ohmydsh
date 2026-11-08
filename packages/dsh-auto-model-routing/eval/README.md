@@ -2,7 +2,18 @@
 
 [中文](README.zh.md)
 
-`cases.json` holds 10 synthetic tasks (development and holdout splits) with independently written expected capability and depth answers for the rule file `../src/rubric.json`. `live.mjs` sends them to the real OpenRouter decision endpoint with a hard budget (at most 20 calls, $0.10) and writes a local report without task text beyond the synthetic cases. It is a manual, paid check, not part of `npm test`.
+`cases.json` holds 18 synthetic tasks (development and holdout splits) with independently written expected capability and depth answers for the [judgement presets](../docs/presets/README.md). `capability`/`depth` are the shared expectations; `depthFor` overrides the depth expectation per preset id; `execution` is `main` or `delegated` (default) and decides whether the state is built like a first main turn or a subtask.
+
+`live.mjs` sends them to the real OpenRouter decision endpoint with a hard budget (at most 20 calls and $0.10 per run) and writes a local report without task text beyond the synthetic cases. It is a manual, paid check, not part of `npm test`:
+
+```bash
+npm run build                      # live.mjs reuses buildState from lib/, so the state matches what AUTO sends
+node eval/live.mjs --preset effort-as-verification <new-result-file>
+```
+
+- `--preset` defaults to the default preset `reasoning-depth`; an unknown id exits before any network request or result file.
+- The report records `preset` at the top and, per result, `execution` and the `expected` sets used for hits.
+- One run checks one preset. Replaying several times for stability exceeds the per-run limit and needs separate authorization.
 
 The earlier four-tier regression set (`run.mjs`, its 90 cases and `baseline.json`) was removed with the four-tier chain in 0.5.0; use the 0.4.x package if you need it.
 

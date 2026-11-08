@@ -226,7 +226,7 @@
   - [pipeline](packages/dsh-pet/src/host/channel/pipeline.ts) 对授权 at 返回「来源会话已归档，这个入口暂停服务」，指明恢复来源或 `/bind` 到新的干活主会话，新入口从 read 开始；普通 at 不自动复活或换来源。回执不包含完整 session ID 或其它入口列表。
   - 当前上限为每入口 **3 次／每次 Host 运行**（`SOURCE_ARCHIVED_RECEIPT_LIMIT`）；`sourceArchivedReceipts` 是进程内 Map，重启后重置。**不能宣称已满足历史条目提出的跨重启持续有限次要求**，也不能把该限制隐藏在“已完成”中。
 - **仍未验证**: 隔离预览与真实网络/Host/GUI/飞书验收均未执行；需验证归档后拒投且不 resume、回执与第 4 次静默、来源恢复、`/bind` 改挂，以及非授权发送者不引发建立或泄露。若继续要求跨重启持续限额，仍需持久计数/水位的实现与重启验证，不能由内存限额推断。
-- **关联**: [ADR-0009](packages/dsh-pet/docs/adr/ADR-0009-locus-three-tier-structure.md)、[分层归档规范](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#requirement-换绑与归档按层处理) 与 [收尾任务](openspec/changes/locus-three-tier-structure/tasks.md#27-收尾)。B029 处理入口侧不可达，本条处理来源侧归档，不合并。
+- **关联**: [ADR-0009](packages/dsh-pet/docs/adr/ADR-0009-locus-three-tier-structure.md)、分层归档规范 与 收尾任务。B029 处理入口侧不可达，本条处理来源侧归档，不合并。
 - **更新**: 2026-11-03 按三层当前实现收口，替换过期“无归档检查”的现状描述；只记录实现与精确限制，不表示已合入、部署或全部闭环。
 
 ### [B041] GUI 侧栏对自动建 main 挂载已有 workspace 存在展示时序问题
@@ -245,12 +245,12 @@
 - **状态**: 实现完成、隔离/真实网络验收未执行
 - **优先级**: P1
 - **背景 / 动机**: 2026-09-15 的旧实现把建树失败记为 `failed`，却只在 startup reconcile 中补偿到 `compensated`，同一 endpoint 在 Host 运行期因此永久阻塞。群首次 @、话题、改绑和 Q&A 共用此机制，不是单个入口的重试问题。
-- **当前实现（2026-11-03 源码核对）**: [persistence](packages/dsh-pet/src/host/locus/persistence.ts) 的 `beginProvisioning` 在同 endpoint 建立前检查旧操作，`FAILED_PROVISIONING_BLOCK_MS = 10 * 60 * 1000`；`failed` 满 10 分钟时先调用 `clearStaleFailedProvisioning`，使用与启动对账相同的 `compensateOperation`。**不是超时后忽略资源、直接覆盖建新**。
+- **当前实现（2026-11-03 源码核对）**: persistence（已删除：`packages/dsh-pet/src/host/locus/persistence.ts`） 的 `beginProvisioning` 在同 endpoint 建立前检查旧操作，`FAILED_PROVISIONING_BLOCK_MS = 10 * 60 * 1000`；`failed` 满 10 分钟时先调用 `clearStaleFailedProvisioning`，使用与启动对账相同的 `compensateOperation`。**不是超时后忽略资源、直接覆盖建新**。
   - 根据 durable `resourceRefs` 与资源归属，依次补偿本次创建的 Q&A chat、child、locus main 与自动工作会话；不删除本来就存在的群。全部 provisioning kind 共享同一路径。
   - 补偿成功才标 `compensated` 并解除阻塞，然后正常建立；补偿失败继续阻塞并诊断，保留原失败时间，下一次请求可立即重试补偿，不再重新等待 10 分钟。部分已完成补偿持久记录，避免重做。
   - 未满 10 分钟仍阻塞；`needs-recovery`、正在补偿或首条创建债务不因这个 failed 超时规则被无条件放行。
 - **仍未验证**: 隔离预览故障注入及真实网络/Host/飞书验收未执行；需覆盖超时前仍阻塞、超时后资源确实回收且可新建、补偿失败继续阻塞并能后续重试，以及全部 provisioning kind 的一致性。不把源码实现或现有任务勾选当作实际资源回收成功。
-- **关联**: [ADR-0009](packages/dsh-pet/docs/adr/ADR-0009-locus-three-tier-structure.md)、[provisioning 超时规范](openspec/changes/locus-three-tier-structure/specs/pet-locus-collaboration/spec.md#requirement-provisioning-失败超时后不再阻塞) 与 [任务 13](openspec/changes/locus-three-tier-structure/tasks.md)。
+- **关联**: [ADR-0009](packages/dsh-pet/docs/adr/ADR-0009-locus-three-tier-structure.md)、provisioning 超时规范 与 任务 13。
 - **更新**: 2026-11-03 由 `locus-three-tier-structure` 一并实现运行期补偿；本条从待设计改为实现完成、验收待做，不表示已合入、部署或全部闭环。
 
 ### [B039] 清理旧 QA 模型的死代码

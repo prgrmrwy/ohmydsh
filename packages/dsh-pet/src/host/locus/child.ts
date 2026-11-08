@@ -20,7 +20,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionId as BrandedSessionId } from '@deepseek-ai/dsh-session'
-import { LOCUS_SAFE_TOOL_NAMES, LOCUS_SHELL_TIER_TOOL_NAMES } from './composition.js'
+import { LOCUS_SAFE_TOOL_NAMES, LOCUS_FULL_ACCESS_TOOL_NAMES } from './composition.js'
 import { LOCUS_CHILD_PRESET } from './preset.js'
 
 /** A live DSH Agent, intentionally opaque apart from its session identity. */
@@ -75,7 +75,7 @@ export interface LocusToolRestriction {
  * list.
  */
 export const LOCUS_BASE_TOOL_FILTER: LocusToolRestriction = Object.freeze({
-  allow: Object.freeze([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_SHELL_TIER_TOOL_NAMES]),
+  allow: Object.freeze([...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_FULL_ACCESS_TOOL_NAMES]),
 })
 
 /**

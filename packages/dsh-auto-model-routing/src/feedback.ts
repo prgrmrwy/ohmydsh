@@ -5,7 +5,7 @@ export const allocationFeedback = ['appropriate', 'too-high', 'too-low', 'unknow
 const probability = z.number().min(0).max(1)
 // `policyVersion`/`mappingVersion` exist only on bindings written before 0.5.0; new ones carry `strategy`.
 const snapshot = z.object({
-  decidedAt: z.number(), appliedAt: z.number(), strategy: z.string().optional(), policyVersion: z.string().optional(), mappingVersion: z.string().optional(),
+  decidedAt: z.number(), appliedAt: z.number(), strategy: z.string().optional(), preset: z.string().optional(), policyVersion: z.string().optional(), mappingVersion: z.string().optional(),
   decisionProvider: z.string(), decisionModel: z.string(), ms: z.number(),
   confidence: probability.optional(), probabilities: z.record(z.string(), probability).optional(),
   provider: z.string(), requestSeq: z.number(), requestTurn: z.number().optional(),

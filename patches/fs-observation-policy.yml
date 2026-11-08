@@ -1,0 +1,21 @@
+# 恢复官方文件观察策略(先读后改 + 外部修改防护)。纯 composition 覆盖,无代码。
+#
+# 来源:DSH 0.2.2 起官方 dsh-base 的 cordis.patch.yml 在顶层 insert 中保留
+# `fs-observation-policy` 行,但默认 `disabled: true`(见 @deepseek-ai/dsh-fs-observation-policy
+# README:出厂组合关闭,把该行设为 `disabled: false` 即恢复对全部写类工具的保护)。
+# 关闭时:`write`/`edit` 不再要求先 read,读后被外部改写也不再报 FS_STALE_VERSION。
+#
+# 恢复后:未读先改 → FS_NOT_OBSERVED;读后文件被会话外进程改写 → FS_STALE_VERSION,
+# 重新 read 后再 edit 才成功。
+#
+# ⚠ 这是**整行覆盖**,不是新增:同 id、同 name 的 override 行会替换官方行(只覆盖
+# `disabled`),有效配置里仍然恰好一条加载该包的行。该策略的 intent slot(fs/*-intent)
+# 只有一个决策者、先注册者生效,**绝不能**再新增第二条加载同一包的行。
+#
+# 退休条件:官方 dsh-base 的该行默认启用(`disabled` 不再为 true),或该行被改名/移除
+# (此时本 fragment 会变成指向不存在 id 的悬空覆盖)时,删除本 fragment 与 patch 文件。
+# 每次 DSH 升级的候选验收必须重跑 `--dump-config`,断言有效配置里恰有一条
+# `@deepseek-ai/dsh-fs-observation-policy` 行且未禁用(tests/fs-observation-policy.official.mjs)。
+- id: fs-observation-policy
+  name: '@deepseek-ai/dsh-fs-observation-policy'
+  disabled: false

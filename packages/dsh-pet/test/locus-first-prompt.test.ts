@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFirstPromptRegistry } from '../src/host/locus/first-prompt.js'
 
-const delivery = { deliveryId: 'delivery', executionId: 'execution', correlation: { endpoint: { chatId: 'chat' }, locusId: 'locus', generation: 1, childSessionId: 'child' } }
+const delivery = { deliveryId: 'delivery', executionId: 'execution', correlation: { endpoint: { chatId: 'chat' }, locusId: 'locus', sessionId: 'child' } }
 
 describe('first prompt synchronous claim / durable binding barrier', () => {
   it('returns exact identity synchronously but blocks the first tool until durable binding commits', async () => {

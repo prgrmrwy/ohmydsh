@@ -7,6 +7,7 @@ import type { RoutingCatalog } from './settings-contract.js'
 
 import { JevClient } from './jev.js'
 import { DECISION_SERVICES, type DecisionProvider } from './decision-service.js'
+import { resolvePreset } from './presets/index.js'
 const keyRef = (provider: DecisionProvider = 'openrouter') => credentialRef(DECISION_SERVICES[provider].credential)
 interface AllowlistService { current(): { enabled: boolean; allowedModels: { provider: string; model: string }[] } }
 
@@ -59,7 +60,8 @@ export function settingsHost(ctx: Context, store: SettingsStore) {
     if (operation === 'settings') return Response.json(await read())
     if (operation === 'testDecision') {
       const client = new JevClient({ get: async name => credentials() ? credentials()!.resolve(credentialRef(name)) : environment.get(name) }, undefined, 8000, () => store.read().settings.decisionService)
-      const result = await client.judgePolicy('Public connection test: sort the numbers [3,1,2] in ascending order.', new AbortController().signal, 'child')
+      const preset = resolvePreset(store.read().settings.preset)
+      const result = await client.judgePolicy('Public connection test: sort the numbers [3,1,2] in ascending order.', new AbortController().signal, 'child', 'both', preset)
       return Response.json(result)
     }
     if (operation === 'saveSettings') {

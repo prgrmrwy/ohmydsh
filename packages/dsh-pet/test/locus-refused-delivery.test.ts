@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { abandonRefusedDelivery, acceptDelivery, claimCurrentDelivery, createDeliveryLedger, expireDelivery } from '../src/host/locus/delivery.js'
 
-const scope = { endpoint: { chatId: 'chat-test' }, locusId: 'locus-test', generation: 1, childSessionId: 'child-test' }
+const scope = { endpoint: { chatId: 'chat-test' }, locusId: 'locus-test', sessionId: 'child-test' }
 function current() {
   const accepted = acceptDelivery(createDeliveryLedger(), { ...scope, messageId: 'message-a', acceptedAt: 100 })
   return claimCurrentDelivery(accepted.state, { ...scope, now: 101 })
@@ -20,11 +20,10 @@ describe('abandon refused current Delivery', () => {
     expect(abandonRefusedDelivery(result.state, { ...input, expectedRevision: result.record!.revision }).changed).toBe(false)
     expect(claimCurrentDelivery(result.state, { ...scope, now: 104 }).record!.messageId).toBe('message-b')
   })
-  it('refuses stale revisions, another generation, backlog, and missing rows', () => {
+  it('refuses stale revisions, another sessionId, backlog, and missing rows', () => {
     const a = current()
     const base = { ...scope, deliveryId: a.record!.deliveryId, now: 103 }
     expect(abandonRefusedDelivery(a.state, { ...base, expectedRevision: 999 }).changed).toBe(false)
-    expect(abandonRefusedDelivery(a.state, { ...base, generation: 2 }).changed).toBe(false)
     expect(abandonRefusedDelivery(a.state, { ...base, deliveryId: 'missing' }).changed).toBe(false)
     const backlog = acceptDelivery(a.state, { ...scope, messageId: 'b', acceptedAt: 102 })
     expect(abandonRefusedDelivery(backlog.state, { ...base, deliveryId: backlog.record.deliveryId }).changed).toBe(false)

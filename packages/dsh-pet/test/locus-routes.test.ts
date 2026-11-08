@@ -92,159 +92,100 @@ afterEach(async () => {
   harness = undefined
 })
 
-describe('unified locus route parsing', () => {
-  it('rejects a discovery request with multiple selectors before calling the port', async () => {
-    const discovery = vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] }))
-    const routes = await makeRoutes({
-      view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
-      discovery,
-    })
+const emptyView = { generation: 1, works: [], writeEnabled: false }
 
-    const reply = await call(routes, LOCUS_ROUTES.discovery, {
-      parentSessionId: 'main-1',
-      childSessionId: 'child-1',
-    })
+function port(overrides: Partial<LocusManagementPort> = {}): LocusManagementPort {
+  const refuse = vi.fn(async () => { throw new Error('must not be called') })
+  return { view: vi.fn(async () => emptyView), stop: refuse, access: refuse, rebind: refuse, ...overrides }
+}
 
-    expect(reply.status).toBe(400)
-    expect(reply.body).toMatchObject({ ok: false, error: 'INVALID_REQUEST' })
-    expect(discovery).not.toHaveBeenCalled()
+const fence = { expectedLocusId: 'L1', expectedRevision: 5 }
+
+describe('v20 locus-action route parsing', () => {
+  it('accepts exactly stop, access and rebind', async () => {
+    const routes = await makeRoutes(port())
+    for (const action of ['bind', 'unbind', 'archive', 'scope', 'tools', 'confirm-anchor', 'rebuild', 'replace-parent', 'view']) {
+      const reply = await call(routes, LOCUS_ROUTES.action, { action, ...fence })
+      expect(reply.status, action).toBe(400)
+      expect(reply.body.error).toBe('INVALID_REQUEST')
+    }
   })
 
-  it('rejects unknown endpoint fields and malformed action fields strictly', async () => {
-    const bind = vi.fn(async () => {
-      throw new Error('must not be called')
-    })
-    const scope = vi.fn(async () => {
-      throw new Error('must not be called')
-    })
-    const routes = await makeRoutes({
-      view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
-      discovery: vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] })),
-      bind,
-      scope,
-    })
-
-    const unknownEndpoint = await call(routes, LOCUS_ROUTES.bind, {
-      action: 'bind',
-      endpoint: { chatId: 'oc-project', displayName: 'Project' },
-      parentSessionId: 'main-1',
-    })
-    expect(unknownEndpoint.status).toBe(400)
-    expect(unknownEndpoint.body.error).toBe('INVALID_REQUEST')
-
-    const invalidScope = await call(routes, LOCUS_ROUTES.scope, {
-      action: 'scope',
-      locusId: 'locus-1',
-      mode: 'admin',
-    })
-    expect(invalidScope.status).toBe(400)
-    expect(invalidScope.body.error).toBe('INVALID_REQUEST')
-    expect(bind).not.toHaveBeenCalled()
-    expect(scope).not.toHaveBeenCalled()
+  it('registers no per-action or discovery route', async () => {
+    const routes = await makeRoutes(port())
+    const paths = routes.map(route => route.path)
+    for (const removed of ['/dsh-pet/api/locus-bind', '/dsh-pet/api/locus-unbind', '/dsh-pet/api/locus-archive', '/dsh-pet/api/locus-stop',
+      '/dsh-pet/api/locus-scope', '/dsh-pet/api/locus-tools', '/dsh-pet/api/locus-rebuild', '/dsh-pet/api/locus-discovery']) {
+      expect(paths).not.toContain(removed)
+    }
+    expect(paths).toEqual(expect.arrayContaining([LOCUS_ROUTES.view, LOCUS_ROUTES.action, LOCUS_ROUTES.defaultQa, LOCUS_ROUTES.todos]))
   })
 
-  it('rejects unknown fields independently for archive and stop actions', async () => {
-    const archive = vi.fn(async () => ({ action: 'archive', locus: {} } as never))
-    const stop = vi.fn(async () => ({ action: 'stop', locus: {} } as never))
-    const routes = await makeRoutes({
-      view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
-      discovery: vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] })),
-      archive,
-      stop,
-    })
-    const archiveReply = await call(routes, LOCUS_ROUTES.archive, {
-      action: 'archive', locusId: 'locus-1', expectedGeneration: 1, unexpected: true,
-    })
-    const stopReply = await call(routes, LOCUS_ROUTES.stop, {
-      action: 'stop', locusId: 'locus-1', expectedGeneration: 1, unexpected: true,
-    })
-    expect(archiveReply.status).toBe(400)
-    expect(stopReply.status).toBe(400)
-    expect(archiveReply.body.error).toBe('INVALID_REQUEST')
-    expect(stopReply.body.error).toBe('INVALID_REQUEST')
-    expect(archive).not.toHaveBeenCalled()
+  it('refuses the removed fences and a missing revision', async () => {
+    const stop = vi.fn(async () => ({ action: 'stop', chat: {} } as never))
+    const routes = await makeRoutes(port({ stop }))
+    const endpoint = { chatId: 'oc-project' }
+    for (const body of [
+      { action: 'stop', endpoint, expectedLocusId: 'L1', expectedRevision: 5, expectedGeneration: 1 },
+      { action: 'stop', endpoint, expectedLocusId: 'L1', expectedRevision: 5, expectedUpdatedAt: 1 },
+      { action: 'stop', endpoint, expectedLocusId: 'L1' },
+      { action: 'stop', endpoint, expectedRevision: 5 },
+      { action: 'stop', endpoint, locusId: 'L1', ...fence },
+    ]) {
+      const reply = await call(routes, LOCUS_ROUTES.action, body)
+      expect(reply.status).toBe(400)
+      expect(reply.body.error).toBe('INVALID_REQUEST')
+    }
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it('rejects storage-key-separator endpoint identifiers before invoking a management action', async () => {
-    const bind = vi.fn(async () => ({ action: 'bind', locus: {} } as never))
-    const routes = await makeRoutes({
-      view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
-      discovery: vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] })),
-      bind,
-    })
-    const reply = await call(routes, LOCUS_ROUTES.bind, {
-      action: 'bind', endpoint: { chatId: `oc-project${STORAGE_KEY_SEPARATOR}evil` }, parentSessionId: 'main-1',
-    })
-    expect(reply.status).toBe(400)
-    expect(reply.body.error).toBe('INVALID_REQUEST')
-    expect(bind).not.toHaveBeenCalled()
+  it('passes stop, access and rebind through with the trusted actor', async () => {
+    const stop = vi.fn(async () => ({ action: 'stop', chat: {} } as never))
+    const access = vi.fn(async () => ({ action: 'access', chat: {} } as never))
+    const rebind = vi.fn(async () => ({ action: 'rebind', chat: {} } as never))
+    const routes = await makeRoutes(port({ stop, access, rebind }))
+    await call(routes, LOCUS_ROUTES.action, { action: 'stop', endpoint: { chatId: 'oc-a', threadId: 'omt_1' }, ...fence })
+    await call(routes, LOCUS_ROUTES.action, { action: 'access', endpoint: { chatId: 'oc-a' }, accessMode: 'read-only', ...fence })
+    await call(routes, LOCUS_ROUTES.action, { action: 'rebind', chatId: 'oc-a', workSessionId: ' S_NEW ', ...fence })
+    expect(stop).toHaveBeenCalledWith({ endpoint: { chatId: 'oc-a', threadId: 'omt_1' }, ...fence }, { actorId: 'owner' })
+    expect(access).toHaveBeenCalledWith({ endpoint: { chatId: 'oc-a' }, accessMode: 'read-only', ...fence }, { actorId: 'owner' })
+    expect(rebind).toHaveBeenCalledWith({ chatId: 'oc-a', workSessionId: 'S_NEW', ...fence }, { actorId: 'owner' })
   })
 
-  it.each([
-    [LOCUS_ROUTES.unbind, 'unbind'],
-    [LOCUS_ROUTES.archive, 'archive'],
-    [LOCUS_ROUTES.stop, 'stop'],
-  ] as const)('requires endpoint proof for exact-current %s', async (path, action) => {
-    const handler = vi.fn(async () => ({ action, locus: {} } as never))
-    const routes = await makeRoutes({
-      view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
-      discovery: vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] })),
-      ...(action === 'unbind' ? { unbind: handler } : action === 'archive' ? { archive: handler } : { stop: handler }),
-    })
-
-    const reply = await call(routes, path, { action, locusId: 'locus-1' })
+  it('refuses full access at the parse point while the write switch is off', async () => {
+    const access = vi.fn(async () => ({ action: 'access', chat: {} } as never))
+    const routes = await makeRoutes(port({ access }))
+    const reply = await call(routes, LOCUS_ROUTES.action, { action: 'access', endpoint: { chatId: 'oc-a' }, accessMode: 'danger-full-access', ...fence })
     expect(reply.status).toBe(400)
-    expect(reply.body.error).toBe('INVALID_REQUEST')
-    expect(handler).not.toHaveBeenCalled()
+    expect(access).not.toHaveBeenCalled()
+    const bad = await call(routes, LOCUS_ROUTES.action, { action: 'access', endpoint: { chatId: 'oc-a' }, accessMode: 'write', ...fence })
+    expect(bad.body.error).toBe('INVALID_REQUEST')
   })
 
-  it('requires the dedicated route action to match its path', async () => {
-    const unbind = vi.fn(async () => {
-      throw new Error('must not be called')
-    })
-    const routes = await makeRoutes({
-      view: vi.fn(() => ({ generation: 1, loci: [], defaultQa: [], discovery: { byEndpoint: [], byParent: [], byChild: [] } })),
-      discovery: vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] })),
-      unbind,
-    })
-
-    const reply = await call(routes, LOCUS_ROUTES.unbind, {
-      action: 'scope',
-      locusId: 'locus-1',
-      mode: 'read',
-    })
-
-    expect(reply.status).toBe(400)
-    expect(reply.body.error).toBe('INVALID_REQUEST')
-    expect(unbind).not.toHaveBeenCalled()
+  it('rejects unknown endpoint fields and storage-key separators before invoking the port', async () => {
+    const stop = vi.fn(async () => ({ action: 'stop', chat: {} } as never))
+    const rebind = vi.fn(async () => ({ action: 'rebind', chat: {} } as never))
+    const routes = await makeRoutes(port({ stop, rebind }))
+    const unknown = await call(routes, LOCUS_ROUTES.action, { action: 'stop', endpoint: { chatId: 'oc-a', displayName: 'x' }, ...fence })
+    const separator = await call(routes, LOCUS_ROUTES.action, { action: 'rebind', chatId: `oc-a${STORAGE_KEY_SEPARATOR}evil`, workSessionId: 'S', ...fence })
+    expect(unknown.status).toBe(400)
+    expect(separator.status).toBe(400)
+    expect(stop).not.toHaveBeenCalled()
+    expect(rebind).not.toHaveBeenCalled()
   })
 })
 
-describe('unified locus route error mapping', () => {
-  function portWithError(error: LocusManagementError): LocusManagementPort {
-    return {
-      view: vi.fn(async () => {
-        throw error
-      }),
-      discovery: vi.fn(async () => ({ byEndpoint: [], byParent: [], byChild: [] })),
-    }
-  }
-
+describe('v20 locus route error mapping', () => {
   it.each([
     ['CAPABILITY_UNAVAILABLE', 'LOCUS_UNAVAILABLE', 503],
     ['ACTION_UNAVAILABLE', 'LOCUS_UNAVAILABLE', 503],
     ['LOCUS_NOT_FOUND', 'LOCUS_NOT_FOUND', 503],
     ['LOCUS_BUSY', 'LOCUS_BUSY', 409],
-    ['LOCUS_INVALID', 'LOCUS_INVALID', 400],
-    ['LOCUS_STOPPED', 'LOCUS_STOPPED', 409],
     ['REVISION_CONFLICT', 'LOCUS_CONFLICT', 409],
     ['INVALID_REQUEST', 'INVALID_REQUEST', 400],
   ] as const)('maps %s to the stable %s response', async (source, expected, status) => {
-    const routes = await makeRoutes(portWithError(new LocusManagementError(source, 'safe diagnostic')))
-
+    const routes = await makeRoutes(port({ view: vi.fn(async () => { throw new LocusManagementError(source, 'safe diagnostic') }) }))
     const reply = await call(routes, LOCUS_ROUTES.view, {})
-
     expect(reply.status).toBe(status)
     expect(reply.body).toMatchObject({ ok: false, error: expected })
     expect(reply.body.message).toContain('safe diagnostic')
@@ -252,16 +193,7 @@ describe('unified locus route error mapping', () => {
 
   it('keeps unavailable management additive and does not consult legacy Pet state', async () => {
     const routes = await makeRoutes()
-
-    const reply = await call(routes, LOCUS_ROUTES.action, {
-      action: 'unbind',
-      endpoint: { chatId: 'oc-missing' },
-      locusId: 'locus-missing',
-      expectedGeneration: 1,
-      expectedLocusId: 'locus-missing',
-      expectedUpdatedAt: 1,
-    })
-
+    const reply = await call(routes, LOCUS_ROUTES.action, { action: 'stop', endpoint: { chatId: 'oc-missing' }, ...fence })
     expect(reply.status).toBe(503)
     expect(reply.body.error).toBe('LOCUS_UNAVAILABLE')
     expect(harness?.repository.listTasks()).toEqual([])

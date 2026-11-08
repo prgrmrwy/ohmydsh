@@ -76,7 +76,20 @@ describe('待办登记后的回复如实且登记失败反馈可执行', () => {
     registerPetTools({ tools: { register: (definition: any) => { registered.set(definition.name, definition); return () => {} } } } as never, {
       repository: {} as never,
       locusChildTools: {
-        loci: { findByChildSessionId: id => t.loci.filter(item => item.childSessionId === id).map(item => ({ ...item, parentSessionId: item.locusMainSessionId, workspaceId: 'ws' })) as never },
+        loci: {
+          findBySessionId: id => {
+            const item = t.loci.find(candidate => candidate.childSessionId === id)
+            return item === undefined ? undefined : {
+              row: {
+                endpoint: item.endpoint, locusId: item.id, sessionId: item.childSessionId, state: item.state,
+                accessMode: 'read-only', revision: 1, createdAt: 1, updatedAt: 1,
+                locusMainSessionId: item.locusMainSessionId, workspaceId: 'ws',
+              } as never,
+              locusMainSessionId: item.locusMainSessionId,
+              workspaceId: 'ws',
+            }
+          },
+        },
         collab: t.collab,
         subagents: () => undefined,
       },

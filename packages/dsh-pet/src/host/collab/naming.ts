@@ -30,11 +30,11 @@ export function establishCmdId(locusMainSessionId: string, step: 'create' | 'all
 }
 
 const PURPOSE_LIMIT = 200
-const PURPOSE_SUFFIX = ' 的 Locus：干活主会话与 locus 主会话共享待办与结论。open 的待办等用户决定何时开工。'
+const PURPOSE_SUFFIX = ' 的 Locus：工作主会话与 locus 主会话共享待办与结论。open 的待办等用户决定何时开工。'
 
 /** Purpose text, truncated on the title so the whole fits in 200 characters. */
 export function locusSpacePurpose(workTitle: string | undefined): string {
-  const title = (workTitle ?? '').trim() || '干活主会话'
+  const title = (workTitle ?? '').trim() || '工作主会话'
   const room = PURPOSE_LIMIT - [...PURPOSE_SUFFIX].length
   const chars = [...title]
   const shown = chars.length <= room ? title : `${chars.slice(0, Math.max(0, room - 1)).join('')}…`

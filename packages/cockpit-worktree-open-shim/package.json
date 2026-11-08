@@ -68,11 +68,11 @@
     "@deepseek-ai/cordis": "^4.0.4"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis": "^4.1.0",
     "@types/node": "^24.19.2",
-    "tsdown": "^0.23.1",
+    "tsdown": "^0.23.5",
     "typescript": "^5.9.3",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.0"
   },
   "ohmydsh": {
     "docTier": "C"

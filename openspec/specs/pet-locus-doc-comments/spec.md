@@ -2,12 +2,14 @@
 
 ## Purpose
 TBD - created by archiving change pet-locus-doc-comments. Update Purpose after archive.
+
 ## Requirements
+
 ### Requirement: 文档评论按全文/划词同构映射为文档级与评论级入口
 
 系统 SHALL 把飞书云文档评论映射为 locus 入口，与群/话题同构：
-- 文档是根，对应群。全文评论属于文档级入口。
-- 每条划词评论是一个子入口，对应话题，以其 `comment_id` 标识。该评论下的所有后续回复属于同一个子入口。
+- 文档是根，对应群：文档级入口是群行（根行），独占 locus 主会话 M 与工作区。全文评论属于文档级入口。
+- 每条划词评论是一个子入口，对应话题：评论行不存 M 与工作区，按 `chatId` 去根行读取，以其 `comment_id` 标识。该评论下的所有后续回复属于同一个子入口。
 
 文档入口 SHALL 以带前缀的根标识寻址：文档级为 `chatId = "doc:docx:<token>"`，评论级在此基础上加 `threadId = <comment_id>`。
 - `<token>` SHALL 取自事件的 `notice_meta.file_token`，即文档的底层对象 token。知识库中的文档同样以底层 obj token 为根，MUST NOT 以 wiki 节点 token 建立入口。
@@ -20,10 +22,10 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 
 层级、建树时机与继承 SHALL 与群/话题规则一致：
 - 首条合格事件到达时建树，文档内没有评论时不预建任何东西。
-- 评论级入口首次建立时，SHALL 先确保文档根结构存在。
-- 文档无主会话时，SHALL 在 default workspace 中创建一个**文档专属**的自动主会话。不同文档 MUST NOT 共用自动主会话。
-- 新评论级入口默认使用文档当前的主会话，显式来源优先。已建立的评论级入口固定其主会话。
-- 文档级与评论级子会话是同一主会话下的兄弟。
+- 从零创建（该文档没有任何行）时，无论首条合格事件是全文评论、划词评论还是 `/bind`，SHALL 在一次提交中建出 W → M → {文档根行, 触发的评论行（若是划词评论）}，MUST NOT 产生第二个 W 或 M。
+- 文档没有根行且无显式来源时，SHALL 在 default workspace 中创建一个**文档专属**的自动主会话（W）。不同文档 MUST NOT 共用自动 W。
+- 文档根行已存在时，新评论行 SHALL 在根行的 M 下追加（不调用 `ensureLocusMain`，不产生 provisioning 操作）；显式 W 与根行的 W 不同时拒绝（见「控制命令在评论中按所在入口生效」）。评论行 MUST NOT 自带 M。
+- 文档级与评论级子会话是同一 M 下的兄弟。
 
 入站时才能得到、又无法从持久标识推出的评论事实，SHALL 在接受 Delivery 时随其持久化，此后不再修改：
 - 划词评论的划词原文，以 `docComment.quote` 保存。保存值 SHALL 不超过 2 000 个 UTF-16 码元，截断标记计入上限；超长值 MUST NOT 写入持久层。全文评论不写入该字段。
@@ -34,12 +36,12 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 #### Scenario: 全文评论进入文档级入口
 - **GIVEN** 文档 `D` 尚无 locus；allowlist 成员在全文评论 `c1` 的根回复 `r1` 中 @bot；查询得到 `is_whole=true`
 - **WHEN** 系统处理该事件
-- **THEN** 建立入口 `chatId=doc:docx:D` 的文档专属自动主会话、子会话与 active locus；Delivery 的 `messageId` 为 `doc:docx:D/c1/r1`
+- **THEN** 一次提交建立文档专属的自动 W、其 M 与文档根行 `chatId=doc:docx:D`；随后创建子会话，根行 `state` 为 `active`；Delivery 的 `messageId` 为 `doc:docx:D/c1/r1`
 
 #### Scenario: 划词评论进入评论级入口
-- **GIVEN** 文档 `D` 已有文档级 locus，主会话为 S0；成员在划词评论 `c2` 中 @bot；查询得到 `is_whole=false`、`quote="接口已有"`
+- **GIVEN** 文档 `D` 已有文档级 locus，其工作主会话为 W0、locus 主会话为 M0（W0 ≠ M0）；成员在划词评论 `c2` 中 @bot；查询得到 `is_whole=false`、`quote="接口已有"`
 - **WHEN** 系统处理该事件
-- **THEN** 建立入口 `(doc:docx:D, c2)` 的子会话，主会话为 S0，与文档级子会话为兄弟；投递 prompt 中包含标注为不可信的划词原文 `接口已有`
+- **THEN** 在文档根行的 M 下追加评论行 `(doc:docx:D, c2)`（其 W 仍为 W0，M 为 M0）并创建其子会话，与文档级子会话为兄弟；`ensureLocusMain` 调用 0 次；投递 prompt 中包含标注为不可信的划词原文 `接口已有`
 
 #### Scenario: 重启后再投递排队中的划词评论
 - **GIVEN** 入口 `(doc:docx:D, c2)` 的子会话正忙；`c2` 下新的触发回复 `r5`（划词原文 `接口已有`）被接受为排队中的 Delivery；随后 Host 重启
@@ -54,7 +56,7 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 #### Scenario: 划词评论先于文档级
 - **GIVEN** 文档 `D` 尚无任何 locus
 - **WHEN** 第一条合格事件来自划词评论 `c2`
-- **THEN** 先为文档根 `doc:docx:D` 建立文档专属的自动主会话，再建立 `(doc:docx:D, c2)` 子会话。此时 `(doc:docx:D, c2)` 的主会话就是该文档根的主会话；之后文档级入口首次建立时，它的主会话也是同一个会话 id
+- **THEN** 恰一次 `commitProvisioning`，建立文档专属的自动 W、其 M，以及两行：根行 `doc:docx:D`（`not-created`）与评论行 `(doc:docx:D, c2)`，二者同在这一个 M 下；只有评论行的子会话被创建。之后文档级入口的首次 at 不再创建 W 或 M，直接用 `not-created` 的根行创建子会话，所在 M 与评论行相同
 
 #### Scenario: 知识库文档以底层 token 为根
 - **GIVEN** 知识库节点 `wikN` 背后的 docx obj token 为 `docO`；评论事件给出 `file_token=docO`、`file_type=docx`
@@ -101,12 +103,12 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 提问资格 SHALL 与群一致：
 - 入口不存在时，只有全局 allowlist 成员的首次合格 @ 能建树。
 - 已建立且处于授权状态的文档级或评论级入口，任何能在该文档评论的人 @bot，都可作为普通问题投递。
-- 工具档位为 `shell` 时，入口为所有者专用，规则与群相同。
+- `accessMode` 为 `danger-full-access` 时，入口为所有者专用，规则与群相同，对 `not-created`、`active` 等所有状态生效。
 
 某个文档的**任一**入口首次建立时（文档级或评论级，自动建立或 `/bind` 建立都算；同一文档只发一次），以及 `/bind` 成功时，Host SHALL 以控制回执发出这句话：“本文档的评论者均可向我提问；只有 allowlist 成员能控制”。控制回执的投递位置与业务正文相同：划词评论下为对触发评论的 bot 回复；全文评论为一条新的 bot 全文评论并提及触发者。控制回执不属于业务正文，也不经过 `pet_locus_finish`。回执发送失败 SHALL 只记诊断，不阻断投递。
 
 #### Scenario: 非 allowlist 成员在已授权文档提问
-- **GIVEN** 文档 `D` 已有授权的文档级 locus，工具档位为 `safe`
+- **GIVEN** 文档 `D` 已有授权的文档级 locus，`accessMode` 为 `read-only`
 - **WHEN** 非 allowlist 成员在全文评论里 @bot 提问
 - **THEN** 该问题作为普通 Delivery 投递给文档级子会话
 
@@ -116,14 +118,14 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 - **THEN** 不建树、不投递、不回复，诊断记 `not-allowed-sender`
 
 #### Scenario: shell 档文档拒绝他人
-- **GIVEN** 文档级入口的工具档位为 `shell`
+- **GIVEN** 文档级入口的 `accessMode` 为 `danger-full-access`
 - **WHEN** 非 allowlist 成员在全文评论里 @bot
-- **THEN** Delivery 数为 0，不回复，不打表情，诊断记 `not-allowed-sender`
+- **THEN** Delivery 数为 0，不回复，不打表情，诊断记 `owner-only-tier`（与群的完全访问入口同一准入规则；`not-allowed-sender` 只用于未初始化文档）
 
 #### Scenario: 划词评论先建立时也披露
 - **GIVEN** 文档 `D` 尚无任何入口
-- **WHEN** allowlist 成员在划词评论 `c2` 中首次 @bot，建立了 `(doc:docx:D, c2)`；随后又在全文评论中 @bot，建立了文档级入口
-- **THEN** `c2` 下出现一次披露回执；建立文档级入口时不再重复发出披露回执
+- **WHEN** allowlist 成员在划词评论 `c2` 中首次 @bot，一次提交建立了文档根行与 `(doc:docx:D, c2)`；随后又在全文评论中 @bot，文档级入口的子会话首次创建
+- **THEN** `c2` 下出现一次披露回执；创建文档级子会话时不再重复发出披露回执
 
 #### Scenario: 建立回执披露提问范围
 - **GIVEN** 文档 `D` 尚无 locus
@@ -157,32 +159,44 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 
 ### Requirement: 控制命令在评论中按所在入口生效
 
-`/bind <prefix>`、`/unbind`、`/scope read|write`、`/tools safe|shell` 及其短参形式在评论中的行为 SHALL 与群/话题完全一致，包括：解析、allowlist 限制、前缀规则、同源幂等、显式来源不可覆盖、忙时拒绝和上下文变更警告。
+`/bind <prefix>`、`/unbind`、`/access read|full`（短参 `-a`）在评论中的行为 SHALL 与群/话题完全一致，包括：解析、allowlist 限制、前缀规则、同源幂等、跨 W 拒绝（`EXPLICIT_PARENT_CONFLICT`）和忙时拒绝（停止与访问模式变更都只在入口空闲时受理）。原 `/scope`、`/tools` 及其短参 MUST NOT 再改变任何状态，回执提示改用 `/access`。「改绑到其他会话」不是评论命令，只在管理面操作（见 `pet-locus-collaboration`）。
 
-- 命令写在全文评论中，SHALL 作用于文档级入口。
+- 命令写在全文评论中，SHALL 作用于文档级入口（根行）。
 - 命令写在划词评论（含其回复）中，SHALL 只作用于该评论级入口。
+- 文档没有任何行时，`/bind <prefix>` 无论写在哪条评论中都走从零创建：W 为显式会话，一次提交建出 M、根行及（划词评论时）该评论行，MUST NOT 产生自动 W。
+- 文档根行已存在而显式 W 与根行的 W 不同，无论命令写在全文评论还是划词评论，SHALL 在不触碰 Host 的前提下以 `EXPLICIT_PARENT_CONFLICT` 拒绝；回执写明“该文档已由 <W 标签> 跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」”。同一 W 的 `/bind`：入口 `stopped` 时只重新启用该入口，否则幂等返回 reused。
 - 非 allowlist 成员的控制命令 SHALL 静默丢弃，MUST NOT 作为普通问题投递。
 - 控制回执 SHALL 按业务正文的同一规则投递：划词评论下回复到发出命令的那条评论；全文评论中的命令以一条新的、提及命令发送者的 bot 全文评论回执。
 
 #### Scenario: 全文评论绑定已知会话
-- **GIVEN** 文档 `D` 尚无 locus；用户自己的会话 S1 未归档，且不是子会话
+- **GIVEN** 文档 `D` 尚无任何行；用户自己的会话 S1 未归档，且不是子会话
 - **WHEN** allowlist 成员在全文评论中发送 `@bot /bind <S1 前缀>`
-- **THEN** 直接以 S1 为主会话建立 `doc:docx:D` 的 locus，`mainSource` 记为显式来源，不产生自动主会话，不发上下文变更警告；回执为一条提及该成员的新 bot 全文评论，并包含提问范围披露
+- **THEN** 直接以 S1 为 W，一次提交建立 M 与 `doc:docx:D` 的根行；`createAutoWorkSession` 调用 0 次，不发上下文变更警告；回执为一条提及该成员的新 bot 全文评论，并包含提问范围披露
 
 #### Scenario: 文档改绑后已有划词评论不迁移
-- **GIVEN** 文档 `D` 的自动主会话为 S0，已有评论级入口 `c2`
-- **WHEN** allowlist 在全文评论中 `/bind S1` 成功，随后新划词评论 `c3` 首次 @bot
-- **THEN** `c2` 继续使用 S0，`c3` 使用 S1；文档级回执包含 S0→S1 上下文变更警告
+- **GIVEN** 文档 `D` 的根行 W 为已归档的 S0，评论行 `c2` 为 `active`（子会话 C2）、评论行 `c3` 为 `stopped`；所有者已在管理面把 `D` 改绑到 S1，S1 的 M 为 M1
+- **WHEN** `c2` 下随后有人 @bot
+- **THEN** 根行与 `c2`、`c3` 同在 M1 下；C2 不迁移（仍在旧 M 下，不再被引用），`c2` 以新预留的 `sessionId` 重新创建，`accessMode = read-only`，首投前言含改绑来历说明；`c3` 保持 `stopped`，`accessMode = read-only`，`revision` 加 1
 
 #### Scenario: 划词评论内绑定只影响该评论
-- **GIVEN** 文档 `D` 的主会话为 S0
-- **WHEN** allowlist 在划词评论 `c4` 中 `/bind S2`
-- **THEN** 只有 `(doc:docx:D, c4)` 使用 S2，文档级入口与其它评论级入口不变
+- **GIVEN** 文档 `D` 根行 W 为 S2；评论行 `c4` 为 `stopped`，根行与评论行 `c5` 为 `active`
+- **WHEN** allowlist 在 `c4` 中发送 `/bind S2`
+- **THEN** 只有 `(doc:docx:D, c4)` 重置为 `not-created`（新预留 `sessionId`、`accessMode = read-only`、`revision` 加 1、`locusId` 不变）；根行与 `c5` 的 `sessionId`、`state`、`revision` 不变
+
+#### Scenario: 划词评论内首次绑定同时建立文档根
+- **GIVEN** 文档 `D` 尚无任何行
+- **WHEN** allowlist 在划词评论 `c4` 中发送 `/bind S2`
+- **THEN** 一次提交建立 S2 的 M、根行 `doc:docx:D` 与评论行 `(doc:docx:D, c4)`，二者同在一个 M 下；不产生第二个 W
+
+#### Scenario: 跨 W 的评论内绑定被拒绝
+- **GIVEN** 文档 `D` 根行 W 为 S0
+- **WHEN** allowlist 在全文评论或划词评论中发送 `/bind S2`（S2 ≠ S0）
+- **THEN** 以 `EXPLICIT_PARENT_CONFLICT` 拒绝；回执含“不能在这里改绑”；`resolveMainParent`、`ensureLocusMain`、`createAutoWorkSession` 调用均为 0 次；全部入口行不变
 
 #### Scenario: 非 allowlist 控制命令
 - **GIVEN** 文档 `D` 已授权
-- **WHEN** 非 allowlist 成员在评论中发送 `@bot /scope write`
-- **THEN** 静默丢弃，不回执，不作为普通问题投递，权限不变
+- **WHEN** 非 allowlist 成员在评论中发送 `@bot /access full`
+- **THEN** 静默丢弃，不回执，不作为普通问题投递，`accessMode` 不变
 
 ### Requirement: 评论出站只经受管完成工具且反馈 fail-soft
 
@@ -208,7 +222,7 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 
 任何表情调用失败只记诊断，MUST NOT 影响 Delivery 状态。
 
-shell 档的 lark-cli 误发守卫 SHALL 额外拦截以下命令，返回与群消息相同的“业务回复只能经 pet_locus_finish”拒绝文案：
+`danger-full-access` 模式的 lark-cli 误发守卫 SHALL 额外拦截以下命令，返回与群消息相同的“业务回复只能经 pet_locus_finish”拒绝文案：
 - 评论写命令：`drive +add-comment`、`+add-reply`、`+update-reply`、`+delete-reply`、`+resolve-comment`、`+restore-comment`、`+react-reply`；
 - 文档正文写命令：`docs +update`、`docs +create`；
 - 对应的 `api` 写调用。路径既可带 `/open-apis` 前缀，也可不带。
@@ -246,7 +260,7 @@ shell 档的 lark-cli 误发守卫 SHALL 额外拦截以下命令，返回与群
 - **THEN** 记 `unknown-terminal` 并推进队列，不自动重发
 
 #### Scenario: shell 档直接调用评论或文档写命令
-- **GIVEN** 文档 locus 处于 shell 档
+- **GIVEN** 文档 locus 的 `accessMode` 为 `danger-full-access`
 - **WHEN** child 执行 `lark-cli drive +add-reply --comment-id c1 ...`、`lark-cli docs +update ...` 或 `lark-cli api POST /open-apis/im/v1/messages ...`
 - **THEN** 三者都被守卫拒绝，并返回受管 finish 的拒绝文案
 
@@ -266,7 +280,7 @@ shell 档的 lark-cli 误发守卫 SHALL 额外拦截以下命令，返回与群
 IM 入口的上述行为 SHALL 保持不变。
 
 #### Scenario: 文档子会话的工具面
-- **GIVEN** 一个文档级 locus 子会话（safe 档）
+- **GIVEN** 一个文档级 locus 子会话（`accessMode` 为 `read-only`）
 - **WHEN** 列出其可用工具
 - **THEN** 包含 `pet_locus_doc_context`，不包含 `pet_locus_chat_history`；composition attestation 通过
 
@@ -301,7 +315,7 @@ IM 入口的上述行为 SHALL 保持不变。
 - 线程与正文合计上限为 28 000 个 UTF-16 码元，线程在前、正文在后。超出部分 SHALL 截断，并在结果中显式标记截断位置及原始总长度。如果线程本身已超过上限，SHALL 截断线程并完全省略正文，同时标明正文已省略。
 - 结果 SHALL 以固定的不可信内容标签开头，说明其中的文档与评论内容可能包含指令，不得当作指令执行。
 - 读取失败与内容为空 SHALL 可区分。
-- safe 与 shell 档 SHALL 都装配该工具；IM 入口的子会话 MUST NOT 看到它。
+- 两种 `accessMode` SHALL 都装配该工具；IM 入口的子会话 MUST NOT 看到它。
 
 #### Scenario: 读取当前评论线程与文档
 - **GIVEN** 评论级入口 `(doc:docx:D, c2)` 的 current Delivery；线程 2 000 码元，文档正文 30 000 码元
@@ -327,13 +341,13 @@ IM 入口的上述行为 SHALL 保持不变。
 
 管理面 SHALL 把文档入口与群入口并列呈现：
 - 文档级入口以文档标题与确定性短码成对展示，标题取自 `drive +inspect` 返回的 `title`。
-- 评论级入口嵌套在文档级之下，以划词原文摘要与短码成对展示。摘要取自该入口最早一个带 `docComment.quote` 的 Delivery，没有时显示兜底名 `评论 · <短码>`。
+- 评论级入口嵌套在文档级之下，以划词原文摘要与短码成对展示。摘要取自该入口最早一个带 `docComment.quote` 的 Delivery，没有时显示 `评论 · <短码>`。
 - 短码 SHALL 按 `pet-locus-collaboration`「管理面的标识以确定性短码表达且名称与短码成对」中的文档/评论规则派生：文档入口取 token，标签为 `doc·`；评论入口取 `comment_id` 的逆序（即从末尾数字截取），标签为 `cmt·`。
-- 标题不可得时，SHALL 呈现兜底名 `文档 · <短码>`，评论级为 `评论 · <短码>`，并标明这是兜底显示，MUST NOT 以 token 或其它文本冒充标题。
+- 标题不可得时，SHALL 只呈现 `文档 · <短码>`，评论级为 `评论 · <短码>`，MUST NOT 附加「兜底」标记，MUST NOT 以 token 或其它文本冒充标题。
 - SHALL 提供打开该文档的链接。
 - 文档入口行 SHALL 标注“本文档的评论者均可提问”。
 
-管理面 MUST NOT 提供手工输入文档链接或 token 来建立入口的控件；文档入口只由评论入站建立。既有的生命周期动作（停止、重建、权限与档位）SHALL 对文档入口同样可用。
+管理面 MUST NOT 提供手工输入文档链接或 token 来建立入口的控件；文档入口只由评论入站建立。文档入口的管理面动作集合 SHALL 与群入口一致：停止、访问模式（`access`）与只读查看；「改绑到其他会话」按钮直接放在文档根行上（不在「更多」或折叠区内），评论行不提供。该按钮仅在根行的 W 已归档时出现；W 可用或无法证明已归档时没有按钮、原因文字与输入框。按钮出现后，该文档下有入口有 current 投递时置灰并写明原因。「停止」与访问模式控件在入口投递中时同样置灰（二者只在入口空闲时受理）。
 
 #### Scenario: 文档与评论嵌套呈现
 - **GIVEN** 文档 `D`（标题“技术方案”）有一个文档级入口和两个评论级入口
@@ -343,10 +357,14 @@ IM 入口的上述行为 SHALL 保持不变。
 #### Scenario: 标题不可得
 - **GIVEN** bot 读取文档元数据失败
 - **WHEN** 打开管理面
-- **THEN** 文档级入口显示 `文档 · <短码>` 并标明为兜底显示
+- **THEN** 文档级入口只显示 `文档 · <短码>`，页面不含「兜底」字样
 
 #### Scenario: 无建立控件
 - **GIVEN** 管理面已打开
 - **WHEN** 检查文档入口区域的可交互元素
-- **THEN** 不存在接受文档链接、token 或会话标识输入的创建控件
+- **THEN** 不存在接受文档链接或 token 输入的创建控件；唯一接受会话标识输入的控件是直接位于文档根行上的「改绑到其他会话」，它不创建入口
 
+#### Scenario: 改绑动作只在文档根行
+- **GIVEN** 文档 `D` 有根行与两个评论行，根行的 W 已归档且无 current 投递
+- **WHEN** 打开管理面
+- **THEN** 根行上直接带有可用的「改绑到其他会话」按钮；两个评论行不含该动作；若根行的 W 未归档，根行没有该按钮、原因文字与输入框

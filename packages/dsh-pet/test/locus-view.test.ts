@@ -1,223 +1,293 @@
 /**
- * Behaviour tests for the locus presentation model.
- *
- * These assert real snapshots — a topic, a rebuilt entry, an archived parent, a
- * generation whose parent session changed — rather than the presence of strings
- * in a source file. That is the point of extracting `locus-view.ts`: the old
- * surface could only prove it contained certain text, never that it grouped the
- * right locus under the right session.
+ * Behaviour tests for the v20 locus presentation model (pet-locus-isomorphic-entries D10).
+ * Real view snapshots, not source-string checks.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
-  ALL_ENTRY_STATES,
   DEFAULT_LOCUS_FILTER,
-  ENTRY_STATE_OPTIONS,
+  ENTRY_BUCKET_OPTIONS,
+  LOCUS_ACCESS_LABELS,
+  LOCUS_ARCHIVED_W_NOTE,
+  LOCUS_DEFAULT_QA_MISSING_NOTE,
+  LOCUS_FULL_ACCESS_NOTE,
+  LOCUS_INVALID_NOTE,
   LOCUS_STATE_LABELS,
-  PARENT_AVAILABILITY_LABELS,
+  LOCUS_STOPPED_NOTE,
+  LOCUS_WRITE_DISABLED_REASON,
   SHOW_ALL_LOCUS_FILTER,
+  accessBlock,
   applyLocusFilter,
+  applyQuery,
+  archivedWorkNote,
   assignHandleCodes,
-  endpointHandleId,
+  childJumpBlock,
   collectHandleCodes,
-  entryMatchesQuery,
-  entryStateFilterLabel,
-  endpointKey,
+  countLocusFilterOptions,
+  emptyListText,
+  endpointHandleId,
+  endpointHandleLabel,
   entryDisplayName,
-  familyHead,
+  entryFeishuTarget,
+  entryStateFilterLabel,
+  entryStateNote,
+  fullAccessBlock,
   groupByEntry,
-  groupByWork,
   handleCode,
-  isHostCurrent,
-  locusSourceLabel,
+  handleLabel,
   locusStateLabel,
   locusStateTone,
-  parentAvailabilityOf,
+  rebindBlock,
+  sessionJumpBlock,
   summarizeLocusView,
-  endpointHandleLabel,
-  handleLabel,
-  locusAnchorConfirmRequest,
-  locusConfirmCandidate,
-  locusNeedsExecutionRoot,
 } from '../src/client/locus-view.js'
-import { locusFixture } from './fixtures/locus-snapshot.js'
-import type {
-  PetLocusManagementView,
-  PetLocusSource,
-  PetLocusState,
-  PetLocusView,
-} from '../src/wire.js'
+import { chatView, entryView, snapshotV20, workView } from './support/mgmt-snapshot.js'
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
+const chatLink = (chatId: string) => `https://applink.feishu.cn/client/chat/open?openChatId=${chatId}`
 
-interface LocusInput {
-  readonly locusId: string
-  readonly generation?: number
-  readonly chatId: string
-  readonly threadId?: string
-  readonly chatName?: string
-  readonly parentSessionId: string
-  readonly parentTitle?: string
-  readonly parentAvailability?: 'available' | 'archived' | 'missing'
-  readonly childSessionId?: string
-  readonly childTitle?: string
-  readonly childAvailability?: 'available' | 'archived' | 'missing'
-  readonly workspaceId?: string
-  readonly workspaceTitle?: string
-  readonly state?: PetLocusState
-  readonly source?: PetLocusSource
-  readonly parentLocusId?: string
-  readonly isDefaultQa?: boolean
-}
+describe('spec Requirement "管理面按工作会话分组且每个入口一行"', () => {
+  it('spec Scenario "同一工作会话的多个群只出现一次 W"', () => {
+    const snapshot = snapshotV20([workView([
+      chatView(entryView({ chatId: 'oc_A' })),
+      chatView(entryView({ chatId: 'doc:docx:D' })),
+    ])])
+    const view = applyLocusFilter(snapshot)
+    expect(view.works).toHaveLength(1)
+    expect(view.works[0]?.chats.map(chat => chat.chat.group.endpoint.chatId)).toEqual(['oc_A', 'doc:docx:D'])
+    expect(new Set(view.works[0]?.chats.map(chat => chat.chat.locusMain.sessionId)).size).toBe(1)
+  })
 
-function locus(input: LocusInput): PetLocusView {
-  const source: PetLocusSource = input.source ?? 'auto'
-  return {
-    locusId: input.locusId,
-    generation: input.generation ?? 1,
-    endpoint: {
-      chatId: input.chatId,
-      ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-      ...(input.chatName === undefined ? {} : { chatName: input.chatName }),
-    },
-    main: {
-      sessionId: input.parentSessionId,
-      source,
-      ...(input.parentTitle === undefined ? {} : { title: input.parentTitle }),
-      ...(input.parentAvailability === undefined ? {} : { availability: input.parentAvailability }),
-    },
-    child: {
-      ...(input.childSessionId === undefined ? {} : { sessionId: input.childSessionId }),
-      ...(input.childTitle === undefined ? {} : { title: input.childTitle }),
-      ...(input.childAvailability === undefined ? {} : { availability: input.childAvailability }),
-    },
-    workspace: {
-      workspaceId: input.workspaceId ?? 'ws-1',
-      ...(input.workspaceTitle === undefined ? {} : { title: input.workspaceTitle }),
-    },
-    permission: { desired: 'read', effective: 'read' },
-    toolTier: { desired: 'safe', effective: 'safe' },
-    childComposition: 'safe-v2',
-    state: {
-      state: input.state ?? 'active',
-      busy: false,
-      createdAt: 1,
-      updatedAt: 2,
-    },
-    source,
-    ...(input.parentLocusId === undefined ? {} : { parentLocusId: input.parentLocusId }),
-    isDefaultQa: input.isDefaultQa ?? false,
-  }
-}
+  it('spec Scenario "话题按 chatId 嵌套在群行之下"', () => {
+    const snapshot = snapshotV20([workView([
+      chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' }), entryView({ chatId: 'oc_A', threadId: 'omt_2' })]),
+      chatView(entryView({ chatId: 'oc_B' }), [entryView({ chatId: 'oc_B', threadId: 'omt_3' })]),
+    ])])
+    const chats = applyLocusFilter(snapshot).works[0]!.chats
+    expect(chats.map(chat => [chat.chat.group.endpoint.chatId, chat.topics.map(topic => topic.endpoint.threadId)])).toEqual([
+      ['oc_A', ['omt_1', 'omt_2']],
+      ['oc_B', ['omt_3']],
+    ])
+    for (const chat of chats) for (const topic of chat.topics) expect(topic.endpoint.chatId).toBe(chat.chat.group.endpoint.chatId)
+  })
 
-/**
- * Build a snapshot the way the Host does: indexes are derived from the same
- * record set, and the current generation is stated explicitly — this module is
- * forbidden from inventing one.
- */
-function snapshot(loci: readonly PetLocusView[], currents: readonly string[] = []): PetLocusManagementView {
-  const byEndpointKey = new Map<string, PetLocusView[]>()
-  for (const record of loci) {
-    const key = endpointKey(record.endpoint)
-    const list = byEndpointKey.get(key)
-    if (list === undefined) byEndpointKey.set(key, [record])
-    else list.push(record)
-  }
-  const currentIds = new Set(currents)
-  const byEndpoint = [...byEndpointKey.entries()].map(([, records]) => {
-    const sorted = [...records].sort((left, right) => left.generation - right.generation)
-    const current = sorted.find(record => currentIds.has(record.locusId))
-    const first = sorted[0]
-    if (first === undefined) throw new Error('fixture: empty endpoint history')
-    return {
-      endpoint: first.endpoint,
-      ...(current === undefined ? {} : { current }),
-      history: sorted,
+  it('spec Scenario "原地重建后仍是一行"', () => {
+    const rebuilt = entryView({ chatId: 'oc_A', state: 'not-created', revision: 4 })
+    const view = applyLocusFilter(snapshotV20([workView([chatView(rebuilt)])]))
+    expect(summarizeLocusView(view)).toEqual({ entries: 1, chats: 1, works: 1 })
+    expect(JSON.stringify(view)).not.toMatch(/历史|generation"?:\s*\d|代/)
+  })
+
+  it('spec Scenario "访问模式以单值呈现"', () => {
+    expect(LOCUS_ACCESS_LABELS['read-only']).toBe('只读')
+    expect(LOCUS_ACCESS_LABELS['danger-full-access']).toBe('完全访问')
+    expect(LOCUS_FULL_ACCESS_NOTE).toContain('整机无边界、入口成员共享')
+    expect(Object.keys(LOCUS_ACCESS_LABELS)).toHaveLength(2)
+  })
+})
+
+describe('spec Requirement "管理面按工作会话与入口状态筛选，条件由筛选控件自述"', () => {
+  it('W 已归档的组默认隐藏，勾选「已归档」后显示并提示可改绑', () => {
+    const work = { availability: 'archived' as const }
+    const chat = chatView(entryView({ chatId: 'oc_A' }))
+    const snapshot = snapshotV20([workView([chat], work)])
+    expect(applyLocusFilter(snapshot).works).toEqual([])
+    const view = applyLocusFilter(snapshot, { buckets: ['serving', 'archived'] })
+    expect(view.works).toHaveLength(1)
+    expect(archivedWorkNote(view.works[0]!.work)).toBe(LOCUS_ARCHIVED_W_NOTE)
+    expect(rebindBlock(chat, view.works[0]!.work)).toBeUndefined()
+  })
+
+  it('offers exactly three flat buckets: 在服务 on, 已停止 / 已失效 and 已归档 off', () => {
+    expect(ENTRY_BUCKET_OPTIONS.map(option => [option.id, option.label])).toEqual([
+      ['serving', '在服务'], ['down', '已停止 / 已失效'], ['archived', '已归档'],
+    ])
+    expect(DEFAULT_LOCUS_FILTER.buckets).toEqual(['serving'])
+    expect(SHOW_ALL_LOCUS_FILTER.buckets).toEqual(['serving', 'down', 'archived'])
+  })
+
+  it('buckets an archived W entry only under 已归档, whatever its state; counts add up to the total', () => {
+    const snapshot = snapshotV20([
+      workView([chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1', state: 'stopped' })])]),
+      workView([chatView(entryView({ chatId: 'oc_B' }), [entryView({ chatId: 'oc_B', threadId: 'omt_2', state: 'invalid' })])],
+        { sessionId: 'session-w-archived', availability: 'archived' }),
+    ])
+    const counts = countLocusFilterOptions(snapshot)
+    expect(Object.fromEntries(counts)).toEqual({ serving: 1, down: 1, archived: 2 })
+    expect([...counts.values()].reduce((a, b) => a + b, 0)).toBe(4)
+    const archivedOnly = applyLocusFilter(snapshot, { buckets: ['archived'] })
+    expect(archivedOnly.works.map(work => work.work.sessionId)).toEqual(['session-w-archived'])
+    expect(archivedOnly.works[0]!.chats[0]!.topics.map(topic => topic.state)).toEqual(['invalid'])
+    // 已停止 / 已失效 alone does not reach into an archived W.
+    expect(applyLocusFilter(snapshot, { buckets: ['down'] }).works.map(work => work.work.sessionId))
+      .toEqual(['session-906220d3-ecee-41d0-9320-f425f17edefe'])
+  })
+
+  it('always shows an unrecognised state as 未知状态, under any filter', () => {
+    const snapshot = snapshotV20([workView([chatView({ ...entryView({ chatId: 'oc_A' }), state: 'retired' as never })])])
+    for (const buckets of [[], ['serving'], ['down'], ['archived']] as const) {
+      expect(applyLocusFilter(snapshot, { buckets }).works, buckets.join()).toHaveLength(1)
     }
+    expect(locusStateLabel('retired')).toBe('未知状态')
+    expect(ENTRY_BUCKET_OPTIONS.map(option => option.label)).not.toContain('未知状态')
   })
 
-  const parentIds = [...new Set(loci.map(record => record.main.sessionId))]
-  const byParent = parentIds.map(parentSessionId => {
-    const members = loci.filter(record => record.main.sessionId === parentSessionId)
-    const defaultQa = members.find(record => record.isDefaultQa)
-    return {
-      parentSessionId,
-      ...(defaultQa === undefined ? {} : { defaultQa }),
-      loci: members,
-    }
+  it('reads the collapsed label from the ticked buckets', () => {
+    expect(entryStateFilterLabel({ buckets: ['serving'] })).toBe('在服务')
+    expect(entryStateFilterLabel({ buckets: ['serving', 'archived'] })).toBe('在服务、已归档')
+    expect(entryStateFilterLabel({ buckets: ['serving', 'down', 'archived'] })).toBe('全部')
+    expect(entryStateFilterLabel({ buckets: [] })).toBe('无')
   })
 
-  const childIds = [...new Set(loci.flatMap(record => (record.child.sessionId === undefined ? [] : [record.child.sessionId])))]
-  const byChild = childIds.map(childSessionId => {
-    const match = loci.find(record => record.child.sessionId === childSessionId)
-    return {
-      childSessionId,
-      ...(match === undefined ? {} : { locus: match }),
-      history: loci.filter(record => record.child.sessionId === childSessionId),
-    }
+  it('spec Scenario "停止已归档 W 的群行后被默认隐藏"', () => {
+    const snapshot = snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'stopped' }))], { availability: 'archived' })])
+    expect(applyLocusFilter(snapshot).works).toEqual([])
+    expect(applyLocusFilter(snapshot, { buckets: ['serving', 'down'] }).works).toEqual([])
+    const shown = applyLocusFilter(snapshot, { buckets: ['archived'] })
+    expect(locusStateLabel(shown.works[0]!.chats[0]!.chat.group.state)).toBe('已停止')
   })
 
-  const defaultQa = loci
-    .filter(record => record.isDefaultQa)
-    .map(record => ({ parentSessionId: record.main.sessionId, locus: record }))
+  it('spec Scenario "默认隐藏已停止与已失效的入口"', () => {
+    const stopped = entryView({ chatId: 'oc_S', state: 'stopped' })
+    const invalid = entryView({ chatId: 'oc_I', state: 'invalid' })
+    const snapshot = snapshotV20([workView([chatView(stopped), chatView(invalid)])])
+    expect(applyLocusFilter(snapshot, DEFAULT_LOCUS_FILTER).works).toEqual([])
+    expect(entryStateFilterLabel(DEFAULT_LOCUS_FILTER)).toBe('在服务')
+    expect(countLocusFilterOptions(snapshot).get('down')).toBe(2)
+    expect(entryStateNote(invalid)).toBe(LOCUS_INVALID_NOTE)
+    expect(entryStateNote(stopped)).toBe(LOCUS_STOPPED_NOTE)
+  })
 
-  return { generation: 1, loci, defaultQa, discovery: { byEndpoint, byParent, byChild } }
-}
+  it('spec Scenario "未创建入口默认可见"', () => {
+    const snapshot = snapshotV20([workView([chatView(
+      entryView({ chatId: 'oc_A', state: 'not-created' }),
+      [entryView({ chatId: 'oc_A', threadId: 'omt_1', state: 'not-created' })],
+    )])])
+    const chat = applyLocusFilter(snapshot).works[0]!.chats[0]!
+    expect(chat.groupVisible).toBe(true)
+    expect(chat.topics).toHaveLength(1)
+    expect(locusStateLabel('not-created')).toBe('未创建')
+    expect(countLocusFilterOptions(snapshot).get('serving')).toBe(2)
+  })
 
-/** The realistic shape: one chat entry, one topic inheriting it, one rebuild. */
-function realisticSnapshot(): PetLocusManagementView {
-  const chat = locus({
-    locusId: 'locus-runtime-1789395333907-19064d8aca8a48',
-    chatId: 'oc_591324b60afa1d62f3e229104607c586',
-    parentSessionId: 'session-4629eb39-c996-4ff6-ad0e-b59ac54337a1',
-    parentTitle: '未命名会话',
-    parentAvailability: 'archived',
-    childSessionId: 'session-7b41abe2-f878-4d5c-9cf0-a6b548219c1a',
-    workspaceTitle: 'acme',
+  it('spec Scenario "已停止群行下仍有活跃话题"', () => {
+    const snapshot = snapshotV20([workView([chatView(
+      entryView({ chatId: 'oc_A', state: 'stopped' }),
+      [entryView({ chatId: 'oc_A', threadId: 'omt_1' })],
+    )])])
+    const chat = applyLocusFilter(snapshot).works[0]!.chats[0]!
+    expect(chat.groupVisible).toBe(false)
+    expect(chat.chat.group.state).toBe('stopped')
+    expect(chat.topics.map(topic => topic.endpoint.threadId)).toEqual(['omt_1'])
+    expect(summarizeLocusView(applyLocusFilter(snapshot)).entries).toBe(1)
   })
-  const chatGen2 = locus({
-    locusId: 'locus-runtime-1789395333907-19064d8aca8a48-g2',
-    generation: 2,
-    chatId: 'oc_591324b60afa1d62f3e229104607c586',
-    parentSessionId: 'session-4629eb39-c996-4ff6-ad0e-b59ac54337a1',
-    parentTitle: '未命名会话',
-    parentAvailability: 'archived',
-    childSessionId: 'session-7b41abe2-f878-4d5c-9cf0-a6b548219c1a',
-    workspaceTitle: 'acme',
-  })
-  const topic = locus({
-    locusId: 'locus-runtime-1789397609276-f750f727f1988',
-    chatId: 'oc_591324b60afa1d62f3e229104607c586',
-    threadId: 'omt_19cd829b840f5bee',
-    parentSessionId: 'session-4629eb39-c996-4ff6-ad0e-b59ac54337a1',
-    parentTitle: '未命名会话',
-    parentAvailability: 'archived',
-    childSessionId: 'session-19b894b4-49d9-4417-a0f1-e194f0baad6f',
-    source: 'inherited',
-    parentLocusId: chatGen2.locusId,
-    workspaceTitle: 'acme',
-  })
-  const qa = locus({
-    locusId: 'locus-runtime-1789398952986-b0d570a7406468',
-    chatId: 'oc_b1fa0f02b695fbf4bd4ff2ebb322fad4',
-    chatName: '答疑 · DSH',
-    parentSessionId: 'session-906220d3-ecee-41d0-9320-f425f17edefe',
-    parentTitle: 'pet locus 待办依赖与优先级',
-    parentAvailability: 'available',
-    childSessionId: 'session-a380ee7b-8b44-406f-80dd-2f1c92023701',
-    childTitle: '答疑 · DSH',
-    source: 'qa-created',
-    isDefaultQa: true,
-    workspaceTitle: 'ohmydsh',
-  })
-  return snapshot([chat, chatGen2, topic, qa], [chatGen2.locusId, qa.locusId])
-}
 
-// ---------------------------------------------------------------------------
-// 1.1 Short codes
-// ---------------------------------------------------------------------------
+  it('spec Scenario "筛选只影响呈现"', () => {
+    const snapshot = snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'stopped' }))])])
+    const before = JSON.stringify(snapshot)
+    applyLocusFilter(snapshot, SHOW_ALL_LOCUS_FILTER)
+    applyLocusFilter(snapshot, DEFAULT_LOCUS_FILTER)
+    expect(JSON.stringify(snapshot)).toBe(before)
+  })
+
+  it('spec Scenario "筛选后为空时说明可放宽的条件"', () => {
+    const snapshot = snapshotV20([workView([chatView(entryView({ chatId: 'oc_A', state: 'stopped' }))])])
+    expect(applyLocusFilter(snapshot).works).toEqual([])
+    expect(emptyListText('')).toContain('勾选「已停止 / 已失效」')
+    expect(emptyListText('')).not.toMatch(/删除/)
+  })
+
+  it('narrows by search without resurrecting what the filter hid', () => {
+    const snapshot = snapshotV20([workView([
+      chatView(entryView({ chatId: 'oc_A', chatName: '项目群' })),
+      chatView(entryView({ chatId: 'oc_B', state: 'stopped', chatName: '项目群旧' })),
+    ])])
+    const codes = collectHandleCodes(snapshot)
+    const view = applyQuery(applyLocusFilter(snapshot), codes, '项目群')
+    expect(view.works[0]?.chats.map(chat => chat.chat.group.endpoint.chatId)).toEqual(['oc_A'])
+  })
+})
+
+describe('spec Requirement "完全访问由 allowlist 显式授予且如实说明" (management half)', () => {
+  it('spec Scenario "关闭期间管理面只禁用完全访问选项"', () => {
+    const entry = entryView({ chatId: 'oc_A' })
+    expect(fullAccessBlock({ writeEnabled: false })).toBe(LOCUS_WRITE_DISABLED_REASON)
+    expect(accessBlock(entry)).toBeUndefined()
+    expect(fullAccessBlock({ writeEnabled: true })).toBeUndefined()
+  })
+})
+
+describe('spec Requirement "管理面提供双向可达且目标不可达时 fail closed"', () => {
+  it('spec Scenario "两种读法同源一致"', () => {
+    const snapshot = snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }), [entryView({ chatId: 'oc_A', threadId: 'omt_1' })])])])
+    const view = applyLocusFilter(snapshot)
+    const [byEntry] = groupByEntry(view)
+    const byWork = view.works[0]!
+    expect(byEntry?.work.sessionId).toBe(byWork.work.sessionId)
+    expect(byEntry?.section.chat.locusMain.sessionId).toBe(byWork.chats[0]!.chat.locusMain.sessionId)
+    expect(byEntry?.section.topics.map(topic => [topic.locusId, topic.sessionId]))
+      .toEqual(byWork.chats[0]!.topics.map(topic => [topic.locusId, topic.sessionId]))
+  })
+
+  it('spec Scenario "父会话已归档时不可跳转"', () => {
+    expect(sessionJumpBlock('archived')).toBe('会话已归档，无法打开')
+    expect(sessionJumpBlock('missing')).toBe('会话不可用，无法打开')
+    expect(sessionJumpBlock('unknown')).toBeDefined()
+    expect(sessionJumpBlock('available')).toBeUndefined()
+  })
+
+  it('spec Scenario "话题身份不可证时退化"', () => {
+    expect(entryFeishuTarget({ chatId: 'oc_A', threadId: 'omt_19cd' }, chatLink)).toMatchObject({ kind: 'thread' })
+    const degraded = entryFeishuTarget({ chatId: 'oc_A', threadId: 'not-a-topic' }, chatLink)
+    expect(degraded).toMatchObject({ kind: 'chat', url: chatLink('oc_A'), reason: '无法证明话题标识，已退化为所属群' })
+  })
+
+  it('spec Scenario "未创建的入口没有子会话可跳转"', () => {
+    expect(childJumpBlock(entryView({ chatId: 'oc_A', state: 'not-created' }))).toBe('尚未创建')
+    expect(childJumpBlock(entryView({ chatId: 'oc_A' }))).toBeUndefined()
+  })
+})
+
+describe('spec Requirement "默认 Q&A 在管理面只读呈现"', () => {
+  it('spec Scenario "默认 Q&A 只做标记"', () => {
+    const snapshot = snapshotV20([workView([chatView(entryView({ chatId: 'oc_Q' }), [entryView({ chatId: 'oc_Q', threadId: 'omt_1' })], { defaultQa: true })])])
+    const view = applyLocusFilter(snapshot)
+    expect(view.works[0]?.hasDefaultQa).toBe(true)
+    expect(summarizeLocusView(view).chats).toBe(1)
+    expect(view.works[0]?.chats[0]?.topics[0]).not.toHaveProperty('defaultQa')
+  })
+
+  it('spec Scenario "尚无默认 Q&A 时说明出处"', () => {
+    const view = applyLocusFilter(snapshotV20([workView([chatView(entryView({ chatId: 'oc_A' }))])]))
+    expect(view.works[0]?.hasDefaultQa).toBe(false)
+    expect(LOCUS_DEFAULT_QA_MISSING_NOTE).toContain('请在目标会话中通过 Pet 轮盘')
+  })
+})
+
+describe('spec Requirement "管理面如实呈现全部生命周期状态"', () => {
+  it('spec Scenario "正在建树的入口可见"', () => {
+    const entry = entryView({ chatId: 'oc_A', state: 'not-created' })
+    expect(locusStateLabel(entry.state)).toBe('未创建')
+    expect(locusStateTone(entry.state)).toBe('on')
+    expect(applyLocusFilter(snapshotV20([workView([chatView(entry)])])).works).toHaveLength(1)
+    expect(accessBlock(entry)).toBeUndefined()
+  })
+
+  it('spec Scenario "非活跃状态不被省略"', () => {
+    expect(Object.keys(LOCUS_STATE_LABELS).sort()).toEqual(['active', 'invalid', 'not-created', 'stopped'])
+    expect(locusStateLabel('stopped')).toBe('已停止')
+    expect(locusStateLabel('invalid')).toBe('已失效')
+    expect(locusStateLabel('retired')).toBe('未知状态')
+  })
+})
+
+describe('spec Requirement "管理面呈现文档入口且不提供新建入口" (view half)', () => {
+  it('spec Scenario "改绑动作只在文档根行"', () => {
+    const root = entryView({ chatId: 'doc:docx:D', chatName: '技术方案' })
+    const chat = chatView(root, [entryView({ chatId: 'doc:docx:D', threadId: '11' }), entryView({ chatId: 'doc:docx:D', threadId: '22' })])
+    expect(rebindBlock(chat, { sessionId: 'W', availability: 'archived' })).toBeUndefined()
+    expect(rebindBlock(chat, { sessionId: 'W', availability: 'available' })).toBe('当前来源会话未归档，仅在其归档后可改绑')
+  })
+})
 
 describe('short codes', () => {
   it('follows one documented rule per kind', () => {
@@ -272,100 +342,6 @@ describe('short codes', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// 1.2 Family aggregation
-// ---------------------------------------------------------------------------
-
-describe('one row per entry', () => {
-  it('collapses every generation of an endpoint into one family', () => {
-    const works = groupByWork(realisticSnapshot())
-    const acme = works.find(work => work.parentSessionId === 'session-4629eb39-c996-4ff6-ad0e-b59ac54337a1')
-    expect(acme?.families).toHaveLength(2)
-    const chatFamily = acme?.families.find(family => family.endpoint.threadId === undefined)
-    expect(chatFamily?.generations).toHaveLength(2)
-    expect(chatFamily?.history).toHaveLength(1)
-    expect(chatFamily?.history[0]?.generation).toBe(1)
-  })
-
-  it('takes current-ness from the Host index, not from the newest generation', () => {
-    const older = locus({ locusId: 'locus-runtime-1-aaaa1111', chatId: 'oc_a', parentSessionId: 'session-1' })
-    const newer = locus({ locusId: 'locus-runtime-2-bbbb2222', generation: 2, chatId: 'oc_a', parentSessionId: 'session-1' })
-    // The Host index names the OLDER generation: a stopped/invalid marker is
-    // still the authoritative current row, and reviving a newer one would be a
-    // routing claim this surface has no business making.
-    const families = groupByWork(snapshot([older, newer], [older.locusId]))[0]?.families
-    const family = families?.[0]
-    expect(family?.current?.locusId).toBe(older.locusId)
-    expect(isHostCurrent(family!, older)).toBe(true)
-    expect(isHostCurrent(family!, newer)).toBe(false)
-  })
-
-  it('claims no current generation when the index is silent', () => {
-    const only = locus({ locusId: 'locus-runtime-1-aaaa1111', chatId: 'oc_a', parentSessionId: 'session-1' })
-    const family = groupByWork(snapshot([only]))[0]?.families[0]
-    expect(family?.current).toBeUndefined()
-    expect(isHostCurrent(family!, only)).toBe(false)
-    // A display head still exists so the row renders; the row simply carries no
-    // 「当前代」 marker.
-    expect(familyHead(family!)?.locusId).toBe(only.locusId)
-  })
-
-  it('keeps one entry under the current generation when the source session changed', () => {
-    const gen1 = locus({ locusId: 'locus-runtime-1-aaaa1111', chatId: 'oc_a', parentSessionId: 'session-A' })
-    const gen2 = locus({ locusId: 'locus-runtime-2-bbbb2222', generation: 2, chatId: 'oc_a', parentSessionId: 'session-B' })
-    const works = groupByWork(snapshot([gen1, gen2], [gen2.locusId]))
-    const workB = works.find(work => work.parentSessionId === 'session-B')
-    expect(workB?.families).toHaveLength(1)
-    // The older generation is history, not a second row under its old session.
-    expect(workB?.families[0]?.history.map(item => item.locusId)).toEqual([gen1.locusId])
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 1.3 Two readings
-// ---------------------------------------------------------------------------
-
-describe('readings', () => {
-  it('nests a topic under the chat entry it inherits from', () => {
-    const works = groupByWork(realisticSnapshot())
-    const acme = works.find(work => work.parentSessionId === 'session-4629eb39-c996-4ff6-ad0e-b59ac54337a1')
-    expect(acme?.nodes).toHaveLength(1)
-    expect(acme?.nodes[0]?.family.endpoint.threadId).toBeUndefined()
-    expect(acme?.nodes[0]?.children).toHaveLength(1)
-    expect(acme?.nodes[0]?.children[0]?.family.endpoint.threadId).toBe('omt_19cd829b840f5bee')
-  })
-
-  it('does not nest a topic under a parent that lives in another work group', () => {
-    const chat = locus({ locusId: 'locus-runtime-1-aaaa1111', chatId: 'oc_a', parentSessionId: 'session-A' })
-    const foreignTopic = locus({
-      locusId: 'locus-runtime-2-bbbb2222',
-      chatId: 'oc_a',
-      threadId: 'omt_1',
-      parentSessionId: 'session-B',
-      parentLocusId: chat.locusId,
-    })
-    const works = groupByWork(snapshot([chat, foreignTopic]))
-    const workB = works.find(work => work.parentSessionId === 'session-B')
-    // Root, not a child: putting it under session A's tree would file a row
-    // under a session it does not belong to.
-    expect(workB?.nodes).toHaveLength(1)
-    expect(workB?.nodes[0]?.children).toHaveLength(0)
-  })
-
-  it('groups the reverse reading by chat with its topics', () => {
-    const entries = groupByEntry(realisticSnapshot())
-    expect(entries).toHaveLength(2)
-    const chatGroup = entries.find(group => group.chatId === 'oc_591324b60afa1d62f3e229104607c586')
-    expect(chatGroup?.chatFamily?.endpoint.threadId).toBeUndefined()
-    expect(chatGroup?.topicFamilies).toHaveLength(1)
-    expect(chatGroup?.families).toHaveLength(2)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 1.4 Names
-// ---------------------------------------------------------------------------
-
 describe('names', () => {
   it('spec Scenario "名称不可得时不猜测": never calls an untyped chat a group', () => {
     const endpoint = { chatId: 'oc_a27b5de7e6a9a57462060eb289ec70ab' }
@@ -389,261 +365,6 @@ describe('names', () => {
 
   it('falls back to the raw id only when no code could be derived', () => {
     expect(entryDisplayName({ chatId: 'oc_a' }, '').name).toBe('入口 · oc_a')
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 1.7 State vocabulary
-// ---------------------------------------------------------------------------
-
-describe('state vocabulary', () => {
-  const states: readonly PetLocusState[] = ['not-created', 'provisioning', 'active', 'switching', 'invalid', 'stopped', 'retired']
-
-  it('covers all seven lifecycle states', () => {
-    expect(Object.keys(LOCUS_STATE_LABELS).sort()).toEqual([...states].sort())
-    for (const state of states) {
-      expect(locusStateLabel(state)).not.toBe('')
-      expect(locusStateLabel(state)).not.toBe('未知状态')
-      expect(['on', 'warn', 'off', 'gone']).toContain(locusStateTone(state))
-    }
-  })
-
-  it('names provisioning explicitly instead of leaving it blank', () => {
-    expect(locusStateLabel('provisioning')).toBe('准备中')
-    expect(locusStateTone('provisioning')).toBe('warn')
-  })
-
-  it('degrades an unrecognised state to a visible word', () => {
-    expect(locusStateLabel('something-new')).toBe('未知状态')
-  })
-
-  it('separates the creation action from being the default entry', () => {
-    // `qa-created` records which action built the association; whether it is the
-    // session's default entry is `isDefaultQa`. Labelling the former as
-    // 「默认 Q&A」 mislabelled every non-default Q&A locus.
-    expect(locusSourceLabel('qa-created')).toBe('答疑群建立')
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 1.5 / 1.8 Filtering
-// ---------------------------------------------------------------------------
-
-describe('filtering', () => {
-  it('buckets every entry state exactly once', () => {
-    const covered = ENTRY_STATE_OPTIONS.flatMap(option => option.states)
-    expect([...covered].sort()).toEqual(
-      ['active', 'invalid', 'provisioning', 'retired', 'stopped', 'switching'].sort(),
-    )
-    expect(new Set(covered).size).toBe(covered.length)
-  })
-
-  it('maps session availability into three buckets', () => {
-    expect(parentAvailabilityOf({ sessionId: 's', availability: 'available' })).toBe('available')
-    expect(parentAvailabilityOf({ sessionId: 's', availability: 'archived' })).toBe('archived')
-    expect(parentAvailabilityOf({ sessionId: 's', availability: 'missing' })).toBe('unverified')
-    expect(parentAvailabilityOf({ sessionId: 's' })).toBe('unverified')
-    expect(Object.keys(PARENT_AVAILABILITY_LABELS).sort()).toEqual(['archived', 'available', 'unverified'])
-  })
-
-  it('hides archived work by default', () => {
-    const view = applyLocusFilter(realisticSnapshot())
-    expect(view.works).toHaveLength(1)
-    expect(view.works[0]?.parentSessionId).toBe('session-906220d3-ecee-41d0-9320-f425f17edefe')
-  })
-
-  it('removes exactly the entries the entry-state filter excludes', () => {
-    const chat = locus({
-      locusId: 'locus-runtime-1-aaaa1111',
-      chatId: 'oc_a',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-    })
-    const stopped = locus({
-      locusId: 'locus-runtime-2-bbbb2222',
-      chatId: 'oc_b',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      state: 'stopped',
-    })
-    const base = snapshot([chat, stopped], [chat.locusId, stopped.locusId])
-
-    expect(applyLocusFilter(base).works.flatMap(work => work.families).map(family => family.key))
-      .toEqual([endpointKey({ chatId: 'oc_a' })])
-    expect(
-      applyLocusFilter(base, { parentAvailability: ['available'], entryStates: ['stopped'] })
-        .works.flatMap(work => work.families).map(family => family.key),
-    ).toEqual([endpointKey({ chatId: 'oc_b' })])
-    // The whole snapshot, for the reading that asks what exists.
-    expect(applyLocusFilter(base, SHOW_ALL_LOCUS_FILTER).works.flatMap(work => work.families))
-      .toHaveLength(2)
-  })
-
-  it('drops a work section whose entries are all filtered out', () => {
-    const stopped = locus({
-      locusId: 'locus-runtime-1-aaaa1111',
-      chatId: 'oc_a',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      state: 'stopped',
-    })
-    const retired = locus({
-      locusId: 'locus-runtime-2-bbbb2222',
-      chatId: 'oc_b',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      state: 'retired',
-    })
-    const base = snapshot([stopped, retired], [])
-    // An empty header is not a reading: the condition is stated on the filter
-    // control, so the list shows nothing rather than a nameless section.
-    expect(applyLocusFilter(base).works).toHaveLength(0)
-    expect(applyLocusFilter(base, SHOW_ALL_LOCUS_FILTER).works.flatMap(work => work.families))
-      .toHaveLength(2)
-  })
-
-  it('leaves exactly the terminal buckets unchecked in the default filter', () => {
-    const off = ENTRY_STATE_OPTIONS.filter(
-      option => !option.states.every(state => DEFAULT_LOCUS_FILTER.entryStates.includes(state)),
-    )
-    expect(off.map(option => option.id)).toEqual(['stopped', 'retired'])
-    expect(SHOW_ALL_LOCUS_FILTER.entryStates).toEqual([...ALL_ENTRY_STATES])
-    expect(entryStateFilterLabel(ALL_ENTRY_STATES)).toBe('全部')
-    expect(entryStateFilterLabel(DEFAULT_LOCUS_FILTER.entryStates)).toBe('在服务')
-    expect(entryStateFilterLabel(['active'])).toBe('1/6 类')
-    expect(entryStateFilterLabel([])).toBe('0/6 类')
-  })
-
-  it('keeps an active topic visible when its chat entry is filtered out', () => {
-    const chat = locus({
-      locusId: 'locus-runtime-1-aaaa1111',
-      chatId: 'oc_a',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      state: 'stopped',
-    })
-    const topic = locus({
-      locusId: 'locus-runtime-2-bbbb2222',
-      chatId: 'oc_a',
-      threadId: 'omt_1',
-      parentSessionId: 'session-1',
-      parentAvailability: 'available',
-      parentLocusId: chat.locusId,
-    })
-    const view = applyLocusFilter(snapshot([chat, topic], [topic.locusId]), {
-      parentAvailability: ['available'],
-      entryStates: ['active'],
-    })
-    // The child is an entry with its own state: losing the parent must not take
-    // it down, and it becomes a root of the group.
-    expect(view.works[0]?.nodes).toHaveLength(1)
-    expect(view.works[0]?.nodes[0]?.family.endpoint.threadId).toBe('omt_1')
-  })
-
-  it('does not mutate the snapshot', () => {
-    const base = realisticSnapshot()
-    const before = JSON.stringify(base)
-    applyLocusFilter(base, DEFAULT_LOCUS_FILTER)
-    expect(JSON.stringify(base)).toBe(before)
-  })
-
-  it('matches search text literally, including display codes', () => {
-    const view = realisticSnapshot()
-    const families = groupByWork(view).flatMap(work => work.families)
-    const codes = collectHandleCodes(view)
-    const chat = families.find(
-      family => family.endpoint.chatId === 'oc_591324b60afa1d62f3e229104607c586' && family.endpoint.threadId === undefined,
-    )
-    const topic = families.find(family => family.endpoint.threadId !== undefined)
-    expect(chat).toBeDefined()
-    expect(topic).toBeDefined()
-    // Blank matches everything; a code, a chat id and a session title all match;
-    // an unrelated word matches nothing (no fuzzy near-misses).
-    expect(entryMatchesQuery(chat!, codes, '  ')).toBe(true)
-    expect(entryMatchesQuery(topic!, codes, '19cd')).toBe(true)
-    expect(entryMatchesQuery(topic!, codes, 'omt_19cd829b840f5bee')).toBe(true)
-    expect(entryMatchesQuery(chat!, codes, '答疑 · DSH')).toBe(false)
-  })
-
-  it('resolves display codes for a whole snapshot in one pass', () => {
-    const codes = collectHandleCodes(realisticSnapshot())
-    expect(codes.endpoint.get('oc_b1fa0f02b695fbf4bd4ff2ebb322fad4')).toBe('b1fa')
-    expect(codes.endpoint.get('omt_19cd829b840f5bee')).toBe('19cd')
-    expect(codes.locus.get('locus-runtime-1789394541339-2f853e76111d38')).toBeUndefined()
-    expect(codes.locus.get('locus-runtime-1789398952986-b0d570a7406468')).toBe('b0d5')
-    expect(codes.session.get('session-906220d3-ecee-41d0-9320-f425f17edefe')).toBe('9062')
-  })
-
-  it('summarises what is on screen', () => {
-    const view = applyLocusFilter(realisticSnapshot())
-    const summary = summarizeLocusView(view)
-    expect(summary.entries).toBe(1)
-    expect(summary.chats).toBe(1)
-    expect(summary.works).toBe(1)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Execution-root confirmation
-// ---------------------------------------------------------------------------
-
-describe('execution-root confirmation', () => {
-  const withRoot = (executionRoot?: string, anchor?: PetLocusView['contextAnchor']): PetLocusView =>
-    locusFixture({
-      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
-      generation: 3,
-      chatId: 'oc_3c57889c7808eae69b5ad1dd9ddc8ace',
-      threadId: 'omt_19cfc89238cf5bb5',
-      parentSessionId: 'session-85620d77-e1a8-4d80-b5d9-66a481bda3c5',
-      childSessionId: 'session-f3b5bd15-9e04-40e5-a515-dbce24c3dff7',
-      ...(executionRoot === undefined ? {} : { executionRoot }),
-      ...(anchor === undefined ? {} : { contextAnchor: anchor }),
-    })
-
-  it('still needs a root while the anchor carries none', () => {
-    // The dead end this change removes: an anchor can be `confirmed` after
-    // confirming context facts, and the write gate still has no root. Keying
-    // the action on `status` alone hid the only way to supply it.
-    expect(locusNeedsExecutionRoot(withRoot('/repo'))).toBe(true)
-    expect(locusNeedsExecutionRoot(withRoot('/repo', { status: 'confirmed' }))).toBe(true)
-    expect(locusNeedsExecutionRoot(withRoot('/repo', {
-      status: 'confirmed',
-      executionRoot: '/Users/prgrmrwy/corp/acme',
-    }))).toBe(false)
-  })
-
-  it('offers only the candidate the Host resolved', () => {
-    expect(locusConfirmCandidate(withRoot('/Users/prgrmrwy/corp/acme')))
-      .toBe('/Users/prgrmrwy/corp/acme')
-    expect(locusConfirmCandidate(withRoot())).toBeUndefined()
-    expect(locusConfirmCandidate(withRoot('   '))).toBeUndefined()
-  })
-
-  it('carries the resolved root in the confirm request', () => {
-    const request = locusAnchorConfirmRequest(withRoot('/Users/prgrmrwy/corp/acme'))
-
-    expect(request).toMatchObject({
-      action: 'confirm-anchor',
-      locusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
-      executionRoot: '/Users/prgrmrwy/corp/acme',
-      expectedGeneration: 3,
-      expectedLocusId: 'locus-runtime-1789543241305-c8db4d8e783e28',
-      expectedUpdatedAt: 2,
-      endpoint: {
-        chatId: 'oc_3c57889c7808eae69b5ad1dd9ddc8ace',
-        threadId: 'omt_19cfc89238cf5bb5',
-      },
-    })
-    // Confirming context facts still must not claim any authority.
-    expect(request).not.toHaveProperty('authorization')
-    expect(request.endpoint).not.toHaveProperty('chatType')
-  })
-
-  it('never invents a root when the Host resolved none', () => {
-    const request = locusAnchorConfirmRequest(withRoot())
-
-    expect(request).not.toHaveProperty('executionRoot')
-    expect(request.action).toBe('confirm-anchor')
   })
 })
 

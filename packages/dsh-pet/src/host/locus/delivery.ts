@@ -10,11 +10,11 @@
  *
  * The important boundary is correlation: a child id alone is not enough to
  * identify a request.  Every FIFO lookup is scoped by endpoint, locus id,
- * locus generation, and child session.  Settlement additionally requires a
+ * and session id (the child session the entry currently reserves or runs).  Settlement additionally requires a
  * per-turn identity from a host adapter.  A child lifecycle/activation event
  * (for example `subagent/end`) is not a per-delivery settlement and MUST NOT
  * be passed to this module without such a turn proof.  This keeps an old
- * child/generation from settling a newer generation, and keeps unrelated child
+ * replaced session from settling a newer one, and keeps unrelated child
  * turns (such as initialization or a GUI turn) out of the feedback queue.
  */
 
@@ -31,8 +31,7 @@ export interface DeliveryEndpoint {
 export interface DeliveryCorrelation {
   readonly endpoint: DeliveryEndpoint
   readonly locusId: string
-  readonly generation: number
-  readonly childSessionId: string
+  readonly sessionId: string
 }
 
 /**
@@ -240,7 +239,7 @@ export interface DeliveryAcceptance {
   readonly record: DeliveryRecord
   /** The message id already had a durable record. */
   readonly duplicate: boolean
-  /** Replay supplied a different endpoint/locus generation/child tuple. */
+  /** Replay supplied a different endpoint/locus/session tuple. */
   readonly conflict: boolean
 }
 
@@ -310,8 +309,7 @@ function currentForCorrelation(
 ): { readonly record?: DeliveryRecord; readonly ambiguous: boolean } {
   const matches = Object.values(state.byDeliveryId).filter(record =>
     record.locusId === correlation.locusId &&
-    record.generation === correlation.generation &&
-    record.childSessionId === correlation.childSessionId &&
+    record.sessionId === correlation.sessionId &&
     sameEndpoint(record.endpoint, correlation.endpoint) &&
     CURRENT_STATUSES.has(record.status),
   )
@@ -647,7 +645,7 @@ export function createDeliveryLedger(): DeliveryLedgerState {
  *
  * The message id is the idempotency key.  A duplicate returns the original
  * record unchanged, even when a redelivery supplies a different endpoint,
- * generation, child, or requested feedback target.  This prevents a replay
+ * session, or requested feedback target.  This prevents a replay
  * from retargeting an already accepted request.
  */
 export function acceptDelivery(
@@ -690,8 +688,7 @@ export function acceptDelivery(
     messageId: input.messageId,
     endpoint: cloneEndpoint(input.endpoint),
     locusId: input.locusId,
-    generation: input.generation,
-    childSessionId: input.childSessionId,
+    sessionId: input.sessionId,
     ...(rootMessageId !== undefined ? { rootMessageId } : {}),
     ...(input.senderOpenId !== undefined ? { senderOpenId: input.senderOpenId } : {}),
     ...(input.senderName !== undefined ? { senderName: input.senderName } : {}),
@@ -885,8 +882,7 @@ export function bindDeliveryTurn(
     deliveryId: input.deliveryId,
     endpoint: input.endpoint,
     locusId: input.locusId,
-    generation: input.generation,
-    childSessionId: input.childSessionId,
+    sessionId: input.sessionId,
     executionId: input.executionId,
     inboxMessageId: input.executionId,
   })
@@ -972,9 +968,9 @@ export interface FifoSettlementInput extends DeliveryCorrelation, DeliveryExecut
 /**
  * Settle the oldest pending Delivery for one exact correlation.
  *
- * The correlation includes generation intentionally.  A late event from an
- * old child/generation therefore either settles its own old Delivery or is a
- * no-op; it can never consume a pending Delivery from the replacement locus.
+ * The correlation includes the session id.  A late event from a replaced
+ * session therefore either settles its own old Delivery or is a no-op; it can
+ * never consume a pending Delivery of the replacement session.
  */
 export function settleNextDelivery(
   state: DeliveryLedgerState,
@@ -1107,15 +1103,14 @@ export function feedbackTargetForDelivery(
     : cloneFeedbackTarget(record.endpoint, record.messageId, record.feedbackTarget.rootMessageId)
 }
 
-/** Compare endpoint/locus generation/child identity exactly. */
+/** Compare endpoint/locus/session identity exactly. */
 export function correlates(
   record: DeliveryRecord,
   correlation: DeliveryCorrelation,
 ): boolean {
   return (
     record.locusId === correlation.locusId &&
-    record.generation === correlation.generation &&
-    record.childSessionId === correlation.childSessionId &&
+    record.sessionId === correlation.sessionId &&
     sameEndpoint(record.endpoint, correlation.endpoint)
   )
 }
@@ -1236,10 +1231,7 @@ function validateCorrelation(correlation: DeliveryCorrelation): void {
     assertIdentifier(correlation.endpoint.threadId, 'endpoint.threadId')
   }
   assertIdentifier(correlation.locusId, 'locusId')
-  assertIdentifier(correlation.childSessionId, 'childSessionId')
-  if (!Number.isSafeInteger(correlation.generation) || correlation.generation < 1) {
-    throw new TypeError('generation must be a positive safe integer')
-  }
+  assertIdentifier(correlation.sessionId, 'sessionId')
 }
 
 function validateAddressing(addressing: DeliveryAddressingProjection): void {

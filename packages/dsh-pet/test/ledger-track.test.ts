@@ -47,7 +47,7 @@ describe('trackTodo', () => {
       parentSessionId: 'main-1',
       // The stable ENTRY identity (hash of the endpoint key), never the generation's row id.
       locusId: locusIdentity(endpointKeyOf({ chatId: 'oc-project' })),
-      generation: 2,
+      // v20 (design D13 step 8): the writer no longer records a generation.
       endpoint: { chatId: 'oc-project' },
       triggerMessageId: 'om_trigger',
       requestedBy: 'ou_requester',

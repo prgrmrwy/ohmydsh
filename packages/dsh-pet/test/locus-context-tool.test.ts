@@ -25,42 +25,30 @@ function locusRecord(
 ): LocusContextRecord {
   return {
     endpoint,
-    locus: { locusId: 'locus-1', generation: 2, state: 'active' },
+    locus: { locusId: 'locus-1', state: 'active', revision: 2 },
     main: { sessionId: 'main-1', title: '研发主会话' },
     child: { sessionId: 'child-1', title: '项目子会话' },
     workspace: { workspaceId: 'workspace-1', title: '项目工作区' },
-    permission: { effective: 'read', desired: 'read', verifiedAt: 100 },
-    contextAnchor: {
-      status: 'confirmed',
-      executionRoot: '/repo/.worktrees/project',
-      constraints: ['只在确认的执行根内工作'],
-      provenance: 'main-confirmed',
-      confirmedAt: 101,
-    },
+    accessMode: 'read-only',
     ...overrides,
   }
 }
 
-function repository(
-  matches: readonly LocusContextRecord[],
-): LocusContextRepository {
-  return {
-    findByChildSessionId: vi.fn(() => matches),
-  }
+function repository(match: LocusContextRecord | undefined): LocusContextRepository {
+  return { findBySessionId: vi.fn(() => match) }
 }
 
 describe('caller-bound unified locus pet_context', () => {
   it('reverse-resolves an active child and returns locus facts without an Invocation', async () => {
     harness = await openPetHarness()
-    const locusRepository = repository([
+    const locusRepository = repository(
       locusRecord({
         currentDelivery: {
           deliveryId: 'delivery-1',
           messageId: 'om_message-1',
           endpoint,
           locusId: 'locus-1',
-          generation: 2,
-          childSessionId: 'child-1',
+          sessionId: 'child-1',
           status: 'running',
           senderOpenId: 'ou_sender',
           senderName: '张三',
@@ -73,7 +61,7 @@ describe('caller-bound unified locus pet_context', () => {
           },
         },
       }),
-    ])
+    )
     const findTask = vi.spyOn(harness.repository, 'findTaskByExecutor')
 
     const result = executePetContext(
@@ -85,13 +73,13 @@ describe('caller-bound unified locus pet_context', () => {
     expect(result.scope).toBe('locus')
     const locus = result as PetLocusContextResult
     expect(locus.endpoint).toEqual(endpoint)
-    expect(locus.locus).toEqual({ locusId: 'locus-1', generation: 2, state: 'active' })
+    expect(locus.locus).toEqual({ locusId: 'locus-1', state: 'active', revision: 2 })
     expect(locus.main).toEqual({ sessionId: 'main-1', title: '研发主会话' })
     expect(locus.child).toEqual({ sessionId: 'child-1', title: '项目子会话' })
     expect(locus.workspace).toEqual({ workspaceId: 'workspace-1', title: '项目工作区' })
-    expect(locus.permission.effective).toBe('read')
-    expect(locus.contextAnchor.executionRoot).toBe('/repo/.worktrees/project')
-    expect(locus.contextAnchor).not.toHaveProperty('targetLocusId')
+    expect(locus.accessMode).toBe('read-only')
+    expect(locus).not.toHaveProperty('permission')
+    expect(locus).not.toHaveProperty('contextAnchor')
     expect(locus.currentDelivery?.deliveryId).toBe('delivery-1')
     expect(locus.currentDelivery?.replyTarget?.chatId).toBe(endpoint.chatId)
     expect(locus).not.toHaveProperty('taskId')
@@ -99,35 +87,13 @@ describe('caller-bound unified locus pet_context', () => {
     expect(findTask).not.toHaveBeenCalled()
   })
 
-  it('reports missing anchors and negative authorization without inventing authority', async () => {
-    harness = await openPetHarness()
-    for (const contextAnchor of [
-      { status: 'unknown' as const },
-      { status: 'missing' as const },
-      { status: 'confirmed' as const, executionRoot: '/repo', existence: 'exists' as const, authorization: 'unknown' as const },
-      { status: 'confirmed' as const, executionRoot: '/repo', existence: 'exists' as const, authorization: 'unauthorized' as const },
-    ]) {
-      const result = executePetContext(
-        harness!.repository,
-        { agent: { id: 'child-1' } },
-        { locusRepository: repository([locusRecord({ contextAnchor })]) },
-      ) as PetLocusContextResult
-      expect(result.scope).toBe('locus')
-      expect(result.contextAnchor).toEqual(contextAnchor)
-      expect(result.permission.effective).toBe('read')
-      expect(result).not.toHaveProperty('currentDelivery')
-    }
-  })
-
-  it('rejects malformed anchor facts rather than treating them as confirmation', async () => {
+  it('rejects an unknown access mode rather than treating it as read-only', async () => {
     harness = await openPetHarness()
     expect(() => executePetContext(
       harness!.repository,
       { agent: { id: 'child-1' } },
-      { locusRepository: repository([locusRecord({
-        contextAnchor: { status: 'trusted-by-model' } as never,
-      })]) },
-    )).toThrow(/Invalid execution anchor/)
+      { locusRepository: repository(locusRecord({ accessMode: 'workspace-write' as never })) },
+    )).toThrow(/unknown access mode/)
   })
 
   it('omits Delivery for a valid child on a local GUI turn', async () => {
@@ -135,36 +101,26 @@ describe('caller-bound unified locus pet_context', () => {
     const result = executePetContext(
       harness.repository,
       { agent: { id: 'child-1' } },
-      { locusRepository: repository([locusRecord()]) },
+      { locusRepository: repository(locusRecord()) },
     )
 
     expect(result.scope).toBe('locus')
     expect(result).not.toHaveProperty('currentDelivery')
   })
 
-  it('fails closed for invalid, stopped, retired, and legacy child associations', async () => {
+  it('fails closed for invalid and stopped child associations (and not-created is not active)', async () => {
     harness = await openPetHarness()
     const unavailable = [
-      {
-        record: locusRecord({ locus: { locusId: 'locus-invalid', generation: 2, state: 'invalid' } }),
-        code: 'LOCUS_INVALID',
-      },
-      {
-        record: locusRecord({ locus: { locusId: 'locus-stopped', generation: 2, state: 'stopped' } }),
-        code: 'LOCUS_STOPPED',
-      },
-      {
-        record: locusRecord({ locus: { locusId: 'locus-retired', generation: 2, state: 'retired' } }),
-        code: 'LOCUS_INVALID',
-      },
-      { record: locusRecord({ legacy: true }), code: 'NOT_A_PET_SESSION' },
+      { state: 'invalid', code: 'LOCUS_INVALID' },
+      { state: 'stopped', code: 'LOCUS_STOPPED' },
+      { state: 'not-created', code: 'LOCUS_INVALID' },
     ] as const
-    for (const { record, code } of unavailable) {
+    for (const { state, code } of unavailable) {
       try {
         executePetContext(
           harness!.repository,
           { agent: { id: 'child-1' } },
-          { locusRepository: repository([record]) },
+          { locusRepository: repository(locusRecord({ locus: { locusId: 'locus-x', state, revision: 3 } })) },
         )
         throw new Error('expected context lookup to fail')
       } catch (error) {
@@ -174,20 +130,15 @@ describe('caller-bound unified locus pet_context', () => {
     }
   })
 
-  it('fails closed for ambiguous reverse lookup instead of choosing an active row', async () => {
+  it('fails closed when the repository cannot resolve the child (ambiguity is the repository\'s refusal)', async () => {
     harness = await openPetHarness()
-    const first = locusRecord()
-    const second = locusRecord({
-      locus: { locusId: 'locus-2', generation: 3, state: 'active' },
-    })
-
     expect(() =>
       executePetContext(
         harness!.repository,
         { agent: { id: 'child-1' } },
-        { locusRepository: repository([first, second]) },
+        { locusRepository: { findBySessionId: () => { throw new Error('ambiguous sessionId') } } },
       ),
-    ).toThrow(/ambiguous locus association/)
+    ).toThrow(/Unable to resolve locus context/)
   })
 
   it('does not turn an ordinary Pet executor into a locus caller', async () => {
@@ -206,7 +157,7 @@ describe('caller-bound unified locus pet_context', () => {
     const result = executePetContext(
       harness.repository,
       { agent: { id: 'exec-1' } },
-      { locusRepository: repository([]) },
+      { locusRepository: repository(undefined) },
     )
 
     expect(result.scope).toBe('invocation')
@@ -216,7 +167,7 @@ describe('caller-bound unified locus pet_context', () => {
 
   it('never accepts a model-provided target or selector', async () => {
     harness = await openPetHarness()
-    const lookup = repository([locusRecord()])
+    const lookup = repository(locusRecord())
     const result = executePetContext(
       harness.repository,
       {
@@ -229,6 +180,6 @@ describe('caller-bound unified locus pet_context', () => {
     )
 
     expect(result.scope).toBe('locus')
-    expect(lookup.findByChildSessionId).toHaveBeenCalledWith('child-1')
+    expect(lookup.findBySessionId).toHaveBeenCalledWith('child-1')
   })
 })

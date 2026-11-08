@@ -36,7 +36,9 @@
 
 **未来方向：** 增加基于本机反馈与执行结果的学习、评估和策略调整，让 AUTO 更贴合你的任务。**尚未实现自动学习或反馈驱动调参**，目前记录用于后续评估，不承诺已证明的质量提升或成本节省。
 
-**安装**：已验证 DSH `0.2.0-rc.2`、Web UI，Node.js `>=22.19`。
+**安装**：本版本线要求 DSH `>=0.2.2-rc.1 <0.3.0`（已验证 `0.2.2-rc.1`）、Web UI，Node.js `>=22.19`。
+
+**版本线**：DSH 0.2.0–0.2.1 继续使用已发布的 0.7.0（或 0.6.x），请精确 pin `0.7.0`；DSH 0.2.2 起使用 0.7.1 及以后版本。0.2.1 的 Host 会按 `engines.dsh` 直接拒绝加载 0.7.1，不会装上但不工作。兼容下界抬到 `0.2.2-rc.1`，是因为 AUTO 现在依赖 `agent.model.select` 和 0.2.2 的“每步固定选择”，0.2.0/0.2.1 都没有，详见 [Changelog](CHANGELOG.md)。
 
 ```sh
 dsh plugin --profile web add dsh-auto-model-routing
@@ -57,12 +59,12 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 
 ### 主模型不换，子任务独立选配
 
-- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；通过官方 `selectModel` 同步选定 effort，同时保存全局默认值。同步失败会记录告警，本次请求保留官方原有 effort；MANUAL 请求原样通过，已绑定子会话不写主选择。
+- **主会话**：`lower / baseline / higher` 相对于具体模型已验证的推荐起点，在受支持序列降低一档、保持或提高一档。缺省上限 `xhigh`，自动不选 `max`；主 provider/model 不变；在每一步的 `agent/pre-step`（DSH 0.2.2 已固定本步选择、尚未生成请求）先通过官方 `selectModel` 同步选定 effort（同时保存全局默认值），再写入本步固定的选择，所以回合的第一个请求就已带上它。同步失败或运行体传来冻结的选择时记录告警，本步保留官方原有 effort（冻结时从下一步起生效）；这依赖运行体的实现细节，由 `test/runtime-selection.e2e.test.ts` 锁定；MANUAL 请求原样通过，已绑定子会话不写主选择。
 - **只管理已注册家族**：主模型的家族有注册策略时 AUTO 才接管；内置 `claude-` 与 `gpt-` 两个家族，id 在去掉 transport 前缀后匹配。切换到其他主模型（DeepSeek、GLM、Grok、Gemini、Kimi、Qwen 等）会自动落为 MANUAL 并锁定芯片：芯片显示描边 info 图标，悬停整个按钮说明支持范围并提供仓库的 issue/PR 链接。切回受支持模型后芯片恢复可点击且保持 MANUAL，不会自动重新启用 AUTO。新增家族属于数据变更而非引擎变更，见[自定义模型家族](#自定义模型家族)。
 - **fresh 子任务**：能力需求为 `bounded / analytical / frontier`，推理投入独立判断。Claude 能力槽为 Haiku / Sonnet / Opus 5.5；GPT 为 Luna / Sol / Sol。实际路由必须同时满足当前目录、支持的 effort 和官方子智能体允许列表。路由保留父会话精确 provider 与完整 model ID（含 transport 前缀），不回退到其它 provider。
 - **尊重显式选择**：只指定模型或投入时，仅判断另一维；两者都指定则不请求 Jev，只校验路由。缺少任务目标或范围时停止委派，不猜。
-- **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在子任务首次请求前绑定精确身份。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束；根会话为 MANUAL 时它直接返回 `routed: false`，不判断、不写状态。fork 和未绑定创建路径暂不支持，不静默替换。
-- **恢复保持初始路线**：根会话改为 MANUAL 后停止新判断，已有绑定子实例维持原路线。`applied` 只证明实际请求配置匹配，**不代表任务成功**。Claude/GPT 普通子调用已在真实模型上验证；fresh teammate 路由及冷恢复有 mock 宿主覆盖，不等于真实模型 teammate 已验收。
+- **官方创建绑定路由**：fresh `subagent` 和 fresh `spawn_teammate` 在创建子任务时绑定精确身份：判断在子会话的 `agent/created` 中完成（首条消息投递之前等待，可随创建一起取消），路线写入子会话自己的选择，不写全局默认；`agent/request` 在每次请求（含重试）只核验。`route_subagent` 只是可选预览，不代表已应用，也不能把推荐复制成用户约束；根会话为 MANUAL 时它直接返回 `routed: false`，不判断、不写状态。fork 和未绑定创建路径暂不支持，不静默替换。
+- **恢复保持初始路线**：根会话改为 MANUAL 后停止新判断，已有绑定子实例维持原路线（0.2.1 记录、首个请求前中断的子会话，恢复时补写其路线，不重新判断）。`applied` 只证明实际请求配置匹配，**不代表任务成功**。Claude/GPT 普通子调用已在真实模型上验证；fresh teammate 路由及冷恢复有 mock 宿主覆盖，不等于真实模型 teammate 已验收。
 
 ### 选择决策服务
 
@@ -76,6 +78,19 @@ dsh plugin --profile web add prgrmrwy/dsh-auto-model-routing
 预置模型菜单列出文档确认的版本，不保证实时可用。自定义服务可填写自己的模型 ID，但必须兼容 `state + questions → answers`；只有 OpenAI chat-completions 接口并不兼容。自定义端点限 HTTPS（回环可 HTTP），禁止 URL 凭据、查询参数、片段及重定向。只配置你信任且适合使用该专用 key 的地址。TypeSafe、Concentrate 目前有协议/mock 覆盖，未在本次验证其真实凭据与地区可用性。失败不自动切换服务。
 
 **判定确定度不等于选中概率**：Choice 公式为 `(pmax − 1/n) / (1 − 1/n)`，三个候选中最高概率 70% 对应确定度 55%。面板分别显示服务返回的确定度和完整分布，保留返回的 0%，缺值标未提供。两者都不是任务成功率。
+
+### 判档预设
+
+AUTO 向 Jev 提的问题来自一个包内置、有名字、有来源的**判档预设**，在「设置 → 自动模型路由 → 判档预设」里选择。预设只改变 Jev 如何选 `lower` / `baseline` / `higher`（子任务还有 `capability`）；effort 序列、单档偏移、上限、不自动选 `max` 以及子模型能力槽都不变。
+
+| 预设 | depth 衡量什么 | 来源 |
+|---|---|---|
+| `reasoning-depth`（缺省） | 推理难度；即 0.6.6 及以前的规则文件，逐字节相同 | 本项目的合成核对 |
+| `effort-as-verification` | 下一步需要多少验证、边界情况测试与自主判断；加一行固定的 `Execution:` 调用路径 | Anthropic《[Spending your effort](https://claude.dev/blog/spending-your-effort/)》（厂商内部数据；用于 GPT 属于未经验证的外推） |
+
+**新增自己的预设。** 预设是包内置的，新增一个只需在本包里做一次小改动：新建 `src/presets/<id>/rubric.json`（标签与现有预设一致），在 `src/presets/index.ts` 的 `PRESETS` 末尾追加元数据（标题、摘要、证据、来源、`context`），在 `test/presets.test.ts` 的锁定表追加哈希，写 `docs/presets/<id>.md`，然后 `npm test`、构建并重启。新预设会自动出现在设置页选择器和决策提示里；effort 序列、上限和模型槽不受预设影响。详细步骤见 [docs/presets](docs/presets/README.zh.md#新增一个预设)。
+
+已发布的预设不会原地修改：新的思路会作为新的预设 id 加入，所以升级后所选预设的判断方式不变。每条反馈绑定的快照都记录作出决策的预设。详见 [docs/presets](docs/presets/README.zh.md)。降级到 0.6.6 时，`preset` 设置会被忽略；带 `snapshot.preset` 的绑定会被旧版跳过，账本不被改写，重新升级后恢复显示。
 
 ### 自定义模型家族
 
@@ -126,7 +141,7 @@ export const deepseek = {
 
 顶部的架构图为 AUTO 路径。主判断失败停用 AUTO，子失败停止派发；保留显式 model/effort。MANUAL 不做新判断，fork 暂不支持。反馈不会自动改变路由。
 
-入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/rubric.json)。家族策略（支持的模型、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[宿主能力核验](docs/host-capability-report.md)。
+入口：[index.ts](src/index.ts)。执行接入：[policy-host.ts](src/policy-host.ts)。实际判据：[rubric.json](src/presets/reasoning-depth/rubric.json)。家族策略（支持的模型、effort 起点、能力槽）：[strategies](src/strategies/index.ts)；路由计算：[routing.ts](src/routing.ts)。界面：[client](src/client/index.ts)。覆盖边界（历史记录）：[开发验证](docs/policy-v2-development.md)、[宿主能力核验](docs/host-capability-report.md)。
 
 ## 开发验证
 

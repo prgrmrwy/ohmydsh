@@ -1,5 +1,5 @@
 /**
- * The message -> locus generation -> child -> execution diagnostic chain.
+ * The message -> locus entry -> child -> execution diagnostic chain.
  *
  * When a Feishu message appears to have gone nowhere, the owner needs to see
  * exactly where it stopped: was it never admitted, admitted but never queued,
@@ -16,7 +16,7 @@
  */
 
 import type { DeliveryRecord, DeliveryStatus } from './delivery.js'
-import type { LocusRecord } from './aggregate.js'
+import type { LocusRowV20 } from './contract-v20.js'
 
 /** How far one accepted message got. */
 export type DeliveryStage =
@@ -37,7 +37,7 @@ export interface DeliveryDiagnostic {
   readonly message: string
   /** The endpoint, reduced to a short chat label plus topic presence. */
   readonly entry: { readonly chat: string; readonly topic: boolean }
-  readonly locus: { readonly id: string; readonly generation: number }
+  readonly locus: { readonly id: string }
   /** Short label for the child session; never the full session id. */
   readonly child: string
   readonly stage: DeliveryStage
@@ -60,11 +60,12 @@ export interface DeliveryDiagnostic {
 export interface LocusDiagnosticReport {
   readonly locus: {
     readonly id: string
-    readonly generation: number
+    readonly revision: number
     readonly state: string
+    /** Derived from the Delivery table: a current Delivery exists. */
     readonly busy: boolean
-    readonly permission: 'read' | 'write'
-    /** Present when the generation is unavailable and says why. */
+    readonly accessMode: 'read-only' | 'danger-full-access'
+    /** Present when the entry is unavailable and says why. */
     readonly invalidReason?: string
   }
   /** Most recent first, so the newest problem is at the top. */
@@ -95,12 +96,12 @@ function stageOf(record: DeliveryRecord): DeliveryStage {
 }
 
 /** What an owner should look at next for one stage. */
-function nextCheckFor(stage: DeliveryStage, locus: LocusRecord): string {
+function nextCheckFor(stage: DeliveryStage, busy: boolean): string {
   switch (stage) {
     case 'accepted':
       // Accepted but never queued means the child could not take the work.
-      return locus.busy
-        ? '该代际正忙；确认当前轮次结束后是否恢复排队。'
+      return busy
+        ? '该入口正忙；确认当前轮次结束后是否恢复排队。'
         : '已接受但未排队：检查子会话是否可用、宿主是否具备投递能力。'
     case 'queued':
       // Queued but unclaimed means the runtime never started a turn for it.
@@ -118,20 +119,22 @@ function nextCheckFor(stage: DeliveryStage, locus: LocusRecord): string {
 }
 
 /**
- * Build the diagnostic chain for one locus generation.
+ * Build the diagnostic chain for one locus entry (its current `sessionId` only).
  * @param locus - the durable locus record.
  * @param deliveries - its durable Delivery records, in any order.
  * @returns the owner-facing report.
  */
 export function buildLocusDiagnostics(
-  locus: LocusRecord,
+  locus: LocusRowV20,
   deliveries: readonly DeliveryRecord[],
 ): LocusDiagnosticReport {
   const stageCounts: Record<DeliveryStage, number> = {
     accepted: 0, queued: 0, running: 0, settled: 0, failed: 0,
   }
-  const rows = deliveries
-    .filter(record => record.locusId === locus.id && record.generation === locus.generation)
+  const mine = deliveries.filter(record => record.locusId === locus.locusId && record.sessionId === locus.sessionId)
+  // Busy is derived from the Delivery table, as the management view derives it.
+  const busy = mine.some(record => record.status === 'current')
+  const rows = mine
     // Newest first by acceptance order, which is monotonic and does not
     // depend on a wall clock that may have moved.
     .slice()
@@ -145,8 +148,8 @@ export function buildLocusDiagnostics(
           chat: shortLabel(record.endpoint.chatId),
           topic: record.endpoint.threadId !== undefined,
         },
-        locus: { id: record.locusId, generation: record.generation },
-        child: shortLabel(record.childSessionId),
+        locus: { id: record.locusId },
+        child: shortLabel(record.sessionId),
         stage,
         // Presence only: the tokens themselves are settlement proof and are
         // never displayed.
@@ -157,17 +160,17 @@ export function buildLocusDiagnostics(
           ? {}
           : { settledAt: record.settledAt ?? record.failedAt },
         ...(record.failureReason === undefined ? {} : { failureReason: record.failureReason }),
-        nextCheck: nextCheckFor(stage, locus),
+        nextCheck: nextCheckFor(stage, busy),
       }
     })
 
   return {
     locus: {
-      id: locus.id,
-      generation: locus.generation,
+      id: locus.locusId,
+      revision: locus.revision,
       state: locus.state,
-      busy: locus.busy,
-      permission: locus.permission.effective,
+      busy,
+      accessMode: locus.accessMode,
       ...(locus.invalidReason === undefined ? {} : { invalidReason: locus.invalidReason }),
     },
     deliveries: rows,

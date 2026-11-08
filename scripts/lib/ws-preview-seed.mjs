@@ -107,10 +107,13 @@ export async function seedPreview({ env = process.env, repo = REPO, log = consol
   const patch = 'profiles/web/cordis.patch.yml'
   await noLinks(home, path.join(home, patch))
   const dstPatch = await read(path.join(home, patch))
-  if (dstPatch === undefined) throw new Error('Missing profile patch; run dsh build first')
-  patchParts(dstPatch)
+  // A first isolated build can stop at the npm scope preflight (private registries live only in the
+  // real .npmrc) before it writes the patch region. Seed everything else so the next build passes;
+  // never create or rewrite the patch here.
+  const patchReady = dstPatch !== undefined && dstPatch.includes(PATCH_ANCHOR)
   const srcPatch = await read(path.join(source, patch))
-  if (srcPatch !== undefined) {
+  if (!patchReady) skipped.push('patch:pending-build')
+  else if (srcPatch !== undefined) {
     const sourceTail = patchParts(srcPatch).tail
     for (const id of PATCH_IDS) if (!new RegExp(`^- id: ${id}\\s*$`, 'm').test(sourceTail)) skipped.push(`patch:${id}`)
     await queue(patch, mergePatch(dstPatch, srcPatch))
@@ -146,6 +149,7 @@ export async function seedPreview({ env = process.env, repo = REPO, log = consol
     finally { await fs.rm(temp, { force: true }) }
   }
   log(`prepare-preview: ${plan.length} writes; skipped: ${skipped.join(', ') || 'none'}; preferred port=${port}`)
+  if (!patchReady) log('profile patch 尚未生成（首次 build 可能停在 npm scope 预检）：已先复制 registry 等配置；请再执行 dsh build，然后重新运行 ws prepare-preview 以同步 patch 行。')
   log('memex 与日常环境共享真实记忆库，预览写卡也会写入真实库。下一步执行 dsh；改代码后先 dsh build 再 dsh restart。实际地址以 DSH_PREVIEW 为准。')
   return { writes: plan.length, skipped, port }
 }

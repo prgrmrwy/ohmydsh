@@ -4,7 +4,6 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
 import { verifyJudgeRequest, judgeSystemText } from './judge-gate.js'
 export interface BoundaryProtocol { provider: string; model: string; effort?: string; schema: unknown; prompt: string }
-const teamToolNames = new Set(['spawn_teammate', 'send_message', 'list_agents', 'interrupt_agent', 'wait_agent', 'team_task_create', 'team_task_list', 'team_task_get', 'team_task_update'])
 
 export function installJudgeBoundary(ctx: Context, parent: Agent, protocol: BoundaryProtocol, budget?: { claim(): void }): { checked(): number; dispose(): void } {
   const children = new Map<string, Agent>()
@@ -17,12 +16,6 @@ export function installJudgeBoundary(ctx: Context, parent: Agent, protocol: Boun
     if (children.size > 0) throw new Error('Judge creation window already claimed')
     if (!ctx.agents.isOwnedBy(agent.id, parent)) throw new Error('Judge live owner mismatch')
     children.set(agent.id, agent)
-    // Stock Team can register own tools before the first subagent descriptor exists.
-    // Project only its known schemas away; the execution guard and final gate remain authoritative.
-    agent.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
-      const assembly = await next()
-      return { ...assembly, tools: assembly.tools.filter(tool => !teamToolNames.has(tool.name)) }
-    })
     agent.ctx.systemPrompt.section({ name: 'memex-eval:complete-judge', order: 0, text: judgeSystemText, interpolate: false, complete: true })
     agent.ctx.systemPrompt.suppressRuntimeContext()
     agent.ctx.tools.guard(execution => execution.name === 'structured_output' ? undefined : 'Judge may only submit structured_output')

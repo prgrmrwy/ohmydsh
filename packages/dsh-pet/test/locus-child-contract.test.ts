@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LOCUS_SAFE_CHILD_COMPOSITION } from '../src/host/locus/aggregate.js'
 import { createLocusChildAdapter, type LocusChildPorts, type LocusLiveParent } from '../src/host/locus/child.js'
 import { createLocusChildDelivery } from '../src/host/locus/child-delivery.js'
 import { LOCUS_BASE_PRESET } from '../src/host/locus/preset.js'
@@ -44,10 +43,14 @@ function world() {
     log,
   })
   const target = {
-    id: 'locus-1',
-    parentSessionId: LOCUS_MAIN,
-    childSessionId: CHILD,
-    childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
+    locusId: 'locus-1',
+    state: 'active' as const,
+    locusMainSessionId: LOCUS_MAIN,
+    sessionId: CHILD,
+    revision: 1,
+    accessMode: 'read-only' as const,
+    workspaceId: 'workspace-1',
+    endpoint: { chatId: 'oc_1' },
   }
   const queue = (child: { parentSessionId: string; childSessionId: string }) => delivery.queueChild({
     locus: target,
@@ -99,10 +102,14 @@ describe('父在 child 存活期间更改组合', () => {
       createAdapter: () => ({}) as never,
     })
     await expect(delivery.ensureChild({
-      id: 'locus-1',
-      parentSessionId: LOCUS_MAIN,
-      childSessionId: CHILD,
-      childComposition: LOCUS_SAFE_CHILD_COMPOSITION,
+      locusId: 'locus-1',
+      state: 'active' as const,
+      locusMainSessionId: LOCUS_MAIN,
+      sessionId: CHILD,
+      revision: 1,
+      accessMode: 'read-only' as const,
+      workspaceId: 'workspace-1',
+      endpoint: { chatId: 'oc_1' },
     }, signal)).rejects.toThrow('locus-main-preset-unverified')
   })
 })

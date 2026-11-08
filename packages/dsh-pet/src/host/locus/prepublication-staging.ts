@@ -4,7 +4,7 @@
  * DSH emits `agent/created` while `startActivation()` is still publishing the
  * fresh child.  The durable locus row cannot be active until that call returns,
  * so a durable-only reverse lookup misses exactly the first event that must
- * install the caller-bound surface and file policy.  This registry bridges only
+ * install the caller-bound surface and the row's access mode.  This registry bridges only
  * that narrow interval:
  *
  * 1. reserve a fresh, registry-generated child id and its expected composition;
@@ -24,11 +24,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import type {
-  LocusChildComposition,
-  LocusChildPermission,
-  LocusCompositionLookup,
-} from './composition.js'
+import type { LocusChildComposition, LocusCompositionLookup } from './composition.js'
+import { LOCUS_ACCESS_MODES_V20, type LocusAccessModeV20 } from './contract-v20.js'
 
 /** Hard limits keep configuration from turning staging into an unbounded store. */
 export const LOCUS_PREPUBLICATION_DEFAULT_TTL_MS = 30_000
@@ -39,19 +36,20 @@ export const LOCUS_PREPUBLICATION_MAX_CAPACITY = 4_096
 /** Expected durable identity, before the fresh child id has been allocated. */
 export interface LocusPrepublicationIdentity {
   /**
-   * The child id to use, when the caller reserved one durably before this
-   * (the first Delivery of a `not-created` generation carries it). Absent, the
-   * registry allocates a fresh one.
+   * The row's reserved `sessionId` (D16: every first creation uses the id the
+   * `not-created` row already carries). Absent, the registry allocates one —
+   * only sensible where nothing correlates to the child beforehand.
    */
-  readonly childSessionId?: string
-  readonly parentSessionId: string
+  readonly sessionId?: string
+  /** The group row's M: the child's parent. */
+  readonly locusMainSessionId: string
   readonly locusId: string
-  readonly generation: number
-  readonly permission: LocusChildPermission
-  readonly childComposition?: 'tier3'
-  readonly toolTier?: { readonly desired: 'safe' | 'shell'; readonly effective: 'safe' | 'shell' }
+  /** The row revision read before creation; `recordAccessVerified` fences on it. */
+  readonly revision: number
+  /** The row's value at creation; `not-created` rows may have been changed (D8). */
+  readonly accessMode: LocusAccessModeV20
   /** The entry the child serves (see {@link LocusChildComposition.endpoint}). */
-  readonly endpoint?: { readonly chatId: string; readonly threadId?: string }
+  readonly endpoint: { readonly chatId: string; readonly threadId?: string }
 }
 
 /**
@@ -61,8 +59,7 @@ export interface LocusPrepublicationIdentity {
  */
 export interface LocusPrepublicationPublication {
   /**
-   * Durably publish the child's association (active generation, composition
-   * marker, current Delivery). Atomic: a throw MUST leave nothing published,
+   * Durably publish the child's association (row active, current Delivery). Atomic: a throw MUST leave nothing published,
    * and it vetoes the child's creation.
    */
   publish(childSessionId: string, composition: LocusChildComposition): void | Promise<void>
@@ -157,19 +154,18 @@ function positiveBoundedInteger(
 
 function assertIdentity(identity: LocusPrepublicationIdentity): void {
   if (
-    !isIdentifier(identity.parentSessionId)
+    !isIdentifier(identity.locusMainSessionId)
     || !isIdentifier(identity.locusId)
-    || !Number.isSafeInteger(identity.generation)
-    || identity.generation <= 0
-    || (identity.permission !== 'read' && identity.permission !== 'write')
-    || (identity.childComposition !== undefined && identity.childComposition !== 'tier3')
-    || (identity.toolTier !== undefined
-      && (!['safe', 'shell'].includes(identity.toolTier.desired)
-        || !['safe', 'shell'].includes(identity.toolTier.effective)))
+    || !Number.isSafeInteger(identity.revision)
+    || identity.revision < 0
+    || !LOCUS_ACCESS_MODES_V20.includes(identity.accessMode)
+    || identity.endpoint === undefined
+    || !isIdentifier(identity.endpoint.chatId)
+    || (identity.sessionId !== undefined && !isIdentifier(identity.sessionId))
   ) {
     throw new LocusPrepublicationError(
       'invalid-identity',
-      'A staging reservation requires an exact parent, locus generation, and permission',
+      'A staging reservation requires an exact locus main, locusId, revision, accessMode and endpoint',
     )
   }
 }
@@ -242,7 +238,7 @@ export class LocusPrepublicationStagingRegistry {
       )
     }
 
-    const childSessionId = identity.childSessionId ?? this.createChildSessionId()
+    const childSessionId = identity.sessionId ?? this.createChildSessionId()
     const reservationId = this.createReservationId()
     if (!isIdentifier(childSessionId)) {
       throw new LocusPrepublicationError('invalid-identity', 'Child id factory returned no usable id')
@@ -263,25 +259,21 @@ export class LocusPrepublicationStagingRegistry {
       )
     }
 
+    // accessMode and the row identity are carried verbatim (D16 rotation keeps
+    // them): the first creation composes exactly what the row says.
     const composition = Object.freeze<LocusChildComposition>({
-      parentSessionId: identity.parentSessionId.trim(),
-      childSessionId: childSessionId.trim(),
+      locusMainSessionId: identity.locusMainSessionId.trim(),
+      sessionId: childSessionId.trim(),
       locusId: identity.locusId.trim(),
-      generation: identity.generation,
-      permission: identity.permission,
-      childComposition: identity.childComposition ?? 'tier3',
-      toolTier: identity.toolTier ?? { desired: 'safe', effective: 'safe' },
-      ...(identity.endpoint === undefined
-        ? {}
-        : {
-          endpoint: Object.freeze(identity.endpoint.threadId === undefined
-            ? { chatId: identity.endpoint.chatId }
-            : { chatId: identity.endpoint.chatId, threadId: identity.endpoint.threadId }),
-        }),
+      revision: identity.revision,
+      accessMode: identity.accessMode,
+      endpoint: Object.freeze(identity.endpoint.threadId === undefined
+        ? { chatId: identity.endpoint.chatId }
+        : { chatId: identity.endpoint.chatId, threadId: identity.endpoint.threadId }),
     })
     const reservation = Object.freeze<LocusPrepublicationReservation>({
       reservationId: reservationId.trim(),
-      childSessionId: composition.childSessionId,
+      childSessionId: composition.sessionId,
       composition,
       expiresAt: this.now() + this.ttlMs,
     })

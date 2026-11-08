@@ -11,13 +11,13 @@
 import { describe, expect, it } from 'vitest'
 
 describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 2.1)', () => {
-  it('PET_DOMAIN_VERSION is 18 while retaining the v15 ledger, v16 answer, v17 inquiry and v18 locus_mains rationale', async () => {
+  it('PET_DOMAIN_VERSION is 20 while retaining the v15 ledger, v16 answer, v17 inquiry, v18 locus_mains and v19 purge rationale', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
       new URL('../src/host/spec.ts', import.meta.url),
       'utf8',
     )
-    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 18')
+    expect(specSource).toContain('export const PET_DOMAIN_VERSION = 20')
     expect(specSource).toContain('Bumped to 18 for the three-tier locus structure')
     expect(specSource).toContain('Bumped to 15 for the shared-fact ledger')
     expect(specSource).toContain('Bumped to 16 for inquiry_answers')
@@ -40,14 +40,14 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
   it('every table (including v17 inquiry tables) follows the same domainTable<string, z.infer<typeof X>>(X) shape', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
-      new URL('../src/host/spec.ts', import.meta.url),
+      new URL('../src/host/domain.ts', import.meta.url),
       'utf8',
     )
     const tableDecls = [...specSource.matchAll(/(\w+):\s*domainTable<string, z\.infer<typeof (\w+)>>\((\w+)\)/g)]
     // 26 real tables after the v15 ledger tables, v16 inquiry_answers,
     // v17 inquiry handoff/work tables, and v18 locus_mains (verified by
     // declaration count).
-    expect(tableDecls.length).toBe(26)
+    expect(tableDecls.length).toBe(24)
     for (const [, , schemaTypeName, schemaValueName] of tableDecls) {
       // Every declaration's type-arg and value-arg name the SAME schema
       // symbol — there is no table with a mismatched schema/type pair today.
@@ -58,15 +58,15 @@ describe('intent-triage domain contract: additive schema evolution (tasks 1.4 / 
   it('v15 ledger, v16 answer, and v17 inquiry tables land alongside the 20 pre-existing tables', async () => {
     const fs = await import('node:fs')
     const specSource = fs.readFileSync(
-      new URL('../src/host/spec.ts', import.meta.url),
+      new URL('../src/host/domain.ts', import.meta.url),
       'utf8',
     )
     const existingNames = [...specSource.matchAll(/^\s*(\w+):\s*domainTable</gm)].map(m => m[1])
     expect(existingNames).toEqual([
       'tasks', 'invocations', 'snapshots', 'runs', 'skill_revisions',
       'skill_selections', 'workspace_env', 'channel_config', 'chat_bindings',
-      'invocation_channel', 'loci', 'locus_indexes', 'locus_deliveries',
-      'locus_operations', 'locus_switch_notices', 'locus_permission_audit',
+      'invocation_channel', 'loci', 'locus_deliveries',
+      'locus_operations', 'locus_permission_audit',
       'collaboration_contexts', 'collaboration_context_revisions', 'inquiries',
       'inquiry_results', 'inquiry_answers', 'inquiry_handoffs', 'inquiry_works',
       'shared_fact_ledger', 'ledger_item', 'locus_mains',

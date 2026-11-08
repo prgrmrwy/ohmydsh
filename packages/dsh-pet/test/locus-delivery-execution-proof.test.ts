@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createDeliveryExecutionProof } from '../src/host/locus/delivery-execution-proof.js'
 import { acceptDelivery, bindQueued, claimCurrentDelivery, createDeliveryLedger } from '../src/host/locus/delivery.js'
 
-const correlation = { endpoint: { chatId: 'chat' }, locusId: 'locus', generation: 1, childSessionId: 'child' }
+const correlation = { endpoint: { chatId: 'chat' }, locusId: 'locus', sessionId: 'child' }
 function fixture() {
   const accepted = acceptDelivery(createDeliveryLedger(), { ...correlation, messageId: 'message', acceptedAt: 1 })
   const current = claimCurrentDelivery(accepted.state, { ...correlation, now: 2 })
@@ -20,11 +20,11 @@ function fixture() {
 describe('refused reply execution association', () => {
   it('proves a refused/mixed caller without granting reply authority', () => {
     const f = fixture()
-    expect(createDeliveryExecutionProof(f.ports)(f.execution)).toEqual({ sessionId: 'child', turn: 1, scope: { kind: 'child', locusId: 'locus', generation: 1 } })
+    expect(createDeliveryExecutionProof(f.ports)(f.execution)).toEqual({ sessionId: 'child', turn: 1, scope: { kind: 'child', locusId: 'locus', sessionId: 'child' } })
   })
   it('rejects missing, duplicate, stale and cross-child current bindings', () => {
     const f = fixture()
-    for (const rows of [[], [f.row, f.row], [{ ...f.row, executionId: undefined }], [{ ...f.row, inboxMessageId: undefined }], [{ ...f.row, childSessionId: 'other' }], [{ ...f.row, status: 'failed' }]]) {
+    for (const rows of [[], [f.row, f.row], [{ ...f.row, executionId: undefined }], [{ ...f.row, inboxMessageId: undefined }], [{ ...f.row, sessionId: 'other' }], [{ ...f.row, status: 'failed' }]]) {
       expect(createDeliveryExecutionProof({ ...f.ports, currentForChild: () => rows as never })(f.execution)).toBeUndefined()
     }
     expect(createDeliveryExecutionProof({ ...f.ports, deliveryForTurn: () => ({ deliveryId: f.row.deliveryId, executionId: 'stale', correlation }) })(f.execution)).toBeUndefined()

@@ -439,10 +439,10 @@ export function createLocusTurnObserver(
   }
 
   const retainRestoredCurrent = (delivery: PendingTurn): void => {
-    const key = turnKey(delivery.correlation.childSessionId, Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1)))
+    const key = turnKey(delivery.correlation.sessionId, Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1)))
     const originalTurn = Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1))
     if (!Number.isSafeInteger(originalTurn) || originalTurn < 1) return
-    const childSessionId = delivery.correlation.childSessionId
+    const childSessionId = delivery.correlation.sessionId
     const existingKey = continuationByChild.get(childSessionId)
     if (existingKey !== undefined && existingKey !== key) return
     retained.set(key, { delivery, originalTurn, lastTurn: originalTurn })
@@ -452,8 +452,8 @@ export function createLocusTurnObserver(
       if (oldest === undefined) break
       const oldestEntry = retained.get(oldest)
       retained.delete(oldest)
-      if (oldestEntry !== undefined && continuationByChild.get(oldestEntry.delivery.correlation.childSessionId) === oldest) {
-        continuationByChild.delete(oldestEntry.delivery.correlation.childSessionId)
+      if (oldestEntry !== undefined && continuationByChild.get(oldestEntry.delivery.correlation.sessionId) === oldest) {
+        continuationByChild.delete(oldestEntry.delivery.correlation.sessionId)
       }
     }
   }
@@ -462,7 +462,7 @@ export function createLocusTurnObserver(
     // There is one current Delivery per child in the product model. Replacing
     // an existing entry would hide an ambiguity, so refuse to retain another
     // lineage until the old one is explicitly removed by the Host lifecycle.
-    const childSessionId = delivery.correlation.childSessionId
+    const childSessionId = delivery.correlation.sessionId
     const existingKey = continuationByChild.get(childSessionId)
     if (existingKey !== undefined && existingKey !== key) return
     const originalTurn = Number(delivery.turnId.slice(delivery.turnId.lastIndexOf('#') + 1))
@@ -474,8 +474,8 @@ export function createLocusTurnObserver(
       if (oldest === undefined) break
       const oldestEntry = retained.get(oldest)
       retained.delete(oldest)
-      if (oldestEntry !== undefined && continuationByChild.get(oldestEntry.delivery.correlation.childSessionId) === oldest) {
-        continuationByChild.delete(oldestEntry.delivery.correlation.childSessionId)
+      if (oldestEntry !== undefined && continuationByChild.get(oldestEntry.delivery.correlation.sessionId) === oldest) {
+        continuationByChild.delete(oldestEntry.delivery.correlation.sessionId)
       }
     }
   }
@@ -517,7 +517,7 @@ export function createLocusTurnObserver(
     if (claimed !== undefined && (claimed.status === undefined || isPendingDeliveryStatus(claimed.status))) {
       const cause = observed.end.reason
       if (observed.end.outcome === 'aborted' && (cause === 'user' || cause === 'parent' || cause === 'disposed') &&
-          claimed.correlation.childSessionId === observed.childSessionId && observed.foreign.size === 0) {
+          claimed.correlation.sessionId === observed.childSessionId && observed.foreign.size === 0) {
         emit({
           phase: 'failed', deliveryId: claimed.deliveryId, executionId: claimed.executionId,
           turnId: observed.turnId, correlation: claimed.correlation,
@@ -822,7 +822,7 @@ export function createLocusTurnObserver(
       if (delivery === null || typeof delivery !== 'object' ||
           !isNonEmpty(delivery.deliveryId) || !isNonEmpty(delivery.executionId) ||
           !isNonEmpty(delivery.turnId) || delivery.status !== undefined && !isPendingDeliveryStatus(delivery.status)) return
-      const turnPrefix = `${delivery.correlation.childSessionId}#`
+      const turnPrefix = `${delivery.correlation.sessionId}#`
       if (!delivery.turnId.startsWith(turnPrefix)) return
       const turn = Number(delivery.turnId.slice(turnPrefix.length))
       if (!Number.isSafeInteger(turn) || turn < 1) return
