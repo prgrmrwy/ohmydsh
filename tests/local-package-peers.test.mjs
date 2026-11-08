@@ -186,19 +186,19 @@ test('scenario: a runtime peer without a matching devDependency fails', () => {
   assert.ok(runtimeContractViolations('x', pkg, '0.2.1-rc.5').some(line => line.includes('peerDependencies.@deepseek-ai/dsh-session') && line.includes('devDependency')))
 })
 
-// DSH 0.2.2 raised the floor for dsh-auto-model-routing only (change upgrade-dsh-0-2-2-runtime, D3): it needs `agent.model.select`
-// and 0.2.2's per-step selection pinning, which 0.2.0/0.2.1 do not have. Every other local package keeps the 0.2.0-rc.2 floor.
-const AUTO_ROUTING = 'dsh-auto-model-routing'
+// AUTO needs 0.2.2 selection pinning; resources 0.2.0 needs the official original-file save service.
+// Other local packages retain their existing 0.2.0-rc.2 floor.
+const RUNTIME_022_PACKAGES = new Set(['dsh-auto-model-routing', 'sidebar-session-resources'])
 const AUTO_FLOOR = '0.2.2-rc.1'
 const DEFAULT_FLOOR = '0.2.0-rc.2'
-test('scenario: only dsh-auto-model-routing raises the runtime floor to 0.2.2-rc.1', async () => {
+test('scenario: only packages requiring 0.2.2 capabilities raise the runtime floor', async () => {
   const wrong = []
-  let seenAuto = false
+  const seen = new Set()
   for (const { id, file } of localPackages()) {
     const pkg = JSON.parse(await readFile(file, 'utf8'))
     if (typeof pkg.engines?.dsh !== 'string') continue
-    const floor = id === AUTO_ROUTING ? AUTO_FLOOR : DEFAULT_FLOOR
-    if (id === AUTO_ROUTING) seenAuto = true
+    const floor = RUNTIME_022_PACKAGES.has(id) ? AUTO_FLOOR : DEFAULT_FLOOR
+    if (RUNTIME_022_PACKAGES.has(id)) seen.add(id)
     const interval = `>=${floor} <0.3.0-0`
     if (pkg.engines.dsh !== interval) wrong.push(`${id} → engines.dsh = "${pkg.engines.dsh}" (expected "${interval}")`)
     for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
@@ -206,7 +206,7 @@ test('scenario: only dsh-auto-model-routing raises the runtime floor to 0.2.2-rc
       if (!range.startsWith(`${interval} || `)) wrong.push(`${id} → peerDependencies.${name} = "${range}" (expected to start with "${interval} || ")`)
     }
   }
-  assert.ok(seenAuto, 'dsh-auto-model-routing must declare engines.dsh')
+  assert.deepEqual(seen, RUNTIME_022_PACKAGES, 'packages requiring 0.2.2 must declare engines.dsh')
   assert.deepEqual(wrong, [], wrong.join('\n'))
 })
 

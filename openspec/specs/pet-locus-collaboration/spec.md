@@ -1171,7 +1171,9 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 
 ### Requirement: 受控停机在原生信号前排空自有执行
 
-受控 stop/restart SHALL 在 SIGTERM 前经既有官方 Connection 鉴权的精确准备接口冻结 Pet 新派发、新建及受管 mutation，等待已进入操作到安全点，再以真实 live locus 主会话身份 await 官方精确自有 children drain 和领域提交。请求 MUST NOT 接受任意 Agent ID 或模型声明的身份；只有持久的 W↔M 配对、入口行当前的 `sessionId` 和官方 catalog 能决定排空对象。只有全部排空与提交完成才 SHALL 返回绑定同 Host PID、bootId、请求 nonce 和期限的 prepared；端口消失、cancel accepted 或 best-effort flush 不构成成功。
+目标 Host 有有效停机 descriptor 时，受控 stop/restart SHALL 在 SIGTERM 前经既有官方 Connection 鉴权的精确准备接口冻结 Pet 新派发、新建及受管 mutation，等待已进入操作到安全点，再以真实 live locus 主会话身份 await 官方精确自有 children drain 和领域提交。请求 MUST NOT 接受任意 Agent ID 或模型声明的身份；只有持久的 W↔M 配对、入口行当前的 `sessionId` 和官方 catalog 能决定排空对象。只有全部排空与提交完成才 SHALL 返回绑定同 Host PID、bootId、请求 nonce 和期限的 prepared；端口消失、cancel accepted 或 best-effort flush 不构成成功。
+
+停机 descriptor 缺失时，web Host SHALL 按 `launcher-host-lifecycle` 的完整归属核验与告警分支跳过 Pet 排空并继续原生停机，不要求额外的首次维护标志，且 MUST NOT 声称已排空。descriptor 存在但无效、鉴权或排空握手失败时仍 MUST 拒绝停机；非 web profile 的前置维护限制保持有效。该降级只改变缺凭据分支，不放宽已有协议的票据、进程身份或恢复守卫。
 
 #### Scenario: 完成排空和领域提交后才允许停机
 - **GIVEN** 原 child 正在执行，下一条消息已为 backlog
@@ -1195,14 +1197,14 @@ locus 主会话 SHALL 获得 `locus_note`（以 `actAs` 创建带本入口 `ext.
 - **THEN** 拒绝停止，不能重新采纳替换宿主作为目标
 
 #### Scenario: 无 Pet 组合仍有真实宿主证明
-- **GIVEN** 目标实际 Loader 已 ready，完整观察证明不存在 Pet，且没有失败/未展开或未知动态载体
+- **GIVEN** 目标实际 Loader 已 ready，完整观察证明不存在 Pet，且没有失败/未展开或未知动态载体，已发布有效停机 descriptor
 - **WHEN** launcher 准备停止该 Host
-- **THEN** 独立 profile 控制插件按同协议证明无自有执行；缺接口、当前 manifest 或磁盘 dump 相等不能代替该证明
+- **THEN** 独立 profile 控制插件按同协议证明无自有执行；当前 manifest 或磁盘 dump 相等不能代替该证明；协议分支失败不得改走缺凭据分支
 
-#### Scenario: 旧 Host 首次维护不计排空成功
-- **GIVEN** 旧 Host 缺少协议且所有者明确使用首次维护分支
-- **WHEN** 按完整旧进程身份维护加载新版本
-- **THEN** 回执明确 drained=false，新 Host 验证新鉴权协议；该次不计作中断恢复验收
+#### Scenario: 旧 Host 缺凭据停机不计排空成功
+- **GIVEN** 旧 web Host 缺少停机 descriptor，完整旧进程归属已核验
+- **WHEN** 按该身份停止或重启 Host
+- **THEN** 告警后跳过 Pet 排空并继续原生停机，不要求首次维护标志；不得把该次报告为 prepared 或排空成功，也不计作中断恢复验收
 
 ### Requirement: 启动恢复证据经官方冷读获取
 

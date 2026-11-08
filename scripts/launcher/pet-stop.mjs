@@ -3,32 +3,27 @@ import path from 'node:path'
 import http from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { sameProcessIdentity } from './process.mjs'
+import { assertPrivatePaths } from './private-files.mjs'
 
 const PREPARE_MS = 30_000
 const RECOVERY_MS = 5_000
 const MAX_BYTES = 64 * 1024
 const fail = code => new Error(`Pet prepare-stop: ${code}`)
 const privateOwner = stat => process.getuid === undefined || stat.uid === process.getuid()
-function privateDirectory(dir) {
-  const stat = fs.lstatSync(dir)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !privateOwner(stat) || (stat.mode & 0o777) !== 0o700) throw fail('unsafe private directory')
-}
-function runDirectory(home, name) {
+function readPrivateJson(home, name) {
   const run = path.join(home, 'run')
-  const stat = fs.lstatSync(run)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !privateOwner(stat) || (stat.mode & 0o022)) throw fail('unsafe run directory')
-  const dir = path.join(run, name)
-  privateDirectory(dir)
-  return dir
-}
-function readPrivateJson(dir, name) {
+  const dir = path.join(run, 'dsh-pet-stop')
   const file = path.join(dir, name)
+  // Ordered, batched validation proves existing boundaries even when a later
+  // path is missing. An unsafe run directory must not become "no descriptor".
+  assertPrivatePaths([{ path: run, type: 'directory', exact: false }, { path: dir, type: 'directory' }, { path: file, type: 'file' }])
   const before = fs.lstatSync(file)
-  if (!before.isFile() || before.isSymbolicLink() || !privateOwner(before) || (before.mode & 0o777) !== 0o600 || before.size > MAX_BYTES) throw fail('unsafe private file')
+  const privateStat = stat => process.platform === 'win32' || (privateOwner(stat) && (stat.mode & 0o777) === 0o600)
+  if (!before.isFile() || before.isSymbolicLink() || !privateStat(before) || before.size > MAX_BYTES) throw fail('unsafe private file')
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0))
   try {
     const stat = fs.fstatSync(fd)
-    if (stat.dev !== before.dev || stat.ino !== before.ino || !privateOwner(stat) || (stat.mode & 0o777) !== 0o600 || stat.size > MAX_BYTES) throw fail('private file changed')
+    if (!stat.isFile() || stat.dev !== before.dev || stat.ino !== before.ino || !privateStat(stat) || stat.size > MAX_BYTES) throw fail('private file changed')
     return JSON.parse(fs.readFileSync(fd, 'utf8'))
   } finally { fs.closeSync(fd) }
 }
@@ -39,7 +34,7 @@ function originUrl(origin, port) {
 }
 function readDescriptor(home, port, initial, profile) {
   let doc
-  try { doc = readPrivateJson(runDirectory(home, 'dsh-pet-stop'), `${port}.json`) }
+  try { doc = readPrivateJson(home, `${port}.json`) }
   catch (error) { if (error.code === 'ENOENT') return undefined; throw fail('unreadable or unsafe descriptor') }
   // Validate the whole document first: a present-but-malformed descriptor
   // always refuses, whatever PID it names.

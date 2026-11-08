@@ -1,5 +1,5 @@
 /**
- * Styles for the Memory settings page and its navigation glyph.
+ * Styles for the Memory settings page.
  *
  * The page lives inside the host's settings panel, so the host owns the theme:
  * every colour is a role mapped onto an official `--dsw-alias-*` token, and the
@@ -12,25 +12,10 @@
  * answers "how many entries, how much in each" before it answers "where does
  * this one publish".
  *
- * Own class names (`dshmx-*`) only, injected once with the plugin marker. The
- * nav-glyph rules are scoped to our own marker attribute, so they cannot reach
- * another plugin's row.
+ * Own class names (`dshmx-*`) only, injected once with the plugin marker.
  *
  * @module dsh-memex/client/styles
  */
-
-/** Attribute marking our own row in the settings navigation. */
-export const NAV_MARKER = 'data-dsh-memex-settings-nav'
-
-/**
- * A 16px outline book, drawn as a mask so it inherits `currentColor` like the
- * official glyphs (no emoji font, no image asset, no network access).
- */
-const BOOK_MASK = `url("data:image/svg+xml,${encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">'
-  + '<path d="M2.4 2.6h4.1a1.6 1.6 0 0 1 1.5 1.1 1.6 1.6 0 0 1 1.5-1.1h4.1v9.4H9.5a1.5 1.5 0 0 0-1.5 1.3 1.5 1.5 0 0 0-1.5-1.3H2.4z"/>'
-  + '</svg>',
-)}")`
 
 /**
  * The page's whole stylesheet.
@@ -217,7 +202,4 @@ export const MEMEX_CSS = `
 @media (prefers-reduced-motion:reduce){
   .dshmx-field,.dshmx-act{transition:none}
 }
-[${NAV_MARKER}]>svg:first-child{display:none}
-[${NAV_MARKER}]::before{content:'';flex:none;width:16px;height:16px;background-color:currentColor;
-  -webkit-mask:${BOOK_MASK} center/16px 16px no-repeat;mask:${BOOK_MASK} center/16px 16px no-repeat}
 `

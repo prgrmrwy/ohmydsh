@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {testFiles} from '../scripts/test.mjs'
+import {testFiles, testBuildWorkspaces} from '../scripts/test.mjs'
 import path from 'node:path'
 const portable=files=>files.map(file=>file.split(path.sep).join('/'))
 
@@ -14,6 +14,16 @@ test('portable root test driver retains all POSIX regression and selects native 
  assert.ok(native.includes('tests/workspace-lifecycle.test.mjs'))
  assert.ok(native.includes('tests/skill-execution.test.mjs'))
  assert.ok(native.includes('tests/platform/windows-launcher.test.mjs'))
+ assert.ok(native.includes('tests/platform/windows-private-files.test.mjs'),'native permissions require real SID/DACL contract tests')
  assert.ok(!native.includes('tests/launcher-cli-routing.test.mjs'),'historical Bash oracle remains in POSIX full regression')
  assert.ok(!native.includes('tests/platform/launcher-terminal.test.mjs'),'unfinished console-close is a separate red gate, not hidden as passed')
+})
+
+test('runtime icon integration builds its gitignored browser bundles only when selected',()=>{
+ assert.deepEqual(testBuildWorkspaces([]),[])
+ assert.deepEqual(testBuildWorkspaces([path.join('tests','launcher-ui.test.mjs')]),[])
+ assert.deepEqual(testBuildWorkspaces([path.join('tests','dsh-openspec-upgrade.test.mjs')]),['dsh-openspec'])
+ assert.deepEqual(testBuildWorkspaces([path.join('tests','settings-navigation-icons.test.mjs')]),['dsh-pet','dsh-memex','dsh-magpie-connector','dsh-auto-model-routing'])
+ assert.deepEqual(testBuildWorkspaces([path.join('tests','platform','windows-private-files.test.mjs')]),['dsh-pet'])
+ assert.equal(testBuildWorkspaces([path.join('tests','platform','windows-private-files.test.mjs'),path.join('tests','settings-navigation-icons.test.mjs')]).filter(name=>name==='dsh-pet').length,1)
 })
