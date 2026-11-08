@@ -20,5 +20,8 @@
 
 - [x] 4.1 用户确认 DSH 空闲后执行 `node scripts/sync.mjs` 两次确认幂等，并重启 DSH。验证：第二次 sync 无变化；`$DSH_HOME/AGENTS.md` 含新句子；新会话的注入文本含新的一行。
   - 2026-10-26 14:51：另一会话执行 `configurable-jev-provider` 任务 10.4 的 `dsh build`，从同一工作区构建，已把本 change 未提交的 0.4.1 与 `AGENTS.md` 新句子物化到 `$DSH_HOME`（部署包 0.4.1、`AGENTS.md` 含新句子，已核对）。DSH 尚未重启，运行中的 Host 仍是旧注入文本；14:53 再次执行 `node scripts/sync.mjs` 输出 no changes（幂等已确认）。15:09 用户重启 DSH：运行中的 Host 加载部署包 0.4.1（`lib/lifecycle/index.js` 含新提示）；重启后新建会话的 `plugin:dsh-memex` instructions 注入已含新的一行（会话日志核对）。
-- [ ] 4.2 上线约两周后，从写卡遥测统计 `overwritten` 事件数，抽查其中修订说明是否写明依据、`created` 是否保留原值；对比上线前后新卡数量。验证：仓库外评估目录中有简短记录，说明样本量。
-- [ ] 4.3 归档顺序：在 `dsh-memex-reuse-evidence-and-card-lead` 归档之后再归档本 change，归档前核对主 spec 同时包含第一段写法、intent 与使用时修订三项。验证：归档后主 spec 包含三项提示。
+- [x] 4.2 上线约两周后，从写卡遥测统计 `overwritten` 事件数，抽查其中修订说明是否写明依据、`created` 是否保留原值；对比上线前后新卡数量。验证：仓库外评估目录中有简短记录，说明样本量。
+  - 2026-11-08（上线后 12.89 天，约 13 天，未称满 14 天）：[脱敏摘要](checking/summary.md)与仓库外 `~/.dsh-memex-eval/change-observation-20261108-37d8a8c5/REPORT.md` 已落盘。截止共 89 条可关联 overwritten，personal 为 66 条；固定身份哈希抽样 12 条，均能绑定实际落盘版本、带日期与依据的说明，created 均与不同的更早已知版本一致，不保证所有中间更新。等长 12.80699 天的前/后窗 created 为 594/173，personal 为 274/156；记录任务/库/模型变化与未知，不作因果解释。
+- [x] 4.3 归档顺序：在 `dsh-memex-reuse-evidence-and-card-lead` 归档之后再归档本 change，归档前核对主 spec 同时包含第一段写法、intent 与使用时修订三项。验证：归档后主 spec 包含三项提示。
+
+  - 2026-11-08：前置 reuse change 已归档，归档前后主规范均核对含第一段、intent、使用时修订三项提示；按依赖顺序完成本 change 归档。

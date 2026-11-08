@@ -53,3 +53,4 @@
 - [x] 5.1 `node scripts/sync.mjs` 两次确认幂等，按需重启 DSH 使 0.4.3 生效。
 - [ ] 5.2 在真实库上走一次迁移：核对新目录含全部卡片、`.sync.json` 保留、`sync --status` 仍识别远端、
   旧目录已删除；失败路径（只读目录）确认旧目录与配置均未变。
+  - 2026-11-08：[实测摘要](checking/summary.md)记录正常迁移/退休、只改名后的真实新 Session 读卡、配置拒绝后的旧库保护。R26 缺具体拒绝原因确定 fail；R11/R12 未在原窗口提交，部分搬迁前置被 Merge conflict 阻断，R-T2 输入污染保持 partial。5.2 不勾选，change 不归档；另保留 BACKLOG B054/B055 的 Git/根目录边界问题。

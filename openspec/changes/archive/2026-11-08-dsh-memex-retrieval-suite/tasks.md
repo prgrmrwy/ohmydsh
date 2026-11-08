@@ -55,9 +55,12 @@
 
 - [x] 8.1 在 `packages/dsh-memex` 内运行 `npm test` 与 typecheck，全部通过；仓库根目录运行 `npm test` 与 `npm run check:artifacts`，结果与改动前的基线对比。先跑完测试，再单独提交
 - [x] 8.2 在主 checkout 执行 `dsh build` 两次，确认第二次输出 `no changes`；核对部署产物里有语义拒绝与新的引导句
-- [ ] 8.3 用 20 题种子（`--set dev`）对 personal 库跑一次评测；报告写到 `~/.dsh-memex-eval/retrieval/<run-id>/`；把排除列表交给用户过目
+- [x] 8.3 用 20 题种子（`--set dev`）对 personal 库跑一次评测；报告写到 `~/.dsh-memex-eval/retrieval/<run-id>/`；把排除列表交给用户过目
+  - 2026-11-08：[20 题完整基线与排除清单](checking/summary.md)。独立按未排序卡片原文确认 20/20 目标，保留原 dev 种子的偏差与版本边界；正式运行 `37d8a8c5-f483-4d2b-ab45-e33c681fea0a` 为 ok，hit@1/3/10 为 13/14/16（分母20），MRR 0.6931，实际离线重算 JSON 与原报告逐字节相同。排除7张的清单已交用户复核；不称 holdout 或总体有效性。
 - [x] 8.4 提醒用户：要重启 Host，语义拒绝才会生效
-- [ ] 8.5 归档前置检查：等 `dsh-memex-reuse-evidence-and-card-lead` 与 `dsh-memex-fix-stale-card-on-use` 都归档之后，比对主 spec 中「会话开始时注入召回引导」的文本与 fix-stale delta（sha256 `5b82428f…`）。文本有变化就重新生成本 change 的 integration delta，不覆盖。不为本 change 勾选前两个 change 的观察任务
+- [x] 8.5 归档前置检查：等 `dsh-memex-reuse-evidence-and-card-lead` 与 `dsh-memex-fix-stale-card-on-use` 都归档之后，比对主 spec 中「会话开始时注入召回引导」的文本与 fix-stale delta（sha256 `5b82428f…`）。文本有变化就重新生成本 change 的 integration delta，不覆盖。不为本 change 勾选前两个 change 的观察任务
+
+  - 2026-11-08：两个前置 change 均已归档；覆盖本 change 之前，主规范保留固定底文 sha256 5b82428f…的全部原约束与既有场景；因长描述移入场景而排版不同，已按 8.5 重新生成本 change 的 integration delta，再合并并归档，未代替前置观察。
 - [x] 8.6 完成 verify.md，把 test-plan 里全部行标为 🟢
 
-实施与可执行验收证据见 [verify.md](verify.md)。8.3 已完成已有目标标注的 9 题 dev 子集，剩余 11 题目标仍待确认，未虚构 gold；报告排除列表已交用户。8.5 的前置 change 未归档，保持未勾选。
+实施与可执行验收证据见 [verify.md](verify.md)。2026-11-03 的 9 题历史子集保留原始限制；2026-11-08 已独立确认全部 20 题目标并补齐完整 dev 基线，未从实测排名反推目标。8.5 的前置归档与底文本核对已完成，见上方记录。

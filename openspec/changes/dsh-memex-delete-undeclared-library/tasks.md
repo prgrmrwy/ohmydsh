@@ -16,15 +16,18 @@
 ## 3. 规范与文档
 
 - [x] 3.1 delta spec 修改「未声明的库可见且可声明」，补删除动作与拒绝条件。
-- [ ] 3.2 中英 README 的「记忆」设置页小节补一句删除入口。
-- [ ] 3.3 `package.json` 0.4.6 → 0.4.7、`dsh.yaml` 版本与 note、CHANGELOG 条目。
+- [x] 3.2 中英 README 的「记忆」设置页小节补一句删除入口。
+- [x] 3.3 `package.json` 0.4.6 → 0.4.7、`dsh.yaml` 版本与 note、CHANGELOG 条目。
+  - 2026-11-08 补证：[英文 README](../../../packages/dsh-memex/README.md#L145)与[中文 README](../../../packages/dsh-memex/README.zh.md#L141)均已说明删除入口、二次确认、绝对路径与卡片数；[package.json](../../../packages/dsh-memex/package.json#L3)与[manifest](../../../dsh.yaml#L118)均为 0.4.7，[CHANGELOG](../../../packages/dsh-memex/CHANGELOG.md#L7)已有 11-04 的发布条目。本轮校正旧任务框，没有重新升版。
 
 ## 4. 校验
 
 - [x] 4.1 包内 `npm run typecheck`、`npm run build`、`npx vitest run`：826 passed（既有 eval 基线失败不变）。
-- [ ] 4.2 仓库级 `npm test`、`check:artifacts`、`openspec validate … --strict`。
+- [x] 4.2 仓库级 `npm test`、`check:artifacts`、`openspec validate … --strict`。
+  - 2026-11-08：基线 32b9e763 上为 777 项（774 通过、3 跳过、0 失败）；任务分支同步上游 4ea30ebd 并按锁文件重新安装后，完整仓库测试为 785 项（782 通过、3 跳过、0 失败）。`check:artifacts` 和本 change 严格校验退出 0。GUI 的 fail/blocked 不因此改判。
 
 ## 5. 部署
 
 - [ ] 5.1 `node scripts/sync.mjs` 两次确认幂等；重启 DSH 后核对：清单出现删除按钮、确认行显示绝对路径与卡片数、
       删掉一个空库后清单与目录都消失。
+  - 2026-11-08：[实测摘要](checking/summary.md)确认两卡库物理删除、声明/busy 拒绝与真实权限失败；D07 结果缺卡数、D08 页面残留条目确定 fail。空库 D15 在原窗口耗尽后未提交，仍存在；确认区裁切保持人工项。5.1 继续未完成，change 不归档，没有重新部署或重启日常 Host。
