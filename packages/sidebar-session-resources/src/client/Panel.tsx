@@ -19,6 +19,7 @@ import {
 import { CATEGORY_LABELS, CATEGORY_ORDER, compareEntries, type LinkEntry } from '../shared/links.js'
 import type { ProducedFile } from './produces.js'
 import type { SessionResourcesStore, SnapshotSource } from './collector.js'
+import { ProducedFileRow } from './ProducedFileRow.jsx'
 
 /**
  * Adapt the official transcript to the store's minimal snapshot face.
@@ -151,10 +152,13 @@ const META_STYLE: CSSProperties = {
  *  Deliberately NOT useSyncExternalStore: plain subscribe + setState keeps
  *  rendering driven by explicit change notifications only, so a snapshot
  *  reference wrinkle can never turn into a max-update-depth loop. */
-export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
+export function Panel(props: PanelProps) {
+  return <SessionPanel key={props.sessionId ?? ''} {...props} />
+}
+
+function SessionPanel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
   const [entries, setEntries] = useState<readonly LinkEntry[]>(EMPTY)
   const [produced, setProduced] = useState<readonly ProducedFile[]>(EMPTY_PRODUCED)
-  const openFile = onOpenFile ?? (() => {})
 
   useEffect(() => {
     if (!sessionId) return
@@ -172,17 +176,20 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
     const rpc = (ctx.get as unknown as (key: string) => { rpc?: ClientConnectionRpc } | undefined)?.('connection')?.rpc
     const controller = new AbortController()
     const attemptBaseline = (attempt: number): void => {
+      if (controller.signal.aborted) return
       if (!rpc) {
         if (attempt === 0) console.warn('[dsh-sidebar-session-resources] baseline NOT fetched: connection RPC unavailable on tab context')
         return
       }
       fetchSessionResources(rpc, sessionId, controller.signal)
         .then((baseline) => {
+          if (controller.signal.aborted) return
           console.info(`[dsh-sidebar-session-resources] baseline applied: ${baseline.entries.length} entries, maxSeq ${baseline.maxSeq}, complete ${baseline.complete}`)
           store.setRules(baseline.rules)
           store.applyBaseline(sessionId, baseline.entries, baseline.produced, baseline.maxSeq)
         })
         .catch((error) => {
+          if (controller.signal.aborted) return
           // Connection may still be re-establishing right after a DSH restart:
           // retry with a short backoff before falling back to window semantics.
           if (attempt < 2 && !controller.signal.aborted) {
@@ -216,16 +223,14 @@ export function Panel({ ctx, store, sessionId, onOpenFile }: PanelProps) {
         <section>
           <h4 style={HEADING_STYLE}>本次产出 · {produced.length}</h4>
           {produced.map((file) => (
-            <div key={file.path} style={ROW_STYLE} title={file.path}>
-              <button
-                type="button"
-                onClick={() => openFile(file.path)}
-                style={{ ...LINK_STYLE, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'var(--dsh-font-mono, monospace)', textAlign: 'left' }}
-              >
-                # {file.path.split(/[\\/]/).pop()}
-              </button>
-              <span style={META_STYLE}>{formatLinkTime(file.time, now)}</span>
-            </div>
+            <ProducedFileRow
+              key={file.path}
+              ctx={ctx}
+              sessionId={sessionId}
+              file={file}
+              time={formatLinkTime(file.time, now)}
+              onOpenFile={onOpenFile}
+            />
           ))}
         </section>
       )}
