@@ -19,11 +19,14 @@ import { formatTime, type Card, type CardWindow, type CardsView } from './view-m
  * Wide sidebar: an accordion. The header row is the only interactive surface
  * (except the refresh button): clicking it toggles the detail, which grows in
  * flow and takes height away from the session list instead of covering it.
- * Collapsed, it shows one weekly row per upstream (at most five) plus a
+ * Collapsed, it shows one weekly row per upstream (the body caps at 320px) plus a
  * decorative overflow chevron. Collapsed sidebar: one icon that opens the same
  * content as a 320px anchored popover.
  *
- * Reads are event-driven through `sidebar-api` (60s TTL); no timers.
+ * Reads are event-driven through `sidebar-api` (60s TTL). The opt-in timer is
+ * the one exception: it performs a real refresh (`POST {all:true}`) because the
+ * gateway answers a card read from its kept cards and only re-reads a vendor
+ * when a refresh is asked for.
  */
 export interface SidebarUsageProps {
   api?: Api
@@ -102,18 +105,24 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   }, [enabled, api])
 
   // Auto refresh: only when the card is enabled and the interval is positive.
-  // A chained timeout avoids overlap; a hidden page only reschedules (the
-  // visibility listener above still re-reads once the page returns).
+  // It must be a real refresh, not a read: the gateway answers `GET cards` from
+  // the cards it last read and only asks a vendor again on `POST refresh`, so a
+  // timer that re-read would show the same frozen reading forever. A chained
+  // timeout avoids overlap; a failure keeps the last reading silently; a hidden
+  // page only reschedules (the visibility listener above re-reads once the page
+  // returns).
   useEffect(() => {
     if (enabled !== true || api === undefined || refreshMinutes <= 0) return
     let timer: ReturnType<typeof setTimeout> | undefined
     let stopped = false
     const interval = refreshMinutes * 60_000
-    const read = (): void => { void loadCards(api, { force: true }).then(setView, () => { /* keep the last reading */ }) }
+    const refreshNow = (): void => {
+      void refreshCards(api).then(result => { if (result.ok) setView(result.view) }, () => { /* keep the last reading */ })
+    }
     const schedule = (): void => {
       timer = setTimeout(() => {
         if (stopped) return
-        if (document.visibilityState === 'visible') read()
+        if (document.visibilityState === 'visible') refreshNow()
         schedule()
       }, interval)
     }

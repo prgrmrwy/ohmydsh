@@ -1,10 +1,13 @@
 /**
- * Data layer of the sidebar usage card: one 60s TTL cache and two reads.
+ * Data layer of the sidebar usage card: one 60s TTL cache, event-driven reads
+ * and one forced refresh.
  *
  * The host's `GET cards` performs a real gateway request every time (only
- * concurrent reads are coalesced), and the spec forbids timer polling, so the
- * cache lives here and the component only calls it on events (mount, manual
- * refresh, expanding, page visible again).
+ * concurrent reads are coalesced) but the gateway answers it from the cards it
+ * last read, so only `refreshCards` (the header button and the opt-in
+ * auto-refresh timer) can bring fresh readings. The cache lives here and the
+ * component calls `loadCards` only on events (mount, expanding, page visible
+ * again); `refreshCards` bypasses it.
  *
  * @module dsh-magpie-connector/client/sidebar-api
  */

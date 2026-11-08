@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
+import { buildModelCatalog } from './support/model-catalog.js'
 import { collect, mountRealHost, until } from './support/host.js'
 import { createGateway, json, sse } from './support/gateway.js'
 import { credentialsMock } from './support/credentials.js'
@@ -33,8 +34,7 @@ test('test_owner_identity_02 spec Scenario "旧 route 选择不再可用"', asyn
   await until(() => host.ownRoutes().length === 2, 'two routes')
   g.requests.length = 0
   await expect(host.llm.prepareCall({ provider: OLD, model: 'codex/gpt-6.1-sol' })).rejects.toMatchObject({ code: 'NO_ADAPTER' })
-  const { buildModelCatalog } = await import('@deepseek-ai/dsh-api-session-controller')
-  const built = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const built = await buildModelCatalog(host.llm)
   expect(built.groups.map(group => group.id)).not.toContain(OLD)
   expect(g.requests.filter(r => r.method === 'POST')).toEqual([])
 })

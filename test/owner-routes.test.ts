@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
+import { buildModelCatalog } from './support/model-catalog.js'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { mountRealHost, until } from './support/host.js'
@@ -21,7 +22,6 @@ async function mount(data: unknown[], extra: Record<string, unknown> = {}, expec
   return { host, gateway }
 }
 const routeId = (key: string) => `dsh-magpie-connector-${key}`
-const sessionController = () => import('@deepseek-ai/dsh-api-session-controller')
 
 test('test_owner_routes_01 spec Scenario "按 owned_by 分组且不按名字猜测"', async () => {
   const { host } = await mount([
@@ -30,8 +30,7 @@ test('test_owner_routes_01 spec Scenario "按 owned_by 分组且不按名字猜�
     { id: 'opencode-go/kimi-k3', owned_by: 'opencode-go' },
     { id: 'x/gpt-lookalike' },
   ], {}, 4)
-  const { buildModelCatalog } = await sessionController()
-  const catalog = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const catalog = await buildModelCatalog(host.llm)
   expect(catalog.groups.map(g => [g.id, g.name, g.models.map(m => m.id)])).toEqual([
     [routeId('claude'), 'Magpie (Claude)', ['claude/claude-opus-5-5']],
     [routeId('codex'), 'Magpie (Codex)', ['custom/claude-looking']],
@@ -109,8 +108,7 @@ test('test_owner_routes_06 spec Scenario "原版宿主即可看到分组"', asyn
     { id: 'claude/claude-opus-5-5', owned_by: 'claude' },
     { id: 'codex/gpt-6.1-sol', owned_by: 'codex' },
   ], {}, 2)
-  const { buildModelCatalog } = await sessionController()
-  const catalog = await buildModelCatalog({ llm: host.llm, agentDefaultModel: { currentSelection: () => ({}) } } as never, {} as never)
+  const catalog = await buildModelCatalog(host.llm)
   expect(catalog.groups.map(g => g.name)).toEqual(['Magpie (Claude)', 'Magpie (Codex)'])
   for (const route of host.ownRoutes()) {
     for (const m of await host.llm.listModels(route)) expect(m).not.toHaveProperty('displayGroup')
