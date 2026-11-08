@@ -1,8 +1,10 @@
 /** Authenticated shutdown preparation; discovery files never authorize stopping a Host. */
 import { randomUUID } from 'node:crypto'
-import { lstat, mkdir, open, realpath, rename, unlink } from 'node:fs/promises'
+import { type Stats } from 'node:fs'
+import { lstat, open, realpath, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { PetError } from '../errors.js'
+import { assertPrivateFile, PRIVATE_FILE_MAX_BYTES, PRIVATE_READ_FLAGS, samePrivateIdentity, secureCreatedPrivateFile, stopPrivateBoundary, verifyPrivateBoundary, verifyPrivateBoundaryIdentity, type PrivateBoundary } from './private-files.js'
 
 export const PET_PREPARE_STOP_ROUTE = '/dsh-pet/api/prepare-stop'
 /** Maximum lifetime of one client request and its prepared acknowledgement. */
@@ -150,46 +152,95 @@ export interface StopDescriptor {
   readonly authenticatedUrl: string
 }
 
+function descriptorTarget(boundary: PrivateBoundary, port: number): string {
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) reject('Invalid stop descriptor port')
+  const target = resolve(boundary.directory, `${port}.json`)
+  if (dirname(target) !== boundary.directory) reject('Stop descriptor path escaped its directory')
+  return target
+}
+async function existingDescriptor(boundary: PrivateBoundary, target: string, additionalFiles: readonly string[] = []): Promise<Stats | undefined> {
+  await verifyPrivateBoundaryIdentity(boundary)
+  let stat: Stats
+  try { stat = await lstat(target) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    if (additionalFiles.length > 0) await verifyPrivateBoundary(boundary, additionalFiles)
+    return undefined
+  }
+  assertPrivateFile(stat)
+  await verifyPrivateBoundary(boundary, [...additionalFiles, target])
+  const checked = await lstat(target)
+  assertPrivateFile(checked)
+  if (!samePrivateIdentity(stat, checked)) reject('Stop descriptor changed during validation')
+  return checked
+}
+
 /** Publish a private discovery cache. Consumers must authenticate and recheck live identity. */
 export async function publishStopDescriptor(home: string, port: number, descriptor: StopDescriptor): Promise<void> {
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) reject('Invalid stop descriptor port')
   const origin = new URL(descriptor.origin)
   const authenticated = new URL(descriptor.authenticatedUrl)
   if (origin.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname) || Number(origin.port) !== port || authenticated.origin !== origin.origin || origin.username || origin.password) reject('Invalid stop descriptor origin')
-  const root = await realpath(home)
-  const run = join(root, 'run')
-  await mkdir(run, { recursive: true, mode: 0o700 })
-  const runStat = await lstat(run)
-  if (!runStat.isDirectory() || runStat.isSymbolicLink()) reject('Unsafe stop descriptor parent')
-  const directory = join(run, 'dsh-pet-stop')
-  await mkdir(directory, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error })
-  const stat = await lstat(directory)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (process.platform !== 'win32' && ((stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()))) reject('Unsafe stop descriptor directory')
-  const target = resolve(directory, `${port}.json`)
-  if (dirname(target) !== directory) reject('Stop descriptor path escaped its directory')
-  try {
-    const existing = await lstat(target)
-    if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1 || (process.getuid !== undefined && existing.uid !== process.getuid())) reject('Unsafe existing stop descriptor')
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  const temporary = join(directory, `${port}-${randomUUID()}.tmp`)
+  const body = `${JSON.stringify(descriptor)}\n`
+  if (Buffer.byteLength(body) > PRIVATE_FILE_MAX_BYTES) reject('Stop descriptor is too large')
+  const boundary = await stopPrivateBoundary(await realpath(home), true)
+  const target = descriptorTarget(boundary, port)
+  const existing = await existingDescriptor(boundary, target)
+  const temporary = join(boundary.directory, `${port}-${randomUUID()}.tmp`)
   const file = await open(temporary, 'wx', 0o600)
-  try { await file.writeFile(`${JSON.stringify(descriptor)}\n`); await file.sync() } finally { await file.close() }
-  // Both absolute names are constrained to the verified owner-only directory.
-  if (dirname(temporary) !== directory || dirname(target) !== directory) reject('Unsafe stop descriptor replacement')
-  await rename(temporary, target)
+  let created: Stats | undefined
+  let published = false
+  try {
+    created = await file.stat()
+    assertPrivateFile(created)
+    await secureCreatedPrivateFile(boundary, temporary)
+    if (!samePrivateIdentity(created, await lstat(temporary))) reject('Stop descriptor temporary file changed')
+    await file.writeFile(body)
+    await file.sync()
+    assertPrivateFile(await file.stat())
+    await file.close()
+    const latest = await existingDescriptor(boundary, target, [temporary])
+    if (!samePrivateIdentity(created, await lstat(temporary))) reject('Stop descriptor temporary file changed')
+    if (existing === undefined ? latest !== undefined : latest === undefined || !samePrivateIdentity(existing, latest)) reject('Stop descriptor replacement changed')
+    await rename(temporary, target)
+    published = true
+  } finally {
+    await file.close()
+    if (!published && created !== undefined) {
+      try {
+        await verifyPrivateBoundary(boundary, [temporary])
+        if (samePrivateIdentity(created, await lstat(temporary))) await unlink(temporary)
+      } catch { /* A changed boundary is never traversed for cleanup. */ }
+    }
+  }
 }
 
 /** Remove this boot's descriptor only; a replacement boot's file is left alone. */
 export async function releaseStopDescriptor(home: string, port: number, bootId: string): Promise<void> {
   try {
-    const directory = join(await realpath(home), 'run', 'dsh-pet-stop')
-    const target = join(directory, `${port}.json`)
-    const stat = await lstat(target)
-    if (!stat.isFile() || stat.isSymbolicLink()) return
-    const file = await open(target, 'r')
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return
+    const boundary = await stopPrivateBoundary(await realpath(home))
+    const target = descriptorTarget(boundary, port)
+    const before = await existingDescriptor(boundary, target)
+    if (before === undefined) return
+    const file = await open(target, PRIVATE_READ_FLAGS)
     let current: unknown
-    try { current = JSON.parse(await file.readFile('utf8')) } finally { await file.close() }
+    let opened: Stats
+    try {
+      opened = await file.stat()
+      assertPrivateFile(opened)
+      if (!samePrivateIdentity(before, opened)) return
+      // The filesystem boundary is verified before bootId or any credential is read.
+      await verifyPrivateBoundaryIdentity(boundary, [target])
+      if (!samePrivateIdentity(opened, await lstat(target))) return
+      current = JSON.parse(await file.readFile('utf8'))
+      const after = await file.stat()
+      assertPrivateFile(after)
+      if (!samePrivateIdentity(opened, after) || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) return
+    } finally { await file.close() }
     if ((current as { bootId?: unknown } | null)?.bootId !== bootId) return
+    const latest = await existingDescriptor(boundary, target)
+    if (latest === undefined || !samePrivateIdentity(opened, latest) || latest.size !== opened.size || latest.mtimeMs !== opened.mtimeMs || latest.ctimeMs !== opened.ctimeMs) return
     await unlink(target)
   } catch { /* best effort: consumers re-verify live identity anyway */ }
 }

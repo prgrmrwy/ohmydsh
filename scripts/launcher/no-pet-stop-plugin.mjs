@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { ensurePrivateDirectories, assertPrivatePaths, secureNewPrivateFile } from './private-files.mjs'
 import known from './no-pet-known-modules.json' with { type: 'json' }
 
 export const name = 'launcher-no-pet-stop'
@@ -69,25 +70,26 @@ function runtimeSnapshot(loader, presetMounts) {
 function sameSnapshot(a, b) {
   return a.text === b.text && a.entries.length === b.entries.length && a.entries.every((e, i) => e === b.entries[i] && a.fibers[i] === b.fibers[i])
 }
-const owned = stat => process.getuid === undefined || stat.uid === process.getuid()
-function directory(dir, exact) {
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const stat = fs.lstatSync(dir)
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !owned(stat) || (exact ? (stat.mode & 0o777) !== 0o700 : (stat.mode & 0o022) !== 0)) throw new Error('unsafe stop descriptor directory')
-}
 function publish(home, port, descriptor) {
   const run = path.join(home, 'run')
-  directory(run, false)
   const dir = path.join(run, 'dsh-pet-stop')
-  directory(dir, true)
+  const boundaries = [{ path: run, type: 'directory', exact: false }, { path: dir, type: 'directory', exact: true }]
+  ensurePrivateDirectories(boundaries)
   const file = path.join(dir, `${port}.json`)
+  try { assertPrivatePaths([{ path: file, type: 'file' }]) }
+  catch (error) { if (error.code !== 'ENOENT') throw error }
   const temp = path.join(dir, `${port}.${descriptor.bootId}.tmp`)
-  fs.writeFileSync(temp, JSON.stringify(descriptor), { flag: 'wx', mode: 0o600 })
+  const fd = fs.openSync(temp, 'wx', 0o600)
+  try {
+    secureNewPrivateFile(temp)
+    fs.writeFileSync(fd, JSON.stringify(descriptor))
+  } finally { fs.closeSync(fd) }
   // Both names are confined to the verified private directory.
   fs.renameSync(temp, file)
   const stat = fs.lstatSync(file)
   return () => {
     try {
+      assertPrivatePaths([...boundaries, { path: file, type: 'file' }])
       const current = fs.lstatSync(file)
       if (current.dev === stat.dev && current.ino === stat.ino) fs.unlinkSync(file)
     } catch (error) { if (error.code !== 'ENOENT') throw error }
