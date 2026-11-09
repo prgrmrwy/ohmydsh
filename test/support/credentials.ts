@@ -24,12 +24,14 @@ export function credentialsMock(initial?: string, writable = true, options: Cred
   const readonlyRefs = new Set(options.readonlyRefs ?? [])
   const failSet = new Set(options.failSet ?? [])
   const failUnset = new Set(options.failUnset ?? [])
+  const failMessages = new Map<string, string>()
   let listener = () => {}
   let resolveCount = 0
   let gate: (() => Promise<void>) | undefined
   let setGate: (() => Promise<void>) | undefined
   const name = (ref: unknown) => ref as string
   const get = (ref: unknown) => values.get(name(ref))
+  const failureMessage = (operation: 'set' | 'unset', ref: string) => failMessages.get(`${operation}:${ref}`) ?? `${operation} failed: ${ref}`
   const service: Credentials = {
     describe: async ref => ({ configured: values.has(name(ref)), writable: writable && !readonlyRefs.has(name(ref)) }),
     resolve: async ref => {
@@ -40,11 +42,11 @@ export function credentialsMock(initial?: string, writable = true, options: Cred
     },
     set: async (ref, next) => {
       if (setGate) await setGate()
-      if (failSet.has(name(ref))) throw new Error(`set failed: ${name(ref)}`)
+      if (failSet.has(name(ref))) throw new Error(failureMessage('set', name(ref)))
       writes.push(next); values.set(name(ref), next); listener()
     },
     unset: async ref => {
-      if (failUnset.has(name(ref))) throw new Error(`unset failed: ${name(ref)}`)
+      if (failUnset.has(name(ref))) throw new Error(failureMessage('unset', name(ref)))
       writes.push(null); values.delete(name(ref)); listener()
     },
   }
@@ -69,10 +71,15 @@ export function credentialsMock(initial?: string, writable = true, options: Cred
     setRef(ref: string, value: string, emit = false) { values.set(ref, value); if (emit) listener() },
     removeRef(ref: string, emit = false) { values.delete(ref); if (emit) listener() },
     markReadonly(ref: string) { readonlyRefs.add(ref) },
-    failOn(operation: 'set' | 'unset', ref: string) { (operation === 'set' ? failSet : failUnset).add(ref) },
+    /** Fail one operation; an explicit message reproduces a real provider error (e.g. a file-mode guard). */
+    failOn(operation: 'set' | 'unset', ref: string, message?: string) {
+      ;(operation === 'set' ? failSet : failUnset).add(ref)
+      if (message !== undefined) failMessages.set(`${operation}:${ref}`, message)
+    },
     clearFailure(operation?: 'set' | 'unset', ref?: string) {
-      if (operation === undefined) { failSet.clear(); failUnset.clear(); return }
+      if (operation === undefined) { failSet.clear(); failUnset.clear(); failMessages.clear(); return }
       ;(operation === 'set' ? failSet : failUnset).delete(ref!)
+      failMessages.delete(`${operation}:${String(ref)}`)
     },
   }
 }

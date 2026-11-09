@@ -64,6 +64,8 @@ export interface LineCheckResult {
 export const CHECK_TIMEOUT_MS = 5_000
 /** Longest `reason` the check returns (redacted first, then truncated). */
 export const CHECK_REASON_MAX = 300
+/** Longest underlying cause echoed in a settings write failure (redacted first, then truncated). */
+export const WRITE_CAUSE_MAX = 300
 /** Request-body keys a line check accepts; anything else is a shape error. */
 const CHECK_FIELDS = ['id', 'baseUrl', 'accessMode', 'key', 'accessClientId', 'accessClientSecret'] as const
 const CHECK_CREDENTIALS: CredentialField[] = ['key', 'accessClientId', 'accessClientSecret']
@@ -512,13 +514,30 @@ export class MagpieRuntime {
       this.retained = retained
       this.writeSettings({ lines: nextLines, credentialUpdatePending: undefined })
       this.failedFields = []
-    } catch {
+    } catch (error) {
       this.failedFields = pending
       this.invalidateCredential()
-      return Response.json({ error: 'MAGPIE_SETTINGS_WRITE_FAILED: credentials may be partially updated; reread settings and retry the complete connection' }, { status: 500 })
+      const cause = this.writeFailureCause(error, writes)
+      return Response.json({ error: `MAGPIE_SETTINGS_WRITE_FAILED: credentials may be partially updated; reread settings and retry the complete connection${cause ? `; cause: ${cause}` : ''}` }, { status: 500 })
     } finally { this.saving = false }
     await this.reconcileActiveLine()
     return this.settingsView()
+  }
+
+  /**
+   * Underlying cause of a failed settings write, for the 500 body. The thrower is the credentials
+   * provider or the settings store, and its message is the only actionable part — e.g.
+   * `credentials-local: … run "chmod 600 …"` for a hand-written, world-readable credentials file.
+   * Redact every known secret AND the values this write tried to store (a provider may echo them),
+   * then truncate: redacting after truncation can leave an unmatched secret prefix. A throwable that
+   * cannot be stringified yields no cause — it must not turn the documented 500 into a 400.
+   */
+  private writeFailureCause(error: unknown, writes: readonly { value: string | null }[]): string {
+    let text: string
+    try { text = this.redact(errorText(error)) } catch { return '' }
+    const attempted = [...new Set(writes.map(write => write.value).filter((value): value is string => typeof value === 'string' && value.length > 0))].sort((a, b) => b.length - a.length)
+    for (const secret of attempted) text = text.split(secret).join('[redacted]')
+    return text.length > WRITE_CAUSE_MAX ? text.slice(0, WRITE_CAUSE_MAX) : text
   }
 
   /** Sync only when the active identity changed (the caller may also ask for a resync). */
