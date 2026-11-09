@@ -1130,6 +1130,20 @@ host SHALL 对每一代维护一个刷新闸门：同一时刻最多只有一个
 
 删除线路、切回直连或清除 Access 时，插件 SHALL 先尝试清除该线路可写凭据；任一凭据清除失败时 SHALL NOT 提交线路/接入方式变更，SHALL 返回错误并保留 pending 标记。带 pending 标记的 runtime 重建后 SHALL 拒绝新的网关操作与目录同步，但设置读取 SHALL 仍可用并返回 `pending: [{lineId, field}]`（不含明文）；该读取 SHALL NOT 探测、换代或同步。
 
+写入失败的错误响应 SHALL 在 `MAGPIE_SETTINGS_WRITE_FAILED` 之后附底层原因（`; cause: …`）：凭据服务或设置存储抛出的错误文本是唯一可操作的信息（例如宿主凭据文件权限过宽时的文件路径与 `chmod 600` 提示），插件 SHALL NOT 只用通用文案替换它。原因文本 SHALL 先对已知秘密与本轮尝试写入的值脱敏，再截断到固定上限（`WRITE_CAUSE_MAX`，与 `CHECK_REASON_MAX` 同为 300），顺序颠倒会在边界处留下秘密前缀。底层抛出值无法字符串化时 SHALL 仍返回 500 并保留 pending，只是不带 `cause`；该失败 SHALL NOT 降级成通用错误处理返回其它状态码。
+
+#### Scenario: 写入失败的错误响应带出底层原因
+
+- **GIVEN** 线路 2 的 key 写入时凭据服务抛错，错误文本含凭据文件路径与 `chmod 600` 修复提示
+- **WHEN** 客户端保存该线路
+- **THEN** 响应为 500 且 `MAGPIE_SETTINGS_WRITE_FAILED` 后附 `; cause: ` 与该错误文本；线路列表不提交，pending 标记仍持久化
+
+#### Scenario: 错误原因先脱敏再截断
+
+- **GIVEN** 线路 2 已保存旧 key，本轮尝试写入新 key，凭据服务的错误文本同时包含两者，且新 key 跨越原因文本长度上限
+- **WHEN** 保存失败
+- **THEN** 响应中不出现旧 key 或新 key 的任何片段；`cause` 在边界处是 `[redacted]` 的前缀而不是新 key 的前缀，且长度不超过 `WRITE_CAUSE_MAX`
+
 #### Scenario: 删除线路凭据清理失败时不提交删除
 
 - **GIVEN** 线路 2 的 key 可写，credentials 服务对它 `unset` 时抛错

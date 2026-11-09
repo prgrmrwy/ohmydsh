@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.11 — 2026-11-09
+
+- **保存线路失败时 500 只说「可能部分更新」，把唯一的可修复信息吃掉（[issue #1](https://github.com/prgrmrwy/dsh-magpie-connector/issues/1)）。** 报告者的 `~/.dsh/.credentials.yaml` 权限是 644；DSH 0.2.2-rc.1 的 `credentials-local` 每次写盘前先做 owner-only 检查（`assertOwnerOnly`），拒绝时抛出的错误带着文件路径与 `run "chmod 600 …"`——正是他最后用来解决问题的信息，但连接器 `updateLines` 的 catch-all 把它换成了通用文案，用户只能自己猜。现在 500 响应在 `MAGPIE_SETTINGS_WRITE_FAILED: …` 后附 `; cause: <底层错误>`：先对已知秘密与本轮尝试写入的值脱敏，再截断到 300 字符（顺序反过来会在截断边界留下秘密前缀）；设置存储自身的写入失败同样受益。另硬化了抛出值本身：非 `Error` 且无法字符串化时不给 cause，仍返回 500（此前会掉进通用处理、把 500 变成 400）。pending 隔离与「完整重试」行为不变，成功路径的响应体不变。
+- 顺手修掉 `speed-ui` 里过期的 slot 断言：设置导航图标迁移到官方槽后客户端多注册了 `settings.section.icon`，该用例仍按 3 个注册、按旧下标取速度控件，在 main 上本就失败。
+- 包内 540 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.10 — 2026-11-05
 
 - **修复热载后整个插件客户端 UI 消失（侧栏额度卡、设置页 Magpie 面板、输入框速度栏）。** `apply()` 注册 zh/en 字典时用了 `ctx.effect(() => { registry.register(...); return () => {} })`，空的清理函数从不释放字典；而 `@deepseek-ai/dsh-client-locale` 的 `register` 在同一命名空间已被占用时直接抛错（`locale namespace "settings.magpie" already has locale "zh"`）。页面开着时客户端 bundle 被重建（`dsh build`/HMR 推送新 bundle）会先卸载旧条目、再对新模块重新执行 `apply`，于是第二次 `register` 抛错、条目导入失败，插件注册的全部 slot 一起消失，直到刷新页面才恢复——表现为「侧栏 Magpie 额卡经常展示不出来」。现在这个 effect 返回 `locale.register` 自己的 disposer；本地用与真实服务同契约的假 locale 加了回归测试（重复注册抛错、disposer 删除命名空间），覆盖「卸载后重新 apply」与「卸载后命名空间已释放」。设置页导航图标的同款写法原本就返回了 disposer，未受影响。
