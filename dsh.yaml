@@ -320,21 +320,21 @@ customizations:
   - id: better-sidebar
     type: package
     source: remote
-    spec: dsh-better-sidebar@0.28.2
-    version: 0.28.2
+    spec: dsh-better-sidebar@0.30.1
+    version: 0.30.1
     enabled: true
     brief: 服务化侧边栏工作台
-    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(官方 terminal 能力,不持有 PTY)、Git 面板、后台任务、侧边对话(继承完整上下文,可关);可选工具 terminal_*/sidebar_open 默认关。0.28.2(peer ^0.2.1-rc.1)随 0.2.1 运行体同批:0.26.1 注入已删除的 webRuntime,在 0.2.1 上静默挂起。复核(2026-11-05):出站域名与依赖同 0.26.1;新增只读 git 提交图 execFile(固定 argv、无 shell、限时限量);两个新 peer 为 optional。回滚:随运行体回 0.26.1。 pin 校验 sha512-JxtRoCoNA/02VexkInZ1K4+c/1Tvk+DVS01dRfjbGKxWfXGZ6NEyemsdERGOhQ3DsLxOWc4Mj0ol+5s+6V0Egg=='
+    note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(官方 terminal 能力,不持有 PTY)、Git 面板、后台任务、侧边对话(继承完整上下文,可关);可选工具 terminal_*/sidebar_open 默认关。0.30.1(peer ^0.2.2-rc.1)是 0.2.2-rc.1 宿主线的对应构建,并修复设置页「侧边卡片」双图标:改用官方 settings.section.icon 槽,删除按文案标记行、按钮伪元素与全页 MutationObserver(0.30.0 起另带侧边对话图片/GenUI 可选面、草稿备份等)。复核 2026-11-09:依赖集与出站域名同 0.28.2、无安装脚本、registerTab 契约未变。回滚:改回 0.28.2 与其 integrity(仅 0.2.1 宿主线)。 pin 校验 sha512-f+DlDz9yYQUXbAAus3e8tSKykVd2uuDxiPvw375+lKfDG1wQDFzzuM4mOCrev+3AVCzkoYueqe4UKf03R1t7mA=='
   # 自研(remote):驾驶舱桥接 — DSH web 客户端上报会话点击给本机 dsh-cockpit
   - id: dsh-cockpit-bridge
     type: package
     source: remote
-    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.4/dsh-cockpit-bridge-0.6.4.tgz'
+    spec: 'https://github.com/prgrmrwy/dsh-cockpit/releases/download/dsh-cockpit-bridge-v0.6.5/dsh-cockpit-bridge-0.6.5.tgz'
     name: dsh-cockpit-bridge
-    version: 0.6.4
+    version: 0.6.5
     enabled: true
     brief: 驾驶舱桥接(会话点击上报 + 0.1.2 待审批/提问观测,顶栏完成提醒自动清除)
-    note: '自研,https://github.com/prgrmrwy/dsh-cockpit(MIT),GitHub release tarball。纯 web client:把会话打开确认、完成未读状态与待审批/提问快照上报本机驾驶舱,并向两个 cockpit-*-shim 提供 cockpitBridge.forwards 等服务名;只传 sessionId 等标识符与协议元数据,不碰内容/设置/凭据;驾驶舱不可达时静默降级。每台接驾驶舱的机器都装,0.6.4 须配 dsh-cockpit 服务端 2f51565 及之后,否则完成未读上报被忽略。升级复核:与驾驶舱服务端版本配对,及两个 shim 所用服务名;旧 portForward 消费者不可回退到 0.5.2。回滚:spec/version 改回上一 release tarball → dsh build → 刷新设备页面。 tarball SHA256 877b1312d85e5f077c318d98815dbb15f238b26e9a118d671c850a71ffb005f2'
+    note: '自研,https://github.com/prgrmrwy/dsh-cockpit(MIT),GitHub release tarball。纯 web client:把会话打开确认、完成未读状态与待审批/提问快照上报本机驾驶舱,并向两个 cockpit-*-shim 提供 cockpitBridge.forwards 等服务名;只传 sessionId 等标识符与协议元数据,不碰内容/设置/凭据;驾驶舱不可达时静默降级。每台接驾驶舱的机器都装,0.6.4 起须配 dsh-cockpit 服务端 2f51565 及之后,否则完成未读上报被忽略;0.6.5 只改设置导航图标(改用官方 settings.section.icon,删除按 label 标记行 + 伪元素 + MutationObserver),协议与服务名不变。升级复核:与驾驶舱服务端版本配对,及两个 shim 所用服务名;旧 portForward 消费者不可回退到 0.5.2。回滚:spec/version 改回上一 release tarball → dsh build → 刷新设备页面。 tarball SHA256 a46e2f251c54dafa71e16e9e9783756725f56735f6d2a2128d854368e4ffa152'
   # 自研(local):仅承载 cockpit bridge → Worktree Session 打开行为的部署侧耦合
   - id: cockpit-worktree-open-shim
     type: package
