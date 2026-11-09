@@ -16,6 +16,9 @@
 
 ### Added
 
+- 自研插件镜像**双向同步**(`scripts/mirror-sync.mjs`):镜像上合入的 PR 会回并到包目录,再以 `split --onto` 快进推送镜像,镜像 SHA 与作者不变;首次运行用一次 `-s ours` 连接历史,冲突时失败且不推送。Mirror release 增加每小时定时运行。
+- 一键发版 workflow `Release package`(`scripts/release-package.mjs`):同步镜像后升版本(`package.json` 与 `dsh.yaml` pin)、把 CHANGELOG 的 Unreleased 转为版本小节并触发镜像发布,无新内容时拒绝发布。
+- dsh-magpie-connector 镜像:issue 满 12 小时无人回复时由 `github-actions[bot]` 移交给 agent-bebop;发布后按提交中的 `Refs prgrmrwy/dsh-magpie-connector#N` 把对应 issue 交给 agent-bebop 核实并回报。
 - 开源社区标准文档:`LICENSE`(MIT)、`CONTRIBUTING.md`、本 CHANGELOG。
 - GitHub 协作配置:CI 工作流、Issue / PR 模板、Dependabot 依赖更新。
 - 双语根说明(`README.md` / `README.zh.md`),以及 `.editorconfig` 统一编辑器风格。
