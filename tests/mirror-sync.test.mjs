@@ -77,6 +77,24 @@ test('first run joins histories without changing files or the mirror, then is id
   } finally { f.done() }
 })
 
+test('first run with unsynced monorepo package commits joins at the mirror and fast-forwards it', { skip }, () => {
+  const f = fixture()
+  try {
+    commit(f.mono, `${PREFIX}/new.js`, 'new\n', 'feat(pkg): change not yet on the mirror')
+    const result = f.sync()
+    assert.equal(result.status, 0, result.err)
+    assert.equal(git(f.mono, 'merge-base', '--is-ancestor', f.first, result.out), '')
+    assert.notEqual(result.out, f.first)
+    assert.equal(f.mirrorMain(), result.out)
+    assert.equal(git(f.mono, 'rev-parse', `${result.out}^{tree}`), git(f.mono, 'rev-parse', `HEAD:${PREFIX}`))
+    // later mirror PRs still merge back after this kind of join
+    const pr = f.contribute('index.js', 'one\ntwo\nthree\n', 'fix: after join')
+    const next = f.sync()
+    assert.equal(next.status, 0, next.err)
+    assert.equal(next.out, pr)
+  } finally { f.done() }
+})
+
 test('a PR merged on the mirror is merged back and keeps its SHA, authorship and fast-forward', { skip }, () => {
   const f = fixture()
   try {

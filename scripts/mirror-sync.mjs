@@ -54,13 +54,15 @@ function main() {
 
   if (!ancestor(remote, 'HEAD')) {
     if (!related(remote, 'HEAD')) {
-      // First two-way sync: connect the histories at the last commit both sides agree on.
+      // First two-way sync: connect the histories at the last commit both sides agree on, the
+      // older of the fresh split and the mirror main (either side may be ahead of the other).
       const fresh = split()
-      if (fresh !== remote && !ancestor(fresh, remote)) {
-        throw new Error(`${name}: the mirror main ${remote} is neither the monorepo split ${fresh} nor a descendant of it; resolve the divergence manually`)
+      const join = ancestor(remote, fresh) ? remote : ancestor(fresh, remote) ? fresh : undefined
+      if (!join) {
+        throw new Error(`${name}: the mirror main ${remote} and the monorepo split ${fresh} have diverged (neither contains the other); resolve the divergence manually`)
       }
-      git(['merge', '-s', 'ours', '--allow-unrelated-histories', '--no-edit', '-m', `chore(mirror): join ${name} mirror history`, fresh])
-      console.error(`${name}: joined the mirror history at ${fresh}`)
+      git(['merge', '-s', 'ours', '--allow-unrelated-histories', '--no-edit', '-m', `chore(mirror): join ${name} mirror history`, join])
+      console.error(`${name}: joined the mirror history at ${join}`)
     }
     if (!ancestor(remote, 'HEAD')) {
       const merged = git(['merge', '--no-ff', `-Xsubtree=${prefix}`, '-m', `chore(mirror): merge ${name} mirror main back`, remote], { allowFail: true })
