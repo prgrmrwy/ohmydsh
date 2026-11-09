@@ -1,0 +1,95 @@
+name: Release package
+
+# One-click release of a mirrored package. The maintainer decides when to
+# release; this does the mechanical part:
+#   1. sync with the mirror first, so PRs merged there are included;
+#   2. bump the version (package.json and the package's dsh.yaml pin) and turn
+#      CHANGELOG's `## Unreleased` into the version section
+#      (scripts/release-package.mjs; refuses when there is nothing new);
+#   3. commit to main and dispatch Mirror release, which pushes the mirror and
+#      creates the `v<version>` tag that starts the mirror's npm release.
+# The dsh.yaml note (human-written history) is not edited; update it by hand if wanted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Mirrored package directory under packages/'
+        type: choice
+        options:
+          - dsh-magpie-connector
+          - dsh-auto-model-routing
+          - dsh-sidebar-session-provider-icon
+          - dsh-session-id-copy
+          - cockpit-worktree-open-shim
+          - cockpit-memex-browse-shim
+      bump:
+        description: 'Version part to bump'
+        type: choice
+        default: patch
+        options: [patch, minor, major]
+
+# Shares the group with Mirror release so the two never push main concurrently.
+concurrency:
+  group: mirror-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure deploy key
+        env:
+          MIRROR_KEY_AUTO_MODEL_ROUTING: ${{ secrets.MIRROR_KEY_AUTO_MODEL_ROUTING }}
+          MIRROR_KEY_MAGPIE_CONNECTOR: ${{ secrets.MIRROR_KEY_MAGPIE_CONNECTOR }}
+          MIRROR_KEY_SIDEBAR_PROVIDER_ICON: ${{ secrets.MIRROR_KEY_SIDEBAR_PROVIDER_ICON }}
+          MIRROR_KEY_SESSION_ID_COPY: ${{ secrets.MIRROR_KEY_SESSION_ID_COPY }}
+          MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM: ${{ secrets.MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM }}
+          MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM: ${{ secrets.MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM }}
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          case "$PACKAGE" in
+            dsh-auto-model-routing) repo=dsh-auto-model-routing; key="$MIRROR_KEY_AUTO_MODEL_ROUTING" ;;
+            dsh-magpie-connector) repo=dsh-magpie-connector; key="$MIRROR_KEY_MAGPIE_CONNECTOR" ;;
+            dsh-sidebar-session-provider-icon) repo=dsh-sidebar-session-provider-icon; key="$MIRROR_KEY_SIDEBAR_PROVIDER_ICON" ;;
+            dsh-session-id-copy) repo=dsh-session-id-copy; key="$MIRROR_KEY_SESSION_ID_COPY" ;;
+            cockpit-worktree-open-shim) repo=dsh-cockpit-worktree-open-shim; key="$MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM" ;;
+            cockpit-memex-browse-shim) repo=dsh-cockpit-memex-browse-shim; key="$MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM" ;;
+            *) echo "::error::unknown package $PACKAGE"; exit 1 ;;
+          esac
+          test -n "$key" || { echo "::error::deploy key secret for $PACKAGE is not set"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$key" > ~/.ssh/mirror && chmod 600 ~/.ssh/mirror
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/mirror -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
+          echo "MIRROR=git@github.com:prgrmrwy/$repo.git" >> "$GITHUB_ENV"
+
+      - name: Sync, bump and commit
+        env:
+          PACKAGE: ${{ inputs.package }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags origin main
+          git checkout -B main origin/main
+          node scripts/mirror-sync.mjs --prefix "packages/$PACKAGE" --mirror "$MIRROR" --push-origin
+          version="$(node scripts/release-package.mjs --dir "packages/$PACKAGE" --bump "$BUMP")"
+          git add "packages/$PACKAGE/package.json" "packages/$PACKAGE/CHANGELOG.md" dsh.yaml
+          git commit -m "chore($PACKAGE): release v$version"
+          git push origin HEAD:refs/heads/main
+          echo "Released v$version to main; dispatching Mirror release." >> "$GITHUB_STEP_SUMMARY"
+
+      # A push made with GITHUB_TOKEN starts no workflow, but a dispatch does.
+      - name: Dispatch Mirror release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run mirror-release.yml --ref main --repo "$GITHUB_REPOSITORY"
