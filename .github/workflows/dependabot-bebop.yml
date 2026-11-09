@@ -1,0 +1,42 @@
+name: Ask Bebop to follow Dependabot PRs
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: dependabot-bebop-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    steps:
+      # Runs only trusted inline code from the base branch; never checks out or executes the PR.
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const issue = { ...context.repo, issue_number: context.issue.number };
+            const marker = '<!-- bebop:dependabot-follow-up -->';
+            const comments = await github.paginate(github.rest.issues.listComments, issue);
+            if (comments.some(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker))) {
+              return;
+            }
+            await github.rest.issues.createComment({
+              ...issue,
+              body: [
+                marker,
+                '@agent-bebop Please validate this Dependabot dependency update and follow it through relevant checks and CI.',
+                'Fix compatibility issues within this dependency update in the original PR branch when possible; otherwise explain the concrete blocker here.',
+                'Report the checks, fixes, and remaining risks in this PR when ready for human review. Do not approve or merge; prgrmrwy will decide whether to merge.'
+              ].join('\n\n')
+            });
