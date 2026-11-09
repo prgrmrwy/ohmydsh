@@ -8,12 +8,17 @@ on:
 permissions:
   contents: write
   id-token: write
+  # The release report comments on Issues the release refs.
+  issues: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release report reads commits since the previous tag.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -71,3 +76,38 @@ jobs:
           fi
           gh release upload "$tag" "$assets/$name-$version.tgz" \
             --repo "$GITHUB_REPOSITORY" --clobber
+      # Commits reference Issues as `Refs <owner>/<repo>#<n>` (never closing keywords),
+      # so Issues stay open until here. Hand each still-open one to Bebop to verify
+      # the release and report back to the reporter.
+      - name: Collect Issues referenced since the previous release
+        id: refs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          previous="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+          range="${previous:+$previous..}$GITHUB_REF_NAME"
+          refs="$(git log "$range" --format=%B \
+            | grep -oiE "refs:? +$GITHUB_REPOSITORY#[0-9]+" | grep -oE '[0-9]+$' | sort -un | tr '\n' ' ')"
+          echo "Issues referenced in $range: ${refs:-none}"
+          echo "issues=$refs" >> "$GITHUB_OUTPUT"
+      - name: Hand referenced Issues to Bebop
+        if: startsWith(github.ref, 'refs/tags/v') && steps.refs.outputs.issues != ''
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          ISSUES: ${{ steps.refs.outputs.issues }}
+        with:
+          script: |
+            const version = context.ref.replace(/^refs\/tags\/v/, '');
+            const marker = `<!-- bebop:release-report v${version} -->`;
+            for (const number of (process.env.ISSUES ?? '').split(/\s+/).filter(Boolean).map(Number)) {
+              let issue;
+              try { ({ data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number })); }
+              catch (error) { core.warning(`#${number}: ${error.message}`); continue; }
+              if (issue.pull_request || issue.state !== 'open') continue;
+              const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: number, per_page: 100 });
+              if (comments.some(comment => comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker))) continue;
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: number,
+                body: [marker, `@agent-bebop v${version} has been released and includes commits that reference this issue. Please verify the release and report back here.`].join('\n\n')
+              });
+            }

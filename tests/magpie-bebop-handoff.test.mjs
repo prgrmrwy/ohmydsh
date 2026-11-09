@@ -3,9 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
 
-const load = name => yaml.load(readFileSync(new URL(`../packages/dsh-magpie-connector/.github/workflows/${name}`, import.meta.url), 'utf8'))
+for (const pkg of ['dsh-magpie-connector', 'dsh-auto-model-routing']) {
+const load = name => yaml.load(readFileSync(new URL(`../packages/${pkg}/.github/workflows/${name}`, import.meta.url), 'utf8'))
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-const repo = { owner: 'prgrmrwy', repo: 'dsh-magpie-connector' }
+const repo = { owner: 'prgrmrwy', repo: pkg }
 const HOUR = 60 * 60 * 1000
 const core = { info() {}, warning() {} }
 
@@ -31,14 +32,14 @@ async function runHandoff(input) {
   return created
 }
 
-test('handoff runs hourly from trusted inline code with only issue write access', () => {
+test(`${pkg}: handoff runs hourly from trusted inline code with only issue write access`, () => {
   assert.deepEqual(handoff.on.schedule, [{ cron: '23 * * * *' }])
   assert.deepEqual(handoff.permissions, { issues: 'write' })
   assert.equal(handoff.jobs.handoff.steps.length, 1)
   assert.match(handoff.jobs.handoff.steps[0].uses, /^actions\/github-script@[a-f0-9]{40}/)
 })
 
-test('only open human issues older than 12 hours without a maintainer or agent reply are handed off once', async () => {
+test(`${pkg}: only open human issues older than 12 hours without a maintainer or agent reply are handed off once`, async () => {
   const created = await runHandoff({
     issues: [issue(1, 13), issue(2, 11), issue(3, 20, 'prgrmrwy'), issue(4, 20, 'dependabot[bot]'), issue(5, 20, 'reporter', { pull_request: {} }),
       issue(6, 20), issue(7, 20), issue(8, 20)],
@@ -49,7 +50,7 @@ test('only open human issues older than 12 hours without a maintainer or agent r
   assert.ok(created.every(c => c.body.includes(triage) && /@agent-bebop/.test(c.body)))
 })
 
-test('at most five issues are handed off per run', async () => {
+test(`${pkg}: at most five issues are handed off per run`, async () => {
   const created = await runHandoff({ issues: Array.from({ length: 8 }, (_, i) => issue(i + 1, 24)) })
   assert.equal(created.length, 5)
 })
@@ -66,7 +67,7 @@ async function runReport(env, input) {
   return created
 }
 
-test('release keeps its publishing permissions, adds issue write and full history', () => {
+test(`${pkg}: release keeps its publishing permissions, adds issue write and full history`, () => {
   assert.deepEqual(release.permissions, { contents: 'write', 'id-token': 'write', issues: 'write' })
   assert.equal(steps[0].with['fetch-depth'], 0)
   const collect = steps.find(step => step.id === 'refs')
@@ -74,7 +75,7 @@ test('release keeps its publishing permissions, adds issue write and full histor
   assert.match(reportStep.uses, /^actions\/github-script@[a-f0-9]{40}/)
 })
 
-test('release report hands each open referenced issue to Bebop once', async () => {
+test(`${pkg}: release report hands each open referenced issue to Bebop once`, async () => {
   const marker = '<!-- bebop:release-report v1.2.3 -->'
   const created = await runReport('1 2 3 4 5', {
     get: { 1: { state: 'open' }, 2: { state: 'closed' }, 3: { state: 'open', pull_request: {} }, 4: { state: 'open' } },
@@ -84,3 +85,4 @@ test('release report hands each open referenced issue to Bebop once', async () =
   assert.ok(created[0].body.includes(marker))
   assert.match(created[0].body, /@agent-bebop v1\.2\.3 has been released/)
 })
+}
