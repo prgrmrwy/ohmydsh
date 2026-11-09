@@ -45,7 +45,7 @@ export interface Generation {
   lastSyncErrorKind?: string
   [key: string]: unknown
 }
-export interface Operation extends ConnectionIdentity { gen: Generation; release(): void }
+export interface Operation extends ConnectionIdentity { gen: Generation; connectionVersion: number; release(): void }
 export interface RuntimeOptions {
   probe?: Probe
   now?: () => number
@@ -281,7 +281,7 @@ export class MagpieRuntime {
       this.rotate(identity.lineId ?? '', identity.baseUrl ?? '', identity.accessMode ?? 'direct', fingerprint, carry)
     }
     validateIdentity(identity)
-    const op = { ...identity, gen: this.current, release: this.retainIdentity(identity) }
+    const op = { ...identity, gen: this.current, connectionVersion: version, release: this.retainIdentity(identity) }
     if (changed && op.key && op.gen.baseUrl) void this.syncGeneration(op.gen, op)
     return op
   }
@@ -301,6 +301,24 @@ export class MagpieRuntime {
     }
   }
   isCurrent(gen: Generation) { return !this.disposed && gen === this.current }
+  /** Synchronous admission guard for an irreversible write, not for prepared generation calls. */
+  isOperationCurrent(op: Pick<Operation, 'gen' | 'connectionVersion'>): boolean {
+    return this.isCurrent(op.gen) && op.connectionVersion === this.writeVersion && !this.saving && !this.failedFields.length
+  }
+  /**
+   * Observe probe expiry and credential changes even without an update event. The newly resolved
+   * operation is only a check: a write must still use the operation that authorised it, and check
+   * isOperationCurrent again synchronously at dispatch after awaiting this method.
+   */
+  async revalidateOperation(op: Operation): Promise<boolean> {
+    if (!this.isOperationCurrent(op)) return false
+    let check: Operation
+    try { check = await this.beginOperation() } catch (error) {
+      if (!this.isOperationCurrent(op)) return false
+      throw error
+    }
+    try { return this.isOperationCurrent(op) } finally { check.release() }
+  }
   redact(text: string) {
     const preparedKeys: string[] = []
     for (const ref of this.prepared) {

@@ -27,8 +27,10 @@ async function setup(options: SetupOptions = {}) {
   }
   const runtime = {
     formatErrorBody: MagpieRuntime.prototype.formatErrorBody, current: gen,
-    beginOperation: async () => ({ gen: runtime.current, baseUrl: runtime.current.baseUrl, key: 'secret', release: () => {} }),
+    beginOperation: async () => ({ gen: runtime.current, connectionVersion: 0, baseUrl: runtime.current.baseUrl, key: 'secret', release: () => {} }),
     isCurrent: (g: unknown) => g === runtime.current,
+    isOperationCurrent: (op: { gen: unknown }) => op.gen === runtime.current,
+    revalidateOperation: async (op: { gen: unknown }) => op.gen === runtime.current,
     redact: (s: string) => s.replaceAll('secret', '[redacted]'),
     transport: { request },
   }
@@ -122,7 +124,8 @@ describe('ResetController', () => {
     const calls: string[] = []
     const runtime = {
       formatErrorBody: MagpieRuntime.prototype.formatErrorBody, current: gen,
-      beginOperation: async () => ({ gen, baseUrl: gen.baseUrl, key: 'k', release: () => {} }), isCurrent: () => true,
+      beginOperation: async () => ({ gen, connectionVersion: 0, baseUrl: gen.baseUrl, key: 'k', release: () => {} }), isCurrent: () => true,
+      isOperationCurrent: () => true, revalidateOperation: async () => true,
       redact: (s: string) => s, transport: { request: async (_c: unknown, _m: string, path: string) => { calls.push(path); return path.includes('codex-reset') ? json({ code: 'reset', windows: 1 }) : reply([codexCard(85)]) } },
     }
     const cards = new CardsController(runtime as unknown as MagpieRuntime)
@@ -155,7 +158,8 @@ describe('ResetController', () => {
     let reads = 0
     const runtime = {
       formatErrorBody: MagpieRuntime.prototype.formatErrorBody, current: gen,
-      beginOperation: async () => ({ gen, baseUrl: gen.baseUrl, key: 'k', release: () => {} }), isCurrent: () => true, redact: (s: string) => s,
+      beginOperation: async () => ({ gen, connectionVersion: 0, baseUrl: gen.baseUrl, key: 'k', release: () => {} }), isCurrent: () => true,
+      isOperationCurrent: () => true, revalidateOperation: async () => true, redact: (s: string) => s,
       transport: { request: async (_c: unknown, method: string, path: string) => {
         paths.push(`${method} ${path}`)
         if (path.includes('codex-reset')) return json({ code: 'reset', windows: 1 })
