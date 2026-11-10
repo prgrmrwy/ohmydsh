@@ -39,9 +39,9 @@ test(`${pkg}: handoff runs hourly from trusted inline code with only issue write
   assert.match(handoff.jobs.handoff.steps[0].uses, /^actions\/github-script@[a-f0-9]{40}/)
 })
 
-test(`${pkg}: only open human issues older than 12 hours without a maintainer or agent reply are handed off once`, async () => {
+test(`${pkg}: only open human issues older than 4 hours without a maintainer or agent reply are handed off once`, async () => {
   const created = await runHandoff({
-    issues: [issue(1, 13), issue(2, 11), issue(3, 20, 'prgrmrwy'), issue(4, 20, 'dependabot[bot]'), issue(5, 20, 'reporter', { pull_request: {} }),
+    issues: [issue(1, 5), issue(2, 3), issue(3, 20, 'prgrmrwy'), issue(4, 20, 'dependabot[bot]'), issue(5, 20, 'reporter', { pull_request: {} }),
       issue(6, 20), issue(7, 20), issue(8, 20)],
     comments: { 6: [{ user: { login: 'prgrmrwy' }, body: 'on it' }], 7: [{ user: { login: 'github-actions[bot]' }, body: triage }],
       8: [{ user: { login: 'outsider' }, body: triage }] },
