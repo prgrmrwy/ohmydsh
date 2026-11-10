@@ -1,9 +1,9 @@
 name: Hand stale issues to Bebop
 
-# Hourly: an open Issue that has waited 12 hours without a reply from the
+# Hourly: an open Issue that has waited 4 hours without a reply from the
 # maintainer or the agent is handed to the agent once with a fixed marker.
 # The agent's rule verifies the comment author and the Issue on GitHub; copying
-# the marker grants nothing. Timing is "at least 12 hours", plus scheduler delay.
+# the marker grants nothing. Timing is "at least 4 hours", plus scheduler delay.
 
 on:
   schedule:
@@ -26,7 +26,7 @@ jobs:
         with:
           script: |
             const marker = '<!-- bebop:issue-triage -->';
-            const minAgeMs = 12 * 60 * 60 * 1000;
+            const minAgeMs = 4 * 60 * 60 * 1000;
             const maintainers = ['prgrmrwy'];
             const agent = 'agent-bebop';
             const maxPerRun = 5;
@@ -44,7 +44,7 @@ jobs:
               await github.rest.issues.createComment({
                 ...context.repo,
                 issue_number: issue.number,
-                body: [marker, '@agent-bebop This issue has been open for 12 hours without a maintainer reply. Please investigate it and follow up here.'].join('\n\n')
+                body: [marker, '@agent-bebop This issue has been open for 4 hours without a maintainer reply. Please investigate it and follow up here.'].join('\n\n')
               });
               if (++handed >= maxPerRun) break;
             }
