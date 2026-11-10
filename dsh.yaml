@@ -213,6 +213,14 @@ customizations:
     enabled: true
     brief: Jev 流程选路 advisory(一行建议,无自动副作用)
     note: '自研,spec jev-workflow-routing。Phase 2 advisory(2026-10-29 用户批准,change make-jev-router-advisory):到达「直接改还是开 change」决策点时调用 pinned Jev MCP(见 thirdPartyResources jev;经 OpenRouter 转发,数据保留条款未单独复核,只发有界特征;凭据由 .env.local 注入 Host)给出**一行中文非阻断建议**,可无视;用户显式指定流程、任务已属既有 change、或非实施请求时零调用零输出;候选闭集 direct / 标准 OpenSpec / 原样 Anvil / 原样 spec-superflow;永不建 change、切 schema、调 ssf、开实施、放宽安全或合入门禁、归档清理,超出「给一行建议」的自动化须另开 change 并获批。延迟由 recorder 的 latency 子命令从会话事件日志 tool/call→tool/result 时间戳回填,不用 Agent 自我计时;会话日志用 Node 内置 zstd 逐帧解码(不依赖外部 zstd CLI)。升级复核:Jev MCP pin 变化时重核候选与输出契约。移除:enabled:false → dsh build。'
+  # 自研(local):建 OpenSpec change 时提醒 agent 先取一次 Jev 路由建议(post-execute 附通知,不阻断)
+  - id: jev-workflow-router-hook
+    type: package
+    source: local
+    version: 0.1.0
+    enabled: true
+    brief: 即将建 OpenSpec change 且未用过 router 时,提醒一次先取 Jev 路由建议
+    note: '自研,spec jev-workflow-routing(change add-jev-router-openspec-reminder-hook,用户 2026-11-10 批准)。Host 订阅 tools/post-execute:skill 加载 openspec-propose 或 bash 含 openspec new change,且该 agent 未加载过 jev-workflow-router、未调用过 *jev_classify/*jev_decide 时,在 additionalContexts 前附一条带来源标签的提醒,每 agent 至多一次;工具结果与下游 block 原样保留。永不拦截/改写,不调用 Jev,不写盘,不联网;状态仅在内存,Host 重启后恢复的会话可能多提醒一次。$DSH_HOME/skills/jev-workflow-router/SKILL.md 不存在或 DSH_JEV_WORKFLOW_ROUTER_DISABLED 为真时静默。升级复核:DSH tools/post-execute 与 PostToolDecision.additionalContexts 语义、skill/bash 参数名。移除:enabled:false → dsh build → 重启。'
   # 自研 skill:「统计一下召回」→ 跑 dsh-memex-recall-report 并按口径解读
   # 命令本身随 dsh-memex 包的 bin 分发(openspec 2026-09-24-memex-recall-report-cli);
   # 这里只提供触发词、定位命令的包装脚本与解读纪律。只读,不改卡片。

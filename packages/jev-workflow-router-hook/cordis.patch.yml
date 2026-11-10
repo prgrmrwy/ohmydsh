@@ -1,0 +1,7 @@
+# dsh-jev-workflow-router-hook bundle patch
+#
+# Mounts the host-only plugin as a profile bundle row. The ohmydsh manifest
+# (source: local) appends this package to the bundle stack automatically.
+- insert:
+    - id: dsh-jev-workflow-router-hook
+      name: dsh-jev-workflow-router-hook

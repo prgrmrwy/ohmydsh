@@ -210,6 +210,7 @@ tests/                   仓库级测试
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — 把驾驶舱的端口转发接入记忆卡片浏览。
 - [dsh-collab](packages/dsh-collab/README.md) — 让已有的独立会话通过邀请共享协作台账，并在下一回合唤醒成员。
 - [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — AUTO 下主模型不变、按回合只调整推理投入，并为 fresh 子任务选配模型与投入并展示决策；主判断失败即停用 AUTO 并提示原因，模型家族是 `src/strategies/` 中的数据。[独立仓库](https://github.com/prgrmrwy/dsh-auto-model-routing)。
+- [jev-workflow-router-hook](packages/jev-workflow-router-hook/README.md) — agent 即将创建 OpenSpec change 时提醒一次先取 Jev 路由建议；不阻断，也不自己调用 Jev。
 
 ### 自研 skill、preset 与 patch
 
