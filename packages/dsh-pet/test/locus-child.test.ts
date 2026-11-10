@@ -886,6 +886,25 @@ describe('probed host child seams', () => {
     expect(resumed?.agent).toEqual(parent())
   })
 
+  it('logs the controller refusal code, redacting session ids from an internal cause', async () => {
+    const REAL_ID = 'session-cc7e052a-c9bb-42b6-9449-7a56cf751dff'
+    const logs: string[] = []
+    const internal = probeLocusChildPorts(hostCtx({
+      sessionController: { resolveAgent: () => ({ error: Object.assign(new Error(`resume failed for session "${REAL_ID}": Error: boom`), { code: 'gateway/internal' }) }) },
+    }), message => logs.push(message))
+    await expect(internal.available
+      ? internal.ports.parent.resume({ resumeSessionId: PARENT_ID })
+      : undefined).resolves.toBeUndefined()
+    const held = probeLocusChildPorts(hostCtx({
+      sessionController: { resolveAgent: () => ({ error: Object.assign(new Error(`held ${REAL_ID}`), { code: 'session/writer-held' }) }) },
+    }), message => logs.push(message))
+    await (held.available ? held.ports.parent.resume({ resumeSessionId: PARENT_ID }) : undefined)
+
+    expect(logs[0]).toMatch(/^dsh-pet locus parent resume refused: gateway\/internal \(.*boom\)$/)
+    expect(logs[1]).toBe('dsh-pet locus parent resume refused: session/writer-held')
+    expect(logs.join('\n')).not.toContain(REAL_ID)
+  })
+
   it('treats a controller refusal and an absent controller as no parent', async () => {
     const refused = probeLocusChildPorts(hostCtx({
       sessionController: { resolveAgent: () => ({ error: 'not resumable' }) },

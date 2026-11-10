@@ -1788,7 +1788,7 @@ async function initialize(
    * launcher publishes it; the official pinned package does not, and remains
    * fail closed rather than relying on version strings or unknown fields.
    */
-  const locusChildProbe = probeLocusChildPorts(ctx as unknown as LocusHostContextLike)
+  const locusChildProbe = probeLocusChildPorts(ctx as unknown as LocusHostContextLike, petLog)
   const locusChildDelivery = locusChildProbe.available
     ? createLocusChildDelivery({
       // One adapter owns exactly one active child; use a factory so sibling
