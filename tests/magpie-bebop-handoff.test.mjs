@@ -3,9 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import yaml from 'js-yaml'
 
-const load = name => yaml.load(readFileSync(new URL(`../packages/dsh-magpie-connector/.github/workflows/${name}`, import.meta.url), 'utf8'))
+for (const pkg of ['dsh-magpie-connector', 'dsh-auto-model-routing']) {
+const load = name => yaml.load(readFileSync(new URL(`../packages/${pkg}/.github/workflows/${name}`, import.meta.url), 'utf8'))
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-const repo = { owner: 'prgrmrwy', repo: 'dsh-magpie-connector' }
+const repo = { owner: 'prgrmrwy', repo: pkg }
 const HOUR = 60 * 60 * 1000
 const core = { info() {}, warning() {} }
 
@@ -31,14 +32,14 @@ async function runHandoff(input) {
   return created
 }
 
-test('handoff runs hourly from trusted inline code with only issue write access', () => {
+test(`${pkg}: handoff runs hourly from trusted inline code with only issue write access`, () => {
   assert.deepEqual(handoff.on.schedule, [{ cron: '23 * * * *' }])
   assert.deepEqual(handoff.permissions, { issues: 'write' })
   assert.equal(handoff.jobs.handoff.steps.length, 1)
   assert.match(handoff.jobs.handoff.steps[0].uses, /^actions\/github-script@[a-f0-9]{40}/)
 })
 
-test('only open human issues older than 12 hours without a maintainer or agent reply are handed off once', async () => {
+test(`${pkg}: only open human issues older than 12 hours without a maintainer or agent reply are handed off once`, async () => {
   const created = await runHandoff({
     issues: [issue(1, 13), issue(2, 11), issue(3, 20, 'prgrmrwy'), issue(4, 20, 'dependabot[bot]'), issue(5, 20, 'reporter', { pull_request: {} }),
       issue(6, 20), issue(7, 20), issue(8, 20)],
@@ -49,7 +50,7 @@ test('only open human issues older than 12 hours without a maintainer or agent r
   assert.ok(created.every(c => c.body.includes(triage) && /@agent-bebop/.test(c.body)))
 })
 
-test('at most five issues are handed off per run', async () => {
+test(`${pkg}: at most five issues are handed off per run`, async () => {
   const created = await runHandoff({ issues: Array.from({ length: 8 }, (_, i) => issue(i + 1, 24)) })
   assert.equal(created.length, 5)
 })
@@ -57,30 +58,43 @@ test('at most five issues are handed off per run', async () => {
 const release = load('release.yml')
 const steps = release.jobs.publish.steps
 const reportStep = steps.find(step => step.name === 'Hand referenced Issues to Bebop')
-async function runReport(env, input) {
+async function runReport({ issues = '', commits = '', pullsByCommit = {}, closing = {}, ...input }) {
   const { github, created } = fakeGithub(input)
-  const previous = process.env.ISSUES
-  process.env.ISSUES = env
+  github.rest.repos = { listPullRequestsAssociatedWithCommit: async ({ commit_sha }) => ({ data: pullsByCommit[commit_sha] ?? [] }) }
+  github.graphql = async (_query, { number }) => ({ repository: { pullRequest: { closingIssuesReferences: { nodes: closing[number] ?? [] } } } })
+  const saved = { ISSUES: process.env.ISSUES, COMMITS: process.env.COMMITS }
+  process.env.ISSUES = issues; process.env.COMMITS = commits
   try { await new AsyncFunction('github', 'context', 'core', reportStep.with.script)(github, { repo, ref: 'refs/tags/v1.2.3' }, core) }
-  finally { if (previous === undefined) delete process.env.ISSUES; else process.env.ISSUES = previous }
+  finally { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v } }
   return created
 }
 
-test('release keeps its publishing permissions, adds issue write and full history', () => {
+test(`${pkg}: release keeps its publishing permissions, adds issue write and full history`, () => {
   assert.deepEqual(release.permissions, { contents: 'write', 'id-token': 'write', issues: 'write' })
   assert.equal(steps[0].with['fetch-depth'], 0)
   const collect = steps.find(step => step.id === 'refs')
-  assert.match(collect.run, /refs:\? \+\$GITHUB_REPOSITORY#\[0-9\]\+/)
+  assert.ok(collect.run.includes('(refs|close[sd]?|fix(e[sd])?|resolve[sd]?):? +$GITHUB_REPOSITORY#[0-9]+'))
   assert.match(reportStep.uses, /^actions\/github-script@[a-f0-9]{40}/)
 })
 
-test('release report hands each open referenced issue to Bebop once', async () => {
+test(`${pkg}: release report covers open and completed-closed issues once, skips PRs and not-planned`, async () => {
   const marker = '<!-- bebop:release-report v1.2.3 -->'
-  const created = await runReport('1 2 3 4 5', {
-    get: { 1: { state: 'open' }, 2: { state: 'closed' }, 3: { state: 'open', pull_request: {} }, 4: { state: 'open' } },
+  const created = await runReport({ issues: '1 2 3 4 5 6',
+    get: { 1: { state: 'open' }, 2: { state: 'closed', state_reason: 'completed' }, 3: { state: 'open', pull_request: {} },
+      4: { state: 'open' }, 6: { state: 'closed', state_reason: 'not_planned' } },
     comments: { 4: [{ user: { login: 'github-actions[bot]' }, body: marker }] },
   })
-  assert.deepEqual(created.map(c => c.issue_number), [1])
-  assert.ok(created[0].body.includes(marker))
-  assert.match(created[0].body, /@agent-bebop v1\.2\.3 has been released/)
+  assert.deepEqual(created.map(c => c.issue_number), [1, 2])
+  assert.ok(created.every(c => c.body.includes(marker) && /@agent-bebop v1\.2\.3 has been released/.test(c.body)))
 })
+
+test(`${pkg}: issues closed by merged PRs in the release are reported, other repositories ignored`, async () => {
+  const created = await runReport({ commits: 'a b',
+    pullsByCommit: { a: [{ number: 10, merged_at: '2026-11-10' }, { number: 11, merged_at: null }] },
+    closing: { 10: [{ number: 7, repository: { nameWithOwner: `prgrmrwy/${pkg}` } }, { number: 8, repository: { nameWithOwner: 'prgrmrwy/ohmydsh' } }],
+      11: [{ number: 9, repository: { nameWithOwner: `prgrmrwy/${pkg}` } }] },
+    get: { 7: { state: 'closed', state_reason: 'completed' }, 8: { state: 'open' }, 9: { state: 'open' } },
+  })
+  assert.deepEqual(created.map(c => c.issue_number), [7])
+})
+}

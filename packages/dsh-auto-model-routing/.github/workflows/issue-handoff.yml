@@ -1,0 +1,51 @@
+name: Hand stale issues to Bebop
+
+# Hourly: an open Issue that has waited 12 hours without a reply from the
+# maintainer or the agent is handed to the agent once with a fixed marker.
+# The agent's rule verifies the comment author and the Issue on GitHub; copying
+# the marker grants nothing. Timing is "at least 12 hours", plus scheduler delay.
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-handoff
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      # Trusted inline code only; nothing from issues is executed.
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const marker = '<!-- bebop:issue-triage -->';
+            const minAgeMs = 12 * 60 * 60 * 1000;
+            const maintainers = ['prgrmrwy'];
+            const agent = 'agent-bebop';
+            const maxPerRun = 5;
+            const now = Date.now();
+            const issues = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 });
+            let handed = 0;
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+              const author = issue.user?.login ?? '';
+              if (maintainers.includes(author) || author === agent || issue.user?.type === 'Bot' || author.endsWith('[bot]')) continue;
+              if (now - Date.parse(issue.created_at) < minAgeMs) continue;
+              const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: issue.number, per_page: 100 });
+              if (comments.some(comment => comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker))) continue;
+              if (comments.some(comment => maintainers.includes(comment.user?.login) || comment.user?.login === agent)) continue;
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issue.number,
+                body: [marker, '@agent-bebop This issue has been open for 12 hours without a maintainer reply. Please investigate it and follow up here.'].join('\n\n')
+              });
+              if (++handed >= maxPerRun) break;
+            }
+            core.info(`handed off ${handed} issue(s)`);
