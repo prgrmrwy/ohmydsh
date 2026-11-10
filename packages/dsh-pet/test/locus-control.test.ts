@@ -222,7 +222,7 @@ describe('unified locus command dispatcher', () => {
       })
       const result = await send(dispatcher, { kind: 'bind', prefix: 'abcdef' })
       expect(result).toMatchObject({ ok: false, reason: 'explicit-source-locked' })
-      expect(result.text).toBe('该群已由其它会话跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」。')
+      expect(result.text).toBe('该群已由其它会话跟进，不能在这里改绑；原会话归档后可在本入口 /bind 新会话，或在管理面「改绑到其他会话」。')
     })
 
     it('停止的入口重新绑定同一 W: receipt says re-enabled, read-only', async () => {

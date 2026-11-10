@@ -174,7 +174,7 @@ export interface CreateLocusControlDispatcherOptions {
 }
 
 export const LOCUS_EXPLICIT_PARENT_CONFLICT_TEXT =
-  '该群已由其它会话跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」。'
+  '该群已由其它会话跟进，不能在这里改绑；原会话归档后可在本入口 /bind 新会话，或在管理面「改绑到其他会话」。'
 export const LOCUS_ACCESS_APPLIED_TEXT = '已更新，下次唤醒时应用并核验；核验失败将拒绝服务。'
 export const LOCUS_DEPRECATED_COMMAND_TEXT = '该命令已不再改变状态，请改用 /access read|full。'
 
@@ -255,7 +255,7 @@ function mappedControlError(error: unknown): LocusControlDispatchResult | undefi
     return failure('stopped', '当前入口已停止；在该入口内对同一个会话重新 /bind 即可重新启用。')
   }
   if (code === 'SOURCE_ARCHIVED') {
-    return failure('source-archived', '来源会话已归档，请在管理面改绑。')
+    return failure('source-archived', '来源会话已归档；可在本入口 /bind 新会话 id 前缀改绑，或在管理面改绑。')
   }
   if (code === 'LOCUS_NOT_FOUND') {
     return failure('not-found', '当前入口不存在或已失效。')
@@ -329,6 +329,9 @@ function bindReceipt(
       : '已为该会话新建 locus 主会话。'
   // A document's /bind always restates who may ask (pet-locus-doc-comments D7).
   const disclosure = (isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : '') + `\n${LOCUS_BIND_SHARING_DISCLOSURE}`
+  if (result.rebound === true) {
+    return `${place}已改绑到主会话 ${source}（原来源会话已归档）；下一条消息会创建新的只读子会话。${disclosure}`
+  }
   if (result.reenabled === true) {
     return `${place}已重新启用，仍绑定主会话 ${source}；下一条消息会创建新的只读子会话。${migrated}${disclosure}`
   }

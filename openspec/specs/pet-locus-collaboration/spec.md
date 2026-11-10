@@ -845,7 +845,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 **群已存在且来源相同**时，新话题 SHALL 在群行的 M 下追加一行，MUST NOT 调用 `ensureLocusMain`，MUST NOT 创建任何外部资源，也不产生 provisioning 操作。
 
-**群已存在而显式 W 与群行的 W 不同**时，无论 `/bind` 发在话题里还是群本体，SHALL 在加群锁之后、解析 M 之前以 `EXPLICIT_PARENT_CONFLICT` 拒绝，不触碰 Host。回执 SHALL 写明“该群已由 <W 标签> 跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」”，MUST NOT 再使用“请先解除后再绑定”。同一 W 的 `/bind`：入口处于 `stopped` 时重新启用（见“换绑与归档按层处理”），否则幂等返回 reused。
+**群已存在而显式 W 与群行的 W 不同**时，无论 `/bind` 发在话题里还是群本体：若群行的 W **可证明已归档**，SHALL 先按“改绑到其他会话”（D6，以当前群行做 fence）把整群改绑到显式 W，再按同一 W 处理本入口，回执写明“已改绑到主会话 <W 标签>（原来源会话已归档）”；显式 W 的校验与普通 `/bind` 相同（子会话、locus 主会话、已归档目标均拒绝）。否则（W 在用或无法证明已归档）SHALL 在加群锁之后、解析 M 之前以 `EXPLICIT_PARENT_CONFLICT` 拒绝，不触碰 Host。回执 SHALL 写明“该群已由 <W 标签> 跟进，不能在这里改绑；原会话归档后可在本入口 /bind 新会话，或在管理面「改绑到其他会话」”，MUST NOT 再使用“请先解除后再绑定”。同一 W 的 `/bind`：入口处于 `stopped` 时重新启用（见“换绑与归档按层处理”），否则幂等返回 reused。
 
 #### Scenario: auto 建立
 - **WHEN** 一个从未关联的群收到所有者的首个 at
@@ -992,7 +992,7 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 不可用状态 SHALL 按层、按下列规则处理；所有写当前行的操作 SHALL 以 `{expectedLocusId, expectedRevision}` 做 CAS。
 
-- 工作主会话（W）被归档时，其全部入口 SHALL 停止服务，MUST NOT 改写行的 `state`；授权 at SHALL 得到有限次回执，说明来源会话已归档并提示所有者在管理面改绑；MUST NOT 自动复活或自动换来源。
+- 工作主会话（W）被归档时，其全部入口 SHALL 停止服务，MUST NOT 改写行的 `state`；授权 at SHALL 得到有限次回执，说明来源会话已归档，并提示所有者恢复该会话、在本入口 `/bind` 新会话或在管理面改绑；MUST NOT 自动复活或自动换来源。所有者在该入口内的 `/bind`、`/unbind`、`/help` SHALL 照常进入控制面（`/unbind` 停止本入口，作为不依赖管理面的出口）；其它普通 at 仍被拒绝。
 - 子会话组合失败 SHALL 只分两类：
   - **A 类**：子会话丢失，或身份无法证明 → 入口行置为 `invalid`，下一条授权 at SHALL **原地重建**：同一行预留新的 `sessionId`、`state = not-created`、`revision + 1`，`locusId` 不变，未注入的 backlog 改指新 `sessionId`（与创建失败轮换同一机制）；不影响同一 M 下的其它入口。
   - **B 类**：其它任何 `composeLocusChild`、访问策略（含 `accessMode` 回读不符、写开关关闭时遇到 `danger-full-access`）或 runtime 能力失败 → 拒绝发布，本次投递以确定性诊断失败结算，**入口行不改写**；首次创建时的失败按“子会话在首条消息到达时创建”轮换 `sessionId`，`accessMode` 与 `state` 不变。
@@ -1008,7 +1008,14 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 
 #### Scenario: 工作主会话归档
 - **WHEN** 工作主会话 W 被归档后，W 名下某群收到所有者 at
-- **THEN** 不投递给子会话，入口行 `state` 不被改写，群内收到“来源会话已归档，请在管理面改绑”回执；同一入口的后续 at 在达到次数上限后不再回执
+- **THEN** 不投递给子会话，入口行 `state` 不被改写，群内收到“来源会话已归档”回执并提示恢复、`/bind` 或管理面改绑；同一入口的后续 at 在达到次数上限后不再回执
+
+#### Scenario: 来源已归档时入口内改绑与停止
+- **GIVEN** 群行的 W1 已归档，机器人显示名含空格（如 `@devbox 小灵通`）
+- **WHEN** 所有者在该群发送 `@devbox 小灵通 /bind <W2 前缀>`
+- **THEN** 命令被识别（按事件 `mentions` 的完整显示名剥离前导 mention），整群改绑到 W2，回执写明已改绑且原来源会话已归档
+- **WHEN** 所有者改为发送 `@devbox 小灵通 /unbind`
+- **THEN** 命令进入控制面，入口空闲时被停止，回执说明已停止
 
 #### Scenario: 子会话不可用只换该入口一代
 - **GIVEN** locus 主会话 M 下有入口 A、B，二者均为 `active`，A 的子会话丢失（A 类），被判 `invalid`

@@ -2174,7 +2174,7 @@ async function initialize(
       },
       bind: {
         bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
-          const run = (): Promise<EnsureGroupResult | EnsureTopicResult> => endpoint.threadId === undefined
+          const ensure = (): Promise<EnsureGroupResult | EnsureTopicResult> => endpoint.threadId === undefined
             ? locusProvisioningController.ensureGroup({
               chatId: endpoint.chatId,
               parentSessionId,
@@ -2186,6 +2186,16 @@ async function initialize(
               parentSessionId,
               ...(chatName === undefined ? {} : { chatName }),
             })
+          // The chat's W is archived and a different session was named: move
+          // the chat first (D6, fenced), then the ordinary ensure is same-W.
+          const run = async (): Promise<EnsureGroupResult | EnsureTopicResult> => {
+            const rebound = await locusProvisioningController.rebindArchivedChatForBind({
+              chatId: endpoint.chatId,
+              workSessionId: parentSessionId,
+            })
+            const result = await ensure()
+            return rebound === undefined ? result : { ...result, rebound: true as const }
+          }
           return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
       },

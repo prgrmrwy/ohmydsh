@@ -496,6 +496,33 @@ describe('unified Locus admission', () => {
     },
   )
 
+  it('lets an allowlisted /unbind out of a retired entry, never a stranger', () => {
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: OWNER, content: '@Pet /unbind' }),
+      context({ authorizationState: 'retired' }),
+    )).toMatchObject({ admit: true, authorization: 'retired', command: { kind: 'unbind' } })
+    expect(admitLocusEvent(
+      groupEvent({ sender_id: STRANGER, content: '@Pet /unbind' }),
+      context({ authorizationState: 'retired' }),
+    )).toMatchObject({ admit: false, reason: 'control-not-allowed' })
+  })
+
+  it('recognises commands after a bot display name that contains a space', () => {
+    const spaced = (content: string) => groupEvent({
+      sender_id: OWNER,
+      content,
+      mentions: [{ id: BOT, key: '@_user_1', name: 'devbox 小灵通' }],
+    })
+    expect(admitLocusEvent(spaced('@devbox 小灵通 /bind fd7a21'), context({ authorizationState: 'retired' })))
+      .toMatchObject({ admit: true, command: { kind: 'bind', prefix: 'fd7a21' } })
+    expect(admitLocusEvent(spaced('@devbox 小灵通 /unbind'), context({ authorizationState: 'retired' })))
+      .toMatchObject({ admit: true, command: { kind: 'unbind' } })
+    // Ordinary text after the spaced name stays ordinary.
+    expect(parseLocusControlCommand('@devbox 小灵通 帮我看看', ['devbox 小灵通'])).toEqual({ kind: 'none' })
+    // A name is matched whole: `@devbox 小灵通x` is not the bot's mention.
+    expect(parseLocusControlCommand('@devbox 小灵通x /bind abc123', ['devbox 小灵通'])).toEqual({ kind: 'none' })
+  })
+
   it('uses the exact endpoint for authorization, not a broad old chat predicate', () => {
     const seen: string[] = []
     const result = admitLocusEvent(

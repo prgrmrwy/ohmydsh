@@ -187,3 +187,39 @@ describe.each(BACKENDS)('改绑到其他会话 [%s]', which => {
     expect(t.repository.findMain('M-w2')!.status).toBe('active')
   })
 })
+
+describe.each(BACKENDS)('入口内 /bind 改绑已归档来源 [%s]', which => {
+  beforeEach(() => { backend = which })
+
+  it('W 已归档且指定其它会话：整群改绑，随后同 W 的 ensure 复用', async () => {
+    const { t, controller } = await setup()
+    const rebound = await controller.rebindArchivedChatForBind({ chatId: 'oc_1', workSessionId: 'W2' })
+    expect(rebound).toBeDefined()
+    const group = t.repository.getRow({ chatId: 'oc_1' })!
+    if (!('locusMainSessionId' in group)) throw new Error('group row expected')
+    expect(t.repository.findMain(group.locusMainSessionId)!.workSessionId).toBe('W2')
+    expect(group.reboundFrom).toBe('W1')
+    const ensured = await controller.ensureGroup({ chatId: 'oc_1', parentSessionId: 'W2' })
+    expect(ensured.reused).toBe(true)
+  })
+
+  it('W 未归档：不改绑，普通 ensure 仍以 EXPLICIT_PARENT_CONFLICT 拒绝', async () => {
+    const t = await Topology.open({}, backend)
+    await t.seedMain('W1', 'M-old')
+    await t.seedGroup('oc_1', 'M-old', 'proj-1', { revision: 1 })
+    const controller = new LocusController(t.deps())
+    await expect(controller.rebindArchivedChatForBind({ chatId: 'oc_1', workSessionId: 'W2' })).resolves.toBeUndefined()
+    await expect(controller.ensureGroup({ chatId: 'oc_1', parentSessionId: 'W2' }))
+      .rejects.toMatchObject({ code: 'EXPLICIT_PARENT_CONFLICT' })
+  })
+
+  it('同一个已归档 W：不改绑', async () => {
+    const { controller } = await setup()
+    await expect(controller.rebindArchivedChatForBind({ chatId: 'oc_1', workSessionId: 'W1' })).resolves.toBeUndefined()
+  })
+
+  it('没有群行：不改绑', async () => {
+    const { controller } = await setup()
+    await expect(controller.rebindArchivedChatForBind({ chatId: 'oc_none', workSessionId: 'W2' })).resolves.toBeUndefined()
+  })
+})

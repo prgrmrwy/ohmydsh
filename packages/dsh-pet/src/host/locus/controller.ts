@@ -169,6 +169,8 @@ export interface EnsureGroupResult {
   readonly reenabled?: true
   /** `/bind` found the W's M unavailable and migrated the whole W first (D6). */
   readonly migration?: LocusMigrationNote
+  /** The chat was moved off its archived W by this in-entry `/bind` (D6). */
+  readonly rebound?: true
 }
 
 export interface EnsureTopicResult {
@@ -181,6 +183,7 @@ export interface EnsureTopicResult {
   readonly reenabled?: true
   /** `/bind` found the W's M unavailable and migrated the whole W first (D6). */
   readonly migration?: LocusMigrationNote
+  readonly rebound?: true
 }
 
 export interface DefaultQaRequest {
@@ -545,7 +548,7 @@ export class LocusController {
     if (main.workSessionId !== explicit) {
       throw new LocusControllerError(
         'EXPLICIT_PARENT_CONFLICT',
-        `该群已由 ${shortLocusSessionLabel(main.workSessionId)} 跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」。`,
+        `该群已由 ${shortLocusSessionLabel(main.workSessionId)} 跟进，不能在这里改绑；原会话归档后可在本入口 /bind 新会话，或在管理面「改绑到其他会话」。`,
       )
     }
     if (target === undefined || target.state !== 'stopped') return undefined
@@ -763,6 +766,35 @@ export class LocusController {
     })
   }
 
+  /**
+   * In-entry `/bind` onto a DIFFERENT work session. Only when the chat's
+   * current W is provably archived does this rebind the chat (the same D6 path
+   * as the management surface, fenced on the group row as read now). Any other
+   * case returns undefined and the caller's ordinary ensure path decides: a
+   * live or unprovable W still refuses with `EXPLICIT_PARENT_CONFLICT`.
+   */
+  async rebindArchivedChatForBind(request: {
+    readonly chatId: string
+    readonly workSessionId: string
+  }): Promise<RebindChatResult | undefined> {
+    const chatId = requireNonEmpty(request.chatId, 'chatId')
+    const targetId = requireNonEmpty(request.workSessionId, 'workSessionId')
+    const group = this.repo.getRow({ chatId })
+    if (group === undefined || !isGroupRow(group)) return undefined
+    const main = this.repo.findMain(group.locusMainSessionId)
+    if (main === undefined || main.workSessionId === targetId) return undefined
+    if (!(await this.isArchivedSession(main.workSessionId))) return undefined
+    // Same refusal vocabulary as an ordinary explicit `/bind` (child session,
+    // locus main, archived target), not the management surface's INVALID_REQUEST.
+    await this.resolveWorkSession(targetId, '显式 parent')
+    return this.rebindChat({
+      chatId,
+      workSessionId: targetId,
+      expectedLocusId: group.locusId,
+      expectedRevision: group.revision,
+    })
+  }
+
   // -- stop (D7) -----------------------------------------------------------
 
   /** Idle-only stop of one row; a group row's stop never touches its topic rows. */
@@ -815,7 +847,7 @@ export class LocusController {
         throw new LocusControllerError(
           disposition.workArchived ? 'SOURCE_ARCHIVED' : endpoint.threadId === undefined ? 'GROUP_UNAVAILABLE' : 'TOPIC_UNAVAILABLE',
           disposition.workArchived
-            ? '来源会话已归档，请在管理面改绑。'
+            ? '来源会话已归档；可在本入口 /bind 新会话 id 前缀改绑，或在管理面改绑。'
             : `入口 ${endpointLabel(endpoint)} ${disposition.reason}，不会静默重建。`,
         )
       case 'replace': {
