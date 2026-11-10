@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.12 — 2026-11-11
 
 - **修复模型请求绕过宿主全局 fetch 上下文处理的问题（prgrmrwy/dsh-magpie-connector#7）。** `POST /responses` 和 `POST /chat/completions` 在发送时读取全局 `fetch`，使 billion-context 等宿主中间件能够处理模型请求；目录、额度与重置等管理请求仍直接调用 undici。保留专用 dispatcher、连接超时、认证与归属 headers、禁止重定向、取消信号和错误分类。
 - **修复使用 Codex 重置卡时，最终校验与不可逆提交可能切换线路或凭据身份。** 确认票据仅在 host 绑定连接版本；提交前重读与重置请求保留同一连接身份，并再次检查线路选择、地址和凭据。身份变化时拒绝旧票据并要求重新确认，不向新身份提交或自动重放。
