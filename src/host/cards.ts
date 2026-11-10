@@ -122,19 +122,21 @@ export class CardsController {
    * A forced read of one card for the reset flow: same gate as a user refresh, so
    * it never runs beside one. Only a 2xx result counts — a failed read leaves the
    * previous (older) cards in place, and those must not authorise spending a
-   * credit, so every failure is returned as such.
+   * credit, so every failure is returned as such. A caller-supplied operation stays
+   * retained by that caller through its subsequent write and response projection.
    */
-  async fresh(target:{provider:string;user:string}):Promise<{ok:true;card:Card|undefined;credits:HostCredit[]}|{ok:false;status:number;error:string}> {
-    const op=await this.runtime.beginOperation()
+  async fresh(target:{provider:string;user:string},operation?:Operation):Promise<{ok:true;card:Card|undefined;credits:HostCredit[]}|{ok:false;status:number;error:string}> {
+    const op=operation ?? await this.runtime.beginOperation()
     try {
       let result:Result
       try {result=await this.run(op,target)} catch(error) {
         return {ok:false,status:502,error:this.runtime.redact(error instanceof Error?error.message:String(error))}
       }
+      if (!this.runtime.isCurrent(op.gen)) return {ok:false,status:409,error:'MAGPIE_GENERATION_CHANGED'}
       if (result.status!==200 || result.body.status!=='ok') return {ok:false,status:result.status,error:result.body.error ?? `HTTP ${result.status}`}
       const key=creditKey(target.provider,target.user)
       return {ok:true,card:result.body.cards.find(card=>card.provider===target.provider && card.user===target.user),credits:this.state(op.gen).credits.get(key) ?? []}
-    } finally {op.release()}
+    } finally {if (!operation) op.release()}
   }
   /** Validate + run one read under the caller's operation; shared by `refresh` and `fresh`. */
   private async run(op:Operation,body:unknown):Promise<Result> {
@@ -146,7 +148,7 @@ export class CardsController {
       if (gate) {
         const covers='all' in gate.target || (!('all' in target) && gate.target.provider===target.provider && gate.target.user===target.user)
         const result=await gate.promise
-        if (covers) return result
+        if (covers) return this.runtime.isCurrent(op.gen) ? result : this.stale()
         continue
       }
       const gateNew={target,promise:Promise.resolve(this.stale())}
