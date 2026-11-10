@@ -1,6 +1,6 @@
 {
   "name": "dsh-worktree-session",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Start a blank DSH session in an isolated Git worktree with recoverable npm and environment preparation",
   "license": "MIT",
   "type": "module",

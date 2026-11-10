@@ -87,10 +87,10 @@ customizations:
   - id: worktree-session
     type: package
     source: local
-    version: 0.1.0
+    version: 0.1.1
     enabled: true
     brief: Worktree Session 首发隔离(task branch/lean deps/独立 build home)
-    note: '自研,spec source-workspace-worktree-session。首次普通发送时创建唯一 ws/* 分支与 .worktrees/* checkout,不切换主 checkout;npm/pnpm 默认 lean 依赖,变更依赖前须先 promote;.env.local 仅同步 Git 忽略的文件并写入隔离 DSH_HOME。已绑定会话的文件/搜索/Bash 限制在 worktree 内;ws 的显式 path 须用户一次性授权;clean 拒绝 dirty/未合入/活跃项,不删远端分支。概念参考 LaoYueHanNi/dsh-git-worktree(MIT,见 packages/worktree-session/NOTICE)。升级复核:每次 DSH 升级重做工具契约与生命周期接缝的回归审计。移除:enabled:false → dsh build。'
+    note: '自研,spec source-workspace-worktree-session。首次普通发送时创建唯一 ws/* 分支与 .worktrees/* checkout,不切换主 checkout;npm/pnpm 默认 lean 依赖,变更依赖前须先 promote;.env.local 仅同步 Git 忽略的文件并写入隔离 DSH_HOME。首条消息中的官方 @ 引用随草稿一次提交,文件/目录引用由绑定上下文映射到 worktree,不读取主 checkout。已绑定会话的文件/搜索/Bash 限制在 worktree 内;ws 的显式 path 须用户一次性授权;clean 拒绝 dirty/未合入/活跃项,不删远端分支。概念参考 LaoYueHanNi/dsh-git-worktree(MIT,见 packages/worktree-session/NOTICE)。升级复核:每次 DSH 升级重做工具契约与生命周期接缝的回归审计。移除:enabled:false → dsh build。'
   # 自研(local):已有独立会话共享协作台账，默认不部署。
   - id: dsh-collab
     type: package

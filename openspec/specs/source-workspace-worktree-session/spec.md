@@ -9,7 +9,7 @@
 ### Requirement: Worktree Session remains in the source Workspace
 系统 SHALL 在源 Workspace 的空白 Session 中完成 Worktree 启动，而不得为新启动流程注册第二个 Workspace 或创建第二个 Session。准备成功后，首条消息 SHALL 通过原 Session 的官方提交路径发送，Session 的 Workspace 归属 SHALL 保持不变。
 
-首条消息 SHALL 将发送时已确认可用的完整草稿载荷作为一个原子交接单元处理，包括文本以及运行体支持的图片、普通文件或其它 generic attachments。插件 SHALL 冻结并转交官方 draft attachment identifiers，准备成功后只调用一次官方 submit；attempt 身份、上传恢复、echo retirement 与失败时保留草稿 SHALL 由目标运行体公开的官方 attachment/input 生命周期承担。插件 MUST NOT 创建第二套跨重试 operation/upload 确认协议。准备或官方提交失败时不得丢失附件、重复提交或降级到主 checkout。
+首条消息 SHALL 将发送时已确认可用的完整草稿载荷作为一个原子交接单元处理，包括文本、运行体官方的 `@` 引用（文件、目录与 Session 引用）以及运行体支持的图片、普通文件或其它 generic attachments。插件 SHALL 冻结并转交官方 draft attachment identifiers，准备成功后只调用一次官方 submit；官方 `@` 引用 SHALL 由目标运行体的官方提交生命周期解析与序列化，插件 MUST NOT 拒绝、剥离、改写或以字符串降级替换引用。attempt 身份、上传恢复、echo retirement 与失败时保留草稿 SHALL 由目标运行体公开的官方 attachment/input 生命周期承担。插件 MUST NOT 创建第二套跨重试 operation/upload 确认协议。准备或官方提交失败时不得丢失附件、重复提交或降级到主 checkout。
 
 #### Scenario: Successful in-place Worktree start
 - **WHEN** 用户在源 Workspace 的空白 Session 选择 base、启用 Worktree 并发送首条消息
@@ -32,6 +32,11 @@
 - **WHEN** 用户未启用 Worktree 并发送消息
 - **THEN** 系统 SHALL 完全沿用普通 Session 的 generic attachment 提交行为且不得创建或绑定 worktree
 
+#### Scenario: First message carries official @ references
+- **WHEN** 用户通过官方 `@` 菜单插入文件、目录或 Session 引用，启用 Worktree 并发送首条消息
+- **THEN** 系统 SHALL 在一次官方提交中发送包含引用的完整草稿，引用由官方提交生命周期解析与序列化，插件不得拒绝或改写引用
+- **THEN** 绑定后的稳定模型上下文 SHALL 说明文件、目录引用以源仓库根为路径基准，并须在使用前映射到托管执行目录
+
 ### Requirement: Session-to-worktree binding is durable and exclusive
 系统 SHALL 持久保存源 Session id、operation id、源仓库、worktree 路径和 task branch 的绑定。一个活动 Session 在同一时刻 MUST 只绑定一个未清理 worktree，一个未清理 operation MUST 只绑定一个源 Session。
 
@@ -48,7 +53,7 @@
 - **THEN** 系统 SHALL 拒绝请求并返回可诊断冲突，不得覆盖既有绑定
 
 ### Requirement: Stable model context describes only durable execution invariants
-系统 SHALL 为已绑定 Session 提供模型可见的 worktree 执行约束，至少包含源仓库、绑定 worktree、task branch、主 checkout 禁写和依赖变更前 promote 规则。该上下文 MUST 排除时间戳、实时阶段、dirty 状态、当前 HEAD、错误文本和 lean/mutable 等易变字段。
+系统 SHALL 为已绑定 Session 提供模型可见的 worktree 执行约束，至少包含源仓库、绑定 worktree、task branch、主 checkout 禁写、依赖变更前 promote 规则，以及官方 `@` 文件/目录引用的路径映射基准。该上下文 MUST 排除时间戳、实时阶段、dirty 状态、当前 HEAD、错误文本和 lean/mutable 等易变字段。
 
 #### Scenario: Unchanged binding across turns
 - **WHEN** 已绑定 Session 开始后续 turn 且稳定绑定内容未变化
@@ -65,6 +70,11 @@
 #### Scenario: Dependency mutation is refused in lean mode
 - **WHEN** 已绑定的 pnpm 项目处于 lean 状态，Agent 尝试修改依赖（如编辑 `package.json` 或 `pnpm-lock.yaml` 后直接安装）
 - **THEN** Worktree Session 执行保护 SHALL 要求先 promote 为 mutable，与 npm 项目的既有规则一致
+
+#### Scenario: Bound context maps official @ file references into the worktree
+- **WHEN** 为活动绑定生成稳定模型上下文，且用户消息携带官方 `@` 文件或目录引用
+- **THEN** 上下文 SHALL 说明引用路径以源仓库根为基准、使用前必须映射到托管执行目录中的绝对路径，且不得把主 checkout 当作可读来源
+- **THEN** 上下文 MUST 区分 `@` Session 引用：其不含路径，按官方引用语义处理
 
 ### Requirement: Worktree reply file links distinguish their base from tool paths
 

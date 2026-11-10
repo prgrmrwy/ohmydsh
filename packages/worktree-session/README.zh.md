@@ -27,6 +27,8 @@ Worktree Session（WS）让**一个 Git 仓库只对应一个 DSH Workspace**。
 
 准备与交接都可恢复且 fail closed。如果准备或绑定失败，源草稿和所有官方通用附件都保持原样，不会从仓库 checkout 提交。准备并绑定之后，WS 只调用一次官方 SessionInput 的提交；尝试次数、上传、回执、重试、回显收尾和草稿恢复都由 DSH 负责。
 
+官方 `@` 引用与附件属于同一份草稿载荷。WS 既不拒绝也不改写引用：常规提交会在绑定之后解析并序列化它们，草稿因此保留引用 chip 和官方重试语义。文件或目录引用以 workspace 根为基准，所以绑定后的稳定上下文要求 Agent 在每次文件工具调用前把引用路径映射到托管 worktree；Session 引用不含路径，保持官方语义。
+
 项目类型在创建任何分支、worktree、operation 文件或绑定之前，依据仓库根目录的 lockfile 解析。只有一个 `package-lock.json` 或 `pnpm-lock.yaml` 时，分别选择 npm 或 pnpm。两个 lockfile 同时存在时，WS 先采信 `package.json` 中受支持的 `packageManager` 声明，再在恰好一个 lockfile 被 Git 跟踪时采用被跟踪的那个；所选包管理器与被忽略的 lockfile 会记入 operation 诊断。如果没有唯一信号能证明仓库意图，WS 会拒绝请求，而不是猜一个默认包管理器。两个 lockfile 都没有的仓库会在创建任何资源之前以 `UNSUPPORTED_PROJECT` 诊断被拒绝。
 
 在空白会话的界面里，base ref 选择器把每个 ref 显示在单行内（超出以省略号截断，hover 显示全名）。选择 ref 只是暂存选择，没有任何 Git 副作用。
@@ -92,7 +94,7 @@ hook 以当前用户身份执行，**不是安全沙箱**。接入方须保证�
 - **委派。** 只允许上文配置的、经审计的 `subagent`，后台与前台（`run_in_background: false`）均可：两者都经 `agents.create` 创建子 Agent，由 `agent/created` 钩子在首个 prompt 前装入绑定。`subagent_fork`、`subagent_codex` 这类一次性 provider 以及未知的委派类工具一律拒绝，因为无法证明子 Agent 在首步前继承了托管根。`send_message` 不受影响。
 - **未审计的工具。** 不在审计清单内的工具默认不受影响，除非其参数暴露了路径、cwd、命令等本地能力——此时在复核之前一律拒绝。
 - **已清理的绑定。** 清理之后，针对旧执行根的所有工具一律拒绝。
-- **稳定上下文。** 对模型可见的上下文只包含持久不变量：仓库根、托管 worktree 根、任务分支、禁止使用主 checkout、显式路径规则，以及变更依赖前先 promote 的指引。分支状态、dirty 状态、时间戳、生命周期阶段、诊断和 lean/mutable 模式属于元数据/UI 或按需的状态输出。
+- **稳定上下文。** 对模型可见的上下文只包含持久不变量：仓库根、托管 worktree 根、任务分支、禁止使用主 checkout、显式路径规则、官方 `@` 文件/目录引用映射，以及变更依赖前先 promote 的指引。分支状态、dirty 状态、时间戳、生命周期阶段、诊断和 lean/mutable 模式属于元数据/UI 或按需的状态输出。
 
 ## 维护与清理
 

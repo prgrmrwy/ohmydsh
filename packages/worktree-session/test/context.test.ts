@@ -62,6 +62,18 @@ describe('Worktree Session stable runtime context', () => {
     expect(boundContextText(cleaned, bindingOf(cleaned))).not.toContain('[报告](docs/report.md)')
   })
 
+  it('maps official @ file references into the managed worktree for every bound Session', () => {
+    const record = operation({ binding: { mode: 'source-session', sourceSessionId: 'session-a', state: 'bound', updatedAt: '2026-01-01T00:00:00.000Z' } })
+    const text = activeBindingContext(record)
+    expect(text).toContain('@ 文件/目录引用以源仓库根为路径基准')
+    expect(text).toContain('@docs/report.md 对应 <托管执行目录>/docs/report.md')
+    expect(text).toContain('worktree 内容来自录制 base commit')
+    expect(text).toContain('不得改为读取主 checkout')
+    expect(text).toContain('@ Session 引用不含路径')
+    const cleaned = operation({ binding: { ...record.binding!, state: 'cleaned' } })
+    expect(boundContextText(cleaned, bindingOf(cleaned))).not.toContain('@ 文件/目录引用以源仓库根为路径基准')
+  })
+
   it('returns undefined when no source-session binding exists', () => {
     const unbound = operation({ binding: undefined })
     expect(boundContextText(unbound, bindingOf(unbound))).toBeUndefined()
