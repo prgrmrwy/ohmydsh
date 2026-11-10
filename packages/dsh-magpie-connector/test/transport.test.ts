@@ -1,10 +1,10 @@
-import { afterEach, expect, test } from 'vitest'
-import { MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici'
+import { afterEach, expect, test, vi } from 'vitest'
+import { Dispatcher1Wrapper, MockAgent, getGlobalDispatcher, setGlobalDispatcher } from 'undici'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import { GatewayTransport } from '../src/host/transport.js'
 import { createGateway, json } from './support/gateway.js'
 const cleanup: (() => Promise<unknown>)[] = []
-afterEach(async () => { for (const f of cleanup.splice(0).reverse()) await f() })
+afterEach(async () => { vi.unstubAllGlobals(); for (const f of cleanup.splice(0).reverse()) await f() })
 async function setup() { const g = await createGateway(); const t = new GatewayTransport(); cleanup.push(g.close, () => t.dispose()); return { g, t, identity: { baseUrl: g.baseUrl, key: 'mk-placeholder' } } }
 test('spec Scenario "完整流程只触达白名单"', async () => {
   const { g, t, identity } = await setup()
@@ -34,13 +34,76 @@ test('spec Scenario "重置端点的 query 受限"', async () => {
   expect(g.requests.at(-1)?.path).toBe('/v1/magpie/quotas/codex-reset')
   expect(g.requests.at(-1)?.query).toBe('?user=a%40b.com&credit=r1')
 })
-test('spec Scenario "重定向不被跟随"', async () => {
+test.each(['/responses', '/chat/completions'])('spec Scenario "重定向不被跟随": %s', async path => {
   const { g, t, identity } = await setup(); const other = await createGateway(); cleanup.push(other.close)
   for (const location of [other.baseUrl, '/api/usage']) {
-    g.handlers.set('POST /v1/responses', res => { res.writeHead(307, { location }); res.end() })
-    await expect(t.request(identity, 'POST', '/responses', { body: '{}' })).rejects.toThrow('重定向')
+    g.handlers.set(`POST /v1${path}`, res => { res.writeHead(307, { location }); res.end() })
+    await expect(t.request(identity, 'POST', path, { body: '{}' })).rejects.toThrow('重定向')
   }
-  expect(other.requests).toHaveLength(0); expect(g.requests.every(r => r.path === '/v1/responses')).toBe(true)
+  expect(other.requests).toHaveLength(0); expect(g.requests.every(r => r.path === `/v1${path}`)).toBe(true)
+})
+test('model requests use middleware installed after transport and fetchFor creation', async () => {
+  const { g, t, identity } = await setup()
+  const fetchFor = t.fetchFor(identity), original = globalThis.fetch
+  for (const path of ['/responses', '/chat/completions']) {
+    g.handlers.set(`POST /v1${path}`, json({ ok: true }))
+    // Replace the wrapper between requests too: neither the module nor fetchFor may cache it.
+    const intercepted = vi.fn<typeof fetch>(async (input, init) => {
+      const body = { ...JSON.parse(String(init?.body)), context: 'processed' }
+      return original(input, { ...init, body: JSON.stringify(body) })
+    })
+    vi.stubGlobal('fetch', intercepted)
+    const response = await fetchFor(identity.baseUrl + path, { method: 'POST', body: '{"model":"test"}' })
+    expect(await response.json()).toEqual({ ok: true })
+    expect(intercepted).toHaveBeenCalledTimes(1)
+    expect(g.requests.at(-1)).toMatchObject({ body: { model: 'test', context: 'processed' }, headers: { authorization: 'Bearer mk-placeholder' } })
+    for (const [key, value] of Object.entries(attributionHeaders())) expect(g.requests.at(-1)?.headers[key]).toBe(value)
+  }
+})
+test('management endpoints bypass global fetch middleware', async () => {
+  const { g, t, identity } = await setup()
+  const intercepted = vi.fn<typeof fetch>(async () => { throw new Error('model middleware must not receive management requests') })
+  vi.stubGlobal('fetch', intercepted)
+  for (const [method, path] of [
+    ['GET', '/models'], ['GET', '/magpie/quotas/cards'], ['POST', '/magpie/quotas/refresh'],
+    ['POST', '/magpie/quotas/codex-reset?user=test&credit=one'],
+  ] as const) {
+    g.handlers.set(`${method} /v1${path.split('?')[0]}`, json({}))
+    expect(await (await t.request(identity, method, path)).json()).toEqual({})
+  }
+  await expect(t.request(identity, 'POST', '/responses?unexpected=1')).rejects.toThrow('MAGPIE_QUERY_FORBIDDEN')
+  await expect(t.request(identity, 'POST', '/forbidden')).rejects.toThrow('MAGPIE_ENDPOINT_FORBIDDEN')
+  expect(intercepted).not.toHaveBeenCalled()
+  expect(g.requests).toHaveLength(4)
+})
+test('model middleware retains the dedicated dispatcher and redirect policy', async () => {
+  const { g, t, identity } = await setup(), originalFetch = globalThis.fetch
+  const originalDispatcher = getGlobalDispatcher(), proxy = new MockAgent()
+  proxy.disableNetConnect(); setGlobalDispatcher(proxy)
+  cleanup.push(async () => { setGlobalDispatcher(originalDispatcher); await proxy.close() })
+  const intercepted = vi.fn<typeof fetch>(async (input, init) => {
+    expect(init).toMatchObject({ dispatcher: expect.any(Dispatcher1Wrapper), redirect: 'error' })
+    return originalFetch(input, init)
+  })
+  vi.stubGlobal('fetch', intercepted)
+  for (const path of ['/responses', '/chat/completions']) {
+    g.handlers.set(`POST /v1${path}`, json({}))
+    expect(await (await t.request(identity, 'POST', path)).json()).toEqual({})
+  }
+  expect(intercepted).toHaveBeenCalledTimes(2)
+  expect(g.requests).toHaveLength(2)
+})
+test.each(['/responses', '/chat/completions'])('model middleware preserves caller and transport cancellation: %s', async path => {
+  const { g, t, identity } = await setup(), original = globalThis.fetch
+  const intercepted = vi.fn<typeof fetch>((input, init) => original(input, init))
+  vi.stubGlobal('fetch', intercepted)
+  const caller = new AbortController()
+  caller.abort()
+  await expect(t.request(identity, 'POST', path, { signal: caller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+  t.signal.abort()
+  await expect(t.request(identity, 'POST', path)).rejects.toMatchObject({ name: 'AbortError' })
+  expect(intercepted).toHaveBeenCalledTimes(2)
+  expect(g.requests).toHaveLength(0)
 })
 test('spec Scenario "存在全局代理时仍直连"', async () => {
   const { g, t, identity } = await setup(); const original = getGlobalDispatcher(); const proxy = new MockAgent(); proxy.disableNetConnect(); setGlobalDispatcher(proxy)

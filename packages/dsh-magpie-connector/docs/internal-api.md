@@ -107,7 +107,7 @@ Core advertises current catalog via `listModels()` and resolves `entry.info`. Fe
 
 ## Transport
 
-`GatewayTransport.request({baseUrl,key}, method, path, init?)` is the only outbound transport. `fetchFor(identity)` returns the same captured-identity transport as a standard fetch for pi-ai `options.fetch`.
+`GatewayTransport.request({baseUrl,key}, method, path, init?)` is the only outbound transport. `fetchFor(identity)` returns the same captured-identity transport as a standard fetch for pi-ai `options.fetch`. Model requests (`POST /responses` and `POST /chat/completions`) read `globalThis.fetch` at send time so host context middleware can intercept them, including wrappers installed after transport creation. Management requests use undici's direct fetch. Model requests pass a `Dispatcher1Wrapper` over the private undici 8 Agent for Node's built-in fetch dispatcher compatibility; management requests use the Agent directly. Both paths retain the same connection timeout and request safeguards.
 
 Allowed relative paths/methods:
 
