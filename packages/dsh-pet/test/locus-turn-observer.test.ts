@@ -505,7 +505,7 @@ describe('sanitized historical finish-refusal sequences', () => {
     })
   })
 
-  it('continues only on a later agent-message after the original turn ends', () => {
+  it('spec Scenario "跨 turn 父回复继续 current Delivery"', () => {
     const fixture = LOCUS_FINISH_HISTORY.continuation
     const h = harness({ deliveries: {
       [fixture.deliveryMessageId]: { deliveryId: fixture.deliveryId, executionId: fixture.executionId },
@@ -673,15 +673,21 @@ describe('Non-routing context does not poison reply authority', () => {
     })
   })
 
-  it('does not create authority from an agent-message without a Delivery', () => {
+  it('spec Scenario "单独的 agent 消息不能获得飞书能力"', () => {
     const h = harness()
 
     h.claim({ childSessionId: CHILD, messageId: 'parent-answer', turn: 1, sourceKind: 'agent-message' })
 
+    // No reply target is established: neither the turn nor the child has a
+    // capability, so finish/wait (which resolve their target from it) refuse.
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toBeUndefined()
+    expect(h.observer.deliveryForTurn?.(CHILD, 1)).toBeUndefined()
+    expect(h.observer.inspectCurrentCapabilityForChild?.(CHILD)).toEqual({ ok: false, reason: 'no-current' })
+    expect(h.events).toEqual([])
   })
 
-  it('still withholds authority for a user-sourced non-Delivery GUI steer', () => {
+  it('spec Scenario "GUI 流量仍不能消费 current"', () => {
     const h = harness()
 
     // `user` is intentionally not context-only: a GUI steer can belong to a
@@ -690,6 +696,19 @@ describe('Non-routing context does not poison reply authority', () => {
     h.claim({ childSessionId: CHILD, messageId: 'gui-prompt', turn: 1, sourceKind: 'user' })
 
     expect(h.observer.currentForChild?.(CHILD)).toBeUndefined()
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toBeUndefined()
+
+    // While a Delivery is current, a LATER GUI/user turn, or one of unknown
+    // source, cannot take over its reply target either.
+    for (const sourceKind of ['user', 'unrecognized-participant'] as const) {
+      const later = harness()
+      later.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+      later.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+      later.claim({ childSessionId: CHILD, messageId: 'gui-later', turn: 2, sourceKind })
+      expect(later.observer.currentForChild?.(CHILD)).toBeUndefined()
+      expect(later.observer.currentCapabilityForChild?.(CHILD)).toBeUndefined()
+      expect(later.observer.deliveryForTurn?.(CHILD, 2)).toBeUndefined()
+    }
   })
 
   it('treats an unreported source as participant traffic', () => {

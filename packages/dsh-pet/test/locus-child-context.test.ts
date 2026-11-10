@@ -19,7 +19,7 @@ describe('three-tier child context ownership', () => {
     expect(install).not.toHaveBeenCalled()
   })
 
-  it('子会话发现不自动成为主会话认知', async () => {
+  it('spec Scenario "子会话发现不自动成为主会话认知"', async () => {
     const runtime = new FakeOfficialRuntime()
     const work = runtime.addParent('work')
     runtime.addParent('locus-main')

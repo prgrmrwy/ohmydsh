@@ -13,13 +13,15 @@
 
 import { LOCUS_MAIN_PRESET } from '../src/host/locus/aggregate.js'
 import { createDurableLocusAuthorizationResolver } from '../src/host/locus/admission.js'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { LocusChannelController } from '../src/host/channel/locus-controller.js'
+import { createLocusControlDispatcher } from '../src/host/locus/control.js'
 import { LocusController } from '../src/host/locus/controller.js'
 import { LocusRepositoryV20 } from '../src/host/locus/persistence-v20.js'
 import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { openPetHarness, type PetHarness } from './harness.js'
 import { enableAtomicTransactions } from './support/three-tier.js'
+import { Topology, closeAllTopologies, type TopologyBackend } from './support/w-topology.js'
 import { admitDocCommentEvent, parseDocCommentEvent } from '../src/host/channel/doc-comment.js'
 import type { DocCommentQuery } from '../src/host/channel/lark.js'
 import { compactCommentEvent } from './fixtures/lark-subscribe.js'
@@ -711,3 +713,161 @@ describe('spec Scenario "文档 Delivery 不调用 IM 接口" (controller side)'
   })
 })
 
+
+
+/**
+ * `/bind` against a W whose active locus main is unavailable: migrate the whole
+ * W first, then build the entry on the new M1. Each scenario runs on the
+ * recording fake AND the real v20 repository over temp SQLite.
+ */
+afterEach(closeAllTopologies)
+
+describe.each(['fake', 'real'] as const satisfies readonly TopologyBackend[])('显式绑定遇到不可用的 locus 主会话先整 W 迁移 [%s]', backend => {
+  const W = 'session-w1abcdef'
+
+  /** W has an unavailable active M-old; group H already hangs under it; G has no entry row. */
+  async function archivedMain(tweakDeps: (deps: ReturnType<Topology['deps']>) => ReturnType<Topology['deps']> = d => d) {
+    const t = await Topology.open({ unusableMains: ['M-old'] }, backend)
+    t.addSession({ id: W, workspaceId: 'proj-1', title: '研发会话' })
+    await t.seedMain(W, 'M-old', 'active', 1)
+    await t.seedGroup('oc_h', 'M-old', 'proj-1')
+    t.calls.length = 0
+    const controller = new LocusController(tweakDeps(t.deps()))
+    // Same wiring as index.ts: the dispatcher's bind port is ensureGroup/ensureTopic.
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => ['ou-owner'],
+      listSessions: () => [{ id: W, title: '研发会话', workspaceId: 'proj-1', state: 'active' }],
+      bind: {
+        bind: ({ endpoint, parentSessionId }) => endpoint.threadId === undefined
+          ? controller.ensureGroup({ chatId: endpoint.chatId, parentSessionId })
+          : controller.ensureTopic({ chatId: endpoint.chatId, threadId: endpoint.threadId, parentSessionId }),
+      },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' as const }) },
+    })
+    const bind = (chatId: string, threadId?: string) => dispatcher.dispatch({
+      command: { kind: 'bind', prefix: 'w1abcd' } as never,
+      endpoint: { chatId, ...(threadId === undefined ? {} : { threadId }), key: threadId === undefined ? chatId : `${chatId}#${threadId}` } as never,
+      senderId: 'ou-owner',
+    })
+    return { t, controller, bind }
+  }
+  const groupMain = (t: Topology, chatId: string) => {
+    const row = t.repository.getRow({ chatId })
+    return row !== undefined && 'locusMainSessionId' in row ? row.locusMainSessionId : undefined
+  }
+
+  it('spec Scenario "主会话已归档时绑定新群"', async () => {
+    const { t, bind } = await archivedMain()
+    const receipt = await bind('oc_g')
+    expect(receipt.ok).toBe(true)
+    const text = 'text' in receipt ? receipt.text ?? '' : ''
+    expect(text).toContain('已绑定主会话')
+    expect(text).toContain('迁移')
+    expect(text).toContain('其它入口')
+    expect(text).not.toContain('请稍后重试')
+    const m1 = t.repository.findActiveMain(W)!
+    expect(m1.locusMainSessionId).not.toBe('M-old')
+    expect(t.created.filter(c => c.kind === 'locus-main')).toHaveLength(1)
+    expect(groupMain(t, 'oc_h')).toBe(m1.locusMainSessionId)
+    expect(groupMain(t, 'oc_g')).toBe(m1.locusMainSessionId)
+    expect(t.repository.getRow({ chatId: 'oc_g' })).toMatchObject({ state: 'not-created' })
+    expect(t.repository.findMain('M-old')!.status).toBe('retired')
+    // Migration is committed BEFORE the entry is begun, and nothing but M1 was created.
+    expect(t.calls.filter(c => c.startsWith('begin'))).toEqual(['begin:migrate', 'begin:chat'])
+    expect(t.created.filter(c => c.kind === 'work')).toEqual([])
+  })
+
+  it('spec Scenario "话题绑定同样迁移"', async () => {
+    const { t, bind } = await archivedMain()
+    const receipt = await bind('oc_g', 'omt_1')
+    expect(receipt.ok).toBe(true)
+    const m1 = t.repository.findActiveMain(W)!.locusMainSessionId
+    expect(m1).not.toBe('M-old')
+    expect(groupMain(t, 'oc_g')).toBe(m1)
+    expect(t.repository.getRow({ chatId: 'oc_g', threadId: 'omt_1' })).toMatchObject({ state: 'not-created' })
+    expect(groupMain(t, 'oc_h')).toBe(m1)
+    expect(t.repository.findMain('M-old')!.status).toBe('retired')
+  })
+
+  it('spec Scenario "迁移已提交但入口建立失败"', async () => {
+    const { t, bind } = await archivedMain()
+    t.failCommit = true
+    const failed = await bind('oc_g')
+    expect(failed.ok).toBe(false)
+    const text = 'text' in failed ? failed.text ?? '' : ''
+    expect(text).toContain('迁移已完成')
+    expect(text).toContain('本入口未绑定')
+    // The reason is still given (PROVISIONING_FAILED's receipt), never the raw exception.
+    expect(text).toContain('入口建立失败')
+    expect(text).not.toContain('commit failed')
+    // The migration is a durable fact: it is not rolled back by the later failure.
+    const m1 = t.repository.findActiveMain(W)!
+    expect(m1.locusMainSessionId).not.toBe('M-old')
+    expect(t.repository.findMain('M-old')!.status).toBe('retired')
+    expect(groupMain(t, 'oc_h')).toBe(m1.locusMainSessionId)
+    expect(t.repository.getRow({ chatId: 'oc_g' })).toBeUndefined()
+
+    // A retry reuses M1: no second migration, no second M.
+    t.failCommit = false
+    const retried = await bind('oc_g')
+    expect(retried.ok).toBe(true)
+    expect(groupMain(t, 'oc_g')).toBe(m1.locusMainSessionId)
+    expect(t.created.filter(c => c.kind === 'locus-main')).toHaveLength(1)
+    expect(t.calls.filter(c => c === 'begin:migrate')).toHaveLength(1)
+    expect(t.repository.findActiveMain(W)!.locusMainSessionId).toBe(m1.locusMainSessionId)
+  })
+
+  it('migration published but its finalize failed: the receipt still says the migration is done and this entry is unbound', async () => {
+    // The M1 handoff hook runs after the durable commit; making it throw drives
+    // `failOperation`'s "published" branch inside `migrateWholeW`.
+    const { t, bind } = await archivedMain(deps => ({
+      ...deps,
+      dsh: {
+        ...deps.dsh,
+        createLocusMainSession: async input => ({
+          ...(await deps.dsh.createLocusMainSession(input)),
+          commit: async () => { throw new Error('handoff failed') },
+        }),
+      },
+    }))
+    const failed = await bind('oc_g')
+    expect(failed.ok).toBe(false)
+    const text = 'text' in failed ? failed.text ?? '' : ''
+    expect(text).toContain('迁移已完成')
+    expect(text).toContain('本入口未绑定')
+    expect(text).not.toContain('handoff failed')
+    // The migration is durable and no entry row was written for G.
+    const m1 = t.repository.findActiveMain(W)!
+    expect(m1.locusMainSessionId).not.toBe('M-old')
+    expect(groupMain(t, 'oc_h')).toBe(m1.locusMainSessionId)
+    expect(t.repository.getRow({ chatId: 'oc_g' })).toBeUndefined()
+
+    // Retrying `/bind` reuses M1: no second migration, no second M, and G gets its row.
+    const retried = await bind('oc_g')
+    expect(retried.ok).toBe(true)
+    expect(groupMain(t, 'oc_g')).toBe(m1.locusMainSessionId)
+    expect(t.repository.getRow({ chatId: 'oc_g' })).toMatchObject({ state: 'not-created' })
+    expect(t.repository.findActiveMain(W)!.locusMainSessionId).toBe(m1.locusMainSessionId)
+    expect(t.calls.filter(c => c === 'begin:migrate')).toHaveLength(1)
+    expect(t.created.filter(c => c.kind === 'locus-main')).toHaveLength(1)
+  })
+
+  it('a usable M is reused without any migration (and without the migration note)', async () => {
+    const t = await Topology.open({}, backend)
+    await t.seedMain('W1', 'M-ok', 'active', 1)
+    await t.seedGroup('oc_h', 'M-ok', 'proj-1')
+    t.calls.length = 0
+    const result = await new LocusController(t.deps()).ensureGroup({ chatId: 'oc_g', parentSessionId: 'W1' })
+    expect(result.migration).toBeUndefined()
+    expect(result.group.locusMainSessionId).toBe('M-ok')
+    expect(t.calls.filter(c => c.startsWith('begin'))).toEqual(['begin:chat'])
+    expect(t.created).toEqual([])
+  })
+
+  it('a W with no active pairing builds its first M without a migration', async () => {
+    const t = await Topology.open({}, backend)
+    const result = await new LocusController(t.deps()).ensureGroup({ chatId: 'oc_g', parentSessionId: 'W1' })
+    expect(result.migration).toBeUndefined()
+    expect(t.calls.filter(c => c.startsWith('begin'))).toEqual(['begin:chat'])
+  })
+})

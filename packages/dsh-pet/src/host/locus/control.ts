@@ -14,7 +14,10 @@ import type {
   LocusControlDispatchRequest,
   LocusControlDispatchResult,
 } from './admission.js'
+import { PetError } from '../errors.js'
+import type { PetErrorCode } from '../../wire.js'
 import {
+  isLocusControllerErrorCode,
   LocusControllerError,
   shortLocusSessionId,
   type EnsureGroupResult,
@@ -27,6 +30,14 @@ import type { LocusAccessModeV20 } from './contract-v20.js'
 
 /** Ask-scope disclosure for document entries (D7); kept in sync with doc egress. */
 export const DOC_ASK_SCOPE_DISCLOSURE = '本文档的评论者均可向我提问；只有 allowlist 成员能控制'
+
+/**
+ * Sharing-scope statement appended to every successful `/bind` receipt (D3):
+ * binding authorizes the entry to get answers that quote the work session, and
+ * `/unbind` withdraws that.
+ */
+export const LOCUS_BIND_SHARING_DISCLOSURE =
+  '本入口的提问可能得到引用该工作会话对话内容的答复；/unbind 可撤销。'
 
 export const MIN_LOCUS_BIND_PREFIX_LENGTH = 6
 export const LOCUS_BIND_UNRESOLVED_TEXT =
@@ -154,6 +165,12 @@ export interface CreateLocusControlDispatcherOptions {
   readonly writeEnabled?: () => boolean
   /** Reads the real platform chat name. Failure/absence must stay absent. */
   readonly chatName?: (chatId: string) => PromiseLike<string | undefined> | string | undefined
+  /**
+   * Local diagnostic sink for failures no receipt mapping covers. Receives a
+   * single line carrying only a defined reason code or `unrecognized`; never an
+   * exception message, class name, stack or cause (D5).
+   */
+  readonly log?: (message: string) => void
 }
 
 export const LOCUS_EXPLICIT_PARENT_CONFLICT_TEXT =
@@ -172,7 +189,61 @@ function failure(reason: string, text: string): LocusControlDispatchResult {
   return { ok: false, reason, text }
 }
 
-function safeControlError(error: unknown): LocusControlDispatchResult {
+/**
+ * Every {@link PetErrorCode}. A `Record` over the union keeps the table total:
+ * adding a code to the wire type without listing it here fails type checking.
+ */
+const PET_ERROR_CODES: Readonly<Record<PetErrorCode, true>> = {
+  PET_DEGRADED: true,
+  INVALID_REQUEST: true,
+  UNKNOWN_CAPABILITY: true,
+  CAPABILITY_UNAVAILABLE: true,
+  CONTEXT_REQUIRED: true,
+  SOURCE_NOT_FOUND: true,
+  TASK_NOT_FOUND: true,
+  TASK_ARCHIVED: true,
+  INVOCATION_NOT_FOUND: true,
+  NO_CURRENT_INVOCATION: true,
+  AMBIGUOUS_CURRENT_INVOCATION: true,
+  NOT_A_PET_SESSION: true,
+  REVISION_CONFLICT: true,
+  SKILL_NOT_FOUND: true,
+  SKILL_DISABLED: true,
+  SKILL_DIGEST_MISMATCH: true,
+  SKILL_IMPORT_REJECTED: true,
+  INVALID_EXPRESSION: true,
+  EXPRESSION_FETCH_FAILED: true,
+  PROJECTION_DRIFT: true,
+  WORKSPACE_UNHEALTHY: true,
+  MODEL_UNAVAILABLE: true,
+  BINDING_INVALID: true,
+  ARCHIVE_BLOCKED: true,
+  LOCUS_UNAVAILABLE: true,
+  LOCUS_NOT_FOUND: true,
+  LOCUS_BUSY: true,
+  LOCUS_CONFLICT: true,
+  LOCUS_PERMISSION_DENIED: true,
+  WRITE_UNSUPPORTED: true,
+  LOCUS_INVALID: true,
+  LOCUS_STOPPED: true,
+  COLLABORATION_UNAVAILABLE: true,
+  COLLABORATION_REVISION_CONFLICT: true,
+  INTERNAL: true,
+}
+
+/**
+ * The only thing the fallback diagnostic may carry: a reason code the error
+ * type itself defines, else `unrecognized`. A plain Error's `code` is
+ * attacker/upstream controlled text, so it is never trusted.
+ */
+function diagnosticCode(error: unknown): string {
+  if (error instanceof LocusControllerError && isLocusControllerErrorCode(error.code)) return error.code
+  if (error instanceof PetError && Object.hasOwn(PET_ERROR_CODES, error.code)) return error.code
+  return 'unrecognized'
+}
+
+/** The receipt for a failure with a stable, mapped reason; `undefined` when none applies. */
+function mappedControlError(error: unknown): LocusControlDispatchResult | undefined {
   const code = (error as { code?: unknown } | undefined)?.code
   if (code === 'LOCUS_BUSY') {
     return failure('busy', '当前入口仍有执行中或排队消息，请稍后重试。')
@@ -195,11 +266,48 @@ function safeControlError(error: unknown): LocusControlDispatchResult {
   if (code === 'INVALID_REQUEST') {
     return failure('access-invalid-state', '当前入口已停止或不可用，无法变更访问模式；重新启用后再试。')
   }
+  if (code === 'LOCUS_MAIN_UNAVAILABLE') {
+    return failure('locus-main-unavailable', '该来源会话的 locus 主会话不可用，本次未绑定。再发一次 /bind 会为它新建主会话并迁移入口。')
+  }
+  if (code === 'PARENT_NOT_FOUND') {
+    return failure('parent-not-found', '指定的工作会话当前不可用（不存在、已归档或无法读取），未绑定。请确认会话后重新 /bind。')
+  }
+  if (code === 'PROVISIONING_FAILED') {
+    return failure('provisioning-failed', '入口建立失败，未发布任何关联。请检查后重新 /bind；仍失败请查看 Host 日志。')
+  }
+  if (code === 'DEFAULT_WORKSPACE_UNAVAILABLE') {
+    return failure('default-workspace-unavailable', '默认工作区不可用，无法自动创建工作会话。请在 DSH 中配置默认工作区，或用 /bind 指定已有会话。')
+  }
+  if (code === 'CAPABILITY_UNAVAILABLE') {
+    return failure('capability-unavailable', '当前 Host 未启用建立入口所需的能力（协作空间或飞书操作端口），未执行任何操作。请检查 dsh-pet 配置。')
+  }
   // The only PARENT_NOT_ALLOWED a control command can reach is "the prefix
   // resolved to a child session", which the spec requires to read exactly like
   // no match.
   if (error instanceof LocusControllerError && error.code === 'PARENT_NOT_ALLOWED') {
     return failure('prefix-unresolved', LOCUS_BIND_UNRESOLVED_TEXT)
+  }
+  return undefined
+}
+
+function safeControlError(
+  error: unknown,
+  commandKind: string,
+  log: ((message: string) => void) | undefined,
+): LocusControlDispatchResult {
+  const mapped = mappedControlError(error)
+  // A whole-W migration was committed before the entry failed (D6): say so, then
+  // give the same stable reason. Retrying `/bind` reuses the new M.
+  const migrated = (error as { migrationCommitted?: unknown } | null | undefined)?.migrationCommitted
+  if (migrated !== undefined && migrated !== null) {
+    const reason = mapped ?? failure('control-failed', '控制命令执行失败。')
+    return { ...reason, text: `迁移已完成：该会话名下的入口已迁移到新的 locus 主会话；但本入口未绑定。${reason.text ?? ''}重新 /bind 会复用新的主会话，不会再次迁移。` }
+  }
+  if (mapped !== undefined) return mapped
+  try {
+    log?.(`locus control ${commandKind} failed: ${diagnosticCode(error)}`)
+  } catch {
+    // A broken diagnostic sink must never change the receipt.
   }
   return failure('control-failed', '控制命令执行失败，请稍后重试。')
 }
@@ -213,15 +321,21 @@ function bindReceipt(
   const named = chatName !== undefined && chatName.trim() !== ''
   const place = !named ? '当前入口' : isDoc ? `文档「${chatName.trim()}」` : `群「${chatName.trim()}」`
   const source = locusSessionReceiptLabel(session)
+  // The W's M was unavailable and `/bind` migrated the whole W first (D6).
+  const migrated = result.migration === undefined
+    ? ''
+    : result.migration.chats > 0
+      ? `已把该会话名下的其它入口（${result.migration.chats} 个群）迁移到新的 locus 主会话。`
+      : '已为该会话新建 locus 主会话。'
   // A document's /bind always restates who may ask (pet-locus-doc-comments D7).
-  const disclosure = isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : ''
+  const disclosure = (isDoc ? `\n${DOC_ASK_SCOPE_DISCLOSURE}` : '') + `\n${LOCUS_BIND_SHARING_DISCLOSURE}`
   if (result.reenabled === true) {
-    return `${place}已重新启用，仍绑定主会话 ${source}；下一条消息会创建新的只读子会话。${disclosure}`
+    return `${place}已重新启用，仍绑定主会话 ${source}；下一条消息会创建新的只读子会话。${migrated}${disclosure}`
   }
   if (result.reused) {
-    return `${place}已绑定主会话 ${source}，本次未重复创建；当前访问模式见 /access。${disclosure}`
+    return `${place}已绑定主会话 ${source}，本次未重复创建；当前访问模式见 /access。${migrated}${disclosure}`
   }
-  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${disclosure}`
+  return `${place}已绑定主会话 ${source}；已创建新的只读子会话。${migrated}${disclosure}`
 }
 
 /**
@@ -300,7 +414,7 @@ export function createLocusControlDispatcher(
             return failure('invalid-command', '控制命令格式无效。')
         }
       } catch (error) {
-        return safeControlError(error)
+        return safeControlError(error, command.kind, options.log)
       }
       return failure('invalid-command', '控制命令格式无效。')
     },

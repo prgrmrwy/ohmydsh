@@ -110,7 +110,7 @@ it('业务结算后下一条仍为独立轮次: B uses official queue/user and a
       deliveryDispatch: { claimCurrent: async ({ correlation: c, ...rest }) => { const r = await world.durable.claimCurrentDelivery({ ...c, ...rest }); return r.changed ? r.record : undefined }, scheduleCurrent: () => {} },
     })
     const send = vi.spyOn(ctx.subagents, 'sendMessage')
-    expect(await replyChild(parent, parent.id, { childSessionId: childId, text: 'parent context for A' }, new AbortController().signal, { loci: { findBySessionId: id => world.durable.findBySessionId(id), listEntryEndpointsOfMain: () => [initial.endpoint] }, subagents: () => ctx.subagents as never })).toEqual({ ok: true })
+    expect(await replyChild(parent, parent.id, { childSessionId: childId, text: 'parent context for A', askRef: 'A' }, new AbortController().signal, { loci: { findBySessionId: id => world.durable.findBySessionId(id), findCurrentSerializedDelivery: input => world.durable.findCurrentSerializedDelivery(input), listEntryEndpointsOfMain: () => [initial.endpoint] }, subagents: () => ctx.subagents as never })).toEqual({ ok: true })
     releaseStep.resolve()
     await replyStarted.promise
     expect(turns.currentCapabilityForChild!(childId)).toMatchObject({ deliveryId: a.record.deliveryId })

@@ -60,7 +60,7 @@ import { legacyTodoBackend } from './host/ledger/backend.js'
 import { projectTodoForOwner } from './host/ledger/owner-view.js'
 import { createOwnerLedger } from './host/ledger/owner-ledger.js'
 import { LocusCollab, type LocusMainRef } from './host/collab/locus-collab.js'
-import type { LocusMainToolsDeps, SubagentMessenger } from './host/collab/locus-tools.js'
+import type { LocusMainToolsDeps, SubagentMessenger, WorkHistoryEvent } from './host/collab/locus-tools.js'
 import { CollabTodoBackend } from './host/collab/todo-backend.js'
 import type { TodoBackend } from './host/ledger/backend.js'
 import type { CollabService } from './host/collab/types.js'
@@ -531,6 +531,16 @@ async function initialize(
       newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
     },
   }
+  /**
+   * The caller lookup of the locus tools that carry an ask reference
+   * (`locus_ask_parent`, `locus_reply_child`): the same unique-sessionId row
+   * lookup plus the durable current-Delivery read the reference is built from.
+   */
+  const locusAskLoci = {
+    ...intentTriageDeps.loci,
+    findCurrentSerializedDelivery: (input: { readonly locusId: string; readonly sessionId: string }) =>
+      locusRepository.findCurrentSerializedDelivery(input),
+  }
   let refusedReplies: ReturnType<typeof createRefusedReplyTracker> | undefined
   let deliveryExecutionProof = (_execution: ToolRunContext): RefusedReplyExecutionProof | undefined => undefined
   const workspaceId = await lifecycle.contain('Pet Workspace', () =>
@@ -710,11 +720,42 @@ async function initialize(
   const locusMainToolsDeps: LocusMainToolsDeps = {
     loci: {
       findBySessionId: (id: string) => locusRepository.findBySessionId(id),
+      findCurrentSerializedDelivery: locusAskLoci.findCurrentSerializedDelivery,
       listEntryEndpointsOfMain: (locusMainSessionId: string) =>
         locusReconcileRows().filter(item => item.locusMainSessionId === locusMainSessionId).map(item => item.row.endpoint),
     },
     collab: locusCollab,
     subagents: officialSubagentMessenger,
+    /**
+     * `locus_work_history`. The target is never an argument: it is the work
+     * session of the caller's ACTIVE `locus_mains` pairing. Status is the
+     * two-valued `idle`/`unknown` (a NEW helper: the child helpers above treat
+     * "not in memory" as not idle, which is the opposite of what this needs to
+     * say about a cold session being unknown rather than busy).
+     */
+    workHistory: {
+      pairedWorkSessionOf: (locusMainSessionId: string) => {
+        const main = locusRepository.findMain(locusMainSessionId)
+        return main?.status === 'active' ? main.workSessionId : undefined
+      },
+      readLive: (workSessionId: string) => {
+        const session = ctx.sessions.get(workSessionId as never)
+        if (session === undefined) return undefined
+        type InboxLike = { readonly nextTurn?: unknown; readonly nextStep?: unknown }
+        const handle = ctx.agents.get(workSessionId as never) as { agent?: { inbox?: InboxLike }; inbox?: InboxLike } | undefined
+        const inbox = ((handle?.agent ?? handle) as { inbox?: InboxLike } | undefined)?.inbox
+        // Readable only when BOTH queues are real lists; anything else is "unknown", never "empty".
+        const inboxPending = inbox !== undefined && Array.isArray(inbox.nextTurn) && Array.isArray(inbox.nextStep)
+          ? inbox.nextTurn.length + inbox.nextStep.length > 0
+          : undefined
+        return { events: session.snapshotEvents() as readonly WorkHistoryEvent[], inboxPending }
+      },
+      readCold: async (workSessionId: string) => {
+        const inspect = createSessionInspector(ctx.get('sessionQuery') as Parameters<typeof createSessionInspector>[0])
+        if (inspect === undefined) throw new Error('sessionQuery.observeSession is unavailable')
+        return (await inspect(workSessionId)).events as readonly WorkHistoryEvent[]
+      },
+    },
   }
   const locusMainScopes = new WeakSet<object>()
   const livePresetFor = (sessionId: string): string | undefined => {
@@ -902,7 +943,7 @@ async function initialize(
                 repository,
                 locusRepository: locusContextRepository,
                 intentTriage: intentTriageDeps,
-                locusChildTools: { loci: intentTriageDeps.loci, collab: locusCollab, subagents: officialSubagentMessenger },
+                locusChildTools: { loci: locusAskLoci, collab: locusCollab, subagents: officialSubagentMessenger },
                 // A user message typed into this executor registers its
                 // Invocation through the durable inbox splice, which can still
                 // be landing when the turn's first step asks for context.
@@ -1142,7 +1183,7 @@ async function initialize(
             logAuthorizationRefusal: ({ operation, reason }) =>
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
           },
-          locusChildTools: { loci: intentTriageDeps.loci, collab: locusCollab, subagents: officialSubagentMessenger },
+          locusChildTools: { loci: locusAskLoci, collab: locusCollab, subagents: officialSubagentMessenger },
           // One read tool per child, by entry kind (D9/D10): a document child
           // gets the doc read and never the group-history read, and an IM child
           // never sees the doc read. Each is published only when the runtime
@@ -2173,6 +2214,8 @@ async function initialize(
         if (token === undefined) return larkClient.chatName(chatId)
         return (await larkClient.inspectDoc?.(token).catch(() => undefined))?.title
       },
+      // Fallback diagnostics for an unmapped control failure: reason code only.
+      log: message => petLog(`dsh-pet: ${message}`),
     })
 
   const locusTurnObserver = (() => {

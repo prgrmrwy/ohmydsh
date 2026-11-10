@@ -281,8 +281,9 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // `locus_ask_parent` (one question, no target) from
     // `locus-three-tier-structure`; the caller-bound entrance read
     // `pet_locus_chat_history` and its document-entry counterpart
-    // `pet_locus_doc_context`; and the locus MAIN session's two tools
-    // `locus_note` and `locus_reply_child`.
+    // `pet_locus_doc_context`; and the locus MAIN session's three tools
+    // `locus_note`, `locus_reply_child` and the read-only `locus_work_history`
+    // (`locus-ask-work-first-and-concise` D4).
     //
     // The count is the point: this asserts nobody adds a registration without
     // amending this list, so a new entry must be justified here in the same
@@ -293,7 +294,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // helper's single native registration delegation (which intentionally owns
     // every definition above).
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(10)
+    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(11)
     expect(tools).not.toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).not.toContain("'pet_locus_ledger_read'")
     // One native registration per registrar: `registerPetTools` and `registerPetLocusMainTools`.
@@ -305,6 +306,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     expect(tools).toContain('LOCUS_ASK_PARENT_TOOL')
     expect(tools).toContain('LOCUS_NOTE_TOOL')
     expect(tools).toContain('LOCUS_REPLY_CHILD_TOOL')
+    expect(tools).toContain('LOCUS_WORK_HISTORY_TOOL')
     expect(tools).toContain('PET_LOCUS_TRACK_TOOL')
     expect(tools).not.toContain('PET_LOCUS_PARENT_LOOKUP_TOOL')
     expect(tools).not.toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')

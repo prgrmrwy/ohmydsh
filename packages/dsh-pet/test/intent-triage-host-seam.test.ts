@@ -7,7 +7,18 @@
  * simplified `{ events, meta.cwd }` description is checked against the real
  * shape rather than re-asserted from memory.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { Context } from '@deepseek-ai/cordis'
+import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+import { LOCUS_SAFE_TOOL_FILTER } from '../src/host/locus/child.js'
+import { runTool } from './support/tool-call.js'
 
 describe('intent-triage host seam: cold Session inspection (task 1.1)', () => {
   it('the installed @deepseek-ai/dsh-api-session-controller package exists and matches the dshVersion pinned in dsh.yaml', async () => {
@@ -203,5 +214,57 @@ describe('intent-triage host seam: cold Session inspection (task 1.1)', () => {
     expect(dts).toContain('export interface SessionInspection extends SessionStorageMetadata')
     expect(dts).toContain('readonly inheritedEventCount: SessionLogOffset;')
     expect(dts).toContain('readonly events: readonly SessionEvent[];')
+  })
+})
+
+describe('pet-locus-intent-triage: a misjudgement cannot become a capability', () => {
+  let ctx: Context | undefined
+  afterEach(async () => { await ctx?.fiber.dispose(); ctx = undefined })
+
+  const probe = (name: string, effect: () => void) => defineTool({
+    name,
+    description: 'Synthetic triage-seam probe.',
+    parameters: {},
+    output: { schema: { type: 'boolean' }, render: () => [{ type: 'text' as const, text: 'ok' }] },
+    async execute() { effect(); return true },
+  })
+
+  it('spec Scenario "误判不产生越权"', async () => {
+    ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
+    const effects: string[] = []
+    for (const name of ['read', 'read_image', 'glob', 'grep', 'web_search', 'write', 'edit', 'bash']) ctx.tools.register(probe(name, () => effects.push(name)))
+    // Same scope derivation as the real child: resolve dsh-scope from ToolRuntime's own dependency root.
+    const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/package.json'))
+    const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as {
+      createScope(ctx: Context, key: Agent): { ctx: Context; dispose(): Promise<void> }
+    }
+    const agent = { id: 'locus-triage-child' as SessionId } as Agent
+    let scope!: ReturnType<typeof createScope>
+    await ctx.plugin(Object.assign((inner: Context) => { scope = createScope(inner, agent) }, { inject: ['tools', 'systemPrompt'] }))
+    // An information-exchange entry runs on the read-only surface.
+    scope.ctx.tools.restrict(LOCUS_SAFE_TOOL_FILTER)
+    // The triage outcomes are the scoped tools: finish (reply / no-reply) and the todo registration.
+    for (const name of ['pet_locus_finish', 'pet_locus_track']) scope.ctx.tools.register(probe(name, () => effects.push(name)))
+    const surfaceBefore = ctx.tools.schemas(agent).map(schema => schema.name)
+    const call = (name: string, id: string) => runTool(ctx!, { agent, name, callId: id as ToolCallId, arguments: {}, signal: new AbortController().signal })
+
+    // GIVEN the child misjudged an information exchange as "do work" and tries to write.
+    for (const name of ['write', 'edit', 'bash']) expect((await call(name, `before-${name}`)).isError, name).toBe(true)
+
+    // WHEN it acts on that judgement through every triage outcome the Host offers.
+    expect((await call('pet_locus_track', 'track')).isError).toBe(false)
+    expect((await call('pet_locus_finish', 'finish')).isError).toBe(false)
+
+    // THEN the write is still refused by the unchanged permission model: the judgement
+    // granted nothing, and no write tool was ever reached.
+    for (const name of ['write', 'edit', 'bash']) expect((await call(name, `after-${name}`)).isError, name).toBe(true)
+    expect(ctx.tools.schemas(agent).map(schema => schema.name)).toEqual(surfaceBefore)
+    expect(surfaceBefore).not.toContain('write')
+    expect(effects).toEqual(['pet_locus_track', 'pet_locus_finish'])
+
+    await scope.dispose()
   })
 })

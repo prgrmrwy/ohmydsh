@@ -1,6 +1,7 @@
 /** Spec: pet-locus-collaboration "换绑与归档按层处理" whole-W migration rows (D7), controller half. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LocusResolutionError } from '../src/host/locus/resolution.js'
+import { createLocusControlDispatcher } from '../src/host/locus/control.js'
 import { LocusController, LocusControllerError } from '../src/host/locus/controller.js'
 import { Topology, closeAllTopologies, type TopologyBackend } from './support/w-topology.js'
 
@@ -179,6 +180,41 @@ describe.each(BACKENDS)('整 W 迁移 [%s]', which => {
     t.archived.add('W1')
     await expect(controller.migrateWholeW('W1', 'oc_a')).rejects.toMatchObject({ code: 'SOURCE_ARCHIVED' })
     expect(t.created).toEqual([])
+  })
+
+  it('spec Scenario "有 current 投递时拒绝"', async () => {
+    const W = 'session-w1abcdef'
+    const t = await Topology.open({ unusableMains: ['M-old'] }, backend)
+    t.addSession({ id: W, workspaceId: 'proj-1', title: 'W1' })
+    await t.seedMain(W, 'M-old', 'active', 1)
+    await t.seedGroup('oc_a', 'M-old', 'proj-1')
+    await t.seedGroup('oc_c', 'M-old', 'proj-1')
+    await t.setCurrent('oc_c')
+    const mainsBefore = t.mainIds().sort()
+    t.calls.length = 0
+    const controller = new LocusController(t.deps())
+    // Same wiring as index.ts: the dispatcher's bind port is ensureGroup.
+    const dispatcher = createLocusControlDispatcher({
+      allowOpenIds: () => ['ou-owner'],
+      listSessions: () => [{ id: W, title: 'W1', workspaceId: 'proj-1', state: 'active' }],
+      bind: { bind: ({ endpoint, parentSessionId }) => controller.ensureGroup({ chatId: endpoint.chatId, parentSessionId }) },
+      exit: { unbindCurrent: async () => ({ state: 'stopped' as const }) },
+    })
+    const receipt = await dispatcher.dispatch({
+      command: { kind: 'bind', prefix: 'w1abcd' } as never,
+      endpoint: { chatId: 'oc_new', key: 'oc_new' } as never,
+      senderId: 'ou-owner',
+    })
+    expect(receipt).toMatchObject({ ok: false, reason: 'busy' })
+    expect('text' in receipt ? receipt.text : '').toContain('请稍后重试')
+    // Nothing was created or written: no M1, no work session, no new group row, no provisioning.
+    expect(t.created).toEqual([])
+    expect(t.repository.getRow({ chatId: 'oc_new' })).toBeUndefined()
+    expect(t.mainIds().sort()).toEqual(mainsBefore)
+    expect(t.repository.findMain('M-old')!.status).toBe('active')
+    expect(t.calls.filter(c => c.startsWith('begin'))).toEqual([])
+    // The controller-level refusal is the same stable code.
+    await expect(controller.ensureGroup({ chatId: 'oc_new', parentSessionId: W })).rejects.toMatchObject({ code: 'LOCUS_BUSY' })
   })
 
   it('ensureEntry on an unusable M triggers the whole-W migration and returns the reset row', async () => {

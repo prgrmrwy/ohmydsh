@@ -408,6 +408,18 @@ effective/read，未扩大权限。」。子会话日志给出机制：
    手输或由服务端静默补齐——手输在「唯一能通过的取值」上没有额外安全性，只
    多出 typo 与跨机器路径混淆。
 
+### 复发实例（2026-11-10，change `locus-ask-work-first-and-concise`）
+
+locus 主会话在 DSH 里归档、工作会话未归档时，对一个还没有群行的群 `/bind`，
+飞书同样回「控制命令执行失败，请稍后重试。」。`ensureLocusMain` 抛的是
+`LocusControllerError(LOCUS_MAIN_UNAVAILABLE)`，但映射表没有这个码；日志也只记了
+`control-failed`，现场无从排查。原错误文案「下一条授权 @ 会迁移」对没有群行的
+群也不成立（下一条 @ 会走 auto 新建工作会话）。修法：`/bind` 遇到不可用的 M 先整
+W 迁移；映射表补全 controller 的确定性错误码；兜底日志只记已定义原因码或
+`unrecognized`，**不记异常消息**（消息里可能带 URL 令牌，截断不等于脱敏）。
+教训补一条：新增错误码时，同时检查控制面映射表是否覆盖它，最好用
+`Record<Code, true>` 一类穷尽表让编译器替你检查。
+
 ---
 
 ## 10. 同一平台两个方向的契约可能不对称（入站预渲染 vs 出站标记）

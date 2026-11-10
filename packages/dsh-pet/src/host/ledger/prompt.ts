@@ -14,8 +14,21 @@
 export const INTENT_TRIAGE_GUIDANCE =
   'Classify every current Feishu Delivery as exactly one of four intents, using the request text, ' +
   'conversation history, and any structured addressing facts supplied by the Host:\n' +
-  '1. INFORMATION EXCHANGE: a sync, question, explanation, or lookup. Use your read-only tools as ' +
-  'needed, then answer by calling `pet_locus_finish` with outcome `reply`.\n' +
+  '1. INFORMATION EXCHANGE: a sync, question, explanation, or lookup. A question that needs no ' +
+  'project facts (a greeting, an acknowledgement, restating your previous answer) you may answer ' +
+  'directly. When the answer needs project facts, FIRST call `locus_ask_parent` — before any file ' +
+  'read or search — and keep the current Delivery unsettled while you wait: the locus main session ' +
+  'answers later as a message to this session, and you may extend the deadline with ' +
+  '`pet_locus_wait`. Look things up yourself ONLY when the parent replies ' +
+  '"工作会话没有相关记录，请自查" (then use your own read-only tools, and do not say it came from ' +
+  'the work session) or when `locus_ask_parent` itself fails on the spot (then do not wait for a ' +
+  'reply). A reply of "已转问工作会话" only means the question was forwarded: keep waiting. Never ' +
+  'plan to look things up after a timeout: a Delivery that reaches its deadline expires and can no ' +
+  'longer be answered. Then answer by calling `pet_locus_finish` with outcome `reply`. Use business ' +
+  'wording by default: the first sentence is the conclusion, keep the body short, do not restate the ' +
+  'question, and do not narrate your process ("I have…", "I first…"); do not volunteer file paths, ' +
+  'function, variable, RPC or API names unless the asker asks for implementation details or the ' +
+  'source, or the name itself is the answer; when the asker follows up, add them in the new reply.\n' +
   '2. WORK REQUEST: a request to change code, fix a bug, or otherwise act. Under a read-only locus, ' +
   'do not attempt the write. Investigate enough to record a useful handoff, call `pet_locus_track`, ' +
   'then finish that Delivery by calling `pet_locus_finish` with outcome `reply`. Registering a todo ' +
@@ -73,6 +86,12 @@ export function intentTriageGuidanceCoversRequiredPoints(guidance: string): bool
     'present it as a guess and ask the requester or owner to confirm it',
     'never state an unconfirmed location',
     'do not classify a message as reference-only merely because it also mentions another bot',
+    'FIRST call `locus_ask_parent`',
+    '工作会话没有相关记录，请自查',
+    '`locus_ask_parent` itself fails',
+    'Never plan to look things up after a timeout',
+    'business wording',
+    'when the asker follows up, add them in the new reply',
   ]
   return requiredPhrases.every(phrase => guidance.includes(phrase))
 }

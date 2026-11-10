@@ -339,7 +339,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
     } finally { await host.close() }
   })
 
-  it('carries one accepted message through current, real turn proof, and a durable finish', async () => {
+  it('spec Scenario "业务完成只经统一工具提交"', async () => {
     const host = await composeSettlementHost()
     try {
       const accepted = await host.controller.handleAdmission(admission('om_first') as never)
@@ -376,7 +376,7 @@ describe('durable Delivery lifecycle against its exact child turn', () => {
   })
 
   it.each(['completed', 'failed'] as const)(
-    'stays current after %s end-before-bind after a delay beyond 200ms, until explicitly finished',
+    'spec Scenario "业务完成只经统一工具提交" (%s end-before-bind after a delay beyond 200ms: stays current until explicitly finished)',
     async outcome => {
       const host = await composeSettlementHost({ endBeforeBind: outcome })
       try {

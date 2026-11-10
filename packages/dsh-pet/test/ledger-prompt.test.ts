@@ -112,3 +112,109 @@ describe('todo replies must match the durable todo state', () => {
     }
   })
 })
+
+/**
+ * `locus-ask-work-first-and-concise` group 8 / `pet-locus-intent-triage`
+ * "子会话判定请求意图并据此选择结局". The model's behaviour is prompt-layer: these
+ * tests pin the text the child is given (the Host does not classify or enforce).
+ */
+describe('子会话判定请求意图并据此选择结局：规则文本', () => {
+  /** The INFORMATION EXCHANGE clause alone, so a phrase cannot be satisfied by another clause. */
+  const infoClause = () => {
+    const start = INTENT_TRIAGE_GUIDANCE.indexOf('1. INFORMATION EXCHANGE')
+    const end = INTENT_TRIAGE_GUIDANCE.indexOf('2. WORK REQUEST')
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    return INTENT_TRIAGE_GUIDANCE.slice(start, end)
+  }
+
+  it('spec Scenario "信息交换当场答复"', () => {
+    const clause = infoClause()
+    // The answer goes out through the one finish tool, and answering never registers a todo.
+    expect(clause).toContain('answer by calling `pet_locus_finish` with outcome `reply`')
+    expect(clause).not.toContain('pet_locus_track')
+    // Questions that need no project facts are answered directly, without asking the parent.
+    expect(clause).toContain('needs no project facts')
+  })
+
+  it('spec Scenario "信息交换先问主会话"', () => {
+    const clause = infoClause()
+    expect(clause).toContain('FIRST call `locus_ask_parent`')
+    expect(clause).toContain('before any file read or search')
+    // The Delivery stays unsettled while the answer is awaited; waiting is the existing wait tool.
+    expect(clause).toContain('keep the current Delivery unsettled')
+    expect(clause).toContain('`pet_locus_wait`')
+    expect(clause.indexOf('FIRST call `locus_ask_parent`')).toBeLessThan(clause.indexOf('read-only tools'))
+  })
+
+  it('spec Scenario "主会话无记录后自行查找"', () => {
+    const clause = infoClause()
+    expect(clause).toContain('ONLY when')
+    expect(clause).toContain('工作会话没有相关记录，请自查')
+    expect(clause).toContain('use your own read-only tools')
+    // The answer must not claim a self-found fact came from the work session.
+    expect(clause).toContain('do not say it came from the work session')
+  })
+
+  it('spec Scenario "询问失败后自行查找"', () => {
+    const clause = infoClause()
+    expect(clause).toContain('`locus_ask_parent` itself fails')
+    expect(clause).toContain('do not wait for a reply')
+    // No timeout-based fallback is promised: an expired Delivery cannot be answered.
+    expect(clause).toContain('Never plan to look things up after a timeout')
+    expect(clause).toContain('expires')
+  })
+
+  it('spec Scenario "默认业务口径"', () => {
+    const clause = infoClause()
+    expect(clause).toContain('business wording')
+    expect(clause).toContain('first sentence')
+    expect(clause).toContain('short')
+    expect(clause).toContain('do not volunteer file paths, function, variable, RPC or API names')
+  })
+
+  it('spec Scenario "追问实现细节时补充"', () => {
+    const clause = infoClause()
+    expect(clause).toContain('unless the asker asks for implementation details or the source')
+    expect(clause).toContain('when the asker follows up, add them in the new reply')
+  })
+
+  it('spec Scenario "要求干活登记待办"', () => {
+    const start = INTENT_TRIAGE_GUIDANCE.indexOf('2. WORK REQUEST')
+    const clause = INTENT_TRIAGE_GUIDANCE.slice(start, INTENT_TRIAGE_GUIDANCE.indexOf('3. REFERENCE-ONLY'))
+    expect(clause.indexOf('call `pet_locus_track`')).toBeGreaterThan(-1)
+    expect(clause.indexOf('then finish that Delivery by calling `pet_locus_finish` with outcome `reply`')).toBeGreaterThan(clause.indexOf('call `pet_locus_track`'))
+    expect(clause).toContain('do not attempt the write')
+  })
+
+  it('spec Scenario "仅提示另一 bot 作为联系人"', () => {
+    const start = INTENT_TRIAGE_GUIDANCE.indexOf('3. REFERENCE-ONLY')
+    const clause = INTENT_TRIAGE_GUIDANCE.slice(start, INTENT_TRIAGE_GUIDANCE.indexOf('4. AMBIGUOUS'))
+    expect(clause).toContain('“if you have questions, contact this bot”')
+    expect(clause).toContain('`pet_locus_finish` with outcome `no-reply`')
+    expect(clause).toContain('non-empty audit reason')
+    expect(clause).toContain('do not call `pet_locus_wait`')
+  })
+
+  it('spec Scenario "多 bot 语义不明确"', () => {
+    const start = INTENT_TRIAGE_GUIDANCE.indexOf('4. AMBIGUOUS')
+    const clause = INTENT_TRIAGE_GUIDANCE.slice(start)
+    expect(clause).toContain('genuinely do not establish')
+    expect(clause).toContain('do not classify a message as reference-only merely because it also mentions another bot')
+  })
+
+  it('the structural coverage guard rejects guidance that drops any new ask-first clause', () => {
+    expect(intentTriageGuidanceCoversRequiredPoints(INTENT_TRIAGE_GUIDANCE)).toBe(true)
+    for (const required of [
+      'FIRST call `locus_ask_parent`',
+      '工作会话没有相关记录，请自查',
+      '`locus_ask_parent` itself fails',
+      'Never plan to look things up after a timeout',
+      'business wording',
+      'when the asker follows up, add them in the new reply',
+    ]) {
+      expect(INTENT_TRIAGE_GUIDANCE).toContain(required)
+      expect(intentTriageGuidanceCoversRequiredPoints(INTENT_TRIAGE_GUIDANCE.replace(required, '')), required).toBe(false)
+    }
+  })
+})

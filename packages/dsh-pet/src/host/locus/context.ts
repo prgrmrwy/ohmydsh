@@ -20,6 +20,19 @@ import {
   type EntranceReadability,
 } from '../channel/entrance-capability.js'
 
+/**
+ * The ask-first and concise-wording rules for information exchange, in the
+ * Chinese the child reads. An EXISTING child only ever receives the follow-up
+ * prompt, so this one text is rendered in both the first and the follow-up
+ * delivery (`locus-ask-work-first-and-concise` D1); `INTENT_TRIAGE_GUIDANCE`
+ * carries the full English clause on the first delivery.
+ */
+const INFO_EXCHANGE_RULE =
+  '信息类问题需要项目事实时，先调用 `locus_ask_parent` 问 locus 主会话（在读取任何文件或搜索之前），当前 Delivery 保持未结算等待答复，可按需 `pet_locus_wait` 延长；'
+  + '只有主会话答复"没有相关记录，请自查"或 `locus_ask_parent` 当场失败，才用自己的只读能力查找；不要等超时后再自查（到期的 Delivery 会过期、不能再答复）。'
+  + '答复默认用业务口径：第一句给结论，正文简短，不主动给出文件、函数、RPC 或接口名；提问人追问时再补。'
+
+
 /** The platform endpoint of one entry row. */
 export interface LocusEndpoint {
   /** Feishu chat id; this is always part of an endpoint. */
@@ -375,6 +388,7 @@ export function renderLocusDeliveryPrompt(
     '',
     '### 按需读取',
     '本次 prompt 刻意不携带压平的聊天记录、项目资料、兄弟 child 历史或父会话摘要。需要的资料请通过当前已授权的读取能力按需读取原始内容；收到资料不等于已采纳。',
+    INFO_EXCHANGE_RULE,
     // The read claim is the MEASURED one for this delivery; the tier below says
     // which tools exist, which is a different fact.
     ...(isDocEndpoint(context.endpoint)
@@ -438,6 +452,7 @@ function renderSubsequentDeliveryPrompt(context: LocusDeliveryContext): string {
     '',
     '### Intent triage',
     '沿用首次投递的四类规则：info→finish(reply)，work→track 后 finish(reply)，reference-only→finish(no-reply) 静默结算，ambiguous→finish(reply) 发一次澄清并终结本 Delivery；后续回答是同一 child 的新 Delivery。不得仅因同时 at 其它 bot 判为 reference-only。',
+    INFO_EXCHANGE_RULE,
     '',
     '### 本次投递的访问模式',
     context.accessMode === 'danger-full-access'

@@ -38,6 +38,7 @@ import {
   foldLocusMainSettings,
   type LocusMainObservedSurface,
 } from './locus-main.js'
+import { LOCUS_ANSWER_PROCEDURE } from '../collab/locus-tools.js'
 import { mountLocusPreset, type LocusPresetRegistry } from './preset.js'
 import type { LocusDshPort, LocusParentSession, LocusWorkspace } from './controller.js'
 import { delegationParentOf } from '../session-lineage.js'
@@ -231,6 +232,10 @@ export function composeLocusCoordinatorBriefing(input: LocusCoordinatorBriefingI
     '',
     '你的职责只是协调：通过协作空间与工作主会话沟通，接收并回答飞书入口子会话经 locus_ask_parent 提出的问题，',
     '用 locus_note 记录入口级信息。你没有 shell、写文件、编辑和委派能力，也不需要它们。',
+    '',
+    '以后每次收到子会话的提问，都按下面的规则处理（同样的规则也附在每条提问里；两处一致，以提问里的为准）：',
+    LOCUS_ANSWER_PROCEDURE,
+    '',
     '这条消息只陈述上下文，不是任务；请只回复「了解」，然后保持待命。',
   ].join('\n')
 }
