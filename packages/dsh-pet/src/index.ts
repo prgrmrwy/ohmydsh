@@ -45,7 +45,7 @@ import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/pat
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
-import { createLarkCliClient, createLocusLarkPort } from './host/channel/lark.js'
+import { createLarkCliClient, createLocusLarkPort, LarkCliCallError } from './host/channel/lark.js'
 import { createLocusMediaPort, sweepMediaSpool, type LocusMediaPort } from './host/channel/media.js'
 import { resolvePetLarkCliCompat } from './host/channel/lark-cli-compat.js'
 import { createPetRoutes } from './host/routes.js'
@@ -2476,14 +2476,24 @@ async function initialize(
       }
       const target = current.replyTarget ?? current.feedbackTarget
       let outboundResult: 'success' | 'unknown' = 'unknown'
+      let outboundDiagnostic = 'reply result was not reliably confirmed'
       if (typeof larkClient.replyToTarget === 'function') {
         try {
           await larkClient.replyToTarget(target, input.text ?? '')
           outboundResult = 'success'
-        } catch {
-          // The current adapter cannot prove whether a process/envelope failure
-          // happened before or after platform acceptance. Never retry it.
+        } catch (error) {
+          // Most process/envelope failures cannot prove whether they happened
+          // before or after platform acceptance. Never retry any of them; only
+          // lark-cli's local validation is provably pre-send, so name it.
           outboundResult = 'unknown'
+          if (error instanceof LarkCliCallError) {
+            petLog(`dsh-pet locus reply failed: ${error.errorType ?? 'unknown'}/${error.errorSubtype ?? 'unknown'}`)
+            if (error.rejectedBeforeSend) {
+              outboundDiagnostic = 'reply was rejected by local lark-cli validation and was not sent'
+            }
+          } else {
+            petLog('dsh-pet locus reply failed: adapter error')
+          }
         }
       }
       const completed = await locusRepository.completeCurrentDelivery({
@@ -2492,7 +2502,7 @@ async function initialize(
         now: Date.now(),
         outcome: 'reply',
         outboundResult,
-        ...(outboundResult === 'unknown' ? { outboundDiagnostic: 'reply result was not reliably confirmed' } : {}),
+        ...(outboundResult === 'unknown' ? { outboundDiagnostic } : {}),
         ...(finishing.record.revision === undefined && finishing.record.stateRevision === undefined
           ? {}
           : { expectedRevision: finishing.record.revision ?? finishing.record.stateRevision }),

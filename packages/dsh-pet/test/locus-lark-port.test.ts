@@ -90,7 +90,7 @@ describe('strict LocusLarkPort control messages', () => {
         'im', '+messages-send',
         '--as', 'bot',
         '--chat-id', CHAT,
-        '--text', '上下文来源发生变化。',
+        '--content', JSON.stringify({ text: '上下文来源发生变化。' }), '--msg-type', 'text',
         '--json',
       ],
       { timeout: 20_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true },

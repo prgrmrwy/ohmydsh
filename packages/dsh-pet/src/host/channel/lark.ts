@@ -583,10 +583,49 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
  * never mistake an exit failure, malformed JSON, or `{ok:false}` for success.
  */
 function strictEnvelopeData(result: CliJsonResult, operation: string): unknown {
-  if (!result.ok) throw new Error(`${operation}: lark-cli process failed`)
   const envelope = recordOf(result.value)
-  if (envelope?.['ok'] !== true) throw new Error(`${operation}: lark-cli envelope was not ok`)
+  if (!result.ok || envelope?.['ok'] !== true) {
+    const error = recordOf(envelope?.['error'])
+    const errorType = typeof error?.['type'] === 'string' ? error['type'] : undefined
+    const errorSubtype = typeof error?.['subtype'] === 'string' ? error['subtype'] : undefined
+    throw new LarkCliCallError(
+      result.ok ? `${operation}: lark-cli envelope was not ok` : `${operation}: lark-cli process failed`,
+      errorType,
+      errorSubtype,
+    )
+  }
   return envelope['data']
+}
+
+/**
+ * A strict lark-cli call that did not succeed. `errorType`/`errorSubtype` are
+ * lark-cli's own low-cardinality error classes (never bodies or ids).
+ * `errorType === 'validation'` is raised by lark-cli's local argument checks
+ * before any API request, so such a call is provably not sent.
+ */
+export class LarkCliCallError extends Error {
+  constructor(
+    message: string,
+    readonly errorType?: string,
+    readonly errorSubtype?: string,
+  ) {
+    super(message)
+    this.name = 'LarkCliCallError'
+  }
+
+  get rejectedBeforeSend(): boolean {
+    return this.errorType === 'validation'
+  }
+}
+
+/**
+ * Plain text as `--content` JSON. `--text` (like `--content`) treats a leading
+ * `@` as "read this file", so a reply starting with `@Name` failed locally;
+ * a JSON object always starts with `{`, and also never trips the leading
+ * `doc:` guard in {@link callJson}.
+ */
+function textContentArgs(text: string): string[] {
+  return ['--content', JSON.stringify({ text }), '--msg-type', 'text']
 }
 
 function requireInput(value: string, field: string): string {
@@ -1305,7 +1344,7 @@ export function createLarkCliClient(
 
     async reply(messageId, text) {
       await callCli(
-        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, ...textContentArgs(text)],
         binary,
         runner,
       )
@@ -1315,7 +1354,7 @@ export function createLarkCliClient(
       const messageId = requireMessageId(requireInput(messageIdInput, 'message id'), 'reply exact')
       const text = requireInput(textInput, 'reply text')
       const result = await callJson(
-        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text, '--json'],
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, ...textContentArgs(text), '--json'],
         binary,
         runner,
       )
@@ -1338,8 +1377,7 @@ export function createLarkCliClient(
         'bot',
         '--message-id',
         targetMessageId,
-        '--text',
-        replyText,
+        ...textContentArgs(replyText),
       ]
       // A thread id is Host-verified context. The CLI flag is still required
       // to select the platform's thread reply path; retaining the id in the
@@ -1358,7 +1396,7 @@ export function createLarkCliClient(
 
     async replyStrict(messageId, text) {
       const result = await callJson(
-        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, ...textContentArgs(text)],
         binary,
         runner,
       )
@@ -1391,7 +1429,7 @@ export function createLarkCliClient(
 
     async sendToChat(chatId, text) {
       await callCli(
-        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text],
+        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, ...textContentArgs(text)],
         binary,
         runner,
       )
@@ -1460,7 +1498,7 @@ export function createLocusLarkPort(
       }
       const text = requireInput(input.text, 'control message text')
       const result = await callJson(
-        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text, '--json'],
+        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, ...textContentArgs(text), '--json'],
         binary,
         runner,
       )

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { connectionCount, consumeDryRun } from './fixtures/lark-subscribe.js'
 import {
   createLarkCliClient,
+  LarkCliCallError,
   parseBotIdentity,
   parseUserIdentity,
   permissionDiagnostic,
@@ -296,7 +297,7 @@ describe('strict Delivery-target reply', () => {
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
       expect(args).toEqual([
         '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
-        '--message-id', 'om_current', '--text', 'done', '--json',
+        '--message-id', 'om_current', '--content', JSON.stringify({ text: 'done' }), '--msg-type', 'text', '--json',
       ])
       return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
     }) as unknown as LarkCliRunner
@@ -310,7 +311,7 @@ describe('strict Delivery-target reply', () => {
     const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
       expect(args).toEqual([
         '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
-        '--message-id', 'om_topic', '--text', 'threaded', '--reply-in-thread', '--json',
+        '--message-id', 'om_topic', '--content', JSON.stringify({ text: 'threaded' }), '--msg-type', 'text', '--reply-in-thread', '--json',
       ])
       return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_threadreply', chat_id: 'oc_group' } }) }
     }) as unknown as LarkCliRunner
@@ -318,6 +319,54 @@ describe('strict Delivery-target reply', () => {
 
     await expect(client.replyToTarget?.({ chatId: 'oc_group', threadId: 'omt_topic', messageId: 'om_topic' }, 'threaded'))
       .resolves.toEqual({ messageId: 'om_threadreply' })
+  })
+
+  it.each([
+    ['a leading @ with an unrendered mention', '@张勇 有结论了'],
+    ['a leading doc: prefix', 'doc: 方案见下'],
+  ])('sends text with %s as --content JSON rather than a file or doc reference', async (_label, body) => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      // Member list unavailable: the mention stays plain text, as in production.
+      if (args.includes('+chat-members-list')) throw Object.assign(new Error('scope'), { stdout: '', stderr: '' })
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await expect(client.replyToTarget?.({ chatId: 'oc_group', threadId: 'omt_topic', messageId: 'om_topic' }, body))
+      .resolves.toEqual({ messageId: 'om_reply' })
+    const reply = calls.find(args => args.includes('+messages-reply'))!
+    expect(reply).not.toContain('--text')
+    expect(JSON.parse(reply[reply.indexOf('--content') + 1]!)).toEqual({ text: body })
+    expect(reply[reply.indexOf('--msg-type') + 1]).toBe('text')
+  })
+
+  it('marks a lark-cli local validation failure as rejected before send', async () => {
+    const runner = vi.fn(async () => {
+      throw Object.assign(new Error('exit 2'), {
+        stdout: '',
+        stderr: JSON.stringify({ ok: false, error: { type: 'validation', subtype: 'invalid_argument', message: 'x' } }),
+      })
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    const failure = await client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done')
+      .then(() => undefined, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(LarkCliCallError)
+    expect(failure).toMatchObject({ errorType: 'validation', errorSubtype: 'invalid_argument', rejectedBeforeSend: true })
+  })
+
+  it('does not treat an API-side failure as provably unsent', async () => {
+    const runner = vi.fn(async () => ({
+      stdout: JSON.stringify({ ok: false, error: { type: 'api', subtype: 'server_error', code: 500 } }),
+    })) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    const failure = await client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, 'done')
+      .then(() => undefined, (error: unknown) => error)
+    expect(failure).toBeInstanceOf(LarkCliCallError)
+    expect((failure as LarkCliCallError).rejectedBeforeSend).toBe(false)
   })
 
   it('rejects an invalid target chat before sending', async () => {
@@ -376,7 +425,7 @@ describe('strict Delivery-target reply', () => {
     expect(calls[1]).toEqual([
       '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
       '--message-id', 'om_current',
-      '--text', '<at user_id="ou_reviewer_02">赵鸿珂</at> 看完了', '--json',
+      '--content', JSON.stringify({ text: '<at user_id="ou_reviewer_02">赵鸿珂</at> 看完了' }), '--msg-type', 'text', '--json',
     ])
   })
 
@@ -394,7 +443,7 @@ describe('strict Delivery-target reply', () => {
       client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '@赵鸿珂 看完了'),
     ).resolves.toEqual({ messageId: 'om_reply' })
 
-    expect(calls[1]).toContain('@赵鸿珂 看完了')
+    expect(calls[1]).toContain(JSON.stringify({ text: '@赵鸿珂 看完了' }))
     // Diagnostics stay low-cardinality: no name, id or body.
     expect(logs.join('\n')).not.toContain('赵鸿珂')
     expect(logs.join('\n')).not.toContain('ou_')
@@ -417,8 +466,8 @@ describe('strict Delivery-target reply', () => {
       .resolves.toEqual({ messageId: 'om_reply' })
 
     expect(calls).toHaveLength(1)
-    const textIndex = calls[0]!.indexOf('--text') + 1
-    expect(calls[0]![textIndex]).toBe(body)
+    const contentIndex = calls[0]!.indexOf('--content') + 1
+    expect(JSON.parse(calls[0]![contentIndex]!)).toEqual({ text: body })
     // No allowed root, no guidance block, no extra flag carrying diagnostics.
     expect(calls[0]).not.toContain('允许根')
     expect(calls[0]).not.toContain('所有者确认')
