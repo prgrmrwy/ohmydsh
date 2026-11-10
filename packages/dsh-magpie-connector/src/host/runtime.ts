@@ -45,7 +45,7 @@ export interface Generation {
   lastSyncErrorKind?: string
   [key: string]: unknown
 }
-export interface Operation extends ConnectionIdentity { gen: Generation; release(): void }
+export interface Operation extends ConnectionIdentity { gen: Generation; connectionVersion: number; release(): void }
 export interface RuntimeOptions {
   probe?: Probe
   now?: () => number
@@ -146,7 +146,7 @@ export class MagpieRuntime {
   /** Set once the initial route registration failed: no further owner admission or publishing (needs a Host restart). */
   private registrationError: { code: string; route?: string } | undefined
   private readonly newId: (existing: readonly string[]) => string
-  /** Bumped by every connection write (and credential event): the only read-consistency proof a check needs. */
+  /** Bumped by every connection write (and credential event): guards asynchronous connection reads. */
   private writeVersion = 0
   private checking = false
   readonly checkTimeoutMs: number
@@ -249,7 +249,7 @@ export class MagpieRuntime {
   }
   invalidateCredential(ref?: unknown) {
     if (this.disposed) return
-    // Any credential event invalidates an in-flight check, including spare-line updates that
+    // Any credential event invalidates in-flight connection reads, including spare-line updates that
     // are not allowed to rotate the generation below.
     this.writeVersion++
     if (ref !== undefined) {
@@ -263,13 +263,15 @@ export class MagpieRuntime {
   async beginOperation(): Promise<Operation> {
     if (this.disposed) throw new Error('MAGPIE_DISPOSED')
     const snapshot = this.current
+    const version = this.writeVersion
     if (this.failedFields.length) throw new Error('MAGPIE_SETTINGS_WRITE_FAILED')
     if (this.saving) throw new Error('MAGPIE_SETTINGS_UPDATING')
     const { active } = await this.selectActive()
     if (this.disposed) throw new Error('MAGPIE_DISPOSED')
     if (this.failedFields.length) throw new Error('MAGPIE_SETTINGS_WRITE_FAILED')
     if (this.saving) throw new Error('MAGPIE_SETTINGS_UPDATING')
-    if (snapshot !== this.current) return this.beginOperation()
+    // Spare-line changes can leave the generation unchanged while invalidating this selection.
+    if (version !== this.writeVersion || snapshot !== this.current) return this.beginOperation()
     const identity = this.identityOf(active)
     const fingerprint = this.fingerprintOf(identity)
     const changed = this.current.lineId !== identity.lineId || this.current.baseUrl !== identity.baseUrl || this.current.keyFingerprint !== fingerprint
@@ -279,7 +281,7 @@ export class MagpieRuntime {
       this.rotate(identity.lineId ?? '', identity.baseUrl ?? '', identity.accessMode ?? 'direct', fingerprint, carry)
     }
     validateIdentity(identity)
-    const op = { ...identity, gen: this.current, release: this.retainIdentity(identity) }
+    const op = { ...identity, gen: this.current, connectionVersion: version, release: this.retainIdentity(identity) }
     if (changed && op.key && op.gen.baseUrl) void this.syncGeneration(op.gen, op)
     return op
   }
@@ -299,6 +301,24 @@ export class MagpieRuntime {
     }
   }
   isCurrent(gen: Generation) { return !this.disposed && gen === this.current }
+  /** Synchronous admission guard for an irreversible write, not for prepared generation calls. */
+  isOperationCurrent(op: Pick<Operation, 'gen' | 'connectionVersion'>): boolean {
+    return this.isCurrent(op.gen) && op.connectionVersion === this.writeVersion && !this.saving && !this.failedFields.length
+  }
+  /**
+   * Observe probe expiry and credential changes even without an update event. The newly resolved
+   * operation is only a check: a write must still use the operation that authorised it, and check
+   * isOperationCurrent again synchronously at dispatch after awaiting this method.
+   */
+  async revalidateOperation(op: Operation): Promise<boolean> {
+    if (!this.isOperationCurrent(op)) return false
+    let check: Operation
+    try { check = await this.beginOperation() } catch (error) {
+      if (!this.isOperationCurrent(op)) return false
+      throw error
+    }
+    try { return this.isOperationCurrent(op) } finally { check.release() }
+  }
   redact(text: string) {
     const preparedKeys: string[] = []
     for (const ref of this.prepared) {
@@ -412,8 +432,7 @@ export class MagpieRuntime {
 
   /** Structured line-list update: the only settings write path (BREAKING schema). */
   private async updateLines(requested: unknown[]): Promise<Response> {
-    // Same synchronous segment as `saving = true` below: even a write that fails later invalidates
-    // any check whose credential read overlapped it.
+    // Even a write that fails validation invalidates earlier connection reads.
     this.writeVersion++
     if (requested.length === 0 || requested.length > MAX_LINES) throw new Error('Invalid lines')
     const config = this.loadConfig()
@@ -495,6 +514,8 @@ export class MagpieRuntime {
       ...cleanup,
     ]
     const retained: PendingCredential[] = []
+    // Validation awaits above allow new reads to start; invalidate those before mutating credentials.
+    this.writeVersion++
     this.saving = true
     try {
       // Marker saves keep the committed line list; a failed write must not apply the new lines.

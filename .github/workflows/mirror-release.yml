@@ -1,20 +1,29 @@
 name: Mirror release
 
 # Self-developed plugins published as standalone repositories are mirrored from
-# this monorepo with `git subtree split`. On every push to main that touches one
-# of them, push its split history to the mirror's main (fast-forward only) and,
-# when the mirror has no `v<package version>` tag yet, create it. The tag starts
-# the mirror's own release.yml, which tests and publishes to npm through
-# trusted publishing and skips versions that are already on npm.
+# this monorepo with `git subtree split`, and kept in sync both ways: PRs may be
+# merged on a mirror as on any standalone repository. Each run, per mirror,
+# scripts/mirror-sync.mjs merges mirror commits this repository does not have
+# back into the package directory, pushes that merge to main here, then splits
+# reusing the mirror's own commits (`--onto`) and fast-forwards the mirror's
+# main. When the mirror has no `v<package version>` tag yet, it creates one;
+# the tag starts the mirror's own release.yml, which tests and publishes to npm
+# through trusted publishing and skips versions already on npm.
+#
+# The first run per mirror joins the two histories once with an `-s ours`
+# merge (no file changes). A merge-back conflict, or a mirror that diverged
+# before that join, fails this job without pushing anything: merge it by hand
+# here (`git merge -Xsubtree=packages/<dir> <mirror main>`) and rerun.
+#
+# Runs on pushes to main touching a mirrored package, hourly (to pick up PRs
+# merged on mirrors), and on dispatch. Pushes made with GITHUB_TOKEN start no
+# new workflow runs, so the merge-back push does not loop.
 #
 # Each mirror has its own write deploy key; the private half is the secret named
-# in the matrix. A rejected (non fast-forward) push fails loudly instead of
-# forcing: the mirror then holds commits that are not in this repository — with
-# one sanctioned exception, renaming a mirrored package directory. `git subtree
-# split` keys on the path prefix, so a rename makes the new split history
-# unrelated to the mirror's main; dispatch this workflow with force=true once to
-# rewrite it. The mirror is a generated artifact, so its main history is
-# replaceable; release tags stay where they are.
+# in the matrix. force=true is the one sanctioned history rewrite: after
+# renaming a mirrored package directory `git subtree split` produces unrelated
+# history, so dispatch once with force to replace the mirror's main (skipping
+# merge-back). Release tags stay where they are.
 
 on:
   push:
@@ -26,6 +35,8 @@ on:
       - 'packages/dsh-session-id-copy/**'
       - 'packages/cockpit-worktree-open-shim/**'
       - 'packages/cockpit-memex-browse-shim/**'
+  schedule:
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       force:
@@ -38,7 +49,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  # Merge-back commits are pushed to this repository's main.
+  contents: write
 
 jobs:
   mirror:
@@ -46,6 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Mirrors run one after another: each may push a merge-back commit to main,
+      # and the next one starts from that new main.
+      max-parallel: 1
       matrix:
         include:
           - dir: dsh-auto-model-routing
@@ -81,19 +96,22 @@ jobs:
           ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
           echo "GIT_SSH_COMMAND=ssh -i ~/.ssh/mirror -o IdentitiesOnly=yes" >> "$GITHUB_ENV"
 
-      - name: Push subtree and tag new version
+      - name: Sync both ways
+        id: sync
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Start from the newest main: an earlier matrix job may have pushed a merge-back.
+          git fetch --no-tags origin main
+          git checkout -B main origin/main
+          node scripts/mirror-sync.mjs --prefix "packages/${{ matrix.dir }}" \
+            --mirror "git@github.com:prgrmrwy/${{ matrix.repo }}.git" --push-origin \
+            ${{ inputs.force && '--force' || '' }}
+
+      - name: Tag new version
+        run: |
           remote="git@github.com:prgrmrwy/${{ matrix.repo }}.git"
-          split="$(git subtree split --prefix=packages/${{ matrix.dir }} HEAD)"
-          echo "split commit: $split"
-          if [ "${{ inputs.force }}" = "true" ]; then
-            echo "force=true: rewriting the mirror main history (package directory rename)."
-            git push --force "$remote" "$split:refs/heads/main"
-          else
-            git push "$remote" "$split:refs/heads/main"
-          fi
+          split="${{ steps.sync.outputs.split }}"
           version="$(git show "$split:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
           if git ls-remote --exit-code --tags "$remote" "refs/tags/v$version" >/dev/null; then
             echo "v$version already tagged on the mirror; nothing to release."

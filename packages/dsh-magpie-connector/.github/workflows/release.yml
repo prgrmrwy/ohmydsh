@@ -13,12 +13,17 @@ on:
 permissions:
   contents: write
   id-token: write
+  # The release report comments on Issues the release refs.
+  issues: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The release report reads commits since the previous tag.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -78,3 +83,64 @@ jobs:
           fi
           gh release upload "$tag" "$assets/$name-$version.tgz" \
             --repo "$GITHUB_REPOSITORY" --clobber
+      # Issues may close at merge (closing keywords) or stay open (`Refs`); either way the
+      # reporter hears about the release. Commit messages are read for the full form
+      # `<keyword> <owner>/<repo>#<n>` (a bare #<n> is ambiguous once synced into the
+      # monorepo); PRs merged on this repository add their GitHub-resolved closing issues.
+      - name: Collect Issues referenced since the previous release
+        id: refs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          previous="$(git describe --tags --abbrev=0 --match 'v*' "$GITHUB_REF_NAME^" 2>/dev/null || true)"
+          range="${previous:+$previous..}$GITHUB_REF_NAME"
+          refs="$(git log "$range" --format=%B \
+            | grep -oiE "(refs|close[sd]?|fix(e[sd])?|resolve[sd]?):? +$GITHUB_REPOSITORY#[0-9]+" | grep -oE '[0-9]+$' | sort -un | tr '\n' ' ')"
+          commits="$(git log "$range" --format=%H | head -n 200 | tr '\n' ' ')"
+          echo "Issues referenced in commit messages of $range: ${refs:-none}"
+          echo "issues=$refs" >> "$GITHUB_OUTPUT"
+          echo "commits=$commits" >> "$GITHUB_OUTPUT"
+      - name: Hand referenced Issues to Bebop
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          ISSUES: ${{ steps.refs.outputs.issues }}
+          COMMITS: ${{ steps.refs.outputs.commits }}
+        with:
+          script: |
+            const version = context.ref.replace(/^refs\/tags\/v/, '');
+            const marker = `<!-- bebop:release-report v${version} -->`;
+            const full = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+            const words = value => (value ?? '').split(/\s+/).filter(Boolean);
+            const numbers = new Set(words(process.env.ISSUES).map(Number));
+            const pulls = new Set();
+            for (const sha of words(process.env.COMMITS)) {
+              try {
+                const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({ ...context.repo, commit_sha: sha });
+                for (const pr of data) if (pr.merged_at) pulls.add(pr.number);
+              } catch (error) { core.warning(`${sha}: ${error.message}`); }
+            }
+            for (const number of pulls) {
+              try {
+                const result = await github.graphql(
+                  'query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){closingIssuesReferences(first:20){nodes{number repository{nameWithOwner}}}}}}',
+                  { ...context.repo, number });
+                for (const node of result.repository.pullRequest.closingIssuesReferences.nodes) {
+                  if (node.repository.nameWithOwner.toLowerCase() === full) numbers.add(node.number);
+                }
+              } catch (error) { core.warning(`PR #${number}: ${error.message}`); }
+            }
+            core.info(`issues to report: ${[...numbers].join(' ') || 'none'}`);
+            for (const number of numbers) {
+              let issue;
+              try { ({ data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: number })); }
+              catch (error) { core.warning(`#${number}: ${error.message}`); continue; }
+              // Closed issues are reported too (a merged PR may have closed them), except ones closed as not planned.
+              if (issue.pull_request || issue.state_reason === 'not_planned') continue;
+              const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: number, per_page: 100 });
+              if (comments.some(comment => comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker))) continue;
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: number,
+                body: [marker, `@agent-bebop v${version} has been released and includes changes that reference or close this issue. Please verify the release and report back here.`].join('\n\n')
+              });
+            }
