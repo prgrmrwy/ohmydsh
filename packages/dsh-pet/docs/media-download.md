@@ -72,3 +72,30 @@ Locus child 的 project-read guard（`src/index.ts` 的 `deniedRoots` 指向 `ds
 | PATH binary 与版本门 | PASS | Host/Pet consumer 及 event bus 均由当前用户 NVM 安装的 `lark-cli` 1.0.97 拉起；启动日志无 `lark media downloader unavailable` |
 | 群内发图 → child 收到 typed image | PASS | 群「pet 命名验证·20260919」16:21 的 post（message position 78）携图触发；16:21 新增 56,108 bytes content-addressed attachment；bot 回复准确复述图片中的群名和三步操作文本 |
 | 结算后 spool 为空 | PASS | `media-spool` mtime 为 16:21:41，验收后目录只有 `.` / `..`，无下载残留 |
+
+## 按需读取单条消息与视频关键帧（2026-11-11，change `locus-read-message-media`）
+
+自动注入路径不变（只取当前触发消息的图片）。新增 caller-bound 工具 `pet_locus_message({ messageId })`，
+同一套下载、字节上限、MIME 嗅探和 spool 清理不变量对它同样成立（`downloadIntoSpool` / `withSpoolDownload`）。
+
+- **两次平台读取**：原始 `lark-cli api GET /open-apis/im/v1/messages/<id> --as bot`（唯一能拿到 `chat_id` 和视频封面
+  `image_key` 的地方，信封在 `data.items[0]`）+ `+messages-mget`（发送者显示名、格式化正文，信封在 `data.messages[0]`）。
+  两者的 `message_id`、`chat_id` 都必须与请求一致，否则在下载任何资源前失败。信封形状见
+  `test/fixtures/lark-message-envelopes.ts`（脱敏的真实样本）和 pitfalls §3。
+- **视频**：封面按图片下载；PATH 上有 `ffmpeg`/`ffprobe`（启动时探测一次并固定为绝对路径，`resolveFrameTools`）时，
+  在独占子目录内下载视频（≤ 64 MiB，下载中途超限即终止）→ `ffprobe` 取时长与容器（白名单 mov/mp4/m4a/3gp/3g2/mj2、
+  matroska/webm，≤ 300 s）→ `ffmpeg` 以 `-protocol_whitelist file -nostdin`、`select='eq(n,0)+gt(scene,0.08)'`、
+  最长边 ≤ 1024 的缩放、`showinfo` 抽最多 `min(8, 剩余图片额度)` 帧。整体 30 s 超时，进程组 SIGKILL。
+- **时间点只来自 `showinfo`**：必须 `-loglevel info`（`error` 会滤掉逐帧行）；第 k 条记录（`n:k`）配第 k+1 个输出文件；
+  数量、连续性、单调性任一不满足就丢弃全部帧、只给封面，原因 `frame-timestamps-unavailable`，**不按序号推算时间**。
+- **帧单独成一批提交 attachment**：帧失败只丢帧（`frame-admission-failed`），不会拖垮封面，也不会留下部分 refs。
+- **降级原因是封闭词表**（`VideoSkipReason`）：`frame-tools-unavailable`、`image-quota-exhausted`、`video-too-large`、
+  `video-too-long`、`video-format-unsupported`、`video-probe-failed`、`video-download-failed`、`video-download-timeout`、
+  `frame-extraction-failed`、`frame-extraction-timeout`、`frame-timestamps-unavailable`、`frame-admission-failed`。
+
+### ffmpeg 的残余风险（必须披露）
+
+`ffmpeg`/`ffprobe` 解析**不可信**容器和码流，以 Host 用户权限运行，**没有额外沙箱**（macOS 上没有低成本的进程级沙箱）。
+已做的收紧：仅 `file` 协议、容器白名单、字节/时长/超时上限、cwd 为 0700 独占子目录、进程组终止、返回前删除。
+没有做的：seccomp/sandbox-exec 类隔离。部署方删掉 ffmpeg 即退回只给封面；这是可选能力。
+

@@ -48,7 +48,18 @@ import {
   type LocusDocContextResult,
 } from './locus-doc-context-tool.js'
 
-export { PET_LOCUS_CHAT_HISTORY_TOOL }
+import {
+  executeLocusMessage,
+  LOCUS_MESSAGE_DESCRIPTION,
+  locusMessageJsonParts,
+  PET_LOCUS_MESSAGE_TOOL,
+  renderLocusMessage,
+  routeAcceptsImages,
+  type LocusMessageToolDeps,
+  type LocusMessageToolResult,
+} from './locus-message-tool.js'
+
+export { PET_LOCUS_CHAT_HISTORY_TOOL, PET_LOCUS_MESSAGE_TOOL }
 import type { PetRepository } from './repository.js'
 import type { LarkClient } from './channel/lark.js'
 import type { LedgerCallerLocusLookup } from './ledger/caller.js'
@@ -368,6 +379,14 @@ export function registerPetTools(
      * `locusHistory` / `locusDocContext` is published per child, by entry kind.
      */
     readonly locusDocContext?: Omit<LocusDocContextDeps, 'callerSessionId'>
+    /**
+     * Caller-bound single-message read for an IM child. Absent means the Host has no
+     * media port for this child (or it serves a document), and the tool is not published.
+     */
+    readonly locusMessage?: Pick<LocusMessageToolDeps, 'loci' | 'media'> & {
+      /** Test seam; production asks the calling session's exact model route. */
+      readonly routeAcceptsImages?: (exec: unknown) => Promise<boolean>
+    }
     /** Child-side `locus_context` and `locus_ask_parent`; absent means neither is published. */
     readonly locusChildTools?: LocusChildToolsDeps
   },
@@ -628,6 +647,43 @@ export function registerPetTools(
     }))
   }
 
+  const message = deps.locusMessage
+  if (message !== undefined) {
+    register(defineTool({
+      name: PET_LOCUS_MESSAGE_TOOL,
+      description: LOCUS_MESSAGE_DESCRIPTION,
+      parameters: {
+        messageId: { type: 'string', required: true },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', required: true },
+            reason: { type: 'string' },
+            text: { type: 'string' },
+            // Ordered text and image parts; images are attachment references.
+            parts: { type: 'json' },
+          },
+        },
+        render: (_args, value) => renderLocusMessage(value as LocusMessageToolResult),
+      },
+      async execute(args, exec) {
+        const result = await executeLocusMessage(args, {
+          callerSessionId: callerSessionId(exec as ExecutionLike),
+          loci: message.loci,
+          media: message.media,
+          canViewImages: () => (message.routeAcceptsImages ?? (run => routeAcceptsImages(ctx, run)))(exec),
+          signal: (exec as { signal?: AbortSignal }).signal ?? new AbortController().signal,
+        })
+        return result.ok
+          ? { ok: true, text: result.text, parts: locusMessageJsonParts(result.parts as never) }
+          : { ok: false, reason: result.reason }
+      },
+    }))
+  }
+
   const history = deps.locusHistory
   if (history !== undefined) {
     register(defineTool({
@@ -639,7 +695,11 @@ export function registerPetTools(
         'than the whole group. Pass `since`/`before` (ISO 8601 with offset, window is ' +
         '[since, before)) or the `cursor` returned by a previous call to keep reading; do not ' +
         'rewrite the cursor. Results are truncated to a declared budget and the truncation is ' +
-        'marked. A failure is reported as a failure, never as an empty history.',
+        'marked. A line whose message carries an image, video, file or audio ends with ' +
+        (message === undefined
+          ? '`(id om_…)`. '
+          : '`(id om_…)`: pass that id to `pet_locus_message` to read it. ') +
+        'A failure is reported as a failure, never as an empty history.',
       parameters: {
         since: { type: 'string' },
         before: { type: 'string' },

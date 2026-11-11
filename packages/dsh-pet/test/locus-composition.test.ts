@@ -396,11 +396,35 @@ describe('spec Scenario "文档子会话的工具面"', () => {
     expect(attestLocusComposition(docSurface, 'read-only')).toMatchObject({ ok: true, leaks: [] })
     expect(attestLocusComposition([...docSurface, ...LOCUS_FULL_ACCESS_TOOL_NAMES], 'danger-full-access')).toMatchObject({ ok: true, leaks: [] })
 
-    // The Host publishes exactly one read tool per child by entry kind.
-    const { readFile } = await import('node:fs/promises')
-    const path = await import('node:path')
-    const index = await readFile(path.resolve(__dirname, '..', 'src', 'index.ts'), 'utf8')
-    const branch = index.slice(index.indexOf('One read tool per child, by entry kind'), index.indexOf('One read tool per child, by entry kind') + 1600)
-    expect(branch).toMatch(/isDocEndpoint\([\s\S]*locusDocContext:[\s\S]*: \(larkClient\.readEntranceHistory === undefined[\s\S]*locusHistory:/)
+    // The Host publishes exactly one read tool per child by entry kind: drive the
+    // production selection (the Host spreads it into registerPetTools as-is).
+    const { selectLocusEntryReadTools } = await import('../src/host/locus/entry-read-tools.js')
+    const ports = {
+      lark: { readEntranceHistory: async () => undefined, queryDocComment: async () => ({}) as never, fetchDocMarkdown: async () => ({ ok: false as const }) },
+      media: { available: true } as never,
+      loci: {} as never,
+      cursor: {} as never,
+      currentDocMessageId: () => undefined,
+    }
+    expect(Object.keys(selectLocusEntryReadTools({ ...ports, endpoint: { chatId: 'doc:docx:Dx0000000000000000000000001' } }))).toEqual(['locusDocContext'])
+    expect(Object.keys(selectLocusEntryReadTools({ ...ports, endpoint: { chatId: 'oc_0000000000000000000000000000001' } })).sort())
+      .toEqual(['locusHistory', 'locusMessage'])
+  })
+})
+
+describe('the IM child surface after pet_locus_message', () => {
+  it('IM child surface equals previous plus pet_locus_message', () => {
+    const previous = [
+      'locus_ask_parent', 'locus_context', 'pet_context', 'pet_locus_chat_history',
+      'pet_locus_doc_context', 'pet_locus_finish', 'pet_locus_track', 'pet_locus_wait',
+    ]
+    expect([...LOCUS_CALLER_BOUND_TOOLS].sort()).toEqual([...previous, 'pet_locus_message'].sort())
+    // An IM child (history + message, no doc read) attests in both access modes.
+    const im = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS.filter(name => name !== 'pet_locus_doc_context')]
+    expect(im).toContain('pet_locus_message')
+    expect(attestLocusComposition(im, 'read-only')).toMatchObject({ ok: true, leaks: [] })
+    expect(attestLocusComposition([...im, ...LOCUS_FULL_ACCESS_TOOL_NAMES], 'danger-full-access')).toMatchObject({ ok: true, leaks: [] })
+    // The same surface WITHOUT the new entry would have been a leak had it been visible unlisted.
+    expect(attestLocusComposition([...LOCUS_SAFE_TOOL_NAMES, 'pet_locus_message_other'], 'read-only').leaks).toEqual(['pet_locus_message_other'])
   })
 })
