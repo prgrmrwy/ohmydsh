@@ -422,11 +422,38 @@ describe('strict Delivery-target reply', () => {
       '--profile', 'dsh-pet', 'im', '+chat-members-list', '--as', 'bot',
       '--chat-id', 'oc_group', '--member-types', 'user', '--page-all',
     ])
-    expect(calls[1]).toEqual([
+    expect(calls.find(args => args.includes('+messages-reply'))).toEqual([
       '--profile', 'dsh-pet', 'im', '+messages-reply', '--as', 'bot',
       '--message-id', 'om_current',
       '--content', JSON.stringify({ text: '<at user_id="ou_reviewer_02">赵鸿珂</at> 看完了' }), '--msg-type', 'text', '--json',
     ])
+  })
+
+  it('renders a plain @bot-name (with a space) into a real mention; bots do not count as human members', async () => {
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      if (args.includes('+chat-members-list')) {
+        const bots = args[args.indexOf('--member-types') + 1] === 'bot'
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            data: bots
+              ? { bots: [{ member_id: 'ou_aily_bot', name: 'Aily 研发助手', app_id: 'cli_x' }] }
+              : { users: [{ member_id: 'ou_zhang', name: '张勇' }] },
+          }),
+        }
+      }
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+
+    await client.replyToTarget?.({ chatId: 'oc_group', messageId: 'om_current' }, '@Aily 研发助手 请说明流程，@张勇 知悉')
+    const reply = calls.find(args => args.includes('+messages-reply'))!
+    expect(JSON.parse(reply[reply.indexOf('--content') + 1]!)).toEqual({
+      text: '<at user_id="ou_aily_bot">Aily 研发助手</at> 请说明流程，<at user_id="ou_zhang">张勇</at> 知悉',
+    })
+    await expect(client.memberCount('oc_group')).resolves.toBe(1)
   })
 
   it('spec Scenario "成员表不可读时仍能发出": original text sent, ONE low-cardinality diagnostic, reply outcome intact', async () => {

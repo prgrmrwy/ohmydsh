@@ -934,6 +934,44 @@ export function createLarkCliClient(
   }
 
   /**
+   * Read one chat's bot members for mention rendering only, cached like humans.
+   *
+   * `--member-types user` never lists bots, so `@Aily 研发助手` stayed plain text
+   * and the bot was never notified. Bots are kept out of {@link memberList}
+   * because that list also backs the human head-count shown at `/bind`.
+   * Fail-soft: any failure yields no bots, never blocks the reply.
+   */
+  const botCache = new Map<string, { readonly at: number; readonly members: readonly MentionMember[] }>()
+  async function botMemberList(chatId: string): Promise<readonly MentionMember[]> {
+    const cached = botCache.get(chatId)
+    const now = Date.now()
+    if (cached !== undefined && now - cached.at < MEMBER_CACHE_TTL_MS) return cached.members
+    const members: MentionMember[] = []
+    try {
+      const data = await callCli(
+        ['im', '+chat-members-list', '--as', 'bot', '--chat-id', chatId, '--member-types', 'bot', '--page-all'],
+        binary,
+        runner,
+      )
+      const bots = (data as { bots?: unknown } | undefined)?.bots
+      if (Array.isArray(bots)) {
+        for (const entry of bots) {
+          if (typeof entry !== 'object' || entry === null) continue
+          const record = entry as { member_id?: unknown; name?: unknown }
+          if (typeof record.member_id !== 'string' || typeof record.name !== 'string') continue
+          if (record.member_id.trim() === '' || record.name.trim() === '') continue
+          members.push({ openId: record.member_id.trim(), name: record.name.trim() })
+        }
+      }
+    } catch {
+      // Not cached: a transient failure should not hide bots for the whole TTL.
+      return []
+    }
+    botCache.set(chatId, { at: now, members })
+    return members
+  }
+
+  /**
    * Turn the agent's `@display-name` references into real mentions.
    *
    * Fail-soft on purpose: rendering is an enhancement, and a member-list read
@@ -948,7 +986,7 @@ export function createLarkCliClient(
         log('lark reply mentions: member list unavailable; sending text unchanged')
         return text
       }
-      const rendered = renderMentions(text, members)
+      const rendered = renderMentions(text, [...members, ...(await botMemberList(chatId))])
       if (rendered.rendered === 0) {
         if (rendered.skipped !== undefined) {
           log(`lark reply mentions: unchanged (${rendered.skipped})`)

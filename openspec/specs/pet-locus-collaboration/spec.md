@@ -393,6 +393,10 @@ Host SHALL 维护进行中/完成/失败等控制反馈；反馈失败不阻断�
 - **WHEN** Agent 回复正文含 `@ou_322ec1d3cd062f04bc2b1f4ba1eff8e9`，且该 open_id 是本 chat 成员
 - **THEN** 发送的正文该处变为 `<at user_id="ou_322ec1d3cd062f04bc2b1f4ba1eff8e9">张勇</at>`，平台侧产生真实提醒，且正文不再出现裸 open_id
 
+#### Scenario: 群内机器人也是可解析成员
+- **WHEN** Agent 回复正文含 `@Aily 研发助手 请说明流程`，且该 chat 的机器人成员中恰有一个显示名为「Aily 研发助手」
+- **THEN** 发送的正文该处变为 `<at user_id="ou_…">Aily 研发助手</at>`（显示名含空格时整名匹配）；机器人成员只参与渲染，MUST NOT 计入 `/bind` 回执中的人类成员数
+
 #### Scenario: 同名歧义不改写
 - **WHEN** 该 chat 有两个成员显示名同为「张伟」，正文写 `@张伟 请看`
 - **THEN** 正文原样发送，不猜测指向哪一位
