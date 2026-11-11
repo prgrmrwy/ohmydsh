@@ -37,6 +37,7 @@ import {
 import {
   clampPosition,
   readPosition,
+  resolvePosition,
   writePosition,
   type PetPosition,
 } from './position.js'
@@ -152,7 +153,17 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   // bought nothing and cost every interaction.
 
   const viewport = useViewport()
-  const [position, setPosition] = useState<PetPosition>(() => readPosition(viewport, globalThis.localStorage, DEFAULT_SIZE_PX))
+  /**
+   * The saved position — the user's intent — never the clamped drawing.
+   *
+   * Kept apart from the rendered position so a viewport that is still settling
+   * cannot rewrite it: an iframe whose host has not laid it out yet measures
+   * 0x0 or its default box, and clamping at read time used to replace the
+   * anchor with that box's corner for good. See `position.ts`.
+   */
+  const [anchor, setAnchor] = useState<PetPosition | undefined>(() =>
+    readPosition(globalThis.localStorage),
+  )
   // Appearance comes from the Host config, not `localStorage`: the plugin
   // runtime has no usable browser storage, so writes there are lost.
   const [accent, setAccent] = useState(() => resolveAccent(undefined))
@@ -350,30 +361,29 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
   }, [viewport, size])
 
   /**
-   * Pet's committed position, for the drag to snapshot at pointerdown.
+   * Position to render, derived rather than stored.
+   *
+   * The saved anchor is only clamped for display, so a viewport that changes
+   * (including one that is still settling when Pet mounts) moves the DRAWING
+   * and never the user's saved spot. Deriving it also removes the old
+   * one-way re-clamp: that effect pushed the rendered state inward on every
+   * shrink and nothing ever brought it back when the viewport grew again.
+   *
+   * Mid-drag the gesture owns the position — it paints `transform` straight to
+   * the DOM — so a re-render caused by an unrelated state change must not paint
+   * over it with the anchor. `pending` is exactly what the drag last painted.
+   */
+  const position = dragging.current?.pending ?? resolvePosition(anchor, viewport, size)
+
+  /**
+   * Pet's rendered position, for the drag to snapshot at pointerdown.
    *
    * Assigned during render rather than in an effect: `onPointerDown` must see
    * the position the user is looking at, and an effect would still be pending
-   * if the pointer goes down in the same frame as a re-clamp.
+   * if the pointer goes down in the same frame as a viewport change.
    */
   const positionRef = useRef(position)
   positionRef.current = position
-
-  // Re-clamp whenever the viewport changes so Pet can never be stranded.
-  // Deliberately does NOT persist: a temporary narrow layout would otherwise
-  // overwrite the user's chosen spot, and it could never be recovered when
-  // the layout widened again. Only a real drag writes the position.
-  useEffect(() => {
-    // Skipped mid-drag: this would `setPosition` and let React paint a
-    // `transform` over the value the drag writes straight to the DOM, which
-    // reads as Pet snapping backwards under the pointer. Nothing is lost by
-    // waiting — the drag already clamps against the current viewport and size
-    // through the refs above, and its commit lands on a clamped value.
-    if (dragging.current !== undefined) return
-    setPosition(current => clampPosition(current, viewport, size))
-    // `size` included: growing the mascot near an edge must pull it back
-    // into view rather than leave it partly off-screen.
-  }, [viewport.width, viewport.height, size])
 
   useEffect(() => {
     let cancelled = false
@@ -690,7 +700,9 @@ export function PetOverlay(props: PetOverlayProps): JSX.Element {
         globalThis.localStorage,
         sizeRef.current,
       )
-      setPosition(committed)
+      // The drag is the only writer: it replaces the saved anchor, and the
+      // render clamps that anchor again for whatever the viewport is then.
+      setAnchor(committed)
     },
     [],
   )
