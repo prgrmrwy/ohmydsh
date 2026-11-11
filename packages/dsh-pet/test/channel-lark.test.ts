@@ -456,6 +456,35 @@ describe('strict Delivery-target reply', () => {
     await expect(client.memberCount('oc_group')).resolves.toBe(1)
   })
 
+  it('refetches a cached member list once when a reference is unknown, so a just-invited member is mentioned', async () => {
+    const users = [{ member_id: 'ou_zhang', name: '张勇' }]
+    const calls: string[][] = []
+    const runner = vi.fn(async (_binary: string, args: readonly string[]) => {
+      calls.push([...args])
+      if (args.includes('+chat-members-list')) {
+        const bots = args[args.indexOf('--member-types') + 1] === 'bot'
+        return { stdout: JSON.stringify({ ok: true, data: bots ? { bots: [] } : { users: [...users] } }) }
+      }
+      return { stdout: JSON.stringify({ ok: true, data: { message_id: 'om_reply', chat_id: 'oc_group' } }) }
+    }) as unknown as LarkCliRunner
+    const client = createLarkCliClient('lark-cli', runner)
+    const target = { chatId: 'oc_group', messageId: 'om_current' }
+
+    await client.replyToTarget?.(target, '@张勇 收到')
+    users.push({ member_id: 'ou_miao', name: '苗小可' })
+    calls.length = 0
+    await client.replyToTarget?.(target, '@张勇 @苗小可 请确认')
+    const reply = calls.find(args => args.includes('+messages-reply'))!
+    expect(JSON.parse(reply[reply.indexOf('--content') + 1]!)).toEqual({
+      text: '<at user_id="ou_zhang">张勇</at> <at user_id="ou_miao">苗小可</at> 请确认',
+    })
+
+    // A name that is never a member costs at most one extra read per reply.
+    calls.length = 0
+    await client.replyToTarget?.(target, '@外部同事 看下')
+    expect(calls.filter(args => args.includes('+chat-members-list') && args.includes('user'))).toHaveLength(1)
+  })
+
   it('spec Scenario "成员表不可读时仍能发出": original text sent, ONE low-cardinality diagnostic, reply outcome intact', async () => {
     const calls: string[][] = []
     const logs: string[] = []

@@ -981,12 +981,25 @@ export function createLarkCliClient(
   async function renderReplyMentions(chatId: string, text: string): Promise<string> {
     if (!hasMentionCandidate(text)) return text
     try {
+      const cached = memberCache.get(chatId)
+      const fromCache = cached !== undefined && Date.now() - cached.at < MEMBER_CACHE_TTL_MS
       const members = await memberList(chatId)
       if (members === undefined) {
         log('lark reply mentions: member list unavailable; sending text unchanged')
         return text
       }
-      const rendered = renderMentions(text, [...members, ...(await botMemberList(chatId))])
+      let rendered = renderMentions(text, [...members, ...(await botMemberList(chatId))])
+      // A cached list predates anyone just invited (a member added a minute
+      // ago stayed plain text for the whole TTL). An unresolved reference is
+      // the only signal, so refetch once — never more than one extra read.
+      if ((rendered.unresolved ?? 0) > 0 && fromCache) {
+        memberCache.delete(chatId)
+        botCache.delete(chatId)
+        const fresh = await memberList(chatId)
+        if (fresh !== undefined) {
+          rendered = renderMentions(text, [...fresh, ...(await botMemberList(chatId))])
+        }
+      }
       if (rendered.rendered === 0) {
         if (rendered.skipped !== undefined) {
           log(`lark reply mentions: unchanged (${rendered.skipped})`)

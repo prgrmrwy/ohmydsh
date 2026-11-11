@@ -38,6 +38,8 @@ export interface MentionRenderResult {
   readonly text: string
   /** How many references became real mentions. */
   readonly rendered: number
+  /** How many reference-shaped `@` were left as written (unknown, ambiguous, over cap). */
+  readonly unresolved?: number
   /**
    * Why nothing was rendered, when that is worth a diagnostic. Absent when the
    * text simply had no candidate.
@@ -202,6 +204,7 @@ export function renderMentions(
   let cursor = 0
   let rendered = 0
   let sawCandidate = false
+  let unresolved = 0
 
   while (cursor < text.length) {
     const at = text.indexOf('@', cursor)
@@ -215,6 +218,7 @@ export function renderMentions(
     const rest = text.slice(at + 1, at + 1 + MAX_NAME_LENGTH)
     const resolved = resolveReference(rest, text, at, names, index, byOpenId)
     if (resolved === undefined || rendered >= MAX_RENDERED) {
+      unresolved += 1
       output += text.slice(cursor, at + 1)
       cursor = at + 1
       continue
@@ -229,8 +233,9 @@ export function renderMentions(
     return {
       text,
       rendered: 0,
+      ...(unresolved > 0 ? { unresolved } : {}),
       ...(sawCandidate ? { skipped: 'no-unique-match' as const } : {}),
     }
   }
-  return { text: output + text.slice(cursor), rendered }
+  return { text: output + text.slice(cursor), rendered, ...(unresolved > 0 ? { unresolved } : {}) }
 }
