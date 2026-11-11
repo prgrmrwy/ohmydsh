@@ -222,3 +222,66 @@ describe('caller-bound entrance read', () => {
     expect(result.reason).toContain('do not pass them again')
   })
 })
+
+describe('message ids on media lines', () => {
+  const MEDIA_TEXTS = [
+    '![Image](img_v3_x) 截图',
+    '[Media: file_v3_x]',
+    '[Image: img_v3_x]',
+    '[Video: file_v3_x]',
+    '[Audio: file_v3_x]',
+    '<file key="file_v3_x" name="a.pdf"/>',
+  ]
+
+  async function lines(texts: readonly string[], overrides: Partial<LocusHistoryToolDeps> = {}) {
+    const result = await executeLocusChatHistory({}, {
+      ...deps(overrides),
+      read: (async () => ({
+        messages: texts.map((text, index) => message(`om_${String(index)}`, `2026-10-12T10:0${String(index % 10)}:00+08:00`, text)),
+        hasMore: false,
+      })) as never,
+    })
+    expect(result.ok).toBe(true)
+    return { result, rows: (result.text ?? '').split('\n').filter(line => line.startsWith('- [')) }
+  }
+
+  it('appends message id to media lines within budget', async () => {
+    // Every media marker form gets its own message id at the END of its line…
+    const { rows } = await lines([...MEDIA_TEXTS, '没有媒体的普通消息'])
+    const byId = (id: string) => rows.find(row => row.includes(`om_${id}`) || row.endsWith(`(id om_${id})`))
+    for (const [index] of MEDIA_TEXTS.entries()) {
+      const row = rows.find(line => line.endsWith(`(id om_${String(index)})`))
+      expect(row, MEDIA_TEXTS[index]).toBeDefined()
+    }
+    // …and a plain line carries none.
+    const plain = rows.find(row => row.includes('没有媒体的普通消息'))!
+    expect(plain).not.toContain('(id ')
+    expect(byId('99')).toBeUndefined()
+
+    // The id survives body truncation (it is appended after the clamp) and follows a topic suffix.
+    const long = await lines([`[Media: file_v3_x] ${'长'.repeat(LOCUS_HISTORY_MAX_BODY_CHARS * 2)}`])
+    expect(long.rows[0]).toContain('…（已截断）')
+    expect(long.rows[0]!.endsWith('(id om_0)')).toBe(true)
+    const topic = await executeLocusChatHistory({}, {
+      ...deps(),
+      read: (async () => ({
+        messages: [message('om_t', '2026-10-12T10:00:00+08:00', '[Media: file_v3_x]', { threadId: 'omt_a' })],
+        hasMore: false,
+      })) as never,
+    })
+    expect(topic.text).toMatch(/（话题 omt_a）\s*\(id om_t\)/)
+
+    // Budget: ids count toward the character budget, so the same messages show fewer media lines than plain ones.
+    const bodyOf = (marker: string) => `${marker} ${'字'.repeat(500)}`
+    const many = 40
+    const media = await lines(Array.from({ length: many }, () => bodyOf('[Media: file_v3_x]')))
+    const plainRows = await lines(Array.from({ length: many }, () => bodyOf('普通文字')))
+    expect(media.rows.join('\n').length).toBeLessThanOrEqual(LOCUS_HISTORY_MAX_CHARS)
+    expect(plainRows.rows.join('\n').length).toBeLessThanOrEqual(LOCUS_HISTORY_MAX_CHARS)
+    expect(media.result.count).toBe(media.rows.length)
+    expect(media.rows.length).toBeLessThan(plainRows.rows.length)
+    expect(media.result.hasMore).toBe(true)
+    expect(media.rows.every(row => /\(id om_\d+\)$/.test(row))).toBe(true)
+  })
+})
+

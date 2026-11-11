@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LOCUS_MESSAGE_DESCRIPTION } from '../src/host/locus-message-tool.js'
 import { LOCUS_PROJECT_READ_DENIAL } from '../src/host/locus/project-read-guard.js'
 import {
   isSafeLocusReplyTarget,
@@ -398,3 +399,76 @@ describe('every delivery declares the row accessMode', () => {
     expect(first).toContain('访问模式：danger-full-access')
   })
 })
+
+describe('locus-read-message-media prompt guidance', () => {
+  const withReply = (over: Partial<LocusDeliveryContext> = {}) => {
+    const base = deliveryContext(over)
+    return { ...base, request: { ...base.request, replyToMessageId: 'om_replied-9' } }
+  }
+  const repliedLine = (prompt: string): string => prompt.split('\n').find(line => line.startsWith('- replied message：'))!
+
+  it('replied message line points to pet_locus_message in first and follow-up prompts', () => {
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(withReply(), { position })
+      const line = repliedLine(prompt)
+      expect(line, position).toContain('om_replied-9')
+      // The pointer sits with the id, on the next bullet, and names the tool.
+      const at = prompt.indexOf(line)
+      const next = prompt.slice(at + line.length, at + line.length + 400)
+      expect(next, position).toContain('`pet_locus_message`')
+      expect(next, position).toContain('图片')
+    }
+    // No reply association → no id to read and no pointer on that line.
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(deliveryContext(), { position })
+      expect(repliedLine(prompt), position).not.toContain('om_')
+      const at = prompt.indexOf(repliedLine(prompt))
+      expect(prompt.slice(at, at + 200), position).not.toContain('读取其正文')
+    }
+  })
+
+  it('prompt and tool description state message links are unresolvable', () => {
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(deliveryContext(), { position })
+      expect(prompt, position).toContain('message/link/open')
+      expect(prompt, position).toContain('无法由 Host 解析')
+      expect(prompt, position).toContain('不要声称已看过链接内容')
+      expect(prompt, position).toContain('直接回复那条消息或转发')
+      expect(prompt, position).toContain('不要把猜测的候选当作已确认')
+    }
+    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('message/link/open')
+    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('无法由 Host 解析')
+    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('转发')
+  })
+
+  it('does not name pet_locus_message when the Host has not published it', () => {
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(withReply({ messageToolAvailable: false }), { position })
+      expect(prompt, position).not.toContain('pet_locus_message')
+      // The link limitation is still stated honestly, with the fallback the child CAN take.
+      expect(prompt, position).toContain('无法由 Host 解析')
+      expect(prompt, position).toContain('直接回复那条消息或转发')
+      // The replied id stays visible as a fact.
+      expect(repliedLine(prompt), position).toContain('om_replied-9')
+    }
+  })
+
+  it('a document entry prompt never mentions the message tool', () => {
+    const docEndpoint = { chatId: 'doc:docx:Dx0000000000000000000000001', threadId: '7' } as never
+    const first = withReply({ endpoint: docEndpoint })
+    const base = {
+      ...first,
+      request: {
+        ...first.request,
+        messageId: 'doc:docx:Dx0000000000000000000000001/7/2',
+        replyTarget: { chatId: 'doc:docx:Dx0000000000000000000000001', threadId: '7', messageId: 'doc:docx:Dx0000000000000000000000001/7/2' },
+      },
+    }
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(base, { position })
+      expect(prompt, position).not.toContain('pet_locus_message')
+      expect(prompt, position).not.toContain('message/link/open')
+    }
+  })
+})
+

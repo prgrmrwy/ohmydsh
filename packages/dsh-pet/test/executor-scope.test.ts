@@ -273,7 +273,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
       'utf8',
     )
 
-    // Pet still does not ship one tool per arbitrary capability. Ten is the
+    // Pet still does not ship one tool per arbitrary capability. Twelve is the
     // full set today: `pet_context`; the security-critical Delivery lifecycle
     // pair (finish/wait), both resolved from the caller/turn proof and
     // deliberately accepting no target selector; `pet_locus_track`; the two
@@ -281,7 +281,9 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // `locus_ask_parent` (one question, no target) from
     // `locus-three-tier-structure`; the caller-bound entrance read
     // `pet_locus_chat_history` and its document-entry counterpart
-    // `pet_locus_doc_context`; and the locus MAIN session's three tools
+    // `pet_locus_doc_context`; the caller-bound single-message read
+    // `pet_locus_message` (`locus-read-message-media`: one `messageId`, scoped to
+    // the caller's own chat, IM entries only); and the locus MAIN session's three tools
     // `locus_note`, `locus_reply_child` and the read-only `locus_work_history`
     // (`locus-ask-work-first-and-concise` D4).
     //
@@ -294,7 +296,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // helper's single native registration delegation (which intentionally owns
     // every definition above).
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(11)
+    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(12)
     expect(tools).not.toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).not.toContain("'pet_locus_ledger_read'")
     // One native registration per registrar: `registerPetTools` and `registerPetLocusMainTools`.
@@ -312,6 +314,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     expect(tools).not.toContain('PET_LOCUS_REQUEST_EXECUTION_TOOL')
     expect(tools).toContain('PET_LOCUS_CHAT_HISTORY_TOOL')
     expect(tools).toContain('PET_LOCUS_DOC_CONTEXT_TOOL')
+    expect(tools).toContain('PET_LOCUS_MESSAGE_TOOL')
     expect(tools).not.toContain('pet_create_mr')
     expect(tools).not.toContain('pet_send_cr')
     expect(tools).not.toContain('pet_clean_worktree')

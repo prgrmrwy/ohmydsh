@@ -1,6 +1,6 @@
 /** Host-owned, caller-bound Lark image admission for one durable Delivery. */
 
-import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
@@ -9,11 +9,21 @@ import { promisify } from 'node:util'
 import type {
   AttachmentStore,
   ImageAttachmentLimits,
+  ImageAttachmentRef,
   ImageMediaType,
   SaveImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { petCliArgs } from './cli.js'
+import { killProcessTree } from './media-process.js'
+import {
+  extractKeyframes,
+  LOCUS_VIDEO_LIMITS,
+  type FrameExtraction,
+  type FrameTools,
+  type VideoLimits,
+  type VideoSkipReason,
+} from './media-video.js'
 import { meetsPetLarkCliFloor } from './lark-cli-compat.js'
 import type { LarkCliRunner } from './lark.js'
 
@@ -34,6 +44,8 @@ const MAX_STDERR_BYTES = 4 * 1024
 const SPOOL_POLL_MS = 50
 /** Random token length of one spool entry, in bytes (32 hex characters). */
 const SPOOL_TOKEN_BYTES = 16
+/** Bound on the platform-formatted body the single-message read returns. */
+export const LOCUS_MESSAGE_MAX_BODY_CHARS = 4_000
 
 export interface LarkMessageResource {
   readonly kind: 'image' | 'file' | 'audio' | 'video' | 'media' | 'unknown'
@@ -51,6 +63,54 @@ export type LocusMediaAdmission =
   | { readonly kind: 'none'; readonly content: readonly ContentBlock[] }
   | { readonly kind: 'unavailable'; readonly reason: string; readonly content: readonly ContentBlock[] }
 
+/** One message the caller-bound `pet_locus_message` tool is allowed to show. */
+export interface LocusReadMessage {
+  readonly messageId: string
+  readonly chatId: string
+  readonly msgType: string
+  /** ISO 8601 with the host offset, when the platform reported a usable time. */
+  readonly createTime?: string
+  readonly senderName?: string
+  readonly threadId?: string
+  /** Platform-formatted body, bounded by {@link LOCUS_MESSAGE_MAX_BODY_CHARS}. */
+  readonly text: string
+  readonly textTruncated: boolean
+}
+
+/** One piece of model-facing media output, in the order the message presents it. */
+export type LocusMessagePart =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly attachment: ImageAttachmentRef }
+
+/** Closed vocabulary of why a single-message read produced no message at all. */
+export type LocusMessageReadFailure =
+  | 'invalid-message-id'
+  | 'aborted'
+  | 'platform-read-failed'
+  | 'envelope-invalid'
+  | 'message-not-unique'
+  | 'message-mismatch'
+  | 'message-deleted'
+  | 'chat-mismatch'
+  | 'content-unparseable'
+  | 'media-unavailable'
+
+export type LocusMessageReadResult =
+  | { readonly kind: 'ok'; readonly message: LocusReadMessage; readonly media: readonly LocusMessagePart[] }
+  | { readonly kind: 'failed'; readonly reason: LocusMessageReadFailure }
+
+export interface LocusMessageReadInput {
+  readonly messageId: string
+  /** The caller's entrance chat id; a topic entrance passes its GROUP chat id. */
+  readonly chatId: string
+  readonly signal: AbortSignal
+  /**
+   * Whether the calling model route accepts image input. Consulted after the
+   * platform read and chat check but BEFORE any media byte is downloaded.
+   */
+  readonly canViewImages: () => Promise<boolean> | boolean
+}
+
 export interface LocusMediaPort {
   readonly available: boolean
   readonly diagnostic?: string
@@ -60,6 +120,8 @@ export interface LocusMediaPort {
     /** Exact durable current fence, invoked immediately before persistence. */
     readonly fenceBeforeSave: () => Promise<boolean>
   }): Promise<LocusMediaAdmission>
+  /** Read ONE message of the caller's chat; fails closed on any doubt. */
+  readMessage(input: LocusMessageReadInput): Promise<LocusMessageReadResult>
 }
 
 /**
@@ -111,6 +173,12 @@ export function parseSingleMessageResources(value: unknown, expectedMessageId: s
     const name = bounded(match[2])
     unsupported.push({ kind: 'file', ...(name === undefined ? {} : { name }) })
   }
+  // `+messages-mget` renders a video — a `media` message or a post's `media`
+  // element — as `[Media: file_…]`; it is the only video marker in the formatted body.
+  const videoMarkers = content.match(/\[Media:\s*file_[A-Za-z0-9_-]+\]/g) ?? []
+  for (let index = 0; index < videoMarkers.length && unsupported.length < MAX_METADATA_ITEMS; index += 1) {
+    unsupported.push({ kind: 'video' })
+  }
   const directKey = bounded(message['image_key'])
   if (directKey?.startsWith('img_')) keys.add(directKey)
 
@@ -134,7 +202,17 @@ export function parseSingleMessageResources(value: unknown, expectedMessageId: s
   if (msgType !== undefined && msgType !== 'text' && msgType !== 'post' && msgType !== 'image') {
     unsupported.push({ kind: msgType === 'file' || msgType === 'audio' || msgType === 'video' || msgType === 'media' ? msgType : 'unknown' })
   }
-  return { imageKeys: [...keys], unsupported: unsupported.slice(0, MAX_METADATA_ITEMS) }
+  // A `media` message is reported by its type AND its body marker: keep one entry
+  // per kind so the note does not name the same video twice.
+  const seen = new Set<string>()
+  const distinct = unsupported.filter(item => {
+    const kind = isVideo(item) ? 'video' : item.kind
+    if (kind !== 'video' && item.name !== undefined) return true
+    if (seen.has(kind)) return false
+    seen.add(kind)
+    return true
+  })
+  return { imageKeys: [...keys], unsupported: distinct.slice(0, MAX_METADATA_ITEMS) }
 }
 
 /** Detect supported MIME from bytes, never filename or transport claims. */
@@ -147,10 +225,31 @@ export function detectImageMediaType(data: Uint8Array): ImageMediaType | undefin
   return undefined
 }
 
-function unsupportedContent(resources: readonly LarkMessageResource[]): ContentBlock[] {
+function isVideo(resource: LarkMessageResource): boolean {
+  return resource.kind === 'video' || resource.kind === 'media'
+}
+
+/**
+ * Bounded notes for resources the automatic path does not read.
+ *
+ * A video is never downloaded or framed here; the note names the on-demand tool
+ * and this message's id so the child can ask for the cover and keyframes.
+ */
+function unsupportedContent(resources: readonly LarkMessageResource[], messageId: string): ContentBlock[] {
   if (resources.length === 0) return []
-  const kinds = [...new Set(resources.map(item => item.kind))].join(', ')
-  return [{ type: 'text', text: `[当前消息还包含暂不支持的资源类型：${kinds || 'unknown'}；未下载、执行、解压、转码或 OCR。]` }]
+  const blocks: ContentBlock[] = []
+  const others = resources.filter(item => !isVideo(item))
+  if (others.length > 0) {
+    const kinds = [...new Set(others.map(item => item.kind))].join(', ')
+    blocks.push({ type: 'text', text: `[当前消息还包含暂不支持的资源类型：${kinds || 'unknown'}；未下载、执行、解压、转码或 OCR。]` })
+  }
+  if (resources.some(isVideo)) {
+    blocks.push({
+      type: 'text',
+      text: `[当前消息含视频：未下载、未抽帧。可用 \`pet_locus_message\` 读取该消息（id ${messageId}）查看其封面与场景关键帧。]`,
+    })
+  }
+  return blocks
 }
 
 /** What the path-mode receipt must prove about the file Pet is about to read. */
@@ -174,14 +273,6 @@ function parseSpoolReceipt(stdout: string): SpoolReceipt | undefined {
     // then the only measurement, and Pet bounds it by its own limit.
     ...(Number.isSafeInteger(value) && (value as number) >= 0 ? { sizeBytes: value as number } : {}),
   }
-}
-
-function killProcessTree(child: ChildProcess): void {
-  child.stdio[3]?.destroy()
-  if (child.pid !== undefined && process.platform !== 'win32') {
-    try { process.kill(-child.pid, 'SIGKILL') } catch { /* process may already have exited */ }
-  }
-  try { child.kill('SIGKILL') } catch { /* process may already have exited */ }
 }
 
 /**
@@ -244,15 +335,21 @@ export async function sweepMediaSpool(spoolRoot: string): Promise<number> {
  * the official path mode has no byte ceiling, the caller's limit is enforced by
  * measuring the growing entry and killing the whole process group on breach;
  * nothing survives the call either way.
+ *
+ * `use` runs while the verified file still exists — this is how a video is framed
+ * in place without ever copying it out of the guarded directory. The directory
+ * is removed when `use` settles, however it settles. The downloader's own
+ * watchdogs end with the downloader: they must not outlive it, or a late tick
+ * could signal a recycled process group.
  */
-async function downloadIntoSpool(input: {
+async function withSpoolDownload<T>(input: {
   readonly binary: string
   readonly spoolRoot: string
   readonly args: readonly string[]
   readonly maxBytes: number
   readonly timeoutMs: number
   readonly signal: AbortSignal
-}): Promise<Uint8Array> {
+}, use: (file: SpoolFile) => Promise<T>): Promise<T> {
   if (input.signal.aborted) throw new Error('download-aborted')
   const token = randomBytes(SPOOL_TOKEN_BYTES).toString('hex')
   const targetName = `${token}.bin`
@@ -303,6 +400,9 @@ async function downloadIntoSpool(input: {
   try {
     const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null]
     exited = true
+    clearTimeout(timer)
+    clearInterval(poll)
+    input.signal.removeEventListener('abort', onAbort)
     if (failure !== undefined) throw failure
     if (code !== 0 || signal !== null) throw new Error('download-process-failed')
 
@@ -323,10 +423,7 @@ async function downloadIntoSpool(input: {
     if (receipt.sizeBytes !== undefined && receipt.sizeBytes !== size) {
       throw new Error('download-receipt-size-mismatch')
     }
-    const data = readFileSync(target)
-    if (data.byteLength > input.maxBytes) throw new Error('download-byte-limit-exceeded')
-    if (data.byteLength !== size) throw new Error('download-output-changed')
-    return new Uint8Array(data)
+    return await use({ dir, name: targetName, path: target, size })
   } finally {
     clearTimeout(timer)
     clearInterval(poll)
@@ -336,7 +433,423 @@ async function downloadIntoSpool(input: {
   }
 }
 
+
+/** A verified download, still inside its call-owned directory. */
+interface SpoolFile {
+  readonly dir: string
+  /** Relative name inside `dir`. */
+  readonly name: string
+  readonly path: string
+  readonly size: number
+}
+
+/** Download one resource and return its bytes; nothing is left on disk. */
+async function downloadIntoSpool(input: Parameters<typeof withSpoolDownload>[0]): Promise<Uint8Array> {
+  return withSpoolDownload(input, async file => {
+    const data = readFileSync(file.path)
+    if (data.byteLength > input.maxBytes) throw new Error('download-byte-limit-exceeded')
+    if (data.byteLength !== file.size) throw new Error('download-output-changed')
+    return new Uint8Array(data)
+  })
+}
+
+
+const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]{1,128}$/
+const IMAGE_KEY_PATTERN = /^img_[A-Za-z0-9_-]+$/
+const FILE_KEY_PATTERN = /^file_[A-Za-z0-9_-]+$/
+const TRUNCATION_MARK = '…（已截断）'
+/** Platform message types whose raw `body.content` is a JSON document Pet reads resources from. */
+const JSON_CONTENT_TYPES: ReadonlySet<string> = new Set(['post', 'image', 'media', 'file', 'audio'])
+
+/** A resource a message carries, in the order the message presents it. */
+export type RawMessageResource =
+  | { readonly kind: 'image'; readonly key: string }
+  | { readonly kind: 'video'; readonly fileKey: string; readonly coverKey?: string; readonly name?: string; readonly durationMs?: number }
+  | { readonly kind: 'file'; readonly name?: string }
+  | { readonly kind: 'audio' }
+
+/** The facts the raw `api GET /im/v1/messages/<id>` read proves about one message. */
+export interface RawMessageFacts {
+  readonly msgType: string
+  readonly createTime?: string
+  readonly threadId?: string
+  readonly resources: readonly RawMessageResource[]
+}
+
+class MessageReadError extends Error {
+  constructor(readonly reason: LocusMessageReadFailure) {
+    super(reason)
+    this.name = 'MessageReadError'
+  }
+}
+
+/** Format epoch milliseconds as ISO 8601 with the host offset (same form the history tool prints). */
+function formatEpochMs(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !/^\d{10,16}$/.test(value)) return undefined
+  const date = new Date(Number(value))
+  if (Number.isNaN(date.getTime())) return undefined
+  const pad = (part: number): string => String(part).padStart(2, '0')
+  const offset = -date.getTimezoneOffset()
+  const absolute = Math.abs(offset)
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+    + `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    + `${offset >= 0 ? '+' : '-'}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
+}
+
+function singleItem(value: unknown, listKey: 'items' | 'messages', expectedId: string, expectedChat: string): Record<string, unknown> {
+  const envelope = recordOf(value)
+  if (envelope?.['ok'] !== true) throw new MessageReadError('envelope-invalid')
+  const list = recordOf(envelope['data'])?.[listKey]
+  if (!Array.isArray(list)) throw new MessageReadError('envelope-invalid')
+  if (list.length !== 1) throw new MessageReadError('message-not-unique')
+  const item = recordOf(list[0])
+  if (item === undefined) throw new MessageReadError('envelope-invalid')
+  if (item['message_id'] !== expectedId) throw new MessageReadError('message-mismatch')
+  if (item['chat_id'] !== expectedChat) throw new MessageReadError('chat-mismatch')
+  return item
+}
+
+/**
+ * Parse the RAW message read. It is the only place a video's cover key and the
+ * authoritative `chat_id` survive; `+messages-mget` drops the former.
+ *
+ * Envelope shape measured on lark-cli 1.0.97 (pitfalls §3): the result is in
+ * `data.items[0]`, `body.content` is the platform JSON string, and a recalled
+ * message is `ok: true` with `deleted: true` and a non-JSON body.
+ */
+export function parseRawMessage(value: unknown, expectedId: string, expectedChat: string): RawMessageFacts {
+  const item = singleItem(value, 'items', expectedId, expectedChat)
+  if (item['deleted'] === true) throw new MessageReadError('message-deleted')
+  const msgType = bounded(item['msg_type'])
+  if (msgType === undefined) throw new MessageReadError('envelope-invalid')
+  const threadId = bounded(item['thread_id'])
+  const createTime = formatEpochMs(item['create_time'])
+  const base = {
+    msgType,
+    ...(createTime === undefined ? {} : { createTime }),
+    ...(threadId === undefined ? {} : { threadId }),
+  }
+  if (!JSON_CONTENT_TYPES.has(msgType)) return { ...base, resources: [] }
+
+  const rawContent = recordOf(item['body'])?.['content']
+  let content: Record<string, unknown> | undefined
+  try {
+    content = typeof rawContent === 'string' ? recordOf(JSON.parse(rawContent)) : undefined
+  } catch {
+    content = undefined
+  }
+  if (content === undefined) throw new MessageReadError('content-unparseable')
+
+  const resources: RawMessageResource[] = []
+  const video = (element: Record<string, unknown>): void => {
+    const fileKey = element['file_key']
+    if (typeof fileKey !== 'string' || !FILE_KEY_PATTERN.test(fileKey)) return
+    const cover = element['image_key']
+    const name = bounded(element['file_name'])
+    const duration = element['duration']
+    resources.push({
+      kind: 'video',
+      fileKey,
+      ...(typeof cover === 'string' && IMAGE_KEY_PATTERN.test(cover) ? { coverKey: cover } : {}),
+      ...(name === undefined ? {} : { name }),
+      ...(typeof duration === 'number' && Number.isFinite(duration) && duration >= 0 ? { durationMs: duration } : {}),
+    })
+  }
+  if (msgType === 'post') {
+    const paragraphs = content['content'] ?? content['content_v2']
+    if (!Array.isArray(paragraphs)) throw new MessageReadError('content-unparseable')
+    for (const paragraph of paragraphs) {
+      if (!Array.isArray(paragraph)) continue
+      for (const raw of paragraph) {
+        const element = recordOf(raw)
+        if (element === undefined) continue
+        if (element['tag'] === 'img') {
+          const key = element['image_key']
+          if (typeof key === 'string' && IMAGE_KEY_PATTERN.test(key)) resources.push({ kind: 'image', key })
+        } else if (element['tag'] === 'media') video(element)
+      }
+    }
+  } else if (msgType === 'image') {
+    const key = content['image_key']
+    if (typeof key === 'string' && IMAGE_KEY_PATTERN.test(key)) resources.push({ kind: 'image', key })
+  } else if (msgType === 'media') video(content)
+  else if (msgType === 'file') {
+    const name = bounded(content['file_name'])
+    resources.push({ kind: 'file', ...(name === undefined ? {} : { name }) })
+  } else resources.push({ kind: 'audio' })
+  return { ...base, resources }
+}
+
+/** Parse the formatted `+messages-mget` read: sender name, rendered body, topic. */
+export function parseFormattedMessage(value: unknown, expectedId: string, expectedChat: string): {
+  readonly senderName?: string
+  readonly text: string
+  readonly threadId?: string
+} {
+  const item = singleItem(value, 'messages', expectedId, expectedChat)
+  const senderName = bounded(recordOf(item['sender'])?.['name'])
+  const threadId = bounded(item['thread_id'])
+  return {
+    ...(senderName === undefined ? {} : { senderName }),
+    text: typeof item['content'] === 'string' ? item['content'] : '',
+    ...(threadId === undefined ? {} : { threadId }),
+  }
+}
+
+function boundBody(text: string): { readonly text: string; readonly truncated: boolean } {
+  const clean = text.replace(/\0/g, '')
+  return clean.length <= LOCUS_MESSAGE_MAX_BODY_CHARS
+    ? { text: clean, truncated: false }
+    : { text: `${clean.slice(0, LOCUS_MESSAGE_MAX_BODY_CHARS)}${TRUNCATION_MARK}`, truncated: true }
+}
+
+/** Metadata-only description of resources that are not (or cannot be) shown. */
+function describeResources(resources: readonly RawMessageResource[]): string {
+  const count = (kind: RawMessageResource['kind']): number => resources.filter(item => item.kind === kind).length
+  const parts = [
+    ['图片', count('image')], ['视频', count('video')], ['文件', count('file')], ['音频', count('audio')],
+  ].filter(([, n]) => (n as number) > 0).map(([name, n]) => `${String(n)} 个${String(name)}`)
+  return parts.join('、')
+}
+
 export const LOCUS_MEDIA_UNAVAILABLE_REASON = 'pinned-cli-media-download-unavailable'
+
+
+/** Download one image resource, enforce the byte bound, and prove its type from bytes. */
+async function downloadImageBytes(input: {
+  readonly binary: string
+  readonly spoolRoot: string
+  readonly messageId: string
+  readonly key: string
+  readonly maxBytes: number
+  readonly timeoutMs: number
+  readonly signal: AbortSignal
+  readonly limits: ImageAttachmentLimits
+}): Promise<SaveImageAttachment> {
+  const data = await downloadIntoSpool({
+    binary: input.binary,
+    spoolRoot: input.spoolRoot,
+    args: petCliArgs([
+      'im', '+messages-resources-download', '--as', 'bot',
+      '--message-id', input.messageId,
+      '--file-key', input.key, '--type', 'image', '--format', 'json',
+    ]),
+    maxBytes: input.maxBytes,
+    timeoutMs: input.timeoutMs,
+    signal: input.signal,
+  })
+  const mediaType = detectImageMediaType(data)
+  if (mediaType === undefined || !input.limits.mediaTypes.includes(mediaType)) {
+    throw new Error('image-mime-unsupported')
+  }
+  return { data, mediaType }
+}
+
+
+/** Everything {@link readMessageMedia} needs from the port that owns it. */
+interface MessageMediaInput {
+  readonly binary: string
+  readonly spoolRoot: string
+  readonly timeoutMs: number
+  readonly limits: ImageAttachmentLimits
+  readonly attachments: AttachmentStore
+  readonly messageId: string
+  readonly resources: readonly RawMessageResource[]
+  readonly signal: AbortSignal
+  /** Fixed at Host start; absent means every video stays cover-only. */
+  readonly frameTools: FrameTools | undefined
+  readonly video: VideoLimits
+}
+
+/** One extracted frame that already passed every Pet-side check; the store has not seen it yet. */
+interface PendingFrame {
+  readonly image: SaveImageAttachment
+  readonly timeSeconds: number
+}
+
+/** One slot of the output, in message order. */
+type MediaSlot =
+  | { readonly kind: 'image'; readonly image: SaveImageAttachment }
+  | { readonly kind: 'note'; readonly text: string }
+  /** Keyframes are committed as their OWN attachment batch, after the other images. */
+  | { readonly kind: 'frames'; readonly durationSeconds: number; readonly frames: readonly PendingFrame[] }
+
+function skipNote(reason: VideoSkipReason): string {
+  return `[视频未抽帧：${reason}。仅提供封面与元数据。]`
+}
+
+function formatTime(seconds: number): string {
+  return `${String(Number(seconds.toFixed(2)))}s`
+}
+
+function framesNote(durationSeconds: number, count: number): string {
+  return `[视频关键帧：以下 ${String(count)} 帧是按场景变化抽样的结果，不是完整视频，不得声称已看过完整视频；`
+    + `时长 ${durationSeconds.toFixed(1)}s，共 ${String(count)} 帧。${count < 2 ? '画面基本静止，只抽到 1 帧，未补帧。' : ''}]`
+}
+
+/**
+ * Turn a message's resources into model-facing parts, in message order.
+ *
+ * Images are downloaded sequentially into the spool under the deployment's
+ * count and byte limits and committed as ONE attachment batch. A video adds its
+ * cover to that batch and, when frame tools exist, its keyframes as a batch of
+ * their own: a frame failure then drops the frames and nothing else, and never
+ * leaves a partial set of frame refs. A resource that cannot be shown becomes an
+ * explicit note, never a silent omission.
+ * @returns the parts, or `undefined` when the call was aborted.
+ */
+async function readMessageMedia(input: MessageMediaInput): Promise<readonly LocusMessagePart[] | undefined> {
+  const { limits } = input
+  const slots: MediaSlot[] = []
+  let images = 0
+  let bytes = 0
+  let omitted = 0
+  const quotaLeft = (): boolean => images < limits.maxImagesPerMessage && limits.maxMessageImageBytes - bytes >= 1
+
+  /** Download one image resource into `slots`; false when the call was aborted. */
+  const takeImage = async (key: string): Promise<boolean> => {
+    if (!quotaLeft()) { omitted += 1; return true }
+    try {
+      const image = await downloadImageBytes({
+        binary: input.binary,
+        spoolRoot: input.spoolRoot,
+        messageId: input.messageId,
+        key,
+        maxBytes: Math.min(limits.maxImageBytes, limits.maxMessageImageBytes - bytes),
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+        limits,
+      })
+      images += 1
+      bytes += image.data.byteLength
+      slots.push({ kind: 'image', image })
+    } catch (error) {
+      if (input.signal.aborted) return false
+      slots.push({
+        kind: 'note',
+        text: `[图片未能读取：${error instanceof Error && error.message === 'download-timeout' ? 'timeout' : 'image-download-or-admission-failed'}。]`,
+      })
+    }
+    return true
+  }
+
+  /** Download and frame one video in place; false when the call was aborted. */
+  const takeFrames = async (fileKey: string): Promise<boolean> => {
+    if (input.frameTools === undefined) { slots.push({ kind: 'note', text: skipNote('frame-tools-unavailable') }); return true }
+    const maxFrames = Math.min(input.video.maxFrames, limits.maxImagesPerMessage - images)
+    const bytesLeft = limits.maxMessageImageBytes - bytes
+    if (maxFrames < 1 || bytesLeft < 1) { slots.push({ kind: 'note', text: skipNote('image-quota-exhausted') }); return true }
+    const tools = input.frameTools
+    let extraction: FrameExtraction
+    try {
+      extraction = await withSpoolDownload({
+        binary: input.binary,
+        spoolRoot: input.spoolRoot,
+        args: petCliArgs([
+          'im', '+messages-resources-download', '--as', 'bot',
+          '--message-id', input.messageId,
+          '--file-key', fileKey, '--type', 'file', '--format', 'json',
+        ]),
+        maxBytes: input.video.maxBytes,
+        timeoutMs: input.timeoutMs,
+        signal: input.signal,
+      }, file => extractKeyframes({
+        tools,
+        dir: file.dir,
+        fileName: file.name,
+        limits: input.video,
+        maxFrames,
+        maxFrameBytes: Math.min(limits.maxImageBytes, bytesLeft),
+        signal: input.signal,
+      }))
+    } catch (error) {
+      if (input.signal.aborted) return false
+      const message = error instanceof Error ? error.message : ''
+      slots.push({
+        kind: 'note',
+        text: skipNote(message === 'download-byte-limit-exceeded' ? 'video-too-large'
+          : message === 'download-timeout' ? 'video-download-timeout' : 'video-download-failed'),
+      })
+      return true
+    }
+    if (extraction.kind === 'skipped') {
+      if (extraction.reason === 'aborted' || input.signal.aborted) return false
+      slots.push({ kind: 'note', text: skipNote(extraction.reason) })
+      return true
+    }
+    // Pet-side admission of the whole batch before the store sees any of it.
+    const pending: PendingFrame[] = []
+    let frameBytes = 0
+    for (const frame of extraction.frames) {
+      const mediaType = detectImageMediaType(frame.data)
+      frameBytes += frame.data.byteLength
+      if (mediaType === undefined || !limits.mediaTypes.includes(mediaType) || frameBytes > bytesLeft) {
+        slots.push({ kind: 'note', text: skipNote('frame-admission-failed') })
+        return true
+      }
+      pending.push({ image: { data: frame.data, mediaType }, timeSeconds: frame.timeSeconds })
+    }
+    images += pending.length
+    bytes += frameBytes
+    slots.push({ kind: 'frames', durationSeconds: extraction.durationSeconds, frames: pending })
+    return true
+  }
+
+  for (const resource of input.resources) {
+    if (input.signal.aborted) return undefined
+    if (resource.kind === 'file') {
+      slots.push({ kind: 'note', text: `[文件${resource.name === undefined ? '' : ` ${resource.name}`}：仅元数据，未下载、解析或执行。]` })
+    } else if (resource.kind === 'audio') {
+      slots.push({ kind: 'note', text: '[音频：仅元数据，未下载或转写。]' })
+    } else if (resource.kind === 'video') {
+      if (resource.coverKey === undefined) {
+        slots.push({ kind: 'note', text: '[视频：消息没有封面图。]' })
+      } else {
+        slots.push({ kind: 'note', text: `[视频封面${resource.name === undefined ? '' : `（${resource.name}）`}：]` })
+        if (!await takeImage(resource.coverKey)) return undefined
+      }
+      if (!await takeFrames(resource.fileKey)) return undefined
+    } else if (!await takeImage(resource.key)) return undefined
+  }
+  if (omitted > 0) slots.push({ kind: 'note', text: `[另有 ${String(omitted)} 张图片未读取：超出单条消息图片数或字节上限。]` })
+
+  const noteParts = (): LocusMessagePart[] =>
+    slots.flatMap(slot => slot.kind === 'note' ? [{ type: 'text' as const, text: slot.text }] : [])
+  const downloaded = slots.flatMap(slot => slot.kind === 'image' ? [slot.image] : [])
+  let refs: readonly ImageAttachmentRef[] = []
+  if (downloaded.length > 0) {
+    try {
+      refs = await input.attachments.saveImages(downloaded)
+      if (refs.length !== downloaded.length) throw new Error('attachment-count-mismatch')
+    } catch {
+      return [{ type: 'text', text: '[图片未通过部署校验，未返回任何图片。]' }, ...noteParts()]
+    }
+  }
+
+  const parts: LocusMessagePart[] = []
+  let next = 0
+  for (const slot of slots) {
+    if (slot.kind === 'note') parts.push({ type: 'text', text: slot.text })
+    else if (slot.kind === 'image') parts.push({ type: 'image', attachment: refs[next++]! })
+    else {
+      let frameRefs: readonly ImageAttachmentRef[] | undefined
+      try {
+        frameRefs = await input.attachments.saveImages(slot.frames.map(frame => frame.image))
+        if (frameRefs.length !== slot.frames.length) frameRefs = undefined
+      } catch { frameRefs = undefined }
+      if (frameRefs === undefined) {
+        parts.push({ type: 'text', text: skipNote('frame-admission-failed') })
+        continue
+      }
+      parts.push({ type: 'text', text: framesNote(slot.durationSeconds, slot.frames.length) })
+      for (const [index, frame] of slot.frames.entries()) {
+        parts.push({ type: 'text', text: `[t=${formatTime(frame.timeSeconds)}]` })
+        parts.push({ type: 'image', attachment: frameRefs[index]! })
+      }
+    }
+  }
+  return parts
+}
 
 export interface CreateLocusMediaPortInput {
   readonly attachments?: AttachmentStore
@@ -345,6 +858,10 @@ export interface CreateLocusMediaPortInput {
   /** Ordinary runner remains sufficient for metadata-only mget. */
   readonly runner?: LarkCliRunner
   readonly timeoutMs?: number
+  /** Fixed `ffmpeg`/`ffprobe` paths from the Host-start probe; absent keeps videos cover-only. */
+  readonly frameTools?: FrameTools
+  /** Overrides of {@link LOCUS_VIDEO_LIMITS}; non-positive or non-finite values are ignored. */
+  readonly video?: Partial<VideoLimits>
 }
 
 /** Create the spooled media port; an unproven CLI performs no I/O at all. */
@@ -362,6 +879,7 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       async admitCurrentImage() {
         return { kind: 'unavailable', reason: LOCUS_MEDIA_UNAVAILABLE_REASON, content: [] }
       },
+      async readMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
     }
   }
 
@@ -375,15 +893,75 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       available: false,
       diagnostic: 'attachment-byte-limit-not-representable',
       async admitCurrentImage() { return { kind: 'unavailable', reason: 'media-unavailable', content: [] } },
+      async readMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
     }
   }
   const runner = input.runner ?? run
   const timeoutMs = input.timeoutMs ?? CALL_TIMEOUT_MS
   const binary = input.download.binary
   const spoolRoot = input.download.spoolRoot
+  const video: VideoLimits = { ...LOCUS_VIDEO_LIMITS }
+  for (const [name, value] of Object.entries(input.video ?? {})) {
+    if (name in video && typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      (video as Record<string, number>)[name] = value
+    }
+  }
 
   return {
     available: true,
+    async readMessage(request) {
+      if (!MESSAGE_ID_PATTERN.test(request.messageId) || request.chatId.trim() === '') {
+        return { kind: 'failed', reason: 'invalid-message-id' }
+      }
+      if (request.signal.aborted) return { kind: 'failed', reason: 'aborted' }
+      let raw: RawMessageFacts
+      let formatted: ReturnType<typeof parseFormattedMessage>
+      try {
+        // Raw first: it carries the authoritative chat id, so a foreign message is
+        // refused before its body is fetched at all.
+        const rawResult = await runner(binary, petCliArgs([
+          'api', 'GET', `/open-apis/im/v1/messages/${request.messageId}`, '--as', 'bot',
+        ]), { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal: request.signal })
+        raw = parseRawMessage(parseJsonSuffix(rawResult.stdout), request.messageId, request.chatId)
+        const formattedResult = await runner(binary, petCliArgs([
+          'im', '+messages-mget', '--as', 'bot', '--message-ids', request.messageId,
+          '--no-reactions', '--format', 'json',
+        ]), { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal: request.signal })
+        formatted = parseFormattedMessage(parseJsonSuffix(formattedResult.stdout), request.messageId, request.chatId)
+      } catch (error) {
+        if (error instanceof MessageReadError) return { kind: 'failed', reason: error.reason }
+        return { kind: 'failed', reason: request.signal.aborted ? 'aborted' : 'platform-read-failed' }
+      }
+      const body = boundBody(formatted.text)
+      const threadId = raw.threadId ?? formatted.threadId
+      const message: LocusReadMessage = {
+        messageId: request.messageId,
+        chatId: request.chatId,
+        msgType: raw.msgType,
+        ...(raw.createTime === undefined ? {} : { createTime: raw.createTime }),
+        ...(formatted.senderName === undefined ? {} : { senderName: formatted.senderName }),
+        ...(threadId === undefined ? {} : { threadId }),
+        text: body.text,
+        textTruncated: body.truncated,
+      }
+      if (raw.resources.length === 0) return { kind: 'ok', message, media: [] }
+
+      let viewable = false
+      try { viewable = await request.canViewImages() } catch { viewable = false }
+      if (!viewable) {
+        return {
+          kind: 'ok',
+          message,
+          media: [{ type: 'text', text: `[当前模型无法查看图片，未下载任何媒体。消息含：${describeResources(raw.resources)}。]` }],
+        }
+      }
+      const media = await readMessageMedia({
+        binary, spoolRoot, timeoutMs, limits, attachments, messageId: request.messageId, resources: raw.resources, signal: request.signal,
+        frameTools: input.frameTools, video,
+      })
+      if (media === undefined) return { kind: 'failed', reason: 'aborted' }
+      return { kind: 'ok', message, media }
+    },
     async admitCurrentImage(request) {
       if (request.signal.aborted) return { kind: 'unavailable', reason: 'aborted', content: [] }
       let parsed: ParsedMessageResources
@@ -396,7 +974,7 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       } catch {
         return { kind: 'unavailable', reason: 'platform-read-failed', content: [] }
       }
-      const metadata = unsupportedContent(parsed.unsupported)
+      const metadata = unsupportedContent(parsed.unsupported, request.messageId)
       if (parsed.imageKeys.length === 0) return { kind: 'none', content: metadata }
       if (parsed.imageKeys.length > limits.maxImagesPerMessage) {
         return { kind: 'unavailable', reason: 'image-count-exceeded', content: metadata }
@@ -410,25 +988,19 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
           const remaining = limits.maxMessageImageBytes - totalBytes
           if (remaining < 1) throw new Error('message-images-too-large')
           const maxBytes = Math.min(limits.maxImageBytes, remaining)
-          const data = await downloadIntoSpool({
+          const image = await downloadImageBytes({
             binary,
             spoolRoot,
-            args: petCliArgs([
-              'im', '+messages-resources-download', '--as', 'bot',
-              '--message-id', request.messageId,
-              '--file-key', imageKey, '--type', 'image', '--format', 'json',
-            ]),
+            messageId: request.messageId,
+            key: imageKey,
             maxBytes,
             timeoutMs,
             signal: request.signal,
+            limits,
           })
-          totalBytes += data.byteLength
+          totalBytes += image.data.byteLength
           if (totalBytes > limits.maxMessageImageBytes) throw new Error('message-images-too-large')
-          const mediaType = detectImageMediaType(data)
-          if (mediaType === undefined || !limits.mediaTypes.includes(mediaType)) {
-            throw new Error('image-mime-unsupported')
-          }
-          saveInputs.push({ data, mediaType })
+          saveInputs.push(image)
         }
         if (!await request.fenceBeforeSave()) {
           return { kind: 'unavailable', reason: 'stale-delivery', content: metadata }

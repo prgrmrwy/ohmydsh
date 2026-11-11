@@ -853,3 +853,19 @@ inbox → 模型被拉回去再走一步（去写卡）→ 以一句写卡汇报
 
   `ensureStyles()` 幂等，组件挂载时再调一次兜底（`useLayoutEffect`），被外部移除也能补回。判断标准：**任何跨 slot / portal 的全局样式，都不该由组件渲染树持有。**
 - **另一个易混点**：同一次故障里用户看到的 DOM 可能还是旧版模块渲染的（例如缺少新版本才有的字段），说明页面还握着旧的插件 bundle。样式修复能保证「样式不再随组件树丢失」，但要让新 bundle 生效仍需要刷新页面 / 重启 Host；排查时先用「DOM 里有没有新版本才有的属性」区分「样式丢了」还是「整个模块还是旧的」。
+
+---
+
+## 16. 按需读单条消息与视频抽帧：四个「调用成功、结果不对」的坑
+
+change `locus-read-message-media`（2026-11-11）。前三条在规划评审或变异验证里被抓到，第四条是实现时的审查发现；都不是靠「跑通了」发现的。
+
+1. **同一条消息的两种读取信封不一样，且各缺一半。** `lark-cli api GET /open-apis/im/v1/messages/<id> --as bot` 的结果在 `data.items[0]`，`body.content` 是平台原始 JSON 字符串，是**唯一**保留视频封面 `image_key` 和权威 `chat_id` 的地方；撤回的消息是 `ok: true`、`deleted: true`、`body.content` 为非 JSON 文本，不是错误。`im +messages-mget` 的结果在 `data.messages[0]`，正文是渲染文本（`![Image](img_…)`、`[Media: file_…]`），有发送者姓名，**丢掉封面 key**。解析只认「列表长度恰为 1 且 `message_id`、`chat_id` 都等于预期」，任何一项不符就失败；脱敏的真实样本在 `packages/dsh-pet/test/fixtures/lark-message-envelopes.ts`。
+2. **`showinfo` 的逐帧时间点是 info 级日志。** 用 `-loglevel error` 抽帧会退出码 0、产出 JPEG，却没有任何 `pts_time` 可解析。按场景变化抽样不是均匀采样，**不能**用帧序号推算时间：必须 `-loglevel info`，持续 drain stderr，只保留 `Parsed_showinfo … n:<k> … pts_time:<t>` 行，与输出文件一一配对，数量、`n` 连续性、时间单调性任一不满足就整批丢弃。
+3. **只限制宽度的缩放挡不住竖屏。** `scale='min(1024,iw)':-2` 会把 1080×1920 变成 1024×1820。正确写法是 `scale=w='min(E,iw)':h='min(E,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`。验收必须用真实 ffmpeg 生成横屏、竖屏、窄长、小图并量实际输出尺寸（`locus-media-video.ffmpeg.test.ts`；把缩放改回宽度版本该测试会失败，已做过变异验证），只检查命令行字符串含 `1024` 什么也证明不了。
+4. **看门狗计时器必须在被监视的子进程退出时就停掉，不能留到后续步骤结束。** 下载器的轮询/超时计时器会对进程组发 `SIGKILL`；如果「下载完成后还要在同一目录里跑 ffmpeg」把清理推迟到整个流程结束，旧下载器的计时器会在它已经退出之后继续触发，对一个可能已被回收的进程组号发信号。`withSpoolDownload` 因此在 `close` 之后立即清掉计时器、轮询和 abort 监听，再执行后续回调；后续进程由各自的 `runBoundedTool` 看门狗负责。
+
+另外两条与本变更有关的小规则：
+
+- 工具 `output.schema` 里变长的「文字 + 图片」列表用 `{ type: 'json' }` 承载，值必须是**纯 JSON**（`attachmentId` 要从品牌类型转成字符串）；`render` 再把它还原成 `{ type: 'image', attachment }` block。该值会被持久化并可能在之后重新渲染，不能持有品牌或类实例字段。`locus-message-tool-runtime.test.ts` 经真实 `ToolRuntime` 执行成功、失败、图片三种返回，防止「声明了字段但 schema 拒收」整体变成 `INVALID_TOOL_OUTPUT`。
+- 新增 Pet 注册的工具必须同时：加入 `LOCUS_CALLER_BOUND_TOOLS`（否则发布期 attestation 判为泄漏）、按入口类型只给对的子会话（文档入口不装配 IM 工具）、并修订 `executor-scope.test.ts` 里的注册计数守卫——那条守卫就是为「不经说明地多注册一个工具」设计的。

@@ -47,6 +47,7 @@ import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
 import { createLarkCliClient, createLocusLarkPort, LarkCliCallError } from './host/channel/lark.js'
 import { createLocusMediaPort, sweepMediaSpool, type LocusMediaPort } from './host/channel/media.js'
+import { resolveFrameTools } from './host/channel/media-video.js'
 import { resolvePetLarkCliCompat } from './host/channel/lark-cli-compat.js'
 import { createPetRoutes } from './host/routes.js'
 import { withBrowserAuth } from './host/http.js'
@@ -134,6 +135,8 @@ import { handleLocusAgentCreated } from './host/locus/agent-created.js'
 import { LocusRepositoryV20 } from './host/locus/persistence-v20.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
+import { publishesLocusMessageTool } from './host/locus/message-guidance.js'
+import { selectLocusEntryReadTools } from './host/locus/entry-read-tools.js'
 import { createDocControlMessenger, DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
@@ -409,9 +412,18 @@ async function initialize(
   } catch (error) {
     petLog(`dsh-pet: lark media downloader unavailable (${error instanceof Error ? error.message : String(error)})`)
   }
+  // Optional: with both `ffmpeg` and `ffprobe` on PATH a video is shown as its cover plus a few
+  // scene keyframes; without them, as the cover only. Resolved ONCE here, to absolute paths, so a
+  // later PATH change cannot swap the binary. They parse untrusted video with the Host user's
+  // rights and no extra sandbox: removing them from the machine turns the feature off.
+  const frameTools = await resolveFrameTools()
+  petLog(frameTools === undefined
+    ? 'dsh-pet: ffmpeg/ffprobe not found; video messages are read as cover only'
+    : `dsh-pet: video keyframes enabled (${frameTools.ffmpeg})`)
   const locusMedia: LocusMediaPort = createLocusMediaPort({
     attachments: ctx.get('attachments') as never,
     ...(locusMediaDownload === undefined ? {} : { download: locusMediaDownload }),
+    ...(frameTools === undefined ? {} : { frameTools }),
   })
   let currentLocusTurnProof: (childSessionId: string) =>
     | { readonly executionId: string; readonly turnId: string }
@@ -1184,31 +1196,21 @@ async function initialize(
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
           },
           locusChildTools: { loci: locusAskLoci, collab: locusCollab, subagents: officialSubagentMessenger },
-          // One read tool per child, by entry kind (D9/D10): a document child
-          // gets the doc read and never the group-history read, and an IM child
-          // never sees the doc read. Each is published only when the runtime
-          // really has the port, so a tool that can never succeed never appears.
-          // A fresh child is composed before its locus row exists, so the
-          // endpoint comes from the composition first (production E2E,
-          // 2026-10-18: the first doc child got the IM tool without this).
-          ...(isDocEndpoint(composition.endpoint ?? locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' })
-            ? (larkClient.queryDocComment === undefined || larkClient.fetchDocMarkdown === undefined ? {} : {
-              locusDocContext: {
-                loci: intentTriageDeps.loci,
-                currentMessageId: caller => locusRepository.listDeliveries(caller.locusId)
-                  .find(record => record.sessionId === caller.childSessionId &&
-                    (record.status === 'current' || record.status === 'finishing') &&
-                    record.queueState === 'current')?.messageId,
-                client: larkClient,
-              },
-            })
-            : (larkClient.readEntranceHistory === undefined ? {} : {
-              locusHistory: {
-                loci: intentTriageDeps.loci,
-                cursor: locusHistoryCursor,
-                read: input => larkClient.readEntranceHistory!(input),
-              },
-            })),
+          // One read-tool set per child, by entry kind (D9/D10) and by what this Host can
+          // serve; see selectLocusEntryReadTools. A fresh child is composed before its
+          // locus row exists, so the endpoint comes from the composition first
+          // (production E2E, 2026-10-18: the first doc child got the IM tool without this).
+          ...selectLocusEntryReadTools({
+            endpoint: composition.endpoint ?? locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' },
+            lark: larkClient,
+            media: locusMedia,
+            loci: intentTriageDeps.loci,
+            cursor: locusHistoryCursor,
+            currentDocMessageId: caller => locusRepository.listDeliveries(caller.locusId)
+              .find(record => record.sessionId === caller.childSessionId &&
+                (record.status === 'current' || record.status === 'finishing') &&
+                record.queueState === 'current')?.messageId,
+          }),
         })
       },
       // D8: read-only denies the full-access tools; danger-full-access leaves the
@@ -2886,6 +2888,8 @@ async function initialize(
             ...(groupRow.reboundFrom === undefined ? {} : { reboundFrom: groupRow.reboundFrom }),
           },
           readability,
+          // Same decision that publishes the tool, so the prompt never names a missing tool.
+          messageToolAvailable: publishesLocusMessageTool(revalidated.endpoint, locusMedia.available),
           message: {
             messageId: message.messageId,
             senderOpenId: message.senderOpenId,

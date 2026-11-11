@@ -85,6 +85,13 @@ export const LOCUS_HISTORY_MAX_SENDER_CHARS = 64
 
 const TRUNCATION_MARK = '…（已截断）'
 
+/**
+ * Markers the platform's formatted body uses for non-text content. A line whose
+ * body carries one gets its message id, so the child can pass it to
+ * `pet_locus_message` to see the image or video.
+ */
+const MEDIA_MARKER = /!\[Image\]\(|\[Media:|\[Image|\[Video|\[Audio|<(?:file|folder)\b/
+
 /** Parsed, validated arguments. */
 export interface LocusHistoryRequest {
   readonly since?: string
@@ -313,8 +320,11 @@ export async function executeLocusChatHistory(
   let consumed = 0
   for (const message of pending) {
     const body = clamp(message.text.replace(/\s+/g, ' ').trim(), LOCUS_HISTORY_MAX_BODY_CHARS)
+    // Decided on the RAW body: the marker may sit past the clamp. The id is appended
+    // after the clamp, so it is never the part that gets cut, and it is inside the budget.
+    const idSuffix = MEDIA_MARKER.test(message.text) ? ` (id ${message.messageId})` : ''
     const line = `- [${message.createTime}] ${senderOf(message)}：${body.text}${
-      message.threadId === undefined ? '' : `（话题 ${message.threadId}）`}`
+      message.threadId === undefined ? '' : `（话题 ${message.threadId}）`}${idSuffix}`
     if (used + line.length + 1 > LOCUS_HISTORY_MAX_CHARS) break
     used += line.length + 1
     lines.push(line)
