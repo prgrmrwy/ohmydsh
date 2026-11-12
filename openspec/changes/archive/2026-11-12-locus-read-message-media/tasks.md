@@ -58,5 +58,6 @@
       - strict validate 首次失败于两条 ADDED requirement 超过 500 字，按原文拆分为「子会话按消息 id 读取本入口 chat 内的单条消息」「单条消息读取按模型图片能力与额度返回并重验 caller」「单条消息读取工具的装配与参数」与「视频以封面与有界场景关键帧呈现」「视频关键帧的尺寸、校验与时间点」，行为不变，test-plan 同步改映射。
       - 根 `npm test` 首次失败于 review 文件以仓库根为基准写链接；已机械改为相对文件路径（本 change 与 `locus-ask-work-first-and-concise` 的 review 文件）。
 - [x] 7.2 更新 dsh-pet README（中英）的媒体能力、ffmpeg 可选依赖与风险说明；有新坑则记入 `docs/architecture/dsh-plugin-integration-pitfalls.md`
-- [ ] 7.3 预览环境验收（需所有者授权专用测试群）：被回复消息截图可见；视频返回封面与关键帧；消息链接得到如实说明；核实已存在子会话冷恢复后是否获得新工具
-- [ ] 7.4 编写 verify 工件
+- [x] 7.3 预览环境验收（需所有者授权专用测试群）：被回复消息截图可见；视频返回封面与关键帧；消息链接得到如实说明；核实已存在子会话冷恢复后是否获得新工具
+      - 2026-11-12 所有者在日常 Host 上验收（合入并重启后），四项均有真机证据，见 verify.md「Live acceptance」；冷恢复项的范围限制见 verify.md Warnings 2。
+- [x] 7.4 编写 verify 工件（verify.md，`DECISION: PASS_WITH_WARNINGS`）
