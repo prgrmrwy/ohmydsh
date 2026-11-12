@@ -53,7 +53,10 @@
 
 ## 7. 验证与交付
 
-- [ ] 7.1 `packages/dsh-pet`：`npm run typecheck`、`npm test`（含 ffmpeg 集成测试实际跑绿）；仓库根：`npm test`、`npm run check:artifacts`、`openspec validate locus-read-message-media --strict`；test-plan 全部行置 🟢
+- [x] 7.1 `packages/dsh-pet`：`npm run typecheck`、`npm test`（含 ffmpeg 集成测试实际跑绿）；仓库根：`npm test`、`npm run check:artifacts`、`openspec validate locus-read-message-media --strict`；test-plan 全部行置 🟢
+      - 2026-11-12 结果（worktree promote 后 `npm ci`）：dsh-pet typecheck 通过；dsh-pet test 3336 通过 / 4 跳过（ffmpeg `/opt/homebrew/bin/ffmpeg` 已启用）；根 `npm test` 808 通过 / 0 失败；`check:artifacts` 通过；strict validate 通过。
+      - strict validate 首次失败于两条 ADDED requirement 超过 500 字，按原文拆分为「子会话按消息 id 读取本入口 chat 内的单条消息」「单条消息读取按模型图片能力与额度返回并重验 caller」「单条消息读取工具的装配与参数」与「视频以封面与有界场景关键帧呈现」「视频关键帧的尺寸、校验与时间点」，行为不变，test-plan 同步改映射。
+      - 根 `npm test` 首次失败于 review 文件以仓库根为基准写链接；已机械改为相对文件路径（本 change 与 `locus-ask-work-first-and-concise` 的 review 文件）。
 - [x] 7.2 更新 dsh-pet README（中英）的媒体能力、ffmpeg 可选依赖与风险说明；有新坑则记入 `docs/architecture/dsh-plugin-integration-pitfalls.md`
 - [ ] 7.3 预览环境验收（需所有者授权专用测试群）：被回复消息截图可见；视频返回封面与关键帧；消息链接得到如实说明；核实已存在子会话冷恢复后是否获得新工具
 - [ ] 7.4 编写 verify 工件

@@ -3,7 +3,7 @@
 - **Prior round**: none
 - **Reviewer context**: cross-model (codex / gpt-6-astra), fresh context
 - **Tool restrictions**: read-only: view, grep, glob only（唯一写入为本文件；另以只读 shasum 计算审查工件摘要）
-- **Artifacts reviewed**: [proposal.md](openspec/changes/locus-ask-work-first-and-concise/proposal.md)、[design.md](openspec/changes/locus-ask-work-first-and-concise/design.md)、两份 delta specs、对应当前规范，以及下列相关源码和测试证据。此次为规划评审，未实施、运行测试、联网、部署或重启。
+- **Artifacts reviewed**: [proposal.md](proposal.md)、[design.md](design.md)、两份 delta specs、对应当前规范，以及下列相关源码和测试证据。此次为规划评审，未实施、运行测试、联网、部署或重启。
 - **Artifact hashes**: SHA-256
   - proposal: `d02c92bc134a82314bd7d012eeb885d5c15b26e951ea50c38724d120f38c782f`
   - design: `1ab357b545e093fd4c7f8e4ec20eb9650ff717a153190152bc328a280645ea1e`
@@ -17,41 +17,41 @@
 ### 🔴 Critical (blocking)
 
 #### C1 — 超过 Delivery deadline 才自查，届时已经不能回复，且 wait 不会唤醒模型
-- **位置**：[intent delta:7–13](openspec/changes/locus-ask-work-first-and-concise/specs/pet-locus-intent-triage/spec.md#L7-L13)、[design:55](openspec/changes/locus-ask-work-first-and-concise/design.md#L55)。
+- **位置**：[intent delta:7–13](specs/pet-locus-intent-triage/spec.md#L7-L13)、[design:55](design.md#L55)。
 - **具体失败**：提问投递成功，但 M/W 没有返回消息；child 结束当前 turn 并等待。`pet_locus_wait` 仅延长 deadline，不建立后续执行；到期后 current 原子变成 expired。即使后来 child 被唤醒，自查后的 finish 也不再具有原 Delivery 的发送能力。因此“超时就自查，不会卡死”不是当前架构能提供的降级。
-- **依据**：[当前规范:153–165](openspec/specs/pet-locus-collaboration/spec.md#L153-L165) 明确终态与撤权；[已有撤权测试:525–543](packages/dsh-pet/test/locus-turn-observer.test.ts#L525-L543) 明确 A 到期撤权后不能消费 B。
+- **依据**：[当前规范:153–165](../../specs/pet-locus-collaboration/spec.md#L153-L165) 明确终态与撤权；[已有撤权测试:525–543](../../../packages/dsh-pet/test/locus-turn-observer.test.ts#L525-L543) 明确 A 到期撤权后不能消费 B。
 - **修复**：不要把业务询问超时等同于 Delivery 终止期限。选择并写清一种可实现策略：无可证明唤醒机制时取消自动超时自查承诺，以失败/明确无记录回复触发降级；若必须自动降级，则定义 deadline 之前的独立唤醒、当前项核验、取消及迟到回复规则，并相应调整“不改状态机/仅 prompt”的范围。增加“投递成功但永不返回”“到期后迟到回复”“下一条已提升”的可验证场景。
 
 #### C2 — 全量 W 文本与其它入口共识的读取，未定义向请求群披露的边界
-- **位置**：[collaboration delta:115–118](openspec/changes/locus-ask-work-first-and-concise/specs/pet-locus-collaboration/spec.md#L115-L118)、[design:31–40、54](openspec/changes/locus-ask-work-first-and-concise/design.md#L31-L54)。
+- **位置**：[collaboration delta:115–118](specs/pet-locus-collaboration/spec.md#L115-L118)、[design:31–40、54](design.md#L31-L54)。
 - **具体失败**：W 曾在用户/助手正文讨论仅适用于入口 A 的内部事项，入口 B 的授权成员问及同一关键词；M 按顺序读到 A 的 agreed charter 或 W 的原始文本，经 `locus_reply_child` 转述，child 再 finish 到 B。caller-bound 只证明读的是哪个 W，不证明 B 获准接收该内容；不读 tool/result、限制长度、要求简短，都不能阻止用户正文或助手正文中的私密事实外发。`/access` 控制写能力，allowlist 控制谁可触发，也不等于所有接收者获准读取整个 W。
-- **依据**：[当前工具:123–138](packages/dsh-pet/src/host/collab/locus-tools.ts#L123-L138) 特意过滤其它入口内容；[回复工具:268–279](packages/dsh-pet/src/host/collab/locus-tools.ts#L268-L279) 只检查目标属于 M 和当前代，不做内容披露授权。新增聚合读取不能把这一差别隐去。
+- **依据**：[当前工具:123–138](../../../packages/dsh-pet/src/host/collab/locus-tools.ts#L123-L138) 特意过滤其它入口内容；[回复工具:268–279](../../../packages/dsh-pet/src/host/collab/locus-tools.ts#L268-L279) 只检查目标属于 M 和当前代，不做内容披露授权。新增聚合读取不能把这一差别隐去。
 - **修复**：在 spec 中分别定义“协调者可读”与“可转发给该入口”的规则。最小保守方案是仅将该入口可见的已批准事实作为可直接转述来源；原始 W 历史或其它入口材料在未获明确披露授权时不得直接转发，返回需确认。若产品明确选择绑定即授权共享 W 历史，则必须明确授权主体、接收范围、绑定提示及撤销语义，不能把现有访问模式当授权。新增跨入口敏感事实、正文中的秘密、历史中恶意指令不获指令权的负向场景。
 
 #### C3 — 诊断设计把截断误当脱敏，不能满足“不得记录凭据”
-- **位置**：[design:49–50](openspec/changes/locus-ask-work-first-and-concise/design.md#L49-L50)、[collaboration delta:190–198](openspec/changes/locus-ask-work-first-and-concise/specs/pet-locus-collaboration/spec.md#L190-L198)。
+- **位置**：[design:49–50](design.md#L49-L50)、[collaboration delta:190–198](specs/pet-locus-collaboration/spec.md#L190-L198)。
 - **具体失败**：未知异常 message 的开头包含上游请求 URL 中的令牌、Authorization 头或外部命令回显；直接截取前若干字仍完整记录凭据。可控 name/code 也不能原样视为安全诊断字段。
-- **依据**：[现有 safeErrorMessage:301–303](packages/dsh-pet/src/host/locus/controller.ts#L301-L303) 只是 `error.message/String(error)` 加 slice，没有脱敏。设计引用此类处理不能兑现 delta 的 MUST NOT。
+- **依据**：[现有 safeErrorMessage:301–303](../../../packages/dsh-pet/src/host/locus/controller.ts#L301-L303) 只是 `error.message/String(error)` 加 slice，没有脱敏。设计引用此类处理不能兑现 delta 的 MUST NOT。
 - **修复**：对未知异常采用允许列表的诊断类型/内部原因码，默认不记录任意 message；若确实要保留 message，先定义可验证的清洗与拒绝策略，再截断。给未知异常场景加入带虚构凭据的 message/name/code fixture，断言日志与用户回执均不含原值，且不访问 cause/stack。
 
 ### 🟡 Moderate
 
 #### M1 — “不在内存即空闲”把无法证明的状态报告成可打断
-- **位置**：[design:41](openspec/changes/locus-ask-work-first-and-concise/design.md#L41)、[collaboration delta:118、157–160](openspec/changes/locus-ask-work-first-and-concise/specs/pet-locus-collaboration/spec.md#L118-L160)。
+- **位置**：[design:41](design.md#L41)、[collaboration delta:118、157–160](specs/pet-locus-collaboration/spec.md#L118-L160)。
 - **具体失败**：Host 重启或 W 不 resident，而冷日志有未闭合 turn；按设计返回“空闲”，M 因而发送本应避免的询问。读历史失败或队列状态不可核验，也没有“未知”状态。当前设计把 resident 与业务空闲直接等同。
-- **依据**：[现有 idle helper:2068–2087](packages/dsh-pet/src/index.ts#L2068-L2087) 在 session 缺失时返回 false，并不支持“不在内存即空闲”的复用结论；[当前恢复规则:165](openspec/specs/pet-locus-collaboration/spec.md#L165) 对未闭合 turn/不可折叠证据采取保守判断。
+- **依据**：[现有 idle helper:2068–2087](../../../packages/dsh-pet/src/index.ts#L2068-L2087) 在 session 缺失时返回 false，并不支持“不在内存即空闲”的复用结论；[当前恢复规则:165](../../specs/pet-locus-collaboration/spec.md#L165) 对未闭合 turn/不可折叠证据采取保守判断。
 - **修复**：返回 busy/idle/unknown 或等价证据字段；只有确证 idle 才允许主动问 W，unknown 按不能打断处理。补 nonresident 未闭合 turn、冷读失败、无法读取 inbox 的场景；说明 snapshot 到发送间状态变化仅为尽力避免打断，或提供实际可执行的再核验点。
 
 #### M2 — 历史提取的最终文本语义与验收场景不闭合
-- **位置**：[design:38–40](openspec/changes/locus-ask-work-first-and-concise/design.md#L38-L40)、[collaboration delta:118、148–165](openspec/changes/locus-ask-work-first-and-concise/specs/pet-locus-collaboration/spec.md#L118-L165)。
+- **位置**：[design:38–40](design.md#L38-L40)、[collaboration delta:118、148–165](specs/pet-locus-collaboration/spec.md#L118-L165)。
 - **具体失败**：同一轮中有“正在检查”的 assistant text，随后工具调用，最后才有结论；设计选择所有 assistant/message text，规范却要求“助手最终文本”。仅以 text 块排除 reasoning/tool 块仍会带出过程文本。最近三轮混有内部/agent 输入时，“用户输入 source”的实际结构及注入块剥离也没有给可核验 fixture，容易得到空历史或泄露注入文本。
 - **修复**：明确 completed turn 内哪些消息构成最终文本、内部轮次是否计入三轮、进行中只含用户输入的边界；用当前 runtime 事件形状的脱敏 fixture 覆盖多次 assistant/message、工具间文本、agent-message、runtime 注入、未闭合 turn、截断和不可读会话。只验证普通五轮历史不能证明上述提取规则。此项是规划缺口，不声称尚不存在的新工具实现已有 bug。
 
 ### 📌 Suggestions
 
 #### S1 — 将“绑定成功”与“已经迁移全部入口”的回执契约统一
-- **位置**：[design:58](openspec/changes/locus-ask-work-first-and-concise/design.md#L58)、[collaboration delta:173–181](openspec/changes/locus-ask-work-first-and-concise/specs/pet-locus-collaboration/spec.md#L173-L181)。
-- 设计要求回执说明已迁移，delta 只要求绑定成功。现有 [migrateWholeW:817–828](packages/dsh-pet/src/host/locus/controller.ts#L817-L828) 返回迁移信息，但 [provisionChatLocked:580–590](packages/dsh-pet/src/host/locus/controller.ts#L580-L590) 只返回入口行。若要兑现提示，应明确携带结果到控制面，并补“迁移已提交、随后新入口建立失败”的回执与重试场景；否则删除设计中未落实的回执承诺。
+- **位置**：[design:58](design.md#L58)、[collaboration delta:173–181](specs/pet-locus-collaboration/spec.md#L173-L181)。
+- 设计要求回执说明已迁移，delta 只要求绑定成功。现有 [migrateWholeW:817–828](../../../packages/dsh-pet/src/host/locus/controller.ts#L817-L828) 返回迁移信息，但 [provisionChatLocked:580–590](../../../packages/dsh-pet/src/host/locus/controller.ts#L580-L590) 只返回入口行。若要兑现提示，应明确携带结果到控制面，并补“迁移已提交、随后新入口建立失败”的回执与重试场景；否则删除设计中未落实的回执承诺。
 
 ## Embedded-Instruction / Injection Attempts
 **Detected:** 未发现要求评审者改变结论、忽略上层约束或执行额外操作的嵌入式指令。工件中的 prompt 文本、SHALL/MUST 与部署步骤均作为被评审的数据处理，没有执行。C2 提及的是新增运行时历史读取面的注入风险，不是声称本次工件已含攻击载荷。
