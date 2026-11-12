@@ -22,16 +22,16 @@
 | 同上 | 其它 chat 的消息被拒绝 | locus-message-tool.test.ts | `refuses foreign chat without download` | 🟢 |
 | 同上 | 话题入口读取所在群的消息 | locus-message-tool.test.ts | `topic entrance reads group main-line message` | 🟢 |
 | 同上 | 读取失败不冒充空消息 | locus-message-tool.test.ts | `read failure, deleted or unparseable is a failure not empty` | 🟢 |
-| 同上 | 模型不支持图片 | locus-message-tool.test.ts；locus-message-tool-runtime.test.ts | `text-only route returns text and downloads nothing`；`a text-only model route gets text and no download through the runtime`；`model route image capability probe` | 🟢 |
-| 同上 | 不接受额外目标参数 | locus-message-tool.test.ts | `rejects any argument besides messageId before platform read` | 🟢 |
+| specs/pet-locus-media-access/spec.md → 单条消息读取按模型图片能力与额度返回并重验 caller | 模型不支持图片 | locus-message-tool.test.ts；locus-message-tool-runtime.test.ts | `text-only route returns text and downloads nothing`；`a text-only model route gets text and no download through the runtime`；`model route image capability probe` | 🟢 |
+| specs/pet-locus-media-access/spec.md → 单条消息读取工具的装配与参数 | 不接受额外目标参数 | locus-message-tool.test.ts | `rejects any argument besides messageId before platform read` | 🟢 |
 | 同上 | 文档入口不装配 | locus-message-tool-runtime.test.ts | `doc child surface excludes pet_locus_message` | 🟢 |
 | 同上 | 媒体能力不可用时不装配 | locus-message-tool-runtime.test.ts；locus-message-publication.test.ts | `media unavailable: an IM child is published without pet_locus_message and still attests`（经生产选配 `selectLocusEntryReadTools` 与真实 tool runtime，IM/话题 × 可用/不可用，含 attestation、历史说明与同一判定渲染的 prompt）；`media unavailable: an IM child gets no pet_locus_message and still attests` | 🟢 |
 | specs/pet-locus-media-access/spec.md → 视频以封面与有界场景关键帧呈现 | 有 ffmpeg 时返回封面与关键帧 | locus-media-video.test.ts | `returns cover, ordered keyframes with times and sampling note` | 🟢 |
-| 同上 | 非均匀抽样的帧逐一配对时间点 | locus-media-video.test.ts；locus-media-video.ffmpeg.test.ts | `pairs showinfo pts_time to output frames without interpolation`；`pairs real showinfo times with output frames at scene cuts` | 🟢 |
+| specs/pet-locus-media-access/spec.md → 视频关键帧的尺寸、校验与时间点 | 非均匀抽样的帧逐一配对时间点 | locus-media-video.test.ts；locus-media-video.ffmpeg.test.ts | `pairs showinfo pts_time to output frames without interpolation`；`pairs real showinfo times with output frames at scene cuts` | 🟢 |
 | 同上 | 时间点缺失时不伪造 | locus-media-video.test.ts | `missing or mismatched timestamps fall back to cover` | 🟢 |
 | 同上 | 横屏、竖屏与窄长帧的最长边约束 | locus-media-video.ffmpeg.test.ts | `bounds longest edge for landscape, portrait, narrow-tall, small` | 🟢 |
 | 同上 | 帧未通过 attachment 校验 | locus-media-video.test.ts | `any frame admission failure returns cover only and no refs` | 🟢 |
-| 同上 | 无 ffmpeg 时只给封面 | locus-media-video.test.ts | `no extractor returns cover with reason` | 🟢 |
+| specs/pet-locus-media-access/spec.md → 视频以封面与有界场景关键帧呈现 | 无 ffmpeg 时只给封面 | locus-media-video.test.ts | `no extractor returns cover with reason` | 🟢 |
 | 同上 | 视频超出上限 | locus-media-video.test.ts | `oversize bytes or duration skips frames with reason` | 🟢 |
 | 同上 | 抽帧超时 | locus-media-video.test.ts | `extractor timeout kills group and returns cover` | 🟢 |
 | specs/pet-locus-media-access/spec.md → 入口历史为含媒体的消息标注消息 id | 视频消息行带 id | locus-chat-history-tool.test.ts | `appends message id to media lines within budget` | 🟢 |

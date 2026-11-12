@@ -70,11 +70,7 @@ Pet SHALL 使用一个位于 `DSH_HOME` 之下、权限 0700 的私有目录作�
 
 ### Requirement: 子会话按消息 id 读取本入口 chat 内的单条消息
 
-Host 媒体能力可用时，IM 入口的 locus 子会话 SHALL 获得 caller-bound 只读工具 `pet_locus_message`，唯一参数为 `messageId`（`om_` 前缀），MUST NOT 接受 chat、thread、file key、URL、本地路径或其它目标参数。Host SHALL 从实际执行 caller 解析其入口；caller 不可解析、不是该入口当前子会话或入口为文档入口时 SHALL 拒绝。文档入口 MUST NOT 装配该工具。Host 的媒体能力不可用（见「当前 Delivery 的图片由 Host caller-bound 取得」中 CLI 或私有目录不可用的情形）时，Host MUST NOT 装配该工具，而不是装配一个必然失败的工具。媒体能力以 Host 启动时的解析结果为准：运行中 CLI 或私有目录发生变化，须重启 Host 重新探测后才改变装配；已装配的工具单次读取失败只返回失败原因，不卸载工具。
-
-Host SHALL 先以 bot 身份读取该消息，并 SHALL 核对返回的唯一消息 `message_id` 等于请求值、其 `chat_id` 等于 caller 入口的 `chatId`；话题入口以所在群的 `chatId` 判定，不要求消息位于同一话题。任一核对不成立、消息已删除、读取失败或返回结构无法解析时，SHALL 返回确定性失败原因，MUST NOT 下载任何资源，MUST NOT 以空结果冒充「消息没有内容」。核对通过后 SHALL 返回有界的消息正文、发送者显示名、创建时间、话题 id 与消息类型，并标注其为不可信群内输入；正文中的图片 SHALL 经私有 spool 下载、magic MIME 检测与 DSH `AttachmentStore` 部署限额校验后，按出现顺序以 typed image block 返回；视频 SHALL 按「视频以封面与有界场景关键帧呈现」处理；文件与音频只返回有界元数据。
-
-Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明图片输入；未声明或无法判定时 SHALL 只返回文字部分并明确说明「当前模型无法查看图片」，MUST NOT 下载或保存任何媒体。每次调用返回的图片总数 SHALL 不超过部署的单条消息图片数上限，超出部分 SHALL 以说明文字标注被省略的数量。Host SHALL 在平台读取与下载之后、返回之前重验 caller 仍是该入口当前子会话；不成立时 SHALL 丢弃结果并返回失败原因。
+子会话调用 `pet_locus_message`（装配与参数见「单条消息读取工具的装配与参数」）时，Host SHALL 先以 bot 身份读取 `messageId` 指定的消息，并 SHALL 核对返回的唯一消息 `message_id` 等于请求值、其 `chat_id` 等于 caller 入口的 `chatId`；话题入口以所在群的 `chatId` 判定，不要求消息位于同一话题。任一核对不成立、消息已删除、读取失败或返回结构无法解析时，SHALL 返回确定性失败原因，MUST NOT 下载任何资源，MUST NOT 以空结果冒充「消息没有内容」。核对通过后 SHALL 返回有界的消息正文、发送者显示名、创建时间、话题 id 与消息类型，并标注其为不可信群内输入；正文中的图片 SHALL 经私有 spool 下载、magic MIME 检测与 DSH `AttachmentStore` 部署限额校验后，按出现顺序以 typed image block 返回；视频 SHALL 按「视频以封面与有界场景关键帧呈现」处理；文件与音频只返回有界元数据。
 
 #### Scenario: 读取被回复消息中的截图
 - **GIVEN** Host 媒体能力可用，当前 Delivery 回复了本群一条带截图的帖子消息，子会话模型支持图片输入
@@ -94,9 +90,17 @@ Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明�
 - **WHEN** 平台读取失败、消息已删除或返回结构无法解析
 - **THEN** 工具返回失败原因，不返回空正文或零张图片的成功结果
 
+### Requirement: 单条消息读取按模型图片能力与额度返回并重验 caller
+
+Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明图片输入；未声明或无法判定时 SHALL 只返回文字部分并明确说明「当前模型无法查看图片」，MUST NOT 下载或保存任何媒体。每次调用返回的图片总数 SHALL 不超过部署的单条消息图片数上限，超出部分 SHALL 以说明文字标注被省略的数量。Host SHALL 在平台读取与下载之后、返回之前重验 caller 仍是该入口当前子会话；不成立时 SHALL 丢弃结果并返回失败原因。
+
 #### Scenario: 模型不支持图片
 - **WHEN** 子会话当前模型 route 未声明图片输入
 - **THEN** 工具只返回正文和媒体元数据，说明当前模型无法查看图片，且不下载、不保存任何媒体
+
+### Requirement: 单条消息读取工具的装配与参数
+
+Host 媒体能力可用时，IM 入口的 locus 子会话 SHALL 获得 caller-bound 只读工具 `pet_locus_message`，唯一参数为 `messageId`（`om_` 前缀），MUST NOT 接受 chat、thread、file key、URL、本地路径或其它目标参数。Host SHALL 从实际执行 caller 解析其入口；caller 不可解析、不是该入口当前子会话或入口为文档入口时 SHALL 拒绝。文档入口 MUST NOT 装配该工具。Host 的媒体能力不可用（见「当前 Delivery 的图片由 Host caller-bound 取得」中 CLI 或私有目录不可用的情形）时，Host MUST NOT 装配该工具，而不是装配一个必然失败的工具。媒体能力以 Host 启动时的解析结果为准：运行中 CLI 或私有目录发生变化，须重启 Host 重新探测后才改变装配；已装配的工具单次读取失败只返回失败原因，不卸载工具。
 
 #### Scenario: 不接受额外目标参数
 - **WHEN** 调用携带 `messageId` 之外的任何参数
@@ -112,7 +116,7 @@ Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明�
 
 ### Requirement: 视频以封面与有界场景关键帧呈现
 
-单条消息读取工具遇到视频（`media` 类型消息或帖子中的 `media` 元素）时，SHALL 先下载其封面图并按图片规则返回。Host 启动时 SHALL 探测抽帧工具（`ffmpeg` 与 `ffprobe`）是否可执行；可用时 SHALL 在私有 spool 的独占子目录内下载该视频，下载 SHALL 受部署声明的视频字节上限约束；SHALL 先探测时长，时长超出上限、无法探测或容器格式不在白名单内时 MUST NOT 抽帧。抽帧 SHALL 只允许本地文件协议、禁止网络协议、不从标准输入读取，受整体超时约束，超时或失败时 SHALL 终止进程组。抽出的帧 SHALL 包含首帧与按场景变化选出的帧，总数不超过部署声明的帧数上限与本次调用的剩余图片额度，保持宽高比缩放到宽与高均不超过声明的最长边（不放大，尺寸取偶数），并 SHALL 经与图片相同的 magic MIME 检测与 `AttachmentStore` 校验后，以 typed image block 按时间顺序返回，每帧附抽帧工具为该帧报告的视频时间点；时间点 SHALL 与输出帧逐一配对，缺失、无法解析、数量不一致或任一帧未通过 attachment 校验时 SHALL 丢弃全部抽出的帧并按封面降级，MUST NOT 推算或编造时间点。返回内容 SHALL 写明视频时长与所取帧数，并 SHALL 说明这些帧是抽样，模型 MUST NOT 被引导声称已看过完整视频。
+单条消息读取工具遇到视频（`media` 类型消息或帖子中的 `media` 元素）时，SHALL 先下载其封面图并按图片规则返回。Host 启动时 SHALL 探测抽帧工具（`ffmpeg` 与 `ffprobe`）是否可执行；可用时 SHALL 在私有 spool 的独占子目录内下载该视频，下载 SHALL 受部署声明的视频字节上限约束；SHALL 先探测时长，时长超出上限、无法探测或容器格式不在白名单内时 MUST NOT 抽帧。抽帧 SHALL 只允许本地文件协议、禁止网络协议、不从标准输入读取，受整体超时约束，超时或失败时 SHALL 终止进程组。抽出的帧 SHALL 按「视频关键帧的尺寸、校验与时间点」返回。
 
 抽帧工具不可用、视频超出上限、下载或抽帧失败时，SHALL 只返回封面并写明未抽帧的确定性原因；封面也取不到时 SHALL 只返回元数据与原因。视频文件与抽出的帧 SHALL 在调用返回前删除。
 
@@ -120,6 +124,22 @@ Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明�
 - **GIVEN** Host 探测到可用的 `ffmpeg` 与 `ffprobe`，视频大小与时长都在上限内
 - **WHEN** 子会话读取含该视频的消息
 - **THEN** 返回封面、按时间顺序的若干关键帧（含首帧，各附时间点）以及时长与帧数说明，私有根内不留视频与帧文件
+
+#### Scenario: 无 ffmpeg 时只给封面
+- **WHEN** Host 启动时未探测到可用的抽帧工具
+- **THEN** 读取视频消息只返回封面，并写明未抽帧的原因
+
+#### Scenario: 视频超出上限
+- **WHEN** 视频字节数或时长超过部署上限
+- **THEN** Host 不抽帧（字节超限时在下载中途终止），只返回封面与超限原因
+
+#### Scenario: 抽帧超时
+- **WHEN** 抽帧超过整体超时
+- **THEN** Host 终止抽帧进程组、删除全部中间产物，只返回封面与超时原因
+
+### Requirement: 视频关键帧的尺寸、校验与时间点
+
+抽出的帧 SHALL 包含首帧与按场景变化选出的帧，总数不超过部署声明的帧数上限与本次调用的剩余图片额度，保持宽高比缩放到宽与高均不超过声明的最长边（不放大，尺寸取偶数），并 SHALL 经与图片相同的 magic MIME 检测与 `AttachmentStore` 校验后，以 typed image block 按时间顺序返回，每帧附抽帧工具为该帧报告的视频时间点；时间点 SHALL 与输出帧逐一配对，缺失、无法解析、数量不一致或任一帧未通过 attachment 校验时 SHALL 丢弃全部抽出的帧并按封面降级，MUST NOT 推算或编造时间点。返回内容 SHALL 写明视频时长与所取帧数，并 SHALL 说明这些帧是抽样，模型 MUST NOT 被引导声称已看过完整视频。
 
 #### Scenario: 非均匀抽样的帧逐一配对时间点
 - **GIVEN** 抽帧工具按场景变化输出 3 帧，其逐帧记录的时间点为 0、1.53、4.27 秒
@@ -139,18 +159,6 @@ Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明�
 - **WHEN** 抽出的某一帧未通过 magic MIME 或 `AttachmentStore` 部署限额校验
 - **THEN** Host 不返回任何关键帧，只返回封面与确定性原因，不产生部分 attachment refs
 
-#### Scenario: 无 ffmpeg 时只给封面
-- **WHEN** Host 启动时未探测到可用的抽帧工具
-- **THEN** 读取视频消息只返回封面，并写明未抽帧的原因
-
-#### Scenario: 视频超出上限
-- **WHEN** 视频字节数或时长超过部署上限
-- **THEN** Host 不抽帧（字节超限时在下载中途终止），只返回封面与超限原因
-
-#### Scenario: 抽帧超时
-- **WHEN** 抽帧超过整体超时
-- **THEN** Host 终止抽帧进程组、删除全部中间产物，只返回封面与超时原因
-
 ### Requirement: 入口历史为含媒体的消息标注消息 id
 
 `pet_locus_chat_history` 返回的每一行中，正文含图片、视频、文件或音频标记的，SHALL 在行尾附上该消息的 `om_` 消息 id，供子会话调用单条消息读取工具；其余行 MAY 不附 id。附加内容 SHALL 计入该工具既有的字符预算。
@@ -163,7 +171,7 @@ Host SHALL 在下载前判定当前子会话的精确模型 route 是否声明�
 
 已装配 `pet_locus_message` 的 IM 入口，其投递 prompt（首投与续投）在存在 reply 关联时，SHALL 在 `replied message` 行说明可用 `pet_locus_message` 读取被回复消息的正文与媒体。此时 prompt 与工具说明 SHALL 写明：飞书消息链接（`…/client/message/link/open?token=…`）无法由 Host 解析为消息；子会话可以在本入口历史或被回复消息中寻找候选消息并读取，确认不了时 SHALL 在答复中如实说明并请发送者直接回复该消息或转发过来，MUST NOT 声称已看过链接内容，也 MUST NOT 把猜测的候选当作已确认的那条消息。
 
-未装配 `pet_locus_message` 时（见「子会话按消息 id 读取本入口 chat 内的单条消息」），投递 prompt 与其它工具说明 MUST NOT 提及该工具，SHALL 改为说明被回复消息与链接内容当前无法读取，并请发送者直接回复该消息或转发过来；`replied message` 行仍给出消息 id。
+未装配 `pet_locus_message` 时（见「单条消息读取工具的装配与参数」），投递 prompt 与其它工具说明 MUST NOT 提及该工具，SHALL 改为说明被回复消息与链接内容当前无法读取，并请发送者直接回复该消息或转发过来；`replied message` 行仍给出消息 id。
 
 #### Scenario: 未装配工具时不提及
 - **GIVEN** Host 的媒体能力不可用，当前 Delivery 带有 reply 关联
