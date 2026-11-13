@@ -42,10 +42,30 @@ describe('queryDocComment', () => {
 
     expect(result).toMatchObject({ kind: 'ok', isWhole: false, quote: '接口已有' })
     expect(result.kind === 'ok' && result.trigger.text).toBe(`@${DOC_IDS.botOpenId} 补充一下`)
+    // A comment mention exists only as a person element; keep it structured so
+    // admission can prove the bot was addressed (pet-locus-collaboration
+    // addressing requirement).
+    expect(result.kind === 'ok' && result.trigger.mentionOpenIds).toEqual([DOC_IDS.botOpenId])
     expect(calls[0]).toEqual(expect.arrayContaining([
       'drive', '+batch-query-comments', '--as', 'bot', '--token', DOC_IDS.docToken, '--type', 'docx',
       '--comment-ids', DOC_IDS.anchoredCommentId,
     ]))
+  })
+
+  it('keeps every person element of a reply as an ordered mention fact', async () => {
+    const { client } = scripted([ok(batchQueryComments([commentCard({
+      commentId: DOC_IDS.anchoredCommentId,
+      isWhole: false,
+      replies: [{
+        replyId: DOC_IDS.anchoredRootReplyId,
+        text: '看下',
+        mentions: [DOC_IDS.otherUserOpenId, DOC_IDS.botOpenId],
+      }],
+    })]))])
+
+    const result = await client.queryDocComment!(DOC_IDS.docToken, DOC_IDS.anchoredCommentId, DOC_IDS.anchoredRootReplyId)
+    expect(result.kind === 'ok' && result.trigger.mentionOpenIds)
+      .toEqual([DOC_IDS.otherUserOpenId, DOC_IDS.botOpenId])
   })
 
   it('spec Scenario "长线程中的触发回复": pages +list-replies until the trigger is found', async () => {

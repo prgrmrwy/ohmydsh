@@ -869,3 +869,14 @@ change `locus-read-message-media`（2026-11-11）。前三条在规划评审或�
 
 - 工具 `output.schema` 里变长的「文字 + 图片」列表用 `{ type: 'json' }` 承载，值必须是**纯 JSON**（`attachmentId` 要从品牌类型转成字符串）；`render` 再把它还原成 `{ type: 'image', attachment }` block。该值会被持久化并可能在之后重新渲染，不能持有品牌或类实例字段。`locus-message-tool-runtime.test.ts` 经真实 `ToolRuntime` 执行成功、失败、图片三种返回，防止「声明了字段但 schema 拒收」整体变成 `INVALID_TOOL_OUTPUT`。
 - 新增 Pet 注册的工具必须同时：加入 `LOCUS_CALLER_BOUND_TOOLS`（否则发布期 attestation 判为泄漏）、按入口类型只给对的子会话（文档入口不装配 IM 工具）、并修订 `executor-scope.test.ts` 里的注册计数守卫——那条守卫就是为「不经说明地多注册一个工具」设计的。
+
+---
+
+## 17. 文档评论的「被 @」不在文本里：addressing 不能用空 mention 列表伪造
+
+2026-11-13 真机：生产文档里有人发了划词评论并 @bot，评论事件到达、准入通过、Delivery 建出，子会话却以 `finish(no-reply)` 结案，理由写的是「Host 标记本 bot 未被提及（self mentioned=false），属于仅引用」。用户看到的现象是「@ 了 bot 但没回复」。
+
+- **根因不在意图判断。** `drive.notice.comment_add_v1` 和 IM 消息不同：它**没有** `mentions` 数组，mention 只以回复正文里的 `person` 元素存在（`user_id` 是 open id）。评论入站把回复渲染成纯文本时会写成 `@ou_…`（评论 API 不返回显示名），而 Delivery 的 addressing 是从空的 mention 列表投影出来的，于是 `selfMentioned=false`。子会话读到 `self mentioned: false` + 一个陌生的 `@ou_…`，按 reference-only 静默结算。**三道内部检查（事件到达、准入、Delivery）全都成功，错的是事实投影。**
+- **本 bot 是否被提及，权威事实是事件顶层 `is_mentioned === true`。** 评论解析已经在任何平台调用之前丢弃 `is_mentioned !== true` 的评论，所以被准入的 Delivery 一定被提及；这个证明 MUST NOT 被「正文里没解析出 `person` 元素」或「正文渲染成 open id」推翻。occurrence 列表与顺序才从 `person` 元素取，没有 chat bot 成员快照时类型保持 `unknown`。
+- **实现位置**：`packages/dsh-pet/src/host/channel/lark.ts`（`DocCommentReply.mentionOpenIds` 来自 `person` 元素）、`doc-comment.ts`（`docCommentAddressing`，self mention 为准入已证明的事实）、`locus/context.ts`（文档评论投递明确写「以 Addressing 为准，不要因为 @ 后不是自己的名字就判为仅引用」）。回归测试：`doc-comment-admission.test.ts` 的「projects the document comment mention into Delivery addressing」「keeps the platform-proven mention when the reply body parse found no person element」、`locus-context.test.ts` 的「makes Addressing, not the opaque @ou_… body text, the mention authority」。
+- **排查口径**：遇到「@ 了 bot 却没回复」，先查该 Delivery 的 `addressing.selfMentioned` 与投递 prompt 的 Addressing 段，再看意图诊断；不要只看「评论事件是否到达」。同类坑：凡是把「没有结构化事实」当成「事实为否」的投影，都会在同一条链路上同时骗过准入、日志和模型。

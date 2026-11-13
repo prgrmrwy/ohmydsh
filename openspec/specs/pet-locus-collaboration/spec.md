@@ -576,9 +576,14 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startActivation` 创建
 
 ### Requirement: Delivery 保留有界结构化 addressing 事实
 
-对合格的群消息，系统 SHALL 在 durable Delivery 中保存有界、顺序化的 normalized addressing projection，至少标识每个 mention occurrence 的 `kind`（`self-bot`、`other-bot`、`human` 或 `unknown`）与可显示名称，并汇总 `selfMentioned` 和 `otherBotCount`。Host 可在内部保存重验所需稳定标识，但注入 child 时 MUST NOT 暴露 app secret、无关 open ID 或原始 transport event。
+对合格的群消息与文档评论，系统 SHALL 在 durable Delivery 中保存有界、顺序化的 normalized addressing projection，至少标识每个 mention occurrence 的 `kind`（`self-bot`、`other-bot`、`human` 或 `unknown`）与可显示名称，并汇总 `selfMentioned` 和 `otherBotCount`。Host 可在内部保存重验所需稳定标识，但注入 child 时 MUST NOT 暴露 app secret、无关 open ID 或原始 transport event。
 
 分类 SHALL 基于入站 mention 结构与 Host 可证明的 chat bot 成员事实；无法证明 bot/human 或 occurrence 顺序时 SHALL 标为 `unknown`，MUST NOT 从压平文本猜测。缺少新字段的旧 Delivery SHALL 保持可读并明确按 addressing unknown 处理，MUST NOT 回填猜测值。
+
+文档评论没有 IM 那样的平台 mention 数组，其 addressing SHALL 由两项事实构成：
+- 本 bot 被提及由事件顶层 `is_mentioned === true` 证明（评论准入已要求）；该证明 MUST NOT 被触发回复正文解析不出 `person` 元素所推翻。
+- occurrence 列表与顺序取自触发回复正文中的 `person` 元素；没有 chat bot 成员快照时其 `kind` SHALL 为 `unknown`。正文解析不出 `person` 元素时，本 bot 的 occurrence SHALL 按平台证明补齐，但 `orderKnown` SHALL 为 `false`，MUST NOT 把补齐项当作正文顺序。
+MUST NOT 因为评论正文把 mention 渲染成 `@ou_…`（评论 API 不返回显示名）而把本 bot 判为未被提及。
 
 这些事实只供 child 做自然语言意图判断；Host MUST NOT 因出现另一个 bot、某个关键词或 reference-only 猜测而在 durable Delivery 前静默丢弃已经合格的本 bot mention。
 
@@ -589,6 +594,16 @@ Locus child SHALL 以 locus 主会话为父、经官方 `startActivation` 创建
 #### Scenario: mention 身份不可证明
 - **WHEN** 某 mention 无法由当前 bot 成员事实判定为 bot 或 human
 - **THEN** 该 occurrence 以 `unknown` 注入，不从显示文本猜测其类型
+
+#### Scenario: 划词评论 @ 本 bot
+- **GIVEN** 一条被准入的划词评论，平台事件 `is_mentioned=true`，触发回复正文含本 bot 的 `person` 元素
+- **WHEN** 系统保存该 Delivery
+- **THEN** addressing 的 `selfMentioned` 为 `true`，带一个 `self-bot` occurrence，顺序与正文一致；投递 prompt 显示 `self mentioned：true`，child MUST NOT 因正文里的 `@ou_…` 判为仅引用
+
+#### Scenario: 评论正文的 person 元素解析失败
+- **GIVEN** 平台事件 `is_mentioned=true`，但触发回复正文没能解析出任何 `person` 元素
+- **WHEN** 系统保存该 Delivery
+- **THEN** addressing 仍以平台证明为准标为 `self-bot`/`selfMentioned=true`，不回退为未被提及；`orderKnown` 为 `false`
 
 #### Scenario: 旧 Delivery 兼容读取
 - **WHEN** Host 恢复一个没有 addressing projection 的历史 Delivery

@@ -102,6 +102,72 @@ describe('admitDocCommentEvent', () => {
     expect(decision.message.source === 'doc-comment' && decision.message.docComment).toEqual({ quote: '接口已有' })
   })
 
+  it('projects the document comment mention into Delivery addressing', () => {
+    // The live report (2026-11-13): an anchored comment that @-mentioned the
+    // bot produced a Delivery whose addressing said `selfMentioned=false`,
+    // because comments have no platform mentions array and the projection was
+    // built from an empty one. The child then settled it as reference-only.
+    const decision = admitDocCommentEvent(
+      event({ commentId: DOC_IDS.anchoredCommentId, replyId: DOC_IDS.anchoredFollowupReplyId, noticeType: 'add_reply' }),
+      {
+        kind: 'ok', isWhole: false,
+        replies: [],
+        trigger: {
+          replyId: DOC_IDS.anchoredFollowupReplyId,
+          text: `@${DOC_IDS.botOpenId} 看下`,
+          mentionOpenIds: [DOC_IDS.botOpenId],
+        },
+      },
+      context(),
+    )
+
+    expect(decision.kind).toBe('accepted')
+    if (decision.kind !== 'accepted') return
+    expect(decision.message.addressing).toEqual({
+      status: 'unknown',
+      occurrences: [{ kind: 'self-bot', displayName: '', stableId: DOC_IDS.botOpenId }],
+      selfMentioned: true,
+      otherBotCount: 0,
+      orderKnown: true,
+    })
+  })
+
+  it('keeps the platform-proven mention when the reply body parse found no person element', () => {
+    // Parsing only admits `is_mentioned === true`. A body that failed to yield
+    // its person elements must not turn that proof back into "not mentioned".
+    const decision = admitDocCommentEvent(
+      event(),
+      { kind: 'ok', isWhole: true, replies: [], trigger: { replyId: DOC_IDS.wholeRootReplyId, text: '看下' } },
+      context(),
+    )
+
+    expect(decision.kind === 'accepted' && decision.message.addressing?.selfMentioned).toBe(true)
+    // A synthesized occurrence is not at its body position: order is not proven.
+    expect(decision.kind === 'accepted' && decision.message.addressing?.orderKnown).toBe(false)
+  })
+
+  it('leaves non-self mentions unknown instead of guessing them', () => {
+    const decision = admitDocCommentEvent(
+      event(),
+      {
+        kind: 'ok', isWhole: true,
+        replies: [],
+        trigger: {
+          replyId: DOC_IDS.wholeRootReplyId,
+          text: '@someone 看下',
+          mentionOpenIds: [DOC_IDS.otherUserOpenId, DOC_IDS.botOpenId],
+        },
+      },
+      context(),
+    )
+
+    expect(decision.kind).toBe('accepted')
+    if (decision.kind !== 'accepted') return
+    expect(decision.message.addressing?.occurrences.map(occurrence => occurrence.kind))
+      .toEqual(['unknown', 'self-bot'])
+    expect(decision.message.addressing?.otherBotCount).toBe(0)
+  })
+
   it('uses the trigger reply\'s own body, never another reply on the same comment', () => {
     const decision = admitDocCommentEvent(
       event({ commentId: DOC_IDS.anchoredCommentId, replyId: DOC_IDS.anchoredFollowupReplyId, noticeType: 'add_reply' }),
