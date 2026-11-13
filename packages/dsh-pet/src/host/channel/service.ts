@@ -21,6 +21,11 @@ import { InboundPipeline, type IntakeOutcome } from './pipeline.js'
 import type { LocusChannelControllerPort } from './locus-capability.js'
 import { MessageDedup, parseInboundLine } from './event.js'
 import { createDocCommentIntake, type DocCommentIntakeOutcome } from './doc-comment-intake.js'
+import {
+  createDocCommentReconciler,
+  type DocCommentReconciler,
+  type DocReconcileOutcome,
+} from './doc-comment-reconcile.js'
 import type { LocusControllerResult, NormalizedLocusAdmission } from './locus-controller.js'
 import { PairingController, type PairingControllerOptions } from './pairing.js'
 import type { WorkspaceLocator } from './route.js'
@@ -34,7 +39,7 @@ import type { PetCoordinator } from '../coordinator.js'
 import type { PetRepository } from '../repository.js'
 import type { PetChannelConfig } from '../spec.js'
 import type { PetUnifiedLocusReadiness } from '../../wire.js'
-import type { LocusAuthorizationResolver } from '../locus/admission.js'
+import type { LocusAdmissionContext, LocusAuthorizationResolver } from '../locus/admission.js'
 import type { ChannelControl } from '../routes.js'
 
 /** What the channel needs from its Host. */
@@ -91,6 +96,16 @@ export interface ChannelServiceDeps {
   readonly docCommentLocus?: {
     handleAdmission(admission: NormalizedLocusAdmission): Promise<LocusControllerResult>
   }
+  /**
+   * Comment reconciliation inputs. When present, documents that already have a
+   * usable `doc:docx:` entry are re-read periodically so a comment whose live
+   * event never arrived can still reach the same admission path. Absent keeps
+   * comments strictly event-driven.
+   */
+  readonly docCommentReconcile?: {
+    readonly entries: () => readonly string[]
+    readonly handledThrough: (chatId: string) => number | undefined
+  }
   readonly subscriptionSpawnProcess?: SubscriptionOptions['spawnProcess']
   readonly subscriptionSchedule?: SubscriptionOptions['schedule']
   /** Injectable pairing randomness/clock/timer seams for deterministic tests. */
@@ -118,6 +133,7 @@ export class ChannelService implements ChannelControl {
   private commentStop = new AbortController()
   private readonly commentDedup = new MessageDedup()
   private readonly docCommentIntake: ((line: string) => Promise<void>) | undefined
+  private readonly commentReconciler: DocCommentReconciler | undefined
   /** Fences async identity probes after disable, teardown, or a newer request. */
   private operationGeneration = 0
   /** Fences pairing start probes independently from formal enable/binding work. */
@@ -154,25 +170,28 @@ export class ChannelService implements ChannelControl {
       ? undefined
       : createDocCommentIntake({
         client: this.client,
-        admissionContext: () => {
-          const config = deps.repository.getChannelConfig()
-          const authorization = deps.locusAuthorization
-          if (authorization === undefined) return undefined
-          return {
-            ...(config.botOpenId === undefined ? {} : { botOpenId: config.botOpenId }),
-            allowOpenIds: config.allowOpenIds,
-            watermark: this.subscription.watermark,
-            isDuplicate: messageId => this.commentDedup.check(messageId),
-            authorization,
-            ...(deps.locusAccessMode === undefined && authorization.accessMode === undefined
-              ? {}
-              : { accessMode: deps.locusAccessMode ?? authorization.accessMode }),
-          }
-        },
+        admissionContext: () => this.commentAdmissionContext(),
         handleAdmission: admission => commentLocus.handleAdmission(admission),
         active: () => this.formalReady,
         signal: () => this.commentStop.signal,
         onOutcome: outcome => this.onCommentOutcome(outcome),
+      })
+    // A comment whose live event never arrived is still readable through the
+    // comment API; this catch-up re-admits those replies on the same path.
+    // Absent inputs keep the channel strictly event-driven.
+    this.commentReconciler = commentLocus === undefined
+      || deps.locusAuthorization === undefined
+      || deps.docCommentReconcile === undefined
+      ? undefined
+      : createDocCommentReconciler({
+        client: this.client,
+        entries: deps.docCommentReconcile.entries,
+        handledThrough: deps.docCommentReconcile.handledThrough,
+        admissionContext: () => this.commentAdmissionContext(),
+        handleAdmission: admission => commentLocus.handleAdmission(admission),
+        active: () => this.formalReady,
+        signal: () => this.commentStop.signal,
+        onOutcome: outcome => this.onCommentReconcileOutcome(outcome),
       })
     this.pipeline = new InboundPipeline({
       repository: deps.repository,
@@ -643,13 +662,55 @@ export class ChannelService implements ChannelControl {
   }
 
   /**
+   * Admission facts shared by live comment intake and the reconciliation
+   * catch-up. Both must see the same allowlist, authorization and access mode;
+   * only the reconciliation overrides the watermark it exists to bypass.
+   */
+  private commentAdmissionContext(): LocusAdmissionContext | undefined {
+    const config = this.deps.repository.getChannelConfig()
+    const authorization = this.deps.locusAuthorization
+    if (authorization === undefined) return undefined
+    const accessMode = this.deps.locusAccessMode ?? authorization.accessMode
+    return {
+      ...(config.botOpenId === undefined ? {} : { botOpenId: config.botOpenId }),
+      allowOpenIds: config.allowOpenIds,
+      watermark: this.subscription.watermark,
+      isDuplicate: messageId => this.commentDedup.check(messageId),
+      authorization,
+      ...(accessMode === undefined ? {} : { accessMode }),
+    }
+  }
+
+  /** Low-cardinality reconciliation diagnostics: only real catches are notable. */
+  private onCommentReconcileOutcome(outcome: DocReconcileOutcome): void {
+    if (outcome.kind === 'admitted') {
+      this.log(`comment reconciled: admitted ${outcome.comments}`)
+      this.deps.onChange?.()
+      return
+    }
+    const reason = `reconcile:${outcome.kind}`
+    const now = Date.now()
+    const previous = this.ignoredAt.get(reason) ?? 0
+    if (now - previous >= 60_000) {
+      this.ignoredAt.set(reason, now)
+      this.log(`comment ${outcome.kind}`)
+    }
+  }
+
+  /**
    * The single writer of `formalReady`. Leaving the formal run aborts every
    * in-flight comment query/retry; entering it issues a fresh signal, so a
    * stale retry from a previous run can never accept, reply or react.
    */
   private setFormalReady(ready: boolean): void {
-    if (ready && !this.formalReady) this.commentStop = new AbortController()
-    if (!ready && this.formalReady) this.commentStop.abort()
+    if (ready && !this.formalReady) {
+      this.commentStop = new AbortController()
+      this.commentReconciler?.start()
+    }
+    if (!ready && this.formalReady) {
+      this.commentStop.abort()
+      this.commentReconciler?.stop()
+    }
     this.formalReady = ready
   }
 

@@ -3272,6 +3272,31 @@ async function initialize(
           }),
         locusAuthorization,
         locusAccessMode: endpoint => locusRepository.getRow(endpoint)?.accessMode,
+        // Live comment events are best-effort: on 2026-11-13 every comment
+        // authored by a reviewer failed to produce an event while owner
+        // comments arrived on the same connection. Re-read recent comments of
+        // documents that ALREADY have a usable entry and re-admit replies that
+        // @ this bot; the identical message id feeds the durable Delivery
+        // index, so a live/reconcile race loses one accept as duplicate.
+        docCommentReconcile: {
+          entries: () =>
+            locusRepository.listRows()
+              .filter(row =>
+                !('threadId' in row.endpoint)
+                && parseDocChatId(row.endpoint.chatId) !== undefined
+                && (row.state === 'active' || row.state === 'not-created'))
+              .map(row => row.endpoint.chatId),
+          // Catch up from the last Delivery this document already handled, so a
+          // restart never re-answers history the bot has moved past.
+          handledThrough: chatId => {
+            let latest: number | undefined
+            for (const delivery of locusRepository.listDeliveries()) {
+              if (delivery.endpoint.chatId !== chatId || delivery.acceptedAt === undefined) continue
+              if (latest === undefined || delivery.acceptedAt > latest) latest = delivery.acceptedAt
+            }
+            return latest
+          },
+        },
         // Bot-added produces no locus of its own: the whole tree is built on
         // demand by the first qualifying @ message, the same seam a group and
         // a topic both already use. `botLifecycleInitializer` stays

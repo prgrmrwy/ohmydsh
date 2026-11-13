@@ -163,6 +163,38 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 - **WHEN** 系统处理触发 `(c1, r1)` 的事件
 - **THEN** 不投递，诊断记 `comment-reply-missing`
 
+### Requirement: 未到达的评论事件按有界对账补投
+
+平台事件是尽力而为的：2026-11-13 生产实测中，文档所有者发出的评论都能到达，评审人发出的划词评论（含 @bot）一条都没到，而同一条连接上的 IM 事件正常。为避免这类评论永久丢失，对**已有可用文档级入口**的文档，系统 SHALL 周期性以 bot 身份读取其评论（`drive +list-comments`），把「触发回复 @ 了本 bot、但从未成为 Delivery」的回复按与实时事件**相同**的准入、去重与投递路径补投。
+
+- 只扫描已有可用文档级入口（根行 `state` 为 `active`/`not-created`）的文档；所有者没有建立入口的文档 MUST NOT 被扫描。
+- 每轮 SHALL 有界：最多 3 个文档、每个文档最多 2 页，按文档轮转；同一文档两次扫描之间 SHALL 至少间隔 60 秒。
+- 扫描起点 SHALL 取该文档最近一次 Delivery 的 `acceptedAt`；没有时回看启动窗口（默认 10 分钟）；此后按已扫描到的最新回复时间推进。起点之前的历史回复 MUST NOT 被补投。
+- 补投候选 MUST 同时满足：作者不是本 bot、触发回复正文含本 bot 的 `person` 元素、`create_time` 晚于起点。补投事件 SHALL 视为 `is_mentioned=true`，且 MUST NOT 受实时订阅水位（watermark）约束。
+- 去重键与实时事件相同（`doc:docx:<token>/<comment_id>/<reply_id>`）。实时事件与对账同时受理同一回复时，第二次接受 SHALL 以 duplicate 拒绝，MUST NOT 发送第二条回复。
+- 读取失败、准入拒绝与取消 SHALL 只记低基数诊断，MUST NOT 影响实时入站，也 MUST NOT 抛出到 channel；channel 停止时 MUST 取消后续轮次与在途补投。
+- 补投出的 Delivery SHALL 与实时事件完全同构：同一 child、同一回复目标，回复仍以 bot 身份发出。
+
+#### Scenario: 评审人的划词评论事件未到达
+- **GIVEN** 文档 `D` 已有 active 根行；评审人在划词评论 `c9` 的回复 `r9` 中 @bot，但平台从未推送该事件
+- **WHEN** 对账轮次扫描到该回复
+- **THEN** 建立或复用评论级入口并投递一次 Delivery；回复以 bot 身份追加在 `c9` 下；下一轮不再重复投递
+
+#### Scenario: 与实时事件竞争同一回复
+- **GIVEN** 同一回复 `r9` 的实时事件与对账扫描同时通过准入
+- **WHEN** 两次接受竞争同一 `messageId`
+- **THEN** 只产生一条 Delivery，另一次接受以 duplicate 拒绝，不发送第二条回复
+
+#### Scenario: 起点之前的历史不补投
+- **GIVEN** 文档 `D` 最近一次 Delivery 的 `acceptedAt=T`
+- **WHEN** 对账扫描到 `T` 之前、@bot 的旧回复
+- **THEN** 不投递
+
+#### Scenario: 读取失败只记诊断
+- **GIVEN** `drive +list-comments` 返回错误
+- **WHEN** 对账轮次运行
+- **THEN** 本轮不投递，只记 `reconcile:list-failed` 类诊断；实时入站不受影响
+
 ### Requirement: 控制命令在评论中按所在入口生效
 
 `/bind <prefix>`、`/unbind`、`/access read|full`（短参 `-a`）在评论中的行为 SHALL 与群/话题完全一致，包括：解析、allowlist 限制、前缀规则、同源幂等、跨 W 拒绝（`EXPLICIT_PARENT_CONFLICT`）和忙时拒绝（停止与访问模式变更都只在入口空闲时受理）。原 `/scope`、`/tools` 及其短参 MUST NOT 再改变任何状态，回执提示改用 `/access`。「改绑到其他会话」不是评论命令，只在管理面操作（见 `pet-locus-collaboration`）。

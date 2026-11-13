@@ -160,6 +160,22 @@ export type DocCommentQuery =
   /** The comment is known but the trigger reply is absent after paging. */
   | { readonly kind: 'reply-missing' }
 
+/** One comment card as `drive +list-comments` returns it. */
+export interface DocCommentCard {
+  readonly commentId: string
+  readonly isWhole: boolean
+  readonly quote?: string
+  readonly replies: readonly DocCommentReply[]
+  readonly createdAt?: number
+}
+
+/** One page of a document's comments (bot identity). */
+export interface DocCommentsPage {
+  readonly comments: readonly DocCommentCard[]
+  readonly hasMore: boolean
+  readonly pageToken?: string
+}
+
 /** Bot-identity Lark operations Pet depends on. */
 export interface LarkClient {
   /** Detect whether the installed CLI exposes the identity contract Pet needs. */
@@ -182,6 +198,12 @@ export interface LarkClient {
    * card reports `has_more` (≤10 pages). Failure and "not found" are distinct.
    */
   queryDocComment?(token: string, commentId: string, replyId: string): Promise<DocCommentQuery>
+  /**
+   * One page of a docx's comments (`drive +list-comments`, bot identity), used
+   * by the reconciliation fallback when a comment event never arrived.
+   * `undefined` means the read failed and MUST NOT be read as "no comments".
+   */
+  listDocComments?(token: string, pageToken?: string): Promise<DocCommentsPage | undefined>
   /** Append a plain-text bot reply under a docx comment (`drive +add-reply`). */
   replyComment?(token: string, commentId: string, text: string): Promise<'success' | 'unknown'>
   /**
@@ -704,6 +726,23 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
   return out
 }
 
+/** Parse one `drive +list-comments` card into the facts reconciliation needs. */
+function parseCommentCard(value: unknown): DocCommentCard | undefined {
+  const card = recordOf(value)
+  const commentId = card?.['comment_id']
+  if (card === undefined || typeof commentId !== 'string' || commentId === '') return undefined
+  if (typeof card['is_whole'] !== 'boolean') return undefined
+  const quote = typeof card['quote'] === 'string' && card['quote'] !== '' ? card['quote'] : undefined
+  const created = card['create_time']
+  return {
+    commentId,
+    isWhole: card['is_whole'],
+    ...(quote === undefined ? {} : { quote }),
+    replies: parseCommentReplies(recordOf(card['reply_list'])?.['replies']),
+    ...(typeof created === 'number' && Number.isFinite(created) ? { createdAt: created * 1000 } : {}),
+  }
+}
+
 function requireChatId(value: unknown, operation: string): string {
   if (typeof value !== 'string' || !/^oc_[A-Za-z0-9]+$/.test(value)) {
     throw new Error(`${operation}: lark-cli returned no valid chat id`)
@@ -1208,6 +1247,37 @@ export function createLarkCliClient(
       if (trigger === undefined) return { kind: 'reply-missing' }
       const quote = typeof card['quote'] === 'string' && card['quote'] !== '' ? card['quote'] : undefined
       return { kind: 'ok', isWhole: card['is_whole'], ...(quote === undefined ? {} : { quote }), replies, trigger }
+    },
+
+    async listDocComments(token, pageToken) {
+      let result: CliJsonResult
+      try {
+        result = await callJson(
+          ['drive', '+list-comments', '--as', 'bot', '--token', requireDocToken(token), '--type', 'docx',
+            '--solved-status', 'all', '--page-size', '100',
+            ...(pageToken === undefined ? [] : ['--page-token', pageToken])],
+          binary,
+          runner,
+        )
+      } catch {
+        return undefined
+      }
+      const envelope = recordOf(result.value)
+      if (!result.ok || envelope?.['ok'] !== true) return undefined
+      const data = recordOf(envelope['data'])
+      const items = data?.['items']
+      if (data === undefined || !Array.isArray(items)) return undefined
+      const comments: DocCommentCard[] = []
+      for (const raw of items) {
+        const card = parseCommentCard(raw)
+        if (card !== undefined) comments.push(card)
+      }
+      const next = data['page_token']
+      return {
+        comments,
+        hasMore: data['has_more'] === true,
+        ...(typeof next === 'string' && next !== '' ? { pageToken: next } : {}),
+      }
     },
 
     async replyComment(token, commentId, text) {

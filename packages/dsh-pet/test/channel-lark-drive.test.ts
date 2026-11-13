@@ -100,6 +100,56 @@ describe('queryDocComment', () => {
     await expect(client.queryDocComment!('Dx1', 'c1', '2')).rejects.toThrow()
     expect(calls).toHaveLength(0)
   })
+
+  it('lists comments with bot identity and carries reply mentions for reconciliation', async () => {
+    const { client, calls } = scripted([ok({
+      items: [{
+        comment_id: DOC_IDS.anchoredCommentId,
+        is_whole: false,
+        quote: '评审修订',
+        create_time: 1_800,
+        reply_list: { replies: [{
+          reply_id: DOC_IDS.anchoredFollowupReplyId,
+          user_id: DOC_IDS.otherUserOpenId,
+          create_time: 1_900,
+          content: { elements: [
+            { type: 'person', person: { user_id: DOC_IDS.botOpenId } },
+            { type: 'text_run', text_run: { text: ' 请处理复审' } },
+          ] },
+        }] },
+      }],
+      has_more: true,
+      page_token: 'p2',
+    })])
+
+    const page = await client.listDocComments!(DOC_IDS.docToken)
+
+    expect(calls[0]).toEqual(expect.arrayContaining([
+      'drive', '+list-comments', '--as', 'bot', '--token', DOC_IDS.docToken, '--type', 'docx',
+      '--solved-status', 'all', '--page-size', '100',
+    ]))
+    expect(page).toMatchObject({ hasMore: true, pageToken: 'p2' })
+    expect(page?.comments[0]).toMatchObject({
+      commentId: DOC_IDS.anchoredCommentId,
+      isWhole: false,
+      quote: '评审修订',
+      createdAt: 1_800_000,
+    })
+    expect(page?.comments[0]?.replies[0]).toMatchObject({
+      replyId: DOC_IDS.anchoredFollowupReplyId,
+      authorOpenId: DOC_IDS.otherUserOpenId,
+      createdAt: 1_900_000,
+      mentionOpenIds: [DOC_IDS.botOpenId],
+    })
+  })
+
+  it('reports a failed comment list as undefined instead of an empty document', async () => {
+    const failed = scripted([() => new Error('timeout')])
+    await expect(failed.client.listDocComments!(DOC_IDS.docToken)).resolves.toBeUndefined()
+
+    const malformed = scripted([ok({ items: 'nope' })])
+    await expect(malformed.client.listDocComments!(DOC_IDS.docToken)).resolves.toBeUndefined()
+  })
 })
 
 describe('comment egress', () => {
