@@ -24,6 +24,12 @@
 - Host 没有恢复时，请用户在外部终端执行 `dsh`。预览环境重连后，以 `$DSH_HOME/preview.json` 或重跑 `dsh` 时的 `DSH_PREVIEW` 输出为准确认地址。
 - `dsh stop` 同样会断开当前会话。Windows 不支持会话内重启，请用户在外部终端执行 `dsh restart`。
 
+## 飞书文档评论的身份
+
+- 文档评论或其回复 @ 了本机 dsh-pet 的 bot 时，回复必须由 bot 发出：评论下回复用 `lark-cli drive +add-reply --as bot …`，全文评论用 `lark-cli drive +add-comment --as bot …`。MUST NOT 用 `--as user` 以所有者身份代答。
+- bot 身份不可用，或该文档没有授权给 bot 时，如实说明并停下；MUST NOT 改用 user 身份重试。
+- 文档正文的读取、编辑等非评论操作，仍按 lark-doc / lark-drive skill 的默认身份。
+
 ## 工作流选路
 
 - 到「这件事直接改，还是要开 OpenSpec change、开哪种」这个决策点时，若用户没有明确指定、当前任务也不属于已有 change，先用 `jev-workflow-router` skill 取一次建议：它只做一次 classify（必要时再一次 decide），然后在你自己的回复里给一行中文建议，例如「（Jev 路由建议：standard-openspec，置信度 0.91；可无视，按你的判断走。）」。

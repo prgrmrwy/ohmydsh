@@ -29,6 +29,7 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 
 入站时才能得到、又无法从持久标识推出的评论事实，SHALL 在接受 Delivery 时随其持久化，此后不再修改：
 - 划词评论的划词原文，以 `docComment.quote` 保存。保存值 SHALL 不超过 2 000 个 UTF-16 码元，截断标记计入上限；超长值 MUST NOT 写入持久层。全文评论不写入该字段。
+- 触发回复的 mention 事实（正文 `person` 元素的 open id，按出现顺序）SHALL 投影为 Delivery 的 addressing 并持久化。本 bot 被提及由事件 `is_mentioned=true` 证明（准入已要求），MUST NOT 因正文把 mention 渲染成 `@ou_…`、或正文解析不出 `person` 元素而标为未被提及；分类与顺序规则见 `pet-locus-collaboration` 的 addressing 要求。
 - 来源、token、`comment_id`、`reply_id` 以及全文/划词的区分 SHALL 从入口 `chatId` 前缀、`threadId` 和 Delivery `messageId` 推导，MUST NOT 另存一份。
 
 投递 prompt 中的划词原文 SHALL 取自持久 Delivery，MUST NOT 取自入站事件。首次投递、排队后投递、Host 重启后再投递，三者渲染出的评论事实 SHALL 相同。
@@ -42,6 +43,11 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 - **GIVEN** 文档 `D` 已有文档级 locus，其工作主会话为 W0、locus 主会话为 M0（W0 ≠ M0）；成员在划词评论 `c2` 中 @bot；查询得到 `is_whole=false`、`quote="接口已有"`
 - **WHEN** 系统处理该事件
 - **THEN** 在文档根行的 M 下追加评论行 `(doc:docx:D, c2)`（其 W 仍为 W0，M 为 M0）并创建其子会话，与文档级子会话为兄弟；`ensureLocusMain` 调用 0 次；投递 prompt 中包含标注为不可信的划词原文 `接口已有`
+
+#### Scenario: 划词评论 @bot 的 mention 事实随 Delivery 持久化
+- **GIVEN** 成员在划词评论 `c2` 的回复 `r1` 中 @bot；该回复正文含本 bot 的 `person` 元素；该事件被接受为 Delivery 后 Host 重启
+- **WHEN** 重启后再次投递该 Delivery
+- **THEN** 两次投递的 addressing 都是 `selfMentioned=true` 且含 `self-bot` occurrence；第二次不重新查询评论、不把正文里的 `@ou_…` 当作未被提及
 
 #### Scenario: 重启后再投递排队中的划词评论
 - **GIVEN** 入口 `(doc:docx:D, c2)` 的子会话正忙；`c2` 下新的触发回复 `r5`（划词原文 `接口已有`）被接受为排队中的 Delivery；随后 Host 重启

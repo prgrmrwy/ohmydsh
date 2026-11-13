@@ -130,6 +130,18 @@ export interface DocCommentReply {
   readonly authorOpenId?: string
   readonly createdAt?: number
   readonly text: string
+  /**
+   * Open ids of the `person` elements in this reply, in body order.
+   *
+   * A doc-comment reply has no platform `mentions` array like an IM message: a
+   * mention exists only as a `person` element inside the reply content, whose
+   * `user_id` is the mentioned user's open id. The text rendering keeps the
+   * same fact as `@<open_id>`; this field keeps it structured so the Delivery
+   * can project addressing instead of treating an unknown as "not mentioned"
+   * (live report 2026-11-13: an anchored comment that @-mentioned the bot was
+   * settled as reference-only because the Delivery said `selfMentioned=false`).
+   */
+  readonly mentionOpenIds?: readonly string[]
 }
 
 /** Result of reading one comment and locating its trigger reply. */
@@ -661,6 +673,7 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
     const replyId = reply?.['reply_id']
     if (reply === undefined || typeof replyId !== 'string' || replyId === '') continue
     const elements = recordOf(reply['content'])?.['elements']
+    const mentionOpenIds: string[] = []
     const text = (Array.isArray(elements) ? elements : [])
       .map(recordOf)
       .map(element => {
@@ -668,7 +681,10 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
         const run = recordOf(element['text_run'])
         if (typeof run?.['text'] === 'string') return run['text']
         const person = recordOf(element['person'])
-        if (typeof person?.['user_id'] === 'string') return `@${person['user_id']}`
+        if (typeof person?.['user_id'] === 'string') {
+          mentionOpenIds.push(person['user_id'])
+          return `@${person['user_id']}`
+        }
         const link = recordOf(element['docs_link'])
         if (typeof link?.['url'] === 'string') return link['url']
         return ''
@@ -680,6 +696,7 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
     out.push({
       replyId,
       text,
+      ...(mentionOpenIds.length === 0 ? {} : { mentionOpenIds }),
       ...(typeof author === 'string' && author !== '' ? { authorOpenId: author } : {}),
       ...(typeof created === 'number' && Number.isFinite(created) ? { createdAt: created * 1000 } : {}),
     })

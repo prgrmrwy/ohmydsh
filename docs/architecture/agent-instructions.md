@@ -12,6 +12,8 @@ Environment-level guidance therefore lives in `$DSH_HOME/AGENTS.md`:
 - Instructions are decoupled from roster selection; every agent under that `DSH_HOME` sees the same text.
 - The single source is `instructions/dsh-home.md`, selected by the top-level `agentInstructions` block of `dsh.yaml`.
 
+It also carries cross-skill policy that no single skill owns. Example: the lark-doc / lark-drive skills default document operations to `--as user`, but a reply to a Feishu document comment that @-mentions the dsh-pet bot must be posted as the bot (`--as bot`), never as the owner. That rule spans two skills and the Pet bot, so it lives here rather than in either skill.
+
 The instructions are model guidance. They grant no permission and do not replace the runtime's real safety boundary.
 
 ## Manifest contract
