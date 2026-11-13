@@ -4,6 +4,13 @@
 
 （无）
 
+## 0.4.8 — 2026-11-13
+
+- **修复：删除未声明的库后清单仍显示该行**。解析器会记住本进程列出过的发现型库，目录删除后仍被列出，直到 Host 重启。现在列库前剔除 `cards` 目录已不存在的发现型库（`src/scope/resolver.ts`，回归测试 `test/scope.test.ts`）。删除成功的提示补上卡片数。
+- **主入口切换覆盖自动派生的库**：工作区原先没有任何条目认领、卡片在按仓库或按本地路径派生的库里时，改由另一个库认领该工作区也算一次切换，先把派生库的卡片复制进新库（`src/scope/primary-migration.ts` 的 `servedBefore`、`src/plugin.ts`）。原路由是 `personal` 或其它已配置的库时不迁移。此前这种情况不复制也不提示。
+- 对应 openspec change `dsh-memex-delete-undeclared-library`、`dsh-memex-primary-switch-carries-cards`。
+- 回滚：`dsh.yaml` 退回 0.4.7 → `node scripts/sync.mjs` → 重启。
+
 ## 0.4.7 — 2026-11-04
 
 - **「未在配置中的库」可删除**：清单每行新增「删除」，点击进入确认态，确认行显示该库的**绝对路径**与卡片数，再点「确认删除」才执行。

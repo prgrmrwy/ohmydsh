@@ -399,7 +399,7 @@ function MemexSettingsPage(props: Required<MemexSectionInjected>): JSX.Element {
         return
       }
       setDeleting(undefined)
-      setNotice({ kind: 'ok', text: `${t('deleteDone')} ${outcome.home ?? ''}` })
+      setNotice({ kind: 'ok', text: `${t('deleteDone')} ${outcome.home ?? ''}${outcome.cards === undefined ? '' : ` — ${String(outcome.cards)} ${t('deleteCards')}`}` })
       await loadStores()
       await loadWorkspaces()
     } catch (error) {

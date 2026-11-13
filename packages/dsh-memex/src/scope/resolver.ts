@@ -413,6 +413,11 @@ export function createScopeResolver(options: ScopeResolverOptions = {}): ScopeSe
   }
 
   const list = (): readonly ScopeResolution[] => {
+    // A discovered library exists only as its directory: once that is deleted,
+    // the remembered resolution must not keep it listed until the Host restarts.
+    for (const [name, item] of known) {
+      if (item.source === 'discovered' && !directoryExists(join(item.home, 'cards'))) known.delete(name)
+    }
     const result = new Map<string, ScopeResolution>(known)
     for (const entry of config.scopes) {
       // Never clobber an entry resolved in this process: that resolution may
