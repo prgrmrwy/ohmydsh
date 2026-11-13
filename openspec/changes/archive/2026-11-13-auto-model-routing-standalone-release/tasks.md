@@ -31,11 +31,15 @@
 
 - [x] 5.1 安全检查现有 npm 登录与发布权限；不足时请用户仅在本机配置认证，记录待办，不索取聊天 token、不读取输出凭据内容。
 - [x] 5.2 手动首发 0.3.0，核验正式 registry 版本、tarball 内容及独立安装；暂存/processing 不算成功且不重复发布，成功后在镜像正确子树提交创建版本 tag/Release，避免触发同版本重复发布。
-- [ ] 5.3 由用户完成 npm Trusted Publisher 两步绑定（正确仓库、release.yml、Allow npm publish）；记录绑定状态，后续版本首次 OIDC 成功时再确认 attestations，不为测试而重复发布 0.3.0，不强制把尚未发生的 provenance 标为已验证。
+- [x] 5.3 由用户完成 npm Trusted Publisher 两步绑定（正确仓库、release.yml、Allow npm publish）；记录绑定状态，后续版本首次 OIDC 成功时再确认 attestations，不为测试而重复发布 0.3.0，不强制把尚未发生的 provenance 标为已验证。
 
 ## 6. 商店收录与交付
 
-- [ ] 6.1 重新读取 awesome-dsh-plugin 当前贡献规则/类别/schema，核对差异化描述、包可加载与实际仓库年龄；本地 validateEntries 预校验通过后以公开身份提单条 YAML PR，记录链接和 CI。
+- [x] 6.1 重新读取 awesome-dsh-plugin 当前贡献规则/类别/schema，核对差异化描述、包可加载与实际仓库年龄；本地 validateEntries 预校验通过后以公开身份提单条 YAML PR，记录链接和 CI。
 - [x] 6.2 提交 dsh.so 自助申请，记录结果；其它 topic 爬虫只报告已配索引条件，不声称即时收录。
 - [x] 6.3 更新根索引独立仓库链接及 verify 中的 npm/镜像/PR/网站可见性；年龄、认证、审核和探测等待分别列为未完成条件，禁止把“申请已提交”写成“已上架”。
 - [x] 6.4 同步主规范的新增要求与 skill 路径，运行严格 OpenSpec 校验；按实际完成情况汇报，仍有必要外部待办则保持 change 未归档。
+
+## 归档说明（2026-11-13）
+
+经用户批准归档。5.3、6.1 按 2026-11-13 的实际状态勾选：npm 上 `dsh-auto-model-routing@0.7.1` 带 SLSA provenance 证明（可信发布已生效）；商店条目 PR #9455 已于 2026-10-26 合并。delta 未回写：两条 ADDED 已在主 spec，MODIFIED 的「子会话决策工具与 skill」已被后续 change 取代，当前契约以 `openspec/specs/auto-model-routing/spec.md` 为准。
