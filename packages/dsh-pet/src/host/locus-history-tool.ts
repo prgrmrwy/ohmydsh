@@ -93,8 +93,8 @@ const TRUNCATION_MARK = '…（已截断）'
  * body carries one gets its message id, so the child can pass it to
  * `pet_locus_message` to see the image or video.
  */
-/** How the formatted body renders a merge-forward (lark-cli 1.0.97 string table). */
-const MERGE_FORWARD_MARKER = /\[Merged forward\]/
+/** How a formatted body renders a merge-forward: `<forwarded_messages>` (measured 2026-11-13), `[Merged forward]` (older string table). */
+const MERGE_FORWARD_MARKER = /<forwarded_messages>|\[Merged forward\]/
 
 const MEDIA_MARKER = /!\[Image\]\(|\[Media:|\[Image|\[Video|\[Audio|<(?:file|folder)\b/
 

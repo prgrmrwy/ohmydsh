@@ -294,6 +294,8 @@ describe('message ids on media lines', () => {
           message('om_link', '2026-10-12T10:00:00+08:00', `看下${link}`),
           message('om_merge', '2026-10-12T10:01:00+08:00', '[Merged forward]', { msgType: 'merge_forward' }),
           message('om_merge2', '2026-10-12T10:02:00+08:00', '聊天记录', { msgType: 'merge_forward' }),
+          // Measured 2026-11-13: the formatted body is a <forwarded_messages> block (no msg_type needed).
+          message('om_merge3', '2026-10-12T10:02:30+08:00', '<forwarded_messages>\n[2026-11-13T17:10:00+08:00] 夹具用户:\n    子消息\n</forwarded_messages>'),
           message('om_fake', '2026-10-12T10:03:00+08:00', 'https://evil.example/client/message/link/open?token=x'),
         ],
         hasMore: false,
@@ -303,6 +305,7 @@ describe('message ids on media lines', () => {
     expect(rows.find(row => row.includes('看下'))!.endsWith('(id om_link)')).toBe(true)
     expect(rows.find(row => row.includes('[Merged forward]'))!.endsWith('(id om_merge)')).toBe(true)
     expect(rows.find(row => row.includes('聊天记录'))!.endsWith('(id om_merge2)')).toBe(true)
+    expect(rows.find(row => row.includes('forwarded_messages'))!.endsWith('(id om_merge3)')).toBe(true)
     // A look-alike host is not a message link.
     expect(rows.find(row => row.includes('evil.example'))).not.toContain('(id ')
   })

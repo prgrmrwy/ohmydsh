@@ -11,7 +11,7 @@
 1. `POST /open-apis/im/v1/message_links/query`，body `{"message_link_url": "<整条链接>"}`，权限点 `im:message.message_link:read`（所有者已申请；申请前返回 `99991672 app_scope_not_applied`）。返回 `data.chat_info{chat_id,is_authorized,name}` 与 `data.messages[].message{message_id,chat_id,msg_type,sender{id,id_type,sender_name,sender_type},create_time,body.content,deleted}`，为复制时刻的快照。lark-cli 未封装，开放平台公开文档无条目；接口线索来自另一个智能体。
 2. 快照 body 的 `image_key/file_key` 与原消息不同；以快照 key 配 `message_id` 下载得 `234003 File not in msg`。以返回的 `message_id` 原始读取（`GET /open-apis/im/v1/messages/<id>`）后取原 key，封面 JPEG 与 MP4 都能下载。
 3. 张勇那条触发消息为 `msg_type: text`，链接以纯文本出现在 `text` 中，没有结构化引用字段；主机为 `applink.larkoffice.com`。
-4. 合并转发：lark-cli 文档写明子消息资源只能经**外层** `message_id` 下载，子消息 id 会被拒（234003）。外层原始读取的返回结构（是否附子消息、`upper_message_id` 字段）**尚未实测**，测试群近 50 条无合并转发。
+4. 合并转发（2026-11-13 实测，tasks 0.1，与 D4 一致，无需改设计）：原始读取外层 id 返回 `data.items` = 外层（body 为非 JSON 文本 `Merged and Forwarded Message`）+ 每条子消息一项；子消息都带 `upper_message_id` = 外层 id，`chat_id` 为其来源会话。以**外层 id + 子消息 key** 下载封面 JPEG 与 MP4 成功；以子消息 id 下载得 234003。`+messages-mget` 外层只返回 1 条，`content` 是 `<forwarded_messages>` 块，逐条为 `[ISO 时间] 发送者:` 加四空格缩进的正文，视频渲染为 `[Media: file_…]`；`+chat-messages-list` 中该行 `msg_type` 为 `merge_forward`。据此 D4 的子消息正文与发送者取自 mget 渲染块（按整条子消息截断），媒体取自原始读取。脱敏样本见 `packages/dsh-pet/test/fixtures/lark-merge-forward-envelopes.ts`。嵌套合并转发的孙消息是否出现在原始读取中仍未实测（真机验收项）。
 
 ## Goals / Non-Goals
 

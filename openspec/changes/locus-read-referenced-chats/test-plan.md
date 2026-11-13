@@ -10,7 +10,7 @@ All test files live in `packages/dsh-pet/test/`. New scenarios start at 🔴 red
 | same | 其它 chat 的消息被拒绝 | locus-message-tool.test.ts | `refuses foreign chat without download` | 🟢 (existing) |
 | same | 话题入口读取所在群的消息 | locus-message-tool.test.ts | `topic entrance reads group main-line message` | 🟢 (existing) |
 | same | 读取失败不冒充空消息 | locus-message-tool.test.ts | `read failure, deleted or unparseable is a failure not empty` | 🟢 (existing) |
-| same | 非合并转发却返回多条 | locus-media-merge.test.ts | `non-merge multi-item response is message-not-unique` | 🔴 red |
+| same | 非合并转发却返回多条 | locus-media-merge.test.ts | `non-merge multi-item response is message-not-unique` | 🟢 |
 | specs/pet-locus-media-access/spec.md → 入口历史为含媒体的消息标注消息 id | 视频消息行带 id | locus-chat-history-tool.test.ts | `appends message id to media lines within budget` | 🟢 (existing) |
 | same | 消息链接与合并转发行带 id | locus-chat-history-tool.test.ts | `appends message id to message-link and merge-forward lines` | 🟢 |
 | same | 普通文字行不附 id | locus-chat-history-tool.test.ts | `plain text line without link gets no id` | 🟢 |
@@ -20,13 +20,13 @@ All test files live in `packages/dsh-pet/test/`. New scenarios start at 🔴 red
 | same | 触发消息含链接时指向链接工具 | locus-context.test.ts | `link in trigger message points to pet_locus_linked_message with trigger id` | 🟢 |
 | same | 无法确认链接指向的消息 | locus-context.test.ts | `unpublished guidance says links are unreadable and asks to forward` | 🟢 |
 | same | 链接读取失败时不猜测 | locus-linked-message-tool.test.ts | `failure result tells the model not to describe the link and to ask for a forward` | 🟢 |
-| specs/pet-locus-media-access/spec.md → 合并转发按子消息展开 | 合并转发中的视频可见 | locus-media-merge.test.ts | `expands merge-forward children and downloads child video via outer id` | 🔴 red |
-| same | 子消息不属于该外层 | locus-media-merge.test.ts | `child with foreign upper_message_id fails envelope-invalid without download` | 🔴 red |
-| same | 子消息超出上限 | locus-media-merge.test.ts | `caps children and states the omitted count` | 🔴 red |
-| same | 嵌套合并转发不递归 | locus-media-merge.test.ts | `nested merge-forward returns metadata only` | 🔴 red |
-| specs/pet-locus-media-access/spec.md → 单次读取的整体工作预算 | 失败下载也消耗尝试次数 | locus-media-budget.test.ts | `failed downloads count toward the 12-attempt cap` | 🔴 red |
-| same | 总时限到期 | locus-media-budget.test.ts | `overall 90s deadline aborts downloads and extraction and leaves spool empty` (also covers the deadline during the non-download stage and the success path within budget) | 🔴 red |
-| same | 文字预算截断 | locus-media-budget.test.ts | `serialized text stays within 16000 chars and states omissions` | 🔴 red |
+| specs/pet-locus-media-access/spec.md → 合并转发按子消息展开 | 合并转发中的视频可见 | locus-media-merge.test.ts | `expands merge-forward children and downloads child video via outer id` | 🟢 |
+| same | 子消息不属于该外层 | locus-media-merge.test.ts | `child with foreign upper_message_id fails envelope-invalid without download` | 🟢 |
+| same | 子消息超出上限 | locus-media-merge.test.ts | `caps children and states the omitted count` | 🟢 |
+| same | 嵌套合并转发不递归 | locus-media-merge.test.ts | `nested merge-forward returns metadata only` | 🟢 |
+| specs/pet-locus-media-access/spec.md → 单次读取的整体工作预算 | 失败下载也消耗尝试次数 | locus-media-budget.test.ts | `failed downloads count toward the 12-attempt cap` | 🟢 |
+| same | 总时限到期 | locus-media-budget.test.ts | `overall 90s deadline aborts downloads and extraction and leaves spool empty` (also covers the deadline during the non-download stage and the success path within budget) | 🟢 |
+| same | 文字预算截断 | locus-media-budget.test.ts | `serialized text stays within 16000 chars and states omissions` | 🟢 |
 | specs/pet-locus-media-access/spec.md → 链接读取工具的装配与参数 | 传入 URL 被拒绝 | locus-linked-message-tool.test.ts | `rejects url, token or unknown arguments before any platform read` | 🟢 |
 | same | 文档入口不装配 | locus-message-tool-runtime.test.ts | `doc child surface excludes pet_locus_linked_message` | 🟢 |
 | same | 媒体能力可用的 IM 入口装配 | locus-message-tool-runtime.test.ts | `IM/topic × create/cold-restore publish both message tools and attest` (real ToolRuntime matrix, including media unavailable) | 🟢 |

@@ -48,6 +48,22 @@ const SPOOL_TOKEN_BYTES = 16
 /** Bound on the platform-formatted body the single-message read returns. */
 export const LOCUS_MESSAGE_MAX_BODY_CHARS = 4_000
 
+/** Limits of ONE single-message or linked-message read, as a whole. */
+export interface LocusCallBudgetLimits {
+  /** Resource download attempts; failures and timeouts count too. */
+  readonly maxAttempts: number
+  /** Wall-clock bound of the whole call, platform reads included. */
+  readonly deadlineMs: number
+  /** Serialized body plus every note the call returns. */
+  readonly maxChars: number
+}
+
+/** Owner-approved defaults (change `locus-read-referenced-chats`, 2026-11-12). */
+export const LOCUS_CALL_BUDGET: LocusCallBudgetLimits = Object.freeze({ maxAttempts: 12, deadlineMs: 90_000, maxChars: 16_000 })
+
+/** At most this many merge-forward children are shown and searched for media. */
+export const LOCUS_MERGE_MAX_CHILDREN = 30
+
 export interface LarkMessageResource {
   readonly kind: 'image' | 'file' | 'audio' | 'video' | 'media' | 'unknown'
   readonly key?: string
@@ -95,6 +111,7 @@ export type LocusMessageReadFailure =
   | 'chat-mismatch'
   | 'content-unparseable'
   | 'media-unavailable'
+  | 'deadline-exceeded'
 
 export type LocusMessageReadResult =
   | { readonly kind: 'ok'; readonly message: LocusReadMessage; readonly media: readonly LocusMessagePart[] }
@@ -506,6 +523,8 @@ export type RawMessageResource =
   | { readonly kind: 'video'; readonly fileKey: string; readonly coverKey?: string; readonly name?: string; readonly durationMs?: number }
   | { readonly kind: 'file'; readonly name?: string }
   | { readonly kind: 'audio' }
+  /** A merge-forward inside a merge-forward: metadata only, never expanded. */
+  | { readonly kind: 'nested' }
 
 /** The facts the raw `api GET /im/v1/messages/<id>` read proves about one message. */
 export interface RawMessageFacts {
@@ -537,7 +556,7 @@ function formatEpochMs(value: unknown): string | undefined {
     + `${offset >= 0 ? '+' : '-'}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`
 }
 
-function singleItem(value: unknown, listKey: 'items' | 'messages', expectedId: string, expectedChat: string): Record<string, unknown> {
+function singleItem(value: unknown, listKey: 'messages', expectedId: string, expectedChat: string): Record<string, unknown> {
   const envelope = recordOf(value)
   if (envelope?.['ok'] !== true) throw new MessageReadError('envelope-invalid')
   const list = recordOf(envelope['data'])?.[listKey]
@@ -558,24 +577,40 @@ function singleItem(value: unknown, listKey: 'items' | 'messages', expectedId: s
  * `data.items[0]`, `body.content` is the platform JSON string, and a recalled
  * message is `ok: true` with `deleted: true` and a non-JSON body.
  */
-export function parseRawMessage(value: unknown, expectedId: string, expectedChat: string): RawMessageFacts {
-  const item = singleItem(value, 'items', expectedId, expectedChat)
-  if (item['deleted'] === true) throw new MessageReadError('message-deleted')
-  const msgType = bounded(item['msg_type'])
-  if (msgType === undefined) throw new MessageReadError('envelope-invalid')
-  const threadId = bounded(item['thread_id'])
-  const createTime = formatEpochMs(item['create_time'])
-  const rawBody = recordOf(item['body'])?.['content']
-  const links = typeof rawBody === 'string' ? extractMessageLinksFromRaw(msgType, rawBody) : []
-  const base = {
-    msgType,
-    links,
-    ...(createTime === undefined ? {} : { createTime }),
-    ...(threadId === undefined ? {} : { threadId }),
-  }
-  if (!JSON_CONTENT_TYPES.has(msgType)) return { ...base, resources: [] }
+/**
+ * The raw read's items: the requested message first, then — only for a
+ * merge-forward — its children. Measured 2026-11-13: every child carries
+ * `upper_message_id` = the outer id and the chat it came FROM; the outer
+ * chat is the one that must match. Anything else fails closed.
+ */
+function rawItems(value: unknown, expectedId: string, expectedChat: string): {
+  readonly item: Record<string, unknown>
+  readonly children: readonly Record<string, unknown>[]
+} {
+  const envelope = recordOf(value)
+  if (envelope?.['ok'] !== true) throw new MessageReadError('envelope-invalid')
+  const list = recordOf(envelope['data'])?.['items']
+  if (!Array.isArray(list)) throw new MessageReadError('envelope-invalid')
+  if (list.length === 0) throw new MessageReadError('message-not-unique')
+  const item = recordOf(list[0])
+  if (item === undefined) throw new MessageReadError('envelope-invalid')
+  if (item['message_id'] !== expectedId) throw new MessageReadError('message-mismatch')
+  if (item['chat_id'] !== expectedChat) throw new MessageReadError('chat-mismatch')
+  if (list.length === 1) return { item, children: [] }
+  if (item['msg_type'] !== 'merge_forward') throw new MessageReadError('message-not-unique')
+  const children = list.slice(1).map(entry => {
+    const child = recordOf(entry)
+    if (child === undefined || child['upper_message_id'] !== expectedId || typeof child['message_id'] !== 'string') {
+      throw new MessageReadError('envelope-invalid')
+    }
+    return child
+  })
+  return { item, children }
+}
 
-  const rawContent = recordOf(item['body'])?.['content']
+/** Resources of one raw body, in the order the message presents them. */
+function resourcesOf(msgType: string, rawContent: unknown): RawMessageResource[] {
+  if (!JSON_CONTENT_TYPES.has(msgType)) return []
   let content: Record<string, unknown> | undefined
   try {
     content = typeof rawContent === 'string' ? recordOf(JSON.parse(rawContent)) : undefined
@@ -583,7 +618,6 @@ export function parseRawMessage(value: unknown, expectedId: string, expectedChat
     content = undefined
   }
   if (content === undefined) throw new MessageReadError('content-unparseable')
-
   const resources: RawMessageResource[] = []
   const video = (element: Record<string, unknown>): void => {
     const fileKey = element['file_key']
@@ -621,7 +655,41 @@ export function parseRawMessage(value: unknown, expectedId: string, expectedChat
     const name = bounded(content['file_name'])
     resources.push({ kind: 'file', ...(name === undefined ? {} : { name }) })
   } else resources.push({ kind: 'audio' })
-  return { ...base, resources }
+  return resources
+}
+
+export function parseRawMessage(value: unknown, expectedId: string, expectedChat: string): RawMessageFacts {
+  const { item, children } = rawItems(value, expectedId, expectedChat)
+  if (item['deleted'] === true) throw new MessageReadError('message-deleted')
+  const msgType = bounded(item['msg_type'])
+  if (msgType === undefined) throw new MessageReadError('envelope-invalid')
+  const threadId = bounded(item['thread_id'])
+  const createTime = formatEpochMs(item['create_time'])
+  const rawBody = recordOf(item['body'])?.['content']
+  const links = typeof rawBody === 'string' ? extractMessageLinksFromRaw(msgType, rawBody) : []
+  const base = {
+    msgType,
+    links,
+    ...(createTime === undefined ? {} : { createTime }),
+    ...(threadId === undefined ? {} : { threadId }),
+  }
+  if (msgType === 'merge_forward') {
+    // A child's media downloads through the OUTER id; the child's own id is refused (234003).
+    const resources: RawMessageResource[] = []
+    for (const child of children.slice(0, LOCUS_MERGE_MAX_CHILDREN)) {
+      if (child['deleted'] === true) continue
+      const childType = bounded(child['msg_type'])
+      if (childType === undefined) continue
+      if (childType === 'merge_forward') { resources.push({ kind: 'nested' }); continue }
+      try {
+        resources.push(...resourcesOf(childType, recordOf(child['body'])?.['content']))
+      } catch {
+        // One unreadable child body costs that child's media, not the whole read.
+      }
+    }
+    return { ...base, resources }
+  }
+  return { ...base, resources: resourcesOf(msgType, recordOf(item['body'])?.['content']) }
 }
 
 /** Parse the formatted `+messages-mget` read: sender name, rendered body, topic. */
@@ -651,7 +719,7 @@ function boundBody(text: string): { readonly text: string; readonly truncated: b
 function describeResources(resources: readonly RawMessageResource[]): string {
   const count = (kind: RawMessageResource['kind']): number => resources.filter(item => item.kind === kind).length
   const parts = [
-    ['图片', count('image')], ['视频', count('video')], ['文件', count('file')], ['音频', count('audio')],
+    ['图片', count('image')], ['视频', count('video')], ['文件', count('file')], ['音频', count('audio')], ['嵌套合并转发', count('nested')],
   ].filter(([, n]) => (n as number) > 0).map(([name, n]) => `${String(n)} 个${String(name)}`)
   return parts.join('、')
 }
@@ -690,6 +758,67 @@ async function downloadImageBytes(input: {
 }
 
 
+/**
+ * One call's shared budget. `signal` aborts on the caller's abort OR the
+ * whole-call deadline; `caller` alone tells the two apart, because a
+ * deadline returns what was already obtained while a caller abort returns nothing.
+ */
+interface CallBudget {
+  readonly signal: AbortSignal
+  readonly caller: AbortSignal
+  readonly limits: LocusCallBudgetLimits
+  attemptsLeft: number
+  timedOut(): boolean
+}
+
+function createCallBudget(caller: AbortSignal, limits: LocusCallBudgetLimits): CallBudget {
+  const deadline = AbortSignal.timeout(limits.deadlineMs)
+  return {
+    signal: AbortSignal.any([caller, deadline]),
+    caller,
+    limits,
+    attemptsLeft: limits.maxAttempts,
+    timedOut: () => deadline.aborted && !caller.aborted,
+  }
+}
+
+const MERGE_ENTRY_HEADER = /^\[[^\]\n]{1,64}\] [^\n]*:$/
+const MERGE_CLOSE = '</forwarded_messages>'
+
+/**
+ * Bound mget's `<forwarded_messages>` block by WHOLE child entries: at most
+ * `maxEntries` children and `maxChars` characters, with the omitted count stated.
+ * A block without recognizable entries falls back to a plain character bound.
+ */
+function boundMergeText(text: string, maxEntries: number, maxChars: number): { readonly text: string; readonly truncated: boolean } {
+  const lines = text.replace(/\0/g, '').split('\n')
+  const starts = lines.flatMap((line, index) => MERGE_ENTRY_HEADER.test(line) ? [index] : [])
+  if (starts.length === 0) {
+    return text.length <= maxChars ? { text, truncated: false } : { text: `${text.slice(0, maxChars)}${TRUNCATION_MARK}`, truncated: true }
+  }
+  const closed = lines[lines.length - 1] === MERGE_CLOSE
+  const end = closed ? lines.length - 1 : lines.length
+  const open = lines.slice(0, starts[0]).join('\n')
+  const entries = starts.map((start, k) => lines.slice(start, k + 1 < starts.length ? starts[k + 1] : end).join('\n'))
+  const kept: string[] = []
+  // Reserve room for the omission note and the closing tag.
+  let used = open.length + MERGE_CLOSE.length + 64
+  for (const entry of entries) {
+    if (kept.length >= maxEntries) break
+    if (used + entry.length + 1 > maxChars) {
+      if (kept.length === 0) kept.push(`${entry.slice(0, Math.max(0, maxChars - used - TRUNCATION_MARK.length))}${TRUNCATION_MARK}`)
+      break
+    }
+    kept.push(entry)
+    used += entry.length + 1
+  }
+  const omitted = entries.length - kept.length
+  return {
+    text: [open, ...kept, ...(omitted > 0 ? [`[另有 ${String(omitted)} 条子消息未显示：超出条数或字符上限。]`] : []), MERGE_CLOSE].join('\n'),
+    truncated: omitted > 0,
+  }
+}
+
 /** Everything {@link readMessageMedia} needs from the port that owns it. */
 interface MessageMediaInput {
   readonly binary: string
@@ -699,7 +828,8 @@ interface MessageMediaInput {
   readonly attachments: AttachmentStore
   readonly messageId: string
   readonly resources: readonly RawMessageResource[]
-  readonly signal: AbortSignal
+  /** The whole call's budget; its signal is what every download and extraction runs under. */
+  readonly budget: CallBudget
   /** Fixed at Host start; absent means every video stays cover-only. */
   readonly frameTools: FrameTools | undefined
   readonly video: VideoLimits
@@ -749,10 +879,29 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
   let bytes = 0
   let omitted = 0
   const quotaLeft = (): boolean => images < limits.maxImagesPerMessage && limits.maxMessageImageBytes - bytes >= 1
+  const { budget } = input
+  const signal = budget.signal
+  let stop: 'attempts' | 'deadline' | undefined
+  let notTried = 0
+  /** Spend one download attempt; false (and counted as not tried) once the call's budget is gone. */
+  const attempt = (): boolean => {
+    if (stop === undefined && budget.timedOut()) stop = 'deadline'
+    if (stop === undefined && budget.attemptsLeft <= 0) stop = 'attempts'
+    if (stop !== undefined) { notTried += 1; return false }
+    budget.attemptsLeft -= 1
+    return true
+  }
+  /** After a failed step: false = caller abort (give up), true = carry on (deadline recorded). */
+  const survive = (): boolean => {
+    if (budget.caller.aborted) return false
+    if (budget.timedOut()) stop = 'deadline'
+    return true
+  }
 
   /** Download one image resource into `slots`; false when the call was aborted. */
   const takeImage = async (key: string): Promise<boolean> => {
     if (!quotaLeft()) { omitted += 1; return true }
+    if (!attempt()) return true
     try {
       const image = await downloadImageBytes({
         binary: input.binary,
@@ -761,14 +910,15 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
         key,
         maxBytes: Math.min(limits.maxImageBytes, limits.maxMessageImageBytes - bytes),
         timeoutMs: input.timeoutMs,
-        signal: input.signal,
+        signal,
         limits,
       })
       images += 1
       bytes += image.data.byteLength
       slots.push({ kind: 'image', image })
     } catch (error) {
-      if (input.signal.aborted) return false
+      if (!survive()) return false
+      if (stop === 'deadline') return true
       slots.push({
         kind: 'note',
         text: `[图片未能读取：${error instanceof Error && error.message === 'download-timeout' ? 'timeout' : 'image-download-or-admission-failed'}。]`,
@@ -783,6 +933,7 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
     const maxFrames = Math.min(input.video.maxFrames, limits.maxImagesPerMessage - images)
     const bytesLeft = limits.maxMessageImageBytes - bytes
     if (maxFrames < 1 || bytesLeft < 1) { slots.push({ kind: 'note', text: skipNote('image-quota-exhausted') }); return true }
+    if (!attempt()) return true
     const tools = input.frameTools
     let extraction: FrameExtraction
     try {
@@ -796,7 +947,7 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
         ]),
         maxBytes: input.video.maxBytes,
         timeoutMs: input.timeoutMs,
-        signal: input.signal,
+        signal,
       }, file => extractKeyframes({
         tools,
         dir: file.dir,
@@ -804,10 +955,11 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
         limits: input.video,
         maxFrames,
         maxFrameBytes: Math.min(limits.maxImageBytes, bytesLeft),
-        signal: input.signal,
+        signal,
       }))
     } catch (error) {
-      if (input.signal.aborted) return false
+      if (!survive()) return false
+      if (stop === 'deadline') return true
       const message = error instanceof Error ? error.message : ''
       slots.push({
         kind: 'note',
@@ -817,7 +969,7 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
       return true
     }
     if (extraction.kind === 'skipped') {
-      if (extraction.reason === 'aborted' || input.signal.aborted) return false
+      if (extraction.reason === 'aborted' || signal.aborted) return survive()
       slots.push({ kind: 'note', text: skipNote(extraction.reason) })
       return true
     }
@@ -840,8 +992,14 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
   }
 
   for (const resource of input.resources) {
-    if (input.signal.aborted) return undefined
-    if (resource.kind === 'file') {
+    if (budget.caller.aborted) return undefined
+    if (stop !== undefined && (resource.kind === 'image' || resource.kind === 'video')) {
+      notTried += resource.kind === 'image' ? 1 : (resource.coverKey === undefined ? 0 : 1) + (input.frameTools === undefined ? 0 : 1)
+      continue
+    }
+    if (resource.kind === 'nested') {
+      slots.push({ kind: 'note', text: '[嵌套合并转发：仅元数据，未展开其内容。]' })
+    } else if (resource.kind === 'file') {
       slots.push({ kind: 'note', text: `[文件${resource.name === undefined ? '' : ` ${resource.name}`}：仅元数据，未下载、解析或执行。]` })
     } else if (resource.kind === 'audio') {
       slots.push({ kind: 'note', text: '[音频：仅元数据，未下载或转写。]' })
@@ -856,6 +1014,11 @@ async function readMessageMedia(input: MessageMediaInput): Promise<readonly Locu
     } else if (!await takeImage(resource.key)) return undefined
   }
   if (omitted > 0) slots.push({ kind: 'note', text: `[另有 ${String(omitted)} 张图片未读取：超出单条消息图片数或字节上限。]` })
+  if (stop === 'deadline') {
+    slots.push({ kind: 'note', text: `[已达单次读取总时限 ${String(Math.round(budget.limits.deadlineMs / 1000))}s，进行中的下载已终止，另有 ${String(notTried)} 个资源未尝试。]` })
+  } else if (stop === 'attempts') {
+    slots.push({ kind: 'note', text: `[已达单次读取的下载尝试上限 ${String(budget.limits.maxAttempts)} 次（失败也计入），另有 ${String(notTried)} 个资源未尝试。]` })
+  }
 
   const noteParts = (): LocusMessagePart[] =>
     slots.flatMap(slot => slot.kind === 'note' ? [{ type: 'text' as const, text: slot.text }] : [])
@@ -906,6 +1069,8 @@ export interface CreateLocusMediaPortInput {
   readonly frameTools?: FrameTools
   /** Overrides of {@link LOCUS_VIDEO_LIMITS}; non-positive or non-finite values are ignored. */
   readonly video?: Partial<VideoLimits>
+  /** Overrides of {@link LOCUS_CALL_BUDGET}; non-positive or non-finite values are ignored. */
+  readonly callBudget?: Partial<LocusCallBudgetLimits>
 }
 
 /** Create the spooled media port; an unproven CLI performs no I/O at all. */
@@ -953,13 +1118,23 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
     }
   }
 
+  const callLimits: LocusCallBudgetLimits = { ...LOCUS_CALL_BUDGET }
+  for (const [name, value] of Object.entries(input.callBudget ?? {})) {
+    if (name in callLimits && typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      (callLimits as unknown as Record<string, number>)[name] = value
+    }
+  }
+  /** Why a platform step produced nothing, once its own error is not a parse failure. */
+  const stepFailure = (budget: CallBudget): 'aborted' | 'deadline-exceeded' | undefined =>
+    budget.caller.aborted ? 'aborted' : budget.timedOut() ? 'deadline-exceeded' : undefined
+
   const callOptions = (signal: AbortSignal) => ({ windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal })
 
   /** One message, proven to be in `expectedChat`, with its media. */
   const readOne = async (request: {
     readonly messageId: string
     readonly expectedChat: string
-    readonly signal: AbortSignal
+    readonly budget: CallBudget
     readonly canViewImages: () => Promise<boolean> | boolean
   }): Promise<
     | { readonly kind: 'ok'; readonly message: LocusReadMessage; readonly media: readonly LocusMessagePart[]; readonly links: readonly string[] }
@@ -968,7 +1143,9 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
     if (!MESSAGE_ID_PATTERN.test(request.messageId) || request.expectedChat.trim() === '') {
       return { kind: 'failed', reason: 'invalid-message-id' }
     }
-    if (request.signal.aborted) return { kind: 'failed', reason: 'aborted' }
+    const { budget } = request
+    const early = stepFailure(budget)
+    if (early !== undefined) return { kind: 'failed', reason: early }
     let raw: RawMessageFacts
     let formatted: ReturnType<typeof parseFormattedMessage>
     try {
@@ -976,18 +1153,21 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       // refused before its body is fetched at all.
       const rawResult = await runner(binary, petCliArgs([
         'api', 'GET', `/open-apis/im/v1/messages/${request.messageId}`, '--as', 'bot',
-      ]), callOptions(request.signal))
+      ]), callOptions(budget.signal))
       raw = parseRawMessage(parseJsonSuffix(rawResult.stdout), request.messageId, request.expectedChat)
       const formattedResult = await runner(binary, petCliArgs([
         'im', '+messages-mget', '--as', 'bot', '--message-ids', request.messageId,
         '--no-reactions', '--format', 'json',
-      ]), callOptions(request.signal))
+      ]), callOptions(budget.signal))
       formatted = parseFormattedMessage(parseJsonSuffix(formattedResult.stdout), request.messageId, request.expectedChat)
     } catch (error) {
       if (error instanceof MessageReadError) return { kind: 'failed', reason: error.reason }
-      return { kind: 'failed', reason: request.signal.aborted ? 'aborted' : 'platform-read-failed' }
+      return { kind: 'failed', reason: stepFailure(budget) ?? 'platform-read-failed' }
     }
-    const body = boundBody(formatted.text)
+    // A merge-forward's body is mget's whole `<forwarded_messages>` block, bounded by child entries.
+    const body = raw.msgType === 'merge_forward'
+      ? boundMergeText(formatted.text, LOCUS_MERGE_MAX_CHILDREN, budget.limits.maxChars - 1_000)
+      : boundBody(formatted.text)
     const threadId = raw.threadId ?? formatted.threadId
     const message: LocusReadMessage = {
       messageId: request.messageId,
@@ -1012,15 +1192,23 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       }
     }
     const media = await readMessageMedia({
-      binary, spoolRoot, timeoutMs, limits, attachments, messageId: request.messageId, resources: raw.resources, signal: request.signal,
+      binary, spoolRoot, timeoutMs, limits, attachments, messageId: request.messageId, resources: raw.resources, budget,
       frameTools: input.frameTools, video,
     })
     if (media === undefined) return { kind: 'failed', reason: 'aborted' }
-    return { kind: 'ok', message, media, links: raw.links }
+    // The whole call's text budget: notes first, the body gives way.
+    const noteChars = media.reduce((sum, part) => sum + (part.type === 'text' ? part.text.length + 1 : 0), 0)
+    const room = budget.limits.maxChars - noteChars
+    const fitted = message.text.length <= room ? message : {
+      ...message,
+      text: `${message.text.slice(0, Math.max(0, room - TRUNCATION_MARK.length))}${TRUNCATION_MARK}`,
+      textTruncated: true,
+    }
+    return { kind: 'ok', message: fitted, media, links: raw.links }
   }
 
   /** Resolve one link through `message_links/query`; only an authorized, single, consistent answer passes. */
-  const resolveLink = async (url: string, signal: AbortSignal): Promise<
+  const resolveLink = async (url: string, budget: CallBudget): Promise<
     | { readonly kind: 'ok'; readonly chatId: string; readonly name?: string; readonly messageId: string }
     | { readonly kind: 'failed'; readonly reason: LocusLinkedReadFailure }
   > => {
@@ -1029,9 +1217,10 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       stdout = (await runner(binary, petCliArgs([
         'api', 'POST', '/open-apis/im/v1/message_links/query', '--as', 'bot',
         '--data', JSON.stringify({ message_link_url: url }),
-      ]), callOptions(signal))).stdout
+      ]), callOptions(budget.signal))).stdout
     } catch (error) {
-      if (signal.aborted) return { kind: 'failed', reason: 'aborted' }
+      const stopped = stepFailure(budget)
+      if (stopped !== undefined) return { kind: 'failed', reason: stopped }
       // A non-zero exit still carries the CLI's JSON error envelope on stdout.
       const out = recordOf(error)?.['stdout']
       if (typeof out !== 'string') return { kind: 'failed', reason: 'link-unresolved' }
@@ -1061,22 +1250,29 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
   return {
     available: true,
     async readMessage(request) {
-      const read = await readOne({ ...request, expectedChat: request.chatId })
+      const read = await readOne({
+        messageId: request.messageId,
+        expectedChat: request.chatId,
+        budget: createCallBudget(request.signal, callLimits),
+        canViewImages: request.canViewImages,
+      })
       return read.kind === 'ok' ? { kind: 'ok', message: read.message, media: read.media } : read
     },
     async readLinkedMessage(request) {
       if (!Number.isSafeInteger(request.linkIndex) || request.linkIndex < 1) return { kind: 'failed', reason: 'invalid-message-id' }
+      // One budget for the whole call: carrier read, resolution, target read and its media.
+      const budget = createCallBudget(request.signal, callLimits)
       // The carrier is read WITHOUT media: only its chat and its raw links matter here.
       const carrier = await readOne({
-        messageId: request.messageId, expectedChat: request.chatId, signal: request.signal, canViewImages: () => false,
+        messageId: request.messageId, expectedChat: request.chatId, budget, canViewImages: () => false,
       })
       if (carrier.kind === 'failed') return carrier
       const url = carrier.links[request.linkIndex - 1]
       if (url === undefined) return { kind: 'failed', reason: 'link-not-found' }
-      const resolved = await resolveLink(url, request.signal)
+      const resolved = await resolveLink(url, budget)
       if (resolved.kind === 'failed') return resolved
       const target = await readOne({
-        messageId: resolved.messageId, expectedChat: resolved.chatId, signal: request.signal, canViewImages: request.canViewImages,
+        messageId: resolved.messageId, expectedChat: resolved.chatId, budget, canViewImages: request.canViewImages,
       })
       if (target.kind === 'failed') return { kind: 'failed', reason: target.reason === 'chat-mismatch' ? 'link-mismatch' : target.reason }
       return {

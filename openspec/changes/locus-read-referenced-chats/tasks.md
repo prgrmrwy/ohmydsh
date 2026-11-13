@@ -1,6 +1,7 @@
 ## 0. Platform probes (gate: stop and go back to design if a result does not match)
 
-- [ ] 0.1 Merge-forward probe: the owner merge-forwards a set of chat records containing a video into the test group. Read the outer message raw as the bot, and run `+messages-mget` on it. Record whether child messages are attached, the `upper_message_id`, `chat_id`, and resource key fields, and whether downloading via the outer id works. Turn the result into a redacted fixture and record it in design.md Context. If it does not match D4, stop, update the design, and send it for a new review.
+- [x] 0.1 Merge-forward probe: the owner merge-forwards a set of chat records containing a video into the test group. Read the outer message raw as the bot, and run `+messages-mget` on it. Record whether child messages are attached, the `upper_message_id`, `chat_id`, and resource key fields, and whether downloading via the outer id works. Turn the result into a redacted fixture and record it in design.md Context. If it does not match D4, stop, update the design, and send it for a new review.
+      - 2026-11-13：所有者在测试群合并转发 3 条（含视频）。结构与 D4 一致，记入 design Context 第 4 条与夹具 `lark-merge-forward-envelopes.ts`。同一时刻真机上旧代码对该消息返回 `message-not-unique`，与预期缺陷一致。
 - [x] 0.2 Message-link fixture: redact the 2026-11-12 `message_links/query` response and the raw-read response into a fixture, including the 99991672 error envelope.
 - [x] 0.3 Backfill the existing test names for the 🟡 rows in test-plan.
 
@@ -12,9 +13,10 @@
 
 ## 2. Merge-forward expansion and overall budget (media.ts)
 
-- [ ] 2.1 Write failing tests: the four tests in locus-media-merge.test.ts and the three in locus-media-budget.test.ts
-- [ ] 2.2 Implement: change `singleItem` to accept merge-forward children; download child resources via the outer id; add a shared per-call budget (12 attempts, 90 s AbortSignal, 16 000 chars) so 2.1 passes
-- [ ] 2.3 Refactor; full suite stays green, including the existing media/video tests
+- [x] 2.1 Write failing tests: the four tests in locus-media-merge.test.ts and the three in locus-media-budget.test.ts
+- [x] 2.2 Implement: change `singleItem` to accept merge-forward children; download child resources via the outer id; add a shared per-call budget (12 attempts, 90 s AbortSignal, 16 000 chars) so 2.1 passes
+- [x] 2.3 Refactor; full suite stays green, including the existing media/video tests
+      - 2026-11-13：dsh-pet typecheck 通过，全量 3366 通过 / 4 跳过 / 0 失败。`non-merge multi-item response is message-not-unique` 写下即为绿（守卫既有行为不被放宽）。历史标记按实测改为同时识别 `<forwarded_messages>`。
 
 ## 3. `pet_locus_linked_message`
 
