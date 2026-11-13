@@ -1,6 +1,6 @@
 ---
 name: weekly-insights
-description: 本地会话洞察（对标 Claude Code /insights）：流式读取 DSH 会话日志，统计工具报错、中止、压缩、token，并逐会话打标签（目标、结果、摩擦、harness 改进点），按会话 id 缓存，生成 HTML 报告和可复制的改进建议。用户说「做一轮 insight」「最近一周复盘」「看看我怎么用 AI」「会话洞察」「weekly insights」时使用。
+description: 本地会话洞察（对标 Claude Code /insights）：流式读取 DSH 会话日志，统计工具报错、中止、压缩、token，并逐会话打标签（目标、结果、摩擦、用户插手、harness 改进点），按会话 id 缓存，生成 HTML 报告和可复制的改进建议。用户说「做一轮 insight」「最近一周复盘」「看看我怎么用 AI」「会话洞察」「weekly insights」时使用。
 whenToUse: 用户想复盘一段时间内的 DSH 使用行为、找出反复出现的摩擦或 harness 改进点时。不用于查看单个会话内容，也不用于统计记忆召回（那是 memex-recall-report）。
 ---
 
@@ -33,6 +33,7 @@ whenToUse: 用户想复盘一段时间内的 DSH 使用行为、找出反复出�
    - `missing` 是仍然没有有效标签的会话。
 
 4. **汇总**：`node $S stats <runDir>`，再读 `<runDir>/summary.json`。里面有窗口内的定量数据、标签分布和全部标签。
+   - `interventions` 是逐条的用户插手：`byTypeStage` 按「任务类型|阶段|性质」计数，`rows` 每条带会话 id 和该条用户消息的时间，`machine` 是本机 hostname。复盘时先看计数最多的一格，再按 `rows` 回看其中几条的现场。
 
 5. **写分析**：写 `<runDir>/analysis.json`，所有文本用简体中文：
 
@@ -65,5 +66,6 @@ whenToUse: 用户想复盘一段时间内的 DSH 使用行为、找出反复出�
 - 只统计窗口内的事件。seeded（fork）会话跳过 `session/end-seed` 之前从父会话继承的部分。
 - 子会话（delegationDepth > 0）不单独成条，计入根会话的子会话统计。
 - 有效会话的标准：至少 2 条用户消息，或 1 条用户消息加至少 5 次工具调用。
-- 摘录超过 24K 字符时，只保留开头 14K 和结尾 10K，中间过程的摩擦可能被低估。
+- 摘录超过 24K 字符时，保留开头约 14K 和结尾约 10K；中间只留每条用户消息和它之前最近的一条助手回复，其余省略。中间过程的工具摩擦可能被低估，用户插手不受影响。
+- 插手是模型按 `facet-spec.md` 的口径从摘录判定的推断。会话之外的插手（例如用户自己去浏览器复查）不在日志里，统计不到。
 - 工具报错包括 `isError` 和 bash 的非零 `[exit code: N]`。grep 无匹配时返回 exit 1，也会被计入。

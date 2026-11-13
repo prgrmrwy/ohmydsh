@@ -97,7 +97,7 @@ test('ingest validates facets, caches by session id, and invalidates when the se
   const { home, rootLog, recent } = fixture()
   const first = run(home, ['collect', '--days', '7']).out
   const meta = JSON.parse(readFileSync(join(first.runDir, 'meta.json'), 'utf8'))
-  const facet = (id) => ({ id, summary: '测试', goal_category: 'debugging', outcome: 'fully_achieved', user_satisfaction_signal: 'neutral', frictions: [{ type: 'tool_failure', detail: 'x' }], harness_improvements: [] })
+  const facet = (id) => ({ id, summary: '测试', goal_category: 'debugging', outcome: 'fully_achieved', user_satisfaction_signal: 'neutral', frictions: [{ type: 'tool_failure', detail: 'x' }], harness_improvements: [], interventions: [{ msg: 2, stage: 'after', kind: 'intervention', task_type: 'bugfix', detail: '结果不对' }] })
   writeFileSync(join(first.runDir, 'facets-0.jsonl'), [...meta.sessions.map((s) => JSON.stringify(facet(s.id))), JSON.stringify({ ...facet('nope') }), JSON.stringify({ ...facet(meta.sessions[0].id), outcome: 'great' })].join('\n'))
   const ing = run(home, ['ingest', first.runDir])
   assert.equal(ing.status, 2)
@@ -117,7 +117,49 @@ test('ingest validates facets, caches by session id, and invalidates when the se
   const st = run(home, ['stats', second.runDir])
   assert.equal(st.status, 0, st.err)
   assert.equal(st.out.coverage.facets, 2)
+  const summary = JSON.parse(readFileSync(st.out.summary, 'utf8'))
+  assert.equal(summary.interventions.total, 2)
+  assert.deepEqual(summary.interventions.byTypeStage, [['bugfix|after|intervention', 2]])
+  assert.equal(summary.interventions.rows[0].at, new Date(recent).toISOString(), 'time comes from the numbered user message')
   const rd = run(home, ['render', second.runDir])
   assert.equal(rd.status, 0, rd.err)
   assert.match(readFileSync(rd.out.report, 'utf8'), /逐会话明细（2）/)
+  assert.match(readFileSync(rd.out.report, 'utf8'), /插手/)
+})
+
+test('ingest rejects malformed interventions', { skip: !hasZstd && 'zstd unavailable' }, () => {
+  const { home } = fixture()
+  const first = run(home, ['collect', '--days', '7']).out
+  const [a] = JSON.parse(readFileSync(join(first.runDir, 'meta.json'), 'utf8')).sessions
+  const base = { id: a.id, summary: '测试', goal_category: 'debugging', outcome: 'fully_achieved', user_satisfaction_signal: 'neutral', frictions: [], harness_improvements: [] }
+  const iv = { msg: 2, stage: 'after', kind: 'intervention', task_type: 'bugfix', detail: 'x' }
+  const bad = [base, { ...base, interventions: [{ ...iv, stage: 'later' }] }, { ...base, interventions: [{ ...iv, kind: 'nudge' }] }, { ...base, interventions: [{ ...iv, msg: 99 }] }]
+  writeFileSync(join(first.runDir, 'facets-0.jsonl'), bad.map((f) => JSON.stringify(f)).join('\n'))
+  const ing = run(home, ['ingest', first.runDir])
+  assert.equal(ing.out.stored, 0)
+  assert.equal(ing.out.errors.length, 4)
+})
+
+test('every user message survives truncation, numbered and timestamped', { skip: !hasZstd && 'zstd unavailable' }, () => {
+  const home = mkdtempSync(join(tmpdir(), 'wi-'))
+  const t = now - day
+  const user = (seq, text) => ({ type: 'user/message', seq, time: t, data: { content: [{ type: 'text', text }], source: { kind: 'user' } } })
+  const ai = (seq) => ({ type: 'assistant/message', seq, time: t, data: { message: { content: [{ type: 'text', text: 'y'.repeat(600) }] }, usage: {} } })
+  const events = [{ type: 'session', id: 'session-long0001', cwd: '/w/long', delegationDepth: 0 }, { type: 'turn/start', seq: 0, time: t, data: {} }, user(1, 'FIRST-MARK')]
+  let seq = 2
+  for (let i = 0; i < 120; i++) events.push(ai(seq++))
+  events.push(user(seq++, 'MIDDLE-MARK'))
+  for (let i = 0; i < 200; i++) events.push(ai(seq++))
+  events.push(user(seq++, 'LATE-MARK'))
+  for (let i = 0; i < 40; i++) events.push(ai(seq++))
+  writeLog(home, 'long', 'session-long0001', events)
+  const r = run(home, ['collect', '--days', '7'])
+  assert.equal(r.status, 0, r.err)
+  const meta = JSON.parse(readFileSync(join(r.out.runDir, 'meta.json'), 'utf8'))
+  assert.equal(meta.sessions[0].userTimes.length, 3)
+  const text = readFileSync(join(r.out.runDir, 'transcripts', `${meta.sessions[0].id}.txt`), 'utf8')
+  assert.match(text, /USER#1 \[\d\d-\d\d \d\d:\d\d\]: FIRST-MARK/)
+  assert.match(text, /USER#2 .*MIDDLE-MARK/)
+  assert.match(text, /USER#3 .*LATE-MARK/)
+  assert.ok(text.length < 40000, `bounded, got ${text.length}`)
 })

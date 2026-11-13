@@ -21,7 +21,7 @@ import { createInterface } from 'node:readline'
 import { createHash } from 'node:crypto'
 import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, basename } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 
 const DSH_HOME = process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const ROOT = join(DSH_HOME, 'insights', 'weekly')
@@ -36,6 +36,9 @@ export const ENUMS = {
   user_satisfaction_signal: ['positive', 'neutral', 'negative', 'unclear'],
   friction: ['misunderstood_request', 'wrong_approach', 'buggy_output', 'tool_failure', 'excessive_exploration', 'premature_claim', 'user_interrupted', 'environment_issue', 'context_loss', 'over_engineering', 'instruction_violation', 'slow_or_long'],
   area: ['instructions', 'skill', 'tool', 'plugin', 'model_routing', 'memory', 'workflow', 'environment'],
+  stage: ['before', 'during', 'after'],
+  kind: ['intervention', 'decision', 'unsure'],
+  task_type: ['bugfix', 'single_repo', 'multi_repo', 'other'],
 }
 
 function parseArgs(argv) {
@@ -54,6 +57,9 @@ function parseArgs(argv) {
 const clip = (t, n) => (t.length > n ? `${t.slice(0, n)}…[+${t.length - n}]` : t)
 const textOf = (content) => (Array.isArray(content) ? content.filter((c) => c?.type === 'text').map((c) => c.text).join('\n') : String(content ?? ''))
 const shortId = (sessionId) => sessionId.replace(/^session-/, '').slice(0, 8)
+const pad = (n) => String(n).padStart(2, '0')
+/** Local wall-clock `MM-DD HH:mm`, so the judge and the reader see the user's own time. */
+const stamp = (ms) => { if (typeof ms !== 'number') return '?'; const d = new Date(ms); return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` }
 
 function argSummary(args) {
   let a
@@ -84,12 +90,13 @@ export async function scanLog({ f, size }, sinceMs) {
   const s = {
     file: f, compressedBytes: size, header: null, turns: 0, userMsgs: 0, steps: 0, tools: {}, toolErrors: {}, errorSamples: [],
     commands: [], skills: [], tokens: { in: 0, out: 0, cacheRead: 0, cacheWrite: 0 }, models: {}, turnEnds: {}, turnErrSamples: [],
-    firstTime: null, lastTime: null, lastSeq: -1, title: null, compactions: 0, transcript: [],
+    firstTime: null, lastTime: null, lastSeq: -1, title: null, compactions: 0, transcript: [], userTimes: [],
   }
   let inherited = false
   let tlen = 0
   const calls = new Map()
-  const push = (line) => { if (tlen < 120000) { s.transcript.push(line); tlen += line.length } }
+  // User messages are always kept: they are what the intervention judge classifies.
+  const push = (line, force = false) => { if (force || tlen < 120000) { s.transcript.push(line); tlen += line.length } }
   for await (const l of rl) {
     let e
     try { e = JSON.parse(l) } catch { continue }
@@ -117,7 +124,11 @@ export async function scanLog({ f, size }, sinceMs) {
       }
       case 'command/run': s.commands.push(d.name); push(`[command] /${d.name}`); break
       case 'user/message':
-        if (d.source?.kind === 'user') { s.userMsgs++; push(`USER: ${clip(textOf(d.content), 1500)}`) }
+        if (d.source?.kind === 'user') {
+          s.userMsgs++
+          s.userTimes.push(typeof e.time === 'number' ? new Date(e.time).toISOString() : null)
+          push(`USER#${s.userMsgs} [${stamp(e.time)}]: ${clip(textOf(d.content), 1500)}`, true)
+        }
         break
       case 'assistant/message': {
         const m = d.message ?? {}
@@ -157,12 +168,32 @@ export async function scanLog({ f, size }, sinceMs) {
 export function boundTranscript(lines) {
   const tr = lines.join('\n')
   if (tr.length <= TRANSCRIPT_MAX) return tr
-  return `${tr.slice(0, HEAD)}\n…[中间省略 ${tr.length - HEAD - TAIL} 字符]…\n${tr.slice(-TAIL)}`
+  let h = 0
+  for (let used = 0; h < lines.length && used + lines[h].length + 1 <= HEAD; h++) used += lines[h].length + 1
+  let t = lines.length
+  for (let used = 0; t > h && used + lines[t - 1].length + 1 <= TAIL; t--) used += lines[t - 1].length + 1
+  // The omitted middle still keeps every user message and the reply it answers.
+  const keep = new Set()
+  for (let i = h; i < t; i++) {
+    if (!lines[i].startsWith('USER#')) continue
+    keep.add(i)
+    for (let j = i - 1; j >= h && !lines[j].startsWith('USER#'); j--) if (lines[j].startsWith('AI: ')) { keep.add(j); break }
+  }
+  const out = lines.slice(0, h)
+  let skipped = 0
+  for (let i = h; i < t; i++) {
+    if (!keep.has(i)) { skipped++; continue }
+    if (skipped) { out.push(`…[省略 ${skipped} 行]…`); skipped = 0 }
+    out.push(lines[i])
+  }
+  if (skipped) out.push(`…[省略 ${skipped} 行]…`)
+  return out.concat(lines.slice(t)).join('\n')
 }
 
 const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0)
 // A facet is reused until the session grows: last event seq is append-only per session.
-const fingerprint = (s) => createHash('sha256').update(`${s.header.id}|${s.lastSeq}`).digest('hex').slice(0, 16)
+// `f2`: facets carry interventions; labels made under the older spec are redone.
+const fingerprint = (s) => createHash('sha256').update(`${s.header.id}|${s.lastSeq}|f2`).digest('hex').slice(0, 16)
 
 function projectMatches(cwd, project) {
   if (!project) return true
@@ -254,7 +285,7 @@ export async function collect(opts) {
       id, sessionId: s.header.id, project: basename(s.header.cwd), cwd: s.header.cwd, seeded: !!s.header.isSeeded, title: s.title,
       start: s.firstTime ? new Date(s.firstTime).toISOString() : null, end: s.lastTime ? new Date(s.lastTime).toISOString() : null,
       durMin: s.firstTime && s.lastTime ? Math.round((s.lastTime - s.firstTime) / 60000) : 0,
-      turns: s.turns, userMsgs: s.userMsgs, steps: s.steps, toolCalls, toolErrors: sum(s.toolErrors), compactions: s.compactions,
+      turns: s.turns, userMsgs: s.userMsgs, userTimes: s.userTimes, steps: s.steps, toolCalls, toolErrors: sum(s.toolErrors), compactions: s.compactions,
       topTools: Object.entries(s.tools).sort((a, b) => b[1] - a[1]).slice(0, 8), toolErrorsBy: s.toolErrors, errorSamples: s.errorSamples,
       turnEnds: s.turnEnds, turnErrSamples: s.turnErrSamples, commands: s.commands, skills: s.skills, tokens: s.tokens, models: s.models,
       subagents: s.subagents, compressedBytes: s.compressedBytes, eligible, fingerprint: fp, cacheHit,
@@ -285,7 +316,7 @@ function readCache(sessionId) {
   try { return JSON.parse(readFileSync(cachePath(sessionId), 'utf8')) } catch { return null }
 }
 
-export function validateFacet(f) {
+export function validateFacet(f, userMsgs = Infinity) {
   const problems = []
   const str = (k) => { if (typeof f[k] !== 'string' || !f[k].trim()) problems.push(`${k} missing`) }
   str('id'); str('summary')
@@ -294,6 +325,11 @@ export function validateFacet(f) {
   else for (const x of f.frictions) if (!ENUMS.friction.includes(x?.type) || typeof x?.detail !== 'string') problems.push(`bad friction ${JSON.stringify(x)}`)
   if (!Array.isArray(f.harness_improvements)) problems.push('harness_improvements not array')
   else for (const x of f.harness_improvements) if (!ENUMS.area.includes(x?.area) || typeof x?.suggestion !== 'string') problems.push(`bad improvement ${JSON.stringify(x)}`)
+  if (!Array.isArray(f.interventions)) problems.push('interventions not array')
+  else for (const x of f.interventions) {
+    const ok = Number.isInteger(x?.msg) && x.msg >= 1 && x.msg <= userMsgs && ENUMS.stage.includes(x.stage) && ENUMS.kind.includes(x.kind) && ENUMS.task_type.includes(x.task_type) && typeof x.detail === 'string'
+    if (!ok) problems.push(`bad intervention ${JSON.stringify(x)}`)
+  }
   return problems
 }
 
@@ -311,7 +347,7 @@ export function ingest(runDir) {
       try { f = JSON.parse(line) } catch { errors.push(`${n}:${i + 1} invalid JSON`); return }
       const s = byShort.get(f.id)
       if (!s) { errors.push(`${n}:${i + 1} unknown id ${f.id}`); return }
-      const p = validateFacet(f)
+      const p = validateFacet(f, s.userMsgs)
       if (p.length) { errors.push(`${n}:${i + 1} ${f.id}: ${p.join('; ')}`); return }
       writeFileSync(cachePath(s.sessionId), JSON.stringify({ sessionId: s.sessionId, fingerprint: s.fingerprint, analysedAt: new Date().toISOString(), windowDays: meta.days, facet: { ...f, project: s.project } }))
       stored++
@@ -357,11 +393,20 @@ export function stats(runDir) {
     },
     facets,
   }
+  // One row per judged intervention; its time is the numbered user message's own timestamp.
+  const rows = S.filter((s) => s.eligible).flatMap((s) => (readCache(s.sessionId)?.facet.interventions ?? []).map((x) => ({ sessionId: s.sessionId, id: s.id, project: s.project, at: s.userTimes?.[x.msg - 1] ?? null, ...x })))
+  summary.interventions = {
+    machine: hostname(), total: rows.length,
+    sessionsWithNone: facets.filter((f) => !(f.interventions ?? []).length).length,
+    byTypeStage: tally(rows.map((x) => `${x.task_type}|${x.stage}|${x.kind}`)),
+    rows,
+  }
   writeFileSync(join(runDir, 'summary.json'), JSON.stringify(summary, null, 1))
   return summary
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+const IV_ZH = { before: '开始前', during: '进行中', after: '结束后', intervention: '干预', decision: '决策', unsure: '待定', bugfix: 'bugfix', single_repo: '单仓', multi_repo: '双仓', other: '其他' }
 const OUTCOME_ZH = { fully_achieved: '完全达成', mostly_achieved: '基本达成', partially_achieved: '部分达成', not_achieved: '未达成', unclear: '不明' }
 
 export function render(runDir) {
@@ -399,6 +444,8 @@ details summary{cursor:pointer}
 ${list(A.glance).length ? `<h2>一眼看懂</h2>${list(A.glance).map((g) => `<div class="card">${esc(g)}</div>`).join('')}` : ''}
 <h2>关键数字</h2><table>${metrics.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>分布</h2><div class="grid">${Object.entries(dists).filter(([, r]) => r.length).map(([t, rows]) => `<div class="card"><b>${esc(t)}</b>${bars(rows)}</div>`).join('')}</div>
+${S.interventions ? `<h2>插手（推断，共 ${S.interventions.total} 次；${S.interventions.sessionsWithNone} 个会话没有）</h2><div class="card"><b>任务类型 · 阶段 · 性质</b>${bars(S.interventions.byTypeStage.map(([k, v]) => [k.split('|').map((p) => IV_ZH[p] ?? p).join(' · '), v]))}</div>
+<table><tr><th>时间</th><th>会话</th><th>项目</th><th>类型</th><th>阶段</th><th>性质</th><th>发生了什么</th></tr>${S.interventions.rows.map((x) => `<tr><td>${esc(x.at ? stamp(Date.parse(x.at)) : '')}</td><td>${esc(x.id)}</td><td>${esc(x.project)}</td><td>${esc(IV_ZH[x.task_type])}</td><td>${esc(IV_ZH[x.stage])}</td><td>${esc(IV_ZH[x.kind])}</td><td>${esc(x.detail)}</td></tr>`).join('')}</table>` : ''}
 ${list(A.themes).length ? `<h2>反复出现的问题与 harness 改进点</h2>${list(A.themes).map((t) => `<div class="card"><b>${esc(t.title)}</b><p><span class="mut">依据：</span>${esc(t.evidence)}</p><p><span class="mut">改进：</span>${esc(t.fix)}</p>${t.where ? `<div class="mut">落点：${esc(t.where)}</div>` : ''}</div>`).join('')}` : ''}
 ${list(A.strengths).length ? `<h2>做得好的</h2>${list(A.strengths).map((s) => `<div class="card">${esc(s)}</div>`).join('')}` : ''}
 ${list(A.recommendations).length ? `<h2>建议（可直接复制给 agent）</h2>${list(A.recommendations).map((r, i) => `<div class="card"><b>${esc(r.title)}</b> <span class="mut">— ${esc(r.why)}</span><pre id="p${i}">${esc(r.prompt)}</pre><button onclick="navigator.clipboard.writeText(document.getElementById('p${i}').innerText)">复制</button></div>`).join('')}` : ''}
