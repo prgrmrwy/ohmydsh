@@ -55,4 +55,8 @@
 - [x] 9.1 逐行核对 test-plan 中 carried forward 的 23 个场景：确认已有测试覆盖语义并补 `spec Scenario` 标题，缺失则新写；全部转 🟢
 - [x] 9.2 `packages/dsh-pet` build、typecheck、test；仓库 `npm test`、`npm run check:artifacts`；`openspec validate locus-ask-work-first-and-concise --strict`
 - [ ] 9.3 预览验收（需用户授权的测试群）：信息类问题先问主会话；工作会话非空闲时不被打扰；群内回复为业务口径；主会话 GUI 只一行；M 归档后新群 `/bind` 成功；迟到答复被拒
-- [ ] 9.4 更新 `docs/architecture/dsh-plugin-integration-pitfalls.md` 第 9 节补本次实例；按 Anvil verify 生成 `verify.md`；合入、部署、重启和归档另经用户批准
+- [x] 9.4 更新 `docs/architecture/dsh-plugin-integration-pitfalls.md` 第 9 节补本次实例；按 Anvil verify 生成 `verify.md`；合入、部署、重启和归档另经用户批准
+
+## 归档说明（2026-11-13）
+
+经用户批准，带未完成项归档。9.3 预览验收（测试群）没有做，六项均无真机证据，见 `verify.md` 的「未覆盖」；功能自 2026-11-11 起随日常 Host 运行。9.4 的陷阱文档实例此前已写入，`verify.md` 于归档当天补写。delta 已同步进主 spec：`pet-locus-collaboration` 2 条 MODIFIED、2 条 ADDED，`pet-locus-intent-triage` 1 条 MODIFIED。
