@@ -688,12 +688,20 @@ export class ChannelService implements ChannelControl {
       this.deps.onChange?.()
       return
     }
-    const reason = `reconcile:${outcome.kind}`
+    if (outcome.kind === 'subscribed') {
+      this.log(`comment reconcile: subscribed ${outcome.documents} document(s)`)
+      return
+    }
+    const reason = outcome.kind === 'subscribe-failed'
+      ? `reconcile:subscribe-${outcome.reason}`
+      : `reconcile:${outcome.kind}`
     const now = Date.now()
     const previous = this.ignoredAt.get(reason) ?? 0
     if (now - previous >= 60_000) {
       this.ignoredAt.set(reason, now)
-      this.log(`comment ${outcome.kind}`)
+      this.log(outcome.kind === 'subscribe-failed'
+        ? `comment reconcile: subscribe ${outcome.reason}`
+        : `comment ${outcome.kind}`)
     }
   }
 

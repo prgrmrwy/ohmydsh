@@ -9,7 +9,11 @@
  *
  * This driver re-reads recent comments of documents that ALREADY have a usable
  * locus entry and runs the SAME admission path for replies that @ this bot but
- * never became a Delivery. It is a bounded catch-up, not a second intake:
+ * never became a Delivery. It also makes the live path more likely to work at
+ * all: the first pass over a document subscribes THIS app to that document's
+ * notification events (`POST /drive/v1/files/:token/subscribe`), which is the
+ * other official prerequisite for receiving comment notices. Both are bounded
+ * catch-ups, not a second intake:
  *
  * - the same `doc:docx:<token>/<comment>/<reply>` message id feeds the durable
  *   Delivery index, so a live/reconcile race loses one accept as `duplicate`;
@@ -17,13 +21,15 @@
  * - per pass: at most `maxDocsPerTick` documents round-robin, at most
  *   `maxPagesPerDoc` pages each, and only replies newer than the document's
  *   last handed-through Delivery (or the startup lookback when there is none);
+ * - the document subscription is attempted once per document and process,
+ *   then retried at most every `subscribeRetryMs` while it keeps failing;
  * - read failures, refusals and cancellations become diagnostics only; they
  *   never touch live intake and never throw into the channel.
  *
  * @module
  */
 
-import type { DocCommentsPage, DocCommentQuery, LarkClient } from './lark.js'
+import type { DocCommentsPage, DocCommentQuery, DocEventSubscription, LarkClient } from './lark.js'
 import { admitDocCommentEvent, type DocCommentEvent } from './doc-comment.js'
 import type { LocusControllerResult, NormalizedLocusAdmission } from './locus-controller.js'
 import type { LocusAdmissionContext } from '../locus/admission.js'
@@ -36,6 +42,8 @@ export const DOC_RECONCILE = {
   startupDelayMs: 15_000,
   /** First-scan window for a document the bot has never handled anything on. */
   startupLookbackMs: 10 * 60_000,
+  /** Minimum gap between subscription attempts for one document that keeps failing. */
+  subscribeRetryMs: 10 * 60_000,
   maxDocsPerTick: 3,
   maxPagesPerDoc: 2,
 } as const
@@ -45,10 +53,16 @@ export type DocReconcileOutcome =
   | { readonly kind: 'admitted'; readonly documents: number; readonly comments: number }
   | { readonly kind: 'refused'; readonly documents: number; readonly comments: number }
   | { readonly kind: 'list-failed'; readonly documents: number }
+  | { readonly kind: 'subscribed'; readonly documents: number }
+  | {
+      readonly kind: 'subscribe-failed'
+      readonly documents: number
+      readonly reason: Exclude<DocEventSubscription, 'success'>
+    }
 
 /** Dependencies of {@link createDocCommentReconciler}. */
 export interface DocReconcileDeps {
-  readonly client: Pick<LarkClient, 'listDocComments'>
+  readonly client: Pick<LarkClient, 'listDocComments' | 'subscribeDocEvents'>
   /** `doc:docx:<token>` roots the Host currently serves; scanned round-robin. */
   readonly entries: () => readonly string[]
   /** The doc's last Delivery `acceptedAt`, so catch-up starts after handled work. */
@@ -90,6 +104,10 @@ export function createDocCommentReconciler(deps: DocReconcileDeps): DocCommentRe
   const schedule = deps.schedule ?? defaultSchedule
   /** chatId → newest reply create time already scanned (ms). */
   const cursors = new Map<string, number>()
+  /** chatIds whose document event subscription already succeeded in this process. */
+  const subscribed = new Set<string>()
+  /** chatId → when its last subscription attempt failed (ms). */
+  const subscribeFailedAt = new Map<string, number>()
   let nextDocument = 0
   let timer: { cancel(): void } | undefined
   let running = false
@@ -123,11 +141,36 @@ export function createDocCommentReconciler(deps: DocReconcileDeps): DocCommentRe
       let admitted = 0
       let refused = 0
       let listFailed = false
+      let subscribeSucceeded = 0
+      const subscribeFailures: Exclude<DocEventSubscription, 'success'>[] = []
       for (let offset = 0; offset < count; offset += 1) {
         if (stoppedNow()) return
         const chatId = entries[(nextDocument + offset) % entries.length]!
         const token = parseDocChatId(chatId)
         if (token === undefined) continue
+        // The other official prerequisite for live comment events: the app must
+        // be subscribed to THIS document's notices. Bind → first pass subscribes.
+        const subscribe = deps.client.subscribeDocEvents
+        if (subscribe !== undefined && !subscribed.has(chatId)) {
+          const failedAt = subscribeFailedAt.get(chatId)
+          if (failedAt === undefined || now() - failedAt >= limits.subscribeRetryMs) {
+            let result: DocEventSubscription
+            try {
+              result = await subscribe.call(deps.client, token)
+            } catch {
+              result = 'unknown'
+            }
+            if (stoppedNow()) return
+            if (result === 'success') {
+              subscribed.add(chatId)
+              subscribeFailedAt.delete(chatId)
+              subscribeSucceeded += 1
+            } else {
+              subscribeFailedAt.set(chatId, now())
+              subscribeFailures.push(result)
+            }
+          }
+        }
         const cursor = cursors.get(chatId)
           ?? deps.handledThrough(chatId)
           ?? now() - limits.startupLookbackMs
@@ -195,6 +238,10 @@ export function createDocCommentReconciler(deps: DocReconcileDeps): DocCommentRe
       if (admitted > 0) report({ kind: 'admitted', documents: count, comments: admitted })
       if (refused > 0) report({ kind: 'refused', documents: count, comments: refused })
       if (listFailed) report({ kind: 'list-failed', documents: count })
+      if (subscribeSucceeded > 0) report({ kind: 'subscribed', documents: subscribeSucceeded })
+      for (const reason of new Set(subscribeFailures)) {
+        report({ kind: 'subscribe-failed', documents: subscribeFailures.length, reason })
+      }
     } finally {
       running = false
     }

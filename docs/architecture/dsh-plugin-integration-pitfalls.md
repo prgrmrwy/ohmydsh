@@ -884,3 +884,5 @@ change `locus-read-message-media`（2026-11-11）。前三条在规划评审或�
 
 **事件之外的兜底（2026-11-13 同日补）**：这条事件是否推送还受评论者的 mention 通知/授权状态、评论者身份等平台条件影响，API 侧无法完全消除。Pet 因此新增有界对账 `packages/dsh-pet/src/host/channel/doc-comment-reconcile.ts`：只对已有可用文档入口的文档，每 60 秒以 bot 身份读一次评论，把「触发回复 @ 了本 bot、但没有成为 Delivery」的回复按同一准入补投；去重键与实时事件相同（`doc:docx:<token>/<comment>/<reply>`），实时/对账竞争时第二次接受会以 duplicate 拒绝。排查口径不变：先确认事件是否到达（无 Delivery、无 comment 诊断），再看 addressing；对账只补「事件没到」这一种，不替代实时链路。
 
+
+同一节补：评论事件的实时到达还要求**应用订阅该文档的通知事件**（`POST /open-apis/drive/v1/files/:file_token/subscribe`，bot 身份；应用需有 `docs:event:subscribe` 等 scope，且文档所有者通过「…更多 → 添加文档应用」把 app 加成可管理）。因此对账在首轮处理每个可用文档入口时会自动调用一次该接口（失败只记 `subscribe missing-scope|forbidden` 并 10 分钟后重试，不阻塞评论读取），把「绑定后就要做」的平台前置条件收进 Host 行为，见 `packages/dsh-pet/src/host/channel/doc-comment-reconcile.ts`。

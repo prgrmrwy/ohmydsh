@@ -219,3 +219,28 @@ describe('addWholeComment (whole-doc answers; full comments cannot be replied to
   })
 })
 
+
+describe('subscribeDocEvents', () => {
+  it('subscribes the app to one document with bot identity', async () => {
+    const { client, calls } = scripted([ok({})])
+
+    await expect(client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('success')
+
+    expect(calls[0]).toEqual(expect.arrayContaining([
+      'api', 'POST', `/open-apis/drive/v1/files/${DOC_IDS.docToken}/subscribe`, '--as', 'bot',
+      '--params', JSON.stringify({ file_type: 'docx' }),
+    ]))
+  })
+
+  it('keeps the two permission outcomes distinct so the Host can name them', async () => {
+    const missingScope = scripted([() => ({ ok: false, error: { code: 99991672, message: 'no scope' } })])
+    const forbidden = scripted([() => ({ ok: false, error: { code: 1069603, message: 'forbidden' } })])
+    const other = scripted([() => ({ ok: false, error: { code: 1069601, message: 'fail' } })])
+    const timeout = scripted([() => new Error('timeout')])
+
+    await expect(missingScope.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('missing-scope')
+    await expect(forbidden.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('forbidden')
+    await expect(other.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('unknown')
+    await expect(timeout.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('unknown')
+  })
+})

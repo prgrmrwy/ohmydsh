@@ -10,7 +10,7 @@ import {
   type DocReconcileDeps,
   type DocReconcileOutcome,
 } from '../src/host/channel/doc-comment-reconcile.js'
-import type { DocCommentsPage, DocCommentCard } from '../src/host/channel/lark.js'
+import type { DocCommentsPage, DocCommentCard, DocEventSubscription } from '../src/host/channel/lark.js'
 import type {
   LocusControllerResult,
   NormalizedLocusAdmission,
@@ -63,21 +63,38 @@ function harness(options: {
   readonly entries?: readonly string[]
   readonly ctx?: LocusAdmissionContext
   readonly handledThrough?: number
-  readonly now?: number
+  readonly now?: number | (() => number)
   readonly active?: boolean
   readonly aborted?: boolean
   readonly reject?: boolean
+  /** Defaults to a successful subscription; `absent` omits the client method. */
+  readonly subscribe?: DocEventSubscription | 'throw' | 'absent'
+  readonly laterSubscriptions?: readonly DocEventSubscription[]
 } = {}) {
   const pages = [...(options.pages ?? [{ comments: [card()], hasMore: false }])]
   const calls: { token: string; pageToken?: string }[] = []
   const admissions: NormalizedLocusAdmission[] = []
   const outcomes: DocReconcileOutcome[] = []
+  const subscribeCalls: string[] = []
+  const order: string[] = []
+  const later = [...(options.laterSubscriptions ?? [])]
   const controller = new AbortController()
   if (options.aborted === true) controller.abort()
   const deps: DocReconcileDeps = {
     client: {
+      ...(options.subscribe === 'absent'
+        ? {}
+        : {
+            subscribeDocEvents: async (token: string) => {
+              subscribeCalls.push(token)
+              order.push('subscribe')
+              if (options.subscribe === 'throw') throw new Error('boom')
+              return later.shift() ?? (options.subscribe ?? 'success')
+            },
+          }),
       listDocComments: async (token, pageToken) => {
         calls.push({ token, ...(pageToken === undefined ? {} : { pageToken }) })
+        order.push('list')
         return pages.shift()
       },
     },
@@ -91,9 +108,9 @@ function harness(options: {
     active: () => options.active ?? true,
     signal: () => controller.signal,
     onOutcome: outcome => outcomes.push(outcome),
-    now: () => options.now ?? 100_000,
+    now: typeof options.now === 'function' ? options.now : () => options.now ?? 100_000,
   }
-  return { reconciler: createDocCommentReconciler(deps), admissions, outcomes, calls, controller }
+  return { reconciler: createDocCommentReconciler(deps), admissions, outcomes, calls, subscribeCalls, order, controller }
 }
 
 describe('doc-comment reconciliation', () => {
@@ -205,6 +222,47 @@ describe('doc-comment reconciliation', () => {
     const aborted = harness({ aborted: true })
     await aborted.reconciler.tick()
     expect(aborted.calls).toHaveLength(0)
+  })
+
+  it('subscribes the document once on the first pass, before reading its comments', async () => {
+    const h = harness({ handledThrough: 1_500 })
+
+    await h.reconciler.tick()
+    await h.reconciler.tick()
+
+    expect(h.subscribeCalls).toEqual([DOC_IDS.docToken])
+    expect(h.order.slice(0, 2)).toEqual(['subscribe', 'list'])
+    expect(h.outcomes).toContainEqual({ kind: 'subscribed', documents: 1 })
+  })
+
+  it('keeps scanning when the subscription is refused, and retries only after the cooldown', async () => {
+    let clock = 1_000
+    const h = harness({ handledThrough: 1_500, now: () => clock, subscribe: 'missing-scope' })
+    await h.reconciler.tick()
+    expect(h.admissions).toHaveLength(1)
+    expect(h.outcomes).toContainEqual({ kind: 'subscribe-failed', documents: 1, reason: 'missing-scope' })
+
+    clock += DOC_RECONCILE.subscribeRetryMs - 1
+    await h.reconciler.tick()
+    expect(h.subscribeCalls).toHaveLength(1)
+
+    clock += 1
+    await h.reconciler.tick()
+    expect(h.subscribeCalls).toHaveLength(2)
+  })
+
+  it('reports a throwing subscription as unknown without blocking the scan', async () => {
+    const h = harness({ handledThrough: 1_500, subscribe: 'throw' })
+    await h.reconciler.tick()
+    expect(h.admissions).toHaveLength(1)
+    expect(h.outcomes).toContainEqual({ kind: 'subscribe-failed', documents: 1, reason: 'unknown' })
+  })
+
+  it('works without a subscribe implementation (older adapter)', async () => {
+    const h = harness({ handledThrough: 1_500, subscribe: 'absent' })
+    await h.reconciler.tick()
+    expect(h.admissions).toHaveLength(1)
+    expect(h.outcomes.some(outcome => outcome.kind === 'subscribed' || outcome.kind === 'subscribe-failed')).toBe(false)
   })
 
   it('start schedules the first pass after the startup delay and stop cancels it', () => {

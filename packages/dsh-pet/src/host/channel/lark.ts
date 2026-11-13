@@ -176,6 +176,9 @@ export interface DocCommentsPage {
   readonly pageToken?: string
 }
 
+/** Outcome of the per-document notification-event subscription. */
+export type DocEventSubscription = 'success' | 'missing-scope' | 'forbidden' | 'unknown'
+
 /** Bot-identity Lark operations Pet depends on. */
 export interface LarkClient {
   /** Detect whether the installed CLI exposes the identity contract Pet needs. */
@@ -204,6 +207,14 @@ export interface LarkClient {
    * `undefined` means the read failed and MUST NOT be read as "no comments".
    */
   listDocComments?(token: string, pageToken?: string): Promise<DocCommentsPage | undefined>
+  /**
+   * Subscribe THIS app to one document's notification events
+   * (`POST /open-apis/drive/v1/files/:file_token/subscribe`). Idempotent; needs
+   * `docs:event:subscribe` (or a broader drive scope) plus document manage
+   * permission (the owner adds the app in the document UI). `missing-scope`
+   * and `forbidden` stay final until the console/document side changes.
+   */
+  subscribeDocEvents?(token: string): Promise<DocEventSubscription>
   /** Append a plain-text bot reply under a docx comment (`drive +add-reply`). */
   replyComment?(token: string, commentId: string, text: string): Promise<'success' | 'unknown'>
   /**
@@ -1278,6 +1289,28 @@ export function createLarkCliClient(
         hasMore: data['has_more'] === true,
         ...(typeof next === 'string' && next !== '' ? { pageToken: next } : {}),
       }
+    },
+
+    async subscribeDocEvents(token) {
+      let result: CliJsonResult
+      try {
+        result = await callJson(
+          ['api', 'POST', `/open-apis/drive/v1/files/${requireDocToken(token)}/subscribe`, '--as', 'bot',
+            '--params', JSON.stringify({ file_type: 'docx' })],
+          binary,
+          runner,
+        )
+      } catch {
+        return 'unknown'
+      }
+      const envelope = recordOf(result.value)
+      if (result.ok && envelope?.['ok'] === true) return 'success'
+      const code = recordOf(envelope?.['error'])?.['code']
+      // Both are decisions the Host cannot fix by retrying sooner: the app
+      // owner or the document owner has to change something first.
+      if (code === 99991672) return 'missing-scope'
+      if (code === 1069603) return 'forbidden'
+      return 'unknown'
     },
 
     async replyComment(token, commentId, text) {

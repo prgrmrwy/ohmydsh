@@ -195,6 +195,26 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 - **WHEN** 对账轮次运行
 - **THEN** 本轮不投递，只记 `reconcile:list-failed` 类诊断；实时入站不受影响
 
+### Requirement: 文档入口建立后自动按文档订阅事件
+
+可用的文档级入口（根行 `state` 为 `active`/`not-created`）出现后，Host SHALL 以 bot 身份对该文档调用 `POST /open-apis/drive/v1/files/:file_token/subscribe`（`file_type=docx`），把应用订阅到该文档的通知事件。这是评论事件实时到达的平台前置条件之一（另一条是应用在开发者后台订阅该事件）；缺失时评论仍由对账补投，但实时链路不可靠。
+
+- 首次尝试 SHALL 在该文档进入可用状态后的第一轮对账内发生（绑定或首次评论建立入口后 ≤1 分钟，含重启后的首轮）；同一进程内对同一文档成功后 MUST NOT 重复调用。
+- 订阅失败 SHALL 只记一条低基数诊断并继续对账；同一文档的重试间隔 MUST NOT 小于 10 分钟。
+- `missing-scope`（99991672，应用未申请 `docs:event:subscribe` 等）与 `forbidden`（1069603，应用没有该文档的管理权限/未加为文档应用）SHALL 在诊断里分别可辨；Host MUST NOT 改用 user 身份或绕过权限重试。
+- 订阅 MUST NOT 阻塞评论读取、准入或补投；订阅失败不影响对账。
+- 订阅 MUST 以 bot（tenant 身份）调用，MUST NOT 用所有者 user 身份代替。
+
+#### Scenario: 绑定后自动订阅
+- **GIVEN** `/bind` 刚为文档 `D` 建立可用根行
+- **WHEN** 第一轮对账处理到 `D`
+- **THEN** 先以 bot 调用 `D` 的订阅并按结果记录；后续轮次不再重复调用
+
+#### Scenario: 应用缺 scope 或文档未授权
+- **GIVEN** 应用未申请 `docs:event:subscribe`，或文档没有把应用加为文档应用
+- **WHEN** 对账尝试订阅
+- **THEN** 诊断分别记 `subscribe missing-scope` / `subscribe forbidden`；评论读取与补投照常；至少 10 分钟后才重试
+
 ### Requirement: 控制命令在评论中按所在入口生效
 
 `/bind <prefix>`、`/unbind`、`/access read|full`（短参 `-a`）在评论中的行为 SHALL 与群/话题完全一致，包括：解析、allowlist 限制、前缀规则、同源幂等、跨 W 拒绝（`EXPLICIT_PARENT_CONFLICT`）和忙时拒绝（停止与访问模式变更都只在入口空闲时受理）。原 `/scope`、`/tools` 及其短参 MUST NOT 再改变任何状态，回执提示改用 `/access`。「改绑到其他会话」不是评论命令，只在管理面操作（见 `pet-locus-collaboration`）。
