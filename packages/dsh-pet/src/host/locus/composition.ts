@@ -78,6 +78,7 @@ export const LOCUS_CALLER_BOUND_TOOLS: readonly string[] = Object.freeze([
   'pet_locus_chat_history',
   'pet_locus_doc_context',
   'pet_locus_finish',
+  'pet_locus_linked_message',
   'pet_locus_message',
   'pet_locus_track',
   'pet_locus_wait',

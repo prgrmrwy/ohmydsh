@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LOCUS_MESSAGE_DESCRIPTION } from '../src/host/locus-message-tool.js'
+import { MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL } from '../src/host/locus/message-guidance.js'
 import { LOCUS_PROJECT_READ_DENIAL } from '../src/host/locus/project-read-guard.js'
 import {
   isSafeLocusReplyTarget,
@@ -427,30 +428,74 @@ describe('locus-read-message-media prompt guidance', () => {
     }
   })
 
-  it('prompt and tool description state message links are unresolvable', () => {
+  it('prompt and tool description point message links to pet_locus_linked_message', () => {
     for (const position of ['first', 'subsequent'] as const) {
       const prompt = renderLocusDeliveryPrompt(deliveryContext(), { position })
       expect(prompt, position).toContain('message/link/open')
-      expect(prompt, position).toContain('无法由 Host 解析')
+      expect(prompt, position).toContain('`pet_locus_linked_message`')
+      expect(prompt, position).toContain('不要自行打开')
+      expect(prompt, position).not.toContain('无法由 Host 解析')
       expect(prompt, position).toContain('不要声称已看过链接内容')
-      expect(prompt, position).toContain('直接回复那条消息或转发')
-      expect(prompt, position).toContain('不要把猜测的候选当作已确认')
+      expect(prompt, position).toContain('转发')
+      expect(prompt, position).toContain('不要把猜测的候选当作')
     }
     expect(LOCUS_MESSAGE_DESCRIPTION).toContain('message/link/open')
-    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('无法由 Host 解析')
-    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('转发')
+    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('pet_locus_linked_message')
+    expect(LOCUS_MESSAGE_DESCRIPTION).not.toContain('无法由 Host 解析')
   })
 
   it('does not name pet_locus_message when the Host has not published it', () => {
+    // spec Scenario "未装配工具时不提及": reply only, no link in the trigger.
     for (const position of ['first', 'subsequent'] as const) {
       const prompt = renderLocusDeliveryPrompt(withReply({ messageToolAvailable: false }), { position })
       expect(prompt, position).not.toContain('pet_locus_message')
-      // The link limitation is still stated honestly, with the fallback the child CAN take.
-      expect(prompt, position).toContain('无法由 Host 解析')
-      expect(prompt, position).toContain('直接回复那条消息或转发')
+      expect(prompt, position).not.toContain('pet_locus_linked_message')
+      // The limitation is stated honestly, with the fallback the child CAN take.
+      expect(prompt, position).toContain('无法读取')
+      expect(prompt, position).toContain('转发')
       // The replied id stays visible as a fact.
       expect(repliedLine(prompt), position).toContain('om_replied-9')
     }
+  })
+
+  const LINK = 'https://applink.larkoffice.com/client/message/link/open?token=AAAAAAAAAAAAAAAAAAAAAA%3D'
+  const withLinkTrigger = (over: Partial<LocusDeliveryContext> = {}) => {
+    const base = deliveryContext(over)
+    return { ...base, request: { ...base.request, messageId: 'om_trigger-7', text: `能看到这个视频不${LINK}` } }
+  }
+
+  it('unpublished tools with a link trigger name neither tool and ask to forward', () => {
+    // spec Scenario "未装配工具且触发消息含链接".
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(withLinkTrigger({ messageToolAvailable: false }), { position })
+      expect(prompt, position).not.toContain('pet_locus_message')
+      expect(prompt, position).not.toContain('pet_locus_linked_message')
+      expect(prompt, position).toContain('当前无法读取')
+      expect(prompt, position).toContain('转发')
+    }
+  })
+
+  it('link in trigger message points to pet_locus_linked_message with trigger id', () => {
+    // spec Scenario "触发消息含链接时指向链接工具".
+    for (const position of ['first', 'subsequent'] as const) {
+      const prompt = renderLocusDeliveryPrompt(withLinkTrigger(), { position })
+      const line = prompt.split('\n').find(text => text.includes('当前请求含'))
+      expect(line, position).toBeDefined()
+      expect(line, position).toContain('`pet_locus_linked_message`')
+      expect(line, position).toContain('om_trigger-7')
+    }
+    // No link in the trigger → no such line.
+    for (const position of ['first', 'subsequent'] as const) {
+      expect(renderLocusDeliveryPrompt(deliveryContext(), { position }), position).not.toContain('当前请求含')
+    }
+  })
+
+  it('unpublished guidance says links are unreadable and asks to forward', () => {
+    // spec Scenario "无法确认链接指向的消息" (tool not published): the guidance forbids describing it.
+    expect(MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL).toContain('当前无法读取')
+    expect(MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL).toContain('不要声称已看过链接内容')
+    expect(MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL).toContain('转发')
+    expect(MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL).not.toContain('pet_locus')
   })
 
   it('a document entry prompt never mentions the message tool', () => {
@@ -467,6 +512,7 @@ describe('locus-read-message-media prompt guidance', () => {
     for (const position of ['first', 'subsequent'] as const) {
       const prompt = renderLocusDeliveryPrompt(base, { position })
       expect(prompt, position).not.toContain('pet_locus_message')
+      expect(prompt, position).not.toContain('pet_locus_linked_message')
       expect(prompt, position).not.toContain('message/link/open')
     }
   })

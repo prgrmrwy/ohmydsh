@@ -48,6 +48,14 @@ import {
   type LocusDocContextResult,
 } from './locus-doc-context-tool.js'
 
+import type { LocusMediaPort } from './channel/media.js'
+import {
+  executeLocusLinkedMessage,
+  LOCUS_LINKED_MESSAGE_DESCRIPTION,
+  PET_LOCUS_LINKED_MESSAGE_TOOL,
+  renderLocusLinkedMessage,
+  type LocusLinkedMessageToolResult,
+} from './locus-linked-message-tool.js'
 import {
   executeLocusMessage,
   LOCUS_MESSAGE_DESCRIPTION,
@@ -383,7 +391,9 @@ export function registerPetTools(
      * Caller-bound single-message read for an IM child. Absent means the Host has no
      * media port for this child (or it serves a document), and the tool is not published.
      */
-    readonly locusMessage?: Pick<LocusMessageToolDeps, 'loci' | 'media'> & {
+    readonly locusMessage?: Pick<LocusMessageToolDeps, 'loci'> & {
+      /** One port serves both the message read and the linked-message read. */
+      readonly media: Pick<LocusMediaPort, 'readMessage' | 'readLinkedMessage'>
       /** Test seam; production asks the calling session's exact model route. */
       readonly routeAcceptsImages?: (exec: unknown) => Promise<boolean>
     }
@@ -682,6 +692,42 @@ export function registerPetTools(
           : { ok: false, reason: result.reason }
       },
     }))
+    // Same deps, same publication decision: the linked read exists exactly when the message read does.
+    register(defineTool({
+      name: PET_LOCUS_LINKED_MESSAGE_TOOL,
+      description: LOCUS_LINKED_MESSAGE_DESCRIPTION,
+      parameters: {
+        messageId: { type: 'string', required: true },
+        linkIndex: { type: 'number' },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean', required: true },
+            reason: { type: 'string' },
+            text: { type: 'string' },
+            parts: { type: 'json' },
+            linkIndex: { type: 'number' },
+            linkCount: { type: 'number' },
+          },
+        },
+        render: (_args, value) => renderLocusLinkedMessage(value as LocusLinkedMessageToolResult),
+      },
+      async execute(args, exec) {
+        const result = await executeLocusLinkedMessage(args, {
+          callerSessionId: callerSessionId(exec as ExecutionLike),
+          loci: message.loci,
+          media: message.media,
+          canViewImages: () => (message.routeAcceptsImages ?? (run => routeAcceptsImages(ctx, run)))(exec),
+          signal: (exec as { signal?: AbortSignal }).signal ?? new AbortController().signal,
+        })
+        return result.ok
+          ? { ok: true, text: result.text, parts: result.parts as never, linkIndex: result.linkIndex, linkCount: result.linkCount }
+          : { ok: false, reason: result.reason }
+      },
+    }))
   }
 
   const history = deps.locusHistory
@@ -695,10 +741,10 @@ export function registerPetTools(
         'than the whole group. Pass `since`/`before` (ISO 8601 with offset, window is ' +
         '[since, before)) or the `cursor` returned by a previous call to keep reading; do not ' +
         'rewrite the cursor. Results are truncated to a declared budget and the truncation is ' +
-        'marked. A line whose message carries an image, video, file or audio ends with ' +
+        'marked. A line whose message carries an image, video, file, audio, a Feishu message link or a merge-forward ends with ' +
         (message === undefined
           ? '`(id om_…)`. '
-          : '`(id om_…)`: pass that id to `pet_locus_message` to read it. ') +
+          : '`(id om_…)`: pass that id to `pet_locus_message` to read it, or to `pet_locus_linked_message` to read the message its link points at. ') +
         'A failure is reported as a failure, never as an empty history.',
       parameters: {
         since: { type: 'string' },

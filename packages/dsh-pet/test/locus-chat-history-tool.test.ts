@@ -283,5 +283,34 @@ describe('message ids on media lines', () => {
     expect(media.result.hasMore).toBe(true)
     expect(media.rows.every(row => /\(id om_\d+\)$/.test(row))).toBe(true)
   })
+
+  it('appends message id to message-link and merge-forward lines', async () => {
+    // spec Scenario "消息链接与合并转发行带 id".
+    const link = 'https://applink.larkoffice.com/client/message/link/open?token=AAAAAAAAAAAAAAAAAAAAAA%3D'
+    const result = await executeLocusChatHistory({}, {
+      ...deps(),
+      read: (async () => ({
+        messages: [
+          message('om_link', '2026-10-12T10:00:00+08:00', `看下${link}`),
+          message('om_merge', '2026-10-12T10:01:00+08:00', '[Merged forward]', { msgType: 'merge_forward' }),
+          message('om_merge2', '2026-10-12T10:02:00+08:00', '聊天记录', { msgType: 'merge_forward' }),
+          message('om_fake', '2026-10-12T10:03:00+08:00', 'https://evil.example/client/message/link/open?token=x'),
+        ],
+        hasMore: false,
+      })) as never,
+    })
+    const rows = (result.text ?? '').split('\n').filter(line => line.startsWith('- ['))
+    expect(rows.find(row => row.includes('看下'))!.endsWith('(id om_link)')).toBe(true)
+    expect(rows.find(row => row.includes('[Merged forward]'))!.endsWith('(id om_merge)')).toBe(true)
+    expect(rows.find(row => row.includes('聊天记录'))!.endsWith('(id om_merge2)')).toBe(true)
+    // A look-alike host is not a message link.
+    expect(rows.find(row => row.includes('evil.example'))).not.toContain('(id ')
+  })
+
+  it('plain text line without link gets no id', async () => {
+    // spec Scenario "普通文字行不附 id".
+    const { rows } = await lines(['只有文字', '参考 https://example.com/page'])
+    expect(rows.every(row => !row.includes('(id '))).toBe(true)
+  })
 })
 

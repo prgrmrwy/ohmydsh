@@ -25,6 +25,7 @@ import {
   type VideoSkipReason,
 } from './media-video.js'
 import { meetsPetLarkCliFloor } from './lark-cli-compat.js'
+import { extractMessageLinksFromRaw } from '../locus/message-link.js'
 import type { LarkCliRunner } from './lark.js'
 
 const run = promisify(execFile) as unknown as LarkCliRunner
@@ -111,6 +112,38 @@ export interface LocusMessageReadInput {
   readonly canViewImages: () => Promise<boolean> | boolean
 }
 
+/** Why a linked-message read produced nothing, beyond the single-message vocabulary. */
+export type LocusLinkedReadFailure =
+  | LocusMessageReadFailure
+  | 'link-not-found'
+  | 'link-unauthorized'
+  | 'link-unresolved'
+  | 'link-scope-missing'
+  | 'link-mismatch'
+
+export type LocusLinkedReadResult =
+  | {
+    readonly kind: 'ok'
+    readonly message: LocusReadMessage
+    readonly media: readonly LocusMessagePart[]
+    /** Platform facts about the source chat; `name` is unsanitized platform text. */
+    readonly source: { readonly chatId: string; readonly name?: string }
+    readonly linkIndex: number
+    readonly linkCount: number
+  }
+  | { readonly kind: 'failed'; readonly reason: LocusLinkedReadFailure }
+
+export interface LocusLinkedReadInput {
+  /** A message of the caller's entrance that carries the link. */
+  readonly messageId: string
+  /** 1-based index among the message's extractable links. */
+  readonly linkIndex: number
+  /** The caller's entrance chat id; a topic entrance passes its GROUP chat id. */
+  readonly chatId: string
+  readonly signal: AbortSignal
+  readonly canViewImages: () => Promise<boolean> | boolean
+}
+
 export interface LocusMediaPort {
   readonly available: boolean
   readonly diagnostic?: string
@@ -122,6 +155,12 @@ export interface LocusMediaPort {
   }): Promise<LocusMediaAdmission>
   /** Read ONE message of the caller's chat; fails closed on any doubt. */
   readMessage(input: LocusMessageReadInput): Promise<LocusMessageReadResult>
+  /**
+   * Read the message a Feishu message link in one entrance message points at.
+   * The link comes from that message's raw body; the platform's `is_authorized`
+   * and a raw read of the target gate everything after resolution.
+   */
+  readLinkedMessage(input: LocusLinkedReadInput): Promise<LocusLinkedReadResult>
 }
 
 /**
@@ -474,6 +513,8 @@ export interface RawMessageFacts {
   readonly createTime?: string
   readonly threadId?: string
   readonly resources: readonly RawMessageResource[]
+  /** Feishu message links in the raw `text`/`post` body, in order (see `locus/message-link.ts`). */
+  readonly links: readonly string[]
 }
 
 class MessageReadError extends Error {
@@ -524,8 +565,11 @@ export function parseRawMessage(value: unknown, expectedId: string, expectedChat
   if (msgType === undefined) throw new MessageReadError('envelope-invalid')
   const threadId = bounded(item['thread_id'])
   const createTime = formatEpochMs(item['create_time'])
+  const rawBody = recordOf(item['body'])?.['content']
+  const links = typeof rawBody === 'string' ? extractMessageLinksFromRaw(msgType, rawBody) : []
   const base = {
     msgType,
+    links,
     ...(createTime === undefined ? {} : { createTime }),
     ...(threadId === undefined ? {} : { threadId }),
   }
@@ -880,6 +924,7 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
         return { kind: 'unavailable', reason: LOCUS_MEDIA_UNAVAILABLE_REASON, content: [] }
       },
       async readMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
+      async readLinkedMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
     }
   }
 
@@ -894,6 +939,7 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       diagnostic: 'attachment-byte-limit-not-representable',
       async admitCurrentImage() { return { kind: 'unavailable', reason: 'media-unavailable', content: [] } },
       async readMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
+      async readLinkedMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
     }
   }
   const runner = input.runner ?? run
@@ -907,60 +953,140 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
     }
   }
 
+  const callOptions = (signal: AbortSignal) => ({ windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal })
+
+  /** One message, proven to be in `expectedChat`, with its media. */
+  const readOne = async (request: {
+    readonly messageId: string
+    readonly expectedChat: string
+    readonly signal: AbortSignal
+    readonly canViewImages: () => Promise<boolean> | boolean
+  }): Promise<
+    | { readonly kind: 'ok'; readonly message: LocusReadMessage; readonly media: readonly LocusMessagePart[]; readonly links: readonly string[] }
+    | { readonly kind: 'failed'; readonly reason: LocusMessageReadFailure }
+  > => {
+    if (!MESSAGE_ID_PATTERN.test(request.messageId) || request.expectedChat.trim() === '') {
+      return { kind: 'failed', reason: 'invalid-message-id' }
+    }
+    if (request.signal.aborted) return { kind: 'failed', reason: 'aborted' }
+    let raw: RawMessageFacts
+    let formatted: ReturnType<typeof parseFormattedMessage>
+    try {
+      // Raw first: it carries the authoritative chat id, so a foreign message is
+      // refused before its body is fetched at all.
+      const rawResult = await runner(binary, petCliArgs([
+        'api', 'GET', `/open-apis/im/v1/messages/${request.messageId}`, '--as', 'bot',
+      ]), callOptions(request.signal))
+      raw = parseRawMessage(parseJsonSuffix(rawResult.stdout), request.messageId, request.expectedChat)
+      const formattedResult = await runner(binary, petCliArgs([
+        'im', '+messages-mget', '--as', 'bot', '--message-ids', request.messageId,
+        '--no-reactions', '--format', 'json',
+      ]), callOptions(request.signal))
+      formatted = parseFormattedMessage(parseJsonSuffix(formattedResult.stdout), request.messageId, request.expectedChat)
+    } catch (error) {
+      if (error instanceof MessageReadError) return { kind: 'failed', reason: error.reason }
+      return { kind: 'failed', reason: request.signal.aborted ? 'aborted' : 'platform-read-failed' }
+    }
+    const body = boundBody(formatted.text)
+    const threadId = raw.threadId ?? formatted.threadId
+    const message: LocusReadMessage = {
+      messageId: request.messageId,
+      chatId: request.expectedChat,
+      msgType: raw.msgType,
+      ...(raw.createTime === undefined ? {} : { createTime: raw.createTime }),
+      ...(formatted.senderName === undefined ? {} : { senderName: formatted.senderName }),
+      ...(threadId === undefined ? {} : { threadId }),
+      text: body.text,
+      textTruncated: body.truncated,
+    }
+    if (raw.resources.length === 0) return { kind: 'ok', message, media: [], links: raw.links }
+
+    let viewable = false
+    try { viewable = await request.canViewImages() } catch { viewable = false }
+    if (!viewable) {
+      return {
+        kind: 'ok',
+        message,
+        links: raw.links,
+        media: [{ type: 'text', text: `[当前模型无法查看图片，未下载任何媒体。消息含：${describeResources(raw.resources)}。]` }],
+      }
+    }
+    const media = await readMessageMedia({
+      binary, spoolRoot, timeoutMs, limits, attachments, messageId: request.messageId, resources: raw.resources, signal: request.signal,
+      frameTools: input.frameTools, video,
+    })
+    if (media === undefined) return { kind: 'failed', reason: 'aborted' }
+    return { kind: 'ok', message, media, links: raw.links }
+  }
+
+  /** Resolve one link through `message_links/query`; only an authorized, single, consistent answer passes. */
+  const resolveLink = async (url: string, signal: AbortSignal): Promise<
+    | { readonly kind: 'ok'; readonly chatId: string; readonly name?: string; readonly messageId: string }
+    | { readonly kind: 'failed'; readonly reason: LocusLinkedReadFailure }
+  > => {
+    let stdout: string
+    try {
+      stdout = (await runner(binary, petCliArgs([
+        'api', 'POST', '/open-apis/im/v1/message_links/query', '--as', 'bot',
+        '--data', JSON.stringify({ message_link_url: url }),
+      ]), callOptions(signal))).stdout
+    } catch (error) {
+      if (signal.aborted) return { kind: 'failed', reason: 'aborted' }
+      // A non-zero exit still carries the CLI's JSON error envelope on stdout.
+      const out = recordOf(error)?.['stdout']
+      if (typeof out !== 'string') return { kind: 'failed', reason: 'link-unresolved' }
+      stdout = out
+    }
+    const envelope = recordOf(parseJsonSuffix(stdout))
+    if (envelope?.['ok'] !== true) {
+      const code = recordOf(envelope?.['error'])?.['code']
+      return { kind: 'failed', reason: code === 99991672 ? 'link-scope-missing' : 'link-unresolved' }
+    }
+    const data = recordOf(envelope['data'])
+    const chatInfo = recordOf(data?.['chat_info'])
+    if (chatInfo?.['is_authorized'] !== true) return { kind: 'failed', reason: 'link-unauthorized' }
+    const chatId = chatInfo['chat_id']
+    const messages = data?.['messages']
+    if (typeof chatId !== 'string' || !/^oc_[A-Za-z0-9_-]{1,128}$/.test(chatId)) return { kind: 'failed', reason: 'link-unresolved' }
+    if (!Array.isArray(messages) || messages.length !== 1) return { kind: 'failed', reason: 'link-unresolved' }
+    const snapshot = recordOf(recordOf(messages[0])?.['message'])
+    const messageId = snapshot?.['message_id']
+    if (typeof messageId !== 'string' || !MESSAGE_ID_PATTERN.test(messageId) || snapshot?.['chat_id'] !== chatId) {
+      return { kind: 'failed', reason: 'link-unresolved' }
+    }
+    const name = typeof chatInfo['name'] === 'string' ? chatInfo['name'] : undefined
+    return { kind: 'ok', chatId, messageId, ...(name === undefined ? {} : { name }) }
+  }
+
   return {
     available: true,
     async readMessage(request) {
-      if (!MESSAGE_ID_PATTERN.test(request.messageId) || request.chatId.trim() === '') {
-        return { kind: 'failed', reason: 'invalid-message-id' }
-      }
-      if (request.signal.aborted) return { kind: 'failed', reason: 'aborted' }
-      let raw: RawMessageFacts
-      let formatted: ReturnType<typeof parseFormattedMessage>
-      try {
-        // Raw first: it carries the authoritative chat id, so a foreign message is
-        // refused before its body is fetched at all.
-        const rawResult = await runner(binary, petCliArgs([
-          'api', 'GET', `/open-apis/im/v1/messages/${request.messageId}`, '--as', 'bot',
-        ]), { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal: request.signal })
-        raw = parseRawMessage(parseJsonSuffix(rawResult.stdout), request.messageId, request.chatId)
-        const formattedResult = await runner(binary, petCliArgs([
-          'im', '+messages-mget', '--as', 'bot', '--message-ids', request.messageId,
-          '--no-reactions', '--format', 'json',
-        ]), { windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal: request.signal })
-        formatted = parseFormattedMessage(parseJsonSuffix(formattedResult.stdout), request.messageId, request.chatId)
-      } catch (error) {
-        if (error instanceof MessageReadError) return { kind: 'failed', reason: error.reason }
-        return { kind: 'failed', reason: request.signal.aborted ? 'aborted' : 'platform-read-failed' }
-      }
-      const body = boundBody(formatted.text)
-      const threadId = raw.threadId ?? formatted.threadId
-      const message: LocusReadMessage = {
-        messageId: request.messageId,
-        chatId: request.chatId,
-        msgType: raw.msgType,
-        ...(raw.createTime === undefined ? {} : { createTime: raw.createTime }),
-        ...(formatted.senderName === undefined ? {} : { senderName: formatted.senderName }),
-        ...(threadId === undefined ? {} : { threadId }),
-        text: body.text,
-        textTruncated: body.truncated,
-      }
-      if (raw.resources.length === 0) return { kind: 'ok', message, media: [] }
-
-      let viewable = false
-      try { viewable = await request.canViewImages() } catch { viewable = false }
-      if (!viewable) {
-        return {
-          kind: 'ok',
-          message,
-          media: [{ type: 'text', text: `[当前模型无法查看图片，未下载任何媒体。消息含：${describeResources(raw.resources)}。]` }],
-        }
-      }
-      const media = await readMessageMedia({
-        binary, spoolRoot, timeoutMs, limits, attachments, messageId: request.messageId, resources: raw.resources, signal: request.signal,
-        frameTools: input.frameTools, video,
+      const read = await readOne({ ...request, expectedChat: request.chatId })
+      return read.kind === 'ok' ? { kind: 'ok', message: read.message, media: read.media } : read
+    },
+    async readLinkedMessage(request) {
+      if (!Number.isSafeInteger(request.linkIndex) || request.linkIndex < 1) return { kind: 'failed', reason: 'invalid-message-id' }
+      // The carrier is read WITHOUT media: only its chat and its raw links matter here.
+      const carrier = await readOne({
+        messageId: request.messageId, expectedChat: request.chatId, signal: request.signal, canViewImages: () => false,
       })
-      if (media === undefined) return { kind: 'failed', reason: 'aborted' }
-      return { kind: 'ok', message, media }
+      if (carrier.kind === 'failed') return carrier
+      const url = carrier.links[request.linkIndex - 1]
+      if (url === undefined) return { kind: 'failed', reason: 'link-not-found' }
+      const resolved = await resolveLink(url, request.signal)
+      if (resolved.kind === 'failed') return resolved
+      const target = await readOne({
+        messageId: resolved.messageId, expectedChat: resolved.chatId, signal: request.signal, canViewImages: request.canViewImages,
+      })
+      if (target.kind === 'failed') return { kind: 'failed', reason: target.reason === 'chat-mismatch' ? 'link-mismatch' : target.reason }
+      return {
+        kind: 'ok',
+        message: target.message,
+        media: target.media,
+        source: { chatId: resolved.chatId, ...(resolved.name === undefined ? {} : { name: resolved.name }) },
+        linkIndex: request.linkIndex,
+        linkCount: carrier.links.length,
+      }
     },
     async admitCurrentImage(request) {
       if (request.signal.aborted) return { kind: 'unavailable', reason: 'aborted', content: [] }
