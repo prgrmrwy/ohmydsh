@@ -82,7 +82,7 @@ jobs:
             repo: dsh-cockpit-memex-browse-shim
             secret: MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
