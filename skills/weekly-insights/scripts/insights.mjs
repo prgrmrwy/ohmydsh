@@ -5,6 +5,7 @@
 //   insights.mjs ingest  <runDir>
 //   insights.mjs stats   <runDir>
 //   insights.mjs render  <runDir>
+//   insights.mjs base-rows <runDir> [--period YYYY-MM-DD]
 //
 // collect  streams every session.v4.jsonl.zstd touched in the window (via the zstd CLI,
 //          which decodes all concatenated frames), keeps only in-window events, skips the
@@ -14,6 +15,8 @@
 //          facet in the cache keyed by session id (plus a fingerprint of the analysed slice).
 // stats    merges metrics + facets (cached or fresh) into <runDir>/summary.json for the agent.
 // render   turns <runDir>/analysis.json + summary.json into <runDir>/report.html.
+// base-rows turns the judged interventions into <runDir>/base-rows-<n>.json (≤200 records each),
+//          ready for a table whose location only the caller knows. Writes nothing elsewhere.
 //
 // Read-only over session logs. Writes only under $DSH_HOME/insights/weekly/. No network.
 import { spawn, spawnSync } from 'node:child_process'
@@ -192,8 +195,8 @@ export function boundTranscript(lines) {
 
 const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0)
 // A facet is reused until the session grows: last event seq is append-only per session.
-// `f2`: facets carry interventions; labels made under the older spec are redone.
-const fingerprint = (s) => createHash('sha256').update(`${s.header.id}|${s.lastSeq}|f2`).digest('hex').slice(0, 16)
+// `f3`: facets carry interventions (f3: earlier-delivery complaints count as after/intervention); labels made under the older spec are redone.
+const fingerprint = (s) => createHash('sha256').update(`${s.header.id}|${s.lastSeq}|f3`).digest('hex').slice(0, 16)
 
 function projectMatches(cwd, project) {
   if (!project) return true
@@ -394,11 +397,12 @@ export function stats(runDir) {
     facets,
   }
   // One row per judged intervention; its time is the numbered user message's own timestamp.
-  const rows = S.filter((s) => s.eligible).flatMap((s) => (readCache(s.sessionId)?.facet.interventions ?? []).map((x) => ({ sessionId: s.sessionId, id: s.id, project: s.project, at: s.userTimes?.[x.msg - 1] ?? null, ...x })))
+  const rows = S.filter((s) => s.eligible).flatMap((s) => (readCache(s.sessionId)?.facet.interventions ?? []).map((x) => ({ sessionId: s.sessionId, id: s.id, project: s.project, title: s.title ?? '', at: s.userTimes?.[x.msg - 1] ?? null, ...x })))
   summary.interventions = {
     machine: hostname(), total: rows.length,
     sessionsWithNone: facets.filter((f) => !(f.interventions ?? []).length).length,
     byTypeStage: tally(rows.map((x) => `${x.task_type}|${x.stage}|${x.kind}`)),
+    byProject: tally(rows.map((x) => `${x.project}|${x.kind}`)),
     rows,
   }
   writeFileSync(join(runDir, 'summary.json'), JSON.stringify(summary, null, 1))
@@ -444,7 +448,7 @@ details summary{cursor:pointer}
 ${list(A.glance).length ? `<h2>一眼看懂</h2>${list(A.glance).map((g) => `<div class="card">${esc(g)}</div>`).join('')}` : ''}
 <h2>关键数字</h2><table>${metrics.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
 <h2>分布</h2><div class="grid">${Object.entries(dists).filter(([, r]) => r.length).map(([t, rows]) => `<div class="card"><b>${esc(t)}</b>${bars(rows)}</div>`).join('')}</div>
-${S.interventions ? `<h2>插手（推断，共 ${S.interventions.total} 次；${S.interventions.sessionsWithNone} 个会话没有）</h2><div class="card"><b>任务类型 · 阶段 · 性质</b>${bars(S.interventions.byTypeStage.map(([k, v]) => [k.split('|').map((p) => IV_ZH[p] ?? p).join(' · '), v]))}</div>
+${S.interventions ? `<h2>插手（推断，共 ${S.interventions.total} 次；${S.interventions.sessionsWithNone} 个会话没有）</h2><div class="grid"><div class="card"><b>任务类型 · 阶段 · 性质</b>${bars(S.interventions.byTypeStage.map(([k, v]) => [k.split('|').map((p) => IV_ZH[p] ?? p).join(' · '), v]))}</div><div class="card"><b>项目 · 性质</b>${bars((S.interventions.byProject ?? []).map(([k, v]) => [k.split('|').map((p) => IV_ZH[p] ?? p).join(' · '), v]))}</div></div>
 <table><tr><th>时间</th><th>会话</th><th>项目</th><th>类型</th><th>阶段</th><th>性质</th><th>发生了什么</th></tr>${S.interventions.rows.map((x) => `<tr><td>${esc(x.at ? stamp(Date.parse(x.at)) : '')}</td><td>${esc(x.id)}</td><td>${esc(x.project)}</td><td>${esc(IV_ZH[x.task_type])}</td><td>${esc(IV_ZH[x.stage])}</td><td>${esc(IV_ZH[x.kind])}</td><td>${esc(x.detail)}</td></tr>`).join('')}</table>` : ''}
 ${list(A.themes).length ? `<h2>反复出现的问题与 harness 改进点</h2>${list(A.themes).map((t) => `<div class="card"><b>${esc(t.title)}</b><p><span class="mut">依据：</span>${esc(t.evidence)}</p><p><span class="mut">改进：</span>${esc(t.fix)}</p>${t.where ? `<div class="mut">落点：${esc(t.where)}</div>` : ''}</div>`).join('')}` : ''}
 ${list(A.strengths).length ? `<h2>做得好的</h2>${list(A.strengths).map((s) => `<div class="card">${esc(s)}</div>`).join('')}` : ''}
@@ -460,6 +464,26 @@ ${list(A.caveats).length ? `<h2>局限</h2><ul>${list(A.caveats).map((c) => `<li
   return out
 }
 
+/** One table record per judged intervention. Field names are the table's; its location is not known here. */
+export function baseRows(runDir, period) {
+  const S = JSON.parse(readFileSync(join(runDir, 'summary.json'), 'utf8'))
+  const I = S.interventions
+  const day = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` }
+  const p = period ?? day(Date.parse(S.window.until))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(p)) throw new Error('--period must be YYYY-MM-DD')
+  const records = I.rows.map((x) => ({
+    时间: x.at ? `${day(Date.parse(x.at))} ${stamp(Date.parse(x.at)).slice(6)}` : null, 机器: I.machine, 'session id': x.sessionId, 任务: clip(x.title || x.id, 80),
+    类型: [IV_ZH[x.task_type]], 阶段: [IV_ZH[x.stage]], 性质: [IV_ZH[x.kind]], 记录人: ['AI'], 一句话: x.detail, 周期: p, 项目: x.project, 消息序号: x.msg,
+  }))
+  const files = []
+  for (let i = 0; i < records.length; i += 200) {
+    const f = join(runDir, `base-rows-${i / 200}.json`)
+    writeFileSync(f, JSON.stringify({ create_records: records.slice(i, i + 200) }))
+    files.push(f)
+  }
+  return { period: p, machine: I.machine, count: records.length, files }
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2)
   const opts = parseArgs(rest)
@@ -471,8 +495,9 @@ async function main() {
     case 'ingest': need(); result = ingest(runDir); if (result.errors.length) process.exitCode = 2; break
     case 'stats': need(); { const s = stats(runDir); result = { summary: join(runDir, 'summary.json'), coverage: s.coverage } } break
     case 'render': need(); result = { report: render(runDir) }; break
+    case 'base-rows': need(); result = baseRows(runDir, opts.period); break
     default:
-      console.error('usage: insights.mjs collect [--days N] [--project NAME] [--batches K] | ingest|stats|render <runDir>')
+      console.error('usage: insights.mjs collect [--days N] [--project NAME] [--batches K] | ingest|stats|render <runDir> | base-rows <runDir> [--period YYYY-MM-DD]')
       process.exit(64)
   }
   console.log(JSON.stringify(result, null, 1))

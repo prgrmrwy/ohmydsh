@@ -33,7 +33,7 @@ whenToUse: 用户想复盘一段时间内的 DSH 使用行为、找出反复出�
    - `missing` 是仍然没有有效标签的会话。
 
 4. **汇总**：`node $S stats <runDir>`，再读 `<runDir>/summary.json`。里面有窗口内的定量数据、标签分布和全部标签。
-   - `interventions` 是逐条的用户插手：`byTypeStage` 按「任务类型|阶段|性质」计数，`rows` 每条带会话 id 和该条用户消息的时间，`machine` 是本机 hostname。复盘时先看计数最多的一格，再按 `rows` 回看其中几条的现场。
+   - `interventions` 是逐条的用户插手：`byTypeStage` 按「任务类型|阶段|性质」计数，`byProject` 按「项目|性质」计数（项目即会话工作目录名），`rows` 每条带会话 id 和该条用户消息的时间，`machine` 是本机 hostname。复盘时先看计数最多的一格，再按 `rows` 回看其中几条的现场。
 
 5. **写分析**：写 `<runDir>/analysis.json`，所有文本用简体中文：
 
@@ -54,6 +54,17 @@ whenToUse: 用户想复盘一段时间内的 DSH 使用行为、找出反复出�
    - 结果和满意度都是推断，不能写成已验证或已被用户接受。
 
 6. **渲染**：`node $S render <runDir>`，向用户报告 `report.html` 的路径，并给出 3 到 5 条最值得做的改进。
+
+## 写入插手表（可选）
+
+仅当本机存在 `~/.dsh-attention-log.json`（含 `base_token`、`table_id`）时执行；文件不存在就跳过这一节，不要询问或创建它。表的位置只在这个文件里，不写进仓库、报告或回复。
+
+1. `node $S base-rows <runDir> [--period YYYY-MM-DD]`：生成 `<runDir>/base-rows-<n>.json`，每个文件不超过 200 条。输出里有 `period`（缺省为窗口结束日）、`machine` 和 `count`。
+2. 重跑同一周期时先清掉旧行：用 `lark-cli base +record-list` 读出表中「周期 = period、机器 = machine、记录人 = AI」的记录，核对数量后用 `+record-delete` 删除。**只删这三项都匹配的行**，记录人为「本人」的行和其它周期、其它机器的行不动。
+3. 逐个文件串行写入：`lark-cli base +record-batch-create --as user --base-token <base_token> --table-id <table_id> --json @<文件>`。
+4. 写完读回，核对该周期该机器的行数等于 `count`。写入失败（例如未授权）时不重试、不发起授权，如实报告，本地报告仍然有效。
+
+多台机器各自跑各自的 weekly 并写入同一张表，靠「机器」列区分；本技能不跨机器读取日志。
 
 ## 缓存
 

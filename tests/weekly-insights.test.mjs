@@ -121,6 +121,13 @@ test('ingest validates facets, caches by session id, and invalidates when the se
   assert.equal(summary.interventions.total, 2)
   assert.deepEqual(summary.interventions.byTypeStage, [['bugfix|after|intervention', 2]])
   assert.equal(summary.interventions.rows[0].at, new Date(recent).toISOString(), 'time comes from the numbered user message')
+  assert.deepEqual(summary.interventions.byProject.map(([k]) => k).sort(), ['alpha|intervention', 'beta|intervention'])
+  const br = run(home, ['base-rows', second.runDir, '--period', '2026-01-02'])
+  assert.equal(br.status, 0, br.err)
+  assert.equal(br.out.count, 2)
+  const rec = JSON.parse(readFileSync(br.out.files[0], 'utf8')).create_records[0]
+  assert.deepEqual([rec.周期, rec.类型, rec.阶段, rec.性质, rec.记录人, rec.消息序号], ['2026-01-02', ['bugfix'], ['结束后'], ['干预'], ['AI'], 2])
+  assert.match(rec.时间, /^\d{4}-\d\d-\d\d \d\d:\d\d$/)
   const rd = run(home, ['render', second.runDir])
   assert.equal(rd.status, 0, rd.err)
   assert.match(readFileSync(rd.out.report, 'utf8'), /逐会话明细（2）/)
