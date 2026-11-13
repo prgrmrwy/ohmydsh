@@ -32,6 +32,6 @@ PRECHECK：第 2 轮评审 `APPROVE`，无要求修改。实现与定向验证�
 
 - [x] 5.1 核对 test-plan 全部 47 行实际测试名与断言，更新状态；额外参数化组不得遗漏。运行 `npm test`、`npm run check:artifacts` 与 `git diff --check`，报告实际环境失败而非静默跳过
 - [x] 5.2 运行 `openspec validate sync-build-inputs-dirs --strict`；按 Anvil verify 比较实现 diff、测试日志与批准 spec，不把规划审查当作实现验收
-- [ ] 5.3 经实现评审和验证后再同步 delta spec / 归档；不自动提交、合入或清理 worktree，这些动作需要用户批准
+- [x] 5.3 经实现评审和验证后再同步 delta spec / 归档；不自动提交、合入或清理 worktree，这些动作需要用户批准 —— 2026-11-13 经用户批准归档;delta 未再同步:ADDED 要求已在主 spec(逐字一致),MODIFIED 要求的主 spec 版本更新(已含 hostRuntimeCompatibility 退役),回写会造成回退。
 
 收尾状态：5.3 中 delta spec 已同步且语义幂等核验通过；归档、提交、合入与 worktree 清理未获用户授权，保持未执行。两份 verify 如实区分实现通过与 Anvil 全仓零skip要求未满足。

@@ -57,6 +57,23 @@ describe('a live primary switch', () => {
     expect(readFileSync(join(personalHome(), 'cards', 'note.md'), 'utf8')).toBe('note body')
   })
 
+  it('carries an auto-derived library into the entry that newly claims its workspace', async () => {
+    const ctx = new Context(); contexts.push(ctx)
+    const seen: { runtime?: MemexRuntime } = {}
+    mkdirSync(workspace(), { recursive: true })
+    const live = await liveConfig(ctx, probe(seen) as never, { scopes: [] })
+    const derived = seen.runtime!.scopes.current.resolve(workspace())
+    expect(['derived', 'local']).toContain(derived.source)
+    mkdirSync(join(derived.home, 'cards'), { recursive: true })
+    writeFileSync(join(derived.home, 'cards', 'note.md'), 'note body')
+
+    await live.replace({ scopes: [{ name: 'personal', pathPrefixes: [workspace()], home: personalHome() }] })
+
+    expect(seen.runtime!.scopes.current.resolve(workspace()).scope).toBe('personal')
+    expect(readFileSync(join(personalHome(), 'cards', 'note.md'), 'utf8')).toBe('note body')
+    expect(readFileSync(join(derived.home, 'cards', 'note.md'), 'utf8')).toBe('note body')
+  })
+
   it('keeps the running routing when the cards cannot be moved', async () => {
     const ctx = new Context(); contexts.push(ctx)
     const seen: { runtime?: MemexRuntime } = {}

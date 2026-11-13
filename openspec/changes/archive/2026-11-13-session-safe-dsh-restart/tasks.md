@@ -27,4 +27,8 @@
 - [x] 4.1 隔离预览验收：在 worktree 预览 Host 内创建会话，由该会话的 bash 工具执行 `dsh restart`，确认会话断开、新预览 Host 起来、`dsh history` 显示 `ready`；日常 3080 不受影响
 - [x] 4.2 外部终端 `dsh restart` 非回归（预览 home）
 - [ ] 4.3 macOS 真机会话内 restart（后续；当前无 macOS 环境）
-- [ ] 4.4 合入后在主 checkout `dsh build` 两次（第二次无变更），由用户从外部重启一次日常 Host 使新 launcher 生效
+- [x] 4.4 合入后在主 checkout `dsh build` 两次（第二次无变更），由用户从外部重启一次日常 Host 使新 launcher 生效
+
+## 归档说明（2026-11-13）
+
+经用户批准归档。4.4 以 2026-11-13 的真实使用为证：主 checkout `dsh build` 第二次无变更后，在日常 Host 的会话内执行 `dsh restart`（restartId `20261113-041157-1803630-a8f108`），调用先返回已排程，receipt 依次记录 stopping、stopped、starting、ready，会话重连后继续工作（Linux）。4.3 macOS 真机未验证，保持未完成。delta 作为新 capability `session-safe-restart` 写入主 spec。

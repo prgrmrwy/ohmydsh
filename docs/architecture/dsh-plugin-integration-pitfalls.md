@@ -881,4 +881,6 @@ change `locus-read-message-media`（2026-11-11）。前三条在规划评审或�
 - **实现位置**：`packages/dsh-pet/src/host/channel/lark.ts`（`DocCommentReply.mentionOpenIds` 来自 `person` 元素）、`doc-comment.ts`（`docCommentAddressing`，self mention 为准入已证明的事实）、`locus/context.ts`（文档评论投递明确写「以 Addressing 为准，不要因为 @ 后不是自己的名字就判为仅引用」）。回归测试：`doc-comment-admission.test.ts` 的「projects the document comment mention into Delivery addressing」「keeps the platform-proven mention when the reply body parse found no person element」、`locus-context.test.ts` 的「makes Addressing, not the opaque @ou_… body text, the mention authority」。
 - **排查口径**：遇到「@ 了 bot 却没回复」，先查该 Delivery 的 `addressing.selfMentioned` 与投递 prompt 的 Addressing 段，再看意图诊断；不要只看「评论事件是否到达」。同类坑：凡是把「没有结构化事实」当成「事实为否」的投影，都会在同一条链路上同时骗过准入、日志和模型。
 
+
 **事件之外的兜底（2026-11-13 同日补）**：这条事件是否推送还受评论者的 mention 通知/授权状态、评论者身份等平台条件影响，API 侧无法完全消除。Pet 因此新增有界对账 `packages/dsh-pet/src/host/channel/doc-comment-reconcile.ts`：只对已有可用文档入口的文档，每 60 秒以 bot 身份读一次评论，把「触发回复 @ 了本 bot、但没有成为 Delivery」的回复按同一准入补投；去重键与实时事件相同（`doc:docx:<token>/<comment>/<reply>`），实时/对账竞争时第二次接受会以 duplicate 拒绝。排查口径不变：先确认事件是否到达（无 Delivery、无 comment 诊断），再看 addressing；对账只补「事件没到」这一种，不替代实时链路。
+

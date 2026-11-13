@@ -457,3 +457,7 @@ spec 是 GitHub release tarball（非 npm），检测器按设计跳过（`:181-
 
 
 > Retention update (2026-10-27): removed checking details cited above are historical Git references at revision `120f9140`, not live evidence files. See [redacted historical summary](checking/summary.md) for retained conclusions and limitations; it does not replace detailed receipts or change the original verdict.
+
+## 归档说明（2026-11-13）
+
+经用户批准归档。本 change 只有 proposal 与 checking 记录，没有 tasks 与 delta spec；实施状态见 §0（2026-10-10），此后的版本以 `dsh.yaml` 为准。

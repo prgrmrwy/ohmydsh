@@ -225,5 +225,9 @@
 - [x] 11.2 `packages/dsh-magpie-connector`：运行 build、typecheck、test；仓库 `npm test`、`npm run check:artifacts`、`openspec validate magpie-owner-routes --strict`
 - [x] 11.3 `package.json` 0.3.0；CHANGELOG（BREAKING：多 route、旧 route 退役、旧会话/默认模型需重选、AUTO/出口守卫需另行适配）；README / README.zh 去掉「需要 Host 扩展」限制并说明 knownOwners 与重启恢复
 - [x] 11.4 `dsh.yaml` 本插件条目 brief/note 与版本更新
-- [ ] 11.5 与用户确认 AUTO / 出口守卫适配的上线顺序后再 `dsh build`（两次，第二次无变更），请用户重启并在 GUI 确认 `Magpie (Claude|Codex|Opencode-go|Deepseek)` 分组
-- [ ] 11.6 按 `publish-dsh-plugin` skill 发版 0.3.0，更新商店 PR #10211 条目描述并回复维护者
+- [x] 11.5 与用户确认 AUTO / 出口守卫适配的上线顺序后再 `dsh build`（两次，第二次无变更），请用户重启并在 GUI 确认 `Magpie (Claude|Codex|Opencode-go|Deepseek)` 分组
+- [x] 11.6 按 `publish-dsh-plugin` skill 发版 0.3.0，更新商店 PR #10211 条目描述并回复维护者
+
+## 归档说明（2026-11-13）
+
+经用户批准归档。11.5、11.6 按 2026-11-13 的实际状态勾选：npm 与本机部署均为 `dsh-magpie-connector@0.6.12`（带 SLSA provenance），出口守卫默认豁免已按归属 route 逐个配置；商店 PR #10211 已于 2026-10-30 合并。GUI 中 `Magpie (<owner>)` 分组的目视确认由用户自行完成，本次未重新取证。归档时把 delta 同步进主 spec：`dsh-magpie-connector` 7 条 MODIFIED、3 条 ADDED，`home-network-model-guard` 2 条 MODIFIED；REMOVED 的「选择器按网关归属展示分组（AMD2）」此前已不在主 spec。
