@@ -673,6 +673,36 @@ describe('Non-routing context does not poison reply authority', () => {
     })
   })
 
+  it('keeps the current across a forwarded-then-answered two-step relay', () => {
+    const h = harness()
+
+    // Production 2026-11-16: turn 2 = "已转问" relay (child only waits),
+    // turn 3 = the real answer. finish in turn 3 was refused as unauthorized.
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+    h.claim({ childSessionId: CHILD, messageId: 'forwarded', turn: 2, sourceKind: 'agent-message' })
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toMatchObject({ deliveryId: 'delivery-1', turnId: `${CHILD}#2` })
+    h.end({ childSessionId: CHILD, turn: 2, outcome: 'completed' })
+    h.claim({ childSessionId: CHILD, messageId: 'answer', turn: 3, sourceKind: 'agent-message' })
+
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toMatchObject({
+      deliveryId: 'delivery-1', turnId: `${CHILD}#3`, source: 'agent-message',
+    })
+    expect(h.observer.deliveryForTurn?.(CHILD, 3)?.deliveryId).toBe('delivery-1')
+  })
+
+  it('still refuses a later relay segment while the previous continuation is running', () => {
+    const h = harness()
+
+    h.claim({ childSessionId: CHILD, messageId: 'om-message-1', turn: 1, sourceKind: 'user' })
+    h.end({ childSessionId: CHILD, turn: 1, outcome: 'completed' })
+    h.claim({ childSessionId: CHILD, messageId: 'forwarded', turn: 2, sourceKind: 'agent-message' })
+    h.claim({ childSessionId: CHILD, messageId: 'answer', turn: 3, sourceKind: 'agent-message' })
+
+    expect(h.observer.currentCapabilityForChild?.(CHILD)).toMatchObject({ turnId: `${CHILD}#2` })
+    expect(h.observer.deliveryForTurn?.(CHILD, 3)).toBeUndefined()
+  })
+
   it('spec Scenario "单独的 agent 消息不能获得飞书能力"', () => {
     const h = harness()
 
