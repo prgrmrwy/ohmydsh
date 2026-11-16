@@ -59,7 +59,10 @@ export async function scheduleRestart({ argv, repo, home, caller, evidence, plat
   const [command, args] = detachCommand({ evidence, execPath: process.execPath, script: path.join(repo, 'bin', 'dsh.mjs'), argv, restartId })
   const env = { ...caller, DSH_RESTART_ORCHESTRATED: '1', DSH_RESTART_DIR: dir, DSH_RESTART_NONCE: nonce }
   let exited
-  const child = spawn(command, args, { env, cwd: process.cwd(), detached: true, stdio: 'ignore', windowsHide: true })
+  // The replacement Host inherits this cwd. Never the calling session's: a
+  // restart run from a Worktree Session would pin the Host inside that
+  // worktree, and ws clean then refuses it as "the caller current worktree".
+  const child = spawn(command, args, { env, cwd: repo, detached: true, stdio: 'ignore', windowsHide: true })
   child.once('error', error => { exited = error.message })
   child.once('exit', (status, signal) => { exited = `exited ${signal ?? status}` })
   child.unref()
