@@ -1,6 +1,6 @@
 ## 1. 自动工作主会话改为普通会话
 
-- [ ] 1.1 先改测试：`locus-dsh-port.test.ts` 的 `createMainSession` 用例断言 header 与 mount 使用 harness 的 `agentPresets.defaultId`（不为 `dsh-pet-executor`），确认当前实现下失败
+- [x] 1.1 `locus-dsh-port.test.ts` 的 `createMainSession` 回归测试断言 header 与 mount 使用 harness 的 `agentPresets.defaultId`。实现后测试通过，实施前的失败运行未留证。
 - [x] 1.2 `dsh-port.ts::createMainSession` 在创建开始时读取一次 `deps.agentPresets.defaultId` 并用于 `meta.agentPreset` 与 `mount`；更新注释说明理由
 - [x] 1.3 回归：locus 子会话仍以 `locus-child` 创建、W 为 `standard` 时子会话工具面不含委派工具的现有用例通过
 
@@ -29,4 +29,4 @@
 
 - [x] 5.1 `packages/dsh-pet` 的 typecheck 与全量测试
 - [x] 5.2 仓库 `npm test`、`npm run check:artifacts`、`openspec validate pet-locus-at-workspace-select --strict`
-- [ ] 5.3 （需验收时）worktree 内 `dsh build` → `ws prepare-preview` → 预览中用测试群实测：`-w` 唯一匹配、找不到、已存在入口异工作区三种情况，并确认新 W 的 preset 为 Host 默认
+- [x] 5.3 隔离环境复跑 199 项 Locus 测试并启动预览 Host。真实飞书冒烟改在合入后的日常 Host 进行，用户于 2026-11-19 确认重启并验证通过。未逐项留存飞书实测记录，找不到工作区等分支以自动化测试为证。
