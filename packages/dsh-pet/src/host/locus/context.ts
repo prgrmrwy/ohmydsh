@@ -9,7 +9,13 @@
  * renders its model-facing briefing.
  */
 
-import { LOCUS_MESSAGE_TOOL_NAME, MESSAGE_LINK_GUIDANCE, MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL } from './message-guidance.js'
+import { extractMessageLinksFromText } from './message-link.js'
+import {
+  LOCUS_LINKED_MESSAGE_TOOL_NAME,
+  LOCUS_MESSAGE_TOOL_NAME,
+  MESSAGE_LINK_GUIDANCE,
+  MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL,
+} from './message-guidance.js'
 import { isDocEndpoint } from './doc-endpoint.js'
 import { endpointKeyOf } from './aggregate.js'
 import type { DeliveryStatus } from './delivery.js'
@@ -322,7 +328,13 @@ function repliedMessageReadLines(context: LocusDeliveryContext): string[] {
 /** One line on message links, for IM entries only; never names an unpublished tool. */
 function messageLinkLines(context: LocusDeliveryContext): string[] {
   if (isDocEndpoint(context.endpoint)) return []
-  return [`- ${context.messageToolAvailable === false ? MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL : MESSAGE_LINK_GUIDANCE}`]
+  const published = context.messageToolAvailable !== false
+  // Discovery only (the same definition the tool re-proves from the raw body at call time).
+  const links = extractMessageLinksFromText(context.request.text)
+  const trigger = links.length === 0 ? [] : published
+    ? [`- 当前请求含 ${String(links.length)} 个飞书消息链接；需要时调用 \`${LOCUS_LINKED_MESSAGE_TOOL_NAME}\` 读取（messageId：${factValue(context.request.messageId)}${links.length > 1 ? `，linkIndex 1–${String(links.length)}` : ''}）。`]
+    : ['- 当前请求含飞书消息链接，其内容当前无法读取。']
+  return [...trigger, `- ${published ? MESSAGE_LINK_GUIDANCE : MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL}`]
 }
 
 /**

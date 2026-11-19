@@ -29,6 +29,7 @@ import {
   type LedgerCallerLocusLookup,
 } from './ledger/caller.js'
 import type { LocusHistoryCursor } from './locus/history-cursor.js'
+import { extractMessageLinksFromText } from './locus/message-link.js'
 
 /** Tool name; also the caller-bound allowlist member. */
 export const PET_LOCUS_CHAT_HISTORY_TOOL = 'pet_locus_chat_history'
@@ -41,6 +42,8 @@ export interface LocusEntranceMessage {
   readonly text: string
   readonly messagePosition?: string
   readonly threadId?: string
+  /** Platform message type, when the read port reports it (`merge_forward` gets an id). */
+  readonly msgType?: string
 }
 
 /** One platform page. `undefined` from the port means the read FAILED. */
@@ -90,7 +93,22 @@ const TRUNCATION_MARK = '…（已截断）'
  * body carries one gets its message id, so the child can pass it to
  * `pet_locus_message` to see the image or video.
  */
+/** How a formatted body renders a merge-forward: `<forwarded_messages>` (measured 2026-11-13), `[Merged forward]` (older string table). */
+const MERGE_FORWARD_MARKER = /<forwarded_messages>|\[Merged forward\]/
+
 const MEDIA_MARKER = /!\[Image\]\(|\[Media:|\[Image|\[Video|\[Audio|<(?:file|folder)\b/
+
+/**
+ * Whether a line gets its message id: media the child can read with
+ * `pet_locus_message`, a Feishu message link it can follow with
+ * `pet_locus_linked_message`, or a merge-forward to expand. Decided on the RAW body.
+ */
+function carriesReadableReference(message: LocusEntranceMessage): boolean {
+  return MEDIA_MARKER.test(message.text)
+    || message.msgType === 'merge_forward'
+    || MERGE_FORWARD_MARKER.test(message.text)
+    || extractMessageLinksFromText(message.text).length > 0
+}
 
 /** Parsed, validated arguments. */
 export interface LocusHistoryRequest {
@@ -322,7 +340,7 @@ export async function executeLocusChatHistory(
     const body = clamp(message.text.replace(/\s+/g, ' ').trim(), LOCUS_HISTORY_MAX_BODY_CHARS)
     // Decided on the RAW body: the marker may sit past the clamp. The id is appended
     // after the clamp, so it is never the part that gets cut, and it is inside the budget.
-    const idSuffix = MEDIA_MARKER.test(message.text) ? ` (id ${message.messageId})` : ''
+    const idSuffix = carriesReadableReference(message) ? ` (id ${message.messageId})` : ''
     const line = `- [${message.createTime}] ${senderOf(message)}：${body.text}${
       message.threadId === undefined ? '' : `（话题 ${message.threadId}）`}${idSuffix}`
     if (used + line.length + 1 > LOCUS_HISTORY_MAX_CHARS) break

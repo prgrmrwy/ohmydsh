@@ -412,16 +412,17 @@ describe('spec Scenario "文档子会话的工具面"', () => {
   })
 })
 
-describe('the IM child surface after pet_locus_message', () => {
-  it('IM child surface equals previous plus pet_locus_message', () => {
+describe('the IM child surface after pet_locus_message and pet_locus_linked_message', () => {
+  it('IM child surface equals previous plus pet_locus_message and pet_locus_linked_message', () => {
     const previous = [
       'locus_ask_parent', 'locus_context', 'pet_context', 'pet_locus_chat_history',
       'pet_locus_doc_context', 'pet_locus_finish', 'pet_locus_track', 'pet_locus_wait',
     ]
-    expect([...LOCUS_CALLER_BOUND_TOOLS].sort()).toEqual([...previous, 'pet_locus_message'].sort())
+    expect([...LOCUS_CALLER_BOUND_TOOLS].sort()).toEqual([...previous, 'pet_locus_message', 'pet_locus_linked_message'].sort())
     // An IM child (history + message, no doc read) attests in both access modes.
     const im = [...LOCUS_SAFE_TOOL_NAMES, ...LOCUS_CALLER_BOUND_TOOLS.filter(name => name !== 'pet_locus_doc_context')]
     expect(im).toContain('pet_locus_message')
+    expect(im).toContain('pet_locus_linked_message')
     expect(attestLocusComposition(im, 'read-only')).toMatchObject({ ok: true, leaks: [] })
     expect(attestLocusComposition([...im, ...LOCUS_FULL_ACCESS_TOOL_NAMES], 'danger-full-access')).toMatchObject({ ok: true, leaks: [] })
     // The same surface WITHOUT the new entry would have been a leak had it been visible unlisted.
