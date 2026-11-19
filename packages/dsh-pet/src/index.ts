@@ -2057,7 +2057,7 @@ async function initialize(
       ? {}
       : {
         provisioning: {
-          ensureForDelivery: async ({ endpoint }) => {
+          ensureForDelivery: async ({ endpoint, workspaceId: selectedWorkspaceId }) => {
             // Name the new generation after its chat rather than its opaque id.
             // These titles are what the owner reads in Locus management, where
             // `Locus 主会话 · oc_…` says nothing about which group an entry
@@ -2078,6 +2078,7 @@ async function initialize(
             const ensured = await locusProvisioningController.ensureEntry({
               chatId: endpoint.chatId,
               ...(endpoint.threadId === undefined ? {} : { threadId: endpoint.threadId }),
+              ...(selectedWorkspaceId === undefined ? {} : { workspaceId: selectedWorkspaceId }),
               ...(chatName === undefined ? {} : { chatName }),
             })
             const record = ensured.locus
@@ -2741,6 +2742,10 @@ async function initialize(
     && locusChildDelivery !== undefined
     ? createLocusChannelCapability({
       locus: locusResolution,
+      ...(locusDshPort?.resolveWorkspaceByTitle === undefined ? {} : {
+        resolveWorkspaceByTitle: (name: string) => locusDshPort.resolveWorkspaceByTitle!(name),
+        workSessionLabel: (locus: { locusMainSessionId: string }) => locusRepository.findMain(locus.locusMainSessionId)?.workSessionId,
+      }),
       deliveries: {
         findByMessageId: messageId => locusRepository.findDeliveryByMessageId(messageId),
         getById: deliveryId => locusRepository.getDelivery(deliveryId),

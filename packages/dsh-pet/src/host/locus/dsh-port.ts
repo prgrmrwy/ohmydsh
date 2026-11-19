@@ -359,7 +359,26 @@ export function createProductionLocusDshPort(
       return { id: workspaceId, ...(workspace.title === undefined ? {} : { title: workspace.title }) }
     },
 
+    async resolveWorkspaceById(id) {
+      const workspace = deps.workspaceRegistry.get(WorkspaceId(id))
+      if (workspace === undefined || String(workspace.id) !== id || await workspace.status() !== 'ok') return undefined
+      return { id, ...(workspace.title === undefined ? {} : { title: workspace.title }) }
+    },
+
+    async resolveWorkspaceByTitle(name) {
+      const matches: LocusWorkspace[] = []
+      for (const workspace of deps.workspaceRegistry.list()) {
+        if (name !== '' && workspace.title === name && await workspace.status() === 'ok') {
+          matches.push({ id: String(workspace.id), title: name })
+        }
+      }
+      if (matches.length === 0) return { ok: false, reason: 'not-found' }
+      if (matches.length > 1) return { ok: false, reason: 'ambiguous' }
+      return { ok: true, workspace: matches[0]! }
+    },
+
     async createMainSession(input) {
+      const presetId = deps.agentPresets.defaultId
       const chatId = normalized(input.chatId)
       if (chatId === undefined) {
         throw new LocusDshCapabilityUnavailableError('Cannot create a locus main without a chat id')
@@ -380,14 +399,7 @@ export function createProductionLocusDshPort(
         )
       }
 
-      // Freeze mutable defaults once so header, setup and runtime selection are
-      // one creation decision even if settings hot-reload during setup.
-      //
-      // Pet's own preset, not the Host default, for the main Pet itself
-      // creates. This is not the child's safety pin: the locus child composes
-      // from LOCUS_CHILD_PRESET whatever preset its main runs, which is why an
-      // owner may `/bind` an ordinary `standard` session.
-      const presetId = 'dsh-pet-executor'
+      // The work session uses the Host default; the child has its own pinned preset.
       const selection = { ...deps.agentDefaultModel.currentSelection() }
       const allocatedSessionId = normalized(createSessionId())
       if (allocatedSessionId === undefined) {

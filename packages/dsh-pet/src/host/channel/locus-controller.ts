@@ -26,6 +26,7 @@ import { randomUUID } from 'node:crypto'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { sourceOf } from '../locus/doc-endpoint.js'
 import { LocusResolutionError } from '../locus/resolution.js'
+import { LocusControllerError } from '../locus/controller.js'
 import type { DeliveryDocComment } from '../locus/delivery.js'
 import type { LocusMediaPort } from './media.js'
 import {
@@ -94,6 +95,7 @@ export interface NormalizedLocusEvent {
 
 /** Facts every source carries. */
 interface NormalizedLocusMessageCore {
+  readonly workspaceName?: string
   readonly kind: 'message'
   readonly messageId: string
   readonly endpoint: LocusEndpoint
@@ -212,6 +214,7 @@ export interface EnsureLocusForDeliveryInput {
   readonly endpoint: LocusEndpoint
   readonly messageId: string
   readonly signal: AbortSignal
+  readonly workspaceId?: string
 }
 
 /**
@@ -431,6 +434,8 @@ const DEFAULT_CAPACITY_RETRY_MS = 5_000
 /** Controller dependencies. */
 export interface LocusControllerDeps {
   readonly locus: LocusResolutionPort
+  readonly resolveWorkspaceByTitle?: (name: string) => Promise<{ readonly ok: true; readonly workspace: { readonly id: string } } | { readonly ok: false; readonly reason: 'not-found' | 'ambiguous' }>
+  readonly workSessionLabel?: (locus: ActiveLocus) => Awaitable<string | undefined>
   /**
    * Whether this document has ever had ANY entry (root or comment, any state).
    * Asked once, before a doc entry is provisioned; `false` means this is the
@@ -644,6 +649,8 @@ function isControlDispatchResult(value: unknown): value is LocusControlDispatchR
 
 function controlValidationText(command: LocusControlCommand): string {
   switch (command.kind) {
+    case 'workspace-invalid':
+      return '用法：-w <工作区名> <工作要求>。工作区标题不能包含空白。'
     case 'bind-missing-prefix':
       return '请提供至少 6 位的主会话 id 前缀。'
     case 'bind':
@@ -814,6 +821,7 @@ function messageFromAdmission(
     chatType: event.chatType,
     senderOpenId: decision.senderId,
     text: decision.text,
+    ...(decision.workspaceName === undefined ? {} : { workspaceName: decision.workspaceName }),
     addressing: projectDeliveryAddressing({
       mentions: event.mentions,
       ...(selfOpenId === undefined ? {} : { selfOpenId }),
@@ -2028,6 +2036,7 @@ export class LocusChannelController {
     // is optional; absent dispatch capability remains fail-closed and does not
     // become business work.
     if (
+      command.kind === 'workspace-invalid' ||
       command.kind === 'bind-missing-prefix' ||
       command.kind === 'bind-invalid' ||
       (command.kind === 'bind' && command.prefix.trim().length < MIN_BIND_PREFIX_LENGTH) ||
@@ -2215,18 +2224,39 @@ export class LocusChannelController {
       return undefined
     }
     if (this.lifecycle !== 'active') return undefined
+    let workspaceId: string | undefined
     try {
+      if (message.workspaceName !== undefined) {
+        if (this.deps.resolveWorkspaceByTitle === undefined) throw new Error('工作区查询不可用，请稍后重试。')
+        const result = await this.deps.resolveWorkspaceByTitle(message.workspaceName)
+        if (!result.ok) {
+          throw new LocusControllerError(result.reason === 'ambiguous' ? 'WORKSPACE_AMBIGUOUS' : 'WORKSPACE_NOT_FOUND', result.reason === 'ambiguous'
+            ? `有多个工作区名为 ${message.workspaceName}，请在 Pet 设置中检查。`
+            : `找不到名为 ${message.workspaceName} 的可用工作区，请在 Pet 设置中检查；标题含空白时请用 /bind。`)
+        }
+        workspaceId = result.workspace.id
+      }
       raw = await this.deps.locus.ensureForDelivery({
         endpoint,
         messageId: message.messageId,
         signal,
+        ...(workspaceId === undefined ? {} : { workspaceId }),
       })
+      const locus = normalizeActiveLocus(raw, endpoint)
+      if (workspaceId !== undefined && locus !== undefined && locus.workspaceId !== workspaceId) {
+        const label = await this.deps.workSessionLabel?.(locus) ?? '已有工作会话'
+        throw new LocusControllerError('WORKSPACE_CONFLICT', `该群已由 ${label} 跟进，-w 不能改绑；可在管理面「改绑到其他会话」。`)
+      }
     } catch (error: unknown) {
       this.logReason('locus-bootstrap-failed', error)
       // D7: M is unavailable but the whole-W migration is deferred by a current
       // Delivery elsewhere. The message is not dropped; the caller accepts it
       // into this entry's durable backlog and the dispatcher retries.
       const deferred = (error as { deferred?: { locusId: string; sessionId: string } } | null)?.deferred
+      if (deferred !== undefined && message.workspaceName !== undefined) {
+        await this.sendControlReceipt(message.replyTarget, '入口忙，请稍后重试。', message.senderOpenId)
+        return undefined
+      }
       if (deferredSink !== undefined && deferred !== undefined) {
         deferredSink.value = deferred
         return undefined

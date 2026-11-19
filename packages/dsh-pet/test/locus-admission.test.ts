@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LarkInboundEvent } from '../src/host/channel/event.js'
+import { locusHelpText } from '../src/host/locus/control.js'
 import { admitNormalizedLocusEvent } from '../src/host/channel/locus-controller.js'
 import {
   admitLocusEvent,
@@ -302,6 +303,49 @@ describe('Locus endpoint extraction', () => {
       ok: false,
       reason: 'invalid-thread',
     })
+  })
+})
+
+describe('workspace selection', () => {
+  it('lists workspace selection and the whitespace limitation in help', () => {
+    expect(locusHelpText()).toContain('-w <工作区名> <工作要求>')
+    expect(locusHelpText()).toContain('标题含空白的工作区请用 /bind')
+  })
+  it.each(['-w Repo 看下', '--workspace Repo 看下', '--workspace=Repo 看下'])(
+    'parses %s while preserving the workspace title', text => {
+      expect(parseLocusControlCommand(`@Pet ${text}`)).toEqual({ kind: 'workspace', name: 'Repo' })
+    },
+  )
+  it.each(['-w', '-w Repo', '--workspace', '--workspace=Repo', '--workspace= 看下'])(
+    'rejects incomplete selection %s', text => {
+      expect(parseLocusControlCommand(`@Pet ${text}`)).toEqual({ kind: 'workspace-invalid' })
+    },
+  )
+  it('recognizes selection only after leading mentions, including spaced names', () => {
+    expect(parseLocusControlCommand('@devbox 小灵通 -w Repo 看下', ['devbox 小灵通']))
+      .toEqual({ kind: 'workspace', name: 'Repo' })
+    expect(parseLocusControlCommand('@Pet 看下 -w Repo')).toEqual({ kind: 'none' })
+  })
+  it.each(['-w Repo', '--workspace Repo', '--workspace=Repo'])(
+    'admits %s without changing the rest of the original message', selection => {
+      const result = admitLocusEvent(groupEvent({
+        sender_id: OWNER,
+        content: `  @devbox 小灵通  ${selection} 步骤：\n1. 登录\n  2. 等待  `,
+        mentions: [{ id: BOT, name: 'devbox 小灵通' }],
+      }), context())
+      expect(result).toMatchObject({ admit: true, workspaceName: 'Repo', text: '  @devbox 小灵通  步骤：\n1. 登录\n  2. 等待  ' })
+      expect(result.admit && result.command).toBeUndefined()
+    },
+  )
+  it('gates valid and invalid selections by allowlist and protects retired entries', () => {
+    for (const content of ['@Pet -w Repo 看下', '@Pet -w']) {
+      expect(admitLocusEvent(groupEvent({ content }), context({ authorizedChats: [GROUP] })))
+        .toMatchObject({ admit: false, reason: 'control-not-allowed' })
+    }
+    expect(admitLocusEvent(groupEvent({ sender_id: OWNER, content: '@Pet -w Repo 看下' }), context({ authorizationState: 'retired' })))
+      .toMatchObject({ admit: false, reason: 'retired-endpoint' })
+    expect(admitLocusEvent(groupEvent({ sender_id: OWNER, content: '@Pet -w' }), context()))
+      .toMatchObject({ admit: true, command: { kind: 'workspace-invalid' } })
   })
 })
 
