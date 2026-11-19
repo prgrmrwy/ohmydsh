@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { LocusController, LocusControllerError } from '../src/host/locus/controller.js'
+import { createLocusResolution } from '../src/host/locus/resolution.js'
 import { Refusal, Topology } from './support/w-topology.js'
 
 const make = (options?: ConstructorParameters<typeof Topology>[0]) => {
@@ -23,6 +24,60 @@ describe('automatic source', () => {
     expect(t.created.filter(c => c.kind === 'work')).toHaveLength(2)
     expect(first.group.workspaceId).toBe('default-ws')
     expect(second.group.locusMainSessionId).not.toBe(first.group.locusMainSessionId)
+  })
+
+  it('passes a selected workspace through first topic creation and refuses an unavailable selection', async () => {
+    const t = new Topology()
+    const deps = t.deps()
+    const controller = new LocusController({ ...deps, dsh: { ...deps.dsh, resolveWorkspaceById: async id => id === 'selected' ? { id } : undefined } })
+    const created = await controller.ensureEntry({ chatId: 'selected-chat', threadId: 'topic', workspaceId: 'selected' })
+    expect(created.group?.workspaceId).toBe('selected')
+    expect(t.repository.getRow({ chatId: 'selected-chat', threadId: 'topic' })).toBeDefined()
+    await expect(controller.ensureGroup({ chatId: 'missing-chat', workspaceId: 'missing' })).rejects.toThrow()
+    expect(t.repository.getRow({ chatId: 'missing-chat' })).toBeUndefined()
+    expect(t.created.filter(c => c.kind === 'work')).toHaveLength(1)
+  })
+
+  it('serializes a first contact and a conflicting workspace selection', async () => {
+    const { t, controller } = make({ defaultWorkspace: 'workspace-a' })
+    const first = controller.ensureGroup({ chatId: 'oc_concurrent' })
+    const second = controller.ensureTopic({ chatId: 'oc_concurrent', threadId: 'topic', workspaceId: 'workspace-b' })
+    const [created, rejected] = await Promise.allSettled([first, second])
+    expect(created.status).toBe('fulfilled')
+    expect(rejected).toMatchObject({ status: 'rejected', reason: { code: 'WORKSPACE_CONFLICT' } })
+    expect(t.repository.getRow({ chatId: 'oc_concurrent', threadId: 'topic' })).toBeUndefined()
+    expect(t.created.filter(c => c.kind === 'work')).toHaveLength(1)
+  })
+
+  it('refuses a selected workspace conflict before adding a topic row', async () => {
+    const { t, controller } = make({ defaultWorkspace: 'workspace-a' })
+    const first = await controller.ensureGroup({ chatId: 'oc_a' })
+    await expect(controller.ensureTopic({ chatId: 'oc_a', threadId: 'topic', workspaceId: 'workspace-b' }))
+      .rejects.toMatchObject({ code: 'WORKSPACE_CONFLICT' })
+    expect(t.repository.getRow({ chatId: 'oc_a', threadId: 'topic' })).toBeUndefined()
+    expect(t.repository.getRow({ chatId: 'oc_a' })).toEqual(first.group)
+  })
+
+  it.each(['invalid', 'unavailable-main'] as const)('rejects workspace mismatch before %s repair through resolution', async reason => {
+    const { t, controller } = make()
+    await t.seedMain('W1', 'M1')
+    const row = await t.seedGroup('oc_repair', 'M1', 'workspace-a', reason === 'invalid'
+      ? { state: 'invalid', invalidReason: '子会话已不存在' } : {})
+    if (reason === 'unavailable-main') t.unusableMains.add('M1')
+    const resolution = createLocusResolution({
+      store: { getRow: endpoint => t.repository.getRow(endpoint) },
+      mains: { find: () => ({ workSessionId: 'W1', status: 'active' }) },
+      verifyMain: () => reason !== 'unavailable-main',
+      isSessionArchived: () => false,
+      provisioning: { ensureForDelivery: async input => {
+        const ensured = await controller.ensureEntry({ chatId: input.endpoint.chatId, ...(input.workspaceId === undefined ? {} : { workspaceId: input.workspaceId }) })
+        return { ...ensured.locus, locusMainSessionId: 'M1', workspaceId: 'workspace-a', workSessionId: 'W1' } as never
+      } },
+    })
+    await expect(resolution.ensureForDelivery({ endpoint: { chatId: 'oc_repair' }, messageId: 'm', signal: new AbortController().signal, workspaceId: 'workspace-b' }))
+      .rejects.toMatchObject({ code: 'WORKSPACE_CONFLICT' })
+    expect(t.repository.getRow({ chatId: 'oc_repair' })).toEqual(row)
+    expect(t.created).toEqual([])
   })
 
   it('fails closed when automatic work-session creation has no default workspace', async () => {

@@ -74,6 +74,12 @@ describe('parseDocCommentEvent', () => {
 })
 
 describe('admitDocCommentEvent', () => {
+  it.each(['-w Repo 看下', '-w', '--workspace=Repo 看下'])('treats %s as ordinary comment text', text => {
+    const decision = admitDocCommentEvent(event(), { ...whole, trigger: { ...whole.trigger, text } }, context())
+    expect(decision).toMatchObject({ kind: 'accepted', message: { text } })
+    expect(decision).not.toHaveProperty('command')
+  })
+
   it('maps a whole-doc comment to the document root with the composite message id', () => {
     const decision = admitDocCommentEvent(event(), whole, context())
 

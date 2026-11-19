@@ -1010,7 +1010,92 @@ describe('LocusChannelController live policy gate', () => {
   })
 })
 
+describe('workspace selection delivery', () => {
+  it('accepts a selection that matches the established workspace', async () => {
+    const ledger = new MemoryDeliveryLedger()
+    const observer = new SynchronousTurnObserver()
+    const ensure = vi.fn(() => LOCUS)
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: ensure },
+      resolveWorkspaceByTitle: async () => ({ ok: true, workspace: { id: LOCUS.workspaceId } }),
+      child: {
+        ensureChild: () => ({ parentSessionId: LOCUS.locusMainSessionId, childSessionId: LOCUS.sessionId }),
+        queueChild: input => ({ accepted: true, executionId: input.executionId, inboxMessageId: 'inbox-workspace' }),
+      },
+      inspectResidentPolicy: () => ({ resident: true, policy: { mode: 'read-only', workspaceRoot: '/repo' } }),
+    })
+    const admission = acceptedAdmission()
+    if (admission.kind !== 'accepted') throw new Error('fixture')
+    expect(await controller.handleAdmission({ ...admission, message: { ...admission.message, workspaceName: 'A' } })).toMatchObject({ kind: 'accepted' })
+    expect(ensure).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: LOCUS.workspaceId }))
+    expect(ledger.listDeliveries()).toHaveLength(1)
+    controller.dispose()
+  })
+  it.each(['not-found', 'ambiguous'] as const)('refuses %s before provisioning', async reason => {
+    const ledger = new MemoryDeliveryLedger()
+    const observer = new SynchronousTurnObserver()
+    const ensure = vi.fn(() => LOCUS)
+    const receipt = vi.fn()
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: ensure },
+      resolveWorkspaceByTitle: async () => ({ ok: false, reason }),
+      receipts: { sendControl: receipt },
+      child: { ensureChild: () => { throw new Error('unexpected') }, queueChild: () => { throw new Error('unexpected') } },
+    })
+    const admission = acceptedAdmission()
+    if (admission.kind !== 'accepted') throw new Error('fixture')
+    await controller.handleAdmission({ ...admission, message: { ...admission.message, workspaceName: 'missing' } })
+    expect(ensure).not.toHaveBeenCalled()
+    expect(receipt).toHaveBeenCalledWith(expect.anything(), expect.stringContaining(reason === 'not-found' ? '找不到' : '多个'), expect.anything())
+    expect(ledger.calls).toEqual([])
+    controller.dispose()
+  })
+
+  it.each(['conflict', 'deferred'] as const)('does not queue a %s selection', async scenario => {
+    const ledger = new MemoryDeliveryLedger()
+    const observer = new SynchronousTurnObserver()
+    const receipt = vi.fn()
+    const ensure = vi.fn(() => {
+      if (scenario === 'deferred') throw Object.assign(new Error('busy'), { deferred: { locusId: LOCUS.locusId, sessionId: LOCUS.sessionId } })
+      return LOCUS
+    })
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      locus: { resolveCurrent: () => LOCUS, ensureForDelivery: ensure },
+      resolveWorkspaceByTitle: async () => ({ ok: true, workspace: { id: 'different-workspace' } }),
+      workSessionLabel: () => '工作会话 W0',
+      receipts: { sendControl: receipt },
+      child: { ensureChild: () => { throw new Error('unexpected') }, queueChild: () => { throw new Error('unexpected') } },
+    })
+    const admission = acceptedAdmission()
+    if (admission.kind !== 'accepted') throw new Error('fixture')
+    await controller.handleAdmission({ ...admission, message: { ...admission.message, workspaceName: 'B' } })
+    expect(ensure).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'different-workspace' }))
+    expect(receipt).toHaveBeenCalledWith(expect.anything(), expect.stringContaining(scenario === 'deferred' ? '入口忙' : '工作会话 W0'), expect.anything())
+    expect(ledger.calls).toEqual([])
+    controller.dispose()
+  })
+})
+
 describe('LocusChannelController control commands', () => {
+  it('sends workspace usage without dispatching malformed control', async () => {
+    const ledger = new MemoryDeliveryLedger()
+    const observer = new SynchronousTurnObserver()
+    const receipt = vi.fn()
+    const dispatch = vi.fn()
+    const controller = new LocusChannelController({
+      ...baseDeps(ledger, observer),
+      child: { ensureChild: () => { throw new Error('unexpected') }, queueChild: () => { throw new Error('unexpected') } },
+      controlDispatch: { dispatch },
+      receipts: { sendControl: receipt },
+    })
+    await controller.handleAdmission(controlAdmission({ kind: 'workspace-invalid' }))
+    expect(receipt).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('-w <工作区名> <工作要求>'), expect.anything())
+    expect(dispatch).not.toHaveBeenCalled()
+    controller.dispose()
+  })
   it('dispatches an authorized control command without queueing Delivery work', async () => {
     const harness = makeHarness(input => ({ accepted: true, executionId: input.executionId, inboxMessageId: `inbox-${input.executionId}` }))
     const dispatch = vi.fn(async (request: { command: LocusControlCommand; endpoint: { chatId: string; threadId?: string; key: string }; senderId: string }) => ({
