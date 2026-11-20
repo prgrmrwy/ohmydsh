@@ -26,6 +26,10 @@ export const usedLevel = (used: number): UsageLevel => used >= 90 ? 'high' : use
 const numericWindows = (card: Card): CardWindow[] =>
   (card.windows ?? []).filter((window): window is CardWindow & { used: number } => typeof window.used === 'number' && Number.isFinite(window.used))
 
+/** The reading shows text (`unlimited`, a gateway `display`), not the `used` percentage: no bar, no colour, not a fallback candidate. */
+export const textReading = (window: Pick<CardWindow, 'display' | 'unlimited'>): boolean =>
+  window.unlimited === true || (typeof window.display === 'string' && window.display !== '')
+
 const tightest = (windows: CardWindow[]): CardWindow => windows.reduce((best, window) => (window.used! > best.used! ? window : best))
 
 const named = (windows: CardWindow[], pattern: RegExp): CardWindow[] =>
@@ -58,7 +62,7 @@ export interface SidebarRow {
 const windowRow = (window: CardWindow, kind: SidebarWindowRow['kind'], fallback = false): SidebarWindowRow => ({
   window,
   kind,
-  ...(typeof window.used === 'number' && Number.isFinite(window.used) ? { used: Math.min(100, Math.max(0, window.used)) } : {}),
+  ...(typeof window.used === 'number' && Number.isFinite(window.used) && !textReading(window) ? { used: Math.min(100, Math.max(0, window.used)) } : {}),
   ...(typeof window.display === 'string' && window.display !== '' ? { display: window.display } : {}),
   ...(window.unlimited === true ? { unlimited: true } : {}),
   ...(fallback ? { fallback: true } : {}),
@@ -83,8 +87,10 @@ export function sidebarRows(cards: Card[], kinds: readonly SidebarWindowKind[] =
         if (matches.length > 0) windows.push(windowRow(tightest(matches), kind))
       }
       if (windows.length === 0) {
-        const best = numeric.length > 0
-          ? tightest(numeric)
+        // Tier matching above still accepts text-reading windows; the tightest fallback only weighs real percentages.
+        const percent = numeric.filter(window => !textReading(window))
+        const best = percent.length > 0
+          ? tightest(percent)
           : (card.windows ?? []).find(window => window.unlimited === true || (typeof window.display === 'string' && window.display !== ''))
         if (best !== undefined) windows.push(windowRow(best, 'other', true))
       }
@@ -155,3 +161,24 @@ export function unchangedReads(previous: Card[], next: Card[]): boolean {
   const before = new Map(previous.map(card => [cardIdentity(card), cardReadTime(card)]))
   return next.every(card => before.has(cardIdentity(card)) && before.get(cardIdentity(card)) === cardReadTime(card))
 }
+
+/** One provider's cards in the sidebar: gateway order, grouped where the provider first appears. */
+export interface SidebarGroup {
+  provider: string
+  /** Card indexes into the input array, in gateway order. */
+  indexes: number[]
+}
+
+/** Group same-provider cards at the provider's first appearance; a one-card group renders as before. */
+export function sidebarGroups(cards: Pick<Card, 'provider'>[]): SidebarGroup[] {
+  const groups: SidebarGroup[] = []
+  cards.forEach((card, index) => {
+    const group = groups.find(g => g.provider === card.provider)
+    if (group) group.indexes.push(index); else groups.push({ provider: card.provider, indexes: [index] })
+  })
+  return groups
+}
+
+/** The account's own name inside a multi-account group, or undefined so the caller numbers it. */
+export const accountUser = (card: Pick<Card, 'user'>): string | undefined =>
+  typeof card.user === 'string' && card.user.trim() !== '' ? card.user : undefined
