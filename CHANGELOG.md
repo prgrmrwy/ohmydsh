@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 — 2026-11-20
+
+- **路由组单独分组。** Magpie 的路由入口（`group/…` 自定义组、`auto/…` 自动发现组）在选择器中进入 `Magpie (Routing)`，在设置页进入最上方的「路由组」分区（可见性、类型、默认推理强度）。此前它们按网关 `owned_by` 落在首个成员的厂商分组下，跨厂商的组被错误归类，成员顺序变化还会换组。只按 id 前缀识别，不读显示名或标签；插件原样透传组 id。`routing` 走现有归属流程，同一次同步中优先准入；网关已有 32 个其它归属时它会被拒绝并在设置里报告。设计与评审见 OpenSpec change `magpie-routing-entries`；思路来自 [#10](https://github.com/prgrmrwy/dsh-magpie-connector/pull/10)（@abworks-dev）与 [#11](https://github.com/prgrmrwy/dsh-magpie-connector/pull/11)（@WuW0），感谢两位。
+- **BREAKING：旧会话中保存在厂商分组下的路由组选择需要重选一次。** 例如保存为 `Magpie (Opencode-go)` / `ds` 的会话，升级后在 `Magpie (Routing)` 下重新选择。按模型 id 保存的默认 effort 不受影响。
+- **BREAKING：路由组的显示/隐藏改由「路由组」分区自己保存。** 此前在厂商分区里对路由组做的勾选不再生效，路由组回到跟随网关，如需隐藏请在新分区重新设置。
+- 默认 effort 下拉的未设置文案改为「默认：不指定」/ `Default: not set`。
+
 ## 0.6.12 — 2026-11-11
 
 - **修复模型请求绕过宿主全局 fetch 上下文处理的问题（prgrmrwy/dsh-magpie-connector#7）。** `POST /responses` 和 `POST /chat/completions` 在发送时读取全局 `fetch`，使 billion-context 等宿主中间件能够处理模型请求；目录、额度与重置等管理请求仍直接调用 undici。保留专用 dispatcher、连接超时、认证与归属 headers、禁止重定向、取消信号和错误分类。

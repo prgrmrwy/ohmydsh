@@ -8,7 +8,7 @@ import { t, type MagpieKey } from './locales.js'
 import { DEFAULT_REFRESH_MINUTES, MAX_REFRESH_MINUTES, setSidebarPreference } from './sidebar-preference.js'
 import { DEFAULT_SIDEBAR_WINDOWS, SIDEBAR_WINDOW_KINDS, normalizeSidebarWindows, type SidebarWindowKind } from '../shared/sidebar-window.js'
 import {
-  cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, parseResetOutcome, parseResetTicket, providerOrder, readTime, resetAccount, sameTarget,
+  cacheIds, cardKey, checkDiff, checkSignature, formatTime, parseCards, parseCheck, parseResetOutcome, parseResetTicket, providerOrder, readTime, ROUTING_PROVIDER, resetAccount, sameTarget,
   type Card, type CardsView, type CheckSnapshot, type ModelGroup, type ModelRow, type ResetTicket, type SettingsView, type SyncErrorKind,
 } from './view-model.js'
 
@@ -744,10 +744,13 @@ function ProviderGroup({ provider, group, settings, cards, busy, saving, mutateS
       return { visibleModels: rest }
     })
   }
-  return h('section', { className: 'dmg-panel', 'data-provider': provider, 'aria-label': provider },
+  const routing = provider === ROUTING_PROVIDER
+  const title = routing ? t('routingGroupsTitle') : provider
+  return h('section', { className: 'dmg-panel', 'data-provider': provider, 'aria-label': title },
     h('div', { className: 'dmg-head' },
-      h('h3', null, provider),
+      h('h3', null, title),
       group && !following ? h('button', { type: 'button', className: 'dmg-button', disabled: saving, onClick: follow }, t('followCatalog')) : null),
+    routing ? h('p', { className: 'dmg-hint' }, t('routingGroupsHint')) : null,
     group ? h('p', { className: 'dmg-hint' }, following ? t('visibilityFollow') : t('visibilityManual')) : null,
     models.length ? h('div', { className: 'dmg-models' }, ...models.map(model => h(ModelLine, {
       key: model.id, model, disabled: saving,
@@ -779,7 +782,8 @@ function ModelLine({ model, visible, effort, disabled, onVisible, onEffort }: {
     h('label', null,
       h('input', { type: 'checkbox', checked: visible, disabled, 'aria-label': t('showInPicker', { label }), onChange: (e: { target: { checked: boolean } }) => onVisible(e.target.checked) }),
       h('span', null, label),
-      model.name && model.name !== model.id ? h('code', null, model.id) : null),
+      model.name && model.name !== model.id ? h('code', null, model.id) : null,
+      model.routingKind ? h('span', { className: 'dmg-hint', 'data-routing-kind': model.routingKind }, t(model.routingKind === 'auto' ? 'routingKindAuto' : 'routingKindCustom')) : null),
     efforts.length ? h('select', {
       className: 'dmg-select', 'aria-label': t('defaultEffortAria', { label }), disabled,
       value: effort ?? '', onChange: (e: { target: { value: string } }) => onEffort(e.target.value === '' ? null : e.target.value),
