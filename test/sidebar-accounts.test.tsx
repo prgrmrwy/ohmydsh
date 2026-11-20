@@ -145,3 +145,12 @@ test('test_sidebar_accounts_10 spec Scenario "同一上游卡片不相邻时归�
   const order = [...host.querySelectorAll('[data-dmg-sidebar-row]')].map(el => text(el.querySelector('[data-dmg-sidebar-account]')) || el.getAttribute('data-dmg-sidebar-row'))
   expect(order).toEqual(['a@example.com', 'b@example.com', 'claude'])
 })
+
+test('regression: a long plan shrinks before the account and never overlaps the line', async () => {
+  const { settingsCss } = await import('../src/client/styles.js')
+  const rule = (name: string) => settingsCss.match(new RegExp(`\\.${name}\\{[^}]*\\}`))?.[0] ?? ''
+  expect(rule('dmg-sidebar-plan')).toMatch(/flex:0 1000 auto/)
+  expect(rule('dmg-sidebar-plan')).toContain('text-overflow:ellipsis')
+  expect(rule('dmg-sidebar-account')).toMatch(/flex:0 1 auto;min-width:0/)
+  expect(rule('dmg-sidebar-label')).toContain('overflow:hidden')
+})
