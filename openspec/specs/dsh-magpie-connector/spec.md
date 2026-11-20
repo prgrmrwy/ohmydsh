@@ -546,13 +546,17 @@ Access 请求头 SHALL 只附加到启用 Cloudflare Access 且地址为 https �
 - **THEN** 该请求不出现 `CF-Access-Client-Id` / `CF-Access-Client-Secret`，只带草稿自己的 bearer
 
 ### Requirement: 按 provider 分组的模型可见性
-设置页 SHALL 按网关模型的 `owned_by` 分组；没有 `owned_by` 的模型，取 id 中第一个 `/` 之前的部分作为分组。
+设置页 SHALL 按网关模型的 `owned_by` 分组；没有 `owned_by` 的模型，取 id 中第一个 `/` 之前的部分作为分组。路由入口（设置响应中带 `routingKind` 的模型行，见「路由入口识别」）例外：它们 SHALL 只出现在键为 `routing` 的「路由组」分区，该分区排在所有 provider 分区之前；厂商分区不再包含路由入口。一个 provider 只剩路由入口、且没有该 provider 的用量卡片时，SHALL NOT 显示该 provider 的空分区；有用量卡片时照常显示该分区（只含卡片）。
 
-每个 provider 的可见性语义：
+「路由组」分区顶部 SHALL 说明路由组在 Magpie 中新建和编辑；每行显示可见性勾选框、名称、类型（自定义 / 自动，取自设置响应模型行的 `routingKind`）以及（有 `reasoning_levels` 时）默认 effort 下拉。插件 SHALL NOT 提供创建、编辑路由组或展示其成员的控件。
+
+每个分区（含「路由组」）的可见性语义：
 - 没有保存过选择：跟随网关模型列表，全部可见；
 - 保存过选择（包括空列表）：只显示列表中的模型，之后新上架的模型默认隐藏。
 
-选择器 SHALL 只提供「网关目录 ∩ 可见集」中的模型。可见性是 DSH 侧本地偏好，SHALL NOT 回写网关。保存时只校验形状（provider → 字符串数组），不与当前目录比对。形状非法时 SHALL 以 400 拒绝。
+保存过选择的分区 SHALL 提供「恢复跟随网关列表」，该操作只删除本分区自己的键。路由入口的可见性 SHALL 只由 `routing` 键决定，不受其 `owned_by` 对应键的白名单影响。
+
+选择器 SHALL 只提供「网关目录 ∩ 可见集」中的模型。可见性是 DSH 侧本地偏好，SHALL NOT 回写网关。保存时只校验形状（键 → 字符串数组），不与当前目录比对。形状非法时 SHALL 以 400 拒绝。
 
 #### Scenario: 未设置时跟随网关
 - **GIVEN** `codex` 组未保存过可见性，网关新增 `codex/gpt-6-nova`
@@ -572,10 +576,35 @@ Access 请求头 SHALL 只附加到启用 Cloudflare Access 且地址为 https �
 - **WHEN** 客户端提交 `{codex: "codex/gpt-6-luna"}`（值不是数组）
 - **THEN** 响应状态为 400，已保存的可见性仍为 V
 
+#### Scenario: 路由组只受 routing 键控制
+- **GIVEN** 网关目录含 `{id:"group/ds", owned_by:"opencode-go"}`、`{id:"auto/glm-5", owned_by:"opencode-go"}` 与 `{id:"opencode-go/kimi-k3", owned_by:"opencode-go"}`；可见性保存了 `{"opencode-go": ["opencode-go/kimi-k3"]}`，没有 `routing` 键
+- **WHEN** 列举模型并读取设置
+- **THEN** `group/ds`、`auto/glm-5` 都可见；设置响应 `groups` 中 `provider: "routing"` 的组恰含这两个模型，其 `routingKind` 依次为 `custom`、`auto`；`opencode-go` 组恰含 `opencode-go/kimi-k3`
+
+#### Scenario: 只有路由组时仍能恢复跟随网关
+- **GIVEN** 网关目录只有 `group/solo`（无用量卡片）；用户取消再勾选 `group/solo`，保存了 `{"routing": ["group/solo"]}` 与 `{"claude": []}`
+- **WHEN** 网关新增 `group/new`，渲染设置页，点击「路由组」分区的「恢复跟随网关列表」，再列举模型
+- **THEN** 点击前 `group/new` 隐藏且分区显示「恢复跟随网关列表」；点击后 `visibleModels` 不含 `routing` 键而 `claude` 键不变，列举结果含 `group/solo` 与 `group/new`
+
+#### Scenario: provider 只剩路由入口时不留空分区
+- **GIVEN** 网关目录只有 `{id:"group/ds", owned_by:"opencode-go"}` 与 `{id:"claude/claude-fable-5-2", owned_by:"claude"}`，没有 `opencode-go` 的用量卡片
+- **WHEN** 渲染设置页
+- **THEN** 分区依次为「路由组」与 `claude`；没有 `data-provider="opencode-go"` 的分区
+
+#### Scenario: provider 只剩路由入口但有用量卡片时保留分区
+- **GIVEN** 网关目录只有 `{id:"group/ds", owned_by:"opencode-go"}`；用量卡片端点返回一张 `provider: "opencode-go"` 的卡片
+- **WHEN** 渲染设置页
+- **THEN** 存在 `data-provider="opencode-go"` 的分区，其中有该用量卡片而没有模型行；`group/ds` 只出现在「路由组」分区
+
+#### Scenario: 路由组分区说明与无编辑控件
+- **GIVEN** 网关目录含 `group/ds`
+- **WHEN** 渲染设置页
+- **THEN** 「路由组」分区含说明文本（中文界面为「在 Magpie 中新建和编辑路由组；这里决定是否在 DSH 显示及默认推理强度」）；该分区内的控件只有可见性勾选框、默认 effort 下拉与「恢复跟随网关列表」按钮
+
 ### Requirement: DSH 侧默认 effort
 用户 SHALL 能为每个 `reasoning_levels` 非空的模型设置或清除一个默认 effort。默认 effort 保存在 DSH 侧，作为该模型的 `reasoning.defaultEffort` 下发给 DSH。
 
-设置时，取值 SHALL 属于该模型当前的 `reasoning_levels`，否则以 400 拒绝。已保存的值因网关目录变化而不再属于当前档位时，SHALL NOT 下发，但存储中保留该值；网关恢复该档位后，SHALL 重新下发。没有设置默认值的模型，SHALL NOT 下发 `defaultEffort`。
+设置时，取值 SHALL 属于该模型当前的 `reasoning_levels`，否则以 400 拒绝。已保存的值因网关目录变化而不再属于当前档位时，SHALL NOT 下发，但存储中保留该值；网关恢复该档位后，SHALL 重新下发。没有设置默认值的模型，SHALL NOT 下发 `defaultEffort`。设置页的默认 effort 下拉在未设置时 SHALL 显示「默认：不指定」（英文 `Default: not set`），已设置时显示所选档位。路由入口与普通模型适用同一规则。
 
 #### Scenario: 设置与清除
 - **GIVEN** `codex/gpt-6.1-sol` 的 `reasoning_levels` 含 `high`
@@ -591,6 +620,11 @@ Access 请求头 SHALL 只附加到启用 Cloudflare Access 且地址为 https �
 - **GIVEN** 已保存 `codex/gpt-6-astra` 的默认值 `ultra`
 - **WHEN** 网关目录中该模型的 `reasoning_levels` 先变为不含 `ultra`，之后又恢复含 `ultra`，每次变化后各解析一次
 - **THEN** 第一次没有 `reasoning.defaultEffort`；第二次为 `ultra`
+
+#### Scenario: 下拉文案与路由入口
+- **GIVEN** `group/cheap-first` 的 `reasoning_levels` 为 `["low","high","max"]` 且未设置默认值；`claude/claude-fable-5-2` 的 `reasoning_levels` 为 `["low","high"]` 且设置了 `high`；界面语言为中文
+- **WHEN** 渲染设置页，然后把 `group/cheap-first` 设为 `high` 并解析一次模型信息
+- **THEN** 渲染时 `group/cheap-first` 的下拉显示「默认：不指定」，`claude/claude-fable-5-2` 的下拉显示 `high`；设置后 `group/cheap-first` 的 `reasoning.defaultEffort` 为 `high`
 
 ### Requirement: 只读用量卡片
 
@@ -815,7 +849,7 @@ host SHALL 按网关响应分类结果：
 
 ### Requirement: 侧边栏常驻额度卡
 
-开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游显示「侧边栏显示窗口档位」勾选的窗口（默认只有 `7 days`），单行布局下窗口名照抄网关原文并紧跟名称后的括号里，多选布局见该要求；每行读数左侧 SHALL 显示该窗口的绝对重置时间（当年 `M/D HH:mm`，跨年 `YYYY/M/D HH:mm`，完整时间放在 `title` 属性）；网关未提供该窗口 `resetsAt`（例如某个滚动窗口当前无用量）时 SHALL 显示 `—` 并在 `title` 说明网关未提供重置时间，SHALL NOT 推算或补造时间。所选档位缺失时按「侧边栏显示窗口档位」回退；没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡正文 SHALL 限高 320px，超出时在卡内滚动；容器溢出时卡片底部 SHALL 保留一行提示带（高度恒定为 16px），只要仍有内容在折叠线以下就 SHALL 在该带内显示无分割线的双下箭头，滚到底后箭头 SHALL 隐藏但提示带高度 SHALL 保留，卡片 SHALL NOT 因箭头出现/消失发生位移（详见「侧边栏卡片的展开、收起与读取」的溢出提示要求）。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
+开关打开时，客户端 SHALL 在官方槽位 `sidebar.footer.action` 渲染常驻卡：每个上游显示「侧边栏显示窗口档位」勾选的窗口（默认只有 `7 days`），单行布局下窗口名照抄网关原文并紧跟名称后的括号里，多选布局见该要求；每行读数左侧 SHALL 显示该窗口的绝对重置时间（当年 `M/D HH:mm`，跨年 `YYYY/M/D HH:mm`，完整时间放在 `title` 属性）；网关未提供该窗口 `resetsAt`（例如某个滚动窗口当前无用量）时 SHALL 显示 `—` 并在 `title` 说明网关未提供重置时间，SHALL NOT 推算或补造时间。所选档位缺失时按「侧边栏显示窗口档位」回退；没有数字读数时显示网关 `display` 文本或「无限」，只有 `balance` 时显示余额，两者都没有才显示 `—`。常驻卡正文 SHALL 限高 320px，超出时在卡内滚动；容器溢出时卡片底部 SHALL 保留一行提示带（高度恒定为 16px），只要仍有内容在折叠线以下就 SHALL 在该带内显示无分割线的双下箭头，滚到底后箭头 SHALL 隐藏但提示带高度 SHALL 保留，卡片 SHALL NOT 因箭头出现/消失发生位移（详见「侧边栏卡片的展开、收起与读取」的溢出提示要求）。常驻卡 SHALL NOT 使用 border；顺序 SHALL 按网关返回顺序；同一 `provider` 有多张卡片时，这些卡片 SHALL 归到该 `provider` 在结果中首次出现的位置，组内保持网关顺序（见「侧边栏多账号分段」）；整张卡 SHALL 只有一个刷新入口；除刷新按钮外，只有标题行是交互目标。
 
 #### Scenario: 默认档位只显示周窗口
 
@@ -854,6 +888,12 @@ host SHALL 按网关响应分类结果：
 - **GIVEN** 常驻卡已渲染
 - **WHEN** 查找所有刷新控件
 - **THEN** 只有头部一个刷新按钮；点击它发出一次 `POST cards {all:true}`，每张卡片上没有独立刷新控件
+
+#### Scenario: 同一上游卡片不相邻时归到首次出现处
+
+- **GIVEN** 网关依次返回 `codex`（user a）、`claude`、`codex`（user b）三张卡片
+- **WHEN** 渲染常驻卡
+- **THEN** 顺序为 `Codex` 组（a、b）在前、`Claude Code` 在后
 
 ### Requirement: 侧边栏卡片的展开、收起与读取（流内手风琴）
 
@@ -1315,6 +1355,7 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 **归属键**：插件 SHALL 把网关目录中的每个模型归入一个归属键。`owned_by` 是不可信的网关数据，SHALL 先校验再使用：
 - `owned_by` 为字符串，去首尾空白后长度 1–48，且转小写后匹配 `^[a-z0-9][a-z0-9._-]*$` 时，归属键为其小写形式；
 - 其它情况（缺失、非字符串、空、超长、含其它字符）归属键为 `other`；网关原值转小写后恰为 `other` 的模型也归入 `other`。
+- 例外：路由入口（见「路由入口识别」）的归属键固定为 `routing`，与其 `owned_by` 无关；其 `owned_by` SHALL NOT 参与归属键计算与归属准入。`routing` 不在已准入的 `knownOwners` 中时（名额已满被拒绝，或 route 冲突后撤回），路由入口 SHALL 改列在其 `owned_by` 按上述规则得到的归属 route 上（得到 `routing` 时用 `other`；该 route 已注册时），使升级前可用的路由入口不因名额而消失；`routing` 准入后即回到 `dsh-magpie-connector-routing`。不是路由入口、但按上述规则归属键或可见性键（`owned_by` 原值，缺失时为 id 首段）会是 `routing` 的普通模型，归属键与可见性键都 SHALL 改为 `other`，使 `routing` 只代表路由入口。
 
 每个归属键对应 route `dsh-magpie-connector-<归属键>`。route 的 `listModels` SHALL 只列出「归属键等于本 route ∩ 可见集」中的模型，模型 id 保持网关原值，SHALL NOT 改写或加前缀。
 
@@ -1322,7 +1363,7 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 
 **provider 身份**：宿主要求 adapter 返回的每条模型信息的 `provider` 都等于被请求的 route。插件 SHALL 在 `listModels(route)`、`resolveModel(route, id)` 与 `prepareCall(route, id)` 返回的模型信息中，把 `provider` 设为被请求的 `route`；查找时 SHALL 按模型 id 在当前完整目录中查找，与请求的 route 无关。因此在任一本插件 route 上请求另一归属的模型 id，得到的能力（effort、上下文、输入模态、线协议）与在其所属 route 上请求一致，只有 `provider` 字段不同。目录中不存在的 id SHALL 返回 `{provider: <route>, id, name: id}` 形状的兜底信息。
 
-插件 SHALL NOT 按模型 id 或显示名推测归属，SHALL NOT 输出 `displayGroup` 或其它非官方展示元数据。可见性与默认 effort 偏好 SHALL 继续以既有键（网关 `owned_by` 原值，缺失时为 id 首段；模型 id）保存与匹配，本 requirement 不改变它们。
+插件 SHALL NOT 按模型 id 或显示名推测归属，SHALL NOT 输出 `displayGroup` 或其它非官方展示元数据。可见性与默认 effort 偏好 SHALL 继续以既有键（网关 `owned_by` 原值，缺失时为 id 首段；模型 id）保存与匹配；例外是路由入口的可见性键固定为 `routing`，以及上文非路由入口改用 `other`（见「按 provider 分组的模型可见性」）。
 
 #### Scenario: 按 owned_by 分组且不按名字猜测
 
@@ -1360,6 +1401,30 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 - **WHEN** 用其 `buildModelCatalog` 生成目录
 - **THEN** `groups` 中出现 `Magpie (Claude)`、`Magpie (Codex)` 等独立分组；插件 `listModels` / `resolveModel` 的任何返回值都不含 `displayGroup` 键
 
+#### Scenario: 路由入口归入 routing 而不随首个成员换组
+
+- **GIVEN** 网关返回 `{id:"group/cheap-first", display_name:"便宜优先", owned_by:"opencode-go"}`、`{id:"auto/kimi-k3", display_name:"Kimi K3", owned_by:"opencode-go"}`、`{id:"opencode-go/kimi-k3", owned_by:"opencode-go"}`、`{id:"claude/claude-fable-5-2", owned_by:"claude"}`；之后网关把 `group/cheap-first` 的 `owned_by` 改为 `claude` 再同步一次
+- **WHEN** 每次同步后读取原版宿主 `session/modelCatalog`
+- **THEN** 两次都有组 `dsh-magpie-connector-routing` / `Magpie (Routing)`，恰含 `group/cheap-first` 与 `auto/kimi-k3`；`Magpie (Opencode-go)` 恰含 `opencode-go/kimi-k3`；`Magpie (Claude)` 恰含 `claude/claude-fable-5-2`；显示名为网关 `display_name` 原值，没有附加后缀
+
+#### Scenario: 首次安装只有路由入口
+
+- **GIVEN** 首次安装、`knownOwners` 为空，网关目录只有 `{id:"group/ds", owned_by:"opencode-go"}`
+- **WHEN** 首次目录同步
+- **THEN** `knownOwners` 为 `["routing"]`；provider 列表中本插件 route 恰为 `dsh-magpie-connector-routing`，其列举含 `group/ds`
+
+#### Scenario: 名为 routing 的普通模型归入 other
+
+- **GIVEN** 网关返回 `{id:"routing/foo", owned_by:"routing"}` 与 `{id:"routing/bar"}`（无 owned_by）
+- **WHEN** 目录同步后列举模型并读取设置
+- **THEN** 两者都在 `Magpie (Other)` 中，不在 `Magpie (Routing)` 中；设置响应中两者位于 `provider: "other"` 的组，都没有 `routingKind`；`knownOwners` 不含 `routing`
+
+#### Scenario: 旧会话保存的厂商 route 路由入口不再可用
+
+- **GIVEN** 网关目录中 `group/ds` 的 `reasoning_levels` 为 `["low","high","max"]`；升级前某会话保存了 (`dsh-magpie-connector-opencode-go`, `group/ds`)，且 `group/ds` 保存了默认 effort `high`
+- **WHEN** 升级后目录同步，宿主对该组合做模型可用性检查，再解析 (`dsh-magpie-connector-routing`, `group/ds`)
+- **THEN** 前者不可用（`dsh-magpie-connector-opencode-go` 的列举不含 `group/ds`）；后者可用且 `reasoning.defaultEffort` 仍为 `high`
+
 ### Requirement: 原生回放身份跨 route 稳定
 
 插件写入 assistant 消息 `replayState` 的 pi-ai 回放身份（envelope `response.provider` 与 pi-ai `Model.provider`）SHALL 是与 DSH route 无关的固定传输身份 `dsh-magpie-connector`，SHALL NOT 使用归属 route id。该值只用于 pi-ai 内部判断「同一模型」，SHALL NOT 作为 LLM route 注册。
@@ -1390,7 +1455,7 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 
 ### Requirement: 归属 route 持久
 
-插件 SHALL 把见过的归属键保存在设置的 `knownOwners`：按首次出现顺序排列的去重数组，元素满足归属键规则（小写、1–48 字符、`^[a-z0-9][a-z0-9._-]*$`），最多 32 个。
+插件 SHALL 把见过的归属键保存在设置的 `knownOwners`：按准入顺序排列的去重数组（同一次同步中 `routing` 先于其它新归属准入，其余按目录中首次出现顺序），元素满足归属键规则（小写、1–48 字符、`^[a-z0-9][a-z0-9._-]*$`），最多 32 个。
 
 **加载校验**：插件启动时 SHALL 在注册任何 route、解析任何凭据、发起任何网络请求之前校验 `knownOwners`：缺失视为空数组；不是数组、元素不是合法归属键、含重复或超过 32 个时，整个 `knownOwners` 视为空数组（不做部分修复），设置响应 SHALL 报告 `knownOwnersReset: true`，插件 SHALL NOT 为此改写设置文件，直到下一次合法的 `knownOwners` 写入。`knownOwners` 的异常 SHALL NOT 影响线路、凭据与偏好的加载。
 
@@ -1402,7 +1467,7 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 - 已有句柄后，`replace` 抛 `DUPLICATE_ADAPTER` / `INVALID_ADAPTER` 时宿主未改变 route 集合；`replace` 抛 `INVARIANT` 时宿主已提交新集合。
 
 **归属追加与发布**（目录同步成功、且仍是当前代且未 dispose 时）：
-1. 按目录中首次出现顺序收集新归属键，依次准入直至 `knownOwners` 满 32 个；超出者不准入，设置响应报告 `ownerLimitReached: true` 与被拒绝列表。
+1. 按目录中首次出现顺序收集新归属键，其中 `routing`（见「按网关归属注册 route」）排在本次新归属的最前面，依次准入直至 `knownOwners` 满 32 个；超出者不准入，设置响应报告 `ownerLimitReached: true` 与被拒绝列表。
 2. 先提交目录（已注册 route 立即可列举到新目录）。
 3. 若有准入的新归属：以「当前 `knownOwners` + 新归属」写入设置。写入失败 → 不扩大 route 集合，设置响应 `lastSyncErrorKind` 为 `settings`，转第 4 步只用原集合发布。
 4. 发布：已有句柄时以（写入成功则扩大后、否则原有的）完整集合调用 `replace`；还没有句柄且集合非空、且未处于启动失败状态时调用 `registerAdapter`（失败按上一条「首次 `registerAdapter` 抛错」处理）。目录有变化而 route 集合不变时也 SHALL 调用 `replace`，使已打开的选择器收到 `llm/adapters-updated`。
@@ -1489,3 +1554,106 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 - **GIVEN** `knownOwners` 已有 30 个
 - **WHEN** 目录同步按顺序返回新归属 `za`、`zb`、`zc` 的模型；之后网关不再返回 `zc`，再同步一次
 - **THEN** 第一次后 `knownOwners` 追加 `za`、`zb` 达到 32 个，注册其 route；不注册 `dsh-magpie-connector-zc`，任何 route 都不列出 `zc` 的模型；设置响应 `ownerLimitReached` 为 `true`、被拒绝列表为 `["zc"]`；第二次后 `ownerLimitReached` 为 `false`
+
+#### Scenario: routing 在同一次同步中优先准入
+
+- **GIVEN** `knownOwners` 已有 31 个且不含 `routing`
+- **WHEN** 目录同步按顺序返回新归属 `zz` 的模型和 `group/ds`（`owned_by: "opencode-go"`）
+- **THEN** `knownOwners` 的最后一项为 `routing`（前 31 项不变），达到 32 个并注册 `dsh-magpie-connector-routing`，其列举含 `group/ds`；`zz` 不准入，设置响应 `ownerLimitReached` 为 `true`、被拒绝列表为 `["zz"]`
+
+#### Scenario: 首次同步时 routing 排在最前
+
+- **GIVEN** 首次安装、`knownOwners` 为空
+- **WHEN** 目录同步按顺序返回 `claude/a`（`owned_by: "claude"`）与 `group/ds`
+- **THEN** `knownOwners` 恰为 `["routing","claude"]`
+
+#### Scenario: 名额已满时 routing 被拒绝并报告
+
+- **GIVEN** `knownOwners` 已有 32 个且不含 `routing`
+- **WHEN** 目录同步返回 `group/ds`
+- **GIVEN** 补充：这 32 个中含 `opencode-go`（升级前已持久的厂商归属）
+- **THEN** 不注册 `dsh-magpie-connector-routing`；`group/ds` 仍可用，列在 `dsh-magpie-connector-opencode-go` 上，不出现在其它 route；设置响应 `ownerLimitReached` 为 `true`、被拒绝列表为 `["routing"]`
+
+#### Scenario: routing route 被占用时 replace 冲突
+
+- **GIVEN** `knownOwners` 为 `["claude"]`（已注册）；另一个 adapter 已注册 route `dsh-magpie-connector-routing`
+- **WHEN** 目录同步返回 `claude/a` 与 `group/ds`（`owned_by: "opencode-go"`，不在 `knownOwners` 中）
+- **THEN** 本插件仍只拥有 `dsh-magpie-connector-claude`，其列举含 `claude/a`；任何 route 都不列出 `group/ds`（其原厂商 route 未注册）；设置文件 `knownOwners` 为 `["claude"]`；设置响应 `lastSyncErrorKind` 为 `registration` 且错误含 `dsh-magpie-connector-routing`
+
+#### Scenario: replace 冲突撤回后路由入口留在已注册的原厂商 route
+
+- **GIVEN** `knownOwners` 为 `["claude"]`（已注册）；另一个 adapter 已注册 route `dsh-magpie-connector-routing`
+- **WHEN** 目录同步返回 `claude/a` 与 `group/mix`（`owned_by: "claude"`）
+- **THEN** `dsh-magpie-connector-claude` 的列举为 `claude/a` 与 `group/mix`；不在任何其它 route 上；设置文件 `knownOwners` 仍为 `["claude"]`；设置响应 `lastSyncErrorKind` 为 `registration`
+
+### Requirement: 路由入口识别
+网关目录中 id 以 `group/` 或 `auto/` 开头的条目 SHALL 视为路由入口；`auto/` 与 `group/auto-` 开头的为自动组，其余为自定义组。前缀比较区分大小写（`Group/x` 不是路由入口）。插件 SHALL 只依据 id 前缀识别，SHALL NOT 依据 `display_name`、`magpie_label` 或其它标签文字判断。设置响应中路由入口的模型行 SHALL 带 `routingKind`（`auto` 或 `custom`），普通模型行 SHALL NOT 带该字段。
+
+#### Scenario: 按前缀识别与分类
+- **GIVEN** 网关返回 `group/ds`、`group/auto-kimi-k3`、`auto/glm-5`、`opencode-go/x`（`display_name: "Routing group X"`, `magpie_label: "routing group"`）
+- **WHEN** 目录同步后读取设置
+- **THEN** `group/ds` 的 `routingKind` 为 `custom`，`group/auto-kimi-k3` 与 `auto/glm-5` 为 `auto`，三者在 `provider: "routing"` 组；`opencode-go/x` 没有 `routingKind`，在 `opencode-go` 组
+
+### Requirement: 路由入口原样透传
+选择路由入口发起生成时，请求的 `model` SHALL 为网关原始 id；插件 SHALL NOT 把路由入口替换为任一成员模型，SHALL NOT 自行选择账号；默认 effort 按「DSH 侧默认 effort」下发，并按该模型线协议的既有 effort 字段发送。
+
+#### Scenario: 透传 id 与 effort
+- **GIVEN** 网关目录中 `group/cheap-first` 的 `native_endpoints` 为 `[]`（因此走 Chat Completions），`reasoning_levels` 为 `["low","high","max"]`；用户为它保存了默认 effort `high`
+- **WHEN** 经原版宿主在 `dsh-magpie-connector-routing` 上选择 `group/cheap-first`、不另选 effort，发起一轮生成（宿主按 `reasoning.defaultEffort` 决定本轮 effort）
+- **THEN** 网关收到的 `POST /v1/chat/completions` 请求体 `model` 为 `group/cheap-first`，`reasoning_effort` 为 `high`
+
+### Requirement: 侧边栏多账号分段
+
+同一 `provider` 在本次卡片结果中有两张及以上卡片时，侧边栏常驻卡的收起形态、展开明细与侧栏收起时的浮层 SHALL 只显示一次该上游名称（卡片 `name`，缺失时 `provider`）并附账号数（中文「N 个账号」，英文「N accounts」），随后按网关顺序列出每张卡片。每张卡片 SHALL 以账号标识代替原来的上游名称位置：账号标识为卡片的 `user`；`user` 缺失或为空时为按组内顺序的「账号 N」（英文「Account N」，N 从 1 起）；有 `plan` 时附在账号标识之后。账号标识过长时 SHALL 截断显示并在 `title` 给出全文。
+
+账号标识之下的窗口选择、窗口行、重置时间、读数、进度条、回退与失败显示 SHALL 与单账号时的规则相同，SHALL NOT 因分段减少显示的窗口或重置时间。只有一张卡片的上游 SHALL 保持原有渲染，不显示账号数或账号标识。插件 SHALL NOT 显示多账号的分配方式。
+
+#### Scenario: 同一上游多账号分段
+- **GIVEN** 网关依次返回 `{provider:"codex", name:"Codex", user:"a@example.com", plan:"prolite", windows:[{name:"7 days", used:3, resetsAt:<11/25 17:17>}]}`、`{provider:"claude", name:"Claude Code", windows:[{name:"7 days", used:20}]}`、`{provider:"codex", name:"Codex", user:"b@example.com", plan:"free", windows:[{name:"30 days", used:0, resetsAt:<12/20 16:04>}]}`；`sidebarWindows` 为 `["weekly"]`
+- **WHEN** 渲染常驻卡（收起），再展开
+- **THEN** 收起时依次为：`Codex` 组标题含「2 个账号」；`a@example.com`、`prolite`、`(7 days)`、`11/25 17:17`、`3%` 与进度条；`b@example.com`、`free`、`(30 days)`（回退）、`12/20 16:04`、`0%` 与进度条；然后是 `Claude Code (7 days)` 单行且没有账号标识或账号数
+- **AND** 展开后 `Codex` 只作为组标题出现一次，两段的段落标题分别为 `a@example.com` 与 `b@example.com`，各自列出自己的全部窗口；`Claude Code` 段落不变
+
+#### Scenario: 多账号且勾选多个档位
+- **GIVEN** 两张 `provider:"claude"`、`name:"Claude Code"` 卡片，`user` 分别为 `a@example.com`（`plan:"max"`）与 `b@example.com`，各有 `5 hours` 与 `7 days` 窗口；`sidebarWindows` 为 `["fiveHour","weekly"]`
+- **WHEN** 渲染常驻卡
+- **THEN** 先是组标题 `Claude Code`「2 个账号」；然后 `a@example.com` 与 `max` 一行，其下 `5 hours`、`7 days` 两行各带到期时间、读数与进度条；然后 `b@example.com` 一行，其下同样两行
+
+#### Scenario: 组内一个账号失败、一个只有余额
+- **GIVEN** 两张 `provider:"deepseek"` 卡片：`{user:"a", error:"HTTP 502"}` 与 `{user:"b", balance:"¥42.50"}`
+- **WHEN** 渲染常驻卡，再展开
+- **THEN** 收起时组标题「2 个账号」下，`a` 行显示「读取失败」且没有百分比与进度条，`b` 行显示 `¥42.50` 且没有进度条；展开后 `a` 段显示 `HTTP 502`，`b` 段显示余额
+
+#### Scenario: 侧栏收起时浮层也分段
+- **GIVEN** 「同一上游多账号分段」的卡片，`wide` 为 `false`
+- **WHEN** 点击 Magpie icon 打开浮层
+- **THEN** 浮层内 `Codex` 组标题只出现一次并含「2 个账号」，两段的段落标题为 `a@example.com` 与 `b@example.com`
+
+#### Scenario: 多账号缺少 user
+- **GIVEN** 三张 `provider:"codex"` 卡片，`user` 依次缺失、为 `"  "`、为 `c@example.com`，各有 `7 days` 窗口
+- **WHEN** 渲染常驻卡
+- **THEN** 账号标识依次为「账号 1」「账号 2」「c@example.com」；渲染文本不出现 `undefined`；渲染过程中没有 React 重复 key 警告
+
+#### Scenario: 账号标识过长时截断
+- **GIVEN** 两张 codex 卡片，其中一张 `user` 为 60 个字符
+- **WHEN** 渲染常驻卡
+- **THEN** 该账号标识元素（`[data-dmg-sidebar-account]`）的 `title` 为完整的 60 字符 `user`，且带 `dmg-sidebar-account` 类；插件样式表中 `.dmg-sidebar-account` 声明 `text-overflow:ellipsis` 与 `min-width:0`
+
+### Requirement: 侧边栏进度条只对百分比读数绘制
+
+侧边栏常驻卡与展开明细中，一个窗口的读数显示为「无限」或网关 `display` 文本时，SHALL NOT 为该窗口绘制进度条，也 SHALL NOT 把它当作数字读数参与「读数最高的窗口」回退选择；它仍可作为最后一级的 `display`/「无限」回退显示文字。只有读数显示为 `used` 百分比的窗口才绘制进度条，读数颜色（`data-level`）同理。勾选档位的匹配规则不变：带有限 `used` 的窗口即使同时带 `display`，仍按窗口名匹配为该档位行，只是显示 `display` 文本且没有进度条。
+
+#### Scenario: 文字读数不画进度条
+- **GIVEN** `codex` 卡片窗口为 `{name:"7 days", used:3}` 与 `{name:"Image generation", used:0, display:"Unknown"}`
+- **WHEN** 渲染展开明细
+- **THEN** `7 days` 行显示 `3%` 并有一条进度条；`Image generation` 行显示 `Unknown` 且没有进度条
+
+#### Scenario: 档位窗口带 display 时仍是档位行
+- **GIVEN** `codex` 卡片只有 `{name:"7 days", used:20, display:"约 20%"}`，`sidebarWindows` 为 `["weekly"]`
+- **WHEN** 渲染常驻卡
+- **THEN** 该行为档位行 `Codex (7 days)`（窗口名没有回退说明 `title`），读数为 `约 20%`，没有进度条，读数元素没有 `data-level`
+
+#### Scenario: 文字读数不参与回退选择
+- **GIVEN** `codex` 卡片只有 `{name:"30 days", used:0}` 与 `{name:"Image generation", used:50, display:"Unknown"}`，`sidebarWindows` 为 `["weekly"]`
+- **WHEN** 渲染常驻卡
+- **THEN** 回退行为 `(30 days)` 与 `0%`，不是 `Image generation`
