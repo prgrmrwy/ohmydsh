@@ -388,8 +388,8 @@ describe('侧栏收起', () => {
     expect(host.querySelector('[data-dmg-sidebar]')).toBeNull()
     const rail = host.querySelector('[data-dmg-sidebar-rail]') as HTMLButtonElement
     expect(rail).not.toBeNull()
-    expect(rail.getAttribute('aria-label')).toBe('Magpie 额度')
-    expect(rail.title).toBe('Magpie 额度')
+    expect(rail.getAttribute('aria-label')).toBe('Magpie 用量')
+    expect(rail.title).toBe('Magpie 用量')
     await act(async () => { rail.click() })
     await flush()
     const popover = document.querySelector('[data-dmg-sidebar-popover]')
