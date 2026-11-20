@@ -46,7 +46,9 @@ test('Linux: orchestrator survives SIGKILL of the Host-managed scope it was sche
   assert.ok(await wait(() => fs.existsSync(f.scheduled), 10_000), 'schedule did not complete')
   assert.equal(fs.readFileSync(f.scheduled, 'utf8'), '0')
   assert.equal(fs.existsSync(f.out), false, 'restart must not run before the grace period')
-  assert.equal(spawnSync('systemctl', ['--user', 'kill', '--signal=SIGKILL', unit]).status, 0)
+  // systemd 255 exits 1 ("auxiliary processes: Invalid argument") even though the scope is killed; judge by the unit state.
+  spawnSync('systemctl', ['--user', 'kill', '--signal=SIGKILL', unit])
+  assert.ok(await wait(() => spawnSync('systemctl', ['--user', 'is-active', unit], { encoding: 'utf8' }).stdout.trim() !== 'active', 5_000), 'range scope still active after SIGKILL')
   assert.ok(await wait(() => fs.existsSync(f.out), 10_000), 'orchestrator died with the range')
   const result = JSON.parse(fs.readFileSync(f.out, 'utf8'))
   assert.match(result.cgroup, /dsh-restart-[^/]+\.scope/)
