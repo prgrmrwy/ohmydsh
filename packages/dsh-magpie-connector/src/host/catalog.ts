@@ -23,7 +23,7 @@ export type RoutingKind = 'auto' | 'custom'
 /** Routing entry type by id prefix only (case-sensitive); labels are presentation text and never decide the type. */
 export const routingKindOf = (id: string): RoutingKind | undefined =>
   id.startsWith('auto/') || id.startsWith('group/auto-') ? 'auto' : id.startsWith('group/') ? 'custom' : undefined
-export interface CatalogModel { info: LlmResolvedModelInfo; /** Visibility key: raw `owned_by`, else the id's first segment; `routing` for routing entries. */ provider: string; /** Owner key that selects the route. */ owner: string; routingKind?: RoutingKind; /** Routing entries only: the vendor owner they list under while `routing` is not admitted. */ fallbackOwner?: string; efforts: string[]; nativeEndpoints: string[]; serviceTiers: string[]; outputLimit?: number }
+export interface CatalogModel { info: LlmResolvedModelInfo; /** Visibility key: raw `owned_by`, else the id's first segment; `routing` for routing entries. */ provider: string; /** Owner key that selects the route. */ owner: string; routingKind?: RoutingKind; /** Routing entries only: the vendor owner they list under while `routing` is not admitted. */ fallbackOwner?: string; /** Routing entries only: the visibility key they used before 0.7 (raw `owned_by`, else id's first segment). */ legacyVisibility?: string; efforts: string[]; nativeEndpoints: string[]; serviceTiers: string[]; outputLimit?: number }
 /**
  * DSH compaction-basic's default `headroomTokens` (DSH 0.2.0-rc.2, lib/index.js) and Magpie's `dshHeadroom`.
  * Re-check on every DSH upgrade: DSH reserves `defaultMaxTokens` plus this headroom out of the window before compacting.
@@ -52,7 +52,7 @@ export function mapCatalog(body: unknown): CatalogModel[] {
     const routingKind = routingKindOf(raw.id)
     // `routing` names routing entries only; an ordinary model that would also map to it falls back to `other`.
     const visibility = ownedBy ?? raw.id.split('/')[0], owner = ownerKey(raw.owned_by)
-    const keys = routingKind ? { provider: ROUTING_OWNER, owner: ROUTING_OWNER, routingKind, fallbackOwner: owner === ROUTING_OWNER ? 'other' : owner }
+    const keys = routingKind ? { provider: ROUTING_OWNER, owner: ROUTING_OWNER, routingKind, fallbackOwner: owner === ROUTING_OWNER ? 'other' : owner, legacyVisibility: visibility }
       : { provider: visibility.toLowerCase() === ROUTING_OWNER ? 'other' : visibility, owner: owner === ROUTING_OWNER ? 'other' : owner }
     return [{ info, ...keys, efforts, ...(outputLimit !== undefined ? { outputLimit } : {}),
       nativeEndpoints: strings(raw.native_endpoints), serviceTiers: Array.isArray(raw.service_tiers) ? raw.service_tiers.flatMap((t: { id?: unknown }) => typeof t?.id === 'string' ? [t.id] : []) : [] }]

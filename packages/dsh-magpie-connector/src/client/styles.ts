@@ -152,6 +152,10 @@ export const settingsCss = `
 .dmg-sidebar-group>.dmg-sidebar-row{padding-left:8px}
 .dmg-sidebar-account-line{display:flex;align-items:baseline;min-width:0}
 .dmg-sidebar-account-line+.dmg-sidebar-row-line{margin-top:1px}
+.dmg-sidebar-row-line.is-account{flex-wrap:wrap;row-gap:1px}
+.dmg-sidebar-row-line.is-account .dmg-sidebar-label{flex:1 0 auto;min-width:0;overflow:visible;gap:5px}
+.dmg-sidebar-row-line.is-account .dmg-sidebar-plan{margin-left:0}
+.dmg-sidebar-reading-group{flex:none;display:flex;align-items:baseline;gap:5px;margin-left:auto}
 .dmg-sidebar-group-name{display:flex;align-items:baseline;min-width:0;font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dmg-sidebar-win-row{display:flex;align-items:baseline;gap:5px;min-width:0;margin-top:3px}
 .dmg-sidebar-win-label{flex:1;min-width:0;font-size:10.5px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
