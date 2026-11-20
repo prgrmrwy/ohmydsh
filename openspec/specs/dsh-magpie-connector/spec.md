@@ -795,7 +795,7 @@ host SHALL 按网关响应分类结果：
 
 ### Requirement: 侧边栏额度开关
 
-插件设置页 SHALL 提供「在侧边栏常驻显示额度用量」开关（`role="switch"`，默认关闭），其值 SHALL 持久化在插件 host 设置的 `sidebarUsage` 布尔字段中；字段缺失时按 `false` 处理，写入非布尔值 SHALL 被拒绝（400）且设置不变。开关关闭时，客户端 SHALL NOT 渲染任何侧栏额度 UI，也 SHALL NOT 发起卡片请求。
+插件设置页 SHALL 提供侧边栏用量开关（与 Magpie 官方用语对齐，侧栏相关文案统一称「用量」（重置卡相关的「重置额度」等文案不变）：中文开关文案为「在侧边栏常驻显示用量」，侧栏标题为「Magpie 用量」；`role="switch"`，默认关闭），其值 SHALL 持久化在插件 host 设置的 `sidebarUsage` 布尔字段中；字段缺失时按 `false` 处理，写入非布尔值 SHALL 被拒绝（400）且设置不变。开关关闭时，客户端 SHALL NOT 渲染任何侧栏额度 UI，也 SHALL NOT 发起卡片请求。
 
 #### Scenario: 开关关闭时不渲染也不请求
 
@@ -897,7 +897,7 @@ host SHALL 按网关响应分类结果：
 
 ### Requirement: 侧边栏卡片的展开、收起与读取（流内手风琴）
 
-标题行 SHALL 提供一个带 `aria-expanded` 的展开/收起按钮，点击 SHALL 在展开与收起之间切换；标题行其余部分（刷新按钮除外）点击效果相同。常驻卡正文与双下箭头 SHALL NOT 可点击。滚动容器 SHALL 隐藏滚动条（`scrollbar-width:none`、`-ms-overflow-style:none` 且 `::-webkit-scrollbar{display:none}`），滚动能力保留。展开时客户端 SHALL 在同一张卡内以手风琴方式显示每个上游的全部窗口、重置时间、余额、重置机会与错误：明细在流内变高、占掉侧栏列表的可用高度，SHALL NOT 以浮层覆盖列表内容；明细自身 SHALL 限高并内部滚动。收起正文与展开明细 SHALL 共用同一条溢出提示规则：容器溢出时卡片底部 SHALL 始终保留 16px 提示带；只要容器里还有内容在折叠线以下，提示带内 SHALL 显示双下箭头，滚动到底部后箭头 SHALL 隐藏（用 `visibility:hidden`，占位保留）。侧栏收起（`wide === false`）时 SHALL 只渲染一个 Magpie icon 按钮，点击打开 320px 浮层。读取 SHALL 只由用户动作或页面事件触发并以 60 秒 TTL 缓存，SHALL NOT 使用其它定时器轮询；用户显式开启的 `sidebarRefreshMinutes` 定时刷新是唯一例外，它按间隔发送全量刷新（见「侧边栏额度定时刷新」）。读取失败 SHALL NOT 影响目录同步、模型选择与生成。
+标题行 SHALL 提供一个带 `aria-expanded` 的展开/收起按钮，点击 SHALL 在展开与收起之间切换；标题行其余部分（刷新按钮除外）点击效果相同。常驻卡正文与双下箭头 SHALL NOT 可点击。滚动容器 SHALL 隐藏滚动条（`scrollbar-width:none`、`-ms-overflow-style:none` 且 `::-webkit-scrollbar{display:none}`），滚动能力保留。展开时客户端 SHALL 在同一张卡内以手风琴方式显示每个上游的全部窗口（网关 `display` 文字读数窗口除外，见「侧边栏进度条只对百分比读数绘制」）、重置时间、余额、重置机会与错误：明细在流内变高、占掉侧栏列表的可用高度，SHALL NOT 以浮层覆盖列表内容；明细自身 SHALL 限高并内部滚动。收起正文与展开明细 SHALL 共用同一条溢出提示规则：容器溢出时卡片底部 SHALL 始终保留 16px 提示带；只要容器里还有内容在折叠线以下，提示带内 SHALL 显示双下箭头，滚动到底部后箭头 SHALL 隐藏（用 `visibility:hidden`，占位保留）。侧栏收起（`wide === false`）时 SHALL 只渲染一个 Magpie icon 按钮，点击打开 320px 浮层。读取 SHALL 只由用户动作或页面事件触发并以 60 秒 TTL 缓存，SHALL NOT 使用其它定时器轮询；用户显式开启的 `sidebarRefreshMinutes` 定时刷新是唯一例外，它按间隔发送全量刷新（见「侧边栏额度定时刷新」）。读取失败 SHALL NOT 影响目录同步、模型选择与生成。
 
 #### Scenario: 标题行的开关负责展开与收起
 
@@ -934,7 +934,7 @@ host SHALL 按网关响应分类结果：
 
 - **GIVEN** `wide` 为 `false`
 - **WHEN** 渲染 `sidebar.footer.action`
-- **THEN** 只有带 `aria-label`/tooltip「Magpie 额度」的 icon 按钮，没有常驻卡与百分比
+- **THEN** 只有带 `aria-label`/tooltip「Magpie 用量」的 icon 按钮，没有常驻卡与百分比
 
 ### Requirement: 用量入口与颜色（AMD4）
 
@@ -1604,14 +1604,14 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 
 ### Requirement: 侧边栏多账号分段
 
-同一 `provider` 在本次卡片结果中有两张及以上卡片时，侧边栏常驻卡的收起形态、展开明细与侧栏收起时的浮层 SHALL 只显示一次该上游名称（卡片 `name`，缺失时 `provider`）并附账号数（中文「N 个账号」，英文「N accounts」），随后按网关顺序列出每张卡片。每张卡片 SHALL 以账号标识代替原来的上游名称位置：账号标识为卡片的 `user`；`user` 缺失或为空时为按组内顺序的「账号 N」（英文「Account N」，N 从 1 起）；有 `plan` 时附在账号标识之后。账号标识过长时 SHALL 截断显示并在 `title` 给出全文。
+同一 `provider` 在本次卡片结果中有两张及以上卡片时，侧边栏常驻卡的收起形态、展开明细与侧栏收起时的浮层 SHALL 只显示一次该上游名称（卡片 `name`，缺失时 `provider`）并附账号数（中文「N 个账号」，英文「N accounts」），随后按网关顺序列出每张卡片。每张卡片 SHALL 以账号标识代替原来的上游名称位置：账号标识为卡片的 `user`；`user` 缺失或为空时为按组内顺序的「账号 N」（英文「Account N」，N 从 1 起）；有 `plan` 时附在账号标识之后。收起形态中，每个账号先占一行（账号标识与 `plan`），其下再显示窗口行；只有账号标识可以截断（截断时在 `title` 给出全文），`plan`、窗口名、到期时间与读数 SHALL 完整显示，不截断、不相互重叠。组内每个账号都恰好显示同一个窗口名（且回退状态相同）时，该窗口名 SHALL 只在组标题中以括号显示一次（如 `Codex (7 days)`「4 个账号」），各账号的窗口行不再重复窗口名；否则窗口名留在各账号的窗口行上。展开明细与浮层中账号标识为段落标题。
 
 账号标识之下的窗口选择、窗口行、重置时间、读数、进度条、回退与失败显示 SHALL 与单账号时的规则相同，SHALL NOT 因分段减少显示的窗口或重置时间。只有一张卡片的上游 SHALL 保持原有渲染，不显示账号数或账号标识。插件 SHALL NOT 显示多账号的分配方式。
 
 #### Scenario: 同一上游多账号分段
 - **GIVEN** 网关依次返回 `{provider:"codex", name:"Codex", user:"a@example.com", plan:"prolite", windows:[{name:"7 days", used:3, resetsAt:<11/25 17:17>}]}`、`{provider:"claude", name:"Claude Code", windows:[{name:"7 days", used:20}]}`、`{provider:"codex", name:"Codex", user:"b@example.com", plan:"free", windows:[{name:"30 days", used:0, resetsAt:<12/20 16:04>}]}`；`sidebarWindows` 为 `["weekly"]`
 - **WHEN** 渲染常驻卡（收起），再展开
-- **THEN** 收起时依次为：`Codex` 组标题含「2 个账号」；`a@example.com`、`prolite`、`(7 days)`、`11/25 17:17`、`3%` 与进度条；`b@example.com`、`free`、`(30 days)`（回退）、`12/20 16:04`、`0%` 与进度条；然后是 `Claude Code (7 days)` 单行且没有账号标识或账号数
+- **THEN** 收起时依次为：`Codex` 组标题含「2 个账号」且不含窗口名（两账号窗口不同）；`a@example.com` 与 `prolite` 一行，其下 `7 days`、`11/25 17:17`、`3%` 与进度条；`b@example.com` 与 `free` 一行，其下 `30 days`（回退）、`12/20 16:04`、`0%` 与进度条；然后是 `Claude Code (7 days)` 单行且没有账号标识或账号数
 - **AND** 展开后 `Codex` 只作为组标题出现一次，两段的段落标题分别为 `a@example.com` 与 `b@example.com`，各自列出自己的全部窗口；`Claude Code` 段落不变
 
 #### Scenario: 多账号且勾选多个档位
@@ -1639,14 +1639,23 @@ dispose SHALL 移除本插件经有效注册句柄拥有的全部 route，SHALL 
 - **WHEN** 渲染常驻卡
 - **THEN** 该账号标识元素（`[data-dmg-sidebar-account]`）的 `title` 为完整的 60 字符 `user`，且带 `dmg-sidebar-account` 类；插件样式表中 `.dmg-sidebar-account` 声明 `text-overflow:ellipsis` 与 `min-width:0`
 
+#### Scenario: 组内同一窗口时窗口名提到组标题
+- **GIVEN** 四张 `provider:"codex"`、`name:"Codex"` 卡片，`plan` 均为 `self_serve_business_prolite`，各只有 `7 days` 窗口；`sidebarWindows` 为 `["weekly"]`
+- **WHEN** 渲染常驻卡
+- **THEN** 组标题为 `Codex`、`(7 days)`、「4 个账号」；四个账号行各显示账号标识与完整的 `self_serve_business_prolite`，其下窗口行显示到期时间与读数但不含 `7 days`
+
+#### Scenario: 只有账号标识可截断
+- **WHEN** 读取插件样式表
+- **THEN** `.dmg-sidebar-plan`、`.dmg-sidebar-expiry`、`.dmg-sidebar-pct` 都声明 `flex:none` 且 `.dmg-sidebar-plan` 不含 `ellipsis`；`.dmg-sidebar-account` 声明 `text-overflow:ellipsis` 与 `min-width:0`
+
 ### Requirement: 侧边栏进度条只对百分比读数绘制
 
-侧边栏常驻卡与展开明细中，一个窗口的读数显示为「无限」或网关 `display` 文本时，SHALL NOT 为该窗口绘制进度条，也 SHALL NOT 把它当作数字读数参与「读数最高的窗口」回退选择；它仍可作为最后一级的 `display`/「无限」回退显示文字。只有读数显示为 `used` 百分比的窗口才绘制进度条，读数颜色（`data-level`）同理。勾选档位的匹配规则不变：带有限 `used` 的窗口即使同时带 `display`，仍按窗口名匹配为该档位行，只是显示 `display` 文本且没有进度条。
+侧边栏展开明细与浮层 SHALL NOT 列出读数为网关 `display` 文本的窗口（如 Codex 的 `Image generation` `Unknown`），这类窗口只在设置页用量卡片中显示；「无限」窗口照常列出。带有限 `used` 又带 `display` 的窗口同样按文字读数处理：可作为收起形态的档位行显示，但不列入展开明细与浮层。侧边栏常驻卡与展开明细中，一个窗口的读数显示为「无限」或网关 `display` 文本时，SHALL NOT 为该窗口绘制进度条，也 SHALL NOT 把它当作数字读数参与「读数最高的窗口」回退选择；它仍可作为最后一级的 `display`/「无限」回退显示文字。只有读数显示为 `used` 百分比的窗口才绘制进度条，读数颜色（`data-level`）同理。勾选档位的匹配规则不变：带有限 `used` 的窗口即使同时带 `display`，仍按窗口名匹配为该档位行，只是显示 `display` 文本且没有进度条。
 
 #### Scenario: 文字读数不画进度条
 - **GIVEN** `codex` 卡片窗口为 `{name:"7 days", used:3}` 与 `{name:"Image generation", used:0, display:"Unknown"}`
-- **WHEN** 渲染展开明细
-- **THEN** `7 days` 行显示 `3%` 并有一条进度条；`Image generation` 行显示 `Unknown` 且没有进度条
+- **WHEN** 渲染侧栏展开明细
+- **THEN** 明细只列出 `7 days` 一行，显示 `3%` 并有一条进度条；渲染文本中没有 `Image generation` 与 `Unknown`
 
 #### Scenario: 档位窗口带 display 时仍是档位行
 - **GIVEN** `codex` 卡片只有 `{name:"7 days", used:20, display:"约 20%"}`，`sidebarWindows` 为 `["weekly"]`

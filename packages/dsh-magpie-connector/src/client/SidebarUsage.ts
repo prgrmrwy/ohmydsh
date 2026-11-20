@@ -238,7 +238,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
  * name heading with one line per window, each with its own bar. A failed card
  * and a balance-only card stay single-line.
  */
-function compactRow(row: SidebarRow, now: number, key: string, account?: Account): ReactNode {
+function compactRow(row: SidebarRow, now: number, key: string, account?: Account, sharedWindow = false): ReactNode {
   const attrs = { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key }
   const name = account === undefined ? h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider) : accountName(account)
   if (row.failed) {
@@ -256,11 +256,22 @@ function compactRow(row: SidebarRow, now: number, key: string, account?: Account
           ...(row.balance === undefined ? {} : { title: `${t('usageBalance')} ${row.balance}` }),
         }, row.balance ?? '—')))
   }
+  if (row.windows.length === 1 && account !== undefined) {
+    // Account on its own line (only the account shrinks); window, expiry and reading below at full width.
+    const only = row.windows[0]!
+    return h('div', attrs,
+      h('div', { className: 'dmg-sidebar-account-line' }, name),
+      h('div', { className: 'dmg-sidebar-row-line' },
+        h('span', { className: 'dmg-sidebar-label' }, sharedWindow ? null : windowLabel(only, false)),
+        expiry(only.window, now),
+        reading(only)),
+      bar(only))
+  }
   if (row.windows.length === 1) {
     const only = row.windows[0]!
     return h('div', attrs,
       h('div', { className: 'dmg-sidebar-row-line' },
-        h('span', { className: 'dmg-sidebar-label' }, name, windowLabel(only, true)),
+        h('span', { className: 'dmg-sidebar-label' }, name, sharedWindow ? null : windowLabel(only, true)),
         expiry(only.window, now),
         reading(only)),
       bar(only))
@@ -290,8 +301,9 @@ const accountName = (account: Account): ReactNode => h(Fragment, null,
   account.plan === undefined ? null : h('span', { className: 'dmg-sidebar-plan' }, account.plan))
 
 /** Title of a multi-account group: the provider once, with its account count. */
-const groupTitle = (card: Card, count: number): ReactNode => h('div', { className: 'dmg-sidebar-group-title', 'data-dmg-sidebar-group-title': '' },
+const groupTitle = (card: Card, count: number, window?: SidebarWindowRow): ReactNode => h('div', { className: 'dmg-sidebar-group-title', 'data-dmg-sidebar-group-title': '' },
   h('span', { className: 'dmg-sidebar-group-label' }, card.name ?? card.provider),
+  window === undefined ? null : windowLabel(window, true),
   h('span', { className: 'dmg-sidebar-count' }, t('sidebarAccountCount', { n: count })))
 
 const cardKey = (card: Card, index: number): string => `${cardIdentity(card)}\u0000${index}`
@@ -301,9 +313,13 @@ function compactGroups(cards: Card[], rows: SidebarRow[], now: number): ReactNod
   return sidebarGroups(cards).map(group => {
     if (group.indexes.length === 1) return compactRow(rows[group.indexes[0]!]!, now, cardKey(cards[group.indexes[0]!]!, group.indexes[0]!))
     const first = cards[group.indexes[0]!]!
+    // Every account shows the same single window: name it once in the title instead of on each line.
+    const lines = group.indexes.map(index => rows[index]!)
+    const shared = lines.every(row => !row.failed && row.windows.length === 1 && row.windows[0]!.window.name !== undefined && row.windows[0]!.window.name === lines[0]!.windows[0]?.window.name && row.windows[0]!.fallback === lines[0]!.windows[0]?.fallback)
+      ? lines[0]!.windows[0] : undefined
     return h('div', { className: 'dmg-sidebar-group', 'data-dmg-sidebar-group': group.provider, key: cardKey(first, group.indexes[0]!) },
-      groupTitle(first, group.indexes.length),
-      ...group.indexes.map((index, position) => compactRow(rows[index]!, now, cardKey(cards[index]!, index), accountOf(cards[index]!, position + 1))))
+      groupTitle(first, group.indexes.length, shared),
+      ...group.indexes.map((index, position) => compactRow(rows[index]!, now, cardKey(cards[index]!, index), accountOf(cards[index]!, position + 1), shared !== undefined)))
   })
 }
 
@@ -365,7 +381,8 @@ function detail(cards: Card[], now: number, status: string | undefined): ReactNo
   ),
   card.error !== undefined
     ? h('p', { className: 'dmg-sidebar-error' }, card.error)
-    : (card.windows ?? []).map((window, index) => {
+    // Gateway text readings (e.g. Image generation `Unknown`) stay on the settings page only.
+    : (card.windows ?? []).filter(window => window.unlimited === true || !textReading(window)).map((window, index) => {
       const used = typeof window.used === 'number' && Number.isFinite(window.used) && !textReading(window) ? Math.min(100, Math.max(0, window.used)) : undefined
       const level = used === undefined ? undefined : usedLevel(used)
       return h('div', { className: 'dmg-sidebar-win', key: index },

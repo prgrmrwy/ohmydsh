@@ -44,8 +44,8 @@ test('test_sidebar_accounts_01 spec Scenario "同一上游多账号分段"', asy
   expect(groupTitles(host)).toEqual(['Codex2 个账号'])
   expect(accounts(group)).toEqual(['a@example.com', 'b@example.com'])
   const rows = [...group.querySelectorAll('[data-dmg-sidebar-row]')]
-  expect(text(rows[0])).toContain('prolite'); expect(text(rows[0])).toContain('(7 days)'); expect(text(rows[0])).toContain('3%')
-  expect(text(rows[1])).toContain('free'); expect(text(rows[1])).toContain('(30 days)'); expect(text(rows[1])).toContain('0%')
+  expect(text(rows[0])).toContain('prolite'); expect(text(rows[0])).toContain('7 days'); expect(text(rows[0])).toContain('3%')
+  expect(text(rows[1])).toContain('free'); expect(text(rows[1])).toContain('30 days'); expect(text(rows[1])).toContain('0%')
   for (const row of rows) expect(row.querySelector('.dmg-sidebar-bar')).not.toBeNull()
   const single = host.querySelector('[data-dmg-sidebar-row="claude"]')!
   expect(single.closest('[data-dmg-sidebar-group]')).toBeNull()
@@ -119,8 +119,10 @@ test('test_sidebar_accounts_07 spec Scenario "文字读数不画进度条"', asy
   await render([{ provider: 'codex', name: 'Codex', readAt: R, windows: [{ name: '7 days', used: 3 }, { name: 'Image generation', used: 0, display: 'Unknown' }] }])
   await expand()
   const wins = [...host.querySelectorAll('[data-dmg-sidebar-expanded] .dmg-sidebar-win')]
+  // Text readings such as Image generation `Unknown` are left to the settings page.
+  expect(wins).toHaveLength(1)
   expect(text(wins[0])).toContain('3%'); expect(wins[0]!.querySelector('.dmg-sidebar-bar')).not.toBeNull()
-  expect(text(wins[1])).toContain('Unknown'); expect(wins[1]!.querySelector('.dmg-sidebar-bar')).toBeNull()
+  expect(text(host)).not.toContain('Unknown')
 })
 
 test('test_sidebar_accounts_08 spec Scenario "档位窗口带 display 时仍是档位行"', async () => {
@@ -146,11 +148,68 @@ test('test_sidebar_accounts_10 spec Scenario "同一上游卡片不相邻时归�
   expect(order).toEqual(['a@example.com', 'b@example.com', 'claude'])
 })
 
-test('regression: a long plan shrinks before the account and never overlaps the line', async () => {
+test('regression: only the account shrinks; plan, expiry and reading keep full width', async () => {
   const { settingsCss } = await import('../src/client/styles.js')
   const rule = (name: string) => settingsCss.match(new RegExp(`\\.${name}\\{[^}]*\\}`))?.[0] ?? ''
-  expect(rule('dmg-sidebar-plan')).toMatch(/flex:0 1000 auto/)
-  expect(rule('dmg-sidebar-plan')).toContain('text-overflow:ellipsis')
+  expect(rule('dmg-sidebar-plan')).toMatch(/flex:none/)
+  expect(rule('dmg-sidebar-plan')).not.toContain('ellipsis')
+  expect(rule('dmg-sidebar-expiry')).toMatch(/flex:none/)
+  expect(rule('dmg-sidebar-pct')).toMatch(/flex:none/)
   expect(rule('dmg-sidebar-account')).toMatch(/flex:0 1 auto;min-width:0/)
   expect(rule('dmg-sidebar-label')).toContain('overflow:hidden')
+})
+
+test('spec Scenario "组内同一窗口时窗口名提到组标题"', async () => {
+  const card = (user?: string) => ({ provider: 'codex', name: 'Codex', ...(user ? { user } : {}), plan: 'self_serve_business_prolite', readAt: R, windows: [{ name: '7 days', used: 3, resetsAt: '2026-11-25T09:17:00Z' }] })
+  await render([card(), card(), card('c@example.com'), card('d@example.com')])
+  const title = text(host.querySelector('[data-dmg-sidebar-group-title]'))
+  expect(title).toContain('Codex'); expect(title).toContain('(7 days)'); expect(title).toContain('4 个账号')
+  const rows = [...host.querySelectorAll('[data-dmg-sidebar-group="codex"] [data-dmg-sidebar-row]')]
+  expect(rows).toHaveLength(4)
+  for (const row of rows) {
+    expect(text(row)).toContain('self_serve_business_prolite')
+    expect(text(row)).not.toContain('7 days')
+    expect(text(row)).toContain('3%')
+    expect(row.querySelector('.dmg-sidebar-expiry')).not.toBeNull()
+  }
+})
+
+test('two-line account rows: account+plan line, then window/expiry/reading line', async () => {
+  await render([codexA, claude, codexB])
+  for (const row of host.querySelectorAll('[data-dmg-sidebar-group="codex"] [data-dmg-sidebar-row]')) {
+    const top = row.querySelector('.dmg-sidebar-account-line')!
+    expect(top.querySelector('[data-dmg-sidebar-account]')).not.toBeNull()
+    expect(top.querySelector('.dmg-sidebar-plan')).not.toBeNull()
+    const line = row.querySelector('.dmg-sidebar-row-line')!
+    expect(line.querySelector('[data-dmg-sidebar-account]')).toBeNull()
+    expect(line.querySelector('.dmg-sidebar-expiry')).not.toBeNull()
+    expect(line.querySelector('[data-reading]')).not.toBeNull()
+  }
+})
+
+test('sidebar copy says 用量; reset copy keeps 额度', async () => {
+  const { zh } = await import('../src/client/locales.js')
+  expect(zh.sidebarTitle).toBe('Magpie 用量'); expect(zh.sidebarPanelTitle).toBe('侧边栏用量'); expect(zh.sidebarToggle).toBe('在侧边栏常驻显示用量')
+  expect(zh.resetUseAcknowledge).toContain('额度')
+  await render([claude])
+  expect(text(host.querySelector('.dmg-sidebar-title'))).toBe('Magpie 用量')
+})
+
+test('rail popover hides text readings but keeps unlimited windows', async () => {
+  await render([{ provider: 'codex', name: 'Codex', readAt: R, windows: [{ name: '7 days', used: 3 }, { name: 'Image generation', used: 0, display: 'Unknown' }, { name: 'Chat', unlimited: true }] }], ['weekly'], false)
+  await act(async () => { (host.querySelector('[data-dmg-sidebar-rail]') as HTMLElement).click() }); await flush()
+  const pop = document.querySelector('[data-dmg-sidebar-popover]')!
+  expect(text(pop)).not.toContain('Unknown'); expect(text(pop)).not.toContain('Image generation')
+  expect(text(pop)).toContain('Chat'); expect(text(pop)).toContain('无限')
+})
+
+test('window name stays on rows when the group does not share one window', async () => {
+  const ok = (user: string, windows: unknown[]) => ({ provider: 'codex', name: 'Codex', user, readAt: R, windows })
+  await render([ok('a', [{ name: '7 days', used: 3 }]), { provider: 'codex', name: 'Codex', user: 'b', error: 'HTTP 502', readAt: R }])
+  expect(text(host.querySelector('[data-dmg-sidebar-group-title]'))).not.toContain('7 days')
+  expect(text(host.querySelector('[data-dmg-sidebar-group="codex"] [data-dmg-sidebar-row]'))).toContain('7 days')
+  await act(async () => root.unmount()); root = createRoot(host); resetSidebarCardsCache(); resetSidebarPreference()
+  await render([ok('a', [{ name: '5 hours', used: 1 }, { name: '7 days', used: 3 }]), ok('b', [{ name: '5 hours', used: 2 }, { name: '7 days', used: 4 }])], ['fiveHour', 'weekly'])
+  const title = text(host.querySelector('[data-dmg-sidebar-group-title]'))
+  expect(title).not.toContain('5 hours'); expect(title).not.toContain('7 days')
 })
