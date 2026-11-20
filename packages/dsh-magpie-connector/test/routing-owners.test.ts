@@ -37,12 +37,14 @@ test('test_routing_owners_02 spec Scenario "首次同步时 routing 排在最前
 })
 
 test('test_routing_owners_03 spec Scenario "名额已满时 routing 被拒绝并报告"', async () => {
-  const existing = owners(32)
+  const existing = [...owners(31), 'opencode-go']
   const host = await mount([{ id: 'group/ds', owned_by: 'opencode-go' }], { knownOwners: existing })
   const body = await until(async () => { const v = await view(host); return v.ownerLimitReached ? v : undefined }, 'limit reported')
   expect(body.rejectedOwners).toEqual(['routing'])
   expect(host.ownRoutes()).not.toContain(route('routing'))
-  for (const id of host.ownRoutes()) expect((await host.llm.listModels(id)).map(m => m.id)).not.toContain('group/ds')
+  // Not admitted: the entry stays usable under its vendor route, as before the upgrade.
+  await until(async () => (await host.llm.listModels(route('opencode-go'))).some(m => m.id === 'group/ds'), 'fallback listing')
+  for (const id of host.ownRoutes().filter(id => id !== route('opencode-go'))) expect((await host.llm.listModels(id)).map(m => m.id)).not.toContain('group/ds')
 })
 
 test('test_routing_owners_04 spec Scenario "routing route 被占用时 replace 冲突"', async () => {
@@ -51,5 +53,13 @@ test('test_routing_owners_04 spec Scenario "routing route 被占用时 replace �
   expect((await view(host)).lastSyncError).toContain(route('routing'))
   expect(host.plugin.routes.current()).toEqual([route('claude')])
   expect((await host.llm.listModels(route('claude'))).map(m => m.id)).toEqual(['claude/a'])
+  expect(knownOwners(host.home)).toEqual(['claude'])
+})
+
+test('test_routing_owners_05 spec Scenario "replace 冲突撤回后路由入口留在已注册的原厂商 route"', async () => {
+  const host = await mount([{ id: 'claude/a', owned_by: 'claude' }, { id: 'group/mix', owned_by: 'claude' }], { knownOwners: ['claude'] }, [route('routing')])
+  await until(async () => (await view(host)).lastSyncErrorKind === 'registration', 'registration error')
+  expect((await host.llm.listModels(route('claude'))).map(m => m.id)).toEqual(['claude/a', 'group/mix'])
+  for (const id of host.ownRoutes().filter(id => id !== route('claude'))) expect((await host.llm.listModels(id)).map(m => m.id)).not.toContain('group/mix')
   expect(knownOwners(host.home)).toEqual(['claude'])
 })

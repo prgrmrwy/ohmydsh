@@ -23,7 +23,7 @@
 **归属键**：插件 SHALL 把网关目录中的每个模型归入一个归属键。`owned_by` 是不可信的网关数据，SHALL 先校验再使用：
 - `owned_by` 为字符串，去首尾空白后长度 1–48，且转小写后匹配 `^[a-z0-9][a-z0-9._-]*$` 时，归属键为其小写形式；
 - 其它情况（缺失、非字符串、空、超长、含其它字符）归属键为 `other`；网关原值转小写后恰为 `other` 的模型也归入 `other`。
-- 例外：路由入口（见「路由入口识别」）的归属键固定为 `routing`，与其 `owned_by` 无关；其 `owned_by` SHALL NOT 参与归属键计算与归属准入。不是路由入口、但按上述规则归属键或可见性键（`owned_by` 原值，缺失时为 id 首段）会是 `routing` 的普通模型，归属键与可见性键都 SHALL 改为 `other`，使 `routing` 只代表路由入口。
+- 例外：路由入口（见「路由入口识别」）的归属键固定为 `routing`，与其 `owned_by` 无关；其 `owned_by` SHALL NOT 参与归属键计算与归属准入。`routing` 不在已准入的 `knownOwners` 中时（名额已满被拒绝，或 route 冲突后撤回），路由入口 SHALL 改列在其 `owned_by` 按上述规则得到的归属 route 上（得到 `routing` 时用 `other`；该 route 已注册时），使升级前可用的路由入口不因名额而消失；`routing` 准入后即回到 `dsh-magpie-connector-routing`。不是路由入口、但按上述规则归属键或可见性键（`owned_by` 原值，缺失时为 id 首段）会是 `routing` 的普通模型，归属键与可见性键都 SHALL 改为 `other`，使 `routing` 只代表路由入口。
 
 每个归属键对应 route `dsh-magpie-connector-<归属键>`。route 的 `listModels` SHALL 只列出「归属键等于本 route ∩ 可见集」中的模型，模型 id 保持网关原值，SHALL NOT 改写或加前缀。
 
@@ -211,13 +211,20 @@
 
 - **GIVEN** `knownOwners` 已有 32 个且不含 `routing`
 - **WHEN** 目录同步返回 `group/ds`
-- **THEN** 不注册 `dsh-magpie-connector-routing`，任何 route 都不列出 `group/ds`；设置响应 `ownerLimitReached` 为 `true`、被拒绝列表为 `["routing"]`
+- **GIVEN** 补充：这 32 个中含 `opencode-go`（升级前已持久的厂商归属）
+- **THEN** 不注册 `dsh-magpie-connector-routing`；`group/ds` 仍可用，列在 `dsh-magpie-connector-opencode-go` 上，不出现在其它 route；设置响应 `ownerLimitReached` 为 `true`、被拒绝列表为 `["routing"]`
 
 #### Scenario: routing route 被占用时 replace 冲突
 
 - **GIVEN** `knownOwners` 为 `["claude"]`（已注册）；另一个 adapter 已注册 route `dsh-magpie-connector-routing`
-- **WHEN** 目录同步返回 `claude/a` 与 `group/ds`
-- **THEN** 本插件仍只拥有 `dsh-magpie-connector-claude`，其列举含 `claude/a`；任何 route 都不列出 `group/ds`；设置文件 `knownOwners` 为 `["claude"]`；设置响应 `lastSyncErrorKind` 为 `registration` 且错误含 `dsh-magpie-connector-routing`
+- **WHEN** 目录同步返回 `claude/a` 与 `group/ds`（`owned_by: "opencode-go"`，不在 `knownOwners` 中）
+- **THEN** 本插件仍只拥有 `dsh-magpie-connector-claude`，其列举含 `claude/a`；任何 route 都不列出 `group/ds`（其原厂商 route 未注册）；设置文件 `knownOwners` 为 `["claude"]`；设置响应 `lastSyncErrorKind` 为 `registration` 且错误含 `dsh-magpie-connector-routing`
+
+#### Scenario: replace 冲突撤回后路由入口留在已注册的原厂商 route
+
+- **GIVEN** `knownOwners` 为 `["claude"]`（已注册）；另一个 adapter 已注册 route `dsh-magpie-connector-routing`
+- **WHEN** 目录同步返回 `claude/a` 与 `group/mix`（`owned_by: "claude"`）
+- **THEN** `dsh-magpie-connector-claude` 的列举为 `claude/a` 与 `group/mix`；不在任何其它 route 上；设置文件 `knownOwners` 仍为 `["claude"]`；设置响应 `lastSyncErrorKind` 为 `registration`
 
 ### Requirement: 按 provider 分组的模型可见性
 设置页 SHALL 按网关模型的 `owned_by` 分组；没有 `owned_by` 的模型，取 id 中第一个 `/` 之前的部分作为分组。路由入口（设置响应中带 `routingKind` 的模型行，见「路由入口识别」）例外：它们 SHALL 只出现在键为 `routing` 的「路由组」分区，该分区排在所有 provider 分区之前；厂商分区不再包含路由入口。一个 provider 只剩路由入口、且没有该 provider 的用量卡片时，SHALL NOT 显示该 provider 的空分区；有用量卡片时照常显示该分区（只含卡片）。

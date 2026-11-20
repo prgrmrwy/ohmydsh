@@ -35,6 +35,7 @@
 | specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 首次同步时 routing 排在最前 | packages/dsh-magpie-connector/test/routing-owners.test.ts | test_routing_owners_02 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 归属 route 持久 | 名额已满时 routing 被拒绝并报告 | packages/dsh-magpie-connector/test/routing-owners.test.ts | test_routing_owners_03 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 归属 route 持久 | routing route 被占用时 replace 冲突 | packages/dsh-magpie-connector/test/routing-owners.test.ts | test_routing_owners_04 | 🟢 green |
+| specs/dsh-magpie-connector/spec.md → 归属 route 持久 | replace 冲突撤回后路由入口留在已注册的原厂商 route | packages/dsh-magpie-connector/test/routing-owners.test.ts | test_routing_owners_05 | 🟢 green |
 | specs/dsh-magpie-connector/spec.md → 按 provider 分组的模型可见性 | 未设置时跟随网关 | packages/dsh-magpie-connector/test/visibility.test.ts | spec Scenario "未设置时跟随网关" | 🟢 green（既有测试，回归保持） |
 | specs/dsh-magpie-connector/spec.md → 按 provider 分组的模型可见性 | 设置后严格按白名单与目录求交集 | packages/dsh-magpie-connector/test/visibility.test.ts | spec Scenario "设置后严格按白名单与目录求交集" | 🟢 green（既有测试，回归保持） |
 | specs/dsh-magpie-connector/spec.md → 按 provider 分组的模型可见性 | 形状非法被拒绝 | packages/dsh-magpie-connector/test/visibility.test.ts | spec Scenario "形状非法被拒绝" | 🟢 green（既有测试，回归保持） |

@@ -38,7 +38,7 @@
 - 否决：独立保留 route + 降级（第一轮 C1/C2：首次注册失败会拖垮全部 route，降级路径不可达且会在 route 间来回跳）。
 
 ### D3 名额：总数仍为 32，`routing` 优先准入
-上限与加载校验不变（`knownOwners` 至多 32 项）。同一次同步中有多个新归属时，`routing` 排在最前面准入。已有 32 个归属且不含 `routing` 时，`routing` 与其它超额归属一样被拒绝并在 `ownerLimitReached` 中报告，路由入口此时不出现在任何 route 上。
+上限与加载校验不变（`knownOwners` 至多 32 项）。同一次同步中有多个新归属时，`routing` 排在最前面准入。已有 32 个归属且不含 `routing` 时，`routing` 与其它超额归属一样被拒绝并在 `ownerLimitReached` 中报告；路由入口此时回退列在原 `owned_by` 厂商 route 上（`CatalogModel.fallbackOwner`，`runtime.ownerOf`），原厂商 route 已注册时与升级前一致、不会消失；未注册时不出现在任何 route 上。这只是列举时选 route，不尝试注册新 route，因此不触及首次注册失败的启动规则（第 4 轮，回应 agent-bebop 在 #11 的意见）。
 - 否决：在 32 之外为 `routing` 多留 1 个（第二轮评审 S1）。它需要放宽加载校验、修正现有上限计算，回滚到旧版本时 33 项数组还会被整体重置；为 32 个以上厂商这种罕见情形付出的复杂度不值得。
 
 ### D4 设置页
@@ -59,7 +59,7 @@
 - [路由组可能在 Magpie 内部转到 Claude，本机出口守卫识别不出] → 守卫本就不覆盖 Magpie 内部转发，Claude 出口由 Magpie 侧代理负责；与现状一致。AUTO 调高 effort 可能让路由组改走 Claude 成员，属于 Magpie 规则的预期效果。
 - [`group/auto-…` 命名的自定义组被标为自动] → 仅类型文字不准。
 - [`dsh-magpie-connector-routing` 被别的 adapter 占用] → 与任何归属 route 被占用相同：运行中 `replace` 冲突时撤回本次同步新增的全部归属（同一次同步里的其它新归属也一并撤回，与现有行为一致），路由入口不出现在任何 route 上，`lastSyncErrorKind` 为 `registration`；`routing` 已持久后重启时，首次注册失败按现有规则为启动失败，所有本插件 route 都不可用，需排除冲突后重启 Host。
-- [已有 32 个归属且不含 `routing`] → 路由入口不出现在任何 route 上，设置响应报告被拒绝的 `routing`；需要用户手动清理 `knownOwners`（现有 README 说明）。
+- [已有 32 个归属且不含 `routing`] → 原厂商 route 已注册时路由入口回退留在该 route，设置响应报告被拒绝的 `routing`；清理 `knownOwners` 后可进入 Routing（现有 README 说明）。
 
 ## Migration Plan
 
