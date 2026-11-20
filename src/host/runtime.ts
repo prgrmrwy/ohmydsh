@@ -161,6 +161,8 @@ export class MagpieRuntime {
   }
   /** Route ids of the persisted owners: the full set the adapter should own. */
   routeSet(): string[] { return this.owners.map(routeOf) }
+  /** Owner whose route lists `model`: a routing entry stays under its vendor while `routing` is not admitted (cap full, conflict). */
+  ownerOf(model: CatalogModel): string { return model.fallbackOwner !== undefined && !this.owners.includes(model.owner) ? model.fallbackOwner : model.owner }
   private emit(routes?: string[]): PublishResult | undefined {
     if (this.disposed) return undefined
     const result = this.publish(routes) as PublishResult | undefined
