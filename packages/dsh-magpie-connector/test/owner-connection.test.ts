@@ -143,6 +143,8 @@ test('test_owner_connection_08 spec Scenario "整表重排不丢凭据"', async 
   seedKey(credentials, 'K2', LINE_ID_2); seedAccess(credentials, LINE_ID_2)
   const store = memoryStore([line('http://a.test:1/v1', LINE_ID), line('https://b.test/v1', LINE_ID_2, 'cloudflare')])
   const runtime = new MagpieRuntime(credentials.service, store, () => {}, { probe: async () => true })
+  // Reordering triggers a catalog sync; keep this credential test off real DNS/network.
+  vi.spyOn(runtime.transport, 'request').mockImplementation(async () => Response.json({ data: [] }))
   cleanup.push(() => runtime.dispose())
   const response = await runtime.settings({ lines: [
     { id: LINE_ID_2, baseUrl: 'https://b.test/v1', accessMode: 'cloudflare' },
