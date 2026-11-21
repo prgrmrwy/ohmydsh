@@ -283,7 +283,10 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // `pet_locus_chat_history` and its document-entry counterpart
     // `pet_locus_doc_context`; the caller-bound single-message read
     // `pet_locus_message` (`locus-read-message-media`: one `messageId`, scoped to
-    // the caller's own chat, IM entries only); and the locus MAIN session's three tools
+    // the caller's own chat, IM entries only); its sibling `pet_locus_linked_message`
+    // (`locus-read-referenced-chats`: one `messageId` of the caller's own chat plus a
+    // link index, registered from the SAME deps so both are published or neither);
+    // and the locus MAIN session's three tools
     // `locus_note`, `locus_reply_child` and the read-only `locus_work_history`
     // (`locus-ask-work-first-and-concise` D4).
     //
@@ -296,7 +299,7 @@ describe('Pet tool schemas match the real defineTool contract', () => {
     // helper's single native registration delegation (which intentionally owns
     // every definition above).
     const code = tools.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(12)
+    expect([...code.matchAll(/\bregister\s*\(\s*defineTool\s*\(/g)]).toHaveLength(13)
     expect(tools).not.toContain('PET_LOCUS_LEDGER_READ_TOOL')
     expect(tools).not.toContain("'pet_locus_ledger_read'")
     // One native registration per registrar: `registerPetTools` and `registerPetLocusMainTools`.

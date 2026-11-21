@@ -31,10 +31,14 @@ import { openPetHarness, type PetHarness } from './harness.js'
 import {
   FIXTURE_CHAT,
   FIXTURE_IDS,
+  FIXTURE_OTHER_CHAT,
   MGET_POST_IMAGE,
   RAW_POST_IMAGE,
+  mgetEnvelope,
+  rawApiEnvelope,
 } from './fixtures/lark-message-envelopes.js'
 import { fakeMediaCli, type FakeMediaCli } from './support/fake-media-cli.js'
+import { FIXTURE_LINK, FIXTURE_LINKED_ID, RAW_LINKED_TEXT, linkQueryEnvelope } from './fixtures/lark-message-link-envelopes.js'
 import { runTool } from './support/tool-call.js'
 
 // Same scope-tag caveat as `ledger-tool-scope.test.ts`: mint scopes from the runtime's own `dsh-scope`.
@@ -42,6 +46,7 @@ const requireFromTools = createRequire(require.resolve('@deepseek-ai/dsh-tools/p
 const { createScope } = await import(pathToFileURL(requireFromTools.resolve('@deepseek-ai/dsh-scope')).href) as typeof import('@deepseek-ai/dsh-scope')
 
 const CHILD = 'child-message-1'
+const LINKED = 'pet_locus_linked_message'
 let harness: PetHarness | undefined
 let cli: FakeMediaCli | undefined
 afterEach(async () => {
@@ -154,6 +159,7 @@ describe('pet_locus_message in the real tool runtime', () => {
     const names = visible(ctx, key)
     expect(names).toContain('pet_locus_doc_context')
     expect(names).not.toContain(PET_LOCUS_MESSAGE_TOOL)
+    expect(names).not.toContain(LINKED)
     expect(names).not.toContain('pet_locus_chat_history')
   })
 
@@ -368,9 +374,102 @@ describe('pet_locus_message in the real tool runtime', () => {
     expect(await cli!.calls()).toEqual([])
   })
 
-  it('the description states that message links are unresolvable', () => {
+  it('the description points message links to pet_locus_linked_message', () => {
     expect(LOCUS_MESSAGE_DESCRIPTION).toContain('message/link/open')
-    expect(LOCUS_MESSAGE_DESCRIPTION).toContain('无法由 Host 解析')
+    expect(LOCUS_MESSAGE_DESCRIPTION).toContain(LINKED)
     expect(LOCUS_MESSAGE_DESCRIPTION).toContain('转发')
+  })
+
+  it('doc child surface excludes pet_locus_linked_message', async () => {
+    for (const available of [true, false]) {
+      const { names } = await surfaceFor({ chatId: 'doc:docx:Dx0000000000000000000000001', threadId: '7' }, available)
+      expect(names, String(available)).not.toContain(LINKED)
+      expect(names, String(available)).not.toContain(PET_LOCUS_MESSAGE_TOOL)
+    }
+  })
+
+  it('IM/topic × create/cold-restore publish both message tools and attest', async () => {
+    const { handleLocusAgentCreated } = await import('../src/host/locus/agent-created.js')
+    expect(LOCUS_CALLER_BOUND_TOOLS).toContain(LINKED)
+    for (const { label, endpoint } of MATRIX.filter(item => item.label !== 'doc')) {
+      for (const available of [true, false]) {
+        for (const path of ['create', 'cold-restore'] as const) {
+          const tag = `${label}/${String(available)}/${path}`
+          let composed = endpoint as { chatId: string; threadId?: string }
+          if (path === 'cold-restore') {
+            const row = {
+              endpoint, locusId: 'locus-r', sessionId: CHILD, state: 'active', accessMode: 'read-only',
+              revision: 3, createdAt: 1, updatedAt: 1, locusMainSessionId: 'M', workspaceId: 'w',
+            }
+            let restored: { endpoint: { chatId: string; threadId?: string } } | undefined
+            await handleLocusAgentCreated({
+              repository: {
+                lookupChildForAgentCreated: () => ({ kind: 'active', row: { row, locusMainSessionId: 'M', workspaceId: 'w' } }) as never,
+                recordAccessVerified: async () => ({}) as never,
+                markInvalid: async () => ({}) as never,
+              },
+              agentPreset: () => 'locus-child',
+              staged: () => undefined,
+              claimStaged: () => {},
+              compose: (_candidate: unknown, composition: { endpoint: { chatId: string; threadId?: string } }) => {
+                restored = composition
+                return { composed: true, composition, accessMode: 'read-only' } as never
+              },
+              publishClaimed: async () => {},
+              now: () => 1,
+            } as never, { id: CHILD })
+            composed = restored!.endpoint
+          }
+          const { names, historyDescription } = await surfaceFor(composed, available)
+          // One decision: both message tools, or neither.
+          expect(names.includes(PET_LOCUS_MESSAGE_TOOL), tag).toBe(available)
+          expect(names.includes(LINKED), tag).toBe(available)
+          expect(historyDescription.includes(LINKED), tag).toBe(available)
+          expect(attestLocusComposition([...LOCUS_SAFE_TOOL_NAMES, ...names], 'read-only'), tag).toEqual({ ok: true, leaks: [] })
+        }
+      }
+    }
+  })
+
+  it('executes pet_locus_linked_message through the runtime: success and failures are schema-valid', async () => {
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = { id: CHILD } as never
+    cli = await fakeMediaCli()
+    const sourceId = FIXTURE_IDS.text
+    const runner = vi.fn<LarkCliRunner>(async (_binary, args) => {
+      if (args.includes('/open-apis/im/v1/message_links/query')) return { stdout: JSON.stringify(linkQueryEnvelope()) }
+      const target = args.some(arg => arg.includes(FIXTURE_LINKED_ID))
+      if (args.includes('+messages-mget')) {
+        return { stdout: JSON.stringify(target
+          ? mgetEnvelope({ messageId: FIXTURE_LINKED_ID, msgType: 'text', chatId: FIXTURE_OTHER_CHAT, content: '来源正文' })
+          : mgetEnvelope({ messageId: sourceId, msgType: 'text', content: 'x' })) }
+      }
+      return { stdout: JSON.stringify(target ? RAW_LINKED_TEXT : rawApiEnvelope({
+        messageId: sourceId, msgType: 'text', content: JSON.stringify({ text: `看${FIXTURE_LINK}` }),
+      })) }
+    })
+    const media = createLocusMediaPort({
+      attachments: { imageLimits: { maxImageBytes: 4096, maxImagesPerMessage: 8, maxMessageImageBytes: 65_536, maxImagePixels: 1_000_000, maxImageDimension: 1_000, mediaTypes: ['image/png'] }, saveImages: vi.fn() } as never,
+      download: { binary: cli.binary, version: '1.0.97', spoolRoot: cli.spool },
+      runner,
+    })
+    await install(createScope(ctx, key).ctx, harness.repository, {
+      locusMessage: { loci: { findBySessionId: (id: string) => id === CHILD ? resolvedRow(FIXTURE_CHAT) : undefined }, media, routeAcceptsImages: async () => true } as never,
+    })
+    const call = async (args: unknown) => {
+      const result = await runTool(ctx, {
+        agent: key, name: LINKED, callId: `linked-${JSON.stringify(args)}` as never,
+        arguments: args, signal: new AbortController().signal,
+      }) as unknown as { content?: readonly { text?: string }[]; isError?: boolean }
+      return (result.content ?? []).map(block => block.text ?? '').join('\n')
+    }
+    const ok = await call({ messageId: sourceId })
+    expect(ok).toContain('<linked-message>')
+    expect(ok).toContain('来源正文')
+    expect(ok).not.toContain('INVALID_TOOL_OUTPUT')
+    const refused = await call({ messageId: sourceId, url: FIXTURE_LINK })
+    expect(refused).toMatch(/invalid-request|INVALID_ARGUMENTS|unexpected|not allowed|additional/i)
+    expect(refused).not.toContain('INVALID_TOOL_OUTPUT')
   })
 })

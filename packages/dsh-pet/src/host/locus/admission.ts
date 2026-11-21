@@ -181,6 +181,7 @@ export type LocusControlCommand =
   /** `-h`, `--help`, `/help`: a pure information receipt; never creates anything. */
   | { readonly kind: 'help' }
   | { readonly kind: 'unbind-invalid' }
+  | { readonly kind: 'workspace-invalid' }
 
 /** Input passed to an already-authorized control dispatcher. */
 export interface LocusControlDispatchRequest {
@@ -208,7 +209,7 @@ export interface LocusControlDispatchPort {
 export type NoLocusControlCommand = { readonly kind: 'none' }
 
 /** Result of parsing a command after leading bot mentions are removed. */
-export type LocusCommandParse = LocusControlCommand | NoLocusControlCommand
+export type LocusCommandParse = LocusControlCommand | NoLocusControlCommand | { readonly kind: 'workspace'; readonly name: string }
 
 /** Refusals emitted by {@link admitLocusEvent}. */
 export type LocusAdmissionRefusal =
@@ -274,6 +275,8 @@ export interface LocusAdmission {
   readonly needsInitialization: boolean
   /** Present only for a recognized, allowlist-authorized control command. */
   readonly command?: LocusControlCommand
+  /** Selected workspace title for an IM work message. */
+  readonly workspaceName?: string
 }
 
 /** A refused admission. Refusals carry no reply/action payload. */
@@ -355,7 +358,7 @@ const ACCESS_COMMAND_MODES: Readonly<Record<string, LocusAccessModeV20>> = {
  * Deprecated tier verbs are accepted by the parser but deliberately absent.
  */
 export interface LocusCommandTableEntry {
-  readonly id: 'bind' | 'unbind' | 'access' | 'help'
+  readonly id: 'bind' | 'unbind' | 'access' | 'help' | 'workspace'
   readonly verbs: readonly string[]
   readonly usage: string
   readonly description: string
@@ -368,6 +371,7 @@ export const LOCUS_COMMAND_TABLE: readonly LocusCommandTableEntry[] = [
   { id: 'unbind', verbs: ['/unbind', '-u', '--unbind'], usage: '/unbind', description: '停止本入口，会话与历史保留', allowlistOnly: true },
   { id: 'access', verbs: ['/access', '-a', '--access'], usage: '/access read|full', description: '设置本入口的访问模式：read 只读，full 完全访问（仅 allowlist 成员可再提问）', allowlistOnly: true },
   { id: 'help', verbs: ['/help', '-h', '--help'], usage: '/help', description: '显示本帮助', allowlistOnly: true },
+  { id: 'workspace', verbs: ['-w', '--workspace'], usage: '-w <工作区名> <工作要求>', description: '选择工作区；标题含空白的工作区请用 /bind', allowlistOnly: true },
 ]
 
 const verbsOf = (id: LocusCommandTableEntry['id']): readonly string[] =>
@@ -394,7 +398,7 @@ function withoutLeadingMentions(text: string, mentionNames: readonly string[] = 
     })
     rest = (known !== undefined ? rest.slice(known.length + 1) : rest.replace(/^@\S+/, '')).trimStart()
   }
-  return rest.replace(/\s+/g, ' ').trim()
+  return rest
 }
 
 /**
@@ -404,11 +408,18 @@ function withoutLeadingMentions(text: string, mentionNames: readonly string[] = 
  * smuggle it into the normal work path.
  */
 export function parseLocusControlCommand(text: string, mentionNames?: readonly string[]): LocusCommandParse {
-  const cleaned = withoutLeadingMentions(text, mentionNames)
+  const cleaned = withoutLeadingMentions(text, mentionNames).replace(/\s+/g, ' ').trim()
   if (cleaned === '') return { kind: 'none' }
 
   const [verb = '', ...args] = cleaned.split(/\s+/)
   const lower = verb.toLowerCase()
+
+  if (verbsOf('workspace').includes(lower) || lower.startsWith('--workspace=')) {
+    const inline = lower.startsWith('--workspace=')
+    const name = inline ? verb.slice('--workspace='.length) : args[0]
+    const body = inline ? args : args.slice(1)
+    return name && body.length > 0 ? { kind: 'workspace', name } : { kind: 'workspace-invalid' }
+  }
 
   if (verbsOf('help').includes(lower)) return { kind: 'help' }
 
@@ -576,6 +587,7 @@ export function admitLocusEvent(
     ...(event.create_time === undefined ? {} : { createTime: event.create_time }),
     // Only a group grants non-allowlisted member questions (see admitCommon).
     memberQuestions: event.chat_type === 'group',
+    workspaceSelection: true,
     mentionNames: (event.mentions ?? [])
       .map(mention => mention.name)
       .filter((name): name is string => typeof name === 'string'),
@@ -594,6 +606,8 @@ export interface CommonAdmissionInput {
   readonly memberQuestions: boolean
   /** Display names of the event's mentions, so a spaced name strips whole. */
   readonly mentionNames?: readonly string[]
+  /** Workspace selection is available only to IM messages. */
+  readonly workspaceSelection?: true
 }
 
 /**
@@ -628,7 +642,10 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
     return { admit: false, reason: 'authorization-unresolved', endpoint }
   }
   const authorization = authorizationLookup.state
-  const parsed = parseLocusControlCommand(text, input.mentionNames)
+  const candidate = parseLocusControlCommand(text, input.mentionNames)
+  const parsed: LocusCommandParse = input.workspaceSelection !== true
+    && (candidate.kind === 'workspace' || candidate.kind === 'workspace-invalid')
+    ? { kind: 'none' } : candidate
   const isControl = parsed.kind !== 'none'
   if (isControl && !allowlisted) {
     return { admit: false, reason: 'control-not-allowed', endpoint, authorization }
@@ -658,10 +675,15 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
     return { admit: false, reason: 'not-allowed-sender', endpoint, authorization }
   }
 
+  const rest = parsed.kind === 'workspace' ? withoutLeadingMentions(input.text, input.mentionNames) : undefined
+  const selection = rest?.match(/^(?:-w\s+\S+|--workspace(?:\s+\S+|=\S+))\s/i)?.[0]
+  const deliveryText = rest !== undefined && selection !== undefined
+    ? input.text.slice(0, input.text.length - rest.length) + rest.slice(selection.length)
+    : text
   const admission: LocusAdmission = {
     admit: true,
     endpoint,
-    text,
+    text: deliveryText,
     senderId,
     authorization,
     // `unusable` (an `invalid` row) is rebuilt in place by the next
@@ -671,7 +693,8 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
     needsInitialization: authorization === 'uninitialized'
       || authorization === 'unusable'
       || authorizationLookup.needsInitialization,
-    ...(isControl ? { command: parsed } : {}),
+    ...(parsed.kind === 'workspace' ? { workspaceName: parsed.name } : {}),
+    ...(parsed.kind !== 'none' && parsed.kind !== 'workspace' ? { command: parsed } : {}),
   }
   return admission
 }

@@ -54,6 +54,7 @@ export interface LarkEntranceMessage {
   readonly text: string
   readonly messagePosition?: string
   readonly threadId?: string
+  readonly msgType?: string
 }
 
 /** One page of an entrance read; `pageToken` continues into the next page. */
@@ -547,6 +548,7 @@ async function readEntranceHistoryWith(
         ? { messagePosition: message['message_position'] }
         : {}),
       ...(typeof threadId === 'string' && threadId !== '' ? { threadId } : {}),
+      ...(typeof message['msg_type'] === 'string' && message['msg_type'] !== '' ? { msgType: message['msg_type'] } : {}),
     })
   }
   return {

@@ -154,6 +154,15 @@ describe('establishing a locus for a new endpoint', () => {
     await expect(ensure(port)).rejects.toBe(failure)
   })
 
+  it('forwards the selected workspace id to provisioning', async () => {
+    const established = { locusId: 'l', endpoint: ENDPOINT, sessionId: 's', state: 'not-created' as const, accessMode: 'read-only' as const, revision: 0, locusMainSessionId: 'm', workSessionId: 'w', workspaceId: 'selected' }
+    const ensureForDelivery = vi.fn(async () => established)
+    const { port } = resolution({ provisioning: { ensureForDelivery } })
+    const signal = new AbortController().signal
+    await port.ensureForDelivery({ endpoint: ENDPOINT, messageId: 'm', workspaceId: 'selected', signal })
+    expect(ensureForDelivery).toHaveBeenCalledWith({ endpoint: ENDPOINT, messageId: 'm', workspaceId: 'selected', signal })
+  })
+
   it('has no retirement refusal any more: a never-seen endpoint is established normally', async () => {
     const established = { locusId: 'l', endpoint: ENDPOINT, sessionId: 's', state: 'not-created' as const, accessMode: 'read-only' as const, revision: 0, locusMainSessionId: 'm', workSessionId: 'w', workspaceId: 'x' }
     const { port } = resolution({ provisioning: { ensureForDelivery: async () => established } })

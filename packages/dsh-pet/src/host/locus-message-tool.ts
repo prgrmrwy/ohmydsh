@@ -51,7 +51,9 @@ export const LOCUS_MESSAGE_DESCRIPTION =
   'message id shown in `pet_locus_chat_history`. The chat is resolved from the calling child and ' +
   'cannot be redirected: the only argument is `messageId`, and a message from any other chat is ' +
   'refused. The output starts with an untrusted-content label. A failure is reported as a failure, ' +
-  'never as an empty message. ' + MESSAGE_LINK_GUIDANCE
+  'never as an empty message. For a Feishu message link (`message/link/open`) use ' +
+  '`pet_locus_linked_message` with the id of the message that contains the link; if it fails, ask the ' +
+  'sender to forward that message. ' + MESSAGE_LINK_GUIDANCE
 
 /** Dependencies of {@link executeLocusMessage}. */
 export interface LocusMessageToolDeps {

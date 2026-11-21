@@ -918,7 +918,7 @@ W 与 M 的关系 SHALL 记录在 `locus_mains`（`{workSessionId, locusMainSess
 
 ### Requirement: 入口建立统一为一条路径
 
-auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionChatLocked`，只在“工作主会话从哪来”上不同：auto（未绑定入口首个授权 at）由 Pet 在 default workspace 新建 W；Q&A 以所有者打开的会话为 W；`/bind` 以所有者指定的普通一级会话为 W。显式 W SHALL 在任何外部创建之前解析。
+auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionChatLocked`，只在“工作主会话从哪来”上不同：auto（未绑定入口首个授权 at）由 Pet 新建 W，工作区为该 at 以 `-w` 指定并唯一匹配的工作区，未指定时为 default workspace（见“首次 at 可用 -w 指定工作区”），新建的 W 是普通会话（见“自动工作主会话是普通会话”）；Q&A 以所有者打开的会话为 W；`/bind` 以所有者指定的普通一级会话为 W。显式 W SHALL 在任何外部创建之前解析。
 
 **从零创建**（该 `chatId` 下没有任何行）无论由哪个入口触发——群首次 at、话题首次 at、群 `/bind`、话题 `/bind`、文档评论——SHALL 得到同一结构：W → M → {群行, 触发入口的话题行（若触发入口是话题）}。建立 SHALL 先复用 W 的 active M，没有则新建 M 并按“协作空间由工作主会话与 locus 主会话两个普通成员组成”建立空间，然后在**一次** `commitProvisioning` 中写入全部行，MUST NOT 分两次提交，MUST NOT 为同一次触发创建第二个 W 或 M。每一行 SHALL 为 `state = not-created`、持有预留的 `sessionId`、`accessMode = read-only`；建立 MUST NOT 预先创建子会话。Q&A 只建群行，且该群行带 `defaultQa`。
 
@@ -931,6 +931,11 @@ auto、Q&A、显式绑定与文档评论 SHALL 走同一建立路径 `provisionC
 #### Scenario: auto 建立
 - **WHEN** 一个从未关联的群收到所有者的首个 at
 - **THEN** Pet 新建工作主会话与 locus 主会话，建立协作空间，群行为 `not-created`，随后按首条消息创建子会话并处理该消息
+
+#### Scenario: auto 建立使用 -w 指定的工作区
+- **GIVEN** 已注册且目录可用的工作区中恰有一个标题为 `infra-service`
+- **WHEN** 一个从未关联的群收到所有者的首个 at：`@bot -w infra-service 排查一下登录超时`
+- **THEN** 新建的 W 位于 `infra-service`（cwd 为其路径），而不是 default workspace；其余结构与“auto 建立”相同
 
 #### Scenario: 话题内首次 bind 一次建出群行和话题行
 - **GIVEN** 话题群 C 从未建立过任何行；会话 W1 未归档、不是子会话
@@ -2158,7 +2163,7 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前工作�
 #### Scenario: 查看帮助
 
 - **WHEN** allowlist 成员在入口发送 `@bot -h`
-- **THEN** 入口收到一条回执，列出 `/bind`、`/unbind`、`/access` 的参数形式与说明，不含 `/scope`、`/tools`
+- **THEN** 入口收到一条回执，列出 `/bind`、`/unbind`、`/access` 与工作区选择参数 `-w <工作区名> <工作要求>` 的参数形式与说明，不含 `/scope`、`/tools`
 - **AND** 没有任何入口、子会话或 Delivery 被创建
 
 #### Scenario: 帮助与解析器一致
@@ -2222,3 +2227,111 @@ Host SHALL 提供 `rebind` 动作：当一个群（或文档）的当前工作�
 - **GIVEN** 无法归类的普通异常，消息含虚构的 `?token=<fixture-token>`，`code` 为 32 位大写十六进制虚构值，带 `cause` 与 `stack`
 - **WHEN** 控制命令失败
 - **THEN** 日志只记 `unrecognized`；日志与回执都不含 `<fixture-token>`、该 code 值、`cause` 或 `stack` 内容
+
+### Requirement: 首次 at 可用 -w 指定工作区
+
+IM 单聊、群与话题中，at bot 的消息在去掉开头的 mention 之后，若以 `-w <名>`、`--workspace <名>` 或 `--workspace=<名>` 开头，SHALL 被识别为工作区选择：`<名>` 为一个不含空白的词元，其后的全部文字为工作要求。标题含空白的工作区不能用 `-w` 选择（可改用 `/bind`）；帮助中的 `-w` 用法与找不到时的回执 SHALL 写明这一限制。工作区选择不是独立控制命令，而是附在一条工作消息上；它 SHALL 仅对 allowlist 发送者可用，非 allowlist 发送者带此参数的消息与控制命令一样以 `control-not-allowed` 静默拒绝，MUST NOT 当作普通提问投递。缺少名字或缺少工作要求时 SHALL 回执用法，不建立入口、不投递。
+
+名字 SHALL 与 Host 中已注册、且目录状态可用的工作区**标题**做精确比较（区分大小写，不做前缀、模糊或目录名匹配）。恰好一个匹配时，该工作区即本次 auto 建立 W 的工作区。没有匹配或多于一个匹配时 SHALL 失败关闭：回执说明“找不到名为 <名> 的可用工作区”或“有多个工作区名为 <名>”，提示到 Pet 设置查看工作区；回执 MUST NOT 列出本机其它工作区的名称或路径；MUST NOT 创建任何会话或入口行，MUST NOT 投递该消息，MUST NOT 退回 default workspace。
+
+入口已存在（群行已存在）时，工作区选择 SHALL 与群行的 W 所在工作区（按工作区 id）比较：同一工作区时按普通消息投递；不同工作区时 SHALL 拒绝并回执“该群已由 <W 标签> 跟进，-w 不能改绑；可在管理面「改绑到其他会话」”，MUST NOT 投递、MUST NOT 改动任何入口行。话题首次 at 带工作区选择而群行尚不存在时，补出的群行与话题行同属该工作区下新建的 W。该比较 SHALL 以入口建立或复用**之后**实际得到的群行为准，从而同样覆盖并发：同一新群里另一条消息先建出了其它工作区的群行时，带工作区选择的消息按“不同工作区”拒绝，MUST NOT 投递进先建出的 W。入口的 locus 主会话不可用且整 W 迁移因其它 current 投递而延后时，已证明工作区不同的消息 SHALL 回执工作区冲突；其他带工作区选择的消息 SHALL 回执“入口忙，请稍后重试”，MUST NOT 进入该入口的 backlog（无法在此时证明工作区相同）。名字 SHALL 在任何建立操作开始之前解析一次，解析失败时 MUST NOT 产生 provisioning 操作记录。
+
+投递给子会话的正文 SHALL 是原文去掉工作区选择参数（`-w <名>` 及其后紧跟的一个空白）后的结果，其余部分（开头 mention、换行、缩进与其它空白）保持原样，MUST NOT 含 `-w <名>`。处于已停止（retired）状态的入口上，工作区选择与普通消息一样被拒绝。
+
+文档评论入口不识别工作区选择：以 `-w` 开头的评论 SHALL 当作普通提问，原文（含 `-w <名>`）照常投递，不进入控制面，不回执用法；文档仍按 default workspace 建立。
+
+#### Scenario: 唯一匹配时在指定工作区建立并投递去掉参数的正文
+- **GIVEN** 工作区标题 `infra-service` 唯一且目录可用；群 C 没有任何入口行
+- **WHEN** allowlist 成员在 C 发送 `@bot -w infra-service 看下登录超时`
+- **THEN** 在 `infra-service` 新建 W 并建立入口；子会话收到的正文不含 `-w infra-service`，其余与原文一致
+
+#### Scenario: 多行工作要求保留换行
+- **WHEN** 首次 at 为 `@bot -w infra-service 复现步骤：` 后接换行与 `1. 登录` 换行 `2. 等待 30s`
+- **THEN** 子会话收到的正文保留这两处换行与编号行，只少了 `-w infra-service `
+
+#### Scenario: 三种写法等价
+- **WHEN** 分别发送 `@bot --workspace infra-service 看下` 与 `@bot --workspace=infra-service 看下`
+- **THEN** 结果与 `@bot -w infra-service 看下` 相同
+
+#### Scenario: 名字只做精确匹配
+- **GIVEN** 存在标题为 `infra-service` 的工作区，不存在标题为 `infra` 或 `Infra-Service` 的工作区
+- **WHEN** 首次 at 写 `-w infra` 或 `-w Infra-Service`
+- **THEN** 回执找不到该工作区；没有创建会话或入口行，没有投递，没有使用 default workspace
+
+#### Scenario: 重名失败关闭
+- **GIVEN** 两个可用工作区的标题都是 `app`
+- **WHEN** 首次 at 写 `-w app 修一下`
+- **THEN** 回执有多个同名工作区；没有创建任何会话或入口行，没有投递
+
+#### Scenario: 目录不可用的工作区不参与匹配
+- **GIVEN** 标题为 `legacy` 的工作区目录已缺失
+- **WHEN** 首次 at 写 `-w legacy 看下`
+- **THEN** 按找不到处理
+
+#### Scenario: 失败回执不泄露其它工作区
+- **WHEN** `-w` 找不到匹配
+- **THEN** 回执不含任何其它工作区的标题或路径
+
+#### Scenario: 已存在入口且工作区相同
+- **GIVEN** 群 C 的群行属于 W1，W1 位于 `infra-service`
+- **WHEN** 所有者在 C 或其话题发送 `@bot -w infra-service 再看看`
+- **THEN** 按普通消息投递，正文不含 `-w infra-service`；入口行不变
+
+#### Scenario: 已存在入口且工作区不同
+- **GIVEN** 群 C 的群行属于 W1，W1 位于 `infra-service`
+- **WHEN** 所有者发送 `@bot -w web-app 再看看`
+- **THEN** 回执“该群已由 <W1 标签> 跟进”；没有投递，没有新建会话，入口行不变
+
+#### Scenario: 话题首次 at 带 -w 让整群归属该工作区
+- **GIVEN** 话题群 C 从未建立过任何行
+- **WHEN** 所有者在话题 T 内发送 `@bot -w infra-service 看下`
+- **THEN** 恰一次 `commitProvisioning` 写入群行 `C` 与话题行 `(C, T)`，同属 `infra-service` 下新建的 W；之后 C 中其它话题的首次 at 复用该 W
+
+#### Scenario: 并发首次 at 时 -w 不被静默吞掉
+- **GIVEN** 群 C 从未建立过任何行，default workspace 为 `acme`
+- **WHEN** `@bot 看下` 与 `@bot -w infra-service 修一下` 同时到达，前者先拿到群锁并在 `acme` 建出 W0
+- **THEN** 后者回执“该群已由 <W0 标签> 跟进”，没有投递进 W0，没有新建会话
+
+#### Scenario: 迁移延后时带 -w 的消息不进 backlog
+- **GIVEN** 群 C 属于工作区 A 下的 W，W 的 locus 主会话已不可用，W 名下另一个群有 current 投递
+- **WHEN** 所有者在 C 发送 `@bot -w B 修一下`
+- **THEN** 回执工作区冲突；该消息没有进入 C 的 backlog，之后也不会投递进 A 下的 W
+
+#### Scenario: 名字打错不产生建立记录
+- **WHEN** 首次 at 写 `-w infar 看下` 且没有该标题的工作区
+- **THEN** 回执找不到；provisioning 操作记录、会话与入口行均未产生
+
+#### Scenario: 格式错误回执用法
+- **WHEN** 所有者发送 `@bot -w`
+- **THEN** 回执为 `-w <工作区名> <工作要求>` 的用法说明，而不是“控制命令执行失败”
+
+#### Scenario: 标题含空白的工作区
+- **GIVEN** 唯一可用工作区标题为 `my app`
+- **WHEN** 首次 at 写 `@bot -w my app 看下`
+- **THEN** 按名字 `my` 找不到处理；回执说明不支持含空白的标题，可改用 `/bind`
+
+#### Scenario: 文档评论中的 -w 是普通文字
+- **WHEN** allowlist 成员在已授权文档评论 `@bot -w infra-service 看下`
+- **THEN** 不进入控制面、不回执用法；原文作为普通提问投递，文档入口仍属 default workspace 下的 W
+
+#### Scenario: 非 allowlist 成员
+- **WHEN** 非 allowlist 成员在已授权群发送 `@bot -w infra-service 看下`
+- **THEN** 以 `control-not-allowed` 静默拒绝，不投递
+
+#### Scenario: 缺少名字或工作要求
+- **WHEN** 所有者发送 `@bot -w` 或 `@bot -w infra-service`
+- **THEN** 回执用法 `-w <工作区名> <工作要求>`；不建立入口，不投递
+
+### Requirement: 自动工作主会话是普通会话
+
+Pet 自动新建的工作主会话 W（IM auto 与文档评论 auto）SHALL 以创建时 Host 的默认 agent preset 创建并在 header 中记录该 preset，与所有者在 DSH 中新建会话得到的 preset 一致；MUST NOT 固定使用 Pet 自有的 `dsh-pet-executor`。默认 preset 在创建开始时读取一次，同一次创建的 header 与挂载 SHALL 使用同一值。本要求不改变 locus 主会话（`locus-base`）与 locus 子会话（`locus-child`）的 preset，也不迁移已存在的 W。
+
+#### Scenario: 自动 W 使用 Host 默认 preset
+- **GIVEN** Host 当前默认 preset 为 `standard`
+- **WHEN** 首个授权 at 触发 auto 建立
+- **THEN** 新建 W 的 header 记录 `agentPreset = standard`，并挂载 `standard`；不是 `dsh-pet-executor`
+
+#### Scenario: 子会话工具面不受 W preset 影响
+- **GIVEN** 自动 W 运行 `standard`
+- **WHEN** 该入口的首条消息创建子会话
+- **THEN** 子会话仍以 `locus-child` 创建，父为 locus 主会话，已发布工具面不含委派工具
