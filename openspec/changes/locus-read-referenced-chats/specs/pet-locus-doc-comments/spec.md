@@ -25,7 +25,7 @@ IM 入口的上述行为 SHALL 保持不变。
 #### Scenario: 文档 Delivery 不调用 IM 接口
 - **GIVEN** 一条文档 Delivery 被接受并投递，随后以 `reply` 完成
 - **WHEN** 统计期间 Host 发起的 lark-cli 调用
-- **THEN** 没有 `im +messages-mget`、`im +messages-reply`、IM reaction、chat members 或 chat history 调用
+- **THEN** 没有 `im +messages-mget`、`im +messages-reply`、IM reaction、chat members、chat history，以及 `message_links/query`、`im +threads-messages-list`、raw message read、消息资源下载调用；续读游标不存在于文档入口，因此也不存在续读调用
 
 #### Scenario: 触发者姓名查询失败
 - **GIVEN** 联系人查询返回权限错误
