@@ -130,6 +130,18 @@ export interface DocCommentReply {
   readonly authorOpenId?: string
   readonly createdAt?: number
   readonly text: string
+  /**
+   * Open ids of the `person` elements in this reply, in body order.
+   *
+   * A doc-comment reply has no platform `mentions` array like an IM message: a
+   * mention exists only as a `person` element inside the reply content, whose
+   * `user_id` is the mentioned user's open id. The text rendering keeps the
+   * same fact as `@<open_id>`; this field keeps it structured so the Delivery
+   * can project addressing instead of treating an unknown as "not mentioned"
+   * (live report 2026-11-13: an anchored comment that @-mentioned the bot was
+   * settled as reference-only because the Delivery said `selfMentioned=false`).
+   */
+  readonly mentionOpenIds?: readonly string[]
 }
 
 /** Result of reading one comment and locating its trigger reply. */
@@ -147,6 +159,25 @@ export type DocCommentQuery =
   | { readonly kind: 'scope-unknown' }
   /** The comment is known but the trigger reply is absent after paging. */
   | { readonly kind: 'reply-missing' }
+
+/** One comment card as `drive +list-comments` returns it. */
+export interface DocCommentCard {
+  readonly commentId: string
+  readonly isWhole: boolean
+  readonly quote?: string
+  readonly replies: readonly DocCommentReply[]
+  readonly createdAt?: number
+}
+
+/** One page of a document's comments (bot identity). */
+export interface DocCommentsPage {
+  readonly comments: readonly DocCommentCard[]
+  readonly hasMore: boolean
+  readonly pageToken?: string
+}
+
+/** Outcome of the per-document notification-event subscription. */
+export type DocEventSubscription = 'success' | 'missing-scope' | 'forbidden' | 'unknown'
 
 /** Bot-identity Lark operations Pet depends on. */
 export interface LarkClient {
@@ -170,6 +201,20 @@ export interface LarkClient {
    * card reports `has_more` (≤10 pages). Failure and "not found" are distinct.
    */
   queryDocComment?(token: string, commentId: string, replyId: string): Promise<DocCommentQuery>
+  /**
+   * One page of a docx's comments (`drive +list-comments`, bot identity), used
+   * by the reconciliation fallback when a comment event never arrived.
+   * `undefined` means the read failed and MUST NOT be read as "no comments".
+   */
+  listDocComments?(token: string, pageToken?: string): Promise<DocCommentsPage | undefined>
+  /**
+   * Subscribe THIS app to one document's notification events
+   * (`POST /open-apis/drive/v1/files/:file_token/subscribe`). Idempotent; needs
+   * `docs:event:subscribe` (or a broader drive scope) plus document manage
+   * permission (the owner adds the app in the document UI). `missing-scope`
+   * and `forbidden` stay final until the console/document side changes.
+   */
+  subscribeDocEvents?(token: string): Promise<DocEventSubscription>
   /** Append a plain-text bot reply under a docx comment (`drive +add-reply`). */
   replyComment?(token: string, commentId: string, text: string): Promise<'success' | 'unknown'>
   /**
@@ -583,10 +628,49 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
  * never mistake an exit failure, malformed JSON, or `{ok:false}` for success.
  */
 function strictEnvelopeData(result: CliJsonResult, operation: string): unknown {
-  if (!result.ok) throw new Error(`${operation}: lark-cli process failed`)
   const envelope = recordOf(result.value)
-  if (envelope?.['ok'] !== true) throw new Error(`${operation}: lark-cli envelope was not ok`)
+  if (!result.ok || envelope?.['ok'] !== true) {
+    const error = recordOf(envelope?.['error'])
+    const errorType = typeof error?.['type'] === 'string' ? error['type'] : undefined
+    const errorSubtype = typeof error?.['subtype'] === 'string' ? error['subtype'] : undefined
+    throw new LarkCliCallError(
+      result.ok ? `${operation}: lark-cli envelope was not ok` : `${operation}: lark-cli process failed`,
+      errorType,
+      errorSubtype,
+    )
+  }
   return envelope['data']
+}
+
+/**
+ * A strict lark-cli call that did not succeed. `errorType`/`errorSubtype` are
+ * lark-cli's own low-cardinality error classes (never bodies or ids).
+ * `errorType === 'validation'` is raised by lark-cli's local argument checks
+ * before any API request, so such a call is provably not sent.
+ */
+export class LarkCliCallError extends Error {
+  constructor(
+    message: string,
+    readonly errorType?: string,
+    readonly errorSubtype?: string,
+  ) {
+    super(message)
+    this.name = 'LarkCliCallError'
+  }
+
+  get rejectedBeforeSend(): boolean {
+    return this.errorType === 'validation'
+  }
+}
+
+/**
+ * Plain text as `--content` JSON. `--text` (like `--content`) treats a leading
+ * `@` as "read this file", so a reply starting with `@Name` failed locally;
+ * a JSON object always starts with `{`, and also never trips the leading
+ * `doc:` guard in {@link callJson}.
+ */
+function textContentArgs(text: string): string[] {
+  return ['--content', JSON.stringify({ text }), '--msg-type', 'text']
 }
 
 function requireInput(value: string, field: string): string {
@@ -622,6 +706,7 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
     const replyId = reply?.['reply_id']
     if (reply === undefined || typeof replyId !== 'string' || replyId === '') continue
     const elements = recordOf(reply['content'])?.['elements']
+    const mentionOpenIds: string[] = []
     const text = (Array.isArray(elements) ? elements : [])
       .map(recordOf)
       .map(element => {
@@ -629,7 +714,10 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
         const run = recordOf(element['text_run'])
         if (typeof run?.['text'] === 'string') return run['text']
         const person = recordOf(element['person'])
-        if (typeof person?.['user_id'] === 'string') return `@${person['user_id']}`
+        if (typeof person?.['user_id'] === 'string') {
+          mentionOpenIds.push(person['user_id'])
+          return `@${person['user_id']}`
+        }
         const link = recordOf(element['docs_link'])
         if (typeof link?.['url'] === 'string') return link['url']
         return ''
@@ -641,11 +729,29 @@ function parseCommentReplies(value: unknown): DocCommentReply[] {
     out.push({
       replyId,
       text,
+      ...(mentionOpenIds.length === 0 ? {} : { mentionOpenIds }),
       ...(typeof author === 'string' && author !== '' ? { authorOpenId: author } : {}),
       ...(typeof created === 'number' && Number.isFinite(created) ? { createdAt: created * 1000 } : {}),
     })
   }
   return out
+}
+
+/** Parse one `drive +list-comments` card into the facts reconciliation needs. */
+function parseCommentCard(value: unknown): DocCommentCard | undefined {
+  const card = recordOf(value)
+  const commentId = card?.['comment_id']
+  if (card === undefined || typeof commentId !== 'string' || commentId === '') return undefined
+  if (typeof card['is_whole'] !== 'boolean') return undefined
+  const quote = typeof card['quote'] === 'string' && card['quote'] !== '' ? card['quote'] : undefined
+  const created = card['create_time']
+  return {
+    commentId,
+    isWhole: card['is_whole'],
+    ...(quote === undefined ? {} : { quote }),
+    replies: parseCommentReplies(recordOf(card['reply_list'])?.['replies']),
+    ...(typeof created === 'number' && Number.isFinite(created) ? { createdAt: created * 1000 } : {}),
+  }
 }
 
 function requireChatId(value: unknown, operation: string): string {
@@ -895,6 +1001,44 @@ export function createLarkCliClient(
   }
 
   /**
+   * Read one chat's bot members for mention rendering only, cached like humans.
+   *
+   * `--member-types user` never lists bots, so `@Aily 研发助手` stayed plain text
+   * and the bot was never notified. Bots are kept out of {@link memberList}
+   * because that list also backs the human head-count shown at `/bind`.
+   * Fail-soft: any failure yields no bots, never blocks the reply.
+   */
+  const botCache = new Map<string, { readonly at: number; readonly members: readonly MentionMember[] }>()
+  async function botMemberList(chatId: string): Promise<readonly MentionMember[]> {
+    const cached = botCache.get(chatId)
+    const now = Date.now()
+    if (cached !== undefined && now - cached.at < MEMBER_CACHE_TTL_MS) return cached.members
+    const members: MentionMember[] = []
+    try {
+      const data = await callCli(
+        ['im', '+chat-members-list', '--as', 'bot', '--chat-id', chatId, '--member-types', 'bot', '--page-all'],
+        binary,
+        runner,
+      )
+      const bots = (data as { bots?: unknown } | undefined)?.bots
+      if (Array.isArray(bots)) {
+        for (const entry of bots) {
+          if (typeof entry !== 'object' || entry === null) continue
+          const record = entry as { member_id?: unknown; name?: unknown }
+          if (typeof record.member_id !== 'string' || typeof record.name !== 'string') continue
+          if (record.member_id.trim() === '' || record.name.trim() === '') continue
+          members.push({ openId: record.member_id.trim(), name: record.name.trim() })
+        }
+      }
+    } catch {
+      // Not cached: a transient failure should not hide bots for the whole TTL.
+      return []
+    }
+    botCache.set(chatId, { at: now, members })
+    return members
+  }
+
+  /**
    * Turn the agent's `@display-name` references into real mentions.
    *
    * Fail-soft on purpose: rendering is an enhancement, and a member-list read
@@ -904,12 +1048,25 @@ export function createLarkCliClient(
   async function renderReplyMentions(chatId: string, text: string): Promise<string> {
     if (!hasMentionCandidate(text)) return text
     try {
+      const cached = memberCache.get(chatId)
+      const fromCache = cached !== undefined && Date.now() - cached.at < MEMBER_CACHE_TTL_MS
       const members = await memberList(chatId)
       if (members === undefined) {
         log('lark reply mentions: member list unavailable; sending text unchanged')
         return text
       }
-      const rendered = renderMentions(text, members)
+      let rendered = renderMentions(text, [...members, ...(await botMemberList(chatId))])
+      // A cached list predates anyone just invited (a member added a minute
+      // ago stayed plain text for the whole TTL). An unresolved reference is
+      // the only signal, so refetch once — never more than one extra read.
+      if ((rendered.unresolved ?? 0) > 0 && fromCache) {
+        memberCache.delete(chatId)
+        botCache.delete(chatId)
+        const fresh = await memberList(chatId)
+        if (fresh !== undefined) {
+          rendered = renderMentions(text, [...fresh, ...(await botMemberList(chatId))])
+        }
+      }
       if (rendered.rendered === 0) {
         if (rendered.skipped !== undefined) {
           log(`lark reply mentions: unchanged (${rendered.skipped})`)
@@ -1101,6 +1258,59 @@ export function createLarkCliClient(
       if (trigger === undefined) return { kind: 'reply-missing' }
       const quote = typeof card['quote'] === 'string' && card['quote'] !== '' ? card['quote'] : undefined
       return { kind: 'ok', isWhole: card['is_whole'], ...(quote === undefined ? {} : { quote }), replies, trigger }
+    },
+
+    async listDocComments(token, pageToken) {
+      let result: CliJsonResult
+      try {
+        result = await callJson(
+          ['drive', '+list-comments', '--as', 'bot', '--token', requireDocToken(token), '--type', 'docx',
+            '--solved-status', 'all', '--page-size', '100',
+            ...(pageToken === undefined ? [] : ['--page-token', pageToken])],
+          binary,
+          runner,
+        )
+      } catch {
+        return undefined
+      }
+      const envelope = recordOf(result.value)
+      if (!result.ok || envelope?.['ok'] !== true) return undefined
+      const data = recordOf(envelope['data'])
+      const items = data?.['items']
+      if (data === undefined || !Array.isArray(items)) return undefined
+      const comments: DocCommentCard[] = []
+      for (const raw of items) {
+        const card = parseCommentCard(raw)
+        if (card !== undefined) comments.push(card)
+      }
+      const next = data['page_token']
+      return {
+        comments,
+        hasMore: data['has_more'] === true,
+        ...(typeof next === 'string' && next !== '' ? { pageToken: next } : {}),
+      }
+    },
+
+    async subscribeDocEvents(token) {
+      let result: CliJsonResult
+      try {
+        result = await callJson(
+          ['api', 'POST', `/open-apis/drive/v1/files/${requireDocToken(token)}/subscribe`, '--as', 'bot',
+            '--params', JSON.stringify({ file_type: 'docx' })],
+          binary,
+          runner,
+        )
+      } catch {
+        return 'unknown'
+      }
+      const envelope = recordOf(result.value)
+      if (result.ok && envelope?.['ok'] === true) return 'success'
+      const code = recordOf(envelope?.['error'])?.['code']
+      // Both are decisions the Host cannot fix by retrying sooner: the app
+      // owner or the document owner has to change something first.
+      if (code === 99991672) return 'missing-scope'
+      if (code === 1069603) return 'forbidden'
+      return 'unknown'
     },
 
     async replyComment(token, commentId, text) {
@@ -1305,7 +1515,7 @@ export function createLarkCliClient(
 
     async reply(messageId, text) {
       await callCli(
-        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, ...textContentArgs(text)],
         binary,
         runner,
       )
@@ -1315,7 +1525,7 @@ export function createLarkCliClient(
       const messageId = requireMessageId(requireInput(messageIdInput, 'message id'), 'reply exact')
       const text = requireInput(textInput, 'reply text')
       const result = await callJson(
-        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text, '--json'],
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, ...textContentArgs(text), '--json'],
         binary,
         runner,
       )
@@ -1338,8 +1548,7 @@ export function createLarkCliClient(
         'bot',
         '--message-id',
         targetMessageId,
-        '--text',
-        replyText,
+        ...textContentArgs(replyText),
       ]
       // A thread id is Host-verified context. The CLI flag is still required
       // to select the platform's thread reply path; retaining the id in the
@@ -1358,7 +1567,7 @@ export function createLarkCliClient(
 
     async replyStrict(messageId, text) {
       const result = await callJson(
-        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, '--text', text],
+        ['im', '+messages-reply', '--as', 'bot', '--message-id', messageId, ...textContentArgs(text)],
         binary,
         runner,
       )
@@ -1391,7 +1600,7 @@ export function createLarkCliClient(
 
     async sendToChat(chatId, text) {
       await callCli(
-        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text],
+        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, ...textContentArgs(text)],
         binary,
         runner,
       )
@@ -1460,7 +1669,7 @@ export function createLocusLarkPort(
       }
       const text = requireInput(input.text, 'control message text')
       const result = await callJson(
-        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, '--text', text, '--json'],
+        ['im', '+messages-send', '--as', 'bot', '--chat-id', chatId, ...textContentArgs(text), '--json'],
         binary,
         runner,
       )

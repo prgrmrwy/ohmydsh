@@ -18,6 +18,7 @@ import {
   clampPosition,
   defaultPosition,
   readPosition,
+  resolvePosition,
   writePosition,
   POSITION_KEY,
 } from '../src/client/position.js'
@@ -182,33 +183,66 @@ describe('overlay position persistence', () => {
   it('round-trips a dragged position across a reload', () => {
     writePosition({ x: 120, y: 240 }, viewport, storage)
 
-    expect(readPosition(viewport, storage)).toEqual({ x: 120, y: 240 })
+    expect(readPosition(storage)).toEqual({ x: 120, y: 240 })
     expect(storage.map.has(POSITION_KEY)).toBe(true)
   })
 
-  it('clamps a stored position into a smaller viewport', () => {
+  it('never rewrites the saved anchor when the viewport is transiently small', () => {
     writePosition({ x: 1200, y: 700 }, viewport, storage)
 
-    // The window shrank; Pet must not be stranded off-screen.
-    const restored = readPosition({ width: 400, height: 300 }, storage)
+    // A hidden or not-yet-laid-out iframe measures 0x0, and one whose host has
+    // not applied its size yet measures the iframe default box. The RENDER may
+    // clamp for either, but the saved anchor has to survive both untouched —
+    // clamping it on read is what left Pet stuck in a corner for good.
+    const anchor = readPosition(storage)
+    expect(anchor).toEqual({ x: 1200, y: 700 })
+    expect(resolvePosition(anchor, { width: 0, height: 0 })).toEqual({ x: 0, y: 0 })
+    expect(resolvePosition(anchor, { width: 300, height: 150 })).toEqual({
+      x: 300 - PET_SIZE,
+      y: 150 - PET_SIZE,
+    })
 
-    expect(restored.x).toBeLessThanOrEqual(400 - PET_SIZE)
-    expect(restored.y).toBeLessThanOrEqual(300 - PET_SIZE)
+    // Once the real viewport arrives, Pet is back at the saved spot exactly.
+    expect(resolvePosition(readPosition(storage), viewport)).toEqual({ x: 1200, y: 700 })
+  })
+
+  it('clamps the rendered position into a smaller viewport', () => {
+    // The window genuinely shrank; Pet must not be stranded off-screen.
+    const rendered = resolvePosition({ x: 1200, y: 700 }, { width: 400, height: 300 })
+
+    expect(rendered.x).toBeLessThanOrEqual(400 - PET_SIZE)
+    expect(rendered.y).toBeLessThanOrEqual(300 - PET_SIZE)
+  })
+
+  it('clamps the rendered position against the actual mascot size', () => {
+    // A large mascot needs stricter bounds than the default diameter.
+    expect(resolvePosition({ x: 1279, y: 799 }, viewport, 88)).toEqual({
+      x: viewport.width - 88,
+      y: viewport.height - 88,
+    })
+  })
+
+  it('follows the viewport with the default until a drag saves one', () => {
+    expect(resolvePosition(readPosition(storage), { width: 1280, height: 800 }))
+      .toEqual(defaultPosition({ width: 1280, height: 800 }))
+    expect(resolvePosition(readPosition(storage), { width: 640, height: 480 }))
+      .toEqual(defaultPosition({ width: 640, height: 480 }))
   })
 
   it('never allows a negative position', () => {
     expect(clampPosition({ x: -500, y: -500 }, viewport)).toEqual({ x: 0, y: 0 })
   })
 
-  it('falls back to the default for corrupt storage', () => {
+  it('treats corrupt storage as no saved anchor', () => {
     storage.map.set(POSITION_KEY, 'not json')
-    expect(readPosition(viewport, storage)).toEqual(defaultPosition(viewport))
+    expect(readPosition(storage)).toBeUndefined()
+    expect(resolvePosition(readPosition(storage), viewport)).toEqual(defaultPosition(viewport))
 
     storage.map.set(POSITION_KEY, JSON.stringify({ x: 'left', y: null }))
-    expect(readPosition(viewport, storage)).toEqual(defaultPosition(viewport))
+    expect(readPosition(storage)).toBeUndefined()
 
     storage.map.set(POSITION_KEY, JSON.stringify({ x: Infinity, y: 0 }))
-    expect(readPosition(viewport, storage)).toEqual(defaultPosition(viewport))
+    expect(readPosition(storage)).toBeUndefined()
   })
 
   it('survives storage that refuses writes', () => {
@@ -224,7 +258,8 @@ describe('overlay position persistence', () => {
   })
 
   it('tolerates a missing storage implementation', () => {
-    expect(readPosition(viewport, undefined)).toEqual(defaultPosition(viewport))
+    expect(readPosition(undefined)).toBeUndefined()
+    expect(resolvePosition(readPosition(undefined), viewport)).toEqual(defaultPosition(viewport))
   })
 })
 

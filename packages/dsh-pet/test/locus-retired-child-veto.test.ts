@@ -59,6 +59,23 @@ describe('已退役的 locus 子会话不能再运行 (one lookup, in order)', (
     expect(t.lookupChild).toHaveBeenCalledTimes(1)
   })
 
+  it('spec Scenario "旧 fork child 不受影响"', async () => {
+    // A historical fork child: it may still carry a locus preset, but the migration
+    // deleted the row that pointed at it, so the one lookup says "ordinary".
+    const t = setup({ kind: 'ordinary' }, { agentPreset: () => 'locus-child' })
+
+    await expect(run(t.ports, 'historical-fork')).resolves.toBe('ordinary')
+
+    // Left alone: nothing composed, claimed, published, migrated, invalidated or verified,
+    // so no Delivery, adoption or cold restore can reach it through Pet.
+    expect(t.lookupChild).toHaveBeenCalledTimes(1)
+    expect(t.lookupChild).toHaveBeenCalledWith({ sessionId: 'historical-fork', agentPreset: 'locus-child', staged: undefined })
+    expect(t.order).toEqual(['lookup'])
+    for (const port of [t.compose, t.claim, t.publishClaimed, t.migrateMain, t.markInvalid, t.recordAccessVerified]) {
+      expect(port).not.toHaveBeenCalled()
+    }
+  })
+
   it('passes the durable preset and the staged tuple to the ONE lookup', async () => {
     const staged = { sessionId: 'child-1', locusMainSessionId: 'M1', revision: 4 }
     const t = setup({ kind: 'staged', row: resolved('not-created') }, { staged: () => staged })

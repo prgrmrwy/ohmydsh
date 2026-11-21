@@ -161,12 +161,17 @@ export function batchQueryComments(items: readonly Record<string, unknown>[]): R
   return { items }
 }
 
-/** One comment card for {@link batchQueryComments}. */
+/**
+ * One comment card for {@link batchQueryComments}.
+ *
+ * A reply's person elements are its mentions (the comment API has no separate
+ * `mentions` array). Each reply defaults to @-mentioning the bot alone.
+ */
 export function commentCard(input: {
   readonly commentId: string
   readonly isWhole: boolean
   readonly quote?: string
-  readonly replies: readonly { readonly replyId: string; readonly text: string; readonly mentionBot?: boolean }[]
+  readonly replies: readonly { readonly replyId: string; readonly text: string; readonly mentionBot?: boolean; readonly mentions?: readonly string[] }[]
   readonly hasMore?: boolean
 }): Record<string, unknown> {
   return {
@@ -180,9 +185,8 @@ export function commentCard(input: {
         reply_id: reply.replyId,
         content: {
           elements: [
-            ...(reply.mentionBot === false
-              ? []
-              : [{ type: 'person', person: { user_id: DOC_IDS.botOpenId } }]),
+            ...(reply.mentions ?? (reply.mentionBot === false ? [] : [DOC_IDS.botOpenId]))
+              .map(userId => ({ type: 'person', person: { user_id: userId } })),
             { type: 'text_run', text_run: { text: ` ${reply.text}` } },
           ],
         },

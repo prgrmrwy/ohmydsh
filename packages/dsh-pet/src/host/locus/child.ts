@@ -1351,8 +1351,26 @@ export function adaptLocusInboxPort(
  * port is exposed when the host can enumerate direct children; otherwise
  * adoption remains deliberately unavailable rather than trusting a durable id.
  */
+/**
+ * Low-cardinality description of a session-controller resume refusal: the
+ * stable RemoteError code, plus — only for the opaque `gateway/internal`
+ * wrapper, whose message is the sole carrier of the cause — a short message
+ * with session ids redacted.
+ */
+export function describeResumeRefusal(error: unknown): string {
+  const record = typeof error === 'object' && error !== null ? error as { code?: unknown; message?: unknown } : {}
+  const code = typeof record.code === 'string' && record.code !== '' ? record.code : 'unknown'
+  if (code !== 'gateway/internal' || typeof record.message !== 'string') return code
+  const detail = record.message
+    .replace(/session-[0-9a-f-]{8,}/gi, 'session-*')
+    .replace(/\s+/g, ' ')
+    .slice(0, 200)
+  return `${code} (${detail})`
+}
+
 export function probeLocusChildPorts(
   ctx: LocusHostContextLike,
+  log?: (message: string) => void,
 ): LocusChildPortsProbe {
   const parentService = ctx.get?.('agents')
   if (parentService === null || typeof parentService !== 'object') {
@@ -1409,12 +1427,19 @@ export function probeLocusChildPorts(
     isArchived: sessionId => archivedSessionIds().some(id => id === sessionId),
     resume: async (resumeOptions) => {
       if (resolveAgent === undefined) return undefined
-      const resolved = await Promise.resolve(resolveAgent(resumeOptions.resumeSessionId)) as
-        | { readonly agent?: LocusLiveParent; readonly error?: unknown }
-        | undefined
+      let resolved: { readonly agent?: LocusLiveParent; readonly error?: unknown } | undefined
+      try {
+        resolved = await Promise.resolve(resolveAgent(resumeOptions.resumeSessionId)) as typeof resolved
+      } catch (error) {
+        log?.(`dsh-pet locus parent resume threw: ${describeResumeRefusal(error)}`)
+        throw error
+      }
       // The controller reports a refusal as data. Returning no agent keeps the
       // adapter's fail-closed path instead of surfacing a partial parent.
-      if (resolved?.error !== undefined) return undefined
+      if (resolved?.error !== undefined) {
+        log?.(`dsh-pet locus parent resume refused: ${describeResumeRefusal(resolved.error)}`)
+        return undefined
+      }
       return resolved?.agent === undefined ? undefined : { agent: resolved.agent }
     },
   }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -82,6 +82,18 @@ describe('scope resolver', () => {
       gitRemote: () => undefined,
     })
     expect(resolver.resolve('/work/repo/src').scope).toBe('specific')
+  })
+
+  it('stops listing a discovered library once its directory is gone', () => {
+    // The settings page deletes the directory and re-lists in the same Host process.
+    const homeDir = tempHome()
+    const home = join(homeDir, '.dsh-memex', 'leftover')
+    mkdirSync(join(home, 'cards'), { recursive: true })
+    const resolver = createScopeResolver({ homeDir, gitRemote: () => undefined, gitRoot: () => undefined })
+    expect(resolver.list().map(item => item.scope)).toContain('leftover')
+    rmSync(home, { recursive: true, force: true })
+    expect(resolver.list().map(item => item.scope)).not.toContain('leftover')
+    expect(() => resolver.resolveByName('leftover')).toThrow(/Unknown scope/)
   })
 
   it('keeps list and resolve pure until ensure is called', () => {

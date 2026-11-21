@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { locusIdentity, locusSpaceId } from '../src/host/collab/naming.js'
 import { endpointKeyOf } from '../src/host/locus/aggregate.js'
+import { askParentFailureText } from '../src/host/collab/locus-tools.js'
 import { LOCUS_ASK_PARENT_TOOL, LOCUS_CONTEXT_TOOL, LOCUS_NOTE_TOOL, LOCUS_REPLY_CHILD_TOOL, registerPetLocusMainTools, registerPetTools } from '../src/host/tools.js'
 import { result } from './support/collab-host.js'
 import { identityOf, openTodoWorld, type TestLocusRow, type TodoWorld } from './support/collab-todo.js'
@@ -55,6 +56,9 @@ const lookupOf = (t: TodoWorld) => ({
       workspaceId: 'ws',
     } as never
   },
+  // No entry here has a current Delivery: every ask reference in this file is `none`
+  // (the askRef contract itself is covered by locus-ask-first.test.ts).
+  findCurrentSerializedDelivery: () => undefined,
   listEntryEndpointsOfMain: (m: string) => t.loci.filter(item => item.locusMainSessionId === m).map(item => item.endpoint),
 })
 
@@ -86,7 +90,7 @@ function fixture(t: TodoWorld) {
 const idsOf = (output: any) => [...output.charters.map((item: any) => item.id)].sort()
 
 describe('子会话读共识与 locus 主会话工具', () => {
-  it('按入口过滤', async () => {
+  it('spec Scenario "按入口过滤"', async () => {
     const t = await ready(row('rec-a', A, 'child-a'), row('rec-b', B, 'child-b'))
     await agreedCharter(t, 'charter-x', undefined)
     await agreedCharter(t, 'charter-y', identityOf(A))
@@ -105,7 +109,7 @@ describe('子会话读共识与 locus 主会话工具', () => {
     expect(JSON.stringify(output)).not.toMatch(/B 的待办|todo-b|私下消息|charter-other|charter-draft/)
   })
 
-  it('话题可见所在群条目', async () => {
+  it('spec Scenario "话题可见所在群条目"', async () => {
     const t = await ready(row('rec-g', GROUP, 'child-g'), row('rec-h', TOPIC, 'child-h'))
     await agreedCharter(t, 'charter-z', locusIdentity(endpointKeyOf(GROUP)))
     await agreedCharter(t, 'charter-topic-only', locusIdentity(endpointKeyOf(TOPIC)))
@@ -134,7 +138,7 @@ describe('子会话读共识与 locus 主会话工具', () => {
     expect(text).toContain(identityOf(A))
     expect(text).toContain('child-a')
 
-    const replied = await call(mainTools, LOCUS_REPLY_CHILD_TOOL, { childSessionId: 'child-a', text: '按 README 的发布章节走。' }, M)
+    const replied = await call(mainTools, LOCUS_REPLY_CHILD_TOOL, { childSessionId: 'child-a', text: '按 README 的发布章节走。', askRef: 'none' }, M)
 
     expect(replied).toEqual({ ok: true })
     expect(sends).toHaveLength(2)
@@ -145,7 +149,7 @@ describe('子会话读共识与 locus 主会话工具', () => {
     expect(Object.keys(childTools.get(LOCUS_ASK_PARENT_TOOL)!.parameters.properties)).toEqual(['question'])
   })
 
-  it('旧代子会话不能询问', async () => {
+  it('spec Scenario "旧代子会话不能询问"', async () => {
     const t = await ready(row('rec-a-g1', A, 'child-old', 'retired', 1), row('rec-a-g2', A, 'child-new', 'active', 2))
     const { sends, childTools, call } = fixture(t)
 
@@ -155,16 +159,41 @@ describe('子会话读共识与 locus 主会话工具', () => {
     expect(sends).toEqual([])
   })
 
-  it('回复非现行代子会话被拒', async () => {
+  it('spec Scenario "回复非现行代子会话被拒"', async () => {
     const t = await ready(row('rec-a-g1', A, 'child-old', 'retired', 1), row('rec-a-g2', A, 'child-new', 'active', 2))
     const { sends, mainTools, call } = fixture(t)
 
-    const stale = await call(mainTools, LOCUS_REPLY_CHILD_TOOL, { childSessionId: 'child-old', text: '回给旧代' }, M)
-    const foreign = await call(mainTools, LOCUS_REPLY_CHILD_TOOL, { childSessionId: 'child-of-someone-else', text: '回给别人的子会话' }, M)
+    const stale = await call(mainTools, LOCUS_REPLY_CHILD_TOOL, { childSessionId: 'child-old', text: '回给旧代', askRef: 'none' }, M)
+    const foreign = await call(mainTools, LOCUS_REPLY_CHILD_TOOL, { childSessionId: 'child-of-someone-else', text: '回给别人的子会话', askRef: 'none' }, M)
 
     expect(stale).toMatchObject({ ok: false })
     expect(foreign).toMatchObject({ ok: false })
     expect(sends).toEqual([])
+  })
+
+  it('spec Scenario "主会话无法回答"', async () => {
+    const t = await ready(row('rec-a', A, 'child-a'))
+    const { sends, childTools, call } = fixture(t)
+    const ask = childTools.get(LOCUS_ASK_PARENT_TOOL)!
+
+    // The question is delivered, but the parent never answers.
+    const asked = await call(childTools, LOCUS_ASK_PARENT_TOOL, { question: '这个仓库的发布流程是什么？' }, 'child-a')
+
+    // "Accepted" is only a delivery fact: the result carries no answer, and the
+    // rendered text says the reply is still to come rather than received.
+    expect(asked).toEqual({ ok: true })
+    expect(ask.description).toContain('never an answer')
+    const rendered = ask.output.render({ question: 'q' }, asked).map((block: any) => block.text).join('')
+    expect(rendered).toContain('回复会作为后续消息到达')
+    expect(rendered).not.toContain('已答复')
+    // Nothing flowed back to the child and the call cannot widen anything: its only argument is the question.
+    expect(sends.map(item => item.target)).toEqual([M])
+    expect(Object.keys(ask.parameters.properties)).toEqual(['question'])
+
+    // When the question cannot even be delivered, the child is told it is NOT confirmed.
+    const failed = ask.output.render({ question: 'q' }, { ok: false, reason: 'delivery-failed' }).map((block: any) => block.text).join('')
+    expect(failed).toBe(askParentFailureText('delivery-failed'))
+    expect(failed).toContain('没有确认送达')
   })
 
   it('locus_note 写入带入口标记的条目，且入口须是该 locus 主会话名下的入口', async () => {

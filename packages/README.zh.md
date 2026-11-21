@@ -32,7 +32,7 @@ packages/<name>/
 |---|---|---|
 | A | `dsh-pet`、`dsh-memex`、`worktree-session`、`dsh-openspec` | `<!-- problem -->` 段落、位于该 package `docs/` 下的位图截图（可再加示意图） |
 | B | `dsh-sidebar-session-provider-icon`、`dsh-session-id-copy`、`system-clock`、`sidebar-session-resources`、`home-network-model-guard` | `<!-- problem -->` 段落与位于该 package `docs/` 下的位图截图 |
-| C | `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`、`collab-kernel`、`dsh-collab`、`dsh-auto-model-routing` | `<!-- problem -->` 段落，以及以 `<!-- section: removal -->` 为锚点的「移除」章节，说明它连接哪两端、何时可以移除 |
+| C | `subscriptions-sandbox-shim`、`cockpit-worktree-open-shim`、`cockpit-memex-browse-shim`、`collab-kernel`、`dsh-collab`、`dsh-auto-model-routing`、`jev-workflow-router-hook` | `<!-- problem -->` 段落，以及以 `<!-- section: removal -->` 为锚点的「移除」章节，说明它连接哪两端、何时可以移除 |
 
 package 也可以在截图之外加一张架构图：`docs/architecture.dual.svg`（archify 导出的双主题 SVG），可编辑源文件 `docs/architecture.json` 放在旁边，嵌入 `## 架构` 章节。架构图不算作 A/B 级要求的位图；示例见 [`dsh-auto-model-routing`](dsh-auto-model-routing/README.zh.md#架构)。
 

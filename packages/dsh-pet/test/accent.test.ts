@@ -111,23 +111,28 @@ describe('the size is bounded and keeps Pet reachable', () => {
 
 describe('appearance survives a restart', () => {
   it('keeps a small mascot where the user dropped it', async () => {
-    const { readPosition, writePosition } = await import('../src/client/position.js')
+    const { readPosition, resolvePosition, writePosition } = await import('../src/client/position.js')
     const viewport = { width: 1000, height: 800 }
 
-    // A 56px mascot may sit up to 944/744; the 72px default caps at 928/728,
-    // so re-reading with the constant silently pulls it back on every load.
+    // A 56px mascot may sit up to 944/744; the 72px default caps at 928/728.
     writePosition({ x: 940, y: 740 }, viewport, globalThis.localStorage, 56)
 
-    expect(readPosition(viewport, globalThis.localStorage, 56)).toEqual({ x: 940, y: 740 })
+    // The saved anchor is stored verbatim, and the render clamps it against
+    // the ACTUAL size, so nothing pulls the small mascot back on reload.
+    const anchor = readPosition(globalThis.localStorage)
+    expect(anchor).toEqual({ x: 940, y: 740 })
+    expect(resolvePosition(anchor, viewport, 56)).toEqual({ x: 940, y: 740 })
+    // Clamping it as if it were the 72px default is exactly the old drift.
+    expect(resolvePosition(anchor, viewport, 72)).toEqual({ x: 928, y: 728 })
   })
 
   it('does not drift across repeated restarts', async () => {
-    const { readPosition, writePosition } = await import('../src/client/position.js')
+    const { readPosition, resolvePosition, writePosition } = await import('../src/client/position.js')
     const viewport = { width: 1000, height: 800 }
     writePosition({ x: 940, y: 740 }, viewport, globalThis.localStorage, 56)
 
-    const first = readPosition(viewport, globalThis.localStorage, 56)
-    const second = readPosition(viewport, globalThis.localStorage, 56)
+    const first = resolvePosition(readPosition(globalThis.localStorage), viewport, 56)
+    const second = resolvePosition(readPosition(globalThis.localStorage), viewport, 56)
 
     expect(second).toEqual(first)
     expect(first).toEqual({ x: 940, y: 740 })
@@ -164,6 +169,22 @@ describe('the overlay measures one stable box before placing Pet', () => {
 
     // A temporary narrow layout must not overwrite the user's chosen spot.
     expect([...overlay.matchAll(/writePosition\(/g)]).toHaveLength(1)
+  })
+
+  it('renders from the saved anchor instead of clamping it into state', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const nodePath = await import('node:path')
+    const overlay = await readFile(
+      nodePath.resolve(process.cwd(), 'src', 'client', 'overlay.tsx'),
+      'utf8',
+    )
+
+    // The position handed to `transform` is derived per render from the saved
+    // anchor. Storing the clamped value instead is what made a viewport that
+    // was still settling at mount (an iframe measuring 0x0) permanently move
+    // Pet: nothing ever restored the saved spot when the real viewport arrived.
+    expect(overlay).toContain('resolvePosition(anchor, viewport, size)')
+    expect(overlay).not.toContain('setPosition(')
   })
 })
 

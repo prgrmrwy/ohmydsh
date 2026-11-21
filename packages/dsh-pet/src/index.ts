@@ -45,8 +45,9 @@ import { ensurePetDirectories, resolvePetPaths, type PetPaths } from './host/pat
 import { rebuildProjection } from './host/projection.js'
 import { PetRepository } from './host/repository.js'
 import { ChannelService } from './host/channel/service.js'
-import { createLarkCliClient, createLocusLarkPort } from './host/channel/lark.js'
+import { createLarkCliClient, createLocusLarkPort, LarkCliCallError } from './host/channel/lark.js'
 import { createLocusMediaPort, sweepMediaSpool, type LocusMediaPort } from './host/channel/media.js'
+import { resolveFrameTools } from './host/channel/media-video.js'
 import { resolvePetLarkCliCompat } from './host/channel/lark-cli-compat.js'
 import { createPetRoutes } from './host/routes.js'
 import { withBrowserAuth } from './host/http.js'
@@ -60,7 +61,7 @@ import { legacyTodoBackend } from './host/ledger/backend.js'
 import { projectTodoForOwner } from './host/ledger/owner-view.js'
 import { createOwnerLedger } from './host/ledger/owner-ledger.js'
 import { LocusCollab, type LocusMainRef } from './host/collab/locus-collab.js'
-import type { LocusMainToolsDeps, SubagentMessenger } from './host/collab/locus-tools.js'
+import type { LocusMainToolsDeps, SubagentMessenger, WorkHistoryEvent } from './host/collab/locus-tools.js'
 import { CollabTodoBackend } from './host/collab/todo-backend.js'
 import type { TodoBackend } from './host/ledger/backend.js'
 import type { CollabService } from './host/collab/types.js'
@@ -134,6 +135,8 @@ import { handleLocusAgentCreated } from './host/locus/agent-created.js'
 import { LocusRepositoryV20 } from './host/locus/persistence-v20.js'
 import { asLocusContextRepository, type LocusContextRepository } from './host/locus/context-repository.js'
 import { isDocEndpoint, parseDocChatId } from './host/locus/doc-endpoint.js'
+import { publishesLocusMessageTool } from './host/locus/message-guidance.js'
+import { selectLocusEntryReadTools } from './host/locus/entry-read-tools.js'
 import { createDocControlMessenger, DOC_DISCLOSURE_TEXT, finishDocReply, reactOnDocTrigger, sendDocControlReceipt } from './host/channel/doc-comment-egress.js'
 import { renderLocusDeliveryFor } from './host/locus/context.js'
 import { createLocusHistoryCursor } from './host/locus/history-cursor.js'
@@ -409,9 +412,18 @@ async function initialize(
   } catch (error) {
     petLog(`dsh-pet: lark media downloader unavailable (${error instanceof Error ? error.message : String(error)})`)
   }
+  // Optional: with both `ffmpeg` and `ffprobe` on PATH a video is shown as its cover plus a few
+  // scene keyframes; without them, as the cover only. Resolved ONCE here, to absolute paths, so a
+  // later PATH change cannot swap the binary. They parse untrusted video with the Host user's
+  // rights and no extra sandbox: removing them from the machine turns the feature off.
+  const frameTools = await resolveFrameTools()
+  petLog(frameTools === undefined
+    ? 'dsh-pet: ffmpeg/ffprobe not found; video messages are read as cover only'
+    : `dsh-pet: video keyframes enabled (${frameTools.ffmpeg})`)
   const locusMedia: LocusMediaPort = createLocusMediaPort({
     attachments: ctx.get('attachments') as never,
     ...(locusMediaDownload === undefined ? {} : { download: locusMediaDownload }),
+    ...(frameTools === undefined ? {} : { frameTools }),
   })
   let currentLocusTurnProof: (childSessionId: string) =>
     | { readonly executionId: string; readonly turnId: string }
@@ -530,6 +542,16 @@ async function initialize(
       now: () => Date.now(),
       newItemId: () => `todo-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`,
     },
+  }
+  /**
+   * The caller lookup of the locus tools that carry an ask reference
+   * (`locus_ask_parent`, `locus_reply_child`): the same unique-sessionId row
+   * lookup plus the durable current-Delivery read the reference is built from.
+   */
+  const locusAskLoci = {
+    ...intentTriageDeps.loci,
+    findCurrentSerializedDelivery: (input: { readonly locusId: string; readonly sessionId: string }) =>
+      locusRepository.findCurrentSerializedDelivery(input),
   }
   let refusedReplies: ReturnType<typeof createRefusedReplyTracker> | undefined
   let deliveryExecutionProof = (_execution: ToolRunContext): RefusedReplyExecutionProof | undefined => undefined
@@ -710,11 +732,42 @@ async function initialize(
   const locusMainToolsDeps: LocusMainToolsDeps = {
     loci: {
       findBySessionId: (id: string) => locusRepository.findBySessionId(id),
+      findCurrentSerializedDelivery: locusAskLoci.findCurrentSerializedDelivery,
       listEntryEndpointsOfMain: (locusMainSessionId: string) =>
         locusReconcileRows().filter(item => item.locusMainSessionId === locusMainSessionId).map(item => item.row.endpoint),
     },
     collab: locusCollab,
     subagents: officialSubagentMessenger,
+    /**
+     * `locus_work_history`. The target is never an argument: it is the work
+     * session of the caller's ACTIVE `locus_mains` pairing. Status is the
+     * two-valued `idle`/`unknown` (a NEW helper: the child helpers above treat
+     * "not in memory" as not idle, which is the opposite of what this needs to
+     * say about a cold session being unknown rather than busy).
+     */
+    workHistory: {
+      pairedWorkSessionOf: (locusMainSessionId: string) => {
+        const main = locusRepository.findMain(locusMainSessionId)
+        return main?.status === 'active' ? main.workSessionId : undefined
+      },
+      readLive: (workSessionId: string) => {
+        const session = ctx.sessions.get(workSessionId as never)
+        if (session === undefined) return undefined
+        type InboxLike = { readonly nextTurn?: unknown; readonly nextStep?: unknown }
+        const handle = ctx.agents.get(workSessionId as never) as { agent?: { inbox?: InboxLike }; inbox?: InboxLike } | undefined
+        const inbox = ((handle?.agent ?? handle) as { inbox?: InboxLike } | undefined)?.inbox
+        // Readable only when BOTH queues are real lists; anything else is "unknown", never "empty".
+        const inboxPending = inbox !== undefined && Array.isArray(inbox.nextTurn) && Array.isArray(inbox.nextStep)
+          ? inbox.nextTurn.length + inbox.nextStep.length > 0
+          : undefined
+        return { events: session.snapshotEvents() as readonly WorkHistoryEvent[], inboxPending }
+      },
+      readCold: async (workSessionId: string) => {
+        const inspect = createSessionInspector(ctx.get('sessionQuery') as Parameters<typeof createSessionInspector>[0])
+        if (inspect === undefined) throw new Error('sessionQuery.observeSession is unavailable')
+        return (await inspect(workSessionId)).events as readonly WorkHistoryEvent[]
+      },
+    },
   }
   const locusMainScopes = new WeakSet<object>()
   const livePresetFor = (sessionId: string): string | undefined => {
@@ -902,7 +955,7 @@ async function initialize(
                 repository,
                 locusRepository: locusContextRepository,
                 intentTriage: intentTriageDeps,
-                locusChildTools: { loci: intentTriageDeps.loci, collab: locusCollab, subagents: officialSubagentMessenger },
+                locusChildTools: { loci: locusAskLoci, collab: locusCollab, subagents: officialSubagentMessenger },
                 // A user message typed into this executor registers its
                 // Invocation through the durable inbox splice, which can still
                 // be landing when the turn's first step asks for context.
@@ -1142,32 +1195,22 @@ async function initialize(
             logAuthorizationRefusal: ({ operation, reason }) =>
               petLog(`dsh-pet locus authorization refused: ${operation}:${reason}`),
           },
-          locusChildTools: { loci: intentTriageDeps.loci, collab: locusCollab, subagents: officialSubagentMessenger },
-          // One read tool per child, by entry kind (D9/D10): a document child
-          // gets the doc read and never the group-history read, and an IM child
-          // never sees the doc read. Each is published only when the runtime
-          // really has the port, so a tool that can never succeed never appears.
-          // A fresh child is composed before its locus row exists, so the
-          // endpoint comes from the composition first (production E2E,
-          // 2026-10-18: the first doc child got the IM tool without this).
-          ...(isDocEndpoint(composition.endpoint ?? locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' })
-            ? (larkClient.queryDocComment === undefined || larkClient.fetchDocMarkdown === undefined ? {} : {
-              locusDocContext: {
-                loci: intentTriageDeps.loci,
-                currentMessageId: caller => locusRepository.listDeliveries(caller.locusId)
-                  .find(record => record.sessionId === caller.childSessionId &&
-                    (record.status === 'current' || record.status === 'finishing') &&
-                    record.queueState === 'current')?.messageId,
-                client: larkClient,
-              },
-            })
-            : (larkClient.readEntranceHistory === undefined ? {} : {
-              locusHistory: {
-                loci: intentTriageDeps.loci,
-                cursor: locusHistoryCursor,
-                read: input => larkClient.readEntranceHistory!(input),
-              },
-            })),
+          locusChildTools: { loci: locusAskLoci, collab: locusCollab, subagents: officialSubagentMessenger },
+          // One read-tool set per child, by entry kind (D9/D10) and by what this Host can
+          // serve; see selectLocusEntryReadTools. A fresh child is composed before its
+          // locus row exists, so the endpoint comes from the composition first
+          // (production E2E, 2026-10-18: the first doc child got the IM tool without this).
+          ...selectLocusEntryReadTools({
+            endpoint: composition.endpoint ?? locusRepository.getLocus(composition.locusId)?.endpoint ?? { chatId: '' },
+            lark: larkClient,
+            media: locusMedia,
+            loci: intentTriageDeps.loci,
+            cursor: locusHistoryCursor,
+            currentDocMessageId: caller => locusRepository.listDeliveries(caller.locusId)
+              .find(record => record.sessionId === caller.childSessionId &&
+                (record.status === 'current' || record.status === 'finishing') &&
+                record.queueState === 'current')?.messageId,
+          }),
         })
       },
       // D8: read-only denies the full-access tools; danger-full-access leaves the
@@ -1747,7 +1790,7 @@ async function initialize(
    * launcher publishes it; the official pinned package does not, and remains
    * fail closed rather than relying on version strings or unknown fields.
    */
-  const locusChildProbe = probeLocusChildPorts(ctx as unknown as LocusHostContextLike)
+  const locusChildProbe = probeLocusChildPorts(ctx as unknown as LocusHostContextLike, petLog)
   const locusChildDelivery = locusChildProbe.available
     ? createLocusChildDelivery({
       // One adapter owns exactly one active child; use a factory so sibling
@@ -2133,7 +2176,7 @@ async function initialize(
       },
       bind: {
         bind: ({ endpoint, parentSessionId, chatName, actorId }) => {
-          const run = (): Promise<EnsureGroupResult | EnsureTopicResult> => endpoint.threadId === undefined
+          const ensure = (): Promise<EnsureGroupResult | EnsureTopicResult> => endpoint.threadId === undefined
             ? locusProvisioningController.ensureGroup({
               chatId: endpoint.chatId,
               parentSessionId,
@@ -2145,6 +2188,16 @@ async function initialize(
               parentSessionId,
               ...(chatName === undefined ? {} : { chatName }),
             })
+          // The chat's W is archived and a different session was named: move
+          // the chat first (D6, fenced), then the ordinary ensure is same-W.
+          const run = async (): Promise<EnsureGroupResult | EnsureTopicResult> => {
+            const rebound = await locusProvisioningController.rebindArchivedChatForBind({
+              chatId: endpoint.chatId,
+              workSessionId: parentSessionId,
+            })
+            const result = await ensure()
+            return rebound === undefined ? result : { ...result, rebound: true as const }
+          }
           return isDocEndpoint(endpoint) ? docControl.withIssuer(endpoint, actorId, run) : run()
         },
       },
@@ -2173,6 +2226,8 @@ async function initialize(
         if (token === undefined) return larkClient.chatName(chatId)
         return (await larkClient.inspectDoc?.(token).catch(() => undefined))?.title
       },
+      // Fallback diagnostics for an unmapped control failure: reason code only.
+      log: message => petLog(`dsh-pet: ${message}`),
     })
 
   const locusTurnObserver = (() => {
@@ -2423,14 +2478,24 @@ async function initialize(
       }
       const target = current.replyTarget ?? current.feedbackTarget
       let outboundResult: 'success' | 'unknown' = 'unknown'
+      let outboundDiagnostic = 'reply result was not reliably confirmed'
       if (typeof larkClient.replyToTarget === 'function') {
         try {
           await larkClient.replyToTarget(target, input.text ?? '')
           outboundResult = 'success'
-        } catch {
-          // The current adapter cannot prove whether a process/envelope failure
-          // happened before or after platform acceptance. Never retry it.
+        } catch (error) {
+          // Most process/envelope failures cannot prove whether they happened
+          // before or after platform acceptance. Never retry any of them; only
+          // lark-cli's local validation is provably pre-send, so name it.
           outboundResult = 'unknown'
+          if (error instanceof LarkCliCallError) {
+            petLog(`dsh-pet locus reply failed: ${error.errorType ?? 'unknown'}/${error.errorSubtype ?? 'unknown'}`)
+            if (error.rejectedBeforeSend) {
+              outboundDiagnostic = 'reply was rejected by local lark-cli validation and was not sent'
+            }
+          } else {
+            petLog('dsh-pet locus reply failed: adapter error')
+          }
         }
       }
       const completed = await locusRepository.completeCurrentDelivery({
@@ -2439,7 +2504,7 @@ async function initialize(
         now: Date.now(),
         outcome: 'reply',
         outboundResult,
-        ...(outboundResult === 'unknown' ? { outboundDiagnostic: 'reply result was not reliably confirmed' } : {}),
+        ...(outboundResult === 'unknown' ? { outboundDiagnostic } : {}),
         ...(finishing.record.revision === undefined && finishing.record.stateRevision === undefined
           ? {}
           : { expectedRevision: finishing.record.revision ?? finishing.record.stateRevision }),
@@ -2823,6 +2888,8 @@ async function initialize(
             ...(groupRow.reboundFrom === undefined ? {} : { reboundFrom: groupRow.reboundFrom }),
           },
           readability,
+          // Same decision that publishes the tool, so the prompt never names a missing tool.
+          messageToolAvailable: publishesLocusMessageTool(revalidated.endpoint, locusMedia.available),
           message: {
             messageId: message.messageId,
             senderOpenId: message.senderOpenId,
@@ -3205,6 +3272,31 @@ async function initialize(
           }),
         locusAuthorization,
         locusAccessMode: endpoint => locusRepository.getRow(endpoint)?.accessMode,
+        // Live comment events are best-effort: on 2026-11-13 every comment
+        // authored by a reviewer failed to produce an event while owner
+        // comments arrived on the same connection. Re-read recent comments of
+        // documents that ALREADY have a usable entry and re-admit replies that
+        // @ this bot; the identical message id feeds the durable Delivery
+        // index, so a live/reconcile race loses one accept as duplicate.
+        docCommentReconcile: {
+          entries: () =>
+            locusRepository.listRows()
+              .filter(row =>
+                !('threadId' in row.endpoint)
+                && parseDocChatId(row.endpoint.chatId) !== undefined
+                && (row.state === 'active' || row.state === 'not-created'))
+              .map(row => row.endpoint.chatId),
+          // Catch up from the last Delivery this document already handled, so a
+          // restart never re-answers history the bot has moved past.
+          handledThrough: chatId => {
+            let latest: number | undefined
+            for (const delivery of locusRepository.listDeliveries()) {
+              if (delivery.endpoint.chatId !== chatId || delivery.acceptedAt === undefined) continue
+              if (latest === undefined || delivery.acceptedAt > latest) latest = delivery.acceptedAt
+            }
+            return latest
+          },
+        },
         // Bot-added produces no locus of its own: the whole tree is built on
         // demand by the first qualifying @ message, the same seam a group and
         // a topic both already use. `botLifecycleInitializer` stays

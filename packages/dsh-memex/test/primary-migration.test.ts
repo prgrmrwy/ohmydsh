@@ -116,6 +116,20 @@ describe('planPrimaryMigrations', () => {
     expect(planPrimaryMigrations(previous, next, { namespaceDir: root })).toEqual([])
   })
 
+  it('treats a first claimer taking over an auto-derived library as a switch', () => {
+    // The workspace had no claiming entry: its cards live in the library derived
+    // from the repository. Claiming it for another library must carry them over.
+    const next: ScopeConfig = { ...base, scopes: [{ name: 'personal', pathPrefixes: ['/w'] }] }
+    const derivedHome = join(root, 'team-repo')
+    const servedBefore = (workspace: string) => workspace === '/w' ? { name: 'team-repo', home: derivedHome } : undefined
+    expect(planPrimaryMigrations(base, next, { namespaceDir: root, servedBefore })).toEqual([{
+      workspace: '/w', from: 'team-repo', to: 'personal', fromHome: derivedHome, toHome: join(root, 'personal'),
+    }])
+    // Without that evidence (or when the same library keeps serving) nothing moves.
+    expect(planPrimaryMigrations(base, next, { namespaceDir: root })).toEqual([])
+    expect(planPrimaryMigrations(base, next, { namespaceDir: root, servedBefore: () => ({ name: 'personal', home: join(root, 'personal') }) })).toEqual([])
+  })
+
   it('merges once when several workspaces switch between the same two libraries', () => {
     const previous: ScopeConfig = {
       ...base,

@@ -27,6 +27,8 @@ The flow creates **no target Workspace and no target Session**. The source Sessi
 
 Preparation and handoff are recoverable and fail closed. If preparation or binding fails, the source draft and all official generic attachments remain intact and are not submitted from the repository checkout. After preparation and binding, WS invokes the official SessionInput submit exactly once; DSH owns attempts, uploads, receipts, retries, echo retirement, and draft restoration.
 
+Official `@` reference chips are part of the same payload. WS neither rejects nor rewrites them: the ordinary submit resolves and serializes them after binding, so the draft keeps its chips and official retry behavior. Because a file or folder reference is workspace-root-relative, the bound context tells the Agent to map the reference path onto the managed worktree before every file tool call; a Session reference carries no path and keeps its official meaning.
+
 Project type is resolved from the repository-root lockfile before any branch, worktree, operation file, or binding is created. A single `package-lock.json` or `pnpm-lock.yaml` selects npm or pnpm respectively. If both lockfiles are present, WS first honors a supported `packageManager` declaration in `package.json`, then adopts the lockfile that is tracked by Git when exactly one is tracked; the selected manager and ignored lockfile are recorded in operation diagnostics. If no unique signal proves the repository intent, WS refuses the request rather than guessing a default manager. A repository with neither lockfile is refused with an `UNSUPPORTED_PROJECT` diagnostic before any resource is created.
 
 In the blank-session UI the base ref chooser shows each ref on a single line (truncated with an ellipsis, full name on hover). Choosing a ref only stages the selection and has no Git side effects.
@@ -92,7 +94,7 @@ A bound Session fails closed outside its worktree:
 - **Delegation.** Only the audited `subagent` configured above is allowed, in either background or foreground (`run_in_background: false`) mode: both create the child through `agents.create`, where the `agent/created` hook installs the binding before the first prompt. One-shot providers such as `subagent_fork` and `subagent_codex`, and unknown delegation-style tools, are denied because inheritance of the managed root before the child's first step cannot be proven. `send_message` is unaffected.
 - **Unaudited tools.** A tool outside the audited inventory is left alone unless its arguments expose a path, cwd, command or similar local capability, in which case it is denied until reviewed.
 - **Cleaned bindings.** After cleanup, every tool is denied for the old execution root.
-- **Stable context.** The model-visible context contains only durable invariants: repository root, managed worktree root, task branch, main-checkout prohibition, explicit-path rule, and promote-before-dependency-mutation guidance. Branch status, dirty state, timestamps, lifecycle phase, diagnostics, and lean/mutable mode belong in metadata/UI or on-demand status output.
+- **Stable context.** The model-visible context contains only durable invariants: repository root, managed worktree root, task branch, main-checkout prohibition, explicit-path rule, official `@` file/folder reference mapping, and promote-before-dependency-mutation guidance. Branch status, dirty state, timestamps, lifecycle phase, diagnostics, and lean/mutable mode belong in metadata/UI or on-demand status output.
 
 ## Maintenance and cleanup
 

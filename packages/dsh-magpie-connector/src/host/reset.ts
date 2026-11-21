@@ -73,7 +73,7 @@ export function resetOutcomeOf(code: string): ResetOutcome {
   return 'unknown'
 }
 
-interface Ticket { id: string; user: string; creditId: string; expiresAt: number }
+interface Ticket extends Pick<Operation, 'gen' | 'connectionVersion'> { id: string; user: string; creditId: string; expiresAt: number }
 export interface ResetOptions {
   now?: () => number
   /** Deterministic ticket seam for tests. */
@@ -122,18 +122,26 @@ export class ResetController {
     if (this.busy) return conflict('MAGPIE_RESET_BUSY')
     if (this.uncertain.has(user.toLowerCase())) return conflict('MAGPIE_RESET_UNCERTAIN')
     this.busy = true
+    let op: Operation | undefined
     try {
-      const fresh = await this.cards.fresh({ provider: 'codex', user })
+      try { op = await this.runtime.beginOperation() } catch (error) { return this.readFailed(this.runtime.redact(errorMessage(error))) }
+      const fresh = await this.cards.fresh({ provider: 'codex', user }, op)
+      if (!this.runtime.isOperationCurrent(op)) return conflict('MAGPIE_RESET_TICKET_INVALID')
       if (!fresh.ok) return this.readFailed(fresh.error)
       const prep = resetPrep(fresh.card, fresh.credits, this.now())
       if (!prep.ok) return conflict(refusalCode(prep.reason))
+      const refused = await this.verifyIdentity(op)
+      if (refused) return refused
+      if (!this.runtime.isOperationCurrent(op)) return conflict('MAGPIE_RESET_TICKET_INVALID')
+      // Only host-side versions survive confirmation, never the operation's credentials.
       // Setting the only slot retires whatever ticket was waiting.
-      this.ticket = { id: this.ticketId(), user, creditId: prep.credit.id, expiresAt: this.now() + RESET_TICKET_TTL_MS }
+      this.ticket = { id: this.ticketId(), user, creditId: prep.credit.id, expiresAt: this.now() + RESET_TICKET_TTL_MS,
+        gen: op.gen, connectionVersion: op.connectionVersion }
       return Response.json({
         ticket: this.ticket.id, expiresAt: new Date(this.ticket.expiresAt).toISOString(), weeklyUsedPercent: prep.weeklyUsedPercent,
         ...(prep.credit.until === undefined ? {} : { creditExpiresAt: prep.credit.until }),
       })
-    } finally { this.busy = false }
+    } finally { op?.release(); this.busy = false }
   }
 
   private async consume(id: string): Promise<Response> {
@@ -148,16 +156,24 @@ export class ResetController {
     const { user } = pending
     const account = user.toLowerCase()
     if (this.uncertain.has(account)) return conflict('MAGPIE_RESET_UNCERTAIN')
+    if (!this.runtime.isOperationCurrent(pending)) return conflict('MAGPIE_RESET_TICKET_INVALID')
     this.busy = true
+    let op: Operation | undefined
     try {
-      // Everything that can refuse is checked against a card read now, not the one prepare saw.
-      const fresh = await this.cards.fresh({ provider: 'codex', user })
+      try { op = await this.runtime.beginOperation() } catch (error) {
+        if (!this.runtime.isOperationCurrent(pending)) return conflict('MAGPIE_RESET_TICKET_INVALID')
+        return this.readFailed(this.runtime.redact(errorMessage(error)))
+      }
+      if (pending.gen !== op.gen || pending.connectionVersion !== op.connectionVersion || !this.runtime.isOperationCurrent(op)) return conflict('MAGPIE_RESET_TICKET_INVALID')
+      // The final read and write share this retained identity; neither may switch lines.
+      const fresh = await this.cards.fresh({ provider: 'codex', user }, op)
+      if (!this.runtime.isOperationCurrent(op)) return conflict('MAGPIE_RESET_TICKET_INVALID')
       if (!fresh.ok) return this.readFailed(fresh.error)
       const prep = resetPrep(fresh.card, fresh.credits, this.now())
       if (!prep.ok) return conflict(refusalCode(prep.reason))
       if (!usableCredits(fresh.credits, this.now()).some(credit => credit.id === pending.creditId)) return conflict('MAGPIE_RESET_CREDIT_GONE')
-      return await this.spend(user, account, pending.creditId)
-    } finally { this.busy = false }
+      return await this.spend(op, user, account, pending.creditId)
+    } finally { op?.release(); this.busy = false }
   }
 
   /**
@@ -165,9 +181,11 @@ export class ResetController {
    * transport failure, a timeout or an unreadable answer means the credit may
    * already be gone, so nothing may be retried until a human checked Magpie.
    */
-  private async spend(user: string, account: string, creditId: string): Promise<Response> {
-    let op: Operation
-    try { op = await this.runtime.beginOperation() } catch (error) { return this.readFailed(this.runtime.redact(errorMessage(error))) }
+  private async spend(op: Operation, user: string, account: string, creditId: string): Promise<Response> {
+    const refused = await this.verifyIdentity(op)
+    if (refused) return refused
+    // No await between admission and transport dispatch. Once dispatched, failure is uncertain.
+    if (!this.runtime.isOperationCurrent(op)) return conflict('MAGPIE_RESET_TICKET_INVALID')
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     this.uncertain.add(account)
@@ -199,7 +217,14 @@ export class ResetController {
       if (!refreshed.ok) return Response.json(base)
       const body = await refreshed.json() as { cards?: Card[] }
       return Response.json(Array.isArray(body.cards) ? { ...base, cards: body.cards } : base)
-    } finally { clearTimeout(timer); op.release() }
+    } finally { clearTimeout(timer) }
+  }
+
+  private async verifyIdentity(op: Operation): Promise<Response | undefined> {
+    try {
+      if (!await this.runtime.revalidateOperation(op)) return conflict('MAGPIE_RESET_TICKET_INVALID')
+    } catch (error) { return this.readFailed(this.runtime.redact(errorMessage(error))) }
+    return undefined
   }
 
   private readFailed(error: string) {

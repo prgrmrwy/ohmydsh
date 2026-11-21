@@ -57,10 +57,12 @@ export function confirmArchiveDetailFor(
   ctx: { sessions?: { get(id: never): unknown } },
   offer: { sourceSessionId: string; taskBranch: string; worktreePath: string },
 ): string {
+  // Rendered as Markdown: one list item per fact (a bare newline would merge
+  // lines), identifiers in code spans so `_`/`*` in paths stay literal.
   return (
-    `源会话：${sessionLabel(offer.sourceSessionId, titleOfSession(ctx, offer.sourceSessionId))}\n` +
-    `任务分支：${offer.taskBranch}\n` +
-    `工作区路径：${offer.worktreePath}\n` +
+    `- 源会话：${sessionLabel(offer.sourceSessionId, titleOfSession(ctx, offer.sourceSessionId))}\n` +
+    `- 任务分支：\`${offer.taskBranch}\`\n` +
+    `- 工作区路径：\`${offer.worktreePath}\`\n\n` +
     '该分支已证明合入，工作区没有未提交改动。确认后将先归档该会话，再删除该工作区与本地任务分支。' +
     '删除不可逆；被归档的会话本身仍可通过取消归档恢复为普通会话。'
   )
@@ -170,16 +172,15 @@ async function askUser(
   const questions = ctx.get?.('userQuestions') as UserQuestionsSeam | undefined
   if (questions === undefined) return 'unavailable'
   try {
-    // Everything the user must read goes in `question`, deliberately not in
-    // the `detail` slot: the current questions UI styles detail with a 2px
-    // horizontal margin, so those lines render flush against the panel edge
-    // while the title and options stay indented. Keeping one block avoids a
-    // decision being presented in a form that is harder to read than the
-    // options it belongs to.
+    // The facts go in `detail`, never appended to `question`: since DSH 0.2.2
+    // the title is clamped to its first lines behind an expand toggle, which
+    // hid every fact below a one-line question. `detail` renders in full as
+    // Markdown, indented like the title.
     const answer = await questions.ask({
       questions: [{
         id: 'ws-confirm',
-        question: `${question}\n\n${detail}`,
+        question,
+        detail,
         header: 'Worktree Session',
         options: [
           { label: CONFIRM_LABEL, description: '仅执行本次这一个操作。' },
@@ -212,7 +213,7 @@ export async function authorizeExplicitPath(
   // UIs, and that segment is what identifies the worktree at a glance.
   const granted = await askUser(ctx, exec,
     `是否对 ${basename(request.path)} 执行 ws ${request.action}？`,
-    `目标路径：${request.path}\n` +
+    `目标路径：\`${request.path}\`\n\n` +
     '该路径不在当前会话自身的绑定范围内。确认后仅授权本次调用；之后每次指定路径都会重新询问。' +
     '所有 Worktree Session 安全门在此之后照常逐项执行。')
   // Both non-grants fail closed; only the diagnosis differs. Reporting an

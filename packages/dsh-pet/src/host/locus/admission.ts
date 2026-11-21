@@ -375,9 +375,26 @@ const verbsOf = (id: LocusCommandTableEntry['id']): readonly string[] =>
 
 const DEPRECATED_TIER_VERBS = new Set(['/scope', '-s', '--scope', '/tools', '-t', '--tools'])
 
-/** Strip one or more leading @mention tokens from message text. */
-function withoutLeadingMentions(text: string): string {
-  return text.replace(/^(?:\s*@\S+)+/, '').replace(/\s+/g, ' ').trim()
+/**
+ * Strip one or more leading @mention tokens from message text.
+ *
+ * The platform renders a mention as `@<display name>`, and a display name may
+ * contain spaces (`@devbox 小灵通`). Known names from the event's `mentions`
+ * are matched whole, longest first; only an unknown mention falls back to one
+ * whitespace-free token. Without this, `@devbox 小灵通 /bind x` parsed as the
+ * ordinary text `小灵通 /bind x` and every command in that group was lost.
+ */
+function withoutLeadingMentions(text: string, mentionNames: readonly string[] = []): string {
+  const names = [...new Set(mentionNames.filter(name => name.trim() !== ''))].sort((a, b) => b.length - a.length)
+  let rest = text.trimStart()
+  while (rest.startsWith('@')) {
+    const known = names.find(name => {
+      const token = `@${name}`
+      return rest.startsWith(token) && (rest.length === token.length || /\s/.test(rest[token.length]!))
+    })
+    rest = (known !== undefined ? rest.slice(known.length + 1) : rest.replace(/^@\S+/, '')).trimStart()
+  }
+  return rest.replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -386,8 +403,8 @@ function withoutLeadingMentions(text: string): string {
  * recognized verb remains a control command so an unallowlisted sender cannot
  * smuggle it into the normal work path.
  */
-export function parseLocusControlCommand(text: string): LocusCommandParse {
-  const cleaned = withoutLeadingMentions(text)
+export function parseLocusControlCommand(text: string, mentionNames?: readonly string[]): LocusCommandParse {
+  const cleaned = withoutLeadingMentions(text, mentionNames)
   if (cleaned === '') return { kind: 'none' }
 
   const [verb = '', ...args] = cleaned.split(/\s+/)
@@ -559,6 +576,9 @@ export function admitLocusEvent(
     ...(event.create_time === undefined ? {} : { createTime: event.create_time }),
     // Only a group grants non-allowlisted member questions (see admitCommon).
     memberQuestions: event.chat_type === 'group',
+    mentionNames: (event.mentions ?? [])
+      .map(mention => mention.name)
+      .filter((name): name is string => typeof name === 'string'),
   }, context)
 }
 
@@ -572,6 +592,8 @@ export interface CommonAdmissionInput {
   readonly createTime?: string
   /** Whether an authorized entry here admits non-allowlisted askers (groups, docs). */
   readonly memberQuestions: boolean
+  /** Display names of the event's mentions, so a spaced name strips whole. */
+  readonly mentionNames?: readonly string[]
 }
 
 /**
@@ -606,16 +628,19 @@ export function admitCommon(input: CommonAdmissionInput, context: LocusAdmission
     return { admit: false, reason: 'authorization-unresolved', endpoint }
   }
   const authorization = authorizationLookup.state
-  const parsed = parseLocusControlCommand(text)
+  const parsed = parseLocusControlCommand(text, input.mentionNames)
   const isControl = parsed.kind !== 'none'
   if (isControl && !allowlisted) {
     return { admit: false, reason: 'control-not-allowed', endpoint, authorization }
   }
 
   // A protected endpoint remains unavailable for ordinary work. The sole
-  // exception is an allowlisted, well-formed explicit bind: it enters the
-  // control plane, where a same-W `/bind` re-enables a stopped entry (D7).
-  const explicitRebuild = allowlisted && (parsed.kind === 'bind' || parsed.kind === 'help')
+  // exceptions are allowlisted, well-formed exits: `/bind` enters the control
+  // plane, where a same-W bind re-enables a stopped entry (D7) and a bind
+  // away from an archived W rebinds the chat; `/unbind` stops the entry so
+  // the owner always has a way out; `/help` only explains.
+  const explicitRebuild = allowlisted
+    && (parsed.kind === 'bind' || parsed.kind === 'unbind' || parsed.kind === 'help')
   if (authorization === 'retired' && !explicitRebuild) {
     return { admit: false, reason: 'retired-endpoint', endpoint, authorization }
   }

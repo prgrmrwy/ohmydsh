@@ -1,13 +1,13 @@
 import { createElement as h, Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useAnchoredPosition, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import { errorText, type Api } from './api.js'
 import { ensureStyles } from './styles.js'
 import { t } from './locales.js'
 import { loadCards, refreshCards } from './sidebar-api.js'
 import { DEFAULT_REFRESH_MINUTES, hydrateSidebarPreference, readSidebarPreference, subscribeSidebarPreference, type SidebarPreference } from './sidebar-preference.js'
 import {
-  ageMinutes, cardIdentity, cardReadTime, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
+  accountUser, ageMinutes, cardIdentity, sidebarGroups, textReading, cardReadTime, formatResetDeadline, formatResetShort, formatUsed, sidebarRows, unchangedReads, usedLevel,
   type SidebarRow, type SidebarWindowRow,
 } from './sidebar-view.js'
 import { DEFAULT_SIDEBAR_WINDOWS } from '../shared/sidebar-window.js'
@@ -131,7 +131,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
   }, [enabled, api, refreshMinutes])
 
   const railOpen = open && !wide
-  const pos = useAnchoredPosition({ open: railOpen, anchorRef, panelRef, side: 'top', align: 'start', gap: 8, margin: 12 })
+  const pos = useRailPosition(railOpen, anchorRef, panelRef)
   useDismissOnOutsidePointer(anchorRef, railOpen, setOpen, panelRef)
   useEffect(() => {
     if (!open) return
@@ -222,7 +222,7 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
           },
             status !== undefined
               ? h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
-              : rows.map(row => compactRow(row, now)),
+              : compactGroups(cards, rows, now),
           ),
           bodyOverflow ? h('div', {
             className: `dmg-sidebar-more${bodyMore ? '' : ' is-hidden'}`, 'aria-hidden': true, 'data-dmg-sidebar-more': '',
@@ -238,9 +238,9 @@ export function SidebarUsage({ api, wide = true }: SidebarUsageProps) {
  * name heading with one line per window, each with its own bar. A failed card
  * and a balance-only card stay single-line.
  */
-function compactRow(row: SidebarRow, now: number): ReactNode {
-  const attrs = { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key: cardIdentity(row.card) }
-  const name = h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider)
+function compactRow(row: SidebarRow, now: number, key: string, account?: Account, sharedWindow = false): ReactNode {
+  const attrs = { className: 'dmg-sidebar-row', 'data-dmg-sidebar-row': row.card.provider, key }
+  const name = account === undefined ? h('span', { className: 'dmg-sidebar-name' }, row.card.name ?? row.card.provider) : accountName(account)
   if (row.failed) {
     return h('div', attrs,
       h('div', { className: 'dmg-sidebar-row-line' },
@@ -256,23 +256,71 @@ function compactRow(row: SidebarRow, now: number): ReactNode {
           ...(row.balance === undefined ? {} : { title: `${t('usageBalance')} ${row.balance}` }),
         }, row.balance ?? '—')))
   }
+  if (row.windows.length === 1 && account !== undefined) {
+    // Account on its own line (only the account shrinks); window, expiry and reading below at full width.
+    const only = row.windows[0]!
+    return h('div', attrs,
+      h('div', { className: 'dmg-sidebar-account-line' }, name),
+      h('div', { className: 'dmg-sidebar-row-line' },
+        h('span', { className: 'dmg-sidebar-label' }, sharedWindow ? null : windowLabel(only, false)),
+        expiry(only.window, now),
+        reading(only)),
+      bar(only))
+  }
   if (row.windows.length === 1) {
     const only = row.windows[0]!
     return h('div', attrs,
       h('div', { className: 'dmg-sidebar-row-line' },
-        h('span', { className: 'dmg-sidebar-label' }, name, windowLabel(only, true)),
+        h('span', { className: 'dmg-sidebar-label' }, name, sharedWindow ? null : windowLabel(only, true)),
         expiry(only.window, now),
         reading(only)),
       bar(only))
   }
   return h('div', { ...attrs, className: 'dmg-sidebar-row is-multi', 'data-dmg-sidebar-multi': '' },
-    h('div', { className: 'dmg-sidebar-group-name' }, row.card.name ?? row.card.provider),
+    h('div', { className: 'dmg-sidebar-group-name' }, account === undefined ? (row.card.name ?? row.card.provider) : accountName(account)),
     ...row.windows.map((window, index) => h(Fragment, { key: index },
       h('div', { className: 'dmg-sidebar-win-row', 'data-dmg-sidebar-tier': window.kind },
         h('span', { className: 'dmg-sidebar-win-label', ...windowTitle(window) }, window.window.name ?? '—'),
         expiry(window.window, now),
         reading(window)),
       bar(window))))
+}
+
+/** One account inside a multi-account provider group (design D2). */
+interface Account { label: string; plan?: string }
+
+/** `user`, else its position in the group (`账号 2`); the plan rides along. */
+const accountOf = (card: Card, position: number): Account => ({
+  label: accountUser(card) ?? t('sidebarAccountN', { n: position }),
+  ...(card.plan === undefined ? {} : { plan: card.plan }),
+})
+
+/** Only the account label shrinks; plan and the rest of the line keep their width. */
+const accountName = (account: Account): ReactNode => h(Fragment, null,
+  h('span', { className: 'dmg-sidebar-account', 'data-dmg-sidebar-account': '', title: account.label }, account.label),
+  account.plan === undefined ? null : h('span', { className: 'dmg-sidebar-plan' }, account.plan))
+
+/** Title of a multi-account group: the provider once, with its account count. */
+const groupTitle = (card: Card, count: number, window?: SidebarWindowRow): ReactNode => h('div', { className: 'dmg-sidebar-group-title', 'data-dmg-sidebar-group-title': '' },
+  h('span', { className: 'dmg-sidebar-group-label' }, card.name ?? card.provider),
+  window === undefined ? null : windowLabel(window, true),
+  h('span', { className: 'dmg-sidebar-count' }, t('sidebarAccountCount', { n: count })))
+
+const cardKey = (card: Card, index: number): string => `${cardIdentity(card)}\u0000${index}`
+
+/** Collapsed body: one-card providers as before, same-provider accounts under one title. */
+function compactGroups(cards: Card[], rows: SidebarRow[], now: number): ReactNode[] {
+  return sidebarGroups(cards).map(group => {
+    if (group.indexes.length === 1) return compactRow(rows[group.indexes[0]!]!, now, cardKey(cards[group.indexes[0]!]!, group.indexes[0]!))
+    const first = cards[group.indexes[0]!]!
+    // Every account shows the same single window: name it once in the title instead of on each line.
+    const lines = group.indexes.map(index => rows[index]!)
+    const shared = lines.every(row => !row.failed && row.windows.length === 1 && row.windows[0]!.window.name !== undefined && row.windows[0]!.window.name === lines[0]!.windows[0]?.window.name && row.windows[0]!.fallback === lines[0]!.windows[0]?.fallback)
+      ? lines[0]!.windows[0] : undefined
+    return h('div', { className: 'dmg-sidebar-group', 'data-dmg-sidebar-group': group.provider, key: cardKey(first, group.indexes[0]!) },
+      groupTitle(first, group.indexes.length, shared),
+      ...group.indexes.map((index, position) => compactRow(rows[index]!, now, cardKey(cards[index]!, index), accountOf(cards[index]!, position + 1), shared !== undefined)))
+  })
 }
 
 /** The gateway's own window name, in brackets next to the account on single-line rows. */
@@ -322,17 +370,20 @@ const bar = (row: SidebarWindowRow): ReactNode =>
 /** Expanded content: every upstream with every window, reset, balance and error. */
 function detail(cards: Card[], now: number, status: string | undefined): ReactNode {
   if (status !== undefined) return h('p', { className: 'dmg-sidebar-status', role: 'status' }, status)
-  return h(Fragment, null, ...cards.map(card => h('section', {
-    className: 'dmg-sidebar-prov', 'data-provider': card.provider, key: cardIdentity(card),
+  const section = (card: Card, index: number, account?: Account): ReactNode => h('section', {
+    className: 'dmg-sidebar-prov', 'data-provider': card.provider, key: cardKey(card, index),
   },
   h('div', { className: 'dmg-sidebar-prov-head' },
-    h('strong', null, card.name ?? card.provider),
+    account === undefined
+      ? h('strong', null, card.name ?? card.provider)
+      : h('strong', { className: 'dmg-sidebar-account', 'data-dmg-sidebar-account': '', title: account.label }, account.label),
     h('span', { className: 'dmg-sidebar-meta' }, providerMeta(card, now)),
   ),
   card.error !== undefined
     ? h('p', { className: 'dmg-sidebar-error' }, card.error)
-    : (card.windows ?? []).map((window, index) => {
-      const used = typeof window.used === 'number' && Number.isFinite(window.used) ? Math.min(100, Math.max(0, window.used)) : undefined
+    // Gateway text readings (e.g. Image generation `Unknown`) stay on the settings page only.
+    : (card.windows ?? []).filter(window => window.unlimited === true || !textReading(window)).map((window, index) => {
+      const used = typeof window.used === 'number' && Number.isFinite(window.used) && !textReading(window) ? Math.min(100, Math.max(0, window.used)) : undefined
       const level = used === undefined ? undefined : usedLevel(used)
       return h('div', { className: 'dmg-sidebar-win', key: index },
         h('div', { className: 'dmg-sidebar-win-line' },
@@ -350,7 +401,12 @@ function detail(cards: Card[], now: number, status: string | undefined): ReactNo
       card.resets?.until === undefined ? null : h('span', null, formatTime(card.resets.until)),
       card.balance === undefined ? null : h('span', null, t('usageBalance'), ' ', h('b', null, String(card.balance))),
     ) : null,
-  )))
+  )
+  return h(Fragment, null, ...sidebarGroups(cards).map(group => group.indexes.length === 1
+    ? section(cards[group.indexes[0]!]!, group.indexes[0]!)
+    : h('div', { className: 'dmg-sidebar-group', 'data-dmg-sidebar-group': group.provider, key: cardKey(cards[group.indexes[0]!]!, group.indexes[0]!) },
+      groupTitle(cards[group.indexes[0]!]!, group.indexes.length),
+      ...group.indexes.map((index, position) => section(cards[index]!, index, accountOf(cards[index]!, position + 1))))))
 }
 
 const statusText = (view: CardsView | undefined, error: string): string | undefined => {
@@ -409,3 +465,30 @@ const chevron = (open: boolean): ReactNode => h('svg', {
 }, h('path', { d: 'M4 6.5l4 4 4-4' }))
 const doubleChevron = (): ReactNode => h('svg', { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: '1.4', 'aria-hidden': true },
   h('path', { d: 'M4 6l4 4 4-4' }), h('path', { d: 'M4 10l4 4 4-4', opacity: '.55' }))
+
+/**
+ * Fixed position of the rail popover: above the icon, left-aligned, kept inside the
+ * viewport. Local because the shell's `useAnchoredPosition` left
+ * `@deepseek-ai/dsh-client-ui-primitives` after 0.2.2-rc.1.
+ */
+function useRailPosition(open: boolean, anchorRef: { current: HTMLElement | null }, panelRef: { current: HTMLElement | null }): { left: number; top: number } | null {
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return }
+    const place = (): void => {
+      const anchor = anchorRef.current, panel = panelRef.current
+      if (anchor === null || panel === null) return
+      const rect = anchor.getBoundingClientRect(), margin = 12, gap = 8
+      const width = document.documentElement.clientWidth || window.innerWidth
+      const height = document.documentElement.clientHeight || window.innerHeight
+      const left = Math.max(margin, Math.min(rect.left, width - margin - panel.offsetWidth))
+      const top = Math.max(margin, Math.min(rect.top - gap - panel.offsetHeight, height - margin - panel.offsetHeight))
+      setPos(current => current?.left === left && current.top === top ? current : { left, top })
+    }
+    place()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true) }
+  }, [open, anchorRef, panelRef])
+  return pos
+}

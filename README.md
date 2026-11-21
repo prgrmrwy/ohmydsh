@@ -210,6 +210,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [cockpit-memex-browse-shim](packages/cockpit-memex-browse-shim/README.md) — Connects cockpit port forwarding to the memory card browser.
 - [dsh-collab](packages/dsh-collab/README.md) — Lets existing independent sessions share a collaboration ledger by invitation and wakes members on their next turn.
 - [dsh-auto-model-routing](packages/dsh-auto-model-routing/README.md) — In AUTO, keeps the main model and adjusts only its reasoning effort per turn, selects model + effort for fresh sub-agents and shows each decision; a failed judgment turns AUTO off and says why, and model families are data in `src/strategies/`. [Standalone repository](https://github.com/prgrmrwy/dsh-auto-model-routing).
+- [jev-workflow-router-hook](packages/jev-workflow-router-hook/README.md) — Reminds an agent once, when it is about to create an OpenSpec change, to fetch a Jev routing suggestion first; never blocks or calls Jev itself.
 
 ### Self-developed skills, preset and patch
 

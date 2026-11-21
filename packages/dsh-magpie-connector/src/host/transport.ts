@@ -1,4 +1,4 @@
-import { Agent, fetch as directFetch } from 'undici'
+import { Agent, Dispatcher1Wrapper, fetch as directFetch } from 'undici'
 import { attributionHeaders } from '@deepseek-ai/dsh-llm'
 import type { AccessMode } from './settings.js'
 
@@ -40,6 +40,8 @@ export class GatewayTransport {
   onConnectionFailure?: (lineId: string) => void
   // undici's default 10s connect timeout fails cold TLS handshakes to the Cloudflare ingress.
   private readonly agent = new Agent({ connect: { timeout: 25_000 } })
+  // Node's built-in fetch uses the legacy dispatcher API; share the same private agent.
+  private readonly modelDispatcher = new Dispatcher1Wrapper(this.agent)
   async request(identity: ConnectionIdentity, method: string, path: string, init: RequestInit = {}): Promise<Response> {
     validateIdentity(identity)
     const base = new URL(identity.baseUrl)
@@ -62,7 +64,10 @@ export class GatewayTransport {
       headers.set('CF-Access-Client-Secret', identity.accessClientSecret)
     }
     try {
-      return await directFetch(url, { ...init, method, headers: Object.fromEntries(headers), redirect: 'error', dispatcher: this.agent,
+      // Read model middleware at send time; only bridge the DOM/undici fetch types here.
+      const modelRequest = endpoint === 'POST /responses' || endpoint === 'POST /chat/completions'
+      const send = modelRequest ? globalThis.fetch as unknown as typeof directFetch : directFetch
+      return await send(url, { ...init, method, headers: Object.fromEntries(headers), redirect: 'error', dispatcher: modelRequest ? this.modelDispatcher : this.agent,
         signal: AbortSignal.any([this.signal.signal, ...(init.signal ? [init.signal] : [])]),
       } as Parameters<typeof directFetch>[1]) as unknown as Response
     } catch (error) {

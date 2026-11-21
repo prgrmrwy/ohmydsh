@@ -29,6 +29,7 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 
 入站时才能得到、又无法从持久标识推出的评论事实，SHALL 在接受 Delivery 时随其持久化，此后不再修改：
 - 划词评论的划词原文，以 `docComment.quote` 保存。保存值 SHALL 不超过 2 000 个 UTF-16 码元，截断标记计入上限；超长值 MUST NOT 写入持久层。全文评论不写入该字段。
+- 触发回复的 mention 事实（正文 `person` 元素的 open id，按出现顺序）SHALL 投影为 Delivery 的 addressing 并持久化。本 bot 被提及由事件 `is_mentioned=true` 证明（准入已要求），MUST NOT 因正文把 mention 渲染成 `@ou_…`、或正文解析不出 `person` 元素而标为未被提及；分类与顺序规则见 `pet-locus-collaboration` 的 addressing 要求。
 - 来源、token、`comment_id`、`reply_id` 以及全文/划词的区分 SHALL 从入口 `chatId` 前缀、`threadId` 和 Delivery `messageId` 推导，MUST NOT 另存一份。
 
 投递 prompt 中的划词原文 SHALL 取自持久 Delivery，MUST NOT 取自入站事件。首次投递、排队后投递、Host 重启后再投递，三者渲染出的评论事实 SHALL 相同。
@@ -42,6 +43,11 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 - **GIVEN** 文档 `D` 已有文档级 locus，其工作主会话为 W0、locus 主会话为 M0（W0 ≠ M0）；成员在划词评论 `c2` 中 @bot；查询得到 `is_whole=false`、`quote="接口已有"`
 - **WHEN** 系统处理该事件
 - **THEN** 在文档根行的 M 下追加评论行 `(doc:docx:D, c2)`（其 W 仍为 W0，M 为 M0）并创建其子会话，与文档级子会话为兄弟；`ensureLocusMain` 调用 0 次；投递 prompt 中包含标注为不可信的划词原文 `接口已有`
+
+#### Scenario: 划词评论 @bot 的 mention 事实随 Delivery 持久化
+- **GIVEN** 成员在划词评论 `c2` 的回复 `r1` 中 @bot；该回复正文含本 bot 的 `person` 元素；该事件被接受为 Delivery 后 Host 重启
+- **WHEN** 重启后再次投递该 Delivery
+- **THEN** 两次投递的 addressing 都是 `selfMentioned=true` 且含 `self-bot` occurrence；第二次不重新查询评论、不把正文里的 `@ou_…` 当作未被提及
 
 #### Scenario: 重启后再投递排队中的划词评论
 - **GIVEN** 入口 `(doc:docx:D, c2)` 的子会话正忙；`c2` 下新的触发回复 `r5`（划词原文 `接口已有`）被接受为排队中的 Delivery；随后 Host 重启
@@ -156,6 +162,58 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 - **GIVEN** 评论 `c1` 分页取全后仍没有 `r1`
 - **WHEN** 系统处理触发 `(c1, r1)` 的事件
 - **THEN** 不投递，诊断记 `comment-reply-missing`
+
+### Requirement: 未到达的评论事件按有界对账补投
+
+平台事件是尽力而为的：2026-11-13 生产实测中，文档所有者发出的评论都能到达，评审人发出的划词评论（含 @bot）一条都没到，而同一条连接上的 IM 事件正常。为避免这类评论永久丢失，对**已有可用文档级入口**的文档，系统 SHALL 周期性以 bot 身份读取其评论（`drive +list-comments`），把「触发回复 @ 了本 bot、但从未成为 Delivery」的回复按与实时事件**相同**的准入、去重与投递路径补投。
+
+- 只扫描已有可用文档级入口（根行 `state` 为 `active`/`not-created`）的文档；所有者没有建立入口的文档 MUST NOT 被扫描。
+- 每轮 SHALL 有界：最多 3 个文档、每个文档最多 2 页，按文档轮转；同一文档两次扫描之间 SHALL 至少间隔 60 秒。
+- 扫描起点 SHALL 取该文档最近一次 Delivery 的 `acceptedAt`；没有时回看启动窗口（默认 10 分钟）；此后按已扫描到的最新回复时间推进。起点之前的历史回复 MUST NOT 被补投。
+- 补投候选 MUST 同时满足：作者不是本 bot、触发回复正文含本 bot 的 `person` 元素、`create_time` 晚于起点。补投事件 SHALL 视为 `is_mentioned=true`，且 MUST NOT 受实时订阅水位（watermark）约束。
+- 去重键与实时事件相同（`doc:docx:<token>/<comment_id>/<reply_id>`）。实时事件与对账同时受理同一回复时，第二次接受 SHALL 以 duplicate 拒绝，MUST NOT 发送第二条回复。
+- 读取失败、准入拒绝与取消 SHALL 只记低基数诊断，MUST NOT 影响实时入站，也 MUST NOT 抛出到 channel；channel 停止时 MUST 取消后续轮次与在途补投。
+- 补投出的 Delivery SHALL 与实时事件完全同构：同一 child、同一回复目标，回复仍以 bot 身份发出。
+
+#### Scenario: 评审人的划词评论事件未到达
+- **GIVEN** 文档 `D` 已有 active 根行；评审人在划词评论 `c9` 的回复 `r9` 中 @bot，但平台从未推送该事件
+- **WHEN** 对账轮次扫描到该回复
+- **THEN** 建立或复用评论级入口并投递一次 Delivery；回复以 bot 身份追加在 `c9` 下；下一轮不再重复投递
+
+#### Scenario: 与实时事件竞争同一回复
+- **GIVEN** 同一回复 `r9` 的实时事件与对账扫描同时通过准入
+- **WHEN** 两次接受竞争同一 `messageId`
+- **THEN** 只产生一条 Delivery，另一次接受以 duplicate 拒绝，不发送第二条回复
+
+#### Scenario: 起点之前的历史不补投
+- **GIVEN** 文档 `D` 最近一次 Delivery 的 `acceptedAt=T`
+- **WHEN** 对账扫描到 `T` 之前、@bot 的旧回复
+- **THEN** 不投递
+
+#### Scenario: 读取失败只记诊断
+- **GIVEN** `drive +list-comments` 返回错误
+- **WHEN** 对账轮次运行
+- **THEN** 本轮不投递，只记 `reconcile:list-failed` 类诊断；实时入站不受影响
+
+### Requirement: 文档入口建立后自动按文档订阅事件
+
+可用的文档级入口（根行 `state` 为 `active`/`not-created`）出现后，Host SHALL 以 bot 身份对该文档调用 `POST /open-apis/drive/v1/files/:file_token/subscribe`（`file_type=docx`），把应用订阅到该文档的通知事件。这是评论事件实时到达的平台前置条件之一（另一条是应用在开发者后台订阅该事件）；缺失时评论仍由对账补投，但实时链路不可靠。
+
+- 首次尝试 SHALL 在该文档进入可用状态后的第一轮对账内发生（绑定或首次评论建立入口后 ≤1 分钟，含重启后的首轮）；同一进程内对同一文档成功后 MUST NOT 重复调用。
+- 订阅失败 SHALL 只记一条低基数诊断并继续对账；同一文档的重试间隔 MUST NOT 小于 10 分钟。
+- `missing-scope`（99991672，应用未申请 `docs:event:subscribe` 等）与 `forbidden`（1069603，应用没有该文档的管理权限/未加为文档应用）SHALL 在诊断里分别可辨；Host MUST NOT 改用 user 身份或绕过权限重试。
+- 订阅 MUST NOT 阻塞评论读取、准入或补投；订阅失败不影响对账。
+- 订阅 MUST 以 bot（tenant 身份）调用，MUST NOT 用所有者 user 身份代替。
+
+#### Scenario: 绑定后自动订阅
+- **GIVEN** `/bind` 刚为文档 `D` 建立可用根行
+- **WHEN** 第一轮对账处理到 `D`
+- **THEN** 先以 bot 调用 `D` 的订阅并按结果记录；后续轮次不再重复调用
+
+#### Scenario: 应用缺 scope 或文档未授权
+- **GIVEN** 应用未申请 `docs:event:subscribe`，或文档没有把应用加为文档应用
+- **WHEN** 对账尝试订阅
+- **THEN** 诊断分别记 `subscribe missing-scope` / `subscribe forbidden`；评论读取与补投照常；至少 10 分钟后才重试
 
 ### Requirement: 控制命令在评论中按所在入口生效
 
@@ -273,6 +331,7 @@ TBD - created by archiving change pet-locus-doc-comments. Update Purpose after a
 | 当前 Delivery 的媒体读取 | 不调用；投递 prompt 不提及媒体 |
 | 群读取能力探测与读群说明 | 不调用、不渲染；改为说明 `pet_locus_doc_context` |
 | `pet_locus_chat_history` | 不装配给文档子会话 |
+| `pet_locus_message` | 不装配给文档子会话；投递 prompt 不提及它 |
 | 触发者显示名 | 以 bot 身份按 open_id 查联系人姓名；失败时只呈现 open_id 且不阻断 |
 | 出站 @ 渲染 | 不渲染，按纯文本发送；prompt MUST NOT 承诺 @ 会成为提醒 |
 | 待办“跳飞书” | 按 `pet-locus-intent-triage` 的规则跳到 `drive +inspect` 返回的文档 URL；评论级待办旁注评论 id，MUST NOT 伪造评论锚点 |
@@ -282,7 +341,7 @@ IM 入口的上述行为 SHALL 保持不变。
 #### Scenario: 文档子会话的工具面
 - **GIVEN** 一个文档级 locus 子会话（`accessMode` 为 `read-only`）
 - **WHEN** 列出其可用工具
-- **THEN** 包含 `pet_locus_doc_context`，不包含 `pet_locus_chat_history`；composition attestation 通过
+- **THEN** 包含 `pet_locus_doc_context`，不包含 `pet_locus_chat_history` 与 `pet_locus_message`；composition attestation 通过
 
 #### Scenario: 文档 Delivery 不调用 IM 接口
 - **GIVEN** 一条文档 Delivery 被接受并投递，随后以 `reply` 完成
@@ -302,7 +361,7 @@ IM 入口的上述行为 SHALL 保持不变。
 #### Scenario: IM 入口不受影响
 - **GIVEN** 一个群 locus 子会话
 - **WHEN** 列出其可用工具并完成一次投递
-- **THEN** 工具面与本变更前相同，并照常执行群成员显示名解析和出站 @ 渲染
+- **THEN** 工具面除新增的 `pet_locus_message`（仅在 Host 媒体能力可用时装配）外与此前相同，并照常执行群成员显示名解析和出站 @ 渲染
 
 ### Requirement: 文档入口具备 caller-bound 的只读上下文
 

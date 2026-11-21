@@ -111,7 +111,7 @@ function toActive(row: LocusRowV20, facts: RowFacts): ResolvedActiveLocus {
   })
   if (disposition.kind === 'terminal') {
     if (facts.workArchived) {
-      throw new LocusResolutionError('source-archived', '来源会话已归档，普通 @ 不会自动恢复或换来源。请在管理面「改绑到其他会话」。')
+      throw new LocusResolutionError('source-archived', '来源会话已归档，普通 @ 不会自动恢复或换来源。可在本入口 /bind 新会话，或在管理面「改绑到其他会话」。')
     }
     throw new LocusResolutionError(
       row.state === 'stopped' ? 'endpoint-stopped' : 'locus-unusable',

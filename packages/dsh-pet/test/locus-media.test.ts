@@ -6,6 +6,14 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { rm } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  FIXTURE_IDS,
+  FIXTURE_KEYS,
+  MGET_MEDIA_MESSAGE,
+  MGET_POST_MEDIA,
+  mgetEnvelope,
+} from './fixtures/lark-message-envelopes.js'
+import { fakeMediaCli } from './support/fake-media-cli.js'
+import {
   createLocusMediaPort,
   detectImageMediaType,
   parseSingleMessageResources,
@@ -371,5 +379,101 @@ describe('Host-owned locus media through the guarded spool', () => {
     expect(source).toContain('mkdirSync(dir, { recursive: true, mode: 0o700 })')
     expect(source).toContain('cwd: dir')
     expect(source).toContain('rmSync(dir, { recursive: true, force: true })')
+  })
+
+  it('does not inject replied message media or text', async () => {
+    const fake = await fakeCli()
+    const { store, saveImages } = attachments()
+    const asked: string[] = []
+    // The current message replies to om_replied, which carries an image and text.
+    // The port must only ever be asked about the Delivery's own trigger message.
+    const runner = vi.fn<LarkCliRunner>(async (_binary, args) => {
+      const id = args[args.indexOf('--message-ids') + 1] ?? ''
+      asked.push(`${args.includes('api') ? 'api' : 'mget'}:${id}`)
+      const content = id === 'om_replied' ? '![Image](img_replied) 被回复的正文' : '只有文字的触发消息'
+      return { stdout: JSON.stringify({ ok: true, data: { messages: [{ message_id: id, msg_type: 'text', content, parent_id: 'om_replied' }] } }) }
+    })
+    const port = createLocusMediaPort({ attachments: store, download: downloader(fake.binary, fake.spool), runner })
+    try {
+      const result = await port.admitCurrentImage({
+        messageId: 'om_current', signal: new AbortController().signal, fenceBeforeSave: async () => true,
+      })
+      expect(result).toEqual({ kind: 'none', content: [] })
+      expect(asked).toEqual(['mget:om_current'])
+      expect(saveImages).not.toHaveBeenCalled()
+      expect(readdirSync(fake.spool)).toEqual([])
+    } finally {
+      await rm(fake.root, { recursive: true, force: true })
+    }
+  })
+
+  it('returns bounded metadata for file and audio', () => {
+    const file = parseSingleMessageResources({
+      ok: true,
+      data: { messages: [{ message_id: 'om_a', msg_type: 'file', content: '<file key="file_report" name="report.pdf"/>' }] },
+    }, 'om_a')
+    expect(file.imageKeys).toEqual([])
+    expect(file.unsupported.map(item => item.kind)).toContain('file')
+    const audio = parseSingleMessageResources({
+      ok: true,
+      data: { messages: [{ message_id: 'om_a', msg_type: 'audio', content: '[Audio: file_voice]' }] },
+    }, 'om_a')
+    expect(audio).toEqual({ imageKeys: [], unsupported: [{ kind: 'audio' }] })
+  })
+
+  it('current video yields metadata and points to pet_locus_message without download', async () => {
+    const cases = [
+      { name: 'media message', id: FIXTURE_IDS.media, envelope: MGET_MEDIA_MESSAGE },
+      { name: 'post with video', id: FIXTURE_IDS.postMedia, envelope: MGET_POST_MEDIA },
+    ]
+    for (const item of cases) {
+      const cli = await fakeMediaCli()
+      const { store, saveImages } = attachments()
+      const runner = vi.fn<LarkCliRunner>(async () => ({ stdout: JSON.stringify(item.envelope) }))
+      const port = createLocusMediaPort({ attachments: store, download: downloader(cli.binary, cli.spool), runner })
+      try {
+        const result = await port.admitCurrentImage({
+          messageId: item.id, signal: new AbortController().signal, fenceBeforeSave: async () => true,
+        })
+        expect(result.kind, item.name).toBe('none')
+        const text = result.content.map(block => block.type === 'text' ? block.text : '').join('\n')
+        expect(text, item.name).toContain('pet_locus_message')
+        expect(text, item.name).toContain(item.id)
+        expect(text, item.name).toContain('视频')
+        // The file key never reaches the model, and nothing was downloaded.
+        expect(text, item.name).not.toContain(FIXTURE_KEYS.video)
+        expect(await cli.calls(), item.name).toEqual([])
+        expect(saveImages, item.name).not.toHaveBeenCalled()
+        expect(runner, item.name).toHaveBeenCalledTimes(1)
+      } finally {
+        await rm(cli.root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('downloads the image of a post that also carries a video, but not the video', async () => {
+    const cli = await fakeMediaCli()
+    const { store, saveImages } = attachments()
+    const envelope = mgetEnvelope({
+      messageId: FIXTURE_IDS.postMedia,
+      msgType: 'post',
+      content: `![Image](${FIXTURE_KEYS.image})\n[Media: ${FIXTURE_KEYS.video}]`,
+    })
+    const port = createLocusMediaPort({
+      attachments: store,
+      download: downloader(cli.binary, cli.spool),
+      runner: vi.fn<LarkCliRunner>(async () => ({ stdout: JSON.stringify(envelope) })),
+    })
+    try {
+      const result = await port.admitCurrentImage({
+        messageId: FIXTURE_IDS.postMedia, signal: new AbortController().signal, fenceBeforeSave: async () => true,
+      })
+      expect(result.kind).toBe('ready')
+      expect(result.content.map(block => block.type)).toEqual(['text', 'image'])
+      expect(await cli.calls()).toEqual([{ type: 'image', fileKey: FIXTURE_KEYS.image, messageId: FIXTURE_IDS.postMedia }])
+      expect(saveImages).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(cli.root, { recursive: true, force: true })
+    }
   })
 })

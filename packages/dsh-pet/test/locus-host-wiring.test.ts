@@ -321,8 +321,8 @@ describe('actual Host three-tier assembly', () => {
   })
   it.each([
     ['topic row without its group row', async (domain: any) => {
-      await domain.table('loci').put('chat\u0000omt', { endpoint: { chatId: 'chat', threadId: 'omt' }, locusId: 'orphan-topic', sessionId: 's1', state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 })
-    }, 'chat\u0000omt'],
+      await domain.table('loci').put('chat\x1fomt', { endpoint: { chatId: 'chat', threadId: 'omt' }, locusId: 'orphan-topic', sessionId: 's1', state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 })
+    }, 'chat\x1fomt (TOPIC_WITHOUT_GROUP'],
     ['duplicate sessionId', async (domain: any) => {
       const g = (c: string, sid: string, extra: Record<string, unknown> = {}) => ({ endpoint: { chatId: c }, locusId: `l-${c}`, sessionId: sid, state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1, locusMainSessionId: 'M', workspaceId: 'w', ...extra })
       await domain.table('locus_mains').put('M', { workSessionId: 'W', locusMainSessionId: 'M', workspaceId: 'p', generation: 1, status: 'active', spaceId: 's', createdAt: 1, updatedAt: 1 })
@@ -338,14 +338,14 @@ describe('actual Host three-tier assembly', () => {
   ])('Pet is NOT ready when the stored loci set violates a v20 invariant: %s', async (_name, seed, key) => {
     const h: any = await host({ seedBeforeStart: seed })
     const line = h.degraded.find((entry: string) => entry.includes('degraded'))
-    expect(line).toContain(key.replace('\u0000', '\u0000'))
+    expect(line).toContain(key)
     // No Pet routes except the safe-stop route a degraded start still serves.
     await vi.waitFor(() => expect(h.routes.map((route: any) => route.path)).toEqual([PET_PREPARE_STOP_ROUTE]))
   })
 
   it('a degraded start (before any live work) still publishes the stop descriptor and serves prepare-stop with no-op freeze/drain', async () => {
     const orphanTopic = async (domain: any) => {
-      await domain.table('loci').put('chat\u0000omt', { endpoint: { chatId: 'chat', threadId: 'omt' }, locusId: 'orphan-topic', sessionId: 's1', state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 })
+      await domain.table('loci').put('chat\x1fomt', { endpoint: { chatId: 'chat', threadId: 'omt' }, locusId: 'orphan-topic', sessionId: 's1', state: 'not-created', accessMode: 'read-only', revision: 0, createdAt: 1, updatedAt: 1 })
     }
     const h: any = await host({ seedBeforeStart: orphanTopic })
     const descriptor = JSON.parse(await readFile(path.join(h.home, 'run', 'dsh-pet-stop', `${h.ctx.webServer.port}.json`), 'utf8'))

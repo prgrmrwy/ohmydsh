@@ -147,7 +147,7 @@ Pet 可以从飞书接收工作：在群里 @ 已绑定的 bot，或直接给它
 - **子会话有自己的上下文。** 它从自身身份和所服务的入口开始，而不是复制主会话的历史；无法证明 provider 不继承父历史时，Pet 会拒绝创建它。当它缺少工作根之类的事实时，可以通过宿主原生消息询问自己的主会话；这个答复只是上下文，绝不构成授权。
 - **一次一个请求。** 每个 Locus 维护一个持久的 FIFO Delivery 队列，同一时刻只向子会话投递一个当前 Delivery。模型 turn 结束并不等于 Delivery 完成。唯一的答复方式是绑定调用者的 `pet_locus_finish` 工具（带正文的 `reply`，或带原因的 `no-reply`）；`pet_locus_wait` 用于延长截止时间（初始为接受后一小时，任何情况下不超过 24 小时）。超时后会在同一个子会话上继续处理下一条消息，而不会重建它。
 - **表情归 Host，回复归 Agent。** Host 在触发消息上维护进行中 → 完成/失败的表情。业务文字由 Agent 通过 `pet_locus_finish` 发给确切的触发消息；回复里 `@名字` 形式的群成员引用，在名字恰好对应一位成员时会被渲染成真正的提醒。
-- **图片。** 当前消息里的图片由 Host 通过固定版本的官方 `lark-cli` 取到私有 spool 中，作为带类型的图片内容交给子会话，并在结算前删除，详见 [media-download.md](docs/media-download.md)（中文）。如果无法证明固定版本的二进制或私有目录可用，只有图片部分不可用，文字 Delivery 照常继续。
+- **图片、视频与按需读取。** 当前消息里的图片由 Host 通过官方 `lark-cli`（≥ 1.0.97）取到私有 spool 中，作为带类型的图片内容交给子会话，并在结算前删除，详见 [media-download.md](docs/media-download.md)（中文）。如果无法证明二进制或私有目录可用，只有图片部分不可用，文字 Delivery 照常继续。其余内容按需读取：绑定调用者的 `pet_locus_message({ messageId })` 只读**本入口所在 chat 内的一条消息**（请求所回复的那条，或 `pet_locus_chat_history` 媒体行行尾给出的 id），返回有界正文和以图片 block 呈现的图片；其它 chat 的消息一律拒绝，文档入口不装配该工具。视频：Host 的 PATH 上有 `ffmpeg` 与 `ffprobe` 时，呈现为封面加最多 8 张按场景变化抽取的关键帧（附视频时间点，是抽样而不是完整视频），没有时只给封面；文件、音频仍只给元数据。飞书消息*链接*无法由 Host 解析：子会话会如实说明，并请发送者直接回复或转发那条消息。**`ffmpeg` 是可选依赖，也是一项风险：** 它以 Host 用户的权限解析不可信视频，没有额外沙箱。Pet 能收紧的都收紧了（只允许本地 `file` 协议、容器格式白名单、≤ 64 MiB、≤ 300 s、30 s 超时、进程组终止、0700 私有 spool、返回前全部删除），但这不是操作系统级沙箱；把机器上的 `ffmpeg` 删掉（并重启 Host）即可让所有视频退回只给封面。
 - **Pet 刻意不把聊天历史压平塞进 prompt。** Agent 以绑定 bot 的身份使用 `lark-cli`，在被授予的工具档位内按需获取更丰富的上下文。
 
 ### 控制命令
@@ -215,7 +215,7 @@ $DSH_HOME/plugins/dsh-pet/
 ├── workspace/                   the registered "DSH Pet" workspace
 │   ├── AGENTS.md                Pet standing instructions
 │   └── .dsh/skills/<name>       managed symlink projection
-├── media-spool/                 private (0700) scratch space for Lark image downloads
+├── media-spool/                 private (0700) scratch space for Lark media downloads and video keyframe extraction
 └── skills/
     ├── store/                   legacy; unused since Skills became links
     └── staging/                 legacy; unused since Skills became links

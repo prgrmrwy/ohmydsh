@@ -156,11 +156,32 @@ describe('in-place source Session submit', () => {
     expect(h.source.calls).toContain('submit:steer')
   })
 
+  it('passes official @ reference chips through untouched to the single official submit', async () => {
+    const occurrence = { occurrenceId: 1, source: 'reference', ref: '@docs/report.md', offset: 0, length: 15, label: 'report.md', appearance: 'file', clipboardText: '@docs/report.md' }
+    const source = input({ draft: '@docs/report.md summarize this', occurrences: [occurrence] })
+    const h = harness(source)
+    const fetch = okFetch()
+    globalThis.fetch = fetch as never
+    setStage('source', '/repo', { enabled: true, baseRef: 'main' })
+    const restore = decorateSubmit(h.ctx, 'source', '/repo')
+    h.source.submit()
+    await vi.waitFor(() => expect(getStage('source', '/repo').phase).toBe('done'))
+    // Exactly one official submit, no plugin-side rewrite of the draft.
+    expect(h.source.calls.filter(call => call.startsWith('submit:'))).toEqual(['submit:queue'])
+    expect(h.source.calls.some(call => call.startsWith('draft:'))).toBe(false)
+    expect(h.source.calls.some(call => call.startsWith('notify:error:'))).toBe(false)
+    // The prepared operation still receives the frozen draft text (naming and
+    // task hash only); the reference itself travels through the official submit.
+    const start = fetch.mock.calls.find(([url]) => String(url).endsWith('/start'))
+    expect(JSON.parse((start?.[1] as { body?: string } | undefined)?.body ?? '{}')).toMatchObject({ taskText: '@docs/report.md summarize this' })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    restore()
+  })
+
   it.each([
     [{ phase: 'adjudicating' as const }, /plain input/],
     [{ phase: 'claimed' as const, claim: { token: '/plan' } }, /plain input/],
     [{ phase: 'submitting' as const }, /plain input/],
-    [{ occurrences: [{}] }, /Remove @ references/],
     [{ draft: '', attachmentIds: [] }, /Enter a task/],
   ])('refuses unsafe input before Host side effects', async (state, expected) => {
     const h = harness(input(state))

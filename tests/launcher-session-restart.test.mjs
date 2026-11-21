@@ -71,6 +71,8 @@ test('schedule returns before the Host stops; orchestrator runs the restart with
   assert.match(logs.join('\n'), /本次会话将断开/)
   assert.match(logs.join('\n'), /返回 0 只表示已排程/)
   assert.deepEqual(spawned[0].args, ['/repo/bin/dsh.mjs', 'restart', '--no-open'])
+  // The new Host must not inherit the calling session's cwd (e.g. a worktree).
+  assert.equal(spawned[0].options.cwd, '/repo')
   assert.equal(spawned[0].options.detached, true)
   assert.equal(spawned[0].options.stdio, 'ignore')
   await new Promise(resolve => setTimeout(resolve, 400))

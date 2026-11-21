@@ -408,6 +408,18 @@ effective/read，未扩大权限。」。子会话日志给出机制：
    手输或由服务端静默补齐——手输在「唯一能通过的取值」上没有额外安全性，只
    多出 typo 与跨机器路径混淆。
 
+### 复发实例（2026-11-10，change `locus-ask-work-first-and-concise`）
+
+locus 主会话在 DSH 里归档、工作会话未归档时，对一个还没有群行的群 `/bind`，
+飞书同样回「控制命令执行失败，请稍后重试。」。`ensureLocusMain` 抛的是
+`LocusControllerError(LOCUS_MAIN_UNAVAILABLE)`，但映射表没有这个码；日志也只记了
+`control-failed`，现场无从排查。原错误文案「下一条授权 @ 会迁移」对没有群行的
+群也不成立（下一条 @ 会走 auto 新建工作会话）。修法：`/bind` 遇到不可用的 M 先整
+W 迁移；映射表补全 controller 的确定性错误码；兜底日志只记已定义原因码或
+`unrecognized`，**不记异常消息**（消息里可能带 URL 令牌，截断不等于脱敏）。
+教训补一条：新增错误码时，同时检查控制面映射表是否覆盖它，最好用
+`Record<Code, true>` 一类穷尽表让编译器替你检查。
+
 ---
 
 ## 10. 同一平台两个方向的契约可能不对称（入站预渲染 vs 出站标记）
@@ -841,3 +853,36 @@ inbox → 模型被拉回去再走一步（去写卡）→ 以一句写卡汇报
 
   `ensureStyles()` 幂等，组件挂载时再调一次兜底（`useLayoutEffect`），被外部移除也能补回。判断标准：**任何跨 slot / portal 的全局样式，都不该由组件渲染树持有。**
 - **另一个易混点**：同一次故障里用户看到的 DOM 可能还是旧版模块渲染的（例如缺少新版本才有的字段），说明页面还握着旧的插件 bundle。样式修复能保证「样式不再随组件树丢失」，但要让新 bundle 生效仍需要刷新页面 / 重启 Host；排查时先用「DOM 里有没有新版本才有的属性」区分「样式丢了」还是「整个模块还是旧的」。
+
+---
+
+## 16. 按需读单条消息与视频抽帧：四个「调用成功、结果不对」的坑
+
+change `locus-read-message-media`（2026-11-11）。前三条在规划评审或变异验证里被抓到，第四条是实现时的审查发现；都不是靠「跑通了」发现的。
+
+1. **同一条消息的两种读取信封不一样，且各缺一半。** `lark-cli api GET /open-apis/im/v1/messages/<id> --as bot` 的结果在 `data.items[0]`，`body.content` 是平台原始 JSON 字符串，是**唯一**保留视频封面 `image_key` 和权威 `chat_id` 的地方；撤回的消息是 `ok: true`、`deleted: true`、`body.content` 为非 JSON 文本，不是错误。`im +messages-mget` 的结果在 `data.messages[0]`，正文是渲染文本（`![Image](img_…)`、`[Media: file_…]`），有发送者姓名，**丢掉封面 key**。解析只认「列表长度恰为 1 且 `message_id`、`chat_id` 都等于预期」，任何一项不符就失败；脱敏的真实样本在 `packages/dsh-pet/test/fixtures/lark-message-envelopes.ts`。
+2. **`showinfo` 的逐帧时间点是 info 级日志。** 用 `-loglevel error` 抽帧会退出码 0、产出 JPEG，却没有任何 `pts_time` 可解析。按场景变化抽样不是均匀采样，**不能**用帧序号推算时间：必须 `-loglevel info`，持续 drain stderr，只保留 `Parsed_showinfo … n:<k> … pts_time:<t>` 行，与输出文件一一配对，数量、`n` 连续性、时间单调性任一不满足就整批丢弃。
+3. **只限制宽度的缩放挡不住竖屏。** `scale='min(1024,iw)':-2` 会把 1080×1920 变成 1024×1820。正确写法是 `scale=w='min(E,iw)':h='min(E,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`。验收必须用真实 ffmpeg 生成横屏、竖屏、窄长、小图并量实际输出尺寸（`locus-media-video.ffmpeg.test.ts`；把缩放改回宽度版本该测试会失败，已做过变异验证），只检查命令行字符串含 `1024` 什么也证明不了。
+4. **看门狗计时器必须在被监视的子进程退出时就停掉，不能留到后续步骤结束。** 下载器的轮询/超时计时器会对进程组发 `SIGKILL`；如果「下载完成后还要在同一目录里跑 ffmpeg」把清理推迟到整个流程结束，旧下载器的计时器会在它已经退出之后继续触发，对一个可能已被回收的进程组号发信号。`withSpoolDownload` 因此在 `close` 之后立即清掉计时器、轮询和 abort 监听，再执行后续回调；后续进程由各自的 `runBoundedTool` 看门狗负责。
+
+另外两条与本变更有关的小规则：
+
+- 工具 `output.schema` 里变长的「文字 + 图片」列表用 `{ type: 'json' }` 承载，值必须是**纯 JSON**（`attachmentId` 要从品牌类型转成字符串）；`render` 再把它还原成 `{ type: 'image', attachment }` block。该值会被持久化并可能在之后重新渲染，不能持有品牌或类实例字段。`locus-message-tool-runtime.test.ts` 经真实 `ToolRuntime` 执行成功、失败、图片三种返回，防止「声明了字段但 schema 拒收」整体变成 `INVALID_TOOL_OUTPUT`。
+- 新增 Pet 注册的工具必须同时：加入 `LOCUS_CALLER_BOUND_TOOLS`（否则发布期 attestation 判为泄漏）、按入口类型只给对的子会话（文档入口不装配 IM 工具）、并修订 `executor-scope.test.ts` 里的注册计数守卫——那条守卫就是为「不经说明地多注册一个工具」设计的。
+
+---
+
+## 17. 文档评论的「被 @」不在文本里：addressing 不能用空 mention 列表伪造
+
+2026-11-13 真机：生产文档里有人发了划词评论并 @bot，评论事件到达、准入通过、Delivery 建出，子会话却以 `finish(no-reply)` 结案，理由写的是「Host 标记本 bot 未被提及（self mentioned=false），属于仅引用」。用户看到的现象是「@ 了 bot 但没回复」。
+
+- **根因不在意图判断。** `drive.notice.comment_add_v1` 和 IM 消息不同：它**没有** `mentions` 数组，mention 只以回复正文里的 `person` 元素存在（`user_id` 是 open id）。评论入站把回复渲染成纯文本时会写成 `@ou_…`（评论 API 不返回显示名），而 Delivery 的 addressing 是从空的 mention 列表投影出来的，于是 `selfMentioned=false`。子会话读到 `self mentioned: false` + 一个陌生的 `@ou_…`，按 reference-only 静默结算。**三道内部检查（事件到达、准入、Delivery）全都成功，错的是事实投影。**
+- **本 bot 是否被提及，权威事实是事件顶层 `is_mentioned === true`。** 评论解析已经在任何平台调用之前丢弃 `is_mentioned !== true` 的评论，所以被准入的 Delivery 一定被提及；这个证明 MUST NOT 被「正文里没解析出 `person` 元素」或「正文渲染成 open id」推翻。occurrence 列表与顺序才从 `person` 元素取，没有 chat bot 成员快照时类型保持 `unknown`。
+- **实现位置**：`packages/dsh-pet/src/host/channel/lark.ts`（`DocCommentReply.mentionOpenIds` 来自 `person` 元素）、`doc-comment.ts`（`docCommentAddressing`，self mention 为准入已证明的事实）、`locus/context.ts`（文档评论投递明确写「以 Addressing 为准，不要因为 @ 后不是自己的名字就判为仅引用」）。回归测试：`doc-comment-admission.test.ts` 的「projects the document comment mention into Delivery addressing」「keeps the platform-proven mention when the reply body parse found no person element」、`locus-context.test.ts` 的「makes Addressing, not the opaque @ou_… body text, the mention authority」。
+- **排查口径**：遇到「@ 了 bot 却没回复」，先查该 Delivery 的 `addressing.selfMentioned` 与投递 prompt 的 Addressing 段，再看意图诊断；不要只看「评论事件是否到达」。同类坑：凡是把「没有结构化事实」当成「事实为否」的投影，都会在同一条链路上同时骗过准入、日志和模型。
+
+
+**事件之外的兜底（2026-11-13 同日补）**：这条事件是否推送还受评论者的 mention 通知/授权状态、评论者身份等平台条件影响，API 侧无法完全消除。Pet 因此新增有界对账 `packages/dsh-pet/src/host/channel/doc-comment-reconcile.ts`：只对已有可用文档入口的文档，每 60 秒以 bot 身份读一次评论，把「触发回复 @ 了本 bot、但没有成为 Delivery」的回复按同一准入补投；去重键与实时事件相同（`doc:docx:<token>/<comment>/<reply>`），实时/对账竞争时第二次接受会以 duplicate 拒绝。排查口径不变：先确认事件是否到达（无 Delivery、无 comment 诊断），再看 addressing；对账只补「事件没到」这一种，不替代实时链路。
+
+
+同一节补：评论事件的实时到达还要求**应用订阅该文档的通知事件**（`POST /open-apis/drive/v1/files/:file_token/subscribe`，bot 身份；应用需有 `docs:event:subscribe` 等 scope，且文档所有者通过「…更多 → 添加文档应用」把 app 加成可管理）。因此对账在首轮处理每个可用文档入口时会自动调用一次该接口（失败只记 `subscribe missing-scope|forbidden` 并 10 分钟后重试，不阻塞评论读取），把「绑定后就要做」的平台前置条件收进 Host 行为，见 `packages/dsh-pet/src/host/channel/doc-comment-reconcile.ts`。

@@ -17,7 +17,13 @@ export const isMagpieRoute = (id: string): boolean => ROUTE.test(id)
 /** Owner key of one of our routes; anything else (direct adapter calls) reads as `other`. */
 export const ownerOfRoute = (route: string): string => isMagpieRoute(route) ? route.slice(ROUTE_PREFIX.length) : 'other'
 /** The gateway's `max_output_tokens`, the model's reply capacity; `info.defaultMaxTokens` is the smaller per-request budget. */
-export interface CatalogModel { info: LlmResolvedModelInfo; /** Visibility key: raw `owned_by`, else the id's first segment. */ provider: string; /** Owner key that selects the route. */ owner: string; efforts: string[]; nativeEndpoints: string[]; serviceTiers: string[]; outputLimit?: number }
+/** Owner and visibility key of every routing entry (`group/…`, `auto/…`): Magpie routing groups belong to no vendor. */
+export const ROUTING_OWNER = 'routing'
+export type RoutingKind = 'auto' | 'custom'
+/** Routing entry type by id prefix only (case-sensitive); labels are presentation text and never decide the type. */
+export const routingKindOf = (id: string): RoutingKind | undefined =>
+  id.startsWith('auto/') || id.startsWith('group/auto-') ? 'auto' : id.startsWith('group/') ? 'custom' : undefined
+export interface CatalogModel { info: LlmResolvedModelInfo; /** Visibility key: raw `owned_by`, else the id's first segment; `routing` for routing entries. */ provider: string; /** Owner key that selects the route. */ owner: string; routingKind?: RoutingKind; /** Routing entries only: the vendor owner they list under while `routing` is not admitted. */ fallbackOwner?: string; efforts: string[]; nativeEndpoints: string[]; serviceTiers: string[]; outputLimit?: number }
 /**
  * DSH compaction-basic's default `headroomTokens` (DSH 0.2.0-rc.2, lib/index.js) and Magpie's `dshHeadroom`.
  * Re-check on every DSH upgrade: DSH reserves `defaultMaxTokens` plus this headroom out of the window before compacting.
@@ -43,7 +49,12 @@ export function mapCatalog(body: unknown): CatalogModel[] {
       ...(outputLimit !== undefined ? { defaultMaxTokens: defaultOutputBudget(contextWindow, outputLimit) } : {}),
       ...(efforts.length ? { reasoning: { efforts: efforts.map(id => ({ id: id as never, name: id })) } } : {}),
     }
-    return [{ info, provider: ownedBy ?? raw.id.split('/')[0], owner: ownerKey(raw.owned_by), efforts, ...(outputLimit !== undefined ? { outputLimit } : {}),
+    const routingKind = routingKindOf(raw.id)
+    // `routing` names routing entries only; an ordinary model that would also map to it falls back to `other`.
+    const visibility = ownedBy ?? raw.id.split('/')[0], owner = ownerKey(raw.owned_by)
+    const keys = routingKind ? { provider: ROUTING_OWNER, owner: ROUTING_OWNER, routingKind, fallbackOwner: owner === ROUTING_OWNER ? 'other' : owner }
+      : { provider: visibility.toLowerCase() === ROUTING_OWNER ? 'other' : visibility, owner: owner === ROUTING_OWNER ? 'other' : owner }
+    return [{ info, ...keys, efforts, ...(outputLimit !== undefined ? { outputLimit } : {}),
       nativeEndpoints: strings(raw.native_endpoints), serviceTiers: Array.isArray(raw.service_tiers) ? raw.service_tiers.flatMap((t: { id?: unknown }) => typeof t?.id === 'string' ? [t.id] : []) : [] }]
   })
 }

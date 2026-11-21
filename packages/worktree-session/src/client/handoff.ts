@@ -30,12 +30,17 @@ function operationId(): string {
  * Freeze the official input machine's current payload before any Host side
  * effects. The source input remains the owner of both text and attachments;
  * Worktree only carries the immutable draft attachment identifiers.
+ *
+ * Official `@` reference chips stay owned by the official submit too: the
+ * handoff runs inside the source Session's own input machine, so the submit
+ * resolves and serializes every occurrence after binding. Worktree neither
+ * rejects nor rewrites references — a string downgrade would drop the chips
+ * and the official retry/restoration lifecycle that comes with them.
  */
 function preflight(ctx: ClientContext, input: InputFacade): { text: string; attachmentIds: readonly DraftAttachmentId[] } {
   const state = input.state.getSnapshot()
   if (state.phase !== 'plain' || state.claim !== undefined) throw new Error('Worktree start requires plain input with no active slash command')
   if (state.draft.trim() === '' && state.attachmentIds.length === 0) throw new Error('Enter a task before starting a Worktree Session')
-  if (state.occurrences.length > 0) throw new Error('Remove @ references before starting a Worktree Session')
 
   const attachmentIds = [...state.attachmentIds]
   const controller = ctx.conversation as unknown as Pick<ConversationController, 'resolveDraftAttachments'>

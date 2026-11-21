@@ -154,6 +154,12 @@ export interface EnsureTopicRequest {
   readonly explicitParentSessionId?: string
 }
 
+/** A whole-W migration that was committed: the new M and how many chats moved with it. */
+export interface LocusMigrationNote {
+  readonly newMain: string
+  readonly chats: number
+}
+
 export interface EnsureGroupResult {
   readonly group: LocusGroupRowV20
   readonly locus: LocusGroupRowV20
@@ -161,6 +167,10 @@ export interface EnsureGroupResult {
   readonly reused: boolean
   /** A stopped row was re-enabled in place by a same-W `/bind` (D7). */
   readonly reenabled?: true
+  /** `/bind` found the W's M unavailable and migrated the whole W first (D6). */
+  readonly migration?: LocusMigrationNote
+  /** The chat was moved off its archived W by this in-entry `/bind` (D6). */
+  readonly rebound?: true
 }
 
 export interface EnsureTopicResult {
@@ -171,6 +181,9 @@ export interface EnsureTopicResult {
   /** Whether this call also created the group row (and its M). */
   readonly groupCreated: boolean
   readonly reenabled?: true
+  /** `/bind` found the W's M unavailable and migrated the whole W first (D6). */
+  readonly migration?: LocusMigrationNote
+  readonly rebound?: true
 }
 
 export interface DefaultQaRequest {
@@ -198,7 +211,7 @@ export interface EnsureEntryResult {
   readonly group?: LocusGroupRowV20
   readonly created: boolean
   /** The whole-W migration that served this call, when one ran. */
-  readonly migration?: { readonly newMain: string; readonly chats: number }
+  readonly migration?: LocusMigrationNote
 }
 
 /** `rebindChat` request: the fence is the GROUP row's (D6). */
@@ -243,6 +256,37 @@ export type LocusControllerErrorCode =
   | 'LOCUS_CONFLICT'
   | 'LOCUS_BUSY'
 
+/**
+ * Runtime table of every {@link LocusControllerErrorCode}. A `Record` over the
+ * union makes the compiler reject a code added to the type but not here, so
+ * diagnostics can tell a DEFINED reason code from an arbitrary `code` string.
+ */
+const LOCUS_CONTROLLER_ERROR_CODES: Readonly<Record<LocusControllerErrorCode, true>> = {
+  INVALID_ENDPOINT: true,
+  INVALID_REQUEST: true,
+  INVALID_PARENT: true,
+  PARENT_NOT_FOUND: true,
+  PARENT_NOT_ALLOWED: true,
+  DEFAULT_WORKSPACE_UNAVAILABLE: true,
+  GROUP_UNAVAILABLE: true,
+  TOPIC_UNAVAILABLE: true,
+  DEFAULT_QA_UNAVAILABLE: true,
+  EXPLICIT_PARENT_CONFLICT: true,
+  CAPABILITY_UNAVAILABLE: true,
+  PROVISIONING_FAILED: true,
+  LOCUS_MAIN_UNAVAILABLE: true,
+  SOURCE_ARCHIVED: true,
+  REPOSITORY_INCONSISTENT: true,
+  LOCUS_NOT_FOUND: true,
+  LOCUS_CONFLICT: true,
+  LOCUS_BUSY: true,
+}
+
+/** Whether `code` is one of the reason codes `LocusControllerError` defines. */
+export function isLocusControllerErrorCode(code: unknown): code is LocusControllerErrorCode {
+  return typeof code === 'string' && Object.hasOwn(LOCUS_CONTROLLER_ERROR_CODES, code)
+}
+
 /** Stable, safe-to-display controller error. */
 export class LocusControllerError extends Error {
   readonly code: LocusControllerErrorCode
@@ -252,6 +296,11 @@ export class LocusControllerError extends Error {
    * backlog of this existing entry (a whole-W migration is deferred, D7).
    */
   readonly deferred?: { readonly locusId: string; readonly sessionId: string }
+  /**
+   * Set (by `/bind`) when a whole-W migration was already committed before this
+   * failure: the migration is a durable fact, so the receipt must say so (D6).
+   */
+  migrationCommitted?: LocusMigrationNote
 
   constructor(code: LocusControllerErrorCode, message: string, cause?: unknown, deferred?: { readonly locusId: string; readonly sessionId: string }) {
     super(message)
@@ -420,13 +469,13 @@ export class LocusController {
           ...(reenabled === undefined ? {} : { reenabled: true as const }),
         }
       }
-      const rows = await this.provisionChatLocked({
+      const { rows, migration } = await this.provisionChatLocked({
         chatId,
         explicit,
         ...(request.chatName === undefined ? {} : { chatName: request.chatName }),
       })
       const created = rows[0] as LocusGroupRowV20
-      return { group: created, locus: created, created: true, reused: false }
+      return { group: created, locus: created, created: true, reused: false, ...(migration === undefined ? {} : { migration }) }
     })
   }
 
@@ -443,7 +492,7 @@ export class LocusController {
       this.withLock(`endpoint:${locusEndpointKey({ chatId, threadId })}`, async () => {
         const group = this.repo.getRow({ chatId })
         if (group === undefined || !isGroupRow(group)) {
-          const rows = await this.provisionChatLocked({
+          const { rows, migration } = await this.provisionChatLocked({
             chatId,
             threadId,
             explicit,
@@ -455,6 +504,7 @@ export class LocusController {
             created: true,
             reused: false,
             groupCreated: true,
+            ...(migration === undefined ? {} : { migration }),
           }
         }
         const existing = this.repo.getRow({ chatId, threadId })
@@ -498,7 +548,7 @@ export class LocusController {
     if (main.workSessionId !== explicit) {
       throw new LocusControllerError(
         'EXPLICIT_PARENT_CONFLICT',
-        `该群已由 ${shortLocusSessionLabel(main.workSessionId)} 跟进，不能在这里改绑；原会话归档后可在管理面「改绑到其他会话」。`,
+        `该群已由 ${shortLocusSessionLabel(main.workSessionId)} 跟进，不能在这里改绑；原会话归档后可在本入口 /bind 新会话，或在管理面「改绑到其他会话」。`,
       )
     }
     if (target === undefined || target.state !== 'stopped') return undefined
@@ -556,15 +606,64 @@ export class LocusController {
    * D4: the one from-zero creation path. Runs inside the caller's group lock.
    * The explicit W is resolved BEFORE any external creation; the group row and
    * the optional topic row are published by a single `commitProvisioning`.
+   *
+   * D6: when the explicit W's active M can no longer serve, the whole W is
+   * migrated first (same mechanism, same lock order as `ensureEntry`'s replace
+   * branch: group lock, then the `main:<W>` lease) and the entry is then built
+   * on the new M, which `ensureLocusMain` reuses. The migration is its own
+   * committed transaction; a later failure marks the error instead of undoing it.
    */
   private async provisionChatLocked(input: {
     readonly chatId: string
     readonly chatName?: string
     readonly threadId?: string
     readonly explicit: string | undefined
-  }): Promise<readonly LocusRowV20[]> {
+  }): Promise<{ readonly rows: readonly LocusRowV20[]; readonly migration?: LocusMigrationNote }> {
     const { chatId, threadId, explicit } = input
     const explicitWork = explicit === undefined ? undefined : await this.resolveWorkSession(explicit, '显式 parent')
+    const migration = explicitWork === undefined ? undefined : await this.migrateUnavailableMainLocked(explicitWork.id, chatId, threadId)
+    try {
+      const rows = await this.buildChatLocked(input, explicitWork)
+      return { rows, ...(migration === undefined ? {} : { migration }) }
+    } catch (error) {
+      if (migration !== undefined && typeof error === 'object' && error !== null) {
+        (error as { migrationCommitted?: LocusMigrationNote }).migrationCommitted = migration
+      }
+      throw error
+    }
+  }
+
+  /**
+   * D6 pre-step of an explicit `/bind`: migrate the W when its active M is not
+   * usable. A current Delivery anywhere in the W defers the migration, and then
+   * nothing at all is created or written.
+   * @returns the committed migration, or undefined when none was needed or
+   * another trigger already did it.
+   */
+  private async migrateUnavailableMainLocked(
+    workSessionId: string,
+    chatId: string,
+    threadId: string | undefined,
+  ): Promise<LocusMigrationNote | undefined> {
+    const active = this.repo.findActiveMain(workSessionId)
+    if (active === undefined || await this.isMainUsable(active)) return undefined
+    const migrated = await this.migrateWholeW(workSessionId, chatId, threadId)
+    if (migrated.migrated) return { newMain: migrated.newMain.locusMainSessionId, chats: migrated.chats }
+    if (migrated.reason === 'current-delivery') {
+      throw new LocusControllerError('LOCUS_BUSY', '该来源会话的另一个群有处理中的投递，暂不迁移；请稍后再绑定。')
+    }
+    return undefined
+  }
+
+  private async buildChatLocked(
+    input: {
+      readonly chatId: string
+      readonly chatName?: string
+      readonly threadId?: string
+    },
+    explicitWork: LocusParentSession | undefined,
+  ): Promise<readonly LocusRowV20[]> {
+    const { chatId, threadId } = input
     const provisioningId = `provisioning-${this.id()}`
     await this.beginProvisioning({
       provisioningId,
@@ -667,6 +766,35 @@ export class LocusController {
     })
   }
 
+  /**
+   * In-entry `/bind` onto a DIFFERENT work session. Only when the chat's
+   * current W is provably archived does this rebind the chat (the same D6 path
+   * as the management surface, fenced on the group row as read now). Any other
+   * case returns undefined and the caller's ordinary ensure path decides: a
+   * live or unprovable W still refuses with `EXPLICIT_PARENT_CONFLICT`.
+   */
+  async rebindArchivedChatForBind(request: {
+    readonly chatId: string
+    readonly workSessionId: string
+  }): Promise<RebindChatResult | undefined> {
+    const chatId = requireNonEmpty(request.chatId, 'chatId')
+    const targetId = requireNonEmpty(request.workSessionId, 'workSessionId')
+    const group = this.repo.getRow({ chatId })
+    if (group === undefined || !isGroupRow(group)) return undefined
+    const main = this.repo.findMain(group.locusMainSessionId)
+    if (main === undefined || main.workSessionId === targetId) return undefined
+    if (!(await this.isArchivedSession(main.workSessionId))) return undefined
+    // Same refusal vocabulary as an ordinary explicit `/bind` (child session,
+    // locus main, archived target), not the management surface's INVALID_REQUEST.
+    await this.resolveWorkSession(targetId, '显式 parent')
+    return this.rebindChat({
+      chatId,
+      workSessionId: targetId,
+      expectedLocusId: group.locusId,
+      expectedRevision: group.revision,
+    })
+  }
+
   // -- stop (D7) -----------------------------------------------------------
 
   /** Idle-only stop of one row; a group row's stop never touches its topic rows. */
@@ -719,7 +847,7 @@ export class LocusController {
         throw new LocusControllerError(
           disposition.workArchived ? 'SOURCE_ARCHIVED' : endpoint.threadId === undefined ? 'GROUP_UNAVAILABLE' : 'TOPIC_UNAVAILABLE',
           disposition.workArchived
-            ? '来源会话已归档，请在管理面改绑。'
+            ? '来源会话已归档；可在本入口 /bind 新会话 id 前缀改绑，或在管理面改绑。'
             : `入口 ${endpointLabel(endpoint)} ${disposition.reason}，不会静默重建。`,
         )
       case 'replace': {
@@ -771,6 +899,7 @@ export class LocusController {
     await this.acquireMainLease(work.id, provisioningId)
     let published = false
     let begun = false
+    let committed: LocusMigrationNote | undefined
     try {
       const active = this.repo.findActiveMain(work.id)
       if (active !== undefined && (await this.isMainUsable(active))) {
@@ -824,6 +953,7 @@ export class LocusController {
         reserveChildSessionId: () => this.reserve(),
       })
       published = true
+      committed = { newMain: main.locusMainSessionId, chats: chats.length }
       await this.finalizeLocked(provisioningId, resources)
       return { migrated: true, newMain: main, chats: chats.length }
     } catch (error) {
@@ -831,7 +961,10 @@ export class LocusController {
         this.releaseMainLease(provisioningId)
         throw error
       }
-      throw await this.failOperation(error, published, provisioningId, resources, `来源会话 ${work.id} 的整体迁移`)
+      const failure = await this.failOperation(error, published, provisioningId, resources, `来源会话 ${work.id} 的整体迁移`)
+      // The commit is durable even though finalize failed: say so (D6), never undo it.
+      if (committed !== undefined && failure instanceof Error) (failure as { migrationCommitted?: LocusMigrationNote }).migrationCommitted = committed
+      throw failure
     }
   }
 
@@ -919,7 +1052,7 @@ export class LocusController {
         if (await this.isMainUsable(existing)) return { main: existing, created: false }
         throw new LocusControllerError(
           'LOCUS_MAIN_UNAVAILABLE',
-          `来源会话 ${shortLocusSessionLabel(work.id, work.title)} 的 locus 主会话不可用；下一条授权 @ 会为它新建并迁移入口。`,
+          `来源会话 ${shortLocusSessionLabel(work.id, work.title)} 的 locus 主会话不可用，未建立入口。`,
         )
       }
     }

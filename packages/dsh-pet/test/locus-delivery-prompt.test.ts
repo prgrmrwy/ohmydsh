@@ -379,3 +379,38 @@ describe('first-delivery rebind note (D9)', () => {
     expect(note).not.toContain('pet_locus_chat_history')
   })
 })
+
+/**
+ * `locus-ask-work-first-and-concise` group 8: an EXISTING child only ever gets the
+ * follow-up prompt, so the ask-first and concise-wording rules must be in BOTH
+ * the first and the follow-up delivery (design D1).
+ */
+describe('子会话规则文本在首投与续投都送达', () => {
+  const render = (position: 'first' | 'subsequent') => renderLocusDeliveryFor({
+    record: record(),
+    message: message(),
+    deliveries: position === 'first' ? [] : [delivery('prior', { inboxMessageId: 'prior-inbox' })],
+  })
+
+  it.each(['first', 'subsequent'] as const)('the %s delivery carries the ask-first and concise rules', position => {
+    const prompt = render(position)
+    expect(prompt).toContain('信息类问题需要项目事实时，先调用 `locus_ask_parent`')
+    expect(prompt).toContain('"没有相关记录，请自查"')
+    expect(prompt).toContain('不要等超时后再自查')
+    expect(prompt).toContain('默认用业务口径')
+    expect(prompt).toContain('第一句给结论')
+    expect(prompt).toContain('不主动给出文件、函数、RPC 或接口名')
+    expect(prompt).toContain('追问时再补')
+  })
+
+  it('spec Scenario "历史不含最新目录"', () => {
+    const prompt = render('first')
+    // No execution root is ever stated as a fact, and the child is told how to ask for it.
+    expect(prompt).not.toMatch(/execution root：|cwd：/)
+    expect(prompt).toContain('无法确定当前执行根')
+    expect(prompt).toContain('`locus_ask_parent`')
+    expect(prompt).toContain('请所有者确认')
+    expect(prompt).toContain('不要猜测 cwd')
+    expect(prompt).toContain('不要自行创建其它工作目录')
+  })
+})

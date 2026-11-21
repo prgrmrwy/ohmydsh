@@ -608,6 +608,7 @@ test('package tiers match the design (D6)', () => {
     'dsh-openspec': 'A',
     'dsh-pet': 'A',
     'home-network-model-guard': 'B',
+    'jev-workflow-router-hook': 'C',
     'sidebar-session-resources': 'B',
     'dsh-session-id-copy': 'B',
     'dsh-sidebar-session-provider-icon': 'B',

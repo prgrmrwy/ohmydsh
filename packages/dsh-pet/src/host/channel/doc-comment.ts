@@ -10,7 +10,7 @@
  * @module
  */
 
-import type { DocCommentQuery } from './lark.js'
+import type { DocCommentQuery, DocCommentReply } from './lark.js'
 import type { NormalizedLocusAdmission, NormalizedLocusMessage } from './locus-controller.js'
 import {
   admitCommon,
@@ -18,6 +18,7 @@ import {
   locusEndpointKey,
   type LocusAdmissionContext,
 } from '../locus/admission.js'
+import { projectDeliveryAddressing, type DeliveryAddressingProjection } from '../locus/addressing.js'
 import { docChatId, docMessageId } from '../locus/doc-endpoint.js'
 import { DOC_COMMENT_QUOTE_MAX } from '../spec.js'
 
@@ -112,6 +113,35 @@ export function boundDocCommentQuote(quote: string): string {
 export type DocCommentRefusal = 'bot-sender' | 'comment-scope-unknown' | 'comment-reply-missing' | 'invalid-event'
 
 /**
+ * Addressing for one document comment — the doc-comment counterpart of the IM
+ * projection groups get.
+ *
+ * Self mention is PROVEN by the platform event's `is_mentioned`. Parsing drops
+ * every comment whose flag is not `true` before a query is even made, so the
+ * proof is normally implied; taking it as an input keeps this projection honest
+ * when the function is called with a hand-built event, and keeps the fact from
+ * being inferred from the reply body, whose mentions exist only as `person`
+ * elements. Occurrences come from those elements; without a chat-bot membership
+ * snapshot they stay `unknown` rather than being guessed (`addressing.ts`).
+ */
+function docCommentAddressing(
+  trigger: DocCommentReply,
+  botOpenId: string | undefined,
+  mentionedProven: boolean,
+): DeliveryAddressingProjection {
+  const mentioned = trigger.mentionOpenIds ?? []
+  // Do not let a body that lost its person element regress the proven mention.
+  const synthesized = mentionedProven && botOpenId !== undefined && !mentioned.includes(botOpenId)
+  return projectDeliveryAddressing({
+    mentions: (synthesized ? [...mentioned, botOpenId] : mentioned).map(id => ({ id })),
+    ...(botOpenId === undefined ? {} : { selfOpenId: botOpenId }),
+    // A synthesized occurrence is not at its body position, so order is proven
+    // only when every occurrence came from the parsed reply body.
+    orderKnown: !synthesized,
+  })
+}
+
+/**
  * Admit one parsed comment event given its comment query outcome.
  *
  * Whole vs anchored comes ONLY from the queried `is_whole` (D6). The trigger
@@ -165,6 +195,7 @@ export function admitDocCommentEvent(
     endpoint: plain,
     senderOpenId: decision.senderId,
     text: decision.text,
+    addressing: docCommentAddressing(query.trigger, context.botOpenId, event.isMentioned),
     replyTarget: { ...plain, messageId },
     ...(event.createdAt === undefined ? {} : { createdAt: event.createdAt }),
     ...(quote === undefined ? {} : { docComment: { quote } }),

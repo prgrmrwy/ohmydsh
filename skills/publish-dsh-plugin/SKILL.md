@@ -99,10 +99,11 @@ GitHub Actions 只执行仓库根目录的 workflow。包内 `.github/workflows/
 
 - 增加包目录的 push paths 条件和 matrix 项，填写 dir、repo、secret。
 - 每个镜像使用独立的 write deploy key；公钥登记到目标镜像，私钥保存为 ohmydsh Actions secret。不得提交私钥或复用宽权限 npm token。
-- checkout 完整历史，执行 subtree split，并以普通快进推送镜像 main。
+- checkout 完整历史，调用 `scripts/mirror-sync.mjs` 双向同步：先把镜像 main 上主仓没有的提交（在镜像合入的 PR）以 `-Xsubtree` 回并到包目录并推回主仓 main，再用 `subtree split --onto=<镜像 main>` 拆分，以普通快进推送镜像 main（镜像 SHA 与作者保持不变）。每个镜像首次运行时用一次 `-s ours` 合并连接两段历史，不改文件。不要用 `split --rejoin`：在本仓 merge 很多的历史上会超出 dash 的递归上限。
+- 回并冲突或镜像在连接前已分叉时，job 失败且不推送任何东西：在主仓 `git merge -Xsubtree=packages/<dir> <镜像 main>` 手动解决后重跑。
 - 读取 split 后包版本；镜像缺少 `v<version>` 时才创建并推送该 tag，触发镜像 release。
 
-当前实现中，任一受管目录触发 workflow 后，会检查 matrix 中全部镜像。同步和发版流程与主仓通用 CI 并行，**不等待主仓 CI 成功**；发布安全检查还必须在镜像 workflow 中执行。
+当前实现中，push、每小时定时与手动 dispatch 都会触发，并按 matrix 逐个（`max-parallel: 1`）检查全部镜像。同步和发版流程与主仓通用 CI 并行，**不等待主仓 CI 成功**；发布安全检查还必须在镜像 workflow 中执行。
 
 ### 独立镜像：npm Trusted Publishing
 
@@ -174,7 +175,9 @@ npm 与仓库的关联依赖正确 repository 元数据；商店采集、索引�
 
 ## 8. 日常发版与商店维护
 
-**日常只在 ohmydsh 修改、验证、提交并推 main。** 不再手工同步镜像或手工打发布 tag。
+**日常在 ohmydsh 修改并推 main，或在镜像上正常合入 PR；两边由 Mirror release 双向同步。** 不再手工同步镜像或手工打发布 tag。
+
+**一键发版：** Actions → Release package，选包和 patch/minor/major。它先同步镜像，再升 `package.json` 与 `dsh.yaml` 的 `version`、把 CHANGELOG 的 `## Unreleased` 改为版本小节（没有时按上个版本以来的包提交生成；都没有则拒绝空发布），提交 main 并 dispatch Mirror release 打 tag。`dsh.yaml` 的 note 不自动改。
 
 **版本号默认不动，只有决定发布时才升。** 日常改代码、文档、截图、测试都保持 `package.json` 的当前版本，也不同步改 manifest 的 `version`；只有在明确要发一个包时才升版本，并在同一批提交里写 CHANGELOG、同步 manifest 与锁文件/版本 fixture。不要把"顺手升个版本"当成日常改动的收尾。
 
