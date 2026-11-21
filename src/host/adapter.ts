@@ -112,7 +112,7 @@ export class MagpieAdapter extends LlmAdapter {
     const op=await this.runtime.beginOperation()
     try {
       const owner=ownerOfRoute(route)
-      return visibleCatalog(op.gen.catalog.filter(m=>m.owner===owner),this.runtime.store.value.visibleModels).map(m=>({...structuredClone(withDefaultEffort(m,this.runtime.store.value.defaultEfforts)),provider:route}))
+      return visibleCatalog(op.gen.catalog.filter(m=>this.runtime.ownerOf(m)===owner),this.runtime.store.value.visibleModels).map(m=>({...structuredClone(withDefaultEffort(m,this.runtime.store.value.defaultEfforts)),provider:route}))
     } finally {op.release()}
   }
   override async resolveModel(route:string,id:string) {

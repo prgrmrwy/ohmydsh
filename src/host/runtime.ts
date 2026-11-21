@@ -6,7 +6,7 @@ import {
 } from './settings.js'
 import { GatewayTransport, validateIdentity, type ConnectionIdentity } from './transport.js'
 import { LineSelector, type Probe } from './selection.js'
-import { mapCatalog, routeOf, type CatalogModel } from './catalog.js'
+import { ROUTING_OWNER, mapCatalog, routeOf, type CatalogModel } from './catalog.js'
 import type { PublishResult } from './registrar.js'
 import { DEFAULT_SIDEBAR_WINDOWS, migrateLegacySidebarWindow, normalizeSidebarWindows, type SidebarWindowKind } from '../shared/sidebar-window.js'
 
@@ -45,7 +45,7 @@ export interface Generation {
   lastSyncErrorKind?: string
   [key: string]: unknown
 }
-export interface Operation extends ConnectionIdentity { gen: Generation; release(): void }
+export interface Operation extends ConnectionIdentity { gen: Generation; connectionVersion: number; release(): void }
 export interface RuntimeOptions {
   probe?: Probe
   now?: () => number
@@ -64,6 +64,8 @@ export interface LineCheckResult {
 export const CHECK_TIMEOUT_MS = 5_000
 /** Longest `reason` the check returns (redacted first, then truncated). */
 export const CHECK_REASON_MAX = 300
+/** Longest underlying cause echoed in a settings write failure (redacted first, then truncated). */
+export const WRITE_CAUSE_MAX = 300
 /** Request-body keys a line check accepts; anything else is a shape error. */
 const CHECK_FIELDS = ['id', 'baseUrl', 'accessMode', 'key', 'accessClientId', 'accessClientSecret'] as const
 const CHECK_CREDENTIALS: CredentialField[] = ['key', 'accessClientId', 'accessClientSecret']
@@ -144,7 +146,7 @@ export class MagpieRuntime {
   /** Set once the initial route registration failed: no further owner admission or publishing (needs a Host restart). */
   private registrationError: { code: string; route?: string } | undefined
   private readonly newId: (existing: readonly string[]) => string
-  /** Bumped by every connection write (and credential event): the only read-consistency proof a check needs. */
+  /** Bumped by every connection write (and credential event): guards asynchronous connection reads. */
   private writeVersion = 0
   private checking = false
   readonly checkTimeoutMs: number
@@ -159,6 +161,8 @@ export class MagpieRuntime {
   }
   /** Route ids of the persisted owners: the full set the adapter should own. */
   routeSet(): string[] { return this.owners.map(routeOf) }
+  /** Owner whose route lists `model`: a routing entry stays under its vendor while `routing` is not admitted (cap full, conflict). */
+  ownerOf(model: CatalogModel): string { return model.fallbackOwner !== undefined && !this.owners.includes(model.owner) ? model.fallbackOwner : model.owner }
   private emit(routes?: string[]): PublishResult | undefined {
     if (this.disposed) return undefined
     const result = this.publish(routes) as PublishResult | undefined
@@ -247,7 +251,7 @@ export class MagpieRuntime {
   }
   invalidateCredential(ref?: unknown) {
     if (this.disposed) return
-    // Any credential event invalidates an in-flight check, including spare-line updates that
+    // Any credential event invalidates in-flight connection reads, including spare-line updates that
     // are not allowed to rotate the generation below.
     this.writeVersion++
     if (ref !== undefined) {
@@ -261,13 +265,15 @@ export class MagpieRuntime {
   async beginOperation(): Promise<Operation> {
     if (this.disposed) throw new Error('MAGPIE_DISPOSED')
     const snapshot = this.current
+    const version = this.writeVersion
     if (this.failedFields.length) throw new Error('MAGPIE_SETTINGS_WRITE_FAILED')
     if (this.saving) throw new Error('MAGPIE_SETTINGS_UPDATING')
     const { active } = await this.selectActive()
     if (this.disposed) throw new Error('MAGPIE_DISPOSED')
     if (this.failedFields.length) throw new Error('MAGPIE_SETTINGS_WRITE_FAILED')
     if (this.saving) throw new Error('MAGPIE_SETTINGS_UPDATING')
-    if (snapshot !== this.current) return this.beginOperation()
+    // Spare-line changes can leave the generation unchanged while invalidating this selection.
+    if (version !== this.writeVersion || snapshot !== this.current) return this.beginOperation()
     const identity = this.identityOf(active)
     const fingerprint = this.fingerprintOf(identity)
     const changed = this.current.lineId !== identity.lineId || this.current.baseUrl !== identity.baseUrl || this.current.keyFingerprint !== fingerprint
@@ -277,7 +283,7 @@ export class MagpieRuntime {
       this.rotate(identity.lineId ?? '', identity.baseUrl ?? '', identity.accessMode ?? 'direct', fingerprint, carry)
     }
     validateIdentity(identity)
-    const op = { ...identity, gen: this.current, release: this.retainIdentity(identity) }
+    const op = { ...identity, gen: this.current, connectionVersion: version, release: this.retainIdentity(identity) }
     if (changed && op.key && op.gen.baseUrl) void this.syncGeneration(op.gen, op)
     return op
   }
@@ -297,6 +303,24 @@ export class MagpieRuntime {
     }
   }
   isCurrent(gen: Generation) { return !this.disposed && gen === this.current }
+  /** Synchronous admission guard for an irreversible write, not for prepared generation calls. */
+  isOperationCurrent(op: Pick<Operation, 'gen' | 'connectionVersion'>): boolean {
+    return this.isCurrent(op.gen) && op.connectionVersion === this.writeVersion && !this.saving && !this.failedFields.length
+  }
+  /**
+   * Observe probe expiry and credential changes even without an update event. The newly resolved
+   * operation is only a check: a write must still use the operation that authorised it, and check
+   * isOperationCurrent again synchronously at dispatch after awaiting this method.
+   */
+  async revalidateOperation(op: Operation): Promise<boolean> {
+    if (!this.isOperationCurrent(op)) return false
+    let check: Operation
+    try { check = await this.beginOperation() } catch (error) {
+      if (!this.isOperationCurrent(op)) return false
+      throw error
+    }
+    try { return this.isOperationCurrent(op) } finally { check.release() }
+  }
   redact(text: string) {
     const preparedKeys: string[] = []
     for (const ref of this.prepared) {
@@ -356,7 +380,9 @@ export class MagpieRuntime {
   /** D6 owner admission + publish for one successfully mapped catalog (synchronous: no await between the checks and the effects). */
   private commitOwners(gen: Generation, catalog: CatalogModel[]) {
     if (this.disposed || !this.isCurrent(gen)) return
+    // `routing` is admitted ahead of other new owners so routing entries are not starved within one sync.
     const fresh = [...new Set(catalog.map(m => m.owner))].filter(owner => !this.owners.includes(owner))
+      .sort((a, b) => Number(b === ROUTING_OWNER) - Number(a === ROUTING_OWNER))
     const admit = fresh.slice(0, Math.max(0, MAX_OWNERS - this.owners.length))
     this.rejectedOwners = fresh.slice(admit.length)
     if (this.registrationError) return
@@ -410,8 +436,7 @@ export class MagpieRuntime {
 
   /** Structured line-list update: the only settings write path (BREAKING schema). */
   private async updateLines(requested: unknown[]): Promise<Response> {
-    // Same synchronous segment as `saving = true` below: even a write that fails later invalidates
-    // any check whose credential read overlapped it.
+    // Even a write that fails validation invalidates earlier connection reads.
     this.writeVersion++
     if (requested.length === 0 || requested.length > MAX_LINES) throw new Error('Invalid lines')
     const config = this.loadConfig()
@@ -493,6 +518,8 @@ export class MagpieRuntime {
       ...cleanup,
     ]
     const retained: PendingCredential[] = []
+    // Validation awaits above allow new reads to start; invalidate those before mutating credentials.
+    this.writeVersion++
     this.saving = true
     try {
       // Marker saves keep the committed line list; a failed write must not apply the new lines.
@@ -512,13 +539,30 @@ export class MagpieRuntime {
       this.retained = retained
       this.writeSettings({ lines: nextLines, credentialUpdatePending: undefined })
       this.failedFields = []
-    } catch {
+    } catch (error) {
       this.failedFields = pending
       this.invalidateCredential()
-      return Response.json({ error: 'MAGPIE_SETTINGS_WRITE_FAILED: credentials may be partially updated; reread settings and retry the complete connection' }, { status: 500 })
+      const cause = this.writeFailureCause(error, writes)
+      return Response.json({ error: `MAGPIE_SETTINGS_WRITE_FAILED: credentials may be partially updated; reread settings and retry the complete connection${cause ? `; cause: ${cause}` : ''}` }, { status: 500 })
     } finally { this.saving = false }
     await this.reconcileActiveLine()
     return this.settingsView()
+  }
+
+  /**
+   * Underlying cause of a failed settings write, for the 500 body. The thrower is the credentials
+   * provider or the settings store, and its message is the only actionable part — e.g.
+   * `credentials-local: … run "chmod 600 …"` for a hand-written, world-readable credentials file.
+   * Redact every known secret AND the values this write tried to store (a provider may echo them),
+   * then truncate: redacting after truncation can leave an unmatched secret prefix. A throwable that
+   * cannot be stringified yields no cause — it must not turn the documented 500 into a 400.
+   */
+  private writeFailureCause(error: unknown, writes: readonly { value: string | null }[]): string {
+    let text: string
+    try { text = this.redact(errorText(error)) } catch { return '' }
+    const attempted = [...new Set(writes.map(write => write.value).filter((value): value is string => typeof value === 'string' && value.length > 0))].sort((a, b) => b.length - a.length)
+    for (const secret of attempted) text = text.split(secret).join('[redacted]')
+    return text.length > WRITE_CAUSE_MAX ? text.slice(0, WRITE_CAUSE_MAX) : text
   }
 
   /** Sync only when the active identity changed (the caller may also ask for a resync). */
@@ -560,7 +604,7 @@ export class MagpieRuntime {
       lines: viewLines, activeLineId: active?.line.id ?? null,
       pending: this.failedFields, retainedCredentials: this.retainedNow(config.lines),
       lastSyncAt: gen.lastSyncAt, lastSyncError: gen.lastSyncError, lastSyncErrorKind: gen.lastSyncErrorKind,
-      groups: [...new Set(gen.catalog.map(m => m.provider))].map(provider => ({ provider, models: gen.catalog.filter(m => m.provider === provider).map(m => ({ id: m.info.id, name: m.info.name, efforts: m.efforts })) })),
+      groups: [...new Set(gen.catalog.map(m => m.provider))].map(provider => ({ provider, models: gen.catalog.filter(m => m.provider === provider).map(m => ({ id: m.info.id, name: m.info.name, efforts: m.efforts, ...(m.routingKind ? { routingKind: m.routingKind } : {}) })) })),
       visibleModels: this.store.value.visibleModels, defaultEfforts: this.store.value.defaultEfforts,
       sidebarUsage: this.store.value.sidebarUsage === true,
       sidebarRefreshMinutes: this.store.value.sidebarRefreshMinutes ?? 5,

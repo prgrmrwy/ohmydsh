@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.7.4 — 2026-11-20
+
+- **多账号行改为两行，信息不再被挤掉。** 账号标识与完整 plan 一行，窗口名、到期时间、读数与进度条一行；只有账号标识会截断（悬停看全名），plan、到期时间与读数完整显示。
+- **组内账号都是同一窗口时，窗口名只在组标题显示一次**，如 `Codex (7 days) 4 个账号`。
+- **侧栏不再显示网关文字读数窗口**（如 Codex 的 `Image generation Unknown`），这类窗口只在设置页用量卡片中显示；「无限」窗口照常显示。
+- **「额度」改为「用量」**，与 Magpie 官方用语一致：侧栏标题 `Magpie 用量`、设置页「侧边栏用量」等；重置卡相关文案不变。
+- OpenSpec change `magpie-sidebar-usage-polish`（独立评审 1 轮）。
+
+## 0.7.3 — 2026-11-20
+
+- **修复侧栏多账号行在长 plan 下文字重叠。** 0.7.2 中 plan 不可收缩，`self_serve_business_prolite` 这类长 plan 会把账号名挤到 0 宽并压在窗口名与到期时间上。现在账号名优先保留，plan 先以省略号截断，名称区域超出部分隐藏，不再与到期时间、读数重叠。
+
+## 0.7.2 — 2026-11-20
+
+- **侧边栏额度卡区分同一上游的多个账号。** 此前 4 张 Codex 卡片显示成 4 行同名 `Codex (7 days)` / `Codex (30 days)`，展开后也是重复的 `Codex`。现在同一上游的卡片归到它首次出现的位置，上游名称只显示一次并附「N 个账号」，每个账号以 `user`（缺失或空白时为「账号 N」）和 plan 打头；窗口行、到期时间、读数与进度条不变，单账号上游保持原样，收起、展开与侧栏浮层一致。
+- **文字读数不再画 0% 进度条。** 例如 Codex 卡的 `Image generation` 窗口网关给的是 `display: "Unknown"`，侧栏此前在文字下画了一条空进度条。现在读数为「无限」或网关原文时不画进度条、不带颜色，也不参与回退时「读数最高的窗口」的选择；勾选档位的匹配不变。
+- **不再依赖宿主的 `useAnchoredPosition`。** `@deepseek-ai/dsh-client-ui-primitives` 0.2.2-rc.5 删除了该导出；侧栏浮层改用插件内的定位（图标上方、左对齐、限制在窗口内），新旧宿主都可用。开发依赖恢复为 `^0.2.2-rc.1`（0.7.1 的精确版本违反仓库的运行时兼容约定，main 的 CI 因此失败）。
+- OpenSpec change `magpie-sidebar-accounts`（独立评审 1 轮）。
+
+## 0.7.1 — 2026-11-20
+
+> 0.7.0 未发布：该版本号在 npm 上曾被占用（发布后撤销），不能重用；以下内容随 0.7.1 首次发布。另把开发依赖 `@deepseek-ai/dsh-client-ui-primitives` 钉到 `0.2.2-rc.1`（rc.5 删除了插件使用的 `useAnchoredPosition`，独立仓发版构建因此失败）。
+
+- **路由组单独分组。** Magpie 的路由入口（`group/…` 自定义组、`auto/…` 自动发现组）在选择器中进入 `Magpie (Routing)`，在设置页进入最上方的「路由组」分区（可见性、类型、默认推理强度）。此前它们按网关 `owned_by` 落在首个成员的厂商分组下，跨厂商的组被错误归类，成员顺序变化还会换组。只按 id 前缀识别，不读显示名或标签；插件原样透传组 id。`routing` 走现有归属流程，同一次同步中优先准入；网关已有 32 个其它归属时它会被拒绝并在设置里报告，此时若原厂商分组已存在，路由组仍留在其中可用（与升级前一致）。设计与评审见 OpenSpec change `magpie-routing-entries`；思路来自 [#10](https://github.com/prgrmrwy/dsh-magpie-connector/pull/10)（@abworks-dev）与 [#11](https://github.com/prgrmrwy/dsh-magpie-connector/pull/11)（@WuW0），感谢两位。
+- **BREAKING：旧会话中保存在厂商分组下的路由组选择需要重选一次。** 例如保存为 `Magpie (Opencode-go)` / `ds` 的会话，升级后在 `Magpie (Routing)` 下重新选择。按模型 id 保存的默认 effort 不受影响。
+- **BREAKING：路由组的显示/隐藏改由「路由组」分区自己保存。** 此前在厂商分区里对路由组做的勾选不再生效，路由组回到跟随网关，如需隐藏请在新分区重新设置。
+- 默认 effort 下拉的未设置文案改为「默认：不指定」/ `Default: not set`。
+
+## 0.6.12 — 2026-11-11
+
+- **修复模型请求绕过宿主全局 fetch 上下文处理的问题（prgrmrwy/dsh-magpie-connector#7）。** `POST /responses` 和 `POST /chat/completions` 在发送时读取全局 `fetch`，使 billion-context 等宿主中间件能够处理模型请求；目录、额度与重置等管理请求仍直接调用 undici。保留专用 dispatcher、连接超时、认证与归属 headers、禁止重定向、取消信号和错误分类。
+- **修复使用 Codex 重置卡时，最终校验与不可逆提交可能切换线路或凭据身份。** 确认票据仅在 host 绑定连接版本；提交前重读与重置请求保留同一连接身份，并再次检查线路选择、地址和凭据。身份变化时拒绝旧票据并要求重新确认，不向新身份提交或自动重放。
+- **修复并发保存线路或更新备用线路凭据后，尚未完成选线的操作仍使用已删除线路或旧凭据。** 新操作在解析凭据、探测线路前后同时检查连接写入版本与当前 generation；期间发生连接写入或凭据事件时重新读取配置并选线，避免向已删除线路发起后台目录请求。已准备或正在生成的请求仍按捕获身份完成。
+
+## 0.6.11 — 2026-11-09
+
+- **保存线路失败时 500 只说「可能部分更新」，把唯一的可修复信息吃掉（[issue #1](https://github.com/prgrmrwy/dsh-magpie-connector/issues/1)）。** 报告者的 `~/.dsh/.credentials.yaml` 权限是 644；DSH 0.2.2-rc.1 的 `credentials-local` 每次写盘前先做 owner-only 检查（`assertOwnerOnly`），拒绝时抛出的错误带着文件路径与 `run "chmod 600 …"`——正是他最后用来解决问题的信息，但连接器 `updateLines` 的 catch-all 把它换成了通用文案，用户只能自己猜。现在 500 响应在 `MAGPIE_SETTINGS_WRITE_FAILED: …` 后附 `; cause: <底层错误>`：先对已知秘密与本轮尝试写入的值脱敏，再截断到 300 字符（顺序反过来会在截断边界留下秘密前缀）；设置存储自身的写入失败同样受益。另硬化了抛出值本身：非 `Error` 且无法字符串化时不给 cause，仍返回 500（此前会掉进通用处理、把 500 变成 400）。pending 隔离与「完整重试」行为不变，成功路径的响应体不变。
+- 顺手修掉 `speed-ui` 里过期的 slot 断言：设置导航图标迁移到官方槽后客户端多注册了 `settings.section.icon`，该用例仍按 3 个注册、按旧下标取速度控件，在 main 上本就失败。
+- 包内 540 vitest、typecheck、build、`check:artifacts`、repo 文档治理测试通过。
+
 ## 0.6.10 — 2026-11-05
 
 - **修复热载后整个插件客户端 UI 消失（侧栏额度卡、设置页 Magpie 面板、输入框速度栏）。** `apply()` 注册 zh/en 字典时用了 `ctx.effect(() => { registry.register(...); return () => {} })`，空的清理函数从不释放字典；而 `@deepseek-ai/dsh-client-locale` 的 `register` 在同一命名空间已被占用时直接抛错（`locale namespace "settings.magpie" already has locale "zh"`）。页面开着时客户端 bundle 被重建（`dsh build`/HMR 推送新 bundle）会先卸载旧条目、再对新模块重新执行 `apply`，于是第二次 `register` 抛错、条目导入失败，插件注册的全部 slot 一起消失，直到刷新页面才恢复——表现为「侧栏 Magpie 额卡经常展示不出来」。现在这个 effect 返回 `locale.register` 自己的 disposer；本地用与真实服务同契约的假 locale 加了回归测试（重复注册抛错、disposer 删除命名空间），覆盖「卸载后重新 apply」与「卸载后命名空间已释放」。设置页导航图标的同款写法原本就返回了 disposer，未受影响。
