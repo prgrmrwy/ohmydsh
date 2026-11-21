@@ -7,6 +7,7 @@ import {
 import { GatewayTransport, validateIdentity, type ConnectionIdentity } from './transport.js'
 import { LineSelector, type Probe } from './selection.js'
 import { ROUTING_OWNER, mapCatalog, routeOf, type CatalogModel } from './catalog.js'
+import { migrateRoutingVisibility } from './visibility.js'
 import type { PublishResult } from './registrar.js'
 import { DEFAULT_SIDEBAR_WINDOWS, migrateLegacySidebarWindow, normalizeSidebarWindows, type SidebarWindowKind } from '../shared/sidebar-window.js'
 
@@ -363,6 +364,7 @@ export class MagpieRuntime {
         const catalog = mapCatalog(JSON.parse(JSON.stringify(await response.json()), (_key, value) => typeof value === 'string' ? this.redact(value) : value))
         if (!this.isCurrent(gen)) return
         gen.catalog = catalog; gen.lastSyncAt = new Date().toISOString(); delete gen.lastSyncError; delete gen.lastSyncErrorKind
+        this.migrateVisibility(catalog)
         this.commitOwners(gen, catalog)
       } catch (error) {
         if (!this.isCurrent(gen)) return
@@ -375,6 +377,12 @@ export class MagpieRuntime {
       }
     })()
     return gen.syncPromise
+  }
+
+  /** Pre-0.7 routing visibility moves to the `routing` key once; a failed write retries on the next sync. */
+  private migrateVisibility(catalog: CatalogModel[]) {
+    const next = migrateRoutingVisibility(catalog, this.store.value.visibleModels ?? {})
+    if (next) try { this.writeSettings({ visibleModels: next }) } catch { /* keep reading the old keys; retried next sync */ }
   }
 
   /** D6 owner admission + publish for one successfully mapped catalog (synchronous: no await between the checks and the effects). */

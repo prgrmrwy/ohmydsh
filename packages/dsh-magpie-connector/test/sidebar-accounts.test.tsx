@@ -174,14 +174,15 @@ test('spec Scenario "组内同一窗口时窗口名提到组标题"', async () =
   }
 })
 
-test('two-line account rows: account+plan line, then window/expiry/reading line', async () => {
+test('two-line account rows: account alone, then plan/window/expiry/reading line', async () => {
   await render([codexA, claude, codexB])
   for (const row of host.querySelectorAll('[data-dmg-sidebar-group="codex"] [data-dmg-sidebar-row]')) {
     const top = row.querySelector('.dmg-sidebar-account-line')!
     expect(top.querySelector('[data-dmg-sidebar-account]')).not.toBeNull()
-    expect(top.querySelector('.dmg-sidebar-plan')).not.toBeNull()
+    expect(top.querySelector('.dmg-sidebar-plan')).toBeNull()
     const line = row.querySelector('.dmg-sidebar-row-line')!
     expect(line.querySelector('[data-dmg-sidebar-account]')).toBeNull()
+    expect(line.querySelector('.dmg-sidebar-plan')).not.toBeNull()
     expect(line.querySelector('.dmg-sidebar-expiry')).not.toBeNull()
     expect(line.querySelector('[data-reading]')).not.toBeNull()
   }
@@ -212,4 +213,16 @@ test('window name stays on rows when the group does not share one window', async
   await render([ok('a', [{ name: '5 hours', used: 1 }, { name: '7 days', used: 3 }]), ok('b', [{ name: '5 hours', used: 2 }, { name: '7 days', used: 4 }])], ['fiveHour', 'weekly'])
   const title = text(host.querySelector('[data-dmg-sidebar-group-title]'))
   expect(title).not.toContain('5 hours'); expect(title).not.toContain('7 days')
+})
+
+test('account second line wraps as a unit instead of truncating', async () => {
+  const { settingsCss } = await import('../src/client/styles.js')
+  expect(settingsCss).toMatch(/\.dmg-sidebar-row-line\.is-account\{[^}]*flex-wrap:wrap/)
+  expect(settingsCss).toMatch(/\.dmg-sidebar-reading-group\{[^}]*flex:none/)
+  await render([codexA, claude, codexB])
+  for (const row of host.querySelectorAll('[data-dmg-sidebar-group="codex"] [data-dmg-sidebar-row]')) {
+    const group = row.querySelector('.dmg-sidebar-row-line.is-account .dmg-sidebar-reading-group')!
+    expect(group.querySelector('.dmg-sidebar-expiry')).not.toBeNull()
+    expect(group.querySelector('[data-reading]')).not.toBeNull()
+  }
 })
