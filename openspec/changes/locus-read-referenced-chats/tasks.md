@@ -6,7 +6,9 @@
 - [x] 0.2 消息链接夹具（2026-11-12）：`message_links/query` 与原始读取脱敏夹具，含 `99991672` 信封。
 - [x] 0.3 平台探针（2026-11-21）：嵌套树、根 id 唯一下载、query 少一层、话题信封、stderr 失败信封、信封大小（design「已实测的平台事实」1–7）。
 - [ ] 0.4 内层**视频** 探针：所有者在测试群转发一条「嵌套合并转发且含视频」的消息，验证根 id 能否下载内层视频 key（`--type file`）；失败则视频单元记入 `failed`，不换 id 猜测。结果记入 design 事实 2。
-- [ ] 0.5 话题超过 50 条探针：`+threads-messages-list --page-size 50` 跨 ≥2 页的 `has_more` 与 `page_token`，确认 design D6 的分页。
+      - 2026-11-23：扫描 bot 所在 47 个群近 200 条消息，嵌套合并转发仅 1 条（29 节点，内层无视频）；素材待所有者提供。
+- [x] 0.5 话题超过 50 条探针：`+threads-messages-list --page-size 50` 跨 ≥2 页的 `has_more` 与 `page_token`，确认 design D6 的分页。
+      - 2026-11-23：bot 所在 47 个群、159 个话题中有 2 个超过 50 条。已部署的 `readTopicPage` 以 bot 身份读取：73 条为 50+23 两页、62 条为 50+12 两页，position 从 −1 连续递增，第 2 页 `has_more=false` 结束。与 D6 一致。
 - [x] 0.6 脱敏夹具：`lark-merge-forward-nested-envelopes.ts`（raw 29 节点含跨群层级与 `interactive` 占位、query 26 节点、mget 嵌套渲染）、`lark-thread-list-envelopes.ts`（第 1 页含 token、第 2 页、非法 token、外来项）、stderr 失败信封（10077、99991672、230002、234003）。不含真实 open_id、token、群名、正文或人名。
 
 ## 1. 删除旧测试
@@ -79,4 +81,5 @@
 - [x] 12.2 dsh-pet 的 `npm run typecheck` 与 `npm test`；仓库根的 `npm test`、`npm run check:artifacts`、`openspec validate locus-read-referenced-chats --strict`；`test-plan.md` 中所有非废弃行为为 🟢。
       - 2026-11-23：dsh-pet typecheck 0 错；全量 vitest 连续 3 次均 3472 通过 / 4 跳过 / 0 失败（真实 ffmpeg 8 条实际运行）；仓库根 npm test 808 通过 / 0 失败；check:artifacts 通过；strict validate 通过。
 - [ ] 12.3 真机验收（所有者授权的测试群）：重跑 2026-11-19 的失败场景——19 秒视频（整秒帧覆盖 0–18）、链接指向整个话题、链接指向嵌套合并转发（29 节点，L2/L3 图片）；另测 bot 不在的群（`link-unauthorized`）、应用无权限点或桩部署（`link-scope-missing`）、含视频的合并转发（0.4）与纯文字链接。确认返回后 spool 无残留，并记录磁盘可用空间前后。
+      - 2026-11-23 部署后自测（未重启 Host，直接以 bot 身份调用已部署的 `readMessagePage`/`readLinkedPage`，只读）：11-13 合并转发 2 页 5 单元、11 张图（含 0–9s 帧）；11-19 直接合并转发 2 页、9 张图；19 秒视频链接 3 页、话题 2 条全读、帧 0–19s 每秒一帧；bot 不在的群 `link-unauthorized`；纯文字链接读出整个话题 6 单元；嵌套合并转发链接 1 页 38 单元、L2/L3 图 4 张。全部 `complete=true`，失败 0，每次读完 spool 无残留。待 Host 重启后在群内复验子会话行为。
 - [ ] 12.4 写 verify artifact。
