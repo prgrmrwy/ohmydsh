@@ -63,6 +63,13 @@
 - [x] 9.2 Green：单次 `select` 取每个整秒首帧（不做场景检测、不用 `fps`）；`showinfo` 配对；逐槽位规则；每页从 `k` 解码（输入 seek 并保留源时间轴）；超时保留已验证前缀；下载超时为本页剩余时限，去掉单独的 20 秒 CLI 超时；每次返回前删除视频与帧。
 - [x] 9.3 Refactor；既有尺寸测试保持绿。（media-video.ts 层完成：`extractSecondFrames` 与 ffmpeg 集成测试；下载页时限三行（R25 的 40 s / 100 s / 已有交付）与 R6 media 层行由 core 在 media.ts 接线后验证；旧 `extractKeyframes`/`buildFrameFilter` 待 media.ts 接线后删除。）
 
+## 9b. 视频场景变化帧（2026-11-23 真机验收后所有者决定，TDD）
+
+- [x] 9b.1 Red（`locus-media-video.test.ts`、`locus-media-video.ffmpeg.test.ts`，覆盖 R25 新增 4 个场景与 R26「超时保留已验证前缀」的修改）：脚本化——时间不在整秒上的帧按时间排序并各带自己的 showinfo 时间、`select` 含 `gt(scene,0.08)`、`-frames:v` 为配额+1；超过配额时窗口缩到多出帧所在整秒之前且 `nextK` 严格前进；同一整秒内超出配额记一项 `scene-frames-over-budget` 并前进；超时的已验证前缀丢掉最后一个整秒。真实 ffmpeg——合成视频在 1.5 s 处闪 0.2 s，1–2 s 之间必须返回一帧；逐页读完与整段读取的帧集合相同、`k` 严格递增。须先确认因正确的原因失败。
+- [x] 9b.2 Green：`buildSecondFilter` 加 `gt(scene,sceneThreshold)`；`-frames:v` 取配额+1；窗口缩小、单秒溢出失败槽、超时丢弃最后一个整秒；位置模型仍为整数秒；media.ts 不改（配额与失败 id 照旧）。
+- [x] 9b.3 Refactor；更新 design D10 与「Ponytail 精简」trade-off 7、README 中的整秒表述；既有测试保持绿。
+      - 2026-11-23：dsh-pet typecheck 0 错；全量 vitest 3536 通过 / 4 跳过 / 0 失败（含真实 ffmpeg 11 条）；根 npm test 811 通过 / 3 跳过 / 0 失败；check:artifacts 与 strict validate 通过。阈值 0.08 沿用旧实现。
+
 ## 10. 装配、指引、历史与文档入口
 
 - [x] 10.1 Red（`locus-context.test.ts`、`locus-chat-history-tool.test.ts`、`locus-on-demand-provisioning.test.ts`、`locus-delivery-prompt.test.ts`，覆盖 R4、R5、文档入口）：装配矩阵（IM 与话题 × 创建与冷恢复 × 媒体可用与否）；文档 Delivery 不产生 `message_links/query`、`+threads-messages-list`、原始读取或资源下载调用。

@@ -161,6 +161,77 @@ describe.skipIf(tools === undefined)('whole-second frames from real video', () =
     delivered(deep).forEach((frame, index) => expect(frame.timeSeconds).toBeCloseTo(expected[5 + index]!, 3))
   })
 
+  /** Black 320x240 clip with white full-frame flashes of 0.2 s starting at each given time. */
+  function flashClip(name: string, duration: number, flashes: readonly number[]) {
+    const enable = flashes.map(start => `between(t\\,${String(start)}\\,${String(start + 0.2)})`).join('+')
+    return generate(
+      name,
+      ['-f', 'lavfi', '-i', `color=c=black:size=320x240:rate=30:duration=${String(duration)}`],
+      ['-vf', `drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='${enable}'`, '-g', '60'],
+    )
+  }
+
+  it('a 0.2 s flash at 1.5 s yields a frame between 1 s and 2 s with its showinfo time', async () => {
+    const clip = await flashClip('flash', 4, [1.5])
+    const { pages } = await readAllPages(clip)
+    const times = pages.flat().map(frame => frame.timeSeconds)
+    // Whole-second frames are all still there …
+    for (const second of [0, 1, 2, 3]) expect(times, `second ${String(second)}`).toContain(second)
+    // … and the sub-second change is no longer missed: a frame between 1 and 2 s that is not the whole-second one.
+    const between = times.filter(time => time > 1 && time < 2)
+    expect(between.length).toBeGreaterThanOrEqual(1)
+    expect(between.some(time => Math.abs(time - 1.5) < 0.1)).toBe(true)
+    for (const frame of pages.flat()) expect(frame.k).toBe(Math.floor(frame.timeSeconds + 0.001))
+  })
+
+  it('paging a video with sub-second changes: k strictly increases and the concatenated pages equal one whole read', async () => {
+    const clip = await flashClip('flashes', 12, [1.5, 3.2, 3.6, 6.4, 9.1])
+    const whole = await extract(clip, 0, 200)
+    expect(whole.kind).toBe('frames')
+    const wholeTimes = delivered(whole).map(frame => frame.timeSeconds)
+    expect(wholeTimes.length, 'whole seconds plus scene frames').toBeGreaterThan(12)
+
+    // The busiest second (3 s: 3.0, 3.2, 3.43, 3.6, 3.83) fits both quotas, so nothing may be lost.
+    for (const quota of [5, 7]) {
+      const times: number[] = []
+      let k = 0
+      let pages = 0
+      for (let guard = 0; guard < 100; guard += 1) {
+        const result = await extract(clip, k, quota)
+        if (result.kind !== 'frames') throw new Error(`skipped: ${result.reason}`)
+        pages += 1
+        expect(result.frames.filter(frame => 'data' in frame).length, 'a page never exceeds the quota').toBeLessThanOrEqual(quota)
+        for (const frame of result.frames) {
+          expect(frame.k, 'a frame belongs to this page window').toBeGreaterThanOrEqual(k)
+          expect(frame.k, 'and ends before the next cursor').toBeLessThan(Math.max(result.nextK, k + 1))
+          if ('data' in frame) times.push(frame.timeSeconds)
+        }
+        if (!result.complete) expect(result.nextK, 'k strictly increases').toBeGreaterThan(k)
+        k = Math.max(result.nextK, k)
+        if (result.complete) break
+      }
+      expect(pages, `quota ${String(quota)} needs several pages`).toBeGreaterThan(2)
+      expect(times, `quota ${String(quota)}: pages joined equal one whole read`).toEqual(wholeTimes)
+      expect(new Set(times).size, 'no frame twice').toBe(times.length)
+    }
+  })
+
+  it('a second with more scene frames than the page quota delivers the quota and counts the rest as one failure; k advances', async () => {
+    const clip = await flashClip('crowded', 6, [3.2, 3.6])
+    const whole = delivered(await extract(clip, 0, 200)).map(frame => frame.timeSeconds)
+    const seconds3 = whole.filter(time => time >= 3 && time < 4)
+    expect(seconds3.length, 'second 3 holds 3.0, 3.2, 3.43, 3.6, 3.83').toBeGreaterThanOrEqual(4)
+    const quota = seconds3.length - 1
+    const page = await extract(clip, 3, quota)
+    if (page.kind !== 'frames') throw new Error(page.reason)
+    expect(delivered(page).map(frame => frame.timeSeconds)).toEqual(seconds3.slice(0, quota))
+    expect(page.frames.filter(frame => 'failed' in frame)).toEqual([
+      expect.objectContaining({ k: 3, failed: 'scene-frames-over-budget' }),
+    ])
+    expect(page.nextK).toBe(4)
+    expect(page.complete).toBe(false)
+  })
+
   it('150 frames pair correctly with six-digit names', async () => {
     const clip = await generate('long150', ['-f', 'lavfi', '-i', 'color=c=blue:size=64x64:rate=1:duration=150'])
     const result = await extract(clip, 0, 150)

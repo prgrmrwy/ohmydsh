@@ -1,12 +1,12 @@
 /**
- * Bounded whole-second frame extraction from one already-downloaded video.
+ * Bounded whole-second + scene-change frame extraction from one already-downloaded video.
  *
  * EXPORTS (change `locus-read-referenced-chats`, design D10, tasks group 9):
  *
  * ```ts
  * // Closed vocabulary of why a video (or one frame slot) was not delivered.
  * type VideoSkipReason = … | 'frame-extraction-timeout' | 'frame-timestamps-unavailable' | …
- * type SecondFrameFailure = 'frame-file-missing' | 'frame-admission-failed'
+ * type SecondFrameFailure = 'frame-file-missing' | 'frame-admission-failed' | 'scene-frames-over-budget'
  *
  * // One slot of the window. `k` is the whole second the slot stands for
  * // (floor of the normalised time); `timeSeconds` is the normalised showinfo time.
@@ -16,14 +16,14 @@
  *
  * type SecondFrameExtraction =
  *   | { kind: 'frames'; durationSeconds: number; frames: readonly SecondFrame[]
- *       nextK: number      // next whole second to read; failed slots advance it too
+ *       nextK: number      // next whole second to read; strictly > fromSecond unless nothing was read; failed slots advance it too
  *       complete: boolean }// true: nothing left after nextK (no cursor needed)
  *   | { kind: 'skipped'; reason: VideoSkipReason; durationSeconds?: number }
  *
  * extractSecondFrames(input: {
  *   tools: FrameTools; dir: string; fileName: string   // video is `<dir>/<fileName>`
  *   fromSecond: number        // k: first whole second wanted (integer ≥ 0)
- *   maxFrames: number         // page quota, ≥ 1
+ *   maxFrames: number         // page quota (whole-second AND scene frames together), ≥ 1
  *   maxFrameBytes: number     // per-frame byte ceiling (over → slot 'frame-admission-failed')
  *   signal: AbortSignal       // page-wide abort; also bounds the decode window
  *   limits?: Partial<VideoLimits>   // maxEdge / decodeWindowMs / probeTimeoutMs overrides
@@ -31,9 +31,19 @@
  * ```
  *
  * Contract the caller (media.ts) relies on:
- * - ONE decode pass per page: input-seek to `k-1`, source timeline kept
+ * - ONE decode pass per page: input-seek to `k-1` (so the first frame of the
+ *   window has a predecessor for the scene score), source timeline kept
  *   (`-copyts`), a single `select` keeps the FIRST frame of every whole second
- *   `≥ k`, at most `maxFrames`. No scene detection, no `fps` resampling.
+ *   `≥ k` plus every scene-change frame (`gt(scene, sceneThreshold)`) `≥ k`, in
+ *   time order; a frame that is both is selected once. No `fps` resampling.
+ *   The position stays an integer second: a page covers `[k, k+n)`.
+ * - Quota: whole-second and scene frames share `maxFrames`. ffmpeg is asked for
+ *   `maxFrames + 1` frames; the extra one only says "the window is over-full".
+ *   Over-full → the window shrinks to the seconds BEFORE the extra frame's
+ *   second `s` (`nextK = s`, those frames are re-selected next page, none is
+ *   dropped). If all of them sit in one second, that second delivers its first
+ *   `maxFrames` frames, one `scene-frames-over-budget` slot is counted for the
+ *   rest, and `nextK = s + 1`: the cursor always advances.
  * - `timeSeconds` is the `showinfo` `pts_time` minus the video stream's
  *   `start_time` (−1 ms or less below zero reads as 0). Never computed.
  * - The caller still owns magic-MIME proof and `AttachmentStore` admission of
@@ -43,11 +53,13 @@
  * - `skipped` reasons: `frame-tools-unavailable` is the caller's; this function
  *   returns `video-probe-failed`, `video-format-unsupported`,
  *   `frame-extraction-failed`, `frame-extraction-timeout` (decode window hit
- *   and the verified prefix is empty), `frame-timestamps-unavailable` (a file
+ *   and nothing is deliverable), `frame-timestamps-unavailable` (a file
  *   without a record voids the whole window), `aborted`.
- * - Timeout/kill with a non-empty verified prefix is `kind: 'frames'` with
+ * - Timeout/kill with a deliverable verified prefix is `kind: 'frames'` with
  *   `complete: false`; the largest existing file (possibly truncated) and every
- *   later slot are re-selected on the next page.
+ *   later slot are re-selected on the next page, and so is every slot sharing
+ *   the second of that largest file (later scene frames of that second may not
+ *   have been decoded yet, so a second is never split across pages).
  *
  * ---- security posture (applies to every ffmpeg/ffprobe call) ----
  * SECURITY POSTURE. `ffmpeg`/`ffprobe` parse an untrusted container and codec.
@@ -87,7 +99,7 @@ export const LOCUS_VIDEO_LIMITS = Object.freeze({
   maxEdge: 1024,
   /** Wall-clock budget for ffprobe and ffmpeg TOGETHER. */
   toolTimeoutMs: 30_000,
-  /** `select` scene-change threshold; the first frame is always included. */
+  /** `select` scene-change threshold (kept from the original scene sampler); whole-second frames are selected regardless. */
   sceneThreshold: 0.08,
   /** Wall-clock budget of ONE decode window (ffmpeg only). */
   decodeWindowMs: 30_000,
@@ -242,7 +254,7 @@ async function probeVideo(input: {
 }
 
 /** Why one slot of a window has no usable frame; the rest of the window is unaffected. */
-export type SecondFrameFailure = 'frame-file-missing' | 'frame-admission-failed'
+export type SecondFrameFailure = 'frame-file-missing' | 'frame-admission-failed' | 'scene-frames-over-budget'
 
 /** One slot of a decoded window; failed slots advance `k` exactly like delivered ones. */
 export type SecondFrame =
@@ -277,10 +289,12 @@ const SECOND_EPSILON = 0.001
 const NO_PACKETS = /Nothing was written into output file, because at least one of its streams received no packets/
 
 /**
- * The `-vf` graph of one window: ONE `select` keeping the first frame of every
- * whole second `>= fromSecond` (the first frame of the window, then each frame
- * whose second differs from the previously selected one), then the bounded
- * proportional scale, then `showinfo` LAST so `n` counts selected frames.
+ * The `-vf` graph of one window: ONE `select` keeping, among frames at or after
+ * `fromSecond`, the first frame of the window, each frame whose second differs
+ * from the previously selected one, and each scene-change frame (`scene` is
+ * scored against the decoded predecessor, which the seek to `k-1` provides for
+ * the window's first frame). Then the bounded proportional scale, then
+ * `showinfo` LAST so `n` counts selected frames.
  *
  * `t` is the source timeline (`-copyts`), so the stream's `start_time` is
  * subtracted inside the expression; the 1 ms epsilon makes a frame stamped just
@@ -288,10 +302,15 @@ const NO_PACKETS = /Nothing was written into output file, because at least one o
  * @param input - Window start, stream start time and edge bound.
  * @returns the filtergraph string (for ffmpeg's own parser, not a shell).
  */
-export function buildSecondFilter(input: { readonly fromSecond: number; readonly startTime: number; readonly maxEdge: number }): string {
+export function buildSecondFilter(input: {
+  readonly fromSecond: number
+  readonly startTime: number
+  readonly maxEdge: number
+  readonly sceneThreshold: number
+}): string {
   const edge = String(Math.trunc(input.maxEdge))
   const second = (time: string): string => `floor(${time}-(${String(input.startTime)})+${String(SECOND_EPSILON)})`
-  return `select='gte(${second('t')},${String(input.fromSecond)})*(isnan(prev_selected_t)+gt(${second('t')},${second('prev_selected_t')}))',`
+  return `select='gte(${second('t')},${String(input.fromSecond)})*(isnan(prev_selected_t)+gt(${second('t')},${second('prev_selected_t')})+gt(scene,${String(input.sceneThreshold)}))',`
     + `scale=w='min(${edge},iw)':h='min(${edge},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,`
     + 'showinfo'
 }
@@ -340,7 +359,7 @@ function pairSlots(input: {
   return slots
 }
 
-/** Extract whole-second frames from `<dir>/<fileName>`; see the file header for the contract. */
+/** Extract whole-second and scene-change frames from `<dir>/<fileName>`; see the file header for the contract. */
 export async function extractSecondFrames(input: ExtractSecondFramesInput): Promise<SecondFrameExtraction> {
   if (!Number.isSafeInteger(input.fromSecond) || input.fromSecond < 0 || !Number.isSafeInteger(input.maxFrames) || input.maxFrames < 1) {
     return secondFramesSkip('frame-extraction-failed')
@@ -365,6 +384,8 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
     return secondFramesSkip('frame-extraction-failed', durationSeconds)
   }
 
+  // One frame beyond the quota is requested: it only tells an over-full window from an exactly full one.
+  const recordCap = input.maxFrames + 1
   const records: SecondRecord[] = []
   let noPackets = false
   const seek = input.fromSecond - 1
@@ -379,9 +400,9 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
       ...(seek > 0 ? ['-ss', String(seek)] : []),
       '-copyts',
       '-i', `./${input.fileName}`,
-      '-vf', buildSecondFilter({ fromSecond: input.fromSecond, startTime, maxEdge: limits.maxEdge }),
+      '-vf', buildSecondFilter({ fromSecond: input.fromSecond, startTime, maxEdge: limits.maxEdge, sceneThreshold: limits.sceneThreshold }),
       '-fps_mode', 'vfr',
-      '-frames:v', String(input.maxFrames),
+      '-frames:v', String(recordCap),
       '-q:v', '4',
       './f_%06d.jpg',
     ],
@@ -392,7 +413,7 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
     onStderrLine(line) {
       if (NO_PACKETS.test(line)) noPackets = true
       const match = SHOWINFO_LINE.exec(line)
-      if (match === null || records.length >= input.maxFrames) return
+      if (match === null || records.length >= recordCap) return
       records.push({ n: Number(match[1]), time: Number(match[2]) })
     },
   })
@@ -427,9 +448,38 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
   if (timedOut && count === 0) return secondFramesSkip('frame-extraction-timeout', durationSeconds)
   if (!timedOut && count === 0 && input.fromSecond === 0) return secondFramesSkip('frame-extraction-failed', durationSeconds)
 
-  const frames = pairSlots({ dir: input.dir, records, count, startTime, maxFrameBytes: input.maxFrameBytes })
-  if (frames === undefined) return secondFramesSkip('frame-timestamps-unavailable', durationSeconds)
-  const nextK = frames.length === 0 ? input.fromSecond : Math.max(input.fromSecond, frames.at(-1)!.k + 1)
-  const complete = !timedOut && (frames.length < input.maxFrames || nextK >= durationSeconds)
+  const slots = pairSlots({ dir: input.dir, records, count, startTime, maxFrameBytes: input.maxFrameBytes })
+  if (slots === undefined) return secondFramesSkip('frame-timestamps-unavailable', durationSeconds)
+
+  // The window ends before the second of the first slot that cannot be delivered whole:
+  // the extra (quota + 1)th frame, or — after a kill — the possibly truncated largest file,
+  // whose second may still have later scene frames that were never decoded.
+  let frames: SecondFrame[] = slots
+  let nextK = slots.length === 0 ? input.fromSecond : Math.max(input.fromSecond, slots.at(-1)!.k + 1)
+  let shrunk = false
+  const boundary = timedOut ? timedOutBoundary(records, count, startTime) : slots.length > input.maxFrames ? slots[input.maxFrames]!.k : undefined
+  if (boundary !== undefined) {
+    shrunk = true
+    const whole = slots.filter(slot => slot.k < boundary)
+    if (whole.length > 0) {
+      frames = whole
+      nextK = boundary
+    } else if (timedOut) {
+      // Everything verified sits in the one second that is still being decoded: nothing can be delivered without splitting it.
+      return secondFramesSkip('frame-extraction-timeout', durationSeconds)
+    } else {
+      // The quota cannot hold even this one second: it delivers its first `maxFrames` frames and counts the rest.
+      const extra = slots[input.maxFrames]!
+      frames = [...slots.slice(0, input.maxFrames), { k: extra.k, timeSeconds: extra.timeSeconds, failed: 'scene-frames-over-budget' }]
+      nextK = extra.k + 1
+    }
+  }
+  const complete = !timedOut && !shrunk && (frames.length < input.maxFrames || nextK >= durationSeconds)
   return { kind: 'frames', durationSeconds, frames, nextK, complete }
+}
+
+/** Second of the record that follows the last trusted slot after a kill (its file may be truncated). */
+function timedOutBoundary(records: readonly SecondRecord[], count: number, startTime: number): number {
+  const time = Math.max(0, (records[count]?.time ?? 0) - startTime)
+  return Math.floor(time + SECOND_EPSILON)
 }

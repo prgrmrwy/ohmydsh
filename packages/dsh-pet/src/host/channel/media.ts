@@ -774,7 +774,7 @@ function skipNote(reason: VideoSkipReason): string {
 }
 
 function secondFramesNote(durationSeconds: number, fromSecond: number, nextSecond: number): string {
-  return `[视频截帧：画面截帧，没有声音；每整秒取一帧，时长 ${durationSeconds.toFixed(1)}s，本页读到第 ${String(fromSecond)}–${String(Math.max(fromSecond, nextSecond - 1))} 秒；不得声称已看过完整视频。]`
+  return `[视频截帧：画面截帧，没有声音；每整秒取一帧并附场景变化帧，时长 ${durationSeconds.toFixed(1)}s，本页读到第 ${String(fromSecond)}–${String(Math.max(fromSecond, nextSecond - 1))} 秒；不得声称已看过完整视频。]`
 }
 
 function formatTime(seconds: number): string {

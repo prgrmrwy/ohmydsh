@@ -212,20 +212,21 @@ describe('extractSecondFrames (scripted tools)', () => {
     expect(early.result).toMatchObject({ kind: 'skipped', reason: 'frame-timestamps-unavailable' })
   })
 
-  it('asks for one select over the source timeline, seeking to k-1, without scene or fps', async () => {
+  it('asks for one select over the source timeline, seeking to k-1, with the scene test and without fps', async () => {
     const deep = await window({ probe: OK_PROBE, ffmpeg: { frames: [8, 9] } }, { fromSecond: 8 })
     const argv = (await deep.fake.invocations()).find(item => item.tool === 'ffmpeg')!.argv
     const seek = argv.indexOf('-ss')
     expect(argv[seek + 1]).toBe('7')
     expect(seek).toBeLessThan(argv.indexOf('-i'))
     expect(argv).toContain('-copyts')
-    expect(argv[argv.indexOf('-frames:v') + 1]).toBe('8')
+    // One more than the quota: the extra frame is how an over-full window is noticed.
+    expect(argv[argv.indexOf('-frames:v') + 1]).toBe('9')
     expect(argv.at(-1)).toBe('./f_%06d.jpg')
     const filter = argv[argv.indexOf('-vf') + 1]!
     expect(filter.match(/select=/g)).toHaveLength(1)
     expect(filter).toContain('prev_selected_t')
     expect(filter).toContain('floor(')
-    expect(filter).not.toContain('scene')
+    expect(filter).toContain('gt(scene,0.08)')
     expect(filter).not.toContain('fps=')
     expect(filter).toContain('scale=w=\'min(1024,iw)\':h=\'min(1024,ih)\'')
     // showinfo is last so `n` counts selected frames.
@@ -244,6 +245,75 @@ describe('extractSecondFrames (scripted tools)', () => {
     )
     const offsetFilter = (await offset.fake.invocations()).find(item => item.tool === 'ffmpeg')!.argv
     expect(offsetFilter[offsetFilter.indexOf('-vf') + 1]).toContain('t-(2)')
+  })
+
+  it('scene frames between whole seconds are kept in time order with their own showinfo times; the select asks for gt(scene,0.08)', async () => {
+    const { result, fake } = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 0.4, 1, 1.5, 1.7, 2.2] } })
+    const frames = framesOf(result)
+    expect(frames.map(frame => frame.timeSeconds)).toEqual([0, 0.4, 1, 1.5, 1.7, 2.2])
+    expect(frames.map(frame => frame.k)).toEqual([0, 0, 1, 1, 1, 2])
+    // Paired one-to-one with the output files: the i-th slot carries the i-th file.
+    expect(delivered(frames).map(frame => frame.data.at(8))).toEqual([1, 2, 3, 4, 5, 6])
+    expect(result).toMatchObject({ nextK: 3, complete: true })
+    const argv = (await fake.invocations()).find(item => item.tool === 'ffmpeg')!.argv
+    const filter = argv[argv.indexOf('-vf') + 1]!
+    expect(filter).toContain(`gt(scene,${String(LOCUS_VIDEO_LIMITS.sceneThreshold)})`)
+    expect(filter.match(/select=/g)).toHaveLength(1)
+  })
+
+  it('a window with more frames than the quota stops before the second of the extra frame and nextK moves strictly forward', async () => {
+    // Quota 8; the 9th frame (2.4) belongs to second 2, so the window is seconds 0–1 and 2.0/2.2/2.4 wait for the next page.
+    const times = [0, 0.3, 0.6, 1, 1.2, 1.5, 2, 2.2, 2.4]
+    const first = await window({ probe: OK_PROBE, ffmpeg: { frames: times } }, { fromSecond: 0 })
+    const frames = framesOf(first.result)
+    expect(frames.map(frame => frame.timeSeconds)).toEqual([0, 0.3, 0.6, 1, 1.2, 1.5])
+    expect(first.result).toMatchObject({ nextK: 2, complete: false })
+    // The next page starts at nextK and gets the deferred frames again: no duplicate, no gap.
+    const next = await window({ probe: OK_PROBE, ffmpeg: { frames: [2, 2.2, 2.4, 3] } }, { fromSecond: 2 })
+    expect(framesOf(next.result).map(frame => frame.timeSeconds)).toEqual([2, 2.2, 2.4, 3])
+    expect(next.result).toMatchObject({ nextK: 4, complete: true })
+    // The whole video in order is the concatenation of the pages.
+    expect([...frames, ...framesOf(next.result)].map(frame => frame.timeSeconds)).toEqual([0, 0.3, 0.6, 1, 1.2, 1.5, 2, 2.2, 2.4, 3])
+  })
+
+  it('dense scene frames shrink the window instead of dropping frames', async () => {
+    // Quota 4, frames at 0, 0.5, 1, 1.4, 1.8: the 5th is in second 1, so only second 0 fits.
+    const { result } = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 0.5, 1, 1.4, 1.8] } }, { maxFrames: 4 })
+    expect(framesOf(result).map(frame => frame.timeSeconds)).toEqual([0, 0.5])
+    expect(result).toMatchObject({ nextK: 1, complete: false })
+    // k > 0: the window start moves, and the shrunk window still ends after k.
+    const deep = await window({ probe: OK_PROBE, ffmpeg: { frames: [5, 5.2, 6, 6.2, 6.4] } }, { fromSecond: 5, maxFrames: 4 })
+    expect(framesOf(deep.result).map(frame => frame.timeSeconds)).toEqual([5, 5.2])
+    expect(deep.result).toMatchObject({ nextK: 6, complete: false })
+  })
+
+  it('scene frames beyond the quota inside one second are one counted failure and k still advances', async () => {
+    const { result } = await window({ probe: OK_PROBE, ffmpeg: { frames: [3, 3.1, 3.2, 3.3, 3.4] } }, { fromSecond: 3, maxFrames: 4 })
+    const frames = framesOf(result)
+    expect(delivered(frames).map(frame => frame.timeSeconds)).toEqual([3, 3.1, 3.2, 3.3])
+    expect(failedOf(frames)).toEqual([{ k: 3, timeSeconds: 3.4, failed: 'scene-frames-over-budget' }])
+    // The cursor strictly advances past the crowded second.
+    expect(result).toMatchObject({ nextK: 4, complete: false })
+    // A second with no whole-second frame of its own (a gap) still advances past the frames it did have.
+    const gap = await window({ probe: OK_PROBE, ffmpeg: { frames: [7.1, 7.2, 7.3] } }, { fromSecond: 5, maxFrames: 2 })
+    expect(delivered(framesOf(gap.result)).map(frame => frame.timeSeconds)).toEqual([7.1, 7.2])
+    expect(gap.result).toMatchObject({ nextK: 8 })
+  })
+
+  it('kill never splits a second: slots of the second of the largest file are reselected next page', async () => {
+    // Records 0, 1, 1.4, 1.8 and four files: the 4th (second 1) may be truncated, and 1 / 1.4 share its second.
+    const { result } = await window(
+      { probe: OK_PROBE, ffmpeg: { frames: [0, 1, 1.4, 1.8, 2, 3], hangAfter: { records: 4, files: 4 } } },
+      { limits: { decodeWindowMs: 2500 } },
+    )
+    expect(framesOf(result).map(frame => frame.timeSeconds)).toEqual([0])
+    expect(result).toMatchObject({ complete: false, nextK: 1 })
+    // Everything verified sits in one second: nothing can be delivered without splitting it.
+    const crowded = await window(
+      { probe: OK_PROBE, ffmpeg: { frames: [0, 0.2, 0.4, 0.6], hangAfter: { records: 4, files: 4 } } },
+      { limits: { decodeWindowMs: 2500 } },
+    )
+    expect(crowded.result).toEqual({ kind: 'skipped', reason: 'frame-extraction-timeout', durationSeconds: 19 })
   })
 
   it('does not stop at a duration or a size: a 20 minute video is framed', async () => {

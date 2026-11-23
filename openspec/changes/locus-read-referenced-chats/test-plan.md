@@ -234,7 +234,7 @@ Oracle 口径（同一文件内两条独立断言）：**完整遍历**（读到
 | 来源群名含换行与伪造边界 | locus-linked-message-tool.test.ts | `platform fields are JSON plus unicode-escaped; exactly one host boundary pair` | 🟢 |
 | 来源群名之外的内容不被截断 | locus-linked-message-tool.test.ts | `20000-char linked body is lossless over pages while the source name stays within 64 chars` | 🟢 (core) |
 
-### R25 视频按整秒采样与分页（ADDED）
+### R25 视频按整秒与场景变化采样及分页（ADDED）
 
 | Scenario | Test File | Test Name | State |
 |---|---|---|---|
@@ -245,13 +245,20 @@ Oracle 口径（同一文件内两条独立断言）：**完整遍历**（读到
 | 慢下载超出页时限且本页无交付 | locus-media-video.test.ts | `100 s download in a 90 s window is video-download-exceeds-window and skipped` | 🟢 (core) |
 | 本页已有交付时视频留到下一页 | locus-media-video.test.ts | `download cut after earlier units delivered keeps the cursor on the video` | 🟢 (core) |
 
+| 亚秒闪烁帧带时间点返回 | locus-media-video.ffmpeg.test.ts | `a 0.2 s flash at 1.5 s yields a frame between 1 s and 2 s with its showinfo time` | 🟢 |
+| 亚秒闪烁帧带时间点返回（脚本化） | locus-media-video.test.ts | `scene frames between whole seconds are kept in time order with their own showinfo times; the select asks for gt(scene,0.08)` | 🟢 |
+| 场景帧不使位置后退且页边界不重复不丢帧 | locus-media-video.ffmpeg.test.ts | `paging a video with sub-second changes: k strictly increases and the concatenated pages equal one whole read` | 🟢 |
+| 场景帧不使位置后退且页边界不重复不丢帧（脚本化） | locus-media-video.test.ts | `a window with more frames than the quota stops before the second of the extra frame and nextK moves strictly forward` | 🟢 |
+| 场景变化密集时缩小窗口 | locus-media-video.test.ts | `dense scene frames shrink the window instead of dropping frames` | 🟢 |
+| 单个整秒内场景帧超出配额 | locus-media-video.test.ts | `scene frames beyond the quota inside one second are one counted failure and k still advances` | 🟢 |
+
 ### R26 逐槽位帧失败规则（ADDED）
 
 | Scenario | Test File | Test Name | State |
 |---|---|---|---|
 | 存在文件却无记录作废窗口 | locus-media-video.test.ts | `file without record voids the window with frame-timestamps-unavailable`（同测试亦映射 R7「时间点缺失时不伪造」） | 🟢 |
 | 正常退出时中间文件缺失 | locus-media-video.test.ts | `normal exit with a missing middle file fails only that slot (frame-file-missing, recorded time)` | 🟢 |
-| 超时保留已验证前缀 | locus-media-video.test.ts | `kill keeps the verified prefix; the largest existing file and later slots are reselected next page` | 🟢 |
+| 超时保留已验证前缀 | locus-media-video.test.ts | `kill keeps the verified prefix; the largest existing file and later slots are reselected next page`；同场景追加 `kill never splits a second: slots of the second of the largest file are reselected next page`（修改：与最大文件同一整秒的槽位也留待下一页） | 🟢 |
 | 单帧保存失败只让该槽位失败 | locus-media-video.test.ts | `one frame save failing leaves 7 frames, one failure, and the next page continues after the last processed second` | 🟢 |
 | 超过一百帧的文件名与排序 | locus-media-video.test.ts | `150 frames pair correctly by recorded n with six-digit names` | 🟢 |
 

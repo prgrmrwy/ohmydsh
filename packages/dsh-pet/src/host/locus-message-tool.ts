@@ -45,7 +45,7 @@ const CURSOR_MAX_CHARS = 256
 /** Model-facing description. */
 export const LOCUS_MESSAGE_DESCRIPTION =
   'Read ONE message of THIS entrance\'s chat by its `om_` message id, with the bot identity: its sender, time and '
-  + 'text, its images as image blocks, a video as its cover and sampled whole-second frames with video times (never '
+  + 'text, its images as image blocks, a video as its cover and sampled whole-second and scene-change frames with video times (never '
   + 'claim you watched the whole video), files and audio as metadata only, and a merge-forward with all its nested '
   + 'children. The chat is resolved from the calling child and cannot be redirected. The output carries a ledger: '
   + 'when a `cursor` is returned, call again with the SAME `messageId` and that `cursor` to read on; say the content is '

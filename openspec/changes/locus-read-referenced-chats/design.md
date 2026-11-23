@@ -92,9 +92,12 @@
 - 磁盘：每 50 ms 用 `statfs` 测 spool 所在卷的可用空间，低于 512 MiB（可配置）→ 终止进程组、删除调用目录、`disk-low`；子进程输出 `ENOSPC` 同样归为 `disk-low`。覆盖下载与抽帧两个阶段，并发调用的占用自然计入卷的可用空间。
 
 **D10 视频。**
-- 抽帧使用单次 `select`：每个整秒取第一帧（首帧，以及 `floor(t)` 与上一选中帧不同的帧），**不做场景检测**；不用 `fps` 重采样。
+- 抽帧使用单次 `select`：每个整秒取第一帧（首帧，以及 `floor(t)` 与上一选中帧不同的帧），**加场景变化帧 `gt(scene,0.08)`**（2026-11-23 所有者在真机验收后决定恢复，见「Ponytail 精简」trade-off 7）；同一源帧只选一次；不用 `fps` 重采样。阈值 0.08 沿用 `ffed6b60` 引入的旧实现（`LOCUS_VIDEO_LIMITS.sceneThreshold`）。
 - 展示时间取 `showinfo` 的 `pts_time`（减去流的 `start_time`，−1 ms 以内按 0），不推算。
-- 位置 `k` 为下一个待取整秒；一页从 `k` 开始解码（输入 seek 到 `k−1` 之前并保持源时间轴），选择 `t ≥ k` 的整秒首帧，至多本页配额。失败槽位同样推进 `k`，因此不会再次选出。
+- 位置 `k` 仍为整数秒（不用 PTS/time_base，不跨页保存场景状态）；一页从 `k` 开始解码（输入 seek 到 `k−1`，因此窗口首帧有前一帧可比较场景分数，保持源时间轴），选择 `t ≥ k` 的整秒首帧与场景帧。一页覆盖窗口 `[k, k+n)`，两类帧按时间排序，与 showinfo 时间逐帧配对，合计至多本页配额（与图片额度共用）。失败槽位同样推进 `k`，因此不会再次选出。
+  - 窗口缩小：`-frames:v` 取配额+1，用多出的一帧判断溢出；溢出时以该帧所在整秒 `s` 为界，本页只交付 `s` 之前的帧，`nextK = s`（整秒帧每秒至少一帧，故 `s > k` 或全部在同一秒）。被推迟的帧下一页从 `s` 起重新选出，不丢、不重复。
+  - 单秒放不下：若配额+1 帧全在同一整秒，本页交付该秒前「配额」帧，其余场景帧记一项该秒的 `scene-frames-over-budget` 失败（计数，不静默），`nextK = s+1`，`k` 仍严格前进。
+  - 超时被杀：只交付早于「最大文件对应记录」所在整秒的槽位，`nextK` 为该整秒（该秒的场景帧可能还没解码，整秒不被拆页）；可交付的部分为空时按空前缀处理（`frame-extraction-timeout`）。
 - 记录与文件的配对：按 showinfo 的序号 `n` 与文件名 `f_%06d` 配对。
   - 存在文件却没有对应记录 → 时间轨无法配对，整个窗口作废，视频 `frame-timestamps-unavailable`（final），封面照常。
   - 记录存在而文件缺失或为空、超过单帧字节上限、magic MIME 不符或 `AttachmentStore` 拒绝 → 只该槽位失败（`frame-file-missing` 或 `frame-admission-failed`），时间取自记录，`k` 照常推进。
@@ -143,7 +146,7 @@
 4. 话题：读到 `has_more=false`（读取期间的新消息按读到为止）；保留重复 token 与 3 个连续空页的终止；去掉边界、target-first、列表初始化、`targetDone`、−2 哨兵与 token 失效重扫；列表首页 final/第 3 次失败 → 回退为链接所指单条消息 + 一条 `topic-list` 失败项，不附话题 cursor；`230001` 为列表页 final 失败；只保留逐项 `chat_id`/`thread_id` 成员校验。
 5. 账本：`complete: boolean`、`delivered` 计数、`failed:[{id,reason}]`（运行类失败用 `topic-page@`、`topic-list`、`container@` 等前缀）、可选 `cursor`；尝试次数写在文字中；去掉 `ledger.unread`、`scope`、结构化 `retry`、三态 `status`。测试只保留一个完整遍历 oracle；停止读取的测试断言无 cursor、`complete=false`、失败项存在。
 6. 合并转发：文字单元 = 根 mget 渲染块整体，按 D8 分段；资源单元 = 去重后节点的资源（按遍历顺序），以根 id 下载。校验只留：首项 = 根、根的 chat 匹配、按 `message_id` 去重、访问集合防环；去掉节点级 mget 对齐、`renderSource`/`renderMismatch`、6 个信封非法子码、query/raw 对账（b)(c)(d)、`rawExtra`、snapshot-only。**接受的 trade-off：图片不与各子消息文字交错，顺序由 mget 标记体现。**
-7. 视频帧：首帧加每个整秒的首帧（按 `floor(t)` 选择）；位置为整数秒 `k`；展示时间取 showinfo；失败槽位照常推进 `k`。去掉场景变化帧、PTS/time_base 位置、预滚与位置缺失。**接受的 trade-off：不做场景变化帧。**
+7. 视频帧：首帧加每个整秒的首帧（按 `floor(t)` 选择）；位置为整数秒 `k`；展示时间取 showinfo；失败槽位照常推进 `k`。去掉场景变化帧、PTS/time_base 位置、预滚与位置缺失。**接受的 trade-off：不做场景变化帧。**（**2026-11-23 经所有者决定撤销场景帧部分**：真机验收中 19 秒录屏的亚秒闪烁——约 1.5 s 与 6.4 s 处顶栏消失——整秒采样完全漏掉，旧的场景检测能抓到。现为整秒帧加窗口内场景帧；位置仍为整数秒、无 PTS/time_base 位置、无跨页场景状态，见 D10。）
 8. 大信封：`execFile` `maxBuffer` 设为 128 MiB，溢出为 `envelope-too-large`；失败信封先读 stdout 后读 stderr（修正真机 stderr 问题）；磁盘监控只用 `statfs`，`ENOSPC` 归入 `disk-low`；去掉 stdout 落 spool 文件与目录大小轮询。
 9. 页打包：固定预留开销（wrapper + 账本骨架 + 最大 cursor 长度）；测试保证最大 cursor 小于预留；去掉重签名/回退循环与 `page-capacity-too-small` 终态，只保留构造时检查。
 10. 去掉历史包袱：design 中的轮次修订表（历史保留在 `review.md`）、删除线的废弃注释、已废弃的 D4 条目；v1 任务组 1–5 收为一行；⚪ 废弃测试行改为一条「删除旧测试」任务。
@@ -153,4 +156,4 @@
 **接受的 trade-off 汇总**：
 - 3：续读不检测读取期间的编辑、撤回与权限撤销。
 - 6：图片不与子消息文字交错，顺序由 mget 标记体现。
-- 7：不做场景变化帧，只按整秒取帧。
+- 7：~~不做场景变化帧，只按整秒取帧~~（2026-11-23 撤销：恢复窗口内场景变化帧，位置模型不变）。
