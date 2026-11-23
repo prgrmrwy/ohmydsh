@@ -220,6 +220,9 @@ async function composeOnDemandHost(options: { readonly failFirstEstablishment?: 
           options.imCalls!.push(`media:${input.messageId}`)
           return { kind: 'none' as const, content: [] }
         },
+        // Paged reads cover the message, link (message_links/query, raw read) and topic (threads list) paths.
+        readMessagePage: async (input: { messageId: string }) => { options.imCalls!.push(`page:message:${input.messageId}`); return { kind: 'failed' as const, reason: 'media-unavailable' } },
+        readLinkedPage: async (input: { messageId: string }) => { options.imCalls!.push(`page:link:${input.messageId}`); return { kind: 'failed' as const, reason: 'media-unavailable' } },
       } as never,
       addressing: {
         listChatBots: (chatId: string) => { options.imCalls!.push(`chat-bots:${chatId}`); return [] },
@@ -692,7 +695,8 @@ describe('spec Scenario "文档 Delivery 不调用 IM 接口" (controller side)'
     try {
       const result = await deliverComment(host, { token: 'DocJ00000000000000000000001', commentId: '121', replyId: '122', isWhole: true })
       expect(result).toMatchObject({ kind: 'accepted' })
-      expect(imCalls.filter(call => call.startsWith('media:') || call.startsWith('chat-bots:'))).toEqual([])
+      // No IM read of any kind: no media download, no bot/chat lookup, no paged message, link or topic read.
+      expect(imCalls.filter(call => call.startsWith('media:') || call.startsWith('chat-bots:') || call.startsWith('page:'))).toEqual([])
       // Name lookup is source-dispatched by the Host port, never an IM member read.
       expect(imCalls.every(call => !call.startsWith('media:'))).toBe(true)
     } finally {

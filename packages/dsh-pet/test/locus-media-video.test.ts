@@ -10,16 +10,23 @@
  */
 
 import { readdirSync } from 'node:fs'
-import { access, rm } from 'node:fs/promises'
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createLocusMediaPort,
   type LarkCliRunner,
   type LocusMessagePart,
-  type LocusMessageReadResult,
 } from '../src/host/channel/media.js'
-import { LOCUS_VIDEO_LIMITS } from '../src/host/channel/media-video.js'
+import {
+  extractSecondFrames,
+  LOCUS_VIDEO_LIMITS,
+  type ExtractSecondFramesInput,
+  type SecondFrame,
+  type SecondFrameExtraction,
+} from '../src/host/channel/media-video.js'
 import {
   FIXTURE_CHAT,
   FIXTURE_IDS,
@@ -77,6 +84,7 @@ let tools: FakeFrameTools | undefined
 afterEach(async () => {
   if (cli !== undefined) await rm(cli.root, { recursive: true, force: true })
   if (tools !== undefined) await rm(tools.root, { recursive: true, force: true })
+  for (const path of scratch.splice(0)) await rm(path, { recursive: true, force: true })
   cli = undefined
   tools = undefined
 })
@@ -109,328 +117,330 @@ async function harness(options: HarnessOptions = {}) {
     ...(options.video === undefined ? {} : { video: options.video }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   })
-  const read = (signal: AbortSignal = new AbortController().signal) => port.readMessage({
+  return { store, cli: fakeCli, tools: fakeTools, runner, port }
+}
+
+/** One paged read of the video post through the harness port. */
+function readPage(port: ReturnType<typeof createLocusMediaPort>) {
+  return port.readMessagePage({
     messageId: FIXTURE_IDS.postMedia,
     chatId: FIXTURE_CHAT,
-    signal,
+    caller: "caller-video",
+    signal: new AbortController().signal,
     canViewImages: async () => true,
   })
-  return { read, store, cli: fakeCli, tools: fakeTools, runner }
 }
 
-function mediaOf(result: LocusMessageReadResult): readonly LocusMessagePart[] {
-  if (result.kind !== 'ok') throw new Error(`expected ok, got ${result.reason}`)
-  return result.media
+/** Whole seconds `start` .. `start + count - 1`, one scripted frame each. */
+function seconds(count: number, start = 0): number[] {
+  return Array.from({ length: count }, (_, index) => start + index)
 }
 
-/** Text parts verbatim; every image collapsed to a marker so order is assertable. */
-function outline(parts: readonly LocusMessagePart[]): readonly string[] {
-  return parts.map(part => part.type === 'text' ? part.text : 'IMAGE')
+/** Directories a scripted test created; removed after every test. */
+const scratch: string[] = []
+
+/** Overrides of one scripted `extractSecondFrames` window. */
+interface WindowOverrides {
+  readonly fromSecond?: number
+  readonly maxFrames?: number
+  readonly maxFrameBytes?: number
+  readonly limits?: Partial<typeof LOCUS_VIDEO_LIMITS>
 }
 
-const imagesIn = (parts: readonly LocusMessagePart[]): number => parts.filter(part => part.type === 'image').length
-const textOf = (parts: readonly LocusMessagePart[]): string => outline(parts).filter(line => line !== 'IMAGE').join('\n')
+/**
+ * Run `extractSecondFrames` over a scripted window: the fake ffprobe/ffmpeg are
+ * configured by `config`, and the source file is a placeholder the probe reads.
+ */
+async function window(config: FakeFrameConfig, overrides: WindowOverrides = {}, signal?: AbortSignal) {
+  tools = await installFakeFrameTools()
+  const fake = tools
+  await fake.configure(config)
+  const dir = await mkdtemp(join(tmpdir(), "video-window-"))
+  await writeFile(join(dir, "video.mp4"), new Uint8Array(16))
+  const input: ExtractSecondFramesInput = {
+    tools: { ffmpeg: fake.ffmpeg, ffprobe: fake.ffprobe, binary: fake.ffmpeg, version: "fake" } as never,
+    dir,
+    fileName: "video.mp4",
+    fromSecond: overrides.fromSecond ?? 0,
+    maxFrames: overrides.maxFrames ?? 8,
+    maxFrameBytes: overrides.maxFrameBytes ?? 4096,
+    signal: signal ?? new AbortController().signal,
+    ...(overrides.limits === undefined ? {} : { limits: overrides.limits }),
+  }
+  const result: SecondFrameExtraction = await extractSecondFrames(input)
+  return { result, fake, dir }
+}
 
-describe('video cover and scene keyframes', () => {
-  it('returns cover, ordered keyframes with times and sampling note', async () => {
-    const h = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1.53, 4.27] } } })
-    const parts = mediaOf(await h.read())
+function framesOf(result: SecondFrameExtraction): readonly SecondFrame[] {
+  if (result.kind !== "frames") throw new Error(`expected frames, got ${result.reason}`)
+  return result.frames
+}
 
-    // Cover first, then the sampling note, then every frame preceded by its own time.
-    expect(imagesIn(parts)).toBe(4)
-    expect(outline(parts).indexOf('IMAGE')).toBeGreaterThanOrEqual(0)
-    const lines = outline(parts)
-    const firstImage = lines.indexOf('IMAGE')
-    expect(lines.slice(0, firstImage).join('\n')).toContain('封面')
-    const afterCover = lines.slice(firstImage + 1)
-    expect(afterCover[0]).toContain('抽样')
-    expect(afterCover[0]).toContain('不是完整视频')
-    expect(afterCover[0]).toContain('19.0s')
-    expect(afterCover[0]).toContain('3 帧')
-    expect(afterCover.slice(1)).toEqual(['[t=0s]', 'IMAGE', '[t=1.53s]', 'IMAGE', '[t=4.27s]', 'IMAGE'])
+function failedOf(frames: readonly SecondFrame[]): Extract<SecondFrame, { failed: unknown }>[] {
+  return frames.filter((frame): frame is Extract<SecondFrame, { failed: unknown }> => "failed" in frame)
+}
 
-    // The cover is downloaded as an image, the video as a file, in that order.
-    expect(await h.cli.calls()).toEqual([
-      { type: 'image', fileKey: FIXTURE_KEYS.cover, messageId: FIXTURE_IDS.postMedia },
-      { type: 'file', fileKey: FIXTURE_KEYS.video, messageId: FIXTURE_IDS.postMedia },
-    ])
-    // Cover and frames are separate attachment batches: a frame failure can then
-    // never take the cover with it, nor leave a partial set of frame refs.
-    expect(h.store.saveImages.mock.calls.map(call => call[0].length)).toEqual([1, 3])
+function delivered(frames: readonly SecondFrame[]): Extract<SecondFrame, { data: Uint8Array }>[] {
+  return frames.filter((frame): frame is Extract<SecondFrame, { data: Uint8Array }> => "data" in frame)
+}
 
-    // Both programs ran confined to the call's own directory under the spool, file protocol only, no stdin.
-    const invocations = await h.tools.invocations()
-    expect(invocations.map(item => item.tool)).toEqual(['ffprobe', 'ffmpeg'])
-    for (const item of invocations) {
-      // realpath: macOS reports /private/var for a /var temp directory.
-      expect(item.cwd).toContain('/media-spool/')
-      expect(item.argv).toContain('-protocol_whitelist')
-      expect(item.argv[item.argv.indexOf('-protocol_whitelist') + 1]).toBe('file')
+describe('extractSecondFrames (scripted tools)', () => {
+  it('pairs each frame with its own showinfo time', async () => {
+    const { result } = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 0.53, 1.27] } })
+    const frames = framesOf(result)
+    expect(frames.map(frame => frame.timeSeconds)).toEqual([0, 0.53, 1.27])
+    expect(frames.map(frame => frame.k)).toEqual([0, 0, 1])
+    // The i-th slot carries the i-th output file (the fake stamps the 1-based index into the last byte).
+    expect(delivered(frames).map(frame => 'data' in frame ? frame.data.at(8) : -1)).toEqual([1, 2, 3])
+    expect(result).toMatchObject({ durationSeconds: 19, nextK: 2, complete: true })
+  })
+
+  it('subtracts the stream start_time and reads 1 ms below zero as 0', async () => {
+    const { result } = await window({
+      probe: { formatName: MP4, duration: '21.0', startTime: '2.000000' },
+      ffmpeg: { frames: [1.9995, 3.04, 4.5] },
+    })
+    const frames = framesOf(result)
+    expect(frames.map(frame => frame.timeSeconds)).toEqual([0, 1.04, 2.5])
+    expect(frames.map(frame => frame.k)).toEqual([0, 1, 2])
+
+    // More than 1 ms before the stream starts cannot be a real frame time: nothing is invented.
+    const early = await window({
+      probe: { formatName: MP4, duration: '21.0', startTime: '2.000000' },
+      ffmpeg: { frames: [1.9, 3] },
+    })
+    expect(early.result).toMatchObject({ kind: 'skipped', reason: 'frame-timestamps-unavailable' })
+  })
+
+  it('asks for one select over the source timeline, seeking to k-1, without scene or fps', async () => {
+    const deep = await window({ probe: OK_PROBE, ffmpeg: { frames: [8, 9] } }, { fromSecond: 8 })
+    const argv = (await deep.fake.invocations()).find(item => item.tool === 'ffmpeg')!.argv
+    const seek = argv.indexOf('-ss')
+    expect(argv[seek + 1]).toBe('7')
+    expect(seek).toBeLessThan(argv.indexOf('-i'))
+    expect(argv).toContain('-copyts')
+    expect(argv[argv.indexOf('-frames:v') + 1]).toBe('8')
+    expect(argv.at(-1)).toBe('./f_%06d.jpg')
+    const filter = argv[argv.indexOf('-vf') + 1]!
+    expect(filter.match(/select=/g)).toHaveLength(1)
+    expect(filter).toContain('prev_selected_t')
+    expect(filter).toContain('floor(')
+    expect(filter).not.toContain('scene')
+    expect(filter).not.toContain('fps=')
+    expect(filter).toContain('scale=w=\'min(1024,iw)\':h=\'min(1024,ih)\'')
+    // showinfo is last so `n` counts selected frames.
+    expect(filter.endsWith(',showinfo')).toBe(true)
+
+    // k = 0 and k = 1 need no seek (nothing precedes the pre-roll second).
+    for (const fromSecond of [0, 1]) {
+      const near = await window({ probe: OK_PROBE, ffmpeg: { frames: [fromSecond] } }, { fromSecond })
+      const nearArgv = (await near.fake.invocations()).find(item => item.tool === 'ffmpeg')!.argv
+      expect(nearArgv, `k=${String(fromSecond)}`).not.toContain('-ss')
     }
-    const ffmpegArgs = invocations[1]!.argv
-    expect(ffmpegArgs).toContain('-nostdin')
-    // Default cap 8, minus the one image the cover already used.
-    expect(ffmpegArgs[ffmpegArgs.indexOf('-frames:v') + 1]).toBe('7')
-    expect(ffmpegArgs[ffmpegArgs.indexOf('-vf') + 1]).toContain('scale=w=\'min(1024,iw)\':h=\'min(1024,ih)\'')
-    expect(readdirSync(h.cli.spool)).toEqual([])
+    // The stream start_time is baked into the select expression, so the window is on the normalised axis.
+    const offset = await window(
+      { probe: { formatName: MP4, duration: '21.0', startTime: '2.000000' }, ffmpeg: { frames: [5] } },
+      { fromSecond: 3 },
+    )
+    const offsetFilter = (await offset.fake.invocations()).find(item => item.tool === 'ffmpeg')!.argv
+    expect(offsetFilter[offsetFilter.indexOf('-vf') + 1]).toContain('t-(2)')
   })
 
-  it('pairs showinfo pts_time to output frames without interpolation', async () => {
-    // Deliberately non-uniform and not index-derived: a frame-number or even-spacing guess would differ.
-    const h = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1.53, 4.27, 4.28] } } })
-    const lines = outline(mediaOf(await h.read()))
-    const tail = lines.slice(lines.indexOf('[t=0s]'))
-    expect(tail).toEqual(['[t=0s]', 'IMAGE', '[t=1.53s]', 'IMAGE', '[t=4.27s]', 'IMAGE', '[t=4.28s]', 'IMAGE'])
-    // The i-th frame handed to the store is the i-th output file (the fake stamps the index into the last byte).
-    const frameBatch = h.store.saveImages.mock.calls[1]![0]
-    expect(frameBatch.map(item => item.data.at(8))).toEqual([1, 2, 3, 4])
+  it('does not stop at a duration or a size: a 20 minute video is framed', async () => {
+    const { result, fake } = await window({ probe: { formatName: MP4, duration: '1200.0' }, ffmpeg: { frames: [600, 601] } }, { fromSecond: 600 })
+    expect(result).toMatchObject({ kind: 'frames', durationSeconds: 1200, complete: true })
+    expect((await fake.invocations()).map(item => item.tool)).toEqual(['ffprobe', 'ffmpeg'])
   })
 
-  it('a single frame is not padded and says so', async () => {
-    const h = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0] } } })
-    const parts = mediaOf(await h.read())
-    expect(imagesIn(parts)).toBe(2)
-    expect(textOf(parts)).toContain('1 帧')
-    expect(textOf(parts)).toContain('基本静止')
-  })
-
-  it('missing or mismatched timestamps fall back to cover', async () => {
-    const modes = ['missing', 'extra-line', 'missing-line', 'unparseable', 'non-monotonic'] as const
-    for (const stderr of modes) {
-      const h = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1.5, 3], stderr } } })
-      const parts = mediaOf(await h.read())
-      expect(imagesIn(parts), stderr).toBe(1)
-      expect(textOf(parts), stderr).toContain('frame-timestamps-unavailable')
-      expect(textOf(parts), stderr).not.toMatch(/t=\d/)
-      expect(h.store.saveImages, stderr).toHaveBeenCalledTimes(1)
-      expect(readdirSync(h.cli.spool), stderr).toEqual([])
-      await rm(h.cli.root, { recursive: true, force: true })
-      await rm(h.tools.root, { recursive: true, force: true })
+  it('file without record voids the window with frame-timestamps-unavailable and invents nothing', async () => {
+    for (const stderr of ['missing', 'missing-line', 'unparseable', 'non-monotonic'] as const) {
+      const { result, dir } = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2], stderr } })
+      expect(result, stderr).toEqual({ kind: 'skipped', reason: 'frame-timestamps-unavailable', durationSeconds: 19 })
+      expect(dir).toBeTruthy()
     }
     // `n:` must run 0,1,2… with no gaps either.
-    const gap = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1.5, 3], nonContiguousN: true } } })
-    const gapParts = mediaOf(await gap.read())
-    expect(imagesIn(gapParts)).toBe(1)
-    expect(textOf(gapParts)).toContain('frame-timestamps-unavailable')
+    const gap = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2], nonContiguousN: true } })
+    expect(gap.result).toMatchObject({ kind: 'skipped', reason: 'frame-timestamps-unavailable' })
   })
 
-  it('any frame admission failure returns cover only and no refs', async () => {
-    // (a) bytes that are not an image
-    const notImage = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2], badFrameBytes: true } } })
-    const notImageParts = mediaOf(await notImage.read())
-    expect(imagesIn(notImageParts)).toBe(1)
-    expect(textOf(notImageParts)).toContain('frame-admission-failed')
-    expect(notImage.store.saveImages).toHaveBeenCalledTimes(1)
-    await rm(notImage.cli.root, { recursive: true, force: true })
-    await rm(notImage.tools.root, { recursive: true, force: true })
+  it('normal exit with a missing middle file fails only that slot (frame-file-missing, recorded time)', async () => {
+    const { result } = await window(
+      { probe: OK_PROBE, ffmpeg: { frames: seconds(10), missingFiles: [5], emptyFiles: [7] } },
+      { maxFrames: 10 },
+    )
+    const frames = framesOf(result)
+    expect(frames).toHaveLength(10)
+    expect(failedOf(frames)).toEqual([
+      { k: 5, timeSeconds: 5, failed: 'frame-file-missing' },
+      { k: 7, timeSeconds: 7, failed: 'frame-file-missing' },
+    ])
+    expect(delivered(frames).map(frame => frame.k)).toEqual([0, 1, 2, 3, 4, 6, 8, 9])
+    expect(result).toMatchObject({ nextK: 10 })
 
-    // (b) a frame larger than the deployment's per-image byte limit
-    const tooBig = await harness({
-      tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2], frameBytes: 8000 } },
-    })
-    const tooBigParts = mediaOf(await tooBig.read())
-    expect(imagesIn(tooBigParts)).toBe(1)
-    expect(textOf(tooBigParts)).toContain('frame-admission-failed')
-    await rm(tooBig.cli.root, { recursive: true, force: true })
-    await rm(tooBig.tools.root, { recursive: true, force: true })
-
-    // (c) the attachment store itself rejects the frame batch: nothing from it is returned
-    const rejected = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2] } } })
-    let call = 0
-    rejected.store.saveImages.mockImplementation(async items => {
-      call += 1
-      if (call === 2) throw new Error('IMAGE_TOO_MANY_PIXELS')
-      return items.map((item, index) => ({
-        attachmentId: `a-${String(call)}-${String(index)}` as never, mediaType: item.mediaType, bytes: item.data.byteLength, width: 1, height: 1,
-      }))
-    })
-    const rejectedParts = mediaOf(await rejected.read())
-    expect(imagesIn(rejectedParts)).toBe(1)
-    expect(textOf(rejectedParts)).toContain('frame-admission-failed')
-    expect(readdirSync(rejected.cli.spool)).toEqual([])
+    // A record past the last file (an extra line) is a missing slot, not a void window.
+    const extra = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2], stderr: 'extra-line' } })
+    const extraFrames = framesOf(extra.result)
+    expect(delivered(extraFrames)).toHaveLength(3)
+    expect(failedOf(extraFrames)).toEqual([{ k: 2, timeSeconds: 2, failed: 'frame-file-missing' }])
   })
 
-  it('frames are capped by the remaining image quota', async () => {
-    // Quota 3: the cover takes one, so only 2 frames may be requested and returned.
-    const h = await harness({
-      imageLimits: { maxImagesPerMessage: 3 },
-      tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2, 3, 4] } },
-    })
-    const parts = mediaOf(await h.read())
-    expect(imagesIn(parts)).toBe(3)
-    const ffmpegArgs = (await h.tools.invocations()).find(item => item.tool === 'ffmpeg')!.argv
-    expect(ffmpegArgs[ffmpegArgs.indexOf('-frames:v') + 1]).toBe('2')
-
-    // Quota 1: the cover uses it all, so the video is never even downloaded.
-    const none = await harness({
-      imageLimits: { maxImagesPerMessage: 1 },
-      tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1] } },
-    })
-    const noneParts = mediaOf(await none.read())
-    expect(imagesIn(noneParts)).toBe(1)
-    expect(textOf(noneParts)).toContain('image-quota-exhausted')
-    expect((await none.cli.calls()).map(item => item.type)).toEqual(['image'])
+  it('one frame failing admission fails only its slot with its recorded time', async () => {
+    // Slot 5 is over the per-frame byte ceiling; the other seven are fine.
+    const { result } = await window({ probe: OK_PROBE, ffmpeg: { frames: seconds(8), bigFrames: [5] } })
+    const frames = framesOf(result)
+    expect(delivered(frames).map(frame => frame.k)).toEqual([0, 1, 2, 3, 4, 6, 7])
+    expect(failedOf(frames)).toEqual([{ k: 5, timeSeconds: 5, failed: 'frame-admission-failed' }])
   })
 
-  it('still frames the video when the post carries no cover', async () => {
-    const h = await harness({ coverKey: null, tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 2] } } })
-    const parts = mediaOf(await h.read())
-    expect(imagesIn(parts)).toBe(2)
-    expect(textOf(parts)).toContain('没有封面')
-    expect((await h.cli.calls()).map(item => item.type)).toEqual(['file'])
+  it('one frame save failing leaves 7 frames, one failure, and the next page continues after the last processed second', async () => {
+    const first = await window({ probe: OK_PROBE, ffmpeg: { frames: seconds(8), emptyFiles: [5] } })
+    const frames = framesOf(first.result)
+    expect(delivered(frames)).toHaveLength(7)
+    expect(failedOf(frames)).toEqual([{ k: 5, timeSeconds: 5, failed: 'frame-file-missing' }])
+    // The failed slot advances k like a delivered one, so it is never selected again.
+    expect(first.result).toMatchObject({ nextK: 8, complete: false })
+    const second = await window({ probe: OK_PROBE, ffmpeg: { frames: seconds(3, 8) } }, { fromSecond: 8 })
+    expect(framesOf(second.result).map(frame => frame.k)).toEqual([8, 9, 10])
+    expect(second.result).toMatchObject({ nextK: 11 })
+    // A failed LAST slot still advances k past its second.
+    const lastFails = await window({ probe: OK_PROBE, ffmpeg: { frames: seconds(8), missingFiles: [7] } })
+    expect(lastFails.result).toMatchObject({ nextK: 8 })
   })
 
-  it('no extractor returns cover with reason', async () => {
-    const h = await harness({ tools: 'absent' })
-    const parts = mediaOf(await h.read())
-    expect(imagesIn(parts)).toBe(1)
-    expect(textOf(parts)).toContain('frame-tools-unavailable')
-    // Nothing but the cover is downloaded, and no process was started.
-    expect((await h.cli.calls()).map(item => item.type)).toEqual(['image'])
-    expect(await h.tools.invocations()).toEqual([])
+  it('kill keeps the verified prefix; the largest existing file and later slots are reselected next page', async () => {
+    // Records reached 6 (seven lines), only six files exist; the sixth may be truncated.
+    const { result, fake } = await window(
+      { probe: OK_PROBE, ffmpeg: { frames: seconds(10), hangAfter: { records: 7, files: 6 } } },
+      { limits: { decodeWindowMs: 2500 } },
+    )
+    const frames = framesOf(result)
+    expect(frames.map(frame => frame.k)).toEqual([0, 1, 2, 3, 4])
+    expect(delivered(frames)).toHaveLength(5)
+    expect(result).toMatchObject({ complete: false, nextK: 5 })
+    // (Group termination is proven by the pure-hang case below: here the fake's delayed child may legitimately
+    // fire before a window long enough for a loaded machine to start node.)
+    expect((await fake.invocations()).map(item => item.tool)).toEqual(['ffprobe', 'ffmpeg'])
+
+    // Empty verified prefix: only one file exists, and that largest file is never trusted.
+    const empty = await window(
+      { probe: OK_PROBE, ffmpeg: { frames: seconds(10), hangAfter: { records: 2, files: 1 } } },
+      { limits: { decodeWindowMs: 2500 } },
+    )
+    expect(empty.result).toEqual({ kind: 'skipped', reason: 'frame-extraction-timeout', durationSeconds: 19 })
+    const hung = await window({ probe: OK_PROBE, ffmpeg: { frames: [0], hang: true } }, { limits: { decodeWindowMs: 300 } })
+    expect(hung.result).toMatchObject({ kind: 'skipped', reason: 'frame-extraction-timeout' })
+    await delay(2000)
+    await expect(access(hung.fake.escaped)).rejects.toBeDefined()
   })
 
-  it('oversize bytes or duration skips frames with reason', async () => {
-    // Bytes: the fake serves 64 bytes for a file, the limit is 32.
-    const bytes = await harness({ video: { maxBytes: 32 }, tools: { probe: OK_PROBE, ffmpeg: { frames: [0] } } })
-    const byteParts = mediaOf(await bytes.read())
-    expect(imagesIn(byteParts)).toBe(1)
-    expect(textOf(byteParts)).toContain('video-too-large')
-    expect(await bytes.tools.invocations()).toEqual([])
-    await rm(bytes.cli.root, { recursive: true, force: true })
-    await rm(bytes.tools.root, { recursive: true, force: true })
+  it('a file without a record also voids a killed window', async () => {
+    const { result } = await window(
+      { probe: OK_PROBE, ffmpeg: { frames: seconds(10), hangAfter: { records: 2, files: 5 } } },
+      { limits: { decodeWindowMs: 2500 } },
+    )
+    expect(result).toMatchObject({ kind: 'skipped', reason: 'frame-timestamps-unavailable' })
+  })
 
-    // Bytes, mid-download: a never-ending writer is stopped by the measurement, not by exit.
-    const growing = await harness({
-      fileKey: 'file_v3_grow',
-      video: { maxBytes: 4096 },
-      timeoutMs: 10_000,
-      tools: { probe: OK_PROBE, ffmpeg: { frames: [0] } },
-    })
-    const started = Date.now()
-    const growParts = mediaOf(await growing.read())
-    expect(Date.now() - started).toBeLessThan(5_000)
-    expect(textOf(growParts)).toContain('video-too-large')
-    expect(readdirSync(growing.cli.spool)).toEqual([])
-    await rm(growing.cli.root, { recursive: true, force: true })
-    await rm(growing.tools.root, { recursive: true, force: true })
-
-    // Duration: the container says 301 s, the limit is 300 s: ffmpeg never runs.
-    const long = await harness({ tools: { probe: { formatName: MP4, duration: '301.0' }, ffmpeg: { frames: [0] } } })
-    const longParts = mediaOf(await long.read())
-    expect(imagesIn(longParts)).toBe(1)
-    expect(textOf(longParts)).toContain('video-too-long')
-    expect((await long.tools.invocations()).map(item => item.tool)).toEqual(['ffprobe'])
-    await rm(long.cli.root, { recursive: true, force: true })
-    await rm(long.tools.root, { recursive: true, force: true })
-
-    // Container outside the allow-list, and an unreadable probe, are not framed either.
-    const avi = await harness({ tools: { probe: { formatName: 'avi', duration: '3.0' }, ffmpeg: { frames: [0] } } })
-    expect(textOf(mediaOf(await avi.read()))).toContain('video-format-unsupported')
-    expect((await avi.tools.invocations()).map(item => item.tool)).toEqual(['ffprobe'])
-    await rm(avi.cli.root, { recursive: true, force: true })
-    await rm(avi.tools.root, { recursive: true, force: true })
-    for (const probe of [{ garbage: true }, { fail: true }] as const) {
-      const bad = await harness({ tools: { probe, ffmpeg: { frames: [0] } } })
-      expect(textOf(mediaOf(await bad.read()))).toContain('video-probe-failed')
-      await rm(bad.cli.root, { recursive: true, force: true })
-      await rm(bad.tools.root, { recursive: true, force: true })
+  it('150 frames pair correctly by recorded n with six-digit names', async () => {
+    const { result } = await window({ probe: { formatName: MP4, duration: '150.0' }, ffmpeg: { frames: seconds(150) } }, { maxFrames: 150 })
+    const frames = framesOf(result)
+    expect(frames).toHaveLength(150)
+    expect(frames.map(frame => frame.k)).toEqual(seconds(150))
+    for (const [index, frame] of frames.entries()) {
+      expect(frame.timeSeconds).toBe(index)
+      // The fake stamps `(slot + 1) & 0xff`: slots 99 and 100 (the 100th and 101st files) pair with times 99 and 100.
+      expect('data' in frame ? frame.data.at(8) : -1, `slot ${String(index)}`).toBe((index + 1) & 0xff)
     }
+    expect(result).toMatchObject({ nextK: 150, complete: true })
   })
 
-  it('extractor timeout kills group and returns cover', async () => {
-    const h = await harness({
-      video: { toolTimeoutMs: 250 },
-      tools: { probe: OK_PROBE, ffmpeg: { frames: [0], hang: true } },
-    })
-    const parts = mediaOf(await h.read())
-    expect(imagesIn(parts)).toBe(1)
-    expect(textOf(parts)).toContain('frame-extraction-timeout')
-    // The hung program forked a delayed writer; killing the group must have stopped it.
-    await delay(2000)
-    await expect(access(h.tools.escaped)).rejects.toBeDefined()
-    expect(readdirSync(h.cli.spool)).toEqual([])
-
-    // A hung ffprobe is bounded by the same budget.
-    const probeHang = await harness({
-      video: { toolTimeoutMs: 250 },
-      tools: { probe: { hang: true }, ffmpeg: { frames: [0] } },
-    })
-    const probeParts = mediaOf(await probeHang.read())
-    expect(textOf(probeParts)).toContain('frame-extraction-timeout')
-    await delay(2000)
-    await expect(access(probeHang.tools.escaped)).rejects.toBeDefined()
-    expect(readdirSync(probeHang.cli.spool)).toEqual([])
+  it('complete says whether anything is left after nextK', async () => {
+    const more = await window({ probe: OK_PROBE, ffmpeg: { frames: seconds(8) } })
+    expect(more.result).toMatchObject({ nextK: 8, complete: false })
+    const exact = await window({ probe: { formatName: MP4, duration: '8.0' }, ffmpeg: { frames: seconds(8) } })
+    expect(exact.result).toMatchObject({ nextK: 8, complete: true })
+    const fewer = await window({ probe: OK_PROBE, ffmpeg: { frames: seconds(3, 16) } }, { fromSecond: 16 })
+    expect(fewer.result).toMatchObject({ nextK: 19, complete: true })
   })
 
-  it('kills downloader or frame extractor on abort/timeout/nonzero and leaves nothing', async () => {
-    // Abort while the DOWNLOAD hangs.
-    const download = await harness({ fileKey: 'file_v3_hang', tools: { probe: OK_PROBE, ffmpeg: { frames: [0] } }, timeoutMs: 10_000 })
-    const downloadAbort = new AbortController()
-    const pendingDownload = download.read(downloadAbort.signal)
-    for (let index = 0; index < 200 && !readdirSync(download.cli.spool).some(Boolean); index += 1) await delay(10)
-    // Let the fake CLI write its partial file and fork its delayed child.
-    await delay(100)
-    downloadAbort.abort()
-    expect(await pendingDownload).toEqual({ kind: 'failed', reason: 'aborted' })
-    await delay(2000)
-    await expect(access(download.cli.escaped)).rejects.toBeDefined()
-    expect(readdirSync(download.cli.spool)).toEqual([])
-    expect(download.store.saveImages).not.toHaveBeenCalled()
-    await rm(download.cli.root, { recursive: true, force: true })
-    await rm(download.tools.root, { recursive: true, force: true })
+  it('seeking past the last frame is an empty complete window; at k = 0 the same output is a failure', async () => {
+    const past = await window({ probe: OK_PROBE, ffmpeg: { frames: [], noPackets: true } }, { fromSecond: 25 })
+    expect(past.result).toEqual({ kind: 'frames', durationSeconds: 19, frames: [], nextK: 25, complete: true })
+    const start = await window({ probe: OK_PROBE, ffmpeg: { frames: [], noPackets: true } })
+    expect(start.result).toMatchObject({ kind: 'skipped', reason: 'frame-extraction-failed' })
+    const nonZero = await window({ probe: OK_PROBE, ffmpeg: { frames: [0, 1], exit: 1 } }, { fromSecond: 3 })
+    expect(nonZero.result).toMatchObject({ kind: 'skipped', reason: 'frame-extraction-failed' })
+  })
 
-    // Abort while the FRAME EXTRACTOR hangs.
-    const extractor = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0], hang: true } } })
-    const extractorAbort = new AbortController()
-    const pendingExtractor = extractor.read(extractorAbort.signal)
+  it('probe failures, unsupported containers, abort and bad arguments never run a decode', async () => {
+    const avi = await window({ probe: { formatName: 'avi', duration: '3.0' }, ffmpeg: { frames: [0] } })
+    expect(avi.result).toEqual({ kind: 'skipped', reason: 'video-format-unsupported', durationSeconds: 3 })
+    expect((await avi.fake.invocations()).map(item => item.tool)).toEqual(['ffprobe'])
+    for (const probe of [{ garbage: true }, { fail: true }] as const) {
+      const bad = await window({ probe, ffmpeg: { frames: [0] } })
+      expect(bad.result).toMatchObject({ kind: 'skipped', reason: 'video-probe-failed' })
+    }
+    const probeHang = await window({ probe: { hang: true }, ffmpeg: { frames: [0] } }, { limits: { probeTimeoutMs: 250 } })
+    expect(probeHang.result).toMatchObject({ kind: 'skipped', reason: 'frame-extraction-timeout' })
+    await delay(2000)
+    await expect(access(probeHang.fake.escaped)).rejects.toBeDefined()
+
+    for (const bad of [{ fromSecond: -1 }, { fromSecond: 1.5 }, { maxFrames: 0 }, { maxFrames: 2.5 }]) {
+      const rejected = await window({ probe: OK_PROBE, ffmpeg: { frames: [0] } }, bad)
+      expect(rejected.result, JSON.stringify(bad)).toMatchObject({ kind: 'skipped', reason: 'frame-extraction-failed' })
+      expect(await rejected.fake.invocations()).toEqual([])
+    }
+
+    const aborted = new AbortController()
+    aborted.abort()
+    const early = await window({ probe: OK_PROBE, ffmpeg: { frames: [0] } }, {}, aborted.signal)
+    expect(early.result).toMatchObject({ kind: 'skipped', reason: 'aborted' })
+  })
+
+  it('abort while the decode hangs kills the group and returns aborted', async () => {
+    const fake = await installFakeFrameTools()
+    await fake.configure({ probe: OK_PROBE, ffmpeg: { frames: [0], hang: true } })
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-pet-seconds-'))
+    scratch.push(fake.root, dir)
+    const controller = new AbortController()
+    const pending = extractSecondFrames({
+      tools: { ffmpeg: fake.ffmpeg, ffprobe: fake.ffprobe }, dir, fileName: 'in.mp4',
+      fromSecond: 0, maxFrames: 8, maxFrameBytes: 4096, signal: controller.signal,
+    })
     for (let index = 0; index < 300; index += 1) {
-      if ((await extractor.tools.invocations()).some(item => item.tool === 'ffmpeg')) break
+      if ((await fake.invocations()).some(item => item.tool === 'ffmpeg')) break
       await delay(10)
     }
     await delay(100)
-    extractorAbort.abort()
-    expect(await pendingExtractor).toEqual({ kind: 'failed', reason: 'aborted' })
+    controller.abort()
+    expect(await pending).toMatchObject({ kind: 'skipped', reason: 'aborted' })
     await delay(2000)
-    await expect(access(extractor.tools.escaped)).rejects.toBeDefined()
-    expect(readdirSync(extractor.cli.spool)).toEqual([])
-    expect(extractor.store.saveImages).not.toHaveBeenCalled()
-    await rm(extractor.cli.root, { recursive: true, force: true })
-    await rm(extractor.tools.root, { recursive: true, force: true })
+    await expect(access(fake.escaped)).rejects.toBeDefined()
+  })
+})
 
-    // Download timeout (the CLI hangs): cover only.
-    const slow = await harness({ fileKey: 'file_v3_hang', timeoutMs: 400, tools: { probe: OK_PROBE, ffmpeg: { frames: [0] } } })
-    const slowParts = mediaOf(await slow.read())
-    expect(imagesIn(slowParts)).toBe(1)
-    expect(textOf(slowParts)).toContain('video-download-timeout')
-    await delay(2000)
-    await expect(access(slow.cli.escaped)).rejects.toBeDefined()
-    expect(readdirSync(slow.cli.spool)).toEqual([])
-    await rm(slow.cli.root, { recursive: true, force: true })
-    await rm(slow.tools.root, { recursive: true, force: true })
-
-    // Non-zero exits: the downloader, then the frame extractor.
-    const downloadFails = await harness({ fileKey: 'file_v3_exit', tools: { probe: OK_PROBE, ffmpeg: { frames: [0] } } })
-    const failParts = mediaOf(await downloadFails.read())
-    expect(imagesIn(failParts)).toBe(1)
-    expect(textOf(failParts)).toContain('video-download-failed')
-    expect(readdirSync(downloadFails.cli.spool)).toEqual([])
-    await rm(downloadFails.cli.root, { recursive: true, force: true })
-    await rm(downloadFails.tools.root, { recursive: true, force: true })
-
-    const extractorFails = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1], exit: 1 } } })
-    const extractorFailParts = mediaOf(await extractorFails.read())
-    expect(imagesIn(extractorFailParts)).toBe(1)
-    expect(textOf(extractorFailParts)).toContain('frame-extraction-failed')
-    expect(readdirSync(extractorFails.cli.spool)).toEqual([])
+describe("video units: frame tools absent and a timeout after a verified prefix (test-plan R6, R17, R25)", () => {
+  it("without frame tools only the cover is returned, with the reason, and nothing is framed", async () => {
+    const h = await harness({ tools: "absent" })
+    const page = await readPage(h.port)
+    if (page.kind !== "ok") throw new Error(`expected ok, got ${page.reason}`)
+    const notes = page.parts.flatMap(part => (part.type === "text" ? [part.text] : [])).join("\n")
+    expect(notes).toContain("frame-tools-unavailable")
+    expect(page.parts.filter(part => part.type === "image")).toHaveLength(1)
+    expect(page.complete).toBe(true)
+    expect(readdirSync(h.cli.spool)).toEqual([])
   })
 
-  it('leaves no video or frame files after readMessage returns', async () => {
-    const h = await harness({ tools: { probe: OK_PROBE, ffmpeg: { frames: [0, 1, 2], frameBytes: 100 } } })
-    const parts = mediaOf(await h.read())
-    expect(imagesIn(parts)).toBe(4)
+  it("a decode timeout after a verified prefix keeps the verified frames and issues a cursor on the video", async () => {
+    // Seven records and six files are written, then the process hangs; the 1.5 s decode window expires after the prefix.
+    const h = await harness({
+      tools: { ffmpeg: { frames: seconds(10), hangAfter: { records: 7, files: 6 } }, probe: OK_PROBE },
+      video: { decodeWindowMs: 1500 },
+    })
+    const page = await readPage(h.port)
+    if (page.kind !== "ok") throw new Error(`expected ok, got ${page.reason}`)
+    expect(page.parts.filter(part => part.type === "image").length).toBeGreaterThan(0)
+    expect(page.cursor).toEqual(expect.any(String))
     expect(readdirSync(h.cli.spool)).toEqual([])
-    // The frames the model received exist only as attachment refs (the fake store kept the bytes in memory).
-    expect(h.store.saveImages.mock.calls[1]![0]).toHaveLength(3)
   })
 })

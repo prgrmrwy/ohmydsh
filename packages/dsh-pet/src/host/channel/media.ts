@@ -4,6 +4,7 @@ import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { statfs } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type {
@@ -17,15 +18,23 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { petCliArgs } from './cli.js'
 import { killProcessTree } from './media-process.js'
 import {
-  extractKeyframes,
+  extractSecondFrames,
   LOCUS_VIDEO_LIMITS,
-  type FrameExtraction,
+  type SecondFrameExtraction,
   type FrameTools,
   type VideoLimits,
   type VideoSkipReason,
 } from './media-video.js'
 import { meetsPetLarkCliFloor } from './lark-cli-compat.js'
 import { extractMessageLinksFromRaw } from '../locus/message-link.js'
+import { createCursorStore, type CursorKind, type CursorStore } from '../locus/media-cursor.js'
+import {
+  initialTopicState,
+  readTopicPage,
+  type TopicMessage,
+  type TopicReaderState,
+  type TopicRunnerResult,
+} from '../locus/topic-reader.js'
 import type { LarkCliRunner } from './lark.js'
 
 const run = promisify(execFile) as unknown as LarkCliRunner
@@ -43,27 +52,12 @@ const MAX_STDERR_BYTES = 4 * 1024
  * deployment limit would care about, without inotify/fsevents portability.
  */
 const SPOOL_POLL_MS = 50
+/** Default `execFile` stdout ceiling for platform envelopes (design D9). */
+export const LOCUS_ENVELOPE_MAX_BYTES = 128 * 1024 * 1024
+/** Default free-space floor of the spool volume (design D9); below it work stops. */
+export const LOCUS_DISK_RESERVE_BYTES = 512 * 1024 * 1024
 /** Random token length of one spool entry, in bytes (32 hex characters). */
 const SPOOL_TOKEN_BYTES = 16
-/** Bound on the platform-formatted body the single-message read returns. */
-export const LOCUS_MESSAGE_MAX_BODY_CHARS = 4_000
-
-/** Limits of ONE single-message or linked-message read, as a whole. */
-export interface LocusCallBudgetLimits {
-  /** Resource download attempts; failures and timeouts count too. */
-  readonly maxAttempts: number
-  /** Wall-clock bound of the whole call, platform reads included. */
-  readonly deadlineMs: number
-  /** Serialized body plus every note the call returns. */
-  readonly maxChars: number
-}
-
-/** Owner-approved defaults (change `locus-read-referenced-chats`, 2026-11-12). */
-export const LOCUS_CALL_BUDGET: LocusCallBudgetLimits = Object.freeze({ maxAttempts: 12, deadlineMs: 90_000, maxChars: 16_000 })
-
-/** At most this many merge-forward children are shown and searched for media. */
-export const LOCUS_MERGE_MAX_CHILDREN = 30
-
 export interface LarkMessageResource {
   readonly kind: 'image' | 'file' | 'audio' | 'video' | 'media' | 'unknown'
   readonly key?: string
@@ -79,20 +73,6 @@ export type LocusMediaAdmission =
   | { readonly kind: 'ready'; readonly content: readonly ContentBlock[] }
   | { readonly kind: 'none'; readonly content: readonly ContentBlock[] }
   | { readonly kind: 'unavailable'; readonly reason: string; readonly content: readonly ContentBlock[] }
-
-/** One message the caller-bound `pet_locus_message` tool is allowed to show. */
-export interface LocusReadMessage {
-  readonly messageId: string
-  readonly chatId: string
-  readonly msgType: string
-  /** ISO 8601 with the host offset, when the platform reported a usable time. */
-  readonly createTime?: string
-  readonly senderName?: string
-  readonly threadId?: string
-  /** Platform-formatted body, bounded by {@link LOCUS_MESSAGE_MAX_BODY_CHARS}. */
-  readonly text: string
-  readonly textTruncated: boolean
-}
 
 /** One piece of model-facing media output, in the order the message presents it. */
 export type LocusMessagePart =
@@ -112,55 +92,6 @@ export type LocusMessageReadFailure =
   | 'content-unparseable'
   | 'media-unavailable'
   | 'deadline-exceeded'
-
-export type LocusMessageReadResult =
-  | { readonly kind: 'ok'; readonly message: LocusReadMessage; readonly media: readonly LocusMessagePart[] }
-  | { readonly kind: 'failed'; readonly reason: LocusMessageReadFailure }
-
-export interface LocusMessageReadInput {
-  readonly messageId: string
-  /** The caller's entrance chat id; a topic entrance passes its GROUP chat id. */
-  readonly chatId: string
-  readonly signal: AbortSignal
-  /**
-   * Whether the calling model route accepts image input. Consulted after the
-   * platform read and chat check but BEFORE any media byte is downloaded.
-   */
-  readonly canViewImages: () => Promise<boolean> | boolean
-}
-
-/** Why a linked-message read produced nothing, beyond the single-message vocabulary. */
-export type LocusLinkedReadFailure =
-  | LocusMessageReadFailure
-  | 'link-not-found'
-  | 'link-unauthorized'
-  | 'link-unresolved'
-  | 'link-scope-missing'
-  | 'link-mismatch'
-
-export type LocusLinkedReadResult =
-  | {
-    readonly kind: 'ok'
-    readonly message: LocusReadMessage
-    readonly media: readonly LocusMessagePart[]
-    /** Platform facts about the source chat; `name` is unsanitized platform text. */
-    readonly source: { readonly chatId: string; readonly name?: string }
-    readonly linkIndex: number
-    readonly linkCount: number
-  }
-  | { readonly kind: 'failed'; readonly reason: LocusLinkedReadFailure }
-
-export interface LocusLinkedReadInput {
-  /** A message of the caller's entrance that carries the link. */
-  readonly messageId: string
-  /** 1-based index among the message's extractable links. */
-  readonly linkIndex: number
-  /** The caller's entrance chat id; a topic entrance passes its GROUP chat id. */
-  readonly chatId: string
-  readonly signal: AbortSignal
-  readonly canViewImages: () => Promise<boolean> | boolean
-}
-
 export interface LocusMediaPort {
   readonly available: boolean
   readonly diagnostic?: string
@@ -170,14 +101,18 @@ export interface LocusMediaPort {
     /** Exact durable current fence, invoked immediately before persistence. */
     readonly fenceBeforeSave: () => Promise<boolean>
   }): Promise<LocusMediaAdmission>
-  /** Read ONE message of the caller's chat; fails closed on any doubt. */
-  readMessage(input: LocusMessageReadInput): Promise<LocusMessageReadResult>
   /**
-   * Read the message a Feishu message link in one entrance message points at.
-   * The link comes from that message's raw body; the platform's `is_authorized`
-   * and a raw read of the target gate everything after resolution.
+   * Paged read of one message or merge-forward of the caller's chat (change
+   * `locus-read-referenced-chats`): a ledger plus Host data blocks and typed
+   * images, continued with the returned `cursor`.
    */
-  readLinkedMessage(input: LocusLinkedReadInput): Promise<LocusLinkedReadResult>
+  readMessagePage(input: LocusPageInput): Promise<LocusPageResult>
+  /**
+   * Paged read of the message a Feishu message link in one entrance message
+   * points at (design D3): the link comes from that message's raw body; the
+   * platform's `is_authorized` and a raw read of the target gate everything.
+   */
+  readLinkedPage(input: LocusLinkedPageInput): Promise<LocusPageResult>
 }
 
 /**
@@ -398,14 +333,18 @@ export async function sweepMediaSpool(spoolRoot: string): Promise<number> {
  * watchdogs end with the downloader: they must not outlive it, or a late tick
  * could signal a recycled process group.
  */
-async function withSpoolDownload<T>(input: {
+export async function withSpoolDownload<T>(input: {
   readonly binary: string
   readonly spoolRoot: string
   readonly args: readonly string[]
   readonly maxBytes: number
   readonly timeoutMs: number
   readonly signal: AbortSignal
-}, use: (file: SpoolFile) => Promise<T>): Promise<T> {
+  /** Free-space floor of the spool volume; defaults to {@link LOCUS_DISK_RESERVE_BYTES}. */
+  readonly diskReserveBytes?: number
+  /** Free bytes of the spool volume; defaults to `statfs(spoolRoot)`. Injectable for tests. */
+  readonly freeBytes?: () => Promise<number> | number
+}, use: (file: SpoolFile, phaseSignal: AbortSignal) => Promise<T>): Promise<T> {
   if (input.signal.aborted) throw new Error('download-aborted')
   const token = randomBytes(SPOOL_TOKEN_BYTES).toString('hex')
   const targetName = `${token}.bin`
@@ -420,9 +359,11 @@ async function withSpoolDownload<T>(input: {
   })
 
   let stdout = ''
-  let stderrBytes = 0
+  let stderrTail = ''
   let failure: Error | undefined
   let exited = false
+  let diskLow = false
+  const phase = new AbortController()
   const fail = (error: Error): void => {
     if (failure !== undefined) return
     failure = error
@@ -432,10 +373,26 @@ async function withSpoolDownload<T>(input: {
   input.signal.addEventListener('abort', onAbort, { once: true })
   const timer = setTimeout(() => fail(new Error('download-timeout')), input.timeoutMs)
   timer.unref?.()
+  const reserve = input.diskReserveBytes ?? LOCUS_DISK_RESERVE_BYTES
+  const measureFree = input.freeBytes ?? (async (): Promise<number> => {
+    const stats = await statfs(input.spoolRoot)
+    return Number(stats.bavail) * Number(stats.bsize)
+  })
+  let measuring = false
+  // One watcher covers BOTH the download and the `use` phase (frame extraction):
+  // it measures the volume's free space (concurrent calls included) and the
+  // growing entry's size, and stops everything on a breach.
   const poll = setInterval(() => {
-    if (largestSpoolEntry(dir) > input.maxBytes) {
-      fail(new Error('download-byte-limit-exceeded'))
-    }
+    if (!exited && largestSpoolEntry(dir) > input.maxBytes) fail(new Error('download-byte-limit-exceeded'))
+    if (measuring) return
+    measuring = true
+    void Promise.resolve().then(measureFree).then(free => {
+      if (free < reserve && !diskLow) {
+        diskLow = true
+        phase.abort()
+        if (!exited) fail(new Error('disk-low'))
+      }
+    }).catch(() => { /* an unreadable volume is no evidence of low space */ }).finally(() => { measuring = false })
   }, SPOOL_POLL_MS)
   poll.unref?.()
 
@@ -448,8 +405,7 @@ async function withSpoolDownload<T>(input: {
     stdout += data.toString()
   })
   child.stderr?.on('data', (chunk: Buffer | string) => {
-    stderrBytes += Buffer.byteLength(chunk)
-    if (stderrBytes > MAX_STDERR_BYTES) child.stderr?.destroy()
+    stderrTail = (stderrTail + (Buffer.isBuffer(chunk) ? chunk.toString() : chunk)).slice(-MAX_STDERR_BYTES)
   })
   child.on('error', error => fail(error))
 
@@ -457,10 +413,15 @@ async function withSpoolDownload<T>(input: {
     const [code, signal] = await once(child, 'close') as [number | null, NodeJS.Signals | null]
     exited = true
     clearTimeout(timer)
-    clearInterval(poll)
     input.signal.removeEventListener('abort', onAbort)
     if (failure !== undefined) throw failure
-    if (code !== 0 || signal !== null) throw new Error('download-process-failed')
+    if (code !== 0 || signal !== null) {
+      if (/No space left on device|ENOSPC/.test(stderrTail)) throw new Error('disk-low')
+      // The CLI prints a failure envelope on stderr (stdout when it is not empty): keep its platform code.
+      const doc = failureDocument(stdout) ?? failureDocument(stderrTail)
+      const platformCode = doc === undefined ? undefined : recordOf(doc['error'])?.['code']
+      throw Object.assign(new Error('download-process-failed'), typeof platformCode === 'number' ? { platformCode } : {})
+    }
 
     const receipt = parseSpoolReceipt(stdout)
     // The CLI must have written the name it was given: a different basename
@@ -479,7 +440,15 @@ async function withSpoolDownload<T>(input: {
     if (receipt.sizeBytes !== undefined && receipt.sizeBytes !== size) {
       throw new Error('download-receipt-size-mismatch')
     }
-    return await use({ dir, name: targetName, path: target, size })
+    let result: T
+    try {
+      result = await use({ dir, name: targetName, path: target, size }, AbortSignal.any([input.signal, phase.signal]))
+    } catch (error) {
+      if (diskLow) throw new Error('disk-low')
+      throw error
+    }
+    if (diskLow) throw new Error('disk-low')
+    return result
   } finally {
     clearTimeout(timer)
     clearInterval(poll)
@@ -489,6 +458,95 @@ async function withSpoolDownload<T>(input: {
   }
 }
 
+
+/** Why one CLI envelope read produced no usable envelope. */
+export type CliEnvelopeFailureReason =
+  | 'platform-error'
+  | 'envelope-too-large'
+  | 'envelope-invalid'
+  | 'disk-low'
+  | 'aborted'
+  | 'timeout'
+  | 'cli-failed'
+
+export type CliEnvelopeResult =
+  | { readonly kind: 'ok'; readonly envelope: Record<string, unknown>; readonly bytes: number }
+  | {
+    readonly kind: 'failed'
+    readonly reason: CliEnvelopeFailureReason
+    /** The platform's own error code when the failure envelope carried one. */
+    readonly platformCode?: number
+    /** Observed stdout size for `envelope-too-large`. */
+    readonly bytes?: number
+  }
+
+/** The LAST parseable JSON document of a text (one line, or a pretty-printed suffix). */
+function lastJsonDocument(text: string): Record<string, unknown> | undefined {
+  const lines = text.trim().split(/\r?\n/)
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const doc = recordOf(JSON.parse(lines.slice(index).join('\n')))
+      if (doc !== undefined) return doc
+    } catch { /* keep walking toward the start */ }
+  }
+  return undefined
+}
+
+function failureDocument(text: unknown): Record<string, unknown> | undefined {
+  if (typeof text !== 'string') return undefined
+  const doc = lastJsonDocument(text)
+  return doc !== undefined && (doc['ok'] === false || recordOf(doc['error']) !== undefined) ? doc : undefined
+}
+
+function platformFailure(doc: Record<string, unknown>): CliEnvelopeResult {
+  const code = recordOf(doc['error'])?.['code']
+  return { kind: 'failed', reason: 'platform-error', ...(typeof code === 'number' ? { platformCode: code } : {}) }
+}
+
+/**
+ * Run one official-CLI JSON call and read its envelope (design D4, D9).
+ *
+ * A failure envelope is read from stdout first and, when stdout has none, from
+ * stderr (the last parseable document) — the real CLI prints it on stderr with
+ * an empty stdout. An envelope above `maxBuffer` is `envelope-too-large` with
+ * its byte count, never an empty success.
+ */
+export async function runLarkEnvelope(
+  runner: LarkCliRunner,
+  binary: string,
+  args: readonly string[],
+  options: { readonly signal: AbortSignal; readonly timeoutMs: number; readonly maxBufferBytes?: number },
+): Promise<CliEnvelopeResult> {
+  let stdout: string
+  try {
+    stdout = (await runner(binary, args, {
+      windowsHide: true,
+      timeout: options.timeoutMs,
+      maxBuffer: options.maxBufferBytes ?? LOCUS_ENVELOPE_MAX_BYTES,
+      signal: options.signal,
+    })).stdout
+  } catch (error) {
+    const failed = recordOf(error)
+    if (failed?.['code'] === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      const out = failed['stdout']
+      return { kind: 'failed', reason: 'envelope-too-large', bytes: typeof out === 'string' ? Buffer.byteLength(out) : 0 }
+    }
+    if (options.signal.aborted || failed?.['name'] === 'AbortError' || failed?.['code'] === 'ABORT_ERR') {
+      return { kind: 'failed', reason: 'aborted' }
+    }
+    if (failed?.['killed'] === true) return { kind: 'failed', reason: 'timeout' }
+    const doc = failureDocument(failed?.['stdout']) ?? failureDocument(failed?.['stderr'])
+    if (doc !== undefined) return platformFailure(doc)
+    const stderr = failed?.['stderr']
+    if (typeof stderr === 'string' && /No space left on device|ENOSPC/.test(stderr)) return { kind: 'failed', reason: 'disk-low' }
+    return { kind: 'failed', reason: 'cli-failed' }
+  }
+  const doc = lastJsonDocument(stdout)
+  if (doc === undefined) return { kind: 'failed', reason: 'envelope-invalid' }
+  if (doc['ok'] === false) return platformFailure(doc)
+  if (doc['ok'] !== true) return { kind: 'failed', reason: 'envelope-invalid' }
+  return { kind: 'ok', envelope: doc, bytes: Buffer.byteLength(stdout) }
+}
 
 /** A verified download, still inside its call-owned directory. */
 interface SpoolFile {
@@ -513,7 +571,6 @@ async function downloadIntoSpool(input: Parameters<typeof withSpoolDownload>[0])
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]{1,128}$/
 const IMAGE_KEY_PATTERN = /^img_[A-Za-z0-9_-]+$/
 const FILE_KEY_PATTERN = /^file_[A-Za-z0-9_-]+$/
-const TRUNCATION_MARK = '…（已截断）'
 /** Platform message types whose raw `body.content` is a JSON document Pet reads resources from. */
 const JSON_CONTENT_TYPES: ReadonlySet<string> = new Set(['post', 'image', 'media', 'file', 'audio'])
 
@@ -658,40 +715,6 @@ function resourcesOf(msgType: string, rawContent: unknown): RawMessageResource[]
   return resources
 }
 
-export function parseRawMessage(value: unknown, expectedId: string, expectedChat: string): RawMessageFacts {
-  const { item, children } = rawItems(value, expectedId, expectedChat)
-  if (item['deleted'] === true) throw new MessageReadError('message-deleted')
-  const msgType = bounded(item['msg_type'])
-  if (msgType === undefined) throw new MessageReadError('envelope-invalid')
-  const threadId = bounded(item['thread_id'])
-  const createTime = formatEpochMs(item['create_time'])
-  const rawBody = recordOf(item['body'])?.['content']
-  const links = typeof rawBody === 'string' ? extractMessageLinksFromRaw(msgType, rawBody) : []
-  const base = {
-    msgType,
-    links,
-    ...(createTime === undefined ? {} : { createTime }),
-    ...(threadId === undefined ? {} : { threadId }),
-  }
-  if (msgType === 'merge_forward') {
-    // A child's media downloads through the OUTER id; the child's own id is refused (234003).
-    const resources: RawMessageResource[] = []
-    for (const child of children.slice(0, LOCUS_MERGE_MAX_CHILDREN)) {
-      if (child['deleted'] === true) continue
-      const childType = bounded(child['msg_type'])
-      if (childType === undefined) continue
-      if (childType === 'merge_forward') { resources.push({ kind: 'nested' }); continue }
-      try {
-        resources.push(...resourcesOf(childType, recordOf(child['body'])?.['content']))
-      } catch {
-        // One unreadable child body costs that child's media, not the whole read.
-      }
-    }
-    return { ...base, resources }
-  }
-  return { ...base, resources: resourcesOf(msgType, recordOf(item['body'])?.['content']) }
-}
-
 /** Parse the formatted `+messages-mget` read: sender name, rendered body, topic. */
 export function parseFormattedMessage(value: unknown, expectedId: string, expectedChat: string): {
   readonly senderName?: string
@@ -708,22 +731,6 @@ export function parseFormattedMessage(value: unknown, expectedId: string, expect
   }
 }
 
-function boundBody(text: string): { readonly text: string; readonly truncated: boolean } {
-  const clean = text.replace(/\0/g, '')
-  return clean.length <= LOCUS_MESSAGE_MAX_BODY_CHARS
-    ? { text: clean, truncated: false }
-    : { text: `${clean.slice(0, LOCUS_MESSAGE_MAX_BODY_CHARS)}${TRUNCATION_MARK}`, truncated: true }
-}
-
-/** Metadata-only description of resources that are not (or cannot be) shown. */
-function describeResources(resources: readonly RawMessageResource[]): string {
-  const count = (kind: RawMessageResource['kind']): number => resources.filter(item => item.kind === kind).length
-  const parts = [
-    ['图片', count('image')], ['视频', count('video')], ['文件', count('file')], ['音频', count('audio')], ['嵌套合并转发', count('nested')],
-  ].filter(([, n]) => (n as number) > 0).map(([name, n]) => `${String(n)} 个${String(name)}`)
-  return parts.join('、')
-}
-
 export const LOCUS_MEDIA_UNAVAILABLE_REASON = 'pinned-cli-media-download-unavailable'
 
 
@@ -737,6 +744,8 @@ async function downloadImageBytes(input: {
   readonly timeoutMs: number
   readonly signal: AbortSignal
   readonly limits: ImageAttachmentLimits
+  readonly diskReserveBytes?: number
+  readonly freeBytes?: () => Promise<number> | number
 }): Promise<SaveImageAttachment> {
   const data = await downloadIntoSpool({
     binary: input.binary,
@@ -749,6 +758,8 @@ async function downloadImageBytes(input: {
     maxBytes: input.maxBytes,
     timeoutMs: input.timeoutMs,
     signal: input.signal,
+    ...(input.diskReserveBytes === undefined ? {} : { diskReserveBytes: input.diskReserveBytes }),
+    ...(input.freeBytes === undefined ? {} : { freeBytes: input.freeBytes }),
   })
   const mediaType = detectImageMediaType(data)
   if (mediaType === undefined || !input.limits.mediaTypes.includes(mediaType)) {
@@ -758,304 +769,309 @@ async function downloadImageBytes(input: {
 }
 
 
-/**
- * One call's shared budget. `signal` aborts on the caller's abort OR the
- * whole-call deadline; `caller` alone tells the two apart, because a
- * deadline returns what was already obtained while a caller abort returns nothing.
- */
-interface CallBudget {
-  readonly signal: AbortSignal
-  readonly caller: AbortSignal
-  readonly limits: LocusCallBudgetLimits
-  attemptsLeft: number
-  timedOut(): boolean
-}
-
-function createCallBudget(caller: AbortSignal, limits: LocusCallBudgetLimits): CallBudget {
-  const deadline = AbortSignal.timeout(limits.deadlineMs)
-  return {
-    signal: AbortSignal.any([caller, deadline]),
-    caller,
-    limits,
-    attemptsLeft: limits.maxAttempts,
-    timedOut: () => deadline.aborted && !caller.aborted,
-  }
-}
-
-const MERGE_ENTRY_HEADER = /^\[[^\]\n]{1,64}\] [^\n]*:$/
-const MERGE_CLOSE = '</forwarded_messages>'
-
-/**
- * Bound mget's `<forwarded_messages>` block by WHOLE child entries: at most
- * `maxEntries` children and `maxChars` characters, with the omitted count stated.
- * A block without recognizable entries falls back to a plain character bound.
- */
-function boundMergeText(text: string, maxEntries: number, maxChars: number): { readonly text: string; readonly truncated: boolean } {
-  const lines = text.replace(/\0/g, '').split('\n')
-  const starts = lines.flatMap((line, index) => MERGE_ENTRY_HEADER.test(line) ? [index] : [])
-  if (starts.length === 0) {
-    return text.length <= maxChars ? { text, truncated: false } : { text: `${text.slice(0, maxChars)}${TRUNCATION_MARK}`, truncated: true }
-  }
-  const closed = lines[lines.length - 1] === MERGE_CLOSE
-  const end = closed ? lines.length - 1 : lines.length
-  const open = lines.slice(0, starts[0]).join('\n')
-  const entries = starts.map((start, k) => lines.slice(start, k + 1 < starts.length ? starts[k + 1] : end).join('\n'))
-  const kept: string[] = []
-  // Reserve room for the omission note and the closing tag.
-  let used = open.length + MERGE_CLOSE.length + 64
-  for (const entry of entries) {
-    if (kept.length >= maxEntries) break
-    if (used + entry.length + 1 > maxChars) {
-      if (kept.length === 0) kept.push(`${entry.slice(0, Math.max(0, maxChars - used - TRUNCATION_MARK.length))}${TRUNCATION_MARK}`)
-      break
-    }
-    kept.push(entry)
-    used += entry.length + 1
-  }
-  const omitted = entries.length - kept.length
-  return {
-    text: [open, ...kept, ...(omitted > 0 ? [`[另有 ${String(omitted)} 条子消息未显示：超出条数或字符上限。]`] : []), MERGE_CLOSE].join('\n'),
-    truncated: omitted > 0,
-  }
-}
-
-/** Everything {@link readMessageMedia} needs from the port that owns it. */
-interface MessageMediaInput {
-  readonly binary: string
-  readonly spoolRoot: string
-  readonly timeoutMs: number
-  readonly limits: ImageAttachmentLimits
-  readonly attachments: AttachmentStore
-  readonly messageId: string
-  readonly resources: readonly RawMessageResource[]
-  /** The whole call's budget; its signal is what every download and extraction runs under. */
-  readonly budget: CallBudget
-  /** Fixed at Host start; absent means every video stays cover-only. */
-  readonly frameTools: FrameTools | undefined
-  readonly video: VideoLimits
-}
-
-/** One extracted frame that already passed every Pet-side check; the store has not seen it yet. */
-interface PendingFrame {
-  readonly image: SaveImageAttachment
-  readonly timeSeconds: number
-}
-
-/** One slot of the output, in message order. */
-type MediaSlot =
-  | { readonly kind: 'image'; readonly image: SaveImageAttachment }
-  | { readonly kind: 'note'; readonly text: string }
-  /** Keyframes are committed as their OWN attachment batch, after the other images. */
-  | { readonly kind: 'frames'; readonly durationSeconds: number; readonly frames: readonly PendingFrame[] }
-
 function skipNote(reason: VideoSkipReason): string {
   return `[视频未抽帧：${reason}。仅提供封面与元数据。]`
+}
+
+function secondFramesNote(durationSeconds: number, fromSecond: number, nextSecond: number): string {
+  return `[视频截帧：画面截帧，没有声音；每整秒取一帧，时长 ${durationSeconds.toFixed(1)}s，本页读到第 ${String(fromSecond)}–${String(Math.max(fromSecond, nextSecond - 1))} 秒；不得声称已看过完整视频。]`
 }
 
 function formatTime(seconds: number): string {
   return `${String(Number(seconds.toFixed(2)))}s`
 }
 
-function framesNote(durationSeconds: number, count: number): string {
-  return `[视频关键帧：以下 ${String(count)} 帧是按场景变化抽样的结果，不是完整视频，不得声称已看过完整视频；`
-    + `时长 ${durationSeconds.toFixed(1)}s，共 ${String(count)} 帧。${count < 2 ? '画面基本静止，只抽到 1 帧，未补帧。' : ''}]`
+// ---------------------------------------------------------------------------
+// Paged read (change `locus-read-referenced-chats`): plan → units → pages.
+//
+// A read first builds an immutable PLAN of units (a head, text segments,
+// resources, metadata notes), then delivers the units in order. The plan is the
+// only thing a continuation reads (design D7, D8).
+// ---------------------------------------------------------------------------
+
+/** Fixed text segment budget: escaped JSON characters per segment (design D9). */
+export const LOCUS_SEGMENT_BUDGET = 4_000
+/** Wall-clock bound of ONE page, platform reads, downloads and decoding included. */
+export const LOCUS_PAGE_DEADLINE_MS = 90_000
+/** One page's capacity in characters of final serialized output (design D9). */
+export const LOCUS_PAGE_CAPACITY_CHARS = 16_000
+/** Fixed reserve: ledger skeleton, the longest cursor, one failure detail or diagnostic line. */
+export const LOCUS_PAGE_RESERVE_CHARS = 1_000
+/** Upper bound of one text segment's data block: the 4000 budget plus wrapper, keys and unit id. */
+const SEGMENT_BLOCK_MAX_CHARS = LOCUS_SEGMENT_BUDGET + 300
+/** Upper bound of one ledger failure line. */
+const FAILURE_LINE_MAX_CHARS = 400
+/** Worst-case note and failure allowance of one video unit, plus per-frame label cost. */
+const VIDEO_UNIT_BASE_CHARS = 700
+const FRAME_LINE_CHARS = 120
+/** The third failure at one position skips the unit. */
+const MAX_ATTEMPTS = 3
+
+/** One terminal failure the ledger reports. */
+export interface LocusPageFailure {
+  readonly id: string
+  readonly reason: string
+}
+
+export type LocusPageResult =
+  | {
+    readonly kind: 'ok'
+    /** True only when there is no `cursor` and no terminal failure so far. */
+    readonly complete: boolean
+    /** Units delivered on THIS page. */
+    readonly delivered: number
+    /** Terminal failures newly recorded on THIS page. */
+    readonly failed: readonly LocusPageFailure[]
+    readonly cursor?: string
+    /** Host data blocks, Host lines and typed images, in reading order. */
+    readonly parts: readonly LocusMessagePart[]
+    readonly source?: { readonly chatId: string; readonly name?: string }
+    readonly linkIndex?: number
+    readonly linkCount?: number
+  }
+  | {
+    readonly kind: 'failed'
+    readonly reason: string
+    /** Sub-reason, e.g. `cycle` or `unreachable` for `envelope-invalid`. */
+    readonly detail?: string
+    readonly platformCode?: number
+    /** Observed size for `envelope-too-large`. */
+    readonly bytes?: number
+  }
+
+export interface LocusPageInput {
+  /** The entrance message (or the container) to read. */
+  readonly messageId: string
+  /** The caller's entrance chat id; a topic entrance passes its GROUP chat id. */
+  readonly chatId: string
+  /** Opaque identity of the calling session and entrance; a cursor is bound to it. */
+  readonly caller: string
+  readonly cursor?: string
+  readonly signal: AbortSignal
+  readonly canViewImages: () => Promise<boolean> | boolean
+  /** Re-verified after the platform work and before any cursor is issued. */
+  readonly isCurrent?: () => boolean
+}
+
+/** Where a topic read stands; stored in the cursor snapshot between pages. */
+interface TopicState {
+  readonly state: TopicReaderState
+  readonly threadId: string
+  readonly chatId: string
+  readonly linkedMessageId: string
+  readonly sourceName?: string
+  /** The linked message's own single-message plan, used when the topic cannot be listed at all. */
+  readonly fallback: readonly PlanUnit[]
+  readonly done: boolean
+}
+
+export interface LocusLinkedPageInput extends LocusPageInput {
+  /** 1-based index among the message's extractable links; default 1, no upper bound. */
+  readonly linkIndex?: number
+}
+
+type PlanUnit =
+  | { readonly kind: 'head'; readonly id: string; readonly fields: Readonly<Record<string, string>> }
+  | { readonly kind: 'text'; readonly id: string; readonly text: string }
+  | { readonly kind: 'note'; readonly id: string; readonly text: string }
+  | { readonly kind: 'fail'; readonly id: string; readonly reason: string }
+  | { readonly kind: 'image'; readonly id: string; readonly key: string; readonly downloadId: string; readonly cover?: boolean }
+  | { readonly kind: 'video'; readonly id: string; readonly fileKey: string; readonly downloadId: string }
+
+/** A read that cannot start or continue; carries the vocabulary the result reports. */
+class PlanError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly detail?: string,
+    readonly platformCode?: number,
+    readonly bytes?: number,
+    /** Ledger id of the step that failed, when it is not the container read. */
+    readonly step?: string,
+  ) {
+    super(reason)
+    this.name = 'PlanError'
+  }
+}
+
+function escapedJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')
+}
+
+/** Size of one code point inside the escaped JSON string. */
+function escapedSize(codePoint: string): number {
+  return codePoint === '<' || codePoint === '>' || codePoint === '&' ? 6 : JSON.stringify(codePoint).length - 2
 }
 
 /**
- * Turn a message's resources into model-facing parts, in message order.
- *
- * Images are downloaded sequentially into the spool under the deployment's
- * count and byte limits and committed as ONE attachment batch. A video adds its
- * cover to that batch and, when frame tools exist, its keyframes as a batch of
- * their own: a frame failure then drops the frames and nothing else, and never
- * leaves a partial set of frame refs. A resource that cannot be shown becomes an
- * explicit note, never a silent omission.
- * @returns the parts, or `undefined` when the call was aborted.
+ * Cut text into fixed segments: accumulate each code point's escaped size and
+ * break BEFORE the code point that would exceed the budget. A surrogate pair is
+ * never split, and the boundaries depend on the text and the budget only.
+ * @returns segments with their starting code-point offset.
  */
-async function readMessageMedia(input: MessageMediaInput): Promise<readonly LocusMessagePart[] | undefined> {
-  const { limits } = input
-  const slots: MediaSlot[] = []
+export function segmentText(text: string, budget: number = LOCUS_SEGMENT_BUDGET): { readonly offset: number; readonly text: string }[] {
+  const segments: { offset: number; text: string }[] = []
+  let current = ''
+  let size = 0
+  let start = 0
+  let offset = 0
+  for (const codePoint of text) {
+    const width = escapedSize(codePoint)
+    if (current !== '' && size + width > budget) {
+      segments.push({ offset: start, text: current })
+      current = ''
+      size = 0
+      start = offset
+    }
+    current += codePoint
+    size += width
+    offset += 1
+  }
+  if (current !== '') segments.push({ offset: start, text: current })
+  return segments
+}
+
+/** Source-chat names are labels, not content: control characters become spaces, 64 characters at most. */
+const LINK_SOURCE_NAME_CHARS = 64
+function labelOf(value: string, max: number): string {
+  return [...value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim()].slice(0, max).join('')
+}
+
+function dataBlock(wrapper: string, payload: Record<string, unknown>): string {
+  return `<${wrapper}>\n${escapedJson(payload)}\n</${wrapper}>`
+}
+
+/** One node of a raw container read. */
+interface TreeNode {
+  readonly id: string
+  readonly msgType: string
+  readonly chatId: string
+  readonly deleted: boolean
+  readonly content: unknown
+  readonly upper?: string
+  readonly createTime?: string
+  readonly threadId?: string
+}
+
+function treeNode(entry: unknown): TreeNode {
+  const item = recordOf(entry)
+  const id = item?.['message_id']
+  const msgType = bounded(item?.['msg_type'])
+  if (item === undefined || typeof id !== 'string' || msgType === undefined) throw new PlanError('envelope-invalid')
+  const upper = item['upper_message_id']
+  const createTime = formatEpochMs(item['create_time'])
+  const threadId = bounded(item['thread_id'])
+  return {
+    id,
+    msgType,
+    chatId: typeof item['chat_id'] === 'string' ? item['chat_id'] : '',
+    deleted: item['deleted'] === true,
+    content: recordOf(item['body'])?.['content'],
+    ...(typeof upper === 'string' && upper !== '' ? { upper } : {}),
+    ...(createTime === undefined ? {} : { createTime }),
+    ...(threadId === undefined ? {} : { threadId }),
+  }
+}
+
+/**
+ * Validate the RAW read of a container BEFORE anything is rendered or downloaded
+ * (design D5): first item is the root and belongs to this entrance; items are
+ * deduplicated by `message_id` (first kept); a walk from the root with a visited
+ * set finds cycles; an item the walk cannot reach fails the whole container.
+ * @returns the root and its descendants in pre-order (siblings in raw order).
+ */
+export function parseRawContainer(value: unknown, rootId: string, expectedChat: string): {
+  readonly root: TreeNode
+  readonly descendants: readonly TreeNode[]
+} {
+  const envelope = recordOf(value)
+  const items = recordOf(envelope?.['data'])?.['items']
+  if (envelope?.['ok'] !== true || !Array.isArray(items)) throw new PlanError('envelope-invalid')
+  if (items.length === 0) throw new PlanError('message-not-unique')
+  const nodes = items.map(treeNode)
+  const root = nodes[0]!
+  if (root.id !== rootId) throw new PlanError(nodes.length === 1 ? 'message-mismatch' : 'envelope-invalid')
+  if (root.chatId !== expectedChat) throw new PlanError('chat-mismatch')
+  if (root.deleted) throw new PlanError('message-deleted')
+  if (nodes.length === 1) return { root, descendants: [] }
+  if (root.msgType !== 'merge_forward') throw new PlanError('message-not-unique')
+
+  const seen = new Set<string>()
+  const unique = nodes.filter(node => !seen.has(node.id) && seen.add(node.id))
+  const childrenOf = new Map<string, TreeNode[]>()
+  for (const node of unique) {
+    if (node.upper === undefined) continue
+    const siblings = childrenOf.get(node.upper)
+    if (siblings === undefined) childrenOf.set(node.upper, [node])
+    else siblings.push(node)
+  }
+  const visited = new Set<string>()
+  const order: TreeNode[] = []
+  const visit = (node: TreeNode): void => {
+    if (visited.has(node.id)) throw new PlanError('envelope-invalid', 'cycle')
+    visited.add(node.id)
+    order.push(node)
+    for (const child of childrenOf.get(node.id) ?? []) visit(child)
+  }
+  visit(root)
+  if (order.length < unique.length) throw new PlanError('envelope-invalid', 'unreachable')
+  return { root, descendants: order.slice(1) }
+}
+
+const CONTENT_TYPES_WITH_RESOURCES: ReadonlySet<string> = new Set(['post', 'image', 'media', 'file', 'audio'])
+
+function metadataNote(id: string, kind: string, name?: string): PlanUnit {
+  return {
+    kind: 'note',
+    id,
+    text: `[元数据：${kind}${name === undefined ? '' : ` ${name}`} · ${id.split('#')[0]!}：仅元数据，未下载、解析或执行。]`,
+  }
+}
+
+/** The resource and metadata units of one node; `downloadId` is the id every download uses. */
+function resourceUnits(node: TreeNode, downloadId: string): PlanUnit[] {
+  if (node.deleted || node.msgType === 'text' || node.msgType === 'merge_forward') return []
+  if (!CONTENT_TYPES_WITH_RESOURCES.has(node.msgType)) return [metadataNote(`${node.id}#n0`, node.msgType)]
+  let resources: RawMessageResource[]
+  try {
+    resources = resourcesOf(node.msgType, node.content)
+  } catch {
+    return [{ kind: 'fail', id: `${node.id}#r0`, reason: 'content-unparseable' }]
+  }
+  const units: PlanUnit[] = []
   let images = 0
-  let bytes = 0
-  let omitted = 0
-  const quotaLeft = (): boolean => images < limits.maxImagesPerMessage && limits.maxMessageImageBytes - bytes >= 1
-  const { budget } = input
-  const signal = budget.signal
-  let stop: 'attempts' | 'deadline' | undefined
-  let notTried = 0
-  /** Spend one download attempt; false (and counted as not tried) once the call's budget is gone. */
-  const attempt = (): boolean => {
-    if (stop === undefined && budget.timedOut()) stop = 'deadline'
-    if (stop === undefined && budget.attemptsLeft <= 0) stop = 'attempts'
-    if (stop !== undefined) { notTried += 1; return false }
-    budget.attemptsLeft -= 1
-    return true
-  }
-  /** After a failed step: false = caller abort (give up), true = carry on (deadline recorded). */
-  const survive = (): boolean => {
-    if (budget.caller.aborted) return false
-    if (budget.timedOut()) stop = 'deadline'
-    return true
-  }
-
-  /** Download one image resource into `slots`; false when the call was aborted. */
-  const takeImage = async (key: string): Promise<boolean> => {
-    if (!quotaLeft()) { omitted += 1; return true }
-    if (!attempt()) return true
-    try {
-      const image = await downloadImageBytes({
-        binary: input.binary,
-        spoolRoot: input.spoolRoot,
-        messageId: input.messageId,
-        key,
-        maxBytes: Math.min(limits.maxImageBytes, limits.maxMessageImageBytes - bytes),
-        timeoutMs: input.timeoutMs,
-        signal,
-        limits,
-      })
-      images += 1
-      bytes += image.data.byteLength
-      slots.push({ kind: 'image', image })
-    } catch (error) {
-      if (!survive()) return false
-      if (stop === 'deadline') return true
-      slots.push({
-        kind: 'note',
-        text: `[图片未能读取：${error instanceof Error && error.message === 'download-timeout' ? 'timeout' : 'image-download-or-admission-failed'}。]`,
-      })
-    }
-    return true
-  }
-
-  /** Download and frame one video in place; false when the call was aborted. */
-  const takeFrames = async (fileKey: string): Promise<boolean> => {
-    if (input.frameTools === undefined) { slots.push({ kind: 'note', text: skipNote('frame-tools-unavailable') }); return true }
-    const maxFrames = Math.min(input.video.maxFrames, limits.maxImagesPerMessage - images)
-    const bytesLeft = limits.maxMessageImageBytes - bytes
-    if (maxFrames < 1 || bytesLeft < 1) { slots.push({ kind: 'note', text: skipNote('image-quota-exhausted') }); return true }
-    if (!attempt()) return true
-    const tools = input.frameTools
-    let extraction: FrameExtraction
-    try {
-      extraction = await withSpoolDownload({
-        binary: input.binary,
-        spoolRoot: input.spoolRoot,
-        args: petCliArgs([
-          'im', '+messages-resources-download', '--as', 'bot',
-          '--message-id', input.messageId,
-          '--file-key', fileKey, '--type', 'file', '--format', 'json',
-        ]),
-        maxBytes: input.video.maxBytes,
-        timeoutMs: input.timeoutMs,
-        signal,
-      }, file => extractKeyframes({
-        tools,
-        dir: file.dir,
-        fileName: file.name,
-        limits: input.video,
-        maxFrames,
-        maxFrameBytes: Math.min(limits.maxImageBytes, bytesLeft),
-        signal,
-      }))
-    } catch (error) {
-      if (!survive()) return false
-      if (stop === 'deadline') return true
-      const message = error instanceof Error ? error.message : ''
-      slots.push({
-        kind: 'note',
-        text: skipNote(message === 'download-byte-limit-exceeded' ? 'video-too-large'
-          : message === 'download-timeout' ? 'video-download-timeout' : 'video-download-failed'),
-      })
-      return true
-    }
-    if (extraction.kind === 'skipped') {
-      if (extraction.reason === 'aborted' || signal.aborted) return survive()
-      slots.push({ kind: 'note', text: skipNote(extraction.reason) })
-      return true
-    }
-    // Pet-side admission of the whole batch before the store sees any of it.
-    const pending: PendingFrame[] = []
-    let frameBytes = 0
-    for (const frame of extraction.frames) {
-      const mediaType = detectImageMediaType(frame.data)
-      frameBytes += frame.data.byteLength
-      if (mediaType === undefined || !limits.mediaTypes.includes(mediaType) || frameBytes > bytesLeft) {
-        slots.push({ kind: 'note', text: skipNote('frame-admission-failed') })
-        return true
-      }
-      pending.push({ image: { data: frame.data, mediaType }, timeSeconds: frame.timeSeconds })
-    }
-    images += pending.length
-    bytes += frameBytes
-    slots.push({ kind: 'frames', durationSeconds: extraction.durationSeconds, frames: pending })
-    return true
-  }
-
-  for (const resource of input.resources) {
-    if (budget.caller.aborted) return undefined
-    if (stop !== undefined && (resource.kind === 'image' || resource.kind === 'video')) {
-      notTried += resource.kind === 'image' ? 1 : (resource.coverKey === undefined ? 0 : 1) + (input.frameTools === undefined ? 0 : 1)
-      continue
-    }
-    if (resource.kind === 'nested') {
-      slots.push({ kind: 'note', text: '[嵌套合并转发：仅元数据，未展开其内容。]' })
-    } else if (resource.kind === 'file') {
-      slots.push({ kind: 'note', text: `[文件${resource.name === undefined ? '' : ` ${resource.name}`}：仅元数据，未下载、解析或执行。]` })
-    } else if (resource.kind === 'audio') {
-      slots.push({ kind: 'note', text: '[音频：仅元数据，未下载或转写。]' })
+  let videos = 0
+  let notes = 0
+  for (const resource of resources) {
+    if (resource.kind === 'image') {
+      units.push({ kind: 'image', id: `${node.id}#r${String(images++)}`, key: resource.key, downloadId })
     } else if (resource.kind === 'video') {
-      if (resource.coverKey === undefined) {
-        slots.push({ kind: 'note', text: '[视频：消息没有封面图。]' })
-      } else {
-        slots.push({ kind: 'note', text: `[视频封面${resource.name === undefined ? '' : `（${resource.name}）`}：]` })
-        if (!await takeImage(resource.coverKey)) return undefined
+      if (resource.coverKey !== undefined) {
+        units.push({ kind: 'image', id: `${node.id}#r${String(images++)}`, key: resource.coverKey, downloadId, cover: true })
       }
-      if (!await takeFrames(resource.fileKey)) return undefined
-    } else if (!await takeImage(resource.key)) return undefined
-  }
-  if (omitted > 0) slots.push({ kind: 'note', text: `[另有 ${String(omitted)} 张图片未读取：超出单条消息图片数或字节上限。]` })
-  if (stop === 'deadline') {
-    slots.push({ kind: 'note', text: `[已达单次读取总时限 ${String(Math.round(budget.limits.deadlineMs / 1000))}s，进行中的下载已终止，另有 ${String(notTried)} 个资源未尝试。]` })
-  } else if (stop === 'attempts') {
-    slots.push({ kind: 'note', text: `[已达单次读取的下载尝试上限 ${String(budget.limits.maxAttempts)} 次（失败也计入），另有 ${String(notTried)} 个资源未尝试。]` })
-  }
-
-  const noteParts = (): LocusMessagePart[] =>
-    slots.flatMap(slot => slot.kind === 'note' ? [{ type: 'text' as const, text: slot.text }] : [])
-  const downloaded = slots.flatMap(slot => slot.kind === 'image' ? [slot.image] : [])
-  let refs: readonly ImageAttachmentRef[] = []
-  if (downloaded.length > 0) {
-    try {
-      refs = await input.attachments.saveImages(downloaded)
-      if (refs.length !== downloaded.length) throw new Error('attachment-count-mismatch')
-    } catch {
-      return [{ type: 'text', text: '[图片未通过部署校验，未返回任何图片。]' }, ...noteParts()]
+      units.push({ kind: 'video', id: `${node.id}#v${videos === 0 ? '' : String(videos)}`, fileKey: resource.fileKey, downloadId })
+      videos += 1
+    } else if (resource.kind === 'file' || resource.kind === 'audio') {
+      units.push(metadataNote(`${node.id}#n${String(notes++)}`, resource.kind, resource.kind === 'file' ? resource.name : undefined))
     }
   }
+  return units
+}
 
-  const parts: LocusMessagePart[] = []
-  let next = 0
-  for (const slot of slots) {
-    if (slot.kind === 'note') parts.push({ type: 'text', text: slot.text })
-    else if (slot.kind === 'image') parts.push({ type: 'image', attachment: refs[next++]! })
-    else {
-      let frameRefs: readonly ImageAttachmentRef[] | undefined
-      try {
-        frameRefs = await input.attachments.saveImages(slot.frames.map(frame => frame.image))
-        if (frameRefs.length !== slot.frames.length) frameRefs = undefined
-      } catch { frameRefs = undefined }
-      if (frameRefs === undefined) {
-        parts.push({ type: 'text', text: skipNote('frame-admission-failed') })
-        continue
-      }
-      parts.push({ type: 'text', text: framesNote(slot.durationSeconds, slot.frames.length) })
-      for (const [index, frame] of slot.frames.entries()) {
-        parts.push({ type: 'text', text: `[t=${formatTime(frame.timeSeconds)}]` })
-        parts.push({ type: 'image', attachment: frameRefs[index]! })
-      }
-    }
-  }
-  return parts
+function textUnits(messageId: string, text: string): PlanUnit[] {
+  return segmentText(text.replace(/\0/g, '')).map(segment => ({
+    kind: 'text' as const, id: `${messageId}#t@${String(segment.offset)}`, text: segment.text,
+  }))
+}
+
+function headUnit(messageId: string, fields: Record<string, string | undefined>): PlanUnit {
+  const clean: Record<string, string> = {}
+  for (const [name, value] of Object.entries(fields)) if (value !== undefined) clean[name] = value
+  return { kind: 'head', id: `${messageId}#h`, fields: clean }
+}
+
+function describeSkippedMedia(images: number, videos: number): string {
+  const parts = [images > 0 ? `${String(images)} 张图片` : '', videos > 0 ? `${String(videos)} 段视频` : ''].filter(Boolean)
+  return `[当前模型无法查看图片，未下载任何媒体。消息含：${parts.join('、')}。]`
 }
 
 export interface CreateLocusMediaPortInput {
@@ -1069,8 +1085,12 @@ export interface CreateLocusMediaPortInput {
   readonly frameTools?: FrameTools
   /** Overrides of {@link LOCUS_VIDEO_LIMITS}; non-positive or non-finite values are ignored. */
   readonly video?: Partial<VideoLimits>
-  /** Overrides of {@link LOCUS_CALL_BUDGET}; non-positive or non-finite values are ignored. */
-  readonly callBudget?: Partial<LocusCallBudgetLimits>
+  /** Paged-read configuration; the defaults are the owner-approved ones (design D9). */
+  readonly page?: { readonly capacityChars?: number; readonly deadlineMs?: number }
+  /** Continuation snapshot table; injectable so tests can observe issued cursors. */
+  readonly cursors?: CursorStore
+  /** Spool volume guard (design D9); defaults are 512 MiB and `statfs` of the spool root. */
+  readonly spool?: { readonly diskReserveBytes?: number; readonly freeBytes?: () => Promise<number> | number }
 }
 
 /** Create the spooled media port; an unproven CLI performs no I/O at all. */
@@ -1088,8 +1108,8 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       async admitCurrentImage() {
         return { kind: 'unavailable', reason: LOCUS_MEDIA_UNAVAILABLE_REASON, content: [] }
       },
-      async readMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
-      async readLinkedMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
+      async readMessagePage() { return { kind: 'failed', reason: 'media-unavailable' } },
+      async readLinkedPage() { return { kind: 'failed', reason: 'media-unavailable' } },
     }
   }
 
@@ -1103,8 +1123,8 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
       available: false,
       diagnostic: 'attachment-byte-limit-not-representable',
       async admitCurrentImage() { return { kind: 'unavailable', reason: 'media-unavailable', content: [] } },
-      async readMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
-      async readLinkedMessage() { return { kind: 'failed', reason: 'media-unavailable' } },
+      async readMessagePage() { return { kind: 'failed', reason: 'media-unavailable' } },
+      async readLinkedPage() { return { kind: 'failed', reason: 'media-unavailable' } },
     }
   }
   const runner = input.runner ?? run
@@ -1118,172 +1138,655 @@ export function createLocusMediaPort(input: CreateLocusMediaPortInput): LocusMed
     }
   }
 
-  const callLimits: LocusCallBudgetLimits = { ...LOCUS_CALL_BUDGET }
-  for (const [name, value] of Object.entries(input.callBudget ?? {})) {
-    if (name in callLimits && typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      (callLimits as unknown as Record<string, number>)[name] = value
+  const pageCapacity = input.page?.capacityChars ?? LOCUS_PAGE_CAPACITY_CHARS
+  const pageReserve = LOCUS_PAGE_RESERVE_CHARS
+  const pageDeadlineMs = input.page?.deadlineMs ?? LOCUS_PAGE_DEADLINE_MS
+  if (!Number.isSafeInteger(pageCapacity) || pageCapacity < pageReserve + SEGMENT_BLOCK_MAX_CHARS) {
+    throw new Error(`page capacity ${String(pageCapacity)} is below the fixed reserve plus one segment (${String(pageReserve + SEGMENT_BLOCK_MAX_CHARS)})`)
+  }
+  const cursors = input.cursors ?? createCursorStore()
+  const spoolGuard = {
+    ...(input.spool?.diskReserveBytes === undefined ? {} : { diskReserveBytes: input.spool.diskReserveBytes }),
+    ...(input.spool?.freeBytes === undefined ? {} : { freeBytes: input.spool.freeBytes }),
+  }
+  /** One platform read through the envelope runner; every failure is a {@link PlanError}. */
+  const readEnvelope = async (
+    args: readonly string[],
+    signal: AbortSignal,
+    step?: string,
+    onPlatformError?: (code: number | undefined) => PlanError,
+  ): Promise<Record<string, unknown>> => {
+    const result = await runLarkEnvelope(runner, binary, petCliArgs(args), { signal, timeoutMs })
+    if (result.kind === 'ok') return result.envelope
+    switch (result.reason) {
+      case 'aborted': throw new PlanError('aborted')
+      case 'envelope-too-large': throw new PlanError('envelope-too-large', undefined, undefined, result.bytes)
+      case 'platform-error':
+        throw onPlatformError?.(result.platformCode) ?? new PlanError('platform-read-failed', undefined, result.platformCode)
+      case 'envelope-invalid': throw new PlanError('envelope-invalid')
+      case 'disk-low': throw new PlanError('disk-low')
+      default: throw new PlanError('platform-read-failed', result.reason, undefined, undefined, step)
     }
   }
-  /** Why a platform step produced nothing, once its own error is not a parse failure. */
-  const stepFailure = (budget: CallBudget): 'aborted' | 'deadline-exceeded' | undefined =>
-    budget.caller.aborted ? 'aborted' : budget.timedOut() ? 'deadline-exceeded' : undefined
 
-  const callOptions = (signal: AbortSignal) => ({ windowsHide: true, timeout: timeoutMs, maxBuffer: 1024 * 1024, signal })
-
-  /** One message, proven to be in `expectedChat`, with its media. */
-  const readOne = async (request: {
-    readonly messageId: string
-    readonly expectedChat: string
-    readonly budget: CallBudget
-    readonly canViewImages: () => Promise<boolean> | boolean
-  }): Promise<
-    | { readonly kind: 'ok'; readonly message: LocusReadMessage; readonly media: readonly LocusMessagePart[]; readonly links: readonly string[] }
-    | { readonly kind: 'failed'; readonly reason: LocusMessageReadFailure }
-  > => {
-    if (!MESSAGE_ID_PATTERN.test(request.messageId) || request.expectedChat.trim() === '') {
-      return { kind: 'failed', reason: 'invalid-message-id' }
-    }
-    const { budget } = request
-    const early = stepFailure(budget)
-    if (early !== undefined) return { kind: 'failed', reason: early }
-    let raw: RawMessageFacts
+  /** The read plan of one message or merge-forward root, proven to be in `chatId`. */
+  const buildPlan = async (
+    messageId: string,
+    chatId: string,
+    signal: AbortSignal,
+    headExtra: Record<string, string | undefined> = {},
+  ): Promise<{ readonly units: readonly PlanUnit[]; readonly kind: 'single' | 'merge'; readonly threadId?: string }> => {
+    const step = `container@${messageId}`
+    const rawEnvelope = await readEnvelope(['api', 'GET', `/open-apis/im/v1/messages/${messageId}`, '--as', 'bot'], signal, step)
+    const { root, descendants } = parseRawContainer(rawEnvelope, messageId, chatId)
+    const mgetEnvelope = await readEnvelope([
+      'im', '+messages-mget', '--as', 'bot', '--message-ids', messageId, '--no-reactions', '--format', 'json',
+    ], signal, step)
     let formatted: ReturnType<typeof parseFormattedMessage>
     try {
-      // Raw first: it carries the authoritative chat id, so a foreign message is
-      // refused before its body is fetched at all.
-      const rawResult = await runner(binary, petCliArgs([
-        'api', 'GET', `/open-apis/im/v1/messages/${request.messageId}`, '--as', 'bot',
-      ]), callOptions(budget.signal))
-      raw = parseRawMessage(parseJsonSuffix(rawResult.stdout), request.messageId, request.expectedChat)
-      const formattedResult = await runner(binary, petCliArgs([
-        'im', '+messages-mget', '--as', 'bot', '--message-ids', request.messageId,
-        '--no-reactions', '--format', 'json',
-      ]), callOptions(budget.signal))
-      formatted = parseFormattedMessage(parseJsonSuffix(formattedResult.stdout), request.messageId, request.expectedChat)
+      formatted = parseFormattedMessage(mgetEnvelope, messageId, chatId)
     } catch (error) {
-      if (error instanceof MessageReadError) return { kind: 'failed', reason: error.reason }
-      return { kind: 'failed', reason: stepFailure(budget) ?? 'platform-read-failed' }
+      throw new PlanError(error instanceof MessageReadError ? error.reason : 'envelope-invalid')
     }
-    // A merge-forward's body is mget's whole `<forwarded_messages>` block, bounded by child entries.
-    const body = raw.msgType === 'merge_forward'
-      ? boundMergeText(formatted.text, LOCUS_MERGE_MAX_CHILDREN, budget.limits.maxChars - 1_000)
-      : boundBody(formatted.text)
-    const threadId = raw.threadId ?? formatted.threadId
-    const message: LocusReadMessage = {
-      messageId: request.messageId,
-      chatId: request.expectedChat,
-      msgType: raw.msgType,
-      ...(raw.createTime === undefined ? {} : { createTime: raw.createTime }),
-      ...(formatted.senderName === undefined ? {} : { senderName: formatted.senderName }),
-      ...(threadId === undefined ? {} : { threadId }),
-      text: body.text,
-      textTruncated: body.truncated,
-    }
-    if (raw.resources.length === 0) return { kind: 'ok', message, media: [], links: raw.links }
-
-    let viewable = false
-    try { viewable = await request.canViewImages() } catch { viewable = false }
-    if (!viewable) {
-      return {
-        kind: 'ok',
-        message,
-        links: raw.links,
-        media: [{ type: 'text', text: `[当前模型无法查看图片，未下载任何媒体。消息含：${describeResources(raw.resources)}。]` }],
-      }
-    }
-    const media = await readMessageMedia({
-      binary, spoolRoot, timeoutMs, limits, attachments, messageId: request.messageId, resources: raw.resources, budget,
-      frameTools: input.frameTools, video,
-    })
-    if (media === undefined) return { kind: 'failed', reason: 'aborted' }
-    // The whole call's text budget: notes first, the body gives way.
-    const noteChars = media.reduce((sum, part) => sum + (part.type === 'text' ? part.text.length + 1 : 0), 0)
-    const room = budget.limits.maxChars - noteChars
-    const fitted = message.text.length <= room ? message : {
-      ...message,
-      text: `${message.text.slice(0, Math.max(0, room - TRUNCATION_MARK.length))}${TRUNCATION_MARK}`,
-      textTruncated: true,
-    }
-    return { kind: 'ok', message: fitted, media, links: raw.links }
+    const units = [
+      headUnit(messageId, {
+        messageId,
+        msgType: root.msgType,
+        sender: formatted.senderName,
+        time: root.createTime,
+        thread: root.threadId ?? formatted.threadId,
+        ...headExtra,
+      }),
+      ...textUnits(messageId, formatted.text),
+      // Every download of a container's resources uses the ROOT id (design D5).
+      ...resourceUnits(root, messageId),
+      ...descendants.flatMap(node => resourceUnits(node, messageId)),
+    ]
+    return { units, kind: descendants.length > 0 ? 'merge' : 'single', ...(root.threadId === undefined ? {} : { threadId: root.threadId }) }
   }
 
-  /** Resolve one link through `message_links/query`; only an authorized, single, consistent answer passes. */
-  const resolveLink = async (url: string, budget: CallBudget): Promise<
-    | { readonly kind: 'ok'; readonly chatId: string; readonly name?: string; readonly messageId: string }
-    | { readonly kind: 'failed'; readonly reason: LocusLinkedReadFailure }
-  > => {
-    let stdout: string
-    try {
-      stdout = (await runner(binary, petCliArgs([
-        'api', 'POST', '/open-apis/im/v1/message_links/query', '--as', 'bot',
-        '--data', JSON.stringify({ message_link_url: url }),
-      ]), callOptions(budget.signal))).stdout
-    } catch (error) {
-      const stopped = stepFailure(budget)
-      if (stopped !== undefined) return { kind: 'failed', reason: stopped }
-      // A non-zero exit still carries the CLI's JSON error envelope on stdout.
-      const out = recordOf(error)?.['stdout']
-      if (typeof out !== 'string') return { kind: 'failed', reason: 'link-unresolved' }
-      stdout = out
+  /** The topic reader's injected runner: the same envelope runner as every other platform read. */
+  const topicRunner = async (args: readonly string[], signal?: AbortSignal): Promise<TopicRunnerResult> => {
+    const result = await runLarkEnvelope(runner, binary, petCliArgs(args), {
+      signal: signal ?? new AbortController().signal,
+      timeoutMs,
+    })
+    if (result.kind === 'ok') return { ok: true, envelope: result.envelope }
+    return { ok: false, ...(result.platformCode === undefined ? {} : { code: String(result.platformCode) }), detail: result.reason }
+  }
+
+  /** Units of the messages of one topic page: head (marked when it is the linked one), text, media. */
+  const topicUnits = async (messages: readonly TopicMessage[], topic: TopicState, signal: AbortSignal): Promise<PlanUnit[]> => {
+    const units: PlanUnit[] = []
+    for (const message of messages) {
+      const fields = {
+        messageId: message.messageId,
+        msgType: message.msgType,
+        sender: message.senderName,
+        time: message.createTime === '' ? undefined : message.createTime,
+        position: String(message.position),
+        thread: topic.threadId,
+        source: topic.sourceName,
+        linked: message.linked ? 'true' : undefined,
+      }
+      if (message.deleted) {
+        units.push(headUnit(message.messageId, fields), metadataNote(`${message.messageId}#n0`, 'deleted'))
+        continue
+      }
+      if (message.msgType === 'merge_forward') {
+        // A merge-forward item is a root of its own: expanded with its own id.
+        try {
+          units.push(...(await buildPlan(message.messageId, topic.chatId, signal, fields)).units)
+        } catch (error) {
+          if (error instanceof PlanError && error.reason === 'aborted') throw error
+          units.push(headUnit(message.messageId, fields), {
+            kind: 'fail', id: `container@${message.messageId}`, reason: error instanceof PlanError ? error.reason : 'envelope-invalid',
+          })
+        }
+        continue
+      }
+      units.push(headUnit(message.messageId, fields), ...textUnits(message.messageId, message.content))
+      if (message.msgType === 'text') continue
+      if (!CONTENT_TYPES_WITH_RESOURCES.has(message.msgType)) {
+        units.push(...resourceUnits({ id: message.messageId, msgType: message.msgType, chatId: topic.chatId, deleted: false, content: undefined }, message.messageId))
+        continue
+      }
+      // Media items are read raw on their own, and download with their OWN id.
+      try {
+        const raw = await readEnvelope(['api', 'GET', `/open-apis/im/v1/messages/${message.messageId}`, '--as', 'bot'], signal)
+        units.push(...resourceUnits(parseRawContainer(raw, message.messageId, topic.chatId).root, message.messageId))
+      } catch (error) {
+        if (error instanceof PlanError && error.reason === 'aborted') throw error
+        units.push({ kind: 'fail', id: `container@${message.messageId}`, reason: error instanceof PlanError ? error.reason : 'envelope-invalid' })
+      }
     }
-    const envelope = recordOf(parseJsonSuffix(stdout))
-    if (envelope?.['ok'] !== true) {
-      const code = recordOf(envelope?.['error'])?.['code']
-      return { kind: 'failed', reason: code === 99991672 ? 'link-scope-missing' : 'link-unresolved' }
+    return units
+  }
+
+  /** What a download failure means for the advance rule (design D8). */
+  const classifyDownload = (error: unknown): { readonly kind: 'final'; readonly reason: string } | { readonly kind: 'transient'; readonly detail: string } => {
+    const message = error instanceof Error ? error.message : ''
+    if (typeof recordOf(error)?.['platformCode'] === 'number') return { kind: 'final', reason: 'resource-download-failed' }
+    if (message === 'disk-low') return { kind: 'final', reason: 'disk-low' }
+    if (message === 'image-mime-unsupported' || message === 'attachment-count-mismatch') return { kind: 'final', reason: 'image-admission-failed' }
+    if (message === 'download-timeout' || message === 'download-process-failed' || message === 'download-aborted') {
+      return { kind: 'transient', detail: message }
     }
+    return { kind: 'final', reason: 'resource-download-failed' }
+  }
+
+  const failureLine = (failure: LocusPageFailure): string => `- 失败 ${failure.id}: ${failure.reason}`
+
+  interface PageRun {
+    readonly units: readonly PlanUnit[]
+    readonly position: number
+    readonly progress: number
+    readonly attempt: number
+    readonly kind: CursorKind
+    readonly topic?: TopicState
+  }
+  interface PageOutcome {
+    /** The plan after this page: a topic read appends the units of the platform pages it read. */
+    readonly units: readonly PlanUnit[]
+    readonly kind: CursorKind
+    readonly topic?: TopicState
+    readonly parts: LocusMessagePart[]
+    readonly delivered: number
+    readonly failed: LocusPageFailure[]
+    /** Where a continuation resumes; equals `units.length` when the plan is exhausted. */
+    readonly position: number
+    readonly progress: number
+    readonly attempt: number
+    /** True when the page ended before the plan did. */
+    readonly stopped: boolean
+    /** Transient-failure note for the ledger text. */
+    readonly diagnostic?: string
+  }
+
+  /**
+   * Deliver units from the run's position until the plan, the page capacity, the
+   * image quota or the page deadline ends the page. Units and their failure
+   * detail are packed atomically against the FINAL serialized size (design D9).
+   */
+  const runPage = async (run: PageRun, ctx: {
+    readonly wrapper: string
+    readonly caller: AbortSignal
+    readonly deadline: AbortSignal
+    readonly signal: AbortSignal
+    readonly canViewImages: () => Promise<boolean> | boolean
+  }): Promise<PageOutcome> => {
+    let units = run.units
+    let topic = run.topic
+    let kind = run.kind
+    let fetched = 0
+    const parts: LocusMessagePart[] = []
+    const failed: LocusPageFailure[] = []
+    let position = run.position
+    let attempt = run.attempt
+    let delivered = 0
+    let body = 0
+    let failLines = 0
+    let imagesLeft = limits.maxImagesPerMessage
+    let bytesLeft = limits.maxMessageImageBytes
+    let skippedImages = 0
+    let skippedVideos = 0
+    let stopped = false
+    let videoProgress = 0
+    const pageStart = Date.now()
+    let diagnostic: string | undefined
+    let viewable: boolean | undefined
+    const canView = async (): Promise<boolean> => {
+      if (viewable === undefined) {
+        try { viewable = await ctx.canViewImages() } catch { viewable = false }
+      }
+      return viewable
+    }
+    const fits = (need: number): boolean => body + failLines + need + pageReserve + 0 <= pageCapacity
+    const addText = (text: string): void => { parts.push({ type: 'text', text }); body += text.length }
+    const addFailure = (failure: LocusPageFailure): void => { failed.push(failure); failLines += failureLine(failure).length + 1 }
+    const advance = (): void => { position += 1; attempt = 0; videoProgress = 0 }
+
+    for (;;) {
+      if (position >= units.length) {
+        if (topic === undefined || topic.done) break
+        if (ctx.caller.aborted) throw new PlanError('aborted')
+        if (fetched > 0 && ctx.deadline.aborted) { stopped = true; break }
+        if (!fits(SEGMENT_BLOCK_MAX_CHARS + FAILURE_LINE_MAX_CHARS)) { stopped = true; break }
+        // One platform page per CLI call; the reader state travels in the snapshot (design D6).
+        const result = await readTopicPage({
+          runner: topicRunner,
+          threadId: topic.threadId,
+          chatId: topic.chatId,
+          linkedMessageId: topic.linkedMessageId,
+          state: topic.state,
+          signal: ctx.signal,
+        })
+        if (ctx.caller.aborted) throw new PlanError('aborted')
+        fetched += 1
+        if (result.kind === 'retry') {
+          topic = { ...topic, state: result.state }
+          attempt = result.state.attempt
+          diagnostic = `[瞬时失败] 话题列表第 ${String(topic.state.pageIndex)} 页 ${result.diagnostic}，尝试 ${String(attempt)}/${String(MAX_ATTEMPTS)}；`
+            + '用返回的 cursor 续读将重试同一页，同一位置第 3 次失败会结束话题读取。'
+          stopped = true
+          break
+        }
+        if (result.kind === 'fallback') {
+          // The topic cannot be listed at all: read the linked message alone.
+          addFailure(result.failed)
+          units = topic.fallback
+          position = 0
+          attempt = 0
+          videoProgress = 0
+          topic = undefined
+          kind = 'single'
+          continue
+        }
+        if (result.kind === 'stopped') {
+          addFailure(result.failed)
+          topic = { ...topic, done: true }
+          continue
+        }
+        const appended = await topicUnits(result.messages, topic, ctx.signal)
+        units = [...units, ...appended]
+        topic = { ...topic, state: result.state, done: result.done || result.failed !== undefined }
+        if (result.failed !== undefined) addFailure(result.failed)
+        continue
+      }
+      if (ctx.caller.aborted) throw new PlanError('aborted')
+      const unit = units[position]!
+      const progressed = position > run.position
+      if (progressed && ctx.deadline.aborted) { stopped = true; break }
+
+      if (unit.kind === 'head' || unit.kind === 'text' || unit.kind === 'note') {
+        const text = unit.kind === 'head' ? dataBlock(ctx.wrapper, { unit: unit.id, ...unit.fields })
+          : unit.kind === 'text' ? dataBlock(ctx.wrapper, { unit: unit.id, text: unit.text })
+            : unit.text
+        if (!fits(Math.max(text.length, 0))) { stopped = true; break }
+        addText(text)
+        delivered += 1
+        advance()
+        continue
+      }
+      if (unit.kind === 'fail') {
+        if (!fits(FAILURE_LINE_MAX_CHARS)) { stopped = true; break }
+        addFailure({ id: unit.id, reason: unit.reason })
+        advance()
+        continue
+      }
+
+      // Resource units from here on.
+      if (!await canView()) {
+        if (unit.kind === 'video') skippedVideos += 1
+        else if (unit.cover !== true) skippedImages += 1
+        advance()
+        continue
+      }
+      if (unit.kind === 'image') {
+        if (!fits(FAILURE_LINE_MAX_CHARS) || imagesLeft < 1 || bytesLeft < 1) { stopped = true; break }
+        try {
+          const image = await downloadImageBytes({
+            binary, spoolRoot, messageId: unit.downloadId, key: unit.key,
+            maxBytes: Math.min(limits.maxImageBytes, bytesLeft), timeoutMs, signal: ctx.signal, limits,
+            ...spoolGuard,
+          })
+          const refs = await attachments.saveImages([image])
+          if (refs.length !== 1) throw new Error('attachment-count-mismatch')
+          addText(`[图片 ${unit.id}]`)
+          parts.push({ type: 'image', attachment: refs[0]! })
+          imagesLeft -= 1
+          bytesLeft -= image.data.byteLength
+          delivered += 1
+          advance()
+        } catch (error) {
+          if (ctx.caller.aborted) throw new PlanError('aborted')
+          const outcome = classifyDownload(error)
+          if (ctx.deadline.aborted && progressed) { stopped = true; break }
+          if (outcome.kind === 'final') {
+            addFailure({ id: unit.id, reason: outcome.reason })
+            advance()
+            continue
+          }
+          if (attempt + 1 >= MAX_ATTEMPTS) {
+            addFailure({ id: unit.id, reason: `transient(${ctx.deadline.aborted ? 'page-deadline' : outcome.detail})` })
+            advance()
+            continue
+          }
+          attempt += 1
+          diagnostic = `[瞬时失败] ${unit.id} 第 ${String(attempt)} 次失败（${ctx.deadline.aborted ? 'page-deadline' : outcome.detail}），尝试 ${String(attempt)}/${String(MAX_ATTEMPTS)}；`
+            + '用返回的 cursor 续读将重试同一位置，同一位置第 3 次失败会跳过该单元。'
+          stopped = true
+          break
+        }
+        continue
+      }
+      // ---- video unit: one decode window per page, resumed from the whole second `k` ----
+      const tools = input.frameTools
+      if (tools === undefined) {
+        addText(skipNote('frame-tools-unavailable'))
+        delivered += 1
+        advance()
+        continue
+      }
+      const startSecond = position === run.position ? run.progress : 0
+      const frameQuota = Math.min(video.maxFrames, imagesLeft)
+      if (frameQuota < 1 || bytesLeft < 1 || !fits(VIDEO_UNIT_BASE_CHARS + frameQuota * FRAME_LINE_CHARS)) { stopped = true; break }
+      let extraction: SecondFrameExtraction
+      try {
+        // The download may use whatever is left of THIS page's time; there is no separate CLI timeout.
+        extraction = await withSpoolDownload({
+          binary,
+          spoolRoot,
+          args: petCliArgs([
+            'im', '+messages-resources-download', '--as', 'bot', '--message-id', unit.downloadId,
+            '--file-key', unit.fileKey, '--type', 'file', '--format', 'json',
+          ]),
+          maxBytes: Number.MAX_SAFE_INTEGER,
+          timeoutMs: Math.max(1, pageDeadlineMs - (Date.now() - pageStart)),
+          signal: ctx.signal,
+          ...spoolGuard,
+        }, (file, phaseSignal) => extractSecondFrames({
+          tools,
+          dir: file.dir,
+          fileName: file.name,
+          fromSecond: startSecond,
+          maxFrames: frameQuota,
+          maxFrameBytes: Math.min(limits.maxImageBytes, bytesLeft),
+          signal: phaseSignal,
+          limits: video,
+        }))
+      } catch (error) {
+        if (ctx.caller.aborted) throw new PlanError('aborted')
+        const message = error instanceof Error ? error.message : ''
+        const timedOut = ctx.deadline.aborted || message === 'download-timeout'
+        if (timedOut) {
+          // Earlier deliveries on this page: the video waits for the next page. Otherwise no
+          // page can ever fit it — a terminal skip, so the cursor always moves forward.
+          if (delivered > 0) { stopped = true; break }
+          addFailure({ id: unit.id, reason: 'video-download-exceeds-window' })
+          advance()
+          continue
+        }
+        const outcome = classifyDownload(error)
+        if (outcome.kind === 'final') {
+          addFailure({ id: unit.id, reason: outcome.reason === 'resource-download-failed' ? 'video-download-failed' : outcome.reason })
+          advance()
+          continue
+        }
+        if (attempt + 1 >= MAX_ATTEMPTS) {
+          addFailure({ id: unit.id, reason: `transient(${outcome.detail})` })
+          advance()
+          continue
+        }
+        attempt += 1
+        diagnostic = `[瞬时失败] ${unit.id} 第 ${String(attempt)} 次失败（${outcome.detail}），尝试 ${String(attempt)}/${String(MAX_ATTEMPTS)}；`
+          + '用返回的 cursor 续读将重试同一位置，同一位置第 3 次失败会跳过该单元。'
+        stopped = true
+        break
+      }
+      if (extraction.kind === 'skipped') {
+        if (extraction.reason === 'aborted') {
+          if (ctx.caller.aborted) throw new PlanError('aborted')
+          if (delivered > 0) { stopped = true; break }
+          addFailure({ id: unit.id, reason: 'video-download-exceeds-window' })
+        } else {
+          addFailure({ id: unit.id, reason: extraction.reason })
+        }
+        advance()
+        continue
+      }
+      if (extraction.frames.length === 0) {
+        if (!extraction.complete) addFailure({ id: unit.id, reason: 'frame-extraction-failed' })
+        advance()
+        continue
+      }
+      addText(secondFramesNote(extraction.durationSeconds, startSecond, extraction.nextK))
+      for (const frame of extraction.frames) {
+        if ('failed' in frame) { addFailure({ id: `${unit.id}@${String(frame.k)}`, reason: frame.failed }); continue }
+        const mediaType = detectImageMediaType(frame.data)
+        if (mediaType === undefined || !limits.mediaTypes.includes(mediaType) || frame.data.byteLength > bytesLeft) {
+          addFailure({ id: `${unit.id}@${String(frame.k)}`, reason: 'frame-admission-failed' })
+          continue
+        }
+        try {
+          const refs = await attachments.saveImages([{ data: frame.data, mediaType }])
+          if (refs.length !== 1) throw new Error('attachment-count-mismatch')
+          addText(`[t=${formatTime(frame.timeSeconds)}]`)
+          parts.push({ type: 'image', attachment: refs[0]! })
+          imagesLeft -= 1
+          bytesLeft -= frame.data.byteLength
+        } catch {
+          addFailure({ id: `${unit.id}@${String(frame.k)}`, reason: 'frame-admission-failed' })
+        }
+      }
+      delivered += 1
+      if (extraction.complete) {
+        advance()
+      } else {
+        // The window ended before the video did: resume at the next whole second.
+        videoProgress = extraction.nextK
+        attempt = 0
+        stopped = true
+        break
+      }
+    }
+    if (skippedImages + skippedVideos > 0) addText(describeSkippedMedia(skippedImages, skippedVideos))
+    return { units, kind, ...(topic === undefined ? {} : { topic }), parts, delivered, failed, position, progress: videoProgress, attempt, stopped, ...(diagnostic === undefined ? {} : { diagnostic }) }
+  }
+
+  /** The ledger text of one page; its size is covered by the fixed reserve. */
+  const ledgerText = (outcome: PageOutcome, cumulativeFailed: number, cursor: string | undefined): string => {
+    const complete = cursor === undefined && cumulativeFailed === 0
+    return [
+      `[读取账本] 本页交付 ${String(outcome.delivered)} 个单元；本页新记失败 ${String(outcome.failed.length)} 项；累计失败 ${String(cumulativeFailed)} 项。`,
+      ...outcome.failed.map(failureLine),
+      ...(outcome.diagnostic === undefined ? [] : [outcome.diagnostic]),
+      cursor !== undefined
+        ? `[续读] 后面还有内容：用同一工具传入 cursor=${cursor} 继续读完；读完之前不得声称已读完。`
+        : complete
+          ? '[读完] 全部单元已交付，无失败项。'
+          : '[读取已结束] 没有后续内容，但存在失败项（见上）；如实说明未读到的部分，不得声称已读完全部内容。',
+    ].join('\n')
+  }
+
+  /** Map a read failure to the port vocabulary; anything unknown is rethrown. */
+  const failedPage = (error: unknown): LocusPageResult => {
+    if (error instanceof PlanError) {
+      return {
+        kind: 'failed',
+        reason: error.reason,
+        ...(error.detail === undefined ? {} : { detail: error.detail }),
+        ...(error.platformCode === undefined ? {} : { platformCode: error.platformCode }),
+        ...(error.bytes === undefined ? {} : { bytes: error.bytes }),
+      }
+    }
+    throw error
+  }
+
+  /**
+   * A failure BEFORE a plan exists. A transient platform error (timeout, crashed
+   * CLI, page deadline) is a ledger result — no cursor, the call can be repeated
+   * as is; every other failure is a deterministic refusal.
+   */
+  const planFailure = (error: unknown, messageId: string, caller: AbortSignal): LocusPageResult => {
+    if (error instanceof PlanError && !caller.aborted) {
+      const transient = (error.reason === 'platform-read-failed' && error.platformCode === undefined) || error.reason === 'aborted'
+      if (transient) {
+        const detail = error.reason === 'aborted' ? 'page-deadline' : (error.detail ?? 'platform-read-failed')
+        const failure: LocusPageFailure = { id: error.step ?? `container@${messageId}`, reason: `transient(${detail})` }
+        return {
+          kind: 'ok',
+          complete: false,
+          delivered: 0,
+          failed: [failure],
+          parts: [{
+            type: 'text',
+            text: `[读取未建立] ${failure.id} 瞬时失败（${detail}），未读到任何内容、没有 cursor；可原样重发同一调用。\n${failureLine(failure)}`,
+          }],
+        }
+      }
+    }
+    return failedPage(error)
+  }
+
+
+  /** Facts a link read carries from its first call into every continuation. */
+  interface LinkMeta { readonly linkIndex: number; readonly linkCount: number; readonly source: { readonly chatId: string; readonly name?: string } }
+
+  /** The links of the carrier message, proven to be in the entrance chat. */
+  const readCarrierLinks = async (messageId: string, chatId: string, signal: AbortSignal): Promise<readonly string[]> => {
+    const envelope = await readEnvelope(['api', 'GET', `/open-apis/im/v1/messages/${messageId}`, '--as', 'bot'], signal, `container@${messageId}`)
+    const items = recordOf(envelope['data'])?.['items']
+    if (!Array.isArray(items) || items.length === 0) throw new PlanError('envelope-invalid')
+    const carrier = treeNode(items[0])
+    if (carrier.id !== messageId) throw new PlanError('message-mismatch')
+    if (carrier.chatId !== chatId) throw new PlanError('chat-mismatch')
+    if (carrier.deleted) throw new PlanError('message-deleted')
+    return extractMessageLinksFromRaw(carrier.msgType, typeof carrier.content === 'string' ? carrier.content : '')
+  }
+
+  /** `message_links/query`: authorization, the root id and the chat facts; never the content. */
+  const resolveLinkRoot = async (url: string, messageId: string, signal: AbortSignal): Promise<{
+    readonly rootId: string
+    readonly chatId: string
+    readonly name?: string
+  }> => {
+    const envelope = await readEnvelope([
+      'api', 'POST', '/open-apis/im/v1/message_links/query', '--as', 'bot', '--data', JSON.stringify({ message_link_url: url }),
+    ], signal, `link-query@${messageId}`, code => (code === 99991672
+      ? new PlanError('link-scope-missing', undefined, code)
+      : new PlanError('link-unresolved', undefined, code)))
     const data = recordOf(envelope['data'])
     const chatInfo = recordOf(data?.['chat_info'])
-    if (chatInfo?.['is_authorized'] !== true) return { kind: 'failed', reason: 'link-unauthorized' }
+    if (chatInfo?.['is_authorized'] !== true) throw new PlanError('link-unauthorized')
     const chatId = chatInfo['chat_id']
     const messages = data?.['messages']
-    if (typeof chatId !== 'string' || !/^oc_[A-Za-z0-9_-]{1,128}$/.test(chatId)) return { kind: 'failed', reason: 'link-unresolved' }
-    if (!Array.isArray(messages) || messages.length !== 1) return { kind: 'failed', reason: 'link-unresolved' }
-    const snapshot = recordOf(recordOf(messages[0])?.['message'])
-    const messageId = snapshot?.['message_id']
-    if (typeof messageId !== 'string' || !MESSAGE_ID_PATTERN.test(messageId) || snapshot?.['chat_id'] !== chatId) {
-      return { kind: 'failed', reason: 'link-unresolved' }
+    const rootId = Array.isArray(messages) ? recordOf(recordOf(messages[0])?.['message'])?.['message_id'] : undefined
+    if (typeof chatId !== 'string' || !/^oc_[A-Za-z0-9_-]{1,128}$/.test(chatId)) throw new PlanError('link-unresolved')
+    if (typeof rootId !== 'string' || !MESSAGE_ID_PATTERN.test(rootId)) throw new PlanError('link-unresolved')
+    const name = typeof chatInfo['name'] === 'string' ? labelOf(chatInfo['name'], LINK_SOURCE_NAME_CHARS) : undefined
+    return { rootId, chatId, ...(name === undefined || name === '' ? {} : { name }) }
+  }
+
+  /** One page of a plain or linked read; a `cursor` continues from its snapshot only. */
+  const readPaged = async (request: LocusLinkedPageInput, linked: boolean): Promise<LocusPageResult> => {
+    if (!MESSAGE_ID_PATTERN.test(request.messageId) || request.chatId.trim() === '') {
+      return { kind: 'failed', reason: 'invalid-message-id' }
     }
-    const name = typeof chatInfo['name'] === 'string' ? chatInfo['name'] : undefined
-    return { kind: 'ok', chatId, messageId, ...(name === undefined ? {} : { name }) }
+    if (request.linkIndex !== undefined && (!Number.isSafeInteger(request.linkIndex) || request.linkIndex < 1)) {
+      return { kind: 'failed', reason: 'invalid-message-id' }
+    }
+    if (request.signal.aborted) return { kind: 'failed', reason: 'aborted' }
+    const deadline = AbortSignal.timeout(pageDeadlineMs)
+    const signal = AbortSignal.any([request.signal, deadline])
+    let run: PageRun
+    let failedBefore = 0
+    let link: LinkMeta | undefined
+    if (request.cursor !== undefined) {
+      const resolved = cursors.resolve(request.cursor, {
+        caller: request.caller,
+        messageId: request.messageId,
+        ...(linked && request.linkIndex !== undefined ? { linkIndex: request.linkIndex } : {}),
+      })
+      if (resolved.kind === 'failed') return { kind: 'failed', reason: resolved.reason }
+      const snapshot = resolved.snapshot
+      // A cursor belongs to the tool that issued it.
+      if ((snapshot.link !== undefined) !== linked) return { kind: 'failed', reason: 'cursor-mismatch' }
+      run = {
+        units: snapshot.units as readonly PlanUnit[],
+        position: snapshot.position,
+        progress: snapshot.progress ?? 0,
+        attempt: snapshot.attempt,
+        kind: snapshot.kind,
+        ...(snapshot.topic === undefined ? {} : { topic: snapshot.topic as TopicState }),
+      }
+      failedBefore = snapshot.failedCount
+      if (snapshot.link !== undefined && snapshot.linkIndex !== undefined) link = { linkIndex: snapshot.linkIndex, ...snapshot.link }
+    } else {
+      try {
+        if (linked) {
+          const index = request.linkIndex ?? 1
+          const links = await readCarrierLinks(request.messageId, request.chatId, signal)
+          const url = links[index - 1]
+          if (url === undefined) throw new PlanError('link-not-found')
+          const root = await resolveLinkRoot(url, request.messageId, signal)
+          let plan: Awaited<ReturnType<typeof buildPlan>>
+          try {
+            plan = await buildPlan(root.rootId, root.chatId, signal, { source: root.name })
+          } catch (error) {
+            throw error instanceof PlanError && error.reason === 'chat-mismatch' ? new PlanError('link-mismatch') : error
+          }
+          run = plan.threadId === undefined
+            ? { units: plan.units, position: 0, progress: 0, attempt: 0, kind: plan.kind }
+            : {
+              // A link into a topic reads the whole topic; the root plan is its fallback.
+              units: [],
+              position: 0,
+              progress: 0,
+              attempt: 0,
+              kind: 'topic',
+              topic: {
+                state: initialTopicState,
+                threadId: plan.threadId,
+                chatId: root.chatId,
+                linkedMessageId: root.rootId,
+                ...(root.name === undefined ? {} : { sourceName: root.name }),
+                fallback: plan.units,
+                done: false,
+              },
+            }
+          link = { linkIndex: index, linkCount: links.length, source: { chatId: root.chatId, ...(root.name === undefined ? {} : { name: root.name }) } }
+        } else {
+          const plan = await buildPlan(request.messageId, request.chatId, signal)
+          run = { units: plan.units, position: 0, progress: 0, attempt: 0, kind: plan.kind }
+        }
+      } catch (error) {
+        return planFailure(error, request.messageId, request.signal)
+      }
+    }
+    let outcome: PageOutcome
+    try {
+      outcome = await runPage(run, {
+        wrapper: linked ? 'linked-message' : 'message-body',
+        caller: request.signal,
+        deadline,
+        signal,
+        canViewImages: request.canViewImages,
+      })
+    } catch (error) {
+      return failedPage(error)
+    }
+    if (request.isCurrent !== undefined && !request.isCurrent()) return { kind: 'failed', reason: 'caller-changed' }
+    const failedCount = failedBefore + outcome.failed.length
+    const cursor = outcome.stopped
+      ? cursors.issue({
+        caller: request.caller,
+        containerId: request.messageId,
+        ...(link === undefined ? {} : { linkIndex: link.linkIndex, link: { linkCount: link.linkCount, source: link.source } }),
+        kind: outcome.kind,
+        ...(outcome.topic === undefined ? {} : { topic: outcome.topic }),
+        units: outcome.units,
+        position: outcome.position,
+        progress: outcome.progress,
+        attempt: outcome.attempt,
+        failedCount,
+      })
+      : undefined
+    return {
+      kind: 'ok',
+      complete: cursor === undefined && failedCount === 0,
+      delivered: outcome.delivered,
+      failed: outcome.failed,
+      ...(cursor === undefined ? {} : { cursor }),
+      parts: [...outcome.parts, { type: 'text', text: ledgerText(outcome, failedCount, cursor) }],
+      ...(link === undefined ? {} : { source: link.source, linkIndex: link.linkIndex, linkCount: link.linkCount }),
+    }
   }
 
   return {
     available: true,
-    async readMessage(request) {
-      const read = await readOne({
-        messageId: request.messageId,
-        expectedChat: request.chatId,
-        budget: createCallBudget(request.signal, callLimits),
-        canViewImages: request.canViewImages,
-      })
-      return read.kind === 'ok' ? { kind: 'ok', message: read.message, media: read.media } : read
-    },
-    async readLinkedMessage(request) {
-      if (!Number.isSafeInteger(request.linkIndex) || request.linkIndex < 1) return { kind: 'failed', reason: 'invalid-message-id' }
-      // One budget for the whole call: carrier read, resolution, target read and its media.
-      const budget = createCallBudget(request.signal, callLimits)
-      // The carrier is read WITHOUT media: only its chat and its raw links matter here.
-      const carrier = await readOne({
-        messageId: request.messageId, expectedChat: request.chatId, budget, canViewImages: () => false,
-      })
-      if (carrier.kind === 'failed') return carrier
-      const url = carrier.links[request.linkIndex - 1]
-      if (url === undefined) return { kind: 'failed', reason: 'link-not-found' }
-      const resolved = await resolveLink(url, budget)
-      if (resolved.kind === 'failed') return resolved
-      const target = await readOne({
-        messageId: resolved.messageId, expectedChat: resolved.chatId, budget, canViewImages: request.canViewImages,
-      })
-      if (target.kind === 'failed') return { kind: 'failed', reason: target.reason === 'chat-mismatch' ? 'link-mismatch' : target.reason }
-      return {
-        kind: 'ok',
-        message: target.message,
-        media: target.media,
-        source: { chatId: resolved.chatId, ...(resolved.name === undefined ? {} : { name: resolved.name }) },
-        linkIndex: request.linkIndex,
-        linkCount: carrier.links.length,
-      }
-    },
+    readMessagePage: request => readPaged(request, false),
+    readLinkedPage: request => readPaged(request, true),
     async admitCurrentImage(request) {
       if (request.signal.aborted) return { kind: 'unavailable', reason: 'aborted', content: [] }
       let parsed: ParsedMessageResources

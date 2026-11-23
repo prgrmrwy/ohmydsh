@@ -108,12 +108,12 @@ if (key.includes('grow')) {
 /** What the fake `ffprobe` and `ffmpeg` do; written to `config.json` per test. */
 export interface FakeFrameConfig {
   readonly probe?:
-    | { readonly formatName: string; readonly duration: string }
+    | { readonly formatName: string; readonly duration: string; readonly startTime?: string }
     | { readonly fail: true }
     | { readonly garbage: true }
     | { readonly hang: true }
   readonly ffmpeg?: {
-    /** Frames to write as `f_01.jpg`…; each time is what showinfo reports. */
+    /** Frames to write as `f_01.jpg` (legacy `%02d`) or `f_000001.jpg` (`%06d`); each time is what showinfo reports. */
     readonly frames: readonly number[]
     /** How the stderr bookkeeping behaves. */
     readonly stderr?: 'ok' | 'missing' | 'extra-line' | 'missing-line' | 'unparseable' | 'non-monotonic'
@@ -125,6 +125,17 @@ export interface FakeFrameConfig {
     readonly frameBytes?: number
     /** Skew `n:` numbering so it is not contiguous from 0. */
     readonly nonContiguousN?: boolean
+    /** 0-based slots whose file is NOT written although the record is printed. */
+    readonly missingFiles?: readonly number[]
+    /** 0-based slots whose file is written empty. */
+    readonly emptyFiles?: readonly number[]
+    /** 0-based slots whose file is `bigFrameBytes` long (default 8000) — over a small per-frame ceiling. */
+    readonly bigFrames?: readonly number[]
+    readonly bigFrameBytes?: number
+    /** Print only this many records / write only this many files, then hang (to be killed by the Host). */
+    readonly hangAfter?: { readonly records: number; readonly files: number }
+    /** Seek-past-the-end shape: no records, no files, the real "no packets" line, exit 234. */
+    readonly noPackets?: boolean
   }
 }
 
@@ -170,7 +181,10 @@ const probe = config.probe
 if (probe?.hang) hang()
 else if (probe?.fail) process.exit(1)
 else if (probe?.garbage) process.stdout.write('not json')
-else process.stdout.write(JSON.stringify({ format: { format_name: probe.formatName, duration: probe.duration } }))
+else process.stdout.write(JSON.stringify({
+  ...(probe.startTime === undefined ? {} : { streams: [{ start_time: probe.startTime }] }),
+  format: { format_name: probe.formatName, duration: probe.duration },
+}))
 `, { mode: 0o700 })
   await writeFile(ffmpeg, `#!/usr/bin/env node
 ${shared}
@@ -182,13 +196,20 @@ requireArg('-loglevel', 'info')
 const input = argv[argv.indexOf('-i') + 1]
 if (typeof input !== 'string' || !input.startsWith('./')) process.exit(98)
 const out = argv.at(-1)
-if (!/^\\.\\/f_%02d\\.jpg$/.test(out)) process.exit(99)
+const six = /^\\.\\/f_%06d\\.jpg$/.test(out)
+if (!six && !/^\\.\\/f_%02d\\.jpg$/.test(out)) process.exit(99)
+if (six) requireArg('-copyts')
 const limit = Number(argv[argv.indexOf('-frames:v') + 1])
 const spec = config.ffmpeg
+if (spec.noPackets) {
+  process.stderr.write('[out#0/image2 @ 0x1] Nothing was written into output file, because at least one of its streams received no packets.\\n')
+  process.exit(234)
+}
 if (spec.hang) { hang() } else {
   const frames = spec.frames.slice(0, limit)
+  const printed = spec.hangAfter ? frames.slice(0, spec.hangAfter.records) : frames
   const lines = []
-  frames.forEach((time, index) => {
+  printed.forEach((time, index) => {
     const n = spec.nonContiguousN ? index * 2 : index
     lines.push('[Parsed_showinfo_2 @ 0x600001234000] n:' + String(n).padStart(4) + ' pts:' + String(Math.round(time * 1000)).padStart(8) + ' pts_time:' + (spec.stderr === 'unparseable' ? 'N/A' : String(time)) + '       duration:1 duration_time:0.04 fmt:yuv420p')
   })
@@ -197,12 +218,17 @@ if (spec.hang) { hang() } else {
   if (spec.stderr === 'non-monotonic' && lines.length > 1) lines.reverse()
   process.stderr.write('ffmpeg version fake\\nInput #0, mov,mp4\\n')
   if (spec.stderr !== 'missing') for (const line of lines) process.stderr.write(line + '\\n')
-  frames.forEach((_time, index) => {
-    const name = 'f_' + String(index + 1).padStart(2, '0') + '.jpg'
-    const head = spec.badFrameBytes ? [1, 2, 3] : [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, index + 1]
-    writeFileSync(name, Buffer.concat([Buffer.from(head), Buffer.alloc(spec.frameBytes ?? 0, 7)]))
+  const written = spec.hangAfter ? frames.slice(0, spec.hangAfter.files) : frames
+  written.forEach((_time, index) => {
+    if (spec.missingFiles?.includes(index)) return
+    const name = 'f_' + String(index + 1).padStart(six ? 6 : 2, '0') + '.jpg'
+    if (spec.emptyFiles?.includes(index)) { writeFileSync(name, Buffer.alloc(0)); return }
+    const head = spec.badFrameBytes ? [1, 2, 3] : [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, (index + 1) & 0xff]
+    const extra = spec.bigFrames?.includes(index) ? (spec.bigFrameBytes ?? 8000) : (spec.frameBytes ?? 0)
+    writeFileSync(name, Buffer.concat([Buffer.from(head), Buffer.alloc(extra, 7)]))
   })
-  process.exit(spec.exit ?? 0)
+  if (spec.hangAfter) hang()
+  else process.exit(spec.exit ?? 0)
 }
 `, { mode: 0o700 })
   await chmod(ffprobe, 0o700)

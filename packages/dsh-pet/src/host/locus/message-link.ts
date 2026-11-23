@@ -10,7 +10,7 @@
  * - parsed with WHATWG `URL`, never matched by path shape alone;
  * - `https:` only, no userinfo, hostname exactly in the allowlist;
  * - pathname exactly `/client/message/link/open`, exactly one non-empty `token`;
- * - deduplicated by normalized href, in order of first appearance, at most 10.
+ * - deduplicated by normalized href, in order of first appearance, no count cap.
  *
  * Discovery is only a hint: authorization is re-proven from the raw body at
  * call time.
@@ -18,9 +18,6 @@
 
 /** Hosts the measured links use (Feishu brand). */
 export const DEFAULT_MESSAGE_LINK_HOSTS: readonly string[] = ['applink.feishu.cn', 'applink.larkoffice.com']
-
-/** At most this many links are numbered per message. */
-export const MAX_MESSAGE_LINKS = 10
 
 const MESSAGE_LINK_PATH = '/client/message/link/open'
 
@@ -59,7 +56,6 @@ function collect(candidates: readonly string[], hosts: readonly string[]): strin
     const link = normalizeMessageLink(candidate, hosts)
     if (link === undefined || links.includes(link)) continue
     links.push(link)
-    if (links.length >= MAX_MESSAGE_LINKS) break
   }
   return links
 }

@@ -869,3 +869,15 @@ change `locus-read-message-media`（2026-11-11）。前三条在规划评审或�
 
 - 工具 `output.schema` 里变长的「文字 + 图片」列表用 `{ type: 'json' }` 承载，值必须是**纯 JSON**（`attachmentId` 要从品牌类型转成字符串）；`render` 再把它还原成 `{ type: 'image', attachment }` block。该值会被持久化并可能在之后重新渲染，不能持有品牌或类实例字段。`locus-message-tool-runtime.test.ts` 经真实 `ToolRuntime` 执行成功、失败、图片三种返回，防止「声明了字段但 schema 拒收」整体变成 `INVALID_TOOL_OUTPUT`。
 - 新增 Pet 注册的工具必须同时：加入 `LOCUS_CALLER_BOUND_TOOLS`（否则发布期 attestation 判为泄漏）、按入口类型只给对的子会话（文档入口不装配 IM 工具）、并修订 `executor-scope.test.ts` 里的注册计数守卫——那条守卫就是为「不经说明地多注册一个工具」设计的。
+
+## 17. 消息链接与合并转发：快照、根 id、少一层、失败信封与话题计数的五个坑
+
+change `locus-read-referenced-chats`（2026-11-21 平台探针，lark-cli 1.0.97，bot 身份）。每一条都是「调用成功、结果看似正确、实际不完整或不可下载」的情形；本节以实测为准，复用前用同一 profile 重跑探针。
+
+1. **消息链接快照里的资源 key 不能下载。** `POST /open-apis/im/v1/message_links/query` 返回的 `messages[].message.body` 是复制时刻的快照，其 `image_key`/`file_key` 与原消息不同；拿快照 key 配原 `message_id` 下载报 `234003 File not in msg`。正确链路是：取快照的 `message_id`，再做一次原始读取 `GET /open-apis/im/v1/messages/<id>`，用原始 body 里的 key 下载。
+2. **合并转发里只有根 id 能读与下载。** 嵌套合并转发的原始读取一次返回全部层级（无分页），`upper_message_id` 指向直接父。中间层与叶子 id 下载得 `234003`，对它们做原始读取得 `230002`。因此所有子资源都以**根**的 `message_id` 下载；按子消息 id 重试没有意义，也不能「换 id 猜」。
+3. **`message_links/query` 比原始读取少一层。** 对嵌套合并转发，query 的 `messages` 树只到第二层（实测 26 节点，原始读取 29 节点）。query 只用来确定根 id 与 `chat_info`，结构与子消息以原始读取为准；拿 query 的子树做完整性判断会漏掉最深一层。
+4. **lark-cli 的失败信封在 stderr，stdout 为空。** `10077`、`99992354`、`99991672` 等错误都是这样出现的：进程非零退出，stdout 为空，JSON 信封在 stderr。只读 stdout 会把这些失败误判为「空结果」。解析顺序是：先 stdout，为空或不可解析再读 stderr，取最后一个可解析的 JSON 文档；测试夹具必须同时覆盖两种形态。
+5. **话题列表的 `total` 是本页的条数，不是话题总数。** `+threads-messages-list` 的 `total` 只计本次返回的页内项；分页要以 `has_more` 与 `page_token` 为准，读到 `has_more` 为 `false` 才算读完。把 `total` 当作总量会在第一页就停止。
+
+相关：权限点 `im:message.message_link:read` 需在应用后台申请，缺失时 query 返回 `99991672`，应映射为 `link-scope-missing`，不要当作普通失败重试。

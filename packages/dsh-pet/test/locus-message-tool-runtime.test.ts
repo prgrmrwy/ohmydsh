@@ -330,10 +330,42 @@ describe('pet_locus_message in the real tool runtime', () => {
 
     expect(ok.isError).not.toBe(true)
     const blocks = ok.content ?? []
-    expect(blocks.map(block => block.type)).toEqual(['text', 'image'])
-    expect(blocks[0]!.text).toContain('夹具正文')
-    expect(blocks[1]!.attachment?.attachmentId).toBe('att-0')
+    // Paged output: Host text blocks (head, body segment, ledger) then the image block.
+    expect(blocks.map(block => block.type)).toContain('image')
+    expect(blocks.filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')).toContain('夹具正文')
+    expect(blocks.find(block => block.type === 'image')?.attachment?.attachmentId).toBe('att-0')
     expect(JSON.stringify(blocks)).not.toContain('INVALID_TOOL_OUTPUT')
+  })
+
+  it('a paged ledger with cursor, failures and a continuation is schema-valid through the runtime', async () => {
+    harness = await openPetHarness()
+    const ctx = await hostContext()
+    const key = { id: CHILD } as never
+    const { deps } = await messageDeps()
+    // A port that answers page one with a cursor and one failed unit (test-plan R10: output.schema declares the ledger).
+    const paged = {
+      ...deps,
+      media: {
+        available: true,
+        readMessagePage: async () => ({
+          kind: 'ok', complete: false, delivered: 1,
+          failed: [{ id: 'om_x#r1', reason: 'content-unparseable' }],
+          cursor: 'cursor-runtime-1',
+          parts: [{ type: 'text', text: 'page one body' }],
+        }),
+      },
+    }
+    await install(createScope(ctx, key).ctx, harness.repository, { locusMessage: paged as never })
+    const result = await runTool(ctx, {
+      agent: key, name: PET_LOCUS_MESSAGE_TOOL, callId: 'message-paged' as never,
+      arguments: { messageId: FIXTURE_IDS.postImage }, signal: new AbortController().signal,
+    }) as unknown as { content?: readonly { type: string; text?: string }[]; isError?: boolean }
+    expect(result.isError).not.toBe(true)
+    const text = (result.content ?? []).map(block => block.text ?? '').join('\n')
+    expect(text).not.toContain('INVALID_TOOL_OUTPUT')
+    expect(text).toContain('page one body')
+    expect(text).toContain('cursor-runtime-1')
+    expect(text).toContain('未读完')
   })
 
   it('executes through the runtime: failures and refused arguments are schema-valid too', async () => {
@@ -368,7 +400,7 @@ describe('pet_locus_message in the real tool runtime', () => {
       agent: key, name: PET_LOCUS_MESSAGE_TOOL, callId: 'message-text' as never,
       arguments: { messageId: FIXTURE_IDS.postImage }, signal: new AbortController().signal,
     }) as unknown as { content?: readonly { type: string; text?: string }[] }
-    expect((result.content ?? []).map(block => block.type)).toEqual(['text', 'text'])
+    expect((result.content ?? []).every(block => block.type === 'text')).toBe(true)
     expect(JSON.stringify(result.content)).toContain('当前模型无法查看图片')
     expect(saveImages).not.toHaveBeenCalled()
     expect(await cli!.calls()).toEqual([])

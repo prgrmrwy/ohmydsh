@@ -475,7 +475,7 @@ describe('locus-read-message-media prompt guidance', () => {
     }
   })
 
-  it('link in trigger message points to pet_locus_linked_message with trigger id', () => {
+  it('link in trigger message points to pet_locus_linked_message with trigger id and mentions cursor continuation', () => {
     // spec Scenario "触发消息含链接时指向链接工具".
     for (const position of ['first', 'subsequent'] as const) {
       const prompt = renderLocusDeliveryPrompt(withLinkTrigger(), { position })
@@ -483,6 +483,8 @@ describe('locus-read-message-media prompt guidance', () => {
       expect(line, position).toBeDefined()
       expect(line, position).toContain('`pet_locus_linked_message`')
       expect(line, position).toContain('om_trigger-7')
+      expect(line, position).toContain('cursor')
+      expect(line, position).toContain('续读')
     }
     // No link in the trigger → no such line.
     for (const position of ['first', 'subsequent'] as const) {

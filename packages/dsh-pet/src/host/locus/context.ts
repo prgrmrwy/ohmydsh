@@ -326,7 +326,7 @@ function messageLinkLines(context: LocusDeliveryContext): string[] {
   // Discovery only (the same definition the tool re-proves from the raw body at call time).
   const links = extractMessageLinksFromText(context.request.text)
   const trigger = links.length === 0 ? [] : published
-    ? [`- 当前请求含 ${String(links.length)} 个飞书消息链接；需要时调用 \`${LOCUS_LINKED_MESSAGE_TOOL_NAME}\` 读取（messageId：${factValue(context.request.messageId)}${links.length > 1 ? `，linkIndex 1–${String(links.length)}` : ''}）。`]
+    ? [`- 当前请求含 ${String(links.length)} 个飞书消息链接；需要时调用 \`${LOCUS_LINKED_MESSAGE_TOOL_NAME}\` 读取（messageId：${factValue(context.request.messageId)}${links.length > 1 ? `，linkIndex 1–${String(links.length)}` : ''}）；返回 cursor 时用同一 messageId（及 linkIndex）与 cursor 续读，未读完不得声称已读完。`]
     : ['- 当前请求含飞书消息链接，其内容当前无法读取。']
   return [...trigger, `- ${published ? MESSAGE_LINK_GUIDANCE : MESSAGE_LINK_GUIDANCE_WITHOUT_TOOL}`]
 }

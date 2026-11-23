@@ -1,155 +1,86 @@
 /**
- * Merge-forward expansion in `pet_locus_message`'s port read
- * (change `locus-read-referenced-chats`, requirement 「合并转发按子消息展开」).
+ * Merge-forward text and video through the paged port read
+ * (change `locus-read-referenced-chats`, tasks 4.x; R1 last row, R8 first row).
  *
- * Envelopes are the redacted shapes measured 2026-11-13
- * (`fixtures/lark-merge-forward-envelopes.ts`); downloads go through the fake
- * official CLI into a real spool, frames through the fake ffmpeg/ffprobe.
+ * Replaces the pre-redesign cases that asserted a 30-child cap, node-level mget
+ * alignment and metadata-only nesting (test-plan ⚪ rows, task 1.1).
  */
 
-import { readdirSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createLocusMediaPort, type LarkCliRunner, type LocusMessageReadResult } from '../src/host/channel/media.js'
-import { FIXTURE_CHAT, FIXTURE_IDS, rawApiEnvelope, MGET_TEXT } from './fixtures/lark-message-envelopes.js'
+import { afterEach, describe, expect, it } from 'vitest'
+import { createLocusMediaPort } from '../src/host/channel/media.js'
+import { FIXTURE_CHAT, FIXTURE_IDS, MGET_TEXT, rawApiEnvelope } from './fixtures/lark-message-envelopes.js'
 import {
   MERGE_KEYS,
   MERGE_OUTER_ID,
   childId,
   mergeBlock,
   mgetMergeEnvelope,
-  nestedChild,
   rawMergeEnvelope,
   textChild,
   videoChild,
-  type MergeChild,
 } from './fixtures/lark-merge-forward-envelopes.js'
-import {
-  fakeMediaCli,
-  installFakeFrameTools,
-  type FakeFrameConfig,
-  type FakeFrameTools,
-  type FakeMediaCli,
-} from './support/fake-media-cli.js'
+import { blockText, contentStore, dataBlocks, imagesOf, pageText, pathCli, scriptedRunner, type PathCli } from './locus-media-harness.js'
 
-let cli: FakeMediaCli | undefined
-let tools: FakeFrameTools | undefined
+let cli: PathCli | undefined
 afterEach(async () => {
   if (cli !== undefined) await rm(cli.root, { recursive: true, force: true })
-  if (tools !== undefined) await rm(tools.root, { recursive: true, force: true })
   cli = undefined
-  tools = undefined
 })
 
-function store() {
-  const saveImages = vi.fn(async (items: readonly { data: Uint8Array; mediaType: string }[]) =>
-    items.map((item, index) => ({
-      attachmentId: `att-${String(saveImages.mock.calls.length)}-${String(index)}` as never,
-      mediaType: item.mediaType, bytes: item.data.byteLength, width: 1, height: 1,
-    })))
-  return {
-    saveImages,
-    store: {
-      imageLimits: {
-        maxImageBytes: 4096, maxImagesPerMessage: 8, maxMessageImageBytes: 65_536,
-        maxImagePixels: 1_000_000, maxImageDimension: 1_000, mediaTypes: ['image/png'] as const,
-      },
-      saveImages,
-    } as never,
-  }
-}
-
-async function harness(raw: Record<string, unknown>, mget: Record<string, unknown>, frames?: FakeFrameConfig) {
-  cli = await fakeMediaCli()
-  tools = await installFakeFrameTools()
-  if (frames !== undefined) await tools.configure(frames)
-  const saved = store()
-  const runner = vi.fn<LarkCliRunner>(async (_binary, args) => ({
-    stdout: JSON.stringify(args.includes('+messages-mget') ? mget : raw),
-  }))
+async function harness(raw: Record<string, unknown>, mget: Record<string, unknown>, id = MERGE_OUTER_ID) {
+  cli = await pathCli()
+  const saved = contentStore()
+  const script = scriptedRunner({ raw: { [id]: raw }, mget: { [id]: mget } })
   const port = createLocusMediaPort({
     attachments: saved.store,
     download: { binary: cli.binary, version: '1.0.97', spoolRoot: cli.spool },
-    runner,
-    ...(frames === undefined ? {} : { frameTools: { ffmpeg: tools.ffmpeg, ffprobe: tools.ffprobe } }),
+    runner: script.runner,
   })
-  const read = (messageId = MERGE_OUTER_ID) => port.readMessage({
-    messageId, chatId: FIXTURE_CHAT, signal: new AbortController().signal, canViewImages: async () => true,
+  const read = () => port.readMessagePage({
+    messageId: id, chatId: FIXTURE_CHAT, caller: 'caller-1', signal: new AbortController().signal, canViewImages: async () => true,
   })
-  return { read, runner, cli, saved }
+  return { read, cli, calls: script.calls }
 }
 
-function okOf(result: LocusMessageReadResult) {
-  if (result.kind !== 'ok') throw new Error(`expected ok, got ${result.reason}`)
-  return result
-}
-
-const entriesOf = (children: readonly MergeChild[]) => children.map((child, index) => ({
-  body: child.msgType === 'post' ? `夹具视频说明\n[Media: ${MERGE_KEYS.video}]` : `夹具子消息 ${String(index + 1)}`,
-}))
-
-describe('merge-forward expansion', () => {
-  it('expands merge-forward children and downloads child video via outer id', async () => {
+describe('merge-forward text and resources', () => {
+  it('merge text is the root mget block; child video downloads with the outer id', async () => {
     const children = [textChild(1), videoChild(2), textChild(3)]
-    const h = await harness(
-      rawMergeEnvelope(children),
-      mgetMergeEnvelope(mergeBlock(entriesOf(children))),
-      { probe: { formatName: 'mov,mp4,m4a,3gp,3g2,mj2', duration: '9.7' }, ffmpeg: { frames: [0, 2.5] } },
-    )
-    const result = okOf(await h.read())
-    expect(result.message.msgType).toBe('merge_forward')
-    // All three children, in platform order, with sender and time.
-    for (const text of ['夹具子消息 1', '夹具视频说明', '夹具子消息 3', '夹具用户']) expect(result.message.text).toContain(text)
-    expect(result.message.text.indexOf('夹具子消息 1')).toBeLessThan(result.message.text.indexOf('夹具子消息 3'))
-    // The second child's video: cover plus sampled keyframes.
-    expect(result.media.filter(part => part.type === 'image')).toHaveLength(3)
-    expect(result.media.some(part => part.type === 'text' && part.text.includes('抽样'))).toBe(true)
-    // Every download goes through the OUTER id with the child's own keys.
-    expect(await h.cli.calls()).toEqual([
-      { type: 'image', fileKey: MERGE_KEYS.cover, messageId: MERGE_OUTER_ID },
-      { type: 'file', fileKey: MERGE_KEYS.video, messageId: MERGE_OUTER_ID },
-    ])
-    expect(readdirSync(h.cli.spool)).toEqual([])
-  })
+    const entries = [
+      { body: '夹具子消息 1' },
+      { body: `夹具视频说明\n[Media: ${MERGE_KEYS.video}]` },
+      { body: '夹具子消息 3' },
+    ]
+    const h = await harness(rawMergeEnvelope(children), mgetMergeEnvelope(mergeBlock(entries)))
+    const result = await h.read()
+    if (result.kind !== 'ok') throw new Error(`expected ok, got ${result.reason}`)
 
-  it('child with foreign upper_message_id fails envelope-invalid without download', async () => {
-    const children = [textChild(1), { ...videoChild(2), upper: childId(99) }]
-    const h = await harness(rawMergeEnvelope(children), mgetMergeEnvelope(mergeBlock(entriesOf(children))))
-    expect(await h.read()).toEqual({ kind: 'failed', reason: 'envelope-invalid' })
-    const missing = { ...videoChild(3), upper: '' }
-    const h2 = await harness(rawMergeEnvelope([missing]), mgetMergeEnvelope(mergeBlock(entriesOf([missing]))))
-    expect(await h2.read()).toEqual({ kind: 'failed', reason: 'envelope-invalid' })
-    expect([...await h.cli.calls(), ...await h2.cli.calls()]).toEqual([])
-  })
+    // The text is the root's rendered block, whole: all three children, sender and time included.
+    const text = blockText(result.parts)
+    for (const expected of ['夹具子消息 1', '夹具视频说明', '夹具子消息 3', '夹具用户', '2026-11-13T17:10:00+08:00']) {
+      expect(text).toContain(expected)
+    }
+    expect(text.indexOf('夹具子消息 1')).toBeLessThan(text.indexOf('夹具子消息 3'))
+    // The root is described once, by its own head block.
+    expect(dataBlocks(result.parts).filter(block => block['messageId'] === MERGE_OUTER_ID)).toHaveLength(1)
+    expect(h.calls.filter(call => call.kind === 'mget')).toHaveLength(1)
 
-  it('caps children and states the omitted count', async () => {
-    const children = Array.from({ length: 35 }, (_, index) => textChild(index + 1))
-    const h = await harness(rawMergeEnvelope(children), mgetMergeEnvelope(mergeBlock(entriesOf(children))))
-    const result = okOf(await h.read())
-    expect(result.message.text).toContain('夹具子消息 30')
-    expect(result.message.text).not.toContain('夹具子消息 31')
-    expect(result.message.text).toContain('另有 5 条子消息未显示')
-  })
-
-  it('nested merge-forward returns metadata only', async () => {
-    const children = [textChild(1), nestedChild(2)]
-    const h = await harness(
-      rawMergeEnvelope(children),
-      mgetMergeEnvelope(mergeBlock([{ body: '夹具子消息 1' }, { body: '[Merged forward]' }])),
-    )
-    const result = okOf(await h.read())
-    // No further platform read and no download for the nested one.
-    expect(h.runner).toHaveBeenCalledTimes(2)
-    expect(await h.cli.calls()).toEqual([])
-    expect(result.media.some(part => part.type === 'text' && part.text.includes('嵌套合并转发'))).toBe(true)
+    // The child's cover downloads through the OUTER id; with no frame tools the video says so.
+    expect((await h.cli.calls())[0]).toEqual({ type: 'image', fileKey: MERGE_KEYS.cover, messageId: MERGE_OUTER_ID })
+    expect(imagesOf(result.parts)).toHaveLength(1)
+    expect(pageText(result)).toContain('frame-tools-unavailable')
+    expect(h.cli.spoolEntries()).toEqual([])
   })
 
   it('non-merge multi-item response is message-not-unique', async () => {
     const single = rawApiEnvelope({ messageId: FIXTURE_IDS.text, msgType: 'text', content: '{"text":"x"}' })
     const items = (single['data'] as { items: unknown[] }).items
-    const doubled = { ...single, data: { items: [...items, { ...(items[0] as object), message_id: childId(1), upper_message_id: FIXTURE_IDS.text }] } }
-    const h = await harness(doubled, MGET_TEXT)
-    expect(await h.read(FIXTURE_IDS.text)).toEqual({ kind: 'failed', reason: 'message-not-unique' })
+    const doubled = {
+      ...single,
+      data: { items: [...items, { ...(items[0] as object), message_id: childId(1), upper_message_id: FIXTURE_IDS.text }] },
+    }
+    const h = await harness(doubled, MGET_TEXT, FIXTURE_IDS.text)
+    expect(await h.read()).toMatchObject({ kind: 'failed', reason: 'message-not-unique' })
     expect(await h.cli.calls()).toEqual([])
   })
 })

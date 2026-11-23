@@ -59,7 +59,6 @@ import {
 import {
   executeLocusMessage,
   LOCUS_MESSAGE_DESCRIPTION,
-  locusMessageJsonParts,
   PET_LOCUS_MESSAGE_TOOL,
   renderLocusMessage,
   routeAcceptsImages,
@@ -393,7 +392,7 @@ export function registerPetTools(
      */
     readonly locusMessage?: Pick<LocusMessageToolDeps, 'loci'> & {
       /** One port serves both the message read and the linked-message read. */
-      readonly media: Pick<LocusMediaPort, 'readMessage' | 'readLinkedMessage'>
+      readonly media: Pick<LocusMediaPort, 'readMessagePage' | 'readLinkedPage'>
       /** Test seam; production asks the calling session's exact model route. */
       readonly routeAcceptsImages?: (exec: unknown) => Promise<boolean>
     }
@@ -664,6 +663,7 @@ export function registerPetTools(
       description: LOCUS_MESSAGE_DESCRIPTION,
       parameters: {
         messageId: { type: 'string', required: true },
+        cursor: { type: 'string' },
       },
       output: {
         schema: {
@@ -672,24 +672,27 @@ export function registerPetTools(
           properties: {
             ok: { type: 'boolean', required: true },
             reason: { type: 'string' },
-            text: { type: 'string' },
-            // Ordered text and image parts; images are attachment references.
+            detail: { type: 'string' },
+            platformCode: { type: 'number' },
+            bytes: { type: 'number' },
+            complete: { type: 'boolean' },
+            delivered: { type: 'number' },
+            failed: { type: 'json' },
+            cursor: { type: 'string' },
+            // Ordered Host text and image parts; images are plain attachment references.
             parts: { type: 'json' },
           },
         },
         render: (_args, value) => renderLocusMessage(value as LocusMessageToolResult),
       },
       async execute(args, exec) {
-        const result = await executeLocusMessage(args, {
+        return executeLocusMessage(args, {
           callerSessionId: callerSessionId(exec as ExecutionLike),
           loci: message.loci,
           media: message.media,
           canViewImages: () => (message.routeAcceptsImages ?? (run => routeAcceptsImages(ctx, run)))(exec),
           signal: (exec as { signal?: AbortSignal }).signal ?? new AbortController().signal,
         })
-        return result.ok
-          ? { ok: true, text: result.text, parts: locusMessageJsonParts(result.parts as never) }
-          : { ok: false, reason: result.reason }
       },
     }))
     // Same deps, same publication decision: the linked read exists exactly when the message read does.
@@ -699,6 +702,7 @@ export function registerPetTools(
       parameters: {
         messageId: { type: 'string', required: true },
         linkIndex: { type: 'number' },
+        cursor: { type: 'string' },
       },
       output: {
         schema: {
@@ -707,7 +711,13 @@ export function registerPetTools(
           properties: {
             ok: { type: 'boolean', required: true },
             reason: { type: 'string' },
-            text: { type: 'string' },
+            detail: { type: 'string' },
+            platformCode: { type: 'number' },
+            bytes: { type: 'number' },
+            complete: { type: 'boolean' },
+            delivered: { type: 'number' },
+            failed: { type: 'json' },
+            cursor: { type: 'string' },
             parts: { type: 'json' },
             linkIndex: { type: 'number' },
             linkCount: { type: 'number' },
@@ -716,16 +726,13 @@ export function registerPetTools(
         render: (_args, value) => renderLocusLinkedMessage(value as LocusLinkedMessageToolResult),
       },
       async execute(args, exec) {
-        const result = await executeLocusLinkedMessage(args, {
+        return executeLocusLinkedMessage(args, {
           callerSessionId: callerSessionId(exec as ExecutionLike),
           loci: message.loci,
           media: message.media,
           canViewImages: () => (message.routeAcceptsImages ?? (run => routeAcceptsImages(ctx, run)))(exec),
           signal: (exec as { signal?: AbortSignal }).signal ?? new AbortController().signal,
         })
-        return result.ok
-          ? { ok: true, text: result.text, parts: result.parts as never, linkIndex: result.linkIndex, linkCount: result.linkCount }
-          : { ok: false, reason: result.reason }
       },
     }))
   }

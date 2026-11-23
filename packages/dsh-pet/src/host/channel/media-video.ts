@@ -1,6 +1,55 @@
 /**
- * Bounded scene-keyframe extraction from one already-downloaded video.
+ * Bounded whole-second frame extraction from one already-downloaded video.
  *
+ * EXPORTS (change `locus-read-referenced-chats`, design D10, tasks group 9):
+ *
+ * ```ts
+ * // Closed vocabulary of why a video (or one frame slot) was not delivered.
+ * type VideoSkipReason = … | 'frame-extraction-timeout' | 'frame-timestamps-unavailable' | …
+ * type SecondFrameFailure = 'frame-file-missing' | 'frame-admission-failed'
+ *
+ * // One slot of the window. `k` is the whole second the slot stands for
+ * // (floor of the normalised time); `timeSeconds` is the normalised showinfo time.
+ * type SecondFrame =
+ *   | { k: number; timeSeconds: number; data: Uint8Array }              // delivered
+ *   | { k: number; timeSeconds: number; failed: SecondFrameFailure }    // this slot only
+ *
+ * type SecondFrameExtraction =
+ *   | { kind: 'frames'; durationSeconds: number; frames: readonly SecondFrame[]
+ *       nextK: number      // next whole second to read; failed slots advance it too
+ *       complete: boolean }// true: nothing left after nextK (no cursor needed)
+ *   | { kind: 'skipped'; reason: VideoSkipReason; durationSeconds?: number }
+ *
+ * extractSecondFrames(input: {
+ *   tools: FrameTools; dir: string; fileName: string   // video is `<dir>/<fileName>`
+ *   fromSecond: number        // k: first whole second wanted (integer ≥ 0)
+ *   maxFrames: number         // page quota, ≥ 1
+ *   maxFrameBytes: number     // per-frame byte ceiling (over → slot 'frame-admission-failed')
+ *   signal: AbortSignal       // page-wide abort; also bounds the decode window
+ *   limits?: Partial<VideoLimits>   // maxEdge / decodeWindowMs / probeTimeoutMs overrides
+ * }): Promise<SecondFrameExtraction>
+ * ```
+ *
+ * Contract the caller (media.ts) relies on:
+ * - ONE decode pass per page: input-seek to `k-1`, source timeline kept
+ *   (`-copyts`), a single `select` keeps the FIRST frame of every whole second
+ *   `≥ k`, at most `maxFrames`. No scene detection, no `fps` resampling.
+ * - `timeSeconds` is the `showinfo` `pts_time` minus the video stream's
+ *   `start_time` (−1 ms or less below zero reads as 0). Never computed.
+ * - The caller still owns magic-MIME proof and `AttachmentStore` admission of
+ *   `data`; a slot that fails there is simply treated as `failed` by the caller
+ *   and `nextK` is NOT rewound (failed slots advance `k` like delivered ones).
+ * - No duration or byte cut-off here: a 20-minute video is framed.
+ * - `skipped` reasons: `frame-tools-unavailable` is the caller's; this function
+ *   returns `video-probe-failed`, `video-format-unsupported`,
+ *   `frame-extraction-failed`, `frame-extraction-timeout` (decode window hit
+ *   and the verified prefix is empty), `frame-timestamps-unavailable` (a file
+ *   without a record voids the whole window), `aborted`.
+ * - Timeout/kill with a non-empty verified prefix is `kind: 'frames'` with
+ *   `complete: false`; the largest existing file (possibly truncated) and every
+ *   later slot are re-selected on the next page.
+ *
+ * ---- security posture (applies to every ffmpeg/ffprobe call) ----
  * SECURITY POSTURE. `ffmpeg`/`ffprobe` parse an untrusted container and codec.
  * Pet narrows what it can, and says plainly what it cannot:
  *
@@ -19,7 +68,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { accessSync, constants, readdirSync, readFileSync, statSync } from 'node:fs'
+import { accessSync, constants, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { delimiter, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { runBoundedTool } from './media-process.js'
@@ -40,6 +89,10 @@ export const LOCUS_VIDEO_LIMITS = Object.freeze({
   toolTimeoutMs: 30_000,
   /** `select` scene-change threshold; the first frame is always included. */
   sceneThreshold: 0.08,
+  /** Wall-clock budget of ONE decode window (ffmpeg only). */
+  decodeWindowMs: 30_000,
+  /** Wall-clock budget of ffprobe. */
+  probeTimeoutMs: 10_000,
 })
 
 export type VideoLimits = { -readonly [K in keyof typeof LOCUS_VIDEO_LIMITS]: number }
@@ -61,6 +114,7 @@ export type VideoSkipReason =
   | 'image-quota-exhausted'
   | 'video-download-failed'
   | 'video-download-timeout'
+  | 'video-download-exceeds-window'
   | 'video-too-large'
   | 'video-too-long'
   | 'video-format-unsupported'
@@ -70,17 +124,6 @@ export type VideoSkipReason =
   | 'frame-timestamps-unavailable'
   | 'frame-admission-failed'
   | 'aborted'
-
-/** One extracted frame with the time its own `showinfo` line reported. */
-export interface KeyframeCandidate {
-  /** Raw bytes; the caller proves the media type from them and runs attachment admission. */
-  readonly data: Uint8Array
-  readonly timeSeconds: number
-}
-
-export type FrameExtraction =
-  | { readonly kind: 'frames'; readonly durationSeconds: number; readonly frames: readonly KeyframeCandidate[] }
-  | { readonly kind: 'skipped'; readonly reason: VideoSkipReason; readonly durationSeconds?: number }
 
 /** Search PATH for an absolute, executable file; relative PATH entries are ignored. */
 function resolveOnPath(name: string, pathValue: string | undefined): string | undefined {
@@ -127,24 +170,6 @@ export async function resolveFrameTools(options: {
   return { ffmpeg, ffprobe }
 }
 
-/**
- * The `-vf` graph: scene-change selection, then a bounded proportional scale,
- * then `showinfo`. `showinfo` is LAST so its `pts_time` belongs to a frame that
- * was really selected, and its `n` counts selected frames from 0.
- *
- * The scale box is `min(edge, iw) × min(edge, ih)` with
- * `force_original_aspect_ratio=decrease`, so the longest edge is at most `edge`,
- * nothing is enlarged, and `force_divisible_by=2` only ever rounds down.
- * @param limits - Edge and scene threshold.
- * @returns the filtergraph string (quoted for ffmpeg's own parser, not a shell).
- */
-export function buildFrameFilter(limits: Pick<VideoLimits, 'maxEdge' | 'sceneThreshold'>): string {
-  const edge = String(Math.trunc(limits.maxEdge))
-  return `select='eq(n,0)+gt(scene,${String(limits.sceneThreshold)})',`
-    + `scale=w='min(${edge},iw)':h='min(${edge},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,`
-    + 'showinfo'
-}
-
 const SHOWINFO_LINE = /Parsed_showinfo\S*\s+@\s+\S+\]\s+n:\s*(\d+)\s+pts:\s*\S+\s+pts_time:\s*(\S+)/
 
 /** Bounded stderr consumer keeping only the per-frame `showinfo` records. */
@@ -164,13 +189,14 @@ function showinfoCollector(max: number): {
   }
 }
 
-interface Probe { readonly durationSeconds: number }
+interface Probe { readonly durationSeconds: number; readonly startTime: number }
 
 async function probeVideo(input: {
   readonly tools: FrameTools
   readonly dir: string
   readonly fileName: string
-  readonly limits: VideoLimits
+  /** Present: a container longer than this is skipped (legacy path). Absent: no duration cut-off. */
+  readonly maxDurationSeconds: number | undefined
   readonly signal: AbortSignal
   readonly remainingMs: () => number
 }): Promise<Probe | { readonly skip: VideoSkipReason; readonly durationSeconds?: number }> {
@@ -179,7 +205,8 @@ async function probeVideo(input: {
     args: [
       '-v', 'error',
       '-protocol_whitelist', 'file',
-      '-show_entries', 'format=duration,format_name',
+      '-select_streams', 'v:0',
+      '-show_entries', 'format=duration,format_name:stream=start_time',
       '-of', 'json',
       `./${input.fileName}`,
     ],
@@ -192,10 +219,17 @@ async function probeVideo(input: {
   if (result.kind === 'timeout') return { skip: 'frame-extraction-timeout' }
   if (result.kind !== 'exited' || result.code !== 0) return { skip: 'video-probe-failed' }
   let format: Record<string, unknown> | undefined
+  let startTime = 0
   try {
     const parsed: unknown = JSON.parse(result.stdout)
-    const candidate = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>)['format'] : undefined
+    const record = typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : undefined
+    const candidate = record?.['format']
     format = typeof candidate === 'object' && candidate !== null ? candidate as Record<string, unknown> : undefined
+    const streams = record?.['streams']
+    const stream = Array.isArray(streams) ? streams[0] as unknown : undefined
+    // An absent or unparseable stream start_time ("N/A") means the timeline starts at 0.
+    const reported = typeof stream === 'object' && stream !== null ? Number((stream as Record<string, unknown>)['start_time']) : Number.NaN
+    if (Number.isFinite(reported)) startTime = reported
   } catch { format = undefined }
   const duration = Number(format?.['duration'])
   const names = typeof format?.['format_name'] === 'string' ? format['format_name'].split(',').map(name => name.trim()) : []
@@ -203,38 +237,137 @@ async function probeVideo(input: {
     return { skip: 'video-probe-failed' }
   }
   if (!names.every(name => VIDEO_CONTAINER_FORMATS.has(name))) return { skip: 'video-format-unsupported', durationSeconds: duration }
-  if (duration > input.limits.maxDurationSeconds) return { skip: 'video-too-long', durationSeconds: duration }
-  return { durationSeconds: duration }
+  if (input.maxDurationSeconds !== undefined && duration > input.maxDurationSeconds) return { skip: 'video-too-long', durationSeconds: duration }
+  return { durationSeconds: duration, startTime }
 }
 
-/**
- * Extract scene keyframes from `<dir>/<fileName>`.
- *
- * Runs INSIDE the caller's spool directory callback: the video and the frames
- * only exist while the caller's `finally` has not yet removed the directory,
- * and the returned candidates are in-memory copies.
- * @param input - Directory, file, tools, limits, the frame budget and an abort signal.
- * @returns frames paired with their reported times, or a deterministic skip reason.
- */
-export async function extractKeyframes(input: {
+/** Why one slot of a window has no usable frame; the rest of the window is unaffected. */
+export type SecondFrameFailure = 'frame-file-missing' | 'frame-admission-failed'
+
+/** One slot of a decoded window; failed slots advance `k` exactly like delivered ones. */
+export type SecondFrame =
+  | { readonly k: number; readonly timeSeconds: number; readonly data: Uint8Array }
+  | { readonly k: number; readonly timeSeconds: number; readonly failed: SecondFrameFailure }
+
+export type SecondFrameExtraction =
+  | {
+    readonly kind: 'frames'
+    readonly durationSeconds: number
+    readonly frames: readonly SecondFrame[]
+    /** Next whole second to read. */
+    readonly nextK: number
+    /** True when nothing is left after `nextK`. */
+    readonly complete: boolean
+  }
+  | { readonly kind: 'skipped'; readonly reason: VideoSkipReason; readonly durationSeconds?: number }
+
+export interface ExtractSecondFramesInput {
   readonly tools: FrameTools
   readonly dir: string
   readonly fileName: string
-  readonly limits: VideoLimits
-  /** Frames wanted: `min(limits.maxFrames, remaining image quota)`; callers pass ≥ 1. */
+  readonly fromSecond: number
   readonly maxFrames: number
-  /** Per-frame byte ceiling from the attachment deployment limits. */
   readonly maxFrameBytes: number
   readonly signal: AbortSignal
-}): Promise<FrameExtraction> {
-  const deadline = Date.now() + input.limits.toolTimeoutMs
-  const remainingMs = (): number => deadline - Date.now()
-  const probe = await probeVideo({ ...input, remainingMs })
-  if ('skip' in probe) {
-    return { kind: 'skipped', reason: probe.skip, ...(probe.durationSeconds === undefined ? {} : { durationSeconds: probe.durationSeconds }) }
+  readonly limits?: Partial<VideoLimits>
+}
+
+/** Tolerance (seconds) shared by the `select` expression and the time normalisation. */
+const SECOND_EPSILON = 0.001
+const NO_PACKETS = /Nothing was written into output file, because at least one of its streams received no packets/
+
+/**
+ * The `-vf` graph of one window: ONE `select` keeping the first frame of every
+ * whole second `>= fromSecond` (the first frame of the window, then each frame
+ * whose second differs from the previously selected one), then the bounded
+ * proportional scale, then `showinfo` LAST so `n` counts selected frames.
+ *
+ * `t` is the source timeline (`-copyts`), so the stream's `start_time` is
+ * subtracted inside the expression; the 1 ms epsilon makes a frame stamped just
+ * below a whole second still belong to it, exactly like the displayed time.
+ * @param input - Window start, stream start time and edge bound.
+ * @returns the filtergraph string (for ffmpeg's own parser, not a shell).
+ */
+export function buildSecondFilter(input: { readonly fromSecond: number; readonly startTime: number; readonly maxEdge: number }): string {
+  const edge = String(Math.trunc(input.maxEdge))
+  const second = (time: string): string => `floor(${time}-(${String(input.startTime)})+${String(SECOND_EPSILON)})`
+  return `select='gte(${second('t')},${String(input.fromSecond)})*(isnan(prev_selected_t)+gt(${second('t')},${second('prev_selected_t')}))',`
+    + `scale=w='min(${edge},iw)':h='min(${edge},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,`
+    + 'showinfo'
+}
+
+type SecondRecord = { readonly n: number; readonly time: number }
+
+function secondFramesSkip(reason: VideoSkipReason, durationSeconds?: number): SecondFrameExtraction {
+  return { kind: 'skipped', reason, ...(durationSeconds === undefined ? {} : { durationSeconds }) }
+}
+
+/**
+ * Pair showinfo records with output files for the first `count` slots.
+ * @returns the slots, or `undefined` when the timeline cannot be trusted.
+ */
+function pairSlots(input: {
+  readonly dir: string
+  readonly records: readonly SecondRecord[]
+  readonly count: number
+  readonly startTime: number
+  readonly maxFrameBytes: number
+}): SecondFrame[] | undefined {
+  const slots: SecondFrame[] = []
+  let previous = Number.NEGATIVE_INFINITY
+  for (let index = 0; index < input.count; index += 1) {
+    const record = input.records[index]!
+    if (record.n !== index || !Number.isFinite(record.time)) return undefined
+    let time = record.time - input.startTime
+    // More than 1 ms before the stream starts is not a frame time of this stream.
+    if (time < -SECOND_EPSILON) return undefined
+    if (time < 0) time = 0
+    time = Number(time.toFixed(6))
+    if (time < previous) return undefined
+    previous = time
+    const k = Math.floor(time + SECOND_EPSILON)
+    const path = join(input.dir, `f_${String(index + 1).padStart(6, '0')}.jpg`)
+    let size = 0
+    try { size = statSync(path).size } catch { size = 0 }
+    if (size < 1) { slots.push({ k, timeSeconds: time, failed: 'frame-file-missing' }); continue }
+    if (size > input.maxFrameBytes) { slots.push({ k, timeSeconds: time, failed: 'frame-admission-failed' }); continue }
+    try {
+      slots.push({ k, timeSeconds: time, data: new Uint8Array(readFileSync(path)) })
+    } catch {
+      slots.push({ k, timeSeconds: time, failed: 'frame-file-missing' })
+    }
+  }
+  return slots
+}
+
+/** Extract whole-second frames from `<dir>/<fileName>`; see the file header for the contract. */
+export async function extractSecondFrames(input: ExtractSecondFramesInput): Promise<SecondFrameExtraction> {
+  if (!Number.isSafeInteger(input.fromSecond) || input.fromSecond < 0 || !Number.isSafeInteger(input.maxFrames) || input.maxFrames < 1) {
+    return secondFramesSkip('frame-extraction-failed')
+  }
+  const limits: VideoLimits = { ...LOCUS_VIDEO_LIMITS, ...input.limits }
+  const probeDeadline = Date.now() + limits.probeTimeoutMs
+  const probe = await probeVideo({
+    tools: input.tools,
+    dir: input.dir,
+    fileName: input.fileName,
+    maxDurationSeconds: undefined,
+    signal: input.signal,
+    remainingMs: () => probeDeadline - Date.now(),
+  })
+  if ('skip' in probe) return secondFramesSkip(probe.skip, probe.durationSeconds)
+  const { durationSeconds, startTime } = probe
+
+  // Frame files of an earlier window in the same directory would read as files without records.
+  try {
+    for (const name of readdirSync(input.dir)) if (/^f_\d{6}\.jpg$/.test(name)) rmSync(join(input.dir, name), { force: true })
+  } catch {
+    return secondFramesSkip('frame-extraction-failed', durationSeconds)
   }
 
-  const collector = showinfoCollector(input.maxFrames)
+  const records: SecondRecord[] = []
+  let noPackets = false
+  const seek = input.fromSecond - 1
   const run = await runBoundedTool({
     binary: input.tools.ffmpeg,
     args: [
@@ -242,50 +375,61 @@ export async function extractKeyframes(input: {
       // `showinfo` per-frame records are info-level; `error` would filter them out.
       '-loglevel', 'info',
       '-protocol_whitelist', 'file',
+      // Input seek to just before `k` for pre-roll, source timeline kept so `t` is the container's own time.
+      ...(seek > 0 ? ['-ss', String(seek)] : []),
+      '-copyts',
       '-i', `./${input.fileName}`,
-      '-vf', buildFrameFilter(input.limits),
+      '-vf', buildSecondFilter({ fromSecond: input.fromSecond, startTime, maxEdge: limits.maxEdge }),
       '-fps_mode', 'vfr',
       '-frames:v', String(input.maxFrames),
       '-q:v', '4',
-      './f_%02d.jpg',
+      './f_%06d.jpg',
     ],
     cwd: input.dir,
-    timeoutMs: remainingMs(),
+    timeoutMs: limits.decodeWindowMs,
     signal: input.signal,
     maxStdoutBytes: 4 * 1024,
-    onStderrLine: collector.onLine,
+    onStderrLine(line) {
+      if (NO_PACKETS.test(line)) noPackets = true
+      const match = SHOWINFO_LINE.exec(line)
+      if (match === null || records.length >= input.maxFrames) return
+      records.push({ n: Number(match[1]), time: Number(match[2]) })
+    },
   })
-  const durationSeconds = probe.durationSeconds
-  if (run.kind === 'aborted') return { kind: 'skipped', reason: 'aborted', durationSeconds }
-  if (run.kind === 'timeout') return { kind: 'skipped', reason: 'frame-extraction-timeout', durationSeconds }
-  if (run.kind !== 'exited' || run.code !== 0) return { kind: 'skipped', reason: 'frame-extraction-failed', durationSeconds }
+  if (run.kind === 'aborted') return secondFramesSkip('aborted', durationSeconds)
+  if (run.kind === 'failed') return secondFramesSkip('frame-extraction-failed', durationSeconds)
 
-  let names: string[]
+  let indexes: number[]
   try {
-    names = readdirSync(input.dir).filter(name => /^f_\d{2}\.jpg$/.test(name)).sort()
+    indexes = readdirSync(input.dir)
+      .map(name => /^f_(\d{6})\.jpg$/.exec(name))
+      .filter((match): match is RegExpExecArray => match !== null)
+      .map(match => Number(match[1]))
+      .sort((a, b) => a - b)
   } catch {
-    return { kind: 'skipped', reason: 'frame-extraction-failed', durationSeconds }
+    return secondFramesSkip('frame-extraction-failed', durationSeconds)
   }
-  if (names.length === 0) return { kind: 'skipped', reason: 'frame-extraction-failed', durationSeconds }
+  // A file without its record means the time axis cannot be paired: the whole window is void.
+  const maxFile = indexes.at(-1) ?? 0
+  if (maxFile > records.length) return secondFramesSkip('frame-timestamps-unavailable', durationSeconds)
 
-  // One-to-one pairing, or nothing: the k-th selected frame (`n:k`) is `f_{k+1}.jpg`.
-  const records = collector.records()
-  const paired = records.length === names.length
-    && names.every((name, index) => name === `f_${String(index + 1).padStart(2, '0')}.jpg`)
-    && records.every((record, index) =>
-      record.n === index
-      && Number.isFinite(record.time)
-      && record.time >= 0
-      && (index === 0 || record.time >= records[index - 1]!.time))
-  if (!paired) return { kind: 'skipped', reason: 'frame-timestamps-unavailable', durationSeconds }
-
-  const frames: KeyframeCandidate[] = []
-  for (const [index, name] of names.entries()) {
-    const path = join(input.dir, name)
-    let size: number
-    try { size = statSync(path).size } catch { return { kind: 'skipped', reason: 'frame-extraction-failed', durationSeconds } }
-    if (size < 1 || size > input.maxFrameBytes) return { kind: 'skipped', reason: 'frame-admission-failed', durationSeconds }
-    frames.push({ data: new Uint8Array(readFileSync(path)), timeSeconds: records[index]!.time })
+  const timedOut = run.kind === 'timeout'
+  if (!timedOut && run.code !== 0) {
+    // Seeking past the last frame leaves ffmpeg with nothing to write: an empty, finished window — but only
+    // when it says so, and never for the very first window of a video.
+    if (noPackets && records.length === 0 && indexes.length === 0 && input.fromSecond > 0) {
+      return { kind: 'frames', durationSeconds, frames: [], nextK: input.fromSecond, complete: true }
+    }
+    return secondFramesSkip('frame-extraction-failed', durationSeconds)
   }
-  return { kind: 'frames', durationSeconds, frames }
+  // Killed: the largest existing file may be truncated, so only slots before it are trusted.
+  const count = timedOut ? Math.max(0, maxFile - 1) : records.length
+  if (timedOut && count === 0) return secondFramesSkip('frame-extraction-timeout', durationSeconds)
+  if (!timedOut && count === 0 && input.fromSecond === 0) return secondFramesSkip('frame-extraction-failed', durationSeconds)
+
+  const frames = pairSlots({ dir: input.dir, records, count, startTime, maxFrameBytes: input.maxFrameBytes })
+  if (frames === undefined) return secondFramesSkip('frame-timestamps-unavailable', durationSeconds)
+  const nextK = frames.length === 0 ? input.fromSecond : Math.max(input.fromSecond, frames.at(-1)!.k + 1)
+  const complete = !timedOut && (frames.length < input.maxFrames || nextK >= durationSeconds)
+  return { kind: 'frames', durationSeconds, frames, nextK, complete }
 }
