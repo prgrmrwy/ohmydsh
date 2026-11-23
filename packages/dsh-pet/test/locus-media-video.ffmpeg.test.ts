@@ -171,6 +171,22 @@ describe.skipIf(tools === undefined)('whole-second frames from real video', () =
     )
   }
 
+  it('three consecutive scene frames 33 ms apart at 30 fps are all written and returned, no missing slot', async () => {
+    // White at frame 45 (1.5 s), dark gray at 46, black at 47: three scene changes of different size, 33 ms apart.
+    const clip = await generate(
+      'blink',
+      ['-f', 'lavfi', '-i', 'color=c=black:size=320x240:rate=30:duration=3'],
+      ['-vf', "drawbox=x=0:y=0:w=iw:h=ih:color=white:t=fill:enable='eq(n\\,45)',drawbox=x=0:y=0:w=iw:h=ih:color=0x404040:t=fill:enable='eq(n\\,46)'", '-g', '60'],
+    )
+    const { pages } = await readAllPages(clip)
+    const frames = pages.flat()
+    expect(frames.filter(frame => 'failed' in frame)).toEqual([])
+    const times = frames.map(frame => frame.timeSeconds).filter(time => time > 1.4 && time < 1.6)
+    expect(times.some(time => Math.abs(time - 1.5) < 0.01)).toBe(true)
+    expect(times.some(time => Math.abs(time - 1.5333) < 0.01)).toBe(true)
+    expect(times.some(time => Math.abs(time - 1.5667) < 0.01)).toBe(true)
+  })
+
   it('a 0.2 s flash at 1.5 s yields a frame between 1 s and 2 s with its showinfo time', async () => {
     const clip = await flashClip('flash', 4, [1.5])
     const { pages } = await readAllPages(clip)
