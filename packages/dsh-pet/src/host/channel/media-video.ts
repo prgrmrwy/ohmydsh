@@ -32,7 +32,9 @@
  *
  * Contract the caller (media.ts) relies on:
  * - ONE decode pass per page: input-seek to `k-1` (so the first frame of the
- *   window has a predecessor for the scene score), source timeline kept
+ *   window has a predecessor for the scene score; if none was decoded — a
+ *   sparse VFR gap longer than 1 s — the pass is repeated seeking 2 s, 4 s …
+ *   back, down to the file start, see design D10), source timeline kept
  *   (`-copyts`), a single `select` keeps the FIRST frame of every whole second
  *   `≥ k` plus every scene-change frame (`gt(scene, sceneThreshold)`) `≥ k`, in
  *   time order; a frame that is both is selected once. No `fps` resampling.
@@ -44,8 +46,11 @@
  *   dropped). If all of them sit in one second, that second delivers its first
  *   `maxFrames` frames, one `scene-frames-over-budget` slot is counted for the
  *   rest, and `nextK = s + 1`: the cursor always advances.
- * - `timeSeconds` is the `showinfo` `pts_time` minus the video stream's
- *   `start_time` (−1 ms or less below zero reads as 0). Never computed.
+ * - `timeSeconds` is the showinfo time minus the video stream's `start_time`
+ *   (−1 ms or less below zero reads as 0). The time and the whole second `k`
+ *   come from the integer `pts` and the printed time base, evaluated like the
+ *   filter's own `t` (the printed `pts_time` keeps only 6 significant digits).
+ *   Never computed from a frame's index.
  * - The caller still owns magic-MIME proof and `AttachmentStore` admission of
  *   `data`; a slot that fails there is simply treated as `failed` by the caller
  *   and `nextK` is NOT rewound (failed slots advance `k` like delivered ones).
@@ -182,24 +187,10 @@ export async function resolveFrameTools(options: {
   return { ffmpeg, ffprobe }
 }
 
-const SHOWINFO_LINE = /Parsed_showinfo\S*\s+@\s+\S+\]\s+n:\s*(\d+)\s+pts:\s*\S+\s+pts_time:\s*(\S+)/
-
-/** Bounded stderr consumer keeping only the per-frame `showinfo` records. */
-function showinfoCollector(max: number): {
-  readonly onLine: (line: string) => void
-  readonly records: () => readonly { readonly n: number; readonly time: number }[]
-} {
-  const records: { n: number; time: number }[] = []
-  return {
-    onLine(line) {
-      if (records.length >= max) return
-      const match = SHOWINFO_LINE.exec(line)
-      if (match === null) return
-      records.push({ n: Number(match[1]), time: Number(match[2]) })
-    },
-    records: () => records,
-  }
-}
+const SHOWINFO_LINE = /(Parsed_showinfo\S*)\s+@\s+\S+\]\s+n:\s*(\d+)\s+pts:\s*(\S+)\s+pts_time:\s*(\S+)/
+const SHOWINFO_CONFIG = /Parsed_showinfo\S*\s+@\s+\S+\]\s+config in time_base:\s*(\d+)\/(\d+)/
+/** The `showinfo` that sits BEFORE `select`, so it sees every decoded frame (the second one sees only selected frames). */
+const DECODED_SHOWINFO = 'Parsed_showinfo_0'
 
 interface Probe { readonly durationSeconds: number; readonly startTime: number }
 
@@ -293,7 +284,9 @@ const NO_PACKETS = /Nothing was written into output file, because at least one o
  * `fromSecond`, the first frame of the window, each frame whose second differs
  * from the previously selected one, and each scene-change frame (`scene` is
  * scored against the decoded predecessor, which the seek to `k-1` provides for
- * the window's first frame). Then the bounded proportional scale, then
+ * the window's first frame). A `showinfo` BEFORE the select reports every
+ * decoded frame (only the first is read: it tells whether the first selected
+ * frame had a predecessor); then the bounded proportional scale, then
  * `showinfo` LAST so `n` counts selected frames.
  *
  * `t` is the source timeline (`-copyts`), so the stream's `start_time` is
@@ -310,15 +303,33 @@ export function buildSecondFilter(input: {
 }): string {
   const edge = String(Math.trunc(input.maxEdge))
   const second = (time: string): string => `floor(${time}-(${String(input.startTime)})+${String(SECOND_EPSILON)})`
-  return `select='gte(${second('t')},${String(input.fromSecond)})*(isnan(prev_selected_t)+gt(${second('t')},${second('prev_selected_t')})+gt(scene,${String(input.sceneThreshold)}))',`
+  return `showinfo,select='gte(${second('t')},${String(input.fromSecond)})*(isnan(prev_selected_t)+gt(${second('t')},${second('prev_selected_t')})+gt(scene,${String(input.sceneThreshold)}))',`
     + `scale=w='min(${edge},iw)':h='min(${edge},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,`
     + 'showinfo'
 }
 
-type SecondRecord = { readonly n: number; readonly time: number }
+/** One selected frame as `showinfo` reports it: raw source-timeline `pts` (stream time base units) and the printed `pts_time`. */
+type SecondRecord = { readonly n: number; readonly pts: number; readonly time: number }
+type TimeBase = { readonly num: number; readonly den: number }
 
 function secondFramesSkip(reason: VideoSkipReason, durationSeconds?: number): SecondFrameExtraction {
   return { kind: 'skipped', reason, ...(durationSeconds === undefined ? {} : { durationSeconds }) }
+}
+
+/**
+ * Source-timeline time of a record, computed exactly the way the filter's own `t` is: `pts * (num / den)` in
+ * doubles. `showinfo` prints `pts_time` with only 6 significant digits (`1000.999` prints as `1001`), so a frame
+ * a hair below a whole second, or any frame of a stream whose `start_time` is large, would otherwise land in a
+ * different second than the one the filter put it in. Without the time base (never the case for a real ffmpeg,
+ * which always prints it) the printed `pts_time` is all there is.
+ */
+function sourceTime(record: SecondRecord, timeBase: TimeBase | undefined): number {
+  return timeBase !== undefined && Number.isFinite(record.pts) ? record.pts * (timeBase.num / timeBase.den) : record.time
+}
+
+/** Whole second of a source time, written like the `select` expression's `floor(t-(start)+eps)` so both round alike. */
+function wholeSecond(time: number, startTime: number): number {
+  return Math.floor(time - startTime + SECOND_EPSILON)
 }
 
 /**
@@ -328,6 +339,7 @@ function secondFramesSkip(reason: VideoSkipReason, durationSeconds?: number): Se
 function pairSlots(input: {
   readonly dir: string
   readonly records: readonly SecondRecord[]
+  readonly timeBase: TimeBase | undefined
   readonly count: number
   readonly startTime: number
   readonly maxFrameBytes: number
@@ -336,15 +348,16 @@ function pairSlots(input: {
   let previous = Number.NEGATIVE_INFINITY
   for (let index = 0; index < input.count; index += 1) {
     const record = input.records[index]!
-    if (record.n !== index || !Number.isFinite(record.time)) return undefined
-    let time = record.time - input.startTime
+    const source = sourceTime(record, input.timeBase)
+    if (record.n !== index || !Number.isFinite(source)) return undefined
+    let time = source - input.startTime
     // More than 1 ms before the stream starts is not a frame time of this stream.
     if (time < -SECOND_EPSILON) return undefined
     if (time < 0) time = 0
     time = Number(time.toFixed(6))
     if (time < previous) return undefined
     previous = time
-    const k = Math.floor(time + SECOND_EPSILON)
+    const k = Math.max(0, wholeSecond(source, input.startTime))
     const path = join(input.dir, `f_${String(index + 1).padStart(6, '0')}.jpg`)
     let size = 0
     try { size = statSync(path).size } catch { size = 0 }
@@ -377,46 +390,82 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
   if ('skip' in probe) return secondFramesSkip(probe.skip, probe.durationSeconds)
   const { durationSeconds, startTime } = probe
 
-  // Frame files of an earlier window in the same directory would read as files without records.
-  try {
-    for (const name of readdirSync(input.dir)) if (/^f_\d{6}\.jpg$/.test(name)) rmSync(join(input.dir, name), { force: true })
-  } catch {
-    return secondFramesSkip('frame-extraction-failed', durationSeconds)
-  }
-
   // One frame beyond the quota is requested: it only tells an over-full window from an exactly full one.
   const recordCap = input.maxFrames + 1
-  const records: SecondRecord[] = []
-  let noPackets = false
-  const seek = input.fromSecond - 1
-  const run = await runBoundedTool({
-    binary: input.tools.ffmpeg,
-    args: [
-      '-nostdin', '-hide_banner', '-nostats',
-      // `showinfo` per-frame records are info-level; `error` would filter them out.
-      '-loglevel', 'info',
-      '-protocol_whitelist', 'file',
-      // Input seek to just before `k` for pre-roll, source timeline kept so `t` is the container's own time.
-      ...(seek > 0 ? ['-ss', String(seek)] : []),
-      '-copyts',
-      '-i', `./${input.fileName}`,
-      '-vf', buildSecondFilter({ fromSecond: input.fromSecond, startTime, maxEdge: limits.maxEdge, sceneThreshold: limits.sceneThreshold }),
-      '-fps_mode', 'vfr',
-      '-frames:v', String(recordCap),
-      '-q:v', '4',
-      './f_%06d.jpg',
-    ],
-    cwd: input.dir,
-    timeoutMs: limits.decodeWindowMs,
-    signal: input.signal,
-    maxStdoutBytes: 4 * 1024,
-    onStderrLine(line) {
-      if (NO_PACKETS.test(line)) noPackets = true
-      const match = SHOWINFO_LINE.exec(line)
-      if (match === null || records.length >= recordCap) return
-      records.push({ n: Number(match[1]), time: Number(match[2]) })
-    },
-  })
+  const decodeDeadline = Date.now() + limits.decodeWindowMs
+
+  /** One decode pass, input-seeking to `seek` seconds (no seek at 0). `undefined`: the directory cannot be prepared. */
+  const decode = async (seek: number) => {
+    // Frame files of an earlier window (or attempt) in the same directory would read as files without records.
+    try {
+      for (const name of readdirSync(input.dir)) if (/^f_\d{6}\.jpg$/.test(name)) rmSync(join(input.dir, name), { force: true })
+    } catch {
+      return undefined
+    }
+    const records: SecondRecord[] = []
+    let noPackets = false
+    let timeBase: TimeBase | undefined
+    let firstDecoded: SecondRecord | undefined
+    const run = await runBoundedTool({
+      binary: input.tools.ffmpeg,
+      args: [
+        '-nostdin', '-hide_banner', '-nostats',
+        // `showinfo` per-frame records are info-level; `error` would filter them out.
+        '-loglevel', 'info',
+        '-protocol_whitelist', 'file',
+        // Input seek for pre-roll, source timeline kept so `t` is the container's own time.
+        ...(seek > 0 ? ['-ss', String(seek)] : []),
+        '-copyts',
+        '-i', `./${input.fileName}`,
+        '-vf', buildSecondFilter({ fromSecond: input.fromSecond, startTime, maxEdge: limits.maxEdge, sceneThreshold: limits.sceneThreshold }),
+        '-fps_mode', 'vfr',
+        '-frames:v', String(recordCap),
+        '-q:v', '4',
+        './f_%06d.jpg',
+      ],
+      cwd: input.dir,
+      timeoutMs: Math.max(1, decodeDeadline - Date.now()),
+      signal: input.signal,
+      maxStdoutBytes: 4 * 1024,
+      onStderrLine(line) {
+        if (NO_PACKETS.test(line)) noPackets = true
+        const config = SHOWINFO_CONFIG.exec(line)
+        if (config !== null) {
+          const num = Number(config[1])
+          const den = Number(config[2])
+          if (timeBase === undefined && num > 0 && den > 0) timeBase = { num, den }
+          return
+        }
+        const match = SHOWINFO_LINE.exec(line)
+        if (match === null) return
+        const record = { n: Number(match[2]), pts: Number(match[3]), time: Number(match[4]) }
+        if (match[1] === DECODED_SHOWINFO) {
+          if (record.n === 0) firstDecoded = record
+          return
+        }
+        if (records.length < recordCap) records.push(record)
+      },
+    })
+    return { run, records, noPackets, timeBase, firstDecoded }
+  }
+
+  // The first selected frame of a window is always taken, but the frame AFTER it is scored against it AND against
+  // its own score from the frame before it (`scene = min(mafd, |mafd - prev_mafd|)`); without a decoded frame before
+  // the first selected one that history is empty and a sparse VFR video (a gap longer than the 1 s pre-roll) selects
+  // frames a single whole read would not. So when nothing precedes the first selected frame, seek further back
+  // (1 s, 2 s, 4 s … before `k`, down to the start of the file) until a predecessor is decoded.
+  let attempt = await decode(Math.max(0, input.fromSecond - 1))
+  for (let back = 2; attempt !== undefined && input.fromSecond - back / 2 > 0; back *= 2) {
+    const first = attempt.records[0]
+    const decoded = attempt.firstDecoded
+    const lacksPredecessor = attempt.run.kind === 'exited' && attempt.run.code === 0
+      && first !== undefined && decoded !== undefined
+      && (Number.isFinite(first.pts) && Number.isFinite(decoded.pts) ? decoded.pts >= first.pts : decoded.time >= first.time)
+    if (!lacksPredecessor) break
+    attempt = await decode(Math.max(0, input.fromSecond - back))
+  }
+  if (attempt === undefined) return secondFramesSkip('frame-extraction-failed', durationSeconds)
+  const { run, records, noPackets, timeBase } = attempt
   if (run.kind === 'aborted') return secondFramesSkip('aborted', durationSeconds)
   if (run.kind === 'failed') return secondFramesSkip('frame-extraction-failed', durationSeconds)
 
@@ -448,7 +497,7 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
   if (timedOut && count === 0) return secondFramesSkip('frame-extraction-timeout', durationSeconds)
   if (!timedOut && count === 0 && input.fromSecond === 0) return secondFramesSkip('frame-extraction-failed', durationSeconds)
 
-  const slots = pairSlots({ dir: input.dir, records, count, startTime, maxFrameBytes: input.maxFrameBytes })
+  const slots = pairSlots({ dir: input.dir, records, timeBase, count, startTime, maxFrameBytes: input.maxFrameBytes })
   if (slots === undefined) return secondFramesSkip('frame-timestamps-unavailable', durationSeconds)
 
   // The window ends before the second of the first slot that cannot be delivered whole:
@@ -457,7 +506,7 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
   let frames: SecondFrame[] = slots
   let nextK = slots.length === 0 ? input.fromSecond : Math.max(input.fromSecond, slots.at(-1)!.k + 1)
   let shrunk = false
-  const boundary = timedOut ? timedOutBoundary(records, count, startTime) : slots.length > input.maxFrames ? slots[input.maxFrames]!.k : undefined
+  const boundary = timedOut ? timedOutBoundary(records, count, timeBase, startTime) : slots.length > input.maxFrames ? slots[input.maxFrames]!.k : undefined
   if (boundary !== undefined) {
     shrunk = true
     const whole = slots.filter(slot => slot.k < boundary)
@@ -479,7 +528,7 @@ export async function extractSecondFrames(input: ExtractSecondFramesInput): Prom
 }
 
 /** Second of the record that follows the last trusted slot after a kill (its file may be truncated). */
-function timedOutBoundary(records: readonly SecondRecord[], count: number, startTime: number): number {
-  const time = Math.max(0, (records[count]?.time ?? 0) - startTime)
-  return Math.floor(time + SECOND_EPSILON)
+function timedOutBoundary(records: readonly SecondRecord[], count: number, timeBase: TimeBase | undefined, startTime: number): number {
+  const record = records[count]
+  return record === undefined ? 0 : Math.max(0, wholeSecond(sourceTime(record, timeBase), startTime))
 }

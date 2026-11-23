@@ -70,6 +70,9 @@
 - [x] 9b.3 Refactor；更新 design D10 与「Ponytail 精简」trade-off 7、README 中的整秒表述；既有测试保持绿。
       - 2026-11-23：dsh-pet typecheck 0 错；全量 vitest 3536 通过 / 4 跳过 / 0 失败（含真实 ffmpeg 11 条）；根 npm test 811 通过 / 3 跳过 / 0 失败；check:artifacts 与 strict validate 通过。阈值 0.08 沿用旧实现。
 
+- [x] 9b.4 跨模型复核三项（2026-11-23，TDD，真实 ffmpeg）：(1) 稀疏 VFR 场景历史——夹具 t=0/3/3.1（步长相等）与 0/40/40.1/40.2/55/55.1；先确认 `from 2` 页多出 3.1、quota 1 记了单秒溢出、40 s 空档页多选，再实现「无前驱则 seek 回退 2/4/… 秒重跑」（design D10「场景历史」）。(2) 整秒边界取整——x.999 帧夹具；偏移 0 的时间轴不复现（通过），偏移 100/12345/86400/100000 s 复现（showinfo 6 位有效数字使页边界处 x.999 帧被静默丢失）；改为由整数 `pts` 与 `time_base` 按滤镜同一算式求秒与时间。(3) 整读对分页的现有测试改用 `readPaged` 并断言 `finished`（`complete` 终止）。
+      - 2026-11-23：新增/改动测试在旧源码上 3 条红（稀疏 ×2、偏移边界 ×1）、新源码全绿；dsh-pet typecheck 0 错；全量 vitest 3540 通过 / 4 跳过 / 0 失败（真实 ffmpeg 15 条）；根 npm test 811 通过 / 3 跳过 / 0 失败；check:artifacts 与 strict validate 通过。
+
 ## 10. 装配、指引、历史与文档入口
 
 - [x] 10.1 Red（`locus-context.test.ts`、`locus-chat-history-tool.test.ts`、`locus-on-demand-provisioning.test.ts`、`locus-delivery-prompt.test.ts`，覆盖 R4、R5、文档入口）：装配矩阵（IM 与话题 × 创建与冷恢复 × 媒体可用与否）；文档 Delivery 不产生 `message_links/query`、`+threads-messages-list`、原始读取或资源下载调用。

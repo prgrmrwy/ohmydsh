@@ -251,6 +251,10 @@ Oracle 口径（同一文件内两条独立断言）：**完整遍历**（读到
 | 场景帧不使位置后退且页边界不重复不丢帧（脚本化） | locus-media-video.test.ts | `a window with more frames than the quota stops before the second of the extra frame and nextK moves strictly forward` | 🟢 |
 | 场景变化密集时缩小窗口 | locus-media-video.test.ts | `dense scene frames shrink the window instead of dropping frames` | 🟢 |
 | 单个整秒内场景帧超出配额 | locus-media-video.test.ts | `scene frames beyond the quota inside one second are one counted failure and k still advances` | 🟢 |
+| 稀疏 VFR：空档超过 1 s 时分页与整读选帧一致（无单秒溢出） | locus-media-video.ffmpeg.test.ts | `sparse VFR: a gap longer than 1 s before k does not change what paged reading selects (oracle: one whole read)` | 🟢 |
+| 稀疏 VFR：40 s 空档需多次回退 seek | locus-media-video.ffmpeg.test.ts | `sparse VFR with a 40 s gap: the page seeks back until a frame precedes the first selected one` | 🟢 |
+| 整秒边界（x.999）分页与整读一致，不丢不重 | locus-media-video.ffmpeg.test.ts | `frames just below a whole second (1.999 and similar) belong to the next second, paged equals whole, no drop or duplicate` | 🟢 |
+| 大 start_time 下 x.999 帧不被静默丢弃（pts+time_base） | locus-media-video.ffmpeg.test.ts | `the same frames on timelines that start at 100 s / 12345 s / 100000 s (showinfo prints only 6 significant digits of the raw time)` | 🟢 |
 
 ### R26 逐槽位帧失败规则（ADDED）
 

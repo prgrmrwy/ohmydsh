@@ -184,6 +184,34 @@ describe.skipIf(tools === undefined)('whole-second frames from real video', () =
     for (const frame of pages.flat()) expect(frame.k).toBe(Math.floor(frame.timeSeconds + 0.001))
   })
 
+  /**
+   * Page through a video the way the Host does (each page starts at the previous `nextK`) and return what was
+   * delivered. `finished` is true only when a page reported `complete` — a runaway cursor must not pass silently.
+   */
+  async function readPaged(clip: Window, quota: number): Promise<{ times: number[]; pages: number; finished: boolean; failed: number }> {
+    const times: number[] = []
+    let failed = 0
+    let k = 0
+    let pages = 0
+    let finished = false
+    for (let guard = 0; guard < 100; guard += 1) {
+      const result = await extract(clip, k, quota)
+      if (result.kind !== 'frames') throw new Error(`skipped: ${result.reason}`)
+      pages += 1
+      expect(result.frames.filter(frame => 'data' in frame).length, 'a page never exceeds the quota').toBeLessThanOrEqual(quota)
+      for (const frame of result.frames) {
+        expect(frame.k, 'a frame belongs to this page window').toBeGreaterThanOrEqual(k)
+        expect(frame.k, 'and ends before the next cursor').toBeLessThan(Math.max(result.nextK, k + 1))
+        if ('data' in frame) times.push(frame.timeSeconds)
+        else failed += 1
+      }
+      if (!result.complete) expect(result.nextK, 'k strictly increases').toBeGreaterThan(k)
+      k = Math.max(result.nextK, k)
+      if (result.complete) { finished = true; break }
+    }
+    return { times, pages, finished, failed }
+  }
+
   it('paging a video with sub-second changes: k strictly increases and the concatenated pages equal one whole read', async () => {
     const clip = await flashClip('flashes', 12, [1.5, 3.2, 3.6, 6.4, 9.1])
     const whole = await extract(clip, 0, 200)
@@ -193,28 +221,103 @@ describe.skipIf(tools === undefined)('whole-second frames from real video', () =
 
     // The busiest second (3 s: 3.0, 3.2, 3.43, 3.6, 3.83) fits both quotas, so nothing may be lost.
     for (const quota of [5, 7]) {
-      const times: number[] = []
-      let k = 0
-      let pages = 0
-      for (let guard = 0; guard < 100; guard += 1) {
-        const result = await extract(clip, k, quota)
-        if (result.kind !== 'frames') throw new Error(`skipped: ${result.reason}`)
-        pages += 1
-        expect(result.frames.filter(frame => 'data' in frame).length, 'a page never exceeds the quota').toBeLessThanOrEqual(quota)
-        for (const frame of result.frames) {
-          expect(frame.k, 'a frame belongs to this page window').toBeGreaterThanOrEqual(k)
-          expect(frame.k, 'and ends before the next cursor').toBeLessThan(Math.max(result.nextK, k + 1))
-          if ('data' in frame) times.push(frame.timeSeconds)
-        }
-        if (!result.complete) expect(result.nextK, 'k strictly increases').toBeGreaterThan(k)
-        k = Math.max(result.nextK, k)
-        if (result.complete) break
-      }
+      const { times, pages, finished } = await readPaged(clip, quota)
+      expect(finished, `quota ${String(quota)}: paging terminated with complete`).toBe(true)
       expect(pages, `quota ${String(quota)} needs several pages`).toBeGreaterThan(2)
       expect(times, `quota ${String(quota)}: pages joined equal one whole read`).toEqual(wholeTimes)
       expect(new Set(times).size, 'no frame twice').toBe(times.length)
     }
   })
+
+  /** Gray levels whose successive jumps all differ by more than the 0.08 scene threshold (about 20 of 255 levels). */
+  const SCENE_LEVELS = [20, 230, 60, 200, 100, 250, 10, 180, 90, 240, 30, 160, 120, 220, 40, 190, 70, 210]
+
+  /**
+   * A clip whose frames sit at exactly the given times (whole milliseconds, ascending; Matroska counts in ms).
+   * Frame `i` is a flat gray of level `levels[i]`; the default levels make every frame a scene change.
+   */
+  function framesAt(name: string, millis: readonly number[], levels: readonly number[] = SCENE_LEVELS, offsetSeconds = 0) {
+    const last = millis.at(-1)!
+    const select = millis.map(ms => `eq(n\\,${String(ms)})`).join('+')
+    const lum = levels.slice(0, millis.length).map((level, index) => `if(eq(N\\,${String(index)})\\,${String(level)}\\,`).join('') + '0' + ')'.repeat(millis.length)
+    return generate(
+      name,
+      ['-f', 'lavfi', '-i', `color=c=black:size=64x64:rate=1000:duration=${String((last + 10) / 1000)}`],
+      ['-vf', `select='${select}',geq=lum='${lum}':cb=128:cr=128`, '-fps_mode', 'vfr', ...(offsetSeconds === 0 ? [] : ['-output_ts_offset', String(offsetSeconds)])],
+      'in.mkv',
+    )
+  }
+
+  it('sparse VFR: a gap longer than 1 s before k does not change what paged reading selects (oracle: one whole read)', async () => {
+    // t=0 black, t=3 gray, t=3.1 white with equal steps: in one read 3.1 scores min(d, |d - d|) = 0 and is not
+    // selected. A page that starts at k=3 and only sees frames from 2 s on has no frame before 3.0, so 3.1 would
+    // score min(d, |d - 0|) = d against an empty history and be selected as an extra.
+    const clip = await framesAt('sparse-gap', [0, 3000, 3100], [16, 126, 235])
+    const wholeTimes = delivered(await extract(clip, 0, 200)).map(frame => frame.timeSeconds)
+    expect(wholeTimes, 'one whole read').toEqual([0, 3])
+    for (const quota of [1, 2, 3, 8]) {
+      const { times, finished, failed } = await readPaged(clip, quota)
+      expect(finished, `quota ${String(quota)} terminated`).toBe(true)
+      expect(times, `quota ${String(quota)}: paged equals whole`).toEqual(wholeTimes)
+      expect(failed, `quota ${String(quota)}: no single-second overflow is logged`).toBe(0)
+    }
+    // A page that starts in the middle of the gap, and one right at the frame, both agree with the whole read.
+    for (const from of [2, 3]) expect(delivered(await extract(clip, from, 8)).map(frame => frame.timeSeconds), `from ${String(from)}`).toEqual([3])
+  })
+
+  it('sparse VFR with a 40 s gap: the page seeks back until a frame precedes the first selected one', async () => {
+    const clip = await framesAt('sparse-long-gap', [0, 40_000, 40_100, 40_200, 55_000, 55_100], [16, 126, 235, 126, 16, 126])
+    const wholeTimes = delivered(await extract(clip, 0, 200)).map(frame => frame.timeSeconds)
+    expect(wholeTimes, 'equal steps: only the first frame of each second').toEqual([0, 40, 55])
+    for (const quota of [1, 2, 8]) {
+      const { times, finished, failed } = await readPaged(clip, quota)
+      expect(finished, `quota ${String(quota)} terminated`).toBe(true)
+      expect(times, `quota ${String(quota)}: paged equals whole`).toEqual(wholeTimes)
+      expect(failed, `quota ${String(quota)}: no single-second overflow is logged`).toBe(0)
+    }
+    for (const from of [20, 40, 41, 50, 55]) {
+      const page = delivered(await extract(clip, from, 8)).map(frame => frame.timeSeconds)
+      expect(page, `from ${String(from)}`).toEqual(wholeTimes.filter(time => time >= from))
+    }
+  })
+
+  /**
+   * Frames hugging whole seconds from below (x.999 starts second x+1; 6.998 still belongs to second 6), at most two per second. Neighbours stay >= 40 ms apart:
+   * the JPEG output runs on a 1/25 s time base and ffmpeg silently drops frames that collide there. Every quota used
+   * below fits the densest second, so nothing may be lost or counted as over budget — and quota 2 puts a page
+   * boundary right in front of an x.999 frame.
+   */
+  const boundaryMillis = [0, 999, 1500, 1999, 2500, 2999, 3500, 3999, 4500, 4999, 5500, 5999, 6998, 7500]
+
+  async function expectPagedEqualsWhole(clip: Window): Promise<number[]> {
+    const wholeTimes = delivered(await extract(clip, 0, 200)).map(frame => frame.timeSeconds)
+    expect(new Set(wholeTimes).size, 'no frame twice in the whole read').toBe(wholeTimes.length)
+    for (const quota of [2, 3, 4, 5, 8]) {
+      const { times, finished, failed } = await readPaged(clip, quota)
+      expect(finished, `quota ${String(quota)} terminated`).toBe(true)
+      expect(times, `quota ${String(quota)}: paged equals whole`).toEqual(wholeTimes)
+      expect(failed, `quota ${String(quota)}: nothing counted as over budget`).toBe(0)
+    }
+    return wholeTimes
+  }
+
+  it('frames just below a whole second (1.999 and similar) belong to the next second, paged equals whole, no drop or duplicate', async () => {
+    const times = await expectPagedEqualsWhole(await framesAt('second-boundary', boundaryMillis))
+    expect(times).toContain(0.999)
+    expect(times).toContain(1.999)
+    expect(times).toContain(6.998)
+  })
+
+  it('the same frames on timelines that start at 100 s / 12345 s / 100000 s (showinfo prints only 6 significant digits of the raw time)', async () => {
+    // Before the second was computed from pts and the time base, paged reading silently dropped x.999 frames here:
+    // the printed time and the filter's own `t - start + eps` disagreed about which second they belong to.
+    for (const offset of [100, 12_345, 100_000]) {
+      const times = await expectPagedEqualsWhole(await framesAt(`second-boundary-${String(offset)}`, boundaryMillis, undefined, offset))
+      expect(times, `offset ${String(offset)}`).toContain(0.999)
+      expect(times, `offset ${String(offset)}`).toContain(1.999)
+      expect(times, `offset ${String(offset)}`).toContain(6.998)
+    }
+  }, 60_000)
 
   it('a second with more scene frames than the page quota delivers the quota and counts the rest as one failure; k advances', async () => {
     const clip = await flashClip('crowded', 6, [3.2, 3.6])
