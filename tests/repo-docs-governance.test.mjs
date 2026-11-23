@@ -609,6 +609,7 @@ test('package tiers match the design (D6)', () => {
     'dsh-pet': 'A',
     'home-network-model-guard': 'B',
     'jev-workflow-router-hook': 'C',
+    'sidebar-local-service-browser': 'C',
     'sidebar-session-resources': 'B',
     'dsh-session-id-copy': 'B',
     'dsh-sidebar-session-provider-icon': 'B',

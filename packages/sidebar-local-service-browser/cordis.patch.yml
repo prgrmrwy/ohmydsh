@@ -1,0 +1,11 @@
+# dsh-sidebar-local-service-browser bundle patch
+#
+# `dsh.bundle.patch` layer: one plugin row inserted into the profile bundle
+# stack. The Host half mounts the same-origin loopback proxy (prefix route,
+# WebSocket upgrade route and the index guard tap) once `connection` exists;
+# the Web client half registers the「本地服务」tab through `ctx.betterSidebar`
+# and stays inactive — no UI, no behavior — until dsh-better-sidebar provides
+# the service. Design: OpenSpec change `sidebar-local-service-browser`.
+- insert:
+    - id: sidebar-local-service-browser
+      name: dsh-sidebar-local-service-browser

@@ -203,6 +203,7 @@ tests/                   仓库级测试
 - [dsh-session-id-copy](packages/dsh-session-id-copy/README.md) — 在标题旁加一个短 session id 徽标，点击复制完整 id。
 - [system-clock](packages/system-clock/README.md) — 在设置底部显示 DSH 主机的时钟、时区与 hostname。
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — 把当前会话的链接与产出文件汇总到侧栏面板。
+- [sidebar-local-service-browser](packages/sidebar-local-service-browser/README.md) — 在侧栏 tab 里经已认证的同源代理打开 Host 本机的回环端口。
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — 主机出口位于受限地区时，在输入框禁用 Claude 系列模型。
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — 为订阅 provider 剥离 sandbox 升级字段并清理孤立的工具调用。
 - [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — 把自托管 Magpie 网关按上游归属接入为多个真实 provider route（原版 DSH 即显示 `Magpie (Claude)`、`Magpie (Codex)` 等分组），支持多线路自动选线（在家 LAN、在外公网/Cloudflare Access；按线路 key/Access），用量卡片按上游 provider 分组，支持可见性、默认 effort 与会话级快速档。
