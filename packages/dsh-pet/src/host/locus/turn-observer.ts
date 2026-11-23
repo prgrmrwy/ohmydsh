@@ -390,7 +390,7 @@ export function createLocusTurnObserver(
   const ended = new Set<string>()
   /** Ended Delivery lineages, bounded and keyed by exact ended turn. */
   const retained = new Map<string, RetainedCurrent>()
-  /** A retained current may have at most one admitted continuation turn. */
+  /** Child -> its single retained current lineage (one continuation segment active at a time). */
   const continuationByChild = new Map<string, string>()
   let disposed = false
 
@@ -602,9 +602,16 @@ export function createLocusTurnObserver(
       ports.log?.('claim-agent-context')
       return
     }
+    // The spec'd relay is two-step ("已转问" first, the real answer later), so
+    // each later agent-message segment hands the lineage forward. Only one
+    // segment may hold it at a time: refuse while the previous continuation
+    // turn is still running.
     if (retainedCurrent.continuationTurnId !== undefined && retainedCurrent.continuationTurnId !== turnIdOf(claim.childSessionId, claim.turn)) {
-      ports.log?.('claim-agent-context')
-      return
+      const previous = turns.get(turnKey(claim.childSessionId, retainedCurrent.lastTurn))
+      if (previous !== undefined && previous.end === undefined) {
+        ports.log?.('claim-agent-context')
+        return
+      }
     }
     const observed = ensureTurn(claim)
     if (observed.agentMessages.has(claim.messageId)) return

@@ -60,7 +60,17 @@ export function createMemexRuntime(
     // next edit retries — rather than leaving that workspace's cards unreachable.
     let migrations: ReturnType<typeof migratePrimarySwitches>
     try {
-      migrations = migratePrimarySwitches(current, next, options)
+      migrations = migratePrimarySwitches(current, next, {
+        ...options,
+        // The resolver still serves the previous routing here, so it can name the
+        // library a so-far unclaimed workspace was derived into.
+        servedBefore: workspace => {
+          try {
+            const served = scopes.current.resolve(workspace)
+            return served.source === 'derived' || served.source === 'local' ? { name: served.scope, home: served.home } : undefined
+          } catch { return undefined }
+        },
+      })
     } catch (error) {
       ctx.logger('dsh-memex').warn(
         'primary switch not applied, keeping the current routing: %s',

@@ -1,0 +1,52 @@
+name: Hand external PRs to Bebop
+
+# At least four hours after creation, plus the hourly scheduler's delay.
+on:
+  schedule:
+    - cron: '37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: pr-review-handoff
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      # Trusted inline code only; never check out or execute PR code here.
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const marker = '<!-- bebop:pr-review -->';
+            const agent = 'agent-bebop';
+            const maintainer = 'prgrmrwy';
+            const now = Date.now();
+            const pulls = await github.paginate(github.rest.pulls.list, { ...context.repo, state: 'open', sort: 'created', direction: 'asc', per_page: 100 });
+            let handed = 0;
+            for (const pull of pulls) {
+              const author = pull.user?.login?.toLowerCase();
+              if (!author || author === maintainer || author === agent || pull.user?.type !== 'User' || author.endsWith('[bot]')) continue;
+              if (pull.draft || !Number.isFinite(Date.parse(pull.created_at)) || now - Date.parse(pull.created_at) < 4 * 60 * 60 * 1000) continue;
+              const params = { ...context.repo, issue_number: pull.number, per_page: 100 };
+              const comments = await github.paginate(github.rest.issues.listComments, params);
+              if (comments.some(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker))) continue;
+              if (comments.some(c => c.user?.login === agent || (c.user?.login === maintainer && /@agent-bebop\b/i.test(c.body ?? '')))) continue;
+              const reviews = await github.paginate(github.rest.pulls.listReviews, { ...context.repo, pull_number: pull.number, per_page: 100 });
+              if (reviews.some(r => r.user?.login === agent)) continue;
+              // Recheck after pagination: a PR may have closed or become a draft.
+              const { data: current } = await github.rest.pulls.get({ ...context.repo, pull_number: pull.number });
+              if (current.state !== 'open' || current.draft) continue;
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: pull.number,
+                body: [marker, '@agent-bebop This external PR has been open for at least 4 hours. Please review the current head, publish your findings here, and mention @prgrmrwy when the review is complete. Review only; do not modify, approve or merge the PR.'].join('\n\n')
+              });
+              if (++handed >= 5) break;
+            }
+            core.info(`handed off ${handed} PR(s)`);

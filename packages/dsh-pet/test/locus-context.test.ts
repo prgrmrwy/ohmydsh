@@ -124,6 +124,36 @@ describe('unified locus delivery context', () => {
     expect(prompt).toContain('self mentioned：unknown')
   })
 
+  it('makes Addressing, not the opaque @ou_… body text, the mention authority for a document comment', () => {
+    // Comment APIs render a mention as `@<open_id>` with no display name. A
+    // child that judged "that is not my name" settled a real @-mention as
+    // reference-only (live report 2026-11-13). The prompt must say the
+    // platform-proven Addressing line wins.
+    const docEndpoint = { chatId: 'doc:docx:Dx0000000000000000000000001', threadId: '7001' }
+    const messageId = `${docEndpoint.chatId}/${docEndpoint.threadId}/8001`
+    const prompt = renderLocusDeliveryPrompt(deliveryContext({
+      endpoint: docEndpoint,
+      request: {
+        ...deliveryContext().request,
+        messageId,
+        text: '@ou_bot 看下',
+        replyTarget: { chatId: docEndpoint.chatId, threadId: docEndpoint.threadId, messageId },
+        addressing: {
+          status: 'unknown',
+          occurrences: [{ kind: 'self-bot', displayName: '', stableId: 'ou_bot' }],
+          selfMentioned: true,
+          otherBotCount: 0,
+          orderKnown: true,
+        },
+      },
+    }))
+
+    expect(prompt).toContain('### 飞书文档评论（current delivery only）')
+    expect(prompt).toContain('self mentioned：true')
+    expect(prompt).toContain('本 bot 是否被提及以上方 Addressing 为准')
+    expect(prompt).toContain('不要因为 @ 后不是自己的名字就判为「仅引用」')
+  })
+
   it('keeps the exported short alias equivalent', () => {
     const context = deliveryContext()
     expect(renderLocusPrompt(context)).toBe(renderLocusDeliveryPrompt(context))

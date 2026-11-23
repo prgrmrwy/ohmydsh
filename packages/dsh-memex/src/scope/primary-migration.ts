@@ -58,6 +58,11 @@ export interface MigrationOptions {
   readonly namespaceDir?: string
   /** Home directory used to expand `~/…` prefixes. */
   readonly homeDir?: string
+  /**
+   * The auto-derived library that served a workspace no entry claimed, if any.
+   * Lets a first claimer taking that workspace over count as a primary switch.
+   */
+  readonly servedBefore?: (workspace: string) => { readonly name: string; readonly home: string } | undefined
 }
 
 function normalizeHome(path: string, home: string): string {
@@ -135,6 +140,12 @@ function claimedPaths(config: ScopeConfig, homeDir: string): string[] {
   return [...paths].sort()
 }
 
+/** Whether any entry claims exactly this path. */
+function hasClaimer(config: ScopeConfig, path: string, homeDir: string): boolean {
+  return config.scopes.some(entry =>
+    (entry.pathPrefixes ?? []).some(prefix => prefix.trim() !== '' && normalizeHome(prefix, homeDir) === path))
+}
+
 /**
  * The primary entry of one claimed path, or `undefined` when the configuration
  * does not identify exactly one.
@@ -175,10 +186,14 @@ export function planPrimaryMigrations(
   const migrations: PrimaryMigration[] = []
   const seen = new Set<string>()
   for (const workspace of [...paths].sort()) {
-    const from = primaryNameOf(previous, workspace, homeDir)
+    const claimed = primaryNameOf(previous, workspace, homeDir)
     const to = primaryNameOf(next, workspace, homeDir)
-    if (from === undefined || to === undefined || from === to) continue
-    const fromHome = homeOf(previous, from, namespaceDir, homeDir)
+    if (to === undefined) continue
+    // No claimer before: the cards live in the library derived for this workspace.
+    const served = claimed === undefined && !hasClaimer(previous, workspace, homeDir) ? options.servedBefore?.(workspace) : undefined
+    const from = claimed ?? served?.name
+    if (from === undefined || from === to) continue
+    const fromHome = served === undefined ? homeOf(previous, from, namespaceDir, homeDir) : normalizeHome(served.home, homeDir)
     const toHome = homeOf(next, to, namespaceDir, homeDir)
     const key = `${fromHome}\u0000${toHome}`
     if (seen.has(key)) continue

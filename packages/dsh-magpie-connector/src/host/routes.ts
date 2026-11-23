@@ -43,7 +43,7 @@ export class SettingsController {
     }
     const response=await runtime.settings()
     const view=await response.json() as Record<string,unknown>
-    view.groups=[...new Set(runtime.current.catalog.map(m=>m.provider))].map(provider=>({provider,models:runtime.current.catalog.filter(m=>m.provider===provider).map(m=>({id:m.info.id,name:m.info.name,efforts:m.efforts,visible:isVisible(m,runtime.store.value.visibleModels)}))}))
+    view.groups=[...new Set(runtime.current.catalog.map(m=>m.provider))].map(provider=>({provider,models:runtime.current.catalog.filter(m=>m.provider===provider).map(m=>({id:m.info.id,name:m.info.name,efforts:m.efforts,...(m.routingKind?{routingKind:m.routingKind}:{}),visible:isVisible(m,runtime.store.value.visibleModels)}))}))
     return Response.json(runtime.redactJson(view))
   }
 }

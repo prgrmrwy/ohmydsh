@@ -89,6 +89,8 @@ export interface LocusDshPort {
   resolveSession(sessionId: string): Promise<LocusParentSession | undefined>
   /** Resolve the currently configured default workspace. */
   resolveDefaultWorkspace(): Promise<LocusWorkspace | undefined>
+  resolveWorkspaceById?(id: string): Promise<LocusWorkspace | undefined>
+  resolveWorkspaceByTitle?(name: string): Promise<{ readonly ok: true; readonly workspace: LocusWorkspace } | { readonly ok: false; readonly reason: 'not-found' | 'ambiguous' }>
   /** Create a fresh automatic work session in exactly the supplied workspace. */
   createMainSession(input: {
     workspaceId: string
@@ -140,6 +142,7 @@ export interface LocusControllerDeps extends LocusControllerDepsV20 {
 export interface EnsureGroupRequest {
   readonly chatId: string
   readonly chatName?: string
+  readonly workspaceId?: string
   /** Explicit work session (W). If absent, a new auto W is created. */
   readonly parentSessionId?: string
   /** Alias useful to callers that want to make precedence explicit in code. */
@@ -150,6 +153,7 @@ export interface EnsureTopicRequest {
   readonly chatId: string
   readonly threadId: string
   readonly chatName?: string
+  readonly workspaceId?: string
   readonly parentSessionId?: string
   readonly explicitParentSessionId?: string
 }
@@ -204,6 +208,7 @@ export interface EnsureEntryRequest {
   readonly chatId: string
   readonly threadId?: string
   readonly chatName?: string
+  readonly workspaceId?: string
 }
 
 export interface EnsureEntryResult {
@@ -243,6 +248,9 @@ export type LocusControllerErrorCode =
   | 'PARENT_NOT_FOUND'
   | 'PARENT_NOT_ALLOWED'
   | 'DEFAULT_WORKSPACE_UNAVAILABLE'
+  | 'WORKSPACE_NOT_FOUND'
+  | 'WORKSPACE_AMBIGUOUS'
+  | 'WORKSPACE_CONFLICT'
   | 'GROUP_UNAVAILABLE'
   | 'TOPIC_UNAVAILABLE'
   | 'DEFAULT_QA_UNAVAILABLE'
@@ -268,6 +276,9 @@ const LOCUS_CONTROLLER_ERROR_CODES: Readonly<Record<LocusControllerErrorCode, tr
   PARENT_NOT_FOUND: true,
   PARENT_NOT_ALLOWED: true,
   DEFAULT_WORKSPACE_UNAVAILABLE: true,
+  WORKSPACE_NOT_FOUND: true,
+  WORKSPACE_AMBIGUOUS: true,
+  WORKSPACE_CONFLICT: true,
   GROUP_UNAVAILABLE: true,
   TOPIC_UNAVAILABLE: true,
   DEFAULT_QA_UNAVAILABLE: true,
@@ -456,6 +467,7 @@ export class LocusController {
     return this.withLock(`group:${chatId}`, async () => {
       const group = this.repo.getRow({ chatId })
       if (group !== undefined && isGroupRow(group)) {
+        this.checkWorkspaceLocked(group, request.workspaceId)
         const reenabled = await this.checkExplicitBindLocked(group, group, explicit)
         const current = reenabled ?? group
         if (reenabled === undefined && !isServing(current)) {
@@ -473,6 +485,7 @@ export class LocusController {
         chatId,
         explicit,
         ...(request.chatName === undefined ? {} : { chatName: request.chatName }),
+        ...(request.workspaceId === undefined ? {} : { workspaceId: request.workspaceId }),
       })
       const created = rows[0] as LocusGroupRowV20
       return { group: created, locus: created, created: true, reused: false, ...(migration === undefined ? {} : { migration }) }
@@ -497,6 +510,7 @@ export class LocusController {
             threadId,
             explicit,
             ...(request.chatName === undefined ? {} : { chatName: request.chatName }),
+            ...(request.workspaceId === undefined ? {} : { workspaceId: request.workspaceId }),
           })
           return {
             group: rows[0] as LocusGroupRowV20,
@@ -507,6 +521,7 @@ export class LocusController {
             ...(migration === undefined ? {} : { migration }),
           }
         }
+        this.checkWorkspaceLocked(group, request.workspaceId)
         const existing = this.repo.getRow({ chatId, threadId })
         const reenabled = await this.checkExplicitBindLocked(group, existing, explicit)
         if (existing !== undefined) {
@@ -535,6 +550,13 @@ export class LocusController {
    * re-enables a `stopped` target in place and is otherwise idempotent.
    * @returns the re-enabled row, or undefined when nothing changed.
    */
+  private checkWorkspaceLocked(group: LocusGroupRowV20, workspaceId: string | undefined): void {
+    if (workspaceId === undefined || group.workspaceId === workspaceId) return
+    const main = this.repo.findMain(group.locusMainSessionId)
+    const label = main === undefined ? '已有工作会话' : shortLocusSessionLabel(main.workSessionId)
+    throw new LocusControllerError('WORKSPACE_CONFLICT', `该群已由 ${label} 跟进，-w 不能改绑；可在管理面「改绑到其他会话」。`)
+  }
+
   private async checkExplicitBindLocked(
     group: LocusGroupRowV20,
     target: LocusRowV20 | undefined,
@@ -618,6 +640,7 @@ export class LocusController {
     readonly chatName?: string
     readonly threadId?: string
     readonly explicit: string | undefined
+    readonly workspaceId?: string
   }): Promise<{ readonly rows: readonly LocusRowV20[]; readonly migration?: LocusMigrationNote }> {
     const { chatId, threadId, explicit } = input
     const explicitWork = explicit === undefined ? undefined : await this.resolveWorkSession(explicit, '显式 parent')
@@ -660,6 +683,7 @@ export class LocusController {
       readonly chatId: string
       readonly chatName?: string
       readonly threadId?: string
+      readonly workspaceId?: string
     },
     explicitWork: LocusParentSession | undefined,
   ): Promise<readonly LocusRowV20[]> {
@@ -675,7 +699,7 @@ export class LocusController {
     const resources: ProvisionedResources = {}
     let published = false
     try {
-      const work = explicitWork ?? await this.createAutoWorkSession(provisioningId, chatId, input.chatName, resources)
+      const work = explicitWork ?? await this.createAutoWorkSession(provisioningId, chatId, input.chatName, resources, input.workspaceId)
       const { main, created } = await this.ensureLocusMain(work, provisioningId, resources)
       const group = this.newGroupRow(chatId, work, main)
       const rows: LocusRowV20[] = threadId === undefined ? [group] : [group, this.newTopicRow(chatId, threadId)]
@@ -818,7 +842,10 @@ export class LocusController {
     const chatId = requireNonEmpty(request.chatId, 'chatId')
     const threadId = request.threadId === undefined ? undefined : requireNonEmpty(request.threadId, 'threadId')
     const endpoint: LocusEndpoint = threadId === undefined ? { chatId } : { chatId, threadId }
-    const named = request.chatName === undefined ? {} : { chatName: request.chatName }
+    const named = {
+      ...(request.chatName === undefined ? {} : { chatName: request.chatName }),
+      ...(request.workspaceId === undefined ? {} : { workspaceId: request.workspaceId }),
+    }
     if (this.repo.getRow(endpoint) === undefined) {
       const ensured = threadId === undefined
         ? await this.ensureGroup({ chatId, ...named })
@@ -830,6 +857,11 @@ export class LocusController {
         const row = this.repo.getRow(endpoint)
         if (row === undefined) {
           throw new LocusControllerError('REPOSITORY_INCONSISTENT', `入口 ${endpointLabel(endpoint)} 已消失。`)
+        }
+        if (request.workspaceId !== undefined) {
+          const group = this.groupOf(row)
+          if (group === undefined) throw new LocusControllerError('REPOSITORY_INCONSISTENT', '入口缺少群行，无法核验工作区。')
+          this.checkWorkspaceLocked(group, request.workspaceId)
         }
         return this.repairEntryLocked(endpoint, row)
       }),
@@ -1018,10 +1050,15 @@ export class LocusController {
     chatId: string,
     chatName: string | undefined,
     resources: ProvisionedResources,
+    workspaceId?: string,
   ): Promise<LocusParentSession> {
-    const workspace = await this.deps.dsh.resolveDefaultWorkspace()
-    if (workspace === undefined || workspace.id.trim() === '') {
-      throw new LocusControllerError('DEFAULT_WORKSPACE_UNAVAILABLE', '未配置或无法解析 default workspace，已停止自动创建来源会话。')
+    const workspace = workspaceId === undefined
+      ? await this.deps.dsh.resolveDefaultWorkspace()
+      : await this.deps.dsh.resolveWorkspaceById?.(workspaceId)
+    if (workspace === undefined || workspace.id.trim() === '' || (workspaceId !== undefined && workspace.id !== workspaceId)) {
+      throw new LocusControllerError('DEFAULT_WORKSPACE_UNAVAILABLE', workspaceId === undefined
+        ? '未配置或无法解析 default workspace，已停止自动创建来源会话。'
+        : '所选工作区已不可用，已停止自动创建来源会话。')
     }
     const work = await this.deps.dsh.createMainSession({
       workspaceId: workspace.id,

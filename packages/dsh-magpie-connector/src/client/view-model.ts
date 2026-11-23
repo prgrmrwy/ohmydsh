@@ -24,7 +24,9 @@ export interface Card {
 export type CardsStatus = 'ok' | 'forbidden' | 'error' | 'unconfigured'
 export interface CardsView { status: CardsStatus; error?: string; cards: Card[] }
 
-export interface ModelRow { id: string; name?: string; efforts?: string[]; visible?: boolean }
+export interface ModelRow { id: string; name?: string; efforts?: string[]; visible?: boolean; /** Set by the host on Magpie routing entries only. */ routingKind?: 'auto' | 'custom' }
+/** Visibility key and settings section of every routing entry (host `ROUTING_OWNER`). */
+export const ROUTING_PROVIDER = 'routing'
 export interface ModelGroup { provider: string; models: ModelRow[] }
 export type SyncErrorKind = 'unauthorized' | 'forbidden' | 'http' | 'unreachable' | 'settings' | 'registration'
 export interface LineView {
@@ -204,7 +206,8 @@ export function parseResetOutcome(body: unknown): ResetOutcome | undefined {
 
 /** Provider groups in page order: catalog groups first, then card-only providers (never dropped). */
 export function providerOrder(groups: ModelGroup[], cards: Card[]): string[] {
-  const order = groups.map(g => g.provider)
+  // Routing groups belong to no vendor: their section always comes first.
+  const order = groups.map(g => g.provider).sort((a, b) => Number(b === ROUTING_PROVIDER) - Number(a === ROUTING_PROVIDER))
   for (const card of cards) if (!order.includes(card.provider)) order.push(card.provider)
   return order
 }

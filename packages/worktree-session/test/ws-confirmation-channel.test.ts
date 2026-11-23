@@ -49,12 +49,11 @@ describe('explicit-path confirmation is routed to the human, not the permission 
     }
     const item = request.questions[0]!
     expect(item.question).toContain('promote')
-    // Everything the user must read lives in `question`. The `detail` slot is
-    // deliberately unused: the current questions UI gives it a 2px horizontal
-    // margin, rendering those lines flush against the panel edge.
-    expect(item.detail).toBeUndefined()
-    expect(item.question).toContain('/repo/.worktrees/task')
-    expect(item.question).toMatch(/仅授权本次调用/)
+    // Facts live in `detail`, not in `question`: DSH 0.2.2 clamps the title
+    // behind an expand toggle, which hid every line after the question.
+    expect(item.question).not.toContain('\n')
+    expect(item.detail).toContain('`/repo/.worktrees/task`')
+    expect(item.detail).toMatch(/仅授权本次调用/)
     // A refusal must be selectable, never only expressible as free text.
     expect(item.options?.map(option => option.label)).toContain('取消')
     // The live agent is forwarded so the question reaches its owning session.
@@ -132,5 +131,7 @@ describe('the confirmation names the session the way a human knows it', () => {
     expect(text).not.toContain('session-6456e0ce-6ded-47ba-9c79-ac02cf871eb3')
     // The exact path stays available for the reader who needs it.
     expect(text).toContain('/repo/.worktrees/task-6aa8f49cc9')
+    // Markdown detail: each fact is its own list item, not merged by a bare newline.
+    expect(text).toMatch(/^- 源会话：.*\n- 任务分支：`ws\/task-6aa8f49cc9`\n- 工作区路径：`\/repo\/\.worktrees\/task-6aa8f49cc9`\n\n/)
   })
 })

@@ -70,7 +70,7 @@
 ## 11. 文档
 
 - [x] 11.1 dsh-pet README（中文与英文）：链接读取、授权前提 `im:message.message_link:read`、续读与账本、资源阈值（512 MiB、128 MiB、90 s、16 000 字符）与风险说明。
-- [x] 11.2 `docs/architecture/dsh-plugin-integration-pitfalls.md` 新增 §17：快照 key 返回 `234003`、只有根 id 能读与下载、`message_links/query` 少一层、lark-cli 失败信封在 stderr、话题列表 `total` 是页内条数。
+- [x] 11.2 `docs/architecture/dsh-plugin-integration-pitfalls.md` 新增 §18（合并 main 时 §17 已被文档评论一节占用）：快照 key 返回 `234003`、只有根 id 能读与下载、`message_links/query` 少一层、lark-cli 失败信封在 stderr、话题列表 `total` 是页内条数。
 
 ## 12. 变异检查与验收
 

@@ -60,3 +60,11 @@ test('refuses symlinks in roots, ancestors and leaves instead of following them'
   await assert.rejects(materializeIndependentPackageFiles(clean.source, join(clean.root, 'alias'), ['fixtures/eval']), /symbolic|link/)
   assert.equal((await stat(join(clean.source, clean.path))).nlink, 2)
 })
+
+test("accepts roots reached through a symlinked ancestor (e.g. /home/u -> /data00/home/u)", async () => {
+  const s = await scene()
+  await symlink(s.root, s.root + "-home")
+  const via = p => p.replace(s.root, s.root + "-home")
+  assert.deepEqual(await materializeIndependentPackageFiles(via(s.source), via(s.deployed), ["fixtures/eval"]), [s.path])
+  assert.equal((await stat(join(s.deployed, s.path))).nlink, 1)
+})

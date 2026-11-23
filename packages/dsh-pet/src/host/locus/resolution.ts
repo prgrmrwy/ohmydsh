@@ -78,6 +78,7 @@ export interface LocusProvisioningPort {
   ensureForDelivery(input: {
     readonly endpoint: LocusEndpoint
     readonly messageId: string
+    readonly workspaceId?: string
     readonly signal: AbortSignal
   }): Promise<ResolvedActiveLocus>
 }
@@ -145,6 +146,7 @@ export function createLocusResolution(ports: LocusResolutionPorts): {
   ensureForDelivery(input: {
     readonly endpoint: LocusEndpoint
     readonly messageId: string
+    readonly workspaceId?: string
     readonly signal: AbortSignal
   }): Promise<ResolvedActiveLocus>
 } {

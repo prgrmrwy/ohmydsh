@@ -270,6 +270,12 @@ function docCommentLines(context: LocusDeliveryContext): string[] {
       : '- 飞书不允许回复全文评论：你的答复会作为一条新的全文评论发出，开头 @ 提问者（会通知对方），文档的所有读者都能看到。',
     '- 读取当前评论线程与文档正文请调用 `pet_locus_doc_context`；不要用其它方式读取飞书。',
     '- 回复里的 @ 不会产生提醒，按纯文本发出。',
+    // The body renders each mention as `@<open_id>` because the comment API
+    // has no display names. Without this line a child reads that opaque id as
+    // "someone else was asked" and settles the Delivery as reference-only even
+    // though the platform proved this bot was mentioned (live report
+    // 2026-11-13). Addressing above is the authority, not the rendered text.
+    '- 正文里的 `@ou_…` 是平台渲染的提及，可能没有显示名；本 bot 是否被提及以上方 Addressing 为准，不要因为 @ 后不是自己的名字就判为「仅引用」。',
     ...(context.request.senderAllowlisted === true
       ? []
       : ['- 提问者不在 allowlist：不要在回复中粘贴项目的私密内容（源码、凭据、内部链接、未公开计划）。']),

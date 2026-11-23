@@ -42,10 +42,30 @@ describe('queryDocComment', () => {
 
     expect(result).toMatchObject({ kind: 'ok', isWhole: false, quote: '接口已有' })
     expect(result.kind === 'ok' && result.trigger.text).toBe(`@${DOC_IDS.botOpenId} 补充一下`)
+    // A comment mention exists only as a person element; keep it structured so
+    // admission can prove the bot was addressed (pet-locus-collaboration
+    // addressing requirement).
+    expect(result.kind === 'ok' && result.trigger.mentionOpenIds).toEqual([DOC_IDS.botOpenId])
     expect(calls[0]).toEqual(expect.arrayContaining([
       'drive', '+batch-query-comments', '--as', 'bot', '--token', DOC_IDS.docToken, '--type', 'docx',
       '--comment-ids', DOC_IDS.anchoredCommentId,
     ]))
+  })
+
+  it('keeps every person element of a reply as an ordered mention fact', async () => {
+    const { client } = scripted([ok(batchQueryComments([commentCard({
+      commentId: DOC_IDS.anchoredCommentId,
+      isWhole: false,
+      replies: [{
+        replyId: DOC_IDS.anchoredRootReplyId,
+        text: '看下',
+        mentions: [DOC_IDS.otherUserOpenId, DOC_IDS.botOpenId],
+      }],
+    })]))])
+
+    const result = await client.queryDocComment!(DOC_IDS.docToken, DOC_IDS.anchoredCommentId, DOC_IDS.anchoredRootReplyId)
+    expect(result.kind === 'ok' && result.trigger.mentionOpenIds)
+      .toEqual([DOC_IDS.otherUserOpenId, DOC_IDS.botOpenId])
   })
 
   it('spec Scenario "长线程中的触发回复": pages +list-replies until the trigger is found', async () => {
@@ -79,6 +99,56 @@ describe('queryDocComment', () => {
     await expect(client.queryDocComment!('bad/token', '1', '2')).rejects.toThrow()
     await expect(client.queryDocComment!('Dx1', 'c1', '2')).rejects.toThrow()
     expect(calls).toHaveLength(0)
+  })
+
+  it('lists comments with bot identity and carries reply mentions for reconciliation', async () => {
+    const { client, calls } = scripted([ok({
+      items: [{
+        comment_id: DOC_IDS.anchoredCommentId,
+        is_whole: false,
+        quote: '评审修订',
+        create_time: 1_800,
+        reply_list: { replies: [{
+          reply_id: DOC_IDS.anchoredFollowupReplyId,
+          user_id: DOC_IDS.otherUserOpenId,
+          create_time: 1_900,
+          content: { elements: [
+            { type: 'person', person: { user_id: DOC_IDS.botOpenId } },
+            { type: 'text_run', text_run: { text: ' 请处理复审' } },
+          ] },
+        }] },
+      }],
+      has_more: true,
+      page_token: 'p2',
+    })])
+
+    const page = await client.listDocComments!(DOC_IDS.docToken)
+
+    expect(calls[0]).toEqual(expect.arrayContaining([
+      'drive', '+list-comments', '--as', 'bot', '--token', DOC_IDS.docToken, '--type', 'docx',
+      '--solved-status', 'all', '--page-size', '100',
+    ]))
+    expect(page).toMatchObject({ hasMore: true, pageToken: 'p2' })
+    expect(page?.comments[0]).toMatchObject({
+      commentId: DOC_IDS.anchoredCommentId,
+      isWhole: false,
+      quote: '评审修订',
+      createdAt: 1_800_000,
+    })
+    expect(page?.comments[0]?.replies[0]).toMatchObject({
+      replyId: DOC_IDS.anchoredFollowupReplyId,
+      authorOpenId: DOC_IDS.otherUserOpenId,
+      createdAt: 1_900_000,
+      mentionOpenIds: [DOC_IDS.botOpenId],
+    })
+  })
+
+  it('reports a failed comment list as undefined instead of an empty document', async () => {
+    const failed = scripted([() => new Error('timeout')])
+    await expect(failed.client.listDocComments!(DOC_IDS.docToken)).resolves.toBeUndefined()
+
+    const malformed = scripted([ok({ items: 'nope' })])
+    await expect(malformed.client.listDocComments!(DOC_IDS.docToken)).resolves.toBeUndefined()
   })
 })
 
@@ -149,3 +219,28 @@ describe('addWholeComment (whole-doc answers; full comments cannot be replied to
   })
 })
 
+
+describe('subscribeDocEvents', () => {
+  it('subscribes the app to one document with bot identity', async () => {
+    const { client, calls } = scripted([ok({})])
+
+    await expect(client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('success')
+
+    expect(calls[0]).toEqual(expect.arrayContaining([
+      'api', 'POST', `/open-apis/drive/v1/files/${DOC_IDS.docToken}/subscribe`, '--as', 'bot',
+      '--params', JSON.stringify({ file_type: 'docx' }),
+    ]))
+  })
+
+  it('keeps the two permission outcomes distinct so the Host can name them', async () => {
+    const missingScope = scripted([() => ({ ok: false, error: { code: 99991672, message: 'no scope' } })])
+    const forbidden = scripted([() => ({ ok: false, error: { code: 1069603, message: 'forbidden' } })])
+    const other = scripted([() => ({ ok: false, error: { code: 1069601, message: 'fail' } })])
+    const timeout = scripted([() => new Error('timeout')])
+
+    await expect(missingScope.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('missing-scope')
+    await expect(forbidden.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('forbidden')
+    await expect(other.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('unknown')
+    await expect(timeout.client.subscribeDocEvents!(DOC_IDS.docToken)).resolves.toBe('unknown')
+  })
+})

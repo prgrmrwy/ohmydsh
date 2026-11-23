@@ -6,7 +6,7 @@ import {
 } from './settings.js'
 import { GatewayTransport, validateIdentity, type ConnectionIdentity } from './transport.js'
 import { LineSelector, type Probe } from './selection.js'
-import { mapCatalog, routeOf, type CatalogModel } from './catalog.js'
+import { ROUTING_OWNER, mapCatalog, routeOf, type CatalogModel } from './catalog.js'
 import type { PublishResult } from './registrar.js'
 import { DEFAULT_SIDEBAR_WINDOWS, migrateLegacySidebarWindow, normalizeSidebarWindows, type SidebarWindowKind } from '../shared/sidebar-window.js'
 
@@ -161,6 +161,8 @@ export class MagpieRuntime {
   }
   /** Route ids of the persisted owners: the full set the adapter should own. */
   routeSet(): string[] { return this.owners.map(routeOf) }
+  /** Owner whose route lists `model`: a routing entry stays under its vendor while `routing` is not admitted (cap full, conflict). */
+  ownerOf(model: CatalogModel): string { return model.fallbackOwner !== undefined && !this.owners.includes(model.owner) ? model.fallbackOwner : model.owner }
   private emit(routes?: string[]): PublishResult | undefined {
     if (this.disposed) return undefined
     const result = this.publish(routes) as PublishResult | undefined
@@ -378,7 +380,9 @@ export class MagpieRuntime {
   /** D6 owner admission + publish for one successfully mapped catalog (synchronous: no await between the checks and the effects). */
   private commitOwners(gen: Generation, catalog: CatalogModel[]) {
     if (this.disposed || !this.isCurrent(gen)) return
+    // `routing` is admitted ahead of other new owners so routing entries are not starved within one sync.
     const fresh = [...new Set(catalog.map(m => m.owner))].filter(owner => !this.owners.includes(owner))
+      .sort((a, b) => Number(b === ROUTING_OWNER) - Number(a === ROUTING_OWNER))
     const admit = fresh.slice(0, Math.max(0, MAX_OWNERS - this.owners.length))
     this.rejectedOwners = fresh.slice(admit.length)
     if (this.registrationError) return
@@ -600,7 +604,7 @@ export class MagpieRuntime {
       lines: viewLines, activeLineId: active?.line.id ?? null,
       pending: this.failedFields, retainedCredentials: this.retainedNow(config.lines),
       lastSyncAt: gen.lastSyncAt, lastSyncError: gen.lastSyncError, lastSyncErrorKind: gen.lastSyncErrorKind,
-      groups: [...new Set(gen.catalog.map(m => m.provider))].map(provider => ({ provider, models: gen.catalog.filter(m => m.provider === provider).map(m => ({ id: m.info.id, name: m.info.name, efforts: m.efforts })) })),
+      groups: [...new Set(gen.catalog.map(m => m.provider))].map(provider => ({ provider, models: gen.catalog.filter(m => m.provider === provider).map(m => ({ id: m.info.id, name: m.info.name, efforts: m.efforts, ...(m.routingKind ? { routingKind: m.routingKind } : {}) })) })),
       visibleModels: this.store.value.visibleModels, defaultEfforts: this.store.value.defaultEfforts,
       sidebarUsage: this.store.value.sidebarUsage === true,
       sidebarRefreshMinutes: this.store.value.sidebarRefreshMinutes ?? 5,

@@ -1,6 +1,6 @@
 import { constants } from 'node:fs'
-import { lstat, readdir, open, rename, unlink } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { lstat, readdir, open, realpath, rename, unlink } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 async function directoryChain(path) {
@@ -31,7 +31,11 @@ export async function materializeIndependentPackageFiles(source, deployed, paths
   if (paths === undefined) return []
   if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string' || !path || isAbsolute(path) || path.includes('\\') || path.split('/').some(part => !part || ['.', '..', 'node_modules', '.git'].includes(part)))) throw new Error('unsafe independent resource paths')
   if (new Set(paths).size !== paths.length || paths.some(a => paths.some(b => a !== b && a.startsWith(b + '/')))) throw new Error('duplicate or overlapping independent resource paths')
-  source = resolve(source); deployed = resolve(deployed)
+  // Canonicalize only the parents: host-level ancestor links (e.g. /home/u -> /data00/home/u,
+  // macOS /var -> /private/var) are trusted, while the roots themselves and everything below
+  // them must still be real directories/files, never followed symlinks.
+  const anchored = async path => { path = resolve(path); return join(await realpath(dirname(path)), basename(path)) }
+  source = await anchored(source); deployed = await anchored(deployed)
   if (source === deployed) throw new Error('independent resource deployment must differ from source')
   const sources = new Map(), targets = new Map()
   for (const root of [source, deployed]) {
