@@ -2,7 +2,7 @@
 
 覆盖账本。spec 中的每个 `#### Scenario:` 都对应一个命名测试：测试标题与 scenario 名逐字相同，并带 `spec Scenario` 前缀，方便机械核对。实施期间，每个测试第一次以正确原因失败（🔴）后再实现；通过后把这一行翻为 🟢。verify 阶段只要还有任何一行是红的，就阻断。
 
-共 67 行，对应 spec 中的 67 个 scenario（第 67 行为实施阶段 spec 修订新增，见 review.md 的定向复核）。
+共 75 行，对应 spec 中的 75 个 scenario（第 67 行为实施阶段注入位置修订新增；第 68–75 行为跨机试用后的提示文案与返回按钮修订新增，见 human-decisions.md 2026-11-24）。
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
@@ -72,6 +72,14 @@
 | specs/sidebar-local-service-browser/spec.md → 前置条件不满足时失败闭合（尽力而为） | 页面未受控时停止并只重载一次 | packages/sidebar-local-service-browser/test/browser/fail-closed.browser.test.ts | spec Scenario "页面未受控时停止并只重载一次" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 可独立启停与卸载清理 | 正常启用时注册 tab 与路由 | packages/sidebar-local-service-browser/test/lifecycle.test.ts | spec Scenario "正常启用时注册 tab 与路由" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 可独立启停与卸载清理 | 缺少 connection 时不暴露路由 | packages/sidebar-local-service-browser/test/lifecycle.test.ts | spec Scenario "缺少 connection 时不暴露路由" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → 前置条件不满足时失败闭合（尽力而为） | 非网页响应显示类型和可读状态码 | packages/sidebar-local-service-browser/test/browser/fail-closed.browser.test.ts | spec Scenario "非网页响应显示类型和可读状态码" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → 前置条件不满足时失败闭合（尽力而为） | 被阻止注入的网页仍提示注入被阻止 | packages/sidebar-local-service-browser/test/browser/fail-closed.browser.test.ts | spec Scenario "被阻止注入的网页仍提示注入被阻止" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → 前置条件不满足时失败闭合（尽力而为） | 状态码不可读时只显示内容类型 | packages/sidebar-local-service-browser/test/tab-not-html.test.tsx | spec Scenario "状态码不可读时只显示内容类型" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 顶部的返回按钮 | 返回按钮回到上一页并同步地址栏 | packages/sidebar-local-service-browser/test/browser/back-button.browser.test.ts | spec Scenario "返回按钮回到上一页并同步地址栏" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 顶部的返回按钮 | 顶层历史穿插时只后退 iframe | packages/sidebar-local-service-browser/test/browser/back-button.browser.test.ts | spec Scenario "顶层历史穿插时只后退 iframe" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 顶部的返回按钮 | 没有上一页时返回按钮禁用 | packages/sidebar-local-service-browser/test/browser/back-button.browser.test.ts | spec Scenario "没有上一页时返回按钮禁用" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 顶部的返回按钮 | 返回目标被重定向时不循环 | packages/sidebar-local-service-browser/test/browser/back-button.browser.test.ts | spec Scenario "返回目标被重定向时不循环" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 顶部的返回按钮 | 提交新地址后访问栈重置 | packages/sidebar-local-service-browser/test/browser/back-button.browser.test.ts | spec Scenario "提交新地址后访问栈重置" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 可独立启停与卸载清理 | 卸载时关闭在途连接与 Service Worker | packages/sidebar-local-service-browser/test/browser/lifecycle.browser.test.ts | spec Scenario "卸载时关闭在途连接与 Service Worker" | 🟢 green |
 
 ## Coverage Notes

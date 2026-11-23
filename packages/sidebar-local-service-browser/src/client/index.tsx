@@ -31,6 +31,7 @@ export function apply(ctx: ClientContext & { betterSidebar: BetterSidebarService
     component: () => <Tab />,
   })
   ctx.effect(() => disposeTab)
+  ctx.effect(() => () => { document.querySelector('style[data-dshls-style]')?.remove() })
   // Unloading the plugin also unregisters its Service Worker (spec: 可独立启停与卸载清理).
   ctx.effect(() => () => { void browserPlatform.unregisterServiceWorker().catch(() => undefined) })
 }

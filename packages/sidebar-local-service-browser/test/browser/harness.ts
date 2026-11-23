@@ -714,6 +714,12 @@ export class BrowserHarness {
     await this.hostPluginFiber?.dispose()
   }
 
+  /** PNG screenshot of the top page (optionally clipped to a CSS-pixel rectangle). */
+  async screenshot(file: string, clip?: { x: number; y: number; width: number; height: number }): Promise<void> {
+    const shot = await this.cdp.send('Page.captureScreenshot', { format: 'png', ...(clip === undefined ? {} : { clip: { ...clip, scale: 2 } }) }, this.pageSession)
+    writeFileSync(file, Buffer.from(shot.data as string, 'base64'))
+  }
+
   // ---- teardown ---------------------------------------------------------------------
 
   async close(): Promise<void> {

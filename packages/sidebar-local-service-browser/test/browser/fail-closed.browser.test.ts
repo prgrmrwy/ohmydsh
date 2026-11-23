@@ -95,3 +95,51 @@ describe('前置条件不满足时失败闭合（尽力而为）', () => {
     }
   })
 })
+
+const tabPanelText = (h: BrowserHarness): Promise<string> => h.evalDsh<string>(`(document.querySelector('.dshls-tab') || document.body).innerText`)
+const iframeAtBlank = (h: BrowserHarness): Promise<boolean> => h.evalDsh<boolean>(`document.querySelector('iframe[data-dshls]').contentWindow.location.href === 'about:blank'`)
+
+describe('前置条件不满足时失败闭合（尽力而为）— 按内容类型分流', () => {
+  it('spec Scenario "非网页响应显示类型和可读状态码"', async () => {
+    const h = await startBrowserHarness({ mode: 'tab' })
+    try {
+      const up = await h.upstream('U8', (_req, res) => { res.writeHead(404, { 'content-type': 'text/plain' }); res.end() })
+      await h.open()
+      await submitAddress(h, `127.0.0.1:${String(up.port)}/`)
+      await waitFor(async () => (await tabPanelText(h)).includes('这个地址返回的不是网页'), 'not-a-web-page title', 15_000, 100)
+      await waitFor(() => iframeAtBlank(h), 'iframe at about:blank')
+      const text = await tabPanelText(h)
+      expect(text).toContain('text/plain')
+      expect(text).toContain('404')
+      expect(text).not.toContain('页面阻止了注入脚本')
+      // No link may point at a proxy path (it would open a un-injected document outside the tab).
+      expect(await h.evalDsh<string[]>(`[...document.querySelectorAll('.dshls-tab a[href], .dshls-tab [href]')].map((a) => a.getAttribute('href')).filter((x) => x.includes('/dsh-local-service/'))`)).toEqual([])
+      // Positive control for that oracle: an HTML page loads normally and shows no such title.
+      const web = await h.upstream('U9', pageHandler('U9'))
+      await openInTab(h, web, '/')
+      expect(await tabPanelText(h)).not.toContain('这个地址返回的不是网页')
+    } finally {
+      await h.close()
+    }
+  })
+
+  it('spec Scenario "被阻止注入的网页仍提示注入被阻止"', async () => {
+    const h = await startBrowserHarness({ mode: 'tab' })
+    try {
+      const up = await h.upstream('U5', pageHandler('U5'))
+      await h.open()
+      // An exact route beats the plugin's prefix route, so this text/html document is served WITHOUT the injected script.
+      h.dsh.webServer.register({
+        kind: 'exact',
+        path: `/dsh-local-service/p/${String(up.port)}/blocked`,
+        handler: (_req, res) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end('<!doctype html><html><head></head><body>no inject here</body></html>') },
+      })
+      await submitAddress(h, `127.0.0.1:${String(up.port)}/blocked`)
+      await waitFor(async () => (await tabPanelText(h)).includes('页面阻止了注入脚本'), 'blocked title', 15_000, 100)
+      await waitFor(() => iframeAtBlank(h), 'iframe at about:blank')
+      expect(await tabPanelText(h)).not.toContain('这个地址返回的不是网页')
+    } finally {
+      await h.close()
+    }
+  })
+})

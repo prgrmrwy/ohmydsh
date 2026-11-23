@@ -444,7 +444,11 @@ Host 在精确升级路由 `/dsh-local-service/ws` 上处理升级请求：
 ### Requirement: 前置条件不满足时失败闭合（尽力而为）
 tab 在加载任何代理页面前 SHALL 检查以下条件：`navigator.serviceWorker` 存在，`window.navigation` 存在，本插件 Service Worker 注册成功并在 5 秒内处于 active。任一条件不满足时，tab MUST NOT 设置 iframe 地址，并 SHALL 显示具体原因。
 
-注入脚本报告「未受控」时，tab SHALL 重新加载 iframe 一次；再次未受控时，SHALL 把 iframe 导航到 `about:blank`，并显示错误。iframe 加载了位于代理路径、但没有注入标记的文档时，tab SHALL 把 iframe 导航到 `about:blank`，并显示「页面阻止了注入脚本」。
+注入脚本报告「未受控」时，tab SHALL 重新加载 iframe 一次；再次未受控时，SHALL 把 iframe 导航到 `about:blank`，并显示错误。
+
+iframe 加载了位于代理路径、但没有注入标记的文档时，tab SHALL 把 iframe 导航到 `about:blank`，并根据该文档的 `document.contentType` 区分两种情况：
+- 不是 `text/html`：显示标题「这个地址返回的不是网页」，并说明内容类型。iframe 窗口的 `performance.getEntriesByType('navigation')` 第一项存在、其 `responseStatus` 为正整数时，同时显示状态码；条目不存在、属性缺失或值为 0 时，只显示内容类型，不显示状态码。tab MUST NOT 提供在 tab 之外打开该代理地址的链接。
+- 是 `text/html`：显示「页面阻止了注入脚本」。
 
 这些检查只是尽力而为：系统不保证所有情况下都不会访问浏览器所在电脑的回环地址。已知的例外 SHALL 写进 README：
 - 页面在 Worker 中发起的请求和 WebSocket；
@@ -467,6 +471,62 @@ tab 在加载任何代理页面前 SHALL 检查以下条件：`navigator.service
 - **THEN** 注入脚本调用了 `window.stop()`、报告「未受控」，并且没有替换 `WebSocket` 构造函数、没有写入身份表
 - **AND** tab 只重新加载 iframe 一次，第二次报告后 iframe 地址变为 `about:blank` 并显示错误
 - **AND** 本场景不断言页面自有脚本的执行次数：`window.stop()` 能否截停同一数据块中已解析的脚本不作保证（尽力而为，见上文已知例外）
+
+#### Scenario: 非网页响应显示类型和可读状态码
+- **GIVEN** 上游 8000 对 `/` 返回 `404`，`Content-Type: text/plain`，正文为空
+- **WHEN** 用户在地址栏输入 `127.0.0.1:8000/`
+- **THEN** 在 Chromium 中（其导航条目提供 `responseStatus`），iframe 地址变为 `about:blank`；tab 显示「这个地址返回的不是网页」，并显示 `text/plain` 与 `404`
+- **AND** tab 中没有任何 `href` 指向 `/dsh-local-service/` 代理路径的链接
+
+#### Scenario: 状态码不可读时只显示内容类型
+- **GIVEN** 没有注入标记的代理文档，`contentType` 为 `application/json`；它的导航条目依次为：不存在、缺少 `responseStatus`、`responseStatus` 为 0
+- **WHEN** tab 处理该次加载
+- **THEN** 三种情况下 tab 都显示「这个地址返回的不是网页」和 `application/json`，且不显示任何状态码数字
+
+#### Scenario: 被阻止注入的网页仍提示注入被阻止
+- **GIVEN** 上游 5173 返回的 `text/html` 文档中没有注入标记（测试中通过在扫描器之外构造该响应来模拟注入被阻止）
+- **WHEN** iframe 加载该文档
+- **THEN** iframe 地址变为 `about:blank`，tab 显示「页面阻止了注入脚本」，不显示「这个地址返回的不是网页」
+
+### Requirement: tab 顶部的返回按钮
+tab 顶部 SHALL 在地址栏左侧提供一个返回按钮，可访问名称为「返回」。
+
+浏览器的联合会话历史由 iframe 与 DSH 顶层页面共用，`history.back()`、iframe 的 `navigation.back()` 和 `traverseTo()` 都可能让 DSH 顶层页面一起后退。因此，返回按钮 MUST NOT 使用这些 API，而 SHALL 改由 tab 自己维护的访问栈实现。返回按钮只改变 iframe，不产生新的会话历史条目，MUST NOT 改变 DSH 顶层页面的地址或历史。
+
+访问栈规则：
+- 栈中每项记录 `{ fam, port, rest }`，内容就是注入脚本在 `dshls:installed` 与 `dshls:location` 消息中报告的值。tab 收到这两类消息（`event.source` 为 iframe 窗口）时，如果地址与栈顶不同，SHALL 入栈。页面内同文档的路由变化（`pushState`）同样入栈；返回到这样的地址时，整页会重新加载。
+- 点击返回时，tab SHALL 弹出栈顶，用 iframe 窗口的 `location.replace(...)` 加载新栈顶的代理路径，并设置“返回中”标志。
+- “返回中”标志生效期间收到的第一条 `dshls:installed`，SHALL 把栈顶替换为它报告的地址（而不是入栈），并清除标志。这样，返回目标被上游重定向到别处时，就不会出现“返回 → 重定向回来 → 再次入栈”的循环。
+- 在地址栏提交地址时，tab SHALL 先清空访问栈并清除“返回中”标志，再加载新地址。iframe 因错误被置为 `about:blank` 时，SHALL 清除“返回中”标志。
+- 栈中少于 2 项时，返回按钮 SHALL 带 `disabled` 属性；有 2 项或更多时，按钮 MUST 可用，MUST NOT 因为在等待加载而被禁用。tab 根元素 SHALL 暴露 `data-dshls-history-depth` 属性，值为栈的长度。
+
+已知限制（尽力而为，SHALL 写入 README）：点击返回后、页面加载完成前，若又发生了其它导航（页面自己跳转、用户快速连点返回），访问栈可能多出一项或错开一项，但不会卡住，也不会影响 DSH。返回目标已失效时，已弹出的那一项不会恢复。返回目标被重定向时，这一项会合并为重定向后的地址。返回时不保留页面内存状态（`history.state`、滚动位置、未提交的表单）。
+
+#### Scenario: 返回按钮回到上一页并同步地址栏
+- **GIVEN** 用户提交 `127.0.0.1:5173/`，然后页面整页导航到 `/second`
+- **WHEN** 用户点击「返回」
+- **THEN** iframe 回到 5173 的 `/`，地址栏显示 `http://127.0.0.1:5173/`，`data-dshls-history-depth` 为 `1`
+
+#### Scenario: 顶层历史穿插时只后退 iframe
+- **GIVEN** iframe 依次显示 5173 的 `/` 和 `/second`；随后在 DSH 顶层页面 `location.hash` 为空时执行 `history.pushState(null, '', '#x')`，并记录顶层此时的 `history.length`
+- **WHEN** 用户点击「返回」
+- **THEN** iframe 回到 5173 的 `/`；DSH 顶层页面的 `location.hash` 仍为 `#x`，`history.length` 不变
+
+#### Scenario: 没有上一页时返回按钮禁用
+- **GIVEN** tab 刚挂载、尚未加载任何页面；随后用户提交 `127.0.0.1:5173/`，并等待加载完成
+- **WHEN** 分别在上述两个时刻检查返回按钮
+- **THEN** 两个时刻按钮都带 `disabled` 属性，点击后 iframe 地址不变；加载完成后 `data-dshls-history-depth` 为 `1`
+
+#### Scenario: 返回目标被重定向时不循环
+- **GIVEN** 栈为 [5173 `/a`, 5173 `/b`]；之后上游把 `/a` 改为返回 `302 Location: /b`
+- **WHEN** 用户点击「返回」
+- **THEN** iframe 最终显示 `/b`，`data-dshls-history-depth` 为 `1`，返回按钮带 `disabled`
+- **AND** 再等待 1 秒，上游 5173 收到的请求总数不再增加
+
+#### Scenario: 提交新地址后访问栈重置
+- **GIVEN** 栈为 [5173 `/`, 5173 `/second`]，此时返回按钮可用
+- **WHEN** 用户在地址栏提交 `127.0.0.1:8000/page`，并等待加载完成
+- **THEN** `data-dshls-history-depth` 为 `1`，返回按钮带 `disabled` 属性
 
 ### Requirement: 可独立启停与卸载清理
 Web client 入口 SHALL 通过 `inject` 依赖 `betterSidebar`。better-sidebar 未安装时，MUST NOT 注册 tab 或 Service Worker。Host 入口 SHALL 在 `connection` 服务不可用时，MUST NOT 注册任何代理路由或 index 注入。

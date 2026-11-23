@@ -275,6 +275,36 @@
 - [x] 14.8 Implement: 使 14.7 通过（可独立启停与卸载清理）
 - [x] 14.9 Refactor；`npm test` 全部保持绿色
 
+## 16. 跨机试用后的修订（2026-11-24，见 human-decisions.md）
+
+- [x] 16.1 对 spec 修订（非网页提示、返回按钮）做定向复核，结论为 APPROVE 后才实施（review.md「Targeted re-review 6 (post-ponytail)」APPROVE，spec SHA 5718df92…）
+- [x] 16.2 Write failing test: `browser/fail-closed.browser.test.ts` → spec Scenario "非网页响应显示类型和可读状态码"
+- [x] 16.3 Implement: 使 16.2 通过
+- [x] 16.4 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.5 Write failing test: `browser/fail-closed.browser.test.ts` → spec Scenario "被阻止注入的网页仍提示注入被阻止"
+- [x] 16.6 Implement: 使 16.5 通过
+- [x] 16.7 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.A1 Write failing test: `tab-not-html.test.tsx` → spec Scenario "状态码不可读时只显示内容类型"
+- [x] 16.A2 Implement: 使 16.A1 通过
+- [x] 16.A3 Refactor；`npm test` 全部保持绿色
+- [x] 16.H1 Write failing test: `browser/back-button.browser.test.ts` → spec Scenario "返回按钮回到上一页并同步地址栏"
+- [x] 16.H2 Implement: 使 16.H1 通过
+- [x] 16.H3 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.H4 Write failing test: `browser/back-button.browser.test.ts` → spec Scenario "顶层历史穿插时只后退 iframe"
+- [x] 16.H5 Implement: 使 16.H4 通过
+- [x] 16.H6 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.H7 Write failing test: `browser/back-button.browser.test.ts` → spec Scenario "没有上一页时返回按钮禁用"
+- [x] 16.H8 Implement: 使 16.H7 通过
+- [x] 16.H9 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.H10 Write failing test: `browser/back-button.browser.test.ts` → spec Scenario "返回目标被重定向时不循环"
+- [x] 16.H11 Implement: 使 16.H10 通过
+- [x] 16.H12 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.H13 Write failing test: `browser/back-button.browser.test.ts` → spec Scenario "提交新地址后访问栈重置"
+- [x] 16.H14 Implement: 使 16.H13 通过
+- [x] 16.H15 Refactor；`npm test` 与 `npm run test:browser` 全部保持绿色
+- [x] 16.14 按 frontend-design 设计稿重做 tab 的视觉：只改样式与布局，不改行为；用 DSH 主题变量，亮色和暗色都要截图自查；全部既有测试保持绿色
+- [ ] 16.15 隔离 dsh build 后，从主 checkout 部署（dsh build 连续两次，第二次无变化），经用户批准后重启
+
 ## 15. 集成、部署与验收
 
 - [x] 15.1 在 `dsh.yaml` 新增 local 条目 `sidebar-local-service-browser`（位于 better-sidebar 之后）；note 写明以下内容：用途；同源信任面（D9）；代理 cookie 会被发往同一回环主机的其它本机服务（D4 残余风险）；已知例外；Chromium 要求；回滚方式（`enabled:false` → `dsh build` → 重启）
