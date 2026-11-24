@@ -49,7 +49,7 @@
 - IndexedDB、Cache Storage、BroadcastChannel 不按端口隔开，与 DSH 同 origin。
 - `location.host`/`location.origin` 返回的是 DSH 的地址。
 - 同一端口内的 cookie Path 粒度：所有 cookie 都放在 `Path=/`。
-- 代理 HTTPS 上游或非回环主机；端口发现。
+- 代理 HTTPS 上游或非回环主机。（端口发现已于 2026-11-24 加入，见 spec「首页列出 Host 上的网页服务」。）
 
 ## Decisions
 

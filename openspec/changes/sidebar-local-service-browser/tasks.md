@@ -305,6 +305,26 @@
 - [x] 16.14 按 frontend-design 设计稿重做 tab 的视觉：只改样式与布局，不改行为；用 DSH 主题变量，亮色和暗色都要截图自查；全部既有测试保持绿色
 - [ ] 16.15 隔离 dsh build 后，从主 checkout 部署（dsh build 连续两次，第二次无变化），经用户批准后重启
 
+## 17. 首页列出 Host 上的网页服务（2026-11-24）
+
+- [x] 17.0 spec 修订通过定向复核（APPROVE）后才开始实施
+- [x] 17.1 Write failing test: `host-services.test.ts` → spec Scenario "列出正在运行的网页服务"
+- [x] 17.2 Implement: 使 17.1 通过
+- [x] 17.3 Refactor；全部测试保持绿色
+- [x] 17.4 Write failing test: `host-services.test.ts` → spec Scenario "服务端点拒绝未认证与跨站请求"
+- [x] 17.5 Implement: 使 17.4 通过
+- [x] 17.6 Refactor；全部测试保持绿色
+- [x] 17.7 Write failing test: `host-services.test.ts` → spec Scenario "无响应的端口不拖慢列表"
+- [x] 17.8 Implement: 使 17.7 通过
+- [x] 17.9 Refactor；全部测试保持绿色
+- [x] 17.10 Write failing test: `browser/home.browser.test.ts` → spec Scenario "Home 按钮回到服务列表并可点选"
+- [x] 17.11 Implement: 使 17.10 通过
+- [x] 17.12 Refactor；全部测试保持绿色
+- [x] 17.13 Write failing test: `browser/home.browser.test.ts` → spec Scenario "没有发现服务时显示示例"
+- [x] 17.14 Implement: 使 17.13 通过
+- [x] 17.15 Refactor；全部测试保持绿色
+- [ ] 17.16 合入、推送、部署（dsh build 两次）
+
 ## 15. 集成、部署与验收
 
 - [x] 15.1 在 `dsh.yaml` 新增 local 条目 `sidebar-local-service-browser`（位于 better-sidebar 之后）；note 写明以下内容：用途；同源信任面（D9）；代理 cookie 会被发往同一回环主机的其它本机服务（D4 残余风险）；已知例外；Chromium 要求；回滚方式（`enabled:false` → `dsh build` → 重启）

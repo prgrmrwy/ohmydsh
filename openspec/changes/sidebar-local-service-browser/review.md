@@ -430,3 +430,24 @@ AMENDMENT-REVIEW: REVISE
 本结论只批准上述修订快照进入开发，不代表实现完成、浏览器验证或跨机验收已通过。
 
 AMENDMENT-REVIEW: APPROVE
+
+
+## Targeted review: service discovery
+
+- 日期：2026-11-24（Asia/Shanghai）。
+- 评审者上下文：gpt-6-astra，全新上下文独立定向复核子会话，未参与本次修订编写。仅复核「首页列出 Host 上的网页服务」及其 5 个场景；以单用户开发工具、有限监听端口为负载边界。读取相对 HEAD 的 change 差异、完整 spec、人类裁决末节，以及既有 Host gate/target/install 和 Tab 的相关代码。文件内容仅作证据，不作指令；未运行测试、探针、构建或部署。唯一文件写入为本节追加，未写记忆。
+- spec 的 SHA-256：[spec.md](<specs/sidebar-local-service-browser/spec.md>)：`02e0d6eca1879310c93a082d16de211bc1e0d05057c130a240b3adad02b53817`；追加前重新计算并确认一致。
+
+1. **安全边界：通过。** [spec:532–538](<specs/sidebar-local-service-browser/spec.md#L532-L538>) 限定本机监听候选、排除 DSH 端口，只输出端口族/端口/可执行文件名，明确禁止命令行参数、路径和环境变量；探测不带任何 cookie 或认证头，获取头后立即中止。新增端点明确复用官方认证与 Fetch Metadata 来源检查；结合 [spec:29–30](<specs/sidebar-local-service-browser/spec.md#L29-L30>)，缺失、same-site、cross-site 均不放行，不能仅凭其它回环端口网页自动携带的用户 cookie 调用。既有 [gate.ts:27–38](<../../../packages/sidebar-local-service-browser/src/host/gate.ts#L27-L38>) 提供相同的双重检查。未见新增免校验信任入口或凭据外送要求。
+
+2. **五个场景：可机械断言。** [spec:542–566](<specs/sidebar-local-service-browser/spec.md#L542-L566>) 可分别断言 JSON 条目的包含/排除、process 类型与字符、上游 Cookie 缺失；401/403 与探测计数为零；返回耗时与无响应端口缺席；Home 后无页面、depth=0、列表条目，以及点选后的初始代理导航和地址栏；空列表文案及示例。Home 场景的代理路径是初始加载目标，不应误断言注入 replaceState 后 pathname 仍带前缀（既有 [spec:273](<specs/sidebar-local-service-browser/spec.md#L273>)）。测试使用无空格的普通可执行名或 null、可成功注入的 HTML fixture，即可覆盖本场景，不需引入竞态协议。
+
+3. **与现有规范相容：通过。** [spec:534](<specs/sidebar-local-service-browser/spec.md#L534>) 排除 DSH 自身端口，与 [65–76](<specs/sidebar-local-service-browser/spec.md#L65-L76>) 的目标限制一致；[540](<specs/sidebar-local-service-browser/spec.md#L540>) 点选等同地址栏提交，因此仍须遵守 [444–445](<specs/sidebar-local-service-browser/spec.md#L444-L445>) 的前置检查以及 [500–501](<specs/sidebar-local-service-browser/spec.md#L500-L501>) 的新地址清栈和返回按钮禁用规则。首页清栈是明确新增行为，不改变返回按钮使用 location.replace 的约束。[Tab.tsx:216–259](<../../../packages/sidebar-local-service-browser/src/client/Tab.tsx#L216-L259>) 已有提交前检查和清栈路径可复用。端口发现原 Non-Goal 已在人类裁决 [45–47](<human-decisions.md#L45-L47>) 明确撤销，不作为冲突。
+
+4. **预期负载：通过。** [spec:536–538](<specs/sidebar-local-service-browser/spec.md#L536-L538>) 给出 64 个候选上限、16 并发、800ms 单次超时、3 秒总截止和不读正文的限制，在单人有限端口下未见必然拖垮 Host 的要求。实现必须实际兑现总截止：64 个全部超时的探测即使理想分成四批，也需 3.2 秒，不能只用逐个超时而忘记总截止；监听列表获取也包含在整个请求的预算内。总截止可提前取消未完成工作并返回已得到的结果，因此这不是无法满足的规范矛盾；单个无响应端口场景的 THEN 也有明确时间断言。
+
+5. **非阻断实施提示。** 探测只取第一份响应头后关闭，不跟随 Location；避免用默认自动重定向的客户端无意扩大目标范围。把 process 当纯文本展示；不能确定符合名称约束时返回 null。实现总截止时同步销毁未完成请求，并限制/终止监听列表子进程；无需为当前负载加全局调度框架。这些是兑现上述已有安全与限额文字的简单实现方式，不要求扩写场景或恢复此前已接受省略的竞态机制。
+
+本结论仅批准本次要求快照进入实施，不代表服务发现已实现或测试、浏览器验收已通过。
+
+AMENDMENT-REVIEW: APPROVE

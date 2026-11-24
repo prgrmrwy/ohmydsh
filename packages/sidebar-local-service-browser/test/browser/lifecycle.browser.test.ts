@@ -39,9 +39,11 @@ describe('可独立启停与卸载清理', () => {
 
       const t0 = Date.now()
       await h.disposeHostPlugin()
-      await h.evalDsh('(window.__hx.dispose(), true)')
+      // The page must still be alive to observe the closes: removing the tab iframe (client dispose) closes its
+      // sockets WITHOUT delivering a close event, so disposing the client first would race the Host's close.
       await waitFor(() => h.evalDsh<boolean>(`window.__life.wsClosed && window.__life.sseEnded`), 'both in-flight connections closed', 1000, 25)
       expect(Date.now() - t0).toBeLessThan(2000)
+      await h.evalDsh('(window.__hx.dispose(), true)')
       expect(up.openSockets()).toBe(0)
       // Routes are gone: the proxy path now falls through to DSH's fallback (404), and the upgrade route is gone.
       const gone = await h.dsh.request({ path: proxyUrl(up, '/'), headers: { cookie, 'sec-fetch-site': 'same-origin' } })

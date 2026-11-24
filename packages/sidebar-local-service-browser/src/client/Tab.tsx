@@ -6,7 +6,7 @@
  * un-injected document in its `load` handler and replaces it by the proxy path the identity table names.
  */
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { ENTRIES_KEY_PREFIX, FRAME_ATTR, INJECT_MARKER, PROXY_PATH_RE, isInjectMessage, proxyPath } from '../contract.js'
+import { ENTRIES_KEY_PREFIX, FRAME_ATTR, INJECT_MARKER, PROXY_PATH_RE, SERVICES_ROUTE, isInjectMessage, proxyPath } from '../contract.js'
 import type { NavigationLike } from '../inject/types.js'
 import { isEntryIdentity } from '../inject/identity.js'
 import { directAddress, parseAddress } from './address.js'
@@ -42,6 +42,16 @@ const HostIcon = () => <svg {...svgProps}><rect x="2" y="3" width="12" height="4
 const EnterIcon = () => <svg {...svgProps}><path d="M12.5 3.5v4a1 1 0 0 1-1 1h-8M6 5.5 3.5 8.5 6 11" /></svg>
 const CloseIcon = () => <svg {...svgProps}><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
 
+const HomeIcon = () => <svg {...svgProps}><path d="M2.5 7.5 8 3l5.5 4.5M4 6.8V13h8V6.8" /></svg>
+const RefreshIcon = () => <svg {...svgProps}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3" /></svg>
+
+interface HostService {
+  fam: 'p' | 'p6'
+  port: number
+  process: string | null
+}
+type Services = { state: 'loading' } | { state: 'done'; items: HostService[] }
+
 const EXAMPLES = ['127.0.0.1:5173', 'localhost:3000', '127.0.0.1:8080']
 
 const newFrameId = (): string => `f${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
@@ -69,6 +79,8 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
   const [external, setExternal] = useState('')
   const [src, setSrc] = useState<string | undefined>(undefined)
   const [depth, setDepth] = useState(0)
+  const [services, setServices] = useState<Services>({ state: 'loading' })
+  const servicesRun = useRef(0)
   const ready = useRef<Promise<string | undefined> | undefined>(undefined)
   const frame = useRef<HTMLIFrameElement | null>(null)
   const uncontrolledSeen = useRef(0)
@@ -76,6 +88,24 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
   // Visit stack behind the back button (spec: 访问栈 + location.replace + "返回中" 标志).
   const stack = useRef<Visit[]>([])
   const returning = useRef(false)
+
+  /** Ask the Host which web services listen on it; any failure reads as "none found". */
+  const loadServices = useCallback((): void => {
+    const run = ++servicesRun.current
+    setServices({ state: 'loading' })
+    void (async () => {
+      let items: HostService[] = []
+      try {
+        const res = await fetch(SERVICES_ROUTE, { credentials: 'same-origin', cache: 'no-store' })
+        const data: unknown = res.ok ? await res.json() : []
+        if (Array.isArray(data)) {
+          items = data.filter((x): x is HostService => typeof x === 'object' && x !== null
+            && ((x as HostService).fam === 'p' || (x as HostService).fam === 'p6') && Number.isInteger((x as HostService).port))
+        }
+      } catch { /* unreachable endpoint: show the empty state */ }
+      if (run === servicesRun.current) setServices({ state: 'done', items })
+    })()
+  }, [])
 
   const syncDepth = (): void => setDepth(stack.current.length)
 
@@ -93,6 +123,7 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
   // Mount: styles, sweep dead frames' tables and stale per-port Service Workers; unmount: drop only our own table.
   useEffect(() => {
     ensureStyle()
+    loadServices()
     sweepStaleTables()
     void platform.cleanupStaleRegistrations().catch(() => undefined)
     return () => {
@@ -100,7 +131,7 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
         window.sessionStorage.removeItem(`${ENTRIES_KEY_PREFIX}${frameId}`)
       } catch { /* ignore */ }
     }
-  }, [platform, frameId])
+  }, [platform, frameId, loadServices])
 
   // Messages from the injected script (same origin, from our iframe only).
   useEffect(() => {
@@ -286,6 +317,20 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
     }
   }
 
+  const goHome = (): void => {
+    stack.current = []
+    returning.current = false
+    uncontrolledSeen.current = 0
+    reportedUncontrolled.current = false
+    syncDepth()
+    setText('')
+    setError('')
+    setNotice(null)
+    setExternal('')
+    setSrc(undefined)
+    loadServices()
+  }
+
   const externalHost = ((): string => {
     try {
       return new URL(external).host
@@ -299,6 +344,9 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
       <div className="dshls-toolbar">
         <button type="button" className="dshls-icon-btn dshls-back" aria-label="返回" title="返回" disabled={depth < 2} onClick={goBack}>
           <BackIcon />
+        </button>
+        <button type="button" className="dshls-icon-btn dshls-back" aria-label="首页" title="首页" onClick={goHome}>
+          <HomeIcon />
         </button>
         <form className="dshls-route" onSubmit={onSubmit}>
           <span className="dshls-host" aria-label="Host 上的本机地址" title="Host 上的本机地址">
@@ -354,12 +402,34 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
           <div className="dshls-panel">
             <h2>在 Host 上打开一个本机服务</h2>
             <p>这里的 127.0.0.1 指运行 DSH 的那台机器，不是你面前这台。</p>
-            <div className="dshls-examples">
-              <span>试试</span>
-              {EXAMPLES.map((example) => (
-                <button key={example} type="button" className="dshls-example" onClick={() => { setText(example); void open(example) }}>{example}</button>
-              ))}
-            </div>
+            {services.state === 'loading' && <p>正在查找…</p>}
+            {services.state === 'done' && services.items.length > 0 && (
+              <ul className="dshls-services">
+                {services.items.map((svc) => {
+                  const target = `${svc.fam === 'p6' ? '[::1]' : '127.0.0.1'}:${String(svc.port)}/`
+                  return (
+                    <li key={`${svc.fam}:${String(svc.port)}`}>
+                      <button type="button" className="dshls-service" data-dshls-service="" onClick={() => { setText(target); void open(target) }}>
+                        <span className="dshls-service-port">{svc.fam === 'p6' ? '[::1]' : ''}{String(svc.port)}</span>
+                        {svc.process !== null && <span className="dshls-service-proc">{svc.process}</span>}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            {services.state === 'done' && services.items.length === 0 && <p>Host 上没有发现网页服务</p>}
+            {services.state === 'done' && services.items.length === 0 && (
+              <div className="dshls-examples">
+                <span>试试</span>
+                {EXAMPLES.map((example) => (
+                  <button key={example} type="button" className="dshls-example" onClick={() => { setText(example); void open(example) }}>{example}</button>
+                ))}
+              </div>
+            )}
+            <button type="button" className="dshls-refresh" aria-label="刷新" onClick={loadServices} disabled={services.state === 'loading'}>
+              <RefreshIcon /><span>刷新</span>
+            </button>
           </div>
         )}
       </div>

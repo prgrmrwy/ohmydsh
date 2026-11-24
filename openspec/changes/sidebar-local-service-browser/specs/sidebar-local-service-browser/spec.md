@@ -528,6 +528,43 @@ tab 顶部 SHALL 在地址栏左侧提供一个返回按钮，可访问名称为
 - **WHEN** 用户在地址栏提交 `127.0.0.1:8000/page`，并等待加载完成
 - **THEN** `data-dshls-history-depth` 为 `1`，返回按钮带 `disabled` 属性
 
+### Requirement: 首页列出 Host 上的网页服务
+Host SHALL 提供只读的 HTTP 端点 `GET /dsh-local-service/services`，它与代理路由使用相同的认证和来源检查：官方 `connection.requestRejection`，加上 `Sec-Fetch-Site` 必须为 `same-origin` 或 `none`，未通过时返回 401/403。端点返回 JSON 数组，每项为 `{ fam, port, process }`，按端口升序排列。
+
+- **候选端口**：Host 本机上监听 `127.0.0.1`、`::1`、`0.0.0.0` 或 `::` 的 TCP 端口，排除 `ctx.webServer.port`。监听在 IPv6 地址上的端口，`fam` 为 `p6`；其余为 `p`。macOS 用 `lsof -nP -iTCP -sTCP:LISTEN` 获取，Linux 读 `/proc/net/tcp` 与 `/proc/net/tcp6`。
+- **进程名**：只返回可执行文件名（例如 `node`），取不到时为 `null`。MUST NOT 返回命令行参数、路径或环境变量。
+- **只保留网页**：Host SHALL 对每个候选端口发起 `GET /` 探测，单次超时 800 毫秒，并发不超过 16。只有响应的 `Content-Type` 以 `text/html` 开头（任意状态码）的端口才列出。探测请求不带任何 cookie 或认证头，只读取响应头，读到响应头后立即中止，不读取正文。
+- **限额**：候选端口超过 64 个时，只探测端口号最小的 64 个。整个请求 SHALL 在 3 秒内返回。
+- **失败**：取不到监听列表时（命令不存在、无权限等），返回 `200` 和空数组，不暴露错误细节。
+
+tab 工具栏 SHALL 在返回按钮右侧提供一个 Home 按钮，可访问名称为「首页」。点击 Home、tab 首次挂载时，都显示首页：iframe 不加载，访问栈清空，地址栏清空。首页 SHALL 请求上述端点，并按“端口 + 进程名”列出服务；点击某一项，等同于在地址栏提交 `127.0.0.1:<端口>/`（`p6` 时为 `[::1]:<端口>/`）。首页 SHALL 提供一个「刷新」按钮，用于重新请求端点。请求进行中显示“正在查找…”；结果为空或请求失败时，显示“Host 上没有发现网页服务”，并给出现有的示例链接。
+
+#### Scenario: 列出正在运行的网页服务
+- **GIVEN** Host 本机 127.0.0.1 上，端口 A 返回 `text/html`，端口 B 返回 `application/json`，DSH 自身监听端口 W
+- **WHEN** 已认证的同源请求访问 `/dsh-local-service/services`
+- **THEN** 响应中包含 `{ fam: "p", port: A }`，不包含 B 和 W；每项的 `process` 是字符串或 `null`，且不含空格和 `/`
+- **AND** 端口 A 收到的探测请求不带 `Cookie` 头
+
+#### Scenario: 服务端点拒绝未认证与跨站请求
+- **GIVEN** 两个请求访问 `/dsh-local-service/services`：一个没有 DSH 会话 cookie；另一个带有效 cookie，但 `Sec-Fetch-Site: same-site`
+- **WHEN** 请求到达 Host
+- **THEN** 状态码依次为 401 和 403，且没有对任何端口发起探测
+
+#### Scenario: 无响应的端口不拖慢列表
+- **GIVEN** Host 上有一个端口接受连接，但永远不发送响应
+- **WHEN** 请求服务端点
+- **THEN** 3 秒内返回，结果不包含该端口
+
+#### Scenario: Home 按钮回到服务列表并可点选
+- **GIVEN** 服务端点会返回 5173；iframe 正在显示 5173 的 `/second`
+- **WHEN** 用户点击「首页」，再点击列表中的 5173
+- **THEN** 点击「首页」后，iframe 不再显示页面，`data-dshls-history-depth` 为 `0`，列表中有 5173；点击 5173 后，iframe 加载 `/dsh-local-service/p/5173/`，地址栏显示 `http://127.0.0.1:5173/`
+
+#### Scenario: 没有发现服务时显示示例
+- **GIVEN** 服务端点返回空数组
+- **WHEN** tab 显示首页
+- **THEN** 页面显示“Host 上没有发现网页服务”，并显示示例链接 `127.0.0.1:5173`
+
 ### Requirement: 可独立启停与卸载清理
 Web client 入口 SHALL 通过 `inject` 依赖 `betterSidebar`。better-sidebar 未安装时，MUST NOT 注册 tab 或 Service Worker。Host 入口 SHALL 在 `connection` 服务不可用时，MUST NOT 注册任何代理路由或 index 注入。
 

@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream'
 import type { Transform } from 'node:stream'
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib'
 import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeaders, ServerResponse } from 'node:http'
-import { ROUTE_PREFIX, SW_SCRIPT } from '../contract.js'
+import { ROUTE_PREFIX, SERVICES_ROUTE, SW_SCRIPT } from '../contract.js'
 import type { InjectConfig } from '../contract.js'
 import { admitHttp, sendError } from './gate.js'
 import type { BrowserFence } from './gate.js'
@@ -16,6 +16,8 @@ import { classifyLocation, externalRedirectNotice, stripFrameAncestors } from '.
 import { addNonceToCsp } from './csp.js'
 import { HtmlInjector, injectIntoDocument } from './html-inject.js'
 import { buildInjectMarkup, newNonce } from './inject.js'
+import { serveServices } from './services.js'
+import type { ServicesDeps } from './services.js'
 import { parseProxyUrl } from './target.js'
 import type { ProxyTarget } from './target.js'
 
@@ -30,6 +32,8 @@ export interface ProxyDeps {
   connectTimeoutMs: number
   /** Sockets/requests that must be destroyed on unload. */
   inflight: Set<{ destroy(): unknown }>
+  /** Service discovery endpoint settings (shares `webServerPort` and `inflight`). */
+  services: Omit<ServicesDeps, 'webServerPort' | 'inflight'>
 }
 
 /** Hop-by-hop response headers (Node re-frames the body itself). */
@@ -78,6 +82,10 @@ export function createHttpHandler(deps: ProxyDeps): (req: IncomingMessage, res: 
     const pathname = rawUrl.split(/[?#]/, 1)[0] ?? ''
     if (pathname === SW_SCRIPT) {
       serveServiceWorker(deps, req, res)
+      return
+    }
+    if (pathname === SERVICES_ROUTE) {
+      serveServices({ ...deps.services, webServerPort: deps.webServerPort, inflight: deps.inflight }, req, res)
       return
     }
     if (!pathname.startsWith(`${ROUTE_PREFIX}/`)) {

@@ -61,4 +61,19 @@ describe('browser harness smoke (tasks 0.2)', () => {
     await h.stopServiceWorker('/__harness-sw/sw.js')
     expect(h.serviceWorker('/__harness-sw/sw.js')?.runningStatus).toBe('stopped')
   })
+
+  it('the BUILT lib/index.js Host assembles routes and proxies an authenticated same-origin request', async () => {
+    // bare mode mounts no tab, so nothing calls the services endpoint (the built Host cannot take a listener stub).
+    const built = await startBrowserHarness({ mode: 'bare', hostSource: 'lib' })
+    try {
+      const u = await built.upstream('UL', (_req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('built-ok') })
+      const cookie = await built.dsh.login()
+      const res = await built.dsh.request({ path: `/dsh-local-service/p/${String(u.port)}/`, headers: { cookie, 'sec-fetch-site': 'same-origin' } })
+      expect(res.status).toBe(200)
+      expect(res.text()).toBe('built-ok')
+      const anonymous = await built.dsh.request({ path: `/dsh-local-service/p/${String(u.port)}/` })
+      expect(anonymous.status).toBe(401) // positive control: the gate is live in the built Host too
+      expect(u.requests).toHaveLength(1)
+    } finally { await built.close() }
+  })
 })

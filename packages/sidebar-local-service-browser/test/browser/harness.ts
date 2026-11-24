@@ -338,6 +338,15 @@ export interface BrowserHarnessOptions {
   mode?: 'tab' | 'bare'
   /** Load the BUILT Host plugin (lib/index.js). Default true. */
   hostPlugin?: boolean
+  /**
+   * Where the Host plugin comes from. `src` (default): `installHost` from src/host/install.ts with the
+   * service-discovery seam stubbed to an empty listing — identical behaviour to production except that
+   * the Host never enumerates this machine's listeners and probes the test upstreams (the tab's home page
+   * calls /dsh-local-service/services on mount). `lib`: the BUILT lib/index.js, which has no such seam.
+   */
+  hostSource?: 'src' | 'lib'
+  /** Listener list the `src` Host reports to the services endpoint (default: none). */
+  listeners?: Array<{ fam: 'p' | 'p6'; port: number; process: string | null }>
   /** Extra Host plugins applied BEFORE the plugin under test (e.g. index-inject test plugins). */
   pluginsBefore?: PluginModule[]
   /** Extra Host plugins applied AFTER the plugin under test. */
@@ -418,9 +427,17 @@ export class BrowserHarness {
     // The plugin under test is applied by hand so a test can dispose exactly this plugin (lifecycle).
     let hostPluginFiber: { dispose(): unknown } | undefined
     if (options.hostPlugin ?? true) {
-      const libIndex = resolve(PACKAGE_ROOT, 'lib/index.js')
-      if (!existsSync(libIndex)) throw new Error(`harness: ${libIndex} is missing — run "npm run build" first (the browser suite exercises the BUILT plugin)`)
-      const pluginModule = (await import(pathToFileURL(libIndex).href)) as PluginModule
+      let pluginModule: PluginModule
+      if ((options.hostSource ?? 'src') === 'lib') {
+        const libIndex = resolve(PACKAGE_ROOT, 'lib/index.js')
+        if (!existsSync(libIndex)) throw new Error(`harness: ${libIndex} is missing — run "npm run build" first`)
+        pluginModule = (await import(pathToFileURL(libIndex).href)) as PluginModule
+      } else {
+        // Not lib/index.js: that artifact cannot take the listeners stub (see BrowserHarnessOptions.hostSource).
+        const { installHost } = await import('../../src/host/install.ts')
+        const listeners = options.listeners ?? []
+        pluginModule = { name: 'sidebar-local-service-browser', apply: (ctx: Context) => installHost(ctx, { listListeners: () => Promise.resolve(listeners) }) }
+      }
       const fiber = dsh.ctx.plugin(pluginModule as never)
       await fiber
       await settle()

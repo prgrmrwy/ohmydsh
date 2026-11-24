@@ -45,6 +45,15 @@ export const TAB_CSS = `
 .dshls-examples { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .dshls-example { font-family: var(--ds-font-family-code) !important; font-size: 12.5px; color: var(--dsw-alias-label-primary) !important;
   text-decoration: underline; padding: 2px 0 !important; }
+.dshls-services { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.dshls-service { display: flex !important; align-items: baseline; gap: 12px; width: 100%; padding: 6px 8px !important; border-radius: 6px; text-align: left;
+  transition: background-color 120ms; }
+.dshls-service:hover { background: var(--dsw-alias-interactive-bg-hover) !important; }
+.dshls-service-port { font-family: var(--ds-font-family-code); font-size: 12.5px; color: var(--dsw-alias-label-primary); }
+.dshls-service-proc { color: var(--dsw-alias-label-tertiary); }
+.dshls-refresh { display: inline-flex !important; align-items: center; gap: 6px; margin-top: 8px !important; padding: 4px 8px !important; border-radius: 6px;
+  color: var(--dsw-alias-label-secondary) !important; transition: background-color 120ms; }
+.dshls-refresh:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover) !important; }
 @container (max-width: 320px) { .dshls-host-text { display: none; } }
-@media (prefers-reduced-motion: reduce) { .dshls-icon-btn { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .dshls-icon-btn, .dshls-service, .dshls-refresh { transition: none; } }
 `

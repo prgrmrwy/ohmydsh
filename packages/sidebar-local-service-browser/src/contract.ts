@@ -21,6 +21,16 @@ export const WS_ROUTE = `${ROUTE_PREFIX}/ws`
 export const SW_SCRIPT = `${ROUTE_PREFIX}/sw.js`
 export const SW_SCOPE = `${ROUTE_PREFIX}/`
 
+/** Read-only service discovery endpoint: `GET` → JSON `ServiceEntry[]` sorted by port ascending. */
+export const SERVICES_ROUTE = `${ROUTE_PREFIX}/services`
+
+/** One discovered web service on the Host machine (`process` is a bare executable name or null). */
+export interface ServiceEntry {
+  fam: Family
+  port: number
+  process: string | null
+}
+
 /** Target families: `p` → Host 127.0.0.1, `p6` → Host ::1. */
 export type Family = 'p' | 'p6'
 export const FAMILIES: readonly Family[] = ['p', 'p6']
