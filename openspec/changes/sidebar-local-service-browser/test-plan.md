@@ -84,7 +84,7 @@
 | specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | 服务端点拒绝未认证与跨站请求 | packages/sidebar-local-service-browser/test/host-services.test.ts | spec Scenario "服务端点拒绝未认证与跨站请求" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | 无响应的端口不拖慢列表 | packages/sidebar-local-service-browser/test/host-services.test.ts | spec Scenario "无响应的端口不拖慢列表" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | Home 按钮回到服务列表并可点选 | packages/sidebar-local-service-browser/test/browser/home.browser.test.ts | spec Scenario "Home 按钮回到服务列表并可点选" | 🟢 green |
-| specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | 没有发现服务时显示示例 | packages/sidebar-local-service-browser/test/browser/home.browser.test.ts | spec Scenario "没有发现服务时显示示例" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | 没有发现服务时只提示不给示例 | packages/sidebar-local-service-browser/test/browser/home.browser.test.ts | spec Scenario "没有发现服务时只提示不给示例" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → tab 工具栏的刷新按钮 | 刷新重新加载当前页面且栈深度不变 | packages/sidebar-local-service-browser/test/browser/refresh-button.browser.test.ts | spec Scenario "刷新重新加载当前页面且栈深度不变" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → tab 工具栏的刷新按钮 | 首页时刷新按钮禁用 | packages/sidebar-local-service-browser/test/browser/refresh-button.browser.test.ts | spec Scenario "首页时刷新按钮禁用" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 可独立启停与卸载清理 | 卸载时关闭在途连接与 Service Worker | packages/sidebar-local-service-browser/test/browser/lifecycle.browser.test.ts | spec Scenario "卸载时关闭在途连接与 Service Worker" | 🟢 green |

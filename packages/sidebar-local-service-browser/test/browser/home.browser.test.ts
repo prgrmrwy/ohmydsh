@@ -44,13 +44,15 @@ describe('首页列出 Host 上的网页服务', () => {
     } finally { await h.close() }
   })
 
-  it('spec Scenario "没有发现服务时显示示例"', async () => {
+  it('spec Scenario "没有发现服务时只提示不给示例"', async () => {
     const h = await startBrowserHarness({ mode: 'tab' })
     try {
       serveServices(h, [])
       await h.open()
       await waitFor(async () => (await panelText(h)).includes('Host 上没有发现网页服务'), 'empty-state message')
-      expect(await panelText(h)).toContain('127.0.0.1:5173')
+      const text = await panelText(h)
+      for (const example of ['127.0.0.1:5173', 'localhost:3000', '127.0.0.1:8080']) expect(text).not.toContain(example)
+      expect(await h.evalDsh<boolean>(`!!document.querySelector('.dshls-panel button[aria-label="刷新"]')`)).toBe(true)
     } finally { await h.close() }
   })
 })

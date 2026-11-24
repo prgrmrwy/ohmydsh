@@ -42,9 +42,6 @@ export const TAB_CSS = `
 .dshls-panel[role="alert"] h2 { color: var(--dsw-alias-state-error-primary); }
 .dshls-panel h2, .dshls-panel p { max-width: 46ch; }
 .dshls-panel p { margin: 0 0 12px; }
-.dshls-examples { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
-.dshls-example { font-family: var(--ds-font-family-code) !important; font-size: 12.5px; color: var(--dsw-alias-label-primary) !important;
-  text-decoration: underline; padding: 2px 0 !important; }
 .dshls-services { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .dshls-service { display: flex !important; align-items: baseline; gap: 12px; width: 100%; padding: 6px 8px !important; border-radius: 6px; text-align: left;
   transition: background-color 120ms; }

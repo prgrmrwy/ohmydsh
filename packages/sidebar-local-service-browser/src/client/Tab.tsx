@@ -53,8 +53,6 @@ interface HostService {
 }
 type Services = { state: 'loading' } | { state: 'done'; items: HostService[] }
 
-const EXAMPLES = ['127.0.0.1:5173', 'localhost:3000', '127.0.0.1:8080']
-
 const newFrameId = (): string => `f${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
 
 export const ERR_NO_RESTORE = '无法恢复该历史记录'
@@ -429,14 +427,6 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
               </ul>
             )}
             {services.state === 'done' && services.items.length === 0 && <p>Host 上没有发现网页服务</p>}
-            {services.state === 'done' && services.items.length === 0 && (
-              <div className="dshls-examples">
-                <span>试试</span>
-                {EXAMPLES.map((example) => (
-                  <button key={example} type="button" className="dshls-example" onClick={() => { setText(example); void open(example) }}>{example}</button>
-                ))}
-              </div>
-            )}
             <button type="button" className="dshls-refresh" aria-label="刷新" onClick={loadServices} disabled={services.state === 'loading'}>
               <RefreshIcon /><span>刷新</span>
             </button>

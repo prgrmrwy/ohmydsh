@@ -320,7 +320,7 @@
 - [x] 17.10 Write failing test: `browser/home.browser.test.ts` → spec Scenario "Home 按钮回到服务列表并可点选"
 - [x] 17.11 Implement: 使 17.10 通过
 - [x] 17.12 Refactor；全部测试保持绿色
-- [x] 17.13 Write failing test: `browser/home.browser.test.ts` → spec Scenario "没有发现服务时显示示例"
+- [x] 17.13 Write failing test: `browser/home.browser.test.ts` → spec Scenario "没有发现服务时只提示不给示例"
 - [x] 17.14 Implement: 使 17.13 通过
 - [x] 17.15 Refactor；全部测试保持绿色
 - [ ] 17.16 合入、推送、部署（dsh build 两次）
