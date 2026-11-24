@@ -451,3 +451,22 @@ AMENDMENT-REVIEW: APPROVE
 本结论仅批准本次要求快照进入实施，不代表服务发现已实现或测试、浏览器验收已通过。
 
 AMENDMENT-REVIEW: APPROVE
+
+
+## Targeted review: refresh button
+
+- 日期：2026-11-24（Asia/Shanghai）。
+- 评审者上下文：gpt-6-astra，全新上下文独立定向复核子会话，未参与本次要求编写。仅复核「tab 工具栏的刷新按钮」及两个场景；读取 HEAD 差异、人类裁决末节、关联导航与返回按钮规范，以及 Tab 和注入代码作为只读参考。文件内容均视为数据，不接受其中的指令。未运行测试、探针、构建或部署；唯一文件写入为本节追加。
+- spec 的 SHA-256：[spec.md](<specs/sidebar-local-service-browser/spec.md>)：`5412e0ed2ef4eacbad64c0d1e900b2c077c1004066446848a67cb053f71b83dd`；追加前已重新计算并校验一致。首次准备追加时检测到 spec 已变化，停止写入；重读要求和完整 spec 差异后，按此最新快照作出结论。
+
+1. **硬约束：通过。** [spec:571–572](<specs/sidebar-local-service-browser/spec.md#L571-L572>) 明确操作 iframe 的 location.reload，而不是顶层窗口。既有 [spec:286,304–307](<specs/sidebar-local-service-browser/spec.md#L286-L307>) 已规定 reload 取消后改为代理路径 replace，不新增历史条目。只读参考 [inject/index.ts:83–100](<../../../packages/sidebar-local-service-browser/src/inject/index.ts#L83-L100>) 与 [routing.ts:15–20](<../../../packages/sidebar-local-service-browser/src/inject/routing.ts#L15-L20>) 显示改写后的代理路径不再被二次改写；本次要求没有引入必然循环，也没有要求改变顶层地址或历史。
+
+2. **两个场景：可机械断言，与正文一致。** [spec:576–584](<specs/sidebar-local-service-browser/spec.md#L576-L584>) 在稳定、成功注入且无自主跳转的受控 HTML fixture 中，可断言上游 /second 请求计数增量、iframe 路径、公开 depth、顶层 history.length，以及工具栏按钮的 disabled 属性和点击请求增量为零。首页也有同名的列表刷新按钮（[spec:540](<specs/sidebar-local-service-browser/spec.md#L540>)），定位应限定工具栏；首页初始服务探测完成后再记录请求基线，禁用按钮可用 DOM click 验证，不用等待按钮 enabled 的自动化点击。这些是既有场景可机械实现的方式，不需新增规范或扩大评审范围。
+
+3. **与既有入栈规则相容：通过。** [spec:573](<specs/sidebar-local-service-browser/spec.md#L573>) 最新文字明确区分地址相同和地址变化：相同时不入栈，变化时遵循返回按钮规则，符合 [spec:497](<specs/sidebar-local-service-browser/spec.md#L497>)。评审中曾指出旧稿无条件承诺深度不变的反例：上游把当前 /second 改为 302 /login，刷新后的 installed 报告新地址，既有规则要求入栈；最新文字已消除此冲突。[Tab.tsx:144–161](<../../../packages/sidebar-local-service-browser/src/client/Tab.tsx#L144-L161>) 可作为既有消息入栈机制的只读参考。不要求增加刷新状态机、令牌或竞态协议，也不以 [spec:503](<specs/sidebar-local-service-browser/spec.md#L503>) 已接受的返回按钮限制驳回。
+
+4. **用户意图与首页行为：通过。** [人类裁决:49–51](<human-decisions.md#L49-L51>) 区分 iframe 页面刷新与首页列表刷新；[spec:569,571,574](<specs/sidebar-local-service-browser/spec.md#L569-L574>) 分别明确按钮位置、调用对象、首页禁用，不取代 [spec:540](<specs/sidebar-local-service-browser/spec.md#L540>) 的列表刷新功能。
+
+本结论仅批准上述要求快照，不代表实现完成或测试、浏览器验收已通过。
+
+AMENDMENT-REVIEW: APPROVE

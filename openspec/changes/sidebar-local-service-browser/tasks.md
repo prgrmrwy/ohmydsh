@@ -325,6 +325,16 @@
 - [x] 17.15 Refactor；全部测试保持绿色
 - [ ] 17.16 合入、推送、部署（dsh build 两次）
 
+## 18. 工具栏刷新按钮（2026-11-24）
+
+- [x] 18.0 spec 修订通过定向复核
+- [x] 18.1 Write failing test: `browser/refresh-button.browser.test.ts` → spec Scenario "刷新重新加载当前页面且栈深度不变"
+- [x] 18.2 Implement: 使 18.1 通过
+- [x] 18.3 Refactor；全部测试保持绿色
+- [x] 18.4 Write failing test: `browser/refresh-button.browser.test.ts` → spec Scenario "首页时刷新按钮禁用"
+- [x] 18.5 Implement: 使 18.4 通过
+- [x] 18.6 Refactor；全部测试保持绿色
+
 ## 15. 集成、部署与验收
 
 - [x] 15.1 在 `dsh.yaml` 新增 local 条目 `sidebar-local-service-browser`（位于 better-sidebar 之后）；note 写明以下内容：用途；同源信任面（D9）；代理 cookie 会被发往同一回环主机的其它本机服务（D4 残余风险）；已知例外；Chromium 要求；回滚方式（`enabled:false` → `dsh build` → 重启）

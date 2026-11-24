@@ -748,7 +748,7 @@ export class BrowserHarness {
     await new Promise<void>((r) => this.cockpitServer.close(() => r()))
     this.cockpitServer.closeAllConnections?.()
     await this.dsh.dispose()
-    rmSync(this.profile, { recursive: true, force: true })
+    rmSync(this.profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     rmSync(this.dist, { recursive: true, force: true })
   }
 }

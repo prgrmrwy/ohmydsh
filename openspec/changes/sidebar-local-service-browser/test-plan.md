@@ -2,7 +2,7 @@
 
 覆盖账本。spec 中的每个 `#### Scenario:` 都对应一个命名测试：测试标题与 scenario 名逐字相同，并带 `spec Scenario` 前缀，方便机械核对。实施期间，每个测试第一次以正确原因失败（🔴）后再实现；通过后把这一行翻为 🟢。verify 阶段只要还有任何一行是红的，就阻断。
 
-共 80 行，对应 spec 中的 80 个 scenario（第 67 行为实施阶段注入位置修订新增；第 68–75 行为跨机试用后的提示文案与返回按钮修订新增，见 human-decisions.md 2026-11-24）。
+共 82 行，对应 spec 中的 82 个 scenario（第 67 行为实施阶段注入位置修订新增；第 68–75 行为跨机试用后的提示文案与返回按钮修订新增，见 human-decisions.md 2026-11-24）。
 
 | Requirement | Scenario | Test File | Test Name | Initial State |
 |-------------|----------|-----------|-----------|---------------|
@@ -85,6 +85,8 @@
 | specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | 无响应的端口不拖慢列表 | packages/sidebar-local-service-browser/test/host-services.test.ts | spec Scenario "无响应的端口不拖慢列表" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | Home 按钮回到服务列表并可点选 | packages/sidebar-local-service-browser/test/browser/home.browser.test.ts | spec Scenario "Home 按钮回到服务列表并可点选" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 首页列出 Host 上的网页服务 | 没有发现服务时显示示例 | packages/sidebar-local-service-browser/test/browser/home.browser.test.ts | spec Scenario "没有发现服务时显示示例" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 工具栏的刷新按钮 | 刷新重新加载当前页面且栈深度不变 | packages/sidebar-local-service-browser/test/browser/refresh-button.browser.test.ts | spec Scenario "刷新重新加载当前页面且栈深度不变" | 🟢 green |
+| specs/sidebar-local-service-browser/spec.md → tab 工具栏的刷新按钮 | 首页时刷新按钮禁用 | packages/sidebar-local-service-browser/test/browser/refresh-button.browser.test.ts | spec Scenario "首页时刷新按钮禁用" | 🟢 green |
 | specs/sidebar-local-service-browser/spec.md → 可独立启停与卸载清理 | 卸载时关闭在途连接与 Service Worker | packages/sidebar-local-service-browser/test/browser/lifecycle.browser.test.ts | spec Scenario "卸载时关闭在途连接与 Service Worker" | 🟢 green |
 
 ## Coverage Notes

@@ -43,6 +43,7 @@ const EnterIcon = () => <svg {...svgProps}><path d="M12.5 3.5v4a1 1 0 0 1-1 1h-8
 const CloseIcon = () => <svg {...svgProps}><path d="m4.5 4.5 7 7m0-7-7 7" /></svg>
 
 const HomeIcon = () => <svg {...svgProps}><path d="M2.5 7.5 8 3l5.5 4.5M4 6.8V13h8V6.8" /></svg>
+const ReloadIcon = () => <svg {...svgProps}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3" /></svg>
 const RefreshIcon = () => <svg {...svgProps}><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.5v3h-3" /></svg>
 
 interface HostService {
@@ -331,6 +332,12 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
     loadServices()
   }
 
+  const reload = (): void => {
+    try {
+      frame.current?.contentWindow?.location.reload()
+    } catch { /* cross-origin or gone: nothing to reload */ }
+  }
+
   const externalHost = ((): string => {
     try {
       return new URL(external).host
@@ -347,6 +354,9 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
         </button>
         <button type="button" className="dshls-icon-btn dshls-back" aria-label="首页" title="首页" onClick={goHome}>
           <HomeIcon />
+        </button>
+        <button type="button" className="dshls-icon-btn dshls-back" aria-label="刷新" title="刷新" disabled={src === undefined || notice !== null} onClick={reload}>
+          <ReloadIcon />
         </button>
         <form className="dshls-route" onSubmit={onSubmit}>
           <span className="dshls-host" aria-label="Host 上的本机地址" title="Host 上的本机地址">

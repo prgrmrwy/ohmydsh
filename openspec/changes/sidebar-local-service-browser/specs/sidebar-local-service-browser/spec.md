@@ -565,6 +565,24 @@ tab 工具栏 SHALL 在返回按钮右侧提供一个 Home 按钮，可访问名
 - **WHEN** tab 显示首页
 - **THEN** 页面显示“Host 上没有发现网页服务”，并显示示例链接 `127.0.0.1:5173`
 
+### Requirement: tab 工具栏的刷新按钮
+tab 工具栏 SHALL 在「首页」按钮右侧提供一个刷新按钮，可访问名称为「刷新」。
+
+- **点击时**：tab SHALL 调用 iframe 窗口的 `location.reload()`。
+- **重新加载后**：按「页面看到直接地址，导航留在代理内」要求，这次 reload 会被改写成对代理路径的 replace 导航，不会新增会话历史条目，MUST NOT 改变 DSH 顶层页面的地址或历史。
+- **访问栈**：重新加载后的地址与栈顶相同时，不入栈，栈深度不变；地址改变时（例如上游改为重定向到别处），按返回按钮的入栈规则处理。
+- **禁用条件**：处于首页（iframe 未加载页面）时，刷新按钮 SHALL 带 `disabled` 属性。
+
+#### Scenario: 刷新重新加载当前页面且栈深度不变
+- **GIVEN** iframe 依次显示 5173 的 `/` 和 `/second`，`data-dshls-history-depth` 为 `2`
+- **WHEN** 用户点击「刷新」
+- **THEN** 上游 5173 再收到一次 `/second` 请求；iframe 仍显示 `/second`；`data-dshls-history-depth` 仍为 `2`；DSH 顶层页面的 `history.length` 不变
+
+#### Scenario: 首页时刷新按钮禁用
+- **GIVEN** tab 显示首页
+- **WHEN** 检查刷新按钮
+- **THEN** 按钮带 `disabled` 属性，点击后上游没有收到请求
+
 ### Requirement: 可独立启停与卸载清理
 Web client 入口 SHALL 通过 `inject` 依赖 `betterSidebar`。better-sidebar 未安装时，MUST NOT 注册 tab 或 Service Worker。Host 入口 SHALL 在 `connection` 服务不可用时，MUST NOT 注册任何代理路由或 index 注入。
 
