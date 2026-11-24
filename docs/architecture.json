@@ -1,0 +1,228 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "dsh-host-browsing：在侧栏标签里浏览 Host 的 localhost",
+  "output": "architecture.html",
+  "quality_profile": "showcase",
+  "locale": "zh-CN"
+ },
+ "components": [
+  {
+   "id": "tab",
+   "type": "frontend",
+   "label": "本地服务 tab",
+   "sublabel": "地址栏 · 首页",
+   "pos": [
+    40,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "page",
+   "type": "frontend",
+   "label": "被代理页面",
+   "sublabel": "iframe + 注入脚本",
+   "pos": [
+    322,
+    300
+   ],
+   "size": [
+    160,
+    64
+   ]
+  },
+  {
+   "id": "sw",
+   "type": "frontend",
+   "label": "Service Worker",
+   "sublabel": "改写子请求",
+   "pos": [
+    552,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "link",
+   "type": "external",
+   "label": "既有 DSH 连接",
+   "sublabel": "Cockpit / SSH 隧道",
+   "pos": [
+    802,
+    300
+   ],
+   "size": [
+    160,
+    64
+   ]
+  },
+  {
+   "id": "gate",
+   "type": "security",
+   "label": "同源路由",
+   "sublabel": "/dsh-local-service",
+   "pos": [
+    1032,
+    300
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "tag": "会话认证 + Sec-Fetch-Site"
+  },
+  {
+   "id": "proxy",
+   "type": "backend",
+   "label": "回环代理",
+   "sublabel": "HTTP · WebSocket",
+   "pos": [
+    1289,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "disc",
+   "type": "backend",
+   "label": "服务发现",
+   "sublabel": "列出网页服务",
+   "pos": [
+    1289,
+    450
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "svc",
+   "type": "database",
+   "label": "Host 本机服务",
+   "sublabel": "127.0.0.1:<port>",
+   "pos": [
+    1532,
+    300
+   ],
+   "size": [
+    170,
+    64
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "你的电脑：浏览器",
+   "wraps": [
+    "tab",
+    "page",
+    "sw"
+   ]
+  },
+  {
+   "kind": "region",
+   "label": "DSH Host 所在机器",
+   "wraps": [
+    "gate",
+    "proxy",
+    "disc",
+    "svc"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "c1",
+   "from": "tab",
+   "to": "page",
+   "label": "加载 /p/<port>/",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c2",
+   "from": "page",
+   "to": "sw",
+   "label": "请求"
+  },
+  {
+   "id": "c3",
+   "from": "sw",
+   "to": "link",
+   "label": "→ 代理路径"
+  },
+  {
+   "id": "c4",
+   "from": "link",
+   "to": "gate",
+   "label": "同源"
+  },
+  {
+   "id": "c5",
+   "from": "gate",
+   "to": "proxy",
+   "label": "通过校验"
+  },
+  {
+   "id": "c6",
+   "from": "proxy",
+   "to": "svc",
+   "label": "127.0.0.1"
+  },
+  {
+   "id": "c7",
+   "from": "gate",
+   "to": "disc",
+   "label": "/services",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "left"
+  },
+  {
+   "id": "c8",
+   "from": "disc",
+   "to": "svc",
+   "label": "探测 GET /",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "bottom"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "浏览器里",
+   "items": [
+    "注入脚本让页面看到直接地址",
+    "cookie 与存储按端口命名空间"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "Host 上",
+   "items": [
+    "只连回环目标，拒绝 DSH 自身端口",
+    "首页只列出返回 text/html 的监听端口"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "信任",
+   "items": [
+    "页面与 DSH 同源：只打开你信任的服务"
+   ]
+  }
+ ]
+}

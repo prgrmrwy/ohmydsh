@@ -1,0 +1,228 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "dsh-host-browsing: browse the Host's localhost in a sidebar tab",
+  "output": "architecture.en.html",
+  "quality_profile": "showcase",
+  "locale": "en"
+ },
+ "components": [
+  {
+   "id": "tab",
+   "type": "frontend",
+   "label": "Tab",
+   "sublabel": "address bar · home",
+   "pos": [
+    40,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "page",
+   "type": "frontend",
+   "label": "Proxied page",
+   "sublabel": "iframe + injected script",
+   "pos": [
+    283,
+    300
+   ],
+   "size": [
+    160,
+    64
+   ]
+  },
+  {
+   "id": "sw",
+   "type": "frontend",
+   "label": "Service Worker",
+   "sublabel": "rewrites sub-requests",
+   "pos": [
+    513,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "link",
+   "type": "external",
+   "label": "Existing DSH link",
+   "sublabel": "Cockpit / SSH tunnel",
+   "pos": [
+    763,
+    300
+   ],
+   "size": [
+    160,
+    64
+   ]
+  },
+  {
+   "id": "gate",
+   "type": "security",
+   "label": "Same-origin route",
+   "sublabel": "/dsh-local-service",
+   "pos": [
+    1029,
+    300
+   ],
+   "size": [
+    170,
+    64
+   ],
+   "tag": "session auth + Sec-Fetch-Site"
+  },
+  {
+   "id": "proxy",
+   "type": "backend",
+   "label": "Loopback proxy",
+   "sublabel": "HTTP · WebSocket",
+   "pos": [
+    1299,
+    300
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "disc",
+   "type": "backend",
+   "label": "Service discovery",
+   "sublabel": "lists web services",
+   "pos": [
+    1299,
+    450
+   ],
+   "size": [
+    150,
+    64
+   ]
+  },
+  {
+   "id": "svc",
+   "type": "database",
+   "label": "Host localhost services",
+   "sublabel": "127.0.0.1:<port>",
+   "pos": [
+    1542,
+    300
+   ],
+   "size": [
+    170,
+    64
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "Your computer: browser",
+   "wraps": [
+    "tab",
+    "page",
+    "sw"
+   ]
+  },
+  {
+   "kind": "region",
+   "label": "DSH Host machine",
+   "wraps": [
+    "gate",
+    "proxy",
+    "disc",
+    "svc"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "c1",
+   "from": "tab",
+   "to": "page",
+   "label": "load page",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c2",
+   "from": "page",
+   "to": "sw",
+   "label": "fetch"
+  },
+  {
+   "id": "c3",
+   "from": "sw",
+   "to": "link",
+   "label": "proxy path"
+  },
+  {
+   "id": "c4",
+   "from": "link",
+   "to": "gate",
+   "label": "same origin"
+  },
+  {
+   "id": "c5",
+   "from": "gate",
+   "to": "proxy",
+   "label": "authorized"
+  },
+  {
+   "id": "c6",
+   "from": "proxy",
+   "to": "svc",
+   "label": "127.0.0.1"
+  },
+  {
+   "id": "c7",
+   "from": "gate",
+   "to": "disc",
+   "label": "/services",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "left"
+  },
+  {
+   "id": "c8",
+   "from": "disc",
+   "to": "svc",
+   "label": "probe GET /",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "bottom"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "In the browser",
+   "items": [
+    "The injected script shows the page its direct address",
+    "Cookies and storage are namespaced per port"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "On the Host",
+   "items": [
+    "Only loopback targets; DSH's own port is refused",
+    "Home lists listeners that answer text/html"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Trust",
+   "items": [
+    "Pages share DSH's origin: open only services you trust"
+   ]
+  }
+ ]
+}
