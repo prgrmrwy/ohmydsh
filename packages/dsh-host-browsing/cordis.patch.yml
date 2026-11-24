@@ -1,4 +1,4 @@
-# dsh-sidebar-local-service-browser bundle patch
+# dsh-host-browsing bundle patch
 #
 # `dsh.bundle.patch` layer: one plugin row inserted into the profile bundle
 # stack. The Host half mounts the same-origin loopback proxy (prefix route,
@@ -7,5 +7,5 @@
 # and stays inactive — no UI, no behavior — until dsh-better-sidebar provides
 # the service. Design: OpenSpec change `sidebar-local-service-browser`.
 - insert:
-    - id: sidebar-local-service-browser
-      name: dsh-sidebar-local-service-browser
+    - id: dsh-host-browsing
+      name: dsh-host-browsing

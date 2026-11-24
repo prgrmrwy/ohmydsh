@@ -189,7 +189,7 @@ test('scenario: a runtime peer without a matching devDependency fails', () => {
 // AUTO needs 0.2.2 selection pinning; resources 0.2.0 needs the official original-file save service;
 // the local service browser relies on the 0.2.2 webServer route/upgrade/tapIndex/port and connection.requestRejection faces.
 // Other local packages retain their existing 0.2.0-rc.2 floor.
-const RUNTIME_022_PACKAGES = new Set(['dsh-auto-model-routing', 'sidebar-session-resources', 'sidebar-local-service-browser'])
+const RUNTIME_022_PACKAGES = new Set(['dsh-auto-model-routing', 'sidebar-session-resources', 'dsh-host-browsing'])
 const AUTO_FLOOR = '0.2.2-rc.1'
 const DEFAULT_FLOOR = '0.2.0-rc.2'
 test('scenario: only packages requiring 0.2.2 capabilities raise the runtime floor', async () => {

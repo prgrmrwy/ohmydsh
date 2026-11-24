@@ -25,7 +25,7 @@ export const TAB_CSS = `
 .dshls-sep { width: 1px; height: 14px; flex: none; background: var(--dsw-alias-border-l2); }
 .dshls-address { flex: 1; min-width: 0; height: 100%; background: transparent; border: 0; outline: 0; padding: 0;
   color: var(--dsw-alias-label-primary); font-family: var(--ds-font-family-code); font-size: 12.5px; }
-.dshls-address::placeholder { color: var(--dsw-alias-label-tertiary); }
+.dshls-address::placeholder { color: var(--dsw-alias-label-tertiary); font-family: var(--dsw-font-family, inherit); font-size: 12px; }
 .dshls-open { width: 24px; height: 24px; color: var(--dsw-alias-label-secondary); }
 .dshls-note { flex: none; padding: 6px 12px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
 .dshls-inline-error { flex: none; padding: 0 12px 6px; color: var(--dsw-alias-state-error-primary); }

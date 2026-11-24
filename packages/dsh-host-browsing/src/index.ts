@@ -1,5 +1,5 @@
 /**
- * Host entry for dsh-sidebar-local-service-browser.
+ * Host entry for dsh-host-browsing.
  *
  * Mounts, on DSH's own web server and only when the official `connection`
  * service exists: the `/dsh-local-service` prefix route (HTTP proxy to the
@@ -12,7 +12,7 @@
  * set inside them right after registering
  * (docs/architecture/dsh-plugin-integration-pitfalls.md, "ctx.inject() 的回调是异步的").
  *
- * @module dsh-sidebar-local-service-browser
+ * @module dsh-host-browsing
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { installHost } from './host/install.js'

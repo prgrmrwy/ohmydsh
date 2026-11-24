@@ -10,6 +10,7 @@ import { ENTRIES_KEY_PREFIX, FRAME_ATTR, INJECT_MARKER, PROXY_PATH_RE, SERVICES_
 import type { NavigationLike } from '../inject/types.js'
 import { isEntryIdentity } from '../inject/identity.js'
 import { directAddress, parseAddress } from './address.js'
+import { t } from './locales.js'
 import { STYLE_ATTR, TAB_CSS } from './styles.js'
 import { browserPlatform, type TabPlatform } from './platform.js'
 
@@ -55,10 +56,6 @@ type Services = { state: 'loading' } | { state: 'done'; items: HostService[] }
 
 const newFrameId = (): string => `f${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
 
-export const ERR_NO_RESTORE = '无法恢复该历史记录'
-export const ERR_BLOCKED = '页面阻止了注入脚本'
-export const TITLE_NOT_HTML = '这个地址返回的不是网页'
-export const ERR_UNCONTROLLED = '页面未受 Service Worker 控制'
 
 /** Remove `__dshls.entries.*` keys whose frame id no live `iframe[data-dshls]` carries. */
 function sweepStaleTables(): void {
@@ -167,14 +164,14 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
             try {
               win.location.reload()
             } catch {
-              blank(ERR_UNCONTROLLED)
+              blank(t('errUncontrolled'))
             }
           } else {
-            blank(ERR_UNCONTROLLED)
+            blank(t('errUncontrolled'))
           }
           break
         case 'dshls:identity-unavailable':
-          blank(data.reason === 'no-identity' ? ERR_NO_RESTORE : `身份表不可用：${data.reason}`)
+          blank(data.reason === 'no-identity' ? t('errNoRestore') : t('errIdentityTable', { reason: data.reason }))
           break
         case 'dshls:external':
           setExternal(data.url)
@@ -191,7 +188,7 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
     try {
       contentType = win.document.contentType
     } catch { /* unreadable: treat as a page the injection was blocked on */ }
-    if (contentType === 'text/html') return ERR_BLOCKED
+    if (contentType === 'text/html') return t('errBlocked')
     let status = 0
     try {
       const first = win.performance.getEntriesByType('navigation')[0] as { responseStatus?: unknown } | undefined
@@ -201,8 +198,8 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
     const m = PROXY_PATH_RE.exec(pathname)
     const where = m === null ? '' : directAddress(m[1] === 'p6' ? 'p6' : 'p', m[2] as string, (m[3] ?? '') === '' ? '/' : (m[3] as string)).replace(/^http:\/\//, '')
     return {
-      title: TITLE_NOT_HTML,
-      detail: `${where === '' ? '' : `${where} `}返回了 ${contentType}${status > 0 ? `，状态 ${String(status)}` : ''}。本地服务只能显示网页，换一个页面地址试试。`,
+      title: t('titleNotHtml'),
+      detail: t('notHtmlDetail', { where: where === '' ? '' : `${where} `, type: contentType, status: status > 0 ? t('notHtmlStatus', { status }) : '' }),
     }
   }
 
@@ -234,24 +231,24 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
       const table: unknown = raw === null ? undefined : JSON.parse(raw)
       const identity = key !== undefined && typeof table === 'object' && table !== null ? (table as Record<string, unknown>)[key] : undefined
       if (!isEntryIdentity(identity)) {
-        blank(ERR_NO_RESTORE)
+        blank(t('errNoRestore'))
         return
       }
       win.location.replace(proxyPath(identity.fam, identity.port, identity.rest))
     } catch {
-      blank(ERR_NO_RESTORE)
+      blank(t('errNoRestore'))
     }
   }
 
   /** Preconditions (D11); resolves to an error message, or undefined when everything is in place. */
   const preflight = (): Promise<string | undefined> => {
     ready.current ??= (async () => {
-      if (!platform.hasServiceWorker()) return '当前浏览器不支持 Service Worker'
-      if (!platform.hasNavigation()) return '当前浏览器不支持 Navigation API'
+      if (!platform.hasServiceWorker()) return t('errNoServiceWorker')
+      if (!platform.hasNavigation()) return t('errNoNavigation')
       try {
         await platform.registerServiceWorker()
       } catch (cause) {
-        return `Service Worker 注册失败：${cause instanceof Error ? cause.message : String(cause)}`
+        return t('errSwRegister', { reason: cause instanceof Error ? cause.message : String(cause) })
       }
       return undefined
     })()
@@ -270,7 +267,7 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
     // The Navigation API check must be re-evaluated per attempt (it can disappear/appear); the SW part is cached.
     if (!platform.hasNavigation()) {
       setError('')
-      setNotice({ title: '当前浏览器不支持 Navigation API' })
+      setNotice({ title: t('errNoNavigation') })
       return
     }
     const failure = await preflight()
@@ -347,17 +344,17 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
   return (
     <div className="dshls-tab" data-dshls-history-depth={depth}>
       <div className="dshls-toolbar">
-        <button type="button" className="dshls-icon-btn dshls-back" aria-label="返回" title="返回" disabled={depth < 2} onClick={goBack}>
+        <button type="button" className="dshls-icon-btn dshls-back" aria-label={t('back')} title={t('back')} disabled={depth < 2} onClick={goBack}>
           <BackIcon />
         </button>
-        <button type="button" className="dshls-icon-btn dshls-back" aria-label="首页" title="首页" onClick={goHome}>
+        <button type="button" className="dshls-icon-btn dshls-back" aria-label={t('home')} title={t('home')} onClick={goHome}>
           <HomeIcon />
         </button>
-        <button type="button" className="dshls-icon-btn dshls-back" aria-label="刷新" title="刷新" disabled={src === undefined || notice !== null} onClick={reload}>
+        <button type="button" className="dshls-icon-btn dshls-back" aria-label={t('refresh')} title={t('refresh')} disabled={src === undefined || notice !== null} onClick={reload}>
           <ReloadIcon />
         </button>
         <form className="dshls-route" onSubmit={onSubmit}>
-          <span className="dshls-host" aria-label="Host 上的本机地址" title="Host 上的本机地址">
+          <span className="dshls-host" aria-label={t('hostBadge')} title={t('hostBadge')}>
             <HostIcon />
             <span className="dshls-host-text">Host</span>
           </span>
@@ -365,25 +362,25 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
           <input
             className="dshls-address"
             data-dshls-address=""
-            aria-label="本机服务地址"
+            aria-label={t('addressLabel')}
             value={text}
-            placeholder="127.0.0.1:5173"
+            placeholder={t('addressPlaceholder')}
             spellCheck={false}
             autoComplete="off"
             onChange={(e) => setText(e.target.value)}
           />
-          <button type="submit" className="dshls-icon-btn dshls-open" aria-label="打开" title="打开">
+          <button type="submit" className="dshls-icon-btn dshls-open" aria-label={t('open')} title={t('open')}>
             <EnterIcon />
           </button>
         </form>
       </div>
-      <div className="dshls-note">页面和 DSH 同源：只打开你信任的服务。</div>
+      <div className="dshls-note">{t('trustNote')}</div>
       {error !== '' && <div role="alert" className="dshls-inline-error">{error}</div>}
       {external !== '' && (
         <div className="dshls-external" data-dshls-external="">
-          <span>页面想打开外部链接 {externalHost}</span>
-          <a href={external} target="_blank" rel="noopener noreferrer">在新窗口打开</a>
-          <button type="button" className="dshls-icon-btn dshls-close" aria-label="关闭" title="关闭" onClick={() => setExternal('')}>
+          <span>{t('externalNotice', { host: externalHost })}</span>
+          <a href={external} target="_blank" rel="noopener noreferrer">{t('openInNewWindow')}</a>
+          <button type="button" className="dshls-icon-btn dshls-close" aria-label={t('close')} title={t('close')} onClick={() => setExternal('')}>
             <CloseIcon />
           </button>
         </div>
@@ -396,7 +393,7 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
             className="dshls-frame"
             hidden={notice !== null}
             src={src}
-            title="本地服务"
+            title={t('frameTitle')}
             onLoad={onLoad}
           />
         )}
@@ -408,9 +405,9 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
         )}
         {notice === null && src === undefined && (
           <div className="dshls-panel">
-            <h2>在 Host 上打开一个本机服务</h2>
-            <p>这里的 127.0.0.1 指运行 DSH 的那台机器，不是你面前这台。</p>
-            {services.state === 'loading' && <p>正在查找…</p>}
+            <h2>{t('homeTitle')}</h2>
+            <p>{t('homeIntro')}</p>
+            {services.state === 'loading' && <p>{t('searching')}</p>}
             {services.state === 'done' && services.items.length > 0 && (
               <ul className="dshls-services">
                 {services.items.map((svc) => {
@@ -426,9 +423,9 @@ export function Tab({ platform = browserPlatform, frameId: givenFrameId }: TabPr
                 })}
               </ul>
             )}
-            {services.state === 'done' && services.items.length === 0 && <p>Host 上没有发现网页服务</p>}
-            <button type="button" className="dshls-refresh" aria-label="刷新" onClick={loadServices} disabled={services.state === 'loading'}>
-              <RefreshIcon /><span>刷新</span>
+            {services.state === 'done' && services.items.length === 0 && <p>{t('noServices')}</p>}
+            <button type="button" className="dshls-refresh" aria-label={t('refresh')} onClick={loadServices} disabled={services.state === 'loading'}>
+              <RefreshIcon /><span>{t('refresh')}</span>
             </button>
           </div>
         )}

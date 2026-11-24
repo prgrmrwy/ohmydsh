@@ -85,7 +85,10 @@ describe('首页列出 Host 上的网页服务', () => {
   })
 
   it('spec Scenario "服务端点拒绝未认证与跨站请求"', async () => {
-    f = await startProxyFixture(html())
+    // The gate is under test, not the enumeration: the listing is injected so the positive control is deterministic.
+    let upstreamPort = 0
+    f = await startProxyFixture(html(), { internal: { listListeners: () => Promise.resolve([{ fam: 'p' as const, port: upstreamPort, process: null }]) } })
+    upstreamPort = f.upstream.port
     const noCookie = await list(f, { cookie: undefined })
     const sameSite = await list(f, { 'sec-fetch-site': 'same-site' })
     expect([noCookie.status, sameSite.status]).toEqual([401, 403])
@@ -95,14 +98,21 @@ describe('首页列出 Host 上的网页服务', () => {
     expect((await list(f, { 'sec-fetch-site': undefined })).status).toBe(403)
     expect(f.upstream.connections).toBe(0)
     // Positive control: the legitimate request does probe this port.
-    expect((await list(f)).status).toBe(200)
+    const ok = await list(f)
+    expect(ok.status).toBe(200)
     expect(f.upstream.connections).toBeGreaterThanOrEqual(1)
+    expect(ok.entries.map((e) => e.port)).toEqual([f.upstream.port])
   })
 
   it('spec Scenario "无响应的端口不拖慢列表"', async () => {
-    f = await startProxyFixture(html('A'))
+    // The total time limit is under test, not the enumeration: inject the two candidates (responsive + hanging).
     const stuck = await startHanging()
     hanging.push(stuck)
+    let upstreamPort = 0
+    f = await startProxyFixture(html('A'), {
+      internal: { listListeners: () => Promise.resolve([upstreamPort, stuck.port].map((port) => ({ fam: 'p' as const, port, process: null }))) },
+    })
+    upstreamPort = f.upstream.port
     const started = Date.now()
     const res = await list(f)
     const elapsed = Date.now() - started

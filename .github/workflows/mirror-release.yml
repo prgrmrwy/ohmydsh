@@ -35,6 +35,7 @@ on:
       - 'packages/dsh-session-id-copy/**'
       - 'packages/cockpit-worktree-open-shim/**'
       - 'packages/cockpit-memex-browse-shim/**'
+      - 'packages/dsh-host-browsing/**'
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
@@ -81,6 +82,9 @@ jobs:
           - dir: cockpit-memex-browse-shim
             repo: dsh-cockpit-memex-browse-shim
             secret: MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM
+          - dir: dsh-host-browsing
+            repo: dsh-host-browsing
+            secret: MIRROR_KEY_HOST_BROWSING
     steps:
       - uses: actions/checkout@v7
         with:

@@ -3,6 +3,7 @@
  * Chromium; the real implementation is `browserPlatform`.
  */
 import { SW_SCOPE, SW_SCRIPT } from '../contract.js'
+import { t } from './locales.js'
 
 export interface TabPlatform {
   hasServiceWorker(): boolean
@@ -33,7 +34,7 @@ export const browserPlatform: TabPlatform = {
         if (outcome === undefined) resolve()
         else reject(outcome)
       }
-      const deadline = setTimeout(() => finish(new Error('Service Worker 未在 5 秒内注册并激活')), SW_ACTIVE_TIMEOUT_MS)
+      const deadline = setTimeout(() => finish(new Error(t('errSwTimeout'))), SW_ACTIVE_TIMEOUT_MS)
       navigator.serviceWorker.register(SW_SCRIPT, { scope: SW_SCOPE }).then((reg) => {
         const check = (): void => {
           if (settled) return

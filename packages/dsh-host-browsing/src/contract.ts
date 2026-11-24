@@ -1,14 +1,14 @@
 /**
  * Shared contract between the Host proxy, the injected page script, the
  * plugin Service Worker and the better-sidebar tab of
- * dsh-sidebar-local-service-browser.
+ * dsh-host-browsing.
  *
  * Source of truth: openspec/changes/sidebar-local-service-browser/{specs,design}.
  * Every literal that two halves must agree on lives here; neither half may
  * hard-code a copy. Changing a value here is a contract change — update the
  * spec first.
  *
- * @module dsh-sidebar-local-service-browser/contract
+ * @module dsh-host-browsing/contract
  */
 
 /** Host prefix route (registered WITHOUT a trailing slash; webserver prefix match is `p === prefix || p.startsWith(prefix + '/')`). */

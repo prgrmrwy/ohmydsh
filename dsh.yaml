@@ -334,7 +334,7 @@ customizations:
     brief: 服务化侧边栏工作台
     note: '第三方 https://github.com/omdsh-dev/DSH-better-sidebar(MIT)。右侧栏/底部面板工作台,开放 ctx.betterSidebar.registerTab(sidebar-session-resources 依赖)。信任面较重:文件管理、内嵌浏览器、终端(官方 terminal 能力,不持有 PTY)、Git 面板、后台任务、侧边对话(继承完整上下文,可关);可选工具 terminal_*/sidebar_open 默认关。0.30.1(peer ^0.2.2-rc.1)是 0.2.2-rc.1 宿主线的对应构建,并修复设置页「侧边卡片」双图标:改用官方 settings.section.icon 槽,删除按文案标记行、按钮伪元素与全页 MutationObserver(0.30.0 起另带侧边对话图片/GenUI 可选面、草稿备份等)。复核 2026-11-09:依赖集与出站域名同 0.28.2、无安装脚本、registerTab 契约未变。回滚:改回 0.28.2 与其 integrity(仅 0.2.1 宿主线)。 pin 校验 sha512-f+DlDz9yYQUXbAAus3e8tSKykVd2uuDxiPvw375+lKfDG1wQDFzzuM4mOCrev+3AVCzkoYueqe4UKf03R1t7mA=='
   # 自研(local):本地服务浏览器 — better-sidebar 右侧工作台 tab,经 DSH Host 同源代理访问 Host 本机回环端口
-  - id: sidebar-local-service-browser
+  - id: dsh-host-browsing
     type: package
     source: local
     version: 0.1.0

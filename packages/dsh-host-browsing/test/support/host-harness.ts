@@ -1,5 +1,5 @@
 /**
- * Node test harness for the Host half of dsh-sidebar-local-service-browser
+ * Node test harness for the Host half of dsh-host-browsing
  * (tasks.md 0.3, test-plan "两类测试 → Node 测试").
  *
  * What is REAL: the Host WebServer (`@deepseek-ai/dsh-host-webserver`) listening

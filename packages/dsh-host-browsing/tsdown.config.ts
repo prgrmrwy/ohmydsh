@@ -84,7 +84,7 @@ const clientEntry = resolve(packageRoot, 'src/client/index.tsx')
 const clientExternal = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', 'dsh-better-sidebar']
 
 const host = {
-  name: 'dsh-sidebar-local-service-browser/host',
+  name: 'dsh-host-browsing/host',
   entry: { index: 'src/index.ts' },
   outDir: 'lib',
   format: 'esm' as const,
@@ -98,7 +98,7 @@ const host = {
 }
 
 const client = {
-  name: 'dsh-sidebar-local-service-browser/client',
+  name: 'dsh-host-browsing/client',
   entry: { client: 'src/client/index.tsx' },
   outDir: 'lib',
   format: 'cjs' as const,
@@ -112,7 +112,7 @@ const client = {
   },
   outputOptions: {
     entryFileNames: 'client.js',
-    banner: 'window.__ModuleLoader__.load({ id: "dsh-sidebar-local-service-browser", factory: (require) => {',
+    banner: 'window.__ModuleLoader__.load({ id: "dsh-host-browsing", factory: (require) => {',
     footer: 'return module.exports; } });',
     intro: 'var module = { exports: {} }; var exports = module.exports;',
   },

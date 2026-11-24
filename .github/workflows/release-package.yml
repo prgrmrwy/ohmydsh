@@ -23,6 +23,7 @@ on:
           - dsh-session-id-copy
           - cockpit-worktree-open-shim
           - cockpit-memex-browse-shim
+          - dsh-host-browsing
       bump:
         description: 'Version part to bump'
         type: choice
@@ -54,6 +55,7 @@ jobs:
           MIRROR_KEY_SESSION_ID_COPY: ${{ secrets.MIRROR_KEY_SESSION_ID_COPY }}
           MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM: ${{ secrets.MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM }}
           MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM: ${{ secrets.MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM }}
+          MIRROR_KEY_HOST_BROWSING: ${{ secrets.MIRROR_KEY_HOST_BROWSING }}
           PACKAGE: ${{ inputs.package }}
         run: |
           case "$PACKAGE" in
@@ -63,6 +65,7 @@ jobs:
             dsh-session-id-copy) repo=dsh-session-id-copy; key="$MIRROR_KEY_SESSION_ID_COPY" ;;
             cockpit-worktree-open-shim) repo=dsh-cockpit-worktree-open-shim; key="$MIRROR_KEY_COCKPIT_WORKTREE_OPEN_SHIM" ;;
             cockpit-memex-browse-shim) repo=dsh-cockpit-memex-browse-shim; key="$MIRROR_KEY_COCKPIT_MEMEX_BROWSE_SHIM" ;;
+            dsh-host-browsing) repo=dsh-host-browsing; key="$MIRROR_KEY_HOST_BROWSING" ;;
             *) echo "::error::unknown package $PACKAGE"; exit 1 ;;
           esac
           test -n "$key" || { echo "::error::deploy key secret for $PACKAGE is not set"; exit 1; }

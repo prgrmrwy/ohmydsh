@@ -203,7 +203,7 @@ Every enabled entry of `dsh.yaml`, grouped by origin. Third-party items link to 
 - [dsh-session-id-copy](packages/dsh-session-id-copy/README.md) — Adds a short session-id badge next to the title that copies the full id.
 - [system-clock](packages/system-clock/README.md) — Shows the DSH host's clock, time zone and hostname at the bottom of settings.
 - [sidebar-session-resources](packages/sidebar-session-resources/README.md) — Collects links and produced files of the current session into a sidebar panel.
-- [sidebar-local-service-browser](packages/sidebar-local-service-browser/README.md) — Opens a Host-machine loopback port in a sidebar tab through an authenticated same-origin proxy.
+- [dsh-host-browsing](packages/dsh-host-browsing/README.md) — Opens a Host-machine loopback port in a sidebar tab through an authenticated same-origin proxy.
 - [home-network-model-guard](packages/home-network-model-guard/README.md) — Disables Claude models in the input box when the host egress region is restricted.
 - [subscriptions-sandbox-shim](packages/subscriptions-sandbox-shim/README.md) — Strips sandbox escalation fields and orphan tool calls for subscription providers.
 - [dsh-magpie-connector](packages/dsh-magpie-connector/README.md) — Connects a self-hosted Magpie gateway with one real provider route per upstream owner (`Magpie (Claude)`, `Magpie (Codex)`, … on stock DSH), multiple auto-selected connection lines (LAN at home, Cloudflare Access/public outside; per-line keys/Access), usage cards grouped by upstream provider, visibility, default effort and per-session fast mode.

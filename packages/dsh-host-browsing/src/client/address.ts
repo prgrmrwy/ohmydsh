@@ -3,6 +3,7 @@
  * goes through WHATWG URL parsing, which would fold default ports (`:80`) away.
  */
 import { proxyPath, type Family } from '../contract.js'
+import { t } from './locales.js'
 
 export interface ParsedAddress {
   ok: true
@@ -20,12 +21,6 @@ export interface AddressError {
   error: string
 }
 
-export const ERR_LOCAL_ONLY = '仅支持本机地址'
-export const ERR_USERINFO = '地址不能包含用户信息'
-export const ERR_PORT_INVALID = '端口无效'
-export const ERR_PORT_REQUIRED = '需要写明端口'
-export const ERR_SCHEME = '仅支持 http 地址'
-export const ERR_CHARS = '地址包含非法字符'
 
 /** Direct address for a target. */
 export function directAddress(fam: Family, port: string, rest: string): string {
@@ -35,23 +30,23 @@ export function directAddress(fam: Family, port: string, rest: string): string {
 export function parseAddress(input: string): ParsedAddress | AddressError {
   const text = input.trim()
   // eslint-disable-next-line no-control-regex
-  if (text === '' || /[\u0000-\u001f\u007f\\\s]/.test(text)) return { ok: false, error: ERR_CHARS }
+  if (text === '' || /[\u0000-\u001f\u007f\\\s]/.test(text)) return { ok: false, error: t('errChars') }
   const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(text)
   let afterScheme = text
   if (scheme !== null) {
-    if (scheme[1]!.toLowerCase() !== 'http') return { ok: false, error: ERR_SCHEME }
+    if (scheme[1]!.toLowerCase() !== 'http') return { ok: false, error: t('errScheme') }
     afterScheme = text.slice(scheme[0].length)
   }
   const cut = afterScheme.search(/[/?#]/)
   const authority = cut === -1 ? afterScheme : afterScheme.slice(0, cut)
   const tail = cut === -1 ? '' : afterScheme.slice(cut)
-  if (authority.includes('@')) return { ok: false, error: ERR_USERINFO }
+  if (authority.includes('@')) return { ok: false, error: t('errUserinfo') }
 
   let host: string
   let portText: string | undefined
   if (authority.startsWith('[')) {
     const m = /^(\[[^\]]*\])(?::(.*))?$/.exec(authority)
-    if (m === null) return { ok: false, error: ERR_LOCAL_ONLY }
+    if (m === null) return { ok: false, error: t('errLocalOnly') }
     host = m[1]!.toLowerCase()
     portText = m[2]
   } else {
@@ -62,11 +57,11 @@ export function parseAddress(input: string): ParsedAddress | AddressError {
   let fam: Family
   if (host === '127.0.0.1' || host === 'localhost') fam = 'p'
   else if (host === '[::1]') fam = 'p6'
-  else return { ok: false, error: ERR_LOCAL_ONLY }
-  if (portText === undefined || portText === '') return { ok: false, error: ERR_PORT_REQUIRED }
-  if (!/^\d+$/.test(portText)) return { ok: false, error: ERR_PORT_INVALID }
+  else return { ok: false, error: t('errLocalOnly') }
+  if (portText === undefined || portText === '') return { ok: false, error: t('errPortRequired') }
+  if (!/^\d+$/.test(portText)) return { ok: false, error: t('errPortInvalid') }
   const n = Number(portText)
-  if (!Number.isSafeInteger(n) || n < 1 || n > 65535) return { ok: false, error: ERR_PORT_INVALID }
+  if (!Number.isSafeInteger(n) || n < 1 || n > 65535) return { ok: false, error: t('errPortInvalid') }
   const port = String(n)
   const rest = tail === '' ? '/' : tail.startsWith('/') ? tail : `/${tail}`
   return { ok: true, fam, port, rest, direct: directAddress(fam, port, rest), proxy: proxyPath(fam, port, rest) }

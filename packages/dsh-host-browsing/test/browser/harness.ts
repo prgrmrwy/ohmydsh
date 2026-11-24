@@ -176,6 +176,8 @@ export interface UpstreamOptions {
   /** `/ws`-like paths that accept an upgrade and echo frames (any path when `true`). Default: none. */
   echoWebSocket?: boolean | ((req: IncomingMessage) => boolean)
   host?: '127.0.0.1' | '::1'
+  /** Listen on this port instead of a random one (documentation screenshots only). */
+  port?: number
 }
 
 export async function startUpstream(name: string, handler: UpstreamHandler, options: UpstreamOptions = {}): Promise<Upstream> {
@@ -219,7 +221,7 @@ export async function startUpstream(name: string, handler: UpstreamHandler, opti
   })
   await new Promise<void>((resolveListen, reject) => {
     server.once('error', reject)
-    server.listen(0, options.host ?? '127.0.0.1', () => resolveListen())
+    server.listen(options.port ?? 0, options.host ?? '127.0.0.1', () => resolveListen())
   })
   state.port = (server.address() as AddressInfo).port
   state.close = () => new Promise<void>((resolveClose) => {
@@ -254,7 +256,7 @@ const HARNESS_ENV_JS = `(() => {
   report({ step: 'boot', inTab: !!(window.frameElement && window.frameElement.hasAttribute && window.frameElement.hasAttribute('data-dshls')) })
   if (!window.__HX_TAB_MODE__) return
   const modules = {}
-  const MODULE_ID = 'dsh-sidebar-local-service-browser'
+  const MODULE_ID = 'dsh-host-browsing'
   const jsxRuntime = {
     Fragment: React.Fragment,
     jsx: (t, p, k) => React.createElement(t, k === undefined ? p : { ...p, key: k }),
@@ -264,7 +266,14 @@ const HARNESS_ENV_JS = `(() => {
   const loadClient = () => new Promise((resolve, reject) => {
     const s = document.createElement('script'); s.src = 'client.js'; s.onload = resolve; s.onerror = () => reject(new Error('client.js failed to load')); document.head.appendChild(s)
   })
+  // Fake locale service (the real one lives in DSH core): dictionaries registered by the plugin, language from __HX_LOCALE__.
+  const dictionaries = {}
+  const locale = {
+    register(ns, dicts) { dictionaries[ns] = dicts; return () => { delete dictionaries[ns] } },
+    bind(ns) { return (key) => (dictionaries[ns][window.__HX_LOCALE__ || 'zh'] || {})[key] },
+  }
   const ctx = {
+    get(name) { return name === 'locale' ? locale : undefined },
     betterSidebar: {
       features: [], version: 'harness',
       registerTab(d) { hx.tabs[d.id] = d; return () => { delete hx.tabs[d.id]; hx.unmount() } },
@@ -311,7 +320,7 @@ function reactAsset(name: 'react' | 'react-dom'): string {
   return found
 }
 
-function buildDist(dir: string, mode: 'tab' | 'bare', extraHead: string): string {
+function buildDist(dir: string, mode: 'tab' | 'bare', extraHead: string, language: 'zh' | 'en'): string {
   mkdirSync(join(dir, '__harness-sw'), { recursive: true })
   writeFileSync(join(dir, 'harness-env.js'), HARNESS_ENV_JS)
   writeFileSync(join(dir, '__harness-sw', 'sw.js'), PROBE_SW)
@@ -322,7 +331,7 @@ function buildDist(dir: string, mode: 'tab' | 'bare', extraHead: string): string
     copyFileSync(client, join(dir, 'client.js'))
     copyFileSync(reactAsset('react'), join(dir, 'react.js'))
     copyFileSync(reactAsset('react-dom'), join(dir, 'react-dom.js'))
-    scripts = '<script>window.__HX_TAB_MODE__ = true</script><script src="react.js"></script><script src="react-dom.js"></script>'
+    scripts = `<script>window.__HX_TAB_MODE__ = true; window.__HX_LOCALE__ = '${language}'</script><script src="react.js"></script><script src="react-dom.js"></script>`
   }
   const index = `<!doctype html><html><head><meta charset="utf-8"><title>dsh</title>${SENTINEL}${extraHead}</head><body>DSH${scripts}<script src="harness-env.js"></script></body></html>`
   const distIndex = join(dir, 'index.html')
@@ -338,6 +347,8 @@ export interface BrowserHarnessOptions {
   mode?: 'tab' | 'bare'
   /** Load the BUILT Host plugin (lib/index.js). Default true. */
   hostPlugin?: boolean
+  /** Interface language the fake locale service reports to the tab (default `zh`). */
+  language?: 'zh' | 'en'
   /**
    * Where the Host plugin comes from. `src` (default): `installHost` from src/host/install.ts with the
    * service-discovery seam stubbed to an empty listing — identical behaviour to production except that
@@ -418,7 +429,7 @@ export class BrowserHarness {
     const chromePath = options.chrome ?? findChrome()
     const mode = options.mode ?? 'bare'
     const dist = mkdtempSync(join(tmpdir(), 'dshls-dist-'))
-    const distIndex = buildDist(dist, mode, options.extraHead ?? '')
+    const distIndex = buildDist(dist, mode, options.extraHead ?? '', options.language ?? 'zh')
     const reports: Report[] = []
     const dshRequests: DshRequest[] = []
     const dshUpgrades: DshRequest[] = []
