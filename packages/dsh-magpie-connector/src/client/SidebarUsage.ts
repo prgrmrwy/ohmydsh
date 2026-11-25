@@ -257,14 +257,16 @@ function compactRow(row: SidebarRow, now: number, key: string, account?: Account
         }, row.balance ?? '—')))
   }
   if (row.windows.length === 1 && account !== undefined) {
-    // Account on its own line (only the account shrinks); window, expiry and reading below at full width.
+    // Account alone on the first line (only it truncates); plan, window, expiry and reading below,
+    // never truncated: when they do not fit, expiry and reading wrap to their own line.
     const only = row.windows[0]!
     return h('div', attrs,
-      h('div', { className: 'dmg-sidebar-account-line' }, name),
-      h('div', { className: 'dmg-sidebar-row-line' },
-        h('span', { className: 'dmg-sidebar-label' }, sharedWindow ? null : windowLabel(only, false)),
-        expiry(only.window, now),
-        reading(only)),
+      h('div', { className: 'dmg-sidebar-account-line' }, accountLabel(account)),
+      h('div', { className: 'dmg-sidebar-row-line is-account' },
+        h('span', { className: 'dmg-sidebar-label' },
+          account.plan === undefined ? null : h('span', { className: 'dmg-sidebar-plan' }, account.plan),
+          sharedWindow ? null : windowLabel(only, false)),
+        h('span', { className: 'dmg-sidebar-reading-group' }, expiry(only.window, now), reading(only))),
       bar(only))
   }
   if (row.windows.length === 1) {
@@ -296,8 +298,10 @@ const accountOf = (card: Card, position: number): Account => ({
 })
 
 /** Only the account label shrinks; plan and the rest of the line keep their width. */
+const accountLabel = (account: Account): ReactNode =>
+  h('span', { className: 'dmg-sidebar-account', 'data-dmg-sidebar-account': '', title: account.label }, account.label)
 const accountName = (account: Account): ReactNode => h(Fragment, null,
-  h('span', { className: 'dmg-sidebar-account', 'data-dmg-sidebar-account': '', title: account.label }, account.label),
+  accountLabel(account),
   account.plan === undefined ? null : h('span', { className: 'dmg-sidebar-plan' }, account.plan))
 
 /** Title of a multi-account group: the provider once, with its account count. */
