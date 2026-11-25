@@ -2,7 +2,7 @@
 // ohmydsh sync — materialize dsh.yaml customizations into ~/.dsh.
 // Idempotent; the repository (dsh.yaml + customization dirs) is the source of truth.
 import { readFile, writeFile, mkdir, cp, rm, readdir, stat, rename, realpath } from 'node:fs/promises'
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from './lib/child-process.mjs'
 import path from 'node:path'
@@ -623,9 +623,13 @@ async function refreshLocalDeployment(localDir, name, spec, compatSpecs, expecte
 function localBuildOutputsExist(dir, pkg) {
   if (typeof pkg?.scripts?.build !== 'string') return true
   const files = Array.isArray(pkg.files) ? pkg.files : []
-  const outputRoots = files.filter((entry) => typeof entry === 'string' && entry !== '')
+  // npm `files` entries may be globs (`docs/*.png`) or negations (`!x`); a
+  // literal existsSync on a glob is always false and blocked every such package.
+  const outputRoots = files.filter((entry) => typeof entry === 'string' && entry !== '' && !entry.startsWith('!'))
   if (outputRoots.length === 0) return existsSync(path.join(dir, 'lib'))
-  return outputRoots.every((entry) => existsSync(path.join(dir, entry)))
+  return outputRoots.every((entry) => /[*?[\]{}]/.test(entry)
+    ? globSync(entry, { cwd: dir }).length > 0
+    : existsSync(path.join(dir, entry)))
 }
 
 function runLocalBuild(item, dir) {
